@@ -342,6 +342,23 @@ Admission takes a shared team/quota lock and records each reservation durably;
 settlement is idempotent by reservation ID. Log reads meter egress exactly and
 are exempt from download quota. Deferred plan counters add no enforcement here.
 
+`Operator.ChargeRetainedStorage(ctx, maintenanceLease)` bills unique `blobs`
+and committed `log_streams.stored_bytes`. Historical replica usage and reference
+counts cannot multiply the charge. The team's cache and log rows share their
+existing `storage_charged_through` watermark because the free allowance applies
+once to the combined bytes. The tenant's retained allowance caps that total
+before the free allowance comes off. An absent quota row adds no ceiling.
+Each watermark and ledger debit commit under the current maintenance fence and
+credit lock. Initial samples establish billing time. Idle gaps are clamped to
+the stored bytes' creation time. A zero price resets existing watermarks so
+resuming billing starts a new interval. Storage charges remain runless.
+
+The `billing-ledger-survives-retention/store-data-sqlite` acceptance proof
+checks a real storage debit and preserves every financial row across leased
+retention and reopening. It does not exercise provider verification or native
+placements. The controller's billing caller uses this operator method. W1's
+maintenance coordinator owns the shared retention, quota and GC ordering.
+
 ## Input and blob invariants
 
 Environment snapshots persist names and a digest, not values. Raw argument

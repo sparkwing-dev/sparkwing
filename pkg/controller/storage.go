@@ -99,7 +99,7 @@ func (s *Server) maintainStorage(ctx context.Context) {
 		}
 	}
 	s.maintainTeamStorage(ctx, now)
-	s.billRetainedStorage(ctx, now)
+	s.billRetainedStorage(ctx)
 	size, err := s.store.DatabaseSize(ctx)
 	if err != nil {
 		s.logger.Error("database size probe failed", "err", err)
@@ -114,31 +114,27 @@ func (s *Server) maintainStorage(ctx context.Context) {
 	s.reportLargestTeams(ctx, settings)
 }
 
-// safety: the sweep runs first, so a team is billed for what it still holds
-// once its allowance has been applied rather than for what stood above it.
-// Two passes cannot bill one interval whatever their clocks say, because the
-// store moves each team's watermark by compare-and-set.
-func (s *Server) billRetainedStorage(ctx context.Context, now time.Time) {
+func (s *Server) billRetainedStorage(ctx context.Context) {
 	if !s.Metering() {
 		return
 	}
-	swept, err := s.store.SweepStorageAllowance(ctx, now)
-	if err != nil {
-		s.logger.Error("expiring storage above the allowance failed", "err", err)
+	operator := s.store.AsOperator()
+	lease, err := operator.AcquireSingletonLease(ctx, "maintenance", s.measureHolder(), StorageMaintenanceInterval)
+	if errors.Is(err, store.ErrLockHeld) {
 		return
 	}
-	if swept.Runs > 0 {
-		s.logger.Info("expired storage above the allowance",
-			"runs", swept.Runs, "bytes", swept.Bytes, "events", swept.Events)
+	if err != nil {
+		s.logger.Error("storage billing lease failed", "err", err)
+		return
 	}
-	billed, err := s.store.ChargeRetainedStorage(ctx, now)
+	billed, err := operator.ChargeRetainedStorage(ctx, lease)
 	if err != nil {
 		s.logger.Error("charging retained storage failed", "err", err)
 		return
 	}
 	for _, charge := range billed.Charges {
 		s.logger.Info("charged retained storage",
-			"principal", charge.Principal, "bytes", charge.StorageBytes,
+			"team", charge.Team, "bytes", charge.StorageBytes,
 			"seconds", charge.Seconds, "amount_micro", charge.AmountMicro)
 	}
 }

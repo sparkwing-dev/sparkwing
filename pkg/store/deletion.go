@@ -421,9 +421,7 @@ func (o *Operator) deleteTenantRows(ctx context.Context, team Team) error {
 			return fmt.Errorf("purge %s: %w", table, err)
 		}
 	}
-	_, err := o.s.exec(ctx, `DELETE FROM sparkwing_meta WHERE key LIKE ?`,
-		metaKeyStorageChargedThroughPrefix+string(team)+"/%")
-	return err
+	return nil
 }
 
 // TeamRunIDs lists the ids of every run a team holds, so the caller can

@@ -44,9 +44,6 @@ func TestUnlicensedStorageMaintenanceWritesNoCharges(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedRetainedRuns(t, f.store, "acme", 1, 1<<30)
-	if _, err := f.store.ChargeRetainedStorage(ctx, time.Now().Add(-24*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
 	f.server.MaintainStorage(ctx)
 	charges, err := f.store.ListCreditCharges(ctx, 10)
 	if err != nil || len(charges) != 0 {
@@ -100,47 +97,6 @@ func TestStorageAllowanceRouteReadsAndSetsOnTheAdminToken(t *testing.T) {
 	}
 	if stored.AllowanceBytes != 53_687_091_200 {
 		t.Fatalf("quota = %+v, want the allowance kept through a quota rewrite", stored)
-	}
-}
-
-// The pass sweeps before it bills, so a team is never billed for the bytes the
-// sweep is about to expire; the allowance is the most it pays for.
-func TestTheStoragePassSweepsBeforeItBills(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 40})
-	licenseStorageMetering(t, f)
-	ctx := context.Background()
-	rate, free := int64(store.CloudStorageRateMicroPerGBDay), int64(0)
-	if _, err := f.store.SetCreditSettings(ctx, store.CreditSettingsUpdate{
-		StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free,
-	}); err != nil {
-		t.Fatalf("set the storage rate: %v", err)
-	}
-	if _, err := f.store.SetStorageAllowance(ctx, "acme", 1<<30); err != nil {
-		t.Fatalf("set allowance: %v", err)
-	}
-	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1_000*store.MicroCreditsPerCent, "pay_1", "operator"); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	seedRetainedRuns(t, f.store, "acme", 100, 1<<30)
-
-	f.server.MaintainStorage(ctx)
-	retained, err := f.store.StorageRetainedBytes(ctx, "acme")
-	if err != nil {
-		t.Fatalf("retained: %v", err)
-	}
-	if retained != 1<<30 {
-		t.Fatalf("retained = %d, want the sweep to have applied the allowance", retained)
-	}
-	billed, err := f.store.ChargeRetainedStorage(ctx, time.Now().UTC().Add(24*time.Hour))
-	if err != nil {
-		t.Fatalf("charge: %v", err)
-	}
-	if len(billed.Charges) != 1 || billed.Charges[0].StorageBytes != 1<<30 {
-		t.Fatalf("charges = %+v, want the one gibibyte the team keeps", billed.Charges)
 	}
 }
 
@@ -216,79 +172,4 @@ func TestAnEmptyBalanceRefusesAChargedWriteWithPaymentRequired(t *testing.T) {
 		eventBody("bytes"), true); code != http.StatusOK {
 		t.Fatalf("an event once the balance holds credit = %d %s, want 200", code, body)
 	}
-}
-
-func TestStorageMaintenanceBillsRetainedBytesAndReportsThemOnCreditsShow(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 20})
-	licenseStorageMetering(t, f)
-	ctx := context.Background()
-	// safety: a handful of event bytes at the cloud rate truncates to nothing,
-	// so this rate is what makes a few bytes worth a micro-credit at all.
-	rate, free := int64(1_000_000_000), int64(0)
-	if _, err := f.store.SetCreditSettings(ctx, store.CreditSettingsUpdate{
-		StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free,
-	}); err != nil {
-		t.Fatalf("set the storage rate: %v", err)
-	}
-	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		100*store.MicroCreditsPerCent, "pay_1", "operator"); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	if code, body := f.request(t, http.MethodPost, storageEventPath, f.team,
-		eventBody("bytes"), true); code != http.StatusOK {
-		t.Fatalf("seed a charged write = %d %s, want 200", code, body)
-	}
-
-	// safety: the first pass only stamps the team, which is what keeps the
-	// sample below at zero.
-	f.server.MaintainStorage(ctx)
-	state := f.creditState(t)
-	if state.StorageRateMicroPerGBDay != rate || state.StorageFreeAllowanceBytes != 0 {
-		t.Fatalf("credits show = %+v, want the storage settings it was given", state)
-	}
-	if state.StorageChargedMicro != 0 {
-		t.Fatalf("credits show = %+v, want nothing billed inside the first interval", state)
-	}
-
-	billed, err := f.store.ChargeRetainedStorage(ctx, time.Now().UTC().Add(48*time.Hour))
-	if err != nil {
-		t.Fatalf("charge: %v", err)
-	}
-	if len(billed.Charges) != 1 || billed.Charges[0].Principal != "acme" {
-		t.Fatalf("charges = %+v, want one for acme", billed.Charges)
-	}
-	if state = f.creditState(t); state.StorageChargedMicro != billed.ChargedMicro {
-		t.Fatalf("credits show = %+v, want the %d micro the pass billed", state, billed.ChargedMicro)
-	}
-
-	code, body := f.request(t, http.MethodGet, "/api/v1/credits/history", f.admin, "", false)
-	if code != http.StatusOK {
-		t.Fatalf("credits history = %d %s, want 200", code, body)
-	}
-	if !strings.Contains(body, `"kind":"`+store.CreditChargeStorage+`"`) ||
-		!strings.Contains(body, `"principal":"acme"`) {
-		t.Fatalf("credits history %q does not separate the storage charge", body)
-	}
-}
-
-type creditStateView struct {
-	StorageChargedMicro       int64 `json:"storage_charged_micro"`
-	StorageRateMicroPerGBDay  int64 `json:"storage_rate_micro_per_gb_day"`
-	StorageFreeAllowanceBytes int64 `json:"storage_free_allowance_bytes"`
-}
-
-func (f storageFixture) creditState(t *testing.T) creditStateView {
-	t.Helper()
-	code, body := f.request(t, http.MethodGet, "/api/v1/credits", f.admin, "", false)
-	if code != http.StatusOK {
-		t.Fatalf("credits show = %d %s, want 200", code, body)
-	}
-	var out creditStateView
-	if err := json.Unmarshal([]byte(body), &out); err != nil {
-		t.Fatalf("decode %q: %v", body, err)
-	}
-	return out
 }

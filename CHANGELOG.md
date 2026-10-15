@@ -76,6 +76,7 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
+- **store (Breaking):** Retained-storage billing uses `Operator.ChargeRetainedStorage` under a maintenance lease and counts unique blobs plus committed log bytes. A team's free allowance applies once to the combined total, and billing watermarks commit with ledger charges. The principal-based `Store.ChargeRetainedStorage` API is removed.
 - **runner + cli:** A guard that names `git:branch=default` refuses the run when the repository's default branch cannot be resolved, instead of treating the token as unmatched
 - **store (Breaking):** Schema version 2 adds `triggers.runner_pin`; a store recording version 1 is refused like any other version and must be deleted
 - **runner:** a run the trigger runner hosts is bounded at six hours, GitHub Actions' default job timeout, instead of the 30 minutes its handler process had

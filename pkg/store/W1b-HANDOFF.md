@@ -1,133 +1,164 @@
 # W1b handoff
 
-W1b remains incomplete. This continuation implements final-schema credit settings,
-removes caller-selected checkout payment marking, and ports billing-cap and usage
-proofs. It starts at `025adae72`. W1 admission, claim, transition, reaper, schema
-and SQL-guard files are untouched. No Git writes or Sparkwing binaries were run.
+W1b remains incomplete. This continuation starts at `ca771a7a9` and ports
+retained-storage billing to the final schema. Earlier upload, blob, log,
+metered-accounting and payment implementations remain in place. W1 admission,
+claim, transition, reaper, schema and SQL-guard files were not edited. The only
+shared store edit removes obsolete watermark cleanup from `deletion.go`.
+No Git writes or Sparkwing binaries were run.
 
-## Implemented in this continuation
+## Implemented
 
-- `credit_settings.go` owns typed JSON reads and writes in `settings`. Missing
-  keys select defaults. Invalid JSON, invalid integer/rate bounds and sealed
-  values return errors. A rejected batch rolls back all writes. Stored prices
-  survive reopening the database. Operator rate-table authority uses the shared
-  advisory-lock helper. Public rate-table reads use one consistent snapshot.
-- Removed `CreditGrantRequest.Checkout`, the HTTP grant request's `checkout`
-  field and `markCreditCheckoutPaidTx`. Generic grants cannot mark a provider
-  checkout paid or release its hold. Verified payment settlement owns the paid
-  timestamp and grant association. HTTP requests carrying the removed field
-  return 400. Grant timestamps use the store clock.
-- Ported balance-cap, open-checkout, concurrent-checkout, late-payment and
-  per-run-usage tests onto the final schema. Cap races and paid-event races use
-  independent database clients. Verified paid events preserve funds above the
-  balance cap. Expired checkouts keep purchase room during the settlement
-  window. A settled payment counts once. Free-grant replay and team isolation
-  remain covered. Usage totals net job/host reservations and refunds, exclude
-  storage and other teams, and honor the result limit.
-- The usage port reproduced a storage-charge insert naming the removed
-  `credit_charges.token_prefix`. It now writes `capability_prefix`.
-- Ported settings rollback and operator-writer races. Added corruption, restart
-  and sealed-value coverage. Updated the unreadable-rate-table fixture to write
-  the final settings table.
+- `Operator.ChargeRetainedStorage(ctx, maintenanceLease)` replaces the raw
+  Store method. It reads unique committed `blobs` and persisted
+  `log_streams.stored_bytes`. Replica usage totals and reference counts cannot
+  multiply retained bytes. The free allowance applies once to the combined
+  inventory, after the team's optional retained ceiling. Teams without quota
+  rows are billed. Charges carry the team and no run or runner price fields.
+- Both existing `team_storage.storage_charged_through` rows share the same
+  watermark. The maintenance fence, credit lock, watermark update, ledger
+  debit and spend counters commit together per team. The fence is checked
+  again before commit. Separate database clients cannot bill one interval
+  twice. The initial sample establishes billing time. Fractional seconds
+  remain for the next pass. Empty samples and creation times bound idle gaps.
+  A disabled price clears existing watermarks so resumed billing starts fresh.
+- Corrupt settings, negative allowances, inconsistent watermarks and invalid
+  or overflowing inventory return errors. Failed ledger writes roll back the
+  watermark. A backward clock produces no charge until it catches up.
+- The controller's existing billing caller acquires the maintenance lease and
+  invokes the operator method. It logs teams rather than token principals.
+  Its call to the obsolete principal allowance sweep is removed. W1's final
+  maintenance coordinator still needs to unify retention, allowances and GC.
+- The new SQLite acceptance cell takes a real storage debit, checks its amount
+  and the expected balance, then runs leased retention and reopens the store.
+  The old run, stream and segments disappear. Every field of all financial
+  rows, including provider evidence, awards and intervals, remains unchanged.
 
-The patch replaces/removes 98 production lines, including 22 obsolete checkout
-payment-marker lines. It removes 391 legacy test lines and ports their assertions.
-`credit_billing_test.go` is deleted. Settings implementation now lives in the
-owned `credit_settings.go`; it is not counted as a net code reduction.
-
-Earlier sessions already implemented upload tickets and receipts, blob records,
-reference authorization, tombstone GC, tagged logs, metered awards/intervals,
-checkout payment settlement, checkout-aware refunds/warnings and cross-path
-payment deduplication. Those implementations were retained and regression-tested.
+The patch removes **213 legacy billing implementation lines**, **413 legacy
+store-test lines** and **119 legacy controller-test lines**. New owned files
+replace billing and port its assertions. These are gross removals, not a net
+code reduction claim. No table, column, setting key, environment variable,
+service, compatibility API or price limit was added.
 
 ## Verification
 
-All Go checks use `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
-`-p 4`, and cache/temp directories beneath `/tmp/sw-astra-W1b/`.
+All Go checks used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
+`-p 4`, and private cache/temp directories under `/tmp/sw-astra-W1b/`.
 
-- Final repository `go build -p 4 ./...` passed.
+- Final `go build -p 4 ./...` passed for the whole repository.
 - `go vet -p 4` passed for `pkg/store/...`, `pkg/controller/...`,
   `internal/acceptance/...` and `tests/acceptance/...`.
-- Store selection passed 85 top-level tests / 168 including subtests, no skips:
+- Store regression selection: **95 top-level tests / 185 with subtests**,
+  no failures or skips. Selection:
   `^(TestStoreData|TestLogPersistence|TestResult|TestBlob|TestPayment|TestReversePaymentTakesBack|TestCreditSettings|TestSetCreditSettings|TestUnsetRateTable|TestSetRateTable|TestAStoredRateTable|TestATableWithoutAFourCore)`.
-- Race selection passed 30 top-level tests / 79 including subtests, no skips:
-  `^(TestStoreDataCreditSettings|TestStoreDataMeteredUsage|TestPayment)`.
-- `TestCreditGrantRequestRefusesCallerSelectedCheckout` passed in the controller.
-- Acceptance packages passed. The existing
-  `storage-replica-safe-accounting/store-data-sqlite` proof passes. No new native
-  acceptance cells were activated because the placement driver remains unbuilt.
-- API documentation was regenerated. `check-api-spec.sh`, `sync-docs.sh --check`
-  and `git diff --check` passed. Generated `CreditGrantRequest` matches the updated
-  snapshot. Wider snapshot drift remains in eight packages: controller,
-  controller/client, projectconfig, match, store, storage/storeurl, sparkwing and
-  storage. Only the changed grant field was cut from the committed snapshot.
-- The first settings run failed against the removed `sparkwing_meta` table.
-  The usage port failed against `token_prefix`. Both passed after their fixes.
-- The full legacy suite and SQL tenant guard were not rerun. Prior legacy-profile
-  fixtures and missing/moved SQL exemptions still need their owners' verification.
-  PostgreSQL, native placements and real Stripe were not exercised.
+- Final race selection: **43 top-level tests / 83 with subtests**, no failures
+  or skips. Selection:
+  `^(TestStoreDataRetainedStorage|TestStoreDataMetered|TestPayment)`.
+- Acceptance packages passed: **20 top-level tests / 195 passes**, with
+  **2,995 existing target skips**. Passing SQLite product cells:
+  `billing-ledger-survives-retention/store-data-sqlite` (new) and
+  `storage-replica-safe-accounting/store-data-sqlite` (existing).
+  Native, PostgreSQL, provider and physical-backend cells remain pending.
+- `go run ./internal/commentcheck -base HEAD <repo>` passed across nine Go
+  files. `sync-docs.sh --check` and `git diff --check` passed.
+- Generated snapshots in scratch confirm the new method signature. Existing
+  snapshot drift remains in eight packages: controller, controller/client,
+  projectconfig, match, store, storage/storeurl, sparkwing and storage. Only
+  the owned method removal/addition was applied to the committed snapshot.
+- The tenant SQL guard still fails with **14 existing findings** in authority,
+  payment and retention code. The new billing file has no finding and adds no
+  exemption. W1 owns that guard. Full legacy suites and pipeline gates were
+  not run. Independent review remains with the lead.
 
-## Integration and remaining cuts
+Tests first reproduced the absent operator API. The extended clock-regression
+case caught rejection of a creation time ahead of a regressed clock. Its
+correction passed the final regression and race runs.
 
-1. W1 must call `recordBillingAwardTx` with server-derived metering, resources
-   and pricing. Issuance still creates unmetered awards here. Start compute
-   intervals at execution, exclude customer-runner waits, charge renewals, and
-   settle release/terminal/reap transactions at their persisted end or lapse.
-   Reconciliation needs atomic memo materialization before memoized success.
-   Data scopes need their permitted default/base refs.
-2. W1 owns the retained compute/admission settings callers. `SetComputeLimits`
-   now writes through the final `setCreditSettingTx`, but `computeLimitsSQL`
-   still selects `sparkwing_meta`. `SetFreeTeamSlots` still uses the legacy
-   `upsertCreditSettingSQL` while its reader uses final settings. Migrate those
-   callers without reintroducing a metadata table. That remaining SQL constant
-   and the legacy `parseCreditSetting` cannot be deleted until their callers
-   move. These W1 files were left untouched under the split ownership.
-3. W2 must implement C2 `SettleBilling`, provider verification and
-   `VerifiedPaymentEvent.Event`, install payment-mode configuration, and wire
-   `Store.SettlePayment`. Store tests fake verified provider facts and the billing
-   calculator. They do not establish Stripe authentication or native acceptance.
-4. Remove the legacy paid-grant routes with W2's payment cut. Legacy claim-time
-   billing, blob/log and storage-credit APIs still need their consumers migrated
-   and implementations deleted. Retained storage charging/sweeping still uses
-   principal-based operational rows and metadata watermarks. Fixing its ledger
-   insert does not port that sweep to unique blobs or leased maintenance.
-5. W7 must wire upload reserve/lookup/commit/abort to physical backend evidence
-   and trusted `ReplicaID`. Supply manifest reads and blob deletion. Shared
-   record namespace/edge functions are stubs here and use contract fakes in
-   store tests. Confirm the trusted-builder mapping for cloud provenance.
-6. W1 must call both blob GC phases from leased maintenance. W2/W7 log signing
-   must derive keys through `LogSegmentObjectKey` and persisted retention
-   classes. Physical integrity, exact proxy egress, backend lifecycle rules
-   and live-ring fallback remain external integration obligations.
+## Assertions ported
 
-## Contract changes needed and open questions
+`retained_storage_billing_test.go` ports daily and partial-day pricing,
+fractional truncation, no charge on the first pass, allowance/free-byte caps,
+no-quota charging, periodic charges before release, interval replay, idle-gap
+clamping, stable inventory while fresh bytes arrive, disabled-price behavior
+and monthly balance reconciliation. It adds real tagged-log commits, shared
+log/blob free allowance, tenant isolation, independent clients, reopening,
+ledger rollback, lease fencing, clock regression and corruption/overflow tests.
+The acceptance proof ports financial preservation through real leased retention.
+Old principal allowance/retention tests remain with their unported APIs.
 
-No new foreign Go contract or schema was changed. C1 documents final settings
-persistence and the removal of caller-selected checkout settlement.
+## Remaining work and integration
 
-- W1 must coordinate test/live identity for retained card attempts, payments,
-  warnings, freezes and refund work with W2/W9. Those tables/API inputs lack a
-  mode discriminator. Checkout lookup follows configured mode, which cannot
-  distinguish identical provider IDs in retained card state across a mode switch.
-- W1 owns `tenant_sql_scope_guard_test.go`. Move its cross-team exemptions from
-  `(*Store).PaidGrantTeam` and `(*Store).RecordPaymentWarning` to
-  `paidGrantForPaymentTx` and `paymentWarningTeamTx`. Provider payment IDs
-  identify the team before refunds/warnings can be scoped. The existing
-  `(*Store).settlePaymentFacts` exemption is also missing. Other previously
-  reported authority/retention guard findings remain in that owner's scope.
+1. W1 must wire `recordBillingAwardTx` into issuance using server-derived
+   metering, resources and pricing. `authority_issue.go` still writes unmetered
+   awards directly. Start intervals at execution, exclude customer-runner
+   waits, charge renewals and settle releases, terminal transitions and reaping
+   at their persisted end or lapse. The primitives and fake-calculator tests
+   are implemented. Reconciliation still needs atomic memo materialization.
+2. W1 must finish final-settings callers. `computeLimitsSQL` still selects
+   `sparkwing_meta`; `SetFreeTeamSlots` still uses the legacy settings writer.
+   `upsertCreditSettingSQL` and `parseCreditSetting` remain until those callers
+   move. W1 must merge its parallel admission/claim/retention implementation.
+3. W2 must implement `capability.SettleBilling`, payment signature verification
+   and `VerifiedPaymentEvent.Event`, configure payment mode and wire verified
+   settlement. Those functions remain stubs in this worktree. Existing store
+   tests use contract fakes. The new retention proof seeds provider evidence
+   directly and makes no claim about Stripe authentication.
+4. Remaining W1b cuts include claim-time credit APIs in `credits.go`, legacy
+   paid-grant paths, `node_logs.go`, principal quota/report APIs and legacy
+   allowance/retention helpers. Their live consumers must be migrated or cut
+   without touching W1's transition/claim implementation. The raw Store
+   retained-billing API and its metadata watermarks are now gone.
+5. W7 must connect upload reserve/lookup/verified commit/abort to physical
+   integrity checks and trusted `ReplicaID`, and supply manifest reads and
+   blob deletion. `blob.AuthorizeEdge`, `RecordNamespace`, `MemoNamespace`
+   and `DepcacheNamespace` remain stubs and are tested through contract fakes.
+   Confirm the cloud-builder provenance mapping.
+6. W1's elected maintenance coordinator must order final retention, allowance
+   policy, both blob GC phases and storage billing under the same lease. The
+   migrated controller billing call is concrete, but the surrounding legacy
+   maintenance/settings/report path is not a final-schema integration proof.
+   Storage billing still samples retained bytes per pass; it is not an exact
+   historical byte-time integral for objects removed between samples.
+7. W2/W7 log signing must use `LogSegmentObjectKey` and sealed retention
+   classes. Exact proxy egress, lifecycle-rule checks, physical expiration and
+   live-ring segment fallback remain external obligations.
+
+## Contract changes needed and questions
+
+The new operator billing method is a local C1 contract correction, recorded in
+`c1-data.md` and the store API snapshot. No foreign contract was changed.
+Inherited questions remain:
+
+- W1/W2/W9 must coordinate test/live identity for retained cards, attempts,
+  warnings, freezes and refund work. Those tables/API inputs lack a mode
+  discriminator, so provider IDs can collide after a configuration switch.
+- W1 must update its SQL guard's legitimate cross-team authority/payment and
+  retention exemptions. Remove stale `(*Store).PaidGrantTeam` and
+  `(*Store).RecordPaymentWarning` entries, add their scoped lookup owners as
+  appropriate, and review `(*Store).settlePaymentFacts`. The new billing scan
+  correlates each inventory lookup to a known team and requires no exception.
 
 ## Shared files touched
 
-- `pkg/controller/credits.go` removes the grant field and its store argument.
-- `pkg/controller/credit_grant_request_test.go` checks the HTTP refusal.
-- `api/openapi.yaml`, `.apidiff/pkg_store.txt`,
-  `design/rewrite/contracts/c1-data.md`, `CHANGELOG.md` and the generated
-  `pkg/docs/changelog.md` describe the changed surface.
+- `pkg/controller/storage.go`: migrate the removed billing caller and remove
+  its obsolete principal sweep call.
+- `pkg/controller/storage_allowance_test.go`: remove two superseded billing
+  tests and their view helper; retain unrelated route and licensing assertions.
+- `pkg/store/deletion.go`: remove the deleted watermark-prefix cleanup. Final
+  team-storage rows already carry the billing watermarks and tenant ownership.
+- `internal/acceptance/store_billing.go` and `tests/acceptance/billing_test.go`:
+  execute the new SQLite retention proof.
+- `design/rewrite/contracts/c1-data.md`, `.apidiff/pkg_store.txt`,
+  `CHANGELOG.md` and generated `pkg/docs/changelog.md`: align the contract,
+  method snapshot and user-facing note.
 
-All other changes are W1b-owned store implementation, tests and this handoff.
+Other changes are owned storage-credit implementation/tests and this handoff.
+Mechanisms added: none beyond implementing the existing maintenance fence and
+watermark columns. The local raw Store API was replaced, without a shim.
+Friction: foreign contract stubs, legacy consumers and fixtures, existing SQL
+scope findings and broader snapshot drift. `commentcheck` was absent from PATH;
+its repository entry point ran successfully. No local Git identity or
+core.worktree override was found. All checks exited, no services were started,
+and the scratch directory was deleted.
 
-Mechanisms added: none beyond replacing the existing settings persistence in its
-own file. No schema, setting key, environment variable, compatibility API or
-runtime service was added. Friction remains in legacy consumers, foreign stubs
-and wider snapshot drift. No local Git identity/core.worktree override was found.
-All checks exited and the scratch directory was deleted.
+STATUS: CONTINUE
