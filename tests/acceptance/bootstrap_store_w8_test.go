@@ -24,6 +24,12 @@ import (
 
 func storedCloudClaimantW8(t *testing.T) (*controller.EngineController, capability.Issued) {
 	t.Helper()
+	expiry := time.Now().UTC().Add(time.Hour)
+	return storedCloudClaimantExpiryW8(t, &expiry)
+}
+
+func storedCloudClaimantExpiryW8(t *testing.T, expiry *time.Time) (*controller.EngineController, capability.Issued) {
+	t.Helper()
 	server, machine := newStoredRunnerW8(t, capability.UnitNode)
 	claimant, err := storedRunnerClientW8(t.Context(), server, machine.Raw)
 	if err != nil {
@@ -37,9 +43,8 @@ func storedCloudClaimantW8(t *testing.T) (*controller.EngineController, capabili
 	if err != nil {
 		t.Fatal(err)
 	}
-	expiry := time.Now().UTC().Add(time.Hour)
 	parent := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Capability.Prefix}
-	root, err := server.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "runner-store-fixture", Authority: &parent, Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}, ExpiresAt: &expiry})
+	root, err := server.Store.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "runner-store-fixture", Authority: &parent, Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch}, ExpiresAt: expiry})
 	if err != nil {
 		t.Fatal(err)
 	}

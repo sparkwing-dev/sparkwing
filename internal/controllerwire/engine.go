@@ -104,20 +104,22 @@ type ClaimResponse struct {
 
 // LauncherObservation compares an immutable award and Kubernetes instance against stored ownership.
 type LauncherObservation struct {
-	Award   capability.LeaseRef `json:"award"`
-	Job     LauncherJobRef      `json:"job"`
-	NodeUID string              `json:"node_uid"`
+	Award         capability.LeaseRef `json:"award"`
+	Job           LauncherJobRef      `json:"job,omitzero"`
+	NodeUID       string              `json:"node_uid"`
+	ReservationID string              `json:"reservation_id,omitempty"`
 }
 
-// LauncherSyncRequest reconciles observed Jobs against the launcher's current awards.
+// LauncherSyncRequest reconciles Jobs and node reservations against the launcher's awards.
 type LauncherSyncRequest struct {
 	Observed []LauncherObservation `json:"observed"`
 }
 
 // LauncherSyncResponse carries immutable execution inputs and cleanup identities without bearers.
 type LauncherSyncResponse struct {
-	Awards []ClaimedUnit    `json:"awards"`
-	Remove []LauncherJobRef `json:"remove"`
+	Awards             []ClaimedUnit            `json:"awards"`
+	Remove             []LauncherJobRef         `json:"remove"`
+	RemoveReservations []LauncherReservationRef `json:"remove_reservations"`
 }
 
 // ExchangeResponse returns the original unit with its exchanged in-memory authority once.

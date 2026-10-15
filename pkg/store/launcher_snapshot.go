@@ -16,7 +16,7 @@ import (
 
 // ReadLauncherSync compares observed awards with live ownership without releasing holder rights.
 func (o *Operator) ReadLauncherSync(ctx context.Context, authority capability.AuthorityRef, observed []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
-	out := controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{}, Remove: []controllerwire.LauncherJobRef{}}
+	out := controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{}, Remove: []controllerwire.LauncherJobRef{}, RemoveReservations: []controllerwire.LauncherReservationRef{}}
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		p, err := tx.ResolveAuthority(ctx, authority)
 		if err != nil {
@@ -31,16 +31,24 @@ func (o *Operator) ReadLauncherSync(ctx context.Context, authority capability.Au
 			if err := observation.Validate(); err != nil {
 				return err
 			}
-			if seen[observation.Award] || jobs[observation.Job] {
+			reservation := controllerwire.LauncherReservationRef{Award: observation.Award, NodeUID: observation.NodeUID, ReservationID: observation.ReservationID}
+			if seen[observation.Award] || observation.ReservationID == "" && jobs[observation.Job] {
 				return authorityError(apierr.BadRequest, "duplicate launcher observation")
 			}
 			seen[observation.Award], jobs[observation.Job] = true, true
+			if observation.ReservationID != "" {
+				if err := launcherReservationAwardTx(ctx, tx, authority, observation.Award); err != nil {
+					return err
+				}
+			}
 			unit, live, err := launcherAwardTx(ctx, tx, authority, observation.Award)
 			if err != nil {
 				return err
 			}
 			if live {
 				out.Awards = append(out.Awards, unit)
+			} else if observation.ReservationID != "" {
+				out.RemoveReservations = append(out.RemoveReservations, reservation)
 			} else {
 				out.Remove = append(out.Remove, observation.Job)
 			}
@@ -53,13 +61,52 @@ func (o *Operator) ReadLauncherSync(ctx context.Context, authority capability.Au
 	return out, nil
 }
 
+func launcherReservationAwardTx(ctx context.Context, tx *storeTx, launcher capability.AuthorityRef, lease capability.LeaseRef) error {
+	var prefix string
+	err := tx.QueryRowContext(ctx, "SELECT prefix FROM capabilities WHERE unit_kind=? AND unit_id=? AND bind_holder=? AND COALESCE(eval_unit_generation,bind_generation)=? AND issuance='award' AND delivery_purpose='bootstrap'", string(lease.Kind), lease.ID, lease.Holder, lease.Generation).Scan(&prefix)
+	if errors.Is(err, sql.ErrNoRows) {
+		return bindingRefusal()
+	}
+	if err != nil {
+		return err
+	}
+	c, err := loadCapabilityTx(ctx, tx, prefix)
+	if err != nil {
+		return err
+	}
+	fence := capability.LeaseRef{Kind: c.Unit, ID: c.UnitID, Holder: c.Binding.Holder, Generation: c.Binding.Generation}
+	if c.Unit == capability.UnitEval && c.Binding.Expansion != nil {
+		fence = *c.Binding.Expansion
+	}
+	if fence != lease || c.Billing == nil || c.Billing.ExecutorClass != "cloud" {
+		return bindingRefusal()
+	}
+	seen := map[capability.AuthorityRef]bool{}
+	for c.Parent != nil {
+		parent := *c.Parent
+		if parent == launcher {
+			return nil
+		}
+		if seen[parent] || parent.Kind != capability.AuthorityCapability {
+			return bindingRefusal()
+		}
+		seen[parent] = true
+		c, err = loadCapabilityTx(ctx, tx, parent.ID)
+		if err != nil {
+			return err
+		}
+	}
+	return bindingRefusal()
+}
+
 func launcherAwardTx(ctx context.Context, tx *storeTx, launcher capability.AuthorityRef, lease capability.LeaseRef) (controllerwire.ClaimedUnit, bool, error) {
 	unit, err := decodeAwardUnit(lease.Kind, lease.ID)
 	if err != nil {
 		return controllerwire.ClaimedUnit{}, false, authorityError(apierr.BadRequest, "invalid launcher award identity")
 	}
 	row, err := loadAwardRowTx(ctx, tx, capability.AwardSpec{Unit: lease.Kind, UnitID: lease.ID})
-	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrNotFound) {
+	var refusal *apierr.Error
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrNotFound) || errors.As(err, &refusal) && refusal.Code == apierr.LockHeld {
 		return controllerwire.ClaimedUnit{}, false, nil
 	}
 	if err != nil {

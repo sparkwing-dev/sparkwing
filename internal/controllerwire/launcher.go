@@ -1,9 +1,10 @@
 package controllerwire
 
 import (
+	"k8s.io/apimachinery/pkg/util/validation"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // LauncherJobRef requires a UID precondition when deleting the named Kubernetes Job.
@@ -11,6 +12,21 @@ type LauncherJobRef struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
 	UID       string `json:"uid"`
+}
+
+// LauncherReservationRef fences release to one award's exact node reservation.
+type LauncherReservationRef struct {
+	Award         capability.LeaseRef `json:"award"`
+	NodeUID       string              `json:"node_uid"`
+	ReservationID string              `json:"reservation_id"`
+}
+
+// Validate requires a complete reservation fence without a Job reference.
+func (r LauncherReservationRef) Validate() error {
+	if r.ReservationID == "" {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "launcher reservation requires its reservation ID"}
+	}
+	return (LauncherObservation{Award: r.Award, NodeUID: r.NodeUID, ReservationID: r.ReservationID}).Validate()
 }
 
 // Validate refuses cleanup identities that could select a replacement Job by name alone.
@@ -28,6 +44,12 @@ func (o LauncherObservation) Validate() error {
 	}
 	switch o.Award.Kind {
 	case capability.UnitPlan, capability.UnitEval, capability.UnitNode:
+		if o.ReservationID != "" {
+			if o.Job != (LauncherJobRef{}) {
+				return &apierr.Error{Code: apierr.BadRequest, Message: "launcher reservation observation cannot carry a Job reference"}
+			}
+			return nil
+		}
 		return o.Job.Validate()
 	default:
 		return &apierr.Error{Code: apierr.BadRequest, Message: "launcher observation has an invalid unit kind"}
