@@ -99,6 +99,11 @@ generated groups and declared pinned pipeline references supply permitted edges.
 Remote-cache capabilities expose only verified-default data and exclude binaries
 and source bundles.
 
+The owning store transaction also implements `CheckDataAccess`. Its checks see
+that transaction's receipt, reference, revocation and holder changes and leave
+commit or rollback to the caller. `Tenant` uses the same checks. Supplied
+principal fields cannot widen persisted capability authority.
+
 `MarkBlobTombstones` and `CollectBlobTombstones` require the maintenance lease.
 Records and live receipts root the graph, including transitive manifest members.
 Collection waits `limits.BlobGCGrace`, takes the same blob lock as writers,

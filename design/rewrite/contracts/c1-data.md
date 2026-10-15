@@ -379,8 +379,8 @@ Rate-table reads use one snapshot so a concurrent update cannot mix its scalar
 price with another table. Operator table authority is checked under the shared
 advisory lock before any settings write.
 
-`CreditSettings` supplies max-charge seconds, the storage price and the free
-storage allowance. Their unused scalar Store getters are removed.
+`CreditSettings` supplies max-charge seconds, the storage price, the free storage
+allowance and rate-table presence. Their unused Store getters are removed.
 
 | Export | Purpose |
 |---|---|
@@ -543,6 +543,14 @@ App intake, namespace rules and byte verification remain integration work.
 `CheckDataAccess` carries a complete target run/job/attempt/generation tuple into
 the authority recheck. Published job receipts require that exact imported
 attempt; omitting the selectors cannot borrow a receipt from another job.
+
+Both `Tenant` and the owning store transaction implement C2's `DataAccessChecker`.
+They share the persisted authority, receipt and read-edge checks. The transaction
+implementation opens no second transaction and leaves commit or rollback to its
+caller. Uncommitted receipt removal, reference changes, revocation and holder
+fences therefore govern authorization in that write. Caller-supplied principal
+fields cannot widen the persisted capability. Final upload and record writes
+still repeat their locking checks before persisting a receipt or reference.
 
 The `storage-reachability-and-retention-tails/store-data-sqlite` proof exercises
 leased record expiry, newest-success output pins, receipt roots, transitive

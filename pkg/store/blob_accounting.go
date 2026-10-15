@@ -8,8 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
-// blobAccounting identifies the signing reservation and the committing replica.
-// The controller restores these fields from its signed upload ticket, never commit input.
 type blobAccounting struct {
 	ReservationID string
 	ReplicaID     string

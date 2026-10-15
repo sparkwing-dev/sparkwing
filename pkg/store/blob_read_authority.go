@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -264,7 +262,16 @@ func (t *Tenant) ReadableBlobs(ctx context.Context, request blob.HasManyRequest)
 		return result, err
 	}
 	defer rollbackOrLog(tx)
-	a, err := resolveBlobAuthorityTx(ctx, tx, t.team, request.Authority, capability.DataRead)
+	result, err = readableBlobsTx(ctx, tx, t.team, request)
+	if err != nil {
+		return result, err
+	}
+	return result, tx.Commit()
+}
+
+func readableBlobsTx(ctx context.Context, tx *storeTx, team Team, request blob.HasManyRequest) (blob.Presence, error) {
+	result := blob.Presence{}
+	a, err := resolveBlobAuthorityTx(ctx, tx, team, request.Authority, capability.DataRead)
 	if err != nil {
 		return result, err
 	}
@@ -280,7 +287,7 @@ func (t *Tenant) ReadableBlobs(ctx context.Context, request blob.HasManyRequest)
 			continue
 		}
 		seen[digest] = true
-		if _, err := requireBlobTx(ctx, tx, t.team, digest); errors.Is(err, blob.ErrNotFound) {
+		if _, err := requireBlobTx(ctx, tx, team, digest); errors.Is(err, blob.ErrNotFound) {
 			continue
 		} else if err != nil {
 			return result, err
@@ -297,69 +304,5 @@ func (t *Tenant) ReadableBlobs(ctx context.Context, request blob.HasManyRequest)
 			result.Present = append(result.Present, digest)
 		}
 	}
-	return result, tx.Commit()
+	return result, nil
 }
-
-// CheckDataAccess rechecks C2's resolved authority before a data route signs or commits.
-func (t *Tenant) CheckDataAccess(ctx context.Context, authorized capability.Authorized, target capability.DataTarget) error {
-	c := authorized.Principal.Capability
-	input := blob.Authority{CapabilityRef: c.Prefix}
-	if c.Prefix == "" || c.Team != string(t.team) {
-		return authorityError(apierr.Forbidden, "data route requires tenant capability authority")
-	}
-	if target.RunID != "" && target.NodeID != "" && target.Attempt > 0 && target.Generation > 0 {
-		input.Attempt = runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: string(t.team), RunID: target.RunID, NodeID: target.NodeID, Attempt: target.Attempt, Generation: target.Generation}}
-	}
-	if target.Operation == capability.DataUpload || target.Operation == capability.DataCommit || target.Operation == capability.DataRecord {
-		tx, err := t.s.beginTx(ctx)
-		if err != nil {
-			return err
-		}
-		defer rollbackOrLog(tx)
-		resolved, err := resolveBlobAuthorityTx(ctx, tx, t.team, input, capability.DataWrite)
-		if err != nil {
-			return err
-		}
-		source := resolved.source
-		if (target.RunID != "" && target.RunID != source.RunID) || (target.NodeID != "" && (!source.Attempt.Set || target.NodeID != source.Attempt.Value.NodeID)) || (target.Attempt != 0 && (!source.Attempt.Set || target.Attempt != source.Attempt.Value.Attempt)) || (target.Generation != 0 && (!source.Attempt.Set || target.Generation != source.Attempt.Value.Generation)) {
-			return blob.ErrDigestNotReadable
-		}
-		if target.RecordKind != "" && !blobKindAllowed(source, blob.Kind(target.RecordKind)) {
-			return blob.ErrDigestNotReadable
-		}
-		if !validBlobDigest(blob.Digest(target.Digest)) {
-			return authorityError(apierr.BadRequest, "invalid blob digest")
-		}
-		if target.Operation == capability.DataRecord {
-			if _, err := requireBlobTx(ctx, tx, t.team, blob.Digest(target.Digest)); err != nil {
-				return err
-			}
-			receipt, err := readOwnBlobReceiptTx(ctx, tx, source, blob.Digest(target.Digest))
-			if err != nil {
-				return err
-			}
-			set, err := blobReadSetTx(ctx, tx, resolved, blob.Digest(target.Digest))
-			if err != nil {
-				return err
-			}
-			if !receipt.Set && len(set.Edges) == 0 {
-				return blob.ErrDigestNotReadable
-			}
-		}
-		return tx.Commit()
-	}
-	if target.Operation != capability.DataDownload && target.Operation != capability.DataHasMany && target.Operation != capability.DataLookup {
-		return authorityError(apierr.BadRequest, "unknown data operation")
-	}
-
-	presence, err := t.ReadableBlobs(ctx, blob.HasManyRequest{Authority: input, Digests: []blob.Digest{blob.Digest(target.Digest)}, Budget: blob.Budget{Deadline: time.Time{}}})
-	if err != nil {
-		return err
-	}
-	if len(presence.Present) != 1 {
-		return blob.ErrDigestNotReadable
-	}
-	return nil
-}
-
-var _ capability.DataAccessChecker = (*Tenant)(nil)

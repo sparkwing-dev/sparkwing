@@ -76,6 +76,8 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
+- **store (Breaking):** Remove the unused `Store.CreditRateTableSet` getter. Read rate-table presence through `CreditSettings.RateTableSet` with the prices from the same snapshot. See [migration guide](docs/migrations/_unreleased.md#rate-table-presence-uses-the-settings-snapshot).
+- **store:** Data authorization can run inside the transaction that owns a write. Receipt, reference, revocation and holder changes in that transaction govern access before commit.
 - **store + controller (Breaking):** Abandoned execution logs close as incomplete through `Operator.SealAbandonedLogStreams` under the maintenance lease. Tagged job streams keep their final tail grace, and owner streams check their own unit fences. The old `Store.AbandonedNodeLogs` API and periodic node-log sweep are removed. See [migration guide](docs/migrations/_unreleased.md#abandoned-logs-use-tagged-streams).
 - **store + controller (Breaking):** Remove the cache service's `POST /internal/egress/totals` endpoint and `Store.RecordEgressTotals` / `PruneEgressTotals`. Cache-service totals stay in memory. Tenant usage uses additive replica rows.
 - **store:** Record lookups with `VerifiedDefaultOnly` exclude entries without persisted verified default-branch evidence before reading their bytes. Remote-cache credentials retain that restriction even when the request flag is false.

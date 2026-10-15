@@ -244,14 +244,6 @@ func (s *Store) CreditRateTable(ctx context.Context) (CreditRateTable, error) {
 	return settings.RateTable, err
 }
 
-// CreditRateTableSet reports whether an operator has written a rate table. An
-// installation that has not prices every class at the single rate, and the
-// single rate is a setting it may still write.
-func (s *Store) CreditRateTableSet(ctx context.Context) (bool, error) {
-	settings, err := s.CreditSettings(ctx)
-	return settings.RateTableSet, err
-}
-
 func creditRateTableTx(ctx context.Context, tx *storeTx) (CreditRateTable, error) {
 	rate, err := creditSettingTx(ctx, tx, metaKeyCreditRateMicro, DefaultCreditRateMicro)
 	if err != nil {

@@ -152,9 +152,9 @@ func TestUnsetRateTablePricesTheDefaultLadder(t *testing.T) {
 	if got := table.RateFor(8); got != 33_000 {
 		t.Fatalf("eight-core class = %d, want the ladder's 33000", got)
 	}
-	set, err := s.CreditRateTableSet(ctx)
-	if err != nil || set {
-		t.Fatalf("CreditRateTableSet = %v, %v; want false with no table written", set, err)
+	settings, err := s.CreditSettings(ctx)
+	if err != nil || settings.RateTableSet {
+		t.Fatalf("RateTableSet = %v, %v; want false with no table written", settings.RateTableSet, err)
 	}
 }
 
@@ -642,9 +642,9 @@ func TestATableWithoutAFourCoreClassLeavesTheScalarAlone(t *testing.T) {
 	if rate != store.DefaultCreditRateMicro {
 		t.Fatalf("single rate = %d, want the default it was left at", rate)
 	}
-	set, err := s.CreditRateTableSet(ctx)
-	if err != nil || !set {
-		t.Fatalf("CreditRateTableSet = %v, %v; want true", set, err)
+	settings, err := s.CreditSettings(ctx)
+	if err != nil || !settings.RateTableSet {
+		t.Fatalf("RateTableSet = %v, %v; want true", settings.RateTableSet, err)
 	}
 }
 

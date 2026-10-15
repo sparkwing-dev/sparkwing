@@ -57,5 +57,29 @@ func blobAccountingDB(t *testing.T, path string) *sql.DB {
 			t.Error(err)
 		}
 	})
+	if err := db.PingContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	return db
+}
+
+func TestBlobAccountingDiskConnectionsInitializeWALBeforeWrites(t *testing.T) {
+	s := authorityStore(t)
+	path := blobAccountingDiskStore(t, s)
+	probe, err := sql.Open("sqlite", sqliteURI(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := probe.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	var mode string
+	if err := probe.QueryRowContext(t.Context(), "PRAGMA journal_mode").Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	if mode != "wal" {
+		t.Fatalf("fixture returned before WAL initialization: %s", mode)
+	}
 }

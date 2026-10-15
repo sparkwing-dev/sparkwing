@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -62,7 +63,7 @@ func checkStorePresenceBoundary(ctx context.Context, root string) (err error) {
 		if err != nil || !slices.Equal(presence.Present, want) {
 			return fmt.Errorf("presence for %s=%+v, want %v: %v", request.Intent.Identity.Attempt.Value.NodeID, presence, want, err)
 		}
-		return nil
+		return checkStorePresenceAccess(ctx, tenant, request.Intent.Authority, query.Digests, want)
 	}
 	if err := check([]blob.Digest{first.Blob.Digest}); err != nil {
 		return err
@@ -118,6 +119,25 @@ func checkStorePresenceBoundary(ctx context.Context, root string) (err error) {
 		return fmt.Errorf("expired presence budget=%v", err)
 	}
 	return checkStorePresenceUsage(ctx, tenant, s.DB())
+}
+
+func checkStorePresenceAccess(ctx context.Context, tenant *store.Tenant, authority blob.Authority, digests, present []blob.Digest) error {
+	a := authority.Attempt.Value
+	authorized := capability.Authorized{Principal: capability.Principal{Capability: capability.Capability{Prefix: authority.CapabilityRef, Team: a.Team}}}
+	for _, operation := range []capability.DataOperation{capability.DataDownload, capability.DataHasMany, capability.DataLookup} {
+		for _, digest := range digests {
+			target := capability.DataTarget{Operation: operation, Digest: string(digest), RunID: a.RunID, NodeID: a.NodeID, Attempt: a.Attempt, Generation: a.Generation}
+			err := tenant.CheckDataAccess(ctx, authorized, target)
+			if slices.Contains(present, digest) {
+				if err != nil {
+					return fmt.Errorf("readable receipt refused by %s: %w", operation, err)
+				}
+			} else if !errors.Is(err, blob.ErrDigestNotReadable) {
+				return fmt.Errorf("%s exposed unreadable digest: %v", operation, err)
+			}
+		}
+	}
+	return nil
 }
 
 func seedStorePresenceAttempts(ctx context.Context, db *sql.DB) (store.UploadReservationRequest, error) {

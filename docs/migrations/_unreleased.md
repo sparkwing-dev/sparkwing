@@ -1,5 +1,10 @@
 # Migrating to the next release
 
+## Rate-table presence uses the settings snapshot
+
+`Store.CreditRateTableSet` is removed. Read `CreditSettings.RateTableSet` so the
+presence flag and prices come from the same settings snapshot.
+
 ## Abandoned logs use tagged streams
 
 `Store.AbandonedNodeLogs` and the controller's old periodic node-log sweep are
