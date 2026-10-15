@@ -747,8 +747,12 @@ exclude a neighboring team's ledger and survive the same retention and restart.
 Both history methods retain tenant attribution. Charge history reads the final
 capability column into CreditCharge.TokenPrefix and preserves the original
 run, job and awarded capability after those operational rows expire.
+`Tenant.CreditUsageByRun` nets reservations, usage and refunds, excluding storage
+and runless charges. Its per-run rows survive operational run retention and
+reopening alongside the tenant balance and history.
 `Tenant.CreditState` and `Tenant.ListCreditGrants` own these reads. Their raw
 Store twins are removed. Burn windows use the store clock.
+Balances use `Tenant.CreditBalanceMicro`. Its raw Store twin is removed.
 `Tenant.RecordCreditGrant` owns grant requests. Its raw Store twin is removed.
 The proof does not exercise provider verification or native placements.
 The controller's billing caller uses this operator method. W1's

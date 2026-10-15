@@ -164,7 +164,7 @@ func fingerprintInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) i
 		f.Secrets = append(f.Secrets, sec.Name+"="+plain)
 	}
 
-	balance, err := st.CreditBalanceMicro(ctx)
+	balance, err := tenant(t, st, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("read credit balance: %v", err)
 	}

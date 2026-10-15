@@ -601,16 +601,6 @@ func creditGrantByReferenceTx(
 	return g, true, nil
 }
 
-// CreditBalanceMicro returns the default team's grants minus its charges, in
-// micro-credits. A controller that was never granted anything reads zero.
-//
-// safety: the unscoped twin reads [DefaultTeam] because a local install holds
-// exactly that one team; summing every team would let a funded team pay for
-// an unfunded one's work.
-func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error) {
-	return s.creditBalanceMicro(ctx, DefaultTeam)
-}
-
 // CreditBalanceMicro returns t's grants minus t's charges, in micro-credits.
 // Another team's grants are not in it, so a team that has spent its own
 // grants reads an empty balance however well funded its neighbors are.

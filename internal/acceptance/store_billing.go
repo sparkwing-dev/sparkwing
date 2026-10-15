@@ -102,6 +102,13 @@ func CheckStoreBillingBoundary(ctx context.Context, root, id string) (err error)
 	if !slices.Equal(charges, wantCharges) {
 		return fmt.Errorf("tenant charge history lost attribution or includes a foreign charge: %+v", charges)
 	}
+	usage, err := tenant.CreditUsageByRun(ctx, 100)
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(usage, []store.RunCreditUsage{{RunID: "old", Seconds: 3, AmountMicro: 30, LastChargedAt: grants[0].CreatedAt}}) {
+		return fmt.Errorf("tenant run usage includes storage or a foreign ledger: %+v", usage)
+	}
 	result, err := operator.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 100})
 	if err != nil {
 		return err
@@ -156,7 +163,11 @@ func CheckStoreBillingBoundary(ctx context.Context, root, id string) (err error)
 	if err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(state, afterState) || !reflect.DeepEqual(grants, afterGrants) || !reflect.DeepEqual(charges, afterCharges) {
+	afterUsage, err := tenant.CreditUsageByRun(ctx, 100)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(state, afterState) || !reflect.DeepEqual(grants, afterGrants) || !reflect.DeepEqual(charges, afterCharges) || !slices.Equal(usage, afterUsage) {
 		return errors.New("tenant credit state or history changed during run retention or restart")
 	}
 	return nil

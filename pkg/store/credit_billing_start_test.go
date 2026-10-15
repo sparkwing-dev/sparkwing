@@ -45,7 +45,7 @@ func dispatchedClaim(t *testing.T, s *store.Store, claimant store.ClaimIdentity,
 
 func mustBalance(t *testing.T, s *store.Store) int64 {
 	t.Helper()
-	b, err := s.CreditBalanceMicro(context.Background())
+	b, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(context.Background())
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}

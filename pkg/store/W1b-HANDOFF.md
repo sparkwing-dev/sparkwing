@@ -1,10 +1,96 @@
 # W1b handoff
 
-Continues `9c42f1022` after the integration merge `766fd6694`. W1b remains
-incomplete. This continuation is uncommitted. The lead owns review, commits,
-pipelines and native integration.
+Continues `00ed1f202`. W1b remains incomplete. This continuation is uncommitted.
+The lead owns review, commits, pipelines and native integration.
 
 ## Current continuation
+
+Removed `Store.CreditBalanceMicro`, **10 production Go lines**, including its
+comments and separating blank line. Fourteen store-test calls and three
+controller-test calls now select the existing Tenant method. No production
+caller outside pkg/store used the removed API. The remaining
+`Store.ListCreditCharges` wrapper has W1-owned claim/race test callers and stays
+until W1 migrates them. W1 implementation and test files are unchanged.
+
+Extended `billing-ledger-survives-retention/store-data-sqlite` to check the exact
+`Tenant.CreditUsageByRun` row before leased retention and after reopening.
+Storage charges and the neighboring team's ledger cannot enter that report.
+Added a 64-case property spanning 128 tenant keys, shared adversarial run IDs,
+reservation/usage/refund netting, storage and runless charges, tied ordering,
+limits, balances and reopening without operational run rows. Its invariant is
+that each Tenant exposes only its own immutable ledger and per-run totals.
+
+Ported the three tests in node_logs_test.go to tagged persistence and deleted
+that file, **173 legacy test lines**. New tests cover segment replay, conflicting
+content, segment and attempt byte limits, exact retained-byte accounting and
+run-deletion cascade. The existing final-schema tests retain immutable seals,
+current-attempt fencing and historical reads. A new test verifies that a later
+node finish cannot extend an attempt's tail grace. This reverses the legacy
+node-end fallback under the final attempt-specific contract. A 96-case property
+checks that team, run, job, attempt and generation forgeries cannot read or write
+another subject. No new archived T1 inventory row is claimed complete.
+
+Verification uses the environment and command prefix under Manual below.
+
+- Whole-repository go build -p 4 ./... passed.
+- go vet -p 4 over store, controller and both acceptance trees passed.
+- The expanded store selection passed **183 top-level tests / 468 cases**, with
+  no skips. This includes the existing Manual selection plus grant, reversal,
+  history, balance and tenant-scope/writer/twin guards.
+- Both acceptance trees passed **20 top-level tests / 486 cases**. All **12
+  SQLite data/billing cells** pass. The native/platform skeleton retains
+  **2,991 skips**. No new native cell is activated.
+- Required commentcheck -base main passed across 890 files. Session sleepcheck,
+  focused documentation/changelog tests, sync-docs --check and whitespace checks
+  passed. The full pkg/docs suite reached TestWebClient_Versions_HappyPath and
+  could not bind its socket in this sandbox. The original failure remains in
+  the session transcript. Its pure mirror/changelog checks passed separately.
+
+The full legacy store suite, controller runtime tests, PostgreSQL, providers,
+physical storage, backup drill, native placements, candidates and pipelines
+were not run. Migrated legacy consumers compile. Their old claim fixtures are
+not new execution evidence. After correcting the tail fixture's start/finish
+ordering, its final focused test and store vet passed again.
+
+Amendment disposition:
+
+- A1-24: transaction data checker and merged binding integration remain in place.
+- A1-27: immutable award/interval/settlement helpers exist. W1 must join its
+  lifecycle transactions. An agreed full refund for an unstarted at_award claim
+  and an explicit customer-runner wait operation remain missing. C2's production
+  calculator is still a panic stub. W1b does not change these foreign contracts.
+- A1-28: committed-checkout settlement exists. W2 owns verified-provider routes
+  and removal of caller-selected paid grants.
+- A1-29 through A1-35: upload, receipt, member, reference, record, tombstone and
+  tagged-log persistence exist. W2/W7 transport, policy and physical integration
+  remain open. Result attachment still needs the real manifest reader. Memo
+  materialization needs a destination identity for a never-executed terminal job.
+  Published owner-log identities still need a cross-owner contract.
+- A1-53: these SQLite proofs pass. Native acceptance stays open.
+- handoffs.md contains no W1b assignment.
+
+No new foreign contract change or human question is added. W1/W2/W7 integration
+and legacy runtime retirement remain the limit on completion. The provider
+verifier, blob namespace/edge policy and physical byte adapters still require
+their real owners. Existing contract-fake proofs remain distinct from native
+readiness.
+
+Shared edits outside the owned store files: pkg/controller/credits_test.go,
+pkg/controller/node_claim_named_test.go (only the three balance caller changes),
+internal/acceptance/store_billing.go, design/rewrite/contracts/c1-data.md,
+.apidiff/pkg_store.txt, CHANGELOG.md, docs/migrations/_unreleased.md and generated
+mirrors. Other edited store files are owned credit/log tests, credits.go,
+STORE-DATA.md and this handoff. No schema, interface, setting, limit, environment
+variable or runtime mechanism was added.
+
+Friction was cold compilation, the docs socket restriction and unavailable
+foreign integrations. The log property was corrected to accept a missing-run
+write refusal while still requiring read authorization before existence lookup.
+No Git writes, service starts or Sparkwing runtime commands ran after bootstrap
+discovery. Git identity is Korey's default with no core.worktree override.
+Scratch is deleted after final inspection.
+
+## Previous continuation (committed in 00ed1f202)
 
 Fixed final-schema billing history. Tenant.ListCreditCharges queried the removed
 credit_charges.token_prefix column. It now reads capability_prefix into the

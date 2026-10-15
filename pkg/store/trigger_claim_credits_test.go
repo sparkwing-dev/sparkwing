@@ -83,7 +83,7 @@ func triggerFloor(t *testing.T, st *store.Store, pool store.ClaimIdentity) int64
 
 func balance(t *testing.T, st *store.Store) int64 {
 	t.Helper()
-	b, err := st.CreditBalanceMicro(context.Background())
+	b, err := tenant(t, st, store.DefaultTeam).CreditBalanceMicro(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

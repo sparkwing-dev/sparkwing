@@ -2926,7 +2926,6 @@ func (s *Store) CreateTokenWith(
 ) (string, *Token, error)
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
 func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) error
-func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error)
 func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error)
 func (s *Store) CreditRateTable(ctx context.Context) (CreditRateTable, error)
 func (s *Store) CreditSettings(ctx context.Context) (_ CreditSettings, err error)

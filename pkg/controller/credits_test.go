@@ -682,7 +682,11 @@ func TestCredits_NodeFinishSettlesAShortNodeAtTheMinimum(t *testing.T) {
 		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	before, err := f.store.CreditBalanceMicro(ctx)
+	billingTenant, err := f.store.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := billingTenant.CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -712,7 +716,7 @@ func TestCredits_NodeFinishSettlesAShortNodeAtTheMinimum(t *testing.T) {
 		t.Fatalf("finish node: %v", err)
 	}
 
-	after, err := f.store.CreditBalanceMicro(ctx)
+	after, err := billingTenant.CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}

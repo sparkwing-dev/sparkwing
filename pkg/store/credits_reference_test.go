@@ -52,7 +52,7 @@ func TestGrantCreditsIsIdempotentByReference(t *testing.T) {
 	if n := grantCount(t, s); n != 1 {
 		t.Fatalf("grants = %d, want the one row", n)
 	}
-	balance, err := s.CreditBalanceMicro(ctx)
+	balance, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestCreditReversalNetsOutOfTheBalanceAndTheHistory(t *testing.T) {
 		t.Fatalf("reversal row = %+v", res)
 	}
 
-	balance, err := s.CreditBalanceMicro(ctx)
+	balance, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestCreditReversalIsIdempotentByRefundReference(t *testing.T) {
 	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, second); err != nil {
 		t.Fatalf("second partial refund: %v", err)
 	}
-	balance, err := s.CreditBalanceMicro(ctx)
+	balance, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestCreditReversalMayTakeTheBalanceBelowZero(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("reversal: %v", err)
 	}
-	balance, err := s.CreditBalanceMicro(ctx)
+	balance, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}

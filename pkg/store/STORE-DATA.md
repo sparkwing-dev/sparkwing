@@ -1,13 +1,16 @@
 # Store data persistence
 
 Financial writes use the same transaction as the state change that caused them.
-Billing state and grant history use `Tenant.CreditState` and
-`Tenant.ListCreditGrants`. Their raw Store twins are removed. Burn windows use
+Balances use `Tenant.CreditBalanceMicro`. Billing state and grant history use
+`Tenant.CreditState` and `Tenant.ListCreditGrants`. Their raw Store twins are removed. Burn windows use
 the store clock and include charges at the window's lower boundary.
 `Tenant.ListCreditCharges` reads the final `capability_prefix` column into
 `CreditCharge.TokenPrefix`. Both history methods return the selected tenant
 on every row and preserve ledger metadata after run retention. Equal timestamps
 sort by descending row ID. Default and maximum history sizes are unchanged.
+`Tenant.CreditUsageByRun` nets reservation, usage and refund rows by run. Storage
+and runless charges affect the balance but stay outside this report. Per-run
+usage survives operational run retention and reopening.
 Grant requests use `Tenant.RecordCreditGrant`. Its raw Store twin is removed.
 Rate-table writes use `SetCreditSettings` with `CreditSettingsUpdate.RateTable`.
 The separate `SetCreditRateTable` wrapper is removed.
@@ -160,6 +163,9 @@ seal even empty streams, and only identical final bodies replay. Job tail grace
 uses the persisted finish time and original writer. Trigger, plan and eval logs
 retain their own live fences. A reader with run-read authority can read historical
 segments after the writer ends. Log incompleteness never changes the job result.
+Segment replay counts retained bytes once. Refused content and byte-limit
+violations preserve the committed inventory. Run deletion cascades streams and
+segments. A later job finish cannot extend an attempt's persisted tail grace.
 
 `SealAbandonedLogStreams` closes existing execution streams as incomplete under
 the maintenance lease. Finished job attempts keep their final tail grace through

@@ -128,7 +128,7 @@ func TestCreditsBalanceIsGrantsMinusCharges(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	balance, err := s.CreditBalanceMicro(ctx)
+	balance, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestCreditsBalanceIsGrantsMinusCharges(t *testing.T) {
 	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, 50*store.MicroCreditsPerCent, "", "admin"); err != nil {
 		t.Fatalf("free grant: %v", err)
 	}
-	balance, err = s.CreditBalanceMicro(ctx)
+	balance, err = tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestClaimReservationLetsOnlyOneRunnerClaimTheLastMinute(t *testing.T) {
 	if !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("the second claim = %v, want ErrInsufficientCredits", err)
 	}
-	balance, err := s.CreditBalanceMicro(ctx)
+	balance, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestFinalizeNodeCreditsRefundsAReservationWhenExecutionNeverStarts(t *testi
 		res.Charge.Seconds != -int64(store.MinBillableSeconds) {
 		t.Fatalf("finalize charge = %+v, want the complete reservation refunded", res.Charge)
 	}
-	balance, err := s.CreditBalanceMicro(ctx)
+	balance, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestReapExpiredNodeClaimKeepsTheMinimumWhenExecutionNeverStarts(t *testing.
 		t.Fatalf("reap expired claim: %v", err)
 	}
 
-	balance, err := s.CreditBalanceMicro(ctx)
+	balance, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -589,7 +589,7 @@ func TestFinalizeNodeCreditsConsumesTheMinimum(t *testing.T) {
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	before, err := s.CreditBalanceMicro(ctx)
+	before, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -608,7 +608,7 @@ func TestFinalizeNodeCreditsConsumesTheMinimum(t *testing.T) {
 	if res.Charge != nil {
 		t.Fatalf("finalize wrote %+v, want nothing: the reservation is the minimum", res.Charge)
 	}
-	after, err := s.CreditBalanceMicro(ctx)
+	after, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}

@@ -7,8 +7,8 @@ then call `Tenant.RecordCreditGrant`. Local stores use `store.DefaultTeam`.
 
 ## Billing reads use tenant handles
 
-`Store.CreditState` and `Store.ListCreditGrants` are removed. Obtain a tenant
-with `Store.ForTeam`, then call `Tenant.CreditState` and `Tenant.ListCreditGrants`.
+`Store.CreditBalanceMicro`, `Store.CreditState` and `Store.ListCreditGrants` are
+removed. Obtain a tenant with `Store.ForTeam`, then call the matching Tenant method.
 Local stores use the handle for `store.DefaultTeam`.
 
 ## Rate-table presence uses the settings snapshot
