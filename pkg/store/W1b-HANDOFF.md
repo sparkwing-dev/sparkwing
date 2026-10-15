@@ -1,5 +1,76 @@
 # W1b handoff
 
+## Continuation audit after 97a91ff3c
+
+No implementation or acceptance-cell change in this continuation. The priority
+items still require foreign contracts or branch integration. The swarm brief
+requires stopping that piece when another area's contract must change. No
+replacement event type, schema workaround or legacy adapter was introduced.
+
+1. W2 must extend `capability.PaymentEvent` and its verifier for card setup,
+   off-session collection, refunds, warnings and disputes. Both this checkout
+   and `bw-3095-w2-credentials` still declare only checkout paid/expired/failed.
+   `VerifiedPaymentEvent` has private facts, so W1b cannot add verified outcomes
+   from its area. W1 must supply the corresponding schema contract. The current
+   `payment_events` CHECK permits those same three outcomes, requires a
+   checkout, and references a same-team/mode `credit_checkouts` row. Card setup
+   also needs a persisted setup/customer-to-team correlation. W1b will extend
+   `SettlePayment` once those contracts exist, deriving the payer from committed
+   identities and committing the business mutation with event deduplication.
+2. W1 must join its lifecycle implementation into this branch and declare the
+   committing spend/grace policy result. This checkout has no `unit_billing.go`.
+   On `bw-3095-w1-store`, `accountUnitBillingTx` still returns only `error` and
+   discards the settlement result. There is no per-award exhaustion anchor in
+   `billing_awards`. W1b cannot edit W1's renewal or schema files under the lead's
+   ownership restriction. The required join must preserve prepaid runway,
+   customer-runner waits, unit-specific minima and holder drain.
+3. W9's `NewDataClient` is now implemented here. The legacy output callers still
+   use `OutputReadGrant`, and `localState.GetNodeOutput` still forwards to the
+   unbound Store reader. W2/W3/W9 must supply the authenticated binding and
+   selected final record key, including materialized results without synthetic
+   attempts. W1's private `CopyMaterializedRecords` still needs its production
+   record-identity contract. Deleting these consumers before that join would
+   remove output reads without a final replacement.
+4. The production controller/client still has no implementation of
+   `blob.LogTransport.SignSegments` or `VerifyUpload`. The acceptance transport
+   is a fake. `LogSegmentUploader` still posts to retired writer routes, while
+   controller reads still call `LatestNodeLog`/`RunNodeLogs` over `node_logs`,
+   which is absent from the final schema. W2/W9 must provide the authenticated
+   transport and W3 must carry the persisted tagged subject. Existing W1b
+   `RecordSegments`, `ReadLogSegments`, `SubjectUploader` and `CommittedReader`
+   remain the final persistence/byte contracts for that cutover.
+
+These are integration requests, not requests to restore removed APIs. A1-27,
+A1-28 and the consumer side of A1-35 remain open at those boundaries. The prior
+implemented A1-24 and A1-29 through A1-35 persistence work is not repeated.
+No new test-only acceptance cell, archived test port or implementation mechanism
+was added. Legacy deletion is zero lines. Only this W1b-owned report changed.
+
+Verification used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4 and
+GOCACHE/GOTMPDIR/TMPDIR beneath /tmp/sw-astra-W1b. Passed:
+
+- Whole-repository `go build ./...`.
+- `go vet ./pkg/store ./pkg/storage/logseg`.
+- Final store payment, tagged-log persistence, segment and record-mutation
+  property tests (38.592 s).
+- Final StoreDataMetered and StoreDataUnmetered accounting tests (33.264 s).
+- Selected SubjectUploader and CommittedReader tests (0.161 s).
+- Commentcheck against main, clean across 2,119 files, and `git diff --check`.
+
+The broader TestMetered selection failed 13 legacy tests before their accounting
+assertions. claim_team_boundary_test.go still seeds runs.args_json.
+trigger_claim_credits_test.go also seeds triggers.pipeline. That file,
+credit_rates_test.go, credits_test.go and execution_attribution_test.go still
+mint rows in the removed tokens table. These failures remain open. No full
+store-suite or acceptance/native/provider/PostgreSQL pass is claimed.
+
+Scratch was removed after checks. No Git write or Sparkwing binary ran. The Git
+identity remains Korey Gambill with no core.worktree override. No shared file
+changed. No product docs impact because runtime behavior is unchanged. The
+earlier implementation report follows unchanged.
+
+## Previous implementation report
+
 Continues 0aca55e2f and W1b-session1792074610.out. W1b remains incomplete.
 The worktree started clean. The lead owns review, commits and pipelines.
 
