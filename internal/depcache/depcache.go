@@ -249,6 +249,11 @@ func deriveKey(name, scope, lockPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read key file %s: %w", lockPath, err)
 	}
+	return Key(name, scope, data)
+}
+
+// Key derives a platform-specific directory-cache key from captured lockfile bytes.
+func Key(name, scope string, data []byte) (string, error) {
 	h := sha256.New()
 	h.Write([]byte(scope))
 	h.Write([]byte{0})
@@ -268,7 +273,7 @@ func resolveNpmCacheDir(workdir string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if command, err := npmCacheCommand(ctx, goruntime.GOOS, exec.LookPath); err == nil {
+	if command, err := NpmCacheCommand(ctx, goruntime.GOOS, exec.LookPath); err == nil {
 		command.Dir = workdir
 		if out, err := command.Output(); err == nil {
 			if v := strings.TrimSpace(string(out)); v != "" && v != "undefined" {
@@ -279,7 +284,8 @@ func resolveNpmCacheDir(workdir string) (string, error) {
 	return defaultNpmCacheDir(goruntime.GOOS)
 }
 
-func npmCacheCommand(ctx context.Context, goos string, lookPath func(string) (string, error)) (*exec.Cmd, error) {
+// NpmCacheCommand queries npm through its native executable or Windows Node entrypoint.
+func NpmCacheCommand(ctx context.Context, goos string, lookPath func(string) (string, error)) (*exec.Cmd, error) {
 	npm, err := lookPath("npm")
 	if err != nil {
 		return nil, err

@@ -137,7 +137,7 @@ func TestDeleteTeamRefusesAnOpenCheckoutOrADisputeHold(t *testing.T) {
 		!strings.Contains(refused.Error, "wait for the checkout to expire or complete") {
 		t.Fatalf("deleting a team with an open checkout = %d %q, want 409 naming the remedy", code, refused.Error)
 	}
-	if code := f.call("DELETE", "/api/v1/teams/acme", "Bearer "+f.admin, nil, &refused); code != http.StatusConflict {
+	if code := f.call("DELETE", "/api/v1/operator/teams/acme", f.consoleAuth(), nil, nil); code != http.StatusConflict {
 		t.Fatalf("the operator deleting it = %d, want 409", code)
 	}
 

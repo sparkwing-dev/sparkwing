@@ -13,7 +13,7 @@ func nodeRow(status, outcome string) http.HandlerFunc {
 }
 
 func outputPath(node string) string {
-	return "/node/v1/nodes/" + url.PathEscape(node) + "/output"
+	return "/node/v1/jobs/" + url.PathEscape(node) + "/output"
 }
 
 func TestOutputReadsANodeOfTheSameRun(t *testing.T) {
@@ -24,7 +24,7 @@ func TestOutputReadsANodeOfTheSameRun(t *testing.T) {
 	c.handle("GET /api/v1/runs/run-1/nodes/{node}/output", answer(http.StatusOK, grant))
 	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c))
 
-	got := ask(t, s, http.MethodGet, "/node/v1/nodes/build%2Flinux/output", bearer, "")
+	got := ask(t, s, http.MethodGet, "/node/v1/jobs/build%2Flinux/output", bearer, "")
 	if got.status != http.StatusOK || got.body["output"].(map[string]any)["digest"] != "sha256:abc" {
 		t.Fatalf("status %d body %v", got.status, got.body)
 	}
@@ -45,33 +45,33 @@ func TestOutputRefusals(t *testing.T) {
 	}{
 		{
 			name: "unknown", node: "nope", row: answer(http.StatusNotFound, map[string]string{"error": "not found"}),
-			status: http.StatusNotFound, code: "unknown_node", reachesControl: true,
+			status: http.StatusNotFound, code: "unknown_job", reachesControl: true,
 		},
 		{
 			name: "running", node: "build", row: nodeRow("running", ""),
-			status: http.StatusConflict, code: "not_ready", reachesControl: true,
+			status: http.StatusConflict, code: "conflict", reachesControl: true,
 		},
 		{
 			name: "failed", node: "build", row: nodeRow("done", "failed"),
-			status: http.StatusNotFound, code: "no_output", reachesControl: true,
+			status: http.StatusNotFound, code: "not_found", reachesControl: true,
 		},
 		{
 			name: "not a dependency", node: "build", row: nodeRow("done", "success"),
 			out:    answer(http.StatusForbidden, map[string]string{"error": "output_not_ancestor"}),
-			status: http.StatusForbidden, code: "not_dependency", reachesControl: true,
+			status: http.StatusForbidden, code: "forbidden", reachesControl: true,
 		},
 		{
 			name: "claim ended", node: "build", row: answer(http.StatusForbidden, map[string]string{"error": "claim_ended"}),
-			status: http.StatusBadGateway, code: "upstream_unavailable", reachesControl: true,
+			status: http.StatusServiceUnavailable, code: "unavailable", reachesControl: true,
 		},
 		{
 			name: "controller error", node: "build", row: leak,
-			status: http.StatusBadGateway, code: "upstream_unavailable", reachesControl: true,
+			status: http.StatusServiceUnavailable, code: "unavailable", reachesControl: true,
 		},
 		{
 			name: "corrupt object", node: "build", row: nodeRow("done", "success"),
 			out:    answer(http.StatusOK, store.OutputReadGrant{URL: "/objects/x", SHA256: "00", Size: 2}),
-			status: http.StatusBadGateway, code: "upstream_unavailable", reachesControl: true,
+			status: http.StatusServiceUnavailable, code: "unavailable", reachesControl: true,
 		},
 		{name: "dot-dot", node: "../run-2/nodes/x", status: http.StatusBadRequest, code: "bad_request"},
 		{name: "backslash", node: `a\b`, status: http.StatusBadRequest, code: "bad_request"},
@@ -110,7 +110,7 @@ func TestPipelineLatestReadsADeclaredReference(t *testing.T) {
 	})
 	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c))
 
-	got := ask(t, s, http.MethodGet, "/node/v1/pipelines/release/latest?node=tag&max_age_ms=5000", bearer, "")
+	got := ask(t, s, http.MethodGet, "/node/v1/pipelines/release/latest?job=tag&max_age_ms=5000", bearer, "")
 	if got.status != http.StatusOK || got.body["run_id"] != "run-0" || got.body["output"] != "v1.2.3" {
 		t.Fatalf("status %d body %v", got.status, got.body)
 	}
@@ -128,15 +128,15 @@ func TestPipelineLatestRefusals(t *testing.T) {
 		status      int
 		code        string
 	}{
-		{"no run", "?node=tag", answer(http.StatusNotFound, map[string]string{"error": "not found"}), http.StatusNotFound, "no_run"},
+		{"no run", "?job=tag", answer(http.StatusNotFound, map[string]string{"error": "not found"}), http.StatusNotFound, "not_found"},
 		{
-			"undeclared", "?node=tag", answer(http.StatusForbidden, map[string]string{"error": "input_undeclared"}),
-			http.StatusForbidden, "reference_undeclared",
+			"undeclared", "?job=tag", answer(http.StatusForbidden, map[string]string{"error": "input_undeclared"}),
+			http.StatusForbidden, "forbidden",
 		},
-		{"no output", "?node=tag", answer(http.StatusOK, store.ClaimInput{RunID: "run-0"}), http.StatusNotFound, "no_output"},
-		{"controller error", "?node=tag", leak, http.StatusBadGateway, "upstream_unavailable"},
+		{"no output", "?job=tag", answer(http.StatusOK, store.ClaimInput{RunID: "run-0"}), http.StatusNotFound, "not_found"},
+		{"controller error", "?job=tag", leak, http.StatusServiceUnavailable, "unavailable"},
 		{"no node", "", nil, http.StatusBadRequest, "bad_request"},
-		{"negative age", "?node=tag&max_age_ms=-1", nil, http.StatusBadRequest, "bad_request"},
+		{"negative age", "?job=tag&max_age_ms=-1", nil, http.StatusBadRequest, "bad_request"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

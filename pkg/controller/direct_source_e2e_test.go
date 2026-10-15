@@ -283,3 +283,19 @@ func envOr(name, fallback string) string {
 	}
 	return fallback
 }
+
+func splitConnectCommand(cmd string) (setup, run string, ok bool) {
+	head, run, ok := strings.Cut(cmd, ") && ")
+	if !ok || !strings.HasPrefix(head, "(") {
+		return "", "", false
+	}
+	return head + ")", run, true
+}
+
+func redactToken(cmd string) string {
+	_, run, ok := splitConnectCommand(cmd)
+	if !ok {
+		return "<connect command withheld: no token setup found>"
+	}
+	return "<token setup> && " + run
+}

@@ -37,7 +37,6 @@ type StateStoreOld interface {
 	FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error
 	UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 	GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error)
-	SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 	AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 	SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
 

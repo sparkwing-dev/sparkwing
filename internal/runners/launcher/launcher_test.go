@@ -111,14 +111,12 @@ func (f launchFixture) requestBody(t *testing.T, method, path, bearer, body stri
 func TestLaunchOne_RunsAnOptedInRepoAsOneJobWithAClaimToken(t *testing.T) {
 	ctx := context.Background()
 	f := newLaunchFixture(t)
-	admin := f.token(t, controller.ScopeAdmin)
-	if code := f.requestBody(t, http.MethodPut, "/api/v1/teams/default/repos/korey/probe/dispatch", admin,
-		`{"dispatch":"shell"}`); code != http.StatusBadRequest {
-		t.Fatalf("unknown dispatch answered %d, want 400", code)
+	tenant, err := f.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if code := f.requestBody(t, http.MethodPut, "/api/v1/teams/default/repos/korey/probe/dispatch", admin,
-		`{"dispatch":"controller"}`); code != http.StatusOK {
-		t.Fatalf("opting in answered %d, want 200", code)
+	if err := tenant.SetRepoDispatch(ctx, "korey", "probe", store.RepoDispatchController, time.Now()); err != nil {
+		t.Fatal(err)
 	}
 	f.intake(t, "run-old", "korey/other")
 	f.intake(t, "run-new", "korey/probe")
@@ -169,8 +167,8 @@ func TestLaunchClaim_RefusesEveryCredentialButTheLauncher(t *testing.T) {
 		if code := f.request(t, http.MethodPost, "/api/v1/launcher/claim", f.token(t, scopes...)); code != http.StatusForbidden {
 			t.Errorf("%s: launch claim answered %d, want 403", name, code)
 		}
-		if code := f.request(t, http.MethodPut, "/api/v1/teams/default/repos/korey/other/dispatch", f.token(t, scopes...)); code != http.StatusForbidden {
-			t.Errorf("%s: repo dispatch answered %d, want 403", name, code)
+		if code := f.request(t, http.MethodPut, "/api/v1/teams/default/repos/korey/other/dispatch", f.token(t, scopes...)); code != http.StatusNotFound {
+			t.Errorf("%s: removed repo dispatch answered %d, want 404", name, code)
 		}
 	}
 }

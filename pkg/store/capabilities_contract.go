@@ -290,7 +290,7 @@ func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityR
 		var created, expires int64
 		var revoked sql.NullInt64
 		c := capability.Capability{Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone}}
-		err := tx.QueryRowContext(ctx, "SELECT principal,team,account_id,capability_prefix,created_at,expires_at,revoked_at,auth_generation FROM sessions WHERE hash = ?"+suffix, ref.ID).Scan(&c.Subject.ID, &c.Team, &account, &parent, &created, &expires, &revoked, &node.generation)
+		err := tx.QueryRowContext(ctx, "SELECT principal,COALESCE(team,''),account_id,capability_prefix,created_at,expires_at,revoked_at,auth_generation FROM sessions WHERE hash = ?"+suffix, ref.ID).Scan(&c.Subject.ID, &c.Team, &account, &parent, &created, &expires, &revoked, &node.generation)
 		if err != nil {
 			return node, err
 		}
@@ -314,10 +314,16 @@ func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityR
 		node.principal.Class = capability.CredentialSession
 	}
 	c := node.principal.Capability
-	if c.RevokedAt != nil || (c.ExpiresAt != nil && !tx.now().Before(*c.ExpiresAt)) {
+	now := tx.now()
+	if c.RevokedAt != nil && !now.Before(*c.RevokedAt) || c.ExpiresAt != nil && !now.Before(*c.ExpiresAt) {
 		return node, authorityError(apierr.Unauthenticated, "authority has ended")
 	}
 	if c.Subject.Kind == capability.SubjectAccount {
+		if c.Team == "" && node.principal.Class == capability.CredentialSession && c.Parent == nil {
+			var account string
+			err := tx.QueryRowContext(ctx, "SELECT id FROM accounts WHERE id=?"+suffix, c.Subject.ID).Scan(&account)
+			return node, err
+		}
 		var role Role
 		if err := tx.QueryRowContext(ctx, "SELECT role FROM memberships WHERE team = ? AND account_id = ?"+suffix, c.Team, c.Subject.ID).Scan(&role); err != nil {
 			return node, err
@@ -363,8 +369,8 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 	now := tx.now()
 	for _, node := range chain {
 		c := node.principal.Capability
-		if c.ExpiresAt != nil && !now.Before(*c.ExpiresAt) {
-			return nil, authorityError(apierr.Unauthenticated, "authority expired while ancestry was locked")
+		if c.ExpiresAt != nil && !now.Before(*c.ExpiresAt) || c.RevokedAt != nil && !now.Before(*c.RevokedAt) {
+			return nil, authorityError(apierr.Unauthenticated, "authority ended while ancestry was locked")
 		}
 	}
 	for i := len(chain) - 2; i >= 0; i-- {

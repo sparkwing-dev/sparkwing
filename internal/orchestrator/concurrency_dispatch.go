@@ -2,22 +2,25 @@ package orchestrator
 
 import (
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 )
 
 const memoKeyPrefix = "memo:"
 
 func ScopeLabelFromKey(key string) string {
-	switch {
-	case strings.HasPrefix(key, memoKeyPrefix):
+	if strings.HasPrefix(key, memoKeyPrefix) {
 		return "content-cache"
-	case strings.HasPrefix(key, "global:"):
+	}
+	scope, identity, _, ok := nodehost.ParseConcurrencyKey(key)
+	if !ok {
+		return "unknown"
+	}
+	switch scope {
+	case "global":
 		return "global"
-	case strings.HasPrefix(key, "run:"):
-		return "run (" + strings.SplitN(key[len("run:"):], ":", 2)[0] + ")"
-	case strings.HasPrefix(key, "box:"):
-		return "box (" + strings.SplitN(key[len("box:"):], ":", 2)[0] + ")"
 	default:
-		return "global"
+		return scope + " (" + identity + ")"
 	}
 }
 

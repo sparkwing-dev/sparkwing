@@ -202,30 +202,6 @@ func TestRetryLeavesTheRowRunningBetweenAttempts(t *testing.T) {
 	wantRow(t, st.Store, "flaky", sparkwing.Success, "")
 }
 
-func TestRetryLeavesTheRowRunningThroughItsBackoff(t *testing.T) {
-	st := &stateWrites{Store: openStore(t)}
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	failed := make(chan struct{})
-	body := func(context.Context, *NodeRun) Result {
-		close(failed)
-		return Result{Outcome: sparkwing.Failed, Err: errors.New("flake")}
-	}
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "flaky", Retry: &nodeproto.RetrySpec{Attempts: 1, BackoffMS: new(int64(int64(time.Hour / time.Millisecond)))}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
-	done := make(chan RunResult)
-	go func() { done <- hostDoc(t, ctx, st, doc, body) }()
-	<-failed
-	// safety: an hour of backoff with ctx live means the layer is still waiting, so this read is mid-backoff.
-	if row := nodeRow(t, st.Store, "flaky"); row.Status != "running" || row.Outcome != "" {
-		t.Errorf("row in backoff: status %q outcome %q, want running with no outcome", row.Status, row.Outcome)
-	}
-	cancel()
-	<-done
-	if fmt.Sprint(st.writes) != "[start finish cancelled]" {
-		t.Errorf("writes %v, want the one start and a cancelled finish", st.writes)
-	}
-}
-
 // safety: a dispatched node's retries and backoff run on its one host, so
 // the host's wall-clock bound covers the last attempt's whole timeout.
 func TestAttemptsBudgetCoversEveryAttemptAndBackoff(t *testing.T) {

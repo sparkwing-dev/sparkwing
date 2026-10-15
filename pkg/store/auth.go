@@ -141,7 +141,7 @@ func (s *Store) lookupSession(ctx context.Context, rawSession string, ttl, maxLi
 	var sess Session
 	var created, expires int64
 	var lastUsed sql.NullInt64
-	err = tx.QueryRowContext(ctx, `SELECT principal,team,account_id,capability_prefix,created_at,expires_at,last_used_at
+	err = tx.QueryRowContext(ctx, `SELECT principal,COALESCE(team,''),account_id,capability_prefix,created_at,expires_at,last_used_at
  FROM sessions WHERE hash=?`+tx.forUpdate(), digest).Scan(&sess.Principal, &sess.Team, &sess.AccountID, &sess.CapabilityPrefix, &created, &expires, &lastUsed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errors.New("unknown session")
@@ -151,7 +151,11 @@ func (s *Store) lookupSession(ctx context.Context, rawSession string, ttl, maxLi
 	}
 	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthoritySession, ID: digest}, true)
 	if err != nil {
-		return nil, err
+		var failure *apierr.Error
+		if errors.As(err, &failure) && failure.Code == apierr.Unauthenticated {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
 	}
 	now := tx.now()
 	sess.ID, sess.CSRFToken = rawSession, csrfToken
@@ -179,7 +183,7 @@ func (s *Store) lookupSession(ctx context.Context, rawSession string, ttl, maxLi
 	}
 	n, err := result.RowsAffected()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
 	}
 	if n != 1 {
 		return nil, errors.New("session has ended")

@@ -224,22 +224,27 @@ func lockAccountTx(ctx context.Context, tx *storeTx, accountID string) error {
 // the state expires, so every replica and a restarted controller refuse a
 // state that was used once.
 func (s *Store) ConsumeIdentityLinkState(ctx context.Context, nonce string, expires, now time.Time) (bool, error) {
-	return s.consumeFlowNonce(ctx, "identity_link_states", nonce, expires, now)
+	return s.consumeFlowNonce(ctx, "identity_link", nonce, expires)
 }
 
-// safety: table is one of this package's own flow-state tables, never input.
-func (s *Store) consumeFlowNonce(ctx context.Context, table, nonce string, expires, now time.Time) (bool, error) {
+func (s *Store) consumeFlowNonce(ctx context.Context, kind, nonce string, expires time.Time) (bool, error) {
 	if nonce == "" {
 		return false, nil
 	}
-	if _, err := s.exec(ctx, `DELETE FROM `+table+` WHERE expires_at <= ?`, now.Unix()); err != nil {
-		return false, err
-	}
-	_, err := s.exec(ctx, `INSERT INTO `+table+` (nonce, expires_at) VALUES (?, ?)`, nonce, expires.Unix())
-	if isUniqueViolation(err) {
-		return false, nil
-	}
-	return err == nil, err
+	used := false
+	err := s.inTx(ctx, func(tx *storeTx) error {
+		if !expires.After(tx.now()) {
+			return nil
+		}
+		result, err := tx.ExecContext(ctx, `INSERT INTO flow_nonces(kind,nonce,expires_at) VALUES (?,?,?) ON CONFLICT(kind,nonce) DO NOTHING`, kind, nonce, expires.UnixNano())
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		used = n == 1
+		return err
+	})
+	return err == nil && used, err
 }
 
 // IdentityLinkStateKey is the key a controller signs link-flow state with.

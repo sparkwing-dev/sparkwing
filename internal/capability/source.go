@@ -1,6 +1,13 @@
 package capability
 
-import "time"
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"slices"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+)
 
 // SourceExecutor comes from registration and award records, never advertised runner labels.
 type SourceExecutor struct {
@@ -44,5 +51,43 @@ type SourceReleaseAudit struct {
 // either a same-team cloud executor or its owner's explicit machine opt-in.
 // Team-admin token management alone cannot consent on the machine owner's behalf.
 func AuthorizeSourceRelease(request SourceReleaseRequest, now time.Time) (SourceReleaseAudit, error) {
-	panic("unimplemented: c2-credentials")
+	a := request.Authorization
+	c := a.Principal.Capability
+	if !isClaim(a.Principal) || a.Access.Liveness != LiveSensitive || a.Access.Binding != BindSource ||
+		a.ResultReplay || a.LogTailAttempt != 0 || !slices.Contains(a.Access.Grants, SourceRead) || !slices.Contains(c.Grants, SourceRead) {
+		return SourceReleaseAudit{}, forbidden(apierr.ReasonMissingGrant)
+	}
+	if c.Audience != Controller {
+		return SourceReleaseAudit{}, forbidden(apierr.ReasonAudience)
+	}
+	if c.RevokedAt != nil && !now.Before(*c.RevokedAt) || c.ExpiresAt != nil && !now.Before(*c.ExpiresAt) ||
+		c.Binding.Deadline != nil && !now.Before(*c.Binding.Deadline) {
+		return SourceReleaseAudit{}, unauthenticated()
+	}
+	executor := request.Executor
+	if c.Team == "" || executor.Team != c.Team || a.Target.Team != c.Team {
+		return SourceReleaseAudit{}, forbidden(apierr.ReasonTeam)
+	}
+	if request.RepositoryKey == "" || !slices.Contains(c.Repositories, request.RepositoryKey) ||
+		!slices.Contains(executor.AuthorizedRepositories, request.RepositoryKey) {
+		return SourceReleaseAudit{}, forbidden(apierr.ReasonRepositoryUnauthorized)
+	}
+	if executor.MachineID == "" || !executor.Cloud && (!executor.OwnerOptedIn || executor.OwnerAccountID == "") {
+		return SourceReleaseAudit{}, forbidden(apierr.ReasonOwnerOptInRequired)
+	}
+	if request.SSH && !request.SSHHostConfirmed {
+		return SourceReleaseAudit{}, forbidden(apierr.ReasonCredentialUnconfirmed)
+	}
+	if request.CredentialID == "" || request.Host == "" || c.Prefix == "" {
+		return SourceReleaseAudit{}, policyFailure()
+	}
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return SourceReleaseAudit{}, err
+	}
+	return SourceReleaseAudit{
+		ID: hex.EncodeToString(id[:]), Team: c.Team, CredentialID: request.CredentialID, Host: request.Host,
+		RepositoryKey: request.RepositoryKey, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Generation: c.Binding.Generation,
+		MachineID: executor.MachineID, OwnerAccountID: executor.OwnerAccountID, CapabilityPrefix: c.Prefix, ReleasedAt: now,
+	}, nil
 }

@@ -16,6 +16,68 @@ func pendingScenarios(t *testing.T, group string) {
 		}
 		count++
 		t.Run(scenario.ID, func(t *testing.T) {
+			switch scenario.ID {
+			case "credentials-delegation-subset":
+				t.Run("hermetic-process-authority", acceptance.CheckProcessAuthority)
+			case "lifecycle-transition-replay-and-fencing":
+				t.Run("hermetic-store-executor-events", acceptance.CheckHostLifecycleEvents)
+				t.Run("hermetic-store-step-records", acceptance.CheckHostStepPersistence)
+				t.Run("hermetic-store-foreign-awards", acceptance.CheckClaimedHostForeignAwards)
+			case "placement-direct-source":
+				t.Run("hermetic-native-git", acceptance.CheckDirectSource)
+				t.Run("hermetic-bundle-failures", acceptance.CheckSourceBundleFailures)
+			case "lifecycle-result-commit-atomicity":
+				t.Run("hermetic-output-records", acceptance.CheckOutputRecordCommit)
+				t.Run("hermetic-executor-output", acceptance.CheckExecutorOutputCommit)
+			case "storage-cas-integrity":
+				t.Run("hermetic-required-output", acceptance.CheckOutputRecordRead)
+				t.Run("hermetic-required-artifacts", acceptance.CheckArtifactStaging)
+				t.Run("hermetic-executor-artifacts", acceptance.CheckExecutorArtifactStaging)
+				t.Run("hermetic-artifact-publication", acceptance.CheckArtifactPublication)
+				t.Run("hermetic-executor-publication", acceptance.CheckExecutorArtifactPublication)
+			case "storage-memo-and-depcache-scope":
+				t.Run("hermetic-depcache-layer", acceptance.CheckDepcacheRecords)
+				t.Run("hermetic-executor-depcache", acceptance.CheckExecutorDepcache)
+			case "storage-memo-materialization-failures":
+				t.Run("hermetic-memo-records", acceptance.CheckMemoRecords)
+			case "storage-local-remote-cache-opt-in":
+				t.Run("hermetic-depcache-opt-in", acceptance.CheckRemoteDepcache)
+				t.Run("hermetic-memo-opt-in", acceptance.CheckRemoteMemo)
+			case "lifecycle-generator-reconstruct-code":
+				t.Run("hermetic-replay", acceptance.CheckGeneratorReplay)
+			case "environment-startup-versus-body":
+				t.Run("hermetic-native-environment-policy", acceptance.CheckSDKEnvironmentProjection)
+			case "environment-captured-local-base":
+				t.Run("hermetic-private-snapshots", acceptance.CheckCapturedHostEnvironment)
+			case "environment-origin-head-and-guards":
+				t.Run("hermetic-checkout-planning", acceptance.CheckCheckoutPlanning)
+			case "protocol-sdk-secrets-mask-annotations":
+				t.Run("hermetic-process-services", acceptance.CheckHostServices)
+			case "recovery-application-retry-ordinal":
+				t.Run("hermetic-executor-ordinals", acceptance.CheckExecutorEnvelope)
+			case "protocol-host-layers-risk-cleanup":
+				t.Run("hermetic-claimed-executor", acceptance.CheckExecutorEnvelope)
+			case "credentials-secret-identifiers":
+				t.Run("hermetic-process-services", acceptance.CheckHostServices)
+				t.Run("hermetic-planning-defaults", acceptance.CheckPlanningDefaults)
+			case "lifecycle-approval-decisions-and-owner-rights":
+				t.Run("hermetic-policy-evaluation", acceptance.CheckOwnerApprovalPolicies)
+				t.Run("hermetic-native-owner-failures", acceptance.CheckNativeOwnerFailures)
+			case "lifecycle-generator-barrier":
+				t.Run("hermetic-library", acceptance.CheckOwnerExpansion)
+			case "lifecycle-request-and-plan-seals":
+				t.Run("hermetic-library", acceptance.CheckOwnerSeals)
+			case "lifecycle-dependency-verdicts":
+				t.Run("hermetic-recorded-failure", acceptance.CheckExecutorFailureRecords)
+				t.Run("hermetic-recovery-graph", acceptance.CheckRecoveryDependencies)
+			case "recovery-keeper-causes-and-backoff":
+				t.Run("hermetic-library", acceptance.CheckKeeperCauses)
+				t.Run("hermetic-claimed-node", acceptance.CheckClaimedNodeLifecycle)
+			case "recovery-keeper-conflict-and-stop-join":
+				t.Run("hermetic-library", acceptance.CheckKeeperConflictAndStop)
+			case "recovery-reconciler-waits-and-reclaims":
+				t.Run("hermetic-library", acceptance.CheckHostReconciliation)
+			}
 			typeScriptBoundary(t, scenario.ID)
 			if check, ok := runspecConfigBoundaries()[scenario.ID]; ok {
 				t.Run("runspec-config", func(t *testing.T) {

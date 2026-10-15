@@ -23,10 +23,8 @@ func TestRefundReportingRejectsTeamOwnerAndRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code := f.call(http.MethodPost, "/api/v1/credits/grants", f.creditsGrantToken(), map[string]any{
-		"kind": "paid", "amount_micro": 500 * store.MicroCreditsPerCent, "reference": "pi_private_refund", "team": owner.team,
-	}, nil); code != http.StatusCreated {
-		t.Fatalf("private payment grant=%d", code)
+	if _, err := tenant.GrantCredits(ctx, store.CreditGrantPaid, 500*store.MicroCreditsPerCent, "pi_private_refund", "test"); err != nil {
+		t.Fatal(err)
 	}
 	balance, err := tenant.CreditBalanceMicro(ctx)
 	if err != nil {

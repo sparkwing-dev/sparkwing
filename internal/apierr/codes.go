@@ -5,8 +5,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"strconv"
 )
 
 // Code is the sole wire error discriminator. Clients branch on it rather than status or message.
@@ -162,74 +165,94 @@ type Envelope struct {
 // Protocol replies, body failures, eval failures and recovery inputs all use this
 // decoder before accepting an Error. HTTP/CLI readers unwrap Envelope exactly once.
 func DecodeInner(data []byte) (*Error, error) {
-	invalid := errors.New("invalid inner error object")
-	var fields map[string]any
-	if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
-		return nil, invalid
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	value, err := decodeValue(decoder)
+	if err != nil {
+		return nil, errors.New("invalid error JSON")
 	}
-	if !uniqueJSONKeys(json.NewDecoder(bytes.NewReader(data))) {
-		return nil, invalid
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("trailing error JSON")
 	}
-	if _, exists := fields["error"]; exists {
-		return nil, invalid
-	}
-	code, ok := fields["code"].(string)
-	if !ok || code == "" {
-		return nil, invalid
-	}
-	message, ok := fields["message"].(string)
+	object, ok := value.(map[string]any)
 	if !ok {
-		return nil, invalid
+		return nil, errors.New("error must be an object")
+	}
+	if _, nested := object["error"]; nested {
+		return nil, errors.New("expected inner error, received envelope")
+	}
+	code, codeOK := object["code"].(string)
+	message, messageOK := object["message"].(string)
+	if !codeOK || code == "" || !messageOK {
+		return nil, errors.New("error requires string code and message")
 	}
 	failure := &Error{Code: Code(code), Message: message}
-	if hint, exists := fields["hint"]; exists {
-		failure.Hint, ok = hint.(string)
-		if !ok {
-			return nil, invalid
+	if hint, exists := object["hint"]; exists {
+		if failure.Hint, ok = hint.(string); !ok {
+			return nil, errors.New("error hint must be a string")
 		}
 	}
-	if details, exists := fields["details"]; exists {
-		failure.Details, ok = details.(map[string]any)
-		if !ok {
-			return nil, invalid
+	if details, exists := object["details"]; exists {
+		if failure.Details, ok = details.(map[string]any); !ok {
+			return nil, errors.New("error details must be an object")
 		}
 	}
 	return failure, nil
 }
 
-func uniqueJSONKeys(decoder *json.Decoder) bool {
+// UnmarshalJSON validates inner errors with the same codec used by protocol replies.
+func (e *Error) UnmarshalJSON(data []byte) error {
+	failure, err := DecodeInner(data)
+	if err != nil {
+		return err
+	}
+	*e = *failure
+	return nil
+}
+
+func decodeValue(decoder *json.Decoder) (any, error) {
 	token, err := decoder.Token()
 	if err != nil {
-		return false
+		return nil, err
 	}
-	switch token {
-	case json.Delim('{'):
-		seen := make(map[string]bool)
+	delim, compound := token.(json.Delim)
+	if !compound {
+		return token, nil
+	}
+	if delim == '{' {
+		object := map[string]any{}
 		for decoder.More() {
 			key, err := decoder.Token()
 			if err != nil {
-				return false
+				return nil, err
 			}
 			name, ok := key.(string)
-			if !ok || seen[name] {
-				return false
+			if !ok {
+				return nil, errors.New("invalid object key")
 			}
-			seen[name] = true
-			if !uniqueJSONKeys(decoder) {
-				return false
+			if _, exists := object[name]; exists {
+				return nil, errors.New("duplicate object key")
 			}
-		}
-	case json.Delim('['):
-		for decoder.More() {
-			if !uniqueJSONKeys(decoder) {
-				return false
+			object[name], err = decodeValue(decoder)
+			if err != nil {
+				return nil, err
 			}
 		}
-	default:
-		return true
+		_, err = decoder.Token()
+		return object, err
 	}
-	_, err = decoder.Token()
-	return err == nil
+	if delim == '[' {
+		var values []any
+		for decoder.More() {
+			value, err := decodeValue(decoder)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		_, err = decoder.Token()
+		return values, err
+	}
+	return nil, errors.New("unexpected JSON delimiter")
 }
 
 // Status returns the registry status; an unregistered code is an internal failure.
@@ -245,10 +268,64 @@ func Status(code Code) int {
 // WriteHTTP writes Envelope and derives status from Code, including retry_after_ms as Retry-After.
 // Encode failures are returned to the caller for logging; this writer never emits plain text.
 func WriteHTTP(w http.ResponseWriter, failure *Error) error {
-	panic("unimplemented: c2-credentials")
+	encoded, err := encode(failure)
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if delay := retryAfter(failure.Details["retry_after_ms"]); delay != "" {
+		w.Header().Set("Retry-After", delay)
+	}
+	w.WriteHeader(Status(failure.Code))
+	n, err := w.Write(encoded)
+	if err == nil && n != len(encoded) {
+		return io.ErrShortWrite
+	}
+	return err
 }
 
 // WriteJSON emits one newline-terminated Envelope for CLI stderr and other JSON streams.
 func WriteJSON(w io.Writer, failure *Error) error {
-	panic("unimplemented: c2-credentials")
+	encoded, err := encode(failure)
+	if err != nil {
+		return err
+	}
+	n, err := w.Write(encoded)
+	if err == nil && n != len(encoded) {
+		return io.ErrShortWrite
+	}
+	return err
+}
+
+func encode(failure *Error) ([]byte, error) {
+	if failure == nil {
+		return nil, errors.New("missing error")
+	}
+	registered := false
+	for _, definition := range Codes {
+		if definition.Code == failure.Code {
+			registered = true
+			break
+		}
+	}
+	if !registered {
+		return nil, errors.New("unregistered error code")
+	}
+	encoded, err := json.Marshal(Envelope{Error: failure})
+	if err != nil {
+		return nil, fmt.Errorf("encode error: %w", err)
+	}
+	return append(encoded, '\n'), nil
+}
+
+func retryAfter(value any) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	millis, err := strconv.ParseFloat(string(encoded), 64)
+	if err != nil || millis < 0 || math.IsNaN(millis) || math.IsInf(millis, 0) {
+		return ""
+	}
+	return strconv.FormatFloat(math.Ceil(millis/1000), 'f', 0, 64)
 }

@@ -87,6 +87,23 @@ func admit(t *testing.T, s *nodehost.Server, n nodehost.Node) string {
 	return bearer
 }
 
+func failureCode(got reply) any {
+	failure, _ := got.body["error"].(map[string]any)
+	return failure["code"]
+}
+
+func failureMessage(got reply) string {
+	failure, _ := got.body["error"].(map[string]any)
+	message, _ := failure["message"].(string)
+	return message
+}
+
+func failureReason(got reply) any {
+	failure, _ := got.body["error"].(map[string]any)
+	details, _ := failure["details"].(map[string]any)
+	return details["reason"]
+}
+
 type reply struct {
 	status int
 	body   map[string]any
@@ -132,23 +149,13 @@ func TestServerListensOnLoopbackOnly(t *testing.T) {
 	}
 }
 
-func TestProtocolMismatchAnswers426WithSupportedVersion(t *testing.T) {
+func TestHTTPServicesNeedNoProtocolVersionHeader(t *testing.T) {
 	s, _ := start(t)
-	bearer := admit(t, s, nodehost.Node{
-		RunID: "run-1", NodeID: "build", Secrets: []string{"TOKEN"},
-		Resolver: &fakeResolver{}, Masker: secrets.NewMasker(),
-	})
-	for _, protocol := range []string{"", "0", "2", "1.0", strings.Repeat("\x80", 4<<10)} {
-		got := get(t, s, "/node/v1/secrets/TOKEN", bearer, protocol)
-		if got.status != http.StatusUpgradeRequired {
-			t.Fatalf("protocol %q: status %d, want 426", protocol, got.status)
-		}
-		if got.body["error"] != "node protocol unsupported" || got.body["code"] != "protocol_mismatch" {
-			t.Fatalf("protocol %q: body %v, want the fixed message and protocol_mismatch", protocol[:min(len(protocol), 8)], got.body)
-		}
-		supported, _ := got.body["supported"].([]any)
-		if len(supported) != 1 || supported[0] != authwire.NodeProtocolVersion {
-			t.Fatalf("protocol %q: supported = %v, want [%s]", protocol, got.body["supported"], authwire.NodeProtocolVersion)
+	bearer := admit(t, s, nodehost.Node{RunID: "run", NodeID: "build", Secrets: []string{"TOKEN"}, Resolver: &fakeResolver{entries: map[string]entry{"TOKEN": {value: "value"}}}, Masker: secrets.NewMasker()})
+	for _, version := range []string{"", "0", "2", "obsolete"} {
+		got := get(t, s, "/node/v1/secrets/TOKEN", bearer, version)
+		if got.status != http.StatusOK || got.body["value"] != "value" {
+			t.Fatalf("header %q: status %d body %v", version, got.status, got.body)
 		}
 	}
 }
@@ -190,8 +197,8 @@ func TestSecretRefusesANameTheNodeDidNotDeclare(t *testing.T) {
 	})
 	for _, name := range []string{"OTHER", "token", "TOKEN ", "../TOKEN"} {
 		got := secret(t, s, name, bearer)
-		if got.status != http.StatusForbidden || got.body["code"] != "secret_undeclared" {
-			t.Fatalf("%q: status %d body %v, want 403 secret_undeclared", name, got.status, got.body)
+		if got.status != http.StatusForbidden || failureCode(got) != "forbidden" {
+			t.Fatalf("%q: status %d body %v, want 403 forbidden", name, got.status, got.body)
 		}
 	}
 	if len(resolver.asked) != 0 {
@@ -285,13 +292,13 @@ func TestSecretMissingAndFailingBackend(t *testing.T) {
 		}}, Masker: masker,
 	})
 
-	if got := secret(t, s, "UNSET", bearer); got.status != http.StatusNotFound || got.body["code"] != "secret_not_found" {
-		t.Fatalf("UNSET: status %d body %v, want 404 secret_not_found", got.status, got.body)
+	if got := secret(t, s, "UNSET", bearer); got.status != http.StatusNotFound || failureCode(got) != "not_found" {
+		t.Fatalf("UNSET: status %d body %v, want 404 not_found", got.status, got.body)
 	}
 	got := secret(t, s, "BROKEN", bearer)
-	if got.status != http.StatusBadGateway || got.body["code"] != "secret_unavailable" ||
-		strings.Contains(got.body["error"].(string), "backend") {
-		t.Fatalf("BROKEN: status %d body %v, want 502 secret_unavailable without the backend's error", got.status, got.body)
+	if got.status != http.StatusServiceUnavailable || failureCode(got) != "unavailable" ||
+		strings.Contains(failureMessage(got), "backend") {
+		t.Fatalf("BROKEN: status %d body %v, want 503 unavailable without the backend's error", got.status, got.body)
 	}
 	if l := logs.String(); strings.Contains(l, "backend") || strings.Contains(l, "pw-cred") || strings.Contains(l, bearer) {
 		t.Fatalf("logs leak the bearer or a secret value:\n%s", logs.String())

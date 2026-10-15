@@ -142,5 +142,50 @@ func checkStoreSessions(ctx context.Context, root string) (err error) {
 	if retained != 0 {
 		return errors.New("expired session returned after reopening")
 	}
+	return checkRolelessStoreSession(ctx, s)
+}
+
+func checkRolelessStoreSession(ctx context.Context, s *store.Store) error {
+	for _, query := range []string{
+		`INSERT INTO accounts(id,email,email_verified,created_at,updated_at,waitlist_reason) VALUES ('waitlisted','waitlisted@example.test',1,1,1,'signup_gate')`,
+		`INSERT INTO identities(provider,subject,account_id,email_verified,created_at) VALUES ('github','waitlisted','waitlisted',1,1)`,
+	} {
+		if _, err := s.DB().ExecContext(ctx, query); err != nil {
+			return err
+		}
+	}
+	raw, csrf, created, err := s.CreateIdentityAccountSession(ctx, store.Account{ID: "waitlisted"}, "", "github", "waitlisted", time.Hour)
+	if err != nil {
+		return err
+	}
+	read, err := s.LookupSessionAndRenew(ctx, raw, 2*time.Hour, 24*time.Hour)
+	if err != nil {
+		return err
+	}
+	if read.Team != "" || len(read.Scopes) != 0 || read.CSRFToken != csrf || !read.ExpiresAt.After(created.ExpiresAt) {
+		return errors.New("roleless renewal gained team authority or lost its identity")
+	}
+	lookup := capability.CredentialLookup{Class: capability.CredentialSession, Digest: sha256.Sum256([]byte(raw)), Audience: capability.Controller}
+	snapshot, err := s.ReadAuthentication(ctx, lookup, capability.RequestEvidence{Target: capability.Target{Team: string(store.DefaultTeam)}})
+	if err != nil {
+		return err
+	}
+	principal, err := capability.ValidateAuthority(snapshot.Authorities, snapshot.Now)
+	if err != nil {
+		return err
+	}
+	if principal.Capability.Team != "" || len(principal.Capability.Grants) != 0 {
+		return errors.New("roleless authentication gained team authority")
+	}
+	if err := s.SwitchSessionTeam(ctx, raw, "waitlisted", "", store.DefaultTeam); !errors.Is(err, store.ErrNotFound) {
+		return fmt.Errorf("roleless switch bypassed membership: %v", err)
+	}
+	expires := time.Now().Add(time.Minute)
+	if ok, err := s.ConsumeIdentityLinkState(ctx, "roleless-link", expires, time.Time{}); err != nil || !ok {
+		return fmt.Errorf("link nonce did not commit: %v", err)
+	}
+	if ok, err := s.ConsumeIdentityLinkState(ctx, "roleless-link", expires, time.Time{}); err != nil || ok {
+		return fmt.Errorf("link nonce replay: %v", err)
+	}
 	return nil
 }

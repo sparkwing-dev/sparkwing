@@ -2,7 +2,12 @@ package capability
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // Owner identifies the authoritative lookup required before a route can expose a resource.
@@ -149,6 +154,7 @@ type RoutePolicy struct {
 
 // Target contains server-resolved ownership plus decoded path/body selectors.
 // BodyRunID includes parent lineage on POST /runs; it cannot be authorized inside the handler.
+// NodeID names the path job, or the parent job for child intake.
 // Unit fields project the resolved blob.LogSubject at the controller boundary without an import cycle.
 type Target struct {
 	// ClaimKinds is decoded before claimSelection, which requires every kind's grant.
@@ -240,7 +246,246 @@ type Authorized struct {
 // Authorize returns forbidden for a live principal missing a grant, audience or binding.
 // Authentication failures are unauthenticated; later transaction races are lock_held or illegal_transition.
 func Authorize(ctx context.Context, bindings BindingChecker, route RoutePolicy, authenticated Authenticated, target Target) (Authorized, error) {
-	panic("unimplemented: c2-credentials")
+	if validateRoutePolicy(route) != nil || bindings == nil || route.Authentication != AuthCapability ||
+		authenticated.Method != route.Method || authenticated.Pattern != route.Path {
+		return Authorized{}, policyFailure()
+	}
+	if len(authenticated.Live) == 0 {
+		return Authorized{}, unauthenticated()
+	}
+	p := authenticated.Principal
+	if p.Capability.Audience != route.Audience {
+		return Authorized{}, forbidden(apierr.ReasonAudience)
+	}
+	var refusal error = forbidden(apierr.ReasonMissingGrant)
+	for _, live := range authenticated.Live {
+		if live.RuleIndex < 0 || live.RuleIndex >= len(route.Access) {
+			return Authorized{}, policyFailure()
+		}
+		rule := route.Access[live.RuleIndex]
+		if live.ResultReplay && rule.Liveness != LiveResult || live.LogTailAttempt != 0 && rule.Liveness != LiveLogTail {
+			return Authorized{}, policyFailure()
+		}
+		if !matchesCredential(p, rule.Credential) || !subset(rule.Grants, p.Capability.Grants) {
+			continue
+		}
+		if err := checkOwner(p, route.Owner, rule, target); err != nil {
+			refusal = err
+			continue
+		}
+		if rule.Binding == BindClaimSelection {
+			if err := claimSelection(p, route.Path, target.ClaimKinds); err != nil {
+				refusal = err
+				continue
+			}
+		}
+		if !bindingShape(p, rule.Binding, target) {
+			refusal = forbidden(apierr.ReasonBinding)
+			continue
+		}
+		if err := bindings.CheckBinding(ctx, p, rule.Binding, target); err != nil {
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || failure.Code != apierr.Forbidden {
+				return Authorized{}, err
+			}
+			refusal = err
+			continue
+		}
+		return Authorized{
+			Principal: p, Target: target, Binding: p.Capability.Binding, Access: rule,
+			ResultReplay: live.ResultReplay, LogTailAttempt: live.LogTailAttempt,
+		}, nil
+	}
+	return Authorized{}, refusal
+}
+
+func claimSelection(p Principal, path string, kinds []UnitKind) error {
+	if path == "/api/v1/launcher/sync" {
+		return nil
+	}
+	if len(kinds) == 0 {
+		return forbidden(apierr.ReasonBinding)
+	}
+	seen := make(map[UnitKind]bool, len(kinds))
+	for _, kind := range kinds {
+		if seen[kind] {
+			return forbidden(apierr.ReasonBinding)
+		}
+		seen[kind] = true
+		var grant Grant
+		switch path {
+		case "/api/v1/launcher/claim":
+			if kind != UnitNode && kind != UnitPlan && kind != UnitEval {
+				return forbidden(apierr.ReasonBinding)
+			}
+			grant = ClaimsLaunch
+		case "/api/v1/runners/claim", "/api/v1/runs/{run}/claim":
+			switch kind {
+			case UnitNode:
+				if path != "/api/v1/runners/claim" {
+					return forbidden(apierr.ReasonBinding)
+				}
+				grant = NodesClaim
+			case UnitTrigger:
+				grant = TriggersClaim
+			default:
+				return forbidden(apierr.ReasonBinding)
+			}
+		default:
+			return policyFailure()
+		}
+		if !slices.Contains(p.Capability.Grants, grant) {
+			return forbidden(apierr.ReasonMissingGrant)
+		}
+	}
+	return nil
+}
+
+func policyFailure() *apierr.Error {
+	return &apierr.Error{Code: apierr.PolicyMissing, Message: "route authorization policy is incomplete"}
+}
+
+func unauthenticated() *apierr.Error {
+	return &apierr.Error{Code: apierr.Unauthenticated, Message: "credential is not live"}
+}
+
+func forbidden(reason apierr.Reason) *apierr.Error {
+	return &apierr.Error{Code: apierr.Forbidden, Message: "credential does not authorize this operation", Details: map[string]any{"reason": reason}}
+}
+
+func subset[T comparable](child, parent []T) bool {
+	for _, value := range child {
+		if !slices.Contains(parent, value) {
+			return false
+		}
+	}
+	return true
+}
+
+func isClaim(p Principal) bool {
+	c := p.Capability
+	return p.Class == CredentialBearer && c.UnitID != "" && c.Unit != "" && c.Purpose != "" &&
+		(c.Issuance == Award || c.Issuance == Exchange || c.Issuance == Delegate) && c.Binding.Kind != BindingNone && c.Binding.RunID != ""
+}
+
+func isMember(p Principal) bool {
+	c := p.Capability
+	if c.Binding.Kind != BindingNone || c.Unit != "" || c.Purpose != "" {
+		return false
+	}
+	switch p.Class {
+	case CredentialBearer, CredentialSession:
+		return c.Subject.Kind == SubjectAccount && c.Subject.ID != ""
+	case CredentialPeer:
+		return c.Subject.Kind == SubjectLocal && c.Subject.ID != ""
+	case CredentialAnonymous:
+		return c.Subject.Kind == SubjectAnonymous
+	}
+	return false
+}
+
+func matchesCredential(p Principal, rule CredentialRule) bool {
+	c := p.Capability
+	switch rule {
+	case CredentialAny:
+		return true
+	case CredentialMember:
+		return isMember(p)
+	case CredentialAccount:
+		return p.Class == CredentialSession && c.Subject.Kind == SubjectAccount && c.Subject.ID != "" && c.Unit == ""
+	case CredentialClaim:
+		return isClaim(p)
+	case CredentialEval:
+		return isClaim(p) && c.Unit == UnitEval && c.Purpose == PurposeEval && c.Delivery != DeliveryBootstrap &&
+			c.Binding.Expansion != nil && c.Binding.Expansion.Kind == UnitEval && c.Binding.Expansion.ID == c.UnitID
+	case CredentialHere:
+		return isClaim(p) && c.Unit == UnitTrigger && c.Purpose == PurposeHere && c.Binding.Reservation == "here:"+c.Binding.RunID
+	case CredentialLauncher:
+		return p.Class == CredentialBearer && c.Subject.Kind == SubjectService && c.Unit == "" && c.Binding.Kind == BindingNone && slices.Contains(c.Grants, ClaimsLaunch)
+	case CredentialDeployment:
+		return p.Class == CredentialBearer && c.Subject.Kind == SubjectOperator && c.Unit == "" && c.Binding.Kind == BindingNone
+	case CredentialOperator:
+		return p.Class == CredentialConsole && c.Subject.Kind == SubjectOperator && c.Subject.ID != "" && c.Unit == "" && c.Binding.Kind == BindingNone
+	case CredentialNodeProcess:
+		return p.Class == CredentialBearer && c.Audience == NodeHost && c.Binding.Kind == BindingNode && c.Binding.Holder != "" && c.Binding.Generation > 0 && c.Binding.Attempt > 0
+	case CredentialPublisher, CredentialRepoReader:
+		if c.Subject.Kind != SubjectAccount || c.Unit != "" || c.Purpose != "" || c.Data == nil || (p.Class != CredentialBearer && p.Class != CredentialSession) {
+			return false
+		}
+		if rule == CredentialPublisher {
+			return c.Data.Use == DataPublish && c.Data.RunID != "" && c.Binding.Kind == BindingRun && c.Binding.RunID == c.Data.RunID
+		}
+		return c.Data.Use == DataRemoteCache && c.Data.RepositoryKey != "" && c.Binding.Kind == BindingNone
+	case CredentialDiscovery:
+		return c.Delivery != DeliveryBootstrap && c.Unit != UnitEval && c.Audience == Controller
+	}
+	return false
+}
+
+func checkOwner(p Principal, owner Owner, rule AccessRule, target Target) error {
+	switch owner {
+	case OwnerTeam, OwnerRun:
+		if rule.Credential == CredentialLauncher && rule.Binding == BindClaimSelection {
+			return nil
+		}
+		if target.Team == "" || p.Capability.Team == "" {
+			return forbidden(apierr.ReasonNoTeam)
+		}
+		if target.Team != p.Capability.Team {
+			return forbidden(apierr.ReasonTeam)
+		}
+	case OwnerAccount:
+		if target.AccountID != "" && p.Capability.Subject.ID != target.AccountID {
+			return forbidden(apierr.ReasonBinding)
+		}
+	case OwnerNone, OwnerDeployment, OwnerNodeHost:
+	default:
+		return policyFailure()
+	}
+	return nil
+}
+
+func bindingShape(p Principal, rule BindingRule, t Target) bool {
+	b := p.Capability.Binding
+	run := b.RunID != "" && b.RunID == t.RunID
+	switch rule {
+	case BindNone, BindOwnToken, BindMachineOwner, BindSelfOrTeamAdmin:
+		return true
+	case BindRun:
+		return run
+	case BindOwnNode:
+		return run && b.Kind == BindingNode && b.NodeID != "" && b.NodeID == t.NodeID && b.Generation > 0 && b.Holder != ""
+	case BindRunOfTrigger:
+		return run && b.Kind == BindingTrigger && p.Capability.Unit == UnitTrigger &&
+			(b.Generation > 0 && b.Holder != "" || p.Capability.Purpose == PurposeHere && b.Reservation == "here:"+b.RunID)
+	case BindBodyNamesRun:
+		return isMember(p) || b.RunID != "" && t.BodyRunID == b.RunID &&
+			(b.Kind != BindingNode || b.NodeID != "" && t.NodeID == b.NodeID)
+	case BindSlotOfBoundNode:
+		return b.RunID != "" && b.RunID == t.SlotRunID && b.Generation > 0 && b.Generation == t.SlotGeneration &&
+			((b.Kind == BindingNode && b.NodeID != "" && b.NodeID == t.SlotNodeID) ||
+				((b.Kind == BindingTrigger || b.Kind == BindingRun && p.Capability.Unit == UnitPlan) && t.SlotNodeID == ""))
+	case BindOwnClaim:
+		return isClaim(p) && t.ClaimID == p.Capability.UnitID
+	case BindOwnEval:
+		lease := b.Expansion
+		return matchesCredential(p, CredentialEval) && run && t.ClaimID == p.Capability.UnitID &&
+			t.Unit == UnitEval && t.UnitID == p.Capability.UnitID && t.UnitGeneration == lease.Generation && t.UnitHolder == lease.Holder &&
+			t.UnitSourceNodeID == b.NodeID && t.UnitSourceGeneration == b.Generation
+	case BindPlanOwner:
+		return run && (p.Capability.Unit == UnitPlan && b.Kind == BindingRun || p.Capability.Unit == UnitTrigger && b.Kind == BindingTrigger)
+	case BindPipelineOfBoundRun:
+		return isClaim(p) && p.Capability.Delivery != DeliveryBootstrap && t.Pipeline != ""
+	case BindExpansion:
+		return run && b.NodeID != "" && b.NodeID == t.NodeID && b.Generation > 0 && b.Expansion != nil
+	case BindChildOfBoundNode, BindOwnCleanup:
+		return b.Kind == BindingNode && b.RunID != "" && b.NodeID != "" && (t.RunID == "" || run)
+	case BindDeclaredSecret, BindSource:
+		return isClaim(p) && (t.RunID == "" || run)
+	case BindReadSet, BindData, BindClaimSelection:
+		return true
+	}
+	return false
 }
 
 // LookupRoute accepts the router's registered pattern, never a prefix match on untrusted paths.
@@ -257,31 +502,14 @@ func LookupRoute(method, pattern string) (RoutePolicy, bool) {
 // Registration keys are METHOD followed by one space and the router pattern.
 func ValidateRoutes(registered []string) error {
 	policies := make(map[string]bool, len(Routes))
-	grants := make(map[Grant]bool, len(Grants))
-	for _, grant := range Grants {
-		grants[grant] = true
-	}
 	for _, route := range Routes {
 		key := route.Method + " " + route.Path
 		if policies[key] {
 			return fmt.Errorf("duplicate route policy: %s", key)
 		}
 		policies[key] = true
-		if route.Audience == "" || route.Owner == "" || route.Retry == "" || route.Authentication == "" {
-			return fmt.Errorf("incomplete route policy: %s", key)
-		}
-		if route.Authentication == AuthCapability && len(route.Access) == 0 {
-			return fmt.Errorf("missing access policy: %s", key)
-		}
-		for _, access := range route.Access {
-			if access.Credential == "" || access.Binding == "" || access.Liveness == "" {
-				return fmt.Errorf("incomplete access policy: %s", key)
-			}
-			for _, grant := range access.Grants {
-				if !grants[grant] {
-					return fmt.Errorf("unknown grant %q: %s", grant, key)
-				}
-			}
+		if err := validateRoutePolicy(route); err != nil {
+			return fmt.Errorf("route %s: %w", key, err)
 		}
 	}
 	seen := make(map[string]bool, len(registered))
@@ -297,6 +525,39 @@ func ValidateRoutes(registered []string) error {
 	for key := range policies {
 		if !seen[key] {
 			return fmt.Errorf("unregistered route policy: %s", key)
+		}
+	}
+	return nil
+}
+
+func validateRoutePolicy(route RoutePolicy) error {
+	if route.Method == "" || !strings.HasPrefix(route.Path, "/") ||
+		!slices.Contains([]Audience{Controller, NodeHost}, route.Audience) ||
+		!slices.Contains([]Owner{OwnerNone, OwnerTeam, OwnerRun, OwnerAccount, OwnerDeployment, OwnerNodeHost}, route.Owner) ||
+		!slices.Contains([]RetryPolicy{RetryNever, RetrySafe, RetryIdempotencyKey, RetryExactBody}, route.Retry) ||
+		!slices.Contains([]Authentication{AuthCapability, AuthPublic, AuthGitHubWebhook, AuthPaymentWebhook, AuthGitHubActions, AuthSignedObject, AuthBrowserFlow}, route.Authentication) {
+		return fmt.Errorf("invalid route metadata")
+	}
+	if (route.Authentication == AuthCapability) != (len(route.Access) > 0) {
+		return fmt.Errorf("invalid route authentication alternatives")
+	}
+	for _, access := range route.Access {
+		if !slices.Contains([]CredentialRule{
+			CredentialAny, CredentialMember, CredentialAccount, CredentialClaim, CredentialEval, CredentialHere, CredentialLauncher,
+			CredentialDeployment, CredentialOperator, CredentialNodeProcess, CredentialPublisher, CredentialRepoReader, CredentialDiscovery,
+		}, access.Credential) ||
+			!slices.Contains([]BindingRule{
+				BindNone, BindRun, BindOwnNode, BindRunOfTrigger, BindBodyNamesRun, BindPipelineOfBoundRun, BindChildOfBoundNode,
+				BindSlotOfBoundNode, BindReadSet, BindDeclaredSecret, BindSource, BindData, BindExpansion, BindClaimSelection, BindOwnToken, BindMachineOwner,
+				BindSelfOrTeamAdmin, BindOwnCleanup, BindPlanOwner, BindOwnClaim, BindOwnEval,
+			}, access.Binding) ||
+			!slices.ContainsFunc(LivenessPolicies, func(policy LivenessPolicy) bool { return policy.Class == access.Liveness }) {
+			return fmt.Errorf("invalid access policy")
+		}
+		for i, grant := range access.Grants {
+			if !slices.Contains(Grants, grant) || slices.Contains(access.Grants[:i], grant) {
+				return fmt.Errorf("unknown or duplicate grant")
+			}
 		}
 	}
 	return nil

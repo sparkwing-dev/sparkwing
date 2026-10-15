@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -149,5 +151,37 @@ func TestAuthenticationSnapshotReadsPlanLeaseAndCancellation(t *testing.T) {
 	got, err := s.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: sha256.Sum256(claim.Bearer), Audience: capability.Controller}, capability.RequestEvidence{})
 	if err != nil || !got.Binding.RunCancelled || got.Binding.Current.Kind != capability.BindingRun || got.Binding.Current.Holder != "launcher" || got.Binding.Current.Generation != claim.Award.Generation || got.Binding.LeaseExpiresAt != claim.Award.LeaseExpiresAt {
 		t.Fatalf("plan liveness: %+v, %v", got.Binding, err)
+	}
+}
+
+func TestAuthenticationCancellationReasonKeepsJobIntentProperty(t *testing.T) {
+	random := rand.New(rand.NewPCG(483, 771))
+	for i := range 24 {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			tenant, _, owner := reconcileFixture(t)
+			operator := authorityMember(t, tenant.s, "operator", RoleOwner)
+			operator.Kind = ActorOperator
+			reason := fmt.Sprintf("%s/%x", []string{"user_cancelled", "雪\n\x00", "' OR 1=1 --"}[random.IntN(3)], random.Uint64())
+			if i == 0 {
+				reason = ""
+			}
+			_, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", "job"}, Actor: owner, To: NodeCancelled, Cause: CauseCancel, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: reason}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: "run", Actor: operator, To: RunCancelled, Cause: RunCancel, Reason: "run reason"}); err != nil {
+				t.Fatal(err)
+			}
+			for _, prefix := range []string{"claim", owner.CapabilityPrefix} {
+				got, err := tenant.s.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Digest: sha256.Sum256([]byte(prefix)), Audience: capability.Controller}, capability.RequestEvidence{Target: capability.Target{RunID: "forged"}})
+				want := "run reason"
+				if prefix == "claim" {
+					want = reason
+				}
+				if err != nil || !got.Binding.RunCancelled || got.Binding.CancelReason != want {
+					t.Fatalf("%s cancellation: %+v, %v; want %q", prefix, got.Binding, err, want)
+				}
+			}
+		})
 	}
 }

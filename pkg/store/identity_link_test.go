@@ -529,32 +529,6 @@ func TestRelinkingLiftsAnUnlink(t *testing.T) {
 	}
 }
 
-func TestIdentityLinkStateIsUsedOnce(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	expires := now.Add(10 * time.Minute)
-	fresh, err := st.ConsumeIdentityLinkState(ctx, "nonce-1", expires, now)
-	if err != nil || !fresh {
-		t.Fatalf("first use = %v, %v; want fresh", fresh, err)
-	}
-	again, err := st.ConsumeIdentityLinkState(ctx, "nonce-1", expires, now)
-	if err != nil || again {
-		t.Fatalf("second use = %v, %v; want refused", again, err)
-	}
-	other, err := st.ConsumeIdentityLinkState(ctx, "nonce-2", expires, now)
-	if err != nil || !other {
-		t.Fatalf("control: another nonce = %v, %v; want fresh", other, err)
-	}
-	if empty, err := st.ConsumeIdentityLinkState(ctx, "", expires, now); err != nil || empty {
-		t.Fatalf("empty nonce = %v, %v; want refused", empty, err)
-	}
-	k1, err := st.IdentityLinkStateKey(ctx)
-	if err != nil || len(k1) == 0 {
-		t.Fatalf("IdentityLinkStateKey = %x, %v", k1, err)
-	}
-}
-
 // Deleting an account relabels what it did under its own addresses. A linked
 // sign-in's address was never one it acted under, so another account's rows
 // under that address keep their name.

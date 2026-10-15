@@ -251,20 +251,6 @@ func (s *Server) teamMember(w http.ResponseWriter, r *http.Request, min store.Ro
 
 var errAccountSessionsDisabled = errors.New("sign-in is not enabled on this controller")
 
-// safety: an account that lost its membership keeps a session so it can switch teams, and that session
-// must not pass a route that admits any authenticated caller.
-func refuseRoleless(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if p, ok := PrincipalFromContext(r.Context()); ok && p.AccountID != "" && p.Role == "" {
-			writeAuthError(w, http.StatusForbidden, authErrorBody{
-				Code: "forbidden", Principal: p.label(), Message: "you are not a member of the active team",
-			})
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func randomURLToken() (string, error) {
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -346,10 +332,10 @@ func (s *Server) oauthSignIn(ctx context.Context, name, code, verifier, redirect
 	case errors.Is(err, errSignInUnverified):
 		return nil, "", refuse(http.StatusForbidden, "", name+" has not verified this account's email address")
 	case errors.Is(err, errSignInRejected):
-		s.logger.Info("sign-in rejected", "provider", name, "reason", err.Error())
+		s.logger.Info("sign-in rejected", "provider", name)
 		return nil, "", refuse(http.StatusUnauthorized, "", "that sign-in could not be verified; start again")
 	case err != nil:
-		s.logger.Warn("sign-in failed", "provider", name, "error", err.Error())
+		s.logger.Warn("sign-in failed", "provider", name)
 		return nil, "", refuse(http.StatusBadGateway, "", name+" could not be reached to finish the sign-in")
 	}
 	now := time.Now().UTC()

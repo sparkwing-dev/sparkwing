@@ -3,6 +3,7 @@ package store
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"slices"
@@ -284,6 +285,31 @@ func TestExpiredSessionCannotRenewProperty(t *testing.T) {
 		}
 		if _, err := s.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialSession, Digest: sha256.Sum256([]byte(raw)), Audience: capability.Controller}, capability.RequestEvidence{}); err == nil {
 			t.Fatal("expired session authenticated through its digest")
+		}
+	}
+}
+
+func TestSessionLookupClassifiesAuthorityBackendFailure(t *testing.T) {
+	s, account, _ := sessionRuntimeStore(t)
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetSessionKeyCipher(cipher)
+	raw, _, _, err := s.CreateAccountSession(t.Context(), account, "a", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `ALTER TABLE memberships RENAME TO unavailable_memberships`)
+	for _, renew := range []bool{false, true} {
+		var err error
+		if renew {
+			_, err = s.LookupSessionAndRenew(t.Context(), raw, time.Hour, 24*time.Hour)
+		} else {
+			_, err = s.LookupSession(t.Context(), raw)
+		}
+		if !errors.Is(err, ErrSessionBackend) {
+			t.Fatalf("backend failure lost classification: %v", err)
 		}
 	}
 }

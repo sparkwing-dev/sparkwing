@@ -80,11 +80,11 @@ func scanGitCredential(row interface{ Scan(...any) error }) (GitCredential, erro
 	}
 	c.Team = Team(team)
 	if confirmed.Valid {
-		ts := time.Unix(confirmed.Int64, 0).UTC()
+		ts := time.Unix(0, confirmed.Int64).UTC()
 		c.ConfirmedAt = &ts
 	}
-	c.CreatedAt = time.Unix(created, 0).UTC()
-	c.UpdatedAt = time.Unix(updated, 0).UTC()
+	c.CreatedAt = time.Unix(0, created).UTC()
+	c.UpdatedAt = time.Unix(0, updated).UTC()
 	return c, nil
 }
 
@@ -105,7 +105,7 @@ func (t *Tenant) PutGitCredential(ctx context.Context, c GitCredential, now time
 	if err := t.lockTeamTx(ctx, tx); err != nil {
 		return GitCredential{}, err
 	}
-	at := now.UTC().Unix()
+	at := now.UTC().UnixNano()
 	prev, err := scanGitCredential(tx.QueryRowContext(ctx,
 		`SELECT `+gitCredentialCols+` FROM git_credentials WHERE team = ? AND host = ?`, string(t.team), c.Host))
 	replacing := err == nil
@@ -127,7 +127,7 @@ func (t *Tenant) PutGitCredential(ctx context.Context, c GitCredential, now time
 	case c.Kind == GitCredentialHTTPS:
 		confirmed = &at
 	case replacing && prev.Kind == GitCredentialSSH && prev.ConfirmedAt != nil && prev.Fingerprint == c.Fingerprint:
-		v := prev.ConfirmedAt.Unix()
+		v := prev.ConfirmedAt.UnixNano()
 		confirmed = &v
 	}
 	id, err := newIdentityID()
@@ -136,7 +136,7 @@ func (t *Tenant) PutGitCredential(ctx context.Context, c GitCredential, now time
 	}
 	created := at
 	if replacing {
-		created = prev.CreatedAt.Unix()
+		created = prev.CreatedAt.UnixNano()
 		if _, err := tx.ExecContext(ctx, `DELETE FROM git_credentials WHERE team = ? AND host = ?`,
 			string(t.team), c.Host); err != nil {
 			return GitCredential{}, err
@@ -171,7 +171,7 @@ func (t *Tenant) ConfirmGitCredential(ctx context.Context, host, fingerprint str
 	if _, err := t.s.exec(ctx, `
 		UPDATE git_credentials SET confirmed_at = ?, updated_at = ?
 		WHERE team = ? AND id = ? AND fingerprint = ? AND confirmed_at IS NULL`,
-		now.UTC().Unix(), now.UTC().Unix(), string(t.team), c.ID, fingerprint); err != nil {
+		now.UTC().UnixNano(), now.UTC().UnixNano(), string(t.team), c.ID, fingerprint); err != nil {
 		return GitCredential{}, err
 	}
 	return t.GitCredentialForHost(ctx, host)
@@ -300,7 +300,7 @@ func (t *Tenant) SetGitCredentialMachine(ctx context.Context, prefix string, ena
 	}
 	_, err = t.s.exec(ctx, `
 		INSERT INTO git_credential_machines (team, token_prefix, enabled_by, enabled_at) VALUES (?, ?, ?, ?)
-		ON CONFLICT (team, token_prefix) DO NOTHING`, string(t.team), prefix, by, now.UTC().Unix())
+		ON CONFLICT (team, token_prefix) DO NOTHING`, string(t.team), prefix, by, now.UTC().UnixNano())
 	return err
 }
 
@@ -330,49 +330,4 @@ func (t *Tenant) GitCredentialMachine(ctx context.Context, prefix string) (bool,
 	err := t.s.queryRow(ctx, `SELECT COUNT(*) FROM git_credential_machines WHERE team = ? AND token_prefix = ?`,
 		string(t.team), prefix).Scan(&n)
 	return n > 0, err
-}
-
-// RotateGitCredentialSecrets stores what reseal returns for every team's
-// git credential secret, in one transaction, so a key rotation moves them
-// with the secrets table.
-func (s *Store) RotateGitCredentialSecrets(ctx context.Context, reseal func(GitCredential) (string, error)) (rotated int, err error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	// safety: SQLite serves one connection, so every row is read before the
-	// first write on this transaction.
-	current, err := selectGitCredentialsTx(ctx, tx)
-	if err != nil {
-		return 0, err
-	}
-	for _, c := range current {
-		value, rerr := reseal(c)
-		if rerr != nil {
-			return 0, rerr
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE git_credentials SET secret = ? WHERE team = ? AND id = ?`,
-			value, string(c.Team), c.ID); err != nil {
-			return 0, err
-		}
-	}
-	return len(current), tx.Commit()
-}
-
-func selectGitCredentialsTx(ctx context.Context, tx *storeTx) (_ []GitCredential, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT `+gitCredentialCols+` FROM git_credentials ORDER BY team, host`)
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var out []GitCredential
-	for rows.Next() {
-		c, err := scanGitCredential(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
 }

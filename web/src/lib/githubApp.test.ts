@@ -111,7 +111,7 @@ describe("GitHub App calls", () => {
     assert.equal(result.workflow, "--team canonical-slug");
     assert.equal(calls[0].method, "POST");
     await lib.disableGitHubRunner(9);
-    assert.equal(calls[1].url, "/api/v1/team/github-runners/9");
+    assert.equal(calls[1].url, "/api/v1/runners/github/9");
     assert.equal(calls[1].method, "DELETE");
   });
   it("reads the team's App and installations", async () => {

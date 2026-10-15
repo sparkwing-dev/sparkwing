@@ -2448,7 +2448,7 @@ var SchemaTables = []SchemaTable{
 	{Name: "run_rate_usage", Owner: SchemaTenant},
 	{Name: "runs", Owner: SchemaTenant},
 	{Name: "secrets", Owner: SchemaTenant},
-	{Name: "sessions", Owner: SchemaTenant},
+	{Name: "sessions", Owner: SchemaOperator},
 	{Name: "settings", Owner: SchemaOperator},
 	{Name: "signup_admissions", Owner: SchemaOperator},
 	{Name: "signup_gate", Owner: SchemaOperator},
@@ -3020,8 +3020,6 @@ func (s *Store) ReversePayment(
 	ctx context.Context, paymentID, reference, createdBy string, amountMicro int64,
 ) (_ CreditReversal, err error)
 func (s *Store) RevokeToken(prefix string, now time.Time) error
-func (s *Store) RotateGitCredentialSecrets(ctx context.Context, reseal func(GitCredential) (string, error)) (rotated int, err error)
-func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Team, Secret) (string, error)) (rotated int, err error)
 func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Time) (raw string, newTok, oldTok *Token, err error)
 func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
@@ -3353,6 +3351,7 @@ func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 func (t *Tenant) RetryRunEffect(ctx context.Context, delivery EffectDelivery, nextAt time.Time) error
 func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error
 func (t *Tenant) RevokeTeamToken(ctx context.Context, prefix string, now time.Time) error
+func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized, secret func(Secret) (string, error), git func(GitCredential) (string, error)) (int, int, error)
 func (t *Tenant) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
 func (t *Tenant) SaveCard(ctx context.Context, c Card, actor string, now time.Time) (err error)
 func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now time.Time) (before, after BillingStanding, err error)
@@ -3379,6 +3378,7 @@ func (t *Tenant) SetTrustLocalBuilds(ctx context.Context, trust bool) error
 func (t *Tenant) SettleQuota(ctx context.Context, reservationID string, used int64) error
 func (t *Tenant) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (t *Tenant) SourceClaimant(ctx context.Context, tok ClaimToken) (ClaimIdentity, error)
+func (t *Tenant) SourceReleaseAudits(ctx context.Context, limit int) (_ []capability.SourceReleaseAudit, err error)
 func (t *Tenant) SpendSourceCredential(ctx context.Context, tok ClaimToken, rel GitCredentialRelease, now time.Time) (_ SourceSpend, err error)
 func (t *Tenant) SpendStanding(ctx context.Context, now time.Time) (SpendStanding, error)
 func (t *Tenant) StartNode(ctx context.Context, runID, nodeID string) error

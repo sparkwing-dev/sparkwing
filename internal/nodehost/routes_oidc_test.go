@@ -41,16 +41,16 @@ func TestOIDCTokenRefusals(t *testing.T) {
 	}{
 		{
 			"no signing key", `{"audience":"a"}`, answer(http.StatusNotFound, map[string]string{"error": "no key"}),
-			http.StatusNotFound, "oidc_unavailable",
+			http.StatusServiceUnavailable, "unavailable",
 		},
 		{
 			"not issued to claims", `{"audience":"a"}`, answer(http.StatusUnprocessableEntity, map[string]string{"error": "later"}),
-			http.StatusNotFound, "oidc_unavailable",
+			http.StatusServiceUnavailable, "unavailable",
 		},
-		{"controller error", `{"audience":"a"}`, leak, http.StatusBadGateway, "upstream_unavailable"},
+		{"controller error", `{"audience":"a"}`, leak, http.StatusServiceUnavailable, "unavailable"},
 		{
 			"empty token", `{"audience":"a"}`, answer(http.StatusOK, map[string]string{"token": ""}),
-			http.StatusBadGateway, "upstream_unavailable",
+			http.StatusBadRequest, "protocol_error",
 		},
 		{"no audience", `{}`, nil, http.StatusBadRequest, "bad_request"},
 		{"not JSON", `audience=a`, nil, http.StatusBadRequest, "bad_request"},

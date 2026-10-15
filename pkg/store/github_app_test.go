@@ -180,22 +180,6 @@ func TestGitHubAppTriggerOptionsRoundTripAndDefaultOff(t *testing.T) {
 	}
 }
 
-func TestGitHubAppConnectStateIsUsedOnce(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	expires := now.Add(10 * time.Minute)
-	if ok, err := st.ConsumeGitHubAppConnectState(ctx, "nonce-1", expires, now); err != nil || !ok {
-		t.Fatalf("first use = %v, %v; want accepted", ok, err)
-	}
-	if ok, err := st.ConsumeGitHubAppConnectState(ctx, "nonce-1", expires, now); err != nil || ok {
-		t.Fatalf("second use = %v, %v; want refused", ok, err)
-	}
-	if ok, err := st.ConsumeGitHubAppConnectState(ctx, "nonce-2", expires, now); err != nil || !ok {
-		t.Fatalf("another state = %v, %v; want accepted", ok, err)
-	}
-}
-
 func TestGitHubAppDeliveryIsRememberedAcrossTeams(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()

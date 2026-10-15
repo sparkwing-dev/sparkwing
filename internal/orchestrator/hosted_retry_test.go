@@ -38,7 +38,7 @@ func TestHostedRetryPolicy_ClassifiesEveryWriteTheRunMakes(t *testing.T) {
 		{"POST", "/api/v1/runs/r1/nodes/n1/usage", hostedRetryUnsent},
 		{"POST", "/api/v1/runs/r1/nodes/n1/metrics", hostedRetryUnsent},
 		{"POST", "/api/v1/runs/r1/nodes/n1/annotations", hostedRetryUnsent},
-		{"POST", "/api/v1/pipelines/p/profile/observations", hostedRetryUnsent},
+		{"POST", "/api/v1/pipelines/p/sizing/observations", hostedRetryUnsent},
 		{"POST", "/api/v1/triggers", hostedRetryUnsent},
 		{"POST", "/api/v1/runs/r1/retry", hostedRetryUnsent},
 	}

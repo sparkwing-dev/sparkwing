@@ -208,10 +208,9 @@ var tenantTables = []string{
 var operatorTables = []string{
 	"accounts",
 	"card_spend_days",
-	"github_app_connect_states",
+	"flow_nonces",
 	"github_app_deliveries",
 	"identities",
-	"identity_link_states",
 	"identity_unlinks",
 	"signup_admissions",
 	"signup_gate",

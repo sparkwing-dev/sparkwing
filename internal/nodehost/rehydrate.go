@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -18,24 +17,16 @@ import (
 type Rehydration struct {
 	// SourceRunID is the run retried.
 	SourceRunID string
-	// Causes, when set, names the nodes an automatic retry runs again, with
-	// every node that depends on one and the on_failure node of one; every
-	// other node copies its source result, whatever it was. Empty copies only
-	// the nodes that succeeded in the source run.
-	Causes []string
 }
 
 type sourceOutputs interface {
 	GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)
 }
 
-// safety: the dispatcher's rule: a manual retry runs again every node that did not succeed, and an automatic
-// retry runs exactly its causes and what they reach, so a result copied from the source is never one a rerun
-// node changes. It is decided once the node is ready, when the nodes a generator added are known.
-func (s *scheduler) rehydrated(ctx context.Context, n nodeproto.JobSpec, byID map[string]nodeproto.JobSpec) (Result, bool) {
+// safety: only successful results can be reused by a new retry run.
+func (s *scheduler) rehydrated(ctx context.Context, n nodeproto.JobSpec) (Result, bool) {
 	r := s.rehydrate
-	strict := r != nil && len(r.Causes) > 0
-	if r == nil || s.rerun[n.ID] || (strict && s.reruns(n.ID, byID, map[string]bool{})) {
+	if r == nil || s.rerun[n.ID] {
 		return Result{}, false
 	}
 	// safety: a resumed run's row an earlier host of this run started, or another holder still claims, is that
@@ -48,14 +39,10 @@ func (s *scheduler) rehydrated(ctx context.Context, n nodeproto.JobSpec, byID ma
 	}
 	prior, err := s.run.State.GetNode(ctx, r.SourceRunID, n.ID)
 	switch {
-	case !strict && (errors.Is(err, store.ErrNotFound) || (err == nil && prior.Outcome != string(sparkwing.Success))):
+	case errors.Is(err, store.ErrNotFound) || (err == nil && prior.Outcome != string(sparkwing.Success)):
 		return s.runsAgain(n.ID)
-	case errors.Is(err, store.ErrNotFound):
-		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("source node %s is absent from retried run %s", n.ID, r.SourceRunID)}, true
 	case err != nil:
 		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("read source node %s: %w", n.ID, err)}, true
-	case prior.Outcome == "":
-		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("source node %s is not terminal", n.ID)}, true
 	}
 	// safety: a node planned differently in the source, as a generator may regenerate it, ran other work, so
 	// its result is not this node's to copy.
@@ -100,34 +87,6 @@ func (s *scheduler) runsAgain(id string) (Result, bool) {
 	return Result{}, false
 }
 
-func (s *scheduler) reruns(id string, byID map[string]nodeproto.JobSpec, seen map[string]bool) bool {
-	if rerun, ok := s.rerun[id]; ok {
-		return rerun
-	}
-	if seen[id] {
-		return false
-	}
-	seen[id] = true
-	n := byID[id]
-	waits, _, err := s.generatedWaits(n, waitsOn(n, byID))
-	if err != nil {
-		s.rerun[id] = true
-		return true
-	}
-	for _, closure := range n.NeedsGenerated {
-		for _, source := range s.nodes {
-			if slices.Contains(source.Closures.Generate, closure) {
-				waits = append(waits, source.ID)
-			}
-		}
-	}
-	rerun := slices.Contains(s.rehydrate.Causes, id) ||
-		(n.OnFailureOf != "" && s.reruns(n.OnFailureOf, byID, seen)) ||
-		slices.ContainsFunc(waits, func(dep string) bool { return s.reruns(dep, byID, seen) })
-	s.rerun[id] = rerun
-	return rerun
-}
-
 func (s *scheduler) sourceOutput(ctx context.Context, prior *store.Node) (json.RawMessage, bool, error) {
 	if prior.OutputRef == nil {
 		return nil, true, nil
@@ -149,7 +108,7 @@ func (s *scheduler) sourceOutput(ctx context.Context, prior *store.Node) (json.R
 func (s *scheduler) copyRetried(ctx context.Context, prior *store.Node, output json.RawMessage) error {
 	ctx, source, id := context.WithoutCancel(ctx), s.rehydrate.SourceRunID, prior.NodeID
 	if prior.ArtifactManifest != "" {
-		if err := s.run.State.SetNodeArtifactManifest(ctx, s.run.ID, id, prior.ArtifactManifest); err != nil {
+		if err := recordArtifactManifest(ctx, s.run.State, s.run.ID, id, prior.ArtifactManifest); err != nil {
 			return fmt.Errorf("copy source node %s artifact: %w", id, err)
 		}
 	}

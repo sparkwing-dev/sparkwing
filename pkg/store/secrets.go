@@ -59,7 +59,7 @@ func (t *Tenant) CreateOrReplaceSecret(sec Secret, now time.Time) error {
 	if sec.Name == "" {
 		return errors.New("secrets: name required")
 	}
-	ts := now.UTC().Unix()
+	ts := now.UTC().UnixNano()
 	if holdsFreeAllowance(t.team) {
 		return t.createOrReplaceBoundedSecret(sec, ts)
 	}
@@ -209,8 +209,8 @@ func (t *Tenant) readSecret(name, pipeline string) (*Secret, error) {
 	}
 	sec.Masked = maskedInt != 0
 	sec.Shared = sharedInt != 0
-	sec.CreatedAt = time.Unix(created, 0).UTC()
-	sec.UpdatedAt = time.Unix(updated, 0).UTC()
+	sec.CreatedAt = time.Unix(0, created).UTC()
+	sec.UpdatedAt = time.Unix(0, updated).UTC()
 	return &sec, nil
 }
 
@@ -314,52 +314,6 @@ func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimI
 	return run, nil
 }
 
-// RotateSecretValues rewrites the stored value of every secret row with
-// whatever reseal returns for it, in one transaction, so a key change
-// either lands for the whole table or for none of it. Every other column
-// keeps its value, including updated_at: the secret did not change, only
-// the bytes it is stored as. Returns the number of rows rewritten.
-//
-// reseal sees the owning team and the row as stored, which for an
-// encrypted table means the envelope in Secret.Value; returning an error
-// abandons the rotation.
-func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Team, Secret) (string, error)) (rotated int, err error) {
-	if reseal == nil {
-		return 0, errors.New("secrets: reseal function required")
-	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-
-	// safety: SQLite serves one connection, so the whole table materializes before any write on this transaction.
-	current, err := selectSecretsTx(ctx, tx)
-	if err != nil {
-		return 0, err
-	}
-
-	for _, row := range current {
-		value, rerr := reseal(Team(row.team), row.Secret)
-		if rerr != nil {
-			return 0, rerr
-		}
-		// safety: the team is in the predicate because the name and the
-		// pipeline no longer identify one row, and without it a rotation
-		// would reseal every team's secret of that name with one team's key.
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE secrets SET value = ? WHERE team = ? AND name = ? AND pipeline = ?`,
-			value, row.team, row.Secret.Name, row.Secret.Pipeline,
-		); err != nil {
-			return 0, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return len(current), nil
-}
-
 // SecretResealCounts is what one [Store.ResealSecrets] pass did.
 type SecretResealCounts struct {
 	// Resealed rows now hold what reseal returned for them.
@@ -380,9 +334,8 @@ type SecretResealCounts struct {
 // newer value. Running it again finds only the rows an earlier pass
 // skipped, which makes it safe to run on every start.
 //
-// Unlike [Store.RotateSecretValues] it holds no transaction across the
-// table, because each row it touches moves from a state every reader
-// refuses to one every reader accepts, and a large table would otherwise
+// Each row it touches moves from a state every reader refuses to one
+// every reader accepts; a large table would otherwise
 // be locked for the whole pass.
 func (s *Store) ResealSecrets(ctx context.Context, sealedPrefix string, batchSize int, reseal func(Team, Secret) (string, error)) (SecretResealCounts, error) {
 	var counts SecretResealCounts
@@ -498,18 +451,6 @@ type teamSecret struct {
 	team string
 }
 
-func selectSecretsTx(ctx context.Context, tx *storeTx) (secs []teamSecret, err error) {
-	rows, err := tx.QueryContext(ctx, `
-        SELECT team, name, value, principal, pipeline, masked, shared, created_at, updated_at
-          FROM secrets
-         ORDER BY team, name, pipeline`+tx.forUpdate())
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	return scanTeamSecretRows(rows)
-}
-
 func scanTeamSecretRows(rows *sql.Rows) ([]teamSecret, error) {
 	var out []teamSecret
 	for rows.Next() {
@@ -522,8 +463,8 @@ func scanTeamSecretRows(rows *sql.Rows) ([]teamSecret, error) {
 		}
 		row.Secret.Masked = maskedInt != 0
 		row.Secret.Shared = sharedInt != 0
-		row.Secret.CreatedAt = time.Unix(created, 0).UTC()
-		row.Secret.UpdatedAt = time.Unix(updated, 0).UTC()
+		row.Secret.CreatedAt = time.Unix(0, created).UTC()
+		row.Secret.UpdatedAt = time.Unix(0, updated).UTC()
 		out = append(out, row)
 	}
 	return out, rows.Err()
@@ -541,8 +482,8 @@ func scanSecretRows(rows *sql.Rows) ([]Secret, error) {
 		}
 		sec.Masked = maskedInt != 0
 		sec.Shared = sharedInt != 0
-		sec.CreatedAt = time.Unix(created, 0).UTC()
-		sec.UpdatedAt = time.Unix(updated, 0).UTC()
+		sec.CreatedAt = time.Unix(0, created).UTC()
+		sec.UpdatedAt = time.Unix(0, updated).UTC()
 		out = append(out, sec)
 	}
 	return out, rows.Err()

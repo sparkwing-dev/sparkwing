@@ -10,13 +10,15 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // PlanRequest is what [PlanDocument] asks a pipeline process to plan.
 type PlanRequest struct {
-	Pipeline string
+	Pipeline   string
+	Entrypoint string
 	// Args are the run's flag values; describe's defaults fill in the rest.
 	Args map[string]string
 	Run  nodeproto.RunContext
@@ -47,19 +49,27 @@ type PlannedRun struct {
 // PlanDocument plans a pipeline in a short-lived SDK process, as a hosted
 // run's plan process does, and validates the plan the same way.
 func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (PlannedRun, error) {
+	if req.Entrypoint == "" {
+		req.Entrypoint = req.Pipeline
+	}
 	if cfg.Sink == nil {
 		cfg.Sink = discardSink{}
 	}
-	scfg := dryRunSession(cfg, req.Run.DryRun)
+	scfg := cfg
 	scfg.Binding = nil
 	scfg.HoldOutput, scfg.Masker = true, req.Masker
+	var err error
+	scfg.Env, err = buildSessionEnvironment(scfg, procenv.Plan, sdkRuntime(req.Run, scfg.Runner))
+	if err != nil {
+		return PlannedRun{}, maskErr(req.Masker, err)
+	}
 	sess, err := StartSession(ctx, scfg)
 	if err != nil {
 		return PlannedRun{}, err
 	}
 	var out PlannedRun
 	var known bool
-	out.Args, known, err = describeArgs(ctx, sess, req.Pipeline, req.Args, req.Masker)
+	out.Args, known, err = describeArgs(ctx, sess, req.Entrypoint, req.Args, req.Masker)
 	out.Secrets = slices.Clone(sess.secrets)
 	out.Requires = slices.Clone(req.Requires)
 	if err == nil && req.CheckArgs != nil {
@@ -70,7 +80,7 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 	}
 	err = releaseDescribed(sess, known, err)
 	if err == nil {
-		out.Doc, out.JSON, err = planRun(ctx, sess, req.Pipeline, out.Args, req.Run)
+		out.Doc, out.JSON, err = planRun(ctx, sess, req.Entrypoint, out.Args, req.Run)
 	}
 	if err == nil {
 		err = validateStepRange(out.Doc, req.StartAt, req.StopAt)
@@ -91,24 +101,10 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 	return out, maskErr(req.Masker, err)
 }
 
-var (
-	podLayers = []Layer{skipIfLayer, memoLayer, admissionLayer, artifactsLayer, cachesLayer, retryLayer, timeoutLayer}
-
-	// safety: a dispatched node's run host already ran its skip_if, memo and
-	// admission, so the pod runs only executor layers.
-	podDispatchedLayers = []Layer{artifactsLayer, cachesLayer, retryLayer, timeoutLayer}
-)
-
-// HostNode executes an accepted job after reconstructing its declarations and checking drift.
-func HostNode(ctx context.Context, cfg Config, nodeID, acceptedHash string, attempt int) Result {
-	run := podRun(&cfg)
-	return podHost(ctx, &cfg, run, nodeID, podAttempt(ctx, &cfg, run, nodeID, acceptedHash, max(attempt, 1), false))
-}
-
 // HostDispatchedNode executes only the layers owned by a dispatched executor.
 func HostDispatchedNode(ctx context.Context, cfg Config, nodeID, acceptedHash string) Result {
 	run := podRun(&cfg)
-	return podHost(ctx, &cfg, run, nodeID, podAttempt(ctx, &cfg, run, nodeID, acceptedHash, 1, true))
+	return podHost(ctx, &cfg, run, nodeID, podAttempt(ctx, &cfg, run, nodeID, acceptedHash))
 }
 
 func podRun(cfg *Config) *Run {
@@ -128,12 +124,12 @@ func podHost(ctx context.Context, cfg *Config, run *Run, nodeID string, res Resu
 	return recordResult(ctx, run, nodeID, res)
 }
 
-func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash string, attempt int, dispatched bool) Result {
+func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash string) Result {
 	if cfg.Attempts == nil {
 		return failed(errors.New("nodehost: no attempt executor"))
 	}
 	planned, err := PlanDocument(ctx, cfg.Session, PlanRequest{
-		Pipeline: cfg.Pipeline, Args: cfg.Args, Run: cfg.Run, Requires: cfg.Requires, Masker: cfg.Attempts.Masker,
+		Pipeline: cfg.Pipeline, Entrypoint: cfg.Entrypoint, Args: cfg.Args, Run: cfg.Run, Requires: cfg.Requires, Masker: cfg.Attempts.Masker,
 	})
 	if err != nil {
 		return failed(fmt.Errorf("plan: %w", err))
@@ -152,33 +148,20 @@ func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash
 		return drift("node %s plans differently than when the run was accepted; plan code must be deterministic for a run", nodeID)
 	case i >= 0:
 		n.Plan = doc.Jobs[i]
-	case !dispatched:
-		return drift("node %s is not in this process's plan; plan code must be deterministic for a run", nodeID)
 	default:
 		if n.Plan, n.Generators, err = podGenerated(ctx, run, nodeID, acceptedHash); err != nil {
 			return failed(err)
 		}
 	}
-	layers := podLayers
-	if dispatched {
-		layers = podDispatchedLayers
-		// safety: the run host generates a dispatched source's nodes from the output this host records, since only
-		// it can add them to the run, so the generators do not run here as well.
-		n.Plan.Closures.Generate = nil
-		if parent := n.Plan.OnFailureOf; parent != "" {
-			row, err := run.State.GetNode(ctx, run.ID, parent)
-			if err != nil {
-				return failed(fmt.Errorf("read how %s failed: %w", parent, err))
-			}
-			n.Failure = parentFailure(parent, row.FailureReason, row.Error)
+	n.Plan.Closures.Generate = nil
+	if parent := n.Plan.OnFailureOf; parent != "" {
+		row, err := run.State.GetNode(ctx, run.ID, parent)
+		if err != nil {
+			return failed(fmt.Errorf("read how %s failed: %w", parent, err))
 		}
+		n.Failure = parentFailure(parent, row.FailureReason, row.Error)
 	}
-	res := podChain(cfg, layers)(ctx, n)
-	if !dispatched && len(res.expansions) > 0 && res.Outcome == sparkwing.Success {
-		// safety: a pod cannot add nodes to its run, and dropping them would read as an empty fan-out.
-		return failed(fmt.Errorf("node %s generates nodes, which a pod cannot host yet", nodeID))
-	}
-	return res
+	return podChain(cfg, []Layer{artifactsLayer, cachesLayer, retryLayer, timeoutLayer})(ctx, n)
 }
 
 // safety: a generated node is in no process's plan, so this host runs the spec the run host recorded on its row
@@ -228,7 +211,6 @@ func podChain(cfg *Config, layers []Layer) Executor {
 		if err := n.Run.State.StartNode(ctx, n.Run.ID, n.Plan.ID); err != nil {
 			return failed(fmt.Errorf("start node %s: %w", n.Plan.ID, err))
 		}
-		// safety: application retries share one node start event.
 		if n.Attempt <= 1 {
 			hostEvent(ctx, n.Run, n.Plan.ID, "node_started", nil)
 		}

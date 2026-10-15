@@ -12,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// safety: the node row stays running until the last application attempt ends.
 func retryLayer(cfg *Config, next Executor) Executor {
 	return func(ctx context.Context, n *NodeRun) Result {
 		m := n.Plan.Retry

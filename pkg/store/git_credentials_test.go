@@ -217,32 +217,6 @@ func TestGitCredentialMachineOptInIsForTheTeamsOwnRunnerTokens(t *testing.T) {
 	}
 }
 
-func TestRotateGitCredentialSecretsRewritesEveryTeam(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	teams := map[string]*store.Tenant{"acme": teamHandle(t, st, "acme"), "other": teamHandle(t, st, "other")}
-	for team, tn := range teams {
-		if _, err := tn.PutGitCredential(ctx, store.GitCredential{
-			Host: "gitlab.example.com", Kind: store.GitCredentialHTTPS, Secret: "old:" + team,
-		}, now); err != nil {
-			t.Fatal(err)
-		}
-	}
-	n, err := st.RotateGitCredentialSecrets(ctx, func(c store.GitCredential) (string, error) {
-		return "new:" + string(c.Team), nil
-	})
-	if err != nil || n != 2 {
-		t.Fatalf("rotate = %d, %v", n, err)
-	}
-	for team, tn := range teams {
-		c, err := tn.GitCredentialForHost(ctx, "gitlab.example.com")
-		if err != nil || c.Secret != "new:"+team {
-			t.Fatalf("%s after rotation = %q, %v", team, c.Secret, err)
-		}
-	}
-}
-
 // The release re-checks the claim inside its own transaction, so a lease
 // that lapses after the caller's check, or a claimant that never held the
 // run, releases nothing and leaves no audit row.

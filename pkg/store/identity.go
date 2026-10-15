@@ -939,14 +939,22 @@ func (s *Store) createAccountSession(ctx context.Context, acct Account, team Tea
 		}
 	}
 	var role Role
-	if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`+tx.forShare(), team, acct.ID).Scan(&role); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			err = ErrNotMember
+	var sessionTeam any
+	if team == "" {
+		if provider == "" {
+			return "", "", nil, ErrNotMember
 		}
-		return "", "", nil, err
-	}
-	if !role.Valid() {
-		return "", "", nil, ErrNotMember
+	} else {
+		sessionTeam = string(team)
+		if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`+tx.forShare(), team, acct.ID).Scan(&role); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				err = ErrNotMember
+			}
+			return "", "", nil, err
+		}
+		if !role.Valid() {
+			return "", "", nil, ErrNotMember
+		}
 	}
 	var email string
 	if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, acct.ID).Scan(&email); err != nil {
@@ -955,7 +963,7 @@ func (s *Store) createAccountSession(ctx context.Context, acct Account, team Tea
 	now := tx.now()
 	expires := now.Add(ttl)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,created_at,expires_at)
- VALUES (?,?,?,'',?,?,?)`, sessionDigest(raw), team, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
+ VALUES (?,?,?,'',?,?,?)`, sessionDigest(raw), sessionTeam, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
 		return "", "", nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -969,7 +977,7 @@ func (s *Store) createAccountSession(ctx context.Context, acct Account, team Tea
 // concurrent switch is reported rather than moved twice.
 func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID string, from, to Team) error {
 	res, err := s.exec(ctx,
-		`UPDATE sessions SET team = ? WHERE hash = ? AND account_id = ? AND team = ?
+		`UPDATE sessions SET team = ? WHERE hash = ? AND account_id = ? AND COALESCE(team,'') = ?
  AND capability_prefix='' AND revoked_at IS NULL AND expires_at>?
  AND EXISTS (SELECT 1 FROM memberships WHERE team=? AND account_id=?)`,
 		string(to), sessionDigest(rawSession), accountID, string(from), s.now().UnixNano(), to, accountID)

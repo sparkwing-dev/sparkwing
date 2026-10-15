@@ -15,6 +15,46 @@ and the leased blob-maintenance pass.
 
 ## Amendment 1: authority and execution seams
 
+
+`Tenant.RotateCredentials` implements the credential-maintenance transaction.
+It reloads persisted account authority and current team-admin membership, selects
+only the authenticated tenant, visits each secret and git credential serially,
+and commits both value-column changes together. Callback, authority and commit
+errors return zero counts and roll back both tables. Metadata stays unchanged.
+The raw `Store.RotateSecretValues` and `Store.RotateGitCredentialSecrets` APIs
+and their deployment-wide readers are removed. Verified local peer maintenance
+still requires the C2 transport-to-authority integration.
+
+`Tenant.SourceReleaseAudits` implements the final tenant-scoped audit projection.
+It reads capability prefixes and nanosecond timestamps, newest first, with the
+existing 200-row bound. Secret and git-credential row timestamps also use Unix
+nanoseconds. The old ClaimToken audit reader remains for its unmigrated callers.
+
+`ReadAuthentication` projects `BindingState.CancelReason`. A job's committed
+intent takes precedence over the run's intent, including an empty reason.
+Owner snapshots retain the run's intent. Session lookups classify infrastructure
+and integrity failures with `ErrSessionBackend`, preserving typed authentication
+refusals for ended credentials.
+
+Provider-linked account sessions may have no selected team. `sessions.team` is
+nullable, with a CHECK requiring an account and no capability parent when absent.
+Sessions are operator-owned identity rows. Tenant statements still carry their
+team predicate. A roleless session authenticates the account with no team or
+grants, including after renewal and membership creation. An explicit team switch
+requires a current membership. Roleless creation still requires the linked
+provider identity in the creating transaction.
+
+Identity-link and GitHub-connect consumption use `flow_nonces` with separate
+kinds, store-clock expiry checks and nanosecond timestamps. The existing unique
+key arbitrates concurrent consumption. Replay survives reopening. Expiration
+cleanup belongs to the leased retention pass, rather than a request-side delete.
+No separate identity-link or GitHub-connect state table exists.
+
+Future revocation timestamps remain live until their exact deadline. Transactional
+authority resolution applies this rule to every ancestor and repeats the expiry
+and revocation checks after locking the chain.
+
+
 Deployment queue metrics use `Operator.CountPendingNodes`,
 `Operator.CountNodesByQueueState` and `Operator.CountActiveRunners`.
 Their raw Store methods are removed. Queue counts partition outstanding jobs
@@ -218,8 +258,8 @@ separately from terminal result fields. The first request owns that intent.
 reopening. Renewal carries it in `LeaseBeat.CancelReason` for job, owner and eval
 units. A request-only edge never writes a holder's error, failure reason or exit
 code. Run cancellation passes its reason to affected jobs without replacing an
-earlier job request. C2's authentication snapshot still needs a reason field to
-transport the same intent through `AuthenticationReader`.
+earlier job request. `AuthenticationReader` transports the same intent through C2's
+`BindingState.CancelReason`.
 
 Session creation and lookup use the store clock and Unix nanoseconds. The session
 row holds a SHA-256 digest. Every authentication reads current membership and
@@ -1360,8 +1400,8 @@ hold no competing idempotency fields.
    implementation. Hashes exclude their own fields and seal timestamps; object
    keys sort, list order and explicit presence remain stable. Typed namespace
    components must encode without collisions, including manual ref scope.
-7. Account audit may precede any team. `business_events` is operator-owned with
-   nullable team; tenant queries still filter it. Intake idempotency belongs to `runs`, scoped by the server-derived principal
+7. Account audit and account sessions may precede any team. `business_events` and
+   `sessions` are operator-owned with nullable team. Tenant queries still filter it. Intake idempotency belongs to `runs`, scoped by the server-derived principal
    and pipeline, so published runs receive the same replay guarantee.
 8. Newest-success pins use a restrictive run FK because a cascading pin would
    permit deletion to erase the retention exception. Explicit deletion must

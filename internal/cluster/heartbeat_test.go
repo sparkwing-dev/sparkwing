@@ -12,7 +12,8 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -121,7 +122,7 @@ func TestTriggerClaimHeartbeat_StopsChildOnClaimSignal(t *testing.T) {
 					t.Fatalf("%s left the run going: outcome=%v cause=%v", tc.name, got, cause)
 				}
 				// safety: only an operator's cancel may record the run as cancelled.
-				var cancel *nodehost.CancelError
+				var cancel *lease.CancelError
 				if isCancel := errors.As(cause, &cancel); isCancel != (tc.want == triggerClaimCancelled) {
 					t.Fatalf("%s stopped the run with %v, a cancel: %v", tc.name, cause, isCancel)
 				}

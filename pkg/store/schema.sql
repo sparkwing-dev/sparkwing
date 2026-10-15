@@ -251,11 +251,12 @@ CREATE TABLE sessions (
     created_at BIGINT NOT NULL,
     expires_at BIGINT NOT NULL,
     last_used_at BIGINT,
-    team TEXT NOT NULL REFERENCES teams(name),
+    team TEXT REFERENCES teams(name),
     account_id TEXT NOT NULL DEFAULT '',
     capability_prefix TEXT NOT NULL DEFAULT '',
     revoked_at BIGINT,
-    auth_generation BIGINT NOT NULL DEFAULT 0 CHECK(auth_generation >= 0)
+    auth_generation BIGINT NOT NULL DEFAULT 0 CHECK(auth_generation >= 0),
+    CHECK(team IS NOT NULL OR (account_id <> '' AND capability_prefix = ''))
 );
 
 CREATE TABLE debug_pauses (

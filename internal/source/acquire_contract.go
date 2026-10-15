@@ -3,6 +3,7 @@ package source
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -45,14 +46,30 @@ type Credential struct {
 	ExtraRepositories []string
 }
 
+// EngineResolver selects a verified engine or restores the accepted engine identity.
+// engine.Resolver implements this contract for every placement.
+type EngineResolver interface {
+	Resolve(context.Context, engine.Pin, releaseasset.Target) (engine.Resolved, error)
+	Ensure(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
+}
+
 // Options supplies host-owned workspace and authority, separate from sealed source data.
 type Options struct {
 	Workspace string
 	Access    Access
-	Engines   *engine.Resolver
+	Engines   EngineResolver
 	Target    releaseasset.Target
 	SDK       engine.SDKKind
-	Base      procenv.Base
+	// ReadPin defaults to engine.ReadPin and must not execute repository code.
+	ReadPin func(string, engine.SDKKind) (engine.Pin, error)
+	// InstallSDK defaults to the verified selected engine's InstallSDK method.
+	InstallSDK func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error)
+	// BuildEnvironment defaults to procenv.Build; adapters may supply the shared policy implementation.
+	BuildEnvironment func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error)
+	// BundleTransport supplies signed-object transfers; the source client always refuses redirects.
+	// Nil uses the standard HTTP transport.
+	BundleTransport http.RoundTripper
+	Base            procenv.Base
 }
 
 // Entry is the acquired checkout and SDK command. Command excludes protocol argv.
@@ -65,7 +82,9 @@ type Entry struct {
 	RepoKey   string
 	SHA       string
 	// DefaultBranch is resolved from origin HEAD only when the sealed request lacks it.
-	DefaultBranch string
+	DefaultBranch     string
+	ownedDirectory    string
+	checkoutDirectory string
 }
 
 // Acquire clones the sealed SHA exactly or uses the authorized local checkout.
@@ -76,17 +95,20 @@ type Entry struct {
 // A supplied sealed Engine uses Engines.Ensure and must agree with the checkout pin. The result's
 // executable hosts the SDK command on every placement, including TypeScript on Windows.
 func Acquire(ctx context.Context, spec Spec, options Options) (*Entry, error) {
-	panic("unimplemented: c3-protocol-sdk")
+	return acquire(ctx, spec, options)
 }
 
 // Close releases acquisition-owned resources without removing a user's checkout.
-func (e *Entry) Close() error { panic("unimplemented: c3-protocol-sdk") }
+func (e *Entry) Close() error { return e.close() }
+
+// CheckoutDirectory returns the acquired root that bounds checkout-derived file reads.
+func (e *Entry) CheckoutDirectory() string { return e.checkoutDirectory }
 
 // ForRequest uses the captured intake checkout policy for planning acquisition.
 // Code and checkout-derived policy can resolve only at AcceptPlan.
 // Source.Location supplies URL/local path/pipeline directory. Repo display is never a clone URL.
 func ForRequest(request runspec.SealedRequest) (Spec, error) {
-	panic("unimplemented: c3-protocol-sdk")
+	return requestSource(request)
 }
 
 // ForExecution uses the accepted checkout winner and immutable acquisition identity.
@@ -94,5 +116,5 @@ func ForRequest(request runspec.SealedRequest) (Spec, error) {
 // The projection also carries the accepted portable engine identity.
 // It preserves the first seal's source location, never the executor's ambient checkout.
 func ForExecution(spec runspec.Spec) (Spec, error) {
-	panic("unimplemented: c3-protocol-sdk")
+	return executionSource(spec)
 }

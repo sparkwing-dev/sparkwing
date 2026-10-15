@@ -4,12 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
-	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -42,71 +40,6 @@ type memberJSON struct {
 	Email  string `json:"email"`
 	Name   string `json:"name"`
 	Role   string `json:"role"`
-}
-
-func (s *Server) handleListMembers(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamMember(w, r, store.RoleReader)
-	if !ok {
-		return
-	}
-	members, err := t.Members(r.Context())
-	if err != nil {
-		s.writeInternalError(w, r, "list members", err)
-		return
-	}
-	out := make([]memberJSON, 0, len(members))
-	for _, m := range members {
-		out = append(out, memberJSON{UserID: m.AccountID, Email: m.Email, Name: m.Name, Role: string(m.Role)})
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-type setRoleReq struct {
-	Role string `json:"role"`
-}
-
-func (s *Server) handleSetMemberRole(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
-	}
-	var req setRoleReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if store.Role(req.Role).Valid() {
-		noteAuditTarget(r.Context(), "role", req.Role)
-	}
-	revoked, err := t.SetMemberRole(r.Context(), p.AccountID, r.PathValue("user_id"), store.Role(req.Role), time.Now())
-	if err != nil {
-		writeIdentityError(w, s, r, "set member role", err)
-		return
-	}
-	s.invalidateRevokedTokens(revoked)
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleReader)
-	if !ok {
-		return
-	}
-	subject := r.PathValue("user_id")
-	if subject != p.AccountID && !p.HasScope(ScopeTeamAdmin) {
-		writeAuthError(w, http.StatusForbidden, authErrorBody{
-			Code: "missing_scope", MissingScope: ScopeTeamAdmin, Principal: p.label(),
-			Message: "removing another member needs the owner role",
-		})
-		return
-	}
-	revoked, err := t.RemoveMember(r.Context(), p.AccountID, subject, time.Now())
-	if err != nil {
-		writeIdentityError(w, s, r, "remove member", err)
-		return
-	}
-	s.invalidateRevokedTokens(revoked)
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) invalidateRevokedTokens(prefixes []string) {
@@ -285,35 +218,6 @@ func validRunnerName(name string) bool {
 		}
 	}
 	return true
-}
-
-// safety: the connect command stores the token in a file, never on the runner's
-// command line, where any local user can read it; the old file goes first,
-// because umask sets only a new file's mode, and && keeps a failed removal from
-// writing the token into that old file (set -e is off inside an && operand).
-const runnerCredentialsDir = `"$HOME/.config/sparkwing/runner-credentials"`
-
-func runnerTokenSetup(raw string) string {
-	file := runnerCredentialsDir + "/agent-token"
-	return "(umask 077 && mkdir -p " + runnerCredentialsDir + " && rm -f " + file + " && printf '%s' " + raw + " > " + file + ")"
-}
-
-// hack: --metrics-addr= because a second runner on a machine would collide on its port; no
-// --gitcache since the git cache is the operator's. Patterns are single-quoted because '*' is
-// a shell glob. The claim flags follow the token's scopes, since a loop the token may not
-// claim for fails.
-func runnerConnectArgs(controllerURL, name string, allow sourceurl.RepoAllowlist, scopes []string) string {
-	cmd := "sparkwing-runner runner --credentials-dir " + runnerCredentialsDir + " --controller " + controllerURL
-	for _, p := range allow.Patterns() {
-		cmd += " --allow-repo '" + p + "'"
-	}
-	if slices.Contains(scopes, ScopeTriggersClaim) {
-		cmd += " --also-claim-triggers"
-	}
-	if !slices.Contains(scopes, ScopeNodesClaim) {
-		cmd += " --claim-nodes=false"
-	}
-	return cmd + " --max-claims-before-restart 0 --metrics-addr= --holder-prefix " + name
 }
 
 func (s *Server) controllerURL(r *http.Request) string {
