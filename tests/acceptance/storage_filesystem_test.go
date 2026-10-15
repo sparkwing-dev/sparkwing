@@ -38,7 +38,7 @@ func (h storageObjectHTTP) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func storageFilesystemHTTP(objects *blob.Filesystem) storageObjectHTTP {
-	server := controller.New(nil, nil).WithDataObjects(objects).WithAuthenticator(controller.NewAuthenticator(nil, time.Minute))
+	server := controller.New(nil, nil).WithDataObjects(objects)
 	return storageObjectHTTP{server.Handler()}
 }
 

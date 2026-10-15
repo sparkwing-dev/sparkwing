@@ -424,9 +424,9 @@ function NeedsAttention({
       ) : (
         <ul className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden divide-y divide-[var(--border)]">
           {approvals.map((a) => (
-            <li key={`${a.run_id}/${a.node_id}`}>
+            <li key={`${a.run_id}/${a.job_id}`}>
               <Link
-                href={`/runs?run=${a.run_id}&node=${encodeURIComponent(a.node_id)}`}
+                href={`/runs?run=${a.run_id}&node=${encodeURIComponent(a.job_id)}`}
                 className="flex items-center gap-3 px-3 py-2 hover:bg-[var(--surface-raised)] transition-colors"
               >
                 <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse shrink-0" />
@@ -434,7 +434,7 @@ function NeedsAttention({
                   approval
                 </span>
                 <span className="font-mono text-xs truncate flex-1">
-                  {a.node_id}
+                  {a.job_id}
                 </span>
                 {
 

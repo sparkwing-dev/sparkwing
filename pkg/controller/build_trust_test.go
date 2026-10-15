@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestTeamOwnerCanChooseWhetherCloudTrustsLocalBinaries(t *testing.T) {
@@ -20,11 +21,7 @@ func TestTeamOwnerCanChooseWhetherCloudTrustsLocalBinaries(t *testing.T) {
 		map[string]bool{"trust_local_builds": true}, &answer); code != http.StatusOK || !answer.TrustLocalBuilds {
 		t.Fatalf("enable trust = %d %+v", code, answer)
 	}
-	tenant, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
-	if err != nil {
-		t.Fatal(err)
-	}
-	trust, err := tenant.TrustLocalBuilds(t.Context())
+	trust, err := teststore.ForTeam(t, f.store, store.Team(olga.team)).TrustLocalBuilds(t.Context())
 	if err != nil || !trust {
 		t.Fatalf("stored trust = %v, %v", trust, err)
 	}

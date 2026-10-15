@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -38,25 +37,6 @@ type SummaryWrite struct {
 	Markdown string
 }
 
-// Segment describes one immutable log range; logs use their own signer and never a blob data download.
-type Segment struct {
-	Index     int64
-	Offset    int64
-	Size      int64
-	Digest    string
-	ObjectKey string
-}
-
-// SegmentCommit fences attribution and completeness to a job attempt or owner unit.
-type SegmentCommit struct {
-	Subject          blob.LogSubject
-	Actor            Actor
-	Segments         []Segment
-	Final            bool
-	IncompleteReason string
-	RetentionClass   string
-}
-
 // RecordStep refuses stale attempts instead of letting delayed reports replace a later attempt's steps.
 func (t *Tenant) RecordStep(ctx context.Context, report StepReport) error {
 	return t.recordStep(ctx, report)
@@ -70,35 +50,4 @@ func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite
 // WriteSummary stores job or step markdown only after the claim binding is rechecked.
 func (t *Tenant) WriteSummary(ctx context.Context, summary SummaryWrite) error {
 	return t.writeSummary(ctx, summary)
-}
-
-// RecordSegments checks subject shape, actor binding, exact persisted generation and
-// contiguity. Eval checks its own lease and immutable source generation separately.
-// For an unsealed final job attempt, C2 LiveLogTail permits the recorded writer
-// until persisted attempt.finished_at + limits.LogSealGrace. The transaction checks
-// authority expiry/revocation/membership, exact holder/capability/attempt/generation,
-// and that no newer attempt or claim generation exists. This permits the first final
-// flush after result completion without reopening execution. After final sealing,
-// only the identical final commit replays. Owner units retain their own liveness
-// rules; eval does not inherit the job-attempt grace exception.
-// A live run-bound publisher with data.write may import logs for an exact terminal
-// job attempt in its publish-mode run, without an execution lease or tail grace.
-// The run owns RetentionClass; incomplete logs never change the unit's result.
-func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error {
-	return t.recordSegments(ctx, commit)
-}
-
-// LogSegments is the persisted read model for one tagged subject, including an empty tail.
-type LogSegments struct {
-	Subject          blob.LogSubject
-	Segments         []Segment
-	Complete         bool
-	IncompleteReason string
-}
-
-// ReadLogSegments selects only the authorized subject's generation and byte range.
-// Controller reads reauthorize each request; terminal logs remain readable under
-// run-read authority after the writer's lease ends.
-func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.LogReadRequest) (LogSegments, error) {
-	return t.readLogSegments(ctx, actor, request)
 }

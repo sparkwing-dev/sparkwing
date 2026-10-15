@@ -31,19 +31,6 @@ func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, windo
 	return s.runLeased(ctx, "bucket measurement", metaKeyBucketMeasureAt, metaKeyBucketMeasureClaim, holder, window, ttl, fn)
 }
 
-const (
-	metaKeyStoragePassAt    = "storage.pass"
-	metaKeyStoragePassClaim = "storage.pass.claim"
-)
-
-// RunStoragePassLeased runs the storage pass under its own store-wide lease,
-// the same way [Store.RunBucketMeasureLeased] runs a measurement: one
-// replica per window lists the bucket, reconciles every team's count and
-// expires old objects.
-func (s *Store) RunStoragePassLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error) {
-	return s.runLeased(ctx, "storage pass", metaKeyStoragePassAt, metaKeyStoragePassClaim, holder, window, ttl, fn)
-}
-
 func (s *Store) runLeased(ctx context.Context, what, atKey, claimKey, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error) {
 	if fn == nil {
 		return false, fmt.Errorf("run the %s: a function is required", what)

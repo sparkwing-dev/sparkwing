@@ -21,3 +21,5 @@ pkg/wingwire/testdata/shapes.json text eol=lf
 Dockerfile.* text eol=lf
 AGENTS.md text eol=lf
 CLAUDE.md text eol=lf
+sdk/typescript/** text eol=lf
+sdk/typescript/native/**/*.node binary

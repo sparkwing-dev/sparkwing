@@ -40,6 +40,10 @@ controller:
     # Key inside the Secret holding the bearer token.
     key: token
 
+# Provision identities and permissions for a separately configured Cloud launcher.
+launcher:
+  serviceAccountName: ""
+
 # -----------------------------------------------------------------------
 # 2. Runner pool. Long-lived pods that poll the controller, claim
 #    triggers + nodes, and execute pipeline DAGs.
@@ -84,19 +88,7 @@ runner:
   # to trigger-claiming and leave the others node-only.
   alsoClaimTriggers: true
 
-  triggerRunner:
-    # inprocess executes nodes inside the trigger worker. warm offers nodes
-    # to remote agents first, then sends eligible overflow to Kubernetes.
-    # k8s sends every node to Kubernetes.
-    kind: inprocess
-    # Static capabilities common to every Job created by the k8s backend.
-    # Empty keeps labeled work on agents.
-    labels: []
-
-  # Mount the runner pod's ServiceAccount token. The runner reaches the
-  # controller over HTTP and needs no API access, so this stays false.
-  # Set it true for triggerRunner.kind k8s or warm, whose trigger worker
-  # creates and inspects runner Jobs through the Kubernetes API.
+  # The runner claims through the controller and needs no Kubernetes API token.
   automountServiceAccountToken: false
 
   # Optional metrics scrape port. The Prometheus client registry on
@@ -111,34 +103,10 @@ runner:
       cpu: "2"
       memory: 2Gi
 
-  # Hard ceiling on the Job pods this runner creates, as Kubernetes
-  # quantities. A pipeline's own .Resources() pin, and the charge
-  # sparkwing measured for it, are both clamped to these before the pod
-  # is created, requests and burst limits alike. Empty means no ceiling,
-  # so a pin becomes the pod size verbatim. Set them at or under
-  # limitRange.max, and at or under what one node can actually schedule.
-  jobCeiling:
-    cpu: ""
-    memory: ""
-
-  # Wall-clock bound on one Job pod this runner creates, as a Go duration
-  # of at least a minute (6h, 90m), passed as --deadline. Kubernetes kills
-  # a pod that outlives it, and a node's own .Timeout() outranks it.
-  # Empty keeps the 6h default.
-  jobDeadline: ""
-
-  # Keep each band node to the team whose Job booted it, passed as
-  # --team-nodes. Turn it on only for a band pool whose nodes carry the
-  # sparkwing.dev/team-node label.
-  teamNodes: false
-
-
-  # Go build and module caches. The runner compiles a repository's
-  # pipeline on the first claim of each source hash. Both settings
-  # below shorten that compile.
+  # Go build and module caches reused by source compilation on this runner.
   goCache:
     # Modules the runner downloads into GOMODCACHE at startup, passed as
-    # --warm-modules. Empty warms the Sparkwing SDK at the runner image's
+    # --warm-module. Empty warms the Sparkwing SDK at the runner image's
     # own version, which is most of a pipeline's dependency graph. Each
     # entry may carry an @version ("example.com/mod@v1.2.3", and
     # similar); a bare path resolves at download time. ["off"] starts the
@@ -209,7 +177,7 @@ rbac:
   create: true
 
 # -----------------------------------------------------------------------
-# 5. Image pull secrets. Same list applies to both components.
+# 5. Image pull secrets for the runner.
 # -----------------------------------------------------------------------
 imagePullSecrets: []
 # - name: ghcr-pull-secret
@@ -218,8 +186,7 @@ volumePermissions:
   enabled: true
 
 # -----------------------------------------------------------------------
-# 6. Pod-level security defaults. Applied uniformly across runner +
-#    cache unless a per-component override sets its own.
+# 6. Runner pod security defaults.
 # -----------------------------------------------------------------------
 podSecurityContext:
   runAsNonRoot: true
@@ -233,33 +200,25 @@ podSecurityContext:
 
 containerSecurityContext:
   allowPrivilegeEscalation: false
-  # Every path the runner pods write lives on a
-  # mounted volume: the component's /data volume, the /tmp scratch
-  # emptyDir, and SPARKWING_HOME inside it. Set false only for an
-  # image that writes to its own layer.
+  # Set false only for an image that writes outside the mounted scratch,
+  # Sparkwing home and Go cache paths.
   readOnlyRootFilesystem: true
   capabilities:
     drop: ["ALL"]
 
 # -----------------------------------------------------------------------
-# 7. Namespace resource guards. The runner clamps a pipeline's declared
-#    pin to runner.jobCeiling, so these are the cluster-side backstop for
-#    anything the runner does not create:
-#    a LimitRange bounds one container, a ResourceQuota bounds the
+# 7. Namespace resource guards. A LimitRange bounds one container,
+#    a ResourceQuota bounds the
 #    namespace total. Both are off by default because an install that
 #    already sizes its pods elsewhere would start failing admission the
 #    moment a quota appears.
 # -----------------------------------------------------------------------
 limitRange:
   # true creates the LimitRange below. Every container in the namespace,
-  # including the Job pods the k8s runner backend creates, is then held
+  # including Jobs from a launcher using this namespace, is then held
   # to it: a pod asking for more than max is rejected at admission.
   enabled: false
-  # Ceiling for one container. Size it above the runner
-  # pods' own limits. It binds on a runner Job only when it sits under
-  # runner.jobCeiling, which the runner already enforces per pod: a pod
-  # asks for a burst limit of twice its core charge and 1.25x its memory,
-  # both capped at runner.jobCeiling.
+  # Size the ceiling above the runner pods' own limits.
   max:
     cpu: "16"
     memory: 64Gi

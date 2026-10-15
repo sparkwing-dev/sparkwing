@@ -78,12 +78,12 @@ func TestDeleteTeamRefusesAnOpenCheckoutOrADisputeHold(t *testing.T) {
 		!strings.Contains(refused.Error, "wait for the checkout to expire or complete") {
 		t.Fatalf("deleting a team with an open checkout = %d %q, want 409 naming the remedy", code, refused.Error)
 	}
-	if code := f.call("DELETE", "/api/v1/teams/acme", "Bearer "+f.admin, nil, &refused); code != http.StatusConflict {
+	if code := f.call("DELETE", "/api/v1/operator/teams/acme", f.consoleAuth(), nil, nil); code != http.StatusConflict {
 		t.Fatalf("the operator deleting it = %d, want 409", code)
 	}
 
 	f.createTeam(&owner, "held")
-	if _, err := f.store.HoldTeamForDispute(context.Background(), "held", "dp_held", "", "dispute opened", time.Now()); err != nil {
+	if _, err := f.store.DB().ExecContext(context.Background(), "INSERT INTO credit_freezes(dispute_id,team,payment_id,reason,created_at) VALUES (?,?,?,?,?)", "dp_held", "held", "", "dispute opened", time.Now().UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	if code := f.call("DELETE", "/api/v1/team", owner.auth, map[string]string{"confirm_slug": "held"}, &refused); code != http.StatusConflict ||

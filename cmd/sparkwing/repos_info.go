@@ -6,17 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type repoInfo struct {
@@ -53,7 +52,7 @@ type repoPipeline struct {
 	LastRun    string `json:"last_run,omitempty"`
 	LastStatus string `json:"last_status,omitempty"`
 
-	lastAt time.Time
+	lastNumber int64
 }
 
 func runReposInfo(args []string) error {
@@ -81,7 +80,16 @@ func runReposInfo(args []string) error {
 		return err
 	}
 
-	info := buildRepoInfo(context.Background(), repo, latest)
+	ctx := context.Background()
+	reader, closeTransport, err := resolveRunReader(ctx, "")
+	if err != nil {
+		return err
+	}
+	defer closeTransport()
+	info, err := buildRepoInfo(ctx, repo, latest, reader)
+	if err != nil {
+		return err
+	}
 	if strings.ToLower(output) == "json" {
 		enc := json.NewEncoder(os.Stdout)
 		return enc.Encode(info)
@@ -111,14 +119,17 @@ func selectRepo(fleet []repos.Repo, sel string) (repos.Repo, error) {
 		}
 	}
 	for _, r := range fleet {
-		if r.Primary != "" && strings.HasPrefix(cwd, r.Primary) {
-			return r, nil
+		if r.Primary != "" {
+			relative, err := filepath.Rel(r.Primary, cwd)
+			if err == nil && filepath.IsLocal(relative) {
+				return r, nil
+			}
 		}
 	}
-	return repos.Repo{}, fmt.Errorf("repos info: %q is not a registered sparkwing repo; pass --repo NAME", cwd)
+	return repos.Repo{}, fmt.Errorf("repos info: %q is not a registered sparkwing repo; select a registered checkout with -C PATH", cwd)
 }
 
-func buildRepoInfo(ctx context.Context, repo repos.Repo, latest string) repoInfo {
+func buildRepoInfo(ctx context.Context, repo repos.Repo, latest string, reader controllerwire.RunReader) (repoInfo, error) {
 	info := repoInfo{
 		Name:         repo.Name,
 		Primary:      repo.Primary,
@@ -151,12 +162,16 @@ func buildRepoInfo(ctx context.Context, repo repos.Repo, latest string) repoInfo
 			info.Commit = strings.TrimSpace(out)
 		}
 	}
-	info.Pipelines = pipelineStates(ctx, repo)
+	var err error
+	info.Pipelines, err = pipelineStates(ctx, repo, reader)
+	if err != nil {
+		return repoInfo{}, err
+	}
 	info.Suggestion = repoSuggestion(info)
-	return info
+	return info, nil
 }
 
-func pipelineStates(ctx context.Context, repo repos.Repo) []repoPipeline {
+func pipelineStates(ctx context.Context, repo repos.Repo, reader controllerwire.RunReader) ([]repoPipeline, error) {
 	byName := map[string]*repoPipeline{}
 	var order []string
 	add := func(name string) *repoPipeline {
@@ -175,35 +190,36 @@ func pipelineStates(ctx context.Context, repo repos.Repo) []repoPipeline {
 			}
 		}
 	}
-	if paths, err := orchestrator.DefaultPaths(); err == nil {
-		if st, err := store.OpenReadOnly(paths.StateDB()); err == nil {
-			defer func() { _ = st.Close() }()
-			if runs, err := st.ListRuns(ctx, store.RunFilter{Limit: 1000}); err == nil {
-				for _, r := range runs {
-					if !repos.RunMatchesRepo(repos.RunObservation{Repo: r.DeclaredRepo, RepoURL: r.RepoURL}, repo) {
-						continue
-					}
-					p := add(r.Pipeline)
-					if p.lastAt.IsZero() || r.StartedAt.After(p.lastAt) {
-						p.lastAt = r.StartedAt
-						p.LastRun = r.StartedAt.Format("2006-01-02 15:04")
-						p.LastStatus = r.Status
-					}
+	err := visitRunPages(ctx, reader, controllerwire.RunQuery{Limit: 500}, func(page controllerwire.RunPage) error {
+		for _, run := range page.Runs {
+			if !repos.RunMatchesRepo(repos.RunObservation{Repo: run.Inputs.Git.Repository.Display}, repo) {
+				continue
+			}
+			p := add(run.Inputs.Pipeline)
+			if run.Number > p.lastNumber {
+				p.lastNumber, p.LastStatus = run.Number, run.Status
+				p.LastRun = ""
+				if run.StartedAt != nil {
+					p.LastRun = run.StartedAt.Format("2006-01-02 15:04")
 				}
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	out := make([]repoPipeline, 0, len(order))
 	for _, name := range order {
 		out = append(out, *byName[name])
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
+	return out, nil
 }
 
 func repoSuggestion(info repoInfo) string {
 	if info.GuidesBehind > 0 && info.Replace == "" && info.Latest != "" {
-		return fmt.Sprintf("pin is %d guide(s) behind: sparkwing repos update --version %s --apply", info.GuidesBehind, info.Latest)
+		return fmt.Sprintf("pin is %d guide(s) behind: sparkwing repos update --version %s --in-place", info.GuidesBehind, info.Latest)
 	}
 	if info.Dirty {
 		return "working tree has uncommitted changes; commit or stash before bumping the SDK pin"

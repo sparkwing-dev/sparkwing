@@ -1,13 +1,9 @@
 package nodehost_test
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -15,7 +11,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -195,55 +190,6 @@ func TestNewLogSinkRequiresItsTargets(t *testing.T) {
 	if _, err := nodehost.NewLogSink(context.Background(), nodehost.LogSinkConfig{RunID: "r", NodeID: "n", Log: &recordLog{}, State: &fakeState{}}); err == nil {
 		t.Fatal("sink without a masker accepted")
 	}
-}
-
-func readLines(t *testing.T, r io.Reader) []sparkwing.LogRecord {
-	t.Helper()
-	var out []sparkwing.LogRecord
-	sc := bufio.NewScanner(r)
-	for sc.Scan() {
-		var rec sparkwing.LogRecord
-		if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {
-			t.Fatalf("stored line %q: %v", sc.Text(), err)
-		}
-		out = append(out, rec)
-	}
-	return out
-}
-
-func writeThrough(t *testing.T, logs orchestrator.LogBackend) {
-	t.Helper()
-	nlog, err := logs.OpenNodeLog(context.Background(), "run-1", "build", nil)
-	if err != nil {
-		t.Fatalf("open node log: %v", err)
-	}
-	sink := newSink(t, nlog, &fakeState{})
-	sink.Text(nodehost.LevelInfo, "out ***")
-	sink.Record(nodeproto.FrameLog{TS: "x", Step: "s", Event: "step_end", Message: "done"})
-	if err := nlog.Close(); err != nil {
-		t.Fatalf("close node log: %v", err)
-	}
-}
-
-func checkStored(t *testing.T, got []sparkwing.LogRecord) {
-	t.Helper()
-	if len(got) != 2 || got[0].Msg != "out ***" || got[0].JobID != "build" ||
-		got[1].Event != "" || got[1].Step != "s" || !got[1].TS.Equal(hostNow) {
-		t.Fatalf("stored records: %+v", got)
-	}
-}
-
-func TestLogSinkWritesTheLocalRunDirectoryLog(t *testing.T) {
-	paths := orchestrator.PathsAt(t.TempDir())
-	if err := paths.EnsureRoot(); err != nil {
-		t.Fatal(err)
-	}
-	writeThrough(t, orchestrator.LocalBackends(paths, nil).Logs)
-	raw, err := os.ReadFile(paths.NodeLog("run-1", "build"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkStored(t, readLines(t, bytes.NewReader(raw)))
 }
 
 type textLog struct {

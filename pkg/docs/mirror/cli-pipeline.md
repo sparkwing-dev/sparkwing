@@ -8,855 +8,323 @@ Every `sparkwing pipeline` command, flag, and argument, generated from the CLI's
 
 This repo's pipelines
 
-Per-project namespace. Every verb here operates on the
-nearest .sparkwing/ walking up from the current directory.
-
-Discovery (list / describe / plan) shows what pipelines this repo
-defines. 'new' scaffolds a fresh pipeline (auto-bootstraps .sparkwing/
-on first use); 'sparkwing run <name>' invokes one. 'hooks' wires
-pipelines to git pre-commit / pre-push / post-commit.
-'sparks' manages reusable spark libraries declared in the
-sparks: block of .sparkwing/sparkwing.yaml.
-
-The discovery verbs (list / describe / plan)
-support -o json so an agent can parse output directly rather
-than scraping tab-complete.
-
-To bump the pipeline SDK pin in .sparkwing/go.mod, use
-'sparkwing repos update --in-place'. To see the current pin, run
-'sparkwing version' (composite card).
-
 ### Subcommands
 
-- `list` -- Enumerate every pipeline with metadata
 - `describe` -- Print one pipeline's full metadata
-- `new` -- Scaffold a new Go pipeline
-- `lint` -- Check pipeline source for idiomatic anti-patterns (enforced gate)
-- `plan` -- Render the runtime-resolved DAG without dispatching any jobs
-- `trigger` -- Submit a pipeline to a profile's controller (remote execution)
 - `hooks` -- Install / uninstall git pre-commit + pre-push + post-commit hooks
+- `lint` -- Check pipeline source for idiomatic anti-patterns (enforced gate)
+- `list` -- Enumerate every pipeline with metadata
+- `new` -- Scaffold a new Go pipeline
+- `plan` -- Render the runtime-resolved DAG without dispatching any jobs
 - `sparks` -- Manage sparks libraries declared in .sparkwing/sparkwing.yaml
+- `trigger` -- Submit a pipeline run to a controller
 
-### Examples
+### Flags
 
-```sh
-# Machine-readable catalog
-sparkwing pipeline list -o json
-
-# One pipeline's details
-sparkwing pipeline describe --name fictional-release -o json
-
-# Search by intent
-sparkwing pipeline list --query "tag a release"
-
-# First pipeline in a new repository (auto-bootstraps)
-sparkwing pipeline new --name release
-
-# Inspect the DAG before running
-sparkwing pipeline plan --static --name fictional-release
-
-# Run a pipeline
-sparkwing run release
-```
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
 
 ## `sparkwing pipeline describe`
 
 Print one pipeline's full metadata
 
-Emits the full record for a single pipeline: kind, group,
-description, typed args, examples, triggers, and (for scripts)
-frontmatter-declared positional args and flags. Always resolves
-hidden entries -- if you're asking for a name explicitly, the
-hidden flag shouldn't surprise you.
-
---secrets compiles the pipeline, describes it fresh, and prints each
-secret its Secrets struct declares, required or optional, instead of the
-metadata. It never resolves a secret's value.
-
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--name NAME` | Pipeline name to describe (required) |
-| `--secrets` | Print the pipeline's declared secrets, required or optional, instead of its metadata |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-
-### Examples
-
-```sh
-# Human-readable
-sparkwing pipeline describe --name release
-
-# Agent-readable
-sparkwing pipeline describe --name fictional-release -o json
-
-# Inspect the declared secrets
-sparkwing pipeline describe --name fictional-release --secrets -o json
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--pipeline NAME` | Pipeline name. (required) |
+| `--secrets` | secrets |
 
 ## `sparkwing pipeline hooks`
 
 Install / uninstall git pre-commit + pre-push + post-commit hooks
 
-Writes small git hook scripts into the repo's .git/hooks/
-directory that call 'sparkwing run <pipeline>' for every pipeline that
-declares pre_commit:, pre_push:, or post_commit: in its
-.sparkwing/sparkwing.yaml triggers block.
-
-The post-commit hook is non-blocking: the commit has already
-landed, so it runs its pipelines, tolerates failures, and never
-aborts. pre-commit and pre-push abort the git action on the first
-failing pipeline.
-
-Managed hooks carry an "Installed by sparkwing" marker so
-uninstall and status can tell them apart from hand-written
-hooks. Existing unmanaged hooks are left alone; install skips
-them with a warning.
-
 ### Subcommands
 
 - `install` -- Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml triggers
-- `uninstall` -- Remove sparkwing-managed git hooks
 - `status` -- Report declared, installed, and missing sparkwing hooks
+- `uninstall` -- Remove sparkwing-managed git hooks
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
 
 ## `sparkwing pipeline hooks install`
 
 Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml triggers
 
-Installs managed hooks for declared pre_commit, pre_push, and post_commit
-triggers. Existing unmanaged hooks are preserved and reported.
-
-Each gate runs successfully through the invoking executable before replacement
-hooks are published. Existing hooks remain callable during verification. Publication uses atomic rename;
-an installation failure restores prior managed hooks, forwarders, modes,
-and configuration. A rejected installation exits nonzero and reports its
-reason on stderr. --no-prove skips gate execution.
-
-Every hook runs its pipelines on this machine. --fleet
-processes registered repositories and distinguishes installed gates, gates
-that could not execute, and repositories declaring no blocking gate.
-
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--fleet` | Install into every registered repo instead of one |
-| `--no-prove` | Claim core.hooksPath without running the gate first |
-
-### Examples
-
-```sh
-# Install in the current repo
-sparkwing pipeline hooks install
-
-# Install in a different repo
-sparkwing -C /path/to/repo pipeline hooks install
-
-# Arm every registered repo
-sparkwing pipeline hooks install --fleet
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--no-prove` | no prove |
+| `--all-repos` | all repos |
 
 ## `sparkwing pipeline hooks status`
 
 Report declared, installed, and missing sparkwing hooks
 
-Lists every managed hook file under .git/hooks/ along with the pipelines it
-invokes. Declared hooks that are missing, shadowed, or borrowed are named with
-the command that repairs them.
-
---prove attempts a commit with a managed gate instructed to refuse it and
-reports whether the gate blocked Git. A control attempt with hooks disabled
-must succeed, so an unrelated commit failure cannot count as a passing
-diagnostic. The attempts use a temporary detached worktree and index; the
-checkout and its branches remain unchanged. Only managed hooks carrying the
-diagnostic guard execute; other hooks are reported as unprovable. It exits
-nonzero unless every applicable repository refused the test commit through
-its own gate, and it proves pre-commit hooks only. --fleet proves every
-registered repository.
-
---all reports declared hooks for every registered repository as armed,
-shadowed, uninstalled, or undeclared. A shadowed hook is installed but
-core.hooksPath selects another location. The STATE column reads no-gate where
-every declared hook fires and none of them is pre-commit or pre-push, because
-nothing there refuses a commit or a push. Register other checkouts before
-expecting them in the report; an unreadable registry produces an error.
---ungated selects repositories where commits or pushes run without a gate.
-
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `-o, --output pretty\|json\|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints hook names. |
-| `--prove` | Make the gate refuse a test commit and report whether it did |
-| `--fleet` | With --prove, prove every registered repo |
-| `--all` | Report the effective gates of every registered repo |
-| `--ungated` | With --all, list only the repos git runs no gate for |
-
-### Examples
-
-```sh
-# Show hook status
-sparkwing pipeline hooks status
-
-# Prove this repo's gate refuses a commit
-sparkwing pipeline hooks status --prove
-
-# Prove every registered repo's gate
-sparkwing pipeline hooks status --prove --fleet
-
-# Survey every registered repo's gates
-sparkwing pipeline hooks status --all
-
-# Just the ungated repos
-sparkwing pipeline hooks status --all --ungated
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--prove` | prove |
+| `--all-repos` | all repos |
+| `--ungated` | ungated |
 
 ## `sparkwing pipeline hooks uninstall`
 
 Remove sparkwing-managed git hooks
 
-Deletes every file under .git/hooks/ that carries the "Installed by sparkwing"
-marker. Hand-written hooks are left alone.
+### Flags
 
-### Examples
-
-```sh
-# Uninstall in the current repo
-sparkwing pipeline hooks uninstall
-```
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
 
 ## `sparkwing pipeline lint`
 
 Check pipeline source for idiomatic anti-patterns (enforced gate)
 
-Statically analyzes pipeline source for the anti-patterns
-that make a Plan() non-deterministic, impure, or misconfigured,
-and exits non-zero on any violation. It inspects the Go syntax tree without
-compilation or execution, including source pinned to another SDK version.
-
-Only the Plan() body is inspected; code inside job/step closures
-and SkipIf / BeforeRun bodies runs at dispatch, so I/O and
-environment reads there are idiomatic and never flagged.
-
-The rule set (see --rules for each rule's charter):
-  plan-io              I/O (shell, exec, file, http) in Plan()
-  plan-runtime-branch  os.Getenv / runtime.GOOS / IsLocal branching in Plan()
-  runner-label         blank Requires/Prefers/WhenRunner labels; Inline +
-                       Requires on one job
-  unused-ref           a RefTo result discarded into _ or a bare statement
-  group-cache-shared   Memoize on a fan-out or group, whose members then
-                       share one cache entry
-  dynamic-group-inert  a JobGroup setter on a JobFanOutDynamic result, which
-                       has no members to apply it to
-  guard-misuse         pipeline guards that can never be satisfied together
-
-With no target it sweeps every pipeline in .sparkwing/sparkwing.yaml
-and exits non-zero if any violates a rule -- designed as a CI gate
-alongside 'explain --all'. --all says the same thing explicitly.
---name lints a single pipeline. Source defaults to <.sparkwing>/jobs;
-override with --dir.
-
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--name NAME` | Pipeline to lint (default: every pipeline) |
-| `--all` | Lint every pipeline in this repo's sparkwing.yaml; the default, non-zero exit on any violation |
-| `--rules` | Print each rule's charter (what it forbids and why) and exit |
-| `--dir DIR` | Directory of pipeline source to scan (default: <.sparkwing>/jobs) |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-
-### Examples
-
-```sh
-# Lint one pipeline
-sparkwing pipeline lint --name release
-
-# Lint every pipeline (CI gate)
-sparkwing pipeline lint --all
-
-# Agent-readable findings
-sparkwing pipeline lint --all -o json
-
-# Show the rule set
-sparkwing pipeline lint --rules
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--pipeline NAME` | Pipeline name. |
+| `--rules` | rules |
+| `--dir DIR` | dir |
+| `--static` | static |
 
 ## `sparkwing pipeline list`
 
 Enumerate every pipeline with metadata
 
-Walks up from the current directory to locate .sparkwing/,
-merges sparkwing.yaml entries with the describe cache's typed
-metadata, and prints a grouped aligned table.
-
--o json emits structured records instead; agents should prefer
--o json since tab-complete / table output is for human reading.
-
---all includes entries marked 'hidden: true'. By default they're
-omitted.
-
---query searches by intent instead: every token must match some field
-(name / short / help / group / tags / triggers), hidden entries included,
-and matches in the name rank above matches in prose. -o json adds a score
-to each record, highest first.
-
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-| `--all` | Include entries marked hidden |
-| `--query TEXT` | Rank entries whose fields match every token |
-
-### Examples
-
-```sh
-# Human-readable table
-sparkwing pipeline list
-
-# Agent-readable catalog
-sparkwing pipeline list -o json
-
-# Include hidden entries
-sparkwing pipeline list --all
-
-# Find release-related pipelines
-sparkwing pipeline list --query release
-
-# Agent-readable ranked hits
-sparkwing pipeline list --query "tag release" -o json
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--all` | Include entries normally hidden. |
+| `--search TEXT` | Match records; never scan log text. |
 
 ## `sparkwing pipeline new`
 
 Scaffold a new Go pipeline
 
-Creates a pipeline source file and registers its name. Creates the pipeline
-module when the repository has none. An existing pipeline name is refused
-before files are written.
-
---template selects the dependency graph. --on selects triggers independently:
-  pull_request   opened, synchronize, and reopened events
-  push           any branch
-  schedule       daily at 09:00 UTC
-  manual         explicit invocation only
-
-Repeat --on or separate events with commas. 'manual' must stand alone.
-Edit the generated trigger configuration to add filters.
-
-Templates:
-  minimal            one node with a placeholder action; no trigger
-  build-test-deploy  sequential build, test, and deploy; no trigger
-  ci-pr-check        parallel lint and test, followed by a gate; pull_request
-  release            version, changelog, and publish sequence; no trigger
-  scheduled-report   collect, parallel gatherers, then publish; schedule
-
-Generated actions print placeholder output. Replace them with the work the
-pipeline should perform. Use 'sparkwing docs read --guide authoring' for
-pipeline authoring guidance and 'sparkwing examples' for complete examples.
-
-'sparkwing -C DIR pipeline new' selects another repository. --hidden hides the entry from default
-listings. --short sets its description.
-
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--name NAME` | New pipeline's kebab-case name (a-z, 0-9, -) (required) |
-| `--template SHAPE` | DAG to scaffold: minimal (1 node) \| build-test-deploy (3) \| ci-pr-check (3) \| release (3) \| scheduled-report (5) (default: minimal) |
-| `--on EVENT` | Trigger(s) to declare: pull_request \| push \| schedule \| pre_commit \| pre_push \| post_commit \| manual (repeatable or comma-separated) (default: the shape's own) |
-| `--hidden` | Mark the entry hidden in default tab-complete menus |
-| `--short TEXT` | Pre-fill the ShortHelp / desc line |
-
-### Examples
-
-```sh
-# Single-node pipeline (default shape)
-sparkwing pipeline new --name release
-
-# Build/test/deploy DAG (three-node)
-sparkwing pipeline new --name fictional-release --template build-test-deploy
-
-# Pull-request gate (lint + test -> gate)
-sparkwing pipeline new --name pr-check --template ci-pr-check
-
-# Scheduled fan-out report
-sparkwing pipeline new --name daily-report --template scheduled-report
-
-# One job, fired by pull requests
-sparkwing pipeline new --name pr-test --template minimal --on pull_request
-
-# Fired by both push and pull requests
-sparkwing pipeline new --name ci --template ci-pr-check --on push,pull_request
-
-# A gate you invoke by hand, not on every PR
-sparkwing pipeline new --name gate --template ci-pr-check --on manual
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--pipeline NAME` | Pipeline name. (required) |
+| `--template SHAPE` | template |
+| `--on EVENT` | on |
+| `--hidden` | hidden |
+| `--short TEXT` | Only -o output, -q quiet, -f follow, -v run verbosity, -C checkout and -h help. |
 
 ## `sparkwing pipeline plan`
 
 Render the runtime-resolved DAG without dispatching any jobs
 
-Compiles the pipeline and evaluates its plan under the supplied arguments.
-Each step reports would_run, would_skip or may_skip with its reason. Step
-actions and SkipIf predicates are not executed.
-
-Skip reasons:
-  user_skipif  the step has a SkipIf predicate, which only a run evaluates
-               (may_skip)
-  range_skip   the step falls outside --start-at and --stop-at (would_skip)
-
-Dynamic fan-out counts remain unresolved when they require execution.
-
---static prints the Plan DAG as the pipeline declares it -- nodes,
-dependencies, approval gates -- without resolving runtime skips. Arguments
-are checked against the pipeline's flags, and a missing required argument
-fails. --static --all constructs every declared pipeline with no extra
-arguments, reports the ones that need arguments as skipped, and exits
-non-zero if any other plan fails validation
-(mismatched typed references, inconsistent declared outputs, duplicate node
-IDs, and similar errors), which makes it a CI gate.
-
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--name NAME` | Pipeline to plan |
-| `--static` | Print the declared Plan DAG without resolving runtime skips |
-| `--all` | With --static, validate every pipeline in sparkwing.yaml; non-zero exit on any failure |
-| `--start-at STEP` | Skip every WorkStep upstream of STEP in the resulting plan |
-| `--stop-at STEP` | Skip every WorkStep downstream of STEP in the resulting plan |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-
-### Examples
-
-```sh
-# Resolve the example cluster DAG with supplied arguments
-sparkwing pipeline plan --name fictional-cluster
-
-# Preview a resume-from-step
-sparkwing pipeline plan --name fictional-cluster --start-at fictional-install
-
-# Agent-readable JSON for diff against expectations
-sparkwing pipeline plan --name fictional-release -o json
-
-# The declared DAG, with args forwarded to the pipeline
-sparkwing pipeline plan --static --name example-release --env prod
-
-# Validate every pipeline (CI gate)
-sparkwing pipeline plan --static --all
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--pipeline NAME` | Pipeline name. (required) |
+| `--start-at STEP` | start at |
+| `--stop-at STEP` | stop at |
 
 ## `sparkwing pipeline sparks`
 
 Manage sparks libraries declared in .sparkwing/sparkwing.yaml
 
-Sparks libraries are Go modules that add opinionated helpers
-(Docker builds, GitOps deploys, ECR auth, language-specific
-checks) on top of the unopinionated SDK. Consumers declare
-which libraries they want live-tracked in the sparks: block
-of .sparkwing/sparkwing.yaml; the resolver writes an overlay modfile
-at .sparkwing/.resolved.mod that the compile step uses via
-'go build -modfile='. The consumer's tracked go.mod is
-never modified.
-
-See docs/sparks.md for the full spec (spark.json schema,
-sparks: block shape, resolution rules, warmup).
-
 ### Subcommands
 
-- `catalog` -- List the blocks a spark library offers
-- `list` -- Show declared sparks libraries and their resolved versions
-- `lint` -- Validate a spark.json library manifest
-- `resolve` -- Resolve versions and materialize the overlay modfile
-- `update` -- Re-resolve every declared library
 - `add` -- Add a library to the sparks: block
-- `remove` -- Remove a library from the sparks: block
-- `warmup` -- Pre-compile pipeline binaries after a sparks release
+- `catalog` -- List the blocks a spark library offers
 - `inflate` -- Copy a spark library's source into this repo so you can edit it
+- `lint` -- Validate a spark.json library manifest
+- `list` -- Show declared sparks libraries and their resolved versions
+- `remove` -- Remove a library from the sparks: block
+- `update` -- Re-resolve every declared library
 
-### Examples
+### Flags
 
-```sh
-# See what a library offers
-sparkwing pipeline sparks catalog
-
-# List declared sparks libraries
-sparkwing pipeline sparks list
-
-# Validate a library's spark.json
-sparkwing pipeline sparks lint ~/code/fictional-sparks
-
-# Re-materialize the overlay modfile
-sparkwing pipeline sparks resolve
-
-# Add a library pinned to latest
-sparkwing pipeline sparks add example.com/fictional/sparks
-```
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
 
 ## `sparkwing pipeline sparks add`
 
 Add a library to the sparks: block
 
-Appends an entry to the sparks: block. Defaults the
-version to 'latest' when --version is omitted. Refuses to add
-a duplicate (same source or same name).
-
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--source PATH` | Go module path (required) |
-| `--version VER` | Declared version ('latest', exact tag, or semver range) |
-| `--name NAME` | Short library name (default: last path segment of --source) |
-
-### Examples
-
-```sh
-# Add a library pinned to latest
-sparkwing pipeline sparks add --source example.com/fictional/sparks
-
-# Add with a semver range
-sparkwing pipeline sparks add --source example.com/fictional/sparks --version "^v0.10.0"
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--source PATH` | source (required) |
+| `--version VER` | version |
+| `--spark NAME` | spark |
 
 ## `sparkwing pipeline sparks catalog`
 
 List the blocks a spark library offers
 
-Reads a library's spark.json and prints one row per block it
-declares, with its stability and what it does. 'sparks list'
-shows the libraries this repo already declares; catalog shows
-what is inside one.
-
-A monorepo library declares 'modules', each independently
-tagged, and each row's name is what 'sparks inflate --module'
-takes. A single-module library declares 'packages' instead, and
-those are import packages rather than modules; inflate that
-library by its own module path.
-
-Without --library the catalog reads sparks-core. A library the
-repo declares in its sparks: block is read at the version
-declared there; any other resolves to latest. --path reads a
-checkout on disk and never touches the network.
-
--o plain prints one row per line: a modules[] row as its module
-path, which is what 'sparks inflate --module' takes, and a
-packages[] row as its package name.
-
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--library MODULE` | Spark library module path (default: github.com/sparkwing-dev/sparks-core) |
-| `--path DIR` | Read a library checkout on disk instead of downloading it |
-| `-o, --output FMT` | Output format: pretty\|json\|plain |
-
-### Examples
-
-```sh
-# What sparks-core offers
-sparkwing pipeline sparks catalog
-
-# Block names for a script
-sparkwing pipeline sparks catalog -o plain
-
-# Another library
-sparkwing pipeline sparks catalog --library example.com/fictional/sparks
-
-# A checkout on disk
-sparkwing pipeline sparks catalog --path ~/code/fictional-sparks
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--library MODULE` | library |
+| `--path DIR` | Path to select. |
 
 ## `sparkwing pipeline sparks inflate`
 
 Copy a spark library's source into this repo so you can edit it
 
-Copies a library from the Go module cache into the pipeline's local sources,
-adds a module replacement pointing at that copy, and runs 'go mod tidy'.
-Imports retain their module paths.
-
---module accepts a sparks-core module name or a full module path. The version
-comes from the pipeline's required modules, or resolves to latest when absent.
-The destination must be unused. To undo the copy, remove its directory and
-module replacement.
-
-'sparkwing pipeline sparks catalog' names every module a library offers.
+Copy one library module into the project and replace its dependency with that local source. JSON emits the module, version, destination and replacement; plain emits the destination.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--module NAME` | Sparks-core module name or full module path (required) |
-| `-o, --output FMT` | Output format: pretty\|json |
-
-### Examples
-
-```sh
-# Inflate the sparks-core templates module
-sparkwing pipeline sparks inflate --module templates
-
-# Inflate any spark library by module path
-sparkwing pipeline sparks inflate --module github.com/example/my-sparks
-
-# See the module names first
-sparkwing pipeline sparks catalog
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--library MODULE` | A sparks-core module name or full Go module path; list choices with pipeline sparks catalog. (required) |
 
 ## `sparkwing pipeline sparks lint`
 
 Validate a spark.json library manifest
 
-Loads spark.json from the given path (or the current directory
-if omitted) and checks: required fields (name, description,
-author), that the manifest declares exactly one non-empty
-entry array -- packages[] for a library that is one Go module,
-modules[] for a monorepo of independently tagged modules --
-that each entry path exists as a directory under the manifest
-root and describes itself, that a modules[] entry names the Go
-module its directory's go.mod declares, that stability values
-are valid, and that paths are not duplicated. Unknown fields
-are a soft warning, not an error. Exits non-zero on any hard
-failure.
-
-### Arguments
-
-- `[path]` (optional) -- Library directory or spark.json path, when --path is not supplied
-
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--path PATH` | Library directory or direct spark.json path. Positional fallback accepted. (default: .) |
-
-### Examples
-
-```sh
-# Lint the library in the current directory
-sparkwing pipeline sparks lint
-
-# Lint a sibling library by path
-sparkwing pipeline sparks lint --path ~/code/fictional-sparks
-
-# Lint a multi-module monorepo
-sparkwing pipeline sparks lint ~/code/fictional-sparks
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--path PATH` | Path to select. |
 
 ## `sparkwing pipeline sparks list`
 
 Show declared sparks libraries and their resolved versions
 
-Reads the sparks: block and prints one row per declared
-library with its declared constraint and the resolved tag
-(found via the module proxy). Use --no-resolve to skip the
-proxy calls when offline.
-
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `-o, --output FMT` | Output format: pretty\|json\|plain |
-| `--no-resolve` | Skip module-proxy lookups; print declared versions only |
-
-### Examples
-
-```sh
-# Table output
-sparkwing pipeline sparks list
-
-# JSON for scripting
-sparkwing pipeline sparks list -o json
-
-# Offline (no proxy calls)
-sparkwing pipeline sparks list --no-resolve
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--no-resolve` | no resolve |
 
 ## `sparkwing pipeline sparks remove`
 
 Remove a library from the sparks: block
 
-Removes the entry matching NAME (or matching its source path).
-
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--name NAME` | Library name or source path to remove (required) |
-
-### Examples
-
-```sh
-# Remove by short name
-sparkwing pipeline sparks remove --name fictional-sparks
-
-# Remove by source path
-sparkwing pipeline sparks remove --name example.com/fictional/sparks
-```
-
-## `sparkwing pipeline sparks resolve`
-
-Resolve versions and materialize the overlay modfile
-
-Resolves declared libraries through the Go module proxy and writes the
-module overlay used for pipeline builds. Prints 'up-to-date' when the
-overlay already matches. The repository's module file stays unchanged.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-q, --quiet` | Suppress the 'up-to-date' message |
-
-### Examples
-
-```sh
-# Resolve and write the overlay
-sparkwing pipeline sparks resolve
-
-# Quiet mode for scripts
-sparkwing pipeline sparks resolve -q
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--spark NAME` | spark (required) |
 
 ## `sparkwing pipeline sparks update`
 
 Re-resolve every declared library
 
-Re-runs resolution for every declared library and
-re-materializes the overlay modfile. For a range or 'latest'
-constraint this picks up any new tag from the module proxy;
-for an exact pin it is a no-op.
-
-The overlay is rebuilt from the whole manifest in one pass, so
-there is no single-library update: --name is refused. To hold
-one library still, pin its "version:" field in
-.sparkwing/sparkwing.yaml.
-
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--name NAME` | Refused; update re-resolves every declared library |
-
-### Examples
-
-```sh
-# Update every declared library
-sparkwing pipeline sparks update
-```
-
-## `sparkwing pipeline sparks warmup`
-
-Pre-compile pipeline binaries after a sparks release
-
-Resolves libraries, compiles the pipeline binary, and stores it in the
-local binary cache. Subsequent runs with matching build inputs can reuse it.
-Warmup uses the same compilation path and cache key as 'sparkwing run'.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--clear-cache` | Delete the local pipeline binary cache before compiling |
-
-### Examples
-
-```sh
-# Warm up the current repo's pipelines
-sparkwing pipeline sparks warmup
-
-# Force a fresh compile
-sparkwing pipeline sparks warmup --clear-cache
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
 
 ## `sparkwing pipeline trigger`
 
-Submit a pipeline to a profile's controller (remote execution)
+Submit a pipeline run to a controller
 
-Submits a trigger to the controller defined by --profile and
-follows the remote run until it reaches a terminal state.
+Flags including --profile may precede the verb; unknown engine flags before -- are usage errors.
 
-The follow streams the run's node logs through the controller.
---detach skips the follow and prints the run id once
-the trigger is registered (the trigger POST itself always
-completes before the command exits, so the run is guaranteed
-queued).
+--resume reattaches only a here run; --runner must be absent or here. The existing sealed spec is authoritative; reject new args, reason, source flags and detach on resume.
 
-A follow exits on the run's outcome, matching a local run:
-0 when the run succeeded, 1 when it failed or was cancelled,
-and 3 when the follow ended without a readable terminal status
-(the run may still be in progress -- re-check it with
-'sparkwing runs status --run <id> --profile <p>'). The status
-block and failing-node errors print to stderr on either follow
-mode, so redirecting stdout still shows why a run failed.
---detach exits 0 once the trigger is queued -- it reports
-submission, not outcome.
-
-Any flag not recognized here is forwarded to the pipeline as a
-typed argument. For example, 'sparkwing pipeline trigger release --profile
-prod --version v1.2.3' passes --version through to the trigger
-payload -- same shape as 'sparkwing run'.
-
---working-tree freezes tracked changes and untracked non-ignored
-files into an immutable Git snapshot, uploads it before admission,
-and runs that exact snapshot without pushing to the origin. It
-requires a complete SHA-1 repository; shallow and SHA-256 checkouts
-fail before upload.
-
-A snapshot carrying a secret-shaped file is refused before upload:
-a dotenv, a key, keystore or certificate file, any text file
-outside source holding a key block, or a settings or manifest file
-whose bytes read as a credential. The refusal names
-each path and whether it is tracked. Untrack it with
-'git rm --cached', ignore it, or send it anyway by naming it with
---allow-secret-file PATH once per file; there is no blanket bypass.
-
-Requires --profile naming a profile with controller: set; there is no
-default. A pipeline whose sparkwing.yaml entry names profile: P is pinned
-to P: trigger refuses any other --profile, and 'sparkwing run' refuses it
-locally.
-
---runner here is the hotfix break-glass: the controller pins the run to a
-one-shot runner credential that can claim only that run, once, within
-10 minutes, and expires after six hours, the hosted-run limit. This process builds the checkout's pipeline,
-hosts the run on this machine, follows it, and exits on its outcome.
-Secrets reach the run as they reach any runner: declared in the plan,
-released per claim, audited and masked. --reason is required and is
-recorded with the caller on the run. The checkout must have no
-uncommitted tracked changes, because the run records HEAD. An interrupt
-cancels the run; a second one stops hosting it. See the hotfix runbook
-('sparkwing docs read --topic hotfix-runner').
+Without --resume, one pipeline positional is required. Runner accepts here, a runner name, or label=<label>.
 
 ### Arguments
 
-- `<pipeline>` (required) -- Pipeline name registered on the controller
+- `<pipeline>` (optional) -- Pipeline name
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--profile NAME` | Profile (from ~/.config/sparkwing/config.yaml) whose controller runs the pipeline (required) |
-| `--detach` | Return once the trigger is registered (print the run id); don't follow |
-| `--working-tree` | Run tracked changes and untracked non-ignored files from an immutable remote snapshot |
-| `--allow-secret-file PATH` | Send this secret-shaped working-tree file anyway; PATH is repository-relative (repeatable) |
-| `--runner here` | Host the run on this machine under a one-shot credential bound to it (hotfix break-glass) |
-| `--reason TEXT` | Why --runner here is needed; recorded on the run and in the audit log |
-
-### Examples
-
-```sh
-# Submit and follow
-sparkwing pipeline trigger fictional-release --profile prod --version v1.2.3
-
-# Fire-and-forget; print run id and exit
-sparkwing pipeline trigger fictional-release --profile prod --detach
-
-# Run the current dirty tree remotely
-sparkwing pipeline trigger test --profile gaming --working-tree
-
-# Send a secret-shaped file the snapshot refuses
-sparkwing pipeline trigger test --profile gaming --working-tree --allow-secret-file config/local.env
-
-# Hotfix: run the release on this machine with its controller secrets
-sparkwing pipeline trigger fictional-release --profile prod --runner here --reason "INC-42 fleet down"
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--profile NAME` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. (required) |
+| `--detach` | detach |
+| `--working-tree` | working tree |
+| `--allow-secret-file PATH` | allow secret file Repeatable; comma-separated values are accepted. |
+| `--runner RUNNER` | Runner name or selection. |
+| `--reason TEXT` | reason |
+| `--resume RUN` | resume |
+| `--ref REF` | ref |
+| `--pipeline-ref REF` | pipeline ref |

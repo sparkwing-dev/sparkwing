@@ -19,12 +19,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// safety: a submitted trigger cannot carry this key, because sanitizeTriggerEnv drops
-// every key outside submittedTriggerEnvKeys.
 const envGitHubAppInstallation = "GITHUB_APP_INSTALLATION_ID"
 
 // safety: a connect flow is a few redirects long; a state that outlives that
@@ -76,25 +76,6 @@ func (s *Server) githubAppEnabled(w http.ResponseWriter) bool {
 
 var errNoGitHubApp = errors.New("this controller has no GitHub App configured")
 
-// safety: only an owner of the active team connects an installation, because the state this
-// controller signs names that team.
-func (s *Server) githubAppOwner(ctx context.Context, p *Principal) (*store.Tenant, error) {
-	if s.githubApp == nil {
-		return nil, refuse(http.StatusNotFound, "", errNoGitHubApp.Error())
-	}
-	if p == nil || p.AccountID == "" {
-		return nil, refuse(http.StatusUnauthorized, "unauthenticated", "sign in to use this route")
-	}
-	if !store.Role(p.Role).AtLeast(store.RoleOwner) {
-		return nil, refuse(http.StatusForbidden, "forbidden", "this needs the "+string(store.RoleOwner)+" role in the active team")
-	}
-	t, err := s.store.ForTeam(ctx, p.Team)
-	if err != nil {
-		return nil, fmt.Errorf("team handle: %w", err)
-	}
-	return t, nil
-}
-
 type githubConnectState struct {
 	Team     string `json:"t"`
 	Account  string `json:"a"`
@@ -112,7 +93,7 @@ var errConnectState = errors.New("the connect flow's state is not valid; start c
 // safety: the state proves this controller started the flow for this account
 // and team, and the verifier proves this browser is the one that started it;
 // the caller records the nonce so a state finishes one flow only.
-func (a *githubAppState) openState(raw, verifier string, p *Principal, now time.Time) (githubConnectState, error) {
+func (a *githubAppState) openState(raw, verifier string, p capability.Authorized, now time.Time) (githubConnectState, error) {
 	var st githubConnectState
 	if !openFlowState(a.stateKey, raw, &st) {
 		return githubConnectState{}, errConnectState
@@ -120,7 +101,7 @@ func (a *githubAppState) openState(raw, verifier string, p *Principal, now time.
 	switch {
 	case now.Unix() >= st.Expires:
 		return githubConnectState{}, errors.New("the connect flow expired; start connecting again")
-	case st.Account != p.AccountID || store.Team(st.Team) != p.Team:
+	case st.Account != p.Principal.Capability.Subject.ID || st.Team != p.Target.Team:
 		return githubConnectState{}, errors.New("the connect flow was started by another account or for another team")
 	case verifier == "" || !hmac.Equal([]byte(st.Verifier), []byte(verifierDigest(verifier))):
 		return githubConnectState{}, errors.New("the connect flow was started in another browser")
@@ -137,10 +118,7 @@ type githubAppConnectGrant struct {
 
 // safety: only an owner connects, and only an account with a linked GitHub
 // identity, because the identity is what the user GitHub reports is held to.
-func (s *Server) githubAppConnectBegin(ctx context.Context, p *Principal, redirectURI string) (githubAppConnectGrant, error) {
-	if _, err := s.githubAppOwner(ctx, p); err != nil {
-		return githubAppConnectGrant{}, err
-	}
+func (s *Server) githubAppConnectBegin(ctx context.Context, p capability.Authorized, redirectURI string) (githubAppConnectGrant, error) {
 	if !s.redirectAllowed(redirectURI) {
 		return githubAppConnectGrant{}, refuse(http.StatusBadRequest, "", "redirect_uri is not on this controller's allowlist")
 	}
@@ -156,7 +134,7 @@ func (s *Server) githubAppConnectBegin(ctx context.Context, p *Principal, redire
 		return githubAppConnectGrant{}, err
 	}
 	state, err := s.githubApp.signState(githubConnectState{
-		Team: string(p.Team), Account: p.AccountID, Expires: time.Now().Add(githubAppStateTTL).Unix(),
+		Team: string(p.Target.Team), Account: p.Principal.Capability.Subject.ID, Expires: time.Now().Add(githubAppStateTTL).Unix(),
 		Nonce: nonce, Verifier: verifierDigest(verifier),
 	})
 	if err != nil {
@@ -170,8 +148,12 @@ func (s *Server) githubAppConnectBegin(ctx context.Context, p *Principal, redire
 	}, nil
 }
 
-func (s *Server) githubIdentitySubject(ctx context.Context, p *Principal) (string, error) {
-	subject, err := s.store.AccountIdentity(ctx, p.AccountID, store.ProviderGitHub)
+func (s *Server) githubIdentitySubject(ctx context.Context, p capability.Authorized) (string, error) {
+	writer, err := s.githubConnectWriter(ctx, p)
+	if err != nil {
+		return "", err
+	}
+	subject, err := writer.LinkedGitHubSubject(ctx, p)
 	if errors.Is(err, store.ErrNotFound) {
 		return "", refuse(http.StatusForbidden, githubIdentityMissing, errNoGitHubIdentity.Error())
 	}
@@ -293,10 +275,7 @@ func (a *githubAppState) openSelection(raw, state string) (githubAppSelectionPro
 	return proof, nil
 }
 
-func (s *Server) githubAppAvailable(ctx context.Context, p *Principal, flow oauthFlowProof, redirectURI string) (githubAppAvailableResp, error) {
-	if _, err := s.githubAppOwner(ctx, p); err != nil {
-		return githubAppAvailableResp{}, err
-	}
+func (s *Server) githubAppAvailable(ctx context.Context, p capability.Authorized, flow oauthFlowProof, redirectURI string) (githubAppAvailableResp, error) {
 	if flow.Code == "" || !s.redirectAllowed(redirectURI) {
 		return githubAppAvailableResp{}, refuse(http.StatusBadRequest, "", "code and allowed redirect_uri are required")
 	}
@@ -345,8 +324,8 @@ func (s *Server) githubAppAvailable(ctx context.Context, p *Principal, flow oaut
 	return out, nil
 }
 
-func (s *Server) githubAppSelect(ctx context.Context, p *Principal, flow oauthFlowProof, authorization string, installationID int64) (store.GitHubAppInstallation, error) {
-	t, err := s.githubAppOwner(ctx, p)
+func (s *Server) githubAppSelect(ctx context.Context, p capability.Authorized, flow oauthFlowProof, authorization string, installationID int64) (store.GitHubAppInstallation, error) {
+	writer, err := s.githubConnectWriter(ctx, p)
 	if err != nil {
 		return store.GitHubAppInstallation{}, err
 	}
@@ -369,12 +348,9 @@ func (s *Server) githubAppSelect(ctx context.Context, p *Principal, flow oauthFl
 	if strconv.FormatInt(proof.UserID, 10) != subject {
 		return store.GitHubAppInstallation{}, refuse(http.StatusForbidden, "", errGitHubUserMismatch.Error())
 	}
-	fresh, err := s.store.ConsumeGitHubAppConnectState(ctx, st.Nonce, time.Unix(st.Expires, 0), now)
+	err = writer.ConsumeGitHubConnect(ctx, p, st.Nonce, time.Unix(st.Expires, 0))
 	if err != nil {
 		return store.GitHubAppInstallation{}, fmt.Errorf("github app connect state: %w", err)
-	}
-	if !fresh {
-		return store.GitHubAppInstallation{}, refuse(http.StatusForbidden, "", "the connect flow was already used; start connecting again")
 	}
 	if !slices.Contains(proof.InstallationIDs, installationID) {
 		return store.GitHubAppInstallation{}, refuse(http.StatusNotFound, "", "installation not found")
@@ -390,23 +366,23 @@ func (s *Server) githubAppSelect(ctx context.Context, p *Principal, flow oauthFl
 	if !admin {
 		return store.GitHubAppInstallation{}, refuse(http.StatusForbidden, "", errGitHubInstallationAccess.Error())
 	}
-	return s.bindGitHubAppInstallation(ctx, t, p, inst, proof.UserID, now)
+	return s.bindGitHubAppInstallation(ctx, writer, p, inst, proof.UserID)
 }
 
-func (s *Server) bindGitHubAppInstallation(ctx context.Context, t *store.Tenant, p *Principal, inst githubapp.Installation, githubUser int64, now time.Time) (store.GitHubAppInstallation, error) {
-	bound, err := t.BindGitHubAppInstallation(ctx, store.GitHubAppInstallation{
+func (s *Server) bindGitHubAppInstallation(ctx context.Context, writer GitHubConnectWriter, p capability.Authorized, inst githubapp.Installation, githubUser int64) (store.GitHubAppInstallation, error) {
+	bound, err := writer.BindAuthorizedGitHubInstallation(ctx, p, store.GitHubAppInstallation{
 		InstallationID: inst.ID, AccountID: inst.Account.ID, AccountLogin: inst.Account.Login,
 		AccountType: inst.Account.Type, Suspended: inst.SuspendedAt != nil,
-		ConnectedBy: p.AccountID, GitHubUserID: githubUser,
-	}, now)
+		ConnectedBy: p.Principal.Capability.Subject.ID, GitHubUserID: githubUser,
+	})
 	if errors.Is(err, store.ErrInstallationBoundElsewhere) {
 		return store.GitHubAppInstallation{}, refuse(http.StatusConflict, "", errGitHubInstallationUnavailable.Error())
 	}
 	if err != nil {
 		return store.GitHubAppInstallation{}, identityRefusal("github app bind", err)
 	}
-	s.logger.Info("github app installation connected", "team", string(p.Team), "installation_id", inst.ID,
-		"account", inst.Account.Login, "account_type", inst.Account.Type, "by", p.AccountID, "github_user", githubUser)
+	s.logger.Info("github app installation connected", "team", string(p.Target.Team), "installation_id", inst.ID,
+		"account", inst.Account.Login, "account_type", inst.Account.Type, "by", p.Principal.Capability.Subject.ID, "github_user", githubUser)
 	return bound, nil
 }
 
@@ -414,8 +390,8 @@ func (s *Server) bindGitHubAppInstallation(ctx context.Context, t *store.Tenant,
 // organization member with read access to one repository sees the
 // organization's installation; binding needs the account's own user or an
 // organization admin, which is who GitHub lets install the App.
-func (s *Server) githubAppConnectFinish(ctx context.Context, p *Principal, flow oauthFlowProof, installationID int64, redirectURI string) (store.GitHubAppInstallation, error) {
-	t, err := s.githubAppOwner(ctx, p)
+func (s *Server) githubAppConnectFinish(ctx context.Context, p capability.Authorized, flow oauthFlowProof, installationID int64, redirectURI string) (store.GitHubAppInstallation, error) {
+	writer, err := s.githubConnectWriter(ctx, p)
 	if err != nil {
 		return store.GitHubAppInstallation{}, err
 	}
@@ -427,20 +403,12 @@ func (s *Server) githubAppConnectFinish(ctx context.Context, p *Principal, flow 
 	}
 	now := time.Now()
 	st, err := s.githubApp.openState(flow.State, flow.Verifier, p, now)
-	if err == nil {
-		// safety: the used state is recorded in the store, so no replica and no
-		// restart finishes the same flow twice.
-		fresh, cerr := s.store.ConsumeGitHubAppConnectState(ctx, st.Nonce, time.Unix(st.Expires, 0), now)
-		if cerr != nil {
-			return store.GitHubAppInstallation{}, fmt.Errorf("github app connect state: %w", cerr)
-		}
-		if !fresh {
-			err = errors.New("the connect flow was already used; start connecting again")
-		}
-	}
 	if err != nil {
-		s.logger.Info("github app connect refused", "team", string(p.Team), "account", p.AccountID, "reason", err.Error())
+		s.logger.Info("github app connect refused", "team", string(p.Target.Team), "account", p.Principal.Capability.Subject.ID, "reason", err.Error())
 		return store.GitHubAppInstallation{}, refuse(http.StatusForbidden, "", err.Error())
+	}
+	if err := writer.ConsumeGitHubConnect(ctx, p, st.Nonce, time.Unix(st.Expires, 0)); err != nil {
+		return store.GitHubAppInstallation{}, err
 	}
 	subject, err := s.githubIdentitySubject(ctx, p)
 	if err != nil {
@@ -469,11 +437,11 @@ func (s *Server) githubAppConnectFinish(ctx context.Context, p *Principal, flow 
 	if err != nil {
 		return store.GitHubAppInstallation{}, s.githubAppConnectRefusal(p, installationID, err)
 	}
-	return s.bindGitHubAppInstallation(ctx, t, p, inst, user.ID, time.Now())
+	return s.bindGitHubAppInstallation(ctx, writer, p, inst, user.ID)
 }
 
-func (s *Server) githubAppConnectRefusal(p *Principal, installation int64, err error) error {
-	s.logger.Info("github app connect refused", "team", string(p.Team), "account", p.AccountID,
+func (s *Server) githubAppConnectRefusal(p capability.Authorized, installation int64, err error) error {
+	s.logger.Info("github app connect refused", "team", string(p.Target.Team), "account", p.Principal.Capability.Subject.ID,
 		"installation_id", installation, "reason", err.Error())
 	switch {
 	case errors.Is(err, githubapp.ErrNotInstalled):
@@ -493,76 +461,70 @@ type githubAppResp struct {
 	Installations []githubAppInstallationJSON `json:"installations"`
 }
 
-func (s *Server) handleGitHubAppShow(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handleGitHubAppShow(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	_, t, ok := s.teamMember(w, r, store.RoleReader)
-	if !ok {
-		return
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	list, err := t.GitHubAppInstallations(r.Context())
 	if err != nil {
-		s.writeInternalError(w, r, "list github app installations", err)
-		return
+		return engineLookupError(err)
 	}
 	out := githubAppResp{Slug: s.githubApp.client.Slug(), Installations: []githubAppInstallationJSON{}}
 	for _, in := range list {
 		out.Installations = append(out.Installations, githubAppInstallationOut(in))
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
-func installationIDFrom(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	id, err := strconv.ParseInt(r.PathValue("installation_id"), 10, 64)
+func (s *Server) handleGitHubAppUnbind(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
+	}
+	writer, err := s.githubAppWriter(r, a)
+	if err != nil {
+		return err
+	}
+	id, err := strconv.ParseInt(r.PathValue("installation"), 10, 64)
 	if err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, errors.New("installation_id is GitHub's numeric installation id"))
-		return 0, false
+		return invalidEngineBody("installation must be a positive integer")
 	}
-	return id, true
-}
-
-func (s *Server) handleGitHubAppUnbind(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+	if err := writer.UnbindAuthorizedGitHubInstallation(r.Context(), a, id); err != nil {
+		return accountMutationError(err)
 	}
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
-	}
-	id, ok := installationIDFrom(w, r)
-	if !ok {
-		return
-	}
-	if err := t.UnbindGitHubAppInstallation(r.Context(), id); err != nil {
-		writeIdentityError(w, s, r, "unbind github app installation", err)
-		return
-	}
-	s.logger.Info("github app installation disconnected", "team", string(p.Team), "installation_id", id, "by", p.AccountID)
+	s.logger.Info("github app installation disconnected", "team", string(store.Team(a.Target.Team)), "installation_id", id, "by", a.Principal.Capability.Subject.ID)
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 // safety: the operator's route is how a binding moves between teams: an
 // owner of the new team connects once the old binding is gone.
-func (s *Server) handleOperatorGitHubAppUnbind(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handleOperatorGitHubAppUnbind(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	id, ok := installationIDFrom(w, r)
-	if !ok {
-		return
+	id, err := strconv.ParseInt(r.PathValue("installation"), 10, 64)
+	if err != nil || id <= 0 {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "installation must be a positive integer"}
 	}
-	team, err := s.store.AsOperator().UnbindGitHubAppInstallation(r.Context(), id)
+	writer, err := s.consoleWriter()
+	if err != nil {
+		return err
+	}
+	team, err := writer.ConsoleUnbindGitHubInstallation(r.Context(), authorized, id)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, errors.New("no team holds that installation"))
-		return
+		return &apierr.Error{Code: apierr.NotFound, Message: "no team holds that installation"}
 	}
 	if err != nil {
-		s.writeInternalError(w, r, "operator unbind github app installation", err)
-		return
+		return err
 	}
-	s.logger.Info("github app installation disconnected by the operator", "team", string(team), "installation_id", id)
+	s.logger.Info("github app installation disconnected by the operator", "team", string(team), "installation_id", id, "by", authorized.Principal.Capability.Subject.ID)
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 type githubAppRepositoryJSON struct {
@@ -571,35 +533,34 @@ type githubAppRepositoryJSON struct {
 	Private      bool   `json:"private"`
 }
 
-func (s *Server) handleGitHubAppRepositories(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handleGitHubAppRepositories(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	_, t, ok := s.teamMember(w, r, store.RoleReader)
-	if !ok {
-		return
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
-	id, ok := installationIDFrom(w, r)
-	if !ok {
-		return
+	id, err := strconv.ParseInt(r.PathValue("installation"), 10, 64)
+	if err != nil || id <= 0 {
+		return invalidEngineBody("installation must be a positive integer")
 	}
 	if _, err := t.GitHubAppInstallation(r.Context(), id); err != nil {
-		writeIdentityError(w, s, r, "github app installation", err)
-		return
+		return engineLookupError(err)
 	}
 	repos, err := s.githubApp.client.InstallationRepositories(r.Context(), id)
 	// safety: a list cut at GitHub's listing bound only displays; nothing is
 	// refused or withdrawn for a repository missing from it.
 	if err != nil && !errors.Is(err, githubapp.ErrTooManyRepositories) {
 		s.logger.Warn("github app repositories", "installation_id", id, "err", err.Error())
-		writeError(w, http.StatusBadGateway, errors.New("GitHub could not list the installation's repositories"))
-		return
+		return &apierr.Error{Code: apierr.Unavailable, Message: "GitHub could not list the installation's repositories"}
 	}
 	out := []githubAppRepositoryJSON{}
 	for _, repo := range repos {
 		out = append(out, githubAppRepositoryJSON{RepositoryID: repo.ID, FullName: repo.FullName, Private: repo.Private})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"repositories": out})
+	return nil
 }
 
 type githubAppTriggerReq struct {
@@ -658,76 +619,68 @@ func githubAppTriggerOut(tr store.GitHubAppTrigger) githubAppTriggerJSON {
 	}
 }
 
-func (s *Server) handleListGitHubAppTriggers(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handleListGitHubAppTriggers(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	_, t, ok := s.teamMember(w, r, store.RoleReader)
-	if !ok {
-		return
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	list, err := t.GitHubAppTriggers(r.Context())
 	if err != nil {
-		s.writeInternalError(w, r, "list github app triggers", err)
-		return
+		return engineLookupError(err)
 	}
 	out := []githubAppTriggerJSON{}
 	for _, tr := range list {
 		out = append(out, githubAppTriggerOut(tr))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"triggers": out})
+	return nil
 }
 
 // safety: the repository is resolved through GitHub to an installation this
 // team holds, so a subscription can name only a repository the team proved
 // it controls.
-func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	var req githubAppTriggerReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &req); err != nil {
+		return githubAppRequestError(http.StatusBadRequest, err)
 	}
 	pipeline, slug, err := validGitHubSubscription(req.Pipeline, req.Repository)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return githubAppRequestError(http.StatusBadRequest, err)
 	}
 	if err := store.ValidateGitHubTagPatterns(req.Tags); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return githubAppRequestError(http.StatusBadRequest, err)
 	}
 	if !req.Push && len(req.Tags) == 0 && !req.PullRequest && !req.PullRequestClosed && !req.PullRequestLabeled && !req.PullRequestReadyForReview &&
 		!req.ReleasePublished && !req.ReleasePrereleased && !req.BranchCreate && !req.BranchDelete {
-		writeError(w, http.StatusBadRequest, errors.New("subscribe to at least one event"))
-		return
+		return githubAppRequestError(http.StatusBadRequest, errors.New("subscribe to at least one event"))
 	}
 	if req.PullRequestLabeled && len(req.PullRequestLabels) == 0 {
-		writeError(w, http.StatusBadRequest, errors.New("pull_request_labeled needs pull_request_labels"))
-		return
+		return githubAppRequestError(http.StatusBadRequest, errors.New("pull_request_labeled needs pull_request_labels"))
 	}
 	repo, _ := store.ParseGitHubRepo(slug)
 	inst, found, err := s.teamInstallationFor(r.Context(), t, repo)
 	if err != nil {
 		s.logger.Warn("github app trigger lookup", "repository", slug, "err", err.Error())
-		writeError(w, http.StatusBadGateway, errors.New("GitHub could not be reached to find the repository's installation"))
-		return
+		return githubAppRequestError(http.StatusBadGateway, errors.New("GitHub could not be reached to find the repository's installation"))
 	}
 	if !found {
-		writeError(w, http.StatusNotFound, errors.New("no installation this team holds covers "+slug))
-		return
+		return githubAppRequestError(http.StatusNotFound, errors.New("no installation this team holds covers "+slug))
 	}
 	repos, err := s.githubApp.client.InstallationRepositories(r.Context(), inst.InstallationID)
 	truncated := errors.Is(err, githubapp.ErrTooManyRepositories)
 	if err != nil && !truncated {
-		writeError(w, http.StatusBadGateway, errors.New("GitHub could not list the installation's repositories"))
-		return
+		return githubAppRequestError(http.StatusBadGateway, errors.New("GitHub could not list the installation's repositories"))
 	}
 	var match *githubapp.Repository
 	for i := range repos {
@@ -736,14 +689,16 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	if match == nil && truncated {
-		writeError(w, http.StatusBadGateway, errors.New("the installation covers more repositories than GitHub lists, so "+slug+" cannot be confirmed"))
-		return
+		return githubAppRequestError(http.StatusBadGateway, errors.New("the installation covers more repositories than GitHub lists, so "+slug+" cannot be confirmed"))
 	}
 	if match == nil {
-		writeError(w, http.StatusNotFound, errors.New("no installation this team holds covers "+slug))
-		return
+		return githubAppRequestError(http.StatusNotFound, errors.New("no installation this team holds covers "+slug))
 	}
-	saved, err := t.PutGitHubAppTrigger(r.Context(), store.GitHubAppTrigger{
+	writer, err := s.githubAppWriter(r, a)
+	if err != nil {
+		return err
+	}
+	saved, err := writer.PutAuthorizedGitHubTrigger(r.Context(), a, store.GitHubAppTrigger{
 		RepositoryID: match.ID, Repository: match.FullName, InstallationID: inst.InstallationID,
 		Pipeline: pipeline, Push: req.Push, Tags: req.Tags, PullRequest: req.PullRequest,
 		Branches: req.Branches, BaseBranches: req.BaseBranches,
@@ -751,38 +706,36 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 		PullRequestLabels: req.PullRequestLabels, PullRequestReadyForReview: req.PullRequestReadyForReview,
 		ReleasePublished: req.ReleasePublished, ReleasePrereleased: req.ReleasePrereleased,
 		BranchCreate: req.BranchCreate, BranchDelete: req.BranchDelete,
-		CreatedBy: p.AccountID,
-	}, time.Now())
+	})
 	if err != nil {
-		writeIdentityError(w, s, r, "put github app trigger", err)
-		return
+		return accountMutationError(err)
 	}
-	s.logger.Info("github app trigger written", "team", string(p.Team), "repository", saved.Repository,
+	s.logger.Info("github app trigger written", "team", string(store.Team(a.Target.Team)), "repository", saved.Repository,
 		"pipeline", saved.Pipeline, "push", saved.Push, "tags", saved.Tags, "pull_request", saved.PullRequest,
-		"by", p.AccountID)
+		"by", a.Principal.Capability.Subject.ID)
 	writeJSON(w, http.StatusOK, githubAppTriggerOut(saved))
+	return nil
 }
 
-func (s *Server) handleDeleteGitHubAppTrigger(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handleDeleteGitHubAppTrigger(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+	writer, err := s.githubAppWriter(r, a)
+	if err != nil {
+		return err
 	}
 	id, err := strconv.ParseInt(r.URL.Query().Get("repository_id"), 10, 64)
 	pipeline := r.URL.Query().Get("pipeline")
 	if err != nil || id <= 0 || pipeline == "" {
-		writeError(w, http.StatusBadRequest, errors.New("repository_id and pipeline are required"))
-		return
+		return githubAppRequestError(http.StatusBadRequest, errors.New("repository_id and pipeline are required"))
 	}
-	if err := t.DeleteGitHubAppTrigger(r.Context(), id, pipeline); err != nil {
-		writeIdentityError(w, s, r, "delete github app trigger", err)
-		return
+	if err := writer.DeleteAuthorizedGitHubTrigger(r.Context(), a, id, pipeline); err != nil {
+		return accountMutationError(err)
 	}
-	s.logger.Info("github app trigger removed", "team", string(p.Team), "repository_id", id, "pipeline", pipeline, "by", p.AccountID)
+	s.logger.Info("github app trigger removed", "team", string(store.Team(a.Target.Team)), "repository_id", id, "pipeline", pipeline, "by", a.Principal.Capability.Subject.ID)
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 // safety: an installation another team holds, or a suspended one, reads as not found,

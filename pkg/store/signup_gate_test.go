@@ -467,8 +467,7 @@ func TestAFreeTeamHoldsAtMostTheMemberLimit(t *testing.T) {
 	if err := join("full2", "full2@example.com"); !errors.Is(err, store.ErrTeamFull) {
 		t.Fatalf("the fifth member = %v, want ErrTeamFull", err)
 	}
-	if _, err := tenant(t, st, owner.Account.ActiveTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		10*store.MicroCreditsPerCredit, "pi_team", "billing"); err != nil {
+	if _, err := tenant(t, st, owner.Account.ActiveTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 10 * store.MicroCreditsPerCredit, Reference: "pi_team", CreatedBy: "billing"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := join("paid", "paid@example.com"); err != nil {

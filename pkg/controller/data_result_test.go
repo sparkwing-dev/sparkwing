@@ -18,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -26,11 +25,7 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 	property := func(payload [16]byte) bool {
 		engine, tenant := engineRuntimeStore(t)
 		authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
-		actor, err := engineActor(authorized)
-		if err != nil {
-			t.Log(err)
-			return false
-		}
+		actor := engineActor(authorized)
 		ref := store.NodeRef{RunID: "run", NodeID: "job"}
 		ordinal := int64(0)
 		started, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: &ordinal})
@@ -60,19 +55,23 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 			return false
 		}
 		stored := dataResultUpload(t, tenant, objects, authority, identity, "manifest", raw)
-		records := tenant.BlobRecords(storage.BlobManifests{Objects: objects})
+		New(engine.Store, nil).WithDataObjects(objects)
 		outputKey := blob.ResultRecordKey(identity.Attempt.Value, "gh:1", blob.RefScope{}, "ci", blob.KindOutput)
 		manifestKey := blob.ResultRecordKey(identity.Attempt.Value, "gh:1", blob.RefScope{}, "ci", blob.KindManifest)
 		for _, request := range []blob.CommitRecordRequest{
 			{Authority: authority, Source: identity, Key: outputKey, Digest: output.Digest},
 			{Authority: authority, Source: identity, Key: manifestKey, Digest: stored.Digest, Members: []blob.Member{{Team: c.Team, ManifestDigest: stored.Digest, Digest: output.Digest, Path: "result", Size: output.Size, Mode: 0o640}}},
 		} {
-			if _, err := records.CommitRecord(t.Context(), request); err != nil {
+			if _, err := tenant.CommitRecord(t.Context(), request); err != nil {
 				t.Log(err)
 				return false
 			}
 		}
-		New(engine.Store, nil).WithDataObjects(objects)
+		lookup := blob.RecordLookup{Authority: authority, Key: manifestKey}
+		if hit, err := tenant.LookupRecord(t.Context(), lookup); err != nil || !hit.Found || len(hit.Members) != 1 || hit.Members[0].Digest != output.Digest {
+			t.Logf("verified manifest lookup: %+v: %v", hit, err)
+			return false
+		}
 		key, err := blob.ObjectKey(c.Team, stored.Digest)
 		if err != nil {
 			t.Log(err)
@@ -81,6 +80,10 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 		path := filepath.Join(dir, filepath.FromSlash(key))
 		if err := os.WriteFile(path, append(bytes.Clone(raw), 'x'), 0o600); err != nil {
 			t.Log(err)
+			return false
+		}
+		if hit, err := tenant.LookupRecord(t.Context(), lookup); !errors.Is(err, blob.ErrIntegrity) || hit.Found {
+			t.Logf("corrupt manifest lookup: %+v: %v", hit, err)
 			return false
 		}
 		ordinal = started.Attempt

@@ -1,125 +1,80 @@
 # GitHub Actions runners
 
-A repository's own GitHub Actions minutes can run its Sparkwing work. A workflow in the repository starts `sparkwing-runner`, which proves which repository it runs in with the job's GitHub ID token, claims that team's triggers and nodes for the job's repository and push, and exits when the queue stays empty.
+GitHub Actions execution uses the same runner claim, hosting and storage contracts
+as other placements. The controller verifies OIDC exchange
+through the shared capability policy. Native runner startup and workflow execution
+require separate integration evidence.
 
-Placement order for a team's work:
+<!-- design:begin -->
+## Repository consent and identity
 
-1. The team's own machines, the runners that advertise the preferred local label.
-2. GitHub Actions jobs, which advertise `github-actions` and take a node only after the [placement hold](scheduling.md#local-first-placement-in-claim-mode) expires or when no local runner with room is polling.
+A team binds a repository through its GitHub Actions registration. The workflow
+selects that team. Repository and owner IDs come from verified GitHub evidence,
+because display names and clone URLs can change or be supplied by a caller.
 
-## Why a job reaches only its own repository
+The workflow requests an ID token for the controller's audience with
+`permissions: id-token: write`. `POST /api/v1/runners/github/exchange` verifies the
+OIDC evidence and current registration before issuing a root capability. The
+controller derives its team, repository, ref, SHA and workflow-run scope.
+User-supplied labels grant no repository or pool authority.
 
-GitHub's terms allow Actions to be used for the production, testing, deployment or publication of the software project in the repository where the workflow runs. The controller enforces that boundary: a job's credential claims a node, a trigger, or reads a run only when the run's trigger names the job's repository in every repository field it carries (`github_owner`/`github_repo`, `repo`, `repo_url`, and `GITHUB_REPOSITORY` in its environment). The comparison is case-insensitive and accepts the `https`, `ssh` and `git@github.com:` spellings of `github.com/<owner>/<name>`.
+OIDC evidence establishes the workflow's push scope. Verified default-branch
+trust comes from a signed App delivery. See [GitHub App](github-app.md) and
+[credentials](credentials.md).
 
-A job's credential is also bound to the push its ID token names: the branch in the `ref` claim and the commit in the `sha` claim. It reaches only a trigger recorded for exactly that branch and commit from a signed GitHub push delivery. A trigger must carry `trigger_source=github`, `GITHUB_EVENT_NAME=push`, a webhook delivery and replay key, with no retry or parent run. Pull requests, retries, child runs, manual submissions and scheduled triggers remain outside the credential even when they name the same repository, branch and commit.
+## Credential issuance
 
-Only `push`, `workflow_dispatch` and `schedule` jobs on a branch (`refs/heads/...`) get a credential. The exchange answers 403 for any other event, including `pull_request`, which runs a contributor's code, and `pull_request_target` and `workflow_run`, which hand the base repository's privileges to input a fork controls, and for a tag or pull request ref or a token that names no commit.
+The exchange issues a controller capability with `nodes.claim` and
+`triggers.claim`, a one-hour lifetime, and the verified repository, ref, commit
+and workflow run binding. Repository identity uses GitHub's numeric ID, so a
+rename preserves that identity. An owner transfer requires a matching new
+binding.
 
-## Two-sided consent
+The request takes `id_token` and `team`. The controller derives grants, push
+facts, expiry and runner identity. Its response carries `token`, `team`,
+`repository`, `expires_at` and `labels`. The token is returned once. The exchange
+has no automatic retry because a repeated request cannot recover a lost bearer.
 
-A binding is dangerous in either direction, so an exchange needs both sides:
+`POST /api/v1/runners/claim` accepts the requested trigger and job kinds. Each
+kind requires its own claim grant, and the store checks repository and push
+authority before awarding work. Source, secrets, data and execution reporting
+use the separate capability awarded for that unit. A runner root cannot read
+them or a pipeline's sizing records by itself. Discovery routes remain
+available to live roots.
 
-- An **owner** of the team binds the repository by GitHub's numeric repository id and owner id. The ids survive renames, and a repository transferred to another owner stops matching.
-- The **workflow** names the team with `--team`. A team that binds a repository it does not control gets nothing, because that repository's workflows never name it.
+The cache-grant protocol and its issuance route are removed. Byte-storage
+access uses the authenticated data adapter and the unit's live authority.
 
-The workflow stores no secret. The job requests an ID token with `permissions: id-token: write` and the controller's external URL as the audience, and `POST /api/v1/runners/github/exchange` verifies it against GitHub's published keys (issuer `https://token.actions.githubusercontent.com`, RS256, audience, expiry). The controller refuses the exchange when it has no external URL.
 
-## Set up a repository
+## Claims and execution
 
-In **Team → GitHub**, select a repository covered by a connected installation and
-choose **Allow GitHub Actions** as a team owner. The controller resolves the
-repository and owner IDs through GitHub, then returns a workflow with the
-controller URL and canonical team slug filled in. Copy or download the workflow
-and commit it as `.github/workflows/sparkwing.yaml`.
+`POST /api/v1/runners/claim` scans one ordered queue for the requested trigger
+and job kinds. A mixed request needs both claim grants. Named owner and job
+claims use the corresponding run-scoped claim routes. Every selection checks
+repository authority and push scope.
 
-This grants worker permission separately from **Enable declarations**, which
-controls repository-managed triggers. A saved binding does not prove the workflow
-is installed or a worker has run. Other team runners retain their placement policy.
+Each award carries a fresh capability, a binding, granted runner identity and
+immutable execution inputs. The reusable Actions credential stays in the runner.
+SDK processes receive delegated process authority through protocol hello.
+Claims and exchanges never retry automatically after a lost one-time response.
+Lease expiry resolves an uncertain award.
 
-The equivalent owner-session request is:
+The acquired checkout uses its sealed location and exact SHA. Its SDK pin selects
+the verified matching engine before installation, planning and execution. A
+workflow checkout alone cannot replace those accepted inputs.
 
-```bash
-curl -X POST "$CONTROLLER/api/v1/team/github-runners" \
-  -H "Authorization: Session $SESSION" -H 'Content-Type: application/json' \
-  -d '{"repository":"acme/widgets"}'
-```
+## Data and source
 
-When the controller has no GitHub App configured, supply both numeric IDs:
+Data reads and writes use signed `/data` transfers and authenticated record
+operations. A live claim needs its own authorized read edges and write scope.
+Repository membership alone does not make every object readable. Pipeline
+binaries remain local to the executing machine.
 
-1. Look up the ids:
+Source acquisition uses the live run claim at
+`POST /api/v1/runs/{run}/source-credential`. The controller checks sealed
+repository authority and records the release before returning a credential.
+See [team git credentials](git-credentials.md).
 
-   ```bash
-   gh api repos/acme/widgets --jq '.id, .owner.id'
-   ```
-
-2. As a team owner, bind the repository:
-
-   ```bash
-   curl -X POST "$CONTROLLER/api/v1/team/github-runners" \
-     -H "Authorization: Session $SESSION" -H 'Content-Type: application/json' \
-     -d '{"repository":"acme/widgets","repository_id":123456,"repository_owner_id":7890}'
-   ```
-
-   The answer and `GET /api/v1/team/github-runners` carry the workflow with the controller URL and team filled in.
-
-3. Commit it as `.github/workflows/sparkwing.yaml`:
-
-```yaml
-# Runs Sparkwing work for this repository on this repository's GitHub
-# Actions minutes. The controller hands the job only triggers and nodes for this
-# repository, and the job exits once the queue has been empty for --idle-exit.
-name: sparkwing
-on:
-  push:
-  workflow_dispatch:
-permissions:
-  id-token: write
-  contents: read
-jobs:
-  sparkwing:
-    runs-on: ubuntu-latest
-    # The runner credential lives one hour, so the job does too.
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install sparkwing-runner
-        run: |
-          base=https://github.com/sparkwing-dev/sparkwing/releases/latest/download
-          curl -fsSLO "$base/sparkwing-runner-linux-amd64"
-          curl -fsSLO "$base/SHA256SUMS"
-          grep ' sparkwing-runner-linux-amd64$' SHA256SUMS | sha256sum -c -
-          install -m 0755 sparkwing-runner-linux-amd64 "$RUNNER_TEMP/sparkwing-runner"
-      - name: Run this repository's Sparkwing work
-        run: |
-          "$RUNNER_TEMP/sparkwing-runner" runner --github-actions \
-            --team acme \
-            --controller https://sparkwing.example.com \
-            --idle-exit 2m
-```
-
-`DELETE /api/v1/team/github-runners/{repository_id}` removes a binding and revokes every live credential minted under it. Credential exchange checks the binding again while minting, so an unbind racing with an exchange either stops the mint or revokes the credential.
-
-## What the credential can do
-
-The exchange mints a runner-kind token for the team with the runner scope bundle, principal `github:<repository_id>:<owner>/<name>`, and a one-hour lifetime, and records the push and workflow run ID from the verified ID token. Execution history shows the repository and workflow run ID for nodes that job runs. A team holds at most 20 live GitHub Actions credentials; the 21st exchange answers 429, counted and minted under one lock so a burst of exchanges cannot pass the limit together. Each exchange first deletes the team's expired and revoked GitHub Actions credentials. The token appears in the team's runner-token list, where an owner can revoke it.
-
-The cache-grant protocol and its issuance route have been removed. Byte-storage
-access must use the authenticated data adapter, whose integration remains incomplete.
-
-Every request the credential makes passes a fence that lists the routes it may use:
-
-| Route | Rule |
-| --- | --- |
-| `POST /api/v1/nodes/claim` | the queue scan sees only the team's nodes of runs from signed GitHub push deliveries for the repository at the job's branch and commit |
-| `POST /api/v1/triggers/claim` | the same repository, branch and commit filter, restricted to signed GitHub push deliveries with no retry or parent run |
-| `/api/v1/runs/{id}/...`, `/api/v1/triggers/{id}/...` | the run's trigger must belong to the team, name the repository, carry the job's branch and commit, and come from a signed GitHub push delivery |
-| `POST /api/v1/runs`, concurrency slots, pipeline profile writes, secrets | already bound to a live claim, which the rules above confine |
-| anything else | 403 |
-
-The work the credential claims runs on the claim token each claim returns, which acts as the credential confined to that one claim, so the same fence applies to it.
-
-## Runner behavior
-
-`sparkwing-runner runner --github-actions` reads `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, exchanges the token, adds the `github-actions` label, and claims both triggers and nodes. It plans claimed triggers in the job with the in-process node runner. It stops taking new work ten minutes before the credential expires. `--idle-exit` ends the job once no node has been held for that long, and a node in flight keeps the job alive whatever the flag says.
-
-A claimed node fetches its source through the controller's run-scoped Git cache, not from the job's `actions/checkout` directory.
+Revoking a registration or credential stops later controller operations. It
+cannot recall GitHub tokens, provider sessions or signed URLs already issued.
+<!-- design:end -->

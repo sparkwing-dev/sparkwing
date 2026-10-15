@@ -72,13 +72,15 @@ func TestCommandsJSONHonorsPathFilter(t *testing.T) {
 
 func TestPipelineListIsAnIndexAndDescribeKeepsTheDetail(t *testing.T) {
 	full := Pipeline{
-		Name:       "release",
-		Short:      "Tag and publish",
-		Help:       "A long help essay that belongs behind describe.",
+		PipelineDescription: nodeproto.PipelineDescription{
+			Name:     "release",
+			Short:    "Tag and publish",
+			Help:     "A long help essay that belongs behind describe.",
+			Examples: []nodeproto.UsageExample{{Comment: "Run it", Command: "sparkwing run release"}},
+			Risks:    []string{"publishes"},
+		},
 		Entrypoint: "Release",
 		Triggers:   []string{"push:main"},
-		Examples:   []nodeproto.UsageExample{{Comment: "Run it", Command: "sparkwing run release"}},
-		Risks:      []string{"publishes"},
 	}
 	line, err := json.Marshal(full.index())
 	if err != nil {
@@ -95,7 +97,7 @@ func TestPipelineListIsAnIndexAndDescribeKeepsTheDetail(t *testing.T) {
 		}
 	}
 
-	bare := Pipeline{Name: "quiet", Help: "first line\nsecond line"}
+	bare := Pipeline{PipelineDescription: nodeproto.PipelineDescription{Name: "quiet", Help: "first line\nsecond line"}}
 	if got := bare.index().Short; got != "first line" {
 		t.Errorf("a pipeline with no short summarized as %q, want the first line of its help", got)
 	}
@@ -111,7 +113,7 @@ func TestProfilesListStreamsRedactedRecords(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", path)
 
 	out := captureStdout(t, func() {
-		if err := runProfilesList([]string{"-o", "json"}); err != nil {
+		if err := runProfiles([]string{"list", "-o", "json"}); err != nil {
 			t.Errorf("profiles list: %v", err)
 		}
 	})

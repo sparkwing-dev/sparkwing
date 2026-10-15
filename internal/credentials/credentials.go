@@ -12,10 +12,13 @@ package credentials
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
 // FlagName is the flag every service names its credentials directory with.
@@ -50,6 +53,23 @@ func Open(path string) (Dir, error) {
 func (d Dir) Read(name string) (string, error) {
 	data, err := d.ReadBytes(name)
 	return strings.TrimSpace(string(data)), err
+}
+
+// ReadPrivate reads a machine-owned credential through the platform's private-file
+// policy. Service projections use Read because Kubernetes owns their file layout.
+func (d Dir) ReadPrivate(name string) (string, error) {
+	if d.path == "" {
+		return "", nil
+	}
+	file, err := fssecure.OpenPrivateConfig(filepath.Join(d.path, name))
+	if err != nil {
+		return "", err
+	}
+	data, err := io.ReadAll(file)
+	if err := errors.Join(err, file.Close()); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
 }
 
 // ReadBytes returns the credential stored under name exactly as the file

@@ -40,18 +40,24 @@ pipelines:
 Each entry has (these are the only valid keys; an unknown field is a
 hard parse error):
 
-- **name** - the pipeline name (`sparkwing run build-deploy`); must equal the `Register("name", ...)` string and match `^[A-Za-z0-9][A-Za-z0-9._-]*$`
-- **entrypoint** - the Go pipeline struct type implementing it (required); equals the struct name
+- **name** - the invoked pipeline name (`sparkwing run build-deploy`), matching `^[A-Za-z0-9][A-Za-z0-9._-]*$`
+- **entrypoint** - the registered SDK entrypoint implementing it (required). Several pipeline names can select the same entrypoint.
 - **description** - one-line summary surfaced by `sparkwing pipeline list`
-- **on** - declarative trigger block: `push` (branches/paths), `pull_request` (actions/branches), `schedule` (one entry, or a list of them, each with `name`, `cron`, a required `where`, `tz`, `overlap`, `catch_up`, `args`), `webhook`, `pre_commit`, `pre_push`, `post_commit`. Absent means "manual only" (a command).
-- **guards** - gate dispatch on profile, args, and git branch (`reject` / `require` token lists)
+- **on** - declarative trigger block: `push` (branches/paths), `pull_request` (actions/branches), `schedule` (one entry, or a list of them, each with `name`, `cron`, a required `where`, `tz`, `overlap`, `catch_up`, `args`), `pre_commit`, `pre_push`, `post_commit`. Absent means "manual only" (a command).
+- **guards** - gate dispatch on placement, args and git branch (`when` / `unless` token lists)
 - **args** - per-arg default values, keyed by CLI flag name
-- **profile** - the project profile this pipeline uses (from the `profiles:` map)
-- **requires** - runner-label requirements for every job (e.g. `[local]` pins execution to this machine)
+- **profile** - the named controller connection in the machine config. A pinned pipeline runs through `pipeline trigger --profile`.
+- **requires** - runner-label requirements inherited by every job
+- **prefers** - soft runner-label preferences
+- **source** - the revision supplying pipeline code
 - **hidden** - omit from `pipeline list` (still invocable by exact name)
 
 For the complete schema -- every top-level key, pipeline field, and
 trigger field with types -- see the generated [config-reference.md](config-reference.md).
+
+For `name: deploy-prod` with `entrypoint: Deploy`, use `deploy-prod` in commands.
+Help, flag completion, secrets and risk declarations come from `Deploy`.
+Help and argument errors keep the invoked name.
 
 ## Triggers
 
@@ -75,27 +81,21 @@ pipelines:
       pull_request:
         branches: [main]                 # declarative: records intent, not gated on
 
-  # Declarative path: recorded, not routed
-  - name: review
-    entrypoint: Review
-    on:
-      webhook:
-        path: /review
-
   # Cron in UTC. `where` is required: `local` fires from a host once
   # armed there; until then invoke it with `sparkwing run nightly`
   - name: nightly
     entrypoint: Nightly
     on:
       schedule:
-        cron: "0 2 * * *"
-        where: local
+        - name: nightly
+          cron: "0 2 * * *"
+          where: local
 ```
 
 `branches` / `paths` / `actions` record intent: the controller does not
 read your `sparkwing.yaml`, so it dispatches the pipelines a team
 subscribed to the repository through the [GitHub App](github-app.md). To require a checked-out branch before any step runs,
-add `guards: {require: [git:branch=main]}` with its literal name. For pull
+add `guards: {when: [git:branch=main]}` with its literal name. For pull
 requests this compares the head branch, not the base branch.
 `git:branch=default` matches the repository's default branch, which a
 GitHub App trigger records and any other run reads from its checkout; a run
@@ -119,7 +119,7 @@ is a layer choice. Internalize this before reading the recipes below.
   in its own process: a separate pod in cluster mode, a separate
   invocation of the pipeline binary in local mode. Nodes carry the
   dispatch envelope -
-  `Retry`, `Timeout`, `OnFailure`, `Memoize`, `Requires`, `BeforeRun` /
+  `Retry`, `Timeout`, `OnFailure`, `Memo`, `Requires`, `BeforeRun` /
   `AfterRun`, `Approval` gating - because each Job *is* the unit the
   scheduler can retry, time out, or route to a labeled runner.
 - **Work / WorkStep** is the *inner* DAG - units of work *within* one
@@ -139,12 +139,12 @@ graph before dispatch so inspection can show it.
 |---|---|---|---|
 | `sw.Job(plan, id, x)` | Plan | one, declared at Plan-time | normal node |
 | `sw.JobFanOut(plan, name, items, fn)` | Plan | many, items in hand at Plan-time | normal nodes; one per element |
-| `sw.JobFanOutDynamic(plan, name, source, fn)` | Plan | many, source's runtime output | source runner exits before fan-out - no stranded compute |
+| `source.Generate(fn)` | Plan | many, source's runtime output | source runner exits before fan-out - no stranded compute |
 | `sw.Step(w, id, fn)` | Work | one, in-process unit of work | one logging frame, ordered/parallel via Needs |
 
 Only Plan-layer `Job*` adders create Jobs. A unit that needs Job-only
 modifiers (Retry, Requires, distinct runner) is its own Job; a set of
-Jobs decided by an earlier Job's output is `JobFanOutDynamic`.
+Jobs decided by an earlier Job's output uses `source.Generate`.
 
 ## Trivial single-step jobs
 
@@ -324,35 +324,12 @@ sw.Job(plan, "artifact", &Artifact{}).Needs(images)
 The chained `.Needs(...)` / `.Retry(...)` apply to every member; see
 *Group modifiers* below.
 
-### Runtime: `JobFanOutDynamic` (slice produced by an upstream Job)
+### Runtime: generated jobs
 
-`sw.JobFanOutDynamic[T]` materializes one Plan-level Job per
-element of an upstream typed Job's output slice. Each fan-out child is
-a fresh Job with its own dispatch envelope:
-
-```go
-type ListShards struct {
-    sparkwing.Base
-    sparkwing.Produces[[]string]
-}
-
-func (j *ListShards) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-    return sw.Step(w, "run", j.run), nil
-}
-
-func (j *ListShards) run(ctx context.Context) ([]string, error) {
-    return loadShards(ctx)
-}
-
-shards := sw.Job(plan, "list-shards", &ListShards{})
-
-sw.JobFanOutDynamic(plan, "shard-work", shards, func(shard string) (string, any) {
-    return "process-" + shard, &ProcessShard{Shard: shard}
-})
-```
-
-`JobFanOutDynamic` creates children from its source job's output after
-the source completes and releases its runner.
+`job.Generate` declares work after a source result becomes available. Read the
+source's typed output inside the generator callback and add jobs to its supplied
+plan. A downstream job uses `NeedsGenerated` to wait for the accepted expansion.
+See [Splitting work into Jobs](#splitting-work-into-jobs) for an example.
 
 ### Group modifiers
 
@@ -360,7 +337,7 @@ Every chainable `*JobNode` modifier has a `*JobGroup` twin: the call
 delegates to each member and returns the same `*JobGroup` for chaining.
 The generated [sdk-reference.md](sdk-reference.md) lists the current
 set. Two carve-outs: `OnFailure` is intentionally per-Job, since
-group-level recovery has unclear semantics; and `Memoize` on a group is
+group-level recovery has unclear semantics; and `Memo` on a group is
 what the `group-cache-shared` lint rule rejects -- a constant key
 across N members makes them share a single cache entry and replay each
 other's results. Key each member instead, by ranging over
@@ -368,30 +345,35 @@ other's results. Key each member instead, by ranging over
 
 ## Splitting work into Jobs
 
-When part of a Job needs a Job-only modifier (Retry, Requires, distinct
-runner, separate cache key), make it a Job of its own and order it with
-`Needs`. When the set of Jobs depends on what an earlier Job finds, have
-that Job produce the list and expand it with `sw.JobFanOutDynamic`:
+When part of a job needs its own retry, runner or memo key, declare it as a
+separate job and order it with `Needs`. When jobs depend on runtime output,
+register a generator on the source:
 
 ```go
-analyze := sw.Job(plan, "analyze", &AnalyzeJob{}) // Produces[[]string]
-sw.JobFanOutDynamic(plan, "compliance", analyze, func(target string) (string, any) {
-    return "scan-" + target, &ComplianceJob{Target: target}
+analyze := sw.Job(plan, "analyze", &AnalyzeJob{})
+targets := sw.RefTo[[]string](analyze)
+generated := analyze.Generate(func(ctx context.Context, expansion *sw.Plan) error {
+    for _, target := range targets.Get(ctx) {
+        sw.Job(expansion, "scan-"+target, &ComplianceJob{Target: target})
+    }
+    return nil
 })
+sw.Job(plan, "finish", func(context.Context) error { return nil }).
+    NeedsGenerated(generated)
 ```
 
-The source Job's runner exits before the children dispatch, so no
-runner sits suspended while they run, and each child is an ordinary
-node with its own row, logs, retries and runner placement.
+Each generated job has its own state, attempts and placement. The host validates
+and persists expansions before scheduling them. See
+[Generated jobs](sdk.md#generated-jobs).
 
 ## Modifier scope discipline
 
 | Modifier | Layer | Notes |
 |---|---|---|
-| `Retry(n, opts...)` | Plan only | `RetryBackoff(d)` + `RetryAuto()` options; `RetryAuto` re-dispatches the whole Job |
+| `Retry(n, opts...)` | Plan only | Application failures retry under the same claim with an increasing attempt ordinal. Lease-lapse recovery uses a separate disruption count |
 | `Timeout` | Plan only | per-attempt cap |
 | `OnFailure(id, job)` | Plan only | constructs a detached recovery node fired on parent failure |
-| `Memoize` | Plan only | content-addressed result memoization |
+| `Memo` | Plan only | content-addressed result memoization |
 | `Requires(labels...)` | Plan only | scheduler routes by runner label |
 | `BeforeRun` / `AfterRun` | Plan only | runner lifecycle hooks |
 | `Approval` | Plan only | gates dispatch on a human decision |
@@ -426,13 +408,12 @@ jobs occupy capacity the dispatcher needs for other nodes.
 Approval gates expose no `Inline` modifier. Runner-selection labels are
 ignored for inline nodes.
 
-### Dynamic nodes
+### Generated topology
 
-A node whose downstream work is runtime-variable is *dynamic*:
-`JobFanOutDynamic` source nodes are auto-marked dynamic at plan
-finalization. `plan.IsDynamicNode(id)` reports it and the plan preview
-shows `[dynamic]`, so reviewers know to inspect the run for the actual
-child nodes rather than expecting the full shape at plan time.
+A generator's callback decides its jobs from the source output. Initial plan
+inspection includes the registered generator, while accepted expansions carry
+the actual jobs. The host persists empty expansions and checks declaration hashes
+when reconstructing code.
 
 ### `GroupJobs(plan, "name", ...)`
 
@@ -453,19 +434,18 @@ runner dispatch. The orchestrator walks the entire reachable nested
 DAG before any node runs.
 What stays runtime-dynamic is bounded:
 
-- Which Nodes execute (Plan-time branching on `in`, Job `SkipIf`).
+- Which jobs execute (Plan-time branching on `in`, Job `SkipIf`).
 - Which Steps execute (intra-Work `SkipIf`).
-- `JobFanOutDynamic` cardinality (count and keys come from the source's
+- Generator cardinality (count and keys come from the source's
   runtime output; the per-item shape is known).
 
-Because the structure is reachable from source, `sparkwing pipeline
-explain --name X` and the dashboard render the full Plan -> Job ->
+Because the structure is reachable from source, `sparkwing pipeline plan --pipeline X` and the dashboard render the full Plan -> Job ->
 Work -> Step tree before anything runs. The dashboard's per-Job card
 exposes a collapsible **Work** section showing its inner steps.
 
 ## Cache
 
-`.Memoize(key, TTL(...))` turns a Job into a content-addressed cache
+`.Memo(key, TTL(...))` turns a Job into a content-addressed cache
 entry. The orchestrator computes the key after upstream deps complete,
 looks it up across runs, and short-circuits the job on a hit, replaying
 the cached output without running. Misses execute normally and record
@@ -473,16 +453,16 @@ the cached output without running. Misses execute normally and record
 time dedupes automatically.
 
 ```go
-sw.Job(plan, "build", &Build{}).Memoize(
-    func(ctx context.Context) (sparkwing.CacheKey, error) {
-        return sparkwing.Key("build", "v1"), nil
+sw.Job(plan, "build", &Build{}).Memo(
+    func(ctx context.Context) (sparkwing.MemoValue, error) {
+        return sparkwing.MemoKey("build", "v1"), nil
     },
-    sparkwing.TTL(24*time.Hour),
+    sparkwing.MemoTTL(24*time.Hour),
 )
 ```
 
-`sparkwing.Key(parts...)` hashes arbitrary parts into a stable string --
-use it rather than hand-concatenating. Return `sparkwing.NoCache, nil`
+`sparkwing.MemoKey(parts...)` hashes arbitrary parts into a stable string --
+use it rather than hand-concatenating. Return `sparkwing.NoMemo, nil`
 to bypass memoization for one invocation. Return errors when inputs cannot
 be resolved. Errors, panics, empty keys, and resolution deadlines fail
 before dispatch. See [Caching](caching.md).
@@ -511,15 +491,14 @@ for a secret it could have named at the start.
   runs. The run fails before any of its nodes runs. Its error names the
   declared secrets the run cannot read, and `sparkwing runs status --run
   RUN_ID --profile PROFILE` shows the team which scope each is missing from
-  and the command that fixes it: `sparkwing secrets set --name NAME --file
+  and the command that fixes it: `sparkwing secrets set --secret NAME --file
   <path> --pipeline PIPELINE --profile PROFILE` for this pipeline only, or
   `--shared` instead of `--pipeline` for a team-wide secret every pipeline
   may read. That detail is a `secret_preflight_refused` run event, read with
   the team's `runs.read` access and never by the run's claim tokens, because
   it names secrets and pipelines the run has no access to.
 - **On a laptop,** `sparkwing run` checks the same declarations against the
-  store the run reads from, which is this machine's local store unless the
-  profile names a secrets backend, and reports every missing secret at once
+  local controller and reports every missing secret at once
   with the command or setting that supplies it.
 
 A missing optional secret never stops a run; its field stays empty and
@@ -530,25 +509,25 @@ name fails with an error naming the `sw` tag to add.
 ## Approval gates
 
 Pause a run and wait for a human decision by registering a gate via
-`sw.JobApproval`. The orchestrator routes approval nodes through the
+`plan.Approval`. The orchestrator routes approval nodes through the
 approval-waiter flow, flipping the Job to `approval_pending`,
 writing an approvals row, and blocking until the dashboard, CLI, or
 the configured timeout resolves it.
 
 ```go
-approve := sw.JobApproval(plan, "approve-prod", sw.ApprovalConfig{
+approve := plan.Approval("approve-prod", sw.ApprovalConfig{
     Message:  fmt.Sprintf("Promote %s to prod?", git.SHA),
     Timeout:  2 * time.Hour,
-    OnExpiry: sw.ApprovalFail,
+    OnTimeout: sw.ApprovalFail,
 }).Needs(integStg)
 sw.Job(plan, "deploy-prod", &Deploy{Env: "prod"}).Needs(approve)
 ```
 
-`sw.JobApproval` returns `*ApprovalGate`, a narrower handle than
+`plan.Approval` returns `*Approval`, a narrower handle than
 `*JobNode` -- only the modifiers that make sense for a human gate are
-methods on it (`Needs`, `NeedsOptional`, `OnFailure`, `BeforeRun`,
-`AfterRun`, `SkipIf`, `Optional`, `ContinueOnError`). Modifiers
-that don't apply to gates -- `Retry`, `Timeout`, `Memoize`, `Requires`,
+methods on it (`Needs`, `NeedsIfPresent`, `NeedsGenerated`, `OnFailure`,
+`SkipIf`, `Optional`, `ContinueOnError`). Modifiers
+that don't apply to gates -- `Retry`, `Timeout`, `Memo`, `Requires`,
 `Inline` -- are physically absent, so misuse is a compile error
 rather than a runtime panic / silent no-op.
 
@@ -559,14 +538,14 @@ rather than a runtime panic / silent no-op.
   weave in run-time values.
 - `Timeout` - maximum wait before the waiter writes a `timed_out`
   resolution itself. Zero (the default) means never time out.
-- `OnExpiry` - one of `sw.ApprovalFail` (default), `sw.ApprovalDeny`,
+- `OnTimeout` - one of `sw.ApprovalFail` (default), `sw.ApprovalDeny`,
   or `sw.ApprovalApprove`. Unrecognized values panic at plan time.
 
 Resolution paths:
 
 - Dashboard: any node in `approval_pending` renders an indigo banner
   with a comment textarea and Approve / Deny buttons.
-- CLI: `sparkwing runs approvals approve --run ID --node ID`,
+- CLI: `sparkwing runs approvals approve --run ID --job ID`,
   `sparkwing runs approvals deny ...`.
 - Programmatic: `POST /api/v1/runs/{run}/approvals/{node}` with
   `{"resolution":"approved","comment":"..."}`. The approver is recorded
@@ -575,3 +554,7 @@ Resolution paths:
 For a local run that must survive closing the submitting terminal, use
 `sparkwing run <pipeline> --sw-detached`. The resident consumer owns the
 run while it waits for approval.
+
+Repository fleet history comes from the local controller's public run projection.
+A failed history read is an error. Repository commands do not open the runs store
+directly or treat an unavailable history source as an empty result.

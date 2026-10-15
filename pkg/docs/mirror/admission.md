@@ -112,7 +112,7 @@ most `cores`; memory and semaphores remain hard limits, and a second burst waits
 ## Jev policy
 
 Store the TypeSafe key as the local secret `TYPESAFE_API_KEY`
-(`sparkwing secrets set --name TYPESAFE_API_KEY --file <path>`); the daemon
+(`sparkwing secrets set --secret TYPESAFE_API_KEY --file <path>`); the daemon
 reads it when it starts in `jev` mode and admits without the advisor when the
 secret is missing. Then select `jev`:
 
@@ -145,11 +145,11 @@ host memory pressure cannot obscure a CPU admission experiment.
 duration becomes the learned admission unit:
 
 ```bash
-sparkwing run admission-stress-light-sequential --class interactive
-sparkwing run admission-stress-light-parallel --class normal
-sparkwing run admission-stress-medium-fan-in --class batch
-sparkwing run admission-stress-cpu-heavy --class batch
-sparkwing run admission-stress-heavy --class batch
+sparkwing run admission-stress-light-sequential -- --class interactive
+sparkwing run admission-stress-light-parallel -- --class normal
+sparkwing run admission-stress-medium-fan-in -- --class batch
+sparkwing run admission-stress-cpu-heavy -- --class batch
+sparkwing run admission-stress-heavy -- --class batch
 sparkwing run admission-stress # the complete phased matrix, class=batch
 ```
 

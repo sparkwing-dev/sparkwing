@@ -3,16 +3,13 @@ package backend
 import (
 	"context"
 	"io"
-	"os"
 
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type StoreBackend struct {
 	st       *store.Store
-	paths    paths.Paths
 	logStore storage.LogStore
 	runs     RunReader
 	live     LiveLogReader
@@ -54,8 +51,8 @@ func (b *StoreBackend) ReadNodeLiveLog(ctx context.Context, runID, nodeID string
 	return b.live.ReadNodeLiveLog(ctx, runID, nodeID, since)
 }
 
-func NewStoreBackend(st *store.Store, paths paths.Paths, logStore storage.LogStore) *StoreBackend {
-	return &StoreBackend{st: st, paths: paths, logStore: logStore}
+func NewStoreBackend(st *store.Store, logStore storage.LogStore) *StoreBackend {
+	return &StoreBackend{st: st, logStore: logStore}
 }
 
 var _ Backend = (*StoreBackend)(nil)
@@ -101,15 +98,7 @@ func (b *StoreBackend) ReadNodeLog(ctx context.Context, runID, nodeID string, op
 	if b.logStore != nil {
 		return b.logStore.Read(ctx, runID, nodeID, toStorageReadOpts(opts))
 	}
-	f, err := os.Open(b.paths.NodeLog(runID, nodeID))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	defer f.Close()
-	return io.ReadAll(f)
+	return nil, storage.ErrNotSupported
 }
 
 func (b *StoreBackend) StreamNodeLog(ctx context.Context, runID, nodeID string) (io.ReadCloser, error) {

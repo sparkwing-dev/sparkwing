@@ -10,8 +10,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 )
 
 var (
@@ -29,7 +27,7 @@ var (
 	runnerClaimsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "sparkwing_runner_claims_total",
-			Help: "Node-claim attempts from a pool / agent claim loop, by outcome.",
+			Help: "Claim attempts from the shared runner loop, by outcome.",
 		},
 		[]string{"outcome"},
 	)
@@ -42,7 +40,6 @@ func init() {
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
-	orchestrator.MetricsHook = observeNodeExecution
 }
 
 func observeNodeExecution(pipeline, outcome string, d time.Duration) {

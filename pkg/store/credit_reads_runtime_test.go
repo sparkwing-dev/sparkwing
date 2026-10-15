@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -88,6 +90,70 @@ func TestStoreDataCreditReadsStayInTenantAndUseStoreClock(t *testing.T) {
 		return true
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 64, Rand: rand.New(rand.NewSource(5832))}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStoreDataCreditStateUsesOneSnapshotProperty(t *testing.T) {
+	property := func(amount uint16) bool {
+		s := authorityStore(t)
+		path := blobAccountingDiskStore(t, s)
+		writer := blobAccountingDB(t, path)
+		now := time.Unix(1700000000, 0).UTC()
+		before := int64(amount) + 1
+		after := before + 1
+		rewriteSchemaExec(t, s.db, "INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES ('snapshot','a','','','','storage',0,?,?)", before, now.UnixNano())
+		rewriteSchemaExec(t, s.db, "INSERT INTO settings(key,value) VALUES (?,?)", metaKeyCreditRateMicro, []byte("1"))
+		reader, err := OpenReadOnly(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := reader.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		changed := false
+		reader.clock = func() time.Time {
+			if !changed {
+				changed = true
+				tx, err := writer.BeginTx(t.Context(), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+						t.Error(err)
+					}
+				}()
+				if _, err := tx.ExecContext(t.Context(), "UPDATE credit_charges SET amount_micro=? WHERE id='snapshot'", after); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := tx.ExecContext(t.Context(), "UPDATE settings SET value=? WHERE key=?", []byte("2"), metaKeyCreditRateMicro); err != nil {
+					t.Fatal(err)
+				}
+				if err := tx.Commit(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return now
+		}
+		tenant := &Tenant{s: reader, team: "a"}
+		state, err := tenant.CreditState(t.Context(), time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !changed || state.ChargedMicro != before || state.StorageChargedMicro != before || state.BurnMicro != before || state.BalanceMicro != -before || state.RateMicroPerSecond != 1 {
+			t.Logf("mixed financial snapshot: %+v", state)
+			return false
+		}
+		fresh, err := tenant.CreditState(t.Context(), time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fresh.ChargedMicro == after && fresh.StorageChargedMicro == after && fresh.BurnMicro == after && fresh.BalanceMicro == -after && fresh.RateMicroPerSecond == 2
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 16, Rand: rand.New(rand.NewSource(8329))}); err != nil {
 		t.Fatal(err)
 	}
 }

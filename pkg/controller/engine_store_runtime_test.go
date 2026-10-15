@@ -138,14 +138,14 @@ func TestEngineJobLifecycleRenewsAndReplaysUnderStoreFences(t *testing.T) {
 	if _, err := server.Renew(t.Context(), authorized, controllerwire.RenewalRequest{}); err != nil {
 		t.Fatal(err)
 	}
-	started, err := server.TransitionJob(t.Context(), authorized, controllerwire.JobTransitionRequest{To: "running", Cause: "start"})
+	started, err := server.TransitionJob(t.Context(), authorized, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: new(int64(0))})
 	if err != nil || started.Attempt != 1 || started.Generation != 1 {
 		t.Fatalf("start: %+v, %v", started, err)
 	}
 	if _, err := server.Renew(t.Context(), authorized, controllerwire.RenewalRequest{Executing: true}); err != nil {
 		t.Fatal(err)
 	}
-	body := controllerwire.JobTransitionRequest{To: "success", Cause: "report", Result: &controllerwire.JobResult{Outcome: "success"}}
+	body := controllerwire.JobTransitionRequest{To: "success", Cause: "report", SourceAttempt: &started.Attempt, Result: &controllerwire.JobResult{Outcome: "success"}}
 	first, err := server.TransitionJob(t.Context(), authorized, body)
 	if err != nil {
 		t.Fatal(err)
@@ -207,10 +207,10 @@ func TestEngineOwnerReconcilesExecutesAndFinishes(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor := capability.Authorized{Principal: principal, Binding: response.Claim.Binding, Target: owner.Target}
-	if _, err := server.TransitionJob(t.Context(), executor, controllerwire.JobTransitionRequest{To: "running", Cause: "start"}); err != nil {
+	if _, err := server.TransitionJob(t.Context(), executor, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: new(int64(0))}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := server.TransitionJob(t.Context(), executor, controllerwire.JobTransitionRequest{To: "success", Cause: "report", Result: &controllerwire.JobResult{Outcome: "success"}}); err != nil {
+	if _, err := server.TransitionJob(t.Context(), executor, controllerwire.JobTransitionRequest{To: "success", Cause: "report", SourceAttempt: new(int64(1)), Result: &controllerwire.JobResult{Outcome: "success"}}); err != nil {
 		t.Fatal(err)
 	}
 	terminal, err := server.ReconcileJob(t.Context(), owner, controllerwire.ReconcileRequest{Policy: "resume"})

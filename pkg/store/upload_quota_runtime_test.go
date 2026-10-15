@@ -261,6 +261,8 @@ func TestBlobUploadEmptyDuplicateCannotFundMissingObject(t *testing.T) {
 
 func TestBlobUploadRecordPointersShareTheObjectBudget(t *testing.T) {
 	s, tenant, request := uploadFixture(t)
+	setBlobRecordRef(t, s, request.Intent.Authority.CapabilityRef)
+	request.Intent.Authority.Ref.Scope.Ref = "main"
 	if err := tenant.SetStorageQuota(t.Context(), StorageQuota{MaxObjectsPerRun: 1}); err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +274,7 @@ func TestBlobUploadRecordPointersShareTheObjectBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, "UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'", []byte(`{"id":"job","memo":{}}`))
-	records := &blobRecords{tenant: tenant, rules: fakeBlobRules{}}
+	records := &blobRecords{tenant: tenant}
 	output := blobOutputRequest(request.Intent)
 	for range 2 {
 		if _, err := records.CommitRecord(t.Context(), output); err != nil {
@@ -280,7 +282,7 @@ func TestBlobUploadRecordPointersShareTheObjectBudget(t *testing.T) {
 		}
 		memo := output
 		memo.Key.Kind, memo.Key.Name = blob.KindMemo, "output"
-		memo.Key.Scope = blob.Scope{Repo: "gh:1", Pipeline: "ci", Job: "job", Key: "memo-key"}
+		memo.Key.Scope = blob.Scope{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Pipeline: "ci", Job: "job", Key: fixtureMemoHash}
 		if _, err := records.CommitRecord(t.Context(), memo); err != nil {
 			t.Fatal(err)
 		}

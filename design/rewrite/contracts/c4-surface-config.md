@@ -41,6 +41,29 @@ is bound to one home, owns one store and uses the shared controller, queue and U
 Readiness includes startup reconciliation. Drain joins shutdown. The four existing
 activity counts determine idle exit, with stay as an explicit override.
 
+The CLI's daemon status, stop and restart adapters consume `LocalLifecycle`
+through the same local-services binding as dashboard, doctor and update.
+Status projects only `LocalStatus`. It never opens the store or probes the old
+daemon transport. Restart preserves a stopped controller, skips the same exact
+version unless forced, joins Stop, confirms stopped status, then calls
+EnsureStarted with the captured home/executable/address and preceding stay value.
+An answering controller after Stop or an unready/wrong-version start is an error.
+No success receipt is emitted after a lifecycle, cancellation or output failure.
+The existing 2/20/30-second status/restart/stop observation budgets remain.
+Native local-services construction and readiness remain W8 integration points.
+
+`daemon events` reads the retained local journal with the final clisurface
+grammar. It selects the newest 50 matching records by default and accepts
+positive limits. Opaque cursors bind the journal directory, normalized filters,
+initial since cutoff and exact unread prefix. Newer appends keep continuation stable.
+Missing, inserted, reordered or edited unread records fail with a restart hint. The cursor
+contains hashes, cutoff and count, never record payloads. It grants no authority.
+JSON emits event rows followed by a page record with next_cursor and truncated,
+including empty and final pages. Plain/pretty continuation goes to stderr.
+`--explain --run` renders the complete related timeline without page metadata.
+It conflicts with list filters and pagination. Offset and zero-limit paths are
+deleted. Journal producer lifecycle remains W8-owned.
+
 Managed controller units call foreground `wingd run --stay --home <absolute-home>`.
 Managed timers call `__tick --home <absolute-home>`. Public dashboard start stays a
 lifecycle client. ManagedUnit retains Home and update re-renders both kinds before
@@ -61,17 +84,41 @@ A1-07, A1-11, A1-12, A1-47 and A1-49.
 Project-file readers use the strict schema. `Config.Registry` projects validated
 project declarations into dispatch metadata for the existing CLI and hosts.
 Settings winners remain owned by `settings.ResolvePlan` and the store seals.
+`runspec.Options.StartAt`, `StopAt` and `Only` retain the CLI's step-window
+selections as `Setting[string]`. Intake sets them through the shared settings
+table. Plan resolution preserves their values and origins, and `SealSpec`
+refuses a changed selection. Retry carries them with the original request.
+W3 consumes these sealed values when validating and executing the plan.
 CLI grammar, host execution and local lifecycle have separate owners.
 The acceptance suite runs each configuration boundary under its scenario's
 `runspec-config` cell. Placement cells require the T1 driver and real hosts.
 
 ## Ownership
 
+The internal launcher grammar requires `--docker-image` beside `--image` and
+does not accept `--deadline`. Both images are digest-pinned by W8's validator.
+`fetch-source` and `run-node` permit an absent `--job` for a plan award. W8
+validates the private award's kind and binding before source or execution.
+
+W9 fills the library-inflation selector omitted from the initial registry.
+`pipeline sparks inflate --library MODULE` takes a required sparks-core name or
+full Go module path, matching the library selector used by catalog. There is no
+`--module` alias. Plain output is the destination. JSON retains module, version,
+destination and replacement. The shared parser governs help and execution.
+
 C4 owns process environment construction, shared limits and deadline arithmetic,
 configuration precedence, both YAML file shapes, command grammar, local controller
 lifecycle and the common Cloud Job builder. The store owns sealing and authority;
 C4 returns values to its transactions. The SDK owns declarations and applies body
 env after planning; C4 decides which env belongs at process startup.
+
+Examples use `--example`, with `--body` requiring that selector. Plain lists
+emit names, and a selected plain body emits source only. Sparks add requires
+`--source`; remove requires `--spark`. Their JSON receipts retain action,
+spark, source, version and project-file path. Plain receipts emit the spark name.
+Repository updates select the current checkout unless `--all-repos` is set.
+Apply is the default; `--dry-run` previews, including read-only SDK pin inspection
+with `--in-place`. Fleet application requires `--yes` before reading the fleet.
 
 | Concern | Authoritative source |
 | --- | --- |
@@ -285,6 +332,26 @@ pipeline arguments start after `--`. Only run and pipeline trigger take a
 pipeline positional. Output selection is validated before side effects; lists
 are NDJSON and diagnostics use the C2 error object on stderr.
 
+`Flag.AllowEmpty` records an allowed empty scalar. `--sw-cache-from=` clears
+the machine cache profile without losing flag presence.
+
+`__complete --word` accepts an empty value to select root completions. Shell
+completion requests use `--kind` and `--word`, with explicit plain output.
+
+`clisurface.ResolvePipeline` captures the invoked name and registered SDK
+entrypoint from validated project configuration. An unconfigured pipeline uses
+the same name for both. A configured entrypoint that is missing from describe
+cannot fall back to an SDK registration named after the alias. Help, completion,
+arguments, secrets and risks all use the selected entrypoint's schema while
+displaying the invoked name. Hosts carry the pair into the sealed source and
+resolved entrypoint. Protocol v2 plan requests select the entrypoint in
+`Request.Pipeline` and retain the invoked name in `RunContext.Pipeline`.
+
+`pipeline plan --pipeline NAME -- <pipeline args>` accepts opaque pipeline flags
+after the separator while retaining the kind-named selector. It resolves the
+configured entrypoint for SDK requests and keeps the invoked name in RunContext.
+Plan previews redact classified arguments and structured planning failures.
+
 - `run` is local. `--publish P` uploads the record/results/logs with local
   provenance under trust_local_builds; publication failure cannot fail the run.
   `--sw-cache-from P` or run.cache_from reads only authorized verified-default-
@@ -314,6 +381,18 @@ restarts an installed controller. Doctor reports skew, incompatible stores and
 removed timer verbs. Windows supports stay and daemon schedules; install is
 refused. Kernel UID or client SID establishes local identity; absent evidence
 refuses access. Private files use fssecure on every supported OS.
+
+`wingd.APIConn.PeerIdentity()` carries `LocalPeerIdentity` from the verified
+transport to the shared controller. The connection retains its own snapshot
+and returns a caller-owned UID copy. `LocalSubject` checks the peer against
+the controller account before the API listener yields the connection.
+This replaces the UID-only accessor. `DialSocket` and `ListenSocket` own the
+platform transport. Windows uses owner-only local named pipes and checks the
+client's identification-token SID before application traffic. Unix uses kernel
+UIDs. Missing identity refuses access. Listener shutdown joins pending transport
+work and retains authenticated connections for drain. See
+[the transport contract](../../../internal/wingd/LOCAL-TRANSPORT.md) for framing
+and native acceptance requirements.
 
 Every plan/eval/work Cloud Job runs root with privileged DinD, including jobs
 from run-host dispatch. Before a runnable object exists, CloudBoundary must
@@ -591,16 +670,18 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 
 | Export | Purpose |
 | --- | --- |
-| [`Authority`](../../../internal/clisurface/contract.go#L10) | Authority separates team credentials from deployment and in-pod powers. |
-| [`Flag`](../../../internal/clisurface/contract.go#L22) | Flag is parser and help metadata; Argument empty means a boolean switch. |
-| [`Command`](../../../internal/clisurface/contract.go#L41) | Command separates parser metadata from handlers; Flags adds to GlobalFlags. |
-| [`GlobalFlags`](../../../internal/clisurface/contract.go#L56) | GlobalFlags is inherited everywhere; profile selection is command-local, but an accepted --profile may appear before the verb. |
-| [`ExitCode`](../../../internal/clisurface/contract.go#L66) | ExitCode keeps usage failures distinguishable from incomplete observations. |
-| [`ErrorFormat`](../../../internal/clisurface/contract.go#L78) | ErrorFormat delegates JSON encoding and codes to internal/apierr; the CLI must not create another error envelope or leak pipeline secrets in hints. |
-| [`Errors`](../../../internal/clisurface/contract.go#L86) | Errors keeps diagnostics on stderr even when stdout contains records. |
-| [`CommonRules`](../../../internal/clisurface/contract.go#L96) | CommonRules fixes shared meanings so a new command cannot reinterpret a flag. |
-| [`Validate`](../../../internal/clisurface/contract.go#L117) | Validate catches grammar drift before a parser or help generator consumes it. |
+| [`Authority`](../../../internal/clisurface/grammar.go) | Authority separates team credentials from deployment and in-pod powers. |
+| [`Flag`](../../../internal/clisurface/grammar.go) | Flag is parser and help metadata; Argument empty means a boolean switch. |
+| [`Command`](../../../internal/clisurface/grammar.go) | Command separates parser metadata from handlers; Flags adds to GlobalFlags. |
+| [`GlobalFlags`](../../../internal/clisurface/grammar.go) | GlobalFlags is inherited everywhere; profile selection is command-local, but an accepted --profile may appear before the verb. |
+| [`ExitCode`](../../../internal/clisurface/grammar.go) | ExitCode keeps usage failures distinguishable from incomplete observations. |
+| [`ErrorFormat`](../../../internal/clisurface/grammar.go) | ErrorFormat delegates JSON encoding and codes to internal/apierr; the CLI must not create another error envelope or leak pipeline secrets in hints. |
+| [`Errors`](../../../internal/clisurface/grammar.go) | Errors keeps diagnostics on stderr even when stdout contains records. |
+| [`CommonRules`](../../../internal/clisurface/grammar.go) | CommonRules fixes shared meanings so a new command cannot reinterpret a flag. |
+| [`Validate`](../../../internal/clisurface/grammar.go) | Validate catches grammar drift before a parser or help generator consumes it. |
 | [`Registry`](../../../internal/clisurface/registry.go#L4) | the final tree is independent of runtime dispatch so help and parsers share one contract. |
+| [`PipelineIdentity`](../../../internal/clisurface/pipeline.go) | Captures the invoked name separately from the registered SDK entrypoint. |
+| [`ResolvePipeline`](../../../internal/clisurface/pipeline.go) | Resolves the configured pair without process globals or later configuration reads. |
 
 ### pkg/projectconfig
 
@@ -648,6 +729,8 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 
 | Export | Purpose |
 | --- | --- |
+| [`DialSocket`](../../../internal/wingd/socket_transport.go) | Connects to the platform's private controller transport under the caller's context and timeout. |
+| [`ListenSocket`](../../../internal/wingd/socket_transport.go) | Binds that transport and yields only authenticated APIConn connections. |
 | [`KeepAliveReason`](../../../internal/wingd/lifecycle_contract.go#L9) | KeepAliveReason separates the four activity holds from the explicit --stay policy. |
 | [`KeepAliveReasons`](../../../internal/wingd/lifecycle_contract.go#L19) | KeepAliveReasons is exhaustive; health probes alone must not prevent idle exit. |
 | [`LocalActivity`](../../../internal/wingd/lifecycle_contract.go#L24) | LocalActivity counts live state, not historical runs or configured schedules. |
@@ -690,7 +773,7 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 
 New contract and test files:
 
-- `internal/clisurface/contract.go`
+- `internal/clisurface/grammar.go`
 - `internal/clisurface/contract_test.go`
 - `internal/clisurface/registry.go`
 - `internal/limits/billing.go`

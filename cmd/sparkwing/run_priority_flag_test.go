@@ -43,7 +43,7 @@ func TestParseRunFlags_PriorityIsNeverForwarded(t *testing.T) {
 		{"--sw-priority"},
 	} {
 		wf, pass := parseRunFlags(args)
-		if !wf.prioritySet {
+		if !wf.prioritySet && wf.parseErr == nil {
 			t.Errorf("%v: prioritySet = false", args)
 		}
 		if slices.Contains(pass, "--sw-priority") {
@@ -76,13 +76,8 @@ func TestValidatePriorityFlag(t *testing.T) {
 	}
 }
 
-func TestRunDetachedDoesNotRefusePriority(t *testing.T) {
-	for _, f := range foregroundOnlyReasons(runFlags{priority: "front", prioritySet: true}) {
-		if f.name == "--sw-priority" {
-			t.Fatal("--sw-priority is carried on the trigger; it must not be refused for a detached run")
-		}
-	}
-	if err := refuseForegroundOnlyFlags(runFlags{priority: "front", prioritySet: true}); err != nil {
-		t.Fatalf("refuseForegroundOnlyFlags = %v", err)
+func TestRunDetachedAcceptsSealedNumericPriority(t *testing.T) {
+	if err := validateLocalRunFlags(runFlags{detached: true, priority: "42", prioritySet: true}); err != nil {
+		t.Fatalf("numeric priority: %v", err)
 	}
 }

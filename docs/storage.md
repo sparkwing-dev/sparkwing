@@ -71,8 +71,8 @@ A refused binding runs cold or skips the save. Local runs keep local archives.
 ## Source and package downloads
 
 Runners clone the source repository directly. The controller releases the
-run's permitted Git credential. A machine owner can use `--allow-repo` or
-`allow_repos` to restrict builds and permit fallback to that machine's Git
+run's permitted Git credential. A machine owner can use `--repos` during enrollment or `runner.repos`
+in the machine file to restrict builds and permit fallback to that machine's Git
 credentials. Working-tree snapshots travel as signed source bundles.
 
 Package managers use their upstream registries. To use a separate registry
@@ -156,3 +156,10 @@ and reads, reopen SQLite and verify byte offsets with filesystem and S3 backends
 Authentication and award issuance remain fixtures.
 
 <!-- design:end -->
+
+Retained log reads select tagged subjects from the tenant's committed run view.
+The controller verifies each persisted segment through the configured blob backend
+and rechecks read authority before serving a live-ring continuation. Filesystem
+and S3 dashboards use this same reader. Local run-directory logs and the separate
+raw S3 log reader are removed. Deployment bucket measurements use the read-only
+`MeasurementStore` and cannot publish or read object payloads.

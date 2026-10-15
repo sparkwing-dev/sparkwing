@@ -20,17 +20,29 @@ sparkwing daemon events --run RUN_ID --explain
 sparkwing daemon events --run RUN_ID --explain -o json
 ```
 
-Both commands read files directly, even when the daemon is down. `events` can
-filter by run, elapsed duration, repeated kind, or incarnation. It shows the
-newest 50 matching records by default. Use `--offset 50` for the previous 50 or
-`--limit 0` for every retained record. New arrivals can shift an offset between
-reads. Unreadable records are skipped, and their count is printed on stderr.
-Records are ordered by timestamp, incarnation, then sequence. JSON output is
-one record per line and is the default when piped; a terminal gets human output.
-With no retained journal, human `events` output prints the directory it checked.
+The command reads files directly, even when the daemon is down. `events` can
+filter by run, elapsed duration, repeated or comma-separated kind, or incarnation.
+It shows the newest 50 matching records by default. `--limit` accepts a positive
+page size. Repeat the same filters with the returned `--cursor` to read older
+records. Each page keeps chronological order. Newer events leave the unread
+history in place, and `--since` keeps the first page's cutoff. If retention or an
+edit changes unread records, continuation fails and asks for a fresh query.
+A late event inserted into the unread history also requires a fresh query.
+
+JSON output is one event per line followed by a `kind: page` record with
+`next_cursor` and `truncated`. The last page has an empty cursor and
+`truncated: false`. JSON is the default when piped. Plain and pretty output send
+continuation instructions to stderr. With no retained journal, human output
+prints the directory it checked and JSON emits an empty final page. Unreadable
+records are skipped, and their count is printed on stderr. Records are ordered
+by timestamp, incarnation, then sequence.
+
 `--explain` renders a run's admission timeline in sentences, including descendant
-node slot requests and attached children owned by that run. Its JSON output
-preserves the structured records. A retained record carries a timestamp, source,
+job slot requests and attached children owned by that run. Its JSON output
+preserves all structured records without page metadata. It requires `--run` and
+cannot be combined with list filters, limits or cursors.
+
+A retained record carries a timestamp, source,
 incarnation, sequence, kind, run identity where known, and decision inputs in
 snake_case `data` fields. Connection records carry the peer PID when the operating
 system supplies it. After a connection identifies its run, later records carry
@@ -67,3 +79,76 @@ Supervisor records keep their enqueue time and daemon identity, and buffered
 records drain on supervisor shutdown. Journal writes do not hold admission or
 replacement. Policy endpoint URLs in records keep only the scheme, host, and
 path; userinfo, query parameters, and fragments are omitted.
+
+## Queue views
+
+```sh
+sparkwing queue list -o json
+sparkwing queue list --profile prod --group g:deploy -o pretty
+sparkwing queue priority --run RUN_ID --set front
+sparkwing queue priority --profile prod --group g:deploy --run 412 --set 0
+```
+
+`queue list` reads one controller snapshot. A profile selects a remote
+controller. Without a profile, the CLI starts the local controller on demand.
+Bare `queue` shows help. Failed reads return nonzero with no success record on
+stdout, so an unreachable controller cannot look like an empty queue.
+
+The admission snapshot retains capacity, holders, connected runs, ordered
+waiters, pressure measurements and runner headroom. `--group` reads one
+concurrency group, including its effective capacity, used cost, separate run
+and job IDs, holder leases, supersession and waiter positions. JSON returns one
+snapshot. Plain output uses tab-separated records.
+
+Priority accepts an integer, including zero, or `front`/`back`. The controller
+resolves relative values against the other runs in the queue. Transport retries
+reuse the same mutation key. The result preserves prior and new
+priorities and positions. A holder keeps its existing lease. A missing run
+returns a receipt and exits 1.
+
+<!-- design:begin -->
+The rewrite implements these CLI and client adapters against fakes. Native
+queue/group projections and priority transactions still need controller
+integration. Remote priority without `--group` needs an authorization route.
+Local admission priority uses the admission wire. Per-team run numbers resolve
+through the controller before changing a rank. Native controller
+startup and queue ownership remain runtime integration work.
+<!-- design:end -->
+
+## Doctor reports
+
+```sh
+sparkwing doctor -o json
+sparkwing doctor --timeout 15s -o pretty
+sparkwing doctor --dry-run -o plain
+```
+
+Doctor inspects the project Go toolchain, repository hooks and competing CLI
+installs. Local controller findings come through its lifecycle interface.
+Both modes use the same diagnostic path. The CLI never opens `state.db`,
+repairs private-home permissions or reaps processes during this command.
+
+JSON output is one report. `controller_checked` is true only after the lifecycle
+check completes. `findings` retains each finding's `code`, `message`, optional
+`unit` and `hint`. When inspection fails, `controller_error` names the failure,
+the report retains any completed findings, and the command exits nonzero.
+Toolchain, hook-survey and install results remain in the same report. An empty
+finding array with `controller_checked: false` does not establish controller
+health.
+
+The timeout bounds inspection and its subprocesses. It defaults to ten seconds
+and accepts any positive duration. Cancellation keeps completed observations.
+
+<!-- design:begin -->
+Native runtime construction is not connected in this rewrite build. Doctor
+reports machine observations and returns an unavailable controller error.
+The machine hook survey uses the final machine reader. Lifecycle tests with
+fakes cover the CLI composition. Native store-schema,
+service-skew and removed-timer checks still require the runtime implementation.
+Permission repair and process cleanup need controller-owned operations before
+they can be exposed again. The retained sweep implementation keeps successful
+cleanup results when an outcome-event write fails, including after run pruning.
+Its report carries a `record_error` warning beside that session. Plain reports
+count these as `unrecorded_step_outcomes`. A failed sweep still returns an error.
+This does not connect process cleanup to the lifecycle CLI.
+<!-- design:end -->

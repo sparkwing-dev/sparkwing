@@ -37,6 +37,7 @@ func CheckBlobLogRecords(ctx context.Context, root string, transport blob.LogTra
 	}
 	var segments []logseg.Segment
 	var content []byte
+	var storedBytes int64
 	for n := 1; n <= count; n++ {
 		line := []byte(fmt.Sprintf("%x/%d\n", seed, n))
 		var compressed bytes.Buffer
@@ -53,6 +54,7 @@ func CheckBlobLogRecords(ctx context.Context, root string, transport blob.LogTra
 			return fmt.Errorf("persist physical segment %d: %w", n, err)
 		}
 		segments, content = append(segments, segment), append(content, line...)
+		storedBytes += segment.StoredBytes
 	}
 	manifest := logseg.Manifest{Status: logseg.StatusComplete, Segments: segments}
 	for range 2 {
@@ -86,8 +88,8 @@ func CheckBlobLogRecords(ctx context.Context, root string, transport blob.LogTra
 		}
 	}
 	retained, err := tenant.StorageRetainedBytes(ctx)
-	if err != nil || retained != int64(len(content)) {
-		return fmt.Errorf("physical log retained bytes=%d, want=%d: %w", retained, len(content), err)
+	if err != nil || retained != storedBytes {
+		return fmt.Errorf("physical log retained bytes=%d, want=%d: %w", retained, storedBytes, err)
 	}
 	if _, err := s.DB().ExecContext(ctx, "UPDATE capabilities SET revoked_at=1 WHERE prefix=?", reader.Authority.ID); err != nil {
 		return err

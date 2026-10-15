@@ -50,7 +50,7 @@ func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Se
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, time.Now().UTC())
+	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Se
 	logs := &syncBuffer{}
 	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	replica := func() (*controller.Server, string) {
-		srv := controller.New(st, logger).EnableAuthFromStore().WithSecretsCipher(testCipher(t)).
+		srv := controller.New(st, logger).WithSecretsCipher(testCipher(t)).
 			WithLicense(license.Resolve(raw, pub, time.Now(), nil)).
 			WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
 			WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect, appCallback}).
@@ -490,7 +490,7 @@ func TestGitHubAppInstallationBelongsToOneTeam(t *testing.T) {
 	if ids := f.installations(bob); len(ids) != 0 {
 		t.Fatalf("bob's team holds %v", ids)
 	}
-	if code := f.call("DELETE", "/api/v1/github-app/installations/7", "Bearer "+f.admin, nil, nil); code != http.StatusNoContent {
+	if code := f.call("DELETE", "/api/v1/operator/github-app/installations/7", f.consoleAuth(), nil, nil); code != http.StatusNoContent {
 		t.Fatalf("operator unbind = %d", code)
 	}
 	f.connect(bob, 502, 7, acmeAdmin)
@@ -1303,7 +1303,7 @@ func TestGitHubAppReplayAfterAMoveStartsNothing(t *testing.T) {
 		t.Fatalf("olga's push = %v", out)
 	}
 	unsent := pushedAt(pushPayload(7, 701, "acme/widgets", strings.Repeat("3", 40)), time.Now().Add(-time.Hour))
-	if code := f.call("DELETE", "/api/v1/github-app/installations/7", "Bearer "+f.admin, nil, nil); code != http.StatusNoContent {
+	if code := f.call("DELETE", "/api/v1/operator/github-app/installations/7", f.consoleAuth(), nil, nil); code != http.StatusNoContent {
 		t.Fatalf("operator unbind = %d", code)
 	}
 	f.connect(bob, 502, 7, acmeAdmin)

@@ -755,7 +755,7 @@ func NodeLogCompletenessHandler(b backend.Backend) http.HandlerFunc {
 			writeErr(w, http.StatusNotFound, fmt.Errorf("node %s not found in run %s", nodeID, runID))
 			return
 		}
-		c, err := backend.NodeLogCompleteness(r.Context(), b, runID, nodes[i], time.Now())
+		c, err := backend.NodeLogCompleteness(r.Context(), b, runID, nodes[i].NodeID)
 		if err != nil {
 			writeErr(w, http.StatusBadGateway, err)
 			return

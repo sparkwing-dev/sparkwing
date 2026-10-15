@@ -8,12 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-
-	"github.com/sparkwing-dev/sparkwing/internal/api"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 const teamB store.Team = "team-b"
@@ -48,7 +45,7 @@ func teamToken(t *testing.T, tenant *store.Tenant, scopes ...string) string {
 func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 	f := newCronsFixture(t)
 	tenantB := teamTenant(t, f.store, teamB)
-	writerB := teamToken(t, tenantB, controller.ScopeRunsRead, controller.ScopeRunsControl)
+	writerB := teamToken(t, tenantB, "runs.read", "runs.control")
 
 	var pushed map[string]any
 	f.call(http.MethodPut, "/api/v1/crons/repos", writerB, cronPushBody(), http.StatusOK, &pushed)
@@ -70,7 +67,7 @@ func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 		t.Fatalf("default team holds %d schedules (err %v), want none", len(own), err)
 	}
 
-	var overview api.OverviewView
+	var overview controllerwire.ScheduleOverview
 	f.call(http.MethodGet, "/api/v1/crons", f.writer, nil, http.StatusOK, &overview)
 	if len(overview.Schedules) != 0 {
 		t.Errorf("the default team lists %d of team B's schedules", len(overview.Schedules))
@@ -138,10 +135,10 @@ func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 func TestControllerCrons_RunNowLaunchesInTheSchedulesTeam(t *testing.T) {
 	f := newCronsFixture(t)
 	tenantB := teamTenant(t, f.store, teamB)
-	writerB := teamToken(t, tenantB, controller.ScopeRunsRead, controller.ScopeRunsControl)
+	writerB := teamToken(t, tenantB, "runs.read", "runs.control")
 	f.call(http.MethodPut, "/api/v1/crons/repos", writerB, cronPushBody(), http.StatusOK, nil)
 
-	var launched api.RunEnvelope
+	var launched controllerwire.ScheduleRun
 	f.call(http.MethodPost, "/api/v1/crons/acme%2Fwidgets%2Fnightly/run", writerB, nil, http.StatusOK, &launched)
 
 	ctx := context.Background()
@@ -159,7 +156,7 @@ func TestControllerCrons_RunNowLaunchesInTheSchedulesTeam(t *testing.T) {
 
 func TestControllerCrons_ATeamsSchedulesAreCapped(t *testing.T) {
 	f := newCronsFixture(t)
-	writerB := teamToken(t, teamTenant(t, f.store, teamB), controller.ScopeRunsRead, controller.ScopeRunsControl)
+	writerB := teamToken(t, teamTenant(t, f.store, teamB), "runs.read", "runs.control")
 
 	many := cronPushBody()
 	var entries []map[string]any

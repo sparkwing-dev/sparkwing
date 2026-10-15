@@ -15,13 +15,13 @@ artifacts in the same run.
 
 ## The model
 
-A producer declares its output files by glob with `Outputs`, relative to
+A producer declares its output files by glob with `Artifacts`, relative to
 its working directory:
 
 ```go
 build := sparkwing.Job(plan, "build", func(ctx context.Context) error {
     return nil
-}).Outputs("dist/**")
+}).Artifacts("dist/**")
 ```
 
 A consumer declares `Consumes(producer)`. That stages the producer's
@@ -47,7 +47,7 @@ sparkwing.Job(plan, "archive", func(ctx context.Context) error {
 `Into` applies to the whole producer; per-file remapping is intentionally
 absent, since it would couple the consumer to the producer's filenames.
 
-Consuming a producer that declared no `Outputs` is a plan-time error ---
+Consuming a producer that declared no `Artifacts` is a plan-time error ---
 there is nothing to stage, so the edge is a mistake the plan rejects up
 front rather than a silent no-op. When one consumer draws two producers
 whose staged paths overlap, the plan emits a lint warning and the
@@ -61,8 +61,8 @@ into every member's workspace. See the
 ## Always publish, always stage
 
 Publishing and staging are independent of memoization. A node that
-declares `Outputs` publishes its files every run, whether or not it also
-declares [`.Memoize()`](caching.md). A consumer stages its declared
+declares `Artifacts` publishes its files every run, whether or not it also
+declares [`.Memo()`](caching.md). A consumer stages its declared
 artifacts every time it runs.
 
 A producer that promises outputs it cannot deliver fails: if a declared
@@ -99,12 +99,13 @@ This is what lets caching and artifacts compose. A
 re-running it, and carries the producer's artifact manifest forward
 unchanged --- so a downstream `Consumes` stages the same files whether
 the producer ran or hit. Caching a file-producing node is supported:
-pair `.Memoize()` with `Outputs`.
+pair `.Memo()` with `Artifacts`.
 
 ## Both execution modes
 
-Local runs store artifacts in `cache/` under their resolved Sparkwing home,
-or in the store `SPARKWING_CACHE_URL` names. Staging checks blob and manifest
+Local runs store artifacts in their local blob store. Explicit
+`--sw-cache-from PROFILE` access reads authorized remote records without writing
+them. Staging checks blob and manifest
 digests and fails when cached bytes are missing or corrupt. A memo entry, or a
 coalesce leader, without a required artifact manifest, or whose manifest or
 any file it lists is gone from the store, is a miss and rebuilds the producer.
@@ -125,7 +126,7 @@ One local asymmetry survives and is worth naming: a run's node
 processes do share a working directory, so a producer that writes a
 file and a consumer that reads it by path still work locally without
 declaring anything, and still break the first time that pipeline runs
-in a pod. Declare `Outputs` and `Consumes` for anything that has to
+in a pod. Declare `Artifacts` and `Consumes` for anything that has to
 travel between jobs.
 
 ## Non-goals
@@ -138,6 +139,6 @@ travel between jobs.
   read and write in place. When steps need a shared mutable tree, keep
   them as steps within one job --- a job's steps share one workspace.
 - **Reaching into another node's directory.** A consumer receives only
-  what a producer declared with `Outputs`, staged through the store.
+  what a producer declared with `Artifacts`, staged through the store.
   There is no path by which a node reads another running node's
   workspace.

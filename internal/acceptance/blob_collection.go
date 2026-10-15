@@ -174,7 +174,7 @@ func checkInterruptedCollection(ctx context.Context, db *sql.DB, op *store.Opera
 	failure := errors.New("collection checkpoint")
 	for _, physicalDelete := range []bool{false, true} {
 		calls := 0
-		interrupted := storeBoundaryDeleter(func(ctx context.Context, b blob.Blob) error {
+		interrupted := blobBoundaryDeleter(func(ctx context.Context, b blob.Blob) error {
 			calls++
 			if physicalDelete {
 				if err := objects.DeleteBlob(ctx, b); err != nil {
@@ -257,4 +257,10 @@ func checkCollectionObjects(ctx context.Context, objects blob.ObjectBackend, tra
 		}
 	}
 	return nil
+}
+
+type blobBoundaryDeleter func(context.Context, blob.Blob) error
+
+func (f blobBoundaryDeleter) DeleteBlob(ctx context.Context, value blob.Blob) error {
+	return f(ctx, value)
 }

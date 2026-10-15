@@ -190,11 +190,11 @@ func TestSparksUpdateRefusesName(t *testing.T) {
 		".sparkwing/go.mod": "module example.com/project/.sparkwing\n\ngo 1.26.0\n",
 	})
 
-	err := runIn(t, root, runSparksUpdate, "--name", "libA")
+	err := runSparkwing([]string{"-C", root, "pipeline", "sparks", "update", "--name", "libA"})
 	if err == nil {
 		t.Fatal("expected --name to be refused")
 	}
-	if !strings.Contains(err.Error(), "--name is not supported") {
+	if exitCodeFor(err) != 2 || !strings.Contains(err.Error(), "unknown flag --name") {
 		t.Fatalf("refusal does not name the flag: %v", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(root, ".sparkwing", ".resolved.mod")); statErr == nil {
@@ -210,12 +210,12 @@ func runIn(t *testing.T, dir string, run func([]string) error, args ...string) e
 
 func TestSparksVerbsFindTheModuleFromASubdirectory(t *testing.T) {
 	root := writeSparkFixture(t, map[string]string{
-		".sparkwing/sparkwing.yaml": "sparks:\n  - name: libA\n    source: example.com/a\n    version: latest\n",
+		".sparkwing/sparkwing.yaml": "pipelines: []\n",
 		".sparkwing/go.mod":         "module example.com/project/.sparkwing\n\ngo 1.26.0\n",
 		"services/api/README":       "x\n",
 	})
-	err := runIn(t, filepath.Join(root, "services", "api"), runSparksUpdate, "--name", "libA")
-	if err == nil || !strings.Contains(err.Error(), "--name is not supported") {
+	err := runSparkwing([]string{"-C", filepath.Join(root, "services", "api"), "pipeline", "sparks", "update"})
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(root, ".sparkwing", "sparkwing.yaml")+" has no libraries") {
 		t.Fatalf("sparks update from a subdirectory = %v, want it to reach the manifest above", err)
 	}
 }

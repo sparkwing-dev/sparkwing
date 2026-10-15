@@ -4,37 +4,34 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
-// The switch has to settle before the command starts a daemon advertising the
-// installed version, mints a run, binds an index, or builds a ref worktree.
-func TestDispatchRunSwitchesBeforeStartingADaemon(t *testing.T) {
-	seedToolchainStore(t, "v0.99.0", releaseFixture("v0.99.0"))
-	cutTheNetwork(t)
-	withInstalledVersion(t, "v0.38.2")
-	withToolchainActive(t, "")
-	t.Setenv(toolchainModeEnv, "")
-
+func TestDispatchRunSwitchesBeforeLocalIntake(t *testing.T) {
 	repo := t.TempDir()
-	writeSparkwingModuleIn(t, repo, pinModule("v0.99.0"))
-
-	var order []string
-	sentinel := errors.New("exec stub")
-	prevExec, prevDaemon := toolchainExecFn, ensureRunDaemonFn
-	toolchainExecFn = func(string, []string, []string) error {
-		order = append(order, "switch")
-		return sentinel
+	dir := filepath.Join(repo, ".sparkwing")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
 	}
-	ensureRunDaemonFn = func() { order = append(order, "daemon") }
-	t.Cleanup(func() { toolchainExecFn, ensureRunDaemonFn = prevExec, prevDaemon })
-
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/pipeline\n\ngo 1.26\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	t.Chdir(repo)
-	err := dispatchRun([]string{"hello"})
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("dispatchRun = %v, want the exec stub's error", err)
-	}
-	if len(order) != 1 || order[0] != "switch" {
-		t.Fatalf("call order = %v, want the switch alone", order)
+	calls := []string{}
+	sentinel := errors.New("selected engine failed")
+	err := dispatchRunWithEngine([]string{"hello"}, func(got string, _ func()) error {
+		calls = append(calls, "switch")
+		if got != dir {
+			t.Fatalf("selected source = %s", got)
+		}
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) || len(calls) != 1 || calls[0] != "switch" {
+		t.Fatalf("dispatch = %v calls=%q", err, calls)
 	}
 }

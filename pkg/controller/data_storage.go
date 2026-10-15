@@ -11,7 +11,10 @@ import (
 
 // WithDataObjects supplies the shared physical backend for data bindings and maintenance.
 func (s *Server) WithDataObjects(objects blob.ObjectBackend) *Server {
-	s.data = &DataController{Store: s.store, Objects: objects}
+	if s.dataController == nil {
+		s.dataController = &DataController{Store: s.store}
+	}
+	s.dataController.Objects = objects
 	if s.store != nil {
 		s.store.SetResultBlobRecords(storage.BlobManifests{Objects: objects})
 	}
@@ -19,7 +22,7 @@ func (s *Server) WithDataObjects(objects blob.ObjectBackend) *Server {
 }
 
 func (s *Server) maintainDataObjects(ctx context.Context, lease store.SingletonLease) error {
-	if s.data == nil || s.data.Objects == nil {
+	if s.dataController == nil || s.dataController.Objects == nil {
 		return nil
 	}
 	operator := s.store.AsOperator()
@@ -31,14 +34,14 @@ func (s *Server) maintainDataObjects(ctx context.Context, lease store.SingletonL
 	if err != nil {
 		return fmt.Errorf("mark blob tombstones: %w", err)
 	}
-	removed, err := operator.CollectBlobTombstones(ctx, lease, 5000, s.data.Objects)
+	removed, err := operator.CollectBlobTombstones(ctx, lease, 5000, s.dataController.Objects)
 	if err != nil {
 		return fmt.Errorf("collect blob tombstones: %w", err)
 	}
 	if marked > 0 || removed > 0 {
 		s.logger.Info("collected unreachable data", "marked", marked, "removed", removed)
 	}
-	if objects, ok := s.data.Objects.(*blob.Filesystem); ok {
+	if objects, ok := s.dataController.Objects.(*blob.Filesystem); ok {
 		if _, err := operator.RenewSingletonLease(ctx, lease, StorageMaintenanceInterval); err != nil {
 			return err
 		}
@@ -50,10 +53,10 @@ func (s *Server) maintainDataObjects(ctx context.Context, lease store.SingletonL
 }
 
 func (s *Server) deleteDataLogs(ctx context.Context, team store.Team, run string) (int64, error) {
-	if s.data == nil || s.data.Objects == nil {
+	if s.dataController == nil || s.dataController.Objects == nil {
 		return 0, nil
 	}
-	objects, ok := s.data.Objects.(blob.LogDeleter)
+	objects, ok := s.dataController.Objects.(blob.LogDeleter)
 	if !ok {
 		return 0, fmt.Errorf("data backend cannot delete logs")
 	}

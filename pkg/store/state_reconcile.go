@@ -46,12 +46,20 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 			return holderRefusal()
 		}
 		if request.Source != nil {
-			_, err = transitionNodeTx(ctx, tx, t.team, NodeTransition{Ref: request.Ref, Actor: request.Actor, Cause: CauseMaterialize, Extra: TransitionExtra{Materialize: request.Source}}, tx.now())
+			var materialized bool
+			materialized, err = tryMaterializationTx(ctx, tx, t.team, request)
 			if err != nil {
 				return err
 			}
-			result.Kind, result.Source = Materialize, request.Source
-		} else if request.MaterializeOnly {
+			if materialized {
+				result.Kind, result.Source = Materialize, request.Source
+			}
+		}
+		if result.Kind == Materialize {
+			result.Node, err = readNodeTx(ctx, tx, t.team, request.Ref)
+			return err
+		}
+		if request.MaterializeOnly {
 			result.Kind = Dispatch
 			return nil
 		} else {

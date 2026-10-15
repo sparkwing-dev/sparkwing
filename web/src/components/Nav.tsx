@@ -214,15 +214,15 @@ function ApprovalsBadge({
             <ul>
               {pending.map((a) => (
                 <li
-                  key={`${a.run_id}/${a.node_id}`}
+                  key={`${a.run_id}/${a.job_id}`}
                   className="border-b border-[var(--border)] last:border-0"
                 >
                   <Link
-                    href={`/runs?run=${encodeURIComponent(a.run_id)}&node=${encodeURIComponent(a.node_id)}`}
+                    href={`/runs?run=${encodeURIComponent(a.run_id)}&node=${encodeURIComponent(a.job_id)}`}
                     className="block p-2 text-sm hover:bg-[var(--surface-raised)]"
                     onClick={onClose}
                   >
-                    <div className="font-medium">{a.node_id}</div>
+                    <div className="font-medium">{a.job_id}</div>
                     <div className="text-xs text-[var(--muted)]">
                       {a.run_id}
                     </div>

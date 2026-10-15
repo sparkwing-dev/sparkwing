@@ -70,7 +70,7 @@ On **Team -> GitHub**, choose **Already installed the app? Connect an existing i
 
 Choosing an installation binds it to the active team. The controller checks the signed, unexpired state and PKCE verifier against the account and team, confirms the linked GitHub identity, and consumes the state before checking the selected installation. The encrypted authorization proof carries the IDs shown in the list, so an ID absent from that list answers 404 and cannot bind. For a listed ID, the controller reads the installation with the App credential and repeats the admin check. A selection with valid state, proof and linked identity consumes the state, including across controller replicas; retry by starting a new connection flow.
 
-An installation stops being bound when GitHub reports it deleted, when a team owner calls `DELETE /api/v1/team/github-app/installations/{installation_id}`, or when the operator calls `DELETE /api/v1/github-app/installations/{installation_id}`, which is how a binding moves to another team. Unbinding does not uninstall the App from GitHub.
+An installation stops being bound when GitHub reports it deleted, when a team owner calls `DELETE /api/v1/team/github-app/installations/{installation_id}`, or when the operator calls `DELETE /api/v1/operator/github-app/installations/{installation_id}`, which is how a binding moves to another team. Unbinding does not uninstall the App from GitHub.
 
 ## Runs from GitHub events
 
@@ -139,7 +139,7 @@ GitHub signs the body but not the `X-GitHub-Event` header, so the controller als
 
 Each run a delivery creates spends one of the team's hourly runs (`--max-runs-per-principal-hour`, see [security](security.md)), from the same budget the team's API submissions spend. When the budget runs out before the first run, the delivery answers 429 with `Retry-After`. When it runs out partway, the runs already created stand, the rest are listed with status `shed`, and the delivery is not remembered. A redelivery answers the runs it already started as `duplicate` without spending anything, and spends the budget only on the runs that were shed.
 
-The hourly budget is enforced separately by each controller replica.
+The hourly run budget uses store-wide counters shared by controller replicas.
 
 `installation` deliveries keep the binding current: `deleted` unbinds, `suspend` and `unsuspend` mark it. The repositories an installation covers are read from GitHub when they matter, not stored, so adding or removing a repository on GitHub takes effect on the next delivery. The source credential route, which serves a run that already exists, keeps GitHub's answer for up to a minute, and an `installation_repositories` delivery drops what it kept. GitHub's repository listing is read up to 1000 repositories. For an installation covering more, a repository past that point cannot be confirmed: subscribing it, adding it as an extra repository and following its rename answer 502, an `installation_repositories` delivery answers 502 without withdrawing any schedule except those of the repositories it names as removed and the first 1000 no longer show, and the repository list shows the first 1000.
 
@@ -155,19 +155,21 @@ A symlink at `.sparkwing`, the repository's `go.mod`, or
 downloaded or the pipeline is built. Put pipeline files and module manifests
 in the repository itself.
 
-A runner without the git cache asks `POST /api/v1/runs/{id}/source-credential` with the claim token of its node or trigger claim before it fetches a run's source; a Cloud Job's init container asks it with its own claim token. It is the only route that mints an installation token for a run's source. Any bearer other than a live claim token of the run gets `403 claim_token_required`. The controller resolves the credential in a fixed order:
+Source acquisition uses `POST /api/v1/runs/{run}/source-credential` under a
+live claim with `source.read` and the sealed source binding. Repository identity
+comes from intake. A typed repository name cannot grant access to an App's private
+repositories. App issuance checks the current installation and the authorized
+repository IDs, including any owner-approved extra repositories.
 
-1. When the run's repository is on github.com, an installation bound to the run's team, and not suspended, covers it, and the repository qualifies, the answer is `{kind: "github_app", host, token, expires_at, repositories, sha, branch, ...}`: an installation token restricted, by GitHub ID, to that repository and the extra repositories a team owner listed for it, with `contents: read`. GitHub issues it for at most an hour. The run's repository qualifies when it is the one the App's webhook recorded on the run's trigger, a retry of such a run and a child run of the same repository included, or when the run names it by hand and one of the team's App trigger subscriptions names it; the token then reads the ID that subscription recorded. A repository a member types into a run that no subscription names gets no App token, so an editor cannot reach a private repository of the installation by naming it. The route reads nothing from the request body, so neither the runner nor anything in the fetched tree widens the token.
-2. Otherwise, for a runner's claim, when the team stored a git credential for the host of the run's repository, the controller releases it; see [Team git credentials](git-credentials.md). A Cloud Job's claim never gets one.
-3. Otherwise it answers 404 with `{"error": "no_source_credential"}` and a message naming the remedies: install the App on the repository, subscribe the repository the run names by hand, or store a git credential for the host.
+Stored team credentials require executor consent as well as repository permission.
+The store records each release before exposing a credential. The source owner
+passes credentials through memory or private fetch configuration, applies the
+shared Git environment policy and removes acquisition-owned files after use.
+See [team git credentials](git-credentials.md).
 
-The runner never falls back to credentials of the machine it runs on; only a runner its owner fenced with `--allow-repo` does, and only when the controller releases nothing.
-
-The older `POST /api/v1/runs/{id}/source-token` and `POST /api/v1/runs/{id}/git-credential` routes are removed and answer 404, so a runner older than this release fetches no source straight from this controller; one with the operator's git cache is unaffected.
-
-A node's claim gets at most three credentials, so a mint that failed or whose answer was lost can be asked for again, and none once its attempt has started, since the node's own process holds the same claim token; past that the route answers `403 source_credential_spent`. Any claim asking more than ten times in a minute answers 429 with `Retry-After`. A runner in a retry loop therefore neither mints a stream of tokens nor spends the App's GitHub rate limit. Each token issued is recorded with the team's git credential releases.
-
-The fetch inherits the token on a pipe, and a credential helper scoped to `https://github.com/`, set in the fetch's environment, reads it from there when GitHub asks. A fetch that presents a released credential reads no system, global or environment git config, so no helper, `http.extraHeader` or `insteadOf` rule of the machine takes part, and it runs without the machine's ssh agent. The token is never in an environment variable, the URL, a command line, a file or a log line; the fetch runs without `GIT_TRACE*` and `GIT_CURL_VERBOSE`, which would write it to a trace; and the checkout's own git commands see neither the helper nor the pipe. While the fetch runs, the token is in the memory of git's own processes, which the runner's user can read like any of its processes.
+Native source acquisition and the transactional release binding still need
+integration evidence. Controller revocation blocks later releases, while GitHub
+tokens already issued retain their upstream lifetime.
 
 ## Check runs
 

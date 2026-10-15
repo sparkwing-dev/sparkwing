@@ -82,7 +82,7 @@ running install:
 
 # The first admin token. The controller stores it as an admin credential
 # before it binds, so it never serves a request unauthenticated. Keep the
-# value: it is the admin bearer for `sparkwing cluster tokens create`. The
+# value: it is the admin bearer for `sparkwing tokens create`. The
 # umask makes the file 0600, so no other local account can read it.
 (umask 077 && printf 'swu_%s' "$(openssl rand -hex 24)" > "$HOME/sparkwing-bootstrap-admin")
 kubectl -n sparkwing create secret generic sparkwing-bootstrap-admin \
@@ -267,8 +267,7 @@ for the full schema; a few commonly overridden keys:
 | `sparkwing-runner-bundle.controller.tokenSecret.name` | The runner's bearer-token Secret. | `""` |
 | `sparkwing-runner-bundle.runner.replicas` | Pool size. | `1` |
 | `sparkwing-runner-bundle.runner.labels` | `Requires` labels. | `[cluster]` |
-| `sparkwing-runner-bundle.runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. | `inprocess` |
-| `sparkwing-runner-bundle.runner.automountServiceAccountToken` | Mount the runner pod's API token for `k8s` or `warm` trigger execution. | `false` |
+| `sparkwing-runner-bundle.runner.automountServiceAccountToken` | Mount the runner pod's API token. Ordinary runners need no Kubernetes API access. | `false` |
 | `sparkwing-runner-bundle.volumePermissions.enabled` | Run a CHOWN-only init before the runner. | `true` |
 | `sparkwing-runner-bundle.runner.goCache.persistence.enabled` | Mount a PVC over the runner's `GOCACHE` and `GOMODCACHE`. | `false` |
 | `sparkwing-runner-bundle.runner.goCache.warmModules` | Modules downloaded into `GOMODCACHE` at runner startup. | `[]` |
@@ -279,18 +278,6 @@ you set top-level `nameOverride` or `fullnameOverride`, also set
 the chart stops at render time with this instruction when the URL is missing.
 Nested runner-bundle naming values control the runner resource names.
 
-Set `sparkwing-runner-bundle.runner.triggerRunner.kind=warm` and
-`sparkwing-runner-bundle.runner.automountServiceAccountToken=true` to offer
-unlabeled nodes to outbound-only remote agents before using Kubernetes Jobs
-for overflow. This mode reuses the bundled runner image, namespace, service
-account and pull policy. It grants namespace-scoped Job lifecycle and
-pod-read access to the runner Role. The default `inprocess` mode keeps the
-existing behavior and renders an empty Role.
-The fallback Job runs `sparkwing-runner run-node`, the executable the runner
-image installs, and that process receives the runner token in its environment,
-so use warm mode only for trusted pipeline code and rotate short-lived tokens.
-The compiled pipeline binary interprets `warm`, so upgrade the controller,
-runner, and pipeline module to the same Sparkwing release before enabling it.
 
 ## Auth
 
@@ -313,8 +300,8 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
 
    ```bash
    kubectl -n sparkwing port-forward deploy/sparkwing-controller 9001:80 &
-   sparkwing cluster tokens create --profile <profile-pointing-at-localhost:9001> \
-       --type user --principal admin --scope admin
+   sparkwing tokens create --profile <profile-pointing-at-localhost:9001> \
+       --type member --principal admin --scope runs.read,runs.write
    kubectl -n sparkwing rollout restart deploy/sparkwing-controller
    ```
 

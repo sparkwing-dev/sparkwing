@@ -9,45 +9,29 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
-	"syscall"
+	"strconv"
 	"time"
 
-	flag "github.com/spf13/pflag"
-
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
 
-func runDashboardLogs(args []string) error {
-	fs := flag.NewFlagSet(cmdDashboardLogs.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "", "pretty|json|plain")
-	limit := fs.Int("limit", 40, "last lines; 0 skips history")
-	follow := fs.Bool("follow", false, "follow appended lines until interrupted")
-	if err := parseAndCheck(cmdDashboardLogs, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	mode, err := resolveOutputFormat(*output, fs.Name())
+func streamDashboardLogs(ctx context.Context, inv clisurface.Invocation, openLog func(context.Context) (*os.File, error), out io.Writer, mode string) error {
+	limit, err := dashboardLogLimit(inv)
 	if err != nil {
 		return err
 	}
-	if *limit < 0 {
-		return errors.New("--limit must be nonnegative")
+	if openLog == nil {
+		return dashboardUnavailable("local controller log source")
 	}
-	dp, err := resolveDashboardPaths("")
+	file, err := openLog(ctx)
 	if err != nil {
 		return err
 	}
-	file, err := fssecure.OpenPrivateConfig(dp.log)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
+	if file == nil {
+		return dashboardUnavailable("local controller log source")
 	}
 	defer file.Close()
+	follow := inv.Bool("follow")
 	info, err := file.Stat()
 	if err != nil {
 		return err
@@ -55,7 +39,7 @@ func runDashboardLogs(args []string) error {
 
 	emit := func(line dashboardLogLine) error {
 		if mode == "json" {
-			return json.NewEncoder(os.Stdout).Encode(struct {
+			return json.NewEncoder(out).Encode(struct {
 				Kind      string `json:"kind"`
 				Tool      string `json:"tool"`
 				Service   string `json:"service"`
@@ -66,12 +50,10 @@ func runDashboardLogs(args []string) error {
 		if line.Truncated {
 			line.Text += " … [line truncated]"
 		}
-		_, e := fmt.Fprintln(os.Stdout, line.Text)
+		_, e := fmt.Fprintln(out, line.Text)
 		return e
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	lines, pending, err := dashboardLogTail(ctx, file, info.Size(), 0, *limit, *follow)
+	lines, pending, err := dashboardLogTail(ctx, file, info.Size(), limit, follow)
 	if err != nil {
 		return err
 	}
@@ -80,7 +62,7 @@ func runDashboardLogs(args []string) error {
 			return err
 		}
 	}
-	if !*follow {
+	if !follow {
 		return nil
 	}
 	if _, err = file.Seek(info.Size(), io.SeekStart); err != nil {
@@ -133,12 +115,12 @@ func appendDashboardLog(line *dashboardLogLine, fragment []byte) {
 	line.Text += string(fragment[:take])
 }
 
-func dashboardLogTail(ctx context.Context, file *os.File, size, minimum int64, limit int, follow bool) ([]dashboardLogLine, dashboardLogLine, error) {
+func dashboardLogTail(ctx context.Context, file *os.File, size int64, limit int, follow bool) ([]dashboardLogLine, dashboardLogLine, error) {
 	pending := dashboardLogLine{}
-	if limit == 0 || minimum >= size {
+	if limit == 0 || size == 0 {
 		return nil, pending, nil
 	}
-	start := max(minimum, size-1024*1024)
+	start := max(int64(0), size-1024*1024)
 	data, err := io.ReadAll(io.NewSectionReader(file, start, size-start))
 	if err != nil {
 		return nil, pending, err
@@ -147,12 +129,12 @@ func dashboardLogTail(ctx context.Context, file *os.File, size, minimum int64, l
 		return nil, pending, nil
 	}
 	parts := bytes.Split(bytes.TrimSuffix(data, []byte{'\n'}), []byte{'\n'})
-	prefixOmitted := start > minimum
+	prefixOmitted := start > 0
 	if prefixOmitted && len(parts) > 1 {
 		parts = parts[1:]
 		prefixOmitted = false
 		if len(parts) < limit {
-			return nil, pending, errors.New("requested log history exceeds 1 MiB; reduce --limit or inspect the log file")
+			return nil, pending, errors.New("requested log history exceeds 1 MiB; reduce --tail or inspect the log file")
 		}
 	}
 	if len(parts) > limit {
@@ -177,4 +159,15 @@ func dashboardLogTail(ctx context.Context, file *os.File, size, minimum int64, l
 		}
 	}
 	return lines, pending, nil
+}
+
+func dashboardLogLimit(inv clisurface.Invocation) (int, error) {
+	if !inv.Has("tail") {
+		return 40, nil
+	}
+	limit, err := strconv.Atoi(inv.Value("tail"))
+	if err != nil || limit < 0 {
+		return 0, &clisurface.UsageError{Path: inv.Command.Path, Message: "--tail must be nonnegative"}
+	}
+	return limit, nil
 }

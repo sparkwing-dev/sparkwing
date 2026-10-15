@@ -2,13 +2,18 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
 )
 
 func runGit(dir string, gitArgs ...string) (string, error) {
-	cmd := exec.Command("git", gitArgs...)
+	return runGitContext(context.Background(), dir, gitArgs...)
+}
+
+func runGitContext(ctx context.Context, dir string, gitArgs ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", gitArgs...)
 	if dir != "" {
 		cmd.Dir = dir
 	}

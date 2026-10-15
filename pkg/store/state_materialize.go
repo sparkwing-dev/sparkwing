@@ -160,6 +160,12 @@ func materializationResultTx(ctx context.Context, tx *storeTx, team Team, run Ru
 }
 
 func materializationRef(team Team, source MaterializeSource) (NodeRef, error) {
+	if source.Kind == SourceMemo {
+		if source.Result != nil || source.Record.Team != string(team) || source.Record.Kind != blob.KindMemo {
+			return NodeRef{}, authorityError(apierr.BadRequest, "memo materialization requires a tenant memo record")
+		}
+		return NodeRef{}, nil
+	}
 	if source.Result != nil {
 		result := source.Result
 		if source.Source != (runspec.AttemptIdentity{}) || source.Kind == SourceMemo || result.Ref.RunID == "" || result.Ref.NodeID == "" || result.StateSeq <= 0 {

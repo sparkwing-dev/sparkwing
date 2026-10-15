@@ -479,17 +479,17 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 
 	now := time.Now().UTC()
 	submitter, _, err := st.CreateToken("ci", store.TokenKindService,
-		[]string{controller.ScopeRunsWrite}, 0, now)
+		[]string{"runs.write"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
 	operator, _, err := st.CreateToken("root", store.TokenKindUser,
-		[]string{controller.ScopeAdmin}, 0, now)
+		[]string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
 
-	srvController := controller.New(st, nil).EnableAuthFromStore()
+	srvController := controller.New(st, nil)
 	srv := httptest.NewServer(srvController.Handler())
 	t.Cleanup(srv.Close)
 

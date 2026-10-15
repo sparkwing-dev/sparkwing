@@ -25,8 +25,8 @@ the output, so two runs of the same commit resolve the same graph.
 | Phase | Command | What it covers |
 | --- | --- | --- |
 | install | `install/install.sh` | signature and digest verification, placement, `sparkwing info --first-time` |
-| scaffold | `sparkwing pipeline new` | the pipeline module, its source file, and module-graph resolution |
-| compile | `sparkwing pipeline plan --static` | the first build of the pipeline binary, including every dependency download |
+| scaffold | `sparkwing pipeline new --pipeline demo` | the pipeline module, its source file, and module-graph resolution |
+| compile | `sparkwing pipeline plan --pipeline demo` | the first build of the pipeline binary, including every dependency download |
 | run | `sparkwing run` | dispatching the scaffolded job to a green finish |
 
 The record carries what makes a number readable later: the phases, the

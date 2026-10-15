@@ -27,9 +27,9 @@ primitives.
 - Docker: `Build`, `BuildAndPush`, `Push`, `Login`, `ComputeTags`
 - Git: `ShortCommit`, `IsDirty`, `FilesetHash`, `CurrentBranch`, `TagsAtHead`, `PushTag`
 - Services: `WithServices` (docker-run backed sidecars)
-- Approval gates: `JobApproval` with `ApprovalConfig` (`ApprovalApprove` /
+- Approval gates: `plan.Approval` with `ApprovalConfig` (`ApprovalApprove` /
   `ApprovalDeny` / `ApprovalFail` expiry policies)
-- Plan / modifiers: `CacheKey`, `Requires`, `RunAndAwait`,
+- Plan / modifiers: `MemoKey`, `Requires`, `RunAndAwait`,
   typed `Ref[T]` outputs
 
 **In a sparks library:** anything with deep opinions on specific tooling.
@@ -216,7 +216,7 @@ in their `go.mod`.
 
 ### Flow
 
-On every `sparkwing run <pipeline>` run (and on explicit `sparkwing pipeline sparks resolve`):
+When a pipeline build resolves its sparks:
 
 1. If the `sparks:` block is absent, no-op. Compile with plain `go build`
    against the user's `go.mod`.
@@ -359,7 +359,7 @@ pinning is suspended for the duration. The `pre-release` gate refuses to
 push a committed `go.work` or `go.work.sum`, so this stays a local-only
 convenience -- shipped builds always go through the overlay.
 
-`sparkwing pipeline sparks resolve` still runs while a workspace is in
+Spark resolution still runs while a workspace is in
 scope: it writes `.resolved.mod` as usual but skips materializing
 `.resolved.sum` (the toolchain refuses `go mod download -modfile=X` under
 `go.work`), printing a one-line notice. Remove the workspace file or set
@@ -369,7 +369,7 @@ scope: it writes `.resolved.mod` as usual but skips materializing
 
 Compiled pipeline binaries are cached under a `PipelineCacheKey` that hashes
 the pipeline source, local replace targets, the resolved sparks versions,
-and the overlay modfile contents. Local runs reuse the binary under
+and the overlay modfile contents. Binaries stay in the local cache under
 `$SPARKWING_HOME/cache/pipelines/v1/entries/<key>/`.
 
 Three tiers of cache behavior fall out of that key, each with a rough
@@ -378,13 +378,12 @@ values below are order-of-magnitude on a developer laptop.
 
 | Tier | Latency | When it applies |
 |---|---|---|
-| Binary cache hit | ~0s | Same source, same resolved sparks versions, same overlay. The compiled binary is fetched and executed. The common case. |
+| Binary cache hit | ~0s | Same source, same resolved sparks versions, same overlay. The locally compiled binary is reused. The common case. |
 | Go build cache hit | ~2-3s | New sparks version or drifted overlay, so the binary cache misses, but most dependency object files are still in the Go build cache. Only the changed module recompiles and the final link runs. |
 | Fully cold | ~10-15s | First-ever build in a fresh environment, a Go toolchain version change, or an invalidated build cache. Every object file is rebuilt from source. |
 
-Remote binary transfers use the controller's signed data path. The Go build cache lives on
-the worker pod's scratch volume and dies with the pod, so a fresh pod that
-misses the binary cache pays the cold tier.
+Each machine builds and caches its own pipeline binary. A fresh ephemeral
+runner pays the cold tier until its local compiler cache is populated.
 
 ## `sparkwing pipeline sparks` CLI
 
@@ -393,7 +392,7 @@ and the overlay. What each subcommand does:
 
 - **catalog** -- list the blocks a library offers, read from its `spark.json`,
   with each block's stability and what it does. For a `modules[]` library each
-  row's name is what `inflate --module` takes; a `packages[]` library is one Go
+  row's name is what `inflate --library` takes; a `packages[]` library is one Go
   module, so inflate it by its own module path. `-o plain` prints one row per
   line -- a `modules[]` row as its module path, a `packages[]` row as its
   package name. Without `--library` it reads sparks-core; `--path` reads a
@@ -412,8 +411,8 @@ and the overlay. What each subcommand does:
   For a range or `latest` constraint this picks up any newer tag; for an
   exact pin it is a no-op. Does not edit the `sparks:` block.
 - **add** / **remove** -- add or remove a library entry in the `sparks:` block.
-- **warmup** -- pre-compile pipeline binaries across consumer repos after a
-  release (see [Warmup](#warmup) below).
+  Select its name with `--spark NAME`. JSON receipts contain the action, spark,
+  source, version and project-file path. Plain output contains the spark name.
 - **inflate** -- copy a spark library's source into your repo so you can own
   and edit it (see [Inflating a spark library](#inflating-a-spark-library)
   below).
@@ -423,25 +422,35 @@ For the exact flags each subcommand takes, see
 
 ### Warmup
 
-`sparkwing pipeline sparks warmup` pre-compiles the pipeline binary across consumer
-repos after a sparks library release. It resolves the declared versions,
-compiles the repo's `.sparkwing/` package into its single pipeline binary,
-and stores it in the local binary cache. Pass `--clear-cache` to discard
-that cache first. The next local run with matching build inputs reuses it.
+`sparkwing cache warm` prepares TypeScript dependencies with `npm ci` without
+executing the pipeline. It filters the install environment and masks stdout,
+stderr and preparation errors, including proxy usernames and passwords. A failed
+install or diagnostic write produces an error without a success receipt.
 
-Warmup uses the exact same build path as `sparkwing`, so cache keys match. It is
-an optimization, not a requirement: pipelines always resolve versions on
-build, warmup just removes the first-run compile cost after a release.
+Go preparation requires the shared compiler's explicit environment and diagnostic
+bindings. This build reports `unavailable` for Go warming until that binding is
+present. It does not invoke the legacy compiler, whose environment and output
+bypass those bindings.
 
-Most useful as a post-release step in a sparks library's own release
-pipeline. After tagging and pushing a new version, iterate over consumer
-repos and warm each:
+Pass `--clear-cache` to prune the local binary cache first. Entries held by a
+running process remain protected. JSON returns one `cache_warm` receipt with
+`language`, `status`, `path`, an optional Go `key` and the confirmed `cleared`
+prune result. Plain prints the prepared path. Build and install progress goes
+to stderr. A preparation failure emits no success receipt.
 
-```bash
-for repo in repo-a repo-b repo-c; do
-    cd ~/code/$repo && sparkwing pipeline sparks warmup
-done
+```sh
+sparkwing cache warm --checkout /path/to/repo -o json
+sparkwing cache warm --checkout /path/to/repo --clear-cache -o plain
 ```
+
+<!-- design:begin -->
+The command uses the shared `procenv.Install` implementation before pruning or
+preparing dependencies. Native TypeScript tests use a fake package-manager child
+process to check invocation, filtering and masking. They do not prove a real npm
+dependency installation. Go component tests supply preparation through a fake.
+The native Go compiler still needs its shared binding, matching engine selection,
+complete cache identity and executable-lease ownership.
+<!-- design:end -->
 
 ### Inflating a spark library
 
@@ -452,13 +461,13 @@ upstream. `sparkwing pipeline sparks inflate` does that.
 
 ```bash
 # inflate the sparks-core templates module
-sparkwing pipeline sparks inflate --module templates
+sparkwing pipeline sparks inflate --library templates
 
 # inflate any other spark library by full module path
-sparkwing pipeline sparks inflate --module github.com/example/my-sparks
+sparkwing pipeline sparks inflate --library github.com/example/my-sparks
 ```
 
-A bare `--module` name resolves to a sparks-core block module
+A bare `--library` name resolves to a sparks-core block module
 (`templates` -> `github.com/sparkwing-dev/sparks-core/templates`); a value
 containing a slash is treated as a complete module path.
 
@@ -521,28 +530,30 @@ sparkwing examples --category ci-hygiene
 
 # full detail for one template: description, parameters table,
 # applicability, and its README
-sparkwing examples --name lint-test-go
+sparkwing examples --example lint-test-go
 
 # ... plus the pipeline body rendered with default / <placeholder> params
-sparkwing examples --name lint-test-go --body
+sparkwing examples --example lint-test-go --body
 ```
 
 Filters are advisory metadata on each template. A template that declares
 no cloud is cloud-agnostic and always passes a `--cloud` filter; a
 `--category` filter matches templates that declare that exact category.
 Every view has an `-o json` form for agent consumption -- the list emits
-the manifests, and a `--name` detail view emits the manifest, README, and
+the manifests, and an `--example` detail view emits the manifest, README, and
 (with `--body`) the rendered body.
+Plain output lists example names. With `--example NAME --body -o plain`, it
+prints only that example's source. `--body` requires `--example`.
 
 Once you have read one, start your own from the shape it uses:
 
 ```bash
-sparkwing pipeline new --name deploy --template build-test-deploy
+sparkwing pipeline new --pipeline deploy --template build-test-deploy
 ```
 
 `--template` takes a shape -- `minimal`, `build-test-deploy`,
 `ci-pr-check`, `release`, or `scheduled-report` -- and passing an
-example name is an error, with the `sparkwing examples --name <name>
+example name is an error, with the `sparkwing examples --example <name>
 --body` command to read it instead. To own and modify the catalog
 itself, inflate it (see
 [Inflating a spark library](#inflating-a-spark-library)).

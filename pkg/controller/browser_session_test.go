@@ -2,6 +2,8 @@ package controller_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -19,15 +23,14 @@ import (
 const dashOrigin = "https://dash.example"
 
 type browserFixture struct {
-	t          *testing.T
-	st         *store.Store
-	srv        *controller.Server
-	h          http.Handler
-	token      string
-	aliceToken string
-	sessID     string
-	csrf       string
-	logs       *syncBuffer
+	t      *testing.T
+	st     *store.Store
+	srv    *controller.Server
+	h      http.Handler
+	token  string
+	sessID string
+	csrf   string
+	logs   *syncBuffer
 }
 
 func newBrowserFixture(t *testing.T, d *controller.Dashboard) *browserFixture {
@@ -37,27 +40,37 @@ func newBrowserFixture(t *testing.T, d *controller.Dashboard) *browserFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	now := time.Now().UTC()
-	token, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	aliceToken, alice, err := st.CreateToken("alice", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sessID, sess, err := st.CreateCapabilitySession(context.Background(), alice.Prefix, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	csrf := sess.CSRFToken
+	rawLicense, key := multiTeamLicense(t)
 	logs := &syncBuffer{}
-	srv := controller.New(st, slog.New(slog.NewTextHandler(logs, nil))).EnableAuthFromStore()
+	srv := controller.New(st, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(testCipher(t)).
+		WithLicense(license.Resolve(rawLicense, key, time.Now(), nil))
+	for _, statement := range []string{
+		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('alice','alice@example.test',1,1)`,
+		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','alice','owner',1)`,
+	} {
+		if _, err := st.DB().ExecContext(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sessID, csrf, _, err := st.CreateAccountSession(t.Context(), store.Account{ID: "alice", Email: "alice@example.test"}, store.DefaultTeam, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte(sessID))
+	issued, err := st.ProvisionCapability(t.Context(), capability.ProvisionSpec{
+		Kind: capability.ProvisionMember, Authority: &capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])},
+		Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "alice"}, Team: string(store.DefaultTeam),
+		Grants: []capability.Grant{capability.RunsRead, capability.RunsWrite, capability.RunsControl, capability.TeamAdmin}, Binding: capability.Binding{Kind: capability.BindingNone},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if d != nil {
 		srv.WithDashboard(*d)
 	}
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
-	return &browserFixture{t: t, st: st, srv: srv, h: srv.Handler(), token: token, aliceToken: aliceToken, sessID: sessID, csrf: csrf, logs: logs}
+	return &browserFixture{t: t, st: st, srv: srv, h: srv.Handler(), token: issued.Raw, sessID: sessID, csrf: csrf, logs: logs}
 }
 
 func (f *browserFixture) serve(req *http.Request) *httptest.ResponseRecorder {
@@ -100,7 +113,7 @@ func TestBrowserCookieAuthenticatesTheSessionsPrincipal(t *testing.T) {
 
 func TestBrowserCookieWriteNeedsTheCSRFCheck(t *testing.T) {
 	f := newBrowserFixture(t, &controller.Dashboard{})
-	const path = "/api/v1/secrets/absent"
+	const path = "/api/v1/tokens"
 	for name, spoil := range map[string]func(*http.Request){
 		"no header":        func(r *http.Request) { r.Header.Del("X-CSRF-Token") },
 		"a forged header":  func(r *http.Request) { r.Header.Set("X-CSRF-Token", "forged") },
@@ -108,14 +121,14 @@ func TestBrowserCookieWriteNeedsTheCSRFCheck(t *testing.T) {
 		"another origin":   func(r *http.Request) { r.Header.Set("Origin", "https://evil.example") },
 		"a planted cookie": func(r *http.Request) { plantCSRF(r, "planted"); r.Header.Set("X-CSRF-Token", "planted") },
 	} {
-		req := f.cookieRequest(http.MethodDelete, path, "")
+		req := f.cookieRequest(http.MethodPost, path, `{"grants":[]}`)
 		spoil(req)
 		if rec := f.serve(req); rec.Code != http.StatusForbidden {
 			t.Errorf("%s = %d %q, want 403", name, rec.Code, rec.Body)
 		}
 	}
-	if rec := f.serve(f.cookieRequest(http.MethodDelete, path, "")); rec.Code != http.StatusNotFound {
-		t.Fatalf("a checked write = %d %s, want the route's own 404", rec.Code, rec.Body)
+	if rec := f.serve(f.cookieRequest(http.MethodPost, path, `{"grants":[]}`)); rec.Code != http.StatusCreated {
+		t.Fatalf("a checked write = %d %s, want a member capability", rec.Code, rec.Body)
 	}
 }
 
@@ -132,12 +145,12 @@ func plantCSRF(r *http.Request, value string) {
 func TestBrowserCredentialHeadersBypassTheCookie(t *testing.T) {
 	f := newBrowserFixture(t, &controller.Dashboard{})
 
-	bearer := f.cookieRequest(http.MethodDelete, "/api/v1/secrets/absent", "")
+	bearer := f.cookieRequest(http.MethodPost, "/api/v1/tokens", `{"grants":[]}`)
 	bearer.Header.Del("X-CSRF-Token")
 	bearer.Header.Del("Origin")
 	bearer.Header.Set("Authorization", "Bearer "+f.token)
-	if rec := f.serve(bearer); rec.Code != http.StatusNotFound {
-		t.Fatalf("bearer write beside a cookie = %d %s, want the route's 404 without a CSRF check", rec.Code, rec.Body)
+	if rec := f.serve(bearer); rec.Code != http.StatusCreated {
+		t.Fatalf("bearer write beside a cookie = %d %s, want a delegated capability without a CSRF check", rec.Code, rec.Body)
 	}
 
 	wrong := f.cookieRequest(http.MethodGet, "/api/v1/auth/whoami", "")
@@ -146,14 +159,15 @@ func TestBrowserCredentialHeadersBypassTheCookie(t *testing.T) {
 		t.Fatalf("a refused bearer beside a live cookie = %d, want 401 rather than the cookie's principal", rec.Code)
 	}
 
-	session := httptest.NewRequest(http.MethodDelete, dashOrigin+"/api/v1/secrets/absent", nil)
+	session := httptest.NewRequest(http.MethodPost, dashOrigin+"/api/v1/tokens", strings.NewReader(`{"grants":[]}`))
+	session.Header.Set("Content-Type", "application/json")
 	session.Header.Set("Authorization", "Session "+f.sessID)
-	if rec := f.serve(session); rec.Code != http.StatusNotFound {
-		t.Fatalf("Session-header write = %d %s, want the route's 404 without a CSRF check", rec.Code, rec.Body)
+	if rec := f.serve(session); rec.Code != http.StatusForbidden {
+		t.Fatalf("Session-header write without CSRF = %d %s, want 403", rec.Code, rec.Body)
 	}
 }
 
-func TestBrowserRefusedCookieIsClearedAndAFaultKeepsIt(t *testing.T) {
+func TestBrowserAPICookieFailuresPreserveCookies(t *testing.T) {
 	f := newBrowserFixture(t, &controller.Dashboard{})
 	stale := httptest.NewRequest(http.MethodGet, dashOrigin+"/api/v1/auth/whoami", nil)
 	stale.AddCookie(&http.Cookie{Name: "__Host-sw_session", Value: "swses_unknown"})
@@ -161,8 +175,8 @@ func TestBrowserRefusedCookieIsClearedAndAFaultKeepsIt(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("unknown session = %d, want 401", rec.Code)
 	}
-	if !clearsCookie(rec, "__Host-sw_session") || !clearsCookie(rec, "__Host-sw_csrf") {
-		t.Fatalf("a refused session left its cookies: %v", rec.Header().Values("Set-Cookie"))
+	if len(rec.Header().Values("Set-Cookie")) != 0 {
+		t.Fatalf("API refusal changed cookies: %v", rec.Header().Values("Set-Cookie"))
 	}
 
 	if _, err := f.st.DB().Exec(`DROP TABLE sessions`); err != nil {
@@ -206,11 +220,11 @@ func TestBrowserInsecureCookiesDropThePrefix(t *testing.T) {
 	}
 }
 
-func TestBrowserCookieIgnoredWithoutASignInSurface(t *testing.T) {
+func TestBrowserAPISessionWorksWithoutASignInSurface(t *testing.T) {
 	for name, d := range map[string]*controller.Dashboard{"no dashboard": nil, "local": {Local: true}} {
 		f := newBrowserFixture(t, d)
-		if rec := f.serve(f.cookieRequest(http.MethodGet, "/api/v1/auth/whoami", "")); rec.Code != http.StatusUnauthorized {
-			t.Errorf("%s: whoami by cookie = %d, want 401", name, rec.Code)
+		if rec := f.serve(f.cookieRequest(http.MethodGet, "/api/v1/auth/whoami", "")); rec.Code != http.StatusOK {
+			t.Errorf("%s: whoami by cookie = %d, want 200", name, rec.Code)
 		}
 	}
 }

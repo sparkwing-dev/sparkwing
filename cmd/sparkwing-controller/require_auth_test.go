@@ -1,32 +1,50 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"testing"
-	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/license"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// A multi-team license turns auth on over an empty tokens table, and
-// --require-auth still refuses that start, because it promises a token.
-func TestCheckRequireAuth_AMultiTeamControllerWithNoTokenRefusesToStart(t *testing.T) {
-	srv, st := secretsTestServer(t, license.FeatureMultiTeam)
-	srv.EnableAuthFromStore()
-	if !srv.AuthEnabled() {
-		t.Fatal("a multi-team controller with an empty tokens table left auth off")
+type adminReaderFunc func(context.Context) (bool, error)
+
+func (f adminReaderFunc) HasDeploymentAdministrator(ctx context.Context) (bool, error) { return f(ctx) }
+
+func TestCheckRequireAuthUsesCapabilityRead(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		ready bool
+		err   error
+	}{
+		{"present", true, nil},
+		{"absent", false, nil},
+		{"unreadable", true, errors.New("database unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			reader := adminReaderFunc(func(ctx context.Context) (bool, error) {
+				calls++
+				if ctx != t.Context() {
+					t.Fatal("context lost")
+				}
+				return tc.ready, tc.err
+			})
+			if err := checkRequireAuth(t.Context(), reader, false); err != nil || calls != 0 {
+				t.Fatal("optional gate read administrator state")
+			}
+			err := checkRequireAuth(t.Context(), reader, true)
+			if (err == nil) != (tc.ready && tc.err == nil) || calls != 1 {
+				t.Fatalf("gate: calls=%d err=%v", calls, err)
+			}
+			if tc.err != nil && !errors.Is(err, tc.err) {
+				t.Fatal("backend failure lost")
+			}
+		})
 	}
-	if err := checkRequireAuth(st, true); err == nil {
-		t.Fatal("--require-auth started a controller with an empty tokens table")
+	if err := checkRequireAuth(t.Context(), nil, true); err == nil {
+		t.Fatal("missing capability reader opened startup")
 	}
-	if err := checkRequireAuth(st, false); err != nil {
-		t.Fatalf("without --require-auth the check refused: %v", err)
-	}
-	if _, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, time.Now().UTC()); err != nil {
+	if err := checkRequireAuth(t.Context(), nil, false); err != nil {
 		t.Fatal(err)
-	}
-	if err := checkRequireAuth(st, true); err != nil {
-		t.Fatalf("--require-auth refused a controller holding a token: %v", err)
 	}
 }

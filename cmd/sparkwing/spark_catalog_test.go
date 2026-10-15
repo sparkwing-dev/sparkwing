@@ -30,7 +30,7 @@ func TestSparksCatalogListsModulesFromALocalLibrary(t *testing.T) {
 			t.Errorf("catalog output is missing %q:\n%s", want, out)
 		}
 	}
-	want := "edit one: sparkwing pipeline sparks inflate --module github.com/acme/my-sparks/docker"
+	want := "edit one: sparkwing pipeline sparks inflate --library github.com/acme/my-sparks/docker"
 	if !strings.Contains(out, want) {
 		t.Errorf("catalog must name the module inflate resolves, not a bare path:\n%s", out)
 	}
@@ -52,7 +52,7 @@ func TestSparksCatalogDoesNotOfferPackagesToInflate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
 	}
-	if strings.Contains(out, "inflate --module docker") || strings.Contains(out, "inflate --module kube") {
+	if strings.Contains(out, "inflate --library docker") || strings.Contains(out, "inflate --library kube") {
 		t.Errorf("a packages[] entry is not a module, so it cannot be inflated by name:\n%s", out)
 	}
 	if !strings.Contains(out, "one Go module") {
@@ -83,7 +83,7 @@ func TestSparksCatalogPlainFeedsInflate(t *testing.T) {
 	got := strings.Fields(out)
 	want := []string{"github.com/acme/my-sparks/docker", "github.com/acme/my-sparks/kube"}
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("plain output = %q, want %q -- the values `inflate --module` resolves", out, want)
+		t.Errorf("plain output = %q, want %q -- the values `inflate --library` resolves", out, want)
 	}
 }
 
@@ -103,7 +103,7 @@ func TestSparksCatalogNamesAPackagesLibraryByItsGoModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("catalog: %v", err)
 	}
-	if !strings.Contains(out, "inflate --module github.com/acme/one-module-lib") {
+	if !strings.Contains(out, "inflate --library github.com/acme/one-module-lib") {
 		t.Errorf("catalog does not name the library's own module:\n%s", out)
 	}
 }
@@ -143,10 +143,10 @@ func TestSparksCatalogJSONIsNDJSON(t *testing.T) {
 	}
 }
 
-func TestSparksInflateWithoutModulePointsAtTheCatalog(t *testing.T) {
+func TestSparksInflateWithoutLibraryPointsAtTheCatalog(t *testing.T) {
 	err := runSparksInflate(nil)
 	if err == nil {
-		t.Fatal("expected --module to be required")
+		t.Fatal("expected --library to be required")
 	}
 	if !strings.Contains(err.Error(), "sparks catalog") {
 		t.Errorf("error does not name the verb that lists the choices: %v", err)

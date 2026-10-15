@@ -48,6 +48,8 @@ var Registry = []Var{
 	{Name: "no_proxy", Prefix: false, Class: Tool, Owner: "tool", RemoteBase: true, Doc: "Remote network and CA base; mask embedded credentials."},
 	{Name: "NODE_EXTRA_CA_CERTS", Prefix: false, Class: Tool, Owner: "tool", RemoteBase: true, Doc: "Remote network and CA base; mask embedded credentials."},
 	{Name: "SSL_CERT_FILE", Prefix: false, Class: Tool, Owner: "tool", RemoteBase: true, Doc: "Remote network and CA base; mask embedded credentials."},
+	{Name: "GIT_SSL_CAINFO", Class: Tool, Owner: "tool", RemoteBase: true, Doc: "Git CA bundle path; inherited by source acquisition."},
+	{Name: "GIT_SSL_CAPATH", Class: Tool, Owner: "tool", RemoteBase: true, Doc: "Git CA directory; inherited by source acquisition."},
 	{Name: "NODE_OPTIONS", Prefix: false, Class: Tool, Owner: "tool", Startup: true, Doc: "Job assignment is always startup environment."},
 	{Name: "GODEBUG", Prefix: false, Class: Tool, Owner: "tool", Startup: true, Doc: "Job assignment is always startup environment."},
 	{Name: "GOMAXPROCS", Prefix: false, Class: Tool, Owner: "tool", Startup: true, Doc: "Job assignment is always startup environment."},

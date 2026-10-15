@@ -44,8 +44,8 @@ type signUpStatus struct {
 func (f *identityFixture) signUpStatus() signUpStatus {
 	f.t.Helper()
 	var st signUpStatus
-	if code := f.call("GET", "/api/v1/signups", "Bearer "+f.admin, nil, &st); code != http.StatusOK {
-		f.t.Fatalf("GET /api/v1/signups = %d", code)
+	if code := f.call("GET", "/api/v1/operator/signups", "Bearer "+f.admin, nil, &st); code != http.StatusOK {
+		f.t.Fatalf("GET /api/v1/operator/signups = %d", code)
 	}
 	return st
 }
@@ -53,8 +53,8 @@ func (f *identityFixture) signUpStatus() signUpStatus {
 func (f *identityFixture) setSignUp(body map[string]any) signUpStatus {
 	f.t.Helper()
 	var st signUpStatus
-	if code := f.call("PUT", "/api/v1/signups", "Bearer "+f.admin, body, &st); code != http.StatusOK {
-		f.t.Fatalf("PUT /api/v1/signups %v = %d", body, code)
+	if code := f.call("PUT", "/api/v1/operator/signups", "Bearer "+f.admin, body, &st); code != http.StatusOK {
+		f.t.Fatalf("PUT /api/v1/operator/signups %v = %d", body, code)
 	}
 	return st
 }
@@ -95,15 +95,15 @@ func TestSignUpGateRoutesAreTheOperators(t *testing.T) {
 	owner := f.signIn(person("g-o", "owner@example.com", "Owner"))
 	auth := sessionAuth(owner.SessionID)
 	for _, r := range []struct{ method, path string }{
-		{"GET", "/api/v1/signups"},
-		{"PUT", "/api/v1/signups"},
+		{"GET", "/api/v1/operator/signups"},
+		{"PUT", "/api/v1/operator/signups"},
 	} {
 		if code := f.call(r.method, r.path, auth, map[string]any{"mode": "open"}, nil); code != http.StatusForbidden {
 			t.Errorf("%s %s as a team owner = %d, want 403", r.method, r.path, code)
 		}
 	}
 	for _, body := range []map[string]any{{}, {"mode": "closed"}, {"hourly_limit": -1}} {
-		if code := f.call("PUT", "/api/v1/signups", "Bearer "+f.admin, body, nil); code != http.StatusBadRequest {
+		if code := f.call("PUT", "/api/v1/operator/signups", "Bearer "+f.admin, body, nil); code != http.StatusBadRequest {
 			t.Errorf("PUT %v = %d, want 400", body, code)
 		}
 	}

@@ -185,6 +185,21 @@ func CacheFrom(in Inputs) (string, Origin, error) {
 	return value, origin, err
 }
 
+// StartAt resolves start_at from the intake selection.
+func StartAt(in Inputs) (string, Origin, error) {
+	return pick(in, "start_at", func(v Values) *string { return v.StartAt }, "")
+}
+
+// StopAt resolves stop_at from the intake selection.
+func StopAt(in Inputs) (string, Origin, error) {
+	return pick(in, "stop_at", func(v Values) *string { return v.StopAt }, "")
+}
+
+// Only resolves only from the intake selection.
+func Only(in Inputs) (string, Origin, error) {
+	return pick(in, "only", func(v Values) *string { return v.Only }, "")
+}
+
 // DryRun resolves dry_run from its permitted sources.
 func DryRun(in Inputs) (bool, Origin, error) {
 	fallback := false

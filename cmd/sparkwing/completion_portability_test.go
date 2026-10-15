@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -22,9 +23,9 @@ func TestBashCompletionWithoutMapfile(t *testing.T) {
 sparkwing() {
  case "$1" in
  __complete)
-  case "$2" in
-  verbs) if [[ "${3-}" != leaf && "${3-}" != empty ]]; then printf '%s\n' run; fi ;;
-  flags) if [[ "${3-}" != empty ]]; then printf '%s\n' --profile; fi ;;
+  case "$3" in
+  verbs) if [[ "${5-}" != leaf && "${5-}" != empty ]]; then printf '%s\n' run; fi ;;
+  flags) if [[ "${5-}" != empty ]]; then printf '%s\n' --profile; fi ;;
   esac ;;
  esac
 }
@@ -40,7 +41,7 @@ sparkwing() {
 func TestPipelineCompletionCarriesKindAndDescription(t *testing.T) {
 	projectAt(t, "pipelines:\n  - name: demo\n    entrypoint: Demo\n")
 	out := captureStdout(t, func() {
-		if err := runInternalCompletePipelines(nil); err != nil {
+		if err := runInternalCompletePipelines(os.Stdout, nil); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -56,7 +57,7 @@ func TestFishPipelineProjectionKeepsDescription(t *testing.T) {
 		t.Skip("shell unavailable")
 	}
 	for _, line := range strings.Split(renderFish(), "\n") {
-		if !strings.Contains(line, "__complete pipelines") || !strings.Contains(line, "awk") {
+		if !strings.Contains(line, "__complete --kind pipelines") || !strings.Contains(line, "awk") {
 			continue
 		}
 		_, projection, ok := strings.Cut(line, "| ")

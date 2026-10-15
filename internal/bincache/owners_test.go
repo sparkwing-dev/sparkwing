@@ -78,7 +78,7 @@ func TestLeaseRecordUseMutatesOnlyItsEntry(t *testing.T) {
 
 func TestExplainCacheKey_AgreesWithPipelineCacheKey(t *testing.T) {
 	dir := newPipelineDir(t)
-	key, parts, err := ExplainCacheKey(dir)
+	key, parts, err := ExplainCacheKey(dir, os.Environ())
 	if err != nil {
 		t.Fatalf("ExplainCacheKey: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestExplainCacheKey_AgreesWithPipelineCacheKey(t *testing.T) {
 
 func TestDiffKeyParts_NamesTheChangedInput(t *testing.T) {
 	dir := newPipelineDir(t)
-	_, before, err := ExplainCacheKey(dir)
+	_, before, err := ExplainCacheKey(dir, os.Environ())
 	if err != nil {
 		t.Fatalf("ExplainCacheKey: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestDiffKeyParts_NamesTheChangedInput(t *testing.T) {
 	}
 
 	writeFile(t, filepath.Join(dir, "main.go"), "package main\n\nfunc main() { println(1) }\n")
-	_, after, err := ExplainCacheKey(dir)
+	_, after, err := ExplainCacheKey(dir, os.Environ())
 	if err != nil {
 		t.Fatalf("ExplainCacheKey: %v", err)
 	}

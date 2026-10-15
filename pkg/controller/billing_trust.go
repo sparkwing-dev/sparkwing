@@ -3,8 +3,9 @@ package controller
 import (
 	"errors"
 	"net/http"
-	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -56,39 +57,33 @@ func billingTrustBody(team store.Team, b store.BillingStanding) billingTrustJSON
 	return out
 }
 
-func (s *Server) handleBillingTrustSet(w http.ResponseWriter, r *http.Request) {
-	t, ok := s.namedTenant(w, r, r.PathValue("team"))
-	if !ok {
-		return
+func (s *Server) handleBillingTrustSet(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	writer, err := s.consoleWriter()
+	if err != nil {
+		return err
 	}
 	var req billingTrustReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	}
 	trust := req.Trust
 	switch trust {
 	case trustAutomatic:
 		trust = store.BillingTrustAutomatic
 	case store.BillingTrustAutomatic:
-		writeError(w, http.StatusBadRequest, errors.New("trust must be granted, revoked or automatic"))
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: "trust must be granted, revoked or automatic"}
 	}
-	actor := ""
-	if p, ok := PrincipalFromContext(r.Context()); ok {
-		actor = p.Name
-	}
-	_, after, err := t.SetBillingTrust(r.Context(), store.BillingTrustChange{
+	actor := authorized.Principal.Capability.Subject.ID
+	after, err := writer.ConsoleSetBillingTrust(r.Context(), authorized, store.BillingTrustChange{
 		Trust: trust, Actor: actor, Reason: req.Reason, LimitCents: req.LimitCents,
 		DailyCapCents: req.DailyCapCents, RungCents: req.RungCents, RunnerCap: req.RunnerCap,
-	}, time.Now())
+	})
 	switch {
 	case errors.Is(err, store.ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	case err != nil:
-		s.writeInternalError(w, r, "billing trust change", err)
-		return
+		return err
 	}
-	writeJSON(w, http.StatusOK, billingTrustBody(t.Team(), after))
+	writeJSON(w, http.StatusOK, billingTrustBody(store.Team(authorized.Target.Team), after))
+	return nil
 }

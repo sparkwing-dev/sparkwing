@@ -38,7 +38,7 @@ func measurementWithHTTP(t *testing.T, maxPages int, transport measurementHTTP) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := reporter.(*s3store.ArtifactStore)
+	store := reporter.(*s3store.MeasurementStore)
 	options := store.Client.(*awss3.Client).Options()
 	options.HTTPClient = transport
 	store.Client = awss3.New(options)

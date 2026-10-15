@@ -24,12 +24,12 @@ func newPauseTestServer(t *testing.T) (*Server, string, *store.Store) {
 
 	now := time.Now().UTC()
 	raw, _, err := st.CreateToken("alice", store.TokenKindUser,
-		[]string{ScopeRunsControl}, 0, now)
+		[]string{"runs.control"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
 
-	srv := New(st, nil).WithAuthenticator(NewAuthenticator(st, 0))
+	srv := New(st, nil)
 	return srv, raw, st
 }
 

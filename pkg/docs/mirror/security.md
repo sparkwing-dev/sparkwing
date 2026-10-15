@@ -1,685 +1,150 @@
 # Security
 
-How sparkwing protects code, credentials, and infrastructure.
+Sparkwing authorizes controller operations, execution claims and stored data
+separately. This guide describes the rewrite's security contract. Native
+controller, host, storage and deployment bindings still need acceptance evidence.
+A fake-backed client test proves transport behavior, rather than a deployed
+security boundary. See [rewrite integration](architecture.md).
 
 Report suspected vulnerabilities through
-[GitHub's private vulnerability form](https://github.com/sparkwing-dev/sparkwing/security/advisories/new),
-not a public issue. The repository [security policy](https://github.com/sparkwing-dev/sparkwing/security/policy)
-defines supported versions and the information to include.
+[GitHub's private vulnerability form](https://github.com/sparkwing-dev/sparkwing/security/advisories/new).
+The repository's [security policy](https://github.com/sparkwing-dev/sparkwing/security/policy)
+states what to include.
 
 ## Trust model
 
-Read this before deciding who holds a token and which repositories share a
-deployment.
+The team is the tenant boundary. Within a team, repository authority, secret
+scope, declared read edges, reserved pools and claim bindings narrow access.
+A name, label or uploaded digest grants no authority by itself.
 
-**The default controller has one team. A license enables multiple teams.** In the default mode, projects share the `default` team's authority.
-A controller with a valid multi-team license requires authentication and
-scopes tenant API requests and store operations to the authenticated team.
-Run lists use that team, and a run belonging to another team is answered as
-not found. See [Teams and sign-in](auth.md#teams-and-sign-in).
+The controller derives the caller, team, granted runner identity, repository
+access, billing provenance and claim fence. It rechecks those facts in the same
+transaction as a mutation. The store clock decides whether a holder is live.
+A client cannot replace those facts with headers, environment variables or JSON.
 
-Within a team, scopes and member roles decide which operations a caller may
-perform. The team is the only tenant boundary. Inside a team, two kinds of
-name bound something, and nothing else does:
+Pipeline authors execute code with the permissions of the runner's OS account.
+Same-account code may read the runner's private credential file, other files or
+process memory. Use a dedicated account, container or VM and enroll only code
+that may use those permissions. Private files and filtered process environments
+reduce disclosure. They do not isolate hostile processes sharing an account.
 
-- **Repository and git ref (branch) bound cache writes.** A run's cache and
-  binary entries are written under its own repository and ref, as
-  [Cache service](#cache-service) describes.
-- **A secret's pipeline or shared scope bounds which secrets a run's claim
-  token reads**, as the run's own plan declares them.
+Cloud execution uses root and privileged Docker-in-Docker on exclusive
+team-dedicated nodes. A launcher credential stays outside the Job. Root plus
+DinD is an accepted deployment boundary. Non-root execution is required before
+shared node tenancy. See [Runner Job placement](#runner-job-placement).
 
-Environment, pipeline (outside secrets), cron, concurrency key, git host and
-every other name are labels inside the team. Scopes, roles and claims decide
-who reaches them, not the name, and a service that reads these names must not
-treat one as a boundary.
-
-**Operators and service credentials have separate authority.** `admin` is
-deployment authority. Service scopes such as `credits.grant` and `claims.launch`
-cross teams for their documented operations. Team membership
-does not grant them, and `admin` does not stand in for `credits.grant`.
-Operator powers over a team's billing standing and the sign-up waitlist answer
-only a listed operator's own console session, never a bearer token; see
-[Operator console](auth.md#operator-console). Operators who control the database, encryption keys or
-cluster remain trusted with tenant data. See [Authentication](auth.md) for
-individual scope and claim contracts.
-
-**A self-hosted runner runs pipeline code as its own OS user; give it a
-dedicated one.** Pipeline code on a runner or agent can read every file that
-user can: the agent's `config.yaml` and the runner token in it, ssh keys,
-cloud profiles and other repositories' secrets. No Sparkwing setting changes
-that, the same as GitHub's self-hosted runners. Run each runner as a
-dedicated OS user that holds nothing else, or in a container or VM, and list
-only repositories whose every committer may act as that user.
-
-**Pipeline authors run code on runners.** A pipeline is Go that the runner
-compiles and executes. Running a runner on a workstation authorizes that
-code to execute as the runner service's OS user. The runner keeps its token
-and claim identity in the node host; the job-body child gets a
-process-lifetime bearer for the host's loopback node routes, limited to its
-exact run and node, and the host records execution start, finish and logs
-itself. The child does not inherit arbitrary agent service credentials, and
-its bearer cannot claim or renew work, manage runners, or call administrative
-routes. A claimed trigger's pipeline binary plans the run with no bearer and
-no node routes; the runner hosts the run itself, and only the closures it
-evaluates later and each node's body get a bearer.
-The host names the node's own run on every route it forwards, so a runner
-holding two runs never lets one read the other. Two lookups reach beyond it, both scoped
-to the team by the controller: a cross-pipeline `Ref` reads another
-pipeline's latest run and then only that run's node outputs, and a retry
-asks which child its source attempt spawned so it reuses that child. The latest-run lookup
-answers only a pipeline and node the run's accepted plan declares as a
-reference. Every claim returns a claim token bound to the claim,
-and the work the claim runs uses it in place of the runner's token: a pooled
-node's supervisor, a Kubernetes Job the trigger's binary creates, and a Job
-controller dispatch (`sparkwing-runner launch`) creates. A Job spec therefore
-carries one node's claim token, which reaches only that claim's run and node
-and stops working when the claim ends; see
-[auth.md](auth.md#claim-tokens).
-
-**Hosted execution also depends on the cluster configuration.** The launcher
-keeps its service credential outside the Job. Its Job builder, like the
-Kubernetes runner's, disables service-account token automounting and service
-links, uses a non-root user and a runtime-default seccomp profile, and gives
-the Job scratch storage limited to 20Gi by default. These settings depend on
-appropriate Kubernetes RBAC, enforced network policies, protected controller
-and storage credentials, and controlled volume mounts. A multi-team license
-does not configure those protections or isolate pipeline code from a shared
-host's OS permissions.
-
-**A warm runner's pool token belongs to an operator-only team.** A warm
-runner claims triggers with its pool token, and only for that token's team,
-then runs that team's pipeline code in its own pod or in Jobs it creates. That
-code can read whatever the runner holds: the pool token itself, a GitHub token
-the runner carries for private modules, the service account it creates Jobs
-with, and the cloud role attached to that account, which the cloud's identity
-webhook still injects into Jobs that disable the Kubernetes token. Creating a
-Job in the runner's namespace can mount any Secret there. Every member of the
-pool token's team therefore has operator authority over that namespace and
-role, so put nobody but operators in it. Customer pipelines belong on runners
-whose token's team they own, launched through controller dispatch, which gives
-each Job a claim token for its own work and no Kubernetes API token.
-
-**Source and byte storage use separate authority checks.** Source acquisition
-uses a run checkout and its released source credential. The cache service,
-shared mirrors and cache-grant protocol have been removed. A stored digest
-alone grants no byte-storage read authority.
-
-Execution on a self-hosted machine keeps the agent OS user's file,
-network, and process permissions. It can read the agent's
-`config.yaml`, which holds the runner token, and every other credential in
-that user's home, such as ssh keys and cloud profiles. GitHub gives the same
-warning for its self-hosted runners. Run the agent as a dedicated OS user
-that holds nothing else, or in a container or VM, and admit only repositories
-whose every committer may act as that user. Sparkwing does not
-join a tailnet or configure host networking.
-[threat-model.md](threat-model.md) states what that boundary isolates, what it
-does not, and what an operator does about the rest when a teammate's branch
-runs on a teammate's desktop runner.
-
-Native Windows runners start the body suspended, assign it to a kill-on-close
-Job Object, and then resume it, so nothing the body spawns exists outside the
-job. The supervisor waits for the Job to report zero active processes after
-the body exits or is cancelled. Linux, macOS, and WSL runners instead create a
-dedicated process session, send TERM and then KILL to its remaining members,
-and wait for that session to empty. Unix code can call `setsid` to leave that
-accounting boundary. Pipeline bodies must not daemonize out of their session;
-Sparkwing does not try to contain intentional evasion by code already trusted
-to run as the agent OS user.
-
-**A warm pool shares one OS account across repositories.** Job bodies
-run in separate child processes, but consecutive nodes still share the same
-filesystem, network identity, and OS permissions. A pipeline that writes a
-credential to disk can leave it where the next repository reads it.
-`sparkwing-runner runner --also-claim-triggers --trigger-runner k8s` gives nodes
-separate Job pods, while its plan code still reads the run's declared
-secrets through the trigger's claim.
-
-**`runs.read` applies within the caller's team.** `GET /api/v1/runs`
-combines the caller's filters with the authenticated team. A team reader can
-read that team's pipeline and repository history, including permitted plans,
-events, trends and queue views. Secret argument values are masked, and some
-fields have narrower permissions, such as dispatch environment snapshots.
-Give this scope to someone who may read the team's history. An operator's
-`admin` authority is separate from this team-scoped read permission.
-
-**Accepted trust facts.** Each of these follows from the model above and is
-not a defect. A team editor can read masked secret values: it can mint a
-runner token, start a run, claim it and read, through the claim's token, the
-secrets the run's plan declares, because it already chooses the code that run
-executes. A runner's own token reads no secret, and every node read is
-recorded as a `secret_released` event. The same editor reaches the source of
-the repositories it can already trigger, and no more: a run's GitHub App token
-reads the repository the App's webhook recorded, or a repository the run names
-by hand only when one of the team's App trigger subscriptions names it, so
-typing a private repository of the installation into a run yields no token for
-it. Only a claim token of the run receives a source credential, through
-`POST /api/v1/runs/{id}/source-credential`, and each issue is recorded with
-the team's git credential releases. The operator's launcher token
-receives claim tokens for every team's ready nodes, so whoever holds it reaches
-every team's run secrets and source credentials; keep it
-operator-only. Which secrets a run may read through a claim token is declared
-by that run's own plan, so the boundary is the secret's pipeline or shared
-scope, not the declaration. The masker covers step output that goes through
-the exec helper and the node log, and the process that starts a pipeline
-process masks that process's raw stdout and stderr line by line with every
-value it registered: output printed without the SDK, from a child process that
-inherits its stdio, and the runtime's report of an unrecovered panic. On
-Windows only the pipeline process's own masking applies. Masking matches the
-literal value and its common encodings, so a transformed secret still prints
-in the clear. `docker run -e
-K=V`, which the SDK's docker and services helpers use, puts the value on the
-docker CLI's command line, which every account on a
-shared self-hosted host can read in the process table.
-
-**The laptop dashboard admits the account that started it.** `sparkwing
-serve start` mounts the controller API and the dashboard on one listener
-and requires the token in `serve-token` under the Sparkwing home, a `0600`
-file, so another account on the machine that reaches the loopback port is
-refused. The CLI sends the token as a bearer; a browser signs in once
-through the link `sparkwing serve status` prints, whose single-use code the
-page trades for a session it keeps in `localStorage` and sends as a bearer.
-A session has no expiry and survives restarts; deleting `serve-token` and
-restarting the dashboard ends every browser session.
-No credential rides a cookie, which every port on `127.0.0.1` would receive. The process refuses a
-non-loopback `--addr` unless the operator passes `--allow-remote`, and a
-browser request carrying a foreign `Origin` is refused unless the operator
-named that origin in `--allow-origin`. See
-[local-execution.md](local-execution.md#the-laptop-boundary). The
-cluster-mode controller is the authenticated deployment; laptop mode is a
-single-user tool on a single-user machine.
+An authorized pipeline can use and disclose its secrets. Masking covers values
+registered with the host and their supported encodings. Arbitrary transformations,
+network exfiltration and files outside the host's output path are outside that
+protection. Registered secrets are refused in job, step, group and approval IDs
+because stored identifiers cannot be masked safely.
 
 ## Authentication and authorization
 
-Controller requests carry a bearer token; each route declares
-the scope it needs. Tokens are typed (`swu_`/`swr_`/`swt_`/`sws_`), stored as
-argon2id hashes, and never logged in full. The complete model -- token
-kinds, the scope set, per-endpoint enforcement, the unauthenticated
-endpoints, and first-visit admin bootstrap -- is in
-[auth.md](auth.md). Sparkwing does not have a "root token"; the `admin`
-scope is the superset of the deployment's scopes, short of `credits.grant` and
-the operator console.
+Controller capabilities use `swk_`. Node-host capabilities use `swn_`. Each
+contains 256 random bits. Prefixes select an audience and a public metadata
+selector. They do not grant a role. Lookup hashes the complete bearer with
+SHA-256. Lists and receipts contain metadata, rather than reusable credentials.
+
+Each route declares accepted credential classes, exact grants, binding,
+liveness and retry policy in one registration table. `admin` is not an implied
+wildcard. Deployment operational credentials cannot replace an operator-console
+session. A live caller missing authority gets `403`. A dead credential gets
+`401`. Canonical errors carry `error.code`, message, optional hint and details.
+See [authentication](auth.md) for the grant and issuance contracts.
 
 ### Team boundary route table
 
-Every route behind authentication is listed in one table in the controller
-(`tenantRoutes` in `pkg/controller/tenant_routes.go`) by the tenant resource
-its path names: none, run, trigger, secret, cron, member, invitation, token,
-pipeline, concurrency key, git credential, GitHub runner binding or App
-installation, or for operator routes a team, account, token or other row of
-any team. The team boundary looks up the route the router matched, never
-the raw path, and acts on its owner:
+HTTP and `api.sock` share route registration and authorization. A team-owned
+resource is resolved through the authenticated team. Cross-team access requires
+the route's specific service authority. An unregistered route fails closed.
+Local peer authentication supplies an account identity and still uses the same
+route policy.
 
-- **Run and trigger:** the `{id}` must be a run or trigger of the caller's
-  team. Another team's answers `404` as a missing run.
-- **Names keyed inside a team** (secret, cron, member, invitation, team
-  token, pipeline, concurrency key, git credential, GitHub binding): the
-  caller's team must resolve, or the request is refused `403 no_team`. The
-  handler then reads the name through that team's handle, so another team's
-  row under the same name is never reached.
-- **The signed-in account's own rows** (a sign-in identity, an invitation
-  to accept): the handler admits only a signed-in account.
-- **Rows of any team** (operator team, account and token routes): a test
-  holds each such route to `admin`, the operator's session or a service
-  scope.
+Delegation narrows its parent's authority. Award creates one credential for a
+selected unit under the claim transaction. Exchange consumes a bootstrap once.
+Revocation checks capability and session ancestry, including the requesting
+ancestor of a here award. A root that may claim work has no arbitrary execution
+write authority.
 
-A route missing from the table answers `500` before its handler runs, and a
-test fails while `server.go` registers a route the table lacks. Below the
-routes, every store statement that touches a tenant-owned table carries a
-team predicate unless it is a named, reviewed cross-team exception, such as
-a reaper or a schema step, with its reason.
+Sensitive reads need a live bound claim. A terminal job's bounded final log
+flush does not reopen general data, source or secret access. A job-process
+credential dies with its process. Plan, eval, owner and job bindings retain
+their separate permissions.
 
 ### Request audit log
 
-The controller writes one slog record per request. A read is an `http` record
-carrying the request id, method, route pattern, status and duration. A write
-is an `audit` record that adds `ts`, `client_ip`, `client_class`,
-`principal_kind`, `principal_id` (an account id or a token prefix, never an
-email or a token) and `team`. These also get an `audit` record:
+Audit records identify the route, operation, team, subject and public credential
+prefix. Source and secret releases record their authorized subject. Raw bearers,
+request bodies, captured environment values and secret-bearing hashes do not
+belong in logs or receipts. Public run details are redacted display projections.
+Restricted claims and sealed execution inputs must never be rendered as details.
 
-- reads of secrets, tokens and operator routes (`/api/v1/secrets`,
-  `/api/v1/tokens`, `/api/v1/team/tokens`,
-  `/api/v1/operator/...`);
-- the dashboard's own sign-in and logout routes, and the redirect that finishes
-  a browser flow: a completed OAuth sign-in, identity link or GitHub App
-  connection, recorded with the account it signed in or acted for;
-- every `401` and `403`, whatever the method. A refused bearer shaped like a
-  Sparkwing token adds `attempted_prefix`, the prefix that names the token
-  without granting it.
+## Login and request budgets
 
-Identity changes name their target: `member_id`, `invitation_id`,
-`token_prefix`, `secret_name` and `role`. A target taken from the request is
-recorded only in the shape the store uses: a token as its prefix, even when a
-whole bearer was sent, an id only when it looks like one the store mints, and a
-role only when it is a valid role. A secret name is recorded once the secret
-was found or written. No record carries the raw path, query, body, headers or a
-credential.
+Capability verification uses indexed SHA-256 lookup. Authentication-cache reuse
+requires current ancestry and membership generations and the shared five-second
+TTL. A cached allow is invalid after the relevant revocation or membership
+change. Browser sessions and CSRF checks retain their separate persistence and
+verification rules.
 
-## Login and hashing budgets
+## Login budgets
 
-The sign-in routes (`POST /login` and the Google and GitHub flows) are the
-controller's unauthenticated routes that can reach argon2, so they carry
-their own budgets. One client gets 30 attempts a minute; the listener as a
-whole gets 600 per concurrent argon2 slot, which bounds hashing work without
-throttling a fleet's real sign-ins. Both answer `429` with `Retry-After` once
-drained. An operator token posted to `POST /login` is then verified the way a
-bearer is, under the budget below.
+The sign-in routes (`POST /login` and the Google and GitHub flows) carry their
+own budgets. One client gets 30 attempts a minute. The listener's existing
+budget is 600 per configured hashing slot. Both answer `429` with
+`Retry-After` once drained. The account access token posted to `/login` uses
+SHA-256 capability lookup and fresh ancestry checks. It does not use the
+legacy token table, argon2 verifier or principal cache.
 
-Bearer verification carries the same protection, keyed on the client
-address and the 12-character token prefix, which is public
-(`sparkwing cluster tokens list` prints it). Ten failed verifications for one
-prefix from one client in a minute and further attempts answer `429`
-without hashing. Keying on the pair matters: a prefix-only budget would let a stranger who reads a prefix
-deny that runner its own token on any cold cache. Only a genuine hash
-mismatch spends the budget, so a prefix that matches no stored row costs
-an indexed `SELECT` and nothing more, and a valid token served from the
-principal cache spends nothing at all. The controller also remembers a
-rejected raw token for five seconds, so a client replaying one wrong
-guess pays for a single hash; that cache evicts its coldest entries when
-full rather than closing to new ones.
+Request limits protect a controller process. Persistent usage counters and
+quotas aggregate in the store. The supported deployment has one controller
+replica. Coordinated request limiters and cross-replica live-log fan-out are
+separate work. Flushed log segments remain the persistence fallback.
 
-Every argon2id token verification, from a bearer or the sign-in form, passes
-through a semaphore sized by `--argon2-memory-budget-mb` (chart:
-`controller.argon2MemoryBudgetMB`, default 256). One hash holds 64 MiB
-while it runs, so the default admits four at a time. A hash waits at most
-250ms for a slot; past that the request is shed with `503` and a
-`Retry-After` rather than queued, so a flood cannot grow an unbounded
-backlog behind legitimate callers. Raise the budget only alongside the
-pod's memory limit. A runner whose token is in the 60-second principal
-cache never reaches the store or the semaphore at all, so heartbeats are
-unaffected by a sign-in flood.
+### Limits profiles
 
-An unauthenticated caller never sees a store error verbatim. Anything
-that is not an authentication rejection answers `503` with a generic
-message and the detail goes to the controller log.
+An operator profile supplies defaults for its declared guards. Explicit operator
+values retain their presence, including zero where the setting allows it.
+Inspect effective limits with `sparkwing operator limits show`. Operator ceilings
+refuse excessive pipeline values and name both values. They never silently clamp
+an author request. See [limits](limits.md) for the setting table and budgets.
 
-Login throttling keys on the TCP peer. Only a request accepted on the
-controller's `--trusted-proxy-addr` listener counts against the budget of its
-`X-Real-IP`, so keep that port reachable by the ingress alone.
-Without it every browser shares the proxy's budget, which stays safe and turns
-coarse. [auth.md](auth.md) covers the setup.
-
-## Trigger and list-query limits
-
-`POST /api/v1/triggers` validates `git.repo_url` with the same rules the
-Git cache routes use, so a submission cannot point a runner's clone at a
-local path, a loopback or private address, or a URL carrying embedded
-credentials. It also keeps only the trigger environment keys a run
-actually reads (`GITHUB_REPOSITORY`, the GitHub pull-request context, and
-the `SPARKWING_START_AT` / `STOP_AT` / `ONLY` / `DRY_RUN` / `NO_CACHE`
-switches). Everything else is dropped, including the retry-provenance
-keys the controller writes for itself, so a submission cannot forge the
-repository directory a later local retry trusts.
-
-The clone-URL check canonicalizes the host before it decides: a trailing
-dot, an IPv6 zone id, and the decimal, hexadecimal, and octal spellings of
-an address (`127.1`, `2130706433`, `0x7f000001`, `017700000001`) all
-resolve to the same place a resolver sends them, and loopback, private,
-link-local, carrier-grade NAT, and the cloud metadata names are rejected
-in every spelling.
-
-An scp-like URL is read the way ssh reads it. `git@a@127.0.0.1:repo.git`
-is refused rather than checked as a host named `a@127.0.0.1`, which is
-what the guard used to do while ssh, splitting the destination at the
-last `@`, dialled the loopback address. A host in that form must read as
-a hostname, with no `@`, `:`, or other character in it that would let the
-host checked differ from the host dialled.
-
-A host is also refused when it sits in a name space that only ever points
-inward: `internal`, `local`, `localdomain`, and `home.arpa`, whole or as
-a suffix, beside `localhost`, the cloud metadata names, and the
-`ip6-localhost` and `ip6-loopback` aliases every Debian and Ubuntu
-`/etc/hosts` ships.
-
-**This is a name check, not an address check, and it is not a complete
-SSRF guard.** A name that resolves to a loopback or private address --
-`evil.example.com` pointed at `127.0.0.1` -- passes it. Names are not
-resolved during validation on purpose: `git` resolves the name again when
-it connects, so an address checked here is not the address reached, and a
-`Host` alias in the runner's `~/.ssh/config` can send ssh somewhere the
-name never resolved to at all. Bound clone targets where the connection
-is actually made: an egress network policy on the cache and runner pods
-that permits only the forges you clone from. Deployments that build
-sparkwing can also install a host allowlist through the clone validator's
-host-policy hook, which runs after every check above.
-
-`GITHUB_REPOSITORY` is the one submitted key a runner reads as a clone
-target, and it wins over `git.repo_url`, so it is accepted only as an
-`owner/name` slug. A caller without `admin` also cannot submit
-`trigger.source: github` or the pull-request environment keys: those are
-what the commit-status reporter trusts when it spends the controller's
-GitHub token, and the HMAC-verified webhook is what writes them.
-
-`GET /api/v1/runs?limit=`, `GET /api/v1/triggers?limit=`, and
-`GET /api/v1/runs/{id}/events?limit=` are capped at 1000 rows, in the
-handler and again in the store, so a read-only token cannot ask one
-request to materialize every row with its plan, args, and payload blobs.
-
-`GET /api/v1/services` announces internal service URLs and needs a
-bearer; any valid token satisfies it, and every client that consumes it
-already holds one.
-
-## Flood control
-
-A push storm, a bot opening hundreds of pull requests, or a misconfigured
-hook delivers thousands of events in minutes, and each one costs a run, a
-log object, and a row. Three controller settings bound what one burst can
-create. All three default to off, so a controller that names none admits
-what it always did.
-
-`--max-runs-per-principal-hour N` (chart
-`controller.maxRunsPerPrincipalHour`) caps the runs one principal may
-create in a rolling hour. An authenticated submission spends its own
-token's budget, or its team's for any team but the operator's. A
-[GitHub App](github-app.md) delivery carries no principal, so it spends
-the budget of the team its installation is bound to, once for every run
-it creates. Past the cap the controller answers
-`429` with a `Retry-After` naming the real refill delay, which lengthens
-while a caller keeps knocking at an empty budget. The budget lives in
-controller memory, so a restart or a rollout refills every principal;
-it bounds a burst, not a month.
-
-`--shed-queue-depth N` (chart `controller.shedQueueDepth`) answers `503`
-with a `Retry-After` once the submitting team's pending triggers reach N,
-which is the outer bound on how deep a backlog one burst can grow. Each
-team's queue is measured on its own, so one team's backlog never sheds
-another team's submissions. The depth is read at most once a second per
-team, because a flood asks for it far faster than it changes.
-
-`--trigger-dedupe-window D` (chart `controller.triggerDedupeWindow`)
-answers a content-identical `POST /api/v1/triggers` submission inside D
-with `409` and the run the first one started. The digest covers the
-submitting principal, so a `409` naming a run id only ever reaches the
-principal that owns that run and two tenants submitting the same body get
-a run each. A GitHub App redelivery is deduped regardless: the
-controller keeps the digest of every signed body that started runs for
-90 days, apart from the runs, so a retried delivery answers `duplicate`
-with the runs it already started whatever this window says, and one
-whose runs were deleted starts nothing. A delivery whose event is older
-than those 90 days is refused (see [GitHub App](github-app.md)).
-
-Deduplication runs before the shed and the cap, so a redelivery is
-answered with its original run rather than a refusal, and retrying one
-never spends the submitter's budget.
-
-Every refusal is a status a caller can act on and a line in the
-controller log at warn naming the principal and the reason. Nothing is
-dropped silently.
-
-## Per-runner request budgets
-
-The claim and heartbeat routes can carry a budget of their own, because a
-looping runner reaches them thousands of times a minute without ever
-failing authentication. `--claims-per-runner-minute` and
-`--heartbeats-per-runner-minute` (chart
-`controller.claimsPerRunnerMinute`,
-`controller.heartbeatsPerRunnerMinute`) bound what one runner spends per
-rolling minute. Both default to zero, which is unlimited: an operator
-opts in.
-
-A claim that comes back with a node spends no claim budget. An award is
-work the controller chose to hand out, and the loop that gets one
-re-claims at once rather than waiting its poll interval, so charging it
-would bound how fast a runner may execute rather than how fast it may
-ask. What the budget bounds is empty polling, which a runner can do
-without limit: a pool runner polls every 500ms, or 120 a minute, so 480
-allows four times that cadence. Node claim heartbeats carry no such
-exemption; 1200 suits the 3s cadence the shipped runners keep. Run and
-trigger claim heartbeats are unbudgeted because losing either can reap
-an active run.
-
-The budget is keyed on the runner, not the token. The controller derives
-the runner from the route wherever it can -- the node, run, or agent the
-path names -- and falls back to the `X-Sparkwing-Runner` header only on
-`POST /api/v1/nodes/claim` and `POST /api/v1/triggers/claim`, which name
-nothing. A runner sends one identity for the life of its process (a pool
-runner its holder prefix and process id), not one per poll: a value that
-changed per request would buy a fresh budget on every claim and grow the
-controller's bucket table at the fleet's poll rate.
-
-On those two claim routes the identity is the runner's own word, so a
-holder of a valid token that varies it gets a fresh budget each time.
-`--runners-per-token` (default 64) caps how many such names one caller --
-its team for a signed-up team, its token in the operator's team -- may hold
-at once. A name counts until it has gone unused for ten minutes, a name
-already held keeps working, and a new name past the cap is answered `429`
-naming the cap and counted under
-`sparkwing_principal_throttled_total{route_class="runner_names"}`. So varying
-the name multiplies a caller's budget at most that many times. Size the cap
-above the largest fleet that shares one token. The per-token budget below
-bounds the caller's total, and the token itself is the control that ends it
--- revoke it.
-
-A runner too old to send an identity shares one bucket with its peers on
-those routes, so during a rolling upgrade a shared-token fleet is
-budgeted as one caller there. Size the budgets per runner and the older
-half of the fleet still clears them, or leave the budgets at zero until
-the rollout finishes.
-
-`--limits-profile` turns the budgets on as a set, so a hosted controller
-carries one setting rather than one per guard. It is described under
-[Limits profiles](#limits-profiles) below.
-
-Run and trigger heartbeats and node touch requests are unbudgeted when the
-caller owns the claim. Losing those updates can tear down an active run.
-
-Past a budget the route answers `429` with a `Retry-After` naming the
-real refill delay, and `sparkwing_principal_throttled_total{route_class}`
-counts it. A runner reads a `429` the way it reads a `503`: it waits the
-header out, capped at 30 seconds, and keeps its claim and its node. A
-host's own admission daemon and the loopback controller budget nothing,
-because their callers are unauthenticated and would share one bucket.
-
-## Per-token request budget
-
-`--requests-per-token-minute` bounds ordinary and signed-data requests,
-keyed by signed-up team or by token prefix in the operator's team. It binds
-a caller varying the runner it says it is: on the two claim routes the runner name
-is the caller's own word, so the per-runner budgets above bound a runaway
-loop rather than a holder of a valid token who means harm. The claim-owned
-heartbeats and node touch requests above are spared here too. Past the budget a request answers
-`429` with a `Retry-After`, counted under
-`sparkwing_principal_throttled_total{route_class="token"}`.
-
-`--requests-per-minute-alarm` refuses nothing. It is the rate, across
-every caller, past which the controller logs at warn and counts
-`sparkwing_request_rate_alarm_total`, once a minute: the notice that one
-pod is serving more than it was sized for.
-
-## Idle-poll enforcement
-
-A controller told to enforce its idle-poll suggestion answers a claim
-poll that arrives sooner than the widest interval it suggests with `429`
-and a `Retry-After` naming the rest of the wait, instead of a claim.
-Enforcement starts only once that widest interval has been the standing
-suggestion for a whole interval, so a runner is never refused against an
-interval it was not yet told about, and it lifts the moment work is
-handed out, so a fleet is never held off a queue that has since filled. A
-runner that honors the suggestion waits at least that long by
-construction and is never refused; a runner that ignores the header pays
-the wait it was told about, which is never longer than one suggestion, so
-two refused polls and a runner's own spread still fit inside the
-placement hold. A controller that suggests nothing, which is
-any controller with `--idle-claim-poll=0` and every host's own admission
-daemon, enforces nothing.
-
-The gate guards the two routes that carry the suggestion, `POST
-/api/v1/nodes/claim` and `POST /api/v1/triggers/claim`. A route that
-names the trigger or the node it wants is no idle poll. It is keyed the way the per-runner budgets are, on the token prefix together
-with the runner, and the runner a pool names itself carries its process
-id, so two runner processes on one host are two runners rather than one
-polling twice.
-
-Before turning enforcement on, check what the fleet is running. A caller
-older than v0.50.1 sends no `X-Sparkwing-Runner`, so every such caller on
-one token shares a single gate slot and all but the first are refused
-every round. They hold their claims and their nodes, because a `429` is
-backpressure they already honor, but they pick work up no faster than
-one runner would. Roll the fleet forward first, or leave
-`--idle-claim-poll` at zero until it is.
-
-Enforcement is off unless a limits profile turns it on;
-`sparkwing_principal_throttled_total{route_class="idle_poll"}` counts the
-refusals.
-
-## Limits profiles
-
-`--limits-profile` (chart `controller.limitsProfile`) names a set of
-abuse guards a hosted controller runs with, so provisioning writes one
-setting rather than one per guard. Empty, the default, supplies none: a
-self-hosted controller keeps every budget unlimited and enforces no idle
-poll, which is what it served before profiles existed.
-
-| Guard | `cloud` | `cloud-free` |
-| --- | --- | --- |
-| `--claims-per-runner-minute` | 480 | 240 |
-| `--heartbeats-per-runner-minute` | 1200 | 600 |
-| `--requests-per-token-minute` | 3600 | 600 |
-| `--requests-per-minute-alarm` | 5000 | 5000 |
-| `--egress-max-log-streams` | 50 | 10 |
-| `--egress-max-downloads` | 20 | 5 |
-| `--max-runs-per-principal-hour` | 600 | 60 |
-| `--shed-queue-depth` | 5000 | 1000 |
-| `--egress-daily-alarm-bytes` | 200 GiB | 20 GiB |
-| Idle-poll enforcement | on | on |
-
-The claim budgets are worked from the cadence the shipped claim loop
-keeps rather than from a round number. It polls once every 500ms while
-the queue is empty, which is 120 requests a minute, and claims once more
-for each node it starts: `cloud` allows four times that cadence and
-`cloud-free` twice, so a runner keeping its configured cadence is never
-refused and one stuck in a tight loop is held to about the work it was
-asked to do. The heartbeat budgets carry the shipped cadence with the
-same headroom the recommendation above uses, and the free tier halves the
-paid figure. The per-token budgets carry the rest of what a runner
-spends: a two-slot runner honoring its cadences spends roughly 300
-requests a minute once its node heartbeats and state writes are counted,
-and a signed-up team's tokens share one budget, so the free tier carries
-one such runner and the paid tier a pool of ten with a fifth to spare. The alarm is what one controller pod is sized to serve. The
-egress caps are the concurrency one team is expected to read logs and
-artifacts at.
-The run cap bounds the pending triggers one principal can queue when no
-runner claims them, and the shed depth is the fleet's backstop behind it.
-The egress alarm names the day the controller's traffic runs ahead of the
-pod it was planned for; it refuses nothing. The bill one team can run up
-with no compute at all is bounded by that team's daily download cap,
-`--team-daily-download-free-bytes` and `--team-daily-download-funded-bytes`,
-which applies with or without a profile.
-
-A profile fills a guard only where the command line and the environment
-named none, and a guard the operator named wins whatever its value,
-including an explicit zero that turns it off. Raising one guard on a
-hosted controller is one flag beside the profile rather than a fork of
-it. `sparkwing cluster limits show` prints the budgets in force beside
-the stored compute guards.
+A `429` or `503` retains its structured error and any `Retry-After`. Renewal
+backoff never counts as a successful renewal. Only operations marked safe by the
+route's retry policy can be replayed. A lost claim response or here bearer is
+never automatically replayed to recover one-time authority.
 
 ## GitHub webhooks
 
-The [GitHub App](github-app.md) is the only signed GitHub trigger. Its
-deliveries arrive at `POST /webhooks/github-app`, which checks the
-`X-Hub-Signature-256` HMAC against the App's webhook secret with a
-constant-time compare before doing any work and answers `401` when it
-does not verify. The installation the delivery names picks the team it
-runs in, and GitHub's own record of which installation covers the
-repository is read on every delivery that would start a run, so a
-delivery runs only pipelines a team owner subscribed to a repository
-that owner's installation covers. A pull request from a fork starts
-nothing. Replay is closed by the body digest described above, which
-covers the signed body rather than the `X-GitHub-Delivery` header the
-sender picks.
+The controller verifies the App webhook's HMAC and deduplicates its delivery key.
+A verified default-branch push carries the webhook's repository, ref and SHA.
+Acquisition clones exactly that SHA. A later branch-head lookup cannot change
+those trust facts or reject a valid earlier push. Retry preserves the original
+trust and records its new requester separately.
+
+Source credentials require live authorized claim access. Team Git credentials
+also require a cloud runner of that team or a machine whose owner opted in.
+Local owner credentials remain subject to the repository allow-list. Every
+credential release is audited. See [Git credentials](git-credentials.md).
 
 ## Secrets at rest
 
-Secret values are encrypted with an XChaCha20-Poly1305 AEAD cipher
-(`internal/secrets`), under a fresh random nonce per value, before they
-reach the database. No secret is ever stored as plaintext. The key is 32
-random bytes. Give it to the controller as the `secrets-key` file in its
-[`--credentials-dir`](self-hosting.md#controller-credentials), raw or
-base64-encoded; generate one with `openssl rand -base64 32`. The chart
-projects `controller.secretsKey` into that directory.
+Secrets remain encrypted with authenticated row binding. Their team, name,
+pipeline/shared scope and masking policy participate in the binding. Moving a
+ciphertext to a row with different access cannot make it readable there. A value
+that fails to open is an error, never an empty success value.
 
-Without that file the controller does one of three things:
+Management reads and execution release are separate permissions. Execution
+release checks the accepted plan's declarations and current claim. Pool-restricted
+secrets require a granted reservation and intake-authorized pool access. Here
+execution cannot release pool-restricted secrets. A label spelling the pool name
+supplies neither condition. See [secret management](cli-secrets.md).
 
-- **A license that allows more than one team:** it refuses to start,
-  because it holds other people's credentials.
-- **One team, SQLite state:** it creates a key on the first secret write
-  and keeps it in `secrets.key` beside the database, on the same volume,
-  mode `0600`. It reads that file on every later start. A store that
-  already holds sealed values and no key file refuses to start rather
-  than create a second key.
-- **One team, PostgreSQL state:** it starts and serves everything else,
-  and refuses each secret write with `409` naming the `secrets-key` file
-  to add. It has no volume of its own to keep a generated key on.
-
-Losing the key loses every value sealed under it, so back it up beside the
-database (see [backup-restore.md](backup-restore.md)).
-
-Each envelope (`enc:v3:`) is bound, as additional authenticated data, to
-the fields of the row that decide who may read it: the team that owns
-the row, the secret name, the owning pipeline (empty for an unscoped
-secret), whether an unscoped row is shared with every run, and whether
-the value is masked in run output. Anyone with database write access who
-copies a ciphertext into another team's row, onto another name, into
-another pipeline or onto the unscoped row, or who edits a row to widen
-its own access, gets a value that fails to open rather than one that
-answers there. A read that fails to open answers `500`, never an empty
-value.
-
-Every start with a key reseals the table before the controller serves a
-request. A row held as plaintext, because an older controller wrote it
-while it ran without a key, is sealed; a SQLite controller without a key
-creates its key to do so. A PostgreSQL controller without a key that
-finds a plaintext row refuses to start and names the `secrets-key` file
-that lets it seal them. An envelope from before team
-binding (`enc:v1:`, bound to nothing, or `enc:v2:`, bound to the row but
-not its team) is opened and resealed with its team. Those older envelopes
-were only ever written into the `default` team, so one found in any other
-team was copied there: it is left as it is, logged, and refused on read.
-The pass walks the table in batches, writes a row only if it still holds
-the value the pass read, and logs how many rows it resealed and skipped,
-so a restart repeats nothing. Reads open only `enc:v3:` envelopes, so an
-older envelope written into a row after the pass does not open either.
-
-Before it writes anything, the pass opens a sample of the envelopes
-already stored. If the key opens none of them, it is not the key the
-table was sealed under, and the controller refuses to start instead of
-sealing plaintext rows under it. It refuses the same way when the sample
-holds envelopes but every one is an older envelope outside the `default`
-team, which cannot confirm the key either way.
-
-`sparkwing secrets list` reports `BOUND true` for a row sealed to its
-team (`"bound"` on the API) and `false` for one that is plaintext or an
-older envelope.
-
-A stored envelope carries no key id, so the controller opens it by
-trying the keys it holds. Put the key values were sealed under before the
-current one in the `secrets-key.previous` credential and it becomes a
-read-only fallback.
-
-A value that does not open under the current key is tried against that
-one, which keeps every value readable across a key change. Close the
-window with `sparkwing secrets rotate --profile <name>`
-(`POST /api/v1/secrets/rotate`, admin): it opens every row with the keys
-the controller holds and writes it back sealed and bound to its team
-under the current key, in one transaction, so the rotation lands for the
-whole table or for none of it.
-
-A row that opens under neither key keeps the bytes it had and is named
-in the response, which is what a value written as plaintext before
-encryption was enabled looks like when it happens to start with an
-envelope prefix. The rest of the table still rotates. `sparkwing secrets
-rotate` lists those rows; re-set each one, or name the key it was sealed
-under, and rotate again. Drop the previous key once a rotation reports
-nothing skipped.
-
-Configure the keys in this order for a key change: mount the new key as
-`secretsKey` and the outgoing one as `secretsPreviousKey`, restart,
-rotate, then clear `secretsPreviousKey`. A controller started with a
-previous key and no current key refuses to start, because it would have
-nothing to seal new values under.
-
-Encrypted or not, values leave the server only through the
-authenticated secrets API; pipelines read them with `sparkwing.Secret`
-(see [sdk.md](sdk.md)).
+The final schema is created once before launch. Legacy envelope conversion,
+store backfills and an open-auth bootstrap window are not part of the rewrite's
+startup contract. Provisioning and key rotation require their owning controller
+and store implementation.
 
 ## Release integrity
 
@@ -695,9 +160,7 @@ than accepting an unknown signer.
 
 Container images follow the same rule. The release signs each image digest
 with cosign, then moves `vX.Y.Z` onto it with
-`docker buildx imagetools create`. It no longer scans the image first; the
-CI/CD group is reintroducing that scan deliberately, with the rest of the
-release-side checks. `bin/publish-image-tags.sh` resolves every
+`docker buildx imagetools create`. `bin/publish-image-tags.sh` resolves every
 tag before it moves any of them and fails when one already points at a
 different digest, so a `workflow_dispatch` rerun cannot swap bytes under an
 operator who pinned the tag and a refusal cannot leave the registry
@@ -721,104 +184,60 @@ and the run fails; completing it takes `force_retag: true`, which moves the
 version tag onto bytes nobody pinned. Prefer `publish_images: false` unless
 the published images are known bad.
 
-## Source and stored bytes
+## Signed data access
 
-Runners fetch repositories directly using the run's released credentials.
-The machine owner's allowlist gates fallback to that owner's Git credentials.
-Artifact capture and staging verify length and SHA-256 before publishing files.
-The [storage rewrite contract](storage.md) specifies reference-edge authority
-and records the controller and tenant-store integration still required.
+The controller authorizes `/data` signing and logical records. Bytes transfer
+directly to filesystem or object storage using short-lived signed requests.
+Signed-object clients receive only signed headers and never attach a reusable
+controller credential, including to the controller's own origin.
 
-`pipeline trigger --working-tree` refuses to upload a snapshot whose manifest
-holds a secret-shaped file: by name, by a key or certificate block in any text
-file, or by the first 64 KiB of a settings or manifest file, using the
-credential vocabulary the detached-run environment filter uses. An operator sends such a file only by naming its path
-with `--allow-secret-file`, so the audit of what left the laptop is the command
-itself.
+Every record edge checks authority, integrity and existence. An unrelated
+same-team or same-run receipt cannot authorize another job's manifest. A remote
+cache profile permits only the user's authorized verified-default-branch memo,
+artifact and dependency-cache reads. It exposes no write or binary-fetch method.
+Publication is separate, labels provenance as local and creates no execution
+claim. A publication failure does not change the completed local verdict.
 
-`pipeline trigger --working-tree` uploads one immutable source object per
-submission. The controller binds it to one run and signs reads only for that
-run's live claim. Source bundle lifetime follows its blob record. A live record
-keeps its bytes regardless of object age or deletion of the originating run.
-After record expiry, reachability collection marks unreferenced bytes and
-waits 24 hours before rechecking references and deleting them. Source bytes
-count once against the team's stored bytes. Uncommitted upload tickets release
-their quota holds through leased retention.
+Downloads expire after 60 seconds and verify the digest at EOF. Revocation
+cannot recall a signed URL already issued, a GitHub credential or an OIDC token.
+Record reachability controls blob retention. Collection marks unreferenced bytes,
+waits 24 hours and rechecks before deletion. A live record keeps its bytes even
+when the originating run has expired. Missing or corrupt recoverable bytes fail
+as an error or cache miss. See [data uploads](data-uploads.md).
 
 ## Local daemon socket
 
-The admission daemon (`wingd`) is a per-user process on the developer's
-own machine. It serves a unix socket at
-`/tmp/sparkwing-<uid>-<hash>/d.sock`, where the hash covers
-`SPARKWING_HOME`. The path is a pure function of the home: no
-environment variable moves it, so a cron job, a privilege-elevated
-shell, and an interactive session all resolve the same socket for the
-same home. It sits under `/tmp` rather than under the home because a
-unix socket path is capped at 104 bytes on macOS. Windows uses the
-`Temp` folder inside the account's LocalAppData known folder, resolved
-from the user token rather than from `TEMP`, `TMP` or `USERPROFILE`, and
-creates that folder when it is missing. The trust boundary is the user account,
-not the machine: everyone logged into the same host as the same user
-shares one daemon and can queue, inspect, cancel, and drain its runs.
-The protocol carries no token, and adding one would not change that -- a
-token readable by the account is readable by anything running as the
-account.
+The local controller owns its home's store, queue, admission and dashboard.
+Unix transports require an owner-only socket directory and kernel peer identity.
+Windows uses the authenticated account SID. An unauthenticated or foreign peer
+is refused. A filesystem path alone is not peer authentication.
 
-Other accounts on the host are outside the boundary, and the checks
-below keep them out. The base directory must be a directory carrying the
-sticky bit, or else not be writable by other accounts, so no one can
-rename this user's socket directory away and substitute their own. The
-daemon then creates its socket directory with `Mkdir` and refuses to
-serve if the path already exists as anything but a real directory owned
-by the current uid with mode `0700`, so another account cannot
-pre-create it and collect connections; a foreign directory at that path
-is a refusal that names it, never a redirect somewhere else. The bound
-socket is chmodded to `0600`. Every accepted connection is checked
-against the kernel's peer credentials (`SO_PEERCRED` on Linux,
-`LOCAL_PEERCRED` on macOS and FreeBSD) and dropped when the caller's uid
-differs, which holds even where socket file modes are not enforced on
-connect. Clients apply the same base and directory tests before dialing,
-including the peer sweep behind `sparkwing doctor`, so a `sparkwing`
-command refuses to hand a handshake to a socket sitting in a directory
-this user does not own.
-
-The ownership, mode, and peer-credential checks are unix-only. Windows
-reports no uid for a unix socket peer and has no sticky bit, so the
-per-user LocalAppData folder is the only separation there, and the daemon
-does not refuse a connection on credentials.
-
-Root is not excluded by any of this; a root account on the host can read
-the daemon's memory whatever the socket says. On a shared host, give
-each user their own `SPARKWING_HOME`, which is the unit of daemon
-isolation.
+Same-account processes and root remain inside this trust boundary. Use distinct
+accounts and homes where separate users must be isolated. Browser access follows
+the controller's session and CSRF rules. A separate dashboard bearer, perpetual
+localStorage session and second store opener are not part of that contract.
+See [local execution](local-execution.md#the-laptop-boundary).
 
 ## Container hardening
 
-The Helm charts run the long-lived services as non-root with explicit
-`securityContext` settings (the controller as uid 65534, privilege
-escalation disabled, all Linux capabilities dropped). The controller
-makes no Kubernetes API calls, so `sparkwing-full` binds it to no Role and
-mounts no API token in its pod.
+The controller and launcher hold service authority outside pipeline Jobs.
+Jobs disable service-account token automounting and service links. They receive
+a single-use bootstrap through a private file and exchange it for their awarded
+unit. No runner root or launcher credential enters a Job's argv or environment.
 
 ## Runner Job placement
 
-The Kubernetes runner keeps each team's Jobs on nodes of their own, because a
-node also carries state that team code can reach, such as a Docker daemon. Every
-Job and its pod carry the label `sparkwing.dev/team` with the run's team, and
-every pod requires, on `kubernetes.io/hostname`, that no pod in any namespace
-with that label and a different value runs on its node. Jobs of one team still
-share nodes; a Job of another team waits for, or makes an autoscaler such as
-Karpenter provision, a node with no other team's Job on it.
+Every plan, eval and work Job uses the same builder, root user and privileged
+DinD sidecar. One Job per team-dedicated node is a hard prerequisite. Jobs from
+the same team cannot share a node under this boundary. Aggregate scratch,
+including DinD, is fixed at 20 GiB.
 
-The label value is the team name when it is a DNS label (lowercase letters,
-digits and inner hyphens, at most 63 characters) and does not start with
-`sha256-`. Any other name becomes `sha256-` and the first 40 hex digits of the
-SHA-256 of the name. A run whose trigger names no team is labeled `default`.
-
-The runner that creates these Jobs runs the team's pipeline binary, so the
-placement holds against a mistake, not against a pipeline that talks to the
-Kubernetes API itself. Enforcing it against team code takes an admission policy
-that refuses a runner pod without the label and the term.
+Deployment acceptance must prove exclusive node reservation, enforced default-deny
+network policy, protected metadata/controller/storage access and complete teardown
+before the reservation is released. Labels and rendered YAML alone establish
+none of those facts. The launcher creates Jobs without executing pipeline code.
+Warm-pool dispatchers and pipeline-owned Kubernetes Job builders are removed
+from the final process model.
 
 ## Verified self-update
 
@@ -830,15 +249,22 @@ public key compiled into the binary and verifies the detached
 network beyond fetching the asset, its detached signature, `SHA256SUMS`,
 and `SHA256SUMS.sig`. It
 then checks the download against the signed digest. A signature covers
-bytes, not a tag, so it also runs the staged binary's
-`version -o json --offline` and refuses one that reports a version other
-than the requested release. It then installs atomically,
+bytes, not a tag, so it also reads the staged binary's embedded build
+identity without executing it and refuses a version other than the requested
+release. It then installs atomically,
 and re-hashes the installed file, requiring it to equal the verified
 digest. macOS binaries are ad-hoc-codesigned by the release *before* the
 manifest is hashed, so the verified bytes install unchanged -- nothing is
 mutated after verification. A signature, digest, download, or install
 failure is terminal: the updater never falls back to `go install`, and a
 post-install mismatch restores the prior binary and fails loudly.
+
+The command refreshes managed schedule units and the installed local-controller
+service after installation. A success receipt confirms both steps. If the
+refresh fails, the diagnostic names the installed CLI version and the retry
+command. A build without managed-unit integration refuses before replacement.
+`sparkwing update --dry-run` reads release metadata without installing software
+or touching services.
 
 The signing key is release machinery, not per-user configuration:
 
@@ -857,9 +283,7 @@ The signing key is release machinery, not per-user configuration:
 The `security-scan` pipeline runs four local scanners. The Security GitHub
 Actions workflow runs it on every pull request, on pushes to `main`, and
 weekly. The release workflow calls none of it: a tag builds and publishes the
-commit those runs already covered on `main`. The CI/CD group is reintroducing
-the release-side scanners deliberately.
-
+commit those runs already covered on `main`.
 - **gosec** over the public module and the `.sparkwing` pipeline module,
   with the rules that describe how a CI tool works (file inclusion and
   subprocess arguments named by its inputs, cache directory permissions)
@@ -897,63 +321,21 @@ scanner failure on `main` is what holds a release back, before the tag exists.
 
 ## Operator checklist
 
-- **Set the auth tokens.** With an empty tokens table the controller
-  serves every endpoint unauthenticated. It logs a warning at startup,
-  reports `"auth": "disabled"` on `GET /api/v1/health`, and `sparkwing
-  cloud status --cluster` flags the controller probe as a warning -- fine for a
-  laptop, not for a shared deployment. Pass `--require-auth` so the pod refuses to start with an empty tokens
-  table. A controller with a multi-team license never serves
-  unauthenticated, whatever the tokens table holds. See [auth.md](auth.md).
-- **Provision the first admin token.** Hand the controller the first
-  admin credential and it never serves a request unauthenticated:
-  the `bootstrap-admin-token` file in its
-  [`--credentials-dir`](self-hosting.md#controller-credentials) holds it.
-  When the tokens table is empty the controller stores that token's
-  argon2 hash as an admin credential under the principal
-  `bootstrap:admin` before it binds the listener, which satisfies
-  `--require-auth` on a first start. A table that already holds a token
-  is left alone, so restarting with the same secret mounted neither
-  duplicates the row nor revives a revoked one. The value has to look
-  like a minted token -- `swu_` followed by at least 28 characters, for
-  example `printf 'swu_%s' "$(openssl rand -hex 24)"` -- because a
-  bearer lookup selects on that prefix. The chart mounts it from
-  `controller.bootstrapAdminToken.name` as a file, renders the flag, and
-  renders `--require-auth` from `controller.requireAuth`, which defaults
-  to `true`. Without a bootstrap token the render refuses unless
-  `controller.allowOpenBootstrap=true`, which drops `--require-auth` so
-  the first token can be minted through the open window and auth enabled
-  by a restart. Anything that reaches the Service during that window can
-  mint an admin token, so keep it closed to everything but the operator.
-- **Know what the bootstrap flag treats as an empty table.** It writes
-  when no token *authenticates*: every row is revoked, expired, or the
-  table is empty. That is what recovers a cluster whose only credential
-  was revoked or ran out, and it is also why revoking the bootstrap
-  token while its Secret stays mounted recreates the same credential on
-  the next restart. Unmount the Secret (clear
-  `controller.bootstrapAdminToken.name`) before revoking, or mint a
-  replacement admin token first so the table still holds a live one.
-- **Know the node log bounds.** Node logs reach the controller as
-  segments in its cache bucket or output directory, so they need no
-  service or volume of their own. A runner caps one node attempt's log at
-  64 MiB and stores a truncation marker past it; the controller refuses a
-  segment over 8 MiB and a manifest over 4 MiB. A run's log search and
-  the cross-run grep read at most 256 MiB and scan for at most 10 seconds,
-  and a search requires a run. On a multi-team controller segment bytes
-  count against the team's log share ([Tenant limits](limits.md)), and
-  bucket lifecycle rules expire them
-  ([self-hosting.md](self-hosting.md#node-log-retention)).
-
-- **Terminate TLS at your ingress.** Sparkwing speaks plain HTTP; put it
-  behind an ingress/proxy that enforces HTTPS.
-- **Pin image digests** rather than floating tags. Each release lists them
-  in its `image-digests.json` asset.
-- **Encrypt etcd / your secret store.** Kubernetes Secrets are
-  base64, not encrypted, unless the cluster enables it.
-- **Rotate the GitHub credentials and cache SSH key** periodically.
+- Provision controller authority through the capability issuer and its private
+  credential files. Keep deployment operational grants separate from team and
+  operator-console authority. Do not use an unauthenticated bootstrap window.
+- Terminate TLS at a trusted ingress and keep signing and source credentials
+  outside pipeline Jobs.
+- Reserve one Job per team-dedicated node and verify network enforcement and
+  teardown with native probes before accepting Cloud execution.
+- Configure storage lifecycle rules for the declared log retention classes.
+  Startup refuses signing into a class whose lifecycle rule is absent.
+- Pin verified image digests, encrypt the deployment's secret store and rotate
+  source and release credentials under their owning services' procedures.
 
 ## Controller client redirects
 
-Controller API clients attach their bearer to the initial request. Go's default HTTP
-redirect handling strips that header on redirects to unrelated hosts. A caller
-can supply a different CheckRedirect policy. Signed artifact URLs carry their
-own grant and receive no controller bearer, including on the controller origin.
+Authenticated controller clients refuse redirects because both the credential
+and private execution inputs must remain at the selected controller. Supplying
+a custom HTTP client does not override that rule. Signed-object transfers use
+their own short-lived authority and never inherit the controller bearer.

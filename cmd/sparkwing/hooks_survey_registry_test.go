@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
 func (f *chainFixture) corruptRegistry(t *testing.T) {
@@ -103,6 +101,7 @@ func TestFleetSweeps_RefuseAnUnreadableRegistry(t *testing.T) {
 
 func TestDoctorDiagnose_CarriesTheReasonTheGateSurveyDidNotRun(t *testing.T) {
 	f := newChainFixture(t)
+	writeExec(t, filepath.Join(f.binDir, "go"), "#!/bin/sh\nprintf 'auto\\ngo1.26.9\\noff\\n'\n")
 	f.asProcessEnv(t)
 	f.corruptRegistry(t)
 	t.Setenv("SPARKWING_HOME", filepath.Join(f.root, "home"))
@@ -110,23 +109,11 @@ func TestDoctorDiagnose_CarriesTheReasonTheGateSurveyDidNotRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report, err := diagnose(t.Context(), mustHomePaths(t, ""), "", true)
-	if err != nil {
-		t.Fatalf("diagnose: %v", err)
-	}
+	report := inspectDoctorMachine(t.Context())
 	if report.GatesSurveyError == "" {
 		t.Fatal("doctor reported no ungated repos without saying it never read the registry")
 	}
 	if report.GatesSurveyed != 0 {
 		t.Errorf("gates_surveyed = %d, want 0: nothing was surveyed", report.GatesSurveyed)
 	}
-}
-
-func mustHomePaths(t *testing.T, home string) paths.Paths {
-	t.Helper()
-	p, err := homePaths(home)
-	if err != nil {
-		t.Fatalf("homePaths: %v", err)
-	}
-	return p
 }

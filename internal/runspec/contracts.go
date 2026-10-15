@@ -310,6 +310,9 @@ type Options struct {
 	Checkout              Setting[CheckoutPolicy]  `json:"checkout"`
 	Requires              Setting[[]string]        `json:"requires"`
 	Prefers               Setting[[]string]        `json:"prefers"`
+	StartAt               Setting[string]          `json:"start_at"`
+	StopAt                Setting[string]          `json:"stop_at"`
+	Only                  Setting[string]          `json:"only"`
 	DryRun                Setting[bool]            `json:"dry_run"`
 	NoMemo                Setting[bool]            `json:"no_memo"`
 	AllowRisk             Setting[[]string]        `json:"allow_risk"`

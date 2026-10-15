@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"errors"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,7 +73,7 @@ func failingDaemon(t *testing.T, home string) *atomic.Int64 {
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatalf("mkdir socket dir: %v", err)
 	}
-	ln, err := net.Listen("unix", sock)
+	ln, err := wingd.ListenSocket(sock)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}

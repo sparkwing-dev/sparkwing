@@ -36,26 +36,26 @@ func newEgressFixture(t *testing.T, cfg egress.Config) egressFixture {
 	t.Cleanup(func() { _ = st.Close() })
 
 	now := time.Now().UTC()
-	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken admin: %v", err)
 	}
 	runner, runnerTok, err := st.CreateToken("pool", store.TokenKindRunner, []string{
-		controller.ScopeNodesClaim, controller.ScopeTriggersClaim,
-		controller.ScopeRunsState,
+		"nodes.claim", "triggers.claim",
+		"runs.state",
 	}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken runner: %v", err)
 	}
 	reader, _, err := st.CreateToken("cli", store.TokenKindUser, []string{
-		controller.ScopeRunsRead, controller.ScopeLogsRead,
+		"runs.read", "logs.read",
 	}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken reader: %v", err)
 	}
 
 	meter := egress.New(cfg)
-	ctrl := controller.New(st, nil).EnableAuthFromStore().WithEgressMeter(meter)
+	ctrl := controller.New(st, nil).WithEgressMeter(meter)
 	srv := httptest.NewServer(ctrl.Handler())
 	t.Cleanup(srv.Close)
 	return egressFixture{
@@ -235,8 +235,8 @@ func TestConcurrentDownloadsAreCappedPerPrincipal(t *testing.T) {
 	if err := json.Unmarshal(refused.body, &refusal); err != nil {
 		t.Fatalf("decode refusal: %v -- raw %q", err, refused.body)
 	}
-	if refusal.Code != controller.EgressDownloadLimitCode {
-		t.Fatalf("refusal code = %q, want %q", refusal.Code, controller.EgressDownloadLimitCode)
+	if refusal.Code != "egress_download_limit" {
+		t.Fatalf("refusal code = %q, want %q", refusal.Code, "egress_download_limit")
 	}
 	if !strings.Contains(refusal.Error, "egress concurrency limit reached") {
 		t.Errorf("error member %q does not carry the reason", refusal.Error)
@@ -295,8 +295,8 @@ func TestLiveLogStreamCapRefusesPastTheLimit(t *testing.T) {
 	if err := json.Unmarshal(second.body, &refusal); err != nil {
 		t.Fatalf("decode refusal: %v -- raw %q", err, second.body)
 	}
-	if refusal.Code != controller.EgressStreamLimitCode {
-		t.Fatalf("refusal code = %q, want %q", refusal.Code, controller.EgressStreamLimitCode)
+	if refusal.Code != "egress_stream_limit" {
+		t.Fatalf("refusal code = %q, want %q", refusal.Code, "egress_stream_limit")
 	}
 	if !strings.Contains(refusal.Error, "egress concurrency limit reached") {
 		t.Errorf("error member %q does not carry the reason", refusal.Error)

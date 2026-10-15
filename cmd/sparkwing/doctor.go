@@ -1,91 +1,201 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
-	flag "github.com/spf13/pflag"
-
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-type doctorReport = opsview.DoctorReport
-
-// doctorDefaultTimeout bounds the daemon and local-state checks. Doctor is the
-// verb an operator reaches for when the machine is already misbehaving, so it
-// answers within a budget rather than waiting on whatever is stuck.
+// safety: a stalled controller must leave doctor available as a recovery tool.
 const doctorDefaultTimeout = 10 * time.Second
 
+type doctorFinding struct {
+	Code    string `json:"code"`
+	Unit    string `json:"unit,omitempty"`
+	Message string `json:"message"`
+	Hint    string `json:"hint,omitempty"`
+}
+
+type doctorReport struct {
+	DryRun            bool                           `json:"dry_run"`
+	ControllerChecked bool                           `json:"controller_checked"`
+	ControllerError   string                         `json:"controller_error,omitempty"`
+	Findings          []doctorFinding                `json:"findings"`
+	GoToolchain       *opsview.DoctorGoToolchain     `json:"go_toolchain,omitempty"`
+	ShadowedHooks     *githooks.Shadow               `json:"shadowed_hooks,omitempty"`
+	UngatedRepos      []githooks.RepoGates           `json:"ungated_repos,omitempty"`
+	GatesSurveyed     int                            `json:"gates_surveyed"`
+	GatesSurveyError  string                         `json:"gates_survey_error,omitempty"`
+	InstallConflict   *opsview.DoctorInstallConflict `json:"install_conflict,omitempty"`
+}
+
+type doctorDependencies struct {
+	version string
+	local   func(context.Context) (dashboardServices, error)
+	machine func(context.Context) doctorReport
+}
+
 func runDoctor(args []string) error {
-	fs := flag.NewFlagSet(cmdDoctor.Path, flag.ContinueOnError)
-	dryRun := fs.Bool("dry-run", false, "report what would be repaired without changing anything")
-	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	timeout := fs.Duration("timeout", doctorDefaultTimeout, "budget for the daemon and local-state checks; each takes a slice of it")
-	if err := parseAndCheck(cmdDoctor, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
+	return runDoctorCommand(context.Background(), args, os.Stdout, doctorDependencies{
+		version: installedVersion(), local: resolveLocalServices, machine: inspectDoctorMachine,
+	})
+}
+
+func runDoctorCommand(ctx context.Context, args []string, out io.Writer, deps doctorDependencies) error {
+	inv, err := clisurface.Parse("sparkwing", append([]string{"doctor"}, args...))
+	if err != nil {
+		return err
+	}
+	format := inv.Output(color.IsInteractiveStdout())
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), out, format)
+	}
+	timeout := doctorDefaultTimeout
+	if inv.Has("timeout") {
+		timeout, err = time.ParseDuration(inv.Value("timeout"))
+		if err != nil || timeout <= 0 {
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: "--timeout must be positive"}
 		}
-		return err
 	}
-	format, err := resolveTTYAwareOutput(*outFmt, cmdDoctor.Path)
-	if err != nil {
-		return err
-	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("doctor: unexpected positional %q (doctor takes flags only)", fs.Arg(0))
-	}
-
-	if *timeout <= 0 {
-		return fmt.Errorf("doctor: --timeout must be positive, got %s", *timeout)
-	}
-	p, err := homePaths("")
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-
-	report, err := diagnose(ctx, p, "", *dryRun)
-	if err != nil {
-		return renderPartialDoctor(os.Stdout, report, format, fmt.Errorf("doctor: %w", err))
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	return renderDoctor(os.Stdout, report, format)
+	report, inspectErr := inspectDoctor(ctx, inv.Bool("dry-run"), deps)
+	return errors.Join(renderDoctor(out, report, format), inspectErr)
 }
 
-func renderPartialDoctor(w io.Writer, report doctorReport, format string, diagnoseErr error) error {
-	// A spent budget is the one failure whose partial report is worth more than
-	// the error: what doctor did reach is what says where the machine is stuck.
-	if len(report.PermissionRepairs) == 0 && !report.PermissionAuditUnverified &&
-		!errors.Is(diagnoseErr, context.DeadlineExceeded) {
-		return diagnoseErr
-	}
-	return errors.Join(renderDoctor(w, report, format), diagnoseErr)
-}
-
-func diagnose(ctx context.Context, p paths.Paths, home string, dryRun bool) (doctorReport, error) {
-	report, err := opsview.Diagnose(ctx, p, home, installedVersion(), dryRun)
-	if err != nil {
+func inspectDoctor(ctx context.Context, dryRun bool, deps doctorDependencies) (doctorReport, error) {
+	report := deps.machine(ctx)
+	report.DryRun = dryRun
+	report.Findings = []doctorFinding{}
+	if err := ctx.Err(); err != nil {
+		report.ControllerError = err.Error()
 		return report, err
 	}
-	report.GoToolchain = diagnoseGoToolchain(ctx)
-	report.ShadowedHooks = shadowedHooks(runGit)
-	surveyed, err := surveyFleet(runGit)
+	services, err := deps.local(ctx)
+	if err == nil && services.lifecycle == nil {
+		err = &apierr.Error{Code: apierr.Unavailable, Message: "doctor requires local controller diagnostics", Hint: "the local controller integration is unavailable in this build"}
+	}
+	if err != nil {
+		report.ControllerError = err.Error()
+		return report, err
+	}
+	if err := ctx.Err(); err != nil {
+		report.ControllerError = err.Error()
+		return report, err
+	}
+	// safety: lifecycle inspection must not acquire a second writing store or start an activity hold.
+	findings, err := services.lifecycle.Doctor(ctx, deps.version)
+	for _, finding := range findings {
+		if strings.TrimSpace(finding.Code) == "" || strings.TrimSpace(finding.Message) == "" {
+			err = errors.Join(err, &apierr.Error{Code: apierr.ProtocolError, Message: "local controller returned a finding without a code or message"})
+			continue
+		}
+		report.Findings = append(report.Findings, doctorFinding{Code: finding.Code, Unit: finding.Unit, Message: finding.Message, Hint: finding.Hint})
+	}
+	err = errors.Join(err, ctx.Err())
+	if err != nil {
+		report.ControllerError = err.Error()
+	} else {
+		report.ControllerChecked = true
+	}
+	return report, err
+}
+
+func inspectDoctorMachine(ctx context.Context) doctorReport {
+	git := func(dir string, args ...string) (string, error) { return runGitContext(ctx, dir, args...) }
+	report := doctorReport{GoToolchain: diagnoseGoToolchain(ctx), ShadowedHooks: shadowedHooks(git)}
+	surveyed, err := surveyFleet(git)
 	if err != nil {
 		report.GatesSurveyError = err.Error()
-		return report, nil
+	} else {
+		report.GatesSurveyed = len(surveyed)
+		report.UngatedRepos = githooks.Ungated(surveyed)
 	}
-	report.GatesSurveyed = len(surveyed)
-	report.UngatedRepos = githooks.Ungated(surveyed)
-	return report, nil
+	if self, err := installsite.Self(); err == nil {
+		home, _ := os.UserHomeDir()
+		report.InstallConflict = opsview.InstallConflict(self, installsite.SearchDirs(os.Getenv, home))
+	}
+	return report
+}
+
+func renderDoctor(out io.Writer, report doctorReport, format string) error {
+	if format == "json" {
+		return json.NewEncoder(out).Encode(report)
+	}
+	var text bytes.Buffer
+	if format == "plain" {
+		fmt.Fprintf(&text, "controller_checked\t%t\n", report.ControllerChecked)
+		if report.ControllerError != "" {
+			fmt.Fprintf(&text, "controller_error\t%s\n", report.ControllerError)
+		}
+		for _, finding := range report.Findings {
+			fmt.Fprintf(&text, "finding\t%s\t%s\t%s\t%s\n", finding.Code, finding.Unit, finding.Message, finding.Hint)
+		}
+	} else {
+		if report.ControllerError != "" {
+			fmt.Fprintf(&text, "Local controller checks incomplete: %s\n", report.ControllerError)
+		} else if report.ControllerChecked && len(report.Findings) == 0 {
+			fmt.Fprintln(&text, "No local controller findings.")
+		}
+		for _, finding := range report.Findings {
+			fmt.Fprintf(&text, "%s [%s]: %s\n", finding.Code, emptyDash(finding.Unit), finding.Message)
+			if finding.Hint != "" {
+				fmt.Fprintf(&text, "  hint: %s\n", finding.Hint)
+			}
+		}
+	}
+	renderDoctorMachine(&text, report)
+	_, err := out.Write(text.Bytes())
+	return err
+}
+
+func renderDoctorMachine(text *bytes.Buffer, report doctorReport) {
+	if toolchain := report.GoToolchain; toolchain != nil {
+		fmt.Fprintf(text, "go_toolchain\t%s\t%s\n", toolchain.Current, toolchain.Verdict)
+		fmt.Fprintf(text, "go_toolchain_setting\t%s\ngo_toolchain_source\t%s\ngo_toolchain_floor\t%s\ngo_toolchain_module\t%s\n", toolchain.Setting, toolchain.Source, toolchain.Floor, toolchain.Module)
+		if toolchain.Override != "" {
+			fmt.Fprintf(text, "go_toolchain_override\t%s\n", toolchain.Override)
+		}
+		if toolchain.Error != "" {
+			fmt.Fprintf(text, "go_toolchain_error\t%s\n", toolchain.Error)
+		}
+	}
+	if shadow := report.ShadowedHooks; shadow != nil {
+		fmt.Fprintf(text, "shadowed_hooks\t%s\n%s\n", shadow.Summary(), shadow.Remedy())
+	}
+	if report.GatesSurveyError != "" {
+		fmt.Fprintf(text, "gates_survey_error\t%s\n", report.GatesSurveyError)
+	} else {
+		fmt.Fprintf(text, "gates_surveyed\t%d\n", report.GatesSurveyed)
+		for _, row := range report.UngatedRepos {
+			fmt.Fprintf(text, "ungated_repo\t%s\t%s\tsparkwing pipeline hooks install --checkout %s\n", row.Repo, strings.Join(row.NotFiring(), ","), row.Repo)
+		}
+	}
+	if conflict := report.InstallConflict; conflict != nil {
+		fmt.Fprintf(text, "executable\t%s\n", conflict.Self)
+		for _, copy := range conflict.Competing {
+			fmt.Fprintf(text, "competing_install\t%s\t%s\t%s\t%s\n", copy.Path, installsite.RetireRemedy(copy.Path).Text(), copy.Modified, copy.Resolved)
+		}
+	}
 }
 
 func shadowedHooks(git githooks.Git) *githooks.Shadow {
@@ -100,10 +210,6 @@ func shadowedHooks(git githooks.Git) *githooks.Shadow {
 	return shadow
 }
 
-func renderDoctor(w io.Writer, r doctorReport, format string) error {
-	return opsview.RenderDoctor(w, r, format)
-}
-
 func diagnoseGoToolchain(ctx context.Context) *opsview.DoctorGoToolchain {
 	dir, err := findSparkwingDir()
 	if err != nil {
@@ -113,7 +219,7 @@ func diagnoseGoToolchain(ctx context.Context) *opsview.DoctorGoToolchain {
 }
 
 func inspectDoctorGoToolchain(ctx context.Context, dir string, env []string) *opsview.DoctorGoToolchain {
-	overlay := bincache.EffectiveOverlay(dir)
+	overlay := bincache.EffectiveOverlay(dir, os.Environ())
 	report, err := gotoolchain.Inspect(ctx, dir, env, overlay)
 	finding := &opsview.DoctorGoToolchain{
 		Current: report.Current, Setting: report.Setting, Source: report.Source,

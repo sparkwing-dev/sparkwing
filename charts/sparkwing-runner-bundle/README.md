@@ -28,10 +28,10 @@ pod replacements, enable `runner.goCache.persistence`. More than one runner repl
 requires a `ReadWriteMany` volume. An existing claim can be selected through
 `runner.goCache.persistence.existingClaim`.
 
-The runner has its own ServiceAccount. Its token is not mounted by default.
-`runner.triggerRunner.kind` selects the installed runtime's trigger execution
-mode. Modes that launch Kubernetes jobs require the runner token mount and the
-corresponding RBAC. Review rendered resources before installing those modes.
+The runner has its own ServiceAccount. Its token is not mounted by default
+because the runner claims work through the controller and needs no Kubernetes
+API access. The launcher owns Kubernetes Jobs. Set `runner.alsoClaimTriggers`
+to `false` for a pool that should claim only jobs.
 
 `values.yaml` lists the supported chart values. Cache-service values, credentials,
 Deployments, Services, PVCs and NetworkPolicies have been removed.

@@ -2,417 +2,121 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
+	"runtime"
 
-	"golang.org/x/mod/modfile"
-	"golang.org/x/mod/semver"
-
-	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	sharedtoolchain "github.com/sparkwing-dev/sparkwing/internal/toolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
 )
 
-const (
-	toolchainModeEnv   = "SPARKWING_TOOLCHAIN"
-	toolchainActiveEnv = "SPARKWING_TOOLCHAIN_ACTIVE"
+const toolchainModeEnv = "SPARKWING_TOOLCHAIN"
 
-	toolchainModeAuto  = "auto"
-	toolchainModeLocal = "local"
-
-	releaseManifestName = "SHA256SUMS"
-)
-
-var toolchainActive string
-
-var toolchainExecFn = execToolchain
-
-func takeToolchainActive() string {
-	value := strings.TrimSpace(os.Getenv(toolchainActiveEnv))
-	_ = os.Unsetenv(toolchainActiveEnv)
-	return value
-}
-
-type toolchainAction int
-
-const (
-	toolchainStay toolchainAction = iota
-	toolchainSwitch
-	toolchainRefuse
-)
-
-type toolchainDecision struct {
-	action    toolchainAction
-	installed string
-	pin       string
-}
-
-type sdkPin struct {
-	version string
-	replace string
-}
-
-func switchToolchain(sparkwingDir string) error {
-	if err := checkToolchainIdentity(); err != nil {
-		return err
-	}
-	mode, err := toolchainMode(os.Getenv(toolchainModeEnv))
-	if err != nil {
-		return err
-	}
-	pin, err := readSDKPin(sparkwingDir)
-	if err != nil {
-		return nil
-	}
-	decision := planToolchainSwitch(installedVersion(), pin, mode, toolchainActive)
-	switch decision.action {
-	case toolchainStay:
-		return nil
-	case toolchainRefuse:
-		return toolchainLocalRefusal(decision)
-	}
-	return runToolchain(os.Stderr, decision)
-}
-
-func checkToolchainIdentity() error {
-	if toolchainActive == "" {
-		return nil
-	}
-	if installed := installedVersion(); isReleaseTag(installed) && installed != toolchainActive {
-		return fmt.Errorf(
-			"switched to sparkwing %s but this binary reports %s; the toolchain store entry for %s holds another release. "+
-				"Delete %s and re-run",
-			toolchainActive, installed, toolchainActive, tildePath(toolchainStorePath(toolchainActive)))
-	}
-	return nil
-}
-
-func toolchainStorePath(version string) string {
-	p, err := paths.DefaultPaths()
-	if err != nil {
-		return filepath.Join("$SPARKWING_HOME", "toolchains", version)
-	}
-	return p.ToolchainDir(version)
-}
-
-func toolchainMode(raw string) (string, error) {
-	mode, err := sharedtoolchain.ParseMode(raw)
-	if err != nil {
-		return "", exitErrorf(2, "%s=%q is not a valid value: use %s (fetch and run the CLI this repo pins) or %s (never fetch)",
-			toolchainModeEnv, raw, toolchainModeAuto, toolchainModeLocal)
-	}
-	return string(mode), nil
-}
-
-func planToolchainSwitch(installed string, pin sdkPin, mode, active string) toolchainDecision {
-	d := toolchainDecision{installed: installed, pin: pin.version}
-	action := sharedtoolchain.Select(sharedtoolchain.Selection{
-		Installed: installed, Required: pin.version, Replacement: pin.replace,
-		Active: active, Mode: sharedtoolchain.Mode(mode),
-	})
-	switch action {
-	case sharedtoolchain.Refuse:
-		d.action = toolchainRefuse
-	case sharedtoolchain.Switch:
-		d.action = toolchainSwitch
-	}
-	return d
-}
-
-func isReleaseTag(v string) bool {
-	return buildinfo.IsReleaseVersion(v)
-}
-
-func readSDKPin(sparkwingDir string) (sdkPin, error) {
-	path := filepath.Join(sparkwingDir, "go.mod")
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return sdkPin{}, err
-	}
-	mf, err := modfile.Parse(path, body, nil)
-	if err != nil {
-		return sdkPin{}, err
-	}
-	var pin sdkPin
-	for _, req := range mf.Require {
-		if req.Mod.Path == sdkModulePath {
-			pin.version = req.Mod.Version
-		}
-	}
-	for _, rep := range mf.Replace {
-		if rep.Old.Path != sdkModulePath {
-			continue
-		}
-		pin.replace = rep.New.Path
-		if rep.New.Version != "" {
-			pin.replace += "@" + rep.New.Version
-		}
-		break
-	}
-	return pin, nil
-}
-
-func runToolchain(w io.Writer, d toolchainDecision) error {
-	binPath, served, err := ensureToolchainBinary(w, d.pin)
-	if err != nil {
-		return err
-	}
-	if served == d.installed {
-		return nil
-	}
-	fmt.Fprintf(w, "sparkwing: running %s from %s because this repo pins SDK %s and the installed sparkwing is %s\n",
-		served, tildePath(binPath), d.pin, d.installed)
-	return toolchainExecFn(binPath, toolchainArgs(), setEnv(os.Environ(), toolchainActiveEnv, served))
-}
-
-// safety: the replay runs from the directory -C already entered, so it gets
-// the argv after the root flags were applied; replaying -C would resolve a
-// relative operand a second time, and an older pinned CLI has no root -C.
 var toolchainReplayArgs []string
+
+var (
+	readEnginePin    = engine.ReadPin
+	enginePinVersion = engine.VersionForPin
+)
+
+type pipelineEngineSwitcher struct {
+	readPin     func(string, engine.SDKKind) (engine.Pin, error)
+	versionFor  func(engine.Pin) (string, error)
+	resolve     func(context.Context, engine.Pin, releaseasset.Target, toolchain.Mode) (engine.Resolved, error)
+	execute     func(string, []string, []string) error
+	current     string
+	target      releaseasset.Target
+	diagnostics io.Writer
+}
+
+func switchToolchain(dir string, beforeExec func()) error {
+	ctx, stop, _ := interruptContext()
+	defer stop()
+	typescript, err := pipelineentry.IsTypeScript(dir)
+	if err != nil {
+		return err
+	}
+	sdk := engine.GoSDK
+	if typescript {
+		sdk = engine.TypeScriptSDK
+	}
+	current, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	command := pipelineEngineSwitcher{
+		readPin: readEnginePin, versionFor: enginePinVersion,
+		current: current, target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
+		execute: func(binary string, args, environment []string) error {
+			if beforeExec != nil {
+				beforeExec()
+			}
+			return execToolchain(binary, args, environment)
+		}, diagnostics: os.Stderr,
+		resolve: func(ctx context.Context, pin engine.Pin, target releaseasset.Target, mode toolchain.Mode) (engine.Resolved, error) {
+			resolver, err := engine.NewResolver(engine.Config{Mode: mode})
+			if err != nil {
+				return engine.Resolved{}, err
+			}
+			return resolver.Resolve(ctx, pin, target)
+		},
+	}
+	return command.run(ctx, dir, sdk, os.Getenv(toolchainModeEnv), toolchainArgs(), os.Environ())
+}
+
+func (c pipelineEngineSwitcher) run(ctx context.Context, dir string, sdk engine.SDKKind, rawMode string, args, environment []string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	mode, err := toolchain.ParseMode(rawMode)
+	if err != nil {
+		return &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
+	}
+	pin, err := c.readPin(dir, sdk)
+	if err := errors.Join(err, ctx.Err()); err != nil {
+		return err
+	}
+	version, err := c.versionFor(pin)
+	if err := errors.Join(err, ctx.Err()); err != nil {
+		return err
+	}
+	selected, err := c.resolve(ctx, pin, c.target, mode)
+	if err := errors.Join(err, ctx.Err()); err != nil {
+		return err
+	}
+	if pin.SDK != sdk || selected.Identity.Pin != pin || selected.Identity.Version != version ||
+		selected.Identity.ManifestDigest == "" || selected.AssetDigest == "" ||
+		selected.Target != c.target || !filepath.IsAbs(selected.Executable) {
+		return &apierr.Error{Code: apierr.ProtocolMismatch, Message: "engine resolver returned a different pin or incomplete verified executable"}
+	}
+	if err := errors.Join(writeEngineNotices(c.diagnostics, selected.Notices), ctx.Err()); err != nil {
+		return err
+	}
+	current, err := os.Stat(c.current)
+	if err != nil {
+		return err
+	}
+	target, err := os.Stat(selected.Executable)
+	if err != nil {
+		return err
+	}
+	if os.SameFile(current, target) {
+		return ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return c.execute(selected.Executable, args, environment)
+}
 
 func toolchainArgs() []string {
 	if toolchainReplayArgs != nil {
 		return toolchainReplayArgs
 	}
 	return os.Args[1:]
-}
-
-// safety: returns the release it actually served, which is an older one when
-// safety: version names a tag whose binaries are not published yet; the caller
-// safety: has to exec and announce that release, not the pin.
-func ensureToolchainBinary(w io.Writer, version string) (string, string, error) {
-	if !isReleaseTag(version) {
-		return "", "", fmt.Errorf("toolchain version %q is not a canonical stable release", version)
-	}
-	p, err := paths.DefaultPaths()
-	if err != nil {
-		return "", "", fmt.Errorf("locate the sparkwing home for the toolchain store: %w", err)
-	}
-	dir := p.ToolchainDir(version)
-	binPath := p.ToolchainBinary(version)
-	stale := ""
-	if verifyErr := verifyStoredToolchain(dir, binPath); verifyErr == nil {
-		removeLegacyDigestSidecar(binPath)
-		return binPath, version, nil
-	} else if _, statErr := os.Stat(binPath); statErr == nil {
-		stale = verifyErr.Error()
-		fmt.Fprintf(w, "sparkwing: stored toolchain %s failed verification (%s); fetching again\n", version, stale)
-	}
-	verified, err := fetchVerifiedRelease(version)
-	if err != nil {
-		// safety: only a missing asset means "not published yet". A signature
-		// safety: or digest failure is a release that is wrong, and serving an
-		// safety: older one in its place would hide it.
-		if !isAssetNotPublished(err) {
-			return "", "", toolchainFetchError(version, stale, err)
-		}
-		published, fallbackErr := newestPublishedRelease(version)
-		if fallbackErr != nil {
-			return "", "", toolchainFetchError(version, stale, err)
-		}
-		fmt.Fprintf(w, "sparkwing: %s has no published binaries yet (%v); falling back to %s\n", version, err, published)
-		return ensureToolchainBinary(w, published)
-	}
-	if err := installToolchainRelease(w, p, dir, binPath, version, verified); err != nil {
-		return "", "", err
-	}
-	return binPath, version, nil
-}
-
-// safety: a repository pins a tag the moment it exists, so the newest release
-// safety: below it is what serves until the release workflow publishes.
-func newestPublishedRelease(version string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), versionFetchTimeout)
-	defer cancel()
-	latest, err := updateFetchLatest(ctx)
-	if err != nil {
-		return "", err
-	}
-	if !isReleaseTag(latest) {
-		return "", fmt.Errorf("latest release %q is not a canonical stable release", latest)
-	}
-	if semver.Compare(latest, version) >= 0 {
-		return "", fmt.Errorf("latest release %s does not precede %s", latest, version)
-	}
-	return latest, nil
-}
-
-func installToolchainRelease(w io.Writer, p paths.Paths, dir, binPath, version string, verified verifiedReleaseAsset) error {
-	if err := prepareToolchainStore(p, dir); err != nil {
-		return err
-	}
-	stage, err := writeInstallTemp(dir, ".sparkwing-toolchain-*", verified.bytes, 0o700)
-	if err != nil {
-		return fmt.Errorf("stage %s: %w", binPath, err)
-	}
-	if err := assertReleaseVersion(stage, version); err != nil {
-		_ = os.Remove(stage)
-		return err
-	}
-	if err := os.Rename(stage, binPath); err != nil {
-		_ = os.Remove(stage)
-		return fmt.Errorf("install %s: %w", binPath, err)
-	}
-	if err := writeToolchainFile(dir, filepath.Join(dir, releaseManifestName), verified.manifest); err != nil {
-		return err
-	}
-	if err := writeToolchainFile(dir, filepath.Join(dir, releaseManifestName+".sig"), verified.manifestSig); err != nil {
-		return err
-	}
-	removeLegacyDigestSidecar(binPath)
-	fmt.Fprintf(w, "sparkwing: fetched and verified sparkwing %s from %s (sha256 %s)\n",
-		version, releaseBaseURL(version), verified.digest)
-	return nil
-}
-
-func removeLegacyDigestSidecar(binPath string) {
-	_ = os.Remove(binPath + ".sha256")
-}
-
-func prepareToolchainStore(p paths.Paths, dir string) error {
-	if err := p.EnsureRoot(); err != nil {
-		return fmt.Errorf("prepare sparkwing home %s: %w", p.Root, err)
-	}
-	if err := fssecure.EnsureDir(p.ToolchainsDir()); err != nil {
-		return fmt.Errorf("create toolchain store %s: %w", p.ToolchainsDir(), err)
-	}
-	if err := fssecure.EnsureDir(dir); err != nil {
-		return fmt.Errorf("create toolchain store %s: %w", dir, err)
-	}
-	return nil
-}
-
-func verifyStoredToolchain(dir, binPath string) error {
-	// #nosec G703 -- the caller admits only canonical stable release names beneath the private toolchain store
-	manifest, err := os.ReadFile(filepath.Join(dir, releaseManifestName))
-	if err != nil {
-		return err
-	}
-	// #nosec G703 -- the caller admits only canonical stable release names beneath the private toolchain store
-	manifestSig, err := os.ReadFile(filepath.Join(dir, releaseManifestName+".sig"))
-	if err != nil {
-		return err
-	}
-	publicKeys, err := releasePublicKeys()
-	if err != nil {
-		return err
-	}
-	if !manifestSignedByTrustSet(publicKeys, manifest, manifestSig) {
-		return fmt.Errorf("%s in %s does not carry a signature from the updater trust set", releaseManifestName, dir)
-	}
-	want, err := manifestDigest(manifest, releaseAssetName())
-	if err != nil {
-		return err
-	}
-	got, err := sha256OfFile(binPath)
-	if err != nil {
-		return err
-	}
-	if got != want {
-		return fmt.Errorf("stored %s has digest %s, but %s records %s", binPath, got, releaseManifestName, want)
-	}
-	return ensureToolchainExecutable(binPath)
-}
-
-func ensureToolchainExecutable(binPath string) error {
-	info, err := os.Stat(binPath)
-	if err != nil {
-		return err
-	}
-	if info.Mode().Perm()&0o100 != 0 {
-		return nil
-	}
-	if err := os.Chmod(binPath, 0o700); err != nil {
-		return fmt.Errorf("restore the execute bit on %s: %w", binPath, err)
-	}
-	return nil
-}
-
-// safety: a signature covers bytes, not a tag, so an older signed release
-// served under a newer tag passes verification; only the binary's own report
-// catches that substitution.
-func assertReleaseVersion(binPath, version string) error {
-	args := []string{"version", "-o", "json", "--offline"}
-	// #nosec G702 -- the release binary this process just verified against its signed manifest, asked only for its version
-	out, err := exec.Command(binPath, args...).Output()
-	if err != nil {
-		return fmt.Errorf("ask the fetched sparkwing %s for its version: `%s %s`: %w%s",
-			version, binPath, strings.Join(args, " "), err, childStderr(err))
-	}
-	var report VersionReport
-	if err := json.Unmarshal(out, &report); err != nil {
-		return fmt.Errorf("parse the version the fetched sparkwing %s reports: %w", version, err)
-	}
-	if report.CLI.Installed != version {
-		return fmt.Errorf(
-			"the release published as %s reports itself as %s; refusing it",
-			version, report.CLI.Installed)
-	}
-	return nil
-}
-
-func childStderr(err error) string {
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
-		return ""
-	}
-	text := strings.TrimSpace(string(exitErr.Stderr))
-	if text == "" {
-		return ""
-	}
-	return "\n  it printed: " + text
-}
-
-// safety: rename is the only atomic step; a concurrent reader must never see a partial file.
-func writeToolchainFile(dir, dest string, body []byte) error {
-	tmp, err := writeInstallTemp(dir, ".sparkwing-toolchain-*", body, fssecure.FileMode)
-	if err != nil {
-		return fmt.Errorf("stage %s: %w", dest, err)
-	}
-	if err := os.Rename(tmp, dest); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("install %s: %w", dest, err)
-	}
-	return nil
-}
-
-func toolchainLocalRefusal(d toolchainDecision) error {
-	return fmt.Errorf(
-		"this repo pins SDK %s but the installed sparkwing is %s and %s=%s forbids fetching one. "+
-			"Install %s with `sparkwing update --version %s`, or unset %s",
-		d.pin, d.installed, toolchainModeEnv, toolchainModeLocal, d.pin, d.pin, toolchainModeEnv)
-}
-
-func toolchainFetchError(version, stale string, cause error) error {
-	reason := ""
-	if stale != "" {
-		reason = "\n  the copy already in the store was rejected: " + stale
-	}
-	return fmt.Errorf(
-		"fetch sparkwing %s, the SDK version this repo pins: %w%s\n"+
-			"  tried %s\n"+
-			"  install it by hand with `sparkwing update --version %s` and re-run",
-		version, cause, reason, releaseBaseURL(version), version)
-}
-
-func tildePath(path string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return path
-	}
-	if path == home {
-		return "~"
-	}
-	prefix := home + string(os.PathSeparator)
-	if strings.HasPrefix(path, prefix) {
-		return "~" + string(os.PathSeparator) + strings.TrimPrefix(path, prefix)
-	}
-	return path
 }

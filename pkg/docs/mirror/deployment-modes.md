@@ -31,9 +31,9 @@ For: a developer working on pipelines on their own laptop.
 
 Tradeoff: nobody else can see what you ran.
 
-No configuration needed. `sparkwing run hello` and
-`sparkwing serve start` work out of the box. The path stays open with no
-network once the first build has fetched its modules; see
+Local runs need no controller connection profile. The dashboard lifecycle still
+needs native runtime and service bindings in this rewrite build. See
+[Local dashboard](native-mode.md) for that boundary and
 [offline after the first build](getting-started.md#offline-after-the-first-build).
 
 ## Sparkwing Cloud
@@ -44,11 +44,11 @@ it over outbound HTTPS and hold no database credential. The same command
 reaches any controller you can reach, including one your team runs:
 
 ```bash
-sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
+sparkwing profiles add --controller https://api.sparkwing.example --token-stdin
 ```
 
-It stores the token you pass on stdin, writes the profile, and prints the
-dashboard URL. `sparkwing pipeline trigger <pipeline> --profile NAME` then
+It stores the token from stdin in the private machine file and prints
+connection metadata with the token redacted. `sparkwing pipeline trigger <pipeline> --profile NAME` then
 runs a pipeline there. See
 [connecting to Sparkwing Cloud](getting-started.md#sparkwing-cloud) for
 the flags, and [hosted controller](#hosted-controller) below for
@@ -65,8 +65,10 @@ A central controller process owns Postgres + object-store credentials
 and serves the dashboard. Clients reach it over HTTP and never see the
 underlying database: `sparkwing pipeline trigger` submits a run, the
 controller dispatches it to its runners, and the dashboard and read verbs
-read the results. The controller handles version translation; clients
-only need to match the controller's API major version.
+read the results. The final version contract selects the exact verified engine
+from the checkout's SDK pin. That engine owns its matching node protocol. The
+controller API retains each engine's twelve-month compatibility window. Native
+engine resolution and host composition remain integration requirements.
 
 For: a team that wants shared run history on infrastructure it runs,
 including untrusted CI, public webhooks, or a need to decouple client and
@@ -95,7 +97,7 @@ A profile with a `controller:` block points commands at that controller
 over HTTP; the nested `token:` authenticates. `sparkwing pipeline trigger
 <pipeline> --profile prod` runs a pipeline there, and `--working-tree` runs
 uncommitted changes from an uploaded snapshot. Register or edit
-profiles with `sparkwing configure profiles`. See
+profiles with `sparkwing profiles`. See
 [Self-hosting](self-hosting.md) for the supported local and controller
 deployment paths.
 
@@ -128,12 +130,13 @@ after ten minutes of silence from a node that never reported finishing.
 refuses a non-positive value.
 
 A reader is told when it misses bytes: a stream of the ring alone
-(`GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream`) whose buffer dropped
+(`GET /api/v1/runs/{run}/jobs/{job}/logs/stream`) whose buffer dropped
 lines before the reader got to them emits one marker line naming the
 dropped byte count, and a reader still attached when the buffer is
-released gets a marker pointing it at the durable copy. The merged read
-(`GET /api/v1/runs/{id}/logs/{node}/stream`) instead waits for the segment
-that covers dropped bytes. Only a node the run actually has can write to a ring.
+released gets a marker pointing it at the durable copy. The shared paged read (`GET /api/v1/runs/{run}/logs`) carries tagged
+subjects, an opaque cursor and a completeness flag. Persisted segments cover
+live-ring gaps. Native cursor and final-segment integration still needs
+acceptance evidence.
 
 #### Schema versioning
 
@@ -196,10 +199,11 @@ the team runs.
 
 ## Local runs
 
-Every `sparkwing run` records to this machine: the local secret store,
-SQLite, and the run directories. Its node processes share artifacts
-through `SPARKWING_CACHE_URL` when it is set, and through `cache/` under
-the Sparkwing home otherwise.
+Every `sparkwing run` records through this machine's local controller. Jobs
+exchange artifacts through its local blob store. `--sw-cache-from PROFILE`
+opts into authorized, read-only remote cache access. `--publish PROFILE` copies
+completed results to a controller with local provenance. See
+[local execution](local-execution.md) for native binding requirements.
 
 ## Selecting a profile
 

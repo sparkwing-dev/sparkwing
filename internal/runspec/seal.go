@@ -77,6 +77,16 @@ func SealSpec(input SealInput) (Spec, error) {
 	if err := verifyRequest(input.Request); err != nil {
 		return Spec{}, err
 	}
+	request, resolved := input.Request.Request.Options, input.Resolved.Settings.Options
+	sameSelection := func(want, got Setting[string]) bool {
+		if want.Set {
+			return want == got
+		}
+		return got.Value == ""
+	}
+	if !sameSelection(request.StartAt, resolved.StartAt) || !sameSelection(request.StopAt, resolved.StopAt) || !sameSelection(request.Only, resolved.Only) {
+		return Spec{}, errors.New("resolved step window differs from sealed intake")
+	}
 	if !validResolvedClassification(input.Request.Request, input.Resolved) {
 		return Spec{}, errors.New("resolved secret argument classification is missing or invalid")
 	}

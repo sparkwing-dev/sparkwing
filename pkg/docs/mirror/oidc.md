@@ -7,7 +7,7 @@ The model matches GitHub Actions' `id-token: write`: the cloud provider fetches 
 ## How it works
 
 1. The controller publishes `https://<external-url>/.well-known/openid-configuration` and the key set it points at, `https://<external-url>/.well-known/jwks.json`. Both are public and cacheable for one hour.
-2. Pipeline code calls `sparkwing.OIDCToken(ctx, audience)`. The runner executing the node sends `POST /api/v1/runs/{id}/oidc-token` with its own credential.
+2. Pipeline code calls `sparkwing.OIDCToken(ctx, audience)`. The host sends `POST /api/v1/runs/{run}/oidc-token` using the job’s live, run-bound capability with `oidc.mint`.
 3. The controller signs a token only for a caller holding a live claim on that run, reads every claim from the run's stored rows, and never from the request, except the audience.
 4. The pipeline hands the token to the cloud provider's token exchange.
 
@@ -57,7 +57,7 @@ Header: `{"alg": "RS256", "kid": "<thumbprint>", "typ": "JWT"}`.
 | `aud` | The audience the caller asked for, as one string. |
 | `sub` | The subject described below. |
 | `iat`, `nbf` | Issue time. |
-| `exp` | Issue time plus the token lifetime, shortened to the requesting credential's own expiry when that comes first. |
+| `exp` | Issue time plus the token lifetime, shortened by the claim’s ancestry expiry, revocation deadline and binding deadline. |
 | `jti` | 128 random bits, hex. |
 | `team` | The run's team slug. |
 | `pipeline` | The pipeline name. |
@@ -90,7 +90,7 @@ The same pipeline run for pull request 42, even one opened from a branch named `
 team:acme:repository_id:123456789:pipeline:deploy:trigger:pull_request:runner:runner:ref:refs/pull/42/head
 ```
 
-The format is stable. Segments run from the coarsest to the finest: a team holds repositories and a repository declares pipelines, so a trust condition that ends in `*` narrows by prefix, and `team:acme:repository_id:123456789:*` admits every pipeline of one repository. A pipeline name is not unique across repositories: a team that subscribes `deploy` on two repositories gets two subjects that differ only in `repository_id`. `<repository_id>` is empty when no GitHub App delivery names the repository, which leaves `repository_id::` in the subject, and `<ref>` is empty when the run names no branch, which leaves the subject ending in `:ref:`. Every segment value is printable ASCII with no `:`, `*` or `?`: the controller refuses to sign for a run whose pipeline or branch holds one of those, whitespace, or any other character (422), so a submitted value cannot forge a later segment or match as a wildcard.
+The format is stable. Segments run from the coarsest to the finest: a team holds repositories and a repository declares pipelines, so a trust condition that ends in `*` narrows by prefix, and `team:acme:repository_id:123456789:*` admits every pipeline of one repository. A pipeline name is not unique across repositories: a team that subscribes `deploy` on two repositories gets two subjects that differ only in `repository_id`. `<repository_id>` is empty when no GitHub App delivery names the repository, which leaves `repository_id::` in the subject, and `<ref>` is empty when the run names no branch, which leaves the subject ending in `:ref:`. Every segment value is printable ASCII with no `:`, `*` or `?`: the controller refuses to sign for a run whose pipeline or branch holds one of those, whitespace, or any other character (400), so a submitted value cannot forge a later segment or match as a wildcard.
 
 ### What each value proves
 
@@ -103,13 +103,15 @@ The controller vouches for the team: it comes from the claimed run's row. The ot
   - `manual`: every other start, including the CLI, the dashboard, the API and a retry. Its `pipeline`, `ref`, `sha` and `repository` are whatever the submitter sent.
 - `runner_kind` names the credential that holds the claim: `runner` for a runner token, `github-actions` for the credential a GitHub Actions job received through the [runner exchange](github-actions-runners.md), `user` for a person's token or session, which is how a laptop run reaches the controller, and `service` for a service token.
 
-A deploy role should therefore require one repository, `trigger:push` on a protected branch, and `runner:runner`, for example `team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main`. Branch protection on that repository then decides what reaches `main`; the protection of another repository that subscribes the same pipeline name does not matter, because its runs carry a different `repository_id`. A policy that leaves the repository open, such as `team:acme:repository_id:*:pipeline:deploy:...`, accepts a push to `main` of any repository the team subscribes, and so trusts the weakest branch protection among them. The cache service keeps to the same line: a run writes cache, binary and artifact entries only under its own repository and ref, and a run whose ref and commit its submitter chose writes under a ref of its own, so neither a pull request's run nor a manual run naming `main` can replace what a `main` push restores. Scheduled runs that follow the branch tip, and retries or children of a push that keep its commit, still write under the real ref, so they warm the caches a push reads. A self-hosted runner's machine is a different matter: whoever runs code on it can change what the next run there finds. `trigger:cron` means "launched by a schedule that any editor can create", so reserve it for roles an editor may use anyway. A trust policy that accepts `trigger:manual` or `runner:user` accepts any code a team member with `runs.write` chooses to run.
+A deploy role should therefore require one repository, `trigger:push` on a protected branch, and `runner:runner`, for example `team:acme:repository_id:123456789:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main`. Branch protection on that repository then decides what reaches `main`; the protection of another repository that subscribes the same pipeline name does not matter, because its runs carry a different `repository_id`. A policy that leaves the repository open, such as `team:acme:repository_id:*:pipeline:deploy:...`, accepts a push to `main` of any repository the team subscribes, and so trusts the weakest branch protection among them. Data records retain their repository, ref and provenance. The controller
+authorizes every reference edge. Manual publication retains local provenance,
+and pipeline binaries stay local. A self-hosted runner's machine is a different matter: whoever runs code on it can change what the next run there finds. `trigger:cron` means "launched by a schedule that any editor can create", so reserve it for roles an editor may use anyway. A trust policy that accepts `trigger:manual` or `runner:user` accepts any code a team member with `runs.write` chooses to run.
 
 A GitHub Actions job holding a claim can request a token too, with `runner:github-actions`. Such a job's credential is bound to its own repository's push, so its `ref` and `sha` are the push's. GitHub's own ID token proves the same repository facts with GitHub as the issuer; use Sparkwing's when the trust policy should name the Sparkwing team and pipeline.
 
 ## The token route
 
-`POST /api/v1/runs/{id}/oidc-token` with scope `nodes.claim` or `triggers.claim`.
+`POST /api/v1/runs/{run}/oidc-token` requires a live awarded or delegated claim with `oidc.mint`, bound to that run. A machine root or account credential cannot call it.
 
 ```json
 {"audience": "sts.amazonaws.com"}
@@ -120,8 +122,8 @@ A GitHub Actions job holding a claim can request a token too, with `runner:githu
 ```
 
 - `audience` is required: 1 to 256 printable ASCII characters with no spaces, which admits URLs and plain identifiers.
-- The caller must hold a live claim on a node of the run or on the trigger that created it, the same rule that fences a runner's secret reads. The run's team comes from that claim. A run the caller holds no claim on answers 404, whether it exists in the caller's team, in another team, or nowhere, so the route reveals nothing about other runs.
-- Each claim holder may mint 30 tokens per run, refilled over five minutes; past that the route answers 429 with `Retry-After`.
+- The caller must hold the live run-bound claim. Missing, expired, revoked, cancelled or ended authority answers 401 `unauthenticated`. A live credential without the grant or matching run binding answers 403 `forbidden`. Request headers and query parameters cannot select the team, holder, repository or signing facts.
+- Each claim may mint 30 tokens per run on each controller replica, refilled over five minutes; past that the route answers 429 with `Retry-After`.
 - A controller with no signing key answers 404.
 
 ## Get a token in a pipeline

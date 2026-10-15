@@ -35,7 +35,7 @@ func Files(workdir, name, scope string, files []string) (string, error) {
 	return "", fmt.Errorf("cache key input: %w", os.ErrNotExist)
 }
 
-// Bytes derives a platform-specific key from captured dependency input.
+// Bytes hashes captured cache-key input and its declaration for the current platform.
 func Bytes(name, scope string, data []byte) (string, error) {
 	raw, err := json.Marshal([]string{name, scope, runtime.GOOS, runtime.GOARCH})
 	if err != nil {

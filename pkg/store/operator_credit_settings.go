@@ -20,28 +20,8 @@ func (o *Operator) CreditSettings(ctx context.Context) (_ CreditSettings, err er
 	return out, tx.Commit()
 }
 
-// SetCreditSettings validates and atomically applies a deployment billing update.
+// SetCreditSettings atomically updates billing policy while preserving an installed rate table.
 func (o *Operator) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) (_ CreditSettings, err error) {
-	writes, err := creditSettingsWrites(up)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	tx, err := o.s.beginCreditSettingsTx(ctx)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	out, err := writeCreditSettingsTx(ctx, tx, writes)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	return out, tx.Commit()
-}
-
-// SetOperatorCreditSettings keeps an installed rate table authoritative during an update.
-func (o *Operator) SetOperatorCreditSettings(
-	ctx context.Context, up CreditSettingsUpdate,
-) (_ CreditSettings, err error) {
 	writes, err := creditSettingsWrites(up)
 	if err != nil {
 		return CreditSettings{}, err

@@ -5,68 +5,64 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
 
-const fakeRegistry = `package main
-
-var cmdRoot = Command{
-	Path:            "sparkwing",
-	SubcommandOrder: []string{"pipeline", "run", "configure"},
+func TestRepositoryCLIExamplesUseCurrentGrammar(t *testing.T) {
+	if !checkCLIVerbs(filepath.Join("..", "..", "docs")) {
+		t.Fatal("documentation invokes commands outside the current grammar")
+	}
 }
 
-var cmdRun = Command{
-	Path: "sparkwing run",
-	PosArgs: []PosArg{
-		{Name: "<pipeline>", Desc: "Pipeline name", Required: true},
-	},
-}
-
-var cmdHandleTrigger = Command{
-	Path:   "sparkwing handle-trigger",
-	Hidden: true,
-}
-
-var cmdPipeline = Command{
-	Path:            "sparkwing pipeline",
-	SubcommandOrder: []string{"list", "hooks"},
-}
-
-var cmdPipelineList = Command{Path: "sparkwing pipeline list"}
-var cmdPipelineHooks = Command{Path: "sparkwing pipeline hooks"}
-var cmdPipelineHooksInstall = Command{Path: "sparkwing pipeline hooks install"}
-
-var cmdConfigure = Command{
-	Path:            "sparkwing configure",
-	SubcommandOrder: []string{"xrepo"},
-}
-
-var cmdConfigureXrepo = Command{Path: "sparkwing configure xrepo"}
-`
-
-func writeFakeRepo(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-	dir := filepath.Join(root, "cmd", "sparkwing")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+func TestExistingCIExamplesUseCurrentGrammar(t *testing.T) {
+	blocks, err := extract(filepath.Join("..", "..", "docs"), "yaml")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "help_registry.go"), []byte(fakeRegistry), 0o644); err != nil {
-		t.Fatal(err)
+	commands := 0
+	var inspect func(*yaml.Node)
+	inspect = func(node *yaml.Node) {
+		if node.Kind == yaml.ScalarNode {
+			for _, line := range strings.Split(node.Value, "\n") {
+				args := strings.Fields(line)
+				if len(args) == 0 || args[0] != "sparkwing" {
+					continue
+				}
+				commands++
+				if _, err := clisurface.Parse("sparkwing", args[1:]); err != nil {
+					t.Errorf("CI example %q: %v", line, err)
+				}
+			}
+		}
+		for _, child := range node.Content {
+			inspect(child)
+		}
 	}
-	return root
+	for _, block := range blocks {
+		if block.file != "ci-embedded.md" {
+			continue
+		}
+		var doc yaml.Node
+		if err := yaml.Unmarshal([]byte(block.body), &doc); err != nil {
+			t.Fatal(err)
+		}
+		inspect(&doc)
+	}
+	if commands == 0 {
+		t.Fatal("CI guide contains no Sparkwing invocations")
+	}
 }
 
 func TestLoadRegistry_CollectsPathsAndHiddenVerbs(t *testing.T) {
-	root := writeFakeRepo(t)
-	valid, posArgs, err := loadRegistry(root)
-	if err != nil {
-		t.Fatalf("loadRegistry: %v", err)
-	}
+	valid, posArgs := loadRegistry()
 	wantValid := []string{
 		"sparkwing pipeline list",
 		"sparkwing pipeline hooks",
-		"sparkwing configure xrepo",
-		"sparkwing handle-trigger",
+		"sparkwing dashboard install",
+		"sparkwing __tick",
 	}
 	for _, p := range wantValid {
 		if !valid[p] {
@@ -82,11 +78,7 @@ func TestLoadRegistry_CollectsPathsAndHiddenVerbs(t *testing.T) {
 }
 
 func TestResolvePath(t *testing.T) {
-	root := writeFakeRepo(t)
-	valid, posArgs, err := loadRegistry(root)
-	if err != nil {
-		t.Fatalf("loadRegistry: %v", err)
-	}
+	valid, posArgs := loadRegistry()
 	cases := []struct {
 		name    string
 		tokens  []string
@@ -99,7 +91,7 @@ func TestResolvePath(t *testing.T) {
 		{"positional after posargs command", []string{"run", "my-pipeline"}, ""},
 		{"positional after leaf command", []string{"pipeline", "list", "extra"}, ""},
 		{"flag ends the walk", []string{"pipeline", "--help"}, ""},
-		{"placeholder ends the walk", []string{"configure", "xrepo", "add"}, ""},
+		{"placeholder ends the walk", []string{"run", "my-pipeline"}, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -141,21 +133,19 @@ func writeDoc(t *testing.T, dir, name, body string) {
 }
 
 func TestCheckCLIVerbs_FailsOnRenamedVerb(t *testing.T) {
-	root := writeFakeRepo(t)
 	content := t.TempDir()
 	writeDoc(t, content, "bad.md", "```bash\nsparkwing pipeline frobnicate\n```\n")
-	if checkCLIVerbs(content, root) {
+	if checkCLIVerbs(content) {
 		t.Fatal("expected failure on nonexistent verb `pipeline frobnicate`")
 	}
 }
 
 func TestCheckCLIVerbs_PassesAndSkipsExemptDocs(t *testing.T) {
-	root := writeFakeRepo(t)
 	content := t.TempDir()
 	writeDoc(t, content, "good.md", "```bash\nsparkwing pipeline list\nsparkwing run my-pipeline --sw-dry-run\n```\n")
 	writeDoc(t, content, "cli-reference.md", "<!-- GENERATED from the CLI command registry -->\n```bash\nsparkwing totally-made-up\n```\n")
 	writeDoc(t, content, "cli-cluster.md", "<!-- GENERATED from the CLI command registry -->\n```bash\nsparkwing also-made-up\n```\n")
-	if !checkCLIVerbs(content, root) {
+	if !checkCLIVerbs(content) {
 		t.Fatal("expected pass: real commands resolve, generated docs are skipped")
 	}
 }
@@ -167,5 +157,106 @@ func TestParseInvocation_SkipsRootFlags(t *testing.T) {
 	}
 	if got := strings.Join(inv.tokens, " "); got != "pipeline list --all" {
 		t.Errorf("tokens = %q, want the verb path after the root flags", got)
+	}
+}
+
+func TestCheckCLIVerbsRejectsRemovedCommands(t *testing.T) {
+	for _, command := range []string{"cluster tokens create", "serve start", "cloud", "configure", "runs bounce", "debug rerun", "crons tick"} {
+		t.Run(command, func(t *testing.T) {
+			content := t.TempDir()
+			writeDoc(t, content, "guide.md", "`sparkwing "+command+"`\n")
+			if checkCLIVerbs(content) {
+				t.Fatalf("removed invocation accepted: %s", command)
+			}
+		})
+	}
+}
+
+func TestCheckCLIVerbsValidatesFencedGrammar(t *testing.T) {
+	for _, command := range []string{
+		"run deploy --sw-no-cache",
+		"run deploy --region us-east",
+		"runs status run-123",
+		"--profile prod run deploy",
+		"runs logs --run run-123 --limit 0",
+	} {
+		t.Run(command, func(t *testing.T) {
+			content := t.TempDir()
+			writeDoc(t, content, "guide.md", "```bash\nsparkwing "+command+"\n```\n")
+			if checkCLIVerbs(content) {
+				t.Fatalf("invalid grammar accepted: %s", command)
+			}
+		})
+	}
+}
+
+func TestCheckCLIVerbsRejectsRetiredInlineFlags(t *testing.T) {
+	for _, command := range []string{
+		"secrets set --name TYPESAFE_API_KEY --file <path>",
+		"examples --name lint-test-go --body",
+		"pipeline new --name deploy",
+		"run build --sw-no-cache",
+		"pipeline list --query build",
+		"pipeline plan --static",
+		"pipeline list -x",
+		"secrets set --name NAME --file\n<path> --pipeline PIPELINE --profile PROFILE",
+	} {
+		t.Run(command, func(t *testing.T) {
+			content := t.TempDir()
+			writeDoc(t, content, "guide.md", "Run `sparkwing "+command+"` first.\n")
+			if checkCLIVerbs(content) {
+				t.Fatalf("retired inline flag accepted: %s", command)
+			}
+		})
+	}
+}
+
+func TestCheckCLIVerbsAcceptsInlineFragments(t *testing.T) {
+	content := t.TempDir()
+	writeDoc(t, content, "guide.md", strings.Join([]string{
+		"`sparkwing run`",
+		"`sparkwing secrets set --secret NAME --file <path>`",
+		"`sparkwing runs status --run`",
+		"`sparkwing run --sw-cache-from P`",
+		"`sparkwing run build -- --author-option value`",
+	}, "\n"))
+	if !checkCLIVerbs(content) {
+		t.Fatal("valid inline fragments rejected")
+	}
+}
+
+func TestCheckCLIVerbsShellExamples(t *testing.T) {
+	content := t.TempDir()
+	writeDoc(t, content, "guide.md", "```bash\n"+
+		"sparkwing pipeline trigger deploy --profile prod \\\n"+
+		"  --runner here --reason \"deploy from this machine\" -- --region us-east\n"+
+		"$ sparkwing runs status --run <id> -o json | jq .status\n"+
+		"sparkwing run deploy -- --arbitrary='two words' # author flags\n"+
+		"sparkwing profiles add --profile prod --controller https://example.com --token-stdin < token\n"+
+		"sparkwing runs logs --run <id> --grep '|' >/tmp/result\n"+
+		"sparkwing runs logs --run <id> --grep '>' 2>/tmp/errors\n"+
+		"# sparkwing run deploy --obsolete is a shell comment\n"+
+		"```\nInline fragments remain valid: `sparkwing runs status`.\n")
+	if !checkCLIVerbs(content) {
+		t.Fatal("valid shell examples rejected")
+	}
+}
+
+func TestCheckCLIVerbsRejectsMalformedShellExamples(t *testing.T) {
+	for _, command := range []string{
+		"sparkwing pipeline trigger deploy --profile prod --runner here --reason 'unfinished",
+		"sparkwing run deploy \\",
+	} {
+		content := t.TempDir()
+		writeDoc(t, content, "guide.md", "```sh\n"+command+"\n```\n")
+		if checkCLIVerbs(content) {
+			t.Fatalf("malformed shell example accepted: %q", command)
+		}
+	}
+}
+
+func TestCheckCLIVerbsReportsReadFailures(t *testing.T) {
+	if checkCLIVerbs(filepath.Join(t.TempDir(), "missing")) {
+		t.Fatal("missing documentation reported as a passing check")
 	}
 }

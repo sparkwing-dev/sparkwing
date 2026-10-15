@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"math/rand/v2"
 	"path/filepath"
 	"time"
@@ -22,7 +23,7 @@ func CheckBlobUploadIsolation(ctx context.Context, root string, objects blob.Obj
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	request, err := seedStorePresenceAttempts(ctx, s.DB())
+	request, err := teststore.SeedPresence(ctx, s.DB())
 	if err != nil {
 		return err
 	}

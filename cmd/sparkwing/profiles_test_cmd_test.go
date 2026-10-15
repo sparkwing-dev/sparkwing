@@ -1,15 +1,11 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
 type errReader struct{ prefix string }
@@ -94,80 +90,50 @@ func TestInterpretHealthBody(t *testing.T) {
 	}
 }
 
-func healthBody(status int, body string) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		_, _ = w.Write([]byte(body))
-	}
-}
-
-func TestProbeLogsReportsWhetherTheControllerKeepsNodeLogs(t *testing.T) {
+func TestProbeAuthChecksFinalRunsRoute(t *testing.T) {
 	for _, tc := range []struct {
-		name, body string
-		status     int
-		want       string
-	}{
-		{"keeps segments", `{"logs":{"segments":true}}`, http.StatusOK, "ok"},
-		{"keeps none", `{"logs":{"segments":false}}`, http.StatusOK, "warn"},
-		{"cannot say", `{}`, http.StatusInternalServerError, "warn"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctrl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/api/v1/capabilities" {
-					http.NotFound(w, r)
-					return
+		status int
+		want   string
+	}{{http.StatusOK, "ok"}, {http.StatusUnauthorized, "fail"}, {http.StatusForbidden, "fail"}} {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			calls := 0
+			profileHTTPFixture(t, func(req *http.Request) (int, string) {
+				calls++
+				if req.Method != "GET" || req.URL.Path != "/api/v1/runs" || req.URL.Query().Get("limit") != "1" || req.Header.Get("Authorization") != "Bearer private-credential" {
+					t.Fatalf("auth probe: %s %s", req.Method, req.URL)
 				}
-				w.WriteHeader(tc.status)
-				_, _ = w.Write([]byte(tc.body))
-			}))
-			t.Cleanup(ctrl.Close)
-			prof := &profile.Profile{Controller: &profile.ControllerSpec{URL: ctrl.URL, Token: "swu_test"}}
-			if got := probeLogs(context.Background(), prof); got.Status != tc.want {
-				t.Fatalf("probeLogs = %+v, want status %s", got, tc.want)
+				return tc.status, `{"runs":[],"next_cursor":"","truncated":false}`
+			})
+			result := probeAuth(t.Context(), connectionFixture("", "https://controller.example", "private-credential"))
+			if result.Status != tc.want || calls != 1 {
+				t.Fatalf("probe: %+v calls=%d", result, calls)
 			}
 		})
 	}
 }
 
-func TestProbeAuthWarnsOnTheControllersAnonymousPrincipal(t *testing.T) {
-	cases := []struct {
-		name       string
-		whoami     string
-		wantStatus string
-		wantDetail string
+func TestProbeAuthRefusesRedirectsAndMalformedSuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		status     int
 	}{
-		{
-			name:       "anonymous principal",
-			whoami:     `{"principal":"unauthed","kind":"none"}`,
-			wantStatus: "warn",
-			wantDetail: "serving unauthenticated",
-		},
-		{
-			name:       "real principal",
-			whoami:     `{"principal":"runner-1","kind":"runner","scopes":["logs.read"]}`,
-			wantStatus: "ok",
-			wantDetail: "principal=runner-1",
-		},
-	}
-	for _, tc := range cases {
+		{"redirect", ``, http.StatusTemporaryRedirect},
+		{"malformed", `{"runs":"broken"}`, http.StatusOK},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctrl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if strings.HasSuffix(r.URL.Path, "/auth/whoami") {
-					_, _ = w.Write([]byte(tc.whoami))
-					return
+			original := http.DefaultTransport
+			calls := 0
+			http.DefaultTransport = profileTransport(func(req *http.Request) (*http.Response, error) {
+				calls++
+				if req.URL.Path != "/api/v1/runs" {
+					t.Fatal("probe forwarded a reusable credential through a redirect")
 				}
-				_, _ = w.Write([]byte(`{"runs":[]}`))
-			}))
-			defer ctrl.Close()
-
-			prof := &profile.Profile{Controller: &profile.ControllerSpec{URL: ctrl.URL, Token: "swu_test"}}
-			got := probeAuth(context.Background(), prof)
-			if got.Status != tc.wantStatus {
-				t.Errorf("status = %q, want %q (detail %q)", got.Status, tc.wantStatus, got.Detail)
-			}
-			if !strings.Contains(got.Detail, tc.wantDetail) {
-				t.Errorf("detail = %q, want it to mention %q", got.Detail, tc.wantDetail)
+				return &http.Response{StatusCode: tc.status, Header: http.Header{"Location": []string{"https://controller.example/redirect"}}, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+			})
+			t.Cleanup(func() { http.DefaultTransport = original })
+			result := probeAuth(t.Context(), connectionFixture("prod", "https://controller.example", "private-credential"))
+			if result.Status != "fail" || calls != 1 {
+				t.Fatalf("invalid probe response: %s, calls=%d", result.Status, calls)
 			}
 		})
 	}

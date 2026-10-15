@@ -35,7 +35,7 @@ func TestToolNodeIsNeverClaimedByAnAgentWithoutTheTool(t *testing.T) {
 		t.Fatalf("a named claim without terraform = %v, want held", err)
 	}
 	pool := meteredClaimant(t, s, "agent:pool")
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 100 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "admin"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.ClaimNamedNode(ctx, pool, "run-tf", "work", "k8s-job:1", time.Minute,

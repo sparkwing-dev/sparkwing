@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import { afterEach, before, beforeEach, describe, it } from "node:test";
 
 type Teams = typeof import("./teams");
@@ -87,9 +91,9 @@ describe("role gates", () => {
     assert.equal(teams.canManageTeam(undefined), false);
   });
 
-  it("offers connecting a machine to editors and owners", () => {
+  it("offers connecting a machine to owners", () => {
     assert.equal(teams.canConnectMachines("owner"), true);
-    assert.equal(teams.canConnectMachines("editor"), true);
+    assert.equal(teams.canConnectMachines("editor"), false);
     assert.equal(teams.canConnectMachines("reader"), false);
   });
 
@@ -149,7 +153,7 @@ describe("switchTeam", () => {
 
   it("surfaces the controller's refusal", async () => {
     respond = () =>
-      new Response(JSON.stringify({ error: "not a member of acme" }), {
+      new Response(JSON.stringify({error: {code:"forbidden",message:"not a member of acme"}}), {
         status: 403,
       });
     await assert.rejects(teams.switchTeam("acme"), (err: Error) => {
@@ -270,7 +274,7 @@ describe("team administration calls", () => {
     assert.deepEqual(
       calls.map((c) => `${c.method} ${c.url}`),
       [
-        "DELETE /api/v1/team/tokens/swr_a%2F..%2F..%2Ftokens",
+        "DELETE /api/v1/tokens/swr_a%2F..%2F..%2Ftokens",
         "DELETE /api/v1/team/members/u%201",
         "POST /api/v1/invitations/inv%3Fx%3D1/accept",
       ],
@@ -305,17 +309,14 @@ describe("team administration calls", () => {
 });
 
 describe("mintMachineToken", () => {
-  it("sends the machine scopes, name and repo patterns", async () => {
+  it("sends the name and repository patterns for server-authorized enrollment", async () => {
     respond = () =>
       new Response(
         JSON.stringify({
-          token: "swr_x",
-          prefix: "swr_x",
-          family: "machine",
-          name: "build-box",
-          scopes: [],
-          expires_at: 1,
-          command: "",
+          capability: "swk_x",
+          prefix: "swk_x",
+          team: "team",
+          grants: ["nodes.claim", "triggers.claim"],
         }),
         { status: 201 },
       );
@@ -323,10 +324,9 @@ describe("mintMachineToken", () => {
       "github.com/acme/*",
       "github.com/acme/app",
     ]);
-    assert.equal(calls[0].url, "/api/v1/team/tokens");
+    assert.equal(calls[0].url, "/api/v1/runners");
     assert.equal(calls[0].method, "POST");
     assert.deepEqual(JSON.parse(calls[0].body), {
-      scopes: ["nodes.claim", "triggers.claim", "runs.state"],
       name: "build-box",
       repos: ["github.com/acme/*", "github.com/acme/app"],
     });
@@ -334,7 +334,7 @@ describe("mintMachineToken", () => {
 
   it("surfaces the controller's pattern validation error", async () => {
     respond = () =>
-      new Response(JSON.stringify({ error: "bad repo pattern" }), {
+      new Response(JSON.stringify({error: {code:"bad_request",message:"bad repo pattern"}}), {
         status: 400,
       });
     await assert.rejects(
@@ -351,32 +351,32 @@ describe("listTeamTokens", () => {
   it("reads member and machine rows from one route", async () => {
     const rows = [
       {
-        prefix: "swu_a",
-        family: "member",
-        name: "",
-        scopes: ["runs.read"],
+        prefix: "swk_a",
+        team: "team",
+        subject: { kind: "account", id: "acct-1" },
+        audience: "controller",
+        grants: ["runs.read"],
         created_by: "acct-1",
-        created_at: 1,
-        expires_at: 2,
-        last_used_at: null,
+        issued_at: "2026-10-14T12:00:00Z",
+        expires_at: "2026-10-15T12:00:00Z",
         git_credentials: false,
       },
       {
-        prefix: "swr_b",
-        family: "machine",
-        name: "build-box",
-        scopes: ["nodes.claim"],
+        prefix: "swk_b",
+        team: "team",
+        subject: { kind: "machine", id: "build-box" },
+        audience: "controller",
+        grants: ["nodes.claim"],
         created_by: "acct-1",
-        created_at: 1,
-        expires_at: null,
-        last_used_at: 3,
+        issued_at: "2026-10-14T12:00:00Z",
+        last_used_at: "2026-10-14T13:00:00Z",
         git_credentials: true,
       },
     ];
-    respond = () => new Response(JSON.stringify(rows), { status: 200 });
+    respond = () => new Response(JSON.stringify({ tokens: rows }), { status: 200 });
     assert.deepEqual(await teams.listTeamTokens(), rows);
     assert.equal(calls[0].method, "GET");
-    assert.equal(calls[0].url, "/api/v1/team/tokens");
+    assert.equal(calls[0].url, "/api/v1/tokens");
   });
 });
 
@@ -414,31 +414,76 @@ describe("parseRepoPatterns", () => {
 });
 
 describe("runnerConnectCommand", () => {
-  const minted = { token: "swr_secret", command: "" };
-
-  it("prefers the command the controller composed", () => {
-    assert.equal(
-      teams.runnerConnectCommand(
-        {
-          ...minted,
-          command: "sparkwing-runner runner --controller https://c",
-        },
-        "box",
-        ["github.com/acme/*"],
-      ),
-      "sparkwing-runner runner --controller https://c",
-    );
+  it("uses the bearer only in its private credential-file setup", () => {
+    const cmd = teams.runnerConnectCommand({ capability: "swk_secret", grants: ["nodes.claim", "triggers.claim"] }, "Korey's laptop", [
+      "github.com/acme/*",
+    ], "https://controller.example");
+    const dir = '\"$HOME/.config/sparkwing/runner-credentials\"';
+    assert.ok(cmd.includes("printf '%s' swk_secret"));
+    const runner = cmd.slice(cmd.indexOf("sparkwing-runner runner"));
+    assert.equal(runner.includes("swk_secret"), false);
+    assert.ok(runner.includes(`--credentials-dir ${dir}`));
+    assert.ok(runner.includes("--controller https://controller.example"));
+    assert.ok(runner.includes("--allow-repo 'github.com/acme/*'"));
+    assert.ok(runner.includes("--holder-prefix 'Korey'"));
   });
 
-  it("falls back to the runner command with the token in its credentials directory", () => {
-    const cmd = teams.runnerConnectCommand(minted, "Korey's laptop", [
-      "github.com/acme/*",
-    ]);
-    const dir = '"$HOME/.config/sparkwing/runner-credentials"';
-    assert.equal(
-      cmd,
-      `(umask 077 && mkdir -p ${dir} && rm -f ${dir}/agent-token && printf '%s' swr_secret > ${dir}/agent-token) && sparkwing-runner runner --credentials-dir ${dir} --controller ${teams.controllerURLPlaceholder} --allow-repo 'github.com/acme/*' --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= --holder-prefix 'Korey'\\''s laptop'`,
-    );
+  it("runs only the claim loops its grants allow", () => {
+    for (const grants of [["nodes.claim"], ["triggers.claim"], ["nodes.claim", "triggers.claim"]]) {
+      const cmd = teams.runnerConnectCommand({ capability: "swk_private", grants }, "builder", ["github.com/acme/*"], "https://controller.example");
+      assert.equal(cmd.includes("--also-claim-triggers"), grants.includes("triggers.claim"));
+      assert.equal(cmd.includes("--claim-nodes=false"), !grants.includes("nodes.claim"));
+    }
+  });
+
+  it("replaces a readable token file with a private one before starting the runner", () => {
+    const home = mkdtempSync(join(tmpdir(), "runner-setup-"));
+    try {
+      const credentials = join(home, ".config", "sparkwing", "runner-credentials");
+      mkdirSync(credentials, { recursive: true });
+      const file = join(credentials, "agent-token");
+      writeFileSync(file, "old", { mode: 0o644 });
+      const bin = join(home, "bin");
+      mkdirSync(bin);
+      writeFileSync(join(bin, "sparkwing-runner"), '#!/bin/sh\nprintf "%s\\n" "$@" > "$HOME/argv"\n', { mode: 0o755 });
+      const cmd = teams.runnerConnectCommand({ capability: "swk_private", grants: ["nodes.claim", "triggers.claim"] }, "builder", ["github.com/acme/*", "gitlab.example/team/repo"], "https://controller.example");
+      const result = spawnSync("sh", ["-c", cmd], { env: { ...process.env, HOME: home, PATH: bin+delimiter+process.env.PATH }, encoding: "utf8", stdio: "inherit" });
+      assert.equal(result.error, undefined);
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(statSync(file).mode & 0o777, 0o600);
+      assert.equal(readFileSync(file, "utf8"), "swk_private");
+      const args = readFileSync(join(home, "argv"), "utf8");
+      assert.equal(args.includes("swk_private"), false);
+      assert.ok(args.includes("github.com/acme/*\n"));
+      assert.ok(args.includes("gitlab.example/team/repo\n"));
+      assert.ok(args.includes("https://controller.example\n"));
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves the old token untouched and stops if setup cannot replace it", (t) => {
+    if (process.getuid?.() === 0) { t.skip("root bypasses directory permissions"); return; }
+    const home = mkdtempSync(join(tmpdir(), "runner-refusal-"));
+    const credentials = join(home, ".config", "sparkwing", "runner-credentials");
+    try {
+      mkdirSync(credentials, { recursive: true });
+      const file = join(credentials, "agent-token");
+      writeFileSync(file, "old", { mode: 0o644 });
+      const bin = join(home, "bin");
+      mkdirSync(bin);
+      writeFileSync(join(bin, "sparkwing-runner"), '#!/bin/sh\ntouch "$HOME/started"\n', { mode: 0o755 });
+      chmodSync(credentials, 0o555);
+      const cmd = teams.runnerConnectCommand({ capability: "swk_private", grants: ["nodes.claim"] }, "builder", ["github.com/acme/*"], "https://controller.example");
+      const result = spawnSync("sh", ["-c", cmd], { env: { ...process.env, HOME: home, PATH: bin+delimiter+process.env.PATH }, encoding: "utf8", stdio: "inherit" });
+      assert.equal(result.error, undefined);
+      assert.notEqual(result.status, 0);
+      assert.equal(readFileSync(file, "utf8"), "old");
+      assert.equal(existsSync(join(home, "started")), false);
+    } finally {
+      chmodSync(credentials, 0o755);
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 
@@ -456,33 +501,29 @@ describe("unixSecondsISO", () => {
 });
 
 describe("member tokens", () => {
-  it("mints the given scopes with the session's CSRF token and returns the setup commands", async () => {
+  it("mints grants through the session's authenticated token route", async () => {
     const minted = {
-      token: "swu_x",
-      prefix: "swu_x",
-      family: "member",
-      scopes: ["runs.read", "runs.write"],
-      expires_at: 1,
-      profile: "acme",
-      setup:
-        "sparkwing cloud connect --controller https://c.example --name acme --token-stdin",
-      run: "sparkwing pipeline trigger <pipeline> --profile acme",
+      capability: "swk_x",
+      prefix: "new-prefix",
+      team: "acme",
+      grants: ["runs.read", "runs.write"],
+      expires_at: "2100-01-01T00:00:00Z",
     };
     respond = () => new Response(JSON.stringify(minted), { status: 201 });
     assert.deepEqual(
       await teams.mintMemberToken(["runs.read", "runs.write"]),
       minted,
     );
-    assert.equal(calls[0].url, "/api/v1/team/tokens");
+    assert.equal(calls[0].url, "/api/v1/tokens");
     assert.equal(calls[0].method, "POST");
     assert.deepEqual(JSON.parse(calls[0].body), {
-      scopes: ["runs.read", "runs.write"],
+      grants: ["runs.read", "runs.write"],
     });
     assert.equal(calls[0].headers.get("X-CSRF-Token"), "session-csrf");
   });
 
-  it("gives each role its full member scope set without team.admin", () => {
-    const read = ["runs.read", "logs.read", "triggers.read"];
+  it("gives each role its member grants without team administration", () => {
+    const read = ["runs.read", "logs.read"];
     const write = [...read, "runs.write", "runs.control", "approvals.write"];
     assert.deepEqual(teams.memberScopesForRole("reader"), read);
     assert.deepEqual(teams.memberScopesForRole("editor"), write);
@@ -492,7 +533,7 @@ describe("member tokens", () => {
   it("revokes by escaped prefix", async () => {
     await teams.revokeTeamToken("swu_a/../tokens");
     assert.equal(calls[0].method, "DELETE");
-    assert.equal(calls[0].url, "/api/v1/team/tokens/swu_a%2F..%2Ftokens");
+    assert.equal(calls[0].url, "/api/v1/tokens/swu_a%2F..%2Ftokens");
   });
 
   it("tells a read-only token from one that starts runs", () => {
@@ -547,48 +588,4 @@ describe("deletion", () => {
     assert.equal(del.state, "pending");
   });
 
-  it("reads a 409 on account deletion as the list of teams to deal with", async () => {
-    respond = () =>
-      Response.json(
-        {
-          error: "hand ownership on",
-          teams: [{ slug: "acme", display_name: "Acme", role: "owner" }],
-        },
-        { status: 409 },
-      );
-    const res = await teams.deleteAccount("ada@example.com");
-    assert.deepEqual(res, {
-      kind: "blocked",
-      teams: [{ slug: "acme", display_name: "Acme", role: "owner" }],
-    });
-    assert.deepEqual(JSON.parse(calls[0].body), {
-      confirm_email: "ada@example.com",
-    });
-  });
-
-  it("reports the teams an account deletion took with it", async () => {
-    respond = () =>
-      Response.json({ account_id: "u", deleted_teams: ["ada-space"] });
-    assert.deepEqual(await teams.deleteAccount("ada@example.com"), {
-      kind: "deleted",
-      deletedTeams: ["ada-space"],
-    });
-  });
-
-  it("asks for a fresh sign-in when the controller wants one", async () => {
-    respond = () =>
-      Response.json(
-        { error: "reauth_required", message: "sign in again" },
-        { status: 403 },
-      );
-    assert.deepEqual(await teams.deleteAccount("ada@example.com"), {
-      kind: "reauth",
-    });
-  });
-
-  it("throws on any other refusal", async () => {
-    respond = () =>
-      Response.json({ error: "confirm_email does not match" }, { status: 400 });
-    await assert.rejects(teams.deleteAccount("x@example.com"), /confirm_email/);
-  });
 });

@@ -1,220 +1,213 @@
 package main
 
 import (
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-func TestWaitForListenerOrExit_FailsFastOnEarlyExit(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	exited := make(chan struct{})
-	close(exited)
-
-	start := time.Now()
-	err := waitForListenerOrExit("127.0.0.1:1", exited, 10*time.Second)
-	if err == nil {
-		t.Fatal("expected an error for a dead supervisor")
-	}
-	if !strings.Contains(err.Error(), "exited during startup") {
-		t.Errorf("error = %q, want the early-exit message", err)
-	}
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Errorf("fast-fail took %s; should return well before the deadline", elapsed)
-	}
+type dashboardLifecycleFake struct {
+	wingd.LocalLifecycle
+	calls   []string
+	options wingd.LocalStartOptions
+	status  wingd.LocalStatus
+	err     error
+	keepUp  bool
 }
 
-func TestWaitForListenerOrExit_TimesOutWhenAliveButSilent(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	exited := make(chan struct{})
-	err := waitForListenerOrExit("127.0.0.1:1", exited, 300*time.Millisecond)
-	if err == nil || !strings.Contains(err.Error(), "failed to accept connections") {
-		t.Fatalf("error = %v, want a deadline timeout", err)
-	}
+func (f *dashboardLifecycleFake) StartDashboard(_ context.Context, options wingd.LocalStartOptions) (wingd.LocalStatus, error) {
+	f.calls = append(f.calls, "start")
+	f.options = options
+	return f.status, f.err
 }
 
-func TestDashboardIsNewer(t *testing.T) {
-	cases := []struct {
-		name    string
-		running string
-		mine    string
-		want    bool
+func (f *dashboardLifecycleFake) Stop(context.Context) error {
+	f.calls = append(f.calls, "stop")
+	if f.err == nil && !f.keepUp {
+		f.status.Running = false
+	}
+	return f.err
+}
+
+func (f *dashboardLifecycleFake) Status(context.Context) (wingd.LocalStatus, error) {
+	f.calls = append(f.calls, "status")
+	return f.status, f.err
+}
+
+type dashboardUnitsFake struct {
+	wingd.ManagedUnitManager
+	calls   []string
+	options wingd.LocalStartOptions
+	err     error
+}
+
+func (f *dashboardUnitsFake) InstallController(_ context.Context, options wingd.LocalStartOptions) error {
+	f.calls = append(f.calls, "install")
+	f.options = options
+	return f.err
+}
+
+func (f *dashboardUnitsFake) UninstallController(context.Context) error {
+	f.calls = append(f.calls, "uninstall")
+	return f.err
+}
+
+func TestDashboardUsesLocalControllerLifecycle(t *testing.T) {
+	for _, tc := range []struct {
+		args         []string
+		calls, units []string
 	}{
-		{"running strictly newer", "v0.17.0", "v0.16.0", true},
-		{"running older", "v0.15.0", "v0.16.0", false},
-		{"equal", "v0.16.0", "v0.16.0", false},
-		{"running unknown", "(unknown)", "v0.16.0", false},
-		{"mine unknown", "v0.17.0", "(unknown)", false},
-		{"both dev pseudo", "v0.0.0-dev", "v0.0.0-dev", false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := dashboardIsNewer(c.running, c.mine); got != c.want {
-				t.Errorf("dashboardIsNewer(%q, %q) = %v, want %v", c.running, c.mine, got, c.want)
+		{[]string{"start", "--stay", "--addr", "[::1]:9000"}, []string{"start"}, nil},
+		{[]string{"status"}, []string{"status"}, nil},
+		{[]string{"stop"}, []string{"stop", "status"}, nil},
+		{[]string{"install"}, []string{"status"}, []string{"install"}},
+		{[]string{"uninstall"}, []string{"status"}, []string{"uninstall"}},
+	} {
+		t.Run(tc.args[0], func(t *testing.T) {
+			lifecycle := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true, Stay: true, Installed: true, PID: 123, Version: "v1.2.3", Activity: wingd.LocalActivity{Runs: 2, QueuedTriggers: 3, HeldLeases: 4, DashboardConnections: 5}}}
+			units := &dashboardUnitsFake{}
+			services := dashboardServices{lifecycle: lifecycle, units: units, options: wingd.LocalStartOptions{Home: "/private/home", Executable: "/bin/sparkwing", Version: "v2.0.0"}}
+			var output bytes.Buffer
+			err := runDashboardCommand(t.Context(), append(tc.args, "-o", "json"), &output, "linux", func(context.Context) (dashboardServices, error) { return services, nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(lifecycle.calls, tc.calls) || !reflect.DeepEqual(units.calls, tc.units) {
+				t.Fatalf("lifecycle=%v units=%v", lifecycle.calls, units.calls)
+			}
+			var got dashboardResult
+			if err := json.Unmarshal(output.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			state := "running"
+			if tc.args[0] == "stop" {
+				state = "stopped"
+			}
+			if got.State != state || got.Version != "v1.2.3" || got.PID != 123 || !got.Stay || !got.Installed || got.Activity != (dashboardActivity{Runs: 2, QueuedTriggers: 3, HeldLeases: 4, DashboardConnections: 5}) {
+				t.Fatalf("lost controller status: %+v", got)
+			}
+			if tc.args[0] == "start" {
+				want := services.options
+				want.Stay, want.DashboardAddress = true, "[::1]:9000"
+				if lifecycle.options != want {
+					t.Fatalf("start options: %+v", lifecycle.options)
+				}
+			}
+			if tc.args[0] == "install" && (!units.options.Stay || units.options.Home != services.options.Home || units.options.Executable != services.options.Executable || units.options.Version != services.options.Version) {
+				t.Fatalf("login options: %+v", units.options)
 			}
 		})
 	}
 }
 
-func TestProbeDashboardVersion_FallsBackToAddr(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/version", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"version":"v0.17.0","schema":11,"pid":42}`))
+func TestDashboardDefaultStartDoesNotPinController(t *testing.T) {
+	f := &dashboardLifecycleFake{}
+	var output bytes.Buffer
+	err := runDashboardCommand(t.Context(), []string{"start", "--stay=false", "--read-only=false", "-o", "plain"}, &output, "windows", func(context.Context) (dashboardServices, error) { return dashboardServices{lifecycle: f}, nil })
+	if err != nil || f.options.Stay || f.options.Standalone || f.options.DashboardAddress != "127.0.0.1:4343" {
+		t.Fatalf("options=%+v err=%v", f.options, err)
+	}
+	if output.String() != "stopped\n" {
+		t.Fatalf("plain output: %q", &output)
+	}
+}
+
+func TestDashboardRejectsBeforeResolvingServices(t *testing.T) {
+	for _, tc := range []struct {
+		goos string
+		args []string
+	}{
+		{"linux", []string{"restart"}},
+		{"linux", []string{"status", "--output", "bogus"}},
+		{"linux", []string{"logs", "--limit", "1"}},
+		{"linux", []string{"logs", "--tail", "-1"}},
+		{"linux", []string{"start", "--addr", "127.0.0.1:notaport"}},
+		{"linux", []string{"start", "--addr", "127.0.0.1:65536"}},
+		{"linux", []string{"start", "--addr", "0.0.0.0:4343"}},
+		{"linux", []string{"start", "--read-only"}},
+		{"linux", []string{"start", "--allow-remote"}},
+		{"linux", []string{"start", "--allow-origin", "http://example.com"}},
+		{"linux", []string{"install", "--force"}},
+		{"windows", []string{"install"}},
+		{"windows", []string{"uninstall"}},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			var output bytes.Buffer
+			err := runDashboardCommand(t.Context(), tc.args, &output, tc.goos, func(context.Context) (dashboardServices, error) {
+				t.Fatal("resolved services for rejected invocation")
+				return dashboardServices{}, nil
+			})
+			if err == nil || output.Len() != 0 {
+				t.Fatalf("error=%v output=%s", err, &output)
+			}
+			if tc.goos == "windows" {
+				var failure *apierr.Error
+				if !errors.As(err, &failure) || !strings.Contains(failure.Hint, "--stay") {
+					t.Fatalf("missing stay guidance: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestDashboardHelpDoesNotResolveRuntime(t *testing.T) {
+	for _, args := range [][]string{nil, {"start", "--help"}, {"install", "--help"}} {
+		var output bytes.Buffer
+		err := runDashboardCommand(t.Context(), args, &output, "windows", func(context.Context) (dashboardServices, error) {
+			t.Fatal("help resolved services")
+			return dashboardServices{}, nil
+		})
+		if err != nil || output.Len() == 0 {
+			t.Fatalf("help: %s %v", &output, err)
+		}
+	}
+}
+
+func TestDashboardPreservesFailuresWithoutSuccessReceipt(t *testing.T) {
+	failure := &apierr.Error{Code: apierr.Unavailable, Message: "admission drain failed"}
+	for _, action := range []string{"start", "status", "stop", "install", "uninstall"} {
+		t.Run(action, func(t *testing.T) {
+			lifecycle := &dashboardLifecycleFake{err: failure}
+			units := &dashboardUnitsFake{err: failure}
+			var output bytes.Buffer
+			err := runDashboardCommand(t.Context(), []string{action}, &output, "linux", func(context.Context) (dashboardServices, error) {
+				return dashboardServices{lifecycle: lifecycle, units: units}, nil
+			})
+			if !errors.Is(err, failure) || output.Len() != 0 {
+				t.Fatalf("error=%v output=%s", err, &output)
+			}
+			if action == "stop" && !reflect.DeepEqual(lifecycle.calls, []string{"stop"}) {
+				t.Fatalf("status after failed stop: %v", lifecycle.calls)
+			}
+		})
+	}
+}
+
+func TestDashboardMissingLifecycleFailsWithoutLegacyServiceFallback(t *testing.T) {
+	var output bytes.Buffer
+	err := runDashboardCommand(t.Context(), []string{"start"}, &output, "linux", func(context.Context) (dashboardServices, error) {
+		return dashboardServices{}, nil
 	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	addr := strings.TrimPrefix(srv.URL, "http://")
-	info, ok := probeDashboardVersion(t.TempDir(), addr)
-	if !ok {
-		t.Fatal("probe should succeed against a live version endpoint")
-	}
-	if info.Version != "v0.17.0" {
-		t.Errorf("version = %q, want v0.17.0", info.Version)
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || output.Len() != 0 {
+		t.Fatalf("error=%v output=%s", err, &output)
 	}
 }
 
-func TestProbeDashboardVersion_MissingEndpoint(t *testing.T) {
-	srv := httptest.NewServer(http.NotFoundHandler())
-	defer srv.Close()
-	addr := strings.TrimPrefix(srv.URL, "http://")
-	if _, ok := probeDashboardVersion(t.TempDir(), addr); ok {
-		t.Error("probe should report not-ok when the endpoint is absent")
+func TestDashboardRefusesAnUndrainedStop(t *testing.T) {
+	fake := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true, Version: "v1"}, keepUp: true}
+	var out bytes.Buffer
+	err := runDashboardCommand(t.Context(), []string{"stop", "-o", "json"}, &out, "linux", func(context.Context) (dashboardServices, error) {
+		return dashboardServices{lifecycle: fake}, nil
+	})
+	if err == nil || out.Len() != 0 {
+		t.Fatalf("undrained stop: %v %s", err, &out)
 	}
-}
-
-func TestTailFileFrom_OnlyNewInstanceLines(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "dashboard.log")
-	prev := "old request line 1\nold request line 2\n"
-	if err := fssecure.WriteFile(path, []byte(prev)); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	offset := fileSize(path)
-
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		t.Fatalf("open append: %v", err)
-	}
-	if _, err := f.WriteString("new supervisor: failed to bind\nnew supervisor: exiting\n"); err != nil {
-		t.Fatalf("append: %v", err)
-	}
-	_ = f.Close()
-
-	got := tailFileFrom(path, offset, 40)
-	if strings.Contains(got, "old request line") {
-		t.Errorf("tail leaked previous-instance lines: %q", got)
-	}
-	if !strings.Contains(got, "new supervisor: failed to bind") {
-		t.Errorf("tail missing new-instance lines: %q", got)
-	}
-}
-
-func TestTailFileFrom_EmptyWhenNoNewOutput(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "dashboard.log")
-	if err := fssecure.WriteFile(path, []byte("only old lines\n")); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if got := tailFileFrom(path, fileSize(path), 40); got != "" {
-		t.Errorf("tail = %q, want empty", got)
-	}
-}
-
-func TestTailFileFrom_TruncatedLogRetainsNewFailure(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "dashboard.log")
-	if err := fssecure.WriteFile(path, []byte(strings.Repeat("old\n", 100))); err != nil {
-		t.Fatal(err)
-	}
-	offset := fileSize(path)
-	if err := fssecure.WriteFile(path, []byte("new instance failed\n")); err != nil {
-		t.Fatal(err)
-	}
-	if got := tailFileFrom(path, offset, 40); got != "new instance failed" {
-		t.Fatalf("truncated log lost startup failure: %q", got)
-	}
-}
-
-func TestResolveDashboardPaths_Precedence(t *testing.T) {
-	env := t.TempDir()
-	explicit := t.TempDir()
-	t.Setenv("SPARKWING_HOME", env)
-
-	dp, err := resolveDashboardPaths(explicit)
-	if err != nil {
-		t.Fatalf("resolveDashboardPaths: %v", err)
-	}
-	if dp.home != filepath.Clean(explicit) {
-		t.Errorf("--home = %q, want the explicit override %q", dp.home, explicit)
-	}
-	if want := filepath.Join(explicit, dashboardPIDFile); dp.pid != want {
-		t.Errorf("pid = %q, want %q", dp.pid, want)
-	}
-
-	dp, err = resolveDashboardPaths("")
-	if err != nil {
-		t.Fatalf("resolveDashboardPaths: %v", err)
-	}
-	if dp.home != filepath.Clean(env) {
-		t.Errorf("home = %q, want the SPARKWING_HOME value %q", dp.home, env)
-	}
-	if want := filepath.Join(env, dashboardLogFile); dp.log != want {
-		t.Errorf("log = %q, want %q", dp.log, want)
-	}
-}
-
-func TestResolveDashboardPaths_UnsetHomeStaysOutOfTheRealHome(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", "")
-
-	dp, err := resolveDashboardPaths("")
-	if err != nil {
-		t.Fatalf("resolveDashboardPaths: %v", err)
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("resolve home: %v", err)
-	}
-	if dp.home == filepath.Join(home, ".sparkwing") {
-		t.Fatalf("resolveDashboardPaths would write into the developer's own home %s", dp.home)
-	}
-	if !strings.HasPrefix(dp.home, os.TempDir()) {
-		t.Errorf("home = %q, want a path under the test sandbox %s", dp.home, os.TempDir())
-	}
-}
-
-func TestRunDashboardStart_RefusesNonLoopbackAddr(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", t.TempDir())
-	err := runDashboardStart([]string{"--addr", "0.0.0.0:4343"})
-	if err == nil {
-		t.Fatal("start accepted a non-loopback --addr without --allow-remote")
-	}
-	if !strings.Contains(err.Error(), "--allow-remote") {
-		t.Fatalf("error = %v, want it to name the opt-in flag", err)
-	}
-}
-
-func TestDashboardStartHelpExposesOriginPolicy(t *testing.T) {
-	var found bool
-	for _, spec := range cmdDashboardStart.Flags {
-		if spec.Name == "allow-origin" {
-			found = spec.Argument == "ORIGINS" && strings.Contains(spec.Desc, "--allow-remote")
-		}
-	}
-	if !found {
-		t.Fatalf("dashboard start help flags = %#v, want --allow-origin ORIGINS", cmdDashboardStart.Flags)
-	}
-	for _, example := range cmdDashboardStart.Examples {
-		if strings.Contains(example.Command, "--allow-origin http://dashboard.example.com:4343") {
-			return
-		}
-	}
-	t.Fatalf("dashboard start examples = %#v, want a public-host --allow-origin example", cmdDashboardStart.Examples)
 }

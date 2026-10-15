@@ -206,9 +206,8 @@ describe("confirmed action", () => {
     respond = () =>
       Response.json(
         {
-          error: "forbidden",
-          message:
-            "the operator console needs the operator's own signed-in account",
+          error: { code: "forbidden", message:
+            "the operator console needs the operator's own signed-in account" },
         },
         { status: 403 },
       );
@@ -231,6 +230,7 @@ describe("waitlist", () => {
     assert.equal(calls[0].url, "/api/v1/operator/waitlist/approve");
     assert.equal(calls[0].method, "POST");
     assert.equal(calls[0].headers.get("X-CSRF-Token"), "session-csrf");
+    assert.ok(calls[0].headers.get("Idempotency-Key"));
     assert.deepEqual(JSON.parse(calls[0].body), { account_ids: ["a1", "b2"] });
   });
 

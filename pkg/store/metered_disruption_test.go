@@ -130,7 +130,7 @@ func checkMeteredDisruption(t *testing.T, unitIndex, elapsed, tariff uint8, atAw
 	}
 	s.db = blobAccountingDB(t, path)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		got, err := settleBillingAwardWithTx(t.Context(), tx, "a", "reservation", s.now(), calculate)
+		got, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", s.now(), true, calculate)
 		if err == nil && got != want {
 			return fmt.Errorf("replayed settlement=%+v, want %+v", got, want)
 		}
@@ -156,7 +156,7 @@ func rollbackMeteredDisruption(t *testing.T, s *Store, lapse time.Time, calculat
 	intervalsBefore := billingIntervalCheckpoints(t, s)
 	refused := errors.New("terminal state write failed")
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		if _, err := settleBillingAwardWithTx(t.Context(), tx, "a", "reservation", lapse, calculate); err != nil {
+		if _, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", lapse, true, calculate); err != nil {
 			return err
 		}
 		return refused
@@ -183,7 +183,7 @@ func raceMeteredDisruptionReplay(t *testing.T, s *Store, path string, lapse time
 		go func() {
 			<-start
 			done <- client.inTx(ctx, func(tx *storeTx) error {
-				_, err := settleBillingAwardWithTx(ctx, tx, "a", "reservation", lapse, calculate)
+				_, err := accountBillingAwardTx(ctx, tx, "a", "reservation", lapse, true, calculate)
 				return err
 			})
 		}()

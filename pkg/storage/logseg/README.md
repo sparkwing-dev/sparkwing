@@ -9,9 +9,17 @@ the immutable source generation.
 `Options.Subject` is required. The sink copies it before opening its spool,
 so changes to the caller's value cannot retag the log. Every stored manifest
 requires a valid subject. Flat run, node, attempt and generation fields are
-removed. `Open` checks that the manifest's subject produces the requested
-`blob.LogSubjectPrefix`. `SealAbandoned` checks that binding before reading or writing
-objects. `AttemptPrefix` is removed.
+removed. `CommittedReader` checks the store-selected subject and object keys
+before opening bytes. Physical manifests and object listings grant no read
+authority. The object-side reader and abandoned-log sealer are removed.
+`Operator.SealAbandonedLogStreams` owns abandoned seals under the maintenance
+lease and preserves every committed segment. `AttemptPrefix` is removed.
+
+Dashboard completeness uses the selected attempt's persisted finish time and
+`RunSnapshot.StoreNow`. A later job finish or an unrelated attempt cannot extend
+that stream's final tail grace. `NodeProgress` and `SealGrace` are removed.
+`NodeLogs.NodeLogCompleteness` takes only context, run and job IDs. The shared
+grace constant remains `limits.LogSealGrace`.
 
 `SubjectUploader` verifies compressed bytes, raw size and line coverage before
 signing. Batches contain up to `limits.LogUploadBatch` segment slots and one
@@ -46,8 +54,7 @@ It returns no bytes or read URL and creates no reference edge. `RecordSegments`
 rechecks the writer before committing that edge. The verifier works with both
 object backends. Its controller route remains an integration point.
 `blob.S3.LogClassReady` supplies the lifecycle callback for the S3 bucket.
-The filesystem backend exposes an expiry pass for the controller's maintenance
-lease. Its scheduling must be connected before enabling filesystem log signing.
+The controller runs filesystem expiry after renewing its maintenance lease.
 
 `CommittedReader` calls `ReadLogSegments` on each read. It checks the returned
 subject, keys and contiguous ranges before reading any object. Each segment must
@@ -111,3 +118,13 @@ job and owner-unit subjects, retention classes and lost PUT responses. It checks
 the bucket lifecycle before signing, reads exact offsets and refuses corrupt
 segments before emitting bytes. Segment records and controller authorization
 remain fakes.
+
+The dashboard reader uses `Tenant.ReadRunView` to select committed subjects and
+passes the request actor to `CommittedReader`. Both physical backends are selected
+through `Server.WithDataObjects`. There is no separate S3 log store or run-directory
+fallback. Closing a dashboard stream cancels its pending reads.
+`TestCommittedDashboardLogsReadRealRecords` drives a real claim, start, signed
+filesystem upload, segment commit, exact-offset read and SSE resume.
+`TestCommittedDashboardLogsNeverEmitForForeignOrRevokedActors` generates payloads
+against the real tenant and verifies that ended authority emits no bytes.
+Authenticated log signing and commit routes remain W2 integration work.

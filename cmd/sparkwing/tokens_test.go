@@ -5,60 +5,38 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
-func TestFormatScopes(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name string
-		in   []string
-		want string
-	}{
-		{"empty renders as dash", nil, "-"},
-		{"single scope", []string{"logs.write"}, "logs.write"},
-		{"multiple scopes joined with comma", []string{"nodes.claim", "triggers.claim", "logs.write"}, "nodes.claim,triggers.claim,logs.write"},
-		{"admin collapses to star", []string{"admin"}, "*"},
-		{"admin alongside others still collapses", []string{"runs.read", "admin", "logs.write"}, "*"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := formatScopes(tc.in)
-			if got != tc.want {
-				t.Fatalf("formatScopes(%v) = %q, want %q", tc.in, got, tc.want)
-			}
-		})
-	}
-}
-
-func fixedTokens() []client.TokenInfo {
+func fixedTokens() []controllerwire.TokenMetadata {
 	last := int64(1714867200)
 	revoked := int64(1714953600)
-	return []client.TokenInfo{
+	return []controllerwire.TokenMetadata{
 		{
-			Prefix:     "swu_abcd",
+			Prefix:     "swk_abcd",
 			Kind:       "runner",
-			Principal:  "agent:sparkwing-warm-runner",
-			Scopes:     []string{"nodes.claim", "triggers.claim", "logs.write"},
+			Principal:  "runner:sparkwing-warm-runner",
+			Scopes:     []capability.Grant{capability.NodesClaim, capability.TriggersClaim, capability.LogsRead},
 			LastUsedAt: &last,
 		},
 		{
-			Prefix:    "swu_admn",
-			Kind:      "user",
+			Prefix:    "swk_admn",
+			Kind:      "member",
 			Principal: "user:admin",
-			Scopes:    []string{"admin"},
+			Scopes:    []capability.Grant{capability.TeamAdmin},
 		},
 		{
-			Prefix:     "swu_dead",
-			Kind:       "service",
+			Prefix:     "swk_dead",
+			Kind:       "runner",
 			Principal:  "deploy-bot",
-			Scopes:     []string{"runs.write"},
+			Scopes:     []capability.Grant{capability.RunsWrite},
 			LastUsedAt: &last,
 			RevokedAt:  &revoked,
 		},
 		{
-			Prefix:    "swu_void",
-			Kind:      "service",
+			Prefix:    "swk_void",
+			Kind:      "runner",
 			Principal: "scopeless-bot",
 			Scopes:    nil,
 		},
@@ -68,33 +46,26 @@ func fixedTokens() []client.TokenInfo {
 func TestRenderTokensTable_IncludesScopesColumn(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	if err := renderTokensTable(&buf, fixedTokens()); err != nil {
+	if err := writeTokenMetadata(&buf, fixedTokens(), "pretty"); err != nil {
 		t.Fatalf("renderTokensTable: %v", err)
 	}
 	out := buf.String()
 
 	header := strings.SplitN(out, "\n", 2)[0]
-	for _, want := range []string{"PREFIX", "TYPE", "PRINCIPAL", "SCOPES", "LAST_USED"} {
+	for _, want := range []string{"PREFIX", "TYPE", "PRINCIPAL", "SCOPES", "LAST USED"} {
 		if !strings.Contains(header, want) {
 			t.Errorf("header %q missing column %q", header, want)
 		}
 	}
 
-	if !strings.Contains(out, "nodes.claim,triggers.claim,logs.write") {
+	if !strings.Contains(out, "nodes.claim,triggers.claim,logs.read") {
 		t.Errorf("table missing warm-runner scopes:\n%s", out)
 	}
 	if !strings.Contains(out, "user:admin") {
 		t.Errorf("table missing user:admin row:\n%s", out)
 	}
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "user:admin") {
-			if !strings.Contains(line, "*") {
-				t.Errorf("admin row should render scopes as *, got: %q", line)
-			}
-			if strings.Contains(line, "admin,") || strings.HasSuffix(strings.TrimSpace(line), "admin") {
-				t.Errorf("admin row should not enumerate the literal scope name, got: %q", line)
-			}
-		}
+	if !strings.Contains(out, "team.admin") || strings.Contains(out, "*") {
+		t.Errorf("scope changed: %s", out)
 	}
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "scopeless-bot") {
@@ -103,26 +74,26 @@ func TestRenderTokensTable_IncludesScopesColumn(t *testing.T) {
 			}
 		}
 	}
-	if !strings.Contains(out, "(revoked)") {
-		t.Errorf("revoked row missing (revoked) marker:\n%s", out)
+	if !strings.Contains(out, "2024-05-06") {
+		t.Errorf("revoked row missing revocation time:\n%s", out)
 	}
 }
 
 func TestRenderTokensTable_EmptyList(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	if err := renderTokensTable(&buf, nil); err != nil {
+	if err := writeTokenMetadata(&buf, nil, "pretty"); err != nil {
 		t.Fatalf("renderTokensTable(nil): %v", err)
 	}
-	if got := strings.TrimSpace(buf.String()); got != "(no tokens)" {
-		t.Errorf("empty table = %q, want \"(no tokens)\"", got)
+	if got := strings.TrimSpace(buf.String()); !strings.Contains(got, "PREFIX") {
+		t.Errorf("empty table = %q, want a column header", got)
 	}
 }
 
 func TestRenderTokensJSON_ExposesScopesArray(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	if err := renderTokensJSON(&buf, fixedTokens()); err != nil {
+	if err := writeTokenMetadata(&buf, fixedTokens(), "json"); err != nil {
 		t.Fatalf("renderTokensJSON: %v", err)
 	}
 
@@ -139,7 +110,7 @@ func TestRenderTokensJSON_ExposesScopesArray(t *testing.T) {
 	if len(scopes) != 3 {
 		t.Errorf("warm-runner scopes length = %d, want 3", len(scopes))
 	}
-	wantScopes := []string{"nodes.claim", "triggers.claim", "logs.write"}
+	wantScopes := []string{"nodes.claim", "triggers.claim", "logs.read"}
 	for i, s := range wantScopes {
 		if scopes[i] != s {
 			t.Errorf("scopes[%d] = %v, want %s", i, scopes[i], s)
@@ -148,15 +119,15 @@ func TestRenderTokensJSON_ExposesScopesArray(t *testing.T) {
 
 	admin := got[1]
 	adminScopes, _ := admin["scopes"].([]any)
-	if len(adminScopes) != 1 || adminScopes[0] != "admin" {
-		t.Errorf("admin scopes = %v, want [admin] (JSON should not collapse)", adminScopes)
+	if len(adminScopes) != 1 || adminScopes[0] != "team.admin" {
+		t.Errorf("admin scopes = %v, want [team.admin]", adminScopes)
 	}
 }
 
 func TestRenderTokensJSON_NilTokensEmitsAnEmptyStream(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	if err := renderTokensJSON(&buf, nil); err != nil {
+	if err := writeTokenMetadata(&buf, nil, "json"); err != nil {
 		t.Fatalf("renderTokensJSON(nil): %v", err)
 	}
 	if got := buf.String(); got != "" {

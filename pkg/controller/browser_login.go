@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"context"
-	"errors"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -10,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -29,9 +28,6 @@ const loginHTML = `<!doctype html>
     input:focus { outline: none; border-color: #58a6ff; }
     button { width: 100%; padding: 0.6rem; background: #238636; color: white; border: none; border-radius: 4px; font-size: 0.95rem; font-weight: 500; cursor: pointer; }
     button:hover { background: #2ea043; }
-    .err { background: #5a1d1d; border: 1px solid #f85149; border-radius: 4px; padding: 0.6rem 0.8rem; font-size: 0.85rem; color: #ffa198; margin-bottom: 1rem; }
-    .note { background: #0d2a4a; border: 1px solid #1f6feb; border-radius: 4px; padding: 0.6rem 0.8rem; font-size: 0.8rem; color: #a5d6ff; margin-bottom: 1rem; line-height: 1.35; }
-    .footer { margin-top: 1.25rem; font-size: 0.75rem; color: #6e7681; text-align: center; }
     .idp { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 40px; padding: 0 12px; box-sizing: border-box; border-radius: 4px; font-family: Roboto, arial, sans-serif; font-size: 14px; font-weight: 500; line-height: 20px; letter-spacing: 0.25px; text-decoration: none; margin-bottom: 0.6rem; }
     .idp svg { width: 20px; height: 20px; flex: none; }
     .gsi { background: #131314; border: 1px solid #8e918f; color: #e3e3e3; }
@@ -47,7 +43,6 @@ const loginHTML = `<!doctype html>
 <body>
   <form class="card" method="POST" action="/login">
     <h1>Sparkwing</h1>
-    {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
     {{if .Google}}
     <a class="idp gsi" href="/auth/google/start?next={{.Next}}">
       <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg>
@@ -62,7 +57,7 @@ const loginHTML = `<!doctype html>
     {{end}}
     {{if or .Google .GitHub}}
     <details>
-      <summary class="or">or use an operator token</summary>
+      <summary class="or">or use an account access token</summary>
       {{template "token" .}}
     </details>
     {{else}}
@@ -72,7 +67,7 @@ const loginHTML = `<!doctype html>
 </body>
 </html>
 {{define "token"}}
-    <label for="token">Operator token</label>
+    <label for="token">Account access token</label>
     <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" {{if not (or .Google .GitHub)}}autofocus {{end}}required>
     <input type="hidden" name="next" value="{{.Next}}">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
@@ -82,7 +77,6 @@ const loginHTML = `<!doctype html>
 var loginTmpl = template.Must(template.New("login").Parse(loginHTML))
 
 type loginPageData struct {
-	Error     string
 	Next      string
 	CSRFToken string
 	Google    bool
@@ -110,7 +104,7 @@ func (s *Server) withSignInProviders(data loginPageData) loginPageData {
 
 // safety: the form carries the CSRF cookie's token, minting one when the browser holds none, so the login post
 // passes the same double-submit check every other form does.
-func (s *Server) renderLoginPage(w http.ResponseWriter, r *http.Request, data loginPageData, status int) {
+func (s *Server) renderLoginPage(w http.ResponseWriter, r *http.Request, data loginPageData, status int) error {
 	secure := s.cookiesSecure()
 	token := ""
 	if cookie, err := r.Cookie(cookieName(csrfCookieName, secure)); err == nil {
@@ -119,87 +113,41 @@ func (s *Server) renderLoginPage(w http.ResponseWriter, r *http.Request, data lo
 	if token == "" {
 		var err error
 		if token, err = newCSRFToken(); err != nil {
-			http.Error(w, "could not create the sign-in form", http.StatusInternalServerError)
-			return
+			return &apierr.Error{Code: apierr.Internal, Message: "could not create the sign-in form"}
 		}
 	}
 	data.CSRFToken = token
 	setCSRFCookie(w, token, secure, int(12*time.Hour/time.Second))
 	renderPage(w, status, loginTmpl, data)
+	return nil
 }
 
-func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
-	data := loginPageData{Next: safeNext(r.URL.Query().Get("next"))}
-	if !s.AuthEnabled() {
-		http.Redirect(w, r, data.Next, http.StatusSeeOther)
-		return
+func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
+	proof, ok := r.Context().Value(loginProofKey{}).(loginProof)
+	if !ok {
+		return missingEndpointPolicy()
 	}
-	if raw := sessionCookie(r, s.cookiesSecure()); raw != "" {
-		_, err := s.resolveBrowserSession(r.Context(), raw)
-		switch {
-		case err == nil:
-			http.Redirect(w, r, data.Next, http.StatusSeeOther)
-			return
-		case errors.Is(err, store.ErrSessionBackend):
-			s.refuseBrowserSession(w, err, s.cookiesSecure())
-			return
-		}
+	data := loginPageData{Next: safeNext(r.URL.Query().Get("next"))}
+	if proof.session != nil {
+		http.Redirect(w, r, data.Next, http.StatusSeeOther)
+		return nil
+	}
+	if len(r.CookiesNamed(cookieName(sessionCookieName, s.cookiesSecure()))) != 0 {
 		clearSessionCookies(w, s.cookiesSecure())
 	}
-	s.renderLoginPage(w, r, s.withSignInProviders(data), http.StatusOK)
+	return s.renderLoginPage(w, r, s.withSignInProviders(data), http.StatusOK)
 }
 
-var errNotOperatorToken = errors.New("only a token holding the admin scope opens a dashboard session")
-
-// safety: the session holds no copy of the token's scopes; every lookup reads them from the token's row, so revoking
-// the token signs its browsers out within one request.
-func (s *Server) tokenSignIn(r *http.Request, raw string) (string, *store.Session, error) {
-	if s.auth == nil || s.auth.AuthDisabled() {
-		return "", nil, errors.New("this controller does not authenticate, so there is nothing to sign in to")
+func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
+	proof, ok := r.Context().Value(loginProofKey{}).(loginProof)
+	if !ok || proof.raw == "" || proof.session == nil {
+		return missingEndpointPolicy()
 	}
-	p, err := s.auth.authenticate(raw, ratelimit.ClientIP(r))
-	if err != nil {
-		return "", nil, err
-	}
-	if p.Kind != store.TokenKindUser || !p.HasScope(ScopeAdmin) {
-		return "", nil, errNotOperatorToken
-	}
-	rawSession, sess, err := s.store.CreateCapabilitySession(r.Context(), p.TokenPrefix, s.sessionInitialTTL())
-	if err != nil {
-		return "", nil, err
-	}
-	s.logger.Info("signed in", "principal", p.Name, "token_prefix", p.TokenPrefix, "expires_at", sess.ExpiresAt.Unix())
-	noteAuditPrincipal(r.Context(), &Principal{Name: p.Name, Kind: store.TokenKindUser, Team: p.Team})
-	return rawSession, sess, nil
-}
-
-func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
-	next := safeNext(r.PostForm.Get("next"))
-	raw, sess, err := s.tokenSignIn(r, strings.TrimSpace(r.PostForm.Get("token")))
-	if err != nil {
-		data := s.withSignInProviders(loginPageData{Next: next})
-		status := http.StatusUnauthorized
-		switch {
-		case errors.Is(err, errAuthThrottled):
-			setRetryAfter(w, authPrefixFailureWindow)
-			status, data.Error = http.StatusTooManyRequests, "Too many failed sign-ins with this token. Wait a minute and try again."
-		case errors.Is(err, store.ErrHashingBusy):
-			setRetryAfter(w, authBusyRetryAfter)
-			status, data.Error = http.StatusServiceUnavailable, "Sign-in is busy right now. Try again shortly."
-		case errors.Is(err, errNotOperatorToken):
-			status, data.Error = http.StatusForbidden, "That token cannot open a dashboard session. Sign in with an operator token or your identity provider."
-		case authRejection(err):
-			data.Error = "That token is not valid."
-		default:
-			s.logger.Error("login.unavailable", "error", err.Error())
-			status, data.Error = http.StatusServiceUnavailable, "Sign-in is unavailable right now. Try again shortly."
-		}
-		s.renderLoginPage(w, r, data, status)
-		return
-	}
-	s.endPriorSession(r, raw)
-	setSessionCookies(w, raw, sess.CSRFToken, s.cookiesSecure())
-	http.Redirect(w, r, next, http.StatusSeeOther)
+	s.endPriorSession(r, proof.raw)
+	noteAuditWrite(r.Context())
+	setSessionCookies(w, proof.raw, proof.session.CSRFToken, s.cookiesSecure())
+	http.Redirect(w, r, safeNext(r.PostForm.Get("next")), http.StatusSeeOther)
+	return nil
 }
 
 // safety: the browser's earlier session would otherwise stay live after its cookie is overwritten, with nothing
@@ -214,67 +162,4 @@ func (s *Server) endPriorSession(r *http.Request, newSessionID string) {
 	}
 }
 
-func (s *Server) handleBrowserLogout(w http.ResponseWriter, r *http.Request) {
-	secure := s.cookiesSecure()
-	raw := sessionCookie(r, secure)
-	if raw == "" {
-		clearSessionCookies(w, secure)
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	sess, err := s.resolveBrowserSession(r.Context(), raw)
-	if errors.Is(err, store.ErrSessionBackend) {
-		s.refuseBrowserSession(w, err, secure)
-		return
-	}
-	if err != nil {
-		clearSessionCookies(w, secure)
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	if !constantTimeEqual(r.PostForm.Get("csrf_token"), sess.csrfToken) {
-		csrfError(w)
-		return
-	}
-	if err := s.store.DeleteSession(raw); err != nil {
-		s.logger.Error("logout", "error", err.Error())
-		http.Error(w, "sign-out failed; try again", http.StatusInternalServerError)
-		return
-	}
-	clearSessionCookies(w, secure)
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
-}
-
-// safety: a form post is checked for its origin and its double-submitted token before a handler reads it, so a
-// page on another site cannot sign a browser in, out, or into a flow.
-func (s *Server) formCSRF(next http.HandlerFunc) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		if !sameOriginRequest(r) {
-			csrfError(w)
-			return
-		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxFormBody)
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if !validFormCSRF(r, s.cookiesSecure()) {
-			csrfError(w)
-			return
-		}
-		next(w, r)
-	})
-}
-
 const maxFormBody = 64 << 10
-
-func (s *Server) signedInBrowser(ctx context.Context, r *http.Request) (*browserSession, error) {
-	raw := sessionCookie(r, s.cookiesSecure())
-	if raw == "" {
-		return nil, errNoBrowserSession
-	}
-	return s.resolveBrowserSession(ctx, raw)
-}
-
-var errNoBrowserSession = errors.New("no session cookie")

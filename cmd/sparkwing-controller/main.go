@@ -27,7 +27,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
@@ -60,7 +59,7 @@ func run(args []string) error {
 				credPGURL, credSecretsKey, credSecretsPreviousKey, credBootstrapAdminToken,
 				credLicense, credOIDCKey, credOIDCPublishedKey, credGitHubClientSecret, credGoogleClientSecret,
 				credGitHubAppKey, credGitHubAppWebhookSecret, credCloudFrontKey,
-				credBillingToken, credCreditsToken,
+				credBillingToken, credStripeAPIKey, credStripeWebhookSecret,
 			}, ", ")+
 			". An absent file leaves its feature off; docs/self-hosting.md says what each one turns on.")
 	dashboardURL := fs.String("dashboard-url", "",
@@ -71,6 +70,7 @@ func run(args []string) error {
 		"base URL of the hosted checkout service that opens a Stripe Checkout Session "+
 			"when a team owner buys credits; the controller authenticates with the "+
 			credBillingToken+" credential. Empty sells no credits.")
+	paymentMode := fs.String("payment-mode", "", "Stripe callback mode: test or live. Requires stripe-api-key and stripe-webhook-secret in --credentials-dir. Empty disables settlement.")
 	operatorAccounts := fs.String("operator-accounts", "",
 		"comma-separated account ids whose signed-in dashboard sessions may use the "+
 			"operator console. No token reaches the console. Empty leaves it off.")
@@ -266,7 +266,7 @@ func run(args []string) error {
 	signUpGate := fs.String("signup-gate", string(store.SignUpOpen),
 		"open or waitlist. waitlist places every new account on the sign-up "+
 			"waitlist whatever the operator's stored setting says; open defers to "+
-			"that setting, which PUT /api/v1/signups changes. Existing accounts are "+
+			"that setting, which PUT /api/v1/operator/signups changes. Existing accounts are "+
 			"never affected.")
 	hsts := fs.Bool("hsts", false,
 		"assert that browsers reach this controller's dashboard over TLS: send "+
@@ -277,10 +277,7 @@ func run(args []string) error {
 			"keeps a session over plain HTTP. Only for a dashboard published without TLS: the "+
 			"cookies then travel readable to every hop on the path")
 	requireAuth := fs.Bool("require-auth", false,
-		"refuse to start when the tokens table is empty, guarding against "+
-			"accidentally deploying an open controller. Leave unset for "+
-			"first-run bootstrap (minting the first token needs an open "+
-			"controller) and for laptop-local use.")
+		"refuse to start until a live deployment administrator capability exists; private routes always require credentials")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -291,6 +288,10 @@ func run(args []string) error {
 	creds, err := readCredentials(*credentialsDir)
 	if err != nil {
 		return err
+	}
+	paymentVerifier, err := readPaymentAuthenticator(*credentialsDir, *paymentMode)
+	if err != nil {
+		return fmt.Errorf("payment configuration: %w", err)
 	}
 	egressCfg, egressNamed, err := readEgress()
 	if err != nil {
@@ -412,7 +413,7 @@ func run(args []string) error {
 	defer func() { _ = tel.Shutdown(context.Background()) }()
 
 	bootstrapToken := creds.BootstrapAdminToken
-	created, bterr := controller.EnsureBootstrapAdminToken(st, bootstrapToken, time.Now().UTC())
+	created, bterr := controller.EnsureBootstrapAdminToken(ctx, st, bootstrapToken)
 	if bterr != nil {
 		return fmt.Errorf("bootstrap admin token: %w", bterr)
 	}
@@ -423,21 +424,8 @@ func run(args []string) error {
 					controller.BootstrapAdminPrincipal)
 		} else {
 			fmt.Fprintln(os.Stderr,
-				"sparkwing-controller: bootstrap admin token skipped: the tokens table already holds a token")
+				"sparkwing-controller: bootstrap admin token skipped: the capability bootstrap gate is closed")
 		}
-	}
-
-	switch created, err := controller.EnsureCheckoutToken(ctx, st, creds.CreditsToken, time.Now().UTC()); {
-	case errors.Is(err, store.ErrSeededTokenRevoked):
-		// safety: a revoked credential is never seeded again; the controller
-		// starts without a checkout token so selling credits stops visibly.
-		fmt.Fprintln(os.Stderr, "sparkwing-controller: ERROR: the "+credCreditsToken+
-			" credential holds a checkout token that was revoked; it is not seeded again. "+
-			"Write a new sws_ value to the credential and to the checkout service, then restart.")
-	case err != nil:
-		return fmt.Errorf("%s credential: %w", credCreditsToken, err)
-	case created:
-		fmt.Fprintln(os.Stderr, "sparkwing-controller: checkout service token created from the "+credCreditsToken+" credential")
 	}
 
 	if strings.TrimSpace(*billingURL) != "" && creds.BillingToken == "" {
@@ -450,6 +438,7 @@ func run(args []string) error {
 		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
 		WithDashboardURL(*dashboardURL).
 		WithBillingCheckout(*billingURL, creds.BillingToken).
+		WithPayments(paymentVerifier, st).
 		WithOperatorAccounts(splitCSV(*operatorAccounts)).
 		WithExternalURL(*externalURL).
 		WithMetricsAddr(*metricsAddr).
@@ -513,9 +502,6 @@ func run(args []string) error {
 	if err := st.SetFreeTeamSlots(ctx, *freeTeamSlots); err != nil {
 		return fmt.Errorf("--free-team-slots: %w", err)
 	}
-	// safety: auth resolves after the license is installed, because the license decides
-	// whether an empty tokens table may serve unauthenticated.
-	srv.EnableAuthFromStore()
 	if err := configureSecrets(ctx, srv, st, creds, generatedKeyPath(p.StateDB())); err != nil {
 		return err
 	}
@@ -529,28 +515,20 @@ func run(args []string) error {
 		}
 		srv = srv.WithBucketUsage(bucketStore)
 	}
-	if *cacheBlobStore != "" {
-		cache, err := openTeamStore(ctx, *cacheBlobStore)
-		if err != nil {
-			return fmt.Errorf("--cache-blob-store: %w", err)
-		}
-		privateKey := creds.CloudFrontKey
-		domain, keyPairID := *cloudFrontDomain, *cloudFrontKeyPairID
-		client, _, _, err := s3store.Open(ctx, *cacheBlobStore)
-		if err != nil {
-			return fmt.Errorf("download signer S3: %w", err)
-		}
-		if err := srv.WithSignedDownloads(cache, client, domain, keyPairID, privateKey); err != nil {
-			return err
-		}
+	if *cacheBlobStore != "" && !strings.HasPrefix(*cacheBlobStore, "s3://") {
+		return errors.New("--cache-blob-store must be an s3:// URL")
 	}
+	if (*cloudFrontDomain != "" || *cloudFrontKeyPairID != "" || creds.CloudFrontKey != "") && !strings.HasPrefix(*cacheBlobStore, "s3://") {
+		return errors.New("CloudFront downloads require an S3 data store")
+	}
+
 	retention, err := parseLogRetention(*logRetention)
 	if err != nil {
 		return fmt.Errorf("--log-retention: %w", err)
 	}
 	srv = srv.WithLogRetention(retention)
 	if strings.HasPrefix(*cacheBlobStore, "s3://") {
-		client, bucket, prefix, err := s3store.Open(ctx, *cacheBlobStore)
+		client, bucket, _, err := s3store.Open(ctx, *cacheBlobStore)
 		if err != nil {
 			return fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
 		}
@@ -558,7 +536,14 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		srv = srv.WithDataObjects(objects).WithDirectUploads(client, bucket, prefix)
+		var backend blob.ObjectBackend = objects
+		if *cloudFrontDomain != "" || *cloudFrontKeyPairID != "" || creds.CloudFrontKey != "" {
+			backend, err = controller.NewCloudFrontDataBackend(objects, *cloudFrontDomain, *cloudFrontKeyPairID, creds.CloudFrontKey)
+			if err != nil {
+				return err
+			}
+		}
+		srv = srv.WithDataObjects(backend)
 	} else {
 		objects, err := openFilesystemData(p.Root, *externalURL, *addr)
 		if err != nil {
@@ -571,7 +556,8 @@ func run(args []string) error {
 		}()
 		srv = srv.WithDataObjects(objects)
 	}
-	if err := checkRequireAuth(st, *requireAuth); err != nil {
+	adminReader, _ := any(st).(deploymentAdminReader)
+	if err := checkRequireAuth(ctx, adminReader, *requireAuth); err != nil {
 		return err
 	}
 	srv.WithDashboard(dashboard(p, *hsts, *insecureCookies))
@@ -699,24 +685,25 @@ func splitCSV(s string) []string {
 	return out
 }
 
-// safety: asks the tokens table rather than whether auth is on, because a multi-team
-// license turns auth on with an empty table and --require-auth promises a usable token.
-func checkRequireAuth(st *store.Store, requireAuth bool) error {
-	if !requireAuth {
+type deploymentAdminReader interface {
+	HasDeploymentAdministrator(context.Context) (bool, error)
+}
+
+func checkRequireAuth(ctx context.Context, reader deploymentAdminReader, required bool) error {
+	if !required {
 		return nil
 	}
-	toks, err := st.ListTokens("", false)
+	if reader == nil {
+		return errors.New("--require-auth: administrator capability check is unavailable")
+	}
+	ready, err := reader.HasDeploymentAdministrator(ctx)
 	if err != nil {
-		return fmt.Errorf("--require-auth: read the tokens table: %w", err)
+		return fmt.Errorf("--require-auth: read deployment administrator capability: %w", err)
 	}
-	if len(toks) > 0 {
-		return nil
+	if !ready {
+		return errors.New("--require-auth: no live deployment administrator capability; supply the " + credBootstrapAdminToken + " credential")
 	}
-	return fmt.Errorf("--require-auth is set but " +
-		"the tokens table is empty; supply the first admin token as the " +
-		credBootstrapAdminToken + " credential, or " +
-		"mint one with the controller started unauthenticated and restart " +
-		"with --require-auth")
+	return nil
 }
 
 // safety: a free team is held to its allowance only by counters kept over the object
@@ -764,8 +751,7 @@ func configureSecrets(ctx context.Context, srv *controller.Server, st *store.Sto
 		srv.WithSecretsCipher(keylessCipher{})
 		return nil
 	}
-	_, err = srv.ResealStoredSecrets(ctx)
-	return err
+	return nil
 }
 
 // safety: the generated key sits beside the database on its volume, so a
@@ -798,17 +784,6 @@ func configureMailer(ctx context.Context, srv *controller.Server, sender, config
 	}
 	srv.WithMailer(m)
 	return nil
-}
-
-func openTeamStore(ctx context.Context, raw string) (*teamblob.Store, error) {
-	if raw == "" {
-		return nil, nil
-	}
-	_, bucket, prefix, err := s3store.Open(ctx, raw)
-	if err != nil {
-		return nil, err
-	}
-	return teamblob.New(teamblob.Options{Bucket: bucket, Prefix: prefix})
 }
 
 // safety: a negative bound would silently remove the ceiling it names, so it stops the controller instead.
@@ -862,7 +837,7 @@ func parseLogRetention(raw string) (map[store.Team]int, error) {
 		}
 		team, rawDays, ok := strings.Cut(item, "=")
 		days, err := strconv.Atoi(rawDays)
-		if !ok || err != nil || days < 1 || !teamblob.ValidTeam(team) {
+		if !ok || err != nil || days < 1 || !blob.ValidLogTeam(team) {
 			return nil, fmt.Errorf("%q is not team=days with a team slug and a positive number of days", item)
 		}
 		out[store.Team(team)] = days

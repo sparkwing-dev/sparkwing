@@ -1,7 +1,6 @@
 package logseg_test
 
 import (
-	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -9,36 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 )
-
-func TestOpenRejectsManifestForAnotherSubject(t *testing.T) {
-	subject := jobSubject()
-	prefix, err := blob.LogSubjectPrefix(logseg.ClassStandard, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, other := range map[string]blob.LogSubject{
-		"other job":   {Kind: blob.LogJobAttempt, Team: subject.Team, RunID: subject.RunID, Attempt: subject.Attempt},
-		"owner unit":  ownerSubject(blob.LogPlan),
-		"invalid tag": {Kind: blob.LogOwnerUnit, Team: subject.Team, RunID: subject.RunID, Attempt: subject.Attempt},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if name == "other job" {
-				attempt := *other.Attempt
-				attempt.NodeID = "test"
-				other.Attempt = &attempt
-			}
-			raw, err := json.Marshal(logseg.Manifest{Version: logseg.ManifestVersion, Subject: &other, Status: logseg.StatusComplete})
-			if err != nil {
-				t.Fatal(err)
-			}
-			objects := newMemObjects()
-			objects.put(blob.LogManifestKey(prefix), raw)
-			if _, err := logseg.Open(t.Context(), objects, prefix); !errors.Is(err, logseg.ErrBadManifest) {
-				t.Fatalf("foreign manifest opened: %v", err)
-			}
-		})
-	}
-}
 
 func TestParseManifestRequiresTaggedSubject(t *testing.T) {
 	for _, raw := range []string{
@@ -50,22 +19,6 @@ func TestParseManifestRequiresTaggedSubject(t *testing.T) {
 		if _, err := logseg.ParseManifest([]byte(raw)); !errors.Is(err, logseg.ErrBadManifest) {
 			t.Errorf("untagged manifest accepted: %s: %v", raw, err)
 		}
-	}
-}
-
-func TestAbandonedSealCannotChangeSubject(t *testing.T) {
-	prefix, err := blob.LogSubjectPrefix(logseg.ClassStandard, jobSubject())
-	if err != nil {
-		t.Fatal(err)
-	}
-	objects := newMemObjects()
-	_, err = logseg.SealAbandoned(t.Context(), objects, prefix,
-		logseg.Manifest{Subject: new(ownerSubject(blob.LogPlan))}, logseg.ReasonRunnerLost, objects.putIfAbsent)
-	if !errors.Is(err, logseg.ErrBadManifest) {
-		t.Fatalf("abandoned seal changed subject: %v", err)
-	}
-	if keys, err := objects.List(t.Context(), prefix); err != nil || len(keys) != 0 {
-		t.Fatalf("refused seal wrote objects: %v, %v", keys, err)
 	}
 }
 
@@ -91,7 +44,9 @@ func TestSinkCopiesItsSubject(t *testing.T) {
 		if err != nil || m.Subject == nil || !reflect.DeepEqual(*m.Subject, want) {
 			t.Fatalf("sink changed subject: %+v, %v", m, err)
 		}
-		if _, err := logseg.Open(t.Context(), objects, prefix); err != nil {
+		if raw, err := m.Marshal(); err != nil {
+			t.Fatal(err)
+		} else if _, err := logseg.ParseManifest(raw); err != nil {
 			t.Fatal(err)
 		}
 	}

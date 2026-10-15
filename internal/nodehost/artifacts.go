@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -72,6 +73,16 @@ func artifactsLayer(cfg *Config, next Executor) Executor {
 		}
 		return res
 	}
+}
+
+func recordArtifactManifest(ctx context.Context, state storage.StateStoreOld, run, node, digest string) error {
+	writer, ok := baseState(state).(interface {
+		SetNodeArtifactManifest(context.Context, string, string, string) error
+	})
+	if !ok {
+		return errors.New("artifact manifests require the job result transaction")
+	}
+	return writer.SetNodeArtifactManifest(ctx, run, node, digest)
 }
 
 func artifactFailure(what string, err error) Result {

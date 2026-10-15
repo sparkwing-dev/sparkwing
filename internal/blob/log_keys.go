@@ -8,7 +8,6 @@ import (
 	"unicode"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
 const (
@@ -24,7 +23,7 @@ func LogRunPrefix(class, team, runID string) (string, error) {
 	if _, ok := LogClassDays(class); !ok {
 		return "", fmt.Errorf("logseg: retention class %q is not r<days>", class)
 	}
-	if team != "_" && !teamblob.ValidTeam(team) {
+	if team != "_" && !ValidLogTeam(team) {
 		return "", fmt.Errorf("logseg: team %q is not a team slug", team)
 	}
 	if err := validLogPath(runID, false); err != nil {
@@ -121,4 +120,17 @@ func validLogPath(id string, hierarchical bool) error {
 		return fmt.Errorf("invalid log identifier %q", id)
 	}
 	return nil
+}
+
+// ValidLogTeam accepts a DNS-label tenant for log storage.
+func ValidLogTeam(team string) bool {
+	if team == "" || len(team) > 63 || team[0] == '-' || team[len(team)-1] == '-' {
+		return false
+	}
+	for _, c := range team {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+			return false
+		}
+	}
+	return true
 }

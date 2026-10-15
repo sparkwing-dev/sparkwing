@@ -16,9 +16,6 @@ func pendingScenarios(t *testing.T, group string) {
 		}
 		count++
 		t.Run(scenario.ID, func(t *testing.T) {
-			if check := storageBoundaryChecks()[scenario.ID]; check != nil {
-				t.Run("storage-components", check)
-			}
 			switch scenario.ID {
 			case "credentials-delegation-subset":
 				t.Run("hermetic-process-authority", acceptance.CheckProcessAuthority)
@@ -80,6 +77,9 @@ func pendingScenarios(t *testing.T, group string) {
 				t.Run("hermetic-library", acceptance.CheckKeeperConflictAndStop)
 			case "recovery-reconciler-waits-and-reclaims":
 				t.Run("hermetic-library", acceptance.CheckHostReconciliation)
+			}
+			if check := storageBoundaryChecks()[scenario.ID]; check != nil {
+				t.Run("storage-components", check)
 			}
 			typeScriptBoundary(t, scenario.ID)
 			if check, ok := runspecConfigBoundaries()[scenario.ID]; ok {

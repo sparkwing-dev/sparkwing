@@ -159,15 +159,9 @@ type capRefusal struct {
 	AmountMicro  int64  `json:"amount_micro"`
 }
 
-// safety: a free grant has no route but the operator console, so it is written
-// straight to the ledger the way the console's grant writes it.
+// safety: billing-page fixtures seed balances without inventing a payment proof.
 func (f *identityFixture) grantTo(team, kind, reference string, micro int64) int {
 	f.t.Helper()
-	if kind == store.CreditGrantPaid {
-		return f.call("POST", "/api/v1/credits/grants", f.creditsGrantToken(), map[string]any{
-			"kind": kind, "amount_micro": micro, "reference": reference, "team": team,
-		}, nil)
-	}
 	t, err := f.store.ForTeam(context.Background(), store.Team(team))
 	if err != nil {
 		f.t.Fatal(err)
@@ -314,12 +308,16 @@ func TestTeamBillingCheckout_RefusesAPurchaseAboveTheBalanceCap(t *testing.T) {
 		refusal.OpenMicro != 1_000*store.MicroCreditsPerCent {
 		t.Errorf("a checkout past the cap with one open = %d %+v, want 409 naming the open checkout", code, refusal)
 	}
-	if code := f.call("POST", "/api/v1/credits/grants", f.creditsGrantToken(), map[string]any{
-		"kind": "paid", "amount_micro": 1_000 * store.MicroCreditsPerCent, "reference": "pi_open",
-		"team": owner.team, "checkout": "cs_test_1",
-	}, nil); code != http.StatusCreated {
-		t.Fatalf("the open checkout's paid grant = %d", code)
+	tenant, err := f.store.ForTeam(t.Context(), store.Team(owner.team))
+	if err != nil {
+		t.Fatal(err)
 	}
+	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{
+		Kind: store.CreditGrantPaid, AmountMicro: 1_000 * store.MicroCreditsPerCent, Reference: "pi_open", CreatedBy: "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	var b teamBilling
 	f.call("GET", "/api/v1/team/billing", owner.auth, nil, &b)
 	if b.BalanceMicro != 5_000*100*store.MicroCreditsPerCent {

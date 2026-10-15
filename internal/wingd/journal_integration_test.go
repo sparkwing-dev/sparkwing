@@ -3,7 +3,6 @@ package wingd_test
 import (
 	"context"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -205,7 +204,7 @@ func TestHealthProbeProducesNoConnectionJournalRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	incomplete, err := net.Dial("unix", socket)
+	incomplete, err := wingd.DialSocket(context.Background(), socket, 3*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

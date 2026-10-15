@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
@@ -62,15 +63,27 @@ func readPackage(path string, into any) error {
 // IsTypeScript reports whether sparkwingDir holds a TypeScript pipeline: a
 // package.json that depends on [SDKPackage].
 func IsTypeScript(sparkwingDir string) (bool, error) {
-	var pkg struct {
-		Dependencies    map[string]json.RawMessage `json:"dependencies"`
-		DevDependencies map[string]json.RawMessage `json:"devDependencies"`
-	}
-	err := readPackage(filepath.Join(sparkwingDir, "package.json"), &pkg)
+	raw, err := os.ReadFile(filepath.Join(sparkwingDir, "package.json"))
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
 	if err != nil {
+		return false, err
+	}
+	typescript, err := IsTypeScriptManifest(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", filepath.Join(sparkwingDir, "package.json"), err)
+	}
+	return typescript, nil
+}
+
+// IsTypeScriptManifest classifies package.json bytes without reading the working tree.
+func IsTypeScriptManifest(raw []byte) (bool, error) {
+	var pkg struct {
+		Dependencies    map[string]json.RawMessage `json:"dependencies"`
+		DevDependencies map[string]json.RawMessage `json:"devDependencies"`
+	}
+	if err := json.Unmarshal(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), &pkg); err != nil {
 		return false, err
 	}
 	_, dep := pkg.Dependencies[SDKPackage]
@@ -125,12 +138,10 @@ func TypeScript(sparkwingDir string) (Command, error) {
 // InstallTypeScript runs npm ci in sparkwingDir with env, less the engine's
 // own variables, writing npm's output to out.
 func InstallTypeScript(ctx context.Context, sparkwingDir string, env []string, out io.Writer) error {
-	npm, err := exec.LookPath("npm")
+	cmd, err := NPMCommand(ctx, runtime.GOOS, exec.LookPath, "ci", "--no-audit", "--no-fund")
 	if err != nil {
 		return fmt.Errorf("install the TypeScript pipeline's dependencies: %w", err)
 	}
-	// #nosec G204 -- npm from PATH with fixed arguments.
-	cmd := exec.CommandContext(ctx, npm, "ci", "--no-audit", "--no-fund")
 	cmd.Dir, cmd.Env = sparkwingDir, engineenv.Strip(env)
 	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Run(); err != nil {

@@ -3,231 +3,95 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
+	"io"
 	"os"
-	"path/filepath"
-	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 type triggerFlags struct {
-	pipeline         string
-	profile          string
-	detach           bool
-	workingTree      bool
-	wantHelp         bool
-	allowSecretFiles []string
-	runner           string
-	reason           string
-	passthrough      []string
+	pipeline                         string
+	profile                          string
+	detach                           bool
+	workingTree                      bool
+	wantHelp                         bool
+	allowSecretFiles                 []string
+	runner                           string
+	reason                           string
+	passthrough                      []string
+	resume, ref, pipelineRef, output string
 }
 
 func parseTriggerFlags(args []string) (triggerFlags, error) {
-	if len(args) == 0 {
-		return triggerFlags{}, errors.New("pipeline name required (e.g. `sparkwing pipeline trigger release --profile prod`)")
-	}
-	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		return triggerFlags{wantHelp: true}, nil
-	}
-	flags := triggerFlags{pipeline: args[0]}
-	if strings.HasPrefix(flags.pipeline, "-") {
-		return triggerFlags{}, fmt.Errorf("pipeline name must come first; got flag %q", flags.pipeline)
-	}
-
-	rest := args[1:]
-	i := 0
-	for i < len(rest) {
-		a := rest[i]
-		switch {
-		case a == "--":
-			flags.passthrough = append(flags.passthrough, rest[i+1:]...)
-			i = len(rest)
-		case a == "-h" || a == "--help":
-			return triggerFlags{wantHelp: true}, nil
-		case a == "--profile":
-			if i+1 < len(rest) {
-				flags.profile = rest[i+1]
-				i += 2
-				continue
-			}
-			i++
-		case strings.HasPrefix(a, "--profile="):
-			flags.profile = strings.TrimPrefix(a, "--profile=")
-			i++
-		case a == "--detach":
-			flags.detach = true
-			i++
-		case a == "--detach=true":
-			flags.detach = true
-			i++
-		case a == "--detach=false":
-			flags.detach = false
-			i++
-		case a == "--working-tree" || a == "--working-tree=true":
-			flags.workingTree = true
-			i++
-		case a == "--working-tree=false":
-			flags.workingTree = false
-			i++
-		case a == "--allow-secret-file":
-			if i+1 < len(rest) {
-				flags.allowSecretFiles = append(flags.allowSecretFiles, rest[i+1])
-				i += 2
-				continue
-			}
-			i++
-		case strings.HasPrefix(a, "--allow-secret-file="):
-			flags.allowSecretFiles = append(flags.allowSecretFiles, strings.TrimPrefix(a, "--allow-secret-file="))
-			i++
-		case a == "--runner" || a == "--reason":
-			if i+1 >= len(rest) {
-				return triggerFlags{}, fmt.Errorf("%s needs a value", a)
-			}
-			if a == "--runner" {
-				flags.runner = rest[i+1]
-			} else {
-				flags.reason = rest[i+1]
-			}
-			i += 2
-		case strings.HasPrefix(a, "--runner="):
-			flags.runner = strings.TrimPrefix(a, "--runner=")
-			i++
-		case strings.HasPrefix(a, "--reason="):
-			flags.reason = strings.TrimPrefix(a, "--reason=")
-			i++
-		default:
-			flags.passthrough = append(flags.passthrough, a)
-			i++
-		}
-	}
-	if err := checkHereFlags(flags); err != nil {
+	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "trigger"}, args...))
+	if err != nil {
 		return triggerFlags{}, err
+	}
+	flags := triggerFlags{
+		pipeline: inv.Pipeline, profile: inv.Value("profile"), detach: inv.Bool("detach"),
+		workingTree: inv.Bool("working-tree"), wantHelp: inv.Help(),
+		allowSecretFiles: inv.Flags["allow-secret-file"], runner: inv.Value("runner"),
+		reason: inv.Value("reason"), passthrough: inv.Args, resume: inv.Value("resume"),
+		ref: inv.Value("ref"), pipelineRef: inv.Value("pipeline-ref"), output: inv.Output(color.IsInteractiveStdout()),
+	}
+	if !flags.wantHelp && flags.resume == "" {
+		if err := checkHereFlags(flags); err != nil {
+			return triggerFlags{}, &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
+		}
 	}
 	return flags, nil
 }
 
 func runPipelineTrigger(args []string) error {
+	ctx, stop, _ := interruptContext()
+	defer stop()
+	return runTriggerCommand(ctx, args, os.Stdout, prepareNativeTrigger, controllerOptions)
+}
+
+func runTriggerCommand(ctx context.Context, args []string, out io.Writer, prepare func(context.Context, triggerFlags) (controllerwire.CreateRunRequest, error), connect func(context.Context, string) (client.EngineOptions, func(), error)) error {
 	flags, err := parseTriggerFlags(args)
+	if err != nil {
+		return err
+	}
 	if flags.wantHelp {
-		PrintHelp(cmdPipelineTrigger, os.Stdout)
-		return nil
+		return writeCommandHelp(cmdPipelineTrigger, out, flags.output)
 	}
-	if err != nil {
-		PrintHelp(cmdPipelineTrigger, os.Stderr)
-		return fmt.Errorf("pipeline trigger: %w", err)
+	if flags.resume != "" {
+		return runHereResumeCommand(ctx, flags, out, connect, client.NewEngineClient,
+			func(ctx context.Context, options client.EngineOptions, run string) (nodehost.RunCompletion, error) {
+				return resumeAttachedHereRun(ctx, options, run, defaultHereDependencies(flags.output))
+			})
 	}
-	if flags.profile == "" {
-		return exitErrorf(2, "pipeline trigger: --profile NAME is required (the controller this trigger submits to)")
-	}
-
-	if err := refuseOtherThanPinnedProfile(flags.pipeline, flags.profile, flags.workingTree); err != nil {
-		return err
-	}
-	prof, err := resolveProfileFlag(flags.profile)
+	request, err := prepare(ctx, flags)
 	if err != nil {
 		return err
 	}
-	if prof.ControllerURL() == "" {
-		return fmt.Errorf("pipeline trigger: profile %q has no controller; `pipeline trigger` requires a profile that defines a controller", prof.Name)
-	}
-
-	source := triggerSource("pipeline-trigger")
-	if flags.workingTree {
-		source = triggerSource("pipeline-working-tree")
-	}
-	if flags.runner == hereRunnerFlag {
-		if err := refuseUncommittedCheckout(); err != nil {
-			return err
-		}
-	}
-	resp, err := createRemoteTrigger(prof, flags.pipeline, source,
-		runFlags{allowSecretFiles: flags.allowSecretFiles, hereReason: flags.reason}, flags.passthrough, flags.workingTree)
+	options, closeTransport, err := connect(ctx, flags.profile)
 	if err != nil {
 		return err
 	}
-	if flags.runner == hereRunnerFlag {
-		return hostAndFollowHere(prof, flags.pipeline, resp)
-	}
-
-	if flags.detach {
-		fmt.Fprintln(os.Stdout, resp.RunID)
-		return nil
-	}
-
-	ctx := context.Background()
-	fmt.Fprintf(os.Stderr, "triggered %s on %s as %s (status=%s); following...\n",
-		flags.pipeline, prof.Name, resp.RunID, resp.Status)
-
-	format, ferr := resolveTTYAwareOutput("", "pipeline trigger")
-	if ferr != nil {
-		return ferr
-	}
-	followErr := orchestrator.JobLogsRemoteWithTokens(ctx, prof.ControllerURL(), prof.ControllerToken(),
-		resp.RunID, orchestrator.LogsOpts{Follow: true, Format: format, JSON: format == "json"}, os.Stdout)
-	return remoteFollowExit(ctx, prof, resp.RunID, followErr)
-}
-
-func remoteFollowExit(ctx context.Context, prof *profile.Profile, runID string, followErr error) error {
-	if followErr != nil {
-		fmt.Fprintf(os.Stderr, "note: follow of %s ended early (%v); reading the run's status\n", runID, followErr)
-	}
-	status, fetchErr := orchestrator.RemoteRunOutcome(ctx, prof.ControllerURL(), prof.ControllerToken(), runID, os.Stderr)
-	return followExitResult(prof.Name, runID, status, fetchErr, followErr)
-}
-
-func followExitResult(profileName, runID, status string, fetchErr, followErr error) error {
-	if fetchErr != nil || !isTerminalRunStatus(status) {
-		return exitError(3, unknownOutcomeError(profileName, runID, status, fetchErr, followErr))
-	}
-
-	if err := statusExitCode(status); err != nil {
-		return exitError(exitCodeFor(err), fmt.Errorf("pipeline trigger: run %s: %s", runID, status))
-	}
-	return nil
-}
-
-func unknownOutcomeError(profileName, runID, status string, fetchErr, followErr error) error {
-	cause := "last seen " + statusOrUnknown(status)
-	if fetchErr != nil {
-		cause = fmt.Sprintf("status read failed: %v", fetchErr)
-	}
-	if followErr != nil {
-		cause += fmt.Sprintf("; follow ended: %v", followErr)
-	}
-	return fmt.Errorf("pipeline trigger: run %s: outcome unknown (%s) -- the run may still be in progress; "+
-		"check it with `sparkwing runs status --run %s --profile %s`", runID, cause, runID, profileName)
-}
-
-func statusOrUnknown(status string) string {
-	if status == "" {
-		return "unknown"
-	}
-	return status
-}
-
-// safety: the pin guards against sending a pipeline to the wrong controller by
-// mistake; the controller still decides who may run it.
-func refuseOtherThanPinnedProfile(pipelineName, profileName string, workingTree bool) error {
-	// safety: the runner compiles the .sparkwing/ at the root of the checkout
-	// the trigger submits, so that file holds the pin, never a nested one.
-	top, err := gitOutput(context.Background(), ".", nil, "rev-parse", "--show-toplevel")
+	defer closeTransport()
+	controller, err := client.NewEngineClient(options)
 	if err != nil {
-		return fmt.Errorf("pipeline trigger: find the git checkout to read pipeline %s's pin: %w", pipelineName, err)
+		return err
 	}
-	// safety: without --working-tree the controller runs the commit HEAD names,
-	// so that commit's sparkwing.yaml holds the pin, not the working tree's.
-	ref := "HEAD"
-	if workingTree {
-		ref = ""
-	}
-	entry, err := pinnedPipelineAt(filepath.Join(strings.TrimSpace(top), ".sparkwing"), ref, pipelineName)
-	if err != nil {
-		return fmt.Errorf("pipeline trigger: %w", err)
-	}
-	if entry == nil || entry.Profile == "" || entry.Profile == profileName {
-		return nil
-	}
-	return fmt.Errorf("pipeline trigger: pipeline %s is pinned to profile %s; pass --profile %s", pipelineName, entry.Profile, entry.Profile)
+	return submitTriggeredRun(ctx, request, flags.detach, flags.output, out, triggerSubmission{
+		Controller: controller,
+		here: func(ctx context.Context, response controllerwire.CreateRunResponse) error {
+			return handoffHereRun(ctx, options, response, defaultHereDependencies(flags.output))
+		},
+		follow: func(ctx context.Context, run string) (string, error) {
+			followErr := followControllerRunLogs(ctx, options, run, flags.output, out)
+			reader, err := client.NewRunReader(options)
+			if err != nil {
+				return "", errors.Join(followErr, err)
+			}
+			outcome, err := triggeredRunOutcome(ctx, reader, run, os.Stderr)
+			return outcome, errors.Join(followErr, err)
+		},
+	})
 }

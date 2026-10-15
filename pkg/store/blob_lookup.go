@@ -42,7 +42,7 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 	if key.Team != string(r.tenant.team) || key.Scope.Repo != a.authority.Repo {
 		return result, blob.ErrDigestNotReadable
 	}
-	namespace, err := r.rules.RecordNamespace(key)
+	namespace, err := blob.RecordNamespace(key)
 	if err != nil {
 		return result, err
 	}
@@ -108,7 +108,7 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 		if err != nil {
 			return result, err
 		}
-		if err := r.rules.AuthorizeEdge(blob.EdgeRequest{TargetKind: key.Kind, Authority: a.authority, Digest: digest, ReadSet: set, OwnReceipt: own}); err != nil {
+		if err := blob.AuthorizeEdge(blob.EdgeRequest{TargetKind: key.Kind, Authority: a.authority, Digest: digest, ReadSet: set, OwnReceipt: own}); err != nil {
 			return result, err
 		}
 		for i := range set.Edges {
@@ -223,7 +223,7 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 		refs = append(refs, blob.RefScope{Ref: a.authority.Ref.DefaultBranch, Verified: true})
 	}
 	for _, ref := range refs {
-		if !slices.Contains(a.capability.Data.ReadRefs, blobRefScope(ref)) {
+		if !slices.Contains(a.capability.Data.ReadRefs, ref.CapabilityScope()) {
 			continue
 		}
 		for _, name := range []string{"output", "manifest"} {
@@ -293,7 +293,7 @@ func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheL
 		}
 	}
 	for _, fallback := range refs {
-		if !slices.Contains(a.capability.Data.ReadRefs, blobRefScope(fallback.ref)) {
+		if !slices.Contains(a.capability.Data.ReadRefs, fallback.ref.CapabilityScope()) {
 			continue
 		}
 		if !request.Budget.Deadline.IsZero() && !tx.now().Before(request.Budget.Deadline) {
@@ -349,7 +349,7 @@ func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest
 			continue
 		}
 		key := blob.ResultRecordKey(request.Destination, a.authority.Repo, a.authority.Ref.Scope, a.pipeline, part.kind)
-		scope, err := r.rules.RecordNamespace(key)
+		scope, err := blob.RecordNamespace(key)
 		if err != nil {
 			return blob.MemoHit{}, err
 		}
@@ -369,7 +369,7 @@ func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest
 	if !request.Lookup.Budget.Deadline.IsZero() && !tx.now().Before(request.Lookup.Budget.Deadline) {
 		return blob.MemoHit{}, nil
 	}
-	if _, err := r.mutateRecordsTx(ctx, tx, a, batch, true); err != nil {
+	if _, err := r.mutateRecordsTx(ctx, tx, a, batch, true, nil); err != nil {
 		if cacheMissError(err) {
 			return blob.MemoHit{}, nil
 		}

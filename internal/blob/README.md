@@ -223,10 +223,8 @@ Standalone controllers install either backend through `Server.WithDataObjects`.
 That constructor also installs physical manifest verification for terminal results.
 The authenticated data bindings and local-controller host construction remain open.
 
-The retained `internal/teamblob` helper constructs keys for the older output
-downloader. Its bucket measurement, client interface, listing budgets and S3 test
-fixture are removed with the bucket-reconciliation pass. Usage and reachability
-come from the store. The final output transport cut also removes this key helper.
+The obsolete `internal/teamblob` object-key builder is removed. Log team validation
+lives beside the tagged log keys. Tenant records own usage and reachability.
 
 The filesystem and S3 collection acceptance boundaries generate twelve pairs of
 tenant graphs, including identical digests, cycles, old referenced bytes and
@@ -319,10 +317,12 @@ contract takes live byte and record clients through `nodehost.StorageBinding`.
 Runtime bindings still need integration.
 
 The raw `pkg/storage.ArtifactStore` contract and filesystem adapter are removed.
-`pkg/storage/s3.ArtifactStore` still serves legacy S3 log handlers and read-only
-bucket measurements. Its remaining log reader and create-only writer retire
-with the authenticated log transport. Signed-data clients use their separate
-authenticated presence API.
+`pkg/storage/s3.MeasurementStore` exposes physical bucket measurement only.
+Tagged log reads use the configured blob backend through `logseg.CommittedReader`.
+The separate raw S3 reader, listing reader and create-only writer are removed.
+Dashboard reads select subjects through `Tenant.ReadRunView`; each byte read and
+live-ring continuation rechecks the request actor through `ReadLogSegments`.
+Local dashboards use the same path. Run-directory log fallback is removed.
 
 `storeurl.OpenArtifactStore`, `storage.Usage` and the controller's unused
 `WithArtifactStore` fallback are removed. `OpenMeasurementStore` and

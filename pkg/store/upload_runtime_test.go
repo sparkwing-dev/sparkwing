@@ -466,6 +466,7 @@ func TestBlobUploadOwnerTicketsRetainUnitIdentity(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, claim := releaseFixture(t, kind)
+			rewriteSchemaExec(t, s.db, "DELETE FROM nodes WHERE team='a' AND run_id='run'")
 			tenant := &Tenant{s: s, team: "a"}
 			unit := blob.UploadUnit{Kind: blob.UploadUnitKind(kind), ID: "run", Generation: 7}
 			identity := blob.UploadIdentity{Kind: blob.UploadOwnerUnit, Team: "a", RunID: "run", Principal: "machine", CapabilityRef: claim.Award.CapabilityPrefix, Unit: runspec.Optional[blob.UploadUnit]{Set: true, Value: unit}}
@@ -473,6 +474,7 @@ func TestBlobUploadOwnerTicketsRetainUnitIdentity(t *testing.T) {
 			if _, err := commitTestBlob(t, tenant, intent); err != nil {
 				t.Fatal(err)
 			}
+			blobAccountingDiskStore(t, s)
 			var tagged string
 			var generation int64
 			if err := s.db.QueryRow("SELECT uploader_kind,unit_generation FROM uploads WHERE team='a'").Scan(&tagged, &generation); err != nil || tagged != "owner_unit" || generation != 7 {
@@ -483,6 +485,7 @@ func TestBlobUploadOwnerTicketsRetainUnitIdentity(t *testing.T) {
 				t.Fatal("owner upload changed its unit fence")
 			}
 			rewriteSchemaCount(t, s.db, "blob_receipts", 1)
+			rewriteSchemaCount(t, s.db, "nodes", 0)
 		})
 	}
 }
@@ -528,7 +531,7 @@ func TestBlobUploadPublicationTicketsKeepImportedAttempt(t *testing.T) {
 				t.Fatalf("publication provenance=%q: %v", provenance, err)
 			}
 			if !imported {
-				records := &blobRecords{tenant: tenant, rules: fakeBlobRules{}}
+				records := &blobRecords{tenant: tenant}
 				request := blobOutputRequest(blobIntent(actor, attempt))
 				request.Authority, request.Source = intent.Authority, identity
 				if _, err := records.CommitRecord(t.Context(), request); err == nil {

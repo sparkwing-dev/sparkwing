@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,18 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-)
 
-// Output limits, enforced when the bytes are reserved.
-const (
-	MaxOutputBytes    int64 = 64 << 20
-	MaxRunOutputBytes int64 = 1 << 30
-	// MaxUnpaidOutputBytes is the largest output every team may store even
-	// with no storage room; a larger one needs room.
-	MaxUnpaidOutputBytes int64 = 1 << 20
-	// MaxSmallOutputOverage is how far past its share a team's small outputs
-	// may take its storage; past it, a small output needs room too.
-	MaxSmallOutputOverage int64 = 64 << 20
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // OutputRef names a node's output object: its key in the team's output store,
@@ -63,7 +52,7 @@ func likePrefix(prefix string) string {
 
 func (r *OutputRef) valid(runID, nodeID string) bool {
 	return r != nil && strings.HasPrefix(r.Key, OutputKeyPrefix(runID, nodeID)) && validUploadKey(r.Key) &&
-		r.Size > 0 && r.Size <= MaxOutputBytes && validSHA256(r.SHA256)
+		r.Size > 0 && r.Size <= limits.NodeOutputBytes && validSHA256(r.SHA256)
 }
 
 // safety: the key must be this node's own attempt's and committed for this
@@ -129,8 +118,8 @@ func clearNodeOutputTx(ctx context.Context, tx *storeTx, team Team, runID, nodeI
 // safety: the caller holds the team's cache storage row, so two reservations
 // for one run count one after the other.
 func checkRunOutputRoomTx(ctx context.Context, tx *storeTx, team Team, runID string, size int64, now time.Time) error {
-	if size > MaxOutputBytes {
-		return fmt.Errorf("%w: an output is %d bytes; the limit is %d (64 MiB)", ErrOutputLimit, size, MaxOutputBytes)
+	if size > limits.NodeOutputBytes {
+		return fmt.Errorf("%w: an output is %d bytes; the limit is %d (16 MiB)", ErrOutputLimit, size, limits.NodeOutputBytes)
 	}
 	pattern := likePrefix(runOutputPrefix(runID))
 	var committed, pending int64
@@ -143,9 +132,9 @@ func checkRunOutputRoomTx(ctx context.Context, tx *storeTx, team Team, runID str
 		string(team), pattern, now.UnixNano()).Scan(&pending); err != nil {
 		return err
 	}
-	if committed+pending+size > MaxRunOutputBytes {
+	if committed+pending+size > limits.RunOutputBytes {
 		return fmt.Errorf("%w: the run's outputs would reach %d bytes; the limit is %d (1 GiB)",
-			ErrOutputLimit, committed+pending+size, MaxRunOutputBytes)
+			ErrOutputLimit, committed+pending+size, limits.RunOutputBytes)
 	}
 	return nil
 }
@@ -200,75 +189,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (team, key, provenance) DO NOTHING`,
 	return err
 }
 
-// NodeOutputObject returns the committed object behind a node's output, or
-// [ErrNotFound] when the node recorded none.
-func (s *Store) NodeOutputObject(ctx context.Context, team Team, runID, nodeID string) (Upload, error) {
-	var u Upload
-	var kind string
-	var committed int64
-	err := s.queryRow(ctx, `SELECT o.key, d.store, d.size, d.sha256, d.principal, d.provenance, d.committed_at
-  FROM node_outputs o JOIN data_objects d ON d.team = o.team AND d.key = o.key
- WHERE o.team = ? AND o.run_id = ? AND o.node_id = ?
- ORDER BY CASE d.provenance WHEN 'cloud' THEN 0 ELSE 1 END LIMIT 1`, string(NormalizeTeam(team)), runID, nodeID).Scan(
-		&u.Key, &kind, &u.Size, &u.SHA256, &u.Principal, &u.Provenance, &committed)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Upload{}, ErrNotFound
-	}
-	if err != nil {
-		return Upload{}, err
-	}
-	u.Team, u.Kind, u.RunID, u.CommittedAt = NormalizeTeam(team), StorageKind(kind), runID, time.Unix(0, committed)
-	return u, nil
-}
-
-// NodeIsAncestor reports whether ancestor is a transitive dependency of node
-// within one run.
-func (s *Store) NodeIsAncestor(ctx context.Context, team Team, runID, ancestor, node string) (_ bool, err error) {
-	rows, err := s.query(ctx, `SELECT node_id, deps_json FROM nodes WHERE team = ? AND run_id = ?`, string(team), runID)
-	if err != nil {
-		return false, err
-	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			err = errors.Join(err, closeErr)
-		}
-	}()
-	deps := map[string][]string{}
-	for rows.Next() {
-		var id string
-		var raw []byte
-		if err := rows.Scan(&id, &raw); err != nil {
-			return false, err
-		}
-		var list []string
-		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &list); err != nil {
-				return false, fmt.Errorf("node %s deps: %w", id, err)
-			}
-		}
-		deps[id] = list
-	}
-	if err := rows.Err(); err != nil {
-		return false, err
-	}
-	seen := map[string]bool{node: true}
-	queue := []string{node}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		for _, d := range deps[cur] {
-			if d == ancestor {
-				return true, nil
-			}
-			if !seen[d] {
-				seen[d] = true
-				queue = append(queue, d)
-			}
-		}
-	}
-	return false, nil
-}
-
 // OutputDir is the directory under which this store keeps output bytes it
 // is handed directly: beside a SQLite database, and empty for Postgres
 // unless [Store.SetOutputDir] names one.
@@ -320,8 +240,8 @@ func (s *Store) writeLocalOutput(ctx context.Context, runID, nodeID string, data
 	if s.outputDir == "" {
 		return nil, ErrNoOutputDir
 	}
-	if int64(len(data)) > MaxOutputBytes {
-		return nil, fmt.Errorf("%w: an output is %d bytes; the limit is %d (64 MiB)", ErrOutputLimit, len(data), MaxOutputBytes)
+	if int64(len(data)) > limits.NodeOutputBytes {
+		return nil, fmt.Errorf("%w: an output is %d bytes; the limit is %d (16 MiB)", ErrOutputLimit, len(data), limits.NodeOutputBytes)
 	}
 	key, err := s.NodeOutputKey(ctx, runID, nodeID)
 	if err != nil {
@@ -330,7 +250,10 @@ func (s *Store) writeLocalOutput(ctx context.Context, runID, nodeID string, data
 	sum := sha256.Sum256(data)
 	ref := &OutputRef{Key: key, Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])}
 	path := OutputPath(s.outputDir, key)
-	if err := WriteOutputFileDurably(path, data); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return nil, err
 	}
 	if err := s.RecordLocalOutput(ctx, runID, nodeID, *ref, time.Now()); err != nil {
@@ -358,16 +281,32 @@ func (s *Store) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte
 
 // ReadOutputFile reads ref from an output directory and verifies its digest.
 // A missing file reads as [ErrNotFound].
-func ReadOutputFile(dir string, ref OutputRef) ([]byte, error) {
+func ReadOutputFile(dir string, ref OutputRef) (data []byte, err error) {
+	if ref.Size > limits.NodeOutputBytes {
+		return nil, ErrOutputLimit
+	}
 	if !validUploadKey(ref.Key) || !strings.HasPrefix(ref.Key, "outputs/") {
 		return nil, fmt.Errorf("%w: invalid output key", ErrInvalidInput)
 	}
-	data, err := os.ReadFile(OutputPath(dir, ref.Key))
+	file, err := os.Open(OutputPath(dir, ref.Key))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, file.Close())
+		if err != nil {
+			data = nil
+		}
+	}()
+	data, err = io.ReadAll(io.LimitReader(file, limits.NodeOutputBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limits.NodeOutputBytes {
+		return nil, ErrOutputLimit
 	}
 	sum := sha256.Sum256(data)
 	if int64(len(data)) != ref.Size || hex.EncodeToString(sum[:]) != ref.SHA256 {
@@ -395,62 +334,4 @@ type OutputReadGrant struct {
 	Expires time.Time `json:"expires,omitzero"`
 	// SourceRunID names the run the output was read from.
 	SourceRunID string `json:"source_run_id,omitempty"`
-}
-
-// WriteOutputFileDurably leaves exactly data at path: an existing file that
-// already matches is synced and kept, and anything else is replaced through a
-// synced temporary file, so a crash leaves either the old file or the whole
-// new one.
-func WriteOutputFileDurably(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	if matched, err := syncIfMatches(path, data); err != nil {
-		return err
-	} else if matched {
-		return syncDir(dir)
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".output-*")
-	if err != nil {
-		return err
-	}
-	_, err = tmp.Write(data)
-	if err == nil {
-		err = tmp.Sync()
-	}
-	if closeErr := tmp.Close(); err == nil {
-		err = closeErr
-	}
-	if err == nil {
-		err = renameOutputFile(tmp.Name(), path)
-	}
-	if err != nil {
-		return errors.Join(err, os.Remove(tmp.Name()))
-	}
-	return syncDir(dir)
-}
-
-// safety: a file found from an earlier run may still sit only in the page
-// cache, so it is synced before anything records it done, and its digest is
-// read back from the synced file.
-func syncIfMatches(path string, data []byte) (bool, error) {
-	f, err := openOutputForSync(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = f.Close() }()
-	if err := f.Sync(); err != nil {
-		return false, err
-	}
-	h := sha256.New()
-	n, err := io.Copy(h, f)
-	if err != nil {
-		return false, err
-	}
-	want := sha256.Sum256(data)
-	return n == int64(len(data)) && string(h.Sum(nil)) == string(want[:]), nil
 }

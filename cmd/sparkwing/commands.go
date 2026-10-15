@@ -11,45 +11,21 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-var allCommands = []*Command{
-	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdQueue, &cmdQueueList, &cmdQueuePriority, &cmdDaemon, &cmdDaemonStatus, &cmdDaemonRestart, &cmdDaemonStop, &cmdDaemonRecoverState, &cmdDaemonEvents, &cmdUpdate, &cmdVersion, &cmdVersionHold, &cmdRun,
-	&cmdConfigure, &cmdConfigureInit,
-	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsSearch, &cmdDocsMigrations,
-	&cmdCache, &cmdCacheInfo, &cmdCachePrune, &cmdCacheExplain,
-	&cmdDebug, &cmdDebugRun, &cmdDebugRelease, &cmdDebugAttach,
-	&cmdDebugEnv,
-	&cmdPipeline, &cmdPipelineList, &cmdPipelineDescribe,
-	&cmdPipelineNew, &cmdExamples, &cmdPipelineLint, &cmdPipelinePlan,
-	&cmdPipelineTrigger,
-	&cmdDashboard, &cmdDashboardStart, &cmdDashboardStop, &cmdDashboardRestart, &cmdDashboardLogs, &cmdDashboardStatus,
-	&cmdWorker, &cmdCompletion, &cmdDoctor,
-	&cmdProfiles, &cmdProfilesList, &cmdProfilesShow,
-	&cmdProfilesSet,
-	&cmdTokens, &cmdTokensCreate, &cmdTokensList, &cmdTokensRevoke,
-	&cmdTokensRotate,
-	&cmdLimits, &cmdLimitsShow, &cmdLimitsSet,
-	&cmdJobs, &cmdJobsList, &cmdJobsStatus, &cmdJobsLogs, &cmdJobsStats, &cmdJobsRetry,
-	&cmdJobsCancel, &cmdJobsPrune,
-	&cmdJobsConsumer, &cmdJobsConsumerStart, &cmdJobsConsumerStatus, &cmdJobsConsumerStop,
-	&cmdHooks, &cmdHooksInstall, &cmdHooksUninstall, &cmdHooksStatus,
-	&cmdSecret, &cmdSecretSet, &cmdSecretGet, &cmdSecretList, &cmdSecretDelete, &cmdSecretRotate,
-	&cmdTriggers, &cmdTriggersList, &cmdTriggersGet,
-	&cmdAgents, &cmdAgentsList, &cmdClusterConcurrency, &cmdClusterObjectStore, &cmdClusterObjectStoreStatus, &cmdClusterObjectStoreResetBreaker,
-	&cmdRunners, &cmdRunnersAdd, &cmdRunnersRemove,
-	&cmdCloud, &cmdCloudConnect, &cmdCloudStatus, &cmdCloudDisconnect,
-	&cmdSparks, &cmdSparksCatalog, &cmdSparksList, &cmdSparksLint, &cmdSparksResolve,
-	&cmdSparksUpdate, &cmdSparksAdd, &cmdSparksRemove, &cmdSparksWarmup, &cmdSparksInflate,
-	&cmdApprove, &cmdDeny, &cmdApprovals, &cmdApprovalsList,
-	&cmdAnnotations, &cmdAnnotationsList, &cmdAnnotationsAdd,
-	&cmdRepos, &cmdReposList, &cmdReposInfo, &cmdReposUpdate, &cmdReposAdd, &cmdReposRemove, &cmdReposPrune,
-	&cmdCrons, &cmdCronsInstall, &cmdCronsUninstall, &cmdCronsList,
-	&cmdCronsShow, &cmdCronsSet, &cmdCronsRun, &cmdCronsTick,
-	&cmdWingd, &cmdWingdRun, &cmdWingdSupervise, &cmdDashboardSupervise, &cmdRunsConsume,
-	&cmdTriggerHost, &cmdComplete,
-}
+var allCommands = func() []*Command {
+	var commands []*Command
+	for _, surface := range clisurface.Registry() {
+		if surface.Path != "sparkwing" && !strings.HasPrefix(surface.Path, "sparkwing ") {
+			continue
+		}
+		command := surfaceHelp(surface)
+		commands = append(commands, &command)
+	}
+	return commands
+}()
 
 type CommandIndexJSON struct {
 	Path            string `json:"path"`
@@ -161,11 +137,11 @@ func runCommands(args []string) error {
 	var output string
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
 	artifactFormat := fs.String("format", "", "artifact format: markdown")
-	includeHidden := fs.Bool("include-hidden", false, "also emit Hidden:true commands (default: skip)")
+	includeHidden := fs.Bool("all", false, "include hidden commands")
 	pathPrefix := fs.String("path", "", "only emit commands whose Path starts with this prefix")
-	query := fs.StringP("query", "q", "", "match every query word against command paths and synopses")
+	query := fs.String("search", "", "match every search word against command paths and synopses")
 	var paging discoveryPaging
-	fs.IntVar(&paging.limit, "limit", 40, "maximum records; 0 returns every remaining match")
+	fs.IntVar(&paging.limit, "limit", 40, "maximum records, at least one")
 	fs.StringVar(&paging.cursor, "cursor", "", "continue after next_cursor with the same filters")
 	splitDir := fs.String("split-dir", "", "with --format markdown: write one page per top-level command group into this directory")
 	if err := parseAndCheck(cmdCommands, fs, args); err != nil {
@@ -174,11 +150,11 @@ func runCommands(args []string) error {
 		}
 		return err
 	}
-	if paging.limit < 0 {
-		return fmt.Errorf("--limit must be zero or greater")
+	if paging.limit < 1 {
+		return fmt.Errorf("--limit must be at least one")
 	}
-	if *artifactFormat == "markdown" && (fs.Changed("limit") || fs.Changed("cursor") || fs.Changed("query")) {
-		return fmt.Errorf("commands: markdown export is exhaustive; --query, --limit and --cursor apply to the index")
+	if *artifactFormat == "markdown" && (fs.Changed("limit") || fs.Changed("cursor") || fs.Changed("search")) {
+		return fmt.Errorf("commands: markdown export is exhaustive; --search, --limit and --cursor apply to the index")
 	}
 	if *artifactFormat != "" && *artifactFormat != "markdown" {
 		return fmt.Errorf("commands: --format must be markdown")
@@ -307,9 +283,9 @@ func blankPathFilter(raw, trimmed string) bool { return raw != "" && trimmed == 
 
 func unmatchedPathError(prefix string, hiddenMatches int) error {
 	if hiddenMatches > 0 {
-		return fmt.Errorf("commands: --path %q matched only hidden commands; pass --include-hidden to list them", prefix)
+		return fmt.Errorf("commands: --path %q matched only hidden commands; pass --all to list them", prefix)
 	}
-	return fmt.Errorf("commands: --path %q matched no command; `sparkwing commands --limit 0 -o plain` lists every path", prefix)
+	return fmt.Errorf("commands: --path %q matched no command; `sparkwing commands -o plain` lists command paths", prefix)
 }
 
 func renderCommandsMarkdown(cmds []CommandJSON) string {

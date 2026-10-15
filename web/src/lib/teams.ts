@@ -52,7 +52,7 @@ export function canManageTeam(role: Role | undefined): boolean {
 }
 
 export function canConnectMachines(role: Role | undefined): boolean {
-  return role !== undefined && roleRank[role] >= roleRank.editor;
+  return canManageTeam(role);
 }
 
 export function assignableRoles(role: Role | undefined): Role[] {
@@ -114,8 +114,8 @@ export async function failure(
   try {
     const text = (await res.text()).trim();
     try {
-      const body = JSON.parse(text) as { message?: string; error?: string };
-      detail = body.message || body.error || text;
+      const body = JSON.parse(text) as { error?: { message?: string } };
+      detail = body.error?.message || text;
     } catch {
       detail = text;
     }
@@ -137,8 +137,12 @@ export async function send(
 ): Promise<Response> {
   const res = await authFetch(url, {
     method,
-    headers:
-      body === undefined ? undefined : { "Content-Type": "application/json" },
+    headers: {
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(method === "POST" && url === "/api/v1/team/invitations"
+        ? { "Idempotency-Key": crypto.randomUUID() }
+        : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) throw await failure(res, action);
@@ -230,21 +234,18 @@ export interface CreatedInvitation {
 
 export type TokenFamily = "member" | "machine";
 
-// One row of the team token list. Member rows are the caller's own CLI
-// tokens; machine rows are runner tokens, every one of the team's for an
-// editor or owner.
 export interface TeamToken {
   prefix: string;
-  family: TokenFamily;
-  // Empty on member rows.
-  name: string;
-  scopes: string[];
+  team: string;
+  subject: { kind: "account" | "machine"; id: string };
+  audience: "controller";
+  grants: string[];
   created_by?: string;
-  // Unix seconds, as the controller reports them.
-  created_at?: number;
-  expires_at?: number | null;
-  last_used_at?: number | null;
+  issued_at: string;
+  expires_at?: string;
+  last_used_at?: string;
   git_credentials?: boolean;
+  metered?: boolean;
 }
 
 // unixSecondsISO turns the controller's unix-second stamps into the ISO
@@ -254,25 +255,14 @@ export function unixSecondsISO(seconds?: number): string {
   return new Date(seconds * 1000).toISOString();
 }
 
-export interface MintedMachineToken {
-  token: string;
-  prefix: string;
-  family: "machine";
-  name: string;
-  scopes: string[];
-  expires_at: number;
-  command: string;
-}
+export type MintedMachineToken = MintedMemberToken;
 
 export interface MintedMemberToken {
-  token: string;
+  capability: string;
   prefix: string;
-  family: "member";
-  scopes: string[];
-  expires_at: number;
-  profile: string;
-  setup: string;
-  run: string;
+  team: string;
+  grants: string[];
+  expires_at?: string;
 }
 
 // A list route may answer with a bare array or wrap it under one key; both read
@@ -368,27 +358,22 @@ export async function acceptInvitation(id: string): Promise<void> {
 }
 
 export async function listTeamTokens(): Promise<TeamToken[]> {
-  const res = await send("GET", "/api/v1/team/tokens", "List tokens");
+  const res = await send("GET", "/api/v1/tokens", "List tokens");
   return asList<TeamToken>(await res.json(), "tokens");
 }
-
-// A runner needs every machine scope to claim, report and fetch what a run
-// uses, so the page mints them all.
-export const machineScopes = ["nodes.claim", "triggers.claim", "runs.state"];
 
 export async function mintMachineToken(
   name: string,
   repos: string[],
 ): Promise<MintedMachineToken> {
-  const res = await send("POST", "/api/v1/team/tokens", "Connect a machine", {
-    scopes: machineScopes,
+  const res = await send("POST", "/api/v1/runners", "Connect a machine", {
     name,
     repos,
   });
   return (await res.json()) as MintedMachineToken;
 }
 
-const readerScopes = ["runs.read", "logs.read", "triggers.read"];
+const readerScopes = ["runs.read", "logs.read"];
 const writerScopes = ["runs.write", "runs.control", "approvals.write"];
 
 // The controller refuses a member scope the role lacks, so the default is the
@@ -402,14 +387,14 @@ export function memberScopesForRole(role: Role): string[] {
 export async function mintMemberToken(
   scopes: string[],
 ): Promise<MintedMemberToken> {
-  const res = await send("POST", "/api/v1/team/tokens", "Create CLI token", {
-    scopes,
+  const res = await send("POST", "/api/v1/tokens", "Create CLI token", {
+    grants: scopes,
   });
   return (await res.json()) as MintedMemberToken;
 }
 
 export async function revokeTeamToken(prefix: string): Promise<void> {
-  await send("DELETE", `/api/v1/team/tokens/${seg(prefix)}`, "Revoke token");
+  await send("DELETE", `/api/v1/tokens/${seg(prefix)}`, "Revoke token");
 }
 
 // The page collects one free-form field; the controller validates each pattern.
@@ -420,26 +405,23 @@ export function parseRepoPatterns(input: string): string[] {
     .filter((s) => s.length > 0);
 }
 
-// The controller composes the connect command because only it knows the URL a
-// machine reaches it on. Without one, the same command carries a placeholder the
-// reader fills in, and the page says so.
-export const controllerURLPlaceholder = "<controller-url>";
-
 export function runnerConnectCommand(
-  minted: Pick<MintedMachineToken, "token" | "command">,
+  minted: Pick<MintedMachineToken, "capability" | "grants">,
   name: string,
   repos: string[],
+  controllerURL: string,
 ): string {
-  if (minted.command) return minted.command;
   const quoted = (s: string) =>
     /^[A-Za-z0-9._:/@=-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
   const dir = '"$HOME/.config/sparkwing/runner-credentials"';
   return [
-    `(umask 077 && mkdir -p ${dir} && rm -f ${dir}/agent-token && printf '%s' ${quoted(minted.token)} > ${dir}/agent-token) &&`,
+    `(umask 077 && mkdir -p ${dir} && rm -f ${dir}/agent-token && printf '%s' ${quoted(minted.capability)} > ${dir}/agent-token) &&`,
     `sparkwing-runner runner --credentials-dir ${dir}`,
-    `--controller ${controllerURLPlaceholder}`,
+    `--controller ${quoted(controllerURL)}`,
     ...repos.map((r) => `--allow-repo '${r.replace(/'/g, `'\\''`)}'`),
-    "--also-claim-triggers --max-claims-before-restart 0 --metrics-addr=",
+    ...(minted.grants.includes("triggers.claim") ? ["--also-claim-triggers"] : []),
+    ...(!minted.grants.includes("nodes.claim") ? ["--claim-nodes=false"] : []),
+    "--max-claims-before-restart 0 --metrics-addr=",
     `--holder-prefix ${quoted(name)}`,
   ].join(" ");
 }
@@ -488,39 +470,4 @@ export async function listTeamDeletions(): Promise<TeamDeletion[]> {
     "List team deletions",
   );
   return asList<TeamDeletion>(await res.json(), "deletions");
-}
-
-export type AccountDeletionResult =
-  | { kind: "deleted"; deletedTeams: string[] }
-  | { kind: "blocked"; teams: TeamRef[] }
-  | { kind: "reauth" };
-
-// A 409 is an answer, not a failure: it names the teams that would be left
-// without an owner, which the page lists so the person can deal with each.
-export async function deleteAccount(
-  confirmEmail: string,
-): Promise<AccountDeletionResult> {
-  const res = await authFetch("/api/v1/me", {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ confirm_email: confirmEmail }),
-  });
-  if (res.status === 409) {
-    const body = (await res.json()) as { teams?: TeamRef[] };
-    return { kind: "blocked", teams: body.teams ?? [] };
-  }
-  // The controller deletes an account only for a sign-in from the last few
-  // minutes; the page asks for a fresh one rather than showing an error.
-  if (res.status === 403) {
-    const body = (await res
-      .clone()
-      .json()
-      .catch(() => ({}))) as {
-      error?: string;
-    };
-    if (body.error === "reauth_required") return { kind: "reauth" };
-  }
-  if (!res.ok) throw await failure(res, "Delete account");
-  const body = (await res.json()) as { deleted_teams?: string[] };
-  return { kind: "deleted", deletedTeams: body.deleted_teams ?? [] };
 }

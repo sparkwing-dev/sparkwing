@@ -1,6 +1,5 @@
 # pkg/storage/logseg
 
-func Assess(m *Manifest, node NodeProgress, now time.Time) Completeness
 type BatchSigner struct {
 	Objects    LogPutSigner
 	ClassReady func(context.Context, string) error
@@ -39,20 +38,6 @@ type Gap struct {
 	From int64
 	To   int64
 }
-type Log struct {
-	Prefix string
-
-	Manifest *Manifest
-
-	Segments []Segment
-
-	Broken int
-}
-func (l *Log) Completeness(node NodeProgress, now time.Time) Completeness
-func (l *Log) LossLine() []byte
-func (l *Log) Read(ctx context.Context, objs Objects, opts storage.ReadOpts) ([]byte, error)
-func (l *Log) Segment(ctx context.Context, objs Objects, seg Segment) ([]byte, error)
-func (l *Log) Verify(ctx context.Context, objs Objects) error
 type LogPutSigner interface {
 	SignLogPut(context.Context, string, time.Time) (string, map[string]string, error)
 }
@@ -76,17 +61,6 @@ const ManifestVersion = 1
 const MaxNodeBytes int64 = 64 << 20
 func NewSink(ctx context.Context, up Uploader, opts Options) (*Sink, error)
 func NewSubjectUploader(data Data) (*SubjectUploader, error)
-type NodeProgress struct {
-	Started    bool
-	Terminal   bool
-	FinishedAt time.Time
-}
-type Objects interface {
-	Get(ctx context.Context, key string) (io.ReadCloser, error)
-
-	List(ctx context.Context, prefix string) ([]string, error)
-}
-func Open(ctx context.Context, objs Objects, prefix string) (*Log, error)
 type Options struct {
 	Subject blob.LogSubject
 
@@ -112,16 +86,10 @@ type ReadResult struct {
 }
 const ReasonByteCap = "byte cap"
 const ReasonDropped = "writer dropped lines"
-const ReasonRunnerLost = "runner lost"
 const ReasonSequenceGap = "sequence gap"
 const ReasonStopped = "node stopped before its log was finished"
 const ReasonUnsealed = "writer did not seal"
 const ReasonUploadFailed = "upload failed"
-func SealAbandoned(ctx context.Context, objs Objects, prefix string, base Manifest, reason string,
-	put func(ctx context.Context, key string, body []byte) error,
-) (*Manifest, error)
-const SealGrace = limits.LogSealGrace
-const SealedByController = "controller"
 const SealedByNode = "node"
 type Segment struct {
 	N           int

@@ -402,6 +402,86 @@
       ]
     },
     {
+      "type": "local_control",
+      "fields": [
+        {
+          "name": "stay",
+          "kind": "*bool",
+          "omitempty": true
+        }
+      ]
+    },
+    {
+      "type": "local_control_status",
+      "fields": [
+        {
+          "name": "running",
+          "kind": "bool",
+          "omitempty": false
+        },
+        {
+          "name": "stay",
+          "kind": "bool",
+          "omitempty": false
+        },
+        {
+          "name": "pid",
+          "kind": "int",
+          "omitempty": false
+        },
+        {
+          "name": "version",
+          "kind": "string",
+          "omitempty": false
+        },
+        {
+          "name": "runs",
+          "kind": "int",
+          "omitempty": false
+        },
+        {
+          "name": "queued_triggers",
+          "kind": "int",
+          "omitempty": false
+        },
+        {
+          "name": "held_leases",
+          "kind": "int",
+          "omitempty": false
+        },
+        {
+          "name": "dashboard_connections",
+          "kind": "int",
+          "omitempty": false
+        },
+        {
+          "name": "idle_since",
+          "kind": "struct",
+          "omitempty": false
+        }
+      ]
+    },
+    {
+      "type": "local_dashboard",
+      "fields": [
+        {
+          "name": "address",
+          "kind": "string",
+          "omitempty": false
+        }
+      ]
+    },
+    {
+      "type": "local_dashboard_ack",
+      "fields": [
+        {
+          "name": "error",
+          "kind": "string",
+          "omitempty": true
+        }
+      ]
+    },
+    {
       "type": "queue_state",
       "fields": [
         {

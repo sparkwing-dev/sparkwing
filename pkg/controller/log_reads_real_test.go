@@ -1,0 +1,150 @@
+package controller
+
+import (
+	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"fmt"
+	"io"
+	"math/rand"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"testing/quick"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+func committedDashboardLogs(t *testing.T, payload []byte) (segmentLogs, blob.LogSubject, *store.Store) {
+	t.Helper()
+	engine, tenant := engineRuntimeStore(t)
+	authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
+	actor := engineActor(authorized)
+	started, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: new(int64(0))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "a", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: started.Attempt, Generation: started.Generation}}
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{41}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := objects.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	var compressed bytes.Buffer
+	zipper := gzip.NewWriter(&compressed)
+	if _, err := zipper.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := zipper.Close(); err != nil {
+		t.Fatal(err)
+	}
+	key, err := blob.LogObjectKey(subject, "r30", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed, _, err := objects.SignLogPut(t.Context(), key, time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	objects.ServeHTTP(response, httptest.NewRequest(http.MethodPut, signed, bytes.NewReader(compressed.Bytes())))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("signed log PUT: %d %s", response.Code, response.Body)
+	}
+	segment := store.Segment{Index: 1, Offset: 0, Size: int64(len(payload)), StoredBytes: int64(compressed.Len()), Digest: fmt.Sprintf("%x", sha256.Sum256(compressed.Bytes())), ObjectKey: key}
+	if err := tenant.RecordSegments(t.Context(), store.SegmentCommit{Actor: actor, Subject: subject, Segments: []store.Segment{segment}, Final: true, RetentionClass: "r30"}); err != nil {
+		t.Fatal(err)
+	}
+	return segmentLogs{records: tenant, actor: actor, live: New(engine.Store, nil).WithDataObjects(objects).liveLogs, objs: objects}, subject, engine.Store
+}
+
+func TestCommittedDashboardLogsReadRealRecords(t *testing.T) {
+	property := func(seed [16]byte, ordinal uint8) bool {
+		payload := []byte(fmt.Sprintf("%x\nsecond\n", seed))
+		logs, subject, st := committedDashboardLogs(t, payload)
+		body, err := logs.Read(t.Context(), "run", "job", storage.ReadOpts{})
+		if err != nil || !bytes.Equal(body, payload) {
+			t.Logf("read = %q, %v", body, err)
+			return false
+		}
+		body, err = logs.Read(t.Context(), "run", "job", storage.ReadOpts{Tail: 1})
+		if err != nil || string(body) != "second\n" {
+			return false
+		}
+		offset := int64(ordinal) % int64(len(payload))
+		var out bytes.Buffer
+		result, err := logs.read(t.Context(), subject, offset, &out)
+		if err != nil || !result.Complete || result.Bytes != int64(len(payload))-offset || !bytes.Equal(out.Bytes(), payload[offset:]) {
+			return false
+		}
+		engineSQL(t, st, `UPDATE runs SET status='success',finished_at=1 WHERE team='a' AND id='run'`)
+		out.Reset()
+		if err := logs.streamNode(t.Context(), "run", "job", logCursor{}, &out); err != nil || !strings.Contains(out.String(), "event: stream_end") || strings.Count(out.String(), "data: second") != 1 {
+			t.Logf("stream=%s, %v", out.String(), err)
+			return false
+		}
+		out.Reset()
+		cursor := logCursor{attempt: 0, off: int64(bytes.IndexByte(payload, '\n') + 1)}
+		if err := logs.streamNode(t.Context(), "run", "job", cursor, &out); err != nil || strings.Contains(out.String(), fmt.Sprintf("%x", seed)) || strings.Count(out.String(), "data: second") != 1 {
+			t.Logf("resume=%s, %v", out.String(), err)
+			return false
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 12, Rand: rand.New(rand.NewSource(71))}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCommittedDashboardLogsNeverEmitForForeignOrRevokedActors(t *testing.T) {
+	property := func(seed [16]byte) bool {
+		logs, subject, st := committedDashboardLogs(t, []byte(fmt.Sprintf("%x\n", seed)))
+		foreign := logs.actor
+		foreign.CapabilityPrefix = "foreign-" + fmt.Sprintf("%x", seed)
+		for _, actor := range []store.Actor{foreign, {}} {
+			var out bytes.Buffer
+			reader := logseg.CommittedReader{Records: logs.records, Objects: logs.objs}
+			result, err := reader.Read(t.Context(), actor, blob.LogReadRequest{Subject: subject}, &out)
+			if err == nil || out.Len() != 0 || result.Bytes != 0 {
+				t.Logf("foreign read = %+v %s, %v", result, out.String(), err)
+				return false
+			}
+		}
+		engineSQL(t, st, `UPDATE capabilities SET revoked_at=1 WHERE prefix=?`, logs.actor.CapabilityPrefix)
+		var out bytes.Buffer
+		result, err := logs.read(t.Context(), subject, 0, &out)
+		if err == nil || out.Len() != 0 || result.Bytes != 0 {
+			return false
+		}
+		body, err := logs.Read(t.Context(), "run", "job", storage.ReadOpts{})
+		return err != nil && len(body) == 0
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 12, Rand: rand.New(rand.NewSource(72))}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCommittedDashboardLogStreamCloseCancelsPendingReads(t *testing.T) {
+	logs, _, _ := committedDashboardLogs(t, []byte("line\n"))
+	stream, err := logs.Stream(t.Context(), "run", "job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadAll(stream); err == nil {
+		t.Fatal("closed log stream remained readable")
+	}
+}

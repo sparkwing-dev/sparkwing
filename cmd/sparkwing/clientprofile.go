@@ -1,30 +1,24 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-
-	flag "github.com/spf13/pflag"
-
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
-func addProfileFlag(fs *flag.FlagSet) *string {
-	return fs.String("profile", "",
-		"profile name from user config or this project")
-}
+var errNoProfile = errors.New("no profile configured")
 
-func resolveProfile(name string) (*profile.Profile, error) {
+func resolveProfile(name string) (*namedProfile, error) {
 	p, err := resolveProfileFlag(name)
 	if err != nil {
 		return nil, err
 	}
 	if p == nil {
-		return nil, profile.ErrNoProfile
+		return nil, errNoProfile
 	}
 	return p, nil
 }
 
-func requireController(p *profile.Profile, cmd string) error {
+func requireController(p *namedProfile, cmd string) error {
 	if p.ControllerURL() == "" {
 		return fmt.Errorf("%s: profile %q has no controller URL", cmd, p.Name)
 	}

@@ -348,7 +348,7 @@ export interface ControllerQueueState {
 }
 
 export async function getControllerQueueState(): Promise<ControllerQueueState | null> {
-  const res = await authFetch(`${API_URL}/api/v1/queue/state`, { cache: "no-store" }).catch(() => null);
+  const res = await authFetch(`${API_URL}/api/v1/queue`, { cache: "no-store" }).catch(() => null);
   return res?.ok ? res.json() : null;
 }
 
@@ -390,7 +390,7 @@ export async function getNodeLogs(
   nodeID: string,
 ): Promise<string> {
   const res = await authFetch(
-    `${API_URL}/api/v1/runs/${pathSegment(runID)}/logs/${pathSegment(nodeID)}?format=ndjson`,
+    `${API_URL}/api/v1/runs/${pathSegment(runID)}/jobs/${pathSegment(nodeID)}/logs?format=ndjson`,
     { cache: "no-store", headers: { Accept: "application/x-ndjson" } },
   );
   if (!res.ok) return "";
@@ -402,7 +402,7 @@ export async function getNodeLogCompleteness(
   nodeID: string,
 ): Promise<LogCompleteness | null> {
   const res = await authFetch(
-    `${API_URL}/api/v1/runs/${pathSegment(runID)}/logs/${pathSegment(nodeID)}/completeness`,
+    `${API_URL}/api/v1/runs/${pathSegment(runID)}/jobs/${pathSegment(nodeID)}/logs/completeness`,
     { cache: "no-store" },
   ).catch(() => null);
   if (!res || !res.ok) return null;
@@ -436,7 +436,7 @@ export async function searchRunLogs(
 }
 
 export function getNodeStreamUrl(runID: string, nodeID: string): string {
-  return `${API_URL}/api/v1/runs/${pathSegment(runID)}/logs/${pathSegment(nodeID)}/stream?format=ndjson`;
+  return `${API_URL}/api/v1/runs/${pathSegment(runID)}/jobs/${pathSegment(nodeID)}/logs/stream?format=ndjson`;
 }
 
 export interface RunsGrepMatch {
@@ -537,14 +537,23 @@ export async function triggerRun(
   args?: Record<string, string>,
   git?: TriggerGit,
 ): Promise<{ run_id: string } | null> {
-  const res = await authFetch(`${API_URL}/api/v1/triggers`, {
+  const res = await authFetch(`${API_URL}/api/v1/runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      pipeline,
-      args: args || {},
-      trigger: { source: "dashboard" },
-      ...(git ? { git } : {}),
+      idempotency_key: crypto.randomUUID(),
+      request: {
+        version: 1,
+        pipeline,
+        mode: "execute",
+        origin: "trigger",
+        dispatch: "host",
+        requested_args: args || {},
+        ...(git ? {
+          git: { repository: { display: git.repo_url }, ref: git.branch },
+          source: { ref: git.repo_url },
+        } : {}),
+      },
     }),
   });
   if (!res.ok) {
@@ -557,6 +566,8 @@ export async function triggerRun(
 export async function cancelRun(runID: string): Promise<void> {
   const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/cancel`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason: "user_cancelled" }),
   });
   if (!res.ok && res.status !== 204) {
     throw new Error(`cancel failed: ${res.status}`);
@@ -594,7 +605,7 @@ export interface Agent {
 }
 
 export async function getAgents(): Promise<Agent[]> {
-  const res = await authFetch(`${API_URL}/api/v1/agents`, {
+  const res = await authFetch(`${API_URL}/api/v1/runners`, {
     cache: "no-store",
   }).catch(() => null);
   if (!res || !res.ok) return [];
@@ -710,10 +721,10 @@ export async function getNodeMetrics(
     const qs = new URLSearchParams({ limit: String(METRIC_PAGE) });
     if (cursor) qs.set("cursor", cursor);
     const res = await authFetch(
-      `${API_URL}/api/v1/runs/${pathSegment(runID)}/nodes/${pathSegment(nodeID)}/metrics?${qs}`,
+      `${API_URL}/api/v1/runs/${pathSegment(runID)}/jobs/${pathSegment(nodeID)}/metrics?${qs}`,
       { cache: "no-store" },
-    ).catch(() => null);
-    if (!res || !res.ok) return { points };
+    );
+    if (!res.ok) throw new Error(`metrics failed: ${res.status}`);
     const page: NodeMetrics & { next_cursor?: string } = await res.json();
     points.push(...(page.points ?? []));
     if (!page.next_cursor || page.next_cursor === cursor) return { points };
@@ -725,11 +736,12 @@ export async function retryRun(
   runID: string,
   opts?: { full?: boolean },
 ): Promise<Run | null> {
-  const qs = opts?.full ? "?full=1" : "";
-  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/retry${qs}`, {
+  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/retry`, {
     method: "POST",
-  }).catch(() => null);
-  if (!res || !res.ok) return null;
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idempotency_key: crypto.randomUUID(), mode: opts?.full ? "all" : "failed" }),
+  });
+  if (!res.ok) throw new Error(`retry failed: ${res.status}`);
   return res.json();
 }
 
@@ -745,16 +757,16 @@ export interface PauseState {
 }
 
 export async function getPaused(runID: string): Promise<PauseState[]> {
-  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/paused`, {
+  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/debug-pauses`, {
     cache: "no-store",
-  }).catch(() => null);
-  if (!res || !res.ok) return [];
+  });
+  if (!res.ok) throw new Error(`debug pauses failed: ${res.status}`);
   return res.json();
 }
 
 export interface Approval {
   run_id: string;
-  node_id: string;
+  job_id: string;
   requested_at: string;
   message?: string;
   timeout_ms?: number;
@@ -778,7 +790,7 @@ export async function getApproval(
 }
 
 export async function getPendingApprovals(): Promise<Approval[]> {
-  const res = await authFetch(`${API_URL}/api/v1/approvals/pending`, {
+  const res = await authFetch(`${API_URL}/api/v1/approvals`, {
     cache: "no-store",
   }).catch(() => null);
   if (!res || !res.ok) return [];
@@ -796,7 +808,7 @@ export async function resolveApproval(
     `${API_URL}/api/v1/runs/${pathSegment(runID)}/approvals/${pathSegment(nodeID)}`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
       body: JSON.stringify({ resolution, comment }),
     },
   );
@@ -804,7 +816,8 @@ export async function resolveApproval(
     const text = await res.text().catch(() => "");
     throw new Error(text || `resolve failed: ${res.status}`);
   }
-  return res.json();
+  const body = await res.json();
+  return body.approval;
 }
 
 export async function releaseNode(
@@ -812,8 +825,12 @@ export async function releaseNode(
   nodeID: string,
 ): Promise<void> {
   const res = await authFetch(
-    `${API_URL}/api/v1/runs/${pathSegment(runID)}/nodes/${pathSegment(nodeID)}/release`,
-    { method: "POST" },
+    `${API_URL}/api/v1/runs/${pathSegment(runID)}/jobs/${pathSegment(nodeID)}/resume`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
   );
   if (!res.ok && res.status !== 204) {
     throw new Error(`release failed: ${res.status}`);
@@ -1024,7 +1041,7 @@ export interface CapacityExplain {
 }
 
 export async function getCapacityProfiles(): Promise<CapacityProfiles | null> {
-  const res = await authFetch(`${API_URL}/api/v1/capacity/profiles`, {
+  const res = await authFetch(`${API_URL}/api/v1/sizing`, {
     cache: "no-store",
   }).catch(() => null);
   if (!res || !res.ok) return null;
@@ -1035,7 +1052,7 @@ export async function getCapacityExplain(
   pipeline: string,
 ): Promise<CapacityExplain | null> {
   const res = await authFetch(
-    `${API_URL}/api/v1/capacity/profiles/explain?pipeline=${encodeURIComponent(pipeline)}`,
+    `${API_URL}/api/v1/sizing/explain?pipeline=${encodeURIComponent(pipeline)}`,
     { cache: "no-store" },
   ).catch(() => null);
   if (!res || !res.ok) return null;
@@ -1174,7 +1191,7 @@ export interface CronDetail {
 }
 
 export async function getCrons(): Promise<CronsOverview | null> {
-  const res = await authFetch(`${API_URL}/api/v1/crons`, {
+  const res = await authFetch(`${API_URL}/api/v1/schedules`, {
     cache: "no-store",
   }).catch(() => null);
   if (!res || !res.ok) return null;
@@ -1183,7 +1200,7 @@ export async function getCrons(): Promise<CronsOverview | null> {
 
 export async function getCron(id: string): Promise<CronDetail | null> {
   const res = await authFetch(
-    `${API_URL}/api/v1/crons/${encodeURIComponent(id)}`,
+    `${API_URL}/api/v1/schedules/${encodeURIComponent(id)}`,
     { cache: "no-store" },
   ).catch(() => null);
   if (!res || !res.ok) return null;
@@ -1192,8 +1209,8 @@ export async function getCron(id: string): Promise<CronDetail | null> {
 
 async function postCron<T>(id: string, action: string): Promise<T> {
   const res = await authFetch(
-    `${API_URL}/api/v1/crons/${encodeURIComponent(id)}/${action}`,
-    { method: "POST" },
+    `${API_URL}/api/v1/schedules/${encodeURIComponent(id)}/${action}`,
+    { method: "POST", headers: action === "run" ? { "Idempotency-Key": crypto.randomUUID() } : undefined },
   );
   if (!res.ok) {
     const text = (await res.text().catch(() => "")).trim();

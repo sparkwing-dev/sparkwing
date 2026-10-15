@@ -18,13 +18,8 @@ func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server {
 	return s
 }
 
-func (s *Server) callerStorageStanding(r *http.Request) (*teamStandingJSON, error) {
-	p, ok := PrincipalFromContext(r.Context())
-	if !ok || p == nil || !s.MultiTeam() {
-		return nil, nil
-	}
-	team := store.NormalizeTeam(p.Team)
-	if team == "" || team == store.DefaultTeam {
+func (s *Server) teamStorageStanding(r *http.Request, team store.Team) (*teamStandingJSON, error) {
+	if !s.MultiTeam() || team == "" || team == store.DefaultTeam {
 		return nil, nil
 	}
 	tenant, err := s.store.ForTeam(r.Context(), team)

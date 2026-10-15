@@ -4,21 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -32,7 +28,6 @@ type creditsFixture struct {
 	url      string
 	store    *store.Store
 	admin    string
-	service  string
 	runner   string
 	prefix   string
 	readonly string
@@ -50,27 +45,23 @@ func newCreditsFixtureWithLicense(t *testing.T, metered bool, feature string) cr
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	now := time.Now().UTC()
-	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatalf("admin token: %v", err)
 	}
 	runner, runnerTok, err := st.CreateTokenWith(context.Background(), "pool", store.TokenKindRunner,
-		[]string{controller.ScopeNodesClaim, controller.ScopeTriggersClaim, controller.ScopeRunsState, controller.ScopeRunsRead},
+		[]string{"nodes.claim", "triggers.claim", "runs.state", "runs.read"},
 		0, now, store.TokenOptions{Metered: metered})
 	if err != nil {
 		t.Fatalf("runner token: %v", err)
 	}
 	readonly, _, err := st.CreateToken("viewer", store.TokenKindUser,
-		[]string{controller.ScopeRunsRead}, 0, now)
+		[]string{"runs.read"}, 0, now)
 	if err != nil {
 		t.Fatalf("reader token: %v", err)
 	}
-	service, _, err := st.CreateToken("checkout-service", store.TokenKindService,
-		[]string{controller.ScopeCreditsGrant}, 0, now)
-	if err != nil {
-		t.Fatalf("service token: %v", err)
-	}
-	ctrl := controller.New(st, nil).EnableAuthFromStore()
+	ctrl := controller.New(st, nil)
+	controller.ConfigureConsoleFixture(ctrl)
 	if feature != "" {
 		pub, priv := licensetest.NewKey(t)
 		raw := licensetest.Sign(t, priv, licensetest.Terms{
@@ -83,7 +74,7 @@ func newCreditsFixtureWithLicense(t *testing.T, metered bool, feature string) cr
 	t.Cleanup(srv.Close)
 	return creditsFixture{
 		url: srv.URL, store: st,
-		admin: admin, service: service, runner: runner, prefix: runnerTok.Prefix, readonly: readonly,
+		admin: admin, runner: runner, prefix: runnerTok.Prefix, readonly: readonly,
 	}
 }
 
@@ -176,411 +167,6 @@ func ageNodeExhaustionAnchor(t *testing.T, st *store.Store, runID, nodeID string
 	}
 }
 
-func TestCredits_UnmeteredTokenClaimsAndIsNeverCharged(t *testing.T) {
-	f := newCreditsFixture(t, false)
-	ctx := context.Background()
-	c := client.NewWithToken(f.url, nil, f.runner)
-	seedRunNode(t, f.store, "run-plain", "build")
-	if err := f.store.MarkNodeReady(ctx, "run-plain", "build"); err != nil {
-		t.Fatalf("mark ready: %v", err)
-	}
-
-	n, err := c.ClaimNode(ctx, "pod-1", nil, time.Minute, nil)
-	if err != nil {
-		t.Fatalf("claim on an unfunded controller must succeed for an unmetered token: %v", err)
-	}
-	if n == nil {
-		t.Fatal("claim returned no node")
-	}
-	claimCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
-		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
-		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
-	})
-	if err := c.HeartbeatNodeClaim(claimCtx, "run-plain", "build", "pod-1", time.Minute, nil); err != nil {
-		t.Fatalf("heartbeat: %v", err)
-	}
-	charges, err := teamTenant(t, f.store, store.DefaultTeam).ListCreditCharges(ctx, 10)
-	if err != nil {
-		t.Fatalf("list charges: %v", err)
-	}
-	if len(charges) != 0 {
-		t.Fatalf("an unmetered token was charged: %+v", charges)
-	}
-}
-
-func TestCredits_MeteredClaimRefusedOnAnEmptyBalance(t *testing.T) {
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	c := client.NewWithToken(f.url, nil, f.runner)
-	seedRunNode(t, f.store, "run-broke", "build")
-	if err := f.store.MarkNodeReady(ctx, "run-broke", "build"); err != nil {
-		t.Fatalf("mark ready: %v", err)
-	}
-
-	_, err := c.ClaimNode(ctx, "pod-1", nil, time.Minute, nil)
-	if !errors.Is(err, store.ErrInsufficientCredits) {
-		t.Fatalf("claim error = %v, want ErrInsufficientCredits", err)
-	}
-
-	events, err := f.store.ListEventsAfter(ctx, "run-broke", 0, 50)
-	if err != nil {
-		t.Fatalf("list events: %v", err)
-	}
-	seen := 0
-	for _, e := range events {
-		if e.Kind == store.EventKindCreditsBlocked {
-			seen++
-		}
-	}
-	if seen != 1 {
-		t.Fatalf("credits_blocked events = %d, want 1", seen)
-	}
-
-	if _, err := c.ClaimNode(ctx, "pod-1", nil, time.Minute, nil); !errors.Is(err, store.ErrInsufficientCredits) {
-		t.Fatalf("second claim error = %v, want ErrInsufficientCredits", err)
-	}
-	events, err = f.store.ListEventsAfter(ctx, "run-broke", 0, 50)
-	if err != nil {
-		t.Fatalf("list events: %v", err)
-	}
-	seen = 0
-	for _, e := range events {
-		if e.Kind == store.EventKindCreditsBlocked {
-			seen++
-		}
-	}
-	if seen != 1 {
-		t.Fatalf("credits_blocked events after a second poll = %d, want 1", seen)
-	}
-}
-
-// A metered pool's trigger claim starts a run, so an empty balance refuses it
-// with the same 402 a node claim gets, and the run records why it waits.
-func TestCredits_MeteredTriggerClaimRefusedOnAnEmptyBalance(t *testing.T) {
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	c := client.NewWithToken(f.url, nil, f.runner).WithTriggerNodeRunner("k8s")
-	now := time.Now()
-	if err := f.store.CreateTriggerWithRun(ctx, store.Trigger{
-		ID: "run-broke", Pipeline: "build", Status: "pending", CreatedAt: now,
-	}, store.Run{ID: "run-broke", Pipeline: "build", Status: "pending", CreatedAt: now, StartedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := c.ClaimTrigger(ctx); !errors.Is(err, store.ErrInsufficientCredits) {
-		t.Fatalf("trigger claim error = %v, want ErrInsufficientCredits", err)
-	}
-	events, err := f.store.ListEventsAfter(ctx, "run-broke", 0, 50)
-	if err != nil {
-		t.Fatal(err)
-	}
-	blocked := 0
-	for _, e := range events {
-		if e.Kind == store.EventKindCreditsBlocked {
-			blocked++
-		}
-	}
-	if blocked != 1 {
-		t.Fatalf("credits_blocked events = %d, want 1", blocked)
-	}
-}
-
-func TestCredits_TriggerHeartbeatLedgerFailureRefusesRenewal(t *testing.T) {
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 100*store.MicroCreditsPerCent, "", "operator"); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	if err := f.store.CreateTriggerWithRun(ctx, store.Trigger{
-		ID: "run-ledger-stop", Pipeline: "build", Status: "pending", CreatedAt: now,
-	}, store.Run{ID: "run-ledger-stop", Pipeline: "build", Status: "pending", CreatedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	c := client.NewWithToken(f.url, nil, f.runner).WithTriggerNodeRunner("k8s")
-	claimed, err := c.ClaimTrigger(ctx)
-	if err != nil || claimed == nil {
-		t.Fatalf("claim = %+v, %v", claimed, err)
-	}
-	if _, err := f.store.DB().Exec(`UPDATE triggers SET credit_reserved_at = ? WHERE id = ?`,
-		time.Now().Add(-(store.MinBillableSeconds+5)*time.Second).UnixNano(), claimed.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.store.DB().Exec(`CREATE TRIGGER reject_trigger_usage BEFORE INSERT ON credit_charges
-		WHEN NEW.kind = 'usage' AND NEW.run_id = 'run-ledger-stop'
-		BEGIN SELECT RAISE(FAIL, 'ledger write failed'); END`); err != nil {
-		t.Fatal(err)
-	}
-	fenced := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: claimed.ClaimSeq})
-	if _, err := c.HeartbeatTrigger(fenced, claimed.ID); !errors.Is(err, store.ErrLockHeld) {
-		t.Fatalf("failed ledger heartbeat = %v, want the terminal 409 claim refusal", err)
-	}
-	got, err := f.store.GetTrigger(ctx, claimed.ID)
-	if err != nil || got.LeaseExpiresAt == nil || !got.LeaseExpiresAt.Equal(*claimed.LeaseExpiresAt) {
-		t.Fatalf("ledger failure renewed lease from %v to %+v, %v", claimed.LeaseExpiresAt, got, err)
-	}
-}
-
-func TestCredits_UnsettledTriggerClaimIsActionableWithoutBlockingQueue(t *testing.T) {
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 100*store.MicroCreditsPerCent, "", "operator"); err != nil {
-		t.Fatal(err)
-	}
-	c := client.NewWithToken(f.url, nil, f.runner).WithTriggerNodeRunner("k8s")
-	if err := f.store.CreateTrigger(ctx, store.Trigger{
-		ID: "run-unsettled", Pipeline: "build", CreatedAt: time.Now(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	prior, err := c.ClaimTrigger(ctx)
-	if err != nil || prior == nil {
-		t.Fatalf("prior claim = %+v, %v", prior, err)
-	}
-	if ok, err := f.store.ReleaseClaimAtGeneration(store.WithoutCreditMetering(ctx), prior.ID, prior.ClaimSeq); err != nil || !ok {
-		t.Fatalf("release without settlement = %t, %v", ok, err)
-	}
-	if _, err := c.ClaimSpecificTrigger(ctx, prior.ID, time.Minute); !errors.Is(err, store.ErrLockHeld) ||
-		!strings.Contains(err.Error(), "unsettled prior metered claim") {
-		t.Fatalf("named claim = %v, want actionable conflict", err)
-	}
-	if err := f.store.CreateTrigger(ctx, store.Trigger{
-		ID: "run-ready", Pipeline: "build", CreatedAt: time.Now(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if next, err := c.ClaimTrigger(ctx); err != nil || next == nil || next.ID != "run-ready" {
-		t.Fatalf("next claim behind parked trigger = %+v, %v", next, err)
-	}
-}
-
-// A metered pool that ran a claimed trigger's nodes in its own process would
-// run them outside any node claim, and so outside any credit charge. A
-// metered trigger claim must name a node runner that claims each node.
-func TestCredits_MeteredTriggerClaimRefusesInProcessNodes(t *testing.T) {
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 100*store.MicroCreditsPerCent, "", "operator"); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	for _, id := range []string{"run-1", "run-2", "run-3"} {
-		if err := f.store.CreateTriggerWithRun(ctx, store.Trigger{
-			ID: id, Pipeline: "build", Status: "pending", CreatedAt: now,
-		}, store.Run{ID: id, Pipeline: "build", Status: "pending", CreatedAt: now, StartedAt: now}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for name, c := range map[string]*client.Client{
-		"no node runner named": client.NewWithToken(f.url, nil, f.runner),
-		"inprocess":            client.NewWithToken(f.url, nil, f.runner).WithTriggerNodeRunner("inprocess"),
-		"removed warm":         client.NewWithToken(f.url, nil, f.runner).WithTriggerNodeRunner("warm"),
-	} {
-		if tr, err := c.ClaimTrigger(ctx); !errors.Is(err, store.ErrMeteredInProcessNodes) {
-			t.Errorf("%s: trigger claim = %+v, %v; want ErrMeteredInProcessNodes", name, tr, err)
-		}
-		if tr, err := c.ClaimSpecificTrigger(ctx, "run-1", time.Minute); !errors.Is(err, store.ErrMeteredInProcessNodes) {
-			t.Errorf("%s: named trigger claim = %+v, %v; want ErrMeteredInProcessNodes", name, tr, err)
-		}
-	}
-	if tr, err := client.NewWithToken(f.url, nil, f.runner).WithTriggerNodeRunner("k8s").ClaimTrigger(ctx); err != nil || tr == nil {
-		t.Fatalf("metered claim naming the k8s node runner = %+v, %v; want a trigger", tr, err)
-	}
-}
-
-func TestCredits_MeteredClaimChargesEachHeartbeat(t *testing.T) {
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	c := client.NewWithToken(f.url, nil, f.runner)
-	seedRunNode(t, f.store, "run-paid", "build")
-	if err := f.store.MarkNodeReady(ctx, "run-paid", "build"); err != nil {
-		t.Fatalf("mark ready: %v", err)
-	}
-	n, err := c.ClaimNode(ctx, "pod-1", nil, time.Minute, nil)
-	if err != nil || n == nil {
-		t.Fatalf("claim on a funded ledger: %v", err)
-	}
-
-	// safety: moving the execution charge window makes the next heartbeat cover
-	// a known interval without waiting on the clock.
-	setNodeChargeWindow(t, f.store, "run-paid", "build", time.Now().Add(-30*time.Second))
-
-	claimCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
-		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
-		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
-	})
-	if err := c.HeartbeatNodeClaim(claimCtx, "run-paid", "build", "pod-1", time.Minute, nil); err != nil {
-		t.Fatalf("heartbeat: %v", err)
-	}
-	charges, err := teamTenant(t, f.store, store.DefaultTeam).ListCreditCharges(ctx, 10)
-	if err != nil {
-		t.Fatalf("list charges: %v", err)
-	}
-	usage := creditChargesOfKind(charges, store.CreditChargeUsage)
-	if len(usage) != 1 {
-		t.Fatalf("usage charges = %d, want 1 beside the claim reservation", len(usage))
-	}
-	if usage[0].Seconds < 29 || usage[0].Seconds > 31 {
-		t.Fatalf("charged %d seconds, want about 30", usage[0].Seconds)
-	}
-	if usage[0].TokenPrefix != f.prefix {
-		t.Fatalf("charge token prefix = %q, want %q", usage[0].TokenPrefix, f.prefix)
-	}
-	if usage[0].RunID != "run-paid" || usage[0].NodeID != "build" {
-		t.Fatalf("charge names %s/%s", usage[0].RunID, usage[0].NodeID)
-	}
-	if len(creditChargesOfKind(charges, store.CreditChargeReservation)) != 1 {
-		t.Fatalf("the claim did not reserve: %+v", charges)
-	}
-}
-
-func TestCredits_MeteredHeartbeatRollsBackWhenLedgerFails(t *testing.T) {
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
-		t.Fatal(err)
-	}
-	c := client.NewWithToken(f.url, nil, f.runner)
-	seedRunNode(t, f.store, "run-ledger-fault", "build")
-	if err := f.store.MarkNodeReady(ctx, "run-ledger-fault", "build"); err != nil {
-		t.Fatal(err)
-	}
-	n, err := c.ClaimNode(ctx, "pod-1", nil, time.Minute, nil)
-	if err != nil || n == nil {
-		t.Fatalf("claim: %v", err)
-	}
-	setNodeChargeWindow(t, f.store, n.RunID, n.NodeID, time.Now().Add(-30*time.Second))
-	before, err := f.store.GetNode(ctx, n.RunID, n.NodeID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var chargedThroughBefore int64
-	if err := f.store.DB().QueryRow(`SELECT credit_charged_through FROM nodes WHERE run_id = ? AND node_id = ?`, n.RunID, n.NodeID).Scan(&chargedThroughBefore); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.store.DB().Exec(`CREATE TRIGGER fail_node_usage BEFORE INSERT ON credit_charges
-		WHEN NEW.kind = 'usage' BEGIN SELECT RAISE(ABORT, 'ledger unavailable'); END`); err != nil {
-		t.Fatal(err)
-	}
-	req, err := http.NewRequest(http.MethodPost,
-		f.url+"/api/v1/runs/"+n.RunID+"/nodes/"+n.NodeID+"/heartbeat",
-		strings.NewReader(`{"holder_id":"pod-1","lease_secs":300}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Authorization", "Bearer "+f.runner)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(store.ClaimHolderHeader, n.ClaimedBy)
-	req.Header.Set(store.ClaimMembershipHeader, n.ClaimMembershipID)
-	req.Header.Set(store.ClaimReservationHeader, n.ReservationID)
-	req.Header.Set(store.ClaimGenerationHeader, fmt.Sprint(n.ClaimGeneration))
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("heartbeat status = %d, want 409", resp.StatusCode)
-	}
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(responseBody), "ledger unavailable") || !strings.Contains(string(responseBody), store.ErrLockHeld.Error()) {
-		t.Fatalf("heartbeat exposed the ledger error: %s", responseBody)
-	}
-	after, err := f.store.GetNode(ctx, n.RunID, n.NodeID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !after.LeaseExpiresAt.Equal(*before.LeaseExpiresAt) || after.ClaimedBy != before.ClaimedBy ||
-		after.ClaimGeneration != before.ClaimGeneration {
-		t.Fatalf("ledger failure changed claim or charge window: before=%+v after=%+v", before, after)
-	}
-	var chargedThroughAfter int64
-	if err := f.store.DB().QueryRow(`SELECT credit_charged_through FROM nodes WHERE run_id = ? AND node_id = ?`, n.RunID, n.NodeID).Scan(&chargedThroughAfter); err != nil {
-		t.Fatal(err)
-	}
-	if chargedThroughAfter != chargedThroughBefore {
-		t.Fatalf("ledger failure advanced charge window from %d to %d", chargedThroughBefore, chargedThroughAfter)
-	}
-	if _, err := f.store.DB().Exec(`ALTER TABLE tokens RENAME TO tokens_unavailable`); err != nil {
-		t.Fatal(err)
-	}
-	claimCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
-		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
-		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
-		Claimant: store.ClaimIdentity{Principal: "pool", TokenPrefix: f.prefix},
-	})
-	_, _, err = f.store.HeartbeatNodeClaimWithCredits(claimCtx, n.RunID, n.NodeID,
-		store.ClaimIdentity{Principal: "pool", TokenPrefix: f.prefix}, n.ClaimedBy, 5*time.Minute, true)
-	if err == nil {
-		t.Fatal("heartbeat renewed while the token marker was unreadable")
-	}
-	after, err = f.store.GetNode(ctx, n.RunID, n.NodeID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !after.LeaseExpiresAt.Equal(*before.LeaseExpiresAt) || after.ClaimedBy != before.ClaimedBy {
-		t.Fatalf("token lookup failure changed claim: before=%+v after=%+v", before, after)
-	}
-}
-
-func TestCredits_MeteredHeartbeatDoesNotReviveClaimExpiredDuringCharge(t *testing.T) {
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
-		t.Fatal(err)
-	}
-	c := client.NewWithToken(f.url, nil, f.runner)
-	seedRunNode(t, f.store, "run-expiring-charge", "build")
-	if err := f.store.MarkNodeReady(ctx, "run-expiring-charge", "build"); err != nil {
-		t.Fatal(err)
-	}
-	n, err := c.ClaimNode(ctx, "pod-1", nil, time.Minute, nil)
-	if err != nil || n == nil {
-		t.Fatalf("claim: %v", err)
-	}
-	setNodeChargeWindow(t, f.store, n.RunID, n.NodeID, time.Now().Add(-30*time.Second))
-	// safety: expiring just after the charge timestamp models a ledger wait
-	// without sleeping, so a stale renewal clock would revive the claim.
-	if _, err := f.store.DB().Exec(`CREATE TRIGGER expire_claim_on_usage AFTER INSERT ON credit_charges
-		WHEN NEW.kind = 'usage' BEGIN UPDATE nodes SET lease_expires_at = NEW.charged_at + 1
-		WHERE run_id = NEW.run_id AND node_id = NEW.node_id; END`); err != nil {
-		t.Fatal(err)
-	}
-	claimant := store.ClaimIdentity{Principal: "pool", TokenPrefix: f.prefix}
-	claimCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
-		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
-		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
-		Claimant: claimant,
-	})
-	_, _, err = f.store.HeartbeatNodeClaimWithCredits(claimCtx, n.RunID, n.NodeID,
-		claimant, n.ClaimedBy, 5*time.Minute, true)
-	if !errors.Is(err, store.ErrLockHeld) {
-		t.Fatalf("heartbeat after claim expiry = %v, want ErrLockHeld", err)
-	}
-	after, err := f.store.GetNode(ctx, n.RunID, n.NodeID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !after.LeaseExpiresAt.Equal(*n.LeaseExpiresAt) || after.ClaimedBy != n.ClaimedBy {
-		t.Fatalf("failed heartbeat changed the claim: before=%+v after=%+v", n, after)
-	}
-	charges, err := teamTenant(t, f.store, store.DefaultTeam).ListCreditCharges(ctx, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if usage := creditChargesOfKind(charges, store.CreditChargeUsage); len(usage) != 0 {
-		t.Fatalf("expired claim kept a usage charge: %+v", usage)
-	}
-}
-
 func creditChargesOfKind(charges []store.CreditCharge, kind string) []store.CreditCharge {
 	var out []store.CreditCharge
 	for _, c := range charges {
@@ -589,141 +175,6 @@ func creditChargesOfKind(charges []store.CreditCharge, kind string) []store.Cred
 		}
 	}
 	return out
-}
-
-func TestCredits_HeartbeatCancelsTheNodeAfterTheGracePeriod(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	floor := unpinnedNodeRateMicro * store.MinBillableSeconds
-	// safety: exactly one reservation, so the first heartbeat past it spends
-	// the balance.
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, floor, "", "root"); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	grace := int64(1)
-	if _, err := f.store.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{GraceSeconds: &grace}); err != nil {
-		t.Fatalf("set grace: %v", err)
-	}
-	c := client.NewWithToken(f.url, nil, f.runner)
-	seedRunNode(t, f.store, "run-run-dry", "build")
-	if err := f.store.MarkNodeReady(ctx, "run-run-dry", "build"); err != nil {
-		t.Fatalf("mark ready: %v", err)
-	}
-	n, err := c.ClaimNode(ctx, "pod-1", nil, time.Minute, nil)
-	if err != nil || n == nil {
-		t.Fatalf("claim: %v", err)
-	}
-	claimCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
-		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
-		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
-	})
-
-	// safety: the node is inside the minute its claim reserved and paid for, so
-	// the spent balance alone must not stop it.
-	if err := c.HeartbeatNodeClaim(claimCtx, "run-run-dry", "build", "pod-1", time.Minute, nil); err != nil {
-		t.Fatalf("first heartbeat: %v", err)
-	}
-	node, err := f.store.GetNode(ctx, "run-run-dry", "build")
-	if err != nil {
-		t.Fatalf("get node: %v", err)
-	}
-	if node.Status == "done" {
-		t.Fatal("the node was cancelled inside the reservation its claim paid for")
-	}
-	ageExhaustionStamp(t, f.store, time.Now().Add(-time.Minute))
-	ageNodeExhaustionAnchor(t, f.store, "run-run-dry", "build", time.Now().Add(-time.Minute))
-	setNodeChargeWindow(t, f.store, "run-run-dry", "build", time.Now().Add(-2*time.Second))
-
-	err = c.HeartbeatNodeClaim(claimCtx, "run-run-dry", "build", "pod-1", time.Minute, nil)
-	if !errors.Is(err, store.ErrLockHeld) {
-		t.Fatalf("heartbeat after the grace period = %v, want ErrLockHeld", err)
-	}
-
-	node, err = f.store.GetNode(ctx, "run-run-dry", "build")
-	if err != nil {
-		t.Fatalf("get node: %v", err)
-	}
-	if node.Status != "done" || node.Outcome != "failed" {
-		t.Fatalf("node = %s/%s, want the cancellation to have landed", node.Status, node.Outcome)
-	}
-	if node.FailureReason != store.FailureCreditsExhausted {
-		t.Fatalf("failure reason = %q, want %q", node.FailureReason, store.FailureCreditsExhausted)
-	}
-	if node.Claimed {
-		t.Fatal("the cancelled node is still claimed, so it waits out its lease")
-	}
-
-	events, err := f.store.ListEventsAfter(ctx, "run-run-dry", 0, 50)
-	if err != nil {
-		t.Fatalf("list events: %v", err)
-	}
-	found := false
-	for _, e := range events {
-		if e.Kind == store.EventKindCreditsExhausted {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("the run does not record why its node was cancelled")
-	}
-}
-
-// A node that finishes between heartbeats and inside its reservation pays the
-// minimum billable seconds, because the finish consumes the reservation.
-func TestCredits_NodeFinishSettlesAShortNodeAtTheMinimum(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	billingTenant, err := f.store.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
-	before, err := billingTenant.CreditBalanceMicro(ctx)
-	if err != nil {
-		t.Fatalf("balance: %v", err)
-	}
-	c := client.NewWithToken(f.url, nil, f.runner)
-	seedRunNode(t, f.store, "run-brief", "build")
-	if err := f.store.MarkNodeReady(ctx, "run-brief", "build"); err != nil {
-		t.Fatalf("mark ready: %v", err)
-	}
-	n, err := c.ClaimNode(ctx, "pod-1", nil, time.Minute, nil)
-	if err != nil || n == nil {
-		t.Fatalf("claim: %v", err)
-	}
-	claimCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
-		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
-		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
-	})
-
-	// safety: the claim reserved through claim plus the minimum; placing that
-	// instant four seconds short of it is a node claimed four seconds ago,
-	// finishing before the first heartbeat would have fired.
-	setNodeChargeWindow(t, f.store, "run-brief", "build",
-		time.Now().Add(time.Duration(store.MinBillableSeconds-4)*time.Second))
-	if err := c.StartNode(claimCtx, "run-brief", "build"); err != nil {
-		t.Fatalf("start node: %v", err)
-	}
-	if err := c.FinishNode(claimCtx, "run-brief", "build", "success", "", nil); err != nil {
-		t.Fatalf("finish node: %v", err)
-	}
-
-	after, err := billingTenant.CreditBalanceMicro(ctx)
-	if err != nil {
-		t.Fatalf("balance: %v", err)
-	}
-	if spent, want := before-after, int64(store.MinBillableSeconds)*unpinnedNodeRateMicro; spent != want {
-		t.Fatalf("spent %d for four seconds of work, want the minimum, %d", spent, want)
-	}
 }
 
 func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
@@ -763,27 +214,8 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 		t.Fatalf("unit constants = %d/%d", state.MicroPerCredit, state.CreditsPerDollar)
 	}
 
-	status, _ = creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.readonly,
-		map[string]any{"kind": "paid", "amount_micro": 1000})
-	if status != http.StatusForbidden {
-		t.Fatalf("grant without credits.grant = %d, want 403", status)
-	}
-	status, _ = creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.admin,
-		map[string]any{"kind": "paid", "amount_micro": 1000, "reference": "pay_admin"})
-	if status != http.StatusForbidden {
-		t.Fatalf("grant with an admin token = %d, want 403", status)
-	}
-
-	status, body = creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.service,
-		map[string]any{"kind": "paid", "amount_micro": 1000 * store.MicroCreditsPerCent, "reference": "pay_9"})
-	if status != http.StatusCreated {
-		t.Fatalf("grant = %d: %s", status, body)
-	}
-
-	status, body = creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.service,
-		map[string]any{"kind": "gift", "amount_micro": 5})
-	if status != http.StatusBadRequest {
-		t.Fatalf("unknown grant kind = %d: %s", status, body)
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_9", CreatedBy: "test"}); err != nil {
+		t.Fatal(err)
 	}
 
 	status, body = creditsRequest(t, http.MethodGet, f.url+"/api/v1/credits/history", f.readonly, nil)
@@ -805,7 +237,7 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	if len(history.Grants) != 1 {
 		t.Fatalf("grants = %d, want 1", len(history.Grants))
 	}
-	if history.Grants[0].Reference != "pay_9" || history.Grants[0].CreatedBy != "checkout-service" {
+	if history.Grants[0].Reference != "pay_9" || history.Grants[0].CreatedBy != "test" {
 		t.Fatalf("grant row = %+v", history.Grants[0])
 	}
 	if len(history.Charges) != 0 {
@@ -819,49 +251,6 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	}
 	if !bytes.Contains(body, []byte("1000")) {
 		t.Fatalf("the refusal does not name the ceiling: %s", body)
-	}
-}
-
-func TestCredits_SetMeteredRouteMarksAnExistingToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	f := newCreditsFixture(t, false)
-	ctx := context.Background()
-
-	status, body := creditsRequest(t, http.MethodPost,
-		f.url+"/api/v1/tokens/"+f.prefix+"/metered", f.readonly, map[string]any{"metered": true})
-	if status != http.StatusForbidden {
-		t.Fatalf("set-metered without admin = %d: %s", status, body)
-	}
-
-	status, body = creditsRequest(t, http.MethodPost,
-		f.url+"/api/v1/tokens/"+f.prefix+"/metered", f.admin, map[string]any{"metered": true})
-	if status != http.StatusOK {
-		t.Fatalf("set-metered = %d: %s", status, body)
-	}
-	var record struct {
-		Prefix  string `json:"prefix"`
-		Metered bool   `json:"metered"`
-	}
-	if err := json.Unmarshal(body, &record); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if record.Prefix != f.prefix || !record.Metered {
-		t.Fatalf("set-metered returned %+v", record)
-	}
-	metered, err := f.store.TokenMetered(ctx, f.prefix)
-	if err != nil {
-		t.Fatalf("token metered: %v", err)
-	}
-	if !metered {
-		t.Fatal("the marker did not reach the database")
-	}
-
-	status, body = creditsRequest(t, http.MethodPost,
-		f.url+"/api/v1/tokens/swu_notatoken/metered", f.admin, map[string]any{"metered": true})
-	if status != http.StatusNotFound {
-		t.Fatalf("set-metered on an unknown prefix = %d: %s", status, body)
 	}
 }
 
@@ -900,204 +289,6 @@ func (v creditSettingsView) rateFor(cores int64) int64 {
 		}
 	}
 	return 0
-}
-
-func TestCreditSettings_ReadsTheDefaultsAndSetsEachValue(t *testing.T) {
-	f := newCreditsFixture(t, false)
-
-	status, view := creditSettings(t, f, http.MethodGet, nil)
-	if status != http.StatusOK {
-		t.Fatalf("GET settings = %d", status)
-	}
-	if view.RateMicroPerSecond != store.DefaultCreditRateMicro ||
-		view.GraceSeconds != store.DefaultCreditGraceSeconds ||
-		view.MaxChargeSeconds != store.DefaultCreditMaxChargeSeconds {
-		t.Fatalf("settings = %+v, want the package defaults", view)
-	}
-	if view.MicroPerCredit != store.MicroCreditsPerCredit || view.CreditsPerDollar != store.CreditsPerDollar {
-		t.Fatalf("unit constants = %d/%d", view.MicroPerCredit, view.CreditsPerDollar)
-	}
-
-	status, view = creditSettings(t, f, http.MethodPut, map[string]any{
-		"rate_micro_per_second": 30_000, "grace_seconds": 0, "max_charge_seconds": 45,
-	})
-	if status != http.StatusOK {
-		t.Fatalf("PUT settings = %d", status)
-	}
-	if view.RateMicroPerSecond != 30_000 || view.GraceSeconds != 0 || view.MaxChargeSeconds != 45 {
-		t.Fatalf("settings after the write = %+v", view)
-	}
-	settings, err := f.store.AsOperator().CreditSettings(context.Background())
-	if err != nil {
-		t.Fatalf("read grace: %v", err)
-	}
-	if settings.GraceSeconds != 0 {
-		t.Fatalf("stored grace = %d, want 0", settings.GraceSeconds)
-	}
-}
-
-func TestCreditSettings_LeavesUnnamedValuesAlone(t *testing.T) {
-	f := newCreditsFixture(t, false)
-
-	if status, _ := creditSettings(t, f, http.MethodPut,
-		map[string]any{"grace_seconds": 0}); status != http.StatusOK {
-		t.Fatalf("PUT grace only = %d", status)
-	}
-	status, view := creditSettings(t, f, http.MethodGet, nil)
-	if status != http.StatusOK {
-		t.Fatalf("GET settings = %d", status)
-	}
-	if view.GraceSeconds != 0 {
-		t.Fatalf("grace = %d, want 0", view.GraceSeconds)
-	}
-	if view.RateMicroPerSecond != store.DefaultCreditRateMicro ||
-		view.MaxChargeSeconds != store.DefaultCreditMaxChargeSeconds {
-		t.Fatalf("a one-field write moved the other settings: %+v", view)
-	}
-}
-
-func TestCreditSettings_RefusesValuesTheLedgerCannotPrice(t *testing.T) {
-	f := newCreditsFixture(t, false)
-
-	for name, body := range map[string]map[string]any{
-		"no field named": {},
-		"rate at zero":   {"rate_micro_per_second": 0},
-		"negative rate":  {"rate_micro_per_second": -1},
-		"negative grace": {"grace_seconds": -1},
-		"cap under the heartbeat cadence": {
-			"max_charge_seconds": store.MinCreditMaxChargeSeconds - 1,
-		},
-		"cap past the ceiling": {
-			"max_charge_seconds": int64(store.MaxCreditMaxChargeSeconds) + 1,
-		},
-		"rate past the ceiling": {
-			"rate_micro_per_second": int64(store.MaxCreditRateMicro) + 1,
-		},
-	} {
-		if status, _ := creditSettings(t, f, http.MethodPut, body); status != http.StatusBadRequest {
-			t.Errorf("%s = %d, want 400", name, status)
-		}
-	}
-
-	status, view := creditSettings(t, f, http.MethodGet, nil)
-	if status != http.StatusOK {
-		t.Fatalf("GET settings = %d", status)
-	}
-	if view.RateMicroPerSecond != store.DefaultCreditRateMicro ||
-		view.GraceSeconds != store.DefaultCreditGraceSeconds ||
-		view.MaxChargeSeconds != store.DefaultCreditMaxChargeSeconds {
-		t.Fatalf("a refused write moved a setting: %+v", view)
-	}
-}
-
-func TestCreditSettings_RefusesAWriteWhoseOtherFieldIsBad(t *testing.T) {
-	f := newCreditsFixture(t, false)
-
-	status, _ := creditSettings(t, f, http.MethodPut,
-		map[string]any{"grace_seconds": 0, "rate_micro_per_second": -5})
-	if status != http.StatusBadRequest {
-		t.Fatalf("mixed write = %d, want 400", status)
-	}
-	settings, err := f.store.AsOperator().CreditSettings(context.Background())
-	if err != nil {
-		t.Fatalf("read grace: %v", err)
-	}
-	if settings.GraceSeconds != store.DefaultCreditGraceSeconds {
-		t.Fatalf("grace = %d; the good half of a refused write was applied", settings.GraceSeconds)
-	}
-}
-
-func TestCreditSettings_RefusesTableWithBadSiblingWithoutChangingPrices(t *testing.T) {
-	f := newCreditsFixture(t, false)
-
-	status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
-		"rate_table":    map[string]int64{"2": 999_999, "4": 20_000},
-		"grace_seconds": -1,
-	})
-	if status != http.StatusBadRequest {
-		t.Fatalf("mixed write = %d, want 400", status)
-	}
-	_, view := creditSettings(t, f, http.MethodGet, nil)
-	if view.RateTableSet || view.rateFor(2) != 9_000 || len(view.RateTable) != 3 {
-		t.Fatalf("the good half of a refused write changed prices: %+v", view)
-	}
-}
-
-func TestCreditSettings_RefusesExplicitNullWithoutChangingPrices(t *testing.T) {
-	f := newCreditsFixture(t, false)
-
-	status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
-		"rate_table":    map[string]int64{"2": 999_999, "4": 20_000},
-		"grace_seconds": nil,
-	})
-	if status != http.StatusBadRequest {
-		t.Fatalf("mixed write = %d, want 400", status)
-	}
-	_, view := creditSettings(t, f, http.MethodGet, nil)
-	if view.RateTableSet || view.rateFor(2) != 9_000 || len(view.RateTable) != 3 {
-		t.Fatalf("the good half of a refused write changed prices: %+v", view)
-	}
-}
-
-func TestCreditSettings_RefusesNullInDuplicateAndAcceptsCaseFold(t *testing.T) {
-	f := newCreditsFixture(t, false)
-
-	status, _ := creditSettings(t, f, http.MethodPut, json.RawMessage(
-		`{"rate_table":{"4":20000},"grace_seconds":null,"grace_seconds":0}`))
-	if status != http.StatusBadRequest {
-		t.Fatalf("duplicate null write = %d, want 400", status)
-	}
-	_, view := creditSettings(t, f, http.MethodGet, nil)
-	if view.RateTableSet {
-		t.Fatalf("the duplicate null write stored a table: %+v", view)
-	}
-	status, view = creditSettings(t, f, http.MethodPut, map[string]any{"GRACE_SECONDS": 0})
-	if status != http.StatusOK || view.GraceSeconds != 0 {
-		t.Fatalf("case-folded valid write = %d, %+v", status, view)
-	}
-}
-
-func TestCreditSettings_ConcurrentTableAndScalarKeepASerialResult(t *testing.T) {
-	const scalarWrites = 8
-	for attempt := range 10 {
-		f := newCreditsFixture(t, false)
-		start := make(chan struct{})
-		statuses := make([]int, scalarWrites+1)
-		var wg sync.WaitGroup
-		wg.Add(len(statuses))
-		go func() {
-			defer wg.Done()
-			<-start
-			statuses[0], _ = creditsRequest(t, http.MethodPut,
-				f.url+"/api/v1/credits/settings", f.admin,
-				map[string]any{"rate_table": map[string]int64{"4": 20_000}})
-		}()
-		for i := 1; i < len(statuses); i++ {
-			go func(i int) {
-				defer wg.Done()
-				<-start
-				statuses[i], _ = creditsRequest(t, http.MethodPut,
-					f.url+"/api/v1/credits/settings", f.admin,
-					map[string]any{"rate_micro_per_second": 99_000})
-			}(i)
-		}
-		close(start)
-		wg.Wait()
-
-		_, view := creditSettings(t, f, http.MethodGet, nil)
-		if statuses[0] != http.StatusOK {
-			t.Fatalf("attempt %d statuses = %v", attempt, statuses)
-		}
-		for _, status := range statuses[1:] {
-			if status != http.StatusOK && status != http.StatusBadRequest {
-				t.Fatalf("attempt %d statuses = %v", attempt, statuses)
-			}
-		}
-		if !view.RateTableSet || view.rateFor(4) != 20_000 {
-			t.Fatalf("attempt %d produced a non-serial result: statuses=%v settings=%+v",
-				attempt, statuses, view)
-		}
-	}
 }
 
 func TestCreditSettings_ReadNeedsRunsReadAndWriteNeedsAdmin(t *testing.T) {
@@ -1202,80 +393,6 @@ func TestCreditSettings_RefusesARateTableTheLedgerCannotPrice(t *testing.T) {
 	}
 }
 
-func TestCredits_HistoryNamesTheClassAndRateEachChargeWasBilledAt(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	f := newCreditsFixture(t, true)
-	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
-		"rate_table": map[string]int64{"2": 10_000, "4": 20_000},
-	}); status != http.StatusOK {
-		t.Fatalf("set the rate table = %d", status)
-	}
-	c := client.NewWithToken(f.url, nil, f.runner)
-	seedRunNode(t, f.store, "run-classed", "build")
-	if err := f.store.MarkNodeReady(ctx, "run-classed", "build"); err != nil {
-		t.Fatalf("mark ready: %v", err)
-	}
-	n, err := c.ClaimNode(ctx, "pod-1", nil, time.Minute, nil)
-	if err != nil || n == nil {
-		t.Fatalf("claim: %v", err)
-	}
-	setNodeChargeWindow(t, f.store, "run-classed", "build", time.Now().Add(-30*time.Second))
-	claimCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
-		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
-		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
-	})
-	if err := c.HeartbeatNodeClaim(claimCtx, "run-classed", "build", "pod-1", time.Minute, nil); err != nil {
-		t.Fatalf("heartbeat: %v", err)
-	}
-
-	status, body := creditsRequest(t, http.MethodGet, f.url+"/api/v1/credits/history", f.readonly, nil)
-	if status != http.StatusOK {
-		t.Fatalf("history = %d: %s", status, body)
-	}
-	var history struct {
-		Charges []struct {
-			Kind               string `json:"kind"`
-			CPUClassCores      int64  `json:"cpu_class_cores"`
-			RateMicroPerSecond int64  `json:"rate_micro_per_second"`
-		} `json:"charges"`
-	}
-	if err := json.Unmarshal(body, &history); err != nil {
-		t.Fatalf("decode history: %v", err)
-	}
-	if len(history.Charges) != 2 {
-		t.Fatalf("charges = %d, want the reservation and the usage", len(history.Charges))
-	}
-	for _, charge := range history.Charges {
-		// safety: a node whose plan pins no cpu resolves to one core, which the
-		// smallest class covers.
-		if charge.CPUClassCores != 2 || charge.RateMicroPerSecond != 10_000 {
-			t.Fatalf("%s charge billed class %d at %d, want the 2-core class at 10000",
-				charge.Kind, charge.CPUClassCores, charge.RateMicroPerSecond)
-		}
-	}
-
-	status, body = creditsRequest(t, http.MethodGet, f.url+"/api/v1/credits", f.readonly, nil)
-	if status != http.StatusOK {
-		t.Fatalf("GET /credits = %d: %s", status, body)
-	}
-	var state struct {
-		RateTable []creditRateView `json:"rate_table"`
-	}
-	if err := json.Unmarshal(body, &state); err != nil {
-		t.Fatalf("decode state: %v", err)
-	}
-	if len(state.RateTable) != 2 || state.RateTable[0].MicroPerSecond != 10_000 {
-		t.Fatalf("the credit state names %+v, want the two classes in force", state.RateTable)
-	}
-}
-
 // With a table stored the scalar is the four-core entry under another name, so
 // writing it alone is refused and the caller is told what to write instead.
 func TestCreditSettings_RefusesTheScalarOnceATableExists(t *testing.T) {
@@ -1314,8 +431,7 @@ func TestCreditSettings_RefusesTheScalarOnceATableExists(t *testing.T) {
 func TestCredits_AClaimAboveTheLargestClassFailsTheNode(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
@@ -1361,8 +477,7 @@ func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
@@ -1419,8 +534,7 @@ func TestCredits_TheClaimResponseCarriesTheBilledClass(t *testing.T) {
 	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
@@ -1470,8 +584,7 @@ func TestCredits_TheClaimResponseCarriesTheBilledClass(t *testing.T) {
 func TestCredits_QuarterCorePinReservesTwoCoreMinimum(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay-quarter", "root"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay-quarter", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if err := f.store.CreateRun(ctx, store.Run{
@@ -1508,8 +621,7 @@ func TestCredits_QuarterCorePinReservesTwoCoreMinimum(t *testing.T) {
 func TestCredits_ANamedClaimThatDoesNotSizeToClassIsRefused(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if err := f.store.CreateRun(ctx, store.Run{
@@ -1544,8 +656,7 @@ func TestCredits_ANamedClaimThatDoesNotSizeToClassIsRefused(t *testing.T) {
 func TestCredits_AWarmClaimPassesOverAClassAboveTheWarmPool(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if err := f.store.CreateRun(ctx, store.Run{

@@ -3,7 +3,6 @@ package wingd
 import (
 	"context"
 	"net"
-	"sync"
 	"time"
 )
 
@@ -13,28 +12,24 @@ import (
 // returns outlives both drains.
 const APIDrainWindow = 5 * time.Second
 
-// APIConn is a connection accepted on api.sock. The daemon checks the peer's
-// uid before it yields the connection, so PeerUID names the account the
-// kernel reported, or this daemon's own uid on a platform that reports none.
+// APIConn carries a verified transport identity for the shared controller's
+// local authorization. PeerIdentity returns a snapshot owned by the caller.
+// Missing kernel UID or client SID evidence refuses access before Accept returns.
 type APIConn interface {
 	net.Conn
-	PeerUID() int
+	PeerIdentity() LocalPeerIdentity
 }
 
-func (d *Daemon) startAPI(ctx context.Context) {
+func (d *Daemon) startAPI(ctx context.Context) error {
 	if d.cfg.ServeAPI == nil {
-		return
+		return nil
 	}
-	ln, err := bindSocket(d.layout.apiSock)
+	ln, err := d.bind(d.layout.apiSock)
 	if err != nil {
-		// safety: admission is the daemon's reason to exist, so a socket the
-		// API cannot bind is reported through api_ready rather than taken as
-		// a reason to leave the machine without a daemon.
 		d.mu.Lock()
 		d.apiErr = err.Error()
 		d.mu.Unlock()
-		d.cfg.logf("controller API unavailable: %v", err)
-		return
+		return err
 	}
 	done := make(chan struct{})
 	d.mu.Lock()
@@ -46,6 +41,7 @@ func (d *Daemon) startAPI(ctx context.Context) {
 		d.cfg.ServeAPI(ctx, apiListener{Listener: ln, d: d})
 	}()
 	d.cfg.logf("serving the controller API on %s", d.layout.apiSock)
+	return nil
 }
 
 func (d *Daemon) apiState() (bool, string) {
@@ -100,44 +96,42 @@ func (l apiListener) Accept() (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		uid, perr := acceptedPeerUID(nc)
+		peer, perr := acceptedPeerIdentity(nc)
+		var connection *apiConn
+		if perr == nil {
+			var owner LocalPeerIdentity
+			owner, perr = controllerPeerIdentity()
+			if perr == nil {
+				connection, perr = newAPIConn(nc, peer, owner)
+			}
+		}
 		if perr != nil {
 			l.d.cfg.logf("%v", perr)
 			_ = nc.Close()
 			continue
 		}
-		l.d.apiConnOpened()
-		return &apiConn{Conn: nc, d: l.d, uid: uid}, nil
+		return connection, nil
 	}
 }
 
 type apiConn struct {
 	net.Conn
-	d    *Daemon
-	uid  int
-	once sync.Once
+	identity LocalPeerIdentity
 }
 
-func (c *apiConn) PeerUID() int { return c.uid }
-
-func (c *apiConn) Close() error {
-	err := c.Conn.Close()
-	c.once.Do(c.d.apiConnClosed)
-	return err
-}
-
-func (d *Daemon) apiConnOpened() {
-	d.mu.Lock()
-	d.apiConns++
-	d.touchLocked()
-	d.mu.Unlock()
-}
-
-func (d *Daemon) apiConnClosed() {
-	d.mu.Lock()
-	if d.apiConns > 0 {
-		d.apiConns--
+func newAPIConn(nc net.Conn, peer, owner LocalPeerIdentity) (*apiConn, error) {
+	if _, err := LocalSubject(peer, owner); err != nil {
+		return nil, err
 	}
-	d.touchLocked()
-	d.mu.Unlock()
+	return &apiConn{Conn: nc, identity: copyPeerIdentity(peer)}, nil
+}
+
+func (c *apiConn) PeerIdentity() LocalPeerIdentity { return copyPeerIdentity(c.identity) }
+
+func copyPeerIdentity(identity LocalPeerIdentity) LocalPeerIdentity {
+	if identity.UID != nil {
+		uid := *identity.UID
+		identity.UID = &uid
+	}
+	return identity
 }

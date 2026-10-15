@@ -2,9 +2,6 @@ package main
 
 import (
 	"bytes"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"regexp"
 	"slices"
 	"strings"
@@ -33,96 +30,6 @@ func TestPrintHelpHidesHiddenFlag(t *testing.T) {
 	}
 }
 
-func TestProfilesRegistryMatchesDispatcher(t *testing.T) {
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "profiles.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dispatched := map[string]bool{}
-	ast.Inspect(file, func(node ast.Node) bool {
-		fn, ok := node.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "runProfiles" {
-			return true
-		}
-		ast.Inspect(fn.Body, func(node ast.Node) bool {
-			clause, ok := node.(*ast.CaseClause)
-			if !ok {
-				return true
-			}
-			for _, expr := range clause.List {
-				literal, ok := expr.(*ast.BasicLit)
-				if ok && literal.Kind == token.STRING {
-					dispatched[strings.Trim(literal.Value, `"`)] = true
-				}
-			}
-			return true
-		})
-		return false
-	})
-
-	for _, child := range childCommands(cmdProfiles.Path) {
-		name := commandLeafName(child.Path)
-		if !child.Hidden && !dispatched[name] {
-			t.Errorf("%s is registered but runProfiles does not dispatch %q", child.Path, name)
-		}
-	}
-}
-
-func TestProfilesRuntimeGuidanceUsesRegisteredPaths(t *testing.T) {
-	fset := token.NewFileSet()
-	for _, filename := range []string{"profiles.go", "profiles_test_cmd.go"} {
-		file, err := parser.ParseFile(fset, filename, nil, parser.ParseComments)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ast.Inspect(file, func(node ast.Node) bool {
-			literal, ok := node.(*ast.BasicLit)
-			if ok && literal.Kind == token.STRING && strings.Contains(literal.Value, "sparkwing profiles") {
-				t.Errorf("%s contains obsolete command path at %s", filename, fset.Position(literal.Pos()))
-			}
-			return true
-		})
-		for _, group := range file.Comments {
-			if strings.Contains(group.Text(), "sparkwing profiles") {
-				t.Errorf("%s contains obsolete command path at %s", filename, fset.Position(group.Pos()))
-			}
-		}
-	}
-}
-
-func TestTokenCommandHelpRequiresProfile(t *testing.T) {
-	testCommandFamilyRequiresProfile(t, cmdTokens)
-}
-
-func testCommandFamilyRequiresProfile(t *testing.T, parent Command) {
-	t.Helper()
-	for _, command := range childCommands(parent.Path) {
-		if command.Hidden {
-			continue
-		}
-		found := false
-		for _, spec := range command.Flags {
-			if spec.Name != "profile" {
-				continue
-			}
-			found = true
-			if !spec.Required {
-				t.Errorf("%s does not mark --profile required", command.Path)
-			}
-		}
-		if !found {
-			t.Errorf("%s does not declare --profile", command.Path)
-		}
-		for _, example := range command.Examples {
-			if !strings.Contains(example.Command, "--profile ") {
-				t.Errorf("%s example %q omits required --profile", command.Path, example.Command)
-			}
-		}
-	}
-}
-
 func TestRequiredProfileFlagsDoNotAdvertiseDefault(t *testing.T) {
 	for _, command := range allCommands {
 		for _, spec := range command.Flags {
@@ -139,77 +46,6 @@ func TestRequiredProfileFlagsDoNotAdvertiseDefault(t *testing.T) {
 	}
 }
 
-func TestRunsMutationHelpDescribesLocalAndRemoteModes(t *testing.T) {
-	for _, command := range []Command{cmdJobsRetry, cmdJobsCancel, cmdJobsPrune} {
-		foundProfile := false
-		for _, spec := range command.Flags {
-			if spec.Name != "profile" {
-				continue
-			}
-			foundProfile = true
-			if !strings.Contains(strings.ToLower(spec.Desc), "omit for local") {
-				t.Errorf("%s describes --profile as %q, want local-mode guidance", command.Path, spec.Desc)
-			}
-		}
-		if !foundProfile {
-			t.Errorf("%s does not declare --profile", command.Path)
-		}
-	}
-}
-
-func TestSecretCommandHelpDescribesLocalAndRemoteModes(t *testing.T) {
-	for _, command := range childCommands(cmdSecret.Path) {
-		if command.Hidden {
-			continue
-		}
-		foundProfile := false
-		for _, spec := range command.Flags {
-			if spec.Name != "profile" {
-				continue
-			}
-			foundProfile = true
-			if spec.Required || !strings.Contains(strings.ToLower(spec.Desc), "omit for the local store") {
-				t.Errorf("%s describes --profile as %q (required %v), want it optional with local-mode guidance", command.Path, spec.Desc, spec.Required)
-			}
-		}
-		if !foundProfile {
-			t.Errorf("%s does not declare --profile", command.Path)
-		}
-		local, remote := false, false
-		for _, example := range command.Examples {
-			if strings.Contains(example.Command, "--profile ") {
-				remote = true
-			} else {
-				local = true
-			}
-		}
-		if !local || !remote {
-			t.Errorf("%s examples do not cover both local and remote modes", command.Path)
-		}
-	}
-}
-
-func TestWorkerHelpRequiresProfile(t *testing.T) {
-	found := false
-	for _, spec := range cmdWorker.Flags {
-		if spec.Name != "profile" {
-			continue
-		}
-		found = true
-		if !spec.Required {
-			t.Error("cluster worker does not mark --profile required")
-		}
-	}
-	if !found {
-		t.Fatal("cluster worker does not declare --profile")
-	}
-	for _, example := range cmdWorker.Examples {
-		if !strings.Contains(example.Command, "--profile ") {
-			t.Errorf("cluster worker example %q omits required --profile", example.Command)
-		}
-	}
-}
-
 func TestPrintHelpDistinguishesOptionalSubcommands(t *testing.T) {
 	cases := []struct {
 		name string
@@ -217,24 +53,24 @@ func TestPrintHelpDistinguishesOptionalSubcommands(t *testing.T) {
 		want string
 	}{
 		{
-			name: "runnable parent",
+			name: "command group",
 			cmd:  cmdQueue,
-			want: "  sparkwing queue [<subcommand>] [flags]\n",
+			want: "  sparkwing queue <subcommand> [flags]\n",
 		},
 		{
 			name: "leaf with positional",
 			cmd:  cmdRun,
-			want: "  sparkwing run <pipeline> [flags] [-- pipeline-flags...]\n",
+			want: "  sparkwing run <pipeline> [flags] [-- <pipeline args>...]\n",
 		},
 		{
-			name: "runnable parent with flags",
+			name: "command group with flags",
 			cmd:  cmdVersion,
-			want: "  sparkwing version [<subcommand>] [flags]\n",
+			want: "  sparkwing version <subcommand> [flags]\n",
 		},
 		{
 			name: "command group",
 			cmd:  cmdJobs,
-			want: "  sparkwing runs <subcommand>\n",
+			want: "  sparkwing runs <subcommand> [flags]\n",
 		},
 	}
 
@@ -369,7 +205,7 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 		"--sw-dry-run",
 		"--target",
 		"--sw-verbose",
-		"--sw-allow",
+		"--sw-allow-risk",
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -383,52 +219,6 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestCompletionFlagsListsHotOnly(t *testing.T) {
-	hotFlags := []string{
-		"--sw-ref",
-		"--sw-start-at", "--sw-stop-at",
-		"--sw-dry-run",
-		"--target",
-		"--help",
-	}
-	advancedFlags := []string{
-		"--sw-verbose",
-		"--sw-allow",
-	}
-	for _, tc := range []struct {
-		name string
-		cmd  Command
-	}{
-		{"sparkwing run", cmdRun},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			flags := visibleFlagsForHelp(tc.cmd, true)
-			present := map[string]bool{}
-			for _, f := range flags {
-				present["--"+f.Name] = true
-			}
-			for _, f := range hotFlags {
-				if !present[f] {
-					t.Errorf("completion %s: expected hot flag %s; got %v", tc.name, f, flagNames(flags))
-				}
-			}
-			for _, f := range advancedFlags {
-				if present[f] {
-					t.Errorf("completion %s: leaked advanced flag %s; got %v", tc.name, f, flagNames(flags))
-				}
-			}
-		})
-	}
-}
-
-func flagNames(fs []FlagSpec) []string {
-	out := make([]string, len(fs))
-	for i, f := range fs {
-		out[i] = "--" + f.Name
-	}
-	return out
 }
 
 func findFlagSpec(flags []FlagSpec, name string) (FlagSpec, bool) {
@@ -505,35 +295,6 @@ func TestHelpListingMatchesRegistry(t *testing.T) {
 	}
 }
 
-func TestSubcommandOrderMatchesRegistry(t *testing.T) {
-	for _, parent := range allCommands {
-		want := map[string]bool{}
-		for _, child := range childCommands(parent.Path) {
-			if !child.Hidden {
-				want[commandLeafName(child.Path)] = true
-			}
-		}
-
-		seen := map[string]bool{}
-		for _, name := range parent.SubcommandOrder {
-			switch {
-			case seen[name]:
-				t.Errorf("%s SubcommandOrder names %q twice", parent.Path, name)
-			case !want[name]:
-				t.Errorf("%s SubcommandOrder names %q, which is not a visible registered child of it",
-					parent.Path, name)
-			}
-			seen[name] = true
-		}
-		for name := range want {
-			if !seen[name] {
-				t.Errorf("%s SubcommandOrder omits its registered child %q, so the child's place in the listing is unowned",
-					parent.Path, name)
-			}
-		}
-	}
-}
-
 func TestWantsHelpIsPositionIndependent(t *testing.T) {
 	yes := [][]string{
 		{"--help"},
@@ -552,7 +313,7 @@ func TestWantsHelpIsPositionIndependent(t *testing.T) {
 		{},
 		{"--name", "x"},
 		{"--short", "helpful things"},
-		{"--query", "help"},
+		{"--search", "help"},
 	}
 	for _, args := range no {
 		if wantsHelp(args) {

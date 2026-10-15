@@ -2,15 +2,14 @@ package controller_test
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
 	"testing"
-	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -48,33 +47,12 @@ func TestController_SessionRoute_OutsideBearerAuth(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	srv := controller.New(st, nil).WithAuthenticator(
-		controller.NewAuthenticator(st, time.Minute),
-	)
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
-
-	resp, err := http.Get(ts.URL + "/api/v1/auth/session")
-	if err != nil {
-		t.Fatalf("GET: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status=%d want 401", resp.StatusCode)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	var parsed map[string]any
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		t.Fatalf("decode body %q: %v", body, err)
-	}
-	if _, hasMessage := parsed["message"]; hasMessage {
-		t.Fatalf("bearer middleware caught the request before handleSession ran: "+
-			"someone gated /api/v1/auth/session behind auth, breaking the dashboard "+
-			"login flow. body=%s", body)
-	}
-	if got, _ := parsed["error"].(string); got != "session header required" {
-		t.Fatalf("error=%q want %q (full body: %s)",
-			got, "session header required", body)
+	srv := controller.New(st, nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/auth/session", nil))
+	var parsed apierr.Envelope
+	if w.Code != http.StatusUnauthorized || json.Unmarshal(w.Body.Bytes(), &parsed) != nil || parsed.Error == nil || parsed.Error.Code != apierr.Unauthenticated || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
 }
 

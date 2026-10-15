@@ -30,7 +30,7 @@ func TestPeerAllowed_AdmitsOnlyThisUser(t *testing.T) {
 		{name: "this user", uid: self, known: true, want: true},
 		{name: "another user", uid: self + 1, known: true, want: false},
 		{name: "root", uid: 0, known: true, want: self == 0},
-		{name: "credentials unavailable", uid: 0, known: false, want: true},
+		{name: "credentials unavailable", uid: 0, known: false, want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -81,7 +81,7 @@ func TestCheckPeerCredentials_UsesTheUIDThePlatformReports(t *testing.T) {
 		wantErr string
 	}{
 		{name: "this user", uid: self, known: true},
-		{name: "credentials unavailable", uid: 0, known: false},
+		{name: "credentials unavailable", uid: 0, known: false, wantErr: "peer identity unavailable"},
 		{name: "another user", uid: self + 1, known: true, wantErr: fmt.Sprintf("refused a connection from uid %d", self+1)},
 		{name: "read failure", uid: 0, known: false, err: errors.New("getsockopt broke"), wantErr: "getsockopt broke"},
 	}

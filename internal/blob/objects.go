@@ -89,6 +89,25 @@ type contextReader struct {
 	reader io.Reader
 }
 
+// VerifyBlob verifies the selected immutable CAS object before result reuse.
+func (f *Filesystem) VerifyBlob(ctx context.Context, expected Blob) error {
+	key, err := ObjectKey(expected.Team, expected.Digest)
+	if err != nil {
+		return err
+	}
+	return f.verify(ctx, key, expected)
+}
+
+// VerifyBlob verifies the selected immutable CAS object before result reuse.
+func (s *S3) VerifyBlob(ctx context.Context, expected Blob) error {
+	key, err := ObjectKey(expected.Team, expected.Digest)
+	if err != nil {
+		return err
+	}
+	_, err = s.verify(ctx, key, expected)
+	return err
+}
+
 func (r *contextReader) Read(p []byte) (int, error) {
 	if err := r.ctx.Err(); err != nil {
 		return 0, err

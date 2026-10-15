@@ -4,55 +4,68 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
+	"math"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	flag "github.com/spf13/pflag"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
-	"github.com/sparkwing-dev/sparkwing/internal/logutil"
-	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
-	"github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
 )
 
-func runLaunchCLI(args []string) error {
-	fs := flag.NewFlagSet("launch", flag.ContinueOnError)
-	var cfg launcher.Config
-	fs.StringVar(&cfg.ControllerURL, "controller", "", "controller URL the launcher and its Jobs reach")
-	fs.StringVar(&cfg.Namespace, "namespace", "sparkwing-jobs", "namespace the Jobs run in")
-	fs.StringVar(&cfg.Image, "image", "", "runner image, pinned by digest")
-	cpu := fs.String("cpu-ceiling", "", "most cores one Job may request (required)")
-	memory := fs.String("memory-ceiling", "", "most memory one Job may request (required)")
-	fs.DurationVar(&cfg.Deadline, "deadline", launcher.MaxDeadline, "a Job's life and its claim token's")
-	fs.StringVar(&cfg.ScratchLimit, "scratch", "", "size limit of a Job's scratch volume (default 20Gi)")
-	poll := fs.Duration("poll", time.Second, "how often an idle launcher asks for work")
-	readLog := logutil.Bind(fs)
-	credentialsDir := fs.String(credentials.FlagName, "",
-		"directory holding "+agentTokenCredential+", the launcher's claims.launch bearer token (required)")
-	if err := fs.Parse(args); err != nil {
+const agentTokenCredential = "agent-token"
+
+// LauncherFactory binds the shared controller transport and the verified Cloud
+// boundary to the launcher. The bearer remains in the transport, never a Job.
+type LauncherFactory func(context.Context, launcher.CloudJobConfig, string) (*launcher.Launcher, error)
+
+// RunLaunchCLI accepts the final Job configuration and refuses to start without
+// both an award transport and a boundary that establishes isolation at runtime.
+func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) error {
+	fs, err := runnerflags.Parse("launch", args, os.Stderr)
+	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
 		return err
 	}
-	var err error
-	if cfg.CPUCeiling, err = k8s.ParseCPUCeiling(*cpu); err != nil {
-		return err
+	value := func(name string) string { v, _ := fs.GetString(name); return v }
+	cfg := launcher.CloudJobConfig{ControllerURL: value("controller"), Namespace: "sparkwing-jobs", RunnerImage: value("image"), DockerImage: value("docker-image")}
+	if fs.Changed("namespace") {
+		cfg.Namespace = value("namespace")
 	}
-	if cfg.MemoryCeiling, err = k8s.ParseMemoryCeiling(*memory); err != nil {
-		return err
+	var poll time.Duration
+	if fs.Changed("poll") {
+		poll, err = time.ParseDuration(value("poll"))
+		if err != nil || poll <= 0 {
+			return errors.New("--poll must be a positive duration")
+		}
 	}
+	cpuQuantity, err := resource.ParseQuantity(value("cpu-ceiling"))
+	if err != nil {
+		return fmt.Errorf("--cpu-ceiling: %w", err)
+	}
+	cfg.CPUCeiling = cpuQuantity.AsApproximateFloat64()
+	memoryQuantity, err := resource.ParseQuantity(value("memory-ceiling"))
+	if err != nil {
+		return fmt.Errorf("--memory-ceiling: %w", err)
+	}
+	if memoryQuantity.Sign() <= 0 || memoryQuantity.Cmp(*resource.NewQuantity(math.MaxInt64, resource.DecimalSI)) > 0 {
+		return errors.New("--memory-ceiling must be positive and fit in a signed 64-bit byte count")
+	}
+	cfg.MemoryCeiling = memoryQuantity.Value()
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	creds, err := credentials.Open(*credentialsDir)
+	if factory == nil {
+		return errors.New("launcher runtime is unavailable: wire the controller Cloud awards and verified node/network boundary before launching Jobs")
+	}
+	creds, err := credentials.Open(value(credentials.FlagName))
 	if err != nil {
 		return err
 	}
@@ -61,34 +74,23 @@ func runLaunchCLI(args []string) error {
 		return err
 	}
 	if token == "" {
-		return errors.New("launch: a claims.launch token is required in " + agentTokenCredential + " under --" + credentials.FlagName)
+		return errors.New("launcher requires a credential in " + agentTokenCredential)
 	}
-	rc, err := rest.InClusterConfig()
-	if err != nil {
-		return fmt.Errorf("kube config: %w", err)
-	}
-	kube, err := kubernetes.NewForConfig(rc)
-	if err != nil {
-		return fmt.Errorf("kube client: %w", err)
-	}
-	holder, err := os.Hostname()
+	runner, err := factory(ctx, cfg, token)
 	if err != nil {
 		return err
 	}
+	if runner == nil {
+		return errors.New("launcher runtime returned no launcher")
+	}
+	if fs.Changed("poll") {
+		runner.Poll = poll
+	}
+	return runner.Run(ctx)
+}
+
+func runLaunchCLI(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-launcher", Log: readLog()})
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := tel.Shutdown(context.Background()); err != nil {
-			slog.Warn("telemetry shutdown", "err", err)
-		}
-	}()
-	l := &launcher.Launcher{
-		Kube: kube, Ctrl: client.NewWithToken(cfg.ControllerURL, nil, token), Config: cfg,
-		Holder: "launcher:" + holder, Poll: *poll, Logger: slog.Default(),
-	}
-	return l.Run(ctx)
+	return RunLaunchCLI(ctx, args, nil)
 }

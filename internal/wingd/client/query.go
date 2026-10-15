@@ -28,7 +28,7 @@ func dialMeansAbsent(err error) bool {
 }
 
 func unreachable(sock string, dialErr error) error {
-	if dialErr == nil || dialMeansAbsent(dialErr) || socketDirMissingAfterDial(sock, dialErr) {
+	if dialErr == nil || dialMeansAbsent(dialErr) {
 		return nil
 	}
 	return fmt.Errorf("%w at %s: %w", ErrDaemonUnreachable, sock, dialErr)

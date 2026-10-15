@@ -6,16 +6,14 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"encoding/pem"
+	"golang.org/x/crypto/ssh"
 	"net/http"
 	"strings"
 	"testing"
-	"time"
-
-	"golang.org/x/crypto/ssh"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type credFixture struct {
@@ -77,7 +75,7 @@ func (f *credFixture) put(who signedIn, body map[string]any) (controller.GitCred
 func (f *credFixture) cloudRun(owner signedIn, runID, repoURL string) string {
 	f.t.Helper()
 	auth, prefix := f.nodeClaim(owner, runID, repoURL, 0)
-	if err := f.store.SetTokenMetered(context.Background(), prefix, true); err != nil {
+	if err := seedLegacyMeteredCredential(f.store, prefix); err != nil {
 		f.t.Fatal(err)
 	}
 	return auth
@@ -165,7 +163,7 @@ func TestTeamGitCredentialStaysWithTheTeamClaimAndHost(t *testing.T) {
 	}
 
 	idle, prefix := f.teamRunner(f.olga, "idle")
-	if err := f.store.SetTokenMetered(context.Background(), prefix, true); err != nil {
+	if err := seedLegacyMeteredCredential(f.store, prefix); err != nil {
 		t.Fatal(err)
 	}
 	if got, code := f.sourceCredential(idle, "run-olga"); code != http.StatusForbidden || got.Secret != "" || got.Error != "claim_token_required" {
@@ -221,42 +219,6 @@ func TestTeamGitCredentialGoesToLocalMachinesOnlyWhenOptedIn(t *testing.T) {
 	}
 }
 
-// The stored credential reaches a runner's claim, its node's or its
-// trigger's, and never a Cloud launcher's claim or a bearer.
-func TestTeamGitCredentialReachesOnlyARunnersClaim(t *testing.T) {
-	f := newCredFixture(t)
-	for host, tok := range map[string]string{"gitlab.example.com": "glpat-olga", "github.com": "github_pat_x"} {
-		if _, code := f.put(f.olga, map[string]any{"host": host, "kind": "https", "token": tok}); code != http.StatusOK {
-			t.Fatalf("put %s = %d", host, code)
-		}
-	}
-	launcher := f.launchedRun(f.olga, "run-cloud", "someone", "else")
-	if got, code := f.sourceCredential("Bearer "+launcher, "run-cloud"); code != http.StatusNotFound ||
-		got.Secret != "" || !strings.Contains(got.Message, "Sparkwing Cloud") {
-		t.Fatalf("a launcher's claim = %d %+v; want no credential and the Cloud remedy", code, got)
-	}
-
-	f.createRun(f.olga, "run-hook", "https://gitlab.example.com/acme/tools.git", 0)
-	machine, prefix := f.teamRunner(f.olga, "trigger-machine")
-	if code := f.call("PUT", "/api/v1/team/tokens/"+prefix+"/git-credentials", f.olga.auth, map[string]bool{"enabled": true}, nil); code != http.StatusOK {
-		t.Fatalf("opt in = %d", code)
-	}
-	if got, code := f.sourceCredential(machine, "run-hook"); code != http.StatusForbidden || got.Secret != "" {
-		t.Fatalf("the opted-in machine's bearer = %d %+v; want 403", code, got)
-	}
-	trig, err := client.NewWithToken(f.url, nil, strings.TrimPrefix(machine, "Bearer ")).ClaimSpecificTrigger(context.Background(), "run-hook", time.Minute)
-	if err != nil || trig == nil {
-		t.Fatalf("claim trigger = %+v, %v", trig, err)
-	}
-	if got, code := f.sourceCredential("Bearer "+trig.ClaimToken, "run-hook"); code != http.StatusOK || got.Secret != "glpat-olga" {
-		t.Fatalf("the opted-in machine's trigger claim = %d %+v", code, got)
-	}
-	rels := f.releases(f.olga)
-	if len(rels) != 1 || rels[0].RunID != "run-hook" || rels[0].TokenPrefix != prefix || !strings.Contains(rels[0].Runner, "trigger-machine") {
-		t.Fatalf("audit = %+v; want one row naming the machine", rels)
-	}
-}
-
 // Replacing the credential changes what the next release gets, and deleting
 // it stops every release after.
 func TestTeamGitCredentialRotationAndRevocation(t *testing.T) {
@@ -289,7 +251,7 @@ func TestTeamGitCredentialLosesToTheAppWhenTheAppCovers(t *testing.T) {
 		t.Fatalf("put = %d", code)
 	}
 	covered, prefix := f.nodeClaim(f.olga, "run-widgets", "https://github.com/acme/widgets.git", 701)
-	if err := f.store.SetTokenMetered(context.Background(), prefix, true); err != nil {
+	if err := seedLegacyMeteredCredential(f.store, prefix); err != nil {
 		t.Fatal(err)
 	}
 	got, code := f.sourceCredential(covered, "run-widgets")
@@ -359,4 +321,9 @@ func jsonText(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func seedLegacyMeteredCredential(st *store.Store, prefix string) error {
+	_, err := st.DB().ExecContext(context.Background(), "UPDATE tokens SET metered=1 WHERE prefix=?", prefix)
+	return err
 }

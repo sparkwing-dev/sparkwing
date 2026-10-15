@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
@@ -17,30 +19,17 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 type Pipeline struct {
-	Name       string   `json:"name"`
-	Short      string   `json:"short,omitempty"`
-	Help       string   `json:"help,omitempty"`
+	nodeproto.PipelineDescription
 	Triggers   []string `json:"triggers,omitempty"`
 	Entrypoint string   `json:"entrypoint,omitempty"`
 	// PinnedProfile is the profile: the pipeline's sparkwing.yaml entry names;
 	// the pipeline runs only through `pipeline trigger <pipeline> --profile` with it.
-	PinnedProfile string                          `json:"pinned_profile,omitempty"`
-	Args          []nodeproto.ArgumentDescription `json:"args,omitempty"`
-	Examples      []nodeproto.UsageExample        `json:"examples,omitempty"`
-
-	EnvVars []nodeproto.EnvironmentDescription `json:"env_vars,omitempty"`
-
-	Risks []string `json:"risks,omitempty"`
-
-	RisksBySteps []nodeproto.StepRisks `json:"risks_by_step,omitempty"`
-
-	Secrets []nodeproto.SecretDeclaration `json:"secrets,omitempty"`
+	PinnedProfile string `json:"pinned_profile,omitempty"`
 }
 
 type PipelineIndex struct {
@@ -93,7 +82,7 @@ func runPipelineList(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineList.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
 	includeHidden := fs.Bool("all", false, "include hidden entries (hidden: true in yaml / # hidden: true in scripts)")
-	query := fs.String("query", "", "rank entries whose fields match every token; searches hidden entries too")
+	query := fs.String("search", "", "rank entries whose fields match every token; searches hidden entries too")
 	if err := parseAndCheck(cmdPipelineList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -101,15 +90,15 @@ func runPipelineList(args []string) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("pipeline list: unexpected positional %q (use --query)", fs.Arg(0))
+		return fmt.Errorf("pipeline list: unexpected positional %q (use --search)", fs.Arg(0))
 	}
 	format, err := resolveOutputFormat(*output, cmdPipelineList.Path)
 	if err != nil {
 		return err
 	}
-	if fs.Changed("query") {
+	if fs.Changed("search") {
 		if strings.TrimSpace(*query) == "" {
-			return errors.New("pipeline list: --query needs at least one token")
+			return errors.New("pipeline list: --search needs at least one token")
 		}
 		return searchPipelines(*query, format)
 	}
@@ -221,9 +210,13 @@ func plural(n int) string {
 }
 
 func runPipelineDescribe(args []string) error {
+	return runPipelineDescribeCommand(args, withPipelineEntry)
+}
+
+func runPipelineDescribeCommand(args []string, withEntry func(string, func(context.Context, pipelineentry.Command, string) error) error) error {
 	fs := flag.NewFlagSet(cmdPipelineDescribe.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
-	pipelineName := fs.String("name", "", "pipeline name to describe")
+	pipelineName := fs.String("pipeline", "", "pipeline name to describe")
 	secretsOnly := fs.Bool("secrets", false, "print the declared secrets, required or optional")
 	if err := parseAndCheck(cmdPipelineDescribe, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -233,42 +226,49 @@ func runPipelineDescribe(args []string) error {
 	}
 	if fs.NArg() > 0 {
 		PrintHelp(cmdPipelineDescribe, os.Stderr)
-		return fmt.Errorf("describe: unexpected positional %q (use --name)", fs.Arg(0))
+		return fmt.Errorf("describe: unexpected positional %q (use --pipeline)", fs.Arg(0))
 	}
 	if *pipelineName == "" {
 		PrintHelp(cmdPipelineDescribe, os.Stderr)
-		return errors.New("describe: --name is required")
+		return errors.New("describe: --pipeline is required")
 	}
 	format, err := resolveOutputFormat(*output, cmdPipelineDescribe.Path)
 	if err != nil {
 		return err
 	}
 	name := *pipelineName
-	if *secretsOnly {
-		return describePipelineSecrets(name, format)
-	}
-	pipelines, err := gatherPipelinesCatalog(true)
+	found := Pipeline{PipelineDescription: nodeproto.PipelineDescription{Name: name}}
+	var schema nodeproto.PipelineDescription
+	err = withEntry(name, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
+		cfg, err := projectconfig.Load(filepath.Join(dir, ".sparkwing", projectconfig.Filename))
+		if err != nil {
+			return err
+		}
+		identity, err := clisurface.ResolvePipeline(cfg, name)
+		if err != nil {
+			return err
+		}
+		found.Entrypoint = identity.Entrypoint
+		for _, pipeline := range cfg.Registry().Pipelines {
+			if pipeline.Name == name {
+				found.PinnedProfile, found.Triggers = pipeline.Profile, summarizeTriggerList(pipeline.On)
+				break
+			}
+		}
+		doc, err := repos.Describe(ctx, entry, dir)
+		if err != nil {
+			return err
+		}
+		schema, err = boundPipelineSchema(doc.Pipelines, identity)
+		return err
+	})
 	if err != nil {
 		return err
 	}
-	var found *Pipeline
-	for i := range pipelines {
-		if pipelines[i].Name == name {
-			found = &pipelines[i]
-			break
-		}
+	if *secretsOnly {
+		return describePipelineSecrets(name, format, schema.Secrets)
 	}
-	if found == nil {
-		candidates := make([]string, 0, len(pipelines))
-		for _, p := range pipelines {
-			candidates = append(candidates, p.Name)
-		}
-		suggestion := sparkwingruntime.SuggestClosest(name, candidates)
-		if suggestion != "" {
-			return fmt.Errorf("no pipeline named %q; did you mean %q? (run `sparkwing pipeline list --all` to see every entry)", name, suggestion)
-		}
-		return fmt.Errorf("no pipeline named %q (run `sparkwing pipeline list --all` to see every entry)", name)
-	}
+	found.describe(schema)
 	switch format {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
@@ -277,27 +277,12 @@ func runPipelineDescribe(args []string) error {
 		fmt.Println(found.Name)
 		return nil
 	default:
-		printPipelineDetail(found)
+		printPipelineDetail(&found)
 		return nil
 	}
 }
 
-// safety: the catalog's describe cache can be cold or older than the source,
-// so secrets come from the current build's own describe or the command fails.
-func describePipelineSecrets(name, format string) error {
-	var secrets []nodeproto.SecretDeclaration
-	err := withPipelineEntry(name, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
-		doc, err := repos.Describe(ctx, entry, dir)
-		if err != nil {
-			return err
-		}
-		schema, err := findPipelineSchema(doc.Pipelines, name)
-		secrets = schema.Secrets
-		return err
-	})
-	if err != nil {
-		return fmt.Errorf("describe --secrets: %w", err)
-	}
+func describePipelineSecrets(name, format string, secrets []nodeproto.SecretDeclaration) error {
 	if secrets == nil {
 		secrets = []nodeproto.SecretDeclaration{}
 	}
@@ -342,34 +327,30 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 		}
 	}
 	var out []Pipeline
-	seen := map[string]struct{}{}
 	if cfg != nil {
 		for _, p := range cfg.Registry().Pipelines {
 			if p.Hidden && !includeHidden {
 				continue
 			}
 			a := Pipeline{
-				Name:          p.Name,
-				Entrypoint:    p.Entrypoint,
-				PinnedProfile: p.Profile,
-				Triggers:      summarizeTriggerList(p.On),
+				PipelineDescription: nodeproto.PipelineDescription{Name: p.Name},
+				Entrypoint:          p.Entrypoint,
+				PinnedProfile:       p.Profile,
+				Triggers:            summarizeTriggerList(p.On),
 			}
-			if dp, ok := describeByName[p.Name]; ok {
-				a.Short = dp.Short
-				a.Help = dp.Help
-				a.Args = dp.Args
-				a.Examples = dp.Examples
-				a.EnvVars = dp.EnvVars
-				a.Risks = dp.Risks
-				a.RisksBySteps = dp.RisksByStep
-				a.Secrets = dp.Secrets
+			if dp, ok := describeByName[p.Entrypoint]; ok {
+				a.describe(dp)
 			}
-			seen[p.Name] = struct{}{}
 			out = append(out, a)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+func (p *Pipeline) describe(schema nodeproto.PipelineDescription) {
+	schema.Name = p.Name
+	p.PipelineDescription = schema
 }
 
 func summarizeTriggerList(t pipelines.Triggers) []string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -60,8 +61,7 @@ func (r *pipelineRun) materialize(env []string) error {
 	if err := resolveSparks(r.ctx, r.sparkwingDir, r.opts); err != nil {
 		return err
 	}
-	env = withWingdHost(env)
-	key, keyParts, err := bincache.ExplainCacheKey(r.sparkwingDir)
+	key, keyParts, err := bincache.ExplainCacheKey(r.sparkwingDir, env)
 	if err != nil {
 		return fmt.Errorf("read .sparkwing/ to weigh what it declares: %w", err)
 	}
@@ -71,7 +71,7 @@ func (r *pipelineRun) materialize(env []string) error {
 			return err
 		}
 		r.uncachedBinary = filepath.Join(dir, "pipeline")
-		if err := bincache.CompileUncachedPipeline(r.ctx, r.sparkwingDir, r.uncachedBinary); err != nil {
+		if err := bincache.CompileUncachedPipeline(r.ctx, r.sparkwingDir, r.uncachedBinary, bincache.CompileOptions{Environment: env, Diagnostics: os.Stderr}); err != nil {
 			return err
 		}
 		r.entry, r.source = pipelineentry.Binary(r.uncachedBinary), "source"
@@ -79,11 +79,12 @@ func (r *pipelineRun) materialize(env []string) error {
 		return nil
 	}
 
-	lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, key, keyParts, env)
+	lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, key, keyParts, env, os.Stderr)
 	if err != nil {
 		return err
 	}
 	r.lease, r.source, r.entry = lease, source, pipelineentry.Binary(lease.Path())
+	ensureDescribeCache(r.ctx, r.sparkwingDir, key, r.entry)
 	return nil
 }
 
@@ -115,11 +116,6 @@ func (r *pipelineRun) stop() {
 func (r *pipelineRun) finish(err error) error {
 	if r.ctx.Err() != nil {
 		r.stopSignals()
-		// safety: raiseInterrupt does not return on a platform that can
-		// re-raise, so teardown has to happen before it, not in a defer.
-		if r.opts.AfterChild != nil {
-			r.opts.AfterChild()
-		}
 		r.raiseInterrupt()
 	}
 	return err
@@ -132,6 +128,7 @@ func pipelineBinary(
 	sparkwingDir, key string,
 	keyParts []bincache.KeyPart,
 	env []string,
+	diagnostics io.Writer,
 ) (*bincache.Lease, string, error) {
 	entry, err := bincache.PipelineEntry(key)
 	if err != nil {
@@ -139,16 +136,21 @@ func pipelineBinary(
 	}
 	source := "cached"
 	lease, _, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		announceCompile()
-		if compileErr := bincache.CompilePipeline(ctx, sparkwingDir, tempPath); compileErr != nil {
+		if err := announceCompile(diagnostics); err != nil {
+			return err
+		}
+		options := bincache.CompileOptions{Environment: env, Diagnostics: diagnostics}
+		if compileErr := bincache.CompilePipeline(ctx, sparkwingDir, tempPath, options); compileErr != nil {
 			if !errors.Is(compileErr, bincache.ErrMissingGoSum) {
 				return compileErr
 			}
-			fmt.Fprintln(os.Stderr, color.Dim("==> populating go.sum (`go mod download`) and retrying compile..."))
-			if dlErr := bincache.RunGo(ctx, sparkwingDir, []string{"mod", "download"}, env); dlErr != nil {
+			if _, err := fmt.Fprintln(diagnostics, color.Dim("==> populating go.sum (`go mod download`) and retrying compile...")); err != nil {
+				return err
+			}
+			if dlErr := bincache.RunGo(ctx, sparkwingDir, []string{"mod", "download"}, options); dlErr != nil {
 				return fmt.Errorf("recovery `go mod download` failed: %w", dlErr)
 			}
-			if compileErr := bincache.CompilePipeline(ctx, sparkwingDir, tempPath); compileErr != nil {
+			if compileErr := bincache.CompilePipeline(ctx, sparkwingDir, tempPath, options); compileErr != nil {
 				return compileErr
 			}
 		}
@@ -159,7 +161,6 @@ func pipelineBinary(
 		return nil, "", err
 	}
 	lease.RecordUse(sparkwingDir, keyParts)
-	ensureDescribeCache(ctx, sparkwingDir, key, pipelineentry.Binary(lease.Path()))
 	return lease, source, nil
 }
 
@@ -172,7 +173,7 @@ func ensureDescribeCache(ctx context.Context, sparkwingDir, key string, entry pi
 	}
 }
 
-func announceCompile() {
+func announceCompile(out io.Writer) error {
 	firstEver := true
 	if entries, err := os.ReadDir(bincache.CacheRoot()); err == nil && len(entries) > 0 {
 		firstEver = false
@@ -183,18 +184,14 @@ func announceCompile() {
 	} else {
 		msg = "==> recompiling .sparkwing/ binary (source changed since last run)"
 	}
-	fmt.Fprintln(os.Stderr, color.Dim(msg))
+	_, err := fmt.Fprintln(out, color.Dim(msg))
+	return err
 }
 
 type compileOptions struct {
 	ExecutionDir string
 	NoUpdate     bool
 	NoBincache   bool
-
-	// safety: every exec path ends in os.Exit to carry the pipeline's status,
-	// which skips defers, so teardown has to travel with the call and run once
-	// the pipeline binary has finished.
-	AfterChild func()
 }
 
 func resolveSparks(ctx context.Context, sparkwingDir string, opts compileOptions) error {

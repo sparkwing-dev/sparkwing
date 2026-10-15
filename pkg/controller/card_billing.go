@@ -2,13 +2,14 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"html"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -33,158 +34,41 @@ type hostedPageJSON struct {
 	URL string `json:"url"`
 }
 
-// safety: only a trusted team adds a card, because the card is what lets its
-// balance run below zero; an untrusted team keeps prepaying.
-func (s *Server) handleTeamBillingCard(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+func (s *Server) handleTeamBillingCard(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if err := emptyBillingBody(r); err != nil {
+		return err
 	}
-	if s.checkout == nil {
-		writeJSON(w, http.StatusServiceUnavailable, codedErrorJSON{
-			Error: "this controller bills no cards", Code: CheckoutUnavailableCode,
-		})
-		return
-	}
-	ctx := r.Context()
-	spend, err := t.SpendStanding(ctx, time.Now())
-	if err != nil {
-		s.writeInternalError(w, r, "team card standing", err)
-		return
-	}
-	if !spend.Billing.Trusted {
-		writeJSON(w, http.StatusConflict, codedErrorJSON{
-			Error: "a card is added once the team is trusted; until then it prepays", Code: CardNotTrustedCode,
-		})
-		return
-	}
-	email := ""
-	if p.AccountID != "" {
-		if email, err = s.store.AccountEmail(ctx, p.AccountID); err != nil && !errors.Is(err, store.ErrNotFound) {
-			s.writeInternalError(w, r, "team card email", err)
-			return
-		}
-	}
-	page, err := s.checkout.hostedPage(ctx, "/internal/card-setup", map[string]any{
-		"team": string(t.Team()), "email": email, "customer": spend.Card.Customer,
-	})
-	if err != nil {
-		s.logger.Error("opening a card setup page failed", "team", string(t.Team()), "err", err)
-		writeError(w, http.StatusBadGateway, errors.New("the card page could not be opened; try again"))
-		return
-	}
-	writeJSON(w, http.StatusOK, hostedPageJSON{URL: page})
+	return s.openBillingPage(w, r, a, capability.BillingPageCard, 0)
 }
 
-func (s *Server) handleTeamBillingPay(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+func (s *Server) handleTeamBillingPay(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if err := emptyBillingBody(r); err != nil {
+		return err
 	}
-	if s.checkout == nil {
-		writeJSON(w, http.StatusServiceUnavailable, codedErrorJSON{
-			Error: "this controller bills no cards", Code: CheckoutUnavailableCode,
-		})
-		return
-	}
-	ctx := r.Context()
-	work, err := t.StartRecoveryAttempt(ctx, time.Now())
-	if errors.Is(err, store.ErrNoPayableCharge) {
-		writeJSON(w, http.StatusConflict, codedErrorJSON{Error: err.Error(), Code: NoPayableChargeCode})
-		return
-	}
-	if err != nil {
-		s.writeInternalError(w, r, "team card recovery", err)
-		return
-	}
-	page, err := s.checkout.hostedPage(ctx, "/internal/charge-checkout", map[string]any{
-		"team": string(work.Team), "charge_id": work.ChargeID, "attempt_id": work.AttemptID,
-		"amount_cents": work.AmountCents, "customer": work.Customer,
-	})
-	if err != nil {
-		if failErr := s.store.DropCardAttempt(ctx, work.AttemptID, time.Now()); failErr != nil {
-			s.logger.Warn("closing an unopened recovery attempt failed", "attempt", work.AttemptID, "err", failErr)
-		}
-		s.logger.Error("opening a recovery checkout failed", "team", string(t.Team()), "err", err)
-		writeError(w, http.StatusBadGateway, errors.New("the payment page could not be opened; try again"))
-		return
-	}
-	writeJSON(w, http.StatusOK, hostedPageJSON{URL: page})
+	return s.openBillingPage(w, r, a, capability.BillingPageRecovery, 0)
 }
 
 type teamBudgetReq struct {
 	BudgetCents int64 `json:"budget_cents"`
 }
 
-func (s *Server) handleTeamBillingBudget(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+func (s *Server) handleTeamBillingBudget(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if !s.Metering() {
+		return &apierr.Error{Code: apierr.NotFound, Message: "billing is unavailable"}
 	}
 	var req teamBudgetReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &req); err != nil {
+		return err
 	}
-	switch err := t.SetSpendBudget(r.Context(), req.BudgetCents); {
-	case errors.Is(err, store.ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, err)
-	case err != nil:
-		s.writeInternalError(w, r, "team budget", err)
-	default:
-		w.WriteHeader(http.StatusNoContent)
+	writer, err := s.billingWriter(r, a)
+	if err != nil {
+		return err
 	}
-}
-
-type savedCardReq struct {
-	Team          string `json:"team"`
-	Customer      string `json:"customer"`
-	PaymentMethod string `json:"payment_method"`
-	Fingerprint   string `json:"fingerprint"`
-	Brand         string `json:"brand"`
-	Last4         string `json:"last4"`
-	// safety: Stripe's signed event time for the setup's completion orders
-	// saves, so a delayed older setup cannot replace a newer card.
-	CompletedAt int64 `json:"completed_at,omitempty"`
-}
-
-// StaleCardSetupCode is the code on the 409 refusing a card setup completed
-// before the card already on file.
-const StaleCardSetupCode = "stale_card_setup"
-
-// safety: only the checkout service holds credits.grant, and it names the
-// team the Stripe session was opened for by the controller.
-func (s *Server) handleSavedCard(w http.ResponseWriter, r *http.Request) {
-	var req savedCardReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := writer.SetAuthorizedSpendBudget(r.Context(), a, req.BudgetCents); err != nil {
+		return billingMutationError(err)
 	}
-	t, ok := s.namedTenant(w, r, req.Team)
-	if !ok {
-		return
-	}
-	card := store.Card{
-		Customer: req.Customer, PaymentMethod: req.PaymentMethod, Fingerprint: req.Fingerprint,
-		Brand: req.Brand, Last4: req.Last4,
-	}
-	if req.CompletedAt > 0 {
-		card.AddedAt = time.Unix(req.CompletedAt, 0)
-	}
-	err := t.SaveCard(r.Context(), card, principalName(r), time.Now())
-	switch {
-	case errors.Is(err, store.ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, err)
-	case errors.Is(err, store.ErrStaleCardSetup):
-		s.logger.Warn("an older card setup arrived after a newer one; keeping the newer card", "team", req.Team,
-			"completed_at", req.CompletedAt, "last4", req.Last4)
-		writeJSON(w, http.StatusConflict, codedErrorJSON{Error: err.Error(), Code: StaleCardSetupCode})
-	case err != nil:
-		s.writeInternalError(w, r, "save card", err)
-	default:
-		s.logger.Info("card saved", "team", req.Team, "brand", req.Brand, "last4", req.Last4)
-		w.WriteHeader(http.StatusNoContent)
-	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 type cardPaymentReq struct {
@@ -198,30 +82,6 @@ type cardPaymentReq struct {
 	Fingerprint   string `json:"fingerprint"`
 }
 
-// safety: the webhook and the recovery Checkout report here, and so does the
-// worker in-process; every path settles through the same store call, which
-// is idempotent on the payment intent.
-func (s *Server) handleCardPayment(w http.ResponseWriter, r *http.Request) {
-	var req cardPaymentReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	err := s.applyCardResult(r.Context(), req)
-	switch {
-	case errors.Is(err, store.ErrCreditGrantConflict):
-		writeError(w, http.StatusConflict, err)
-	case errors.Is(err, store.ErrNotFound):
-		writeError(w, http.StatusNotFound, err)
-	case errors.Is(err, store.ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, err)
-	case err != nil:
-		s.writeInternalError(w, r, "card payment", err)
-	default:
-		w.WriteHeader(http.StatusNoContent)
-	}
-}
-
 // safety: operator alerting keys on this value, so renaming it silences the
 // alert for a fraud-warned card's payment.
 const cardPaymentWarnedAlert = "card_payment_warned"
@@ -230,7 +90,7 @@ func (s *Server) applyCardResult(ctx context.Context, req cardPaymentReq) error 
 	now := time.Now()
 	switch req.Status {
 	case cardChargeSucceeded:
-		created, warned, err := s.store.SettleCardPayment(ctx, store.CardPayment{
+		created, warned, err := s.store.AsOperator().SettleCardPayment(ctx, store.CardPayment{
 			Team: store.Team(req.Team), ChargeID: req.ChargeID, AttemptID: req.AttemptID,
 			PaymentIntent: req.PaymentIntent, AmountCents: req.AmountCents, Fingerprint: req.Fingerprint,
 		}, now)
@@ -254,7 +114,7 @@ func (s *Server) applyCardResult(ctx context.Context, req cardPaymentReq) error 
 		if req.AttemptID == "" {
 			return fmt.Errorf("%w: a failed payment names its attempt", store.ErrInvalidInput)
 		}
-		team, first, err := s.store.FailCardAttempt(ctx, req.AttemptID, req.PaymentIntent, req.DeclineCode, now)
+		team, first, err := s.store.AsOperator().FailCardAttempt(ctx, req.AttemptID, req.PaymentIntent, req.DeclineCode, now)
 		if err != nil {
 			return err
 		}
@@ -270,46 +130,6 @@ func (s *Server) applyCardResult(ctx context.Context, req cardPaymentReq) error 
 		return nil
 	}
 	return fmt.Errorf("%w: status must be succeeded, failed or processing", store.ErrInvalidInput)
-}
-
-type paymentWarningReq struct {
-	PaymentIntent string `json:"payment_intent"`
-	WarningID     string `json:"warning_id"`
-	Fingerprint   string `json:"fingerprint"`
-	Actionable    bool   `json:"actionable"`
-	Reason        string `json:"reason"`
-}
-
-type paymentWarningJSON struct {
-	Team string `json:"team"`
-	Held bool   `json:"held"`
-}
-
-// safety: the warning is stored before anything else answers, so a payment
-// that settles after it is never granted; only the checkout service holds
-// credits.grant.
-func (s *Server) handlePaymentWarning(w http.ResponseWriter, r *http.Request) {
-	var req paymentWarningReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	team, err := s.store.RecordPaymentWarning(r.Context(), store.PaymentWarning{
-		WarningID: req.WarningID, PaymentIntent: req.PaymentIntent, Fingerprint: req.Fingerprint,
-		Actionable: req.Actionable,
-	}, time.Now())
-	switch {
-	case errors.Is(err, store.ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, err)
-		return
-	case err != nil:
-		s.writeInternalError(w, r, "payment warning", err)
-		return
-	}
-	s.logger.Warn("billing alert: an early fraud warning was recorded", "alert", "early_fraud_warning",
-		"warning", req.WarningID, "payment_intent", req.PaymentIntent, "actionable", req.Actionable,
-		"team", string(team))
-	writeJSON(w, http.StatusOK, paymentWarningJSON{Team: string(team), Held: team != ""})
 }
 
 func (s *Server) runCardBilling(ctx context.Context, every time.Duration) {
@@ -333,7 +153,7 @@ func (s *Server) runCardBilling(ctx context.Context, every time.Duration) {
 // and the next pass asks Stripe for it by the same id instead of charging
 // again.
 func (s *Server) cardBillingPass(ctx context.Context) {
-	work, alerts, err := s.store.DueCardCharges(ctx, time.Now())
+	work, alerts, err := s.store.AsOperator().DueCardCharges(ctx, time.Now())
 	if err != nil {
 		if ctx.Err() == nil {
 			s.logger.Error("card billing pass", "err", err)
@@ -377,7 +197,7 @@ func (s *Server) chargeCard(ctx context.Context, wk store.CardChargeWork) (cardC
 		if err != nil || res.Status != cardChargeCreated {
 			return res, err
 		}
-		if err := s.store.RecordAttemptIntent(ctx, wk.AttemptID, res.PaymentIntent, time.Now()); err != nil {
+		if err := s.store.AsOperator().RecordAttemptIntent(ctx, wk.AttemptID, res.PaymentIntent, wk.Customer, time.Now()); err != nil {
 			return res, err
 		}
 		wk.PaymentIntent = res.PaymentIntent
@@ -389,7 +209,7 @@ func (s *Server) chargeCard(ctx context.Context, wk store.CardChargeWork) (cardC
 // retry, so a repeated pass repeats the same refund and a retry after a
 // failed one makes a new one; the refund's success reverses its grant.
 func (s *Server) refundQueuedPayments(ctx context.Context) {
-	due, err := s.store.DueCardRefunds(ctx, time.Now())
+	due, err := s.store.AsOperator().DueCardRefunds(ctx, time.Now())
 	if err != nil {
 		s.logger.Error("listing queued card refunds", "err", err)
 		return
@@ -401,7 +221,7 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 				"payment_intent", d.PaymentIntent, "err", err)
 			continue
 		}
-		if err := s.store.MarkCardRefundMade(ctx, d.Team, d.Key, refund, status, time.Now()); err != nil {
+		if err := s.store.AsOperator().MarkCardRefundMade(ctx, d.Team, d.Key, refund, status, time.Now()); err != nil {
 			s.logger.Error("recording a card refund failed", "payment_intent", d.PaymentIntent, "err", err)
 			continue
 		}
@@ -409,42 +229,6 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 			"team", string(d.Team), "payment_intent", d.PaymentIntent, "refund", refund, "status", status,
 			"reason", d.Reason)
 	}
-}
-
-type cardRefundReq struct {
-	PaymentIntent string `json:"payment_intent"`
-	RefundID      string `json:"refund_id"`
-	Queue         string `json:"queue"`
-	Status        string `json:"status"`
-}
-
-type cardRefundJSON struct {
-	Queued bool `json:"queued"`
-}
-
-// safety: a refund the controller queued is done only when Stripe says it
-// succeeded; a failed or canceled one is due again, so the payer is never
-// left with neither the money nor the credits.
-func (s *Server) handleCardRefund(w http.ResponseWriter, r *http.Request) {
-	var req cardRefundReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if req.PaymentIntent == "" || req.RefundID == "" || req.Queue == "" || req.Status == "" {
-		writeError(w, http.StatusBadRequest, errors.New("payment_intent, refund_id, queue and status are required"))
-		return
-	}
-	queued, err := s.store.ReportCardRefund(r.Context(), req.Queue, req.RefundID, req.Status, time.Now())
-	if err != nil {
-		s.writeInternalError(w, r, "card refund", err)
-		return
-	}
-	if queued && (req.Status == "failed" || req.Status == "canceled") {
-		s.logger.Warn("billing alert: a queued card refund failed; it is retried", "alert", "card_refund_failed",
-			"payment_intent", req.PaymentIntent, "refund", req.RefundID, "status", req.Status)
-	}
-	writeJSON(w, http.StatusOK, cardRefundJSON{Queued: queued})
 }
 
 // safety: a failed send loses only the email; the dashboard shows the same

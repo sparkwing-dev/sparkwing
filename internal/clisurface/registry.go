@@ -7,7 +7,7 @@ func Registry() []Command {
 		{Path: "sparkwing __sdk-install", Hidden: true, Rules: []string{"Read engine.SDKInstallRequest from stdin, inherit the filtered install environment, write one engine.SDKCommand to stdout."}},
 		{Path: "sparkwing __complete", Hidden: true, Flags: []Flag{
 			{Name: "kind", Argument: "KIND", Repeatable: true, CommaList: true},
-			{Name: "word", Argument: "WORD"},
+			{Name: "word", Argument: "VALUE", Meaning: "Command words to complete; empty selects the root."},
 		}},
 		{Path: "sparkwing __host-trigger", Hidden: true, Flags: []Flag{
 			{Name: "standalone-reason", Argument: "REASON"},
@@ -31,7 +31,7 @@ func Registry() []Command {
 			{Name: "all-entries"},
 			{Name: "docs"},
 		}},
-		{Path: "sparkwing cache warm", Flags: []Flag{
+		{Path: "sparkwing cache warm", Rules: []string{"Build Go pipelines into the local binary cache or install TypeScript dependencies. Binary cache entries stay on this machine. JSON emits one preparation receipt; plain emits the prepared path.", "Go preparation uses the filtered install environment and masks compiler diagnostics. A failed build publishes no binary cache entry. Cached binaries retain the source, workspace dependencies and Go build settings that selected them."}, Flags: []Flag{
 			{Name: "clear-cache"},
 		}},
 		{Path: "sparkwing commands", Flags: []Flag{
@@ -47,13 +47,16 @@ func Registry() []Command {
 			{Name: "shell", Argument: "NAME", Values: []string{"bash", "zsh", "fish", "powershell"}},
 		}},
 		{Path: "sparkwing daemon", Flags: []Flag{}},
-		{Path: "sparkwing daemon events", Flags: []Flag{
+		{Path: "sparkwing daemon events", Rules: []string{
+			"Show the newest 50 matching records by default, in chronological order within each page. Positive --limit and opaque --cursor continue toward older records with the same filters. Newer arrivals do not shift a continuation. Changed or removed unread history requires restarting without the cursor.",
+			"JSON emits event records followed by a page record with next_cursor and truncated. Plain and pretty output send continuation instructions to stderr. --explain reads the complete run timeline, including descendants, without pagination.",
+		}, Flags: []Flag{
 			{Name: "run", Argument: "ID"},
 			{Name: "since", Argument: "DURATION"},
 			{Name: "kind", Argument: "KIND", Repeatable: true, CommaList: true},
-			{Name: "incarnation", Argument: "N"},
+			{Name: "incarnation", Argument: "N", Minimum: 0, HasMinimum: true},
 			{Name: "limit", Argument: "N", Minimum: 1, HasMinimum: true},
-			{Name: "explain", Requires: []string{"run"}},
+			{Name: "explain", Requires: []string{"run"}, Conflicts: []string{"since", "kind", "incarnation", "limit", "cursor"}},
 			{Name: "cursor", Argument: "CURSOR"},
 		}},
 		{Path: "sparkwing daemon recover-state", Flags: []Flag{
@@ -133,13 +136,13 @@ func Registry() []Command {
 			{Name: "body"},
 			{Name: "topics"},
 		}},
-		{Path: "sparkwing doctor", Rules: []string{"Identify removed timer verbs, service version skew and incompatible store schemas."}, Flags: []Flag{
+		{Path: "sparkwing doctor", Rules: []string{"Identify removed timer verbs, service version skew and incompatible store schemas through the local controller lifecycle. Inspection does not open state.db. Partial reports retain findings and exit nonzero when controller inspection fails."}, Flags: []Flag{
 			{Name: "dry-run"},
 			{Name: "timeout", Argument: "DURATION"},
 		}},
 		{Path: "sparkwing examples", Flags: []Flag{
 			{Name: "example", Argument: "EXAMPLE"},
-			{Name: "body"},
+			{Name: "body", Requires: []string{"example"}},
 			{Name: "category", Argument: "CATEGORY"},
 			{Name: "cloud", Argument: "CLOUD"},
 		}},
@@ -165,24 +168,24 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing operator tokens", Authority: DeploymentAdmin, Flags: []Flag{}},
-		{Path: "sparkwing operator tokens create", Authority: DeploymentAdmin, Rules: []string{"Only deployment service credentials; never console trust, grants, freezes, refunds or account deletion powers. Licensed self-hosters have no deployment-admin token path."}, Flags: []Flag{
+		{Path: "sparkwing operator tokens create", Authority: DeploymentAdmin, Rules: []string{"Only deployment service credentials; never console trust, grants, freezes, refunds or account deletion powers. Licensed self-hosters have no deployment-admin token path.", "Use the deployment /operator/tokens routes. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry."}, Flags: []Flag{
 			{Name: "type", Argument: "KIND", Values: []string{"service", "deployment"}},
 			{Name: "principal", Argument: "NAME"},
 			{Name: "scope", Argument: "SCOPE", Repeatable: true, CommaList: true},
 			{Name: "ttl", Argument: "DURATION"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing operator tokens list", Authority: DeploymentAdmin, Flags: []Flag{
+		{Path: "sparkwing operator tokens list", Authority: DeploymentAdmin, Rules: []string{"Read deployment credential metadata. JSON emits one record per token, with exact scopes and no bearer. Plain emits prefixes. --token selects one prefix."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX"},
 			{Name: "type", Argument: "KIND", Values: []string{"service", "deployment"}},
 			{Name: "include-revoked"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing operator tokens revoke", Authority: DeploymentAdmin, Flags: []Flag{
+		{Path: "sparkwing operator tokens revoke", Authority: DeploymentAdmin, Rules: []string{"Revoke through the deployment token route. JSON retains the confirmed revocation; plain emits the prefix."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX", Required: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing operator tokens rotate", Authority: DeploymentAdmin, Flags: []Flag{
+		{Path: "sparkwing operator tokens rotate", Authority: DeploymentAdmin, Rules: []string{"Rotate through the deployment token route. JSON includes the new bearer, metadata and old revocation time; plain emits the new bearer. Grace defaults to 24h. Zero TTL preserves the old remaining lifetime. Durations use nonnegative whole seconds."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX", Required: true},
 			{Name: "grace", Argument: "DURATION"},
 			{Name: "ttl", Argument: "DURATION"},
@@ -221,14 +224,14 @@ func Registry() []Command {
 			{Name: "hidden"},
 			{Name: "short", Argument: "TEXT"},
 		}},
-		{Path: "sparkwing pipeline plan", Flags: []Flag{
+		{Path: "sparkwing pipeline plan", PipelineArgsAfterSeparator: true, Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME", Required: true},
 			{Name: "start-at", Argument: "STEP"},
 			{Name: "stop-at", Argument: "STEP"},
 		}},
 		{Path: "sparkwing pipeline sparks", Flags: []Flag{}},
 		{Path: "sparkwing pipeline sparks add", Flags: []Flag{
-			{Name: "source", Argument: "PATH"},
+			{Name: "source", Argument: "PATH", Required: true},
 			{Name: "version", Argument: "VER"},
 			{Name: "spark", Argument: "NAME"},
 		}},
@@ -236,7 +239,9 @@ func Registry() []Command {
 			{Name: "library", Argument: "MODULE"},
 			{Name: "path", Argument: "DIR"},
 		}},
-		{Path: "sparkwing pipeline sparks inflate", Flags: []Flag{}},
+		{Path: "sparkwing pipeline sparks inflate", Rules: []string{"Copy one library module into the project and replace its dependency with that local source. JSON emits the module, version, destination and replacement; plain emits the destination."}, Flags: []Flag{
+			{Name: "library", Argument: "MODULE", Required: true, Meaning: "A sparks-core module name or full Go module path; list choices with pipeline sparks catalog."},
+		}},
 		{Path: "sparkwing pipeline sparks lint", Flags: []Flag{
 			{Name: "path", Argument: "PATH"},
 		}},
@@ -244,7 +249,7 @@ func Registry() []Command {
 			{Name: "no-resolve"},
 		}},
 		{Path: "sparkwing pipeline sparks remove", Flags: []Flag{
-			{Name: "spark", Argument: "NAME"},
+			{Name: "spark", Argument: "NAME", Required: true},
 		}},
 		{Path: "sparkwing pipeline sparks update", Flags: []Flag{}},
 		{Path: "sparkwing pipeline trigger", PipelineArgument: true, PipelineArgsAfterSeparator: true, PipelineOptionalOnResume: true, Rules: []string{"Flags including --profile may precede the verb; unknown engine flags before -- are usage errors.", "--resume reattaches only a here run; --runner must be absent or here. The existing sealed spec is authoritative; reject new args, reason, source flags and detach on resume.", "Without --resume, one pipeline positional is required. Runner accepts here, a runner name, or label=<label>."}, Flags: []Flag{
@@ -259,7 +264,7 @@ func Registry() []Command {
 			{Name: "pipeline-ref", Argument: "REF"},
 		}},
 		{Path: "sparkwing pools", Flags: []Flag{}},
-		{Path: "sparkwing pools allow", Authority: TeamCredential, Rules: []string{"Require independently verified repository authority; a typed repository or branch grants no trust."}, Flags: []Flag{
+		{Path: "sparkwing pools allow", Authority: TeamCredential, Rules: []string{"Require independently verified repository authority; a typed repository or branch grants no trust.", "Create a rule through the team-admin route with an idempotency key. JSON preserves the rule and replay result; plain emits its ID."}, Flags: []Flag{
 			{Name: "pool", Argument: "POOL", Required: true},
 			{Name: "repo", Argument: "REPO", Repeatable: true, CommaList: true, Required: true},
 			{Name: "branch", Argument: "BRANCH", Repeatable: true, CommaList: true},
@@ -267,12 +272,12 @@ func Registry() []Command {
 			{Name: "route"},
 			{Name: "profile", Argument: "PROFILE"},
 		}},
-		{Path: "sparkwing pools disallow", Authority: TeamCredential, Flags: []Flag{
+		{Path: "sparkwing pools disallow", Authority: TeamCredential, Rules: []string{"Delete the selected pool rule through the team-admin route. JSON retains whether it was deleted or already absent; plain emits the rule ID."}, Flags: []Flag{
 			{Name: "pool", Argument: "POOL", Required: true},
 			{Name: "rule", Argument: "RULE", Required: true},
 			{Name: "profile", Argument: "PROFILE"},
 		}},
-		{Path: "sparkwing pools list", Authority: TeamCredential, Flags: []Flag{
+		{Path: "sparkwing pools list", Authority: TeamCredential, Rules: []string{"Read controller-granted reservations and access rules. JSON emits each pool with its runners and rules; plain emits pool names."}, Flags: []Flag{
 			{Name: "profile", Argument: "PROFILE"},
 		}},
 		{Path: "sparkwing profiles", Flags: []Flag{}},
@@ -304,8 +309,9 @@ func Registry() []Command {
 			{Name: "group", Argument: "GROUP"},
 		}},
 		{Path: "sparkwing queue priority", Flags: []Flag{
-			{Name: "run", Argument: "ID"},
-			{Name: "set", Argument: "VALUE"},
+			{Name: "profile", Argument: "PROFILE"},
+			{Name: "run", Argument: "ID", Required: true},
+			{Name: "set", Argument: "VALUE", Required: true},
 			{Name: "group", Argument: "GROUP"},
 		}},
 		{Path: "sparkwing repos", Flags: []Flag{}},
@@ -327,7 +333,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing run", PipelineArgument: true, PipelineArgsAfterSeparator: true, Rules: []string{"Always executes locally, including detached work on the local controller. --profile is refused.", "Publication is one-way run/results/logs with local provenance; a publication failure never changes the local run verdict.", "Cache-from reads only authorized verified-default-branch memo/artifacts/depcache; no shared writes or remote binary fetch.", "--sw-output applies to foreground and detached runs; explicit --sw-output beats -o, then SPARKWING_LOG_FORMAT, then terminal detection."}, Flags: []Flag{
 			{Name: "publish", Argument: "PROFILE"},
-			{Name: "sw-cache-from", Argument: "PROFILE"},
+			{Name: "sw-cache-from", Argument: "PROFILE", AllowEmpty: true, Meaning: "Read the authorized remote cache; an empty value disables the machine default."},
 			{Name: "sw-pause-before", Argument: "JOB", Repeatable: true, CommaList: true},
 			{Name: "sw-pause-after", Argument: "JOB", Repeatable: true, CommaList: true},
 			{Name: "sw-pause-on-failure"},
@@ -355,11 +361,11 @@ func Registry() []Command {
 			{Name: "target", Argument: "TARGET"},
 		}},
 		{Path: "sparkwing runners", Flags: []Flag{}},
-		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Use team credentials; only a team admin sets --reserved-for. --repos is the explicit allow-list spelling exception."}, Flags: []Flag{
-			{Name: "runner", Argument: "RUNNER"},
+		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Use team credentials. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
+			{Name: "runner", Argument: "RUNNER", Required: true},
 			{Name: "repos", Argument: "PATTERN", Repeatable: true, CommaList: true},
 			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true},
-			{Name: "max-concurrent", Argument: "N"},
+			{Name: "max-concurrent", Argument: "N", Minimum: 1, HasMinimum: true},
 			{Name: "contribution", Argument: "SPEC"},
 			{Name: "config", Argument: "PATH"},
 			{Name: "force"},
@@ -367,11 +373,11 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 			{Name: "reserved-for", Argument: "POOL", Repeatable: true, CommaList: true},
 		}},
-		{Path: "sparkwing runners list", Authority: TeamCredential, Flags: []Flag{
+		{Path: "sparkwing runners list", Authority: TeamCredential, Rules: []string{"Read the same runner details from the local controller or a selected profile. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
 			{Name: "quiet", Short: "q"},
 		}},
-		{Path: "sparkwing runners remove", Authority: TeamCredential, Flags: []Flag{
+		{Path: "sparkwing runners remove", Authority: TeamCredential, Rules: []string{"Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. JSON retains confirmed revocation. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "config", Argument: "PATH"},
 			{Name: "no-service"},
 			{Name: "profile", Argument: "NAME"},
@@ -379,14 +385,18 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing runs", Flags: []Flag{}},
 		{Path: "sparkwing runs annotations", Flags: []Flag{}},
-		{Path: "sparkwing runs annotations add", Flags: []Flag{
+		{Path: "sparkwing runs annotations add", Rules: []string{
+			"Plain emits run/job[/step]. JSON retains the controller replay result.",
+		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID", Required: true},
 			{Name: "job", Argument: "JOB"},
 			{Name: "step", Argument: "STEP_ID"},
 			{Name: "message", Argument: "TEXT", Required: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing runs annotations list", Flags: []Flag{
+		{Path: "sparkwing runs annotations list", Rules: []string{
+			"JSON emits job_id, optional step_id, level, message and source location per annotation. Plain emits one message per line, with line breaks replaced by spaces.",
+		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID", Required: true},
 			{Name: "job", Argument: "JOB"},
 			{Name: "step", Argument: "STEP_ID"},
@@ -394,19 +404,25 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing runs approvals", Flags: []Flag{}},
-		{Path: "sparkwing runs approvals approve", Flags: []Flag{
+		{Path: "sparkwing runs approvals approve", Rules: []string{
+			"The controller derives the approver from authentication. Plain emits run/job. JSON includes the approval and replay result.",
+		}, Flags: []Flag{
 			{Name: "run", Argument: "ID", Required: true},
 			{Name: "job", Argument: "JOB", Required: true},
 			{Name: "comment", Argument: "STR"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing runs approvals deny", Flags: []Flag{
+		{Path: "sparkwing runs approvals deny", Rules: []string{
+			"The controller derives the approver from authentication. Plain emits run/job. JSON includes the approval and replay result.",
+		}, Flags: []Flag{
 			{Name: "run", Argument: "ID", Required: true},
 			{Name: "job", Argument: "JOB", Required: true},
 			{Name: "comment", Argument: "STR"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing runs approvals list", Flags: []Flag{
+		{Path: "sparkwing runs approvals list", Rules: []string{
+			"Without --run, list pending approvals. With --run, include resolved history. Plain emits run/job.",
+		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID"},
 			{Name: "profile", Argument: "NAME"},
 		}},
@@ -414,7 +430,10 @@ func Registry() []Command {
 			{Name: "run", Argument: "RUN_ID", Required: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing runs grep", Flags: []Flag{
+		{Path: "sparkwing runs grep", Rules: []string{
+			"Search controller logs across matching runs. Filters apply before the run page limit. --max-matches limits matches per log subject, with zero meaning uncapped.",
+			"JSON emits matching records and a page record with next_cursor and truncated. Quiet JSON emits run_id records and sends continuation metadata to stderr. Plain emits matching lines, or run IDs with --quiet.",
+		}, Flags: []Flag{
 			{Name: "job", Argument: "JOB"},
 			{Name: "grep", Argument: "PATTERN"},
 			{Name: "since", Argument: "DURATION"},
@@ -430,7 +449,12 @@ func Registry() []Command {
 			{Name: "quiet", Short: "q"},
 			{Name: "cursor", Argument: "CURSOR"},
 		}},
-		{Path: "sparkwing runs list", Flags: []Flag{
+		{Path: "sparkwing runs list", Rules: []string{
+			"Read runs through the selected controller. Filters apply before pagination. Runs are ordered by descending team number. --since accepts days and weeks, such as 7d or 2w.",
+			"JSON emits compact run records and a page record with next_cursor and truncated. Quiet JSON emits id records and sends continuation metadata to stderr. Plain emits run IDs.",
+			"--by-pipeline totals every matching page and retains the newest --sparkline statuses. --group-by run|job|step requires --status failed and groups the selected page.",
+			"--wait blocks until a matching run appears. --follow reads every newer matching run between polls. Grouped follow output describes each new batch. Interrupted or timed-out waits exit 3.",
+		}, Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME"},
 			{Name: "status", Argument: "STATUS"},
 			{Name: "branch", Argument: "BRANCH", Repeatable: true, CommaList: true},
@@ -456,7 +480,11 @@ func Registry() []Command {
 			{Name: "follow", Short: "f"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing runs logs", Flags: []Flag{
+		{Path: "sparkwing runs logs", Rules: []string{
+			"Read job-attempt and trigger, plan or eval logs through the controller. --job selects a job. --tree includes descendants. --events-only and --no-events select lifecycle events or output.",
+			"--follow consumes every available page, then waits for new records until final log segments are complete. An incomplete or interrupted observation exits 3.",
+			"JSON emits tagged log records. Plain emits log lines. Use --grep without --run to search across runs with the same filters and pagination as runs grep.",
+		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID"},
 			{Name: "job", Argument: "JOB"},
 			{Name: "tail", Argument: "N"},
@@ -480,28 +508,43 @@ func Registry() []Command {
 			{Name: "quiet", Short: "q"},
 			{Name: "cursor", Argument: "CURSOR"},
 		}},
-		{Path: "sparkwing runs prune", Flags: []Flag{
+		{Path: "sparkwing runs prune", Rules: []string{
+			"Select --run, including --run - for IDs on stdin, or --older-than. Age selection reads every page and includes only terminal runs started before the cutoff. A failed selection deletes nothing.",
+			"--dry-run prints the selected IDs without deleting. The controller enforces retention pins. JSON retains deletion results and structured failures. Plain emits run IDs.",
+		}, Flags: []Flag{
 			{Name: "older-than", Argument: "DURATION"},
 			{Name: "run", Argument: "RUN_ID"},
 			{Name: "dry-run"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing runs retry", Flags: []Flag{
-			{Name: "run", Argument: "RUN_ID", Required: true},
+		{Path: "sparkwing runs retry", Rules: []string{
+			"Select --failed to reuse successful jobs or --all-jobs to execute the sealed plan again. Retry preserves the source request, plan, source trust and actor. The controller records the retrier separately.",
+			"Repeat --run or use --run - for newline-separated IDs on stdin. JSON emits one safe receipt or structured failure per source run. Plain emits new run IDs. Local and remote retries use the same controller API.",
+		}, Flags: []Flag{
+			{Name: "run", Argument: "RUN_ID", Required: true, Repeatable: true, CommaList: true},
 			{Name: "failed", Conflicts: []string{"all-jobs"}},
 			{Name: "all-jobs", Conflicts: []string{"failed"}},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing runs stats", Flags: []Flag{
+		{Path: "sparkwing runs stats", Rules: []string{
+			"Read every matching root-run page through the selected controller. --since accepts days and weeks. JSON emits pipeline counts, success percentage, mean duration and nearest-rank P95. Plain emits pipeline names.",
+			"--sizing reads controller measurements, job rows, source, drift, memo exclusions and demand floors. --reset selects one --pipeline or --all-pipelines --yes and preserves resource pins. --since applies to run statistics only.",
+			"Sizing reset requires an authorized controller route. Until that contract exists the adapter returns policy_missing without changing state.",
+		}, Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME"},
-			{Name: "since", Argument: "DURATION"},
+			{Name: "since", Argument: "DURATION", Conflicts: []string{"sizing", "reset"}},
 			{Name: "sizing"},
 			{Name: "reset"},
-			{Name: "all-pipelines"},
-			{Name: "yes"},
+			{Name: "all-pipelines", Requires: []string{"reset"}, Conflicts: []string{"pipeline"}},
+			{Name: "yes", Requires: []string{"reset"}},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing runs status", Flags: []Flag{
+		{Path: "sparkwing runs status", Rules: []string{
+			"Read the same public run detail through a controller profile or the local controller. Numeric run selectors are per-team numbers.",
+			"Views: summary, timeline, receipt, errors, tree. --steps includes recorded steps. Receipts retain the controller's hashes and settled cost.",
+			"--follow streams observations until the run ends. Exit 0 means success, 1 means a failed or cancelled run, 2 means invalid usage, and 3 means the observation is incomplete. --exit-zero suppresses terminal failure only.",
+			"JSON preserves run details and notices. Plain prints the status, failed job IDs for errors, run IDs for tree, or the receipt hash. --steps adds job/step IDs in plain status and tree output.",
+		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID", Required: true},
 			{Name: "follow", Short: "f"},
 			{Name: "steps"},
@@ -563,24 +606,24 @@ func Registry() []Command {
 			{Name: "all-repos"},
 		}},
 		{Path: "sparkwing secrets", Flags: []Flag{}},
-		{Path: "sparkwing secrets delete", Flags: []Flag{
+		{Path: "sparkwing secrets delete", Rules: []string{"Delete the exact pipeline or unscoped row. JSON retains whether the row was deleted or already absent; plain emits the name."}, Flags: []Flag{
 			{Name: "secret", Argument: "NAME", Required: true},
 			{Name: "pipeline", Argument: "NAME"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets get", Flags: []Flag{
+		{Path: "sparkwing secrets get", Rules: []string{"This explicit authorized read includes the value. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline."}, Flags: []Flag{
 			{Name: "secret", Argument: "NAME", Required: true},
 			{Name: "pipeline", Argument: "NAME"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets list", Flags: []Flag{
+		{Path: "sparkwing secrets list", Rules: []string{"List metadata without values, including pipeline visibility and pool restrictions. Search matches names case-insensitively. JSON emits metadata records; plain emits names."}, Flags: []Flag{
 			{Name: "search", Argument: "PATTERN"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets rotate", Flags: []Flag{
+		{Path: "sparkwing secrets rotate", Rules: []string{"Retain rotated counts and skipped row names/pipelines. The previous key is still needed when any row was skipped. JSON includes the controller's replay marker."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets set", Rules: []string{"Restricted --only-on secrets require matching pool demands at seal and reserved pools at release; restricted secrets are refused for here machines.", "If neither --value nor --file is supplied, read the value from stdin. --variable stores an unmasked value."}, Flags: []Flag{
+		{Path: "sparkwing secrets set", Rules: []string{"Restricted --only-on secrets require matching pool demands at seal and reserved pools at release; restricted secrets are refused for here machines.", "If neither --value nor --file is supplied, read the value from stdin. Preserve empty values and trailing newlines. --variable stores an unmasked value.", "Local unscoped writes are shared with local pipelines. Controller writes preserve explicit --pipeline or --shared selection. JSON returns metadata and replay without the value; plain emits the name."}, Flags: []Flag{
 			{Name: "secret", Argument: "NAME", Required: true},
 			{Name: "value", Argument: "VALUE", Conflicts: []string{"file"}},
 			{Name: "file", Argument: "PATH", Conflicts: []string{"value"}},
@@ -591,24 +634,24 @@ func Registry() []Command {
 			{Name: "only-on", Argument: "POOL"},
 		}},
 		{Path: "sparkwing tokens", Flags: []Flag{}},
-		{Path: "sparkwing tokens create", Authority: TeamCredential, Flags: []Flag{
+		{Path: "sparkwing tokens create", Authority: TeamCredential, Rules: []string{"Create a member or runner credential through the team token route. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry."}, Flags: []Flag{
 			{Name: "type", Argument: "KIND", Values: []string{"member", "runner"}},
 			{Name: "principal", Argument: "NAME"},
 			{Name: "scope", Argument: "SCOPE", Repeatable: true, CommaList: true},
 			{Name: "ttl", Argument: "DURATION"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing tokens list", Authority: TeamCredential, Flags: []Flag{
+		{Path: "sparkwing tokens list", Authority: TeamCredential, Rules: []string{"JSON emits one metadata record per token with exact scopes and no bearer. Plain emits prefixes. --token selects one prefix. Deployment credentials use operator tokens."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX"},
 			{Name: "type", Argument: "KIND", Values: []string{"member", "runner"}},
 			{Name: "include-revoked"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing tokens revoke", Authority: TeamCredential, Flags: []Flag{
+		{Path: "sparkwing tokens revoke", Authority: TeamCredential, Rules: []string{"JSON retains the confirmed revocation; plain emits the prefix. A failed or unconfirmed revocation returns an error."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX", Required: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing tokens rotate", Authority: TeamCredential, Flags: []Flag{
+		{Path: "sparkwing tokens rotate", Authority: TeamCredential, Rules: []string{"JSON includes the new bearer, metadata and old revocation time; plain emits the new bearer. Grace defaults to 24h. Zero TTL preserves the old remaining lifetime. Durations use nonnegative whole seconds."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX", Required: true},
 			{Name: "grace", Argument: "DURATION"},
 			{Name: "ttl", Argument: "DURATION"},
@@ -642,11 +685,7 @@ func Registry() []Command {
 			{Name: "stay"},
 			{Name: "standalone-reason", Argument: "REASON"},
 		}},
-		{Path: "sparkwing wingd supervise", Hidden: true, Flags: []Flag{
-			{Name: "version", Argument: "VERSION"},
-			{Name: "state-db", Argument: "PATH"},
-			{Name: "stay"},
-		}},
+
 		{Path: "sparkwing-controller", Flags: []Flag{
 			{Name: "addr", Argument: "VALUE"},
 			{Name: "metrics-addr", Argument: "VALUE"},
@@ -719,7 +758,7 @@ func Registry() []Command {
 		{Path: "sparkwing-runner fetch-source", Hidden: true, Rules: []string{"Use the bootstrap file only for authorized source acquisition; clone the sealed SHA exactly."}, Flags: []Flag{
 			{Name: "controller", Argument: "URL", Required: true},
 			{Name: "run", Argument: "RUN", Required: true},
-			{Name: "job", Argument: "JOB", Required: true},
+			{Name: "job", Argument: "JOB"},
 			{Name: "generation", Argument: "N", Required: true},
 			{Name: "bootstrap-file", Argument: "PATH", Required: true},
 			{Name: "source-dir", Argument: "PATH", Required: true},
@@ -731,14 +770,14 @@ func Registry() []Command {
 			{Name: "image", Argument: "IMAGE", Required: true},
 			{Name: "cpu-ceiling", Argument: "CPU", Required: true},
 			{Name: "memory-ceiling", Argument: "BYTES", Required: true},
-			{Name: "deadline", Argument: "DURATION"},
+			{Name: "docker-image", Argument: "IMAGE", Required: true},
 			{Name: "poll", Argument: "DURATION"},
 			{Name: "credentials-dir", Argument: "PATH", Required: true},
 		}},
 		{Path: "sparkwing-runner run-node", Hidden: true, Rules: []string{"Read the bootstrap file once, exchange it and keep the capability in memory; no bearer in argv or env."}, Flags: []Flag{
 			{Name: "controller", Argument: "URL", Required: true},
 			{Name: "run", Argument: "RUN", Required: true},
-			{Name: "job", Argument: "JOB", Required: true},
+			{Name: "job", Argument: "JOB"},
 			{Name: "generation", Argument: "N", Required: true},
 			{Name: "bootstrap-file", Argument: "PATH", Required: true},
 			{Name: "source-dir", Argument: "PATH", Required: true},

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -193,20 +192,6 @@ func isRegularFile(path string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
-func (p Paths) ToolchainsDir() string { return filepath.Join(p.Root, "toolchains") }
-
-func (p Paths) ToolchainDir(version string) string {
-	return filepath.Join(p.ToolchainsDir(), version)
-}
-
-func (p Paths) ToolchainBinary(version string) string {
-	name := "sparkwing"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	return filepath.Join(p.ToolchainDir(version), name)
-}
-
 func (p Paths) VersionStampDir() string { return filepath.Join(p.Root, "last-version.d") }
 
 func (p Paths) VersionStampFile(key string) string {
@@ -217,23 +202,6 @@ func (p Paths) RunsDir() string { return filepath.Join(p.Root, "runs") }
 
 func (p Paths) RunDir(runID string) string {
 	return filepath.Join(p.RunsDir(), runID)
-}
-
-func (p Paths) NodeLog(runID, nodeID string) string {
-	return filepath.Join(p.RunDir(runID), sanitizeNodeFile(nodeID)+".log")
-}
-
-func (p Paths) EnvelopeLog(runID string) string {
-	return filepath.Join(p.RunDir(runID), "_envelope.ndjson")
-}
-
-var reservedNodeFileChars = []string{"/", `\`, ":", "*", "?", `"`, "<", ">", "|"}
-
-func sanitizeNodeFile(nodeID string) string {
-	for _, c := range reservedNodeFileChars {
-		nodeID = strings.ReplaceAll(nodeID, c, "__")
-	}
-	return nodeID
 }
 
 func (p Paths) EnsureRunDir(runID string) error {

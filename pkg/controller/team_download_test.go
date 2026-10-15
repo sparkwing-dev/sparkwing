@@ -95,7 +95,7 @@ func freeTeamToken(t *testing.T, st *store.Store, team store.Team) string {
 		t.Fatal(err)
 	}
 	raw, _, err := tenant.CreateToken(ctx, "ci", store.TokenKindUser,
-		[]string{controller.ScopeRunsWrite, controller.ScopeRunsRead}, 0, time.Now())
+		[]string{"runs.write", "runs.read"}, 0, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

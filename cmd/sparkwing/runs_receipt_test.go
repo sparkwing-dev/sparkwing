@@ -2,93 +2,10 @@ package main
 
 import (
 	"bytes"
-	"context"
-	"encoding/json"
 	"io"
 	"os"
-	"strings"
 	"testing"
-	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
-
-func TestRunJobsReceipt_LocalEmitsJSON(t *testing.T) {
-	dir := t.TempDir()
-	paths := orchestrator.PathsAt(dir)
-	if err := paths.EnsureRoot(); err != nil {
-		t.Fatal(err)
-	}
-	st, err := teststore.Open(paths.StateDB())
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	start := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
-	end := start.Add(2 * time.Second)
-	if err := st.CreateRun(ctx, store.Run{
-		ID: "run-cli-1", Pipeline: "deploy", Status: "running",
-		StartedAt: start,
-		Args:      map[string]string{"env": "prod"},
-		GitSHA:    "deadbeef",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB().ExecContext(ctx,
-		`UPDATE runs SET status='success', finished_at=? WHERE id='run-cli-1'`,
-		end.UnixNano()); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-cli-1", NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB().ExecContext(ctx,
-		`UPDATE nodes SET status='done', outcome='success', started_at=?, finished_at=?, output_json=? WHERE node_id='build'`,
-		start.UnixNano(), end.UnixNano(), []byte(`{"img":"x"}`)); err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
-
-	out := captureStdout(t, func() {
-		if err := renderRunView(ctx, paths, runView{name: "receipt", runID: "run-cli-1", format: "json"}); err != nil {
-			t.Fatalf("receipt view: %v", err)
-		}
-	})
-
-	var rec map[string]any
-	if err := json.Unmarshal([]byte(out), &rec); err != nil {
-		t.Fatalf("decode receipt: %v\n%s", err, out)
-	}
-	if rec["run_id"] != "run-cli-1" {
-		t.Errorf("run_id = %v, want run-cli-1", rec["run_id"])
-	}
-	if !strings.HasPrefix(rec["receipt_sha"].(string), "sha256:") {
-		t.Errorf("receipt_sha = %q, want sha256: prefix", rec["receipt_sha"])
-	}
-	if _, ok := rec["cost"].(map[string]any); !ok {
-		t.Errorf("cost section missing")
-	}
-}
-
-func TestRunsStatusReceiptViewRefusesTextOutput(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", t.TempDir())
-	err := runJobs([]string{"status", "run-x", "--view", "receipt", "-o", "pretty"})
-	if err == nil || !strings.Contains(err.Error(), "only renders json") {
-		t.Fatalf("want a json-only refusal, got %v", err)
-	}
-}
-
-func TestReceiptHelpMatchesLocalCost(t *testing.T) {
-	description := strings.ToLower(cmdJobsStatus.Description)
-	if strings.Contains(description, "cost_per_runner_hour") {
-		t.Fatalf("receipt help advertises removed profile rate: %q", cmdJobsStatus.Description)
-	}
-	if !strings.Contains(description, "zero cost") {
-		t.Fatalf("receipt help does not describe the local cost result: %q", cmdJobsStatus.Description)
-	}
-}
 
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()

@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -19,14 +18,12 @@ func TestRefundReportingRejectsTeamOwnerAndRunner(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner, _, err := tenant.CreateToken(ctx, "private-runner", store.TokenKindRunner,
-		[]string{controller.ScopeNodesClaim, controller.ScopeRunsState, controller.ScopeSecretsRead}, 0, time.Now())
+		[]string{"nodes.claim", "runs.state", "secrets.read"}, 0, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code := f.call(http.MethodPost, "/api/v1/credits/grants", f.creditsGrantToken(), map[string]any{
-		"kind": "paid", "amount_micro": 500 * store.MicroCreditsPerCent, "reference": "pi_private_refund", "team": owner.team,
-	}, nil); code != http.StatusCreated {
-		t.Fatalf("private payment grant=%d", code)
+	if _, err := tenant.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 500 * store.MicroCreditsPerCent, Reference: "pi_private_refund", CreatedBy: "test"}); err != nil {
+		t.Fatal(err)
 	}
 	balance, err := tenant.CreditBalanceMicro(ctx)
 	if err != nil {

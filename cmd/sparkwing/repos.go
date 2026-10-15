@@ -14,16 +14,16 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func runRepos(args []string) error {
@@ -83,7 +83,10 @@ func buildFleet(latest string) ([]repos.Repo, error) {
 	if err != nil {
 		return nil, err
 	}
-	obs := observeRuns()
+	obs, err := observeRuns()
+	if err != nil {
+		return nil, err
+	}
 	gv := guideVersions()
 	fleet := repos.DeriveFleet(cands, obs, fleetGit, latest, func(pin, lt string) int {
 		return repos.GuidesBehind(gv, pin, lt)
@@ -91,33 +94,33 @@ func buildFleet(latest string) ([]repos.Repo, error) {
 	return fleet, nil
 }
 
-func observeRuns() []repos.RunObservation {
-	paths, err := orchestrator.DefaultPaths()
+func observeRuns() ([]repos.RunObservation, error) {
+	ctx := context.Background()
+	reader, closeTransport, err := resolveRunReader(ctx, "")
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	st, err := store.Open(paths.StateDB())
+	defer closeTransport()
+	return repoRunObservations(ctx, reader)
+}
+
+func repoRunObservations(ctx context.Context, reader controllerwire.RunReader) ([]repos.RunObservation, error) {
+	page, err := reader.ListRuns(ctx, controllerwire.RunQuery{Limit: 500})
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	defer func() { _ = st.Close() }()
-	runs, err := st.ListRuns(context.Background(), store.RunFilter{Limit: 500})
-	if err != nil {
-		return nil
-	}
-	out := make([]repos.RunObservation, 0, len(runs))
-	for _, r := range runs {
-		if r.DeclaredRepo == "" {
+	out := make([]repos.RunObservation, 0, len(page.Runs))
+	for _, run := range page.Runs {
+		if run.Inputs.Git.Repository.Display == "" {
 			continue
 		}
-		out = append(out, repos.RunObservation{
-			Repo:     r.DeclaredRepo,
-			RepoURL:  r.RepoURL,
-			Pipeline: r.Pipeline,
-			At:       r.StartedAt,
-		})
+		at := time.Time{}
+		if run.StartedAt != nil {
+			at = *run.StartedAt
+		}
+		out = append(out, repos.RunObservation{Repo: run.Inputs.Git.Repository.Display, Pipeline: run.Inputs.Pipeline, At: at})
 	}
-	return out
+	return out, nil
 }
 
 func runReposList(args []string) error {
@@ -214,9 +217,6 @@ func printFleet(fleet []repos.Repo, latest string) {
 		fmt.Printf("   latest SDK: %s", latest)
 	}
 	fmt.Println()
-	if repos.PinsDiverge(fleet) {
-		fmt.Println(color.Yellow("  pins diverge across the fleet; a shared state schema wants them bumped together (sparkwing repos update)"))
-	}
 	for _, r := range fleet {
 		pin := orDashStr(r.Pin)
 		if r.Replace != "" {
@@ -246,33 +246,27 @@ func printFleet(fleet []repos.Repo, latest string) {
 }
 
 func runReposUpdate(args []string) error {
-	fs := flag.NewFlagSet(cmdReposUpdate.Path, flag.ContinueOnError)
-	var version, repo, output string
-	var apply, verify bool
-	fs.StringVar(&version, "version", "", "target SDK release (e.g. v0.16.0); default latest")
-	fs.StringVar(&repo, "repo", "", "scope to one repo by name or checkout path")
-	fs.BoolVar(&apply, "apply", false, "write the bumps and commit per repo")
-	fs.BoolVar(&verify, "verify", false, "run each repo's pre-commit gate after the bump")
-	inPlace := fs.Bool("in-place", false, "update this checkout's .sparkwing/go.mod pin with go get and go mod tidy; no plan comparison, no commit")
-	check := fs.Bool("check", false, "with --in-place, compare the pin with the release without changing it")
-	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json")
-	if err := parseAndCheck(cmdReposUpdate, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
+	return runReposUpdateWith(args, buildFleet, func(fleet []repos.Repo, config repos.UpdateConfig) []repos.Verdict {
+		return repos.UpdateFleet(&execOps{ctx: config.Context}, fleet, config)
+	})
+}
+
+func runReposUpdateWith(args []string, readFleet func(string) ([]repos.Repo, error), update func([]repos.Repo, repos.UpdateConfig) []repos.Verdict) error {
+	inv, err := clisurface.Parse("sparkwing", append([]string{"repos", "update"}, args...))
+	if err != nil {
 		return err
 	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("repos update: unexpected positional %q", fs.Arg(0))
+	output := inv.Output(color.IsInteractiveStdout())
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, output)
 	}
-	if *inPlace {
-		return updatePinInPlace(fs, version, *check, output)
+	if inv.Bool("in-place") {
+		return updatePinInPlace(inv)
 	}
-	if *check {
-		return errors.New("repos update: --check needs --in-place; without --apply the fleet preview already changes nothing")
+	if inv.Bool("all-repos") && !inv.Bool("dry-run") && !inv.Bool("yes") {
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: "--all-repos requires --yes to apply changes; use --dry-run to preview"}
 	}
-
-	target := strings.TrimSpace(version)
+	target := strings.TrimSpace(inv.Value("version"))
 	if target == "" {
 		latest, err := fetchLatestRelease()
 		if err != nil {
@@ -281,15 +275,16 @@ func runReposUpdate(args []string) error {
 		target = latest
 	}
 
-	fleet, err := buildFleet(target)
+	fleet, err := readFleet(target)
 	if err != nil {
 		return err
 	}
-	if repo != "" {
-		fleet = scopeFleet(fleet, repo)
-		if len(fleet) == 0 {
-			return fmt.Errorf("repos update: no tracked repo matches %q", repo)
+	if !inv.Bool("all-repos") {
+		selected, err := selectRepo(fleet, "")
+		if err != nil {
+			return err
 		}
+		fleet = []repos.Repo{selected}
 	}
 
 	// The first Ctrl-C ends the walk and lets the repo in flight restore
@@ -304,19 +299,25 @@ func runReposUpdate(args []string) error {
 
 	cfg := repos.UpdateConfig{
 		Target:    target,
-		Apply:     apply,
-		Verify:    verify,
+		Apply:     !inv.Bool("dry-run"),
+		Verify:    inv.Bool("verify"),
 		GuidesFor: guidesFor,
 		Progress: func(repo, msg string) {
 			fmt.Fprintf(os.Stderr, "%s: %s\n", repo, msg)
 		},
 		Context: ctx,
 	}
-	verdicts := repos.UpdateFleet(&execOps{ctx: ctx}, fleet, cfg)
+	verdicts := update(fleet, cfg)
 
 	if strings.ToLower(output) == "json" {
 		if err := ndjson.Write(os.Stdout, verdicts); err != nil {
 			return err
+		}
+	} else if output == "plain" {
+		for _, verdict := range verdicts {
+			if _, err := fmt.Fprintln(os.Stdout, verdict.Repo); err != nil {
+				return err
+			}
 		}
 	} else {
 		printVerdicts(verdicts, fleet, cfg)
@@ -357,16 +358,13 @@ func printVerdicts(vs []repos.Verdict, fleet []repos.Repo, cfg repos.UpdateConfi
 		mode = "apply"
 	}
 	fmt.Printf("Bumping %d repo(s) to %s (%s)\n", len(vs), cfg.Target, mode)
-	if repos.PinsDiverge(fleet) {
-		fmt.Println(color.Yellow("  pins diverge; the shared state schema wants the whole fleet on one pin -- bump them together"))
-	}
 	for _, v := range vs {
 		printOneVerdict(v)
 	}
 	fmt.Println()
 	fmt.Printf("Summary: %s\n", repos.SummarizeVerdicts(vs))
 	if !cfg.Apply && anyActionable(vs) {
-		fmt.Println(color.Dim("re-run with --apply to write and commit the bumps"))
+		fmt.Println(color.Dim("re-run without --dry-run to write and commit the bumps"))
 	}
 }
 
@@ -619,7 +617,7 @@ func parsePlanDoc(pipeline string, raw []byte) (repos.Plan, error) {
 		name = pipeline
 	}
 	plan := repos.Plan{Pipeline: name}
-	for _, n := range doc.Nodes {
+	for _, n := range doc.Jobs {
 		pn := repos.PlanNode{
 			ID:          n.ID,
 			Deps:        n.Deps,
@@ -637,20 +635,18 @@ func parsePlanDoc(pipeline string, raw []byte) (repos.Plan, error) {
 	return plan, nil
 }
 
-func updatePinInPlace(fs *flag.FlagSet, version string, check bool, output string) error {
-	for _, name := range []string{"apply", "verify", "repo"} {
-		if fs.Changed(name) {
-			return fmt.Errorf("repos update --in-place: --%s works on the tracked fleet; drop it or drop --in-place", name)
+func updatePinInPlace(inv clisurface.Invocation) error {
+	for _, name := range []string{"verify", "all-repos"} {
+		if inv.Has(name) {
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: "--" + name + " works on tracked repositories; drop it or drop --in-place"}
 		}
 	}
-	if fs.Changed("version") && !validUpdateVersion(version) {
-		return errors.New("repos update --in-place: --version must be a canonical release tag such as v0.48.1; omit it for latest")
+	version := inv.Value("version")
+	if inv.Has("version") && !validUpdateVersion(version) {
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: "--version must be a canonical release tag such as v0.48.1; omit it for latest"}
 	}
-	mode, err := resolveOutputFormat(output, "repos update")
-	if err != nil {
-		return err
-	}
-	if check {
+	mode := inv.Output(color.IsInteractiveStdout())
+	if inv.Bool("dry-run") {
 		return runUpdateCheck("sdk", version, false, false, mode)
 	}
 	result, err := updateSDK(version)

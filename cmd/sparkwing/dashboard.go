@@ -2,350 +2,142 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
+	"io"
 	"net"
-	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
-	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
-	flag "github.com/spf13/pflag"
-	"golang.org/x/mod/semver"
-
-	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
-
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/pkg/localws"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-const (
-	dashboardPIDFile = "dashboard.pid"
-	dashboardLogFile = "dashboard.log"
-	dashboardEnvFile = "dev.env"
-)
-
-const dashboardStartTimeout = 30 * time.Second
+type dashboardServices struct {
+	runtime   wingd.LocalRuntime
+	lifecycle wingd.LocalLifecycle
+	units     wingd.ManagedUnitManager
+	options   wingd.LocalStartOptions
+	openLog   func(context.Context) (*os.File, error)
+}
 
 func runDashboard(args []string) error {
-	if handleParentHelp(cmdDashboard, args) {
-		return nil
-	}
-	if len(args) == 0 {
-		PrintHelp(cmdDashboard, os.Stdout)
-		return nil
-	}
-	switch args[0] {
-	case "start":
-		return runDashboardStart(args[1:])
-	case "stop":
-		return runDashboardStop(args[1:])
-	case "restart":
-		return runDashboardRestart(args[1:])
-	case "logs":
-		return runDashboardLogs(args[1:])
-	case "status":
-		return runDashboardStatus(args[1:])
-	default:
-		PrintHelp(cmdDashboard, os.Stderr)
-		return fmt.Errorf("serve: unknown subcommand %q", args[0])
-	}
-}
-
-type dashboardPaths struct {
-	home string
-	pid  string
-	log  string
-}
-
-func resolveDashboardPaths(homeOverride string) (dashboardPaths, error) {
-	home := homeOverride
-	if home == "" {
-		paths, err := orchestrator.DefaultPaths()
-		if err != nil {
-			return dashboardPaths{}, fmt.Errorf("resolve SPARKWING_HOME: %w", err)
-		}
-		home = paths.Root
-	}
-	abs, err := filepath.Abs(home)
-	if err != nil {
-		return dashboardPaths{}, err
-	}
-	home = abs
-	return dashboardPaths{
-		home: home,
-		pid:  filepath.Join(home, dashboardPIDFile),
-		log:  filepath.Join(home, dashboardLogFile),
-	}, nil
-}
-
-func readLivePID(pidPath string) (int, bool) {
-	b, err := os.ReadFile(pidPath)
-	if err != nil {
-		return 0, false
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil || pid <= 0 {
-		return 0, false
-	}
-	if !processAlive(pid) {
-		return 0, false
-	}
-	return pid, true
-}
-
-func runDashboardSupervise(args []string) error {
-	fs := flag.NewFlagSet("__dashboard-supervise", flag.ContinueOnError)
-	addr := fs.String("addr", "127.0.0.1:4343", "")
-	home := fs.String("home", "", "")
-	pidPath := fs.String("pid", "", "")
-	readOnly := fs.Bool("read-only", false, "")
-	allowRemote := fs.Bool("allow-remote", false, "")
-	allowOrigins := fs.String("allow-origin", "", "")
-	version := fs.String("version", "", "")
-	instance := fs.String("instance", "", "")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *home == "" || *pidPath == "" {
-		return errors.New("__dashboard-supervise: --home and --pid required")
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	return runDashboardCommand(ctx, args, os.Stdout, runtime.GOOS, resolveLocalServices)
+}
 
-	opts := localws.Options{
-		Addr:         *addr,
-		Home:         *home,
-		ReadOnly:     *readOnly,
-		AllowRemote:  *allowRemote,
-		AllowOrigins: splitCSV(*allowOrigins),
-		Version:      *version,
-		Instance:     *instance,
-	}
-	if !opts.AllowRemote && !localws.LoopbackBind(opts.Addr) {
-		return errors.New("non-loopback dashboard requires --allow-remote")
-	}
-	listener, err := net.Listen("tcp", opts.Addr)
+func dashboardUnavailable(dependency string) error {
+	return &apierr.Error{Code: apierr.Unavailable, Message: "dashboard requires " + dependency, Hint: "the local controller integration is unavailable in this build"}
+}
+
+func runDashboardCommand(ctx context.Context, args []string, out io.Writer, goos string, resolve func(context.Context) (dashboardServices, error)) error {
+	inv, err := clisurface.Parse("sparkwing", append([]string{"dashboard"}, args...))
 	if err != nil {
 		return err
 	}
-	defer func() { dashboardCleanupError("close dashboard listener", listener.Close()) }()
-	opts.Listener = listener
-	opts.Addr = listener.Addr().String()
-	birth, err := procgroup.ProcessBirth(os.Getpid())
+	mode := inv.Output(color.IsInteractiveStdout())
+	if inv.Help() || inv.Command.Path == "sparkwing dashboard" {
+		return writeCommandHelp(surfaceHelp(inv.Command), out, mode)
+	}
+	if err := validateDashboardInvocation(inv, goos); err != nil {
+		return err
+	}
+	services, err := resolve(ctx)
 	if err != nil {
 		return err
 	}
-	boot, err := dashboardBoot()
+	if inv.Command.Path == "sparkwing dashboard logs" {
+		return streamDashboardLogs(ctx, inv, services.openLog, out, mode)
+	}
+	result, err := executeDashboard(ctx, inv, services)
 	if err != nil {
 		return err
 	}
-	dp, err := resolveDashboardPaths(*home)
-	if err != nil {
+	return renderDashboard(out, result, mode)
+}
+
+func validateDashboardInvocation(inv clisurface.Invocation, goos string) error {
+	switch inv.Command.Path {
+	case "sparkwing dashboard logs":
+		_, err := dashboardLogLimit(inv)
 		return err
-	}
-	record := dashboardRecord{PID: os.Getpid(), Birth: birth, Boot: boot, Instance: *instance, Artifact: dashboardRunningArtifact(), Options: dashboardOptions{Addr: opts.Addr, AllowOrigins: *allowOrigins, ReadOnly: *readOnly, AllowRemote: *allowRemote}}
-	if record.Instance == "" {
-		record.Instance = fmt.Sprintf("%d-%s", record.PID, record.Birth)
-		opts.Instance = record.Instance
-	}
-	if err = writeDashboardRecord(dp, record); err != nil {
-		return err
-	}
-	if err = fssecure.WriteFile(*pidPath, []byte(strconv.Itoa(os.Getpid())+"\n")); err != nil {
-		return err
-	}
-	defer func() { dashboardCleanupError("remove dashboard state", removeDashboardRecord(dp, record)) }()
-	if err := localws.Run(ctx, opts); err != nil {
-		return fmt.Errorf("local-ws: %w", err)
+	case "sparkwing dashboard install", "sparkwing dashboard uninstall":
+		if goos != "linux" && goos != "darwin" {
+			return &apierr.Error{Code: apierr.BadRequest, Message: "dashboard login services are supported on Linux and macOS", Hint: "use sparkwing dashboard start --stay"}
+		}
+		if inv.Bool("force") {
+			return dashboardUnavailable("managed-unit replacement policy for --force")
+		}
+	case "sparkwing dashboard start":
+		addr := dashboardAddress(inv)
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: "--addr must be HOST:PORT"}
+		}
+		number, err := strconv.Atoi(port)
+		if err != nil || number < 0 || number > 65535 {
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: "--addr requires a port between 0 and 65535"}
+		}
+		ip := net.ParseIP(host)
+		if host != "localhost" && (ip == nil || !ip.IsLoopback()) && !inv.Bool("allow-remote") {
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: "non-loopback --addr requires --allow-remote"}
+		}
+		if inv.Bool("read-only") || inv.Bool("allow-remote") || inv.Has("allow-origin") {
+			return dashboardUnavailable("local controller dashboard access-policy options")
+		}
 	}
 	return nil
 }
 
-func readBaseURL(home string) string {
-	b, err := os.ReadFile(filepath.Join(home, dashboardEnvFile))
-	if err != nil {
-		return ""
+func dashboardAddress(inv clisurface.Invocation) string {
+	if inv.Has("addr") {
+		return inv.Value("addr")
 	}
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "SPARKWING_CONTROLLER_URL=") {
-			return strings.TrimPrefix(line, "SPARKWING_CONTROLLER_URL=")
+	return "127.0.0.1:4343"
+}
+
+func executeDashboard(ctx context.Context, inv clisurface.Invocation, services dashboardServices) (dashboardResult, error) {
+	action := strings.TrimPrefix(inv.Command.Path, "sparkwing dashboard ")
+	result := dashboardResult{Kind: "service", Tool: "sparkwing", Service: "dashboard", Action: action}
+	if services.lifecycle == nil {
+		return result, dashboardUnavailable("local controller lifecycle")
+	}
+	var status wingd.LocalStatus
+	var err error
+	switch action {
+	case "start":
+		options := services.options
+		options.Stay, options.DashboardAddress = inv.Bool("stay"), dashboardAddress(inv)
+		status, err = services.lifecycle.StartDashboard(ctx, options)
+	case "stop":
+		status, err = stopLocalController(ctx, services.lifecycle)
+	case "status":
+		status, err = services.lifecycle.Status(ctx)
+	case "install", "uninstall":
+		if services.units == nil {
+			return result, dashboardUnavailable("local controller managed units")
 		}
-	}
-	return ""
-}
-
-func portHolder(addr string) (string, error) {
-	ln, err := net.Listen("tcp", addr)
-	if err == nil {
-		_ = ln.Close()
-		return "", nil
-	}
-	if !strings.Contains(strings.ToLower(err.Error()), "in use") {
-		return "", fmt.Errorf("probe %s: %w", addr, err)
-	}
-	port := addr
-	if i := strings.LastIndex(addr, ":"); i >= 0 {
-		port = addr[i+1:]
-	}
-	out, lerr := exec.Command("lsof", "-nP", "-iTCP:"+port, "-sTCP:LISTEN", "-Fcp").Output()
-	if lerr != nil || len(out) == 0 {
-		return "another process", nil
-	}
-	var cmdName, pidStr string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if len(line) < 2 {
-			continue
+		if action == "install" {
+			options := services.options
+			options.Stay = true
+			err = services.units.InstallController(ctx, options)
+		} else {
+			err = services.units.UninstallController(ctx)
 		}
-		switch line[0] {
-		case 'p':
-			pidStr = line[1:]
-		case 'c':
-			cmdName = line[1:]
-		}
-	}
-	switch {
-	case cmdName != "" && pidStr != "":
-		return fmt.Sprintf("%s (pid %s)", cmdName, pidStr), nil
-	case pidStr != "":
-		return fmt.Sprintf("pid %s", pidStr), nil
-	default:
-		return "another process", nil
-	}
-}
-
-func tailFile(path string, n int) string {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.Join(lines, "\n")
-}
-
-func fileSize(path string) int64 {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return 0
-	}
-	return fi.Size()
-}
-
-func tailFileFrom(path string, byteOffset int64, n int) string {
-	f, err := fssecure.OpenPrivateConfig(path)
-	if err != nil {
-		return "startup log unavailable"
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return "startup log unavailable"
-	}
-	if byteOffset > info.Size() {
-		byteOffset = 0
-	}
-	lines, _, err := dashboardLogTail(context.Background(), f, info.Size(), max(int64(0), byteOffset), n, false)
-	if err != nil {
-		return err.Error()
-	}
-	text := make([]string, 0, len(lines))
-	for _, line := range lines {
-		if line.Truncated {
-			line.Text += " [line truncated]"
-		}
-		text = append(text, line.Text)
-	}
-	return strings.Join(text, "\n")
-}
-
-func probeDashboardVersion(home, addr string) (localws.VersionInfo, bool) {
-	candidates := []string{}
-	if base := readBaseURL(home); base != "" {
-		candidates = append(candidates, base)
-	}
-	candidates = append(candidates, "http://"+addr)
-
-	client := &http.Client{Timeout: 2 * time.Second}
-	seen := map[string]bool{}
-	for _, base := range candidates {
-		base = strings.TrimRight(base, "/")
-		if base == "" || seen[base] {
-			continue
-		}
-		seen[base] = true
-		if info, ok := getDashboardVersion(client, base); ok {
-			return info, true
-		}
-	}
-	return localws.VersionInfo{}, false
-}
-
-func getDashboardVersion(client *http.Client, base string) (localws.VersionInfo, bool) {
-	resp, err := client.Get(base + "/api/v1/version")
-	if err != nil {
-		return localws.VersionInfo{}, false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return localws.VersionInfo{}, false
-	}
-	var info localws.VersionInfo
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil || info.Version == "" {
-		return localws.VersionInfo{}, false
-	}
-	return info, true
-}
-
-func dashboardIsNewer(running, mine string) bool {
-	if !semver.IsValid(running) || !semver.IsValid(mine) {
-		return false
-	}
-	return semver.Compare(running, mine) > 0
-}
-
-func waitForListenerOrExit(addr string, exited <-chan struct{}, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
 		if err == nil {
-			_ = conn.Close()
-			return nil
+			status, err = services.lifecycle.Status(ctx)
 		}
-		select {
-		case <-exited:
-			return fmt.Errorf("exited during startup before accepting connections")
-		default:
-		}
-		time.Sleep(100 * time.Millisecond)
+	default:
+		return result, fmt.Errorf("unsupported dashboard action %q", action)
 	}
-	return fmt.Errorf("failed to accept connections within %s", timeout)
-}
-
-func stopSupervisor(pid int, pidPath string) error {
-	if err := signalTerminate(pid); err != nil {
-		return fmt.Errorf("terminate pid %d: %w", pid, err)
+	if err != nil {
+		return result, err
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if !processAlive(pid) {
-			dashboardCleanupError("remove consumer PID", os.Remove(pidPath))
-			return nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	dashboardCleanupError("stop consumer", signalKill(pid))
-	dashboardCleanupError("remove consumer PID", os.Remove(pidPath))
-	return nil
+	return localStatusResult("dashboard", action, status), nil
 }

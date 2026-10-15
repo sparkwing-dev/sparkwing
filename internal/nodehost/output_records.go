@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // JobUpload carries server-derived job authority and its destination record key.
@@ -29,6 +30,14 @@ type OutputRecords struct {
 	Blobs   blob.Store
 	Records blob.RecordStore
 	Bind    func(context.Context, NodeInput) (JobUpload, error)
+}
+
+// ReadResult reads the exact output selector committed with a terminal result.
+func (o OutputRecords) ReadResult(ctx context.Context, row store.NodeRow, authority blob.Authority) (json.RawMessage, error) {
+	if row.Status != store.StatusDone || row.OutputRecord == nil {
+		return nil, blob.ErrNotFound
+	}
+	return o.ReadOutput(ctx, blob.RecordLookup{Authority: authority, Key: *row.OutputRecord})
 }
 
 // PublishOutput returns a record only after both immutable upload and record
