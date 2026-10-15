@@ -26,7 +26,7 @@ func TestEngineLauncherSyncHTTPUsesAuthenticatedRootAndNeverDeliversBearer(t *te
 	h := New(e.Store, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(e).Handler()
 	body := `{"observed":[{"award":{"kind":"node","id":"unit","holder":"launcher","generation":1},"job":{"namespace":"ci","name":"job","uid":"job-uid"},"node_uid":"node"}]}`
 	engineClaimHTTP(t, h, "", "POST", "/api/v1/launcher/sync", body, 401)
-	engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/sync", body, 500)
+	engineClaimHTTP(t, h, raw, "POST", "/api/v1/launcher/sync", body, 200)
 	called := 0
 	e.Launcher = launcherSyncFunc(func(_ context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
 		called++

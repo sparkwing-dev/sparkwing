@@ -624,4 +624,5 @@ func (sharedEngineVersionContracts) Index(ctx context.Context, resolver *engine.
 func (sharedEngineVersionContracts) Policy(index engine.VerifiedIndex) engine.VersionIndex
 func (r *statusRecorder) Unwrap() http.ResponseWriter
 func (r *statusRecorder) WriteHeader(code int)
+func (s storeLauncherSync) ReadLauncherSync(ctx context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
 func (s storeOperatorSettings) StorageTenant(ctx context.Context, team store.Team) (storageQuotaStore, error)

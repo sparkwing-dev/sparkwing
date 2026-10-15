@@ -134,12 +134,18 @@ and the reserved `node_uid`. The award generation identifies the unit award,
 including an eval's own lease. It does not replace that eval's source generation.
 The server compares observations with this launcher's stored awards.
 
+The default store adapter reads ancestry, current claims and execution inputs in
+one snapshot. It checks the root and service identity, holder, generation,
+expiry and cancellation. Eval awards also require the current controller lease
+and unresolved source expansion. Exchange preserves the original award shown
+by synchronization. Sync never changes a claim or returns its bearer.
+
 The response contains held `awards` without bearer material and a `remove` list
 of exact Job instances. Each removal carries namespace, name and UID. The
 launcher must use that UID as a Kubernetes deletion precondition because a new
 Job can reuse the name. A failed transport, decode or validation returns no
-partial sync result. Native observation, reconciliation and cleanup bindings
-still require integration.
+partial sync result. Native Kubernetes adoption and teardown still require
+execution evidence.
 
 ## Logs and stored data
 

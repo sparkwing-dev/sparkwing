@@ -113,19 +113,6 @@ func (c *Client) claimInput(ctx context.Context, runID, nodeID string, req store
 	}
 }
 
-// LauncherSync tells the controller the Jobs a launcher holds, and hears what
-// to do with each.
-func (c *Client) LauncherSync(ctx context.Context, jobs []store.LaunchJob) ([]store.LaunchJobResult, error) {
-	if jobs == nil {
-		jobs = []store.LaunchJob{}
-	}
-	var out struct {
-		Jobs []store.LaunchJobResult `json:"jobs"`
-	}
-	err := c.post(ctx, "/api/v1/launcher/sync", map[string]any{"jobs": jobs}, http.StatusOK, &out)
-	return out.Jobs, err
-}
-
 func claimNodePath(runID, nodeID, verb string) string {
 	return fmt.Sprintf("/api/v1/runs/%s/nodes/%s/%s", url.PathEscape(runID), url.PathEscape(nodeID), verb)
 }

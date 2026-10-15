@@ -920,10 +920,18 @@ by this cut, and no additional archived T1 source identity is claimed closed.
 | ReportAttempt output ownership and failed-attempt reuse | `TestBlobResultRecordsRejectForgedResultKeys` covers record team, namespace, job, run, attempt and generation. `TestResultRecordsFromAnEarlierAttemptCannotFinishARetry` refuses the earlier record before and after the retry ordinal advances. W1b's result fixture supplies SourceAttempt. |
 | Child invocation deduplication and live-parent rights | `TestChildIntakePersistsLineageAndInvocationReplay` uses explicit intake keys. `TestChildIntakeCannotEscapeItsLiveParentProperty` varies parent run, job, team, generation, cancellation and terminal state. New invocation keys replace implicit live-child reuse. |
 | Dependency verdicts, cancellation and application retry | Existing scheduling, cancellation-intent, holder-ordinal, leased-recovery and unit-billing tests retain these concerns through the final interfaces. The old settle-based automatic retries are removed. |
-| Old launcher Job synchronization tests | `ReleaseUnit`, renewal and unit billing retain the store concerns. Safe real Job synchronization remains open on the W8/W9 award-generation and Job-instance contract gap. |
+| Old launcher Job synchronization tests | `ReleaseUnit`, renewal and unit billing retain the store concerns. `TestLauncherSnapshotRetainsCurrentAwardThroughExchange`, `TestLauncherSnapshotFencingProperty`, `TestEngineLauncherSyncUsesStoreSnapshot` and `placement-run-host-to-launcher/store-sqlite` cover current award reconstruction and exact observed Job cleanup after reopening. Native Kubernetes adoption and teardown remain required. |
 
 The selected package files are in `../w1-session19-tests.txt`. The session report
 lists the remaining legacy surfaces and shared caller changes.
+
+The removed `TestLaunchBilling_ReleaseRefundsAndTheFirstBeatBills` is covered by
+`TestMeteredUnitUnstartedCloudReleaseRefundsReservation` and
+`TestMeteredUnitCloudRenewalStartsComputeWithoutAnAttempt`. The first proves a
+full refund before compute. The second proves that the first Cloud renewal opens
+compute without consuming an execution attempt and that a later release settles
+the job minimum. The old sync-side prohibition on handing back a billed Job is
+replaced by the final `ReleaseUnit` transaction and immutable accounting.
 
 ## W1 run-row heartbeat retirement
 

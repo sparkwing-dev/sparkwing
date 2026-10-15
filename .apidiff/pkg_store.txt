@@ -287,7 +287,6 @@ type CapacityLivenessRule struct {
 	Scope      string
 	Conditions []string
 }
-const CapacityWaitDetail = "waiting for Cloud capacity"
 type CapacityWaiter struct {
 	Key            string
 	ID             string
@@ -1404,23 +1403,14 @@ type LaunchClaimRequest struct {
 	RunID, NodeID string
 }
 const LaunchDeadlineSlack = 10 * time.Minute
-type LaunchJob struct {
-	RunID      string
-	NodeID     string
-	Generation int64
-
-	Release bool
-}
-const LaunchJobDelete LaunchJobState = "delete"
-const LaunchJobKeep LaunchJobState = "keep"
-type LaunchJobResult struct {
-	RunID      string
-	NodeID     string
-	Generation int64
-	State      LaunchJobState
-}
-type LaunchJobState string
 const LaunchScope = "claims.launch"
+type LauncherAward struct {
+	Claim                  UnitClaim
+	Capability             capability.Capability
+	Run                    RunRow
+	Node                   NodeRow
+	ParentCapabilityExpiry *time.Time
+}
 type LeaseBeat struct {
 	ExpiresAt       time.Time
 	CancelRequested bool
@@ -2104,7 +2094,6 @@ type RegisteredAgent struct {
 	Profile  match.Profile
 	LastSeen time.Time
 }
-const ReleaseBackoff = 5 * time.Minute
 type RepoDispatch string
 const RepoDispatchController RepoDispatch = "controller"
 const RepoDispatchTrigger RepoDispatch = "trigger"
@@ -2994,6 +2983,7 @@ func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string
 func (s *Store) ProvisionCapability(ctx context.Context, spec capability.ProvisionSpec) (capability.Issued, error)
 func (s *Store) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error)
 func (s *Store) ReadClaimProfile(ctx context.Context, authority capability.AuthorityRef) (match.Profile, match.Resources, error)
+func (s *Store) ReadLauncherAwards(ctx context.Context, authority capability.AuthorityRef) ([]LauncherAward, error)
 func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) ([]ReapedUnit, error)
 func (s *Store) RecordAgentLabels(ctx context.Context, prefix string, labels []string) error
 func (s *Store) RecordAttemptIntent(ctx context.Context, attemptID, paymentIntent string, now time.Time) error
@@ -3059,7 +3049,6 @@ func (s *Store) StartClaimExecution(ctx context.Context, tok ClaimToken, now tim
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID string, from, to Team) error
-func (s *Store) SyncLaunchJobs(ctx context.Context, launcher ClaimIdentity, jobs []LaunchJob, now time.Time) ([]LaunchJobResult, error)
 func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error)
 func (s *Store) TeamInfo(ctx context.Context, team Team) (TeamInfo, error)
 func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)

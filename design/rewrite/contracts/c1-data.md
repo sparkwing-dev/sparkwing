@@ -2,6 +2,32 @@
 
 <!-- design:begin -->
 
+## Launcher award snapshots
+
+`Store.ReadLauncherAwards` rechecks launcher ancestry and reads current awards,
+seals, job settings and parent expiry in one snapshot. Root ancestry and the
+service subject determine ownership across teams. The snapshot excludes ended
+leases, cancelled or terminal work, replaced generations and completed evals.
+Eval liveness checks both its source generation and the current controller lease.
+Exchange replaces the stored credential without changing the award fence.
+
+The controller's default `LauncherSyncReader` uses this snapshot. It validates
+unique Job and award observations, retains exact matching fences and returns
+only the observed namespace/name/UID for cleanup. A sync response describes the
+original bootstrap award even after exchange. It carries no bearer and performs
+no lifecycle, reservation or billing write. Infrastructure or integrity errors
+discard the complete response.
+
+`Store.SyncLaunchJobs`, its types and helpers, and `Client.LauncherSync` are
+removed. Unstarted release uses `ReleaseUnit`. The owner redispatches pending
+jobs through its normal readiness transition. The elected reaper recovers lost
+or cancelled holders.
+
+The `placement-run-host-to-launcher/store-sqlite` cell checks real claim,
+exchange, release, owner redispatch, replacement and synchronization across three
+reopenings. Native Kubernetes adoption and UID-fenced teardown remain separate
+integration evidence.
+
 ## Capability inventory and rotation
 
 Tenant and Operator implement C2's CapabilityManager. Collection and detail reads
