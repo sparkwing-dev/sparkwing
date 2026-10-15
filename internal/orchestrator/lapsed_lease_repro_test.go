@@ -43,7 +43,7 @@ func TestAClaimedTriggerRefusesADispatchItCannotHoldTheTreeFor(t *testing.T) {
 	}
 	claimed.TriggerEnv = map[string]string{SubmitRepoDirKey: dir}
 
-	runClaimedTrigger(ctx, st, claimed, nil, slog.New(slog.DiscardHandler), home, time.Minute)
+	runClaimedTrigger(ctx, st, claimed, slog.New(slog.DiscardHandler), home, time.Minute)
 
 	run, gerr := st.GetRun(ctx, "run-contended")
 	if gerr != nil {
@@ -81,7 +81,7 @@ func TestAClaimedTriggerHoldsItsTreeAgainstTheSweep(t *testing.T) {
 	dispatched := false
 	origin := dispatchLocalTriggerFn
 	dispatchLocalTriggerFn = func(
-		context.Context, *store.Trigger, string, *localCompileCache, *slog.Logger, []string,
+		context.Context, *store.Trigger, *slog.Logger, []string,
 	) error {
 		dispatched = true
 		if ferr := st.FinishTrigger(ctx, "run-dispatching"); ferr != nil {
@@ -93,7 +93,7 @@ func TestAClaimedTriggerHoldsItsTreeAgainstTheSweep(t *testing.T) {
 	}
 	t.Cleanup(func() { dispatchLocalTriggerFn = origin })
 
-	runClaimedTrigger(ctx, st, claimed, nil, slog.New(slog.DiscardHandler), home, time.Minute)
+	runClaimedTrigger(ctx, st, claimed, slog.New(slog.DiscardHandler), home, time.Minute)
 
 	if !dispatched {
 		t.Fatal("claimed trigger was refused before dispatch")

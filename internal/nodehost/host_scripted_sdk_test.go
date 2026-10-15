@@ -207,3 +207,14 @@ func replaySDK(sdk *scriptedSDK, failure *nodeproto.JobFailure, evaluate func(no
 	}
 	return p
 }
+
+type noV2Secrets struct{}
+
+func (noV2Secrets) ContainsSecret(string) bool { return false }
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}

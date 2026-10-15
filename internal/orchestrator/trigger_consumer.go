@@ -261,8 +261,6 @@ func consumeLocalTriggers(
 	ctx context.Context, st *store.Store, logger *slog.Logger,
 	wedge *storeWedgeGuard, rt consumerRuntime,
 ) error {
-	cache := &localCompileCache{}
-	defer cache.Close()
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
@@ -335,7 +333,7 @@ func consumeLocalTriggers(
 		go func(t *store.Trigger) {
 			defer wg.Done()
 			defer inFlight.remove(t.ID)
-			runClaimedTrigger(ctx, st, t, cache, logger, rt.home, rt.lease)
+			runClaimedTrigger(ctx, st, t, logger, rt.home, rt.lease)
 		}(trig)
 	}
 }
@@ -368,7 +366,7 @@ var dispatchLocalTriggerFn = dispatchLocalTrigger
 
 func runClaimedTrigger(
 	ctx context.Context, st *store.Store, trig *store.Trigger,
-	cache *localCompileCache, logger *slog.Logger, home string, duration time.Duration,
+	logger *slog.Logger, home string, duration time.Duration,
 ) {
 	ctx = DispatchContext(ctx, trig)
 	book := context.WithoutCancel(ctx)
@@ -420,7 +418,7 @@ func runClaimedTrigger(
 	if err = dispatchCtx.Err(); err != nil {
 		return
 	}
-	err = dispatchLocalTriggerFn(dispatchCtx, trig, "", cache, logger, env)
+	err = dispatchLocalTriggerFn(dispatchCtx, trig, logger, env)
 }
 
 func submittedWorktreeDir(trig *store.Trigger) string {

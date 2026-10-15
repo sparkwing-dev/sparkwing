@@ -125,17 +125,17 @@ func TestHereResumeKeepsLocalSocketBinding(t *testing.T) {
 	claimed := 0
 	deps := hereDependencies{
 		credentials: func() (hereCredentials, error) { return hereCredentials{dir: store.dir}, nil },
-		resolve: func(_ context.Context, got client.EngineOptions) (hereRuntime, error) {
+		resolve: func(_ context.Context, got client.EngineOptions) (runHostRuntime, error) {
 			bearer, err := got.Bearer(t.Context())
 			if err != nil || bearer != "private-bearer" || got.HTTP != options.HTTP {
 				t.Fatal("resume changed its selected local transport or authority")
 			}
-			return hereRuntime{controller: hereTestController{claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+			return runHostRuntime{controller: hereTestController{claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 				claimed++
 				return controllerwire.ClaimResponse{}, nil
-			}}, bind: func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error) {
+			}}, bind: func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (runHostSession, error) {
 				t.Fatal("empty claim constructed a host")
-				return hereHostSession{}, nil
+				return runHostSession{}, nil
 			}}, nil
 		},
 	}

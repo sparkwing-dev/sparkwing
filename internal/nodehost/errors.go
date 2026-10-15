@@ -93,24 +93,6 @@ func maskErrorDetails(details map[string]any, mask func(string) string) map[stri
 	return sanitize(normalized).(map[string]any)
 }
 
-func errText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
-}
-
-// safety: only the node's row and end event are shortened; a cut taken before
-// masking could split a secret the masker no longer recognizes, so hook and
-// recovery inputs keep the whole error.
-func recordedErrText(err error) string {
-	return boundedNodeErrText(errText(err))
-}
-
-// RecordedErrText is err as a node's row records it, bounded as every node
-// finish bounds it.
-func RecordedErrText(err error) string { return recordedErrText(err) }
-
 // safety: the first line names what failed and the tail is where a command's
 // output reports why, so both survive and the elision is stated.
 func boundedNodeErrText(text string) string {

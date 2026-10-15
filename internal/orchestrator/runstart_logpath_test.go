@@ -9,37 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
-func TestBuildRunInvocation_LogPathFromLocalLogBackend(t *testing.T) {
-	p := Paths{Root: t.TempDir()}
-	dir := localRunLogDir(localLogs{paths: p}, "run-1")
-	if want := p.RunDir("run-1"); dir != want {
-		t.Fatalf("localRunLogDir = %q, want %q", dir, want)
-	}
-	inv := buildRunInvocation(Options{Pipeline: "demo"}, "run-1", dir, nil)
-	got, ok := inv["log_path"].(string)
-	if !ok {
-		t.Fatalf("log_path missing or not a string: %#v", inv["log_path"])
-	}
-	if got != p.RunDir("run-1") {
-		t.Errorf("log_path = %q, want %q", got, p.RunDir("run-1"))
-	}
-	if !filepath.IsAbs(got) {
-		t.Errorf("log_path = %q, want an absolute path", got)
-	}
-
-	if d := filepath.Dir(p.EnvelopeLog("run-1")); d != got {
-		t.Errorf("envelope log lives in %q, log_path says %q", d, got)
-	}
-	if d := filepath.Dir(p.NodeLog("run-1", "build")); d != got {
-		t.Errorf("node log lives in %q, log_path says %q", d, got)
-	}
-	if hints, hasHints := inv["hints"].(map[string]string); hasHints {
-		if _, buried := hints["log_path"]; buried {
-			t.Error("log_path must be a top-level invocation field, not a hint")
-		}
-	}
-}
-
 func TestLocalRunLogDir_PointerBackend(t *testing.T) {
 	p := Paths{Root: t.TempDir()}
 	if got, want := localRunLogDir(&localLogs{paths: p}, "run-1"), p.RunDir("run-1"); got != want {
@@ -69,13 +38,6 @@ func TestLocalRunLogDir_RelativeHomeRecordsAbsolutePath(t *testing.T) {
 	}
 	if _, err := os.Stat(got); err != nil {
 		t.Errorf("recorded log_path does not exist: %v", err)
-	}
-}
-
-func TestBuildRunInvocation_NoLogPathWithoutLocalLogs(t *testing.T) {
-	inv := buildRunInvocation(Options{Pipeline: "demo"}, "run-1", "", nil)
-	if v, ok := inv["log_path"]; ok {
-		t.Errorf("log_path must be omitted when the run writes no local logs; got %v", v)
 	}
 }
 

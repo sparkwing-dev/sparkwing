@@ -3,6 +3,7 @@ package nodehost
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -206,13 +207,25 @@ func TestRemoteOperationsPreserveTransportErrors(t *testing.T) {
 	}
 }
 
-func TestRemoteReconciliationRefusesUnrepresentableResultSource(t *testing.T) {
-	f := &ownerOperationWire{}
-	_, err := (&RemoteOwnerStore{Controller: f}).ReconcileNode(t.Context(), store.ReconcileRequest{
-		Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Policy: store.SourceManualRetry,
-		Source: &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &store.MaterializedResultSource{Ref: store.NodeRef{RunID: "previous", NodeID: "job"}, StateSeq: 9}},
+func FuzzRemoteReconciliationPreservesTerminalResult(f *testing.F) {
+	f.Add("previous", "source", uint64(9))
+	f.Add("", "", uint64(0))
+	f.Fuzz(func(t *testing.T, run, job string, sequence uint64) {
+		ref := store.NodeRef{RunID: "run-" + hex.EncodeToString([]byte(run)), NodeID: "job-" + hex.EncodeToString([]byte(job))}
+		stateSeq := int64(sequence%(1<<62)) + 1
+		source := &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &store.MaterializedResultSource{Ref: ref, StateSeq: stateSeq}}
+		row := executionWireFixture()
+		row.Status, row.Outcome = "done", "success"
+		wireSource := &controllerwire.ReuseSource{Policy: string(source.Kind), Result: &controllerwire.MaterializedResultSource{RunID: ref.RunID, JobID: ref.NodeID, StateSeq: stateSeq}}
+		wire := &ownerOperationWire{reconcile: controllerwire.ReconcileResponse{Kind: string(store.Materialize), Job: row, Source: wireSource}}
+		result, err := (&RemoteOwnerStore{Controller: wire}).ReconcileNode(t.Context(), store.ReconcileRequest{Ref: store.NodeRef{RunID: "target", NodeID: row.ID}, Policy: source.Kind, Source: source, MaterializeOnly: true})
+		if err != nil || !reflect.DeepEqual(wire.request.Source, wireSource) || !reflect.DeepEqual(result.Source, source) {
+			t.Fatalf("terminal result fence changed: error=%v", err)
+		}
+		wire.request.Source.Result.StateSeq++
+		wireSource.Result.StateSeq++
+		if source.Result.StateSeq != stateSeq || result.Source.Result.StateSeq != stateSeq {
+			t.Fatal("terminal result projection aliases transport state")
+		}
 	})
-	if err == nil || f.run != "" {
-		t.Fatal("sent a result source after silently dropping its identity")
-	}
 }

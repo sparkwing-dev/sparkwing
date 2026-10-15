@@ -1,10 +1,7 @@
 package nodehost
 
 import (
-	"context"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 const (
@@ -22,29 +19,6 @@ type ChildRequest struct {
 	Args     map[string]string `json:"args,omitempty"`
 	Repo     string            `json:"repo,omitempty"`
 	Branch   string            `json:"branch,omitempty"`
-}
-
-func (g *grant) startChild(ctx context.Context, request ChildRequest) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, localServiceTimeout)
-	defer cancel()
-	if !validName(request.Pipeline) || len(request.Args) > 256 {
-		return "", executorError(apierr.BadRequest, "invalid child pipeline or arguments")
-	}
-	request.Job = ""
-	if g.Children == nil {
-		return "", serviceUnavailable()
-	}
-	return g.localStartChild(ctx, request)
-}
-
-func (g *grant) awaitChild(ctx context.Context, child, job string, wait time.Duration) (ProcessChildResult, error) {
-	if !validName(child) || (job != "" && !validNodeID(job)) {
-		return ProcessChildResult{}, executorError(apierr.BadRequest, "invalid child run or job")
-	}
-	if g.Children == nil {
-		return ProcessChildResult{}, serviceUnavailable()
-	}
-	return g.localAwaitChild(ctx, child, job, wait)
 }
 
 func terminalRun(status string) bool {

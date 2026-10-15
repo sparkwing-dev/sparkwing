@@ -17,6 +17,20 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
+// Admitter acquires machine capacity under the local controller.
+type Admitter interface {
+	Acquire(context.Context, wingwire.AdmissionRequest, func(wingwire.Queued)) (Lease, error)
+}
+
+// Lease holds machine capacity until Release and joins ownership watching.
+type Lease interface {
+	Token() string
+	Release() error
+	Watch(func(wingwire.Evicted), func(wingwire.Cancel)) error
+}
+
+var errQueueTimeout = errors.New("queue timeout")
+
 // LocalAdmission holds machine resources and local concurrency under sealed settings.
 type LocalAdmission struct {
 	storeGroups bool

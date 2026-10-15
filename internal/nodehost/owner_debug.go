@@ -12,6 +12,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+const defaultDebugPauseTimeout = 30 * time.Minute
+
 // DebugBoundary binds an owner-selected pause to persisted execution and sealed policy.
 type DebugBoundary struct {
 	Ref        store.NodeRef

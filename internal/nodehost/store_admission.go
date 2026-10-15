@@ -14,6 +14,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+const (
+	waiterPoll        = 100 * time.Millisecond
+	storeOutageBudget = 5 * time.Minute
+)
+
 // CapacityStore supplies tenant-scoped admission and continuous adoption.
 type CapacityStore interface {
 	AdoptCapacity(context.Context, string, string, store.CapacityBinding, store.Actor) (store.CapacityAdoption, error)

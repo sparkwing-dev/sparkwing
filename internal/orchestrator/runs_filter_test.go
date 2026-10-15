@@ -1,9 +1,10 @@
 package orchestrator
 
 import (
-	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )

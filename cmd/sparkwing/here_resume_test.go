@@ -86,12 +86,12 @@ func TestHereResumeUsesOnlyAwardedInputs(t *testing.T) {
 	closed := 0
 	deps := hereDependencies{
 		credentials: func() (hereCredentials, error) { return store, nil }, version: "v1.2.3",
-		resolve: func(ctx context.Context, options client.EngineOptions) (hereRuntime, error) {
+		resolve: func(ctx context.Context, options client.EngineOptions) (runHostRuntime, error) {
 			bearer, err := options.Bearer(ctx)
 			if err != nil || bearer != "retained-private-bearer" || options.URL != "https://controller.example" {
 				t.Fatal("resume lost its private connection binding")
 			}
-			return hereRuntime{
+			return runHostRuntime{
 				controller: hereTestController{claim: func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 					calls = append(calls, "claim")
 					if request.RunID != "retry-run" || request.JobID != "" || request.RunnerVersion != "v1.2.3" || !reflect.DeepEqual(request.Kinds, []capability.UnitKind{capability.UnitTrigger}) || len(request.Labels) != 0 {
@@ -99,13 +99,13 @@ func TestHereResumeUsesOnlyAwardedInputs(t *testing.T) {
 					}
 					return controllerwire.ClaimResponse{Claim: &award}, nil
 				}},
-				bind: func(ctx context.Context, options client.EngineOptions, got controllerwire.ClaimedUnit) (hereHostSession, error) {
+				bind: func(ctx context.Context, options client.EngineOptions, got controllerwire.ClaimedUnit) (runHostSession, error) {
 					calls = append(calls, "bind")
 					token, err := options.Bearer(ctx)
 					if err != nil || token != award.Capability || !reflect.DeepEqual(got, award) {
 						t.Fatal("binder lost server-granted identity or authority")
 					}
-					return hereHostSession{close: func() error { closed++; return nil }, host: hereTestHost(func(ctx context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
+					return runHostSession{close: func() error { closed++; return nil }, host: hereTestHost(func(ctx context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
 						calls = append(calls, "host")
 						var request runspec.Request
 						var accepted runspec.Spec
@@ -173,9 +173,9 @@ func TestHereCredentialsArePrivateAndBound(t *testing.T) {
 func TestHereReplayWithoutRetainedBearerNeverClaims(t *testing.T) {
 	deps := hereDependencies{
 		credentials: func() (hereCredentials, error) { return hereCredentials{dir: t.TempDir()}, nil },
-		resolve: func(context.Context, client.EngineOptions) (hereRuntime, error) {
+		resolve: func(context.Context, client.EngineOptions) (runHostRuntime, error) {
 			t.Fatal("lost handoff claimed a run")
-			return hereRuntime{}, nil
+			return runHostRuntime{}, nil
 		},
 	}
 	err := handoffHereRun(t.Context(), client.EngineOptions{URL: "https://controller.example"}, controllerwire.CreateRunResponse{RunID: "r", Replayed: true}, deps)
@@ -276,7 +276,7 @@ func TestHereHandoffRetainsAuthorityBeforeNativeRefusal(t *testing.T) {
 	refusal := &apierr.Error{Code: apierr.Unavailable, Message: "run host binding unavailable"}
 	deps := hereDependencies{
 		credentials: func() (hereCredentials, error) { return store, nil },
-		resolve:     func(context.Context, client.EngineOptions) (hereRuntime, error) { return hereRuntime{}, refusal },
+		resolve:     func(context.Context, client.EngineOptions) (runHostRuntime, error) { return runHostRuntime{}, refusal },
 	}
 	err := handoffHereRun(t.Context(), client.EngineOptions{URL: "https://controller.example"}, controllerwire.CreateRunResponse{RunID: "run", HereBearer: "private-bearer"}, deps)
 	if exitCodeFor(err) != 3 || !errors.Is(err, refusal) {
@@ -375,11 +375,11 @@ func TestHereCancellationDoesNotStartHosting(t *testing.T) {
 					}
 					return store, nil
 				},
-				resolve: func(context.Context, client.EngineOptions) (hereRuntime, error) {
+				resolve: func(context.Context, client.EngineOptions) (runHostRuntime, error) {
 					if point == "after-resolve" {
 						cancel()
 					}
-					return hereRuntime{
+					return runHostRuntime{
 						controller: hereTestController{claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 							if point == "after-resolve" {
 								t.Fatal("cancelled resume claimed")
@@ -389,12 +389,12 @@ func TestHereCancellationDoesNotStartHosting(t *testing.T) {
 							}
 							return controllerwire.ClaimResponse{Claim: &award}, nil
 						}},
-						bind: func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error) {
+						bind: func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (runHostSession, error) {
 							if point == "after-claim" {
 								t.Fatal("cancelled resume constructed a host")
 							}
 							cancel()
-							return hereHostSession{close: func() error { closed = true; return nil }, host: hereTestHost(func(context.Context, nodehost.RunInput) (nodehost.RunCompletion, error) {
+							return runHostSession{close: func() error { closed = true; return nil }, host: hereTestHost(func(context.Context, nodehost.RunInput) (nodehost.RunCompletion, error) {
 								t.Fatal("cancelled resume started a host")
 								return nodehost.RunCompletion{}, nil
 							})}, nil
@@ -434,13 +434,13 @@ func FuzzHereDiagnosticsExcludePrivateInputs(f *testing.F) {
 		}
 		deps := hereDependencies{
 			credentials: func() (hereCredentials, error) { return store, nil },
-			resolve: func(context.Context, client.EngineOptions) (hereRuntime, error) {
-				return hereRuntime{
+			resolve: func(context.Context, client.EngineOptions) (runHostRuntime, error) {
+				return runHostRuntime{
 					controller: hereTestController{claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 						return controllerwire.ClaimResponse{Claim: &award}, nil
 					}},
-					bind: func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error) {
-						return hereHostSession{}, refusal
+					bind: func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (runHostSession, error) {
+						return runHostSession{}, refusal
 					},
 				}, nil
 			},
@@ -471,13 +471,13 @@ func TestHereHostCleanupFailureIsIncomplete(t *testing.T) {
 	award := hereAward(t)
 	deps := hereDependencies{
 		credentials: func() (hereCredentials, error) { return store, nil },
-		resolve: func(context.Context, client.EngineOptions) (hereRuntime, error) {
-			return hereRuntime{
+		resolve: func(context.Context, client.EngineOptions) (runHostRuntime, error) {
+			return runHostRuntime{
 				controller: hereTestController{claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 					return controllerwire.ClaimResponse{Claim: &award}, nil
 				}},
-				bind: func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error) {
-					return hereHostSession{close: func() error { return io.ErrClosedPipe }, host: hereTestHost(func(context.Context, nodehost.RunInput) (nodehost.RunCompletion, error) {
+				bind: func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (runHostSession, error) {
+					return runHostSession{close: func() error { return io.ErrClosedPipe }, host: hereTestHost(func(context.Context, nodehost.RunInput) (nodehost.RunCompletion, error) {
 						return nodehost.RunCompletion{Outcome: "success"}, nil
 					})}, nil
 				},
@@ -516,14 +516,14 @@ func FuzzHerePreparationCannotReplaceAward(f *testing.F) {
 		}
 		called, closed := false, false
 		_, err = runHereAward(t.Context(), client.EngineOptions{}, award.RunID, award,
-			func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error) {
+			func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (runHostSession, error) {
 				prepared := nodehost.RunInput{
 					RunID: run, RequestHash: run, SealedRequest: []byte(run),
 					GrantedRunner: nodeproto.RunnerIdentity{Name: run, Type: holder, Labels: []string{label}},
 					Owner:         store.Actor{Kind: store.ActorOperator, CapabilityPrefix: "bound-authority", Owner: store.OwnerLeaseRef{RunID: run, Holder: holder, Generation: generation}},
 				}
 				award.Runner.Labels[0] = label
-				return hereHostSession{input: prepared, close: func() error { closed = true; return nil }, host: hereTestHost(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
+				return runHostSession{input: prepared, close: func() error { closed = true; return nil }, host: hereTestHost(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
 					called = true
 					if input.RunID != expected.RunID || input.RequestHash != expected.RequestHash || !bytes.Equal(input.SealedRequest, expected.SealedRequest) || input.Owner.Kind != expected.Owner.Kind || input.Owner.Owner != expected.Owner.Owner || !reflect.DeepEqual(input.GrantedRunner, expected.GrantedRunner) || input.Owner.CapabilityPrefix != "bound-authority" {
 						t.Fatal("preparation replaced awarded identity or sealed input")

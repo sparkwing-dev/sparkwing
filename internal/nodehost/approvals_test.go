@@ -12,12 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func fastApprovalPoll(t *testing.T) {
-	previous := approvalPoll
-	approvalPoll = time.Millisecond
-	t.Cleanup(func() { approvalPoll = previous })
-}
-
 func approvalFixture(t *testing.T, gate nodeproto.ApprovalSpec) *storeHostFixture {
 	t.Helper()
 	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{

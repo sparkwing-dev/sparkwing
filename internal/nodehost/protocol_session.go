@@ -39,7 +39,6 @@ type ProtocolSessionConfig struct {
 	ParseFrame      func([]byte) (nodeproto.Frame, error)
 	ValidateRequest func(nodeproto.Request) error
 	cleanupEnv      []string
-	output          *processOutput
 	grace           time.Duration
 }
 
@@ -450,14 +449,6 @@ func protocolScanner(file *os.File) *bufio.Scanner {
 func (s *ProtocolSession) readProtocolText(file *os.File, level string) {
 	defer s.streams.Done()
 	defer file.Close()
-	if s.cfg.output != nil {
-		index := 1
-		if level == LevelWarn {
-			index = 2
-		}
-		readQueuedText(file, s.cfg.output.queues[index])
-		return
-	}
 	scanner := protocolScanner(file)
 	for scanner.Scan() {
 		s.emitProtocolLog(nodeproto.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: level, Message: scanner.Text()})
@@ -552,9 +543,6 @@ func (s *ProtocolSession) Close() error {
 			<-drained
 		}
 		s.stopLogs()
-		if s.cfg.output != nil {
-			s.cfg.output.close()
-		}
 		err := s.protocolFailure()
 		if errors.Is(err, errProtocolSessionClosed) {
 			err = nil

@@ -24,13 +24,13 @@ func (s *RemoteOwnerStore) ReconcileNode(ctx context.Context, request store.Reco
 	}
 	body := controllerwire.ReconcileRequest{Policy: string(request.Policy), MaterializeOnly: request.MaterializeOnly}
 	if request.Source != nil {
-		if request.Source.Result != nil {
-			return store.ReconciledNode{}, errors.New("controller wire cannot represent a terminal result source")
-		}
 		if request.Policy != request.Source.Kind {
 			return store.ReconciledNode{}, errors.New("reconciliation source policy differs from its read edge")
 		}
 		body.Source = &controllerwire.ReuseSource{Policy: string(request.Source.Kind), Attempt: request.Source.Source, Record: request.Source.Record}
+		if result := request.Source.Result; result != nil {
+			body.Source.Result = &controllerwire.MaterializedResultSource{RunID: result.Ref.RunID, JobID: result.Ref.NodeID, StateSeq: result.StateSeq}
+		}
 	}
 	wire, err := s.Controller.ReconcileJob(ctx, request.Ref.RunID, request.Ref.NodeID, body)
 	if err != nil {
@@ -43,6 +43,9 @@ func (s *RemoteOwnerStore) ReconcileNode(ctx context.Context, request store.Reco
 	result := store.ReconciledNode{Kind: store.ReconcileKind(wire.Kind), Node: row}
 	if wire.Source != nil {
 		result.Source = &store.MaterializeSource{Kind: store.SourcePolicy(wire.Source.Policy), Source: wire.Source.Attempt, Record: wire.Source.Record}
+		if source := wire.Source.Result; source != nil {
+			result.Source.Result = &store.MaterializedResultSource{Ref: store.NodeRef{RunID: source.RunID, NodeID: source.JobID}, StateSeq: source.StateSeq}
+		}
 	}
 	if result.Kind == store.Execute {
 		claim := wire.Claim

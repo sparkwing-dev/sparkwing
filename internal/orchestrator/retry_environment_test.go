@@ -13,7 +13,7 @@ import (
 func TestConsumerRefusesUncapturedRetriesBeforeDispatch(t *testing.T) {
 	original := dispatchLocalTriggerFn
 	t.Cleanup(func() { dispatchLocalTriggerFn = original })
-	dispatchLocalTriggerFn = func(context.Context, *store.Trigger, string, *localCompileCache, *slog.Logger, []string) error {
+	dispatchLocalTriggerFn = func(context.Context, *store.Trigger, *slog.Logger, []string) error {
 		t.Error("retry reached dispatch without its execution environment")
 		return nil
 	}
@@ -30,7 +30,7 @@ func TestConsumerRefusesUncapturedRetriesBeforeDispatch(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runClaimedTrigger(t.Context(), st, trigger, nil, quietLogger(), home, time.Minute)
+			runClaimedTrigger(t.Context(), st, trigger, quietLogger(), home, time.Minute)
 			run, err := st.GetRun(t.Context(), trigger.ID)
 			if err != nil {
 				t.Fatal(err)

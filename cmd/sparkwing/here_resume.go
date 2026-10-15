@@ -19,17 +19,17 @@ import (
 
 type hereDependencies struct {
 	credentials func() (hereCredentials, error)
-	resolve     func(context.Context, client.EngineOptions) (hereRuntime, error)
+	resolve     func(context.Context, client.EngineOptions) (runHostRuntime, error)
 	version     string
 	attach      func(context.Context, client.EngineOptions, string, func(context.Context) (nodehost.RunCompletion, error)) (nodehost.RunCompletion, error)
 }
 
-type hereRuntime struct {
+type runHostRuntime struct {
 	controller controllerwire.Controller
-	bind       func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error)
+	bind       func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (runHostSession, error)
 }
 
-type hereHostSession struct {
+type runHostSession struct {
 	host  nodehost.RunHost
 	input nodehost.RunInput
 	close func() error
@@ -37,15 +37,15 @@ type hereHostSession struct {
 
 func defaultHereDependencies(output string) hereDependencies {
 	return hereDependencies{
-		credentials: localHereCredentials, version: installedVersion(), resolve: resolveHereRuntime,
+		credentials: localHereCredentials, version: installedVersion(), resolve: resolveHostRuntime,
 		attach: func(ctx context.Context, options client.EngineOptions, run string, host func(context.Context) (nodehost.RunCompletion, error)) (nodehost.RunCompletion, error) {
 			return attachHereRun(ctx, options, run, output, os.Stdout, host)
 		},
 	}
 }
 
-func resolveHereRuntime(context.Context, client.EngineOptions) (hereRuntime, error) {
-	return hereRuntime{}, &apierr.Error{Code: apierr.Unavailable, Message: "here run hosting is unavailable in this build", Hint: "the shared run host, source, storage and lease keeper require a native binding"}
+func resolveHostRuntime(context.Context, client.EngineOptions) (runHostRuntime, error) {
+	return runHostRuntime{}, &apierr.Error{Code: apierr.Unavailable, Message: "native run hosting is unavailable in this build", Hint: "the shared run host, source, storage and lease keeper require a native binding"}
 }
 
 func handoffHereRun(ctx context.Context, options client.EngineOptions, response controllerwire.CreateRunResponse, deps hereDependencies) error {
@@ -136,7 +136,7 @@ func resumeHereRun(ctx context.Context, options client.EngineOptions, run string
 }
 
 func runHereAward(ctx context.Context, options client.EngineOptions, run string, award controllerwire.ClaimedUnit,
-	bind func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error),
+	bind func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (runHostSession, error),
 ) (completion nodehost.RunCompletion, resultErr error) {
 	input, err := hereRunInput(run, award)
 	if err != nil {

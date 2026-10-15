@@ -4,13 +4,10 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
 
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
-
-func init() { waiterPoll = 5 * time.Millisecond }
 
 const testBox = "box-1"
 
@@ -173,17 +170,4 @@ func (d *fakeDaemon) only(t *testing.T) *fakeLease {
 		return l
 	}
 	return nil
-}
-
-func awaitHostedEvent(t *testing.T, ctx context.Context, event <-chan string, done <-chan RunResult) string {
-	t.Helper()
-	select {
-	case value := <-event:
-		return value
-	case result := <-done:
-		t.Fatalf("host returned before its event: %v", result.Err)
-	case <-ctx.Done():
-		t.Fatal("host event did not arrive:", context.Cause(ctx))
-	}
-	return ""
 }

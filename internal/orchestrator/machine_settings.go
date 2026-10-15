@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
@@ -59,26 +58,6 @@ func boxHostID() string {
 		return h
 	}
 	return "localhost"
-}
-
-func pauseTimeout() time.Duration {
-	var s debugSettings
-	path, _, err := userconfig.ReadDefault(userconfig.Debug, &s)
-	if err != nil {
-		slog.Warn("debug pause timeout unreadable; using the default", "err", err, "default", defaultPauseTimeout)
-		return defaultPauseTimeout
-	}
-	v := strings.TrimSpace(s.PauseTimeout)
-	if v == "" {
-		return defaultPauseTimeout
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d <= 0 {
-		slog.Warn("debug pause timeout is not a positive duration; using the default",
-			"file", path, "key", pauseTimeoutKey, "value", v, "default", defaultPauseTimeout)
-		return defaultPauseTimeout
-	}
-	return d
 }
 
 func submitEnvAllowSetting() ([]string, string, error) {

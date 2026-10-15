@@ -17,7 +17,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/testleak"
 )
@@ -200,16 +199,19 @@ func checkNoNewPipes(t *testing.T, before map[string]bool) {
 func startFake(t *testing.T, ctx context.Context, sink *recorder) *ProtocolSession {
 	t.Helper()
 	before := openPipes(t)
-	s, err := startConfiguredProcess(ctx, SessionConfig{
-		Entry: pipelineentry.Binary(os.Args[0]),
-		// bug: the race runtime otherwise sleeps a second at exit, past the grace.
-		Env:   append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
-		Sink:  sink,
-		Grace: 500 * time.Millisecond, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
+	s, err := StartProtocolSession(ctx, ProtocolSessionConfig{
+		Command: []string{os.Args[0]}, Environment: append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
+		Log: func(_ context.Context, record nodeproto.FrameLog) error { sink.Record(record); return nil }, grace: 500 * time.Millisecond,
 	})
+	if err == nil {
+		var hello nodeproto.HelloResult
+		err = ask(ctx, s, nodeproto.Request{Op: nodeproto.OpHello, Protocol: 2, Engine: &nodeproto.EngineIdentity{Version: "test"}, Runner: &nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}, &hello)
+	}
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
+	stop := context.AfterFunc(ctx, func() { s.failProtocol(context.Cause(ctx)) })
+	t.Cleanup(func() { stop() })
 	t.Cleanup(func() {
 		_ = s.Close()
 		if s.cmd.ProcessState == nil {
@@ -346,7 +348,11 @@ func TestSessionStdoutCannotForgeReply(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	text, _ := sink.snapshot()
+	_, records := sink.snapshot()
+	text := make([]string, 0, len(records))
+	for _, record := range records {
+		text = append(text, record.Level+" "+record.Message)
+	}
 	want := []string{`"outcome":"failed"`, "warn warned"}
 	for _, line := range want {
 		found := false
@@ -422,69 +428,6 @@ func TestSessionCancelKillsGrandchildren(t *testing.T) {
 		if p.PID == pid && !p.Terminated() {
 			t.Fatalf("grandchild %d outlived the cancel: %+v", pid, p)
 		}
-	}
-}
-
-type blockingSink struct {
-	release chan struct{}
-	mu      sync.Mutex
-	text    []string
-}
-
-func (b *blockingSink) Text(level, line string) {
-	<-b.release
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.text = append(b.text, level+" "+line)
-}
-
-func (b *blockingSink) Record(rec nodeproto.FrameLog) {
-	<-b.release
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.text = append(b.text, rec.Level+" "+rec.Message)
-}
-
-func TestSessionBlockedSinkNeitherStallsRepliesNorClose(t *testing.T) {
-	sink := &blockingSink{release: make(chan struct{})}
-	t.Cleanup(func() { close(sink.release) })
-	before := openPipes(t)
-	s, err := startConfiguredProcess(context.Background(), SessionConfig{
-		Entry: pipelineentry.Binary(os.Args[0]),
-		Env:   append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
-		Sink:  sink,
-		Grace: 100 * time.Millisecond, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
-	})
-	if err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	for range 3 {
-		if _, err := s.Request(callCtx(t), runStep("echo")); err != nil {
-			t.Fatalf("run_step behind a blocked sink: %v", err)
-		}
-	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("close behind a blocked sink: %v", err)
-	}
-	checkNoNewPipes(t, before)
-}
-
-func TestSinkQueueCountsDrops(t *testing.T) {
-	defer func(old int) { sinkQueueBytes = old }(sinkQueueBytes)
-	sinkQueueBytes = 1000
-	sink := &blockingSink{release: make(chan struct{})}
-	q := newSinkQueue(LevelInfo, nil)
-	go q.run(sink)
-	for i := range 50 {
-		q.push(sinkItem{text: strings.Repeat("x", 90) + strconv.Itoa(i), size: 92})
-	}
-	close(sink.release)
-	q.close()
-	<-q.done
-	kept := len(sink.text) - 1
-	want := fmt.Sprintf("warn sparkwing: %d log lines dropped while the log sink was behind", 50-kept)
-	if kept >= 50 || sink.text[len(sink.text)-1] != want {
-		t.Fatalf("delivered %d lines ending %q, want drops counted as %q", kept, sink.text[len(sink.text)-1], want)
 	}
 }
 
@@ -564,4 +507,13 @@ func TestSessionReapsLeaderWhenCleanupTimesOut(t *testing.T) {
 	if s.cmd.ProcessState == nil {
 		t.Fatal("the leader was left unreaped")
 	}
+}
+
+func ask(ctx context.Context, process ExecutorProcess, req nodeproto.Request, result any) error {
+	req.ID = "host"
+	reply, err := process.Request(ctx, req)
+	if err != nil {
+		return err
+	}
+	return reply.Decode(result)
 }

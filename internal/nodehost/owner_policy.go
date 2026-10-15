@@ -15,6 +15,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+const (
+	defaultSkipBudget    = 30 * time.Second
+	memoKeyBudget        = 30 * time.Second
+	afterRunTimeoutLimit = 2 * time.Minute
+)
+
 // SkipEvaluation reports the guard decision and zero-based predicates that
 // exhausted their budget. Hosts log TimedOut as don't-skip diagnostics.
 type SkipEvaluation struct {

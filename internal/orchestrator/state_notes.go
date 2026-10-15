@@ -22,3 +22,9 @@ func noteEvent(ctx context.Context, state StateBackend, runID, nodeID, kind stri
 	noteLostStateWrite(ctx, "append event "+kind+" on node "+nodeID, runID,
 		state.AppendEvent(ctx, runID, nodeID, kind, payload))
 }
+
+func warnHostedClose(what string, err error) {
+	if err != nil {
+		slog.Default().Warn("close "+what, "err", err)
+	}
+}

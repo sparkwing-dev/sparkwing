@@ -1,5 +1,12 @@
 # C3 protocol and SDK contract
 
+[The local hosting cut](../w3-local-hosting-cut-progress.md) removes the local
+scheduler, Server, attempt chain, source compiler and trigger shepherd. Local
+foreground and claimed-trigger callers use typed intake/awards and the shared
+host boundary. The native runtime binding and legacy local intake/consumer
+migration remain open. Remote reconciliation now carries terminal result
+references declared by W9.
+
 [The remote hosting cut](../w3-remote-hosting-cut-progress.md) routes initial here
 hosting through the same sealed owner handoff as resume. It deletes the legacy
 trigger dispatcher, pod host, remote service proxy and scheduler resume path.
@@ -167,11 +174,11 @@ The capability and layer tables contain the complete target data.
 |---|---|
 | Hello, operations, frames, describe, flat plan and shared validation | `internal/nodeproto/*_contract.go` |
 | Windows inherited-handle argv spelling | `internal/protofd/transport_contract.go` |
-| Run and node host roles, layer order, event-following reconciliation | `internal/nodehost/host_contract.go` |
+| Run and node host roles, layer order, event-following reconciliation | `internal/nodehost/host.go` |
 | Pure graph decisions and consistent snapshot projection | `pkg/store/scheduling_contract.go` |
 | Every unit's renewal loop | `internal/lease/keeper_contract.go` |
 | Checkout and entry acquisition | `internal/source/acquire_contract.go` |
-| Plan cache identity, eligibility and validated hits | `internal/nodehost/plan_cache_contract.go` |
+| Plan cache identity, eligibility and validated hits | `internal/nodehost/plan_cache.go` |
 | Exact engines, verified releases and signed version policy | `internal/engine` |
 | Go declarations and services | `sparkwing/sdk_contract.go`, `sparkwing/inputs/memo_contract.go`, retained API inventory below |
 | Author test host | `sparkwing/sparkwingtest/host_contract.go` |
@@ -860,10 +867,11 @@ unless masking changes them, in which case the error uses `sdk_error`.
 Successful and cancelled results carry no failure. Holder renewal and reporting
 also carry the awarded capability's `Actor.Authority` reference, not just its fence.
 
-The remote wire still omits `JobResult.Failure` and
-`MaterializeSource.Result`. W3 refuses the latter before calling the controller
-because dropping its terminal state sequence would change the proposed source.
-Both fields need W9 contract declarations before remote adapters can carry them.
+The wire declares `JobResult.Failure` and terminal result references.
+Remote reconciliation carries the terminal result's run, job and state sequence
+in both directions. Its property test checks exact projection and independent
+ownership of the translated values. Native authenticated adapter composition
+remains open.
 
 `lifecycle-dependency-verdicts/hermetic-recorded-failure` checks retry and final
 failure records through the common claim host and executor with contract fakes.

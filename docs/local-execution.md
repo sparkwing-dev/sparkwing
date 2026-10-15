@@ -4,9 +4,10 @@
 submits it to a controller. Both placements use the shared run and job hosts,
 sealed inputs and matching SDK engine.
 
-This guide describes the rewrite contract. The CLI's local and initial-trigger
-paths still need their final host, source, storage and lifecycle bindings.
-Native execution, detachment and standalone behavior require acceptance evidence.
+This guide describes the rewrite contract. The foreground local caller uses
+sealed intake and an awarded shared host. Its native runtime binding is absent,
+so it refuses hosting before submitting a run. Local detachment and standalone
+execution still need integration and native acceptance evidence.
 See [rewrite integration](architecture.md) for that boundary.
 
 ## Execution commands

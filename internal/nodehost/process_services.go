@@ -19,6 +19,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
+var logLevels = map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
+
 // ProcessServices supplies one live process's accepted declaration and record writers.
 // Writers recheck Authorized in their transaction. Every sink uses Masks' shared masker.
 type ProcessServices struct {

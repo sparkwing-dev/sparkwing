@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -388,12 +387,12 @@ func TestConsumer_CancelRequestedBeforeClaimNeverDispatches(t *testing.T) {
 
 	dispatched := false
 	previous := dispatchLocalTriggerFn
-	dispatchLocalTriggerFn = func(context.Context, *store.Trigger, string, *localCompileCache, *slog.Logger, []string) error {
+	dispatchLocalTriggerFn = func(context.Context, *store.Trigger, *slog.Logger, []string) error {
 		dispatched = true
 		return nil
 	}
 	t.Cleanup(func() { dispatchLocalTriggerFn = previous })
-	runClaimedTrigger(ctx, st, claimed, nil, quietLogger(), home, time.Minute)
+	runClaimedTrigger(ctx, st, claimed, quietLogger(), home, time.Minute)
 	if dispatched {
 		t.Fatal("a cancelled trigger reached dispatch")
 	}
@@ -410,45 +409,6 @@ func TestConsumer_CancelRequestedBeforeClaimNeverDispatches(t *testing.T) {
 	}
 	if trig.Status != "done" {
 		t.Fatalf("trigger status = %q, want done", trig.Status)
-	}
-}
-
-func TestSubmittedTriggerRepoDir_SelectsTheSubmittingCheckout(t *testing.T) {
-	repoDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(repoDir, ".sparkwing"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	trig := &store.Trigger{
-		ID: "run-1", Pipeline: "lint",
-		TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir},
-	}
-	got, err := locateTriggerRepo(context.Background(), trig, t.TempDir())
-	if err != nil {
-		t.Fatalf("locateTriggerRepo: %v", err)
-	}
-	if filepath.Clean(got) != filepath.Clean(repoDir) {
-		t.Fatalf("located %q, want the submitting checkout %q", got, repoDir)
-	}
-}
-
-func TestSubmittedTriggerRepoDir_FailsClosedWhenTheCheckoutIsGone(t *testing.T) {
-	trig := &store.Trigger{
-		ID: "run-1", Pipeline: "lint",
-		TriggerEnv: map[string]string{SubmitRepoDirKey: filepath.Join(t.TempDir(), "gone")},
-	}
-	_, err := locateTriggerRepo(context.Background(), trig, "")
-	if err == nil {
-		t.Fatal("a submitted trigger whose checkout vanished resolved anyway")
-	}
-	if !strings.Contains(err.Error(), "no longer has a .sparkwing/") {
-		t.Fatalf("error does not name the cause: %v", err)
-	}
-}
-
-func TestSubmittedTriggerRepoDir_AbsentOnOrdinaryTriggers(t *testing.T) {
-	dir, err := submittedTriggerRepoDir(&store.Trigger{ID: "run-1", Pipeline: "lint"})
-	if err != nil || dir != "" {
-		t.Fatalf("submittedTriggerRepoDir = %q, %v; want empty and no error", dir, err)
 	}
 }
 
