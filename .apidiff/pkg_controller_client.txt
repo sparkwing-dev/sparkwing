@@ -127,7 +127,6 @@ func (c *engineClient) ReadSteps(ctx context.Context, run string) (controllerwir
 func (c *engineClient) ReconcileJob(ctx context.Context, run, job string, input controllerwire.ReconcileRequest) (controllerwire.ReconcileResponse, error)
 func (c *engineClient) RecordStep(ctx context.Context, run, job string, input controllerwire.StepReportRequest) error
 func (c *engineClient) Renew(ctx context.Context, claim string, input controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error)
-func (c *engineClient) ReplaceSchedules(ctx context.Context, input controllerwire.ScheduleRepoRequest) (controllerwire.ScheduleRepoWritten, error)
 func (c *engineClient) ResetObjectStoreBreaker(ctx context.Context, key string) (controllerwire.ObjectStoreBreaker, error)
 func (c *engineClient) ResetSchedule(ctx context.Context, name string) (controllerwire.ScheduleView, error)
 func (c *engineClient) ResetSizing(context.Context, controllerwire.SizingReset) (controllerwire.SizingResetSummary, error)
@@ -141,6 +140,7 @@ func (c *engineClient) SetSchedulePaused(ctx context.Context, name string, pause
 func (c *engineClient) SyncLauncher(ctx context.Context, input controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
 func (c *engineClient) TransitionJob(ctx context.Context, run, job string, input controllerwire.JobTransitionRequest) (controllerwire.Applied, error)
 func (c *engineClient) WriteOperatorLimits(ctx context.Context, input controllerwire.OperatorLimitsWrite) (controllerwire.OperatorLimits, error)
+func (c *engineClient) WriteSchedules(ctx context.Context, input controllerwire.ScheduleRepoRequest) (controllerwire.ScheduleRepoWritten, error)
 func (c *engineClient) WriteSecret(ctx context.Context, input controllerwire.SecretWrite) (controllerwire.SecretWritten, error)
 func (c *tokenManager) CreateToken(ctx context.Context, input controllerwire.TokenCreate) (controllerwire.TokenCreated, error)
 func (c *tokenManager) EnrollRunner(ctx context.Context, request EnrollRunnerRequest) (*CreatedToken, error)

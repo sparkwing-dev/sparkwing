@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -19,7 +18,7 @@ func TestRefundReportingRejectsTeamOwnerAndRunner(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner, _, err := tenant.CreateToken(ctx, "private-runner", store.TokenKindRunner,
-		[]string{controller.ScopeNodesClaim, controller.ScopeRunsState, controller.ScopeSecretsRead}, 0, time.Now())
+		[]string{"nodes.claim", "runs.state", "secrets.read"}, 0, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

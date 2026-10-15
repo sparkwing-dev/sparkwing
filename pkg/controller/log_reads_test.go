@@ -219,30 +219,6 @@ func TestCommittedDashboardLogResumeUsesAttemptOrder(t *testing.T) {
 	}
 }
 
-func TestDashboardLogActorUsesPersistedCredentialIdentity(t *testing.T) {
-	for _, p := range []*Principal{nil, {TokenPrefix: "capability"}, {TokenPrefix: "capability", session: "session-secret"}} {
-		ctx := t.Context()
-		if p != nil {
-			ctx = context.WithValue(ctx, principalCtxKey{}, p)
-		}
-		actor := dashboardLogActor(ctx)
-		if p == nil {
-			if actor != (store.Actor{}) {
-				t.Fatal("anonymous actor acquired authority")
-			}
-			continue
-		}
-		expected := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: p.TokenPrefix}
-		if p.session != "" {
-			digest := sha256.Sum256([]byte(p.session))
-			expected = capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-		}
-		if actor.Authority != expected {
-			t.Fatalf("authority=%+v, want %+v", actor.Authority, expected)
-		}
-	}
-}
-
 func TestCommittedDashboardLogUsesFinalStore(t *testing.T) {
 	engine, tenant := engineRuntimeStore(t)
 	authorized := engineRuntimeClaim(t, engine, capability.UnitNode)

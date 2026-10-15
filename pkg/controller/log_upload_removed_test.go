@@ -9,7 +9,7 @@ import (
 )
 
 func TestRetiredLogPersistenceRoutesHaveNoWriterProperty(t *testing.T) {
-	mux, _ := (&Server{}).routers()
+	mux := (&Server{}).routers()
 	property := func(run, job uint64) bool {
 		for _, operation := range []string{"log-segments", "log-manifest"} {
 			path := fmt.Sprintf("/api/v1/runs/%x/nodes/%x/%s", run, job, operation)

@@ -2,13 +2,14 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"html"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -33,107 +34,41 @@ type hostedPageJSON struct {
 	URL string `json:"url"`
 }
 
-// safety: only a trusted team adds a card, because the card is what lets its
-// balance run below zero; an untrusted team keeps prepaying.
-func (s *Server) handleTeamBillingCard(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+func (s *Server) handleTeamBillingCard(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if err := emptyBillingBody(r); err != nil {
+		return err
 	}
-	if s.checkout == nil {
-		writeJSON(w, http.StatusServiceUnavailable, codedErrorJSON{
-			Error: "this controller bills no cards", Code: CheckoutUnavailableCode,
-		})
-		return
-	}
-	ctx := r.Context()
-	spend, err := t.SpendStanding(ctx, time.Now())
-	if err != nil {
-		s.writeInternalError(w, r, "team card standing", err)
-		return
-	}
-	if !spend.Billing.Trusted {
-		writeJSON(w, http.StatusConflict, codedErrorJSON{
-			Error: "a card is added once the team is trusted; until then it prepays", Code: CardNotTrustedCode,
-		})
-		return
-	}
-	email := ""
-	if p.AccountID != "" {
-		if email, err = s.store.AccountEmail(ctx, p.AccountID); err != nil && !errors.Is(err, store.ErrNotFound) {
-			s.writeInternalError(w, r, "team card email", err)
-			return
-		}
-	}
-	page, err := s.checkout.hostedPage(ctx, "/internal/card-setup", map[string]any{
-		"team": string(t.Team()), "email": email, "customer": spend.Card.Customer,
-	})
-	if err != nil {
-		s.logger.Error("opening a card setup page failed", "team", string(t.Team()), "err", err)
-		writeError(w, http.StatusBadGateway, errors.New("the card page could not be opened; try again"))
-		return
-	}
-	writeJSON(w, http.StatusOK, hostedPageJSON{URL: page})
+	return s.openBillingPage(w, r, a, capability.BillingPageCard, 0)
 }
 
-func (s *Server) handleTeamBillingPay(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+func (s *Server) handleTeamBillingPay(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if err := emptyBillingBody(r); err != nil {
+		return err
 	}
-	if s.checkout == nil {
-		writeJSON(w, http.StatusServiceUnavailable, codedErrorJSON{
-			Error: "this controller bills no cards", Code: CheckoutUnavailableCode,
-		})
-		return
-	}
-	ctx := r.Context()
-	work, err := t.StartRecoveryAttempt(ctx, time.Now())
-	if errors.Is(err, store.ErrNoPayableCharge) {
-		writeJSON(w, http.StatusConflict, codedErrorJSON{Error: err.Error(), Code: NoPayableChargeCode})
-		return
-	}
-	if err != nil {
-		s.writeInternalError(w, r, "team card recovery", err)
-		return
-	}
-	page, err := s.checkout.hostedPage(ctx, "/internal/charge-checkout", map[string]any{
-		"team": string(work.Team), "charge_id": work.ChargeID, "attempt_id": work.AttemptID,
-		"amount_cents": work.AmountCents, "customer": work.Customer,
-	})
-	if err != nil {
-		if failErr := s.store.AsOperator().DropCardAttempt(ctx, work.AttemptID, time.Now()); failErr != nil {
-			s.logger.Warn("closing an unopened recovery attempt failed", "attempt", work.AttemptID, "err", failErr)
-		}
-		s.logger.Error("opening a recovery checkout failed", "team", string(t.Team()), "err", err)
-		writeError(w, http.StatusBadGateway, errors.New("the payment page could not be opened; try again"))
-		return
-	}
-	writeJSON(w, http.StatusOK, hostedPageJSON{URL: page})
+	return s.openBillingPage(w, r, a, capability.BillingPageRecovery, 0)
 }
 
 type teamBudgetReq struct {
 	BudgetCents int64 `json:"budget_cents"`
 }
 
-func (s *Server) handleTeamBillingBudget(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+func (s *Server) handleTeamBillingBudget(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if !s.Metering() {
+		return &apierr.Error{Code: apierr.NotFound, Message: "billing is unavailable"}
 	}
 	var req teamBudgetReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &req); err != nil {
+		return err
 	}
-	switch err := t.SetSpendBudget(r.Context(), req.BudgetCents); {
-	case errors.Is(err, store.ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, err)
-	case err != nil:
-		s.writeInternalError(w, r, "team budget", err)
-	default:
-		w.WriteHeader(http.StatusNoContent)
+	writer, err := s.billingWriter(r, a)
+	if err != nil {
+		return err
 	}
+	if err := writer.SetAuthorizedSpendBudget(r.Context(), a, req.BudgetCents); err != nil {
+		return billingMutationError(err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 type cardPaymentReq struct {

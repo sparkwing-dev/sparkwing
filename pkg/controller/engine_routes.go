@@ -132,18 +132,6 @@ func (s *EngineController) handleExpansion(w http.ResponseWriter, r *http.Reques
 	return nil
 }
 
-func (s *Server) registerEngineRoutes(mux *http.ServeMux) {
-	endpoints := s.engineEndpoints()
-	// safety: the run list still has its own registration on this shared collection path.
-	router := NewPolicyRouter(s.authorization)
-	if err := router.Register(endpoints[0]); err != nil {
-		mux.HandleFunc("POST /api/v1/runs", func(w http.ResponseWriter, _ *http.Request) { writePolicyError(w, err) })
-	} else {
-		mux.Handle("POST /api/v1/runs", noStore(router))
-	}
-	s.registerPolicyEndpoints(mux, endpoints[1:])
-}
-
 func (s *EngineController) runTarget(r *http.Request) (capability.RequestEvidence, error) {
 	evidence := capability.RequestEvidence{Target: capability.Target{RunID: r.PathValue("run"), NodeID: r.PathValue("job")}}
 	var team store.Team
@@ -184,9 +172,6 @@ func (s *EngineController) intakeTarget(r *http.Request) (capability.RequestEvid
 	target := capability.Target{
 		Team: body.Request.Team, BodyRunID: body.Request.Lineage.ParentRunID,
 		RunID: body.Request.Lineage.ParentRunID, NodeID: body.Request.Lineage.ParentJobID,
-	}
-	if target.Team == "" {
-		return capability.RequestEvidence{}, invalidEngineBody("request.team is required")
 	}
 	return capability.RequestEvidence{Target: target}, nil
 }
@@ -278,6 +263,13 @@ func decodeEngineRequest(r *http.Request, body any) error {
 }
 
 func engineLookupError(err error) error {
+	var sqlErr interface{ SQLState() string }
+	if errors.As(err, &sqlErr) {
+		switch sqlErr.SQLState() {
+		case "40001", "40P01", "55P03":
+			return &apierr.Error{Code: apierr.Unavailable, Message: "transaction is temporarily unavailable", Details: map[string]any{"retry_after_ms": 1000}}
+		}
+	}
 	var transition *store.ErrIllegalTransition
 	if errors.As(err, &transition) {
 		code := apierr.IllegalTransition

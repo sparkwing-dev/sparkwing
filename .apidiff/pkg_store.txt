@@ -2762,7 +2762,6 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 func (s *Store) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error)
 func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (ClaimedRun, error)
 func (s *Store) Close() error
-func (s *Store) CommittedObject(ctx context.Context, team Team, key string) (Upload, error)
 func (s *Store) ComputeAlarmState(ctx context.Context) (runners, alarm int64, err error)
 func (s *Store) ComputeLimits(ctx context.Context) (_ ComputeLimits, err error)
 func (s *Store) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error)
@@ -2872,7 +2871,6 @@ func (s *Store) NodeClaimOrigin(ctx context.Context, runID, nodeID string) (prin
 func (s *Store) NodeExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeOutputKey(ctx context.Context, runID, nodeID string) (string, error)
-func (s *Store) NodeOutputObject(ctx context.Context, team Team, runID, nodeID string) (Upload, error)
 func (s *Store) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error)
 func (s *Store) OpenInvitationsForEmail(ctx context.Context, email string, now time.Time) (_ []Invitation, err error)
 func (s *Store) OutputDir() string
@@ -2905,7 +2903,6 @@ func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Ti
 func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
-func (s *Store) RunStoragePassLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
 func (s *Store) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, err error)
 func (s *Store) SeedToken(ctx context.Context, raw, principal, kind string, scopes []string, now time.Time) (_ bool, err error)
@@ -3220,6 +3217,7 @@ func (t *Tenant) ReserveQuota(ctx context.Context, quota string, amount int64) (
 func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
 func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)
 func (t *Tenant) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
+func (t *Tenant) ResolveBlobAuthority(ctx context.Context, selector blob.Authority, grant capability.Grant) (blob.Authority, error)
 func (t *Tenant) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error)
 func (t *Tenant) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) (err error)
 func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
@@ -3436,22 +3434,6 @@ type UnpricedCPUClassError struct {
 }
 func (e *UnpricedCPUClassError) Error() string
 func (e *UnpricedCPUClassError) Unwrap() error
-type Upload struct {
-	ID          string
-	Team        Team
-	RunID       string
-	Kind        StorageKind
-	Key         string
-	Size        int64
-	SHA256      string
-	Principal   string
-	ClaimPrefix string
-	Provenance  string
-	Repo        string
-	Ref         string
-	ExpiresAt   time.Time
-	CommittedAt time.Time
-}
 type UploadReservation struct {
 	ID          string
 	Blob        blob.Blob

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -17,22 +18,24 @@ type renameTeamReq struct {
 	DisplayName string `json:"display_name"`
 }
 
-func (s *Server) handleRenameTeam(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
-	}
+func (s *Server) handleRenameTeam(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var req renameTeamReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &req); err != nil {
+		return err
 	}
-	info, err := t.Rename(r.Context(), req.DisplayName, time.Now())
+	writer, err := s.teamWriter(r, a)
 	if err != nil {
-		writeIdentityError(w, s, r, "rename team", err)
-		return
+		return err
 	}
-	writeJSON(w, http.StatusOK, teamJSON{Slug: string(info.Slug), DisplayName: info.Label(), Role: p.Role})
+	info, err := writer.RenameAuthorizedTeam(r.Context(), a, req.DisplayName)
+	if err != nil {
+		return accountMutationError(err)
+	}
+	if info.Slug != store.Team(a.Target.Team) {
+		return missingEndpointPolicy()
+	}
+	writeJSON(w, http.StatusOK, teamJSON{Slug: string(info.Slug), DisplayName: info.Label(), Role: string(store.RoleOwner)})
+	return nil
 }
 
 type memberJSON struct {
@@ -42,12 +45,6 @@ type memberJSON struct {
 	Role   string `json:"role"`
 }
 
-func (s *Server) invalidateRevokedTokens(prefixes []string) {
-	for _, prefix := range prefixes {
-		s.auth.Invalidate(prefix)
-	}
-}
-
 type invitationJSON struct {
 	ID        string `json:"id"`
 	Email     string `json:"email"`
@@ -55,21 +52,21 @@ type invitationJSON struct {
 	ExpiresAt int64  `json:"expires_at"`
 }
 
-func (s *Server) handleListInvitations(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+func (s *Server) handleListInvitations(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	invites, err := t.Invitations(r.Context(), time.Now())
 	if err != nil {
-		s.writeInternalError(w, r, "list invitations", err)
-		return
+		return engineLookupError(err)
 	}
 	out := make([]invitationJSON, 0, len(invites))
 	for _, inv := range invites {
 		out = append(out, invitationJSON{ID: inv.ID, Email: inv.Email, Role: string(inv.Role), ExpiresAt: inv.ExpiresAt.Unix()})
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 type inviteReq struct {
@@ -83,26 +80,32 @@ type inviteResp struct {
 	EmailSent bool   `json:"email_sent"`
 }
 
-func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
-	}
+func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var req inviteReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &req); err != nil {
+		return err
 	}
-	inv, err := t.CreateInvitation(r.Context(), p.AccountID, req.Email, store.Role(req.Role), time.Now())
+	key, err := controlIdempotencyKey(r)
 	if err != nil {
-		writeIdentityError(w, s, r, "invite", err)
-		return
+		return err
+	}
+	writer, err := s.teamWriter(r, a)
+	if err != nil {
+		return err
+	}
+	inv, err := writer.CreateAuthorizedInvitation(r.Context(), a, req.Email, store.Role(req.Role), key)
+	if err != nil {
+		return accountMutationError(err)
+	}
+	if inv.Team != store.Team(a.Target.Team) {
+		return missingEndpointPolicy()
 	}
 	noteAuditTarget(r.Context(), "invitation_id", inv.ID)
 	noteAuditTarget(r.Context(), "role", string(inv.Role))
 	accept := s.acceptURL(inv.ID)
-	sent := s.mailInvitation(r.Context(), p, t, inv, accept)
+	sent := s.mailInvitation(r.Context(), a, inv, accept)
 	writeJSON(w, http.StatusCreated, inviteResp{ID: inv.ID, AcceptURL: accept, EmailSent: sent})
+	return nil
 }
 
 // WithMailer sends invitation emails through m. Without one, the controller
@@ -114,7 +117,7 @@ func (s *Server) WithMailer(m mailer.Mailer) *Server {
 
 // safety: a failed or refused send leaves the invitation standing, because the
 // owner still holds its accept link; only the email is lost, and the response says so.
-func (s *Server) mailInvitation(ctx context.Context, p *Principal, t *store.Tenant, inv store.Invitation, accept string) bool {
+func (s *Server) mailInvitation(ctx context.Context, a capability.Authorized, inv store.Invitation, accept string) bool {
 	if s.mailer == nil {
 		if err := (mailer.Log{Logger: s.logger}).Send(ctx, mailer.Message{To: inv.Email, Subject: "team invitation"}); err != nil {
 			s.logger.Warn("invitation email: log", "err", err)
@@ -130,13 +133,15 @@ func (s *Server) mailInvitation(ctx context.Context, p *Principal, t *store.Tena
 		s.logger.Info("invitation email withheld: the address reached its daily limit", "invitation", inv.ID)
 		return false
 	}
-	inviter := p.Name
-	if acct, err := s.store.Account(ctx, p.AccountID); err == nil && strings.TrimSpace(acct.Name) != "" {
+	inviter := a.Principal.Capability.Subject.ID
+	if acct, err := s.store.Account(ctx, a.Principal.Capability.Subject.ID); err == nil && strings.TrimSpace(acct.Name) != "" {
 		inviter = acct.Name
 	}
-	team := string(t.Team())
-	if info, err := t.Info(ctx); err == nil {
-		team = info.Label()
+	team := string(inv.Team)
+	if tenant, err := s.store.ForTeam(ctx, inv.Team); err == nil {
+		if info, err := tenant.Info(ctx); err == nil {
+			team = info.Label()
+		}
 	}
 	msg, err := mailer.InvitationMessage(inv.Email, mailer.Invitation{
 		InviterName: inviter, TeamName: team, Role: string(inv.Role), AcceptURL: accept, ExpiresAt: inv.ExpiresAt,
@@ -166,44 +171,37 @@ func (s *Server) acceptURL(id string) string {
 	return u.Scheme + "://" + u.Host + path
 }
 
-func (s *Server) handleDeleteInvitation(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+func (s *Server) handleDeleteInvitation(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	writer, err := s.teamWriter(r, a)
+	if err != nil {
+		return err
 	}
-	if err := t.DeleteInvitation(r.Context(), r.PathValue("id"), time.Now()); err != nil {
-		writeIdentityError(w, s, r, "delete invitation", err)
-		return
+	if err := writer.DeleteAuthorizedInvitation(r.Context(), a, r.PathValue("invitation")); err != nil {
+		return accountMutationError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
-func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) {
-	p, ok := accountPrincipal(w, r)
-	if !ok {
-		return
-	}
-	acc, err := s.store.AcceptInvitation(r.Context(), p.AccountID, r.PathValue("id"), time.Now())
+func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	writer, err := s.accountWriter()
 	if err != nil {
-		writeIdentityError(w, s, r, "accept invitation", err)
-		return
+		return err
 	}
-	team := acc.Team
+	acc, err := writer.AcceptAccountInvitation(r.Context(), a, r.PathValue("invitation"))
+	if err != nil {
+		return accountMutationError(err)
+	}
 	if acc.Admitted {
 		observeSignUpOutcome("admitted", "invitation")
-		s.logger.Info("signup.admitted_by_invitation", "account", p.AccountID, "team", string(team))
+		s.logger.Info("signup.admitted_by_invitation", "account", a.Principal.Capability.Subject.ID, "team", string(acc.Team))
 	}
 	if g := acc.GateClosed; g != nil {
 		observeSignUpGateClosed(g.Source)
 		s.logger.Warn("signup.gate_closed", "source", g.Source, "reason", g.Reason)
 	}
-	if p.Team != team {
-		if err := s.store.SwitchSessionTeam(r.Context(), p.session, p.AccountID, p.Team, team); err != nil {
-			s.writeInternalError(w, r, "accept invitation switch", err)
-			return
-		}
-	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 const maxRunnerRepos = 32

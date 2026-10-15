@@ -20,7 +20,64 @@ unlock.
 
 ## [Unreleased]
 
+- **controller (Breaking):** Use shared object backends for signing and capability subjects for authentication metrics
+  CloudFront download signing wraps the S3 backend. Duplicate signer types and legacy upload helpers are removed. Authenticated requests use subject-kind labels, and the token-cache metric is removed. See [migration guide](docs/migrations/_unreleased.md#data-signing-and-authentication-metrics).
+
+- **controller (Breaking):** Remove legacy Principal helpers and use final job metric routes
+  Metric and deployment-setting writes require authority-bearing transactions. Runner budgets use authenticated holders, and egress concurrency refusals use the canonical error envelope. See [migration guide](docs/migrations/_unreleased.md#final-credential-helpers-and-reporting-writes).
+
+- **controller (Breaking):** GitHub connection and console writes require authority-bearing transactions
+  Browser connections use the shared policy router. Embedded controllers supply `WithGitHubConnectWriter` and `WithConsoleWriter`. Waitlist approval requires a replay key. See [migration guide](docs/migrations/_unreleased.md#browser-connection-and-console-transactions).
+
+- **controller (Breaking):** Team, GitHub App and billing writes use the shared capability policy
+  The legacy token verifier, caches and route fences are removed. Invitation and payment-page POSTs require a replay key. Embedded controllers supply authority-bearing transaction adapters. Account deletion is available through the operator console. See [migration guide](docs/migrations/_unreleased.md#remaining-team-credential-routes).
+
+- **controller (Breaking):** Reporting reads use the shared capability policy and job log paths
+  Runner, approval and sizing reads use `/runners`, `/approvals` and `/sizing`. Legacy read paths and the `paused` alias are removed. See [migration guide](docs/migrations/_unreleased.md#reporting-credential-routes).
+
+- **controller (Breaking):** Step lifecycle reports use the shared attempt-fenced request and acknowledgement
+  Start, finish and skip require `state` and a captured positive `source_attempt`. Errors are masked text, and optional timestamps preserve nanoseconds. A stale ordinal returns `lock_held`. See [migration guide](docs/migrations/_unreleased.md#typed-step-reports).
+
+- **controller (Breaking):** Concurrency routes use the shared capability policy and authority-bearing tenant transactions
+  Operations move from `/api/v1/concurrency/{key}` to `/api/v1/queue/groups/{group}` and use job wire names. Embedded controllers supply `WithConcurrencyStore`. See [migration guide](docs/migrations/_unreleased.md#concurrency-credential-routes).
+
+### Changed
+
+- **controller (Breaking):** Runner lists, queue headroom and runner metrics read tenant store snapshots
+  Holder-string identity and process-local presence, heartbeat and headroom caches are removed. Embedded controllers supply `WithRunnerInventory` using the shared credential snapshot types. See [migration guide](docs/migrations/_unreleased.md#runner-observation-snapshots).
+
+- **controller (Breaking):** Schedule and review routes use shared capability authorization
+  Schedules move to `/api/v1/schedules`. Run-now, approval decisions and debug-pause creation carry replay keys. Approval objects use `job_id`; the raw gate-request route is removed. See [migration guide](docs/migrations/_unreleased.md#schedule-and-review-credential-routes).
+
+- **controller:** Verify Stripe card setup, payment, refund, warning and dispute events through the signed callback
+  Provider lookups verify card identity and mode. Non-checkout settlement still needs its store adapter.
+- **controller (Breaking):** Replace token-table startup seeding with the once-only capability bootstrap transaction
+  Configured seeds refuse startup without that adapter. Empty token tables no longer open private routes. `--require-auth` checks a live deployment administrator capability. See [migration guide](docs/migrations/_unreleased.md#verified-billing-events-and-deployment-bootstrap).
+
+- **controller (Breaking):** Remove the legacy trigger and node execution routes, claim-token middleware, raw event append, node output upload path and `Server.WithLocalExecution`. Execution uses the capability-backed run, job and data routes. Missing routes and methods return canonical errors before credential lookup. The unused `WriteUnsupportedRoute` helper and `UnsupportedRouteError` constant are removed. See [migration guide](docs/migrations/_unreleased.md#legacy-execution-credential-routes).
+
+- **controller (Breaking):** Browser identity linking uses the shared proof policy and canonical errors
+  Linking requires the account's direct provider session and one-use state. Embedded controllers supply `WithIdentityLinkWriter`. Nonlocal dashboard pages always require a session. See [migration guide](docs/migrations/_unreleased.md#browser-identity-linking).
+
+- **controller:** `Server.HTTP()` supplies the elected local runtime's shared API and dashboard handlers. Socket identity comes from Wingd's verified connection context, and the local API excludes legacy routes.
+
+- **controller (Breaking):** OIDC minting requires a live run-bound `oidc.mint` capability and returns canonical errors. Machine roots and account tokens no longer mint. Embedded controllers supply `WithOIDCReader`. See [migration guide](docs/migrations/_unreleased.md#oidc-claim-authorization).
+
+- Account mutations require the selected account session and CSRF proof through the shared authorization policy. They no longer renew sessions, and closed invitations return the common `conflict` error.
+
+- **Breaking:** Remove self-service `DELETE /api/v1/me`. Account deletion uses
+  the operator console path with session-bound CSRF proof.
+
+- **Breaking:** Account discovery reads require a live account session and return
+  the shared error object. They no longer renew sessions or switch teams during
+  GET requests. Credit-settings reads use the shared member authorization policy.
+
+- **controller (Breaking):** Dashboard token sign-in uses account capabilities and parented sessions
+  Console access requires a configured operator account’s direct sign-in session, with session-bound CSRF on writes. Embedded controllers supply verified uid or SID subjects with `WithPeerIdentity`, replacing `WithPeerPrincipal`.
 ### Fixed
+
+- **controller authorization:** Preserve capability-derived browser-session ancestry and lifetime during credential issuance, and require direct sign-in for account-consent routes.
+- **dashboard API:** Send final run, job and pause routes with JSON cancellation and retry requests. Reporting read failures propagate to callers.
 
 - **cli intake:** Preserve output selections and their origins through sealing
   Detached receipts honor `-o`, `--output`, `--sw-output` and `SPARKWING_LOG_FORMAT`.
@@ -650,7 +707,7 @@ unlock.
   Nothing converts the service's logs; they become unreadable when it retires. A controller without a cache bucket or output directory keeps no node logs. Read node logs with `client.NodeLogs` and their completeness with `pkg/storage/logseg`. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
 - **controller (Breaking):** `--logs-url`, `--logs-archive-store`, the `logs-delete-token` credential file, the `logs.write` and `logs.delete` scopes, `GET /api/v1/runs/{id}/log-access`, `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate`, the `logs` field of `GET /api/v1/services` and signed `kind=log` downloads are removed
-  Read logs through `GET /api/v1/runs/{id}/logs/{node}`. Minting a token with a removed scope is refused, and runner tokens no longer carry `logs.write`. In Go, `Server.WithLogsURL`, `ScopeLogsWrite`, `ScopeLogsDelete`, `store.LogsDeleteScope`, `TeamStorage.LogsURL` and `LogsToken`, and `ServicesResponse.Logs` are gone, and `WithSignedDownloads` takes the cache store alone; `client.ProcessIdentity` names a process for `Client.WithRunnerIdentity`. Leased maintenance bills committed blob and tagged-log inventory. The independent bucket-listing reconciliation pass is removed. Team deletion deletes segments, and the storage counter routes answer only the cache's operator token. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
+  Read logs through `GET /api/v1/runs/{id}/logs/{node}`. Minting a token with a removed scope is refused, and runner tokens no longer carry `logs.write`. In Go, `Server.WithLogsURL`, `ScopeLogsWrite`, `ScopeLogsDelete`, `store.LogsDeleteScope`, `TeamStorage.LogsURL` and `LogsToken`, and `ServicesResponse.Logs` are gone; `client.ProcessIdentity` names a process for `Client.WithRunnerIdentity`. Leased maintenance bills committed blob and tagged-log inventory. The independent bucket-listing reconciliation pass is removed. Team deletion deletes segments, and the storage counter routes answer only the cache's operator token. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
 - **runner (Breaking):** `--logs` on `sparkwing-runner runner` and `launch`, `--trigger-runner-logs-url`, `handle-trigger --runner-logs-url`, the agent config's `logs:` key and `SPARKWING_LOGS_EGRESS_*` are removed
   Runners upload node logs as segments through the controller and need no logs URL. An agent `config.yaml` with `logs:` fails to load with `field logs not found`. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).

@@ -2,20 +2,28 @@ package acceptance_test
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -433,4 +441,51 @@ func TestDataReadHTTPDiscovery(t *testing.T) {
 	f.data.Objects = nil
 	w = discoveryRequest(f.handler(), f.boundary, "GET", "/api/v1/services")
 	assertEngineError(t, w, 404, apierr.NotFound)
+}
+
+func TestDataReadHTTPChoosesCloudFrontOnlyForIngress(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	private := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
+	client := s3.NewFromConfig(aws.Config{Region: "us-east-1", Credentials: credentials.NewStaticCredentialsProvider("fixture-access", "fixture-secret", "")})
+	objects, err := blob.NewS3(client, "fixture-bucket")
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend, err := controller.NewCloudFrontDataBackend(objects, "cdn.example.test", "key-id", private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, header := range []string{"", "X-Forwarded-For", "X-Forwarded-Host"} {
+		f := newDataHTTPFixture()
+		f.data.Objects = backend
+		request := httptest.NewRequest("POST", "https://controller.test/api/v1/data/download", strings.NewReader(`{"digest":"`+string(dataDigest())+`"}`))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Authorization", "Bearer "+f.boundary.raw)
+		if header != "" {
+			request.Header.Set(header, "forwarded-client.example")
+		}
+		w := httptest.NewRecorder()
+		f.handler().ServeHTTP(w, request)
+		var response controller.DataDownloadResponse
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &response) != nil {
+			t.Fatalf("%s HTTP %d %s", header, w.Code, w.Body)
+		}
+		parsed, err := url.Parse(response.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if header == "" {
+			if !strings.Contains(parsed.Host, "fixture-bucket") || parsed.Query().Get("X-Amz-Signature") == "" {
+				t.Fatalf("direct URL = %s", response.URL)
+			}
+		} else if parsed.Host != "cdn.example.test" || parsed.Query().Get("Policy") == "" || parsed.Query().Get("Key-Pair-Id") != "key-id" {
+			t.Fatalf("ingress URL = %s", response.URL)
+		}
+		if len(f.charges) != 1 || len(f.reads) != 1 || response.SHA256 != string(dataDigest()) || response.Size != 14 {
+			t.Fatal("download lost authorized metadata or charging")
+		}
+	}
 }

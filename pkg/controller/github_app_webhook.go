@@ -1023,7 +1023,7 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 		}
 		run, err := s.startGitHubAppRun(r, tenant, plan, repo, delivery, body)
 		if err != nil {
-			if s.writeComputeLimitRefusal(w, r, "", "", err) {
+			if s.writeComputeLimitRefusal(w, r, err) {
 				return
 			}
 			writeIdentityError(w, s, r, "github app run", err)

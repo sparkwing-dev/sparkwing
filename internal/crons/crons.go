@@ -749,7 +749,7 @@ func (s *Service) Resolve(ctx context.Context, name string) (store.CronSchedule,
 			trimmed, ErrAmbiguousName, strings.Join(names, ", "))
 	}
 	return store.CronSchedule{}, fmt.Errorf(
-		"crons: no schedule named %q is armed here; `sparkwing crons list` names them", trimmed)
+		"crons: no schedule named %q is armed here; `sparkwing crons list` names them: %w", trimmed, store.ErrNotFound)
 }
 
 // safety: the order matches the CLI's own flags, so a reader sees the fields

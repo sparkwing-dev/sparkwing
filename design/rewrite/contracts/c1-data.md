@@ -49,8 +49,66 @@ Refund retry state is read and updated under one transaction and ledger lock.
 failing receipt boundary and checks their financial state after reopening.
 Generated properties cover refund conservation, payer isolation, immutable
 replay, setup ordering and unrepresentable collection amounts. Verified event
-dispatch beyond checkout still requires C2's expanded proof and the matching
-payment receipt and setup correlation schema.
+dispatch now consumes C2's expanded proof in `payment_provider_settlement.go`.
+The schema and billing-page writers below are pending W1 integration. The tests
+substitute those tables and do not establish production payment readiness.
+
+### Non-checkout payment persistence contract
+
+`SettlePayment` dispatches verified setup, collection, refund, warning and dispute
+facts through the existing transaction-local owners. One locked transaction
+checks configured mode, immutable provider-object association and event replay,
+then commits the financial result and receipt. A receipt failure rolls back the
+financial mutation. C2 owns provider payload/status verification. C1 owns payer
+association, supported ledger currency, integer arithmetic and settlement.
+
+W1 must extend its final `schema.sql` with these local C1 requirements before
+these callbacks can settle in production. No worker schema fragment or migration
+is installed by W1b.
+
+- `payment_events` keeps its existing columns and `(payment_mode,event_id)` key.
+  Its kind check admits all `capability.PaymentEventKind` values. `checkout_id`
+  becomes nullable for non-checkout events, and `team` becomes nullable only for
+  a warning with no committed payer yet. Checkout events retain their composite
+  checkout foreign key and required team/checkout association.
+- Add `object_id TEXT NOT NULL DEFAULT ''`, `event_json TEXT` and
+  `settlement_json TEXT` to that receipt. Non-checkout events require all three.
+  The JSON stores the verified facts and `PaymentSettlement`, respectively.
+  Checkout writes retain their existing shape. Index `(payment_mode,object_id)`.
+  Several event IDs can refer to one provider object. They cannot change its
+  payer association or a settled object's payment, amount, currency, method and
+  card. A payment-intent failure is an observation before settlement. Its amount,
+  method and latest charge can change before success while the persisted payer
+  and attempt remain fixed. Closing a dispute preserves its
+  terminal outcome and prevents a late open from restoring its hold.
+- Add `payment_correlations` with `payment_mode`, `provider_id`, `kind`, `team`,
+  `customer_id`, `currency`, `attempt_id` and `charge_id`, all non-null TEXT.
+  The primary key is `(payment_mode,provider_id)`. Mode is test/live, kind is
+  setup/collection, and team references `teams(name)`. Customer is nonempty.
+  Currency, attempt and charge default to empty for setup. Collection requires
+  its currency and exact persisted attempt/charge. These associations are
+  immutable and survive run retention.
+- The trusted billing-page completion transaction records a setup correlation
+  from its committed reservation and confirmed provider setup ID. The trusted
+  collection adapter records a collection correlation from its exact attempt,
+  internal charge, customer and confirmed payment-intent ID. It also binds
+  `card_attempts.payment_intent` before settlement. Provider metadata, callback
+  parameters and caller-selected teams cannot create these associations.
+
+`providerPaymentFixture` supplies a schema fake for this contract. It drives all
+seven non-checkout outcomes, event/object replay, rollback, reopening, setup
+ordering, partial refunds, warning escalation and payer isolation through the
+real transaction owners. A signed refund also enters through C2's authenticator
+and the public opaque-proof `SettlePayment` entry point. No provider network or
+billing-page persistence integration is claimed.
+
+Refund and dispute owners resolve the mode-scoped checkout or collection payer
+before touching legacy financial rows. Unknown warnings may persist before a
+payment is associated, so later settlement can refuse the warned payment.
+Warnings escalate monotonically. Returning to non-actionable never removes
+recorded protection. Mode isolation of retained card fingerprints and legacy
+warning/collection rows still needs W1's final schema and writer cutover. This
+contract does not treat the raw legacy rows as a new provider association.
 
 ## Persisted log readers
 

@@ -2,125 +2,60 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"path/filepath"
+	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func runAttention(t *testing.T, base, runID string) (single, listed string) {
-	t.Helper()
-	get := func(path string, out any) {
-		resp, err := http.Get(base + path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("GET %s = %d", path, resp.StatusCode)
-		}
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var run struct {
-		NeedsAttention string `json:"needs_attention"`
-	}
-	get("/api/v1/runs/"+runID, &run)
-	var list struct {
-		Runs []struct {
-			ID             string `json:"id"`
-			NeedsAttention string `json:"needs_attention"`
-		} `json:"runs"`
-	}
-	get("/api/v1/runs", &list)
-	for _, r := range list.Runs {
-		if r.ID == runID {
-			listed = r.NeedsAttention
-		}
-	}
-	return run.NeedsAttention, listed
-}
-
-// A node no agent can claim marks its run with a reason naming what is
-// missing, then the offline agent that could run it, and the mark clears once
-// an agent is online and once one claims.
 func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
+	e, _ := engineRuntimeStore(t)
+	st := e.Store
+	now := time.Now().UTC()
+	engineSQL(t, st, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','apply','pending',?,?,?)`, now.Add(-time.Minute).UnixNano(), []byte(`{"id":"apply"}`), []byte(`{"requires":{"value":["tool:terraform"]},"resources":{"value":{"cores":{"set":true,"value":4}}}}`))
+	capacity := 8.0
+	st.SetClaimProfileResolver(engineEnrollmentFunc(func(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
+		return match.Profile{Capacity: match.Resources{Cores: capacity}}, match.Resources{Cores: capacity}, nil
+	}))
+	engineHTTPRoot(t, e, "a", "box", []capability.Grant{capability.NodesClaim})
+	if err := st.RecordAgentLabels(t.Context(), "box", []string{"tool:git"}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
-	ctx := context.Background()
 	srv := New(st, nil)
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-
-	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "deploy", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "apply", Status: "pending", NeedsLabels: []string{"tool:terraform"}, RequestedCores: 4}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.MarkNodeReady(ctx, "run-1", "apply"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET ready_at = ?, placement_hold_from = ?`,
-		time.Now().Add(-time.Minute).UnixNano(), time.Now().Add(-time.Minute).UnixNano()); err != nil {
-		t.Fatal(err)
-	}
-	expect := func(step, want string) {
+	expect := func(want string) {
 		t.Helper()
-		srv.sweepClaimAttention(ctx, time.Now(), claimAttentionBatch)
-		if single, listed := runAttention(t, ts.URL, "run-1"); single != want || listed != want {
-			t.Fatalf("%s: run says %q, run list says %q; want %q", step, single, listed, want)
+		srv.sweepClaimAttention(t.Context(), now, claimAttentionBatch)
+		var got string
+		if err := st.DB().QueryRow(`SELECT attention_reason FROM nodes WHERE team='a' AND run_id='run' AND node_id='apply'`).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("attention = %q, want %q", got, want)
 		}
 	}
-
-	_, box, err := st.CreateToken("agent:box", store.TokenKindRunner, []string{"nodes.claim"}, 0, time.Now())
-	if err != nil {
+	expect("node apply needs tool:terraform; no agent in team a has it")
+	engineHTTPRoot(t, e, "a", "pi", []capability.Grant{capability.NodesClaim})
+	if err := st.RecordAgentLabels(t.Context(), "pi", []string{"tool:terraform"}); err != nil {
 		t.Fatal(err)
 	}
-	srv.runnerPresence.record(presenceKey{tokenPrefix: box.Prefix, name: "box"}, []string{"tool:git"}, nil, match.Profile{}, nil, time.Now())
-	expect("no agent has the tool", "node apply needs tool:terraform; no agent in team default has it")
-
-	_, pi, err := st.CreateToken("agent:pi", store.TokenKindRunner, []string{"nodes.claim"}, 0, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.RecordAgentLabels(ctx, pi.Prefix, []string{"tool:terraform"}); err != nil {
-		t.Fatal(err)
-	}
-	seen := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
-	if _, err := st.DB().ExecContext(ctx, `UPDATE tokens SET last_used_at = ? WHERE prefix = ?`, seen.Unix(), pi.Prefix); err != nil {
-		t.Fatal(err)
-	}
-	expect("the eligible agent is offline", "node apply needs tool:terraform; eligible agent pi is offline (last seen 2026-09-28T10:00:00Z)")
-
-	small := match.Profile{Capacity: match.Resources{Cores: 2}}
-	srv.runnerPresence.record(presenceKey{tokenPrefix: pi.Prefix, name: "pi"}, []string{"tool:terraform"}, nil, small, nil, time.Now())
-	expect("an online agent too small for the node", "node apply needs tool:terraform; every agent in team default that matches refuses it: pi (shape)")
-	srv.runnerPresence.record(presenceKey{tokenPrefix: pi.Prefix, name: "pi"}, []string{"tool:terraform"}, nil, match.Profile{}, nil, time.Now())
-	expect("the eligible agent is online", "")
-
-	srv.runnerPresence.record(presenceKey{tokenPrefix: pi.Prefix, name: "pi"}, []string{"tool:terraform"}, nil, match.Profile{}, nil, time.Now().Add(-time.Hour))
-	expect("the eligible agent went offline", "node apply needs tool:terraform; eligible agent pi is offline (last seen 2026-09-28T10:00:00Z)")
-	if _, err := st.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "agent:pi", TokenPrefix: pi.Prefix}, "pi:1", time.Minute, []string{"tool:terraform"}); err != nil {
-		t.Fatal(err)
-	}
-	if single, listed := runAttention(t, ts.URL, "run-1"); single != "" || listed != "" {
-		t.Fatalf("after the claim the run says %q and the list %q; want neither", single, listed)
-	}
+	seen := now.Add(-time.Hour)
+	engineSQL(t, st, `UPDATE capabilities SET last_used_at=? WHERE prefix='pi'`, seen.UnixNano())
+	offline := "node apply needs tool:terraform; eligible agent pi is offline (last seen " + seen.Format(time.RFC3339) + ")"
+	expect(offline)
+	capacity = 2
+	engineSQL(t, st, `UPDATE capabilities SET last_used_at=? WHERE prefix='pi'`, now.UnixNano())
+	expect("node apply needs tool:terraform; every agent in team a that matches refuses it: pi (shape)")
+	capacity = 8
+	expect("")
+	engineSQL(t, st, `UPDATE capabilities SET last_used_at=? WHERE prefix='pi'`, seen.UnixNano())
+	expect(offline)
 }
 
-// Sparkwing Cloud counts as an agent with its image's tools.
 func TestClaimAttentionCountsSparkwingCloud(t *testing.T) {
 	terraform := store.WaitingNode{NodeID: "apply", Team: "acme", Selector: []string{"tool:terraform"}}
 	if got, want := claimAttention(terraform, nil, true),
@@ -138,64 +73,48 @@ func TestClaimAttentionCountsSparkwingCloud(t *testing.T) {
 	}
 }
 
-// A new platform with the same labels is still worth storing.
-func TestPresenceReportsAPlatformChange(t *testing.T) {
-	reg := newRunnerPresenceRegistry()
-	key := presenceKey{tokenPrefix: "swr_pi", name: "pi"}
-	amd := match.Profile{OS: "linux", Arch: "amd64"}
-	if !reg.record(key, []string{"tool:git"}, nil, amd, nil, time.Now()) {
-		t.Fatal("a first record is not reported")
+func TestClaimAttentionCommittedLivenessProperty(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	if err := quick.Check(func(delta int64) bool {
+		delta = delta % int64(4*time.Minute)
+		registered := []store.RegisteredAgent{{Name: "runner", LastSeen: now.Add(time.Duration(delta))}}
+		got := sightAgents(registered, now)
+		return len(got) == 1 && got[0].online == (delta <= 0 && delta >= -int64(agentOnlineWithin))
+	}, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatal(err)
 	}
-	if reg.record(key, []string{"tool:git"}, nil, amd, nil, time.Now()) {
-		t.Fatal("an unchanged record is reported")
-	}
-	if !reg.record(key, []string{"tool:git"}, nil, match.Profile{OS: "linux", Arch: "arm64"}, nil, time.Now()) {
-		t.Fatal("a changed architecture is not reported")
+	if sightAgents([]store.RegisteredAgent{{Name: "never seen"}}, now)[0].online {
+		t.Fatal("unobserved runner is online")
 	}
 }
 
-// A pass ends once it has read every node that was waiting when it began, so a
-// node behind the cursor is judged again even while newer nodes keep every
-// page after the cursor full.
 func TestClaimAttentionPassWrapsDespiteNewNodes(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	ctx := context.Background()
+	e, _ := engineRuntimeStore(t)
+	st := e.Store
 	srv := New(st, nil)
-	seed := func(runID string, readyAt time.Time) {
+	start := time.Now().UTC()
+	seed := func(id string, ready time.Time) {
 		t.Helper()
-		if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
-			t.Fatal(err)
-		}
-		if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: "work", Status: "pending"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := st.MarkNodeReady(ctx, runID, "work"); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET ready_at = ?, placement_hold_from = ? WHERE run_id = ?`,
-			readyAt.UnixNano(), readyAt.UnixNano(), runID); err != nil {
-			t.Fatal(err)
-		}
+		engineSQL(t, st, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run',?,'pending',?,?,?)`, id, ready.UnixNano(), []byte(`{"id":"`+id+`"}`), []byte(`{}`))
 	}
-	start := time.Now()
-	for _, run := range []string{"run-a", "run-b", "run-c"} {
-		seed(run, start.Add(-time.Minute))
+	for _, id := range []string{"a", "b", "c"} {
+		seed(id, start.Add(-time.Minute))
 	}
-	srv.sweepClaimAttention(ctx, start, 2)
-	if err := st.AsOperator().SetNodeAttention(ctx, []store.NodeAttention{{Team: store.DefaultTeam, RunID: "run-a", NodeID: "work"}}); err != nil {
+	srv.sweepClaimAttention(t.Context(), start, 2)
+	if err := st.AsOperator().SetNodeAttention(t.Context(), []store.NodeAttention{{Team: "a", RunID: "run", NodeID: "a"}}); err != nil {
 		t.Fatal(err)
 	}
 	for i := 1; i <= 4; i++ {
 		tick := start.Add(time.Duration(i) * 100 * time.Second)
-		seed(fmt.Sprintf("run-d%dx", i), tick.Add(-time.Minute))
-		seed(fmt.Sprintf("run-d%dy", i), tick.Add(-time.Minute))
-		srv.sweepClaimAttention(ctx, tick, 2)
+		seed(fmt.Sprintf("d%dx", i), tick.Add(-time.Minute))
+		seed(fmt.Sprintf("d%dy", i), tick.Add(-time.Minute))
+		srv.sweepClaimAttention(t.Context(), tick, 2)
 	}
-	if run, err := st.GetRun(ctx, "run-a"); err != nil || run.NeedsAttention == "" {
-		t.Fatalf("run-a = %+v, %v; the node behind the cursor was never judged again", run, err)
+	var reason string
+	if err := st.DB().QueryRow(`SELECT attention_reason FROM nodes WHERE team='a' AND run_id='run' AND node_id='a'`).Scan(&reason); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reason, "needs an agent") {
+		t.Fatalf("node behind cursor never reconsidered: %q", reason)
 	}
 }

@@ -76,13 +76,7 @@ func (router *PolicyRouter) Validate() error {
 
 func (router *PolicyRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, pattern := router.mux.Handler(r); pattern == "" {
-		allowed := router.allowedMethods(r)
-		if len(allowed) != 0 {
-			w.Header().Set("Allow", strings.Join(allowed, ", "))
-			writePolicyError(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "method is not registered"})
-		} else {
-			writePolicyError(w, &apierr.Error{Code: apierr.NotFound, Message: "route not found"})
-		}
+		writeRouteMiss(w, router.allowedMethods(r))
 		return
 	}
 	router.mux.ServeHTTP(w, r)
@@ -90,20 +84,37 @@ func (router *PolicyRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (router *PolicyRouter) allowedMethods(r *http.Request) []string {
 	var methods []string
+	for _, endpoint := range router.registered {
+		methods = append(methods, endpoint.Method)
+	}
+	return allowedRouteMethods(router.mux, r, methods)
+}
+
+func allowedRouteMethods(mux *http.ServeMux, r *http.Request, methods []string) []string {
+	var allowed []string
 	seen := make(map[string]bool)
 	probe := r.Clone(r.Context())
-	for _, endpoint := range router.registered {
-		if seen[endpoint.Method] {
+	for _, method := range methods {
+		if seen[method] {
 			continue
 		}
-		seen[endpoint.Method] = true
-		probe.Method = endpoint.Method
-		if _, pattern := router.mux.Handler(probe); pattern != "" {
-			methods = append(methods, probe.Method)
+		seen[method] = true
+		probe.Method = method
+		if _, pattern := mux.Handler(probe); pattern != "" && (!strings.Contains(pattern, " ") || strings.HasPrefix(pattern, method+" ")) {
+			allowed = append(allowed, method)
 		}
 	}
-	slices.Sort(methods)
-	return methods
+	slices.Sort(allowed)
+	return allowed
+}
+
+func writeRouteMiss(w http.ResponseWriter, allowed []string) {
+	if len(allowed) != 0 {
+		w.Header().Set("Allow", strings.Join(allowed, ", "))
+		writePolicyError(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "method is not registered"})
+		return
+	}
+	writePolicyError(w, &apierr.Error{Code: apierr.NotFound, Message: "route not found"})
 }
 
 func (router *PolicyRouter) checkEndpoint(route capability.RoutePolicy, endpoint Endpoint) error {
@@ -224,4 +235,40 @@ func writePolicyError(w http.ResponseWriter, err error) {
 		// safety: internal errors may contain credentials; log only the safe code.
 		slog.Error("write API error response", "code", failure.Code)
 	}
+}
+
+func (s *Server) registerControllerEndpoints(mux *registeredMux, endpoints []Endpoint) {
+	policy := NewPolicyRouter(s.authorization)
+	for _, endpoint := range endpoints {
+		if err := policy.Register(s.budgetEndpoint(endpoint)); err != nil {
+			panic(err)
+		}
+	}
+	for _, endpoint := range endpoints {
+		var handler http.Handler = policy
+		if endpoint.Authentication != capability.AuthPublic {
+			handler = noStore(handler)
+		}
+		mux.Handle(endpoint.Method+" "+endpoint.Pattern, handler)
+	}
+}
+
+type registeredMux struct {
+	*http.ServeMux
+	registrations []string
+}
+
+func newRegisteredMux() *registeredMux {
+	return &registeredMux{ServeMux: http.NewServeMux()}
+}
+
+func (mux *registeredMux) Handle(pattern string, handler http.Handler) {
+	mux.ServeMux.Handle(pattern, handler)
+	if strings.Contains(pattern, " ") {
+		mux.registrations = append(mux.registrations, pattern)
+	}
+}
+
+func (mux *registeredMux) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
+	mux.Handle(pattern, http.HandlerFunc(handler))
 }

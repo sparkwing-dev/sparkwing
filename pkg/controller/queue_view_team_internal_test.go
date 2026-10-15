@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -18,8 +19,13 @@ func TestQueueStateShowsOnlyTheCallersTeamsRunners(t *testing.T) {
 		return queueTeamReader{team: team}, nil
 	})
 	now := time.Now()
-	srv.runnerHeadroom.record(presenceKey{name: "operator-box"}, runnerHeadroom{Team: store.DefaultTeam, Cores: 4, UpdatedAt: now})
-	srv.runnerHeadroom.record(presenceKey{name: "team-b-box"}, runnerHeadroom{Team: "team-b", Cores: 2, UpdatedAt: now})
+	srv.WithRunnerInventory(func(_ context.Context, team store.Team) (RunnerInventoryReader, error) {
+		name, cores := "operator-box", 4.0
+		if team == "team-b" {
+			name, cores = "team-b-box", 2.0
+		}
+		return &runnerInventoryFake{team: team, snapshot: capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{{Team: string(team), Runner: nodeproto.RunnerIdentity{Name: name, Type: "runner"}, Headroom: &capability.RunnerHeadroom{Cores: cores, ObservedAt: now}}}}}, nil
+	})
 
 	view := func(team store.Team) []string {
 		t.Helper()

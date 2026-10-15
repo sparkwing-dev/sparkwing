@@ -189,27 +189,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (team, key, provenance) DO NOTHING`,
 	return err
 }
 
-// NodeOutputObject returns the committed object behind a node's output, or
-// [ErrNotFound] when the node recorded none.
-func (s *Store) NodeOutputObject(ctx context.Context, team Team, runID, nodeID string) (Upload, error) {
-	var u Upload
-	var kind string
-	var committed int64
-	err := s.queryRow(ctx, `SELECT o.key, d.store, d.size, d.sha256, d.principal, d.provenance, d.committed_at
-  FROM node_outputs o JOIN data_objects d ON d.team = o.team AND d.key = o.key
- WHERE o.team = ? AND o.run_id = ? AND o.node_id = ?
- ORDER BY CASE d.provenance WHEN 'cloud' THEN 0 ELSE 1 END LIMIT 1`, string(NormalizeTeam(team)), runID, nodeID).Scan(
-		&u.Key, &kind, &u.Size, &u.SHA256, &u.Principal, &u.Provenance, &committed)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Upload{}, ErrNotFound
-	}
-	if err != nil {
-		return Upload{}, err
-	}
-	u.Team, u.Kind, u.RunID, u.CommittedAt = NormalizeTeam(team), StorageKind(kind), runID, time.Unix(0, committed)
-	return u, nil
-}
-
 // OutputDir is the directory under which this store keeps output bytes it
 // is handed directly: beside a SQLite database, and empty for Postgres
 // unless [Store.SetOutputDir] names one.

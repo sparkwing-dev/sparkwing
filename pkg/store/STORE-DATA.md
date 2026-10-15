@@ -416,3 +416,17 @@ owners, then verifies them unchanged after run retention and reopening. Provider
 verification for card, warning and refund facts is still a C2 integration point.
 The unused legacy storage-pass lease API is removed; maintenance uses the elected
 Operator pass.
+
+
+`payment_provider_settlement.go` extends verified-event dispatch to card setup,
+collection, refunds, warnings and disputes. Its receipt and provider-correlation
+schema contract is recorded in `design/rewrite/contracts/c1-data.md`. W1's final
+schema and trusted billing-page/collection writers have not implemented that
+contract. Tests use a schema fake for those missing tables. Production callbacks
+remain unavailable until that integration lands, and failed receipt writes
+cannot leave financial mutations behind.
+
+`Store.CommittedObject`, `Store.NodeOutputObject` and their legacy `Upload` model
+are removed because the controller now reads committed blob records. Source-key
+validation and the old local output writers remain until their W1/W3 callers
+are retired.

@@ -4,24 +4,18 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestStampPrincipalNamesAccountsWithoutTheirEmail(t *testing.T) {
-	for _, tc := range []struct {
-		p    Principal
-		want string
-	}{
-		{Principal{Name: "ada@example.com", AccountID: "acct-1"}, "acct-1"},
-		{Principal{Name: "ada@example.com", TokenPrefix: "swu_abc"}, "swu_abc"},
-		{Principal{Name: "ada@example.com"}, ""},
-		{Principal{Name: "runner-7"}, "runner-7"},
-	} {
+	for _, subject := range []capability.Subject{{Kind: capability.SubjectAccount, ID: "acct-1"}, {Kind: capability.SubjectMachine, ID: "runner-7"}} {
 		rec := tracetest.NewSpanRecorder()
 		tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
 		ctx, span := tp.Tracer("test").Start(context.Background(), "request")
-		stampPrincipal(ctx, &tc.p)
+		notePolicyPrincipal(ctx, capability.Principal{Capability: capability.Capability{Subject: subject}})
 		span.End()
 		got := ""
 		for _, kv := range rec.Ended()[0].Attributes() {
@@ -29,8 +23,8 @@ func TestStampPrincipalNamesAccountsWithoutTheirEmail(t *testing.T) {
 				got = kv.Value.AsString()
 			}
 		}
-		if got != tc.want {
-			t.Errorf("principal %+v stamped %q, want %q", tc.p, got, tc.want)
+		if got != subject.ID {
+			t.Errorf("principal %+v stamped %q, want %q", subject, got, subject.ID)
 		}
 	}
 }

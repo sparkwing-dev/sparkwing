@@ -21,7 +21,7 @@ type PaymentSettlement struct {
 	Replayed    bool
 }
 
-// SettlePayment settles verified provider events against a committed checkout.
+// SettlePayment settles verified provider events against committed billing facts.
 func (s *Store) SettlePayment(ctx context.Context, proof capability.VerifiedPaymentEvent) (PaymentSettlement, error) {
 	if proof == (capability.VerifiedPaymentEvent{}) {
 		return PaymentSettlement{}, authorityError(apierr.Unauthenticated, "payment verification is required")
@@ -38,6 +38,9 @@ type paymentCheckout struct {
 }
 
 func (s *Store) settlePaymentFacts(ctx context.Context, event capability.PaymentEvent) (PaymentSettlement, error) {
+	if event.Kind != capability.PaymentCheckoutPaid && event.Kind != capability.PaymentCheckoutExpired && event.Kind != capability.PaymentCheckoutFailed {
+		return s.settleProviderPaymentFacts(ctx, event)
+	}
 	if event.EventID == "" || event.CheckoutID == "" || event.AmountMinor <= 0 || event.Currency == "" || (event.Mode != capability.PaymentTest && event.Mode != capability.PaymentLive) {
 		return PaymentSettlement{}, authorityError(apierr.BadRequest, "invalid verified payment facts")
 	}

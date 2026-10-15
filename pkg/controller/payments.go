@@ -11,9 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// PaymentSettler commits authenticated provider events against their stored checkouts.
-// The checkout supplies the team and credit value; HTTP callers cannot select either.
-// Expected refusals use apierr.Error; other failures become a redacted internal error.
+// PaymentSettler commits verified provider outcomes against stored billing records.
 type PaymentSettler interface {
 	SettlePayment(context.Context, capability.VerifiedPaymentEvent) (store.PaymentSettlement, error)
 }

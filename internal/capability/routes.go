@@ -1,7 +1,6 @@
 package capability
 
-// Routes is the complete target authorization table, including external proofs.
-// The running controller is switched to it by the implementation phase.
+// Routes is the authorization table for controller and node-host operations, including external proofs.
 var Routes = []RoutePolicy{
 	route("GET", "/api/v1/runs/{run}/snapshot", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveSensitive)),
 	route("POST", "/api/v1/runs/{run}/jobs/{job}/reconcile", OwnerRun, RetryNever, claim(NodesClaim, BindRunOfTrigger, LiveSensitive)),

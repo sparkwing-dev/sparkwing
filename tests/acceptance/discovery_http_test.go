@@ -198,7 +198,7 @@ func TestDiscoveryHTTPAnnouncesIndividualServices(t *testing.T) {
 func TestDiscoveryHTTPRequiresAuthenticatedDataAdapters(t *testing.T) {
 	b := authorityMember()
 	client := s3.NewFromConfig(aws.Config{Region: "us-east-1", Credentials: credentials.NewStaticCredentialsProvider("synthetic", "synthetic", "")})
-	h := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).WithDirectUploads(client, "objects", "data").Handler()
+	h := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b)).WithS3Logs(client, "objects", "data").Handler()
 	for _, path := range []string{"/api/v1/services", "/api/v1/data/capabilities"} {
 		assertEngineError(t, discoveryRequest(h, b, "GET", path), 404, apierr.NotFound)
 	}

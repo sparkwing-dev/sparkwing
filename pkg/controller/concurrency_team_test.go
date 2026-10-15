@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -123,7 +122,7 @@ func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		ctx := context.Background()
 		raw, _, err := f.teamB.CreateToken(ctx, "b-spawner", store.TokenKindRunner, []string{
-			controller.ScopeRunsWrite, controller.ScopeRunsState, controller.ScopeTriggersClaim,
+			"runs.write", "runs.state", "triggers.claim",
 		}, 0, time.Now())
 		if err != nil {
 			t.Fatal(err)

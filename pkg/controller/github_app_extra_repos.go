@@ -7,8 +7,9 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -19,18 +20,17 @@ type githubAppExtraReposJSON struct {
 	ExtraRepos []string `json:"extra_repos"`
 }
 
-func (s *Server) handleListGitHubAppExtraRepos(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handleListGitHubAppExtraRepos(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	_, t, ok := s.teamMember(w, r, store.RoleReader)
-	if !ok {
-		return
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	all, err := t.AllGitHubAppExtraRepos(r.Context())
 	if err != nil {
-		s.writeInternalError(w, r, "list github app extra repos", err)
-		return
+		return engineLookupError(err)
 	}
 	out := []githubAppExtraReposJSON{}
 	for repo, extras := range all {
@@ -38,59 +38,55 @@ func (s *Server) handleListGitHubAppExtraRepos(w http.ResponseWriter, r *http.Re
 	}
 	slices.SortFunc(out, func(a, b githubAppExtraReposJSON) int { return strings.Compare(a.Repository, b.Repository) })
 	writeJSON(w, http.StatusOK, map[string]any{"extra_repos": out})
+	return nil
 }
 
 // safety: only a team owner widens what a run's token reads, never the
 // repository's own code, and each listed repository must be covered by the
 // same installation of the team's that covers the source repository, since
 // that installation mints the token. The mint checks the coverage again.
-func (s *Server) handlePutGitHubAppExtraRepos(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handlePutGitHubAppExtraRepos(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	var req githubAppExtraReposJSON
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &req); err != nil {
+		return githubAppRequestError(http.StatusBadRequest, err)
 	}
 	repo, ok := store.ParseGitHubRepo(req.Repository)
 	if !ok {
-		writeError(w, http.StatusBadRequest, errors.New("repository must be owner/name"))
-		return
+		return githubAppRequestError(http.StatusBadRequest, errors.New("repository must be owner/name"))
 	}
 	if len(req.ExtraRepos) > store.MaxGitHubAppExtraRepos {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("at most %d extra repositories per repository", store.MaxGitHubAppExtraRepos))
-		return
+		return githubAppRequestError(http.StatusBadRequest, fmt.Errorf("at most %d extra repositories per repository", store.MaxGitHubAppExtraRepos))
 	}
 	var ids map[string]int64
 	if len(req.ExtraRepos) > 0 {
 		var status int
 		var err error
 		if ids, status, err = s.extraReposCovered(r.Context(), t, repo, req.ExtraRepos); err != nil {
-			writeError(w, status, err)
-			return
+			return githubAppRequestError(status, err)
 		}
 	}
-	saved, err := t.SetGitHubAppExtraRepos(r.Context(), repo.Slug(), req.ExtraRepos, p.AccountID, time.Now())
+	writer, err := s.githubAppWriter(r, a)
+	if err != nil {
+		return err
+	}
+	saved, err := writer.SetAuthorizedGitHubExtraRepos(r.Context(), a, repo.Slug(), req.ExtraRepos, ids)
 	if errors.Is(err, store.ErrInvalidInput) {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return githubAppRequestError(http.StatusBadRequest, err)
 	}
 	if err != nil {
-		s.writeInternalError(w, r, "put github app extra repos", err)
-		return
+		return engineLookupError(err)
 	}
-	if err := t.SetGitHubAppExtraRepoIDs(r.Context(), repo.Slug(), ids); err != nil {
-		s.writeInternalError(w, r, "record github app extra repo ids", err)
-		return
-	}
-	s.logger.Info("github app extra repos written", "team", string(p.Team), "repository", repo.Slug(),
-		"extra_repos", strings.Join(saved, ","), "by", p.AccountID)
+	s.logger.Info("github app extra repos written", "team", string(store.Team(a.Target.Team)), "repository", repo.Slug(),
+		"extra_repos", strings.Join(saved, ","), "by", a.Principal.Capability.Subject.ID)
 	writeJSON(w, http.StatusOK, githubAppExtraReposJSON{Repository: strings.ToLower(repo.Slug()), ExtraRepos: saved})
+	return nil
 }
 
 // safety: One held installation must cover both the run repository and every extra repository,
@@ -139,16 +135,4 @@ func (s *Server) extraReposCovered(ctx context.Context, t *store.Tenant, repo st
 		}
 	}
 	return ids, 0, nil
-}
-
-func ownerExtraRepos(ctx context.Context, t *store.Tenant, repo store.GitHubRepo) ([]store.GitHubRepo, error) {
-	return t.GitHubAppExtraRepoRefs(ctx, repo.Slug())
-}
-
-func repoSlugs(repos []store.GitHubRepo) []string {
-	var out []string
-	for _, x := range repos {
-		out = append(out, x.Slug())
-	}
-	return out
 }

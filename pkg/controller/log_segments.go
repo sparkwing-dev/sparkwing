@@ -6,9 +6,9 @@ import (
 )
 
 func (s *Server) logObjects() logseg.SegmentObjects {
-	if s.directUploads == nil {
+	if s.s3Logs == nil {
 		return nil
 	}
-	d := s.directUploads
+	d := s.s3Logs
 	return s3store.NewArtifactStore(d.bucket, d.prefix, d.client)
 }

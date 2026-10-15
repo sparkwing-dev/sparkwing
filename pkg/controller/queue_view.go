@@ -101,18 +101,16 @@ func (s *Server) handleQueueStateView(w http.ResponseWriter, r *http.Request, a 
 			})
 		}
 	}
-	for _, rh := range s.runnerHeadroom.list(now, runnerHeadroomStale) {
-		// safety: a runner's name is its team's to know.
-		if rh.Team != tenant.Team() {
-			continue
-		}
-		qs.Runners = append(qs.Runners, wingwire.RunnerHeadroom{
-			Name:        rh.Name,
-			Cores:       rh.Cores,
-			MemoryBytes: rh.MemoryBytes,
-			QueueDepth:  rh.QueueDepth,
-		})
+	snapshot, err := s.runnerInventory(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
+	for _, row := range snapshot.Runners {
+		if h := row.Headroom; h != nil && snapshot.Now.Sub(h.ObservedAt) <= runnerHeadroomStale {
+			qs.Runners = append(qs.Runners, wingwire.RunnerHeadroom{Name: row.Runner.Name, Cores: h.Cores, MemoryBytes: h.MemoryBytes, QueueDepth: h.QueueDepth})
+		}
+	}
+
 	writeJSON(w, http.StatusOK, qs)
 	return nil
 }

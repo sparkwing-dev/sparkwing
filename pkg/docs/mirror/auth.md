@@ -10,14 +10,64 @@ verification remain separate from client transport tests. See
 
 ## Controller authorization
 
+Embedded controllers supply `WithMetricWriter` for job metric and usage writes,
+and `WithOperatorSettingsWriter` for deployment setting changes. Each writer
+receives the verified authority and resource target and rechecks them in its
+committing transaction. Signup mode and limit changes commit together. Missing
+writers return `policy_missing`.
+
+Job metrics use `GET` and `POST /api/v1/runs/{run}/jobs/{job}/metrics`. Process
+usage uses `POST /api/v1/runs/{run}/jobs/{job}/usage`. The former `/nodes/` paths
+are removed. Request budgets run after policy authorization and use the
+credential's team and authenticated holder. A successful empty claim response
+spends the polling budget. An award does not. Log concurrency refusals use the
+canonical error envelope with `rate_limited` and a reason in `error.details`.
+
+
 The controller's shared policy routes use the store's authentication snapshot
 and binding checker by default. Each request reads current capability ancestry
 and account membership. Browser writes use the session-bound CSRF verifier by default. The header
 and cookie must match the token derived from the persisted encrypted key, and
 the request must come from the same origin. A forged or cross-session token
-returns `forbidden`. Session key failures return `unavailable`. Verified local-peer and operator-console presentations need
-their transport-specific adapters. Request headers and loopback addresses do
-not supply those identities.
+returns `forbidden`. Session key failures return `unavailable`. Configured operator
+accounts use the default console-session adapter. Verified local peers use
+`WithPeerIdentity`, whose callback returns only the transport-verified uid or SID
+as a local subject. Request headers and loopback addresses supply neither
+identity. The local store must implement peer authentication snapshots and
+transactional authority checks before those presentations can execute work.
+
+Embedded local controllers use `Server.HTTP()` for the API and dashboard
+handlers in `wingd.LocalHTTP`. The API reads the verified socket identity from
+Wingd's connection context. Explicit credentials keep precedence. Browser
+requests supply their own authentication. These handlers expose the same capability policy routes as the network controller.
+
+Schedule, invitation, build-trust, billing and storage reads use member
+capability policy. The same holds for GitHub App installation, repository,
+trigger and extra-repository reads. Schedule and review mutations pass the verified
+`Authorized` value to tenant transactions through `WithScheduleWriter` and
+`WithRunControlWriter`. Each committing transaction rechecks ancestry,
+membership and the selected route alternative. Team administration, run deletion and GitHub App configuration writes use the same boundary. Embedded controllers supply `WithTeamWriter`, `WithGitHubAppWriter` and `WithBillingWriter` for committing transactions. The token-table verifier, its caches and its route fences are removed. Missing adapters fail
+with `policy_missing`. Metrics on the API listener uses deployment or console
+policy.
+
+GitHub App connection pages verify their signed browser flow through the shared
+policy router. Connecting, listing administered installations, selecting and
+completing a connection require a live account session with `team.admin` in its
+active team. Form posts require the session's CSRF token. Provider returns
+verify signed state and the browser verifier. Embedded controllers supply
+`WithGitHubConnectWriter` for the linked-identity read, single-use state
+consumption and installation binding. Each write rechecks the session and
+current team ownership. The final bind also rechecks the linked GitHub identity.
+
+Console mutations pass their verified authority to `WithConsoleWriter`.
+The transaction derives the audit actor and rechecks the direct operator session.
+This covers credit grants, billing trust, holds, account/team deletion, waitlist
+approval, credit settings and installation unbinding. Waitlist approval requires
+an `Idempotency-Key` header. A missing transaction adapter returns `policy_missing`.
+
+Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.
+
+Job logs use `/api/v1/runs/{run}/jobs/{job}/logs`, with `/stream` and `/completeness` beneath it. The old `/runs/{run}/logs/{job}` paths are removed. Use `/api/v1/runners` instead of `/api/v1/agents`, `/api/v1/approvals` instead of `/api/v1/approvals/pending`, and `/api/v1/sizing` or `/api/v1/sizing/explain` instead of `/api/v1/capacity/profiles`. Read debug pauses at `/runs/{run}/debug-pauses`. The `paused` alias is removed.
 
 `GET /api/v1/queue` uses the shared capability policy. A member or verified
 local peer needs `runs.read` for its active team. Queue groups and advertised
@@ -30,6 +80,19 @@ controller resolves the resource's team before authorization and derives
 actors and fences from the credential. Unknown or ended credentials get
 `unauthenticated`. A live
 credential without the grant or binding gets `forbidden`.
+
+The legacy `/api/v1/triggers` family and `/api/v1/runs/{run}/nodes`
+family are removed. So is raw `POST /api/v1/runs/{run}/events`. Intake uses
+`POST /api/v1/runs`, plan insertion uses `/runs/{run}/plan`, and job state
+uses `/runs/{run}/jobs/{job}/transition`. Run and job renewal use their
+`heartbeat` routes. Outputs use the authorized `/api/v1/data` upload,
+commit and record operations. Retired claim tokens and caller-supplied
+execution fences have no execution route.
+
+An absent route returns the shared `not_found` error before credential
+lookup. A method with no handler on a registered path returns
+`method_not_allowed` and `Allow`, also before credential lookup. Neither
+response renews browser sessions.
 
 `GET /api/v1/runs/{run}/jobs` returns a status array from one committed
 snapshot. It accepts member `runs.read` or the live run owner's `trigger.host`.
@@ -423,15 +486,65 @@ error. Pricing and compute measurements come from the controller's observations.
 
 ## Buying credits
 
-The controller verifies Stripe webhook signatures. It derives the team, amount,
-checkout identity and credit grant from verified payment provenance. Settlement
-uses the committed checkout and deduplicates the payment event in its
-transaction. A caller's supplied team or amount is not payment proof.
+Checkout, card setup and payment-recovery POSTs require one nonempty
+`Idempotency-Key` header. A committing transaction derives the team, account,
+reservation and current billing limits. The checkout service receives that
+reservation as its request key. A completed replay returns the recorded URL
+without opening another page. Provider failure leaves the reservation available
+for reconciliation. API failures use the canonical error envelope. Billing
+refusal details include a `reason`, such as `balance_cap` or `purchase_limit`.
+
+
+The controller verifies Stripe signatures at `POST /webhooks/stripe`. Checkout
+payments, failures and expiry carry the committed provider session identity.
+Card setup and card payment outcomes, individual refund updates, early fraud
+warnings and opened or closed disputes carry their provider identities and
+verified status. The verifier reads card details from Stripe when needed and
+checks their identity, customer and test/live mode. Metadata grants no team,
+credit, attempt or billing authority.
+
+Settlement derives the team and ledger effect from committed billing records
+and deduplicates provider events in its transaction. Checkout settlement is
+implemented. Settlement of card, refund, warning and dispute events still needs
+the store integration. A provider retry cannot safely be treated as a new
+credit grant.
 
 Test and live Stripe keys select configuration for the same implementation.
 Checkout, payment history, card operations, payment holds and reversals retain
 their account authorization. A signed payment event authorizes only its declared
 payment operation. It grants no general team or operator power.
+
+## Removed credential routes
+
+GitHub Actions enrollment uses `GET` and `POST /api/v1/runners/github` and
+`DELETE /api/v1/runners/github/{repository}`. The three
+`/api/v1/team/github-runners` registrations are removed. The dashboard uses
+the final paths. `POST /api/v1/tokens/{prefix}/metered` is removed. Runner
+metering uses the console-only
+`POST /api/v1/operator/runners/{runner}/metered`, selecting an enrolled root's
+capability prefix.
+
+The eight `credits.grant` service registrations for cards, card payments,
+refunds, freezes, warnings, unit reports and payment lookup are removed.
+Automated outcomes enter through the signed provider callback. No service
+bearer can submit a team or credit grant through the removed routes.
+
+## Deployment bootstrap
+
+The mounted `bootstrap-admin-token` must be a `swk_` controller capability.
+Startup supplies it to the once-only bootstrap transaction before opening the
+listener. That transaction stores only its digest and issues operational
+limits, object-store and token administration grants. It must refuse to issue
+another administrator or revive a revoked seed. It grants no operator-console
+or claim authority.
+
+The token-table bootstrap path is removed. Startup refuses a configured seed
+when the store has no seeded bootstrap transaction. That transaction remains a
+store integration requirement. An empty file input provisions no credential.
+Startup enables authentication even before credentials exist. An empty or
+unreadable token table cannot open private routes. `--require-auth` additionally
+requires a live deployment administrator capability and refuses startup when
+that capability read is unavailable. Local access uses verified peer identity.
 
 ## Operator console
 
@@ -467,6 +580,12 @@ The controller returns granted class and location alongside free labels,
 repository fences, active jobs and measured headroom. Missing headroom means
 there is no observation. It is not a zero-capacity sample.
 
+Runner and queue views read one tenant-scoped store snapshot. Display names and
+holder strings grant no identity. Distinct credentials with the same name remain
+separate observations. Accepted renewals refresh liveness without offering a free
+slot or refreshing headroom. Embedded controllers supply `WithRunnerInventory`.
+A missing adapter returns `policy_missing`.
+
 A here runner is reserved for its run. Pool access comes from granted
 reservations and verified repository authority. The first eligible matching
 claim wins under the same matcher used for queued and named work.
@@ -497,12 +616,35 @@ registered machine. Issuance checks the account or registration and cannot
 exceed its authority. Principal text is a display label. It cannot establish
 membership, machine identity, reserved pools or metering.
 
+A browser session opened with an account capability retains that capability as
+its authority parent. Credential issuance through that session delegates from
+its existing ancestry and inherits the shortest remaining lifetime. Independent
+member roots and owner-consent routes require a direct account sign-in session.
+Changing a token into a browser cookie does not establish that consent.
+
 ### Linked sign-ins
 
 Google and GitHub identities can be linked from an authenticated account.
 A matching email address alone must not merge two accounts. Linking and
 unlinking identities require the account's authorized session. A provider's
 verified identity and the application's team membership remain separate facts.
+
+Linking starts at `POST /auth/{provider}/link` with one `csrf_token` form field,
+the matching CSRF and session cookies, and same-origin proof. It requires the
+account's direct provider session from the last ten minutes. An account-token
+session cannot add sign-in methods. The flow binds its account, session,
+provider and PKCE verifier, expires after ten minutes, and can complete once.
+The existing limit is ten link attempts per account per minute.
+
+`GET /auth/{provider}/link/complete` uses that same session and flow cookie.
+It consumes the flow before provider access and attaches only the verified
+provider identity. Neither endpoint renews the session or accepts an
+Authorization header. Failures return the canonical error envelope. Embedded
+controllers supply `WithIdentityLinkWriter` for committing session and nonce
+checks. A missing writer returns `policy_missing`.
+
+A nonlocal dashboard requires a live session for its private pages. Its login page remains available to
+signed-out browsers. `Dashboard.Local` selects local pages without browser login.
 
 ### Sign-up gate
 
@@ -551,15 +693,14 @@ See [Credential management](credentials.md) for the implemented client surface.
 ## Credential lookup
 
 Capability lookup uses SHA-256 of the complete random token. Password hashing
-remains a separate account concern. Cached authorization lasts at most five
-seconds and also requires fresh ancestry and membership generations. A failed
-generation read refuses cache reuse. Expiry is checked within a cache window.
+remains a separate account concern. Every authenticated request reads current
+authority, ancestry, membership and expiry in one store snapshot. The controller
+has no bearer verification cache.
 
 ## How long revocation takes to bite
 
 Revocation advances the affected authority generation in the same transaction.
-Every descendant depends on live ancestry. The five-second cache TTL does not
-replace the generation check.
+Every descendant depends on live ancestry. Each request reads those facts again.
 
 Revocation cannot recall a signed URL or an external GitHub or OIDC credential
 already issued. Those retain their separate expirations. Stopping a runner is

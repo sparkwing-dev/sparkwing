@@ -152,7 +152,7 @@ func TestOperatorHTTPRemovesDeploymentEntryPoints(t *testing.T) {
 	}
 }
 
-func TestOperatorHTTPCommitsAuthorizedActions(t *testing.T) {
+func TestOperatorHTTPForwardsActionsAndAudits(t *testing.T) {
 	for _, dashboard := range []bool{false, true} {
 		t.Run(map[bool]string{false: "api", true: "dashboard"}[dashboard], func(t *testing.T) {
 			st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
@@ -165,7 +165,7 @@ func TestOperatorHTTPCommitsAuthorizedActions(t *testing.T) {
 			}
 			b := consoleBoundary()
 			var audit bytes.Buffer
-			s := controller.New(st, slog.New(slog.NewJSONHandler(&audit, nil))).WithAuthorization(consoleAuthorization(b))
+			s := controller.New(st, slog.New(slog.NewJSONHandler(&audit, nil))).WithAuthorization(consoleAuthorization(b)).WithConsoleWriter(consoleStoreFake{store: st})
 			if dashboard {
 				s.WithDashboard(controller.Dashboard{})
 			}

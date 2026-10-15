@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"errors"
-	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -47,8 +46,8 @@ func (s *Server) credentialInventory(ctx context.Context, team string) (Credenti
 	return reader, nil
 }
 
-func (s *Server) registerCredentialRoutes(mux *http.ServeMux) {
-	endpoints := []Endpoint{
+func (s *Server) credentialEndpoints() []Endpoint {
+	return []Endpoint{
 		{Method: "GET", Pattern: "/api/v1/secrets", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleListSecrets},
 		{Method: "POST", Pattern: "/api/v1/secrets", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleCreateSecret},
 		{Method: "GET", Pattern: "/api/v1/secrets/{name}", Authentication: capability.AuthCapability, Decode: secretReadTarget, Handle: s.handleReadSecret},
@@ -59,14 +58,6 @@ func (s *Server) registerCredentialRoutes(mux *http.ServeMux) {
 		{Method: "POST", Pattern: "/api/v1/team/git-credentials/{host}/confirm", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleConfirmGitCredential},
 		{Method: "DELETE", Pattern: "/api/v1/team/git-credentials/{host}", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDeleteGitCredential},
 		{Method: "GET", Pattern: "/api/v1/team/git-credentials/releases", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleListGitCredentialReleases},
-	}
-	for _, endpoint := range endpoints {
-		router := NewPolicyRouter(s.authorization)
-		var handler http.Handler = router
-		if err := router.Register(endpoint); err != nil {
-			handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { writePolicyError(w, err) })
-		}
-		mux.Handle(endpoint.Method+" "+endpoint.Pattern, noStore(handler))
 	}
 }
 

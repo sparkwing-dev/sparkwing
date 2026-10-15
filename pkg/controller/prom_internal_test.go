@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/hex"
 	"io"
 	"maps"
 	"net/http"
@@ -13,14 +14,16 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/quick"
 	"testing/synctest"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -48,6 +51,12 @@ func scrapeRegistry(t *testing.T) string {
 		t.Fatalf("read metrics: %v", err)
 	}
 	return string(body)
+}
+
+func TestMetricsExcludeCredentialHashingBudget(t *testing.T) {
+	if body := scrapeRegistry(t); strings.Contains(body, "sparkwing_auth_hashing_rejected_total") {
+		t.Fatal("controller publishes obsolete credential hashing telemetry")
+	}
 }
 
 func sampleValue(body, series string) (float64, bool) {
@@ -224,7 +233,7 @@ func TestSetQueueDepthCoversEveryState(t *testing.T) {
 }
 
 func TestCredentialLabelClampsAnUnknownKind(t *testing.T) {
-	for _, kind := range []string{store.TokenKindUser, store.TokenKindRunner, store.TokenKindService} {
+	for _, kind := range []string{"account", "machine", "service", "operator", "local", "anonymous"} {
 		if got := credentialLabel(kind); got != kind {
 			t.Errorf("credentialLabel(%q) = %q", kind, got)
 		}
@@ -472,7 +481,13 @@ func TestSamplersFillTheOperationalSeries(t *testing.T) {
 	}
 
 	srv := New(st, nil).WithLicense(meteringTestLicense(t))
-	srv.runnerPresence.record(presenceKey{name: "pool-a"}, []string{"zone=b"}, nil, match.Profile{}, nil, time.Now())
+	srv.WithRunnerInventory(func(_ context.Context, team store.Team) (RunnerInventoryReader, error) {
+		snapshot := capability.RunnerSnapshot{Now: time.Now()}
+		if team == "a" {
+			snapshot.Runners = []capability.RunnerObservation{{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "pool-a", Type: "runner", Labels: []string{"zone=b"}}, LastSeen: snapshot.Now}}
+		}
+		return &runnerInventoryFake{team: team, snapshot: snapshot}, nil
+	})
 
 	srv.sampleCreditLedger(ctx)
 	srv.sampleOperationalSeries(ctx)
@@ -542,6 +557,8 @@ func TestReaperSamplesTheOperationalSeries(t *testing.T) {
 	}
 }
 
+const claimRoute = "/api/v1/runners/claim"
+
 func claimWithLabels(t *testing.T, base, holder string, labels []string) {
 	t.Helper()
 	body := `{"holder_id":"` + holder + `","lease_secs":60,"labels":["` + strings.Join(labels, `","`) + `"]}`
@@ -552,77 +569,6 @@ func claimWithLabels(t *testing.T, base, holder string, labels []string) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		t.Fatalf("claim poll status = %d", resp.StatusCode)
-	}
-}
-
-// A node's charge window is what holds it in the reservation index and what
-// keeps its reserved seconds out of the billing line, so a finish must release
-// it even when the credential posting the finish is not the metered one that
-// claimed the node.
-func TestSettleFinishedNodeClearsTheWindowForAnUnmeteredFinisher(t *testing.T) {
-	restoreGlobals(t)
-
-	ctx := context.Background()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-
-	billingTenant, err := st.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := billingTenant.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 20_000_000, Reference: "invoice", CreatedBy: "admin"}); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	_, tok, err := st.CreateTokenWith(ctx, "pool", store.TokenKindRunner,
-		[]string{ScopeNodesClaim}, 0, time.Now(), store.TokenOptions{Metered: true})
-	if err != nil {
-		t.Fatalf("mint a metered token: %v", err)
-	}
-	claimant := store.ClaimIdentity{Principal: "pool", TokenPrefix: tok.Prefix}
-
-	if err := st.CreateRun(ctx, store.Run{
-		ID: "run-window", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-window", NodeID: "node-a", Status: "pending"}); err != nil {
-		t.Fatalf("create node: %v", err)
-	}
-	if err := st.MarkNodeReady(ctx, "run-window", "node-a"); err != nil {
-		t.Fatalf("mark ready: %v", err)
-	}
-	if _, err := st.ClaimNextReadyNode(ctx, claimant, "holder-window", time.Minute, nil); err != nil {
-		t.Fatalf("metered claim: %v", err)
-	}
-	before, err := st.NodeSettlement(ctx, "run-window", "node-a")
-	if err != nil {
-		t.Fatalf("NodeSettlement: %v", err)
-	}
-	if !before.ChargeWindowOpen {
-		t.Fatal("the metered claim opened no charge window, so this test proves nothing")
-	}
-
-	if err := st.StartNode(ctx, "run-window", "node-a"); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	if err := st.FinishNode(ctx, "run-window", "node-a", "success", "", nil); err != nil {
-		t.Fatalf("finish: %v", err)
-	}
-
-	// safety: the request carries no credential at all, which is the shape a
-	// revoked or un-metered finisher presents to this path.
-	srv := New(st, nil).WithLicense(meteringTestLicense(t))
-	srv.settleFinishedNode(httptest.NewRequest(http.MethodPost, "/finish", nil), "run-window", "node-a")
-
-	after, err := st.NodeSettlement(ctx, "run-window", "node-a")
-	if err != nil {
-		t.Fatalf("NodeSettlement after the finish: %v", err)
-	}
-	if after.ChargeWindowOpen {
-		t.Error("the finish left the charge window open, so the node holds a reservation forever")
 	}
 }
 
@@ -656,3 +602,73 @@ func describedMetrics() map[string][]string {
 }
 
 var describedNameRE = regexp.MustCompile(`fqName: "([^"]+)".*variableLabels: \{([^}]*)\}`)
+
+func TestRequestPrincipalMetricsCountsAuthenticatedPolicy(t *testing.T) {
+	s, raw := credentialSessionServer(t)
+	h := s.Handler()
+	const series = `sparkwing_requests_by_principal_total{credential="account"}`
+	before := mustSample(t, scrapeRegistry(t), series)
+	for _, tc := range []struct {
+		method, path, raw string
+		status            int
+	}{
+		{"GET", "/api/v1/auth/whoami", raw, 200},
+		{"POST", "/api/v1/runners/claim", raw, 403},
+		{"GET", "/api/v1/auth/whoami", "unknown", 401},
+		{"GET", "/api/v1/no-such-route", raw, 404},
+	} {
+		r := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
+		r.Header.Set("Authorization", "Session "+tc.raw)
+		r.Header.Set("Content-Type", "application/json")
+		if tc.method == "POST" {
+			r.Header.Set("Origin", "http://example.com")
+			r.Header.Set(csrfHeaderName, "session-csrf")
+			r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "session-csrf"})
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != tc.status {
+			t.Fatalf("%s %s = %d %s", tc.method, tc.path, w.Code, w.Body)
+		}
+	}
+	if after := mustSample(t, scrapeRegistry(t), series); after != before+2 {
+		t.Fatalf("authenticated requests = %v, want %v", after, before+2)
+	}
+	if strings.Contains(scrapeRegistry(t), "sparkwing_auth_token_cache_total") {
+		t.Fatal("retired token cache metric remains")
+	}
+}
+
+func TestRequestPrincipalMetricLabelsProperty(t *testing.T) {
+	allowed := []string{"account", "machine", "service", "operator", "local", "anonymous", "other"}
+	property := func(input []byte, known bool, choice uint8) bool {
+		private := "private-" + hex.EncodeToString(input)
+		kind := private
+		if known {
+			kind = allowed[int(choice)%len(allowed)]
+		}
+		notePolicyPrincipal(context.Background(), capability.Principal{Capability: capability.Capability{Prefix: private, Team: private, Subject: capability.Subject{Kind: capability.SubjectKind(kind), ID: private}}})
+		families, err := metricsRegistry.Gather()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, family := range families {
+			if family.GetName() != "sparkwing_requests_by_principal_total" {
+				continue
+			}
+			if len(family.Metric) != len(allowed) {
+				return false
+			}
+			for _, metric := range family.Metric {
+				if len(metric.Label) != 1 || metric.Label[0].GetName() != "credential" || !slices.Contains(allowed, metric.Label[0].GetValue()) {
+					return false
+				}
+			}
+			return true
+		}
+		return false
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+		t.Fatal(err)
+	}
+}

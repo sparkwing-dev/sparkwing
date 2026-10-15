@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -28,7 +27,7 @@ func TestControllerPipelines_ListIsTheCallersTeamOnly(t *testing.T) {
 	f := newCronsFixture(t)
 	ctx := context.Background()
 	tenantB := teamTenant(t, f.store, teamB)
-	readerB := teamToken(t, tenantB, controller.ScopeRunsRead)
+	readerB := teamToken(t, tenantB, "runs.read")
 	own, err := f.store.ForTeam(ctx, store.DefaultTeam)
 	if err != nil {
 		t.Fatalf("ForTeam default: %v", err)

@@ -88,6 +88,15 @@ TTL. A cached allow is invalid after the relevant revocation or membership
 change. Browser sessions and CSRF checks retain their separate persistence and
 verification rules.
 
+## Login budgets
+
+The sign-in routes (`POST /login` and the Google and GitHub flows) carry their
+own budgets. One client gets 30 attempts a minute. The listener's existing
+budget is 600 per configured hashing slot. Both answer `429` with
+`Retry-After` once drained. The account access token posted to `/login` uses
+SHA-256 capability lookup and fresh ancestry checks. It does not use the
+legacy token table, argon2 verifier or principal cache.
+
 Request limits protect a controller process. Persistent usage counters and
 quotas aggregate in the store. The supported deployment has one controller
 replica. Coordinated request limiters and cross-replica live-log fan-out are

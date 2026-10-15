@@ -9,8 +9,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -134,5 +136,64 @@ func TestCredentialIssuanceRechecksMembershipInTransaction(t *testing.T) {
 				t.Fatalf("issued=%d err=%v", count, err)
 			}
 		})
+	}
+}
+
+func TestCredentialIssuanceValidatesEveryGrant(t *testing.T) {
+	s, raw := credentialSessionServer(t)
+	h := s.Handler()
+	for _, grant := range capability.Grants {
+		t.Run(string(grant), func(t *testing.T) {
+			body, err := json.Marshal(credentialRequest{Grants: []capability.Grant{grant}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := credentialRequestHTTP(t, h, raw, string(body), false)
+			want := http.StatusForbidden
+			if slices.Contains([]capability.Grant{capability.RunsRead, capability.RunsWrite, capability.RunsControl, capability.LogsRead, capability.ApprovalsWrite}, grant) {
+				want = http.StatusCreated
+			}
+			if w.Code != want {
+				t.Fatalf("HTTP %d %s, want %d", w.Code, w.Body, want)
+			}
+		})
+	}
+	for _, body := range []string{`{}`, `{"grants":null}`, `{"grants":[null]}`, `{"grants":["runs.read","runs.read"]}`, `{"grants":[" runs.read "]}`, `{"grants":[""]}`, `{"grants":["runs.read","jobs:write","runs.admin"]}`, `{"scopes":["runs.read"]}`} {
+		w := credentialRequestHTTP(t, h, raw, body, false)
+		var failure apierr.Envelope
+		if w.Code != 400 || json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error == nil || failure.Error.Code != apierr.BadRequest {
+			t.Fatalf("HTTP %d %s", w.Code, w.Body)
+		}
+	}
+	w := credentialRequestHTTP(t, h, raw, `{"grants":[]}`, false)
+	var result credentialResponse
+	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Grants == nil || len(result.Grants) != 0 {
+		t.Fatalf("inert credential: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestCredentialIssuanceRefusedGrantProperty(t *testing.T) {
+	s, raw := credentialSessionServer(t)
+	h := s.Handler()
+	property := func(input []byte, mixed bool) bool {
+		grant := "private-" + hex.EncodeToString(input)
+		grants := []string{grant}
+		if mixed {
+			grants = append(grants, "runs.read")
+		}
+		body, err := json.Marshal(map[string]any{"grants": grants})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := credentialRequestHTTP(t, h, raw, string(body), false)
+		var count int
+		if err := s.store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM capabilities`).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		var failure apierr.Envelope
+		return w.Code == 400 && json.Unmarshal(w.Body.Bytes(), &failure) == nil && failure.Error != nil && failure.Error.Code == apierr.BadRequest && count == 0 && !strings.Contains(w.Body.String(), grant)
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {
+		t.Fatal(err)
 	}
 }

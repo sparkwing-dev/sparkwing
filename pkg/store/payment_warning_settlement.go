@@ -32,6 +32,9 @@ func recordPaymentWarningTx(ctx context.Context, tx *storeTx, w PaymentWarning, 
 	if !w.Actionable {
 		return "", nil
 	}
+	if _, err := tx.ExecContext(ctx, "UPDATE payment_warnings SET actionable=1 WHERE warning_id=?", w.WarningID); err != nil {
+		return "", err
+	}
 	team, err := paymentWarningTeamTx(ctx, tx, payment)
 	if err != nil || team == "" {
 		return "", err
