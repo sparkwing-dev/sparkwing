@@ -53,9 +53,14 @@ func (r *storageLogRecords) ReadLogSegments(context.Context, store.Actor, blob.L
 	return r.view, nil
 }
 
+type storageLogObjects interface {
+	logseg.LogPutSigner
+	logseg.SegmentObjects
+}
+
 type storageLogTransport struct {
 	blob.LogTransport
-	objects *blob.Filesystem
+	objects storageLogObjects
 	class   string
 	signs   int
 	checks  int
@@ -63,7 +68,13 @@ type storageLogTransport struct {
 
 func (s *storageLogTransport) SignSegments(ctx context.Context, q blob.LogSigningRequest) (blob.LogUploadBatch, error) {
 	s.signs++
-	return (logseg.BatchSigner{Objects: s.objects, ClassReady: func(context.Context, string) error { return nil }}).Sign(ctx, q, s.class)
+	ready := func(context.Context, string) error { return nil }
+	if objects, ok := s.objects.(interface {
+		LogClassReady(context.Context, string) error
+	}); ok {
+		ready = objects.LogClassReady
+	}
+	return (logseg.BatchSigner{Objects: s.objects, ClassReady: ready}).Sign(ctx, q, s.class)
 }
 
 func (s *storageLogTransport) VerifyUpload(ctx context.Context, q blob.LogUploadCheck) error {
@@ -71,10 +82,10 @@ func (s *storageLogTransport) VerifyUpload(ctx context.Context, q blob.LogUpload
 	return (logseg.UploadVerifier{Objects: s.objects}).Verify(ctx, q, s.class)
 }
 
-type storageLostResponse struct{ storageObjectHTTP }
+type storageLostResponse struct{ http.RoundTripper }
 
 func (h storageLostResponse) RoundTrip(r *http.Request) (*http.Response, error) {
-	response, err := h.storageObjectHTTP.RoundTrip(r)
+	response, err := h.RoundTripper.RoundTrip(r)
 	if err != nil {
 		return nil, err
 	}
@@ -100,77 +111,82 @@ func storageLogSegment(t *testing.T, number int, body []byte) (logseg.Segment, [
 
 func checkStorageLogs(t *testing.T) {
 	storageProperty(t, func(seed [16]byte, ordinal uint8, lost bool) bool {
-		f, dir := storageFilesystem(t)
-		i, _ := storageIdentity(seed, uint32(ordinal))
-		subject := blob.LogSubject{Team: i.Team, RunID: i.RunID}
-		switch ordinal % 4 {
-		case 0:
-			subject.Kind, subject.Attempt = blob.LogJobAttempt, &i.Attempt.Value
-		default:
-			subject.Kind = blob.LogOwnerUnit
-			subject.Unit = &blob.LogUnit{Kind: []blob.LogUnitKind{blob.LogTrigger, blob.LogPlan, blob.LogEval}[ordinal%4-1], Generation: int64(ordinal) + 1}
-			if subject.Unit.Kind == blob.LogEval {
-				subject.Unit.Source = &blob.LogSource{NodeID: "generator", Generation: int64(ordinal) + 2}
-			}
-		}
-		class := logseg.ClassStandard
-		if ordinal%2 == 0 {
-			class = logseg.ClassFree
-		}
-		signing := &storageLogTransport{objects: f, class: class}
-		records := &storageLogRecords{}
-		var transport http.RoundTripper = storageObjectHTTP{f}
-		if lost {
-			transport = storageLostResponse{storageObjectHTTP{f}}
-		}
-		uploader, err := logseg.NewSubjectUploader(logseg.Data{
-			Subject: subject, Transport: signing,
-			HTTPClient: blob.TransferClient{Transport: transport}, Records: records,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		var segments []logseg.Segment
-		var content []byte
-		for number := 1; number <= 2; number++ {
-			line := []byte(hex.EncodeToString(seed[:]) + string(rune('0'+number)) + "\n")
-			seg, raw := storageLogSegment(t, number, line)
-			if err := uploader.PutSegment(t.Context(), seg, raw); err != nil {
+		objects, dir := storageFilesystem(t)
+		return checkStorageLogRoundTrip(t, objects, storageObjectHTTP{objects}, func(key string, body []byte) {
+			if err := os.WriteFile(filepath.Join(dir, key), body, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			segments, content = append(segments, seg), append(content, line...)
-		}
-		manifest := logseg.Manifest{Status: logseg.StatusComplete, Segments: segments}
-		if err := uploader.PutManifest(t.Context(), manifest); err != nil {
-			t.Fatal(err)
-		}
-		if signing.signs != 1 || (lost && signing.checks != 3) || (!lost && signing.checks != 0) {
-			return false
-		}
-		reader := logseg.CommittedReader{Records: records, Objects: f}
-		for _, offset := range []int64{0, int64(len(content) / 2), int64(len(content) - 1), int64(len(content))} {
-			var output bytes.Buffer
-			result, err := reader.Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: subject, Offset: offset}, &output)
-			if err != nil || !result.Complete || result.Bytes != int64(len(content))-offset || !bytes.Equal(output.Bytes(), content[offset:]) {
-				return false
-			}
-		}
-		foreign := subject
-		foreign.RunID += "-other"
-		if foreign.Attempt != nil {
-			attempt := *foreign.Attempt
-			attempt.RunID = foreign.RunID
-			foreign.Attempt = &attempt
-		}
-		if _, err := reader.Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: foreign}, io.Discard); !errors.Is(err, blob.ErrIntegrity) {
-			return false
-		}
-		path := filepath.Join(dir, records.view.Segments[0].ObjectKey)
-		if err := os.WriteFile(path, []byte("corrupt"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		var output bytes.Buffer
-		result, err := reader.Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: subject}, &output)
-		return err != nil && result.Bytes == 0 && output.Len() == 0 && !result.Complete
+		}, seed, ordinal, lost)
 	})
+}
+
+func checkStorageLogRoundTrip(t *testing.T, objects storageLogObjects, transport http.RoundTripper, corrupt func(string, []byte), seed [16]byte, ordinal uint8, lost bool) bool {
+	t.Helper()
+	i, _ := storageIdentity(seed, uint32(ordinal))
+	subject := blob.LogSubject{Team: i.Team, RunID: i.RunID}
+	switch ordinal % 4 {
+	case 0:
+		subject.Kind, subject.Attempt = blob.LogJobAttempt, &i.Attempt.Value
+	default:
+		subject.Kind = blob.LogOwnerUnit
+		subject.Unit = &blob.LogUnit{Kind: []blob.LogUnitKind{blob.LogTrigger, blob.LogPlan, blob.LogEval}[ordinal%4-1], Generation: int64(ordinal) + 1}
+		if subject.Unit.Kind == blob.LogEval {
+			subject.Unit.Source = &blob.LogSource{NodeID: "generator", Generation: int64(ordinal) + 2}
+		}
+	}
+	class := logseg.ClassStandard
+	if ordinal%2 == 0 {
+		class = logseg.ClassFree
+	}
+	signing := &storageLogTransport{objects: objects, class: class}
+	records := &storageLogRecords{}
+	if lost {
+		transport = storageLostResponse{transport}
+	}
+	uploader, err := logseg.NewSubjectUploader(logseg.Data{
+		Subject: subject, Transport: signing,
+		HTTPClient: blob.TransferClient{Transport: transport}, Records: records,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var segments []logseg.Segment
+	var content []byte
+	for number := 1; number <= 2; number++ {
+		line := []byte(hex.EncodeToString(seed[:]) + string(rune('0'+number)) + "\n")
+		seg, raw := storageLogSegment(t, number, line)
+		if err := uploader.PutSegment(t.Context(), seg, raw); err != nil {
+			t.Fatal(err)
+		}
+		segments, content = append(segments, seg), append(content, line...)
+	}
+	manifest := logseg.Manifest{Status: logseg.StatusComplete, Segments: segments}
+	if err := uploader.PutManifest(t.Context(), manifest); err != nil {
+		t.Fatal(err)
+	}
+	if signing.signs != 1 || (lost && signing.checks != 3) || (!lost && signing.checks != 0) {
+		return false
+	}
+	reader := logseg.CommittedReader{Records: records, Objects: objects}
+	for _, offset := range []int64{0, int64(len(content) / 2), int64(len(content) - 1), int64(len(content))} {
+		var output bytes.Buffer
+		result, err := reader.Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: subject, Offset: offset}, &output)
+		if err != nil || !result.Complete || result.Bytes != int64(len(content))-offset || !bytes.Equal(output.Bytes(), content[offset:]) {
+			return false
+		}
+	}
+	foreign := subject
+	foreign.RunID += "-other"
+	if foreign.Attempt != nil {
+		attempt := *foreign.Attempt
+		attempt.RunID = foreign.RunID
+		foreign.Attempt = &attempt
+	}
+	if _, err := reader.Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: foreign}, io.Discard); !errors.Is(err, blob.ErrIntegrity) {
+		return false
+	}
+	corrupt(records.view.Segments[0].ObjectKey, []byte("corrupt"))
+	var output bytes.Buffer
+	result, err := reader.Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: subject}, &output)
+	return err != nil && result.Bytes == 0 && output.Len() == 0 && !result.Complete
 }

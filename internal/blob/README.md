@@ -252,13 +252,22 @@ Controller authorization and transactional records use fakes. These component
 checks run separately from the skipped native targets, whose transport,
 transaction, backend matrix and placement assertions need their real drivers.
 
-Two additional acceptance boundaries use real SQLite records. The filesystem
-upload property covers separate same-run upload receipts, missing staging,
-deduplication and receipt replay after cleanup. The repository-reader boundary
+The upload-isolation boundary uses real SQLite records with both filesystem
+objects and the S3 signer and SDK against a fake object service. Thirty-two
+generated uploads cover separate same-run receipts, missing staging and unique
+byte accounting. Physical publication grants no receipt. After staging cleanup
+and reopening SQLite, exact settlement replay retains its receipt while an
+unrelated job still cannot read the bytes. The repository-reader boundary
 uses the shared edge rules with a repo-bound reader that has no job attempt and
 rejects records without verified default-branch evidence. Authority and graph
 intake are seeded fixtures. Neither proof covers authenticated controller routes
 or native placements.
+
+The tagged-log property runs against filesystem objects and the S3 signer and
+SDK. It varies subject identities, retention classes and lost PUT responses.
+Batch signing checks S3 lifecycle readiness. Offset reads verify persisted ranges
+before emitting bytes, and corrupt objects fail before output. Controller
+authorization and segment records are fakes in this property.
 
 Local host construction does not open an artifact backend from
 `SPARKWING_CACHE_URL` or create an unused raw artifact cache. The final host

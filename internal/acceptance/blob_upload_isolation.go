@@ -1,26 +1,23 @@
 package acceptance
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/rand/v2"
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// CheckBlobUploadIsolation checks independent upload receipts with real SQLite and filesystem bytes.
-func CheckBlobUploadIsolation(ctx context.Context, root string) (err error) {
-	s, err := store.Open(filepath.Join(root, "upload-isolation.db"))
+// CheckBlobUploadIsolation checks independent upload receipts with SQLite and the supplied physical backend.
+func CheckBlobUploadIsolation(ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient) (err error) {
+	path := filepath.Join(root, "upload-isolation.db")
+	s, err := store.Open(path)
 	if err != nil {
 		return err
 	}
@@ -33,14 +30,6 @@ func CheckBlobUploadIsolation(ctx context.Context, root string) (err error) {
 	if err != nil {
 		return err
 	}
-	objects, err := blob.NewFilesystem(blob.FilesystemOptions{
-		Directory: filepath.Join(root, "objects"), Endpoint: "https://objects.invalid/data",
-		SigningKey: bytes.Repeat([]byte{7}, 32),
-	})
-	if err != nil {
-		return err
-	}
-	defer func() { err = errors.Join(err, objects.Close()) }()
 	random := rand.New(rand.NewPCG(29, 66))
 	var total int64
 	for i := range 32 {
@@ -60,7 +49,7 @@ func CheckBlobUploadIsolation(ctx context.Context, root string) (err error) {
 		if err != nil {
 			return err
 		}
-		if err := uploadBoundaryObject(ctx, objects, first, body); err != nil {
+		if err := uploadBoundaryObject(ctx, objects, transfers, first, body); err != nil {
 			return err
 		}
 		presence, err := tenant.ReadableBlobs(ctx, blob.HasManyRequest{Authority: request.Intent.Authority, Digests: []blob.Digest{first.Blob.Digest}})
@@ -87,8 +76,12 @@ func CheckBlobUploadIsolation(ctx context.Context, root string) (err error) {
 		if err := objects.CommitObject(ctx, second.StagingKey, second.Blob); !errors.Is(err, blob.ErrNotFound) {
 			return fmt.Errorf("case %d accepted another ticket's final bytes without its own staged upload: %v", i, err)
 		}
-		if err := uploadBoundaryObject(ctx, objects, second, body); err != nil {
+		if err := uploadBoundaryObject(ctx, objects, transfers, second, body); err != nil {
 			return err
+		}
+		presence, err = tenant.ReadableBlobs(ctx, query)
+		if err != nil || len(presence.Present) != 0 {
+			return fmt.Errorf("physical deduplication granted a receipt at case %d: %+v: %v", i, presence, err)
 		}
 		receipt, err := tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{
 			TicketID: second.ID, Authority: request.Intent.Authority, Verified: second.Blob, ReplicaID: "b",
@@ -105,11 +98,28 @@ func CheckBlobUploadIsolation(ctx context.Context, root string) (err error) {
 				return err
 			}
 		}
+		if err := s.Close(); err != nil {
+			return err
+		}
+		reopened, err := store.Open(path)
+		if err != nil {
+			return err
+		}
+		s = reopened
+		tenant, err = s.ForTeam(ctx, store.DefaultTeam)
+		if err != nil {
+			return err
+		}
 		replayed, err := tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{
 			TicketID: second.ID, Authority: request.Intent.Authority, Verified: second.Blob, ReplicaID: "b",
 		})
 		if err != nil || replayed != receipt {
 			return fmt.Errorf("settled receipt replay after staging cleanup at case %d: %+v: %v", i, replayed, err)
+		}
+		query.Authority.Attempt.Value.NodeID = "unrelated"
+		presence, err = tenant.ReadableBlobs(ctx, query)
+		if err != nil || len(presence.Present) != 0 {
+			return fmt.Errorf("persisted receipt escaped its job at case %d: %+v: %v", i, presence, err)
 		}
 	}
 	usage, err := tenant.StorageUsageFor(ctx, "upload", store.StorageMonth(time.Now()))
@@ -119,27 +129,13 @@ func CheckBlobUploadIsolation(ctx context.Context, root string) (err error) {
 	return nil
 }
 
-func uploadBoundaryObject(ctx context.Context, objects *blob.Filesystem, ticket store.UploadReservation, body []byte) error {
-	signed, err := objects.Sign(ctx, capability.ObjectToSign{
-		Method: http.MethodPut, Key: ticket.StagingKey, SHA256: string(ticket.Blob.Digest),
-		Size: ticket.Blob.Size, ExpiresAt: ticket.ExpiresAt,
-	})
+func uploadBoundaryObject(ctx context.Context, objects blob.ObjectBackend, transfers blob.HTTPClient, ticket store.UploadReservation, body []byte) error {
+	pending, err := stageBoundaryObject(ctx, objects, transfers, ticket.Blob, body, ticket.ID)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, signed.URL, bytes.NewReader(body))
-	if err != nil {
-		return err
+	if pending != ticket.StagingKey {
+		return blob.ErrIntegrity
 	}
-	response := httptest.NewRecorder()
-	objects.ServeHTTP(response, req)
-	if response.Code != http.StatusCreated {
-		return fmt.Errorf("signed upload: HTTP %d: %s", response.Code, response.Body)
-	}
-	for range 2 {
-		if err := objects.CommitObject(ctx, ticket.StagingKey, ticket.Blob); err != nil {
-			return err
-		}
-	}
-	return nil
+	return objects.CommitObject(ctx, pending, ticket.Blob)
 }

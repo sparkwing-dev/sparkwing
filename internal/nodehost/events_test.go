@@ -260,7 +260,7 @@ func TestHostedRunEmitsPlanConcurrencyRefusals(t *testing.T) {
 		res := hostEvents(t, ctx, state, Config{
 			Execute:   func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} },
 			Admission: &Admission{Slots: storeSlots{st: st}},
-		}, planGrouped("global:deploys", "skip", "a"))
+		}, planGrouped("global", "skip", "a"))
 		if res.Status != "success" {
 			t.Fatalf("run %s %v, want a skipped run to succeed", res.Status, res.Err)
 		}

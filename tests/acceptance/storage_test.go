@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
 func TestStorage(t *testing.T) {
@@ -42,7 +43,14 @@ func TestStorage(t *testing.T) {
 		})
 	}
 	t.Run("storage-reference-edge-laundering/filesystem-store", func(t *testing.T) {
-		if err := acceptance.CheckBlobUploadIsolation(t.Context(), t.TempDir()); err != nil {
+		objects, _ := storageFilesystem(t)
+		if err := acceptance.CheckBlobUploadIsolation(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: storageObjectHTTP{objects}}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("storage-reference-edge-laundering/s3-store", func(t *testing.T) {
+		objects, transport := storageS3(t)
+		if err := acceptance.CheckBlobUploadIsolation(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: transport}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -61,5 +69,6 @@ func TestStorage(t *testing.T) {
 	t.Run("storage-components/dependency-key-containment", checkStorageKeyContainment)
 	t.Run("storage-components/go-modules-resolver", checkStorageGoModulesResolver)
 	t.Run("storage-log-segments-and-fallback/filesystem-records", checkStorageFilesystemLogRecords)
+	t.Run("storage-log-segments-and-fallback/s3-components", checkStorageS3Logs)
 	pendingScenarios(t, "storage")
 }

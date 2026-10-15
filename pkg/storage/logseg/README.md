@@ -92,3 +92,10 @@ records, reopens the store and checks offset reads and revoked readers. It is
 blocked because the store uses a separate hashed namespace and starts segment
 records at zero. The first real commit refuses the signed segment. The component
 checks use record fakes and do not close that integration gap.
+
+The S3 component property joins the real signer, SDK, batch uploader, upload
+verifier and committed reader against a fake object service. Its 128 inputs vary
+job and owner-unit subjects, retention classes and lost PUT responses. It checks
+the bucket lifecycle before signing, reads exact offsets and refuses corrupt
+segments before emitting bytes. Segment records and controller authorization
+remain fakes.

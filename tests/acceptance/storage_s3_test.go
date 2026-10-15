@@ -27,6 +27,10 @@ func (s collectionS3) RoundTrip(r *http.Request) (*http.Response, error) {
 	out := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody, Request: r}
 	switch r.Method {
 	case http.MethodGet:
+		if r.URL.Query().Has("lifecycle") {
+			out.Body = io.NopCloser(strings.NewReader(`<LifecycleConfiguration><Rule><ID>free</ID><Filter><Prefix>logs/r30/</Prefix></Filter><Status>Enabled</Status><Expiration><Days>30</Days></Expiration></Rule><Rule><ID>standard</ID><Filter><Prefix>logs/r90/</Prefix></Filter><Status>Enabled</Status><Expiration><Days>90</Days></Expiration></Rule></LifecycleConfiguration>`))
+			break
+		}
 		body, found := s.objects[key]
 		if !found {
 			out.StatusCode = http.StatusNotFound
@@ -50,12 +54,18 @@ func (s collectionS3) RoundTrip(r *http.Request) (*http.Response, error) {
 			s.objects[key] = bytes.Clone(body)
 			out.Body = io.NopCloser(strings.NewReader(`<CopyObjectResult><ETag>"final"</ETag></CopyObjectResult>`))
 		} else {
+			if r.Header.Get("If-None-Match") == "*" {
+				if _, exists := s.objects[key]; exists {
+					out.StatusCode = http.StatusPreconditionFailed
+					break
+				}
+			}
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				return nil, err
 			}
 			sum := sha256.Sum256(body)
-			if r.ContentLength != int64(len(body)) || r.Header.Get("X-Amz-Checksum-Sha256") != base64.StdEncoding.EncodeToString(sum[:]) {
+			if r.ContentLength != int64(len(body)) || (r.Header.Get("If-None-Match") != "*" && r.Header.Get("X-Amz-Checksum-Sha256") != base64.StdEncoding.EncodeToString(sum[:])) {
 				out.StatusCode = http.StatusBadRequest
 				break
 			}
@@ -94,4 +104,13 @@ func checkStorageS3Collection(t *testing.T) {
 	if len(transport.objects) != 0 {
 		t.Fatalf("collection leaked %d objects", len(transport.objects))
 	}
+}
+
+func checkStorageS3Logs(t *testing.T) {
+	storageProperty(t, func(seed [16]byte, ordinal uint8, lost bool) bool {
+		objects, transport := storageS3(t)
+		return checkStorageLogRoundTrip(t, objects, transport, func(key string, body []byte) {
+			transport.objects[key] = bytes.Clone(body)
+		}, seed, ordinal, lost)
+	})
 }
