@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -146,14 +145,6 @@ func TestV2AfterRunPreservesCanonicalFailure(t *testing.T) {
 	}
 	if got := afterRunArgOf(Result{Outcome: sparkwing.Success}); got.Outcome != "success" || got.Error != nil {
 		t.Fatalf("success: %+v", got)
-	}
-}
-
-func TestV2RetryBudgetCountsAdditionalAttempts(t *testing.T) {
-	timeout, backoff := int64(100), int64(10)
-	job := nodeproto.JobSpec{TimeoutMS: &timeout, Retry: &nodeproto.RetrySpec{Attempts: 2, BackoffMS: &backoff}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
-	if got := AttemptsBudget(job); got != 330*time.Millisecond {
-		t.Fatalf("budget = %v", got)
 	}
 }
 

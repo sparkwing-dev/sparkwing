@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -74,29 +72,6 @@ func retryAnnounce(ctx context.Context, cfg *Config, n *NodeRun, ordinal, budget
 	}
 	hostEvent(ctx, n.Run, n.Plan.ID, "attempt_retry", fmt.Appendf(nil, "attempt %d/%d", ordinal, budget))
 	return true
-}
-
-// AttemptsBudget is the longest node n runs on one host: every attempt its
-// retries allow at its timeout_ms, and the backoff between them. Zero means
-// the node declares no timeout.
-func AttemptsBudget(n nodeproto.JobSpec) time.Duration {
-	if value(n.TimeoutMS) <= 0 {
-		return 0
-	}
-	retries := 0
-	var backoff time.Duration
-	if n.Retry != nil {
-		retries = max(n.Retry.Attempts, 0)
-		backoff = millis(value(n.Retry.BackoffMS))
-	}
-	total := time.Duration(retries+1) * millis(value(n.TimeoutMS))
-	for i := 1; i <= retries; i++ {
-		total += scaledBackoff(backoff, i)
-	}
-	if total < 0 {
-		return math.MaxInt64
-	}
-	return total
 }
 
 func scaledBackoff(initial time.Duration, attempt int) time.Duration {

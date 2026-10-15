@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func writeMachineSettings(t *testing.T, body string) string {
+func writeMachineSettings(t testing.TB, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {

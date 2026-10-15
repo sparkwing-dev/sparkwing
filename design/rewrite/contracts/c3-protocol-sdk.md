@@ -1,5 +1,9 @@
 # C3 protocol and SDK contract
 
+[The runtime helper cut](../w3-runtime-helper-cut-progress.md) deletes the legacy
+runner adapter and duplicate remote-environment and Windows Job Object code.
+Production placement migration and the legacy scheduler cut remain open.
+
 [The native input cut](../w3-native-input-cut-progress.md) moves here resume to
 the same awarded-input constructor as runner hosting. RunInput.SealedRequest
 contains the sealed request's Request payload. Retries retain the original

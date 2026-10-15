@@ -20,8 +20,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -44,9 +44,8 @@ type TriggerHost struct {
 	// root they run in.
 	Entry pipelineentry.Command
 	Dir   string
-	// Runner dispatches each node, as a Kubernetes Job or to a warm runner.
-	// Nil hosts each node in this process under a claim of its own.
-	Runner   runner.Runner
+	// Dispatch executes each claimed job.
+	Dispatch nodehost.Executor
 	Engine   nodeproto.EngineIdentity
 	Identity nodeproto.RunnerIdentity
 	Logger   *slog.Logger
@@ -71,7 +70,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	})
 	masker := secrets.NewMasker()
 	masker.Register(h.Token)
-	env, err := podProcessEnv(masker, logger)
+	env, err := podProcessEnv(procenv.Plan, os.Environ(), masker)
 	if err != nil {
 		return err
 	}
@@ -89,9 +88,9 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 		return err
 	}
 	slots := NewHTTPConcurrency(h.ControllerURL, nil, h.Token, store.DefaultConcurrencyLease)
-	dispatch := h.Runner
+	dispatch := h.Dispatch
 	if dispatch == nil {
-		dispatch = &claimedNodeHost{controllerURL: h.ControllerURL, entry: h.Entry, dir: h.Dir, ctrl: c, logger: logger}
+		dispatch = (&claimedNodeHost{controllerURL: h.ControllerURL, entry: h.Entry, dir: h.Dir, ctrl: c, logger: logger}).execute
 	}
 	hostLog := &triggerHostLog{out: os.Stderr}
 	shuttingDown := shuttingDownOn(ctx)
@@ -120,7 +119,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 			Routes: routes, Resolver: podSecrets{c: client.NewWithToken(h.ControllerURL, nil, trig.ClaimToken), runID: trig.ID}, Masker: masker,
 			OpenLog: func(context.Context, string, string) (nodehost.NodeLog, error) { return hostLog, nil },
 		},
-		Dispatch: dispatchThrough(dispatch, trig.Pipeline),
+		Dispatch: dispatch,
 		// safety: a reclaimed trigger finds the rows its stopped host left, which the run keeps.
 		Resume: true,
 		// safety: a retry copies what its source run already finished; it is apart from Resume, which keeps this
@@ -284,26 +283,6 @@ const (
 	runReadBackoff  = 250 * time.Millisecond
 )
 
-func dispatchThrough(r runner.Runner, pipeline string) nodehost.Executor {
-	return func(ctx context.Context, n *nodehost.NodeRun) nodehost.Result {
-		req := runner.Request{
-			RunID: n.Run.ID, NodeID: n.Plan.ID, Pipeline: pipeline,
-			ClaimWait: time.Duration(pointerValue(n.Run.Doc.ClaimWaitMS)) * time.Millisecond,
-		}
-		// safety: the node's retries and their backoff run on its host, so its Job outlives them all.
-		req.Timeout = nodehost.AttemptsBudget(n.Plan)
-		if resources := n.Plan.Resources; resources != nil {
-			req.Cores, req.MemoryBytes = pointerValue(resources.Cores), pointerValue(resources.MemoryBytes)
-		}
-		res := r.RunNode(ctx, req)
-		out := nodehost.Result{Outcome: res.Outcome, Err: res.Err}
-		if data, ok := res.Output.([]byte); ok {
-			out.Output = data
-		}
-		return out
-	}
-}
-
 // safety: the node runs under a claim this runner takes for it, as a
 // Kubernetes Job's pod does, so its rows, logs and routes are fenced to that
 // claim and a second host of the same node is refused by the controller.
@@ -316,14 +295,14 @@ type claimedNodeHost struct {
 
 const claimedNodeHolder = "trigger-host:"
 
-func (h *claimedNodeHost) RunNode(ctx context.Context, req runner.Request) runner.Result {
-	n, err := h.ctrl.ClaimNodeByID(store.WithoutClaimFences(ctx), req.RunID, req.NodeID,
-		claimedNodeHolder+req.RunID+"/"+req.NodeID, store.MaxLeaseDuration, false, nil)
+func (h *claimedNodeHost) execute(ctx context.Context, req *nodehost.NodeRun) nodehost.Result {
+	n, err := h.ctrl.ClaimNodeByID(store.WithoutClaimFences(ctx), req.Run.ID, req.Plan.ID,
+		claimedNodeHolder+req.Run.ID+"/"+req.Plan.ID, store.MaxLeaseDuration, false, nil)
 	if err != nil {
 		if ctx.Err() != nil {
-			return runner.Result{Outcome: sparkwing.Cancelled, Err: ctx.Err()}
+			return nodehost.Result{Outcome: sparkwing.Cancelled, Err: ctx.Err()}
 		}
-		return runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("claim node %s: %w", req.NodeID, err)}
+		return nodehost.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("claim node %s: %w", req.Plan.ID, err)}
 	}
 	fence := store.NodeClaimFence{
 		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
@@ -331,11 +310,11 @@ func (h *claimedNodeHost) RunNode(ctx context.Context, req runner.Request) runne
 	}
 	ctx = store.WithNodeClaimFence(store.WithoutClaimFences(ctx), fence)
 	ctx, stop := nodeClaimKeeper(client.NewWithToken(h.controllerURL, nil, n.ClaimToken),
-		req.RunID, req.NodeID, fence, store.MaxLeaseDuration).Run(ctx)
+		req.Run.ID, req.Plan.ID, fence, store.MaxLeaseDuration).Run(ctx)
 	defer stop()
 	res, err := hostDispatchedNode(ctx, podNode{
 		entry: h.entry, dir: h.dir, controllerURL: h.controllerURL, token: n.ClaimToken,
-		runID: req.RunID, nodeID: req.NodeID, logger: h.logger,
+		runID: req.Run.ID, nodeID: req.Plan.ID, logger: h.logger,
 	})
 	if err == nil {
 		res.Err = errors.Join(res.Err, context.Cause(ctx))
@@ -344,10 +323,10 @@ func (h *claimedNodeHost) RunNode(ctx context.Context, req runner.Request) runne
 	err = errors.Join(err, context.Cause(ctx))
 	// safety: only this claim may write the node now, so a host that never started finishes the row under it.
 	if ferr := client.NewWithToken(h.controllerURL, nil, n.ClaimToken).FinishNodeWithReason(context.WithoutCancel(ctx),
-		req.RunID, req.NodeID, string(sparkwing.Failed), nodehost.RecordedErrText(err), nil, store.FailureUnknown, nil); ferr != nil {
-		h.logger.Warn("trigger host: finish a node whose host never started", "run_id", req.RunID, "node_id", req.NodeID, "err", ferr)
+		req.Run.ID, req.Plan.ID, string(sparkwing.Failed), nodehost.RecordedErrText(err), nil, store.FailureUnknown, nil); ferr != nil {
+		h.logger.Warn("trigger host: finish a node whose host never started", "run_id", req.Run.ID, "node_id", req.Plan.ID, "err", ferr)
 	}
-	return runner.Result{Outcome: sparkwing.Failed, Err: err}
+	return nodehost.Result{Outcome: sparkwing.Failed, Err: err}
 }
 
 func nodeClaimKeeper(ctrl *client.Client, runID, nodeID string, fence store.NodeClaimFence, duration time.Duration) lease.Keeper {
@@ -422,14 +401,10 @@ func (s stoppingHostState) FinishNodeWithReason(ctx context.Context, runID, node
 	return s.Client.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
 }
 
-func hostDispatchedNode(ctx context.Context, p podNode) (runner.Result, error) {
+func hostDispatchedNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	p.state = stoppingHostState{
 		Client:       client.NewWithToken(p.controllerURL, nil, p.token),
 		shuttingDown: shuttingDownOn(ctx),
 	}
-	res, err := hostPodNode(ctx, p)
-	if err != nil {
-		return runner.Result{}, err
-	}
-	return runner.Result{Outcome: res.Outcome, Err: res.Err}, nil
+	return hostPodNode(ctx, p)
 }

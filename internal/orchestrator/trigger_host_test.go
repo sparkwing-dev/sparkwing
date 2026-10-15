@@ -23,8 +23,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -109,7 +107,7 @@ func (h *hostedTrigger) claimTrigger(t *testing.T, id string, args map[string]st
 	h.trig = claimed
 }
 
-func (h *hostedTrigger) host(t *testing.T, ctx context.Context, r runner.Runner, heartbeat time.Duration) error {
+func (h *hostedTrigger) host(t *testing.T, ctx context.Context, r nodehost.Executor, heartbeat time.Duration) error {
 	t.Helper()
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	if heartbeat > 0 {
@@ -130,7 +128,7 @@ func (h *hostedTrigger) host(t *testing.T, ctx context.Context, r runner.Runner,
 	}
 	return HostTriggerRun(ctx, TriggerHost{
 		ControllerURL: h.url, Token: h.token, Trigger: h.trig, Entry: pipelineentry.Binary(h.bin), Dir: t.TempDir(),
-		Runner: r, Logger: quiet,
+		Dispatch: r, Logger: quiet,
 	})
 }
 
@@ -420,33 +418,24 @@ func TestTriggerHost_ASecretBackedSkipIfSkipsTheNode(t *testing.T) {
 	}
 }
 
-type runnerFunc func(context.Context, runner.Request) runner.Result
-
-func (f runnerFunc) RunNode(ctx context.Context, req runner.Request) runner.Result {
-	return f(ctx, req)
-}
-
-// safety: a node another holder won the claim to is that holder's to run and
-// finish, so the run host neither runs it nor fails the run: it takes the
-// holder's result as the node's.
 func TestTriggerHost_TakesTheResultOfTheHolderThatWonTheClaim(t *testing.T) {
 	envOut := filepath.Join(t.TempDir(), "env")
 	h := newHostedTrigger(t, map[string]string{"envout": envOut})
 	c := client.NewWithToken(h.url, nil, h.token)
 	finished := make(chan error, 1)
-	r := runnerFunc(func(ctx context.Context, req runner.Request) runner.Result {
-		won, err := c.ClaimNodeByID(store.WithoutClaimFences(ctx), req.RunID, req.NodeID, "pool:legitimate", time.Minute, false, nil)
+	r := nodehost.Executor(func(ctx context.Context, req *nodehost.NodeRun) nodehost.Result {
+		won, err := c.ClaimNodeByID(store.WithoutClaimFences(ctx), req.Run.ID, req.Plan.ID, "pool:legitimate", time.Minute, false, nil)
 		if err != nil {
 			t.Errorf("claim: %v", err)
-			return runner.Result{Outcome: sparkwing.Failed, Err: err}
+			return nodehost.Result{Outcome: sparkwing.Failed, Err: err}
 		}
 		host := &claimedNodeHost{controllerURL: h.url, entry: pipelineentry.Binary(h.bin), dir: t.TempDir(), ctrl: c, logger: slog.New(slog.DiscardHandler)}
-		res := host.RunNode(ctx, req)
+		res := host.execute(ctx, req)
 		fenced := store.WithNodeClaimFence(context.WithoutCancel(ctx), store.NodeClaimFence{
 			HolderID: won.ClaimedBy, MembershipID: won.ClaimMembershipID, ReservationID: won.ReservationID, ClaimGeneration: won.ClaimGeneration,
 		})
 		go func() {
-			finished <- client.NewWithToken(h.url, nil, won.ClaimToken).FinishNodeWithReason(fenced, req.RunID, req.NodeID, string(sparkwing.Success), "", nil, "", nil)
+			finished <- client.NewWithToken(h.url, nil, won.ClaimToken).FinishNodeWithReason(fenced, req.Run.ID, req.Plan.ID, string(sparkwing.Success), "", nil, "", nil)
 		}()
 		return res
 	})
@@ -514,20 +503,6 @@ func TestTriggerHost_ADispatchedRecoverySeesItsParentsFailure(t *testing.T) {
 	got, err := os.ReadFile(recovered)
 	if n := h.node(t, "recover"); err != nil || !strings.Contains(string(got), "broken on purpose") {
 		t.Fatalf("recover = %s/%s (%s), recorded %q %v; want the parent's error", n.Status, n.Outcome, n.Error, got, err)
-	}
-}
-
-// safety: a dispatched node's Job is bounded by every attempt its retries
-// allow on its host, and the backoff between them, not by one attempt.
-func TestDispatchThrough_BoundsTheNodeByAllItsAttempts(t *testing.T) {
-	var got runner.Request
-	exec := dispatchThrough(runnerFunc(func(_ context.Context, req runner.Request) runner.Result {
-		got = req
-		return runner.Result{Outcome: sparkwing.Success}
-	}), "p")
-	exec(t.Context(), &nodehost.NodeRun{Run: &nodehost.Run{ID: "r"}, Plan: nodeproto.JobSpec{ID: "n", TimeoutMS: testOrchestratorPtr[int64](5 * 60_000), Retry: &nodeproto.RetrySpec{Attempts: 1, BackoffMS: testOrchestratorPtr[int64](6 * 60_000)}, Resources: &nodeproto.ResourceSpec{Cores: testOrchestratorPtr[float64](4), MemoryBytes: testOrchestratorPtr[int64](8 << 30)}}})
-	if got.Timeout != 16*time.Minute || got.Cores != 4 || got.MemoryBytes != 8<<30 {
-		t.Fatalf("request timeout=%s cores=%v memory=%d, want 16m, 4 cores and 8 GiB", got.Timeout, got.Cores, got.MemoryBytes)
 	}
 }
 
@@ -657,19 +632,19 @@ func TestTriggerHost_AReclaimedTriggerResumesItsRun(t *testing.T) {
 	}
 	h.trig = claimed
 	var dispatched []string
-	r := runnerFunc(func(ctx context.Context, req runner.Request) runner.Result {
-		dispatched = append(dispatched, req.NodeID)
-		n, err := client.NewWithToken(h.url, nil, h.token).ClaimNodeByID(store.WithoutClaimFences(ctx), req.RunID, req.NodeID, "successor", time.Minute, false, nil)
+	r := nodehost.Executor(func(ctx context.Context, req *nodehost.NodeRun) nodehost.Result {
+		dispatched = append(dispatched, req.Plan.ID)
+		n, err := client.NewWithToken(h.url, nil, h.token).ClaimNodeByID(store.WithoutClaimFences(ctx), req.Run.ID, req.Plan.ID, "successor", time.Minute, false, nil)
 		if err != nil {
-			return runner.Result{Outcome: sparkwing.Failed, Err: err}
+			return nodehost.Result{Outcome: sparkwing.Failed, Err: err}
 		}
 		fenced := store.WithNodeClaimFence(store.WithoutClaimFences(ctx), store.NodeClaimFence{
 			HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID, ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
 		})
-		if err := client.NewWithToken(h.url, nil, n.ClaimToken).FinishNodeWithReason(fenced, req.RunID, req.NodeID, string(sparkwing.Success), "", nil, "", nil); err != nil {
-			return runner.Result{Outcome: sparkwing.Failed, Err: err}
+		if err := client.NewWithToken(h.url, nil, n.ClaimToken).FinishNodeWithReason(fenced, req.Run.ID, req.Plan.ID, string(sparkwing.Success), "", nil, "", nil); err != nil {
+			return nodehost.Result{Outcome: sparkwing.Failed, Err: err}
 		}
-		return runner.Result{Outcome: sparkwing.Success}
+		return nodehost.Result{Outcome: sparkwing.Success}
 	})
 	resumeCtx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()

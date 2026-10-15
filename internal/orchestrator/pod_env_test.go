@@ -7,13 +7,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 func TestPodEnvCarriesProxyAndCASettingsButNoRunnerCredential(t *testing.T) {
+	writeMachineSettings(t, "run:\n  submit_env_allow: []\n")
 	t.Setenv("HTTPS_PROXY", "http://user:proxy-pass@proxy.corp:3128")
 	t.Setenv("no_proxy", "localhost")
 	t.Setenv("NODE_EXTRA_CA_CERTS", "/etc/corp-ca.pem")
@@ -26,7 +29,11 @@ func TestPodEnvCarriesProxyAndCASettingsButNoRunnerCredential(t *testing.T) {
 	t.Setenv("PIP_INDEX_URL", "https://registry.example/pypi")
 	t.Setenv("PIP_TRUSTED_HOST", "registry.example")
 	masker := secrets.NewMasker()
-	env := strings.Join(podSessionEnv(masker), "\n")
+	values, err := podProcessEnv(procenv.Plan, os.Environ(), masker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := strings.Join(values, "\n")
 	for _, want := range []string{
 		"HTTPS_PROXY=http://user:proxy-pass@proxy.corp:3128", "no_proxy=localhost",
 		"NODE_EXTRA_CA_CERTS=/etc/corp-ca.pem", "SSL_CERT_FILE=/etc/corp-ca.pem",
@@ -43,8 +50,14 @@ func TestPodEnvCarriesProxyAndCASettingsButNoRunnerCredential(t *testing.T) {
 	if got := masker.Mask("via user:proxy-pass@proxy.corp"); strings.Contains(got, "proxy-pass") {
 		t.Fatalf("the proxy password was not masked: %s", got)
 	}
-	if got := strings.Join(PodBaseEnv(), "\n"); got != env {
-		t.Fatalf("installs and node processes got different environments:\n%s\n--\n%s", got, env)
+	install, err := podProcessEnv(procenv.Install, os.Environ(), masker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range install {
+		if !slices.Contains(values, value) {
+			t.Fatalf("install environment %q differs from planning", value)
+		}
 	}
 }
 
@@ -56,9 +69,14 @@ func TestRegistrySettingsRequireTheOperatorAllowList(t *testing.T) {
 		"PIP_INDEX_URL=https://registry.example/pypi",
 		"PIP_TRUSTED_HOST=registry.example",
 	}
-	got, err := operatorAllowedEnv(values, nil, secrets.NewMasker(), quietLogger())
-	if err != nil || strings.Join(got, "\n") != strings.Join(values, "\n") {
-		t.Fatalf("allowed registry settings = %v, %v", got, err)
+	got, err := podProcessEnv(procenv.Install, values, secrets.NewMasker())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range values {
+		if !slices.Contains(got, value) {
+			t.Fatalf("allowed registry setting %q missing from %v", value, got)
+		}
 	}
 }
 

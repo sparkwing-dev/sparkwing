@@ -18,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/logpretty"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -589,7 +588,9 @@ func renderStatus(
 	fmt.Fprintf(out, "nodes (%d total, %d done):\n", len(nodes), countFinished(nodes))
 	renderNodesWithSteps(out, nodes, stepsByNode, includeSteps)
 
-	if outputs, ok := b.(runner.OutputReader); ok {
+	if outputs, ok := b.(interface {
+		GetNodeOutput(context.Context, string, string) ([]byte, error)
+	}); ok {
 		for _, n := range nodes {
 			if n.OutputRef == nil {
 				continue

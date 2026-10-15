@@ -237,22 +237,3 @@ func TestRetryLeavesTheRowRunningBetweenAttempts(t *testing.T) {
 		t.Fatalf("terminal events success=%d failure=%d", successes, failures)
 	}
 }
-
-// safety: a dispatched node's retries and backoff run on its one host, so
-// the host's wall-clock bound covers the last attempt's whole timeout.
-func TestAttemptsBudgetCoversEveryAttemptAndBackoff(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		m    *nodeproto.JobSpec
-		want time.Duration
-	}{
-		{"no timeout", &nodeproto.JobSpec{Retry: &nodeproto.RetrySpec{Attempts: 3}, Steps: []nodeproto.StepSpec{{ID: "body"}}}, 0},
-		{"one attempt", &nodeproto.JobSpec{TimeoutMS: new(int64(5 * 60_000)), Steps: []nodeproto.StepSpec{{ID: "body"}}}, 5 * time.Minute},
-		{"retry with backoff", &nodeproto.JobSpec{TimeoutMS: new(int64(5 * 60_000)), Retry: &nodeproto.RetrySpec{Attempts: 1, BackoffMS: new(int64(6 * 60_000))}, Steps: []nodeproto.StepSpec{{ID: "body"}}}, 16 * time.Minute},
-		{"doubling backoff", &nodeproto.JobSpec{TimeoutMS: new(int64(60_000)), Retry: &nodeproto.RetrySpec{Attempts: 2, BackoffMS: new(int64(1_000))}, Steps: []nodeproto.StepSpec{{ID: "body"}}}, 3*time.Minute + 3*time.Second},
-	} {
-		if got := AttemptsBudget(*tc.m); got != tc.want {
-			t.Errorf("%s: budget = %s, want %s", tc.name, got, tc.want)
-		}
-	}
-}

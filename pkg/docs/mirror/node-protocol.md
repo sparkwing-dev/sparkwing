@@ -175,6 +175,10 @@ before execution. `startup: true` and the engine's fixed interpreter variable
 list apply before process startup. Startup values must leave declarations
 unchanged. Commands and cleanups inherit the attempt environment.
 
+Runner planning and SDK installation use the same remote base and
+`run.submit_env_allow` policy. Install processes receive no job runtime or
+job-declared environment. Proxy credentials are masked before either process starts.
+
 Concurrency entries contain a `group` with optional `scope`, `capacity`, `cost`,
 `on_limit`, `queue_timeout_ms` and `cancel_timeout_ms`. Omitted values resolve to
 `global`, `1`, `1` and `queue`. Explicit zero capacity or cost is invalid. The host

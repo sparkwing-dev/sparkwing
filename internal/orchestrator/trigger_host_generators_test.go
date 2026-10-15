@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -36,7 +36,7 @@ func fanBodies(t *testing.T, log string) []string {
 	return lines
 }
 
-func (h *hostedTrigger) hostToEnd(t *testing.T, r runner.Runner) {
+func (h *hostedTrigger) hostToEnd(t *testing.T, r nodehost.Executor) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
@@ -179,19 +179,19 @@ func TestTriggerHost_AResumedRunKeepsAFinishedGeneratorsNodes(t *testing.T) {
 	}
 	h.trig = claimed
 	var dispatched []string
-	r := runnerFunc(func(ctx context.Context, req runner.Request) runner.Result {
-		dispatched = append(dispatched, req.NodeID)
-		n, err := client.NewWithToken(h.url, nil, h.token).ClaimNodeByID(store.WithoutClaimFences(ctx), req.RunID, req.NodeID, "successor", time.Minute, false, nil)
+	r := nodehost.Executor(func(ctx context.Context, req *nodehost.NodeRun) nodehost.Result {
+		dispatched = append(dispatched, req.Plan.ID)
+		n, err := client.NewWithToken(h.url, nil, h.token).ClaimNodeByID(store.WithoutClaimFences(ctx), req.Run.ID, req.Plan.ID, "successor", time.Minute, false, nil)
 		if err != nil {
-			return runner.Result{Outcome: sparkwing.Failed, Err: err}
+			return nodehost.Result{Outcome: sparkwing.Failed, Err: err}
 		}
 		fenced := store.WithNodeClaimFence(store.WithoutClaimFences(ctx), store.NodeClaimFence{
 			HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID, ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
 		})
-		if err := client.NewWithToken(h.url, nil, n.ClaimToken).FinishNodeWithReason(fenced, req.RunID, req.NodeID, string(sparkwing.Success), "", nil, "", nil); err != nil {
-			return runner.Result{Outcome: sparkwing.Failed, Err: err}
+		if err := client.NewWithToken(h.url, nil, n.ClaimToken).FinishNodeWithReason(fenced, req.Run.ID, req.Plan.ID, string(sparkwing.Success), "", nil, "", nil); err != nil {
+			return nodehost.Result{Outcome: sparkwing.Failed, Err: err}
 		}
-		return runner.Result{Outcome: sparkwing.Success}
+		return nodehost.Result{Outcome: sparkwing.Success}
 	})
 	h.hostToEnd(t, r)
 	if run := h.run(t); run.Status != "success" || !slices.Equal(dispatched, []string{"held"}) {

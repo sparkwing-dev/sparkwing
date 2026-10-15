@@ -1,58 +1,51 @@
 package orchestrator
 
 import (
-	"bytes"
-	"log/slog"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-func TestOperatorAllowedEnvPassesListedNamesButNeverEngineOrCredentialNames(t *testing.T) {
-	writeMachineSettings(t, "run:\n  submit_env_allow: [AWS_PROFILE, AWS_REGION, DOCKER_*, PATH, SPARKWING_AGENT_TOKEN, SPARKWING_NODE_CLAIM_*, GITHUB_PAT, BUILD_NOTE]\n")
-	env := []string{
-		"AWS_PROFILE=ci",
-		"AWS_REGION=us-east-1",
-		"DOCKER_HOST=unix:///var/run/docker.sock",
-		"BUILD_NOTE=ghp_0123456789abcdefghijklmnopqrstuvwxyz",
-		"AWS_SECRET_ACCESS_KEY=unlisted",
-		"KUBECONFIG=/unlisted",
-		"PATH=/runner/bin",
-		"SPARKWING_AGENT_TOKEN=swr_runner",
-		"SPARKWING_NODE_CLAIM_HOLDER=pod",
-		"GITHUB_PAT=ghp_live",
-	}
-	var logged bytes.Buffer
-	masker := secrets.NewMasker()
-	got, err := operatorAllowedEnv(env, []string{"PATH=/usr/bin"}, masker, slog.New(slog.NewTextHandler(&logged, nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{
-		"AWS_PROFILE=ci", "AWS_REGION=us-east-1", "DOCKER_HOST=unix:///var/run/docker.sock",
-		"BUILD_NOTE=ghp_0123456789abcdefghijklmnopqrstuvwxyz",
-	}
-	if !slices.Equal(got, want) {
-		t.Fatalf("node env = %#v, want %#v", got, want)
-	}
-	if line := masker.Mask("note ghp_0123456789abcdefghijklmnopqrstuvwxyz"); strings.Contains(line, "ghp_") {
-		t.Fatalf("a long passed-through value reached the log unmasked: %q", line)
-	}
-	if line := masker.Mask("decision: deploy to us-east-1"); line != "decision: deploy to us-east-1" {
-		t.Fatalf("short config was masked: %q", line)
-	}
-	for _, name := range []string{"SPARKWING_AGENT_TOKEN", "SPARKWING_NODE_CLAIM_HOLDER", "GITHUB_PAT"} {
-		if !strings.Contains(logged.String(), name) {
-			t.Errorf("drop of %s was not logged: %s", name, logged.String())
+func TestPodEnvironmentUsesSharedAllowListValidation(t *testing.T) {
+	writeMachineSettings(t, "run:\n  submit_env_allow: [\"*\"]\n")
+	for _, kind := range []procenv.Kind{procenv.Plan, procenv.Install} {
+		if _, err := podProcessEnv(kind, []string{"AWS_PROFILE=ci"}, secrets.NewMasker()); err == nil {
+			t.Fatal("bare wildcard accepted")
 		}
 	}
 }
 
-func TestOperatorAllowedEnvRefusesABareWildcard(t *testing.T) {
-	writeMachineSettings(t, "run:\n  submit_env_allow: [\"*\"]\n")
-	if _, err := operatorAllowedEnv([]string{"AWS_PROFILE=ci"}, nil, secrets.NewMasker(), quietLogger()); err == nil {
-		t.Fatal("operatorAllowedEnv error = nil, want the bare wildcard refused")
-	}
+func FuzzPodEnvironmentKeepsCredentialBoundary(f *testing.F) {
+	writeMachineSettings(f, "run:\n  submit_env_allow: [CUSTOM_*, HTTPS_PROXY, BUILD_NOTE]\n")
+	f.Add("private-password")
+	f.Add("encoded%40password")
+	f.Fuzz(func(t *testing.T, raw string) {
+		secret := fmt.Sprintf("private-%x", []byte(raw))
+		proxy := "http://reader:" + secret + "@proxy.invalid"
+		for _, kind := range []procenv.Kind{procenv.Plan, procenv.Install} {
+			masker := secrets.NewMasker()
+			env, err := podProcessEnv(kind, []string{
+				"CUSTOM_TOKEN=" + secret, "BUILD_NOTE=" + secret, "HTTPS_PROXY=" + proxy,
+				"SPARKWING_RUNNER_NAME=forged", "SPARKWING_AGENT_TOKEN=" + secret,
+			}, masker)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Contains(env, "HTTPS_PROXY="+proxy) || !slices.Contains(env, "BUILD_NOTE="+secret) {
+				t.Fatal("allowed input lost")
+			}
+			for _, entry := range env {
+				if strings.HasPrefix(entry, "CUSTOM_TOKEN=") || strings.HasPrefix(entry, "SPARKWING_AGENT_TOKEN=") || strings.HasPrefix(entry, "SPARKWING_RUNNER_NAME=") {
+					t.Fatal("credential or forged runtime input inherited")
+				}
+			}
+			if strings.Contains(masker.Mask(proxy+" "+secret), secret) {
+				t.Fatal("admitted secret is not masked")
+			}
+		}
+	})
 }

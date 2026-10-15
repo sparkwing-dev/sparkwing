@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 
@@ -77,34 +76,5 @@ func TestAssistedChildJobRejectsBreakaway(t *testing.T) {
 	}
 	if string(raw) != "denied" {
 		t.Fatalf("breakaway result = %q, want denied", raw)
-	}
-}
-
-func TestAssistedChildUnexpectedSuspendCountReapsBeforeBodyRuns(t *testing.T) {
-	previousResume := resumeAssistedChildThread
-	resumeAssistedChildThread = func(windows.Handle) (uint32, error) {
-		return 2, nil
-	}
-	t.Cleanup(func() { resumeAssistedChildThread = previousResume })
-
-	marker := filepath.Join(t.TempDir(), "body-started")
-	cmd := exec.Command(os.Args[0], "-test.run=^TestAssistedChildProcessHelper$")
-	cmd.Env = append(
-		os.Environ(),
-		assistedChildHelperMode+"=mark",
-		assistedChildHelperMarker+"="+marker,
-	)
-	outcome, err := runAssistedChildProcess(context.Background(), cmd, discardAssistedChildLogger())
-	if err == nil || outcome.cancelCause != nil || outcome.waitErr != nil {
-		t.Fatalf("unexpected suspend count result = %+v err=%v", outcome, err)
-	}
-	if !strings.Contains(err.Error(), "unexpected previous suspend count 2") {
-		t.Fatalf("unexpected suspend count error = %v", err)
-	}
-	if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
-		t.Fatalf("unexpected suspend count did not reap process: %+v", cmd.ProcessState)
-	}
-	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatalf("body ran before suspend-count rejection: %v", err)
 	}
 }
