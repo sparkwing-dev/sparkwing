@@ -2,6 +2,26 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+## From W7 archive integration and cache delivery cleanup
+
+**W7 archive transactions now pass with both physical backends.**
+`storage-memo-and-depcache-scope/filesystem-archives` and `s3-archives` join
+signed transfers, SQLite upload reservations, physical publication, receipt
+settlement, record commits and reopened archive restores. Each backend receives
+128 generated payloads. Forged repo/ref/attempt selectors fail. Equal-length
+corruption and missing objects preserve the destination. Failed work cannot
+replace a cache record. Successful cold work can publish a replacement.
+Authority and claim intake are seeded. The signing adapter is a contract fake,
+so W2 authentication and W3/W8 host construction remain open.
+
+**Cache image fixture cut completed.** The current release fixtures now expect
+only controller and runner images. Both previously failing release tests pass.
+Three commands targeting the removed Git cache package were deleted from
+`bin/pre-release-test.sh`. Historical release-asset matrices remain unchanged.
+W9/lead should retire or migrate that standalone script's other obsolete package
+paths. Its syntax passes, but the full script was not run and is not claimed as
+a release check. The current release scripts were exercised with a fake registry.
+
 ## From W7 whole-branch verification
 
 **W6/W4 test timing.** `go run ./internal/sleepcheck -base main .` reports

@@ -66,6 +66,14 @@ publishing, so checksum errors and truncated trailers preserve the destination.
 Cancellation during extraction also preserves it. A failed restore runs cold
 and can replace the failed archive after successful work.
 
+The archive acceptance checks join signed filesystem and S3 transfers to SQLite
+upload reservations, receipt settlement and record transactions. They reopen the
+store before restoring, reject forged repository/ref/attempt selectors, and
+preserve destination files after equal-length corruption or missing objects.
+A failed body leaves its cache record unchanged. A successful cold execution
+can publish a replacement archive. Authentication and host construction remain
+contract fixtures in these checks.
+
 Record transactions, read-set construction, unique-byte accounting, GC and
 retention belong to `pkg/store`. Controller authorization and upload tickets belong
 to the controller and capability packages.

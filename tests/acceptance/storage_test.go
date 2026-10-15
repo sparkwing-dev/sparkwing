@@ -72,5 +72,7 @@ func TestStorage(t *testing.T) {
 	t.Run("storage-log-segments-and-fallback/s3-components", checkStorageS3Logs)
 	t.Run("storage-memo-materialization-failures/filesystem-components", checkStorageFilesystemMaterialization)
 	t.Run("storage-memo-materialization-failures/s3-components", checkStorageS3Materialization)
+	t.Run("storage-memo-and-depcache-scope/filesystem-archives", checkStorageFilesystemDepcache)
+	t.Run("storage-memo-and-depcache-scope/s3-archives", checkStorageS3Depcache)
 	pendingScenarios(t, "storage")
 }
