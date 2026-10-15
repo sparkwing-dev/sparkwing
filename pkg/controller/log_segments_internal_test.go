@@ -393,11 +393,11 @@ func TestLogSegmentsChargeTheTeamsLogStorageOnce(t *testing.T) {
 	}), pub, now, nil))
 	tok := f.claim(t, "a", store.ClaimTokenWork)
 	committed := func() int64 {
-		usage, err := f.st.TeamStorage(t.Context(), store.DefaultTeam)
-		if err != nil {
+		var used int64
+		if err := f.st.DB().QueryRowContext(t.Context(), "SELECT used_bytes FROM team_storage WHERE team=? AND store=?", store.DefaultTeam, store.StorageLogs).Scan(&used); err != nil {
 			t.Fatal(err)
 		}
-		return usage[store.StorageLogs].UsedBytes
+		return used
 	}
 	for _, step := range []struct {
 		n    int

@@ -768,3 +768,19 @@ script that called the binary directly moves to the CLI:
 [{"name": ..., "required": true}]}` (or `"optional": true`), read from
 describe, instead of the per-field Go names and resolution notes the binary
 printed.
+
+## Storage standing uses retained inventory
+
+Use `Store.ForTeam(ctx, team)` followed by `Tenant.StorageStanding(ctx)` for
+the team's storage report. The snapshot returns retained event, blob and log
+bytes plus live blob-upload reservation bytes. Historical usage counters remain
+financial records and do not determine retained storage. Deleting a run releases
+its retained event bytes without a repair call.
+
+`Store.StorageStandingFor`, `Store.TeamStorage`, `TeamStorageUsage` and
+`Store.ReconcileFreeEventBytes` are removed. The pre-launch schema also removes
+the duplicate `free_slots.event_bytes` column. Rebuild the disposable store.
+
+`Store.ReleaseExpiredStorage` is removed. Final upload reservations expire
+through quota admission and leased blob maintenance. An expired upload ticket
+cannot commit, including a zero-byte ticket.

@@ -328,7 +328,7 @@ func TestDirectCommitAdoptsVerifiedCopyAfterOldReservationExpires(t *testing.T) 
 	if _, err := f.store.CommittedObject(t.Context(), store.Team(olga.team), key); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("copied but uncommitted row = %v", err)
 	}
-	if _, err := f.store.ReleaseExpiredStorage(t.Context(), time.Now().Add(store.DirectUploadTTL+time.Hour)); err != nil {
+	if err := f.store.ReleaseStorage(t.Context(), store.Team(olga.team), answer.UploadID, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	var retry controller.DirectUploadResponse

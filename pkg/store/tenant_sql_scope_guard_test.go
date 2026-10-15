@@ -45,11 +45,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"globalRunnerRefusal":               "the global concurrent runner cap counts live claims from every team",
 	"globalRunsPerHourRefusal":          "the global hourly cap counts runs from every team",
 	"(*Store).NodeClaimFenceNodeForRun": "the run ID is global, and the query matches its exact claimant and generation",
-	"(*Store).expiredReservationRows": "the sweep finds which teams hold expired reservations; each release " +
-		"then runs under that team's own row lock",
-
-	"runOwnerTx":             "asks which team owns an id, so an answer scoped to the asker is no answer",
-	"(*Store).NodeOutputKey": "the run ID is global, and the key only names an attempt the upload's own check binds",
+	"runOwnerTx":                        "asks which team owns an id, so an answer scoped to the asker is no answer",
+	"(*Store).NodeOutputKey":            "the run ID is global, and the key only names an attempt the upload's own check binds",
 	"(*Store).RecordLocalOutput": "a laptop store records an output its own process wrote for a node it holds; " +
 		"the run ID is global and the row takes that node's team",
 	"(*Store).claimScope": "asks which team a claim credential belongs to, so an answer scoped to " +
@@ -125,8 +122,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).PruneEgressUsage": "drops every team's egress months past the window, which is a deployment-wide retention",
 	"ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
 		"account deletion can tell sole ownership from shared",
-	"(*Store).ReconcileFreeEventBytes": "the storage pass recounts every slotted team's event bytes, each from its own " +
-		"team's runs",
 	"(*Store).finalizeClaimRoundAt": "closes the claim round of a node named by global id under the team boundary " +
 		"of the finalize route",
 	"claimRoundSummaryTx": "reads the node and run a claim round names by global id, under the team boundary its " +

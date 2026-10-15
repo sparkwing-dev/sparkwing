@@ -8,6 +8,23 @@ The primary inventory has 74 changed or added functions: 6 lifecycle, 6 state-ma
 
 ## Source snapshots
 
+`pkg/store/storage_standing_runtime_test.go` ports retained event-byte release
+after deletion and the funded/free/held storage-standing matrix to final rows.
+It checks unique blob/log inventory, commit/abort/expiry holds, corrupt totals
+and reopening. `FuzzStorageStandingTenantInventory` generates own and foreign
+inventory sizes and replica identities, with stale raw counters present. Reports
+must stay tenant-scoped and leave accounting unchanged. The controller proof uses
+the same final tenant snapshot. The existing upload crash/replay SQLite cell now
+checks live holds before commit and retained bytes after reopening. The raw
+standing/usage reads, event-byte repair API and duplicate event cache are removed.
+No archived source row or native acceptance cell is newly closed.
+
+The unused unleased `Store.ReleaseExpiredStorage` scan and its two legacy tests
+are removed. `TestBlobUploadExpiredReservationFreesCapacity` ports zero-byte
+expiry and capacity release to final tickets. Empty uploads reserve object
+capacity, expired tickets refuse late commits, and aborting an expired ticket
+cannot release its successor's hold. Committed replay remains covered separately.
+
 The raw paid-credit route and its handler tests are retired.
 `pkg/store/credit_grant_runtime_test.go` ports free-grant idempotency, team
 scoping, validation, balance/history accounting and payment-linked reversals

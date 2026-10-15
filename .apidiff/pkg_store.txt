@@ -2795,9 +2795,11 @@ func (s StorageSettings) RetentionOn() bool
 type StorageStanding struct {
 	Tier TeamStorageTier
 
-	AllowanceBytes int64
-
-	EventBytes int64
+	AllowanceBytes    int64
+	EventBytes        int64
+	BlobBytes         int64
+	ReservedBlobBytes int64
+	LogBytes          int64
 }
 type StorageTeamUsage struct {
 	Team    Team
@@ -3039,7 +3041,6 @@ func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters
 func (s *Store) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error)
 func (s *Store) ReadClaimProfile(ctx context.Context, authority capability.AuthorityRef) (match.Profile, match.Resources, error)
 func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) ([]ReapedUnit, error)
-func (s *Store) ReconcileFreeEventBytes(ctx context.Context) error
 func (s *Store) RecordAgentLabels(ctx context.Context, prefix string, labels []string) error
 func (s *Store) RecordAttemptIntent(ctx context.Context, attemptID, paymentIntent string, now time.Time) error
 func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error
@@ -3050,7 +3051,6 @@ func (s *Store) RecordPaymentWarning(ctx context.Context, w PaymentWarning, now 
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID, actor, reason string, now time.Time) (int64, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
-func (s *Store) ReleaseExpiredStorage(ctx context.Context, now time.Time) (int, error)
 func (s *Store) ReleaseStorage(ctx context.Context, team Team, id string, now time.Time) (err error)
 func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPrefix string) error
 func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error)
@@ -3122,12 +3122,10 @@ func (s *Store) SourceBoundToRun(ctx context.Context, team Team, key, runID stri
 func (s *Store) StartClaimExecution(ctx context.Context, tok ClaimToken, now time.Time) (specHash string, err error)
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
-func (s *Store) StorageStandingFor(ctx context.Context, team Team) (_ StorageStanding, err error)
 func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID string, from, to Team) error
 func (s *Store) SyncLaunchJobs(ctx context.Context, launcher ClaimIdentity, jobs []LaunchJob, now time.Time) ([]LaunchJobResult, error)
 func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error)
 func (s *Store) TeamInfo(ctx context.Context, team Team) (TeamInfo, error)
-func (s *Store) TeamStorage(ctx context.Context, team Team) (_ map[StorageKind]TeamStorageUsage, err error)
 func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)
 func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error
@@ -3191,11 +3189,6 @@ type TeamSecret struct {
 	Secret Secret
 }
 type TeamStorageTier string
-type TeamStorageUsage struct {
-	UsedBytes     int64
-	ReservedBytes int64
-	ReconciledAt  time.Time
-}
 const TeamTierFree TeamStorageTier = "free"
 const TeamTierFunded TeamStorageTier = "funded"
 const TeamTierNone TeamStorageTier = "none"
@@ -3460,6 +3453,7 @@ func (t *Tenant) StartNodeStep(ctx context.Context, runID, nodeID, stepID string
 func (t *Tenant) StartRecoveryAttempt(ctx context.Context, now time.Time) (_ CardChargeWork, err error)
 func (t *Tenant) StorageQuota(ctx context.Context) (StorageQuota, error)
 func (t *Tenant) StorageRetainedBytes(ctx context.Context) (int64, error)
+func (t *Tenant) StorageStanding(ctx context.Context) (_ StorageStanding, err error)
 func (t *Tenant) StorageUsageFor(ctx context.Context, runID, month string) (StorageUsage, error)
 func (t *Tenant) SupersedeCapacity(ctx context.Context, key, holderID string, actor Actor) error
 func (t *Tenant) Team() Team

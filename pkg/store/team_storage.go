@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// StorageKind names the store a [TeamStorageUsage] row counts.
+// StorageKind names the storage inventory class.
 type StorageKind string
 
 const (
@@ -80,13 +80,6 @@ type StorageReservation struct {
 	Granted   int64           `json:"granted_bytes"`
 	Unlimited bool            `json:"unlimited,omitempty"`
 	ExpiresAt time.Time       `json:"expires_at"`
-}
-
-// TeamStorageUsage is what one team holds in one store.
-type TeamStorageUsage struct {
-	UsedBytes     int64     `json:"used_bytes"`
-	ReservedBytes int64     `json:"reserved_bytes"`
-	ReconciledAt  time.Time `json:"reconciled_at,omitzero"`
 }
 
 func checkStorageTeam(team Team, kind StorageKind) error {
@@ -410,47 +403,6 @@ func (s *Store) ReleaseStorage(ctx context.Context, team Team, id string, now ti
 	return tx.Commit()
 }
 
-// ReleaseExpiredStorage drops every reservation that expired by now and
-// reports how many rows it unblocked. A reserve drops its own team's expired
-// reservations as it goes; this catches the rows nobody reserves against.
-func (s *Store) ReleaseExpiredStorage(ctx context.Context, now time.Time) (int, error) {
-	keys, err := s.expiredReservationRows(ctx, now)
-	if err != nil {
-		return 0, err
-	}
-	for _, k := range keys {
-		if err := s.inTx(ctx, func(tx *storeTx) error {
-			_, _, err := lockTeamStorageTx(ctx, tx, k.team, k.kind, now)
-			return err
-		}); err != nil {
-			return 0, err
-		}
-	}
-	return len(keys), nil
-}
-
-type storageRow struct {
-	team Team
-	kind StorageKind
-}
-
-func (s *Store) expiredReservationRows(ctx context.Context, now time.Time) (_ []storageRow, err error) {
-	rows, err := s.query(ctx, `SELECT DISTINCT team, store FROM storage_reservations WHERE expires_at <= ?`, now.UnixNano())
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var out []storageRow
-	for rows.Next() {
-		var team, kind string
-		if err := rows.Scan(&team, &kind); err != nil {
-			return nil, err
-		}
-		out = append(out, storageRow{Team(team), StorageKind(kind)})
-	}
-	return out, rows.Err()
-}
-
 func (s *Store) inTx(ctx context.Context, fn func(*storeTx) error) (err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -461,30 +413,6 @@ func (s *Store) inTx(ctx context.Context, fn func(*storeTx) error) (err error) {
 		return err
 	}
 	return tx.Commit()
-}
-
-// TeamStorage reports what team holds in each store the controller counts.
-func (s *Store) TeamStorage(ctx context.Context, team Team) (_ map[StorageKind]TeamStorageUsage, err error) {
-	rows, err := s.query(ctx, `SELECT store, used_bytes, reserved_bytes, reconciled_at FROM team_storage WHERE team = ?`,
-		string(NormalizeTeam(team)))
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	out := map[StorageKind]TeamStorageUsage{}
-	for rows.Next() {
-		var kind string
-		var u TeamStorageUsage
-		var reconciled int64
-		if err := rows.Scan(&kind, &u.UsedBytes, &u.ReservedBytes, &reconciled); err != nil {
-			return nil, err
-		}
-		if reconciled > 0 {
-			u.ReconciledAt = time.Unix(0, reconciled).UTC()
-		}
-		out[StorageKind(kind)] = u
-	}
-	return out, rows.Err()
 }
 
 // DownloadCharge asks to serve a team's download.

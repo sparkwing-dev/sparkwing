@@ -1,5 +1,23 @@
 # Store data persistence
 
+`Tenant.StorageStanding` reads policy, retained events, unique blobs, tagged log
+bytes and live upload holds in one snapshot. It shares the blob/log inventory
+reader with storage billing. Committed and aborted tickets contribute no holds.
+Expired holds disappear from the report without a maintenance write. Historical
+usage, raw storage counters and other tenants cannot change retained byte totals.
+Corrupt inventory or an overflowing total returns an error and no partial report.
+The controller's team storage report consumes this snapshot.
+
+`Store.StorageStandingFor`, `Store.TeamStorage`, `TeamStorageUsage` and
+`Store.ReconcileFreeEventBytes` are removed. `free_slots` retains slot ownership
+and its timestamp. Its duplicate event-byte column and writer are removed.
+Event storage admission reads retained run counters under its existing free-tier
+lock. Run deletion releases retained event bytes without a repair pass. The
+financial storage usage counters survive deletion and remain separate.
+`Store.ReleaseExpiredStorage` and its unleased cross-team scan are removed.
+Final upload expiry uses quota admission and leased blob maintenance. Empty
+uploads reserve object capacity too, and expired tickets cannot commit.
+
 The raw paid-credit grant path is removed. `Store.GrantCredits`,
 `Tenant.GrantCredits` and `Tenant.RecordCreditGrant` accept no `paid` kind.
 Paid checkout credit uses `Store.SettlePayment`, which derives the team and

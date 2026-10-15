@@ -2,6 +2,17 @@
 
 <!-- design:begin -->
 
+`Tenant.StorageStanding` reports the selected team's policy, retained event,
+blob and tagged-log bytes, and live upload reservation bytes from one snapshot.
+The controller and retained-storage billing share the same blob/log inventory
+owner. Historical usage counters never determine retained bytes.
+The raw `Store.StorageStandingFor` and `Store.TeamStorage` reads, their
+`TeamStorageUsage` type, and `Store.ReconcileFreeEventBytes` are removed.
+`free_slots` records only slot ownership and `taken_at`. Event bytes come from
+retained `runs.event_bytes`, including during event storage admission.
+`Store.ReleaseExpiredStorage` is removed. Upload expiry uses quota admission
+and the leased blob-maintenance pass.
+
 ## Amendment 1: authority and execution seams
 
 [Amendments 1](amendments-1.md) records the worker requests and assignments.

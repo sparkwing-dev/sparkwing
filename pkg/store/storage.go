@@ -300,7 +300,7 @@ ON CONFLICT (principal, month) DO UPDATE SET
 		principal, month, bytes, objects, now.UnixNano()); err != nil {
 		return err
 	}
-	return addFreeEventBytesTx(ctx, tx, team, bytes)
+	return nil
 }
 
 func quotaRefusal(quota StorageQuota, runBytes, runObjects, monthBytes, bytes, objects int64) error {

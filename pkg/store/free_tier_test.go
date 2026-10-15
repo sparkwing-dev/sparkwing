@@ -36,7 +36,7 @@ func fund(t *testing.T, tenant *store.Tenant) {
 
 func standing(t *testing.T, st *store.Store, team store.Team) store.StorageStanding {
 	t.Helper()
-	got, err := st.StorageStandingFor(context.Background(), team)
+	got, err := tenant(t, st, team).StorageStanding(context.Background())
 	if err != nil {
 		t.Fatalf("standing of %s: %v", team, err)
 	}
@@ -281,7 +281,7 @@ func TestTheOperatorsTeamIsNotHeldToAnEventShare(t *testing.T) {
 	}
 }
 
-func TestExpiryAndReconcileLowerAFreeTeamsEventBytes(t *testing.T) {
+func TestExpiryAndDeletionLowerAFreeTeamsEventBytes(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	acme := teamHandle(t, st, "acme")
@@ -312,11 +312,8 @@ func TestExpiryAndReconcileLowerAFreeTeamsEventBytes(t *testing.T) {
 	if err := acme.DeleteRun(ctx, "gone"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.ReconcileFreeEventBytes(ctx); err != nil {
-		t.Fatal(err)
-	}
 	if got := standing(t, st, "acme"); got.EventBytes != 100 {
-		t.Fatalf("after the reconcile = %d, want the one run left", got.EventBytes)
+		t.Fatalf("after deletion = %d, want the one run left", got.EventBytes)
 	}
 }
 

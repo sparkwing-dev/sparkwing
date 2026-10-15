@@ -28,11 +28,11 @@ func (s *Server) callerStorageStanding(r *http.Request) (*teamStandingJSON, erro
 	if team == "" || team == store.DefaultTeam {
 		return nil, nil
 	}
-	got, err := s.store.StorageStandingFor(r.Context(), team)
+	tenant, err := s.store.ForTeam(r.Context(), team)
 	if err != nil {
 		return nil, err
 	}
-	held, err := s.store.TeamStorage(r.Context(), team)
+	got, err := tenant.StorageStanding(r.Context())
 	if err != nil {
 		return nil, err
 	}
@@ -42,8 +42,8 @@ func (s *Server) callerStorageStanding(r *http.Request) (*teamStandingJSON, erro
 		LogShareBytes:   store.FreeLogShare(got.AllowanceBytes),
 		EventShareBytes: store.FreeEventShare(got.AllowanceBytes),
 		EventBytes:      got.EventBytes,
-		CacheBytes:      held[store.StorageCache].UsedBytes + held[store.StorageCache].ReservedBytes,
-		LogBytes:        held[store.StorageLogs].UsedBytes + held[store.StorageLogs].ReservedBytes,
+		CacheBytes:      got.BlobBytes + got.ReservedBlobBytes,
+		LogBytes:        got.LogBytes,
 	}, nil
 }
 

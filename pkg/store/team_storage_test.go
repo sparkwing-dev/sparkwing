@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sync"
@@ -27,13 +28,16 @@ func reserve(st *store.Store, team store.Team, kind store.StorageKind, n int64, 
 	})
 }
 
-func usageOf(t *testing.T, st *store.Store, team store.Team, kind store.StorageKind) store.TeamStorageUsage {
+type legacyStorageUsage struct{ UsedBytes, ReservedBytes int64 }
+
+func usageOf(t *testing.T, st *store.Store, team store.Team, kind store.StorageKind) legacyStorageUsage {
 	t.Helper()
-	all, err := st.TeamStorage(context.Background(), team)
-	if err != nil {
+	var out legacyStorageUsage
+	err := st.DB().QueryRowContext(t.Context(), storetest.Rebind(st, "SELECT used_bytes,reserved_bytes FROM team_storage WHERE team=? AND store=?"), team, kind).Scan(&out.UsedBytes, &out.ReservedBytes)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("storage of %s: %v", team, err)
 	}
-	return all[kind]
+	return out
 }
 
 // A free team's cache share is three quarters of its allowance and its log
@@ -189,7 +193,7 @@ func warmPool(t *testing.T, st *store.Store, n int) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := st.TeamStorage(context.Background(), "warm"); err != nil {
+			if _, err := st.CreditSettings(context.Background()); err != nil {
 				t.Error(err)
 			}
 		}()
@@ -233,65 +237,6 @@ func TestReserveRaceForTheLastBytesAdmitsExactlyOne(t *testing.T) {
 	}
 	if _, err := reserve(st, "alone", store.StorageCache, 4<<10, now); err != nil {
 		t.Fatalf("the last 4 KiB with no rival: %v", err)
-	}
-}
-
-// A writer that died holding a reservation stops blocking its team once the
-// reservation expires, and a commit that arrives after the expiry still
-// counts the bytes the write stored.
-func TestExpiredReservationsReleaseAndLateCommitsCount(t *testing.T) {
-	st := storetest.Open(t)
-	setFreeAllowance(t, st, 16<<10)
-	freeTeam(t, st, "team-a")
-	now := time.Now()
-	stale, err := reserve(st, "team-a", store.StorageCache, 12<<10, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := reserve(st, "team-a", store.StorageCache, 1, now.Add(59*time.Minute)); err == nil {
-		t.Fatal("a reserve before the stale reservation expired passed, want a quota error")
-	}
-	later := now.Add(61 * time.Minute)
-	if _, err := reserve(st, "team-a", store.StorageCache, 12<<10, later); err != nil {
-		t.Fatalf("the share after the reservation expired: %v", err)
-	}
-	if err := st.CommitStorage(context.Background(), store.StorageCommit{ID: stale.ID, Team: "team-a", Kind: store.StorageCache, Bytes: 2 << 10, Now: later}); err != nil {
-		t.Fatalf("a late commit: %v", err)
-	}
-	if err := st.CommitStorage(context.Background(), store.StorageCommit{ID: stale.ID, Team: "team-a", Kind: store.StorageCache, Bytes: 2 << 10, Now: later}); err != nil {
-		t.Fatalf("a replay of the late commit: %v", err)
-	}
-	if got := usageOf(t, st, "team-a", store.StorageCache); got.UsedBytes != 2<<10 || got.ReservedBytes != 12<<10 {
-		t.Fatalf("after a late commit = %+v, want its 2 KiB used beside the live 12 KiB reservation", got)
-	}
-	n, err := st.ReleaseExpiredStorage(context.Background(), later.Add(2*time.Hour))
-	if err != nil || n != 1 {
-		t.Fatalf("sweep = %d, %v; want the one live reservation released once it expired", n, err)
-	}
-	if got := usageOf(t, st, "team-a", store.StorageCache); got.ReservedBytes != 0 {
-		t.Fatalf("after the sweep = %+v, want nothing reserved", got)
-	}
-}
-
-func TestExpiredZeroByteReservationIsRemoved(t *testing.T) {
-	st := storetest.Open(t)
-	setFreeAllowance(t, st, 16<<10)
-	freeTeam(t, st, "team-a")
-	now := time.Now()
-	zero, err := reserve(st, "team-a", store.StorageCache, 0, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.ReleaseExpiredStorage(t.Context(), now.Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	var count int
-	if err := st.DB().QueryRowContext(t.Context(),
-		storetest.Rebind(st, `SELECT COUNT(*) FROM storage_reservations WHERE id = ?`), zero.ID).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 0 {
-		t.Fatalf("expired zero-byte reservation remains: %d row", count)
 	}
 }
 
