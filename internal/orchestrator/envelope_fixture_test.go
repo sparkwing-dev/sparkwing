@@ -100,6 +100,8 @@ func (envelopeFixture) Plan(_ context.Context, plan *sparkwing.Plan, in envelope
 		gated("g2").Concurrency(g)
 		gated("g3").Concurrency(g)
 		gated("free").Needs(gated("pre"))
+	case "recover-memo", "recover-skip", "recover-conc":
+		addEnvelopeRecovery(plan, in, gated, key, group)
 	case "args":
 		sparkwing.Job(plan, "record", func(context.Context) error {
 			return os.WriteFile(filepath.Join(in.Marker, "zone"), []byte(in.Zone), 0o600)
@@ -108,6 +110,33 @@ func (envelopeFixture) Plan(_ context.Context, plan *sparkwing.Plan, in envelope
 		return fmt.Errorf("unknown shape %q", in.Shape)
 	}
 	return nil
+}
+
+func addEnvelopeRecovery(plan *sparkwing.Plan, in envelopeInputs, gated func(string) *sparkwing.JobNode,
+	key sparkwing.MemoKeyFn, group func(string, sparkwing.Scope, int, sparkwing.OnLimit) *sparkwing.ConcurrencyGroup,
+) {
+	rollback := func(context.Context) error {
+		f, err := os.OpenFile(filepath.Join(in.Marker, "rollback"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(f, "body")
+		return errors.Join(err, f.Close())
+	}
+	failing := func(context.Context) error { return errors.New("deploy failed") }
+	switch in.Shape {
+	case "recover-memo":
+		recovery := sparkwing.Job(plan, "deploy", failing).OnFailure("rollback", rollback)
+		recovery.Memo(key)
+	case "recover-skip":
+		recovery := sparkwing.Job(plan, "deploy", failing).OnFailure("rollback", rollback)
+		recovery.SkipIf(func(context.Context) bool { return true })
+	case "recover-conc":
+		g := group("recover-grp", sparkwing.ScopeRun, 1, sparkwing.Fail)
+		gated("hold").Concurrency(g)
+		recovery := gated("deploy").OnFailure("rollback", rollback)
+		recovery.Concurrency(g)
+	}
 }
 
 func init() {

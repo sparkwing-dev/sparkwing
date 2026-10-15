@@ -1,9 +1,9 @@
 package nodeproto
 
-// safety: Placement identifies execution topology without overloading runner labels or trust pools.
+// Placement identifies execution topology without overloading runner labels or trust pools.
 type Placement string
 
-// safety: Every launch topology participates in the same validation matrix.
+// PlacementLocal through PlacementGitHubActions name the supported execution topologies.
 const (
 	PlacementLocal          Placement = "local"
 	PlacementLocalTriggered Placement = "local_triggered"
@@ -13,10 +13,10 @@ const (
 	PlacementGitHubActions  Placement = "github_actions"
 )
 
-// safety: PlanCapability names each declarative feature checked by the shared validator.
+// PlanCapability names each declarative feature checked by the shared validator.
 type PlanCapability string
 
-// safety: Capability names are wire-independent; a host must not silently ignore unsupported features.
+// CapabilityJobs through CapabilitySource name the declarative features checked during validation.
 const (
 	CapabilityJobs                  PlanCapability = "jobs"
 	CapabilitySteps                 PlanCapability = "steps"
@@ -56,7 +56,7 @@ const (
 	CapabilitySource                PlanCapability = "source"
 )
 
-// safety: PlacementCapability makes all six verdicts reviewable, including former launcher parity gaps.
+// PlacementCapability records support for one feature across execution topologies.
 type PlacementCapability struct {
 	Feature        PlanCapability
 	Local          bool
@@ -67,8 +67,7 @@ type PlacementCapability struct {
 	GitHubActions  bool
 }
 
-// safety: CapabilityTable is the complete launch matrix, not a snapshot of the old implementation's gaps.
-// Decision 99 requires parity; a missing feature must be implemented rather than marked unsupported.
+// CapabilityTable returns the supported features for every execution topology.
 func CapabilityTable() []PlacementCapability {
 	return []PlacementCapability{
 		{CapabilityJobs, true, true, true, true, true, true},

@@ -380,28 +380,11 @@ func (n *JobNode) NoProgressTimeout(d time.Duration) *JobNode {
 	return n
 }
 
-// OnFailure registers a recovery node that runs only when this node
-// terminates with outcome=failed; otherwise it's marked Skipped. The
-// recovery inherits no dependencies from its parent. Useful for
-// rollback, alerting, and cleanup hooks.
-//
-// Accepts the same argument shapes as sparkwing.Job (a Workable struct
-// or a bare func(ctx) error closure), plus a failure-aware
-// [FailureRecoveryFn] -- func(ctx context.Context, f sparkwing.Failure)
-// error -- which receives the [Failure] describing how this node
-// terminated. Branch on f.Stage to recover differently for an action
-// failure versus a [Verify] failure:
-//
-//	deploy.OnFailure("recover", func(ctx context.Context, f sparkwing.Failure) error {
-//	    if f.Stage != sparkwing.StageVerify {
-//	        return convergeForward(ctx) // action failed: state unknown
-//	    }
-//	    return rollback(ctx)            // verify failed: prior artifact is safe
-//	})
+// OnFailure declares and returns a recovery job that runs when this job fails.
 func (n *JobNode) OnFailure(id string, x any) *JobNode {
 	job := coerceRecoveryArg("OnFailure", id, x)
 	n.onFailure = newNode("OnFailure", id, job)
-	return n
+	return n.onFailure
 }
 
 // SkipOption configures a SkipIf registration.

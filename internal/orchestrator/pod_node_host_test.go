@@ -4,6 +4,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
@@ -287,41 +289,42 @@ func TestPodNode_WithoutAnAcceptedHashFailsClosed(t *testing.T) {
 	}
 }
 
-// A retry_auto node's every attempt is its own claim and pod: before_run runs
-// in each, as every dispatch did, and after_run in the last, the one the
-// controller does not retry.
 func TestLaunchedNode_RetryRunsAfterRunLast(t *testing.T) {
 	trace := filepath.Join(t.TempDir(), "trace")
-	r := newLaunchedRun(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "trace": trace, "auto": "true"})
+	r := newLaunchedRun(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "trace": trace})
 	requests := r.recordRequests(t)
 	if _, err := r.host(t, store.PlanNodeID); err != nil {
 		t.Fatalf("plan: %v", err)
 	}
-	for attempt := 1; attempt <= 3; attempt++ {
-		if _, err := r.host(t, "build"); err == nil {
-			t.Fatalf("attempt %d of a failing node succeeded", attempt)
-		}
-		want := "pending"
-		if attempt == 3 {
-			want = "done"
-		}
-		if n := r.node(t, "build"); n.Status != want || n.AttemptsConsumed != attempt {
-			t.Fatalf("after attempt %d build = %s with %d attempts (%q), want %s", attempt, n.Status, n.AttemptsConsumed, n.Error, want)
-		}
+	if _, err := r.host(t, "build"); err == nil {
+		t.Fatal("a failing job succeeded")
 	}
-	wantTrace(t, trace, "before\nbefore\nbefore\nafter:step \"run\": still broken\n")
+	if n := r.node(t, "build"); n.Status != "done" || n.Outcome != string(sparkwing.Failed) || n.ClaimGeneration != 1 {
+		t.Fatalf("build = %s/%s, claim generation %d, want done/failed under one claim", n.Status, n.Outcome, n.ClaimGeneration)
+	}
+	wantTrace(t, trace, "before\nafter:step \"run\": still broken\n")
 	sent, err := os.ReadFile(requests)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for attempt := 1; attempt <= 3; attempt++ {
-		if !strings.Contains(string(sent), fmt.Sprintf(`"op":"run_step","node":"build","step":"run","attempt":%d`, attempt)) {
-			t.Errorf("no run_step for attempt %d in the requests:\n%s", attempt, sent)
+	decoder := json.NewDecoder(strings.NewReader(string(sent)))
+	var attempts []int
+	for {
+		var req nodeproto.Request
+		if err := decoder.Decode(&req); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			t.Fatal(err)
 		}
+		if req.Op == nodeproto.OpRunStep && req.Job == "build" && req.Step == "run" {
+			attempts = append(attempts, req.Attempt)
+		}
+	}
+	if !slices.Equal(attempts, []int{1, 2, 3}) {
+		t.Fatalf("run_step attempts = %v, want [1 2 3]; requests:\n%s", attempts, sent)
 	}
 }
 
-// hack: the Go SDK ignores the attempt ordinal, so a wrapper copies every request to the returned file instead.
 func (r *launchedRun) recordRequests(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -336,31 +339,24 @@ func (r *launchedRun) recordRequests(t *testing.T) string {
 	return log
 }
 
-// A retry_auto node whose before_run refuses never runs its body, though the
-// controller dispatches it again.
 func TestLaunchedNode_RetryNeverRunsABodyItsBeforeRunRefused(t *testing.T) {
-	envOut := filepath.Join(t.TempDir(), "env")
-	r := newLaunchedRun(t, map[string]string{
-		"envout": envOut, "trace": filepath.Join(t.TempDir(), "trace"), "auto": "true", "refuse": "true",
-	})
+	envOut, trace := filepath.Join(t.TempDir(), "env"), filepath.Join(t.TempDir(), "trace")
+	r := newLaunchedRun(t, map[string]string{"envout": envOut, "trace": trace, "refuse": "true"})
 	if _, err := r.host(t, store.PlanNodeID); err != nil {
 		t.Fatalf("plan: %v", err)
 	}
-	for attempt := 1; attempt <= 3; attempt++ {
-		if _, err := r.host(t, "build"); err == nil {
-			t.Fatalf("attempt %d of a refused node succeeded", attempt)
-		}
-		if _, err := os.Stat(envOut); !os.IsNotExist(err) {
-			t.Fatalf("attempt %d ran the body of a refused node: %v", attempt, err)
-		}
+	if _, err := r.host(t, "build"); err == nil {
+		t.Fatal("a refused job succeeded")
 	}
-	if n := r.node(t, "build"); n.Status != "done" || n.Outcome != string(sparkwing.Failed) {
-		t.Fatalf("build = %s/%s, want done/failed", n.Status, n.Outcome)
+	if _, err := os.Stat(envOut); !os.IsNotExist(err) {
+		t.Fatalf("refused body ran: %v", err)
 	}
+	if n := r.node(t, "build"); n.Status != "done" || n.Outcome != string(sparkwing.Failed) || n.ClaimGeneration != 1 || !strings.Contains(n.Error, "not authorized") {
+		t.Fatalf("build = %+v, want done/failed for the refused hook under one claim", n)
+	}
+	wantTrace(t, trace, "before\n")
 }
 
-// A plain retry re-runs in the one pod its claim started, with before_run in
-// the first attempt and after_run in the last.
 func TestLaunchedNode_PlainRetryRunsInThePod(t *testing.T) {
 	trace := filepath.Join(t.TempDir(), "trace")
 	r := newLaunchedRun(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "trace": trace})
@@ -370,8 +366,8 @@ func TestLaunchedNode_PlainRetryRunsInThePod(t *testing.T) {
 	if _, err := r.host(t, "build"); err == nil {
 		t.Fatal("a failing node succeeded")
 	}
-	if n := r.node(t, "build"); n.Status != "done" || n.Outcome != string(sparkwing.Failed) || n.AttemptsConsumed != 1 {
-		t.Fatalf("build = %s/%s with %d claims, want done/failed with 1", n.Status, n.Outcome, n.AttemptsConsumed)
+	if n := r.node(t, "build"); n.Status != "done" || n.Outcome != string(sparkwing.Failed) || n.ClaimGeneration != 1 {
+		t.Fatalf("build = %s/%s with claim generation %d, want done/failed under one claim", n.Status, n.Outcome, n.ClaimGeneration)
 	}
 	wantTrace(t, trace, "before\nafter:step \"run\": still broken\n")
 }
