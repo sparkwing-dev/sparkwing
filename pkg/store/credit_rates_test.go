@@ -613,7 +613,7 @@ func TestAStoredRateTableNothingCanReadIsAnError(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	if _, err := s.DB().Exec(
-		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES ('credit_rate_table', 'not json', 1)`,
+		`INSERT INTO settings (key, value) VALUES ('credit_rate_table', ?)`, []byte(`not json`),
 	); err != nil {
 		t.Fatalf("write an unreadable table: %v", err)
 	}

@@ -287,6 +287,15 @@ paid grant. Checkout lookups select the configured test/live mode. Distinct card
 charge grants retain their provider payment reference. Ambiguous payment/grant
 associations fail instead of choosing a team. Caller-directed checkout closure
 is removed. Verified failure and expiry events own those outcomes.
+`CreditGrantRequest` carries no checkout session. Only verified payment
+settlement writes the checkout's paid timestamp and grant association.
+
+Credit pricing and storage-rate settings use unsealed JSON values in `settings`.
+Only missing keys select defaults. Malformed values, invalid prices and sealed
+rows return errors. A settings batch and its returned snapshot commit together.
+Rate-table reads use one snapshot so a concurrent update cannot mix its scalar
+price with another table. Operator table authority is checked under the shared
+advisory lock before any settings write.
 
 | Export | Purpose |
 |---|---|

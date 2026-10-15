@@ -182,15 +182,3 @@ func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) (err error) 
 	}
 	return tx.Commit()
 }
-
-// safety: runs inside the paid grant's transaction, so the checkout stops
-// counting as open in the same step its amount enters the balance.
-func markCreditCheckoutPaidTx(ctx context.Context, tx *storeTx, team Team, sessionID string, nowNS int64) error {
-	if sessionID == "" {
-		return nil
-	}
-	_, err := tx.ExecContext(ctx,
-		`UPDATE credit_checkouts SET paid_at = ? WHERE team = ? AND session_id = ? AND paid_at IS NULL`,
-		nowNS, string(team), sessionID)
-	return err
-}

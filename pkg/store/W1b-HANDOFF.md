@@ -1,38 +1,71 @@
 # W1b handoff
 
-W1b remains incomplete. This continuation closes checkout-to-refund lookup and
-cross-path payment replay. It removes caller-directed checkout closure. W1's
-admission, claim, transition, reaper, schema and guard files remain untouched.
-No git writes or Sparkwing executable runs were made.
+W1b remains incomplete. This continuation implements final-schema credit settings,
+removes caller-selected checkout payment marking, and ports billing-cap and usage
+proofs. It starts at `025adae72`. W1 admission, claim, transition, reaper, schema
+and SQL-guard files are untouched. No Git writes or Sparkwing binaries were run.
 
 ## Implemented in this continuation
 
-- `payment_lookup.go` resolves provider payment IDs through the checkout's
-  persisted grant association and configured test/live mode. Distinct card
-  grants retain their provider payment reference. Empty IDs, ledger references
-  presented as provider IDs, invalid associations and ambiguous grants cannot
-  choose a payer or fund a refund.
-- Console refunds use the original grant reference in `reverses`. Prior
-  reversals count toward the cap. Partial and complete refunds replay after
-  reopening the database, preserve negative balances after consumed credit,
-  and roll back if their audit fails. Independent clients cannot refund more
-  than one payment. Refund timestamps use the store clock.
-- Payment warnings now find teams funded through verified checkouts. Card,
-  checkout and paid-grant settlement share the payment identity lookup. Tests
-  reproduced and closed double grants from card-to-checkout,
-  checkout-to-paid-grant and paid-grant-to-checkout replay.
-- Deleted `Tenant.CloseCreditCheckout`, `ErrCheckoutNotFound`, its controller
-  handler/types/error constant, route registration and route inventory entry.
-  Verified failure/expiry events own checkout outcomes. This removes 112
-  obsolete production lines. The old 17-line raw payment lookup was replaced.
-- Removed the obsolete closure-route test. Ported card/grant funding races and
-  spent-balance refunds to final-schema fixtures. Verified checkout audits,
-  failure/expiry, missing sessions and immutable paid credit already have
-  store tests. Account/business-event tests retain their other assertions.
+- `credit_settings.go` owns typed JSON reads and writes in `settings`. Missing
+  keys select defaults. Invalid JSON, invalid integer/rate bounds and sealed
+  values return errors. A rejected batch rolls back all writes. Stored prices
+  survive reopening the database. Operator rate-table authority uses the shared
+  advisory-lock helper. Public rate-table reads use one consistent snapshot.
+- Removed `CreditGrantRequest.Checkout`, the HTTP grant request's `checkout`
+  field and `markCreditCheckoutPaidTx`. Generic grants cannot mark a provider
+  checkout paid or release its hold. Verified payment settlement owns the paid
+  timestamp and grant association. HTTP requests carrying the removed field
+  return 400. Grant timestamps use the store clock.
+- Ported balance-cap, open-checkout, concurrent-checkout, late-payment and
+  per-run-usage tests onto the final schema. Cap races and paid-event races use
+  independent database clients. Verified paid events preserve funds above the
+  balance cap. Expired checkouts keep purchase room during the settlement
+  window. A settled payment counts once. Free-grant replay and team isolation
+  remain covered. Usage totals net job/host reservations and refunds, exclude
+  storage and other teams, and honor the result limit.
+- The usage port reproduced a storage-charge insert naming the removed
+  `credit_charges.token_prefix`. It now writes `capability_prefix`.
+- Ported settings rollback and operator-writer races. Added corruption, restart
+  and sealed-value coverage. Updated the unreadable-rate-table fixture to write
+  the final settings table.
 
-No other area's Go contract changed. C1 documentation now states the persisted
-payment/grant association and the closure cut. Existing upload ticket, blob
-record, tagged-log and metered-ledger implementations remain in place.
+The patch replaces/removes 98 production lines, including 22 obsolete checkout
+payment-marker lines. It removes 391 legacy test lines and ports their assertions.
+`credit_billing_test.go` is deleted. Settings implementation now lives in the
+owned `credit_settings.go`; it is not counted as a net code reduction.
+
+Earlier sessions already implemented upload tickets and receipts, blob records,
+reference authorization, tombstone GC, tagged logs, metered awards/intervals,
+checkout payment settlement, checkout-aware refunds/warnings and cross-path
+payment deduplication. Those implementations were retained and regression-tested.
+
+## Verification
+
+All Go checks use `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
+`-p 4`, and cache/temp directories beneath `/tmp/sw-astra-W1b/`.
+
+- Final repository `go build -p 4 ./...` passed.
+- `go vet -p 4` passed for `pkg/store/...`, `pkg/controller/...`,
+  `internal/acceptance/...` and `tests/acceptance/...`.
+- Store selection passed 85 top-level tests / 168 including subtests, no skips:
+  `^(TestStoreData|TestLogPersistence|TestResult|TestBlob|TestPayment|TestReversePaymentTakesBack|TestCreditSettings|TestSetCreditSettings|TestUnsetRateTable|TestSetRateTable|TestAStoredRateTable|TestATableWithoutAFourCore)`.
+- Race selection passed 30 top-level tests / 79 including subtests, no skips:
+  `^(TestStoreDataCreditSettings|TestStoreDataMeteredUsage|TestPayment)`.
+- `TestCreditGrantRequestRefusesCallerSelectedCheckout` passed in the controller.
+- Acceptance packages passed. The existing
+  `storage-replica-safe-accounting/store-data-sqlite` proof passes. No new native
+  acceptance cells were activated because the placement driver remains unbuilt.
+- API documentation was regenerated. `check-api-spec.sh`, `sync-docs.sh --check`
+  and `git diff --check` passed. Generated `CreditGrantRequest` matches the updated
+  snapshot. Wider snapshot drift remains in eight packages: controller,
+  controller/client, projectconfig, match, store, storage/storeurl, sparkwing and
+  storage. Only the changed grant field was cut from the committed snapshot.
+- The first settings run failed against the removed `sparkwing_meta` table.
+  The usage port failed against `token_prefix`. Both passed after their fixes.
+- The full legacy suite and SQL tenant guard were not rerun. Prior legacy-profile
+  fixtures and missing/moved SQL exemptions still need their owners' verification.
+  PostgreSQL, native placements and real Stripe were not exercised.
 
 ## Integration and remaining cuts
 
@@ -42,86 +75,59 @@ record, tagged-log and metered-ledger implementations remain in place.
    settle release/terminal/reap transactions at their persisted end or lapse.
    Reconciliation needs atomic memo materialization before memoized success.
    Data scopes need their permitted default/base refs.
-2. W2 must implement C2 `SettleBilling`, provider verification and
+2. W1 owns the retained compute/admission settings callers. `SetComputeLimits`
+   now writes through the final `setCreditSettingTx`, but `computeLimitsSQL`
+   still selects `sparkwing_meta`. `SetFreeTeamSlots` still uses the legacy
+   `upsertCreditSettingSQL` while its reader uses final settings. Migrate those
+   callers without reintroducing a metadata table. That remaining SQL constant
+   and the legacy `parseCreditSetting` cannot be deleted until their callers
+   move. These W1 files were left untouched under the split ownership.
+3. W2 must implement C2 `SettleBilling`, provider verification and
    `VerifiedPaymentEvent.Event`, install payment-mode configuration, and wire
-   `Store.SettlePayment`. Store tests fake provider facts and the calculator.
-   They do not establish Stripe authentication or native billing acceptance.
-3. Remove the legacy paid-grant routes with W2's payment cut, then delete
-   `CreditGrantRequest.Checkout` and `markCreditCheckoutPaidTx` with their
-   callers. Legacy blob/log/storage-credit and claim-time billing APIs still
-   need their consumers migrated and their old implementations deleted.
-4. W7 must wire upload reserve/lookup/commit/abort to physical backend evidence
+   `Store.SettlePayment`. Store tests fake verified provider facts and the billing
+   calculator. They do not establish Stripe authentication or native acceptance.
+4. Remove the legacy paid-grant routes with W2's payment cut. Legacy claim-time
+   billing, blob/log and storage-credit APIs still need their consumers migrated
+   and implementations deleted. Retained storage charging/sweeping still uses
+   principal-based operational rows and metadata watermarks. Fixing its ledger
+   insert does not port that sweep to unique blobs or leased maintenance.
+5. W7 must wire upload reserve/lookup/commit/abort to physical backend evidence
    and trusted `ReplicaID`. Supply manifest reads and blob deletion. Shared
    record namespace/edge functions are stubs here and use contract fakes in
    store tests. Confirm the trusted-builder mapping for cloud provenance.
-5. W1 must call both blob GC phases from leased maintenance. W2/W7 log signing
+6. W1 must call both blob GC phases from leased maintenance. W2/W7 log signing
    must derive keys through `LogSegmentObjectKey` and persisted retention
    classes. Physical integrity, exact proxy egress, backend lifecycle rules
    and live-ring fallback remain external integration obligations.
 
-## Contract changes needed
+## Contract changes needed and open questions
 
-- W1 owns the schema and must coordinate mode identity for retained card
-  attempts, payments, warnings, freezes and refund work with W2/W9. Those
-  tables/API inputs still lack a test/live discriminator. Checkout lookup
-  follows configured mode, but that cannot distinguish identical provider IDs
-  in retained card state across a mode switch. No schema or foreign contract
-  was changed to guess at this requirement.
+No new foreign Go contract or schema was changed. C1 documents final settings
+persistence and the removal of caller-selected checkout settlement.
+
+- W1 must coordinate test/live identity for retained card attempts, payments,
+  warnings, freezes and refund work with W2/W9. Those tables/API inputs lack a
+  mode discriminator. Checkout lookup follows configured mode, which cannot
+  distinguish identical provider IDs in retained card state across a mode switch.
 - W1 owns `tenant_sql_scope_guard_test.go`. Move its cross-team exemptions from
   `(*Store).PaidGrantTeam` and `(*Store).RecordPaymentWarning` to
   `paidGrantForPaymentTx` and `paymentWarningTeamTx`. Provider payment IDs
-  identify the team before the refund/warning can be scoped. The former
-  validates the selected grant association before returning it. The latter
-  resolves a card attempt when a grant has not arrived. The existing
-  `(*Store).settlePaymentFacts` exemption is also missing. Other existing
-  authority/retention guard findings remain in that file's owner scope.
-
-## Verification
-
-All Go checks use `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
-`-p 4`, and cache/temp directories beneath `/tmp/sw-astra-W1b/`.
-
-- Final repository `go build -p 4 ./...` passed. `go vet -p 4` passed for
-  `pkg/store/...`, `pkg/controller/...`, `internal/orchestrator/...`,
-  `internal/acceptance/...` and `tests/acceptance/...`.
-- Focused store tests passed 66 top-level tests / 131 including subtests, with
-  no skips. Selection:
-  `^(TestStoreDataMetered|TestLogPersistence|TestResult|TestBlob|TestPayment|TestReversePaymentTakesBack)`.
-- `go test -p 4 ./internal/acceptance ./tests/acceptance -count=1` passed.
-  The existing `storage-replica-safe-accounting/store-data-sqlite` boundary
-  passes. No new native acceptance cell was activated. Native placements,
-  PostgreSQL and real Stripe remain unproved.
-- All `^TestPayment` tests passed under `go test -race -p 4`, including
-  independent-client refund races and cross-path funding replay.
-- The OpenAPI rewriter and API reference generator produced byte-identical
-  output after the route cut.
-  `bin/sync-docs.sh --check` passed. Removed exports are absent from generated
-  API snapshots. Full snapshot drift remains in eight packages from the wider
-  rewrite. Only this continuation's removed/changed entries were updated.
-- The SQL tenant guard fails on the missing/moved exemptions above and
-  existing authority/retention findings. The account/business-event fixture
-  fails during sign-in with a foreign-key error. These are reported, not
-  treated as successful checks. Prior full-store failures on legacy profile
-  and removed `sparkwing_meta` fixtures remain outside this continuation.
-- `git diff --check` passed. HEAD remains `20f3383ac`. No local Git
-  identity/core.worktree override was found. All checks exited and the scratch
-  directory was deleted.
+  identify the team before refunds/warnings can be scoped. The existing
+  `(*Store).settlePaymentFacts` exemption is also missing. Other previously
+  reported authority/retention guard findings remain in that owner's scope.
 
 ## Shared files touched
 
-The production caller cut changes only `pkg/controller/credit_reversals.go`,
-`server.go` and `tenant_routes.go`. Matching test inventories change in
-`pkg/controller/credit_reversals_test.go`, `operator_test.go` and
-`internal/orchestrator/wingd_api_routes_test.go`. Documentation changes are
-`api/openapi.yaml`, `docs/api-reference.md`, `docs/auth.md`, `CHANGELOG.md`,
-their embedded mirrors, C1's contract notes, and the two affected `.apidiff`
-files. All other edits are W1b-owned store files.
+- `pkg/controller/credits.go` removes the grant field and its store argument.
+- `pkg/controller/credit_grant_request_test.go` checks the HTTP refusal.
+- `api/openapi.yaml`, `.apidiff/pkg_store.txt`,
+  `design/rewrite/contracts/c1-data.md`, `CHANGELOG.md` and the generated
+  `pkg/docs/changelog.md` describe the changed surface.
 
-Mechanisms added: one private payment-to-grant lookup shared by existing
-financial writers/readers. Separate lookups were the cause of cross-path
-funding and missing checkout refunds. No setting, schema, compatibility API
-or runtime service was added.
+All other changes are W1b-owned store implementation, tests and this handoff.
 
-Friction: isolated Go caches require a cold dependency/race build. Legacy
-fixtures and W1-owned guard exemptions prevent a full store-suite pass. The
-remaining foreign implementations were tested through their contract fakes.
+Mechanisms added: none beyond replacing the existing settings persistence in its
+own file. No schema, setting key, environment variable, compatibility API or
+runtime service was added. Friction remains in legacy consumers, foreign stubs
+and wider snapshot drift. No local Git identity/core.worktree override was found.
+All checks exited and the scratch directory was deleted.

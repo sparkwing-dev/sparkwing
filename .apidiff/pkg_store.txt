@@ -498,8 +498,6 @@ type CreditGrantRequest struct {
 	CreatedBy   string
 
 	Reason string
-
-	Checkout string
 }
 type CreditGrantResult struct {
 	Grant   CreditGrant

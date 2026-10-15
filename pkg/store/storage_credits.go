@@ -426,7 +426,7 @@ func insertStorageChargeTx(ctx context.Context, tx *storeTx, c storageCharge) (*
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `
-        INSERT INTO credit_charges (team, id, run_id, node_id, token_prefix, principal, kind,
+        INSERT INTO credit_charges (team, id, run_id, node_id, capability_prefix, principal, kind,
                 seconds, amount_micro, storage_bytes, charged_at, card_fingerprint)
         VALUES (?, ?, '', '', '', ?, ?, ?, ?, ?, ?, ?)`,
 		string(c.Team), id, c.Principal, CreditChargeStorage,

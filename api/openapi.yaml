@@ -8147,7 +8147,6 @@ components:
         amount_micro: {type: integer, format: int64, description: "Micro-credits to add; 100,000 is one credit and 1,000,000 one cent, and one grant may not exceed 10^15."}
         reference: {type: string, description: "The payment id. A non-empty one is idempotent."}
         team: {type: string, description: "Slug of the team whose balance the grant funds. Required on a multi-team controller; defaults to the default team otherwise."}
-        checkout: {type: string, description: "Checkout Session id a paid grant settles, so the checkout it opened stops counting against the team's balance cap."}
     PaymentReversal:
       x-sparkwing-go-type: pkg/controller.reversePaymentJSON
       type: object
