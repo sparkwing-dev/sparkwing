@@ -89,7 +89,7 @@ indexed in [cli-reference.md](cli-reference.md):
 | `runners` | Runner observations, enrollment and removal |
 | `pools` | Team-admin reserved-pool access rules |
 | `secrets` | Secrets in the local store, or controller-stored with `--profile`: set / get / list / delete / rotate |
-| `debug` | Interactive run debugging: run / release / attach / env / replay |
+| `debug` | Job inspection and debugging: resume / attach / env |
 | `docs` | The embedded copy of this doc tree: list / read / search / migrations |
 | `examples` | The worked-pipeline registry; `--example <example> --body` prints the source |
 | `commands` | The full CLI surface as JSON (agent self-discovery) |

@@ -621,4 +621,47 @@ settings to C4's final job and schedule names. C2 continues to own deployment
 authorization and reset replay. Fake transport and CLI component tests do not
 establish native store, quota, reset or console authorization behavior.
 
+### Public debug observations
+
+`controllerwire.DebugReader` and `client.NewDebugReader` use C2's existing GET
+routes for `/api/v1/runs/{run}/jobs/{job}` and its `/debug-pause` child. W9 owns
+these success messages. No route, grant or release operation is added.
+
+The job route returns `DebugJob`: resolved `run_id`, positive team `number`, the
+existing safe `JobDetail`, and nullable `execution`. An execution contains a
+public runner name and `kind=local|runner|kubernetes`. Only Kubernetes execution
+contains `pod`, `namespace` and `container`. All three are explicit valid
+Kubernetes names. The server projects the current executor and execution
+container together with the job, without returning any claim bearer, bootstrap,
+sealed request, raw environment or private storage row. A claim-holder string
+cannot serve as an attachment location.
+
+The pause route returns `DebugPauseResult` with resolved `run_id`, `number`,
+`job_id` and a required nullable `pause`. A present pause has masked `reason`,
+nonzero `paused_at` and nullable `expires_at`. Null expiry means indefinite.
+Only explicit null means no active pause. Read errors, missing fields, malformed
+times and mismatched identities fail. Additive unknown fields remain readable
+and are discarded when the public projection is serialized.
+
+`debug env` reads both messages through the same HTTP/api.sock client. It resolves
+a team number once and uses the stable run ID for the second read. It emits the
+public job/execution/pause projection in JSON and propagates failed pause reads.
+The two reads are observations rather than an atomic snapshot. They confer no
+execution authority. A future environment/working-directory snapshot needs a
+host-owned masked capture contract before those values can enter the view.
+
+`debug attach` requires a running Kubernetes execution. It accepts the existing
+namespace override, validates it and passes the explicit execution container to
+the caller's kubectl. The CLI process environment builder filters inherited
+credentials. JSON output starts with the safe execution target and streams
+stdout chunks as `{kind:debug_output,text}` records. Plain/pretty stream the
+child's stdout directly. Child errors, cancellation and output errors remain
+failures. Fakes and a Unix kubectl fixture establish only this adapter boundary.
+
+W2 must bind the two projections on its existing authenticated routes and derive
+the current execution target. W3 owns any future masked environment/directory
+capture. W9's legacy env/attach readers and claim-prefix pod guessing are deleted.
+Debug resume still needs W2's declared release route, authority and replay body.
+Native controller, Kubernetes, Windows and Darwin integration remains open.
+
 <!-- design:end -->

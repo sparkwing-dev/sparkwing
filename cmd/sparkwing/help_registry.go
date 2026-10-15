@@ -172,7 +172,7 @@ var commandSynopses = map[string]string{
 	"sparkwing dashboard uninstall":                 "Remove the dashboard login service",
 	"sparkwing debug":                               "Interactive debugging for pipeline runs",
 	"sparkwing debug attach":                        "kubectl exec into a paused job's pod (cluster mode)",
-	"sparkwing debug env":                           "Print a paused job's environment and working directory + claim holder",
+	"sparkwing debug env":                           "Inspect public job, executor and pause diagnostics",
 	"sparkwing debug resume":                        "Resume a paused job",
 	"sparkwing docs":                                "Embedded user docs (offline)",
 	"sparkwing docs list":                           "Enumerate every doc topic",

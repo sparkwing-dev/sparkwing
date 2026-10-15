@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **debug CLI (Breaking):** Job inspection uses the shared public controller projections
+  Env and attach use the local API socket or profile transport. Failed pause reads stay errors. Attach uses the server's explicit pod, namespace and execution container. JSON streams shell output in `debug_output` records. Native debug projection bindings remain an integration requirement. See [job inspection](docs/debugging.md).
+
 - **engine CLI (Breaking):** Local dispatch uses the shared exact SDK-matched engine resolver
   Newer installed versions and missing release assets cannot substitute another engine. Cached starts still check signed policy. The legacy CLI downloader, cache and environment recursion marker are removed. Native engine resolution remains an integration requirement.
 

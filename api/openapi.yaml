@@ -1152,6 +1152,83 @@ components:
         - source
       type: object
       x-sparkwing-go-type: controllerwire.DataUploadUnit
+    internal.controllerwire.DebugExecution:
+      additionalProperties: true
+      properties:
+        container:
+          type: string
+        kind:
+          type: string
+        namespace:
+          type: string
+        pod:
+          type: string
+        runner:
+          type: string
+      required:
+        - runner
+        - kind
+      type: object
+      x-sparkwing-go-type: controllerwire.DebugExecution
+    internal.controllerwire.DebugJob:
+      additionalProperties: true
+      properties:
+        execution:
+          anyOf:
+            - $ref: '#/components/schemas/internal.controllerwire.DebugExecution'
+            - type: "null"
+        job:
+          $ref: '#/components/schemas/internal.controllerwire.JobDetail'
+        number:
+          type: integer
+        run_id:
+          type: string
+      required:
+        - run_id
+        - number
+        - job
+        - execution
+      type: object
+      x-sparkwing-go-type: controllerwire.DebugJob
+    internal.controllerwire.DebugPause:
+      additionalProperties: true
+      properties:
+        expires_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        paused_at:
+          format: date-time
+          type: string
+        reason:
+          type: string
+      required:
+        - reason
+        - paused_at
+        - expires_at
+      type: object
+      x-sparkwing-go-type: controllerwire.DebugPause
+    internal.controllerwire.DebugPauseResult:
+      additionalProperties: true
+      properties:
+        job_id:
+          type: string
+        number:
+          type: integer
+        pause:
+          anyOf:
+            - $ref: '#/components/schemas/internal.controllerwire.DebugPause'
+            - type: "null"
+        run_id:
+          type: string
+      required:
+        - run_id
+        - number
+        - job_id
+        - pause
+      type: object
+      x-sparkwing-go-type: controllerwire.DebugPauseResult
     internal.controllerwire.DetailView:
       additionalProperties: true
       properties:
@@ -9614,7 +9691,6 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/jobs/{job}:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: run
@@ -9627,13 +9703,19 @@ paths:
           schema:
             type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.DebugJob'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/runs/{run}/jobs/{job}
+      summary: Read a public job and its execution location
       x-sparkwing-policy:
         method: GET
         path: /api/v1/runs/{run}/jobs/{job}
@@ -9657,7 +9739,6 @@ paths:
             binding: runOfTrigger
             liveness: sensitive
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/jobs/{job}/activity:
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -9941,7 +10022,6 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/jobs/{job}/debug-pause:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: run
@@ -9954,13 +10034,19 @@ paths:
           schema:
             type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.DebugPauseResult'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/runs/{run}/jobs/{job}/debug-pause
+      summary: Read a public job pause
       x-sparkwing-policy:
         method: GET
         path: /api/v1/runs/{run}/jobs/{job}/debug-pause
@@ -9984,7 +10070,6 @@ paths:
             binding: runOfTrigger
             liveness: sensitive
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/jobs/{job}/expansion:
     post:
       parameters:

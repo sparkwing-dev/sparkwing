@@ -113,3 +113,15 @@ authority and replay body. W2 must declare that operation before this piece can
 cut over. The CLI must send no caller-selected releasing principal. Debug env
 and attach still need final safe job/pause/execution projections. This is an
 unfinished integration, not an approved feature cut.
+
+**W2/W3/W9: bind the public debug observations.** W9 now declares
+`DebugJob` and `DebugPauseResult` in `internal/controllerwire/debug.go` on C2's
+existing GET job and debug-pause routes. The CLI's env/attach readers use those
+messages and no longer open the local store or call legacy `/nodes` reads.
+W2 must derive the current runner, pod, namespace and execution container in
+the job projection, return masked pause diagnostics and explicit null for an
+absent pause, under the existing policy. See C3's public-debug section. W9's
+HTTP/api.sock transport fakes and Unix kubectl fixture do not establish that
+native binding. Env and working-directory capture still need W3's masked
+snapshot contract before those fields can be added. The release-route handoff
+above still blocks debug resume's cutover. No foreign contract changed.

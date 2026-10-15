@@ -2,36 +2,20 @@ package main
 
 import (
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
 
-func TestClaimToPod(t *testing.T) {
-	cases := []struct {
-		in      string
-		wantPod string
-	}{
-		{"runner:warm-1", "warm-1"},
-		{"pod:run-abc:build", "run-abc:build"},
-		{"agent:laptop", ""},
-		{"", ""},
-	}
-	for _, tc := range cases {
-		if got := claimToPod(tc.in); got != tc.wantPod {
-			t.Errorf("claimToPod(%q) = %q, want %q", tc.in, got, tc.wantPod)
+func TestDebugNamespaceBelongsOnlyToAttach(t *testing.T) {
+	for _, verb := range []string{"attach", "env", "resume"} {
+		inv, err := clisurface.Parse("sparkwing", []string{"debug", verb, "--run=r1", "--job=n1", "--namespace=ci"})
+		if verb == "attach" {
+			if err != nil || inv.Value("namespace") != "ci" {
+				t.Fatalf("attachment namespace: %+v %v", inv, err)
+			}
+		} else if err == nil {
+			t.Fatalf("debug %s accepted --namespace", verb)
 		}
-	}
-}
-
-func TestParseDebugTarget_NamespaceOnAttachOnly(t *testing.T) {
-	got, err := parseDebugTarget(cmdDebugAttach, []string{"--run", "r1", "--job", "n1"})
-	if err != nil || got.namespace != defaultDebugNamespace {
-		t.Fatalf("attach default = %+v, %v; want namespace %s", got, err, defaultDebugNamespace)
-	}
-	got, err = parseDebugTarget(cmdDebugAttach, []string{"--run", "r1", "--job", "n1", "--namespace", "ci"})
-	if err != nil || got.namespace != "ci" {
-		t.Fatalf("attach --namespace ci = %+v, %v", got, err)
-	}
-	if _, err := parseDebugTarget(cmdDebugRelease, []string{"--run", "r1", "--job", "n1", "--namespace", "ci"}); err == nil {
-		t.Fatal("debug release accepted --namespace")
 	}
 }
 

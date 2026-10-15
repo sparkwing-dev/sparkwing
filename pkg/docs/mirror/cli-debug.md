@@ -11,7 +11,7 @@ Interactive debugging for pipeline runs
 ### Subcommands
 
 - `attach` -- kubectl exec into a paused job's pod (cluster mode)
-- `env` -- Print a paused job's environment and working directory + claim holder
+- `env` -- Inspect public job, executor and pause diagnostics
 - `resume` -- Resume a paused job
 
 ### Flags
@@ -42,7 +42,7 @@ kubectl exec into a paused job's pod (cluster mode)
 
 ## `sparkwing debug env`
 
-Print a paused job's environment and working directory + claim holder
+Inspect public job, executor and pause diagnostics
 
 ### Flags
 

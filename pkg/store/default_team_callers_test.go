@@ -39,7 +39,6 @@ var defaultTeamCallers = map[string]string{
 	"cmd/sparkwing.runCapacityReset":                                   defaultTeamCli,
 	"cmd/sparkwing.runCapacityStats":                                   defaultTeamCli,
 	"cmd/sparkwing.runCronsShow":                                       defaultTeamCrons,
-	"cmd/sparkwing.runDebugEnv":                                        defaultTeamCli,
 	"cmd/sparkwing.runDebugRelease":                                    defaultTeamCli,
 	"internal/backend.(*StoreBackend).GetRun":                          defaultTeamBackend,
 	"internal/backend.(*StoreBackend).ListEventsAfter":                 defaultTeamBackend,

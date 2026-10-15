@@ -39,6 +39,8 @@ func wireOperations() map[string]wireOperation {
 		"GET /api/v1/runs/{run}/snapshot":                      operation("Read private scheduling state", nil, wire.ScheduleSnapshot{}),
 		"GET /api/v1/runs/{run}/receipt":                       operation("Read a run receipt", nil, wire.Receipt{}),
 		"GET /api/v1/runs/{run}/steps":                         operation("Read run steps", nil, wire.RunSteps{}),
+		"GET /api/v1/runs/{run}/jobs/{job}":                    operation("Read a public job and its execution location", nil, wire.DebugJob{}),
+		"GET /api/v1/runs/{run}/jobs/{job}/debug-pause":        operation("Read a public job pause", nil, wire.DebugPauseResult{}),
 		"POST /api/v1/runs/{run}/plan":                         operation("Accept a sealed plan", wire.PlanSubmission{}, wire.PlanAccepted{}),
 		"POST /api/v1/runs/{run}/finish":                       operation("Finish an owned run", wire.FinishRequest{}, wire.Applied{}),
 		"POST /api/v1/runs/{run}/cancel":                       operation("Request run cancellation", wire.CancelRequest{}, wire.Applied{}),

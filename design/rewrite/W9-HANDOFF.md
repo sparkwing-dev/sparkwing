@@ -1,11 +1,80 @@
 # W9 handoff
 
-W9 remains incomplete. This continuation started clean at acaf0edf8. The lead
+W9 remains incomplete. This continuation started clean at 2593f01f8. The lead
 owns commits, independent review, pipelines and native integration. Only the
 required installed-tool discovery ran. No install, service-management command, pipeline,
 release or Git write ran. Earlier work remains in Git history.
 
-## This continuation
+## This continuation (session 7)
+
+Debug env and attach now consume the final public job and debug-pause routes
+through the same authenticated HTTP/api.sock transport. W9's new DebugReader,
+DebugJob and DebugPauseResult success shapes live in internal/controllerwire/debug.go
+and are recorded in C3. They add no route, grant or foreign contract shape.
+Run numbers resolve to stable IDs before the second read. Missing or mismatched
+identities, malformed projections and failed pause reads stay errors. Only an
+explicit null pause means absent. Public serialization discards unknown private
+fields, including those nested in a job or execution. These reads are separate
+observations, not a transactional snapshot.
+
+Attachment takes the server's explicit pod, namespace and execution container.
+It does not interpret claim-holder names. The existing namespace override stays
+available and passes the same Kubernetes-name validator. The caller's kubectl
+uses the shared CLI environment builder and keeps its KUBECONFIG while controller
+credentials are filtered. JSON output emits the target followed by debug_output
+text chunks. Plain and pretty retain raw child stdout. Child stderr stays on
+stderr. Command, cancellation and output failures propagate.
+
+Deleted the old env and attach implementations, claim-prefix pod guessing and
+their unused parser fields/default namespace. The debug.go diff removes 141
+lines and adds six. The retired TestClaimToPod and source-comment scan account
+for 38 deleted test lines. The namespace test now exercises the actual final
+registry. Tests for resume's required run/job selectors remain. Resume still
+uses its preceding writer because C2 has no final release route. Its transport
+and complete common-output cutover remain required, not an approved feature cut.
+
+The help synopsis now describes the available public diagnostics rather than
+promising environment/working-directory snapshots that were never returned.
+Those snapshots still need a W3-owned masked capture contract. The new guide,
+CLI reference, OpenAPI and embedded mirrors describe the implemented adapter.
+W2 must serve the success projections and derive the current execution target
+on its existing routes. Its real handlers, actual local API socket, Kubernetes,
+Windows and Darwin execution are unverified. No real kubectl or Sparkwing binary
+was run. The Unix fixture is a shell program named kubectl in a private PATH.
+
+The public-projection invariant is that unknown private wire fields never enter
+a serialized debug view, and selectors never change the declared route. The
+client property run passed 9,925 generated cases. The attachment invariant is
+that only validated explicit target fields reach command execution. The final
+attachment property run passed 1,526 generated cases with four workers.
+
+The new TestSurfaceDebugObservationTransport passes for HTTP and api.sock endpoint
+shapes using a fake transport. It does not complete a native T1 scenario. Focused
+CLI tests cover all output formats, resolved identities, explicit absence,
+failed reads, target refusal, namespace selection, cancellation and write errors.
+A real Unix subprocess fixture verifies argv, execution-container selection,
+credential filtering and KUBECONFIG preservation. T1's parked inventory assigns
+no original test directly to W9. No native acceptance cell was unskipped.
+
+Whole-repository build, scoped vet, focused CLI/client/acceptance tests, full
+clisurface/controllerwire/apispec/apiref/doccheck tests, generated-reference drift,
+commentcheck and sleepcheck pass. All Go commands use GOWORK=off,
+GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and cache/tmp paths below /tmp/sw-astra-W9.
+Tests use -p 4 or less. One fuzz build overlapped a parser edit and failed to
+compile an incomplete snapshot. It was rerun after source edits stopped.
+The default-team caller inventory test fails on 18 unrelated stale entries,
+including retired capacity/profile/concurrency callers. It reports no remaining
+debug-env entry. Those foreign inventory rows were not swept in this change.
+
+Shared edits are two internal/apispec/wire.go bindings, generated api/openapi.yaml,
+the one removed debug-env entry in pkg/store/default_team_callers_test.go,
+tests/acceptance/debug_contract_test.go, CHANGELOG.md, documentation mirrors,
+C3, the cross-area handoff ledger and this report. No other foreign caller or
+production contract changed. Overwing still reports its stale installed binary.
+The lead owns commits, independent review, native integration, pipelines and
+launch QA. Scratch is removed before the final report. No Git write occurs.
+
+## Previous continuation (session 6)
 
 Local dispatch consumes engine.ReadPin, VersionForPin and Resolver.Resolve for
 both SDKs and the current executable platform. Every invocation checks policy,
@@ -168,7 +237,7 @@ Native selected-engine process-tree cancellation remains unverified.
    native lifecycle endpoints, managed units, logs and runner startup/refresh.
 5. Finish local schedule install/pin/uninstall, captured schedule intake and
    controller-owned __tick. Integrate W1/W2 schedule persistence and projections.
-6. Finish remaining legacy client/management retirement, including debug's
+6. Finish remaining legacy client/management retirement, including debug resume's
    direct store and old client paths, and the runtime-guide,
    script/example and OpenAPI audit. Regenerate owning references when public
    behavior changes. Run every native surface/placement cell and launch QA with
@@ -220,7 +289,9 @@ acceptance from component tests.
 | A1-20/39/40/41/49 | Credential, runner and lifecycle adapters retained. Native provisioning, shared runner, local runtime, services and timers remain. |
 | A1-29/30/34/37/50 | Signed-data, local-cache, here and prepared-intake components retained. Public cutover, cache/publication and old runtime/client removal remain. |
 | A1-43/45/47 | Exact resolver dispatch and read-only pin summaries replace the old CLI selector/cache. Notices, upgrade, settings and guards retained. Native version policy, selected-source hosting and scheduled intake remain. |
-| A1-51 | C3 and eight intake transport combinations retain separate source commits. Operator clients and dead debug run are removed. Operator OpenAPI messages are generated. Remaining public/runtime retirement and reference audit stay open. |
+| A1-51 | C3 and eight intake transport combinations retain separate source commits. Operator clients and dead debug run are removed. Operator OpenAPI messages are generated. Debug env/attach readers now use final public projections, and their legacy
+  store/node paths and pod guessing are removed. Native debug bindings, remaining
+  public/runtime retirement and reference audit stay open. |
 | A1-52; Windows packaging handoff | Packaging implementation retained. Native Windows and publication evidence remain unclaimed. |
 | A1-53 | New native Git and shell-fixture evidence only. No native T1 scenario was unskipped. |
 
