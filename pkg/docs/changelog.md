@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Remove the unused team token store API
+  Member and machine provisioning, inventory and revocation use current capability authority. The old tenant token constructors, readers and revoker, token-family declarations and machine-principal helper are removed. See [migration guide](docs/migrations/_unreleased.md#team-token-store-api-removed).
 - **store (Breaking):** Secret calls require an explicit tenant
   The seven default-team secret methods on `Store` and four unused legacy fence readers are removed. Local readers select `DefaultTeam`. See [migration guide](docs/migrations/_unreleased.md#secret-store-calls-select-a-tenant).
 ### Changed

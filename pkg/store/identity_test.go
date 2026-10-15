@@ -190,20 +190,6 @@ func TestIdentityTeamScopedWritesMissAnotherTeam(t *testing.T) {
 	if err := ta.DeleteInvitation(ctx, inv.ID, time.Now()); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("team a deleting team b's invitation = %v, want ErrNotFound", err)
 	}
-	_, tok, err := tb.CreateTokenWith(ctx, "agent:b", store.TokenKindRunner, []string{"nodes.claim"}, 0, time.Now(),
-		store.TokenOptions{CreatedBy: b.Account.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := ta.RevokeTeamToken(ctx, tok.Prefix, time.Now()); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("team a revoking team b's token = %v, want ErrNotFound", err)
-	}
-	if toks, err := ta.TeamTokens(ctx, a.Account.ID, true, time.Now()); err != nil || len(toks) != 0 {
-		t.Fatalf("team a lists %d runner tokens (%v), want 0", len(toks), err)
-	}
-	if toks, err := tb.TeamTokens(ctx, b.Account.ID, true, time.Now()); err != nil || len(toks) != 1 || toks[0].CreatedBy != b.Account.ID {
-		t.Fatalf("team b lists %+v (%v)", toks, err)
-	}
 	if _, err := ta.SetMemberRole(ctx, a.Account.ID, b.Account.ID, store.RoleReader, time.Now()); !errors.Is(err, store.ErrNotMember) {
 		t.Fatalf("team a re-roling team b's owner = %v, want ErrNotMember", err)
 	}
@@ -337,43 +323,6 @@ func TestIdentityReservedSlugs(t *testing.T) {
 	}
 }
 
-func TestIdentityRunnerTokenCapHoldsUnderConcurrentMints(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	u := signIn(t, st, "s", "mint@example.com")
-	tn := tenant(t, st, u.PersonalTeam)
-	const tries = 3 * store.MaxRunnerTokensPerTeam
-	errs := make(chan error, tries)
-	for i := range tries {
-		go func() {
-			_, _, err := tn.CreateMachineToken(ctx, fmt.Sprintf("m%d", i), []string{"nodes.claim"}, u.Account.ID, time.Now())
-			errs <- err
-		}()
-	}
-	minted := 0
-	for range tries {
-		switch err := <-errs; {
-		case err == nil:
-			minted++
-		case !errors.Is(err, store.ErrRunnerTokenLimit):
-			t.Errorf("mint: %v", err)
-		}
-	}
-	if minted != store.MaxRunnerTokensPerTeam {
-		t.Fatalf("minted %d runner tokens, want exactly %d", minted, store.MaxRunnerTokensPerTeam)
-	}
-	toks, err := tn.TeamTokens(ctx, u.Account.ID, true, time.Now())
-	if err != nil || len(toks) != store.MaxRunnerTokensPerTeam {
-		t.Fatalf("team holds %d tokens (%v)", len(toks), err)
-	}
-	if err := tn.RevokeTeamToken(ctx, toks[0].Prefix, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := tn.CreateMachineToken(ctx, "again", []string{"nodes.claim"}, u.Account.ID, time.Now()); err != nil {
-		t.Fatalf("mint after a revoke freed a slot: %v", err)
-	}
-}
-
 func TestIdentityTeamTokensNeverCarryAdmin(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
@@ -388,15 +337,6 @@ func TestIdentityTeamTokensNeverCarryAdmin(t *testing.T) {
 	}
 	if _, _, err := tn.CreateToken(ctx, "ops", store.TokenKindService, []string{store.LaunchScope}, 0, time.Now()); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
 		t.Fatalf("team mint with claims.launch = %v, want ErrAdminScopeOnTeamToken", err)
-	}
-
-	for _, scopes := range [][]string{{"admin"}, {"nodes.claim", store.LaunchScope}, {"runs.read", "admin"}} {
-		if _, _, err := tn.CreateMachineToken(ctx, "x", scopes, u.Account.ID, time.Now()); !errors.Is(err, store.ErrInvalidInput) {
-			t.Fatalf("machine mint with %v = %v, want ErrInvalidInput", scopes, err)
-		}
-		if _, _, err := tn.CreateMemberToken(ctx, "adm@example.com", scopes, u.Account.ID, time.Now()); !errors.Is(err, store.ErrInvalidInput) {
-			t.Fatalf("member mint with %v = %v, want ErrInvalidInput", scopes, err)
-		}
 	}
 }
 
@@ -476,7 +416,7 @@ func TestIdentityLeavingOrLosingEditorRevokesTheRunnerTokensAMemberMinted(t *tes
 	}
 	mint := func(name, by string) string {
 		t.Helper()
-		_, tok, err := tn.CreateMachineToken(ctx, name, []string{"nodes.claim"}, by, time.Now())
+		_, tok, err := tn.CreateTokenWith(ctx, "agent:"+name, store.TokenKindTeam, []string{"nodes.claim"}, store.RunnerTokenLifetime, time.Now(), store.TokenOptions{CreatedBy: by})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -484,7 +424,7 @@ func TestIdentityLeavingOrLosingEditorRevokesTheRunnerTokensAMemberMinted(t *tes
 	}
 	live := func() map[string]bool {
 		t.Helper()
-		toks, err := tn.TeamTokens(ctx, owner.Account.ID, true, time.Now())
+		toks, err := st.ListTokens(store.TokenKindTeam, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -538,11 +478,11 @@ func TestRunnerTokenExpiryFollowsItsLastUse(t *testing.T) {
 	u := signIn(t, st, "s", "slide@example.com")
 	tn := tenant(t, st, u.PersonalTeam)
 	minted := time.Now().UTC().Truncate(time.Second)
-	raw, _, err := tn.CreateMachineToken(ctx, "box", []string{"nodes.claim"}, u.Account.ID, minted)
+	raw, _, err := tn.CreateTokenWith(ctx, "agent:box", store.TokenKindTeam, []string{"nodes.claim"}, store.RunnerTokenLifetime, minted, store.TokenOptions{CreatedBy: u.Account.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	idle, _, err := tn.CreateMachineToken(ctx, "idle", []string{"nodes.claim"}, u.Account.ID, minted)
+	idle, _, err := tn.CreateTokenWith(ctx, "agent:idle", store.TokenKindTeam, []string{"nodes.claim"}, store.RunnerTokenLifetime, minted, store.TokenOptions{CreatedBy: u.Account.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -561,7 +501,7 @@ func TestRunnerTokenExpiryFollowsItsLastUse(t *testing.T) {
 		t.Fatalf("a token idle for its whole lifetime = %v, want it expired", err)
 	}
 	prefix := raw[:store.PrefixLen]
-	if err := tn.RevokeTeamToken(ctx, prefix, used.Add(2*time.Hour)); err != nil {
+	if err := st.RevokeToken(prefix, used.Add(2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.LookupToken(raw, used.Add(2*time.Hour)); !errors.Is(err, store.ErrTokenRevoked) {
@@ -577,7 +517,7 @@ func TestTokenUseIsWrittenAtMostHourly(t *testing.T) {
 	u := signIn(t, st, "s", "hourly@example.com")
 	tn := tenant(t, st, u.PersonalTeam)
 	start := time.Now().UTC().Truncate(time.Second)
-	raw, _, err := tn.CreateMachineToken(ctx, "box", []string{"nodes.claim"}, u.Account.ID, start)
+	raw, _, err := tn.CreateTokenWith(ctx, "agent:box", store.TokenKindTeam, []string{"nodes.claim"}, store.RunnerTokenLifetime, start, store.TokenOptions{CreatedBy: u.Account.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

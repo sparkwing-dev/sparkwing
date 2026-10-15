@@ -115,9 +115,32 @@ reuse after revocation or expiry, rotation grace and concurrent mint limits to
 `TestMachineEnrollmentNamesAreTeamScoped` and
 `TestMachineEnrollmentSerializesNamesAndLimits`. These retain the concerns from
 `TestRunnerTokenRefusesADuplicateAgentName`, `TestAgentNameIsUniqueOnEveryMintPath`
-and `TestIdentityRunnerTokenCapHoldsUnderConcurrentMints`. Retired token-kind
-entry points remain pending their caller cut. Their old tests are retained.
+and `TestIdentityRunnerTokenCapHoldsUnderConcurrentMints`. Their superseded
+raw-token tests are removed with the unused team token constructors and inventory.
 The final machine origin requires current team administration, as C2 specifies.
+
+`TestProvisionMemberCurrentScopesProperty` ports current-role, requested-subset
+and removal assertions from `TestMemberTokenScopesAreBoundedByTheMintersRole`,
+`TestMemberTokenMintUsesCommittedMembershipAuthority` and the member portion of
+`TestIdentityTeamTokensNeverCarryAdmin`. It generates grant subsets, roles and
+missing memberships, checks that rejected requests persist no credential and
+preserves the supplied grant slice. The actual HTTP transaction race remains
+covered by `TestCredentialIssuanceRechecksMembershipInTransaction`.
+
+`TestMachineEnrollmentAuthorityProperty` retains the minter recheck from
+`TestRunnerTokenMintRechecksTheMintersRole` and the machine-scope refusals.
+`TestCapabilityInventoryScopesAndMetadata`, `OwnershipProperty` and
+`FiltersAndRefusals` retain own-credential selection, foreign-team exclusion
+and execution-credential hiding from the removed TeamTokens and TeamToken tests.
+`TestCapabilityMintWaitsOnAnUncommittedMembershipDrop` replaces the raw mint race
+with member and machine `ProvisionCapability` requests. It configures the sealed
+session key and uses a real account session; PostgreSQL execution remains pending.
+
+The raw family/prefix tests, legacy cross-kind counting and legacy-name-index
+assertions retire with their unused APIs. Current registered machine names,
+caps, rotation and reuse use the enrollment tests named above. This cut adds no
+member-root quota to C2. Sliding expiry and member-removal raw-token fixtures
+remain until the remaining token authentication and identity paths migrate.
 
 `TestMachineEnrollmentAuthorityProperty` generates invalid registration, role,
 grant, repository, pool, data and name inputs even with a permissive extra policy.

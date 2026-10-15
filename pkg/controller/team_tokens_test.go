@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -287,57 +286,6 @@ func TestMemberTokensArePersonal(t *testing.T) {
 	}
 	if cliAuthenticates(f, mine.Token) {
 		t.Error("a revoked member token still authenticates")
-	}
-}
-
-func TestMemberTokenMintUsesCommittedMembershipAuthority(t *testing.T) {
-	for _, dialect := range []string{"sqlite", "postgres"} {
-		t.Run(dialect, func(t *testing.T) {
-			rawLicense, key := multiTeamLicense(t)
-			opts := fixtureOpts{license: rawLicense, key: key}
-			if dialect == "postgres" {
-				opts.store = openPostgresStore(t)
-			}
-			f := newIdentityFixtureWith(t, opts)
-			owner, editor, reader := teamOf(f)
-			for who, role := range map[signedIn]store.Role{owner: store.RoleOwner, editor: store.RoleEditor, reader: store.RoleReader} {
-				token := mintCLI(f, who, role)
-				if slices.Contains(token.Scopes, controller.ScopeTeamAdmin) {
-					t.Fatal("member token carries team administration")
-				}
-				if got := slices.Contains(token.Scopes, controller.ScopeRunsWrite); got != (who.id != reader.id) {
-					t.Fatalf("ordinary member authority mismatch: write=%v", got)
-				}
-			}
-			stale := store.CLITokenScopes(store.RoleEditor)
-			original := slices.Clone(stale)
-			if code := f.call("PATCH", "/api/v1/team/members/"+editor.id, owner.auth, map[string]string{"role": "reader"}, nil); code != http.StatusNoContent {
-				t.Fatalf("demote=%d", code)
-			}
-			tenant, err := f.store.ForTeam(context.Background(), store.Team(editor.team))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, _, err := tenant.CreateMemberToken(context.Background(), "pending-editor", stale, editor.id, time.Now()); err == nil {
-				t.Fatal("a demoted member minted the editor's scopes")
-			}
-			if !slices.Equal(stale, original) {
-				t.Fatal("mint mutated caller scopes")
-			}
-			raw, tok, err := tenant.CreateMemberToken(context.Background(), "reader-subset", []string{controller.ScopeLogsRead}, editor.id, time.Now())
-			if err != nil || !slices.Equal(tok.Scopes, []string{controller.ScopeLogsRead}) {
-				t.Fatalf("requested subset widened: %v error=%v", tok, err)
-			}
-			if code := f.call("DELETE", "/api/v1/team/members/"+editor.id, owner.auth, nil, nil); code != http.StatusNoContent {
-				t.Fatalf("remove=%d", code)
-			}
-			if raw, tok, err := tenant.CreateMemberToken(context.Background(), "pending-removed", []string{controller.ScopeRunsRead}, editor.id, time.Now()); err == nil || raw != "" || tok != nil {
-				t.Fatal("removed member minted a token")
-			}
-			if code := f.call("GET", "/api/v1/runs", "Bearer "+raw, nil, nil); code != http.StatusUnauthorized {
-				t.Errorf("removed member bearer=%d", code)
-			}
-		})
 	}
 }
 

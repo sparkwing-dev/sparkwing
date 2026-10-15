@@ -1,5 +1,17 @@
 # Migrating to the next release
 
+## Team token store API removed
+
+`Tenant.CreateMemberToken`, `CreateMachineToken`, `TeamTokens`, `TeamToken`
+and `RevokeTeamToken` are removed, along with `TokenFamily`, its constants,
+`TeamTokenFamily`, `Token.Family` and `MachinePrincipal`.
+
+Use `Store.ProvisionCapability` with a current session authority for member
+roots or a registered `ProvisionMachine` origin for machines. Use the tenant's
+`ListCapabilities`, `ReadCapability`, `RotateCapability` and `RevokeAuthority`
+methods for credential management. Enrollment derives identity and checks
+current team administration in the committing transaction.
+
 ## Secret store calls select a tenant
 
 The default-team secret methods on `Store` are removed. Select the registered

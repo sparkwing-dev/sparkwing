@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -136,5 +137,24 @@ func TestSetNodeAttentionHoldsOneNodeLockAtATime(t *testing.T) {
 	}
 	if run, err := s.GetRun(ctx, "run-y"); err != nil || run.NeedsAttention != "y" {
 		t.Fatalf("run-y = %+v, %v; want its reason once the lock is released", run, err)
+	}
+}
+
+func seedMatchNode(t *testing.T, s *store.Store, runID, repoURL string, cores float64, needs ...string) {
+	t.Helper()
+	ctx := context.Background()
+	seedRepoTrigger(t, s, runID, repoURL, time.Now())
+	plan := `{"nodes":[{"id":"work","modifiers":{"res_cores":` + strconv.FormatFloat(cores, 'f', -1, 64) + `}}]}`
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE runs SET plan_json = ? WHERE id = ?`), plan, runID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateNode(ctx, store.Node{
+		RunID: runID, NodeID: "work", Status: "pending", NeedsLabels: needs,
+		RequestedCores: cores,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkNodeReady(ctx, runID, "work"); err != nil {
+		t.Fatal(err)
 	}
 }

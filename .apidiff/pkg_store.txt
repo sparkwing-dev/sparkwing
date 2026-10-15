@@ -1399,7 +1399,6 @@ type LogSegments struct {
 }
 const LogWatchHeader = "X-Sparkwing-Log-Watch"
 func LooksLikeEmail(email string) bool
-func MachinePrincipal(name string) string
 func MachineTokenScopes() []string
 const Materialize ReconcileKind = "materialize"
 type MaterializeSource struct {
@@ -3018,7 +3017,6 @@ type TeamStorageTier string
 const TeamTierFree TeamStorageTier = "free"
 const TeamTierFunded TeamStorageTier = "funded"
 const TeamTierNone TeamStorageTier = "none"
-func TeamTokenFamily(scopes []string) (TokenFamily, error)
 type Tenant struct {
 }
 func (t *Tenant) AbortBlobUpload(ctx context.Context, authority blob.Authority, ticketID string) error
@@ -3062,12 +3060,6 @@ func (t *Tenant) CreateDebugPause(ctx context.Context, p DebugPause) error
 func (t *Tenant) CreateGitHubAutomationTriggerWithRun(ctx context.Context, trig Trigger, run Run, grant GitHubAppAutomation) error
 func (t *Tenant) CreateHereTriggerWithRun(ctx context.Context, trig Trigger, r Run, here HereRunner, now time.Time) (string, *Token, error)
 func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, role Role, now time.Time) (Invitation, error)
-func (t *Tenant) CreateMachineToken(
-	ctx context.Context, name string, scopes []string, createdBy string, now time.Time,
-) (string, *Token, error)
-func (t *Tenant) CreateMemberToken(
-	ctx context.Context, principal string, scopes []string, accountID string, now time.Time,
-) (string, *Token, error)
 func (t *Tenant) CreateOrReplaceSecret(sec Secret, now time.Time) error
 func (t *Tenant) CreateRun(ctx context.Context, r Run) error
 func (t *Tenant) CreateSourceTriggerWithRun(ctx context.Context, trig Trigger, r Run, key, principal, tokenPrefix string) error
@@ -3241,7 +3233,6 @@ func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 func (t *Tenant) RetryRunEffect(ctx context.Context, delivery EffectDelivery, nextAt time.Time) error
 func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error
 func (t *Tenant) RevokeGitHubRunner(ctx context.Context, a capability.Authorized, repositoryID int64) error
-func (t *Tenant) RevokeTeamToken(ctx context.Context, prefix string, now time.Time) error
 func (t *Tenant) RotateCapability(ctx context.Context, a capability.Authorized, grace time.Duration, expires *time.Time) (capability.Rotation, error)
 func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized, secret func(Secret) (string, error), git func(GitCredential) (string, error)) (int, int, error)
 func (t *Tenant) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
@@ -3278,8 +3269,6 @@ func (t *Tenant) StorageUsageFor(ctx context.Context, runID, month string) (Stor
 func (t *Tenant) SupersedeCapacity(ctx context.Context, key, holderID string, actor Actor) error
 func (t *Tenant) Team() Team
 func (t *Tenant) TeamOwnerEmails(ctx context.Context) (_ []string, err error)
-func (t *Tenant) TeamToken(ctx context.Context, prefix string) (Token, error)
-func (t *Tenant) TeamTokens(ctx context.Context, accountID string, allMachines bool, now time.Time) (_ []Token, err error)
 func (t *Tenant) TransitionNode(ctx context.Context, change NodeTransition) (Applied, error)
 func (t *Tenant) TransitionRun(ctx context.Context, change RunTransition) (Applied, error)
 func (t *Tenant) TriggerClaimGeneration(ctx context.Context, id string) (int64, error)
@@ -3316,13 +3305,9 @@ type Token struct {
 
 	CreatedBy string
 }
-func (t *Token) Family() TokenFamily
 func (t *Token) HasScope(scope string) bool
 func (t *Token) IsValid(now time.Time) bool
 func TokenEnded(revokedAt, expiresAt *time.Time, now time.Time) error
-type TokenFamily string
-const TokenFamilyMachine TokenFamily = "machine"
-const TokenFamilyMember TokenFamily = "member"
 func TokenKindFromPrefix(raw string) string
 const TokenKindRunner = "runner"
 const TokenKindService = "service"

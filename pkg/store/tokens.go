@@ -19,9 +19,7 @@ const (
 	TokenKindUser    = "user"
 	TokenKindRunner  = "runner"
 	TokenKindService = "service"
-	// TokenKindTeam is a credential a member mints from team settings. Its
-	// scopes place it in one [TokenFamily].
-	TokenKindTeam = "team"
+	TokenKindTeam    = "team"
 )
 
 // Token prefix markers; raw is `<prefix>_<entropy>`.
@@ -767,4 +765,24 @@ func expiresUnix(t *time.Time) any {
 		return nil
 	}
 	return t.Unix()
+}
+
+var machineTokenScopes = []string{ScopeNodesClaim, ScopeTriggersClaim, ScopeRunsState}
+
+// MachineTokenScopes returns the scopes a machine team token may carry.
+func MachineTokenScopes() []string { return slices.Clone(machineTokenScopes) }
+
+// ActingKind resolves a legacy team credential's member or runner kind.
+func ActingKind(kind, principal string) string {
+	if kind != TokenKindTeam {
+		return kind
+	}
+	if strings.HasPrefix(principal, agentPrincipalPrefix) {
+		return TokenKindRunner
+	}
+	return TokenKindUser
+}
+
+func isAgentToken(kind, principal string) bool {
+	return ActingKind(kind, principal) == TokenKindRunner && strings.HasPrefix(principal, agentPrincipalPrefix)
 }

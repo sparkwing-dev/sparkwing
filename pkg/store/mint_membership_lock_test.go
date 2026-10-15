@@ -2,44 +2,52 @@ package store_test
 
 import (
 	"context"
-	"errors"
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// Account deletion drops its memberships before it sweeps the account's
-// tokens. A mint that reads its minter's role while that drop is uncommitted
-// waits for it and then finds no role, rather than reading the old row and
-// landing a token after the sweep. The open transaction below holds the drop
-// at that point; SQLite serializes writers, so only Postgres can interleave.
-func TestTokenMintWaitsOnAnUncommittedMembershipDrop(t *testing.T) {
-	mints := map[string]func(*store.Tenant, string) (string, error){
-		"cli": func(tn *store.Tenant, account string) (string, error) {
-			raw, _, err := tn.CreateMemberToken(context.Background(), "cli:"+account, []string{"runs.read"}, account, time.Now())
-			return raw, err
-		},
-		"runner": func(tn *store.Tenant, account string) (string, error) {
-			raw, _, err := tn.CreateMachineToken(context.Background(), account, []string{"nodes.claim"}, account, time.Now())
-			return raw, err
-		},
-	}
-	for name, mint := range mints {
+func TestCapabilityMintWaitsOnAnUncommittedMembershipDrop(t *testing.T) {
+	for _, name := range []string{"member", "machine"} {
 		t.Run(name, func(t *testing.T) {
 			st := storetest.OpenPostgres(t)
+			cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+			if err != nil {
+				t.Fatal(err)
+			}
+			st.SetSessionKeyCipher(cipher)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
 			owner := signIn(t, st, "owner-"+name, "owner-"+name+"@example.com")
 			member := signIn(t, st, "member-"+name, "member-"+name+"@example.com")
 			tn := tenant(t, st, owner.PersonalTeam)
-			inv, err := tn.CreateInvitation(ctx, owner.Account.ID, member.Account.Email, store.RoleEditor, time.Now())
+			inv, err := tn.CreateInvitation(ctx, owner.Account.ID, member.Account.Email, store.RoleOwner, time.Now())
 			if err != nil {
 				t.Fatal(err)
 			}
 			if _, err := st.AcceptInvitation(ctx, member.Account.ID, inv.ID, time.Now()); err != nil {
 				t.Fatal(err)
+			}
+
+			raw, _, _, err := st.CreateAccountSession(ctx, member.Account, owner.PersonalTeam, time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			digest := sha256.Sum256([]byte(raw))
+			ref := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
+			spec := capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &ref, Team: string(owner.PersonalTeam), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: member.Account.ID}, Grants: []capability.Grant{capability.RunsRead}, Binding: capability.Binding{Kind: capability.BindingNone}}
+			if name == "machine" {
+				spec.Kind = capability.ProvisionMachine
+				spec.Subject = capability.Subject{Kind: capability.SubjectMachine, ID: "machine"}
+				spec.Grants = []capability.Grant{capability.NodesClaim}
+				spec.RegistrationID = "runner:" + spec.Team + ":machine"
+				spec.Repositories = []string{"github.com/acme/*"}
 			}
 
 			drop, err := st.DB().BeginTx(ctx, nil)
@@ -58,8 +66,8 @@ func TestTokenMintWaitsOnAnUncommittedMembershipDrop(t *testing.T) {
 			}
 			done := make(chan result, 1)
 			go func() {
-				raw, err := mint(tn, member.Account.ID)
-				done <- result{raw, err}
+				issued, err := st.ProvisionCapability(ctx, spec)
+				done <- result{issued.Raw, err}
 			}()
 			var early *result
 			for early == nil {
@@ -85,8 +93,8 @@ WHERE wait_event_type = 'Lock' AND query LIKE '%FROM memberships%'`).Scan(&waiti
 				t.Fatal(err)
 			}
 			r := <-done
-			if !errors.Is(r.err, store.ErrNotMember) {
-				t.Fatalf("mint after the membership drop committed = %v, want ErrNotMember", r.err)
+			if r.err == nil || r.raw != "" {
+				t.Fatalf("mint after membership removal returned a bearer: error=%v", r.err)
 			}
 		})
 	}

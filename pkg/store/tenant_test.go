@@ -10,6 +10,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
+func defaultTenant(t *testing.T, st *store.Store) *store.Tenant {
+	t.Helper()
+	return tenant(t, st, store.DefaultTeam)
+}
+
 func tenantFor(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 	t.Helper()
 	ctx := context.Background()

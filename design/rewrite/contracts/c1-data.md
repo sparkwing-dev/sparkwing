@@ -2,6 +2,23 @@
 
 <!-- design:begin -->
 
+## Team token API retirement
+
+`Tenant.CreateMemberToken`, `CreateMachineToken`, `TeamTokens`, `TeamToken`
+and `RevokeTeamToken` are removed with `TokenFamily`, its constants,
+`TeamTokenFamily`, `Token.Family` and `MachinePrincipal`. Production callers
+already use capability provisioning and management. Member roots use
+`Store.ProvisionCapability` under current session authority. Machine roots use
+the registered `ProvisionMachine` origin. Inventory, rotation and revocation
+use the authority-bearing capability methods.
+
+The current-membership scope property checks generated grant subsets against
+the committing role and refuses removed members without persisting a credential.
+The membership-drop lock test now calls `ProvisionCapability` for member and
+machine roots. Its PostgreSQL execution remains pending. Legacy identity and
+deletion fixtures still using raw tokens seed through `CreateTokenWith`; their
+remaining raw-token behavior is separate retirement work.
+
 ## Explicit secret tenants and unused fence readers
 
 `Store.CreateOrReplaceSecret`, `GetSecret`, `GetSecretRow`,
