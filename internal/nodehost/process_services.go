@@ -22,6 +22,7 @@ import (
 // ProcessServices supplies one live process's accepted declaration and record writers.
 // Writers recheck Authorized in their transaction. Every sink uses Masks' shared masker.
 type ProcessServices struct {
+	lifetime   context.Context
 	RunID      string
 	Job        nodeproto.JobSpec
 	Masks      *MaskRegistry
@@ -71,7 +72,20 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 			if service == nil || service.Masks == nil || service.Masks.masker == nil || service.RunID != auth.Binding.RunID || service.Job.ID != auth.Binding.NodeID || service.RunID == "" || service.Job.ID == "" {
 				return executorError(apierr.SpecDrift, "service binding differs from its live process")
 			}
+			if service.lifetime != nil {
+				ctx, cancel := context.WithCancel(request.Context())
+				stop := context.AfterFunc(service.lifetime, cancel)
+				defer func() { stop(); cancel() }()
+				if service.lifetime.Err() != nil {
+					cancel()
+				}
+				request = request.WithContext(ctx)
+			}
+			if err := context.Cause(request.Context()); err != nil {
+				return err
+			}
 			body, status, err := service.serve(request, auth, path)
+			err = errors.Join(err, context.Cause(request.Context()))
 			if err != nil {
 				return maskHostError(err, service.Masks.mask)
 			}

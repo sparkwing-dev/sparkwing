@@ -53,9 +53,9 @@ func TestIsTypeScriptNeedsTheSDKAsADependency(t *testing.T) {
 	}
 }
 
-func TestTypeScriptPreloadsTheInstalledSDKBootstrap(t *testing.T) {
+func TestTypeScriptStartsTheInstalledSDKEntry(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("the TypeScript SDK does not open Windows protocol handles yet")
+		t.Skip("the fixture provides a POSIX executable on PATH")
 	}
 	node := filepath.Join(t.TempDir(), "node")
 	writeFile(t, node, "#!/bin/sh\n")
@@ -74,33 +74,13 @@ func TestTypeScriptPreloadsTheInstalledSDKBootstrap(t *testing.T) {
 		t.Fatalf("an uninstalled SDK: %v, want ErrNotInstalled", err)
 	}
 
-	// safety: a linked SDK must resolve to its real path, the name Node.js gives the module the SDK imports.
-	sdk := t.TempDir()
-	writeFile(t, filepath.Join(sdk, "package.json"), `{"exports":{".":"./src/index.ts"}}`)
-	if err := os.MkdirAll(filepath.Join(dir, "node_modules", "@sparkwing"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(sdk, filepath.Join(dir, "node_modules", "@sparkwing", "sdk")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := TypeScript(dir); err == nil || !strings.Contains(err.Error(), "./bootstrap") {
-		t.Fatalf("an SDK without the bootstrap export: %v", err)
-	}
-	writeFile(t, filepath.Join(sdk, "package.json"), `{"exports":"./src/index.ts"}`)
-	if _, err := TypeScript(dir); err == nil || !strings.Contains(err.Error(), "./bootstrap") {
-		t.Fatalf("an SDK whose exports is a string: %v", err)
-	}
-	writeFile(t, filepath.Join(sdk, "package.json"), `{"exports":{".":"./src/index.ts","./bootstrap":"./src/bootstrap.ts"}}`)
-	writeFile(t, filepath.Join(sdk, "src", "bootstrap.ts"), "")
+	sdk := filepath.Join(dir, "node_modules", "@sparkwing", "sdk")
+	writeFile(t, filepath.Join(sdk, "package.json"), `{"exports":{".":{"types":"./index.d.ts","import":"./dist/index.js"}}}`)
 	got, err := TypeScript(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	realSDK, err := filepath.EvalSymlinks(sdk)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := Command{node, "--import", "file://" + filepath.ToSlash(filepath.Join(realSDK, "src", "bootstrap.ts")), filepath.Join(dir, "pipeline.ts")}
+	want := Command{node, filepath.Join(dir, "pipeline.ts")}
 	if !slices.Equal(got, want) {
 		t.Fatalf("command = %q, want %q", got, want)
 	}

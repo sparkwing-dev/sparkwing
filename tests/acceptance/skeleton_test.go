@@ -17,6 +17,8 @@ func pendingScenarios(t *testing.T, group string) {
 		count++
 		t.Run(scenario.ID, func(t *testing.T) {
 			switch scenario.ID {
+			case "credentials-delegation-subset":
+				t.Run("hermetic-process-authority", acceptance.CheckProcessAuthority)
 			case "lifecycle-transition-replay-and-fencing":
 				t.Run("hermetic-store-executor-events", acceptance.CheckHostLifecycleEvents)
 				t.Run("hermetic-store-step-records", acceptance.CheckHostStepPersistence)
@@ -75,6 +77,7 @@ func pendingScenarios(t *testing.T, group string) {
 			case "recovery-reconciler-waits-and-reclaims":
 				t.Run("hermetic-library", acceptance.CheckHostReconciliation)
 			}
+			typeScriptBoundary(t, scenario.ID)
 			if check, ok := runspecConfigBoundaries()[scenario.ID]; ok {
 				t.Run("runspec-config", func(t *testing.T) {
 					if err := check(scenario.ID); err != nil {

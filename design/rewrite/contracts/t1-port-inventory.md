@@ -486,6 +486,20 @@ persisted action/verify failures, retry failures and successful clearing.
 `FuzzClaimedAwardFence` mutates claim identity and sealed settings and requires
 rejection before renewal, source acquisition, SDK startup or result writes.
 
+## W3 process authority component
+
+The [process authority continuation](w3-authority-continuation.md) adds
+`credentials-delegation-subset/hermetic-process-authority` using the real memory
+adapter and registered summary handler. C2 validators, parent persistence and
+resource relations are explicit fakes. The native credential matrix stays blocked.
+
+The retained bound-admission, unique-bearer, invalid-token and revoke/close cases
+from `internal/nodehost/routes_test.go` now also run against `ProcessAuthorities`.
+The old HTTP tests remain until the actual C2 router supplies their replacement.
+Pipe-process tests cover revocation after failed spawn, rejected hello and Close,
+and require revoked authority before cleanup. The fence/revocation fuzz property
+generates changed run, job, holder, generation and attempt identities.
+
 ## Open questions for the lead
 
 The [W3 diagnostics continuation](w3-diagnostics-continuation.md) ports the

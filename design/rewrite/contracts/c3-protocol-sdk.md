@@ -1,5 +1,9 @@
 # C3 protocol and SDK contract
 
+[Process authority](w3-authority-continuation.md) adds digest-based in-memory
+delegation, fresh parent snapshots, bound service resolution and process
+revocation. C2 router and native placement assembly remain open.
+
 [Execution diagnostics](w3-diagnostics-continuation.md) adds committed step/retry
 logs and the native Go step-policy acceptance component. Step windows and native
 placement assembly remain open.
@@ -145,6 +149,7 @@ are part of this contract.
 | `nodehost.ClaimAuthority` | Refers to authenticated executor authority without granting it from a request body. |
 | `nodehost.NodeInput` | Binds an attempt to accepted spec, node, generation, runner and route bearer. |
 | `nodehost.NewNodeInput` | Constructs execution from a persisted awarded row, its accepted seal, the selected engine and the granted runner. |
+| `nodehost.ProcessAuthorities`, `NewProcessAuthorities`, `ProcessAuthorityDependencies` | Own narrowed node-host bearers in memory, provide fresh authentication snapshots and process-bound resource checks, resolve live services, and revoke authority on process exit or registry shutdown. |
 | `nodehost.ConcurrencyKey`, `nodehost.ParseConcurrencyKey` | Encode and decode scoped group identity without separator collisions. |
 | `nodehost.NodeHost.Execute` | Replans, checks drift, runs executor layers and reports through store transitions. |
 | `nodehost.NewNodeExecutor`, `ExecutorDependencies`, `ExecutorProcess` | Connect the common executor to the fenced store, matched engine, SDK process and storage adapters. |

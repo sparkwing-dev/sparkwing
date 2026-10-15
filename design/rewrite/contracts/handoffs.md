@@ -1,5 +1,10 @@
 # Cross-area handoffs
 
+W3's [process authority continuation](w3-authority-continuation.md) adds the
+memory delegation/snapshot/binding adapter and service revocation. The new
+credential component uses explicit C2 validation fakes. Production C2 router
+assembly, remote parent snapshots, native placements and legacy removal remain open.
+
 W3's [diagnostics continuation](w3-diagnostics-continuation.md) ports retained
 step logs and activates the eleven-case native Go step-policy component. The
 SQLite step cell now verifies diagnostic commit ordering and refused delivery.
@@ -63,3 +68,5 @@ W3 also owns finding 1's retained test port. `go test -p 4 -gcflags=-e ./interna
 **W1: separate cancellation intent for W2.** W2's cancellation-reason persistence test fails because the store has no cancellation-intent field separate from the terminal reason. Add it to the store's authentication/cancellation snapshot (amendment A1-21), and finish the session digest and CSRF persistence W2 reads. W2 consumes it through the contract interface.
 
 **DESIGN approved (lead, pending Korey's ratification): SDK planning diagnostic sanitization, W5 and W4.** Invariant: no declared secret argument value (default or supplied, pipeline or job scope) appears in any error the SDK returns from describe, argument resolution or planning: not in message, hint, details or detail keys, in any encoding. Each SDK collects the nonempty declared secret values once at its discovery/planning boundary and passes every outgoing canonical error through one sanitizer, which keeps codes and field paths. That replaces the describe-only replacement. Host masking still owns execution output and dynamic service values. Both SDKs carry a property test over thrown values, canonical errors, overlapping values, encodings and both argument scopes. W5 implements it in TypeScript; W4 implements the same in the Go SDK. No cross-area contract change.
+
+**DESIGN: W9 Windows release packaging for the TypeScript SDK (from W5 review finding 6).** Invariant: every published TypeScript SDK package contains working protocol bridges for win32-x64 and win32-arm64. The release workflow builds both `native/win32-*/protocol.node` artifacts on native Windows runners, runs TestNativeProtocol and TestNativeConformance on each, stamps the SDK version, and makes publication depend on package assembly. W5's proposal is in `sdk/typescript/IMPLEMENTATION.md`.
