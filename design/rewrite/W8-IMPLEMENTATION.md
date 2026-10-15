@@ -1,9 +1,9 @@
 # W8 implementation handoff
 
-W8 remains incomplete. This continuation implements the Windows local transport
-and migrates its callers and fixtures. All 26 W8 amendment rows and both W8
-handoffs were rechecked. The shared host declarations and integration points
-below remain open. Native acceptance cells remain blocked.
+W8 remains incomplete. This continuation resolves the TypeScript trigger-test
+merge conflict and verifies the integrated SDK changes against W8. All 26 W8
+amendment rows and both W8 handoffs were rechecked. The shared host declarations
+and integration points below remain open. Native acceptance cells remain blocked.
 
 | Owner | Remaining boundary | Evidence in this checkout |
 | --- | --- | --- |
@@ -2197,3 +2197,46 @@ Friction: sandbox DNS prevented downloading go-winio, and sockets/native Windows
 are unavailable here. The transport uses existing Go/Windows APIs. No Sparkwing
 binary, pipeline, Git write, deployment or release ran. Git config remains free
 of author/core.worktree overrides. Worker scratch was deleted after final checks.
+
+## Continuation: TypeScript merge verification
+
+The incoming modify/delete conflict in
+`internal/cluster/trigger_typescript_test.go` keeps W8's deletion. Its 51 incoming
+lines call the removed trigger loop. The merged pipelineentry tests cover the
+retained TypeScript command and protocol argument. No production behavior or
+contract shape changed. The lead must stage this deletion and finish the merge
+because the swarm brief prohibits worker Git writes. The index still reports
+this path as unmerged. Working files contain no conflict markers.
+
+All assigned amendment rows and handoffs retain their recorded status. W3 must
+declare shared host/process constructors and run/plan/eval identity inputs.
+The cache owner must expose workspace-off hashing. W9 must allow plan bootstrap
+commands without a job ID. Source acquisition/projection, the keeper, HTTP/data
+clients, shared local services, Cloud plan/eval resources and launcher sync still
+need their owning implementations. W8 consumes the available contracts through
+the existing fake component ports. Native Windows, Cloud enforcement/cleanup
+and placement QA still need their platform and deployment fixtures. No new
+cross-area contract change or product question was introduced.
+
+Verification used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and private
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W8:
+
+- Whole-repository `go build -p 4 ./...` passed.
+- Vet passed for cluster, runners, wingd, engine and acceptance packages.
+- All runner, launcher and engine package tests passed.
+- All acceptance package tests passed in 33.619 seconds, including the merged
+  TypeScript SDK boundary and native Linux pipe tests. The first run failed
+  because this worktree lacked TypeScript's compiler. The exact three locked
+  packages were installed offline from digest-verified machine cache entries
+  through a private npm cache, then the complete acceptance package was rerun.
+- Cluster passed with its socket-based metrics test excluded. Focused local
+  lifecycle, identity, dashboard, managed-unit and client tests passed.
+- The incoming pipelineentry suite passed. Commentcheck passed across 1,051
+  files. `git diff --check` passed.
+
+No new native catalog cell was activated or T1 inventory test ported. No
+other-area tracked file or production caller needed migration. The only edited
+report is this W8 handoff. No Sparkwing binary, pipeline, Git write, deployment
+or release ran. Git identity still comes from the user's global config, with no
+repository identity or core.worktree override. Check processes finished and
+worker scratch was deleted.

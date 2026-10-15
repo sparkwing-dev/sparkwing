@@ -1,100 +1,196 @@
-// Framing between the engine and an SDK process, per the node protocol. The
-// engine writes one JSON request per line to the request pipe. The SDK writes
-// one JSON object per line to the frame pipe: a line with "reply" answers the
-// request with that id, and every other line is a log record. stdout and
-// stderr belong to pipeline code and never carry frames.
-
-import { createInterface } from "node:readline";
+import { parseJSON } from "./json.ts";
 import type { Readable } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 import type { LineSink } from "./log.ts";
+import { decodeError, failure, object, string, type ErrorFields } from "./errors.ts";
 
-export const OPS = ["describe", "plan", "run_node", "run_step", "cancel", "eval"] as const;
-export type Op = (typeof OPS)[number];
-
-/** Error codes an SDK sends in a failed reply. */
-export type ErrorCode =
-  | "unknown_op"
-  | "unknown_pipeline"
-  | "unknown_node"
-  | "unknown_step"
-  | "unknown_closure"
-  | "no_plan"
-  | "bad_request"
-  | "invalid_args"
-  | "plan_failed";
-
-/** The largest step output value, as JSON, the host records: 16 MiB. */
+export const OPS = ["hello", "describe", "plan", "run_step", "eval", "cancel"] as const;
 export const MAX_OUTPUT_BYTES = 16 << 20;
-
-/** Every frame, newline included, fits in 17 MiB: an output of MAX_OUTPUT_BYTES and its reply's own fields. */
 export const MAX_FRAME_BYTES = MAX_OUTPUT_BYTES + (1 << 20);
-
 export interface Request {
   id: string;
   op: string;
   [field: string]: unknown;
 }
-
-export type Reply =
-  { reply: string; ok: true; result: unknown } | { reply: string; ok: false; error: { code?: ErrorCode; message: string } };
-
-/** The SDK could not do what a request asked; its code goes in the failed reply. */
-export class ProtocolError extends Error {
-  readonly code: ErrorCode;
-
-  constructor(code: ErrorCode, message: string) {
-    super(message);
-    this.code = code;
-  }
-}
-
-/** A request line the SDK cannot answer, because it names no id to answer. */
+export type Reply = { reply: string; ok: true; result: unknown } | { reply: string; ok: false; error: ErrorFields };
 export class UnanswerableRequest extends Error {}
 
-/**
- * Yields each request on the request pipe. A line that carries an id but is
- * otherwise malformed is yielded as a ProtocolError to answer; a line with no
- * id throws UnanswerableRequest, since the host would wait on a reply forever.
- */
-export async function* readRequests(input: Readable): AsyncGenerator<Request | { id: string; error: ProtocolError }> {
-  const lines = createInterface({ input, crlfDelay: Infinity });
-  for await (const line of lines) {
-    if (line.trim() === "") continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch (err) {
-      throw new UnanswerableRequest(`request is not JSON: ${(err as Error).message}`);
+export async function* readRequests(input: Readable): AsyncGenerator<Request> {
+  const decoder = new StringDecoder("utf8");
+  let pending = "";
+  for await (const chunk of input) {
+    pending += typeof chunk === "string" ? chunk : decoder.write(chunk);
+    let end: number;
+    while ((end = pending.indexOf("\n")) >= 0) {
+      const line = pending.slice(0, end);
+      pending = pending.slice(end + 1);
+      if (Buffer.byteLength(line) > MAX_FRAME_BYTES) throw new UnanswerableRequest("request exceeds frame limit");
+      if (line.trim()) yield parseRequest(line);
     }
-    const r = parsed as Partial<Request> | null;
-    const id = typeof r?.id === "string" && r.id !== "" ? r.id : null;
-    if (id === null) throw new UnanswerableRequest("a request needs a non-empty string id");
-    if (typeof r?.op !== "string") {
-      yield {
-        id,
-        error: new ProtocolError("bad_request", "a request needs a string op"),
-      };
-      continue;
+    if (Buffer.byteLength(pending) > MAX_FRAME_BYTES) throw new UnanswerableRequest("request exceeds frame limit");
+  }
+  pending += decoder.end();
+  if (pending.trim()) yield parseRequest(pending);
+}
+function parseRequest(line: string): Request {
+  let value: unknown;
+  try {
+    value = parseJSON(line);
+  } catch {
+    throw new UnanswerableRequest("request is not JSON");
+  }
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    typeof (value as Request).id !== "string" ||
+    !(value as Request).id
+  )
+    throw new UnanswerableRequest("request needs a nonempty string id");
+  return value as Request;
+}
+const fields: Record<string, readonly string[]> = {
+  hello: ["protocol", "engine", "runner", "binding"],
+  describe: [],
+  plan: ["pipeline", "args", "run"],
+  run_step: ["job", "step", "attempt", "settled", "failure"],
+  eval: ["closure", "input", "attempt", "settled"],
+  cancel: ["job", "step", "target"],
+};
+const operationFields = new Set(Object.values(fields).flat());
+export function validateRequest(req: Request): void {
+  if (typeof req.op !== "string") throw failure("bad_request", "op must be a string");
+  if (!(OPS as readonly string[]).includes(req.op)) throw failure("unknown_op", `unknown operation ${req.op}`);
+  for (const key of Object.keys(req))
+    if (operationFields.has(key) && (!fields[req.op]!.includes(key) || (req[key] === null && key !== "input")))
+      throw failure("bad_request", `${key} contradicts ${req.op}`);
+  if (req.op === "hello") {
+    if (!Number.isInteger(req.protocol)) throw failure("bad_request", "protocol must be an integer");
+    string(object(req.engine, "engine").version, "engine.version");
+    const runner = object(req.runner, "runner");
+    string(runner.name, "runner.name");
+    string(runner.type, "runner.type");
+    if (!Array.isArray(runner.labels) || runner.labels.some((v) => typeof v !== "string"))
+      throw failure("bad_request", "runner.labels must be strings");
+    if (req.binding !== undefined) {
+      const binding = object(req.binding, "binding");
+      string(binding.run_id, "binding.run_id");
+      string(binding.job_id, "binding.job_id");
+      const routes = object(binding.routes, "binding.routes");
+      string(routes.url, "binding.routes.url");
+      string(routes.bearer, "binding.routes.bearer");
     }
-    yield r as Request;
+  }
+  if (req.op === "plan") {
+    string(req.pipeline, "pipeline");
+    stringMap(req.args, "args");
+    const run = object(req.run, "run");
+    string(run.run_id, "run.run_id");
+    string(run.pipeline, "run.pipeline");
+    for (const key of ["dry_run", "no_memo"])
+      if (run[key] !== undefined && typeof run[key] !== "boolean") throw failure("bad_request", `run.${key} must be boolean`);
+    if (run.git !== undefined) {
+      const git = object(run.git, "run.git");
+      for (const key of ["sha", "branch"])
+        if (typeof git[key] !== "string") throw failure("bad_request", `run.git.${key} must be a string`);
+      optionalStrings(git, ["repo", "repo_url", "default_branch"], "run.git");
+    }
+    if (run.trigger !== undefined) {
+      const trigger = object(run.trigger, "run.trigger");
+      string(trigger.source, "run.trigger.source");
+      optionalStrings(trigger, ["user"], "run.trigger");
+      if (trigger.pull_request !== undefined) {
+        const pr = object(trigger.pull_request, "run.trigger.pull_request");
+        if (!Number.isSafeInteger(pr.number) || Number(pr.number) < 1)
+          throw failure("bad_request", "pull request number must be a positive integer");
+        optionalStrings(pr, ["action", "base_ref", "base_sha", "head_ref", "head_sha"], "run.trigger.pull_request");
+      }
+    }
+    if (run.started_at !== undefined) {
+      const started = string(run.started_at, "run.started_at");
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(started) || !Number.isFinite(Date.parse(started)))
+        throw failure("bad_request", "run.started_at must be RFC3339");
+    }
+  }
+  if (req.op === "cancel") {
+    if (req.target !== undefined) {
+      string(req.target, "target");
+      if (req.job !== undefined || req.step !== undefined) throw failure("bad_request", "cancel selectors cannot be mixed");
+    } else string(req.job, "job");
+  }
+  if (req.op === "run_step") string(req.job, "job");
+  if (req.op === "run_step" || req.step !== undefined) string(req.step, "step");
+  if (req.job !== undefined) string(req.job, "job");
+  if (req.op === "run_step" || req.attempt !== undefined || req.settled !== undefined) {
+    if (
+      !Number.isSafeInteger(req.attempt) ||
+      Number(req.attempt) < 1 ||
+      !Array.isArray(req.settled) ||
+      req.settled.some((id) => typeof id !== "string")
+    )
+      throw failure("bad_request", "step state needs a positive attempt and settled steps");
+  }
+  if (req.op === "eval") string(req.closure, "closure");
+  if (req.args !== undefined) stringMap(req.args, "args");
+  if (req.failure !== undefined) {
+    const f = object(req.failure, "failure");
+    string(f.job, "failure.job");
+    string(f.stage, "failure.stage");
+    decodeError(f.error);
   }
 }
-
-/**
- * Writes one reply frame. A result too large for one frame becomes a failed
- * reply, so the host never waits on an id the SDK dropped.
- */
-export function writeReply(out: LineSink, reply: Reply): void {
-  let line = JSON.stringify(reply) + "\n";
-  if (Buffer.byteLength(line) > MAX_FRAME_BYTES) {
-    line =
-      JSON.stringify({
-        reply: reply.reply,
-        ok: false,
-        error: {
-          message: `reply exceeds the ${MAX_FRAME_BYTES}-byte frame limit`,
-        },
-      }) + "\n";
+function optionalStrings(value: Record<string, unknown>, keys: readonly string[], label: string): void {
+  for (const key of keys)
+    if (value[key] !== undefined && typeof value[key] !== "string") throw failure("bad_request", `${label}.${key} must be a string`);
+}
+export function stringMap(value: unknown, label: string): Record<string, string> {
+  const values = object(value, label);
+  for (const value of Object.values(values))
+    if (typeof value !== "string") throw failure("bad_request", `${label} must contain only strings`);
+  return values as Record<string, string>;
+}
+export function jsonOutput(value: unknown): unknown {
+  const output = jsonValue(value);
+  if (output !== undefined && Buffer.byteLength(JSON.stringify(output)) > MAX_OUTPUT_BYTES)
+    throw failure("sdk_error", `output exceeds ${MAX_OUTPUT_BYTES} bytes`);
+  return output;
+}
+export function jsonValue(value: unknown): unknown {
+  if (value === undefined) return undefined;
+  const json = JSON.stringify(value, (_key, child: unknown) => {
+    if (
+      typeof child === "function" ||
+      typeof child === "symbol" ||
+      typeof child === "bigint" ||
+      (typeof child === "number" && !Number.isFinite(child))
+    )
+      throw failure("sdk_error", "output must be JSON serializable");
+    return child;
+  });
+  if (json === undefined) throw failure("sdk_error", "output must be JSON serializable");
+  return JSON.parse(json);
+}
+function frameLine(frame: unknown): string {
+  const json = JSON.stringify(frame);
+  if (json === undefined) throw failure("sdk_error", "frame must be JSON serializable");
+  const line = json + "\n";
+  if (Buffer.byteLength(line) > MAX_FRAME_BYTES) throw failure("sdk_error", "encoded frame exceeds frame limit");
+  return line;
+}
+export function writeFrame(out: LineSink, frame: unknown, fallback?: unknown): void {
+  let line: string;
+  try {
+    line = frameLine(frame);
+  } catch (error) {
+    if (fallback === undefined) throw error;
+    line = frameLine(fallback);
   }
   out.write(line);
+}
+export function writeReply(out: LineSink, reply: Reply): void {
+  writeFrame(out, reply, {
+    reply: reply.reply,
+    ok: false,
+    error: { code: "sdk_error", message: "reply exceeds frame limit or is not JSON serializable" },
+  });
 }

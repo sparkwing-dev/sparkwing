@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"runtime/debug"
 	"slices"
@@ -81,17 +82,21 @@ func (sdkOperations) Context(ctx context.Context, rc nodeproto.RunContext, runne
 }
 
 func (sdkOperations) Plan(ctx context.Context, name string, args map[string]string, run nodeproto.RunContext) (built any, document nodeproto.PlanDoc, failure error) {
+	diagnostics := &planningDiagnostics{args: maps.Clone(args)}
 	defer func() {
-		if recover() != nil {
+		if value := recover(); value != nil {
 			built = nil
 			document = nodeproto.PlanDoc{}
-			failure = sdkError(apierr.PlanFailed, "pipeline declaration panicked")
+			failure = planningFailure(value)
 		}
+		failure = diagnostics.sanitize(failure, apierr.PlanFailed, "")
 	}()
 	reg, ok := lookup(name)
 	if !ok {
 		return nil, nodeproto.PlanDoc{}, sdkError(apierr.UnknownPipeline, "pipeline is not registered")
 	}
+	diagnostics.collect(reg.Schema)
+	ctx = withPlanningDiagnostics(ctx, diagnostics)
 	rc := RunContext{RunID: run.RunID, Pipeline: run.Pipeline, StartedAt: run.StartedAt, NoMemo: run.NoMemo, DryRun: run.DryRun}
 	if run.Git != nil {
 		g := run.Git
@@ -112,16 +117,20 @@ func (sdkOperations) Plan(ctx context.Context, name string, args map[string]stri
 		if errors.As(err, &input) {
 			code = apierr.InvalidArgs
 		}
-		return nil, nodeproto.PlanDoc{}, sdkError(code, maskText(err.Error(), reg.secretValues(args)))
+		var canonical *apierr.Error
+		if errors.As(err, &canonical) {
+			return nil, nodeproto.PlanDoc{}, canonical
+		}
+		return nil, nodeproto.PlanDoc{}, sdkError(code, err.Error())
 	}
 	p.registration = reg
-	p.secretInputs = reg.secretValues(args)
+	p.secretInputs = slices.Clone(diagnostics.values)
 	doc := planDocument(p)
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		return nil, doc, sdkError(apierr.PlanFailed, "plan cannot be encoded")
 	}
-	if _, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: declarationSecrets(ctx, reg.secretValues(args))}); err != nil {
+	if _, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: declarationSecrets(ctx, p.secretInputs)}); err != nil {
 		return nil, doc, err
 	}
 	return p, doc, nil
@@ -228,6 +237,17 @@ func (sdkOperations) Eval(ctx context.Context, built any, req nodeproto.Request)
 	if n == nil || (req.Job != "" && n.id != req.Job && !generatorClosure(n, req.Closure)) {
 		return result, sdkError(apierr.UnknownClosure, "closure is not declared for the bound job")
 	}
+	if generatorClosure(n, req.Closure) {
+		if p.diagnostics == nil {
+			p.diagnostics = &planningDiagnostics{args: p.args, values: slices.Clone(p.secretInputs)}
+		}
+		defer func() {
+			err = p.diagnostics.sanitize(err, apierr.SDKError, "")
+			if result.Error != nil {
+				result.Error = p.diagnostics.sanitize(result.Error, apierr.SDKError, "").(*apierr.Error)
+			}
+		}()
+	}
 	if step := closureStep(n, req.Closure); step != nil {
 		if err := n.work.beginStep(req.Attempt, step, req.Settled); err != nil {
 			return result, err
@@ -318,6 +338,7 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 			return prior, nil
 		}
 		expansion := NewPlan()
+		expansion.diagnostics = p.diagnostics
 		base := jsonResolverFromContext(ctx)
 		ctx = context.WithValue(ctx, keyJSONRefResolver, func(ctx context.Context, j string) ([]byte, error) {
 			if j == n.id && len(input) > 0 {
@@ -348,6 +369,7 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 			return nil, err
 		}
 		existing := planDocument(p)
+		p.secretInputs = slices.Clone(p.diagnostics.values)
 		if _, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{
 			Placement: nodeproto.PlacementLocal, Secrets: declarationSecrets(ctx, p.secretInputs),
 			Expansion: true, ExistingJobs: existing.Jobs, ExistingConcurrency: existing.Concurrency, SourceJob: n.id,
@@ -457,15 +479,6 @@ func closureStep(n *JobNode, id string) *WorkStep {
 		}
 	}
 	return nil
-}
-
-func maskText(text string, values []string) string {
-	for _, v := range values {
-		if v != "" {
-			text = strings.ReplaceAll(text, v, "***")
-		}
-	}
-	return text
 }
 
 func (sdkOperations) Prepare(built any, request nodeproto.Request) error {
