@@ -212,7 +212,74 @@ Responses expose public record/member metadata, excluding authority, uploader,
 source and read-set snapshots. These routes cover generic RecordStore lookup
 and commit.
 
-### Credential inventory reads
+### Capability inventory and rotation
+
+GET `/api/v1/tokens` and GET `/api/v1/tokens/{token}` use PolicyRouter.
+The collection uses member `runs.read` with BindNone because it has no token
+selector. The manager filters the committed read to credentials owned by the
+authenticated account, or the team's credentials for current team-admin
+authority. A detail read retains ownToken. GET on the collection and resource
+under `/api/v1/operator/tokens` requires operator.tokens or a console session
+and selects only deployment service/operator credentials. Queries and headers
+cannot change either scope. GET `/api/v1/team/tokens` is removed.
+
+capability.Metadata is the explicit public projection. It contains prefix,
+team, subject, audience, grants, created_by, issued_at, optional expires_at,
+revoked_at and last_used_at, and git_credentials and metered. Times use RFC3339. It contains
+no bearer, digest, binding, ancestry, pools or billing provenance. Collections return
+`{tokens:[]}` when empty. Optional kind selects account, machine, service or
+operator. Optional include_revoked is 0 or 1. Invalid or duplicate filters
+return bad_request after authentication. Scope-invalid adapter output fails
+without returning partial metadata.
+
+POST `/api/v1/tokens/{token}/rotate` and its operator counterpart use the
+existing resource ownership policies and RetryNever. The raw replacement is
+returned once and has no secret replay contract. The body accepts optional
+grace_secs and expires_at. Omitted grace retains the existing 24-hour default.
+An explicit grace is an integer from zero through the existing seven-day
+ceiling. Null, negative and overflowing values fail. Omitted expiry preserves
+the original expiry. An explicit expiry passes the original parent's ceilings
+for a delegated credential or the current origin policy for a provisioned root.
+The response carries capability, new public metadata, old_prefix and the
+RFC3339 old_revoked_at. Session and console writes require CSRF. All inventory
+and rotation responses use no-store and canonical errors.
+
+Invariant: credential metadata and replacements remain within authenticated
+ownership and scope, and a failed transaction exposes no new bearer or partial
+result. CapabilityManager is W2's local transaction interface. Team reports
+the selected tenant, or empty for deployment operations. ListCapabilities
+takes context, Authorized and capability.InventoryFilter. ReadCapability takes context
+and Authorized with the exact token selector. RotateCapability takes context,
+Authorized, grace duration and optional absolute expiry. It returns
+capability.Rotation containing Issued, the pre-rotation Previous metadata and
+the store-derived RevokesAt. WithCapabilityManager injects the same interface
+for embedded controllers and tests. Defaults select Tenant or Operator and
+refuse missing implementations with policy_missing.
+
+W1 must implement these operations with its store clock and transaction-local
+ancestry, membership, owner and route checks. Inventories select controller
+root/delegated credentials, never unit awards or node-host credentials. The
+store clock decides whether a scheduled revocation has ended a row. The HTTP
+projection preserves that committed selection and its grace deadline.
+Deployment inventories select unbound service/operator roots. Rotation issues
+through Store.Issue, preserves the original origin/parent, registration, owner,
+repository/data scope, pools, metering and source consent, and cannot widen
+grants or escape its current issuance expiry ceilings. Its replacement must not parent to the old credential that
+the rotation ends. The replacement and bounded old revocation deadline commit
+together, advancing the old authority generation. Repeating rotation on an
+already scheduled old credential fails rather than issuing a second replacement.
+An explicit revocation cuts
+grace short. A failure returns no Raw. No legacy token-table read or RotateToken
+fallback is permitted. The controller cannot implement this transaction or
+create a new persistence representation. Its fakes prove transport and
+projection only. Real rotation, revocation propagation, registration and
+source-consent transfer remain W1 integration work.
+
+These are local C2 declarations. No C1 signature or implementation changes.
+The collection binding and rotation retry corrections follow the existing
+member-creation correction. Native route-matrix cells remain pending.
+
+### Secret and git credential inventory reads
 
 GET `/api/v1/secrets` and GET `/api/v1/team/git-credentials` use PolicyRouter
 and the existing member rules. Both select the authenticated team and return
@@ -1457,10 +1524,9 @@ Contract changes needed in C1:
   commit or recheck that transaction, and may not return Raw before commit.
   C1 must expose its final actor-bearing transaction boundary for these
   operations. No alternate issuer or legacy token bridge was introduced.
-- Token metadata lookup/list and rotation also lack a capability-based
-  contract. The remaining methods return legacy `store.Token` rows. C1 must
-  define capability metadata and atomic rotation before those handlers can
-  replace the old routes.
+- Capability metadata and rotation now use the local C2 CapabilityManager
+  contract above. C1 must implement its authority-bearing transactions. The
+  retired `store.Token` readers and rotation are not adapters.
 
 Earlier open contracts still apply: committed reconciliation award delivery,
 trusted runner-profile inputs, result digest persistence, annotation/summary

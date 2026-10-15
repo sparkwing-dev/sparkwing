@@ -233,8 +233,8 @@ func requireCloudUserToken(controllerURL, adminToken, prefix string) error {
 	if err := json.Unmarshal(resp, &found); err != nil {
 		return fmt.Errorf("decode the token %s: %w", prefix, err)
 	}
-	if store.ActingKind(found.Kind, found.Principal) != store.TokenKindUser {
-		return fmt.Errorf("the token %s is a %s token held by %q, not a user token", prefix, found.Kind, found.Principal)
+	if found.Subject.Kind != "account" {
+		return fmt.Errorf("the token %s is a %s token held by %q, not an account token", prefix, found.Subject.Kind, found.Subject.ID)
 	}
 	return nil
 }

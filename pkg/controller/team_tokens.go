@@ -30,18 +30,6 @@ type teamTokenResp struct {
 	Command   string            `json:"command,omitempty"`
 }
 
-type teamTokenJSON struct {
-	Prefix         string            `json:"prefix"`
-	Name           string            `json:"name"`
-	Family         store.TokenFamily `json:"family"`
-	Scopes         []string          `json:"scopes"`
-	CreatedBy      string            `json:"created_by"`
-	CreatedAt      int64             `json:"created_at"`
-	ExpiresAt      *int64            `json:"expires_at"`
-	LastUsedAt     *int64            `json:"last_used_at"`
-	GitCredentials bool              `json:"git_credentials"`
-}
-
 func (s *Server) handleCreateTeamToken(w http.ResponseWriter, r *http.Request) {
 	p, t, ok := s.teamMember(w, r, store.RoleReader)
 	if !ok {
@@ -106,42 +94,4 @@ func (s *Server) createMachineToken(w http.ResponseWriter, r *http.Request, p *P
 		ExpiresAt: tok.ExpiresAt.Unix(),
 		Command:   runnerTokenSetup(raw) + " && " + runnerConnectArgs(s.controllerURL(r), name, allow, tok.Scopes),
 	})
-}
-
-func (s *Server) handleListTeamTokens(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleReader)
-	if !ok {
-		return
-	}
-	now := time.Now()
-	toks, err := t.TeamTokens(r.Context(), p.AccountID, store.Role(p.Role).AtLeast(store.RoleEditor), now)
-	if err != nil {
-		s.writeInternalError(w, r, "list team tokens", err)
-		return
-	}
-	optedIn, err := t.GitCredentialMachines(r.Context())
-	if err != nil {
-		s.writeInternalError(w, r, "list git credential machines", err)
-		return
-	}
-	out := make([]teamTokenJSON, 0, len(toks))
-	for _, tok := range toks {
-		row := teamTokenJSON{
-			Prefix: tok.Prefix, Family: tok.Family(), Scopes: tok.Scopes,
-			CreatedBy: tok.CreatedBy, CreatedAt: tok.CreatedAt.Unix(), GitCredentials: optedIn[tok.Prefix],
-		}
-		if row.Family == store.TokenFamilyMachine {
-			row.Name = strings.TrimPrefix(tok.Principal, runnerPrincipalPrefix)
-		}
-		if tok.ExpiresAt != nil {
-			v := tok.ExpiresAt.Unix()
-			row.ExpiresAt = &v
-		}
-		if tok.LastUsedAt != nil {
-			v := tok.LastUsedAt.Unix()
-			row.LastUsedAt = &v
-		}
-		out = append(out, row)
-	}
-	writeJSON(w, http.StatusOK, out)
 }

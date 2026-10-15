@@ -126,11 +126,11 @@ func renderTokensTable(w io.Writer, tokens []client.TokenInfo) error {
 		return err
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PREFIX\tTYPE\tPRINCIPAL\tSCOPES\tMETERED\tLAST_USED")
+	fmt.Fprintln(tw, "PREFIX\tTYPE\tPRINCIPAL\tGRANTS\tMETERED\tLAST_USED")
 	for _, t := range tokens {
 		lastUsed := "-"
 		if t.LastUsedAt != nil {
-			lastUsed = time.Unix(*t.LastUsedAt, 0).UTC().Format("2006-01-02 15:04")
+			lastUsed = t.LastUsedAt.UTC().Format("2006-01-02 15:04")
 		}
 		if t.RevokedAt != nil {
 			lastUsed += " (revoked)"
@@ -140,7 +140,7 @@ func renderTokensTable(w io.Writer, tokens []client.TokenInfo) error {
 			metered = "yes"
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			t.Prefix, t.Kind, t.Principal, formatScopes(t.Scopes), metered, lastUsed)
+			t.Prefix, t.Subject.Kind, t.Subject.ID, formatScopes(t.Grants), metered, lastUsed)
 	}
 	return tw.Flush()
 }
@@ -213,15 +213,27 @@ func runTokensRotate(args []string) error {
 	if err := requireController(prof, "tokens rotate"); err != nil {
 		return err
 	}
+	var expires *time.Time
+	if *ttl < 0 {
+		return errors.New("ttl must not be negative")
+	}
+	if *ttl > 0 {
+		at := time.Now().Add(*ttl)
+		expires = &at
+	}
 	out, err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).
-		RotateToken(context.Background(), *prefix, *grace, *ttl)
+		RotateToken(context.Background(), *prefix, *grace, expires)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "WARNING: stash this new token NOW. The old token continues working until the grace window closes.")
-	fmt.Println(out.Token)
-	fmt.Fprintf(os.Stderr, "---\nold prefix=%s revoked_at=%d\nnew metadata: %s\n",
-		*prefix, out.OldRevokedAt, string(out.New))
+	fmt.Println(out.Capability)
+	metadata, err := json.Marshal(out.New)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "---\nold prefix=%s revoked_at=%s\nnew metadata: %s\n",
+		out.OldPrefix, out.OldRevokedAt.Format(time.RFC3339Nano), metadata)
 	return nil
 }
 

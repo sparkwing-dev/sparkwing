@@ -127,7 +127,7 @@ func CredentialRoutes() []CredentialRouteExpectation {
 		{"POST", "/api/v1/queue/groups/{group}/cancel-waiter", "controller", "team", "capability", []string{"awarded_or_delegated_claim|node.report|slotOfBoundNode|reporting", "awarded_or_delegated_claim|runs.state|slotOfBoundNode|reporting"}},
 		{"GET", "/api/v1/queue/groups/{group}/holder", "controller", "team", "capability", []string{"awarded_or_delegated_claim|node.report|slotOfBoundNode|reporting", "awarded_or_delegated_claim|runs.state|slotOfBoundNode|reporting"}},
 		{"GET", "/api/v1/queue/groups/{group}/resolve", "controller", "team", "capability", []string{"awarded_or_delegated_claim|node.report|slotOfBoundNode|sensitive", "awarded_or_delegated_claim|runs.state|slotOfBoundNode|sensitive"}},
-		{"GET", "/api/v1/tokens", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|ownToken|credential"}},
+		{"GET", "/api/v1/tokens", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential"}},
 		{"POST", "/api/v1/tokens", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential"}},
 		{"GET", "/api/v1/tokens/{token}", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|ownToken|credential"}},
 		{"DELETE", "/api/v1/tokens/{token}", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|ownToken|credential"}},

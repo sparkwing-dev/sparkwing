@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **controller (Breaking):** Capability inventories and rotation use the shared policy and authority-bearing store transactions
+  Team lists use `/api/v1/tokens`. Deployment metadata uses `/api/v1/operator/tokens`. Metadata carries subjects, grants and RFC3339 times. Rotation returns its capability once and accepts an absolute expiry. Embedded controllers supply `WithCapabilityManager`. See [migration guide](docs/migrations/_unreleased.md#capability-inventory-and-rotation).
 - **controller (Breaking):** Session renewal and logout use the shared route policy and verified session proof
   Logout takes no body and ends only the presented session. It requires session-bound CSRF and same-origin proof. Renewal refuses duplicate presentations and HEAD. Both routes return canonical errors. See [migration guide](docs/migrations/_unreleased.md#session-lifecycle).
 - **controller (Breaking):** Secret-by-name reads use the shared capability policy and a tenant transaction that rechecks authority

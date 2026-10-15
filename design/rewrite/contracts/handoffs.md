@@ -2,6 +2,26 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+**W1/W2: capability inventory and rotation.** W2's member/deployment metadata
+and rotation HTTP routes use PolicyRouter and C2's CapabilityManager. Its
+shared Metadata, InventoryFilter and Rotation types live in internal/capability
+so persistence can implement the interface without importing controller.
+W1 must supply Team, ListCapabilities(ctx, Authorized, InventoryFilter),
+ReadCapability(ctx, Authorized), and RotateCapability(ctx, Authorized, grace,
+expires). Recheck live authority and ownership in the transaction. Inventories
+return owned account/machine controller credentials or deployment
+service/operator roots, never executable awards or private authority fields.
+Rotation commits through Store.Issue, preserves origin/parent/registration,
+owner, scopes and source consent, respects current issuance expiry ceilings,
+cannot widen grants, and commits
+the bounded old revocation with the replacement before returning Raw.
+The replacement cannot parent to the old credential that rotation ends.
+W1's readAuthorityTx currently rejects every non-nil RevokedAt, including a
+future grace deadline. C2 credentialAlive already accepts it until that
+deadline. Align the persistence check before claiming grace integration.
+No W1 implementation or foreign contract signature changed. HTTP and client
+tests use fakes. See [W2-capability-management-handoff.md](../W2-capability-management-handoff.md).
+
 **W2 session policy continuation.** Documented Session authorization headers now
 reach ordinary policy routes. The default controller reader applies the existing
 license and absolute lifetime to the store's single authentication snapshot,

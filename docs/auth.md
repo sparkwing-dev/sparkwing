@@ -188,6 +188,38 @@ digest and returns the reusable bearer only at issuance.
 
 Member issuance uses `POST /api/v1/tokens` (see [team tokens](#team-tokens)).
 
+## Capability inventory and rotation
+
+`GET /api/v1/tokens` lists credentials within the authenticated team. Members
+need `runs.read` and see their own credentials. A team admin can see the team's
+credentials. `GET /api/v1/tokens/{token}` checks ownership of that prefix.
+Deployment service and operator credentials use the corresponding collection
+and detail routes under `/api/v1/operator/tokens`, requiring `operator.tokens`
+or an operator console session.
+
+The collection returns `{tokens:[...]}`. Each row carries `prefix`, `team`,
+`subject`, `audience`, `grants`, `created_by`, `issued_at`, `git_credentials`,
+`metered`, and optional `expires_at`, `last_used_at` and `revoked_at`. Times are RFC3339
+timestamps. The response omits bearer secrets, digests, bindings and ancestry.
+`kind` filters by `account`, `machine`, `service` or `operator`.
+`include_revoked=1` includes revoked rows. Duplicate or invalid filters fail.
+
+`POST /api/v1/tokens/{token}/rotate` replaces an owned credential. Deployment
+credentials use `/api/v1/operator/tokens/{token}/rotate`. The body accepts
+`grace_secs` and optional `expires_at`. Grace defaults to 24 hours and accepts
+zero through seven days. An omitted expiry keeps the original expiry. An
+explicit expiry must pass the original parent's ceilings or the current root
+origin policy. The transaction preserves the original
+authority and ends the old credential after the grace window. Explicit
+revocation ends that window at once.
+
+The rotation response returns `capability` once, `new` public metadata,
+`old_prefix` and the RFC3339 `old_revoked_at`. Do not replay a rotation after
+losing its response. Browser mutations require session-bound CSRF proof.
+All inventory and rotation responses use `Cache-Control: no-store` and the
+common error envelope. Embedded controllers provide `WithCapabilityManager`
+for authority-bearing inventory and rotation transactions.
+
 ## Metered runners
 
 A token carries a `metered` marker that Sparkwing Cloud operators set with
@@ -1184,10 +1216,9 @@ Token issuance uses the role held when the token is written, so a pending
 request cannot restore authority after a demotion. No token minted into a team
 carries `admin`.
 
-`GET /api/v1/team/tokens` answers any member with the tokens they minted, of
-either family, and adds every machine token of the team for an editor or
-owner. Each row names `prefix`, `name`, `family`, `scopes`, `created_by`,
-`created_at`, `expires_at`, `last_used_at` and `git_credentials`.
+`GET /api/v1/tokens` returns capability metadata as described in
+[Capability inventory and rotation](#capability-inventory-and-rotation).
+`GET /api/v1/team/tokens` is removed.
 `DELETE /api/v1/tokens/{token}` revokes a token at once: the member who
 minted it revokes their own, and an owner revokes any machine token. A token
 the caller cannot see answers `404`, and one they see but may not revoke
@@ -1198,11 +1229,6 @@ answers `403`. The machine owner consents to stored git credential release with
 Membership changes advance the team auth generation in the same transaction.
 Authentication rechecks the current membership and effective grants. Here
 authority also ends when its requesting parent loses `runs.write`.
-
-CLI tokens (`swu_`) and runner tokens (`swr_`) minted from team settings
-before team tokens existed keep authenticating as they did until they expire
-or are revoked. The same routes list and revoke them, and they count toward
-the 10 member tokens and 100 machine tokens a team may hold.
 
 ### Linked sign-ins
 

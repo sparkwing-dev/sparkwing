@@ -1,5 +1,27 @@
 # Migrating to the next release
 
+## Capability inventory and rotation
+
+Use `GET /api/v1/tokens` instead of `GET /api/v1/team/tokens`. The collection
+returns `{tokens:[...]}`. Read `subject.kind` and `subject.id` instead of
+`family`, `kind`, `name` or `principal`, and `grants` instead of `scopes`.
+`issued_at`, `expires_at`, `last_used_at` and `revoked_at` use RFC3339 timestamps.
+Members see owned credentials. Team admins can see the team's credentials.
+Deployment service/operator metadata uses `/api/v1/operator/tokens`.
+
+Rotation uses `POST` on the selected token resource's `/rotate` suffix.
+Send `grace_secs` and optional absolute `expires_at`, replacing `ttl_secs`.
+Explicit expiry must pass the original parent's ceilings or current root
+origin policy. Grace defaults to 24
+hours, accepts zero for immediate replacement and has the existing seven-day
+ceiling. Read the one-time bearer from `capability`, its metadata from `new`,
+and the old credential's deadline from the RFC3339 `old_revoked_at`.
+`old_prefix` replaces `old_replaced_by`. Never automatically retry rotation.
+
+Embedded controllers provide `WithCapabilityManager`. Its reads and rotation
+must recheck authority inside their store transaction. The retired token-table
+APIs cannot supply this contract. Missing adapters return `policy_missing`.
+
 ## Session lifecycle
 
 Session renewal and logout use the shared policy router with session proof.

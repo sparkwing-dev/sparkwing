@@ -351,32 +351,32 @@ describe("listTeamTokens", () => {
   it("reads member and machine rows from one route", async () => {
     const rows = [
       {
-        prefix: "swu_a",
-        family: "member",
-        name: "",
-        scopes: ["runs.read"],
+        prefix: "swk_a",
+        team: "team",
+        subject: { kind: "account", id: "acct-1" },
+        audience: "controller",
+        grants: ["runs.read"],
         created_by: "acct-1",
-        created_at: 1,
-        expires_at: 2,
-        last_used_at: null,
+        issued_at: "2026-10-14T12:00:00Z",
+        expires_at: "2026-10-15T12:00:00Z",
         git_credentials: false,
       },
       {
-        prefix: "swr_b",
-        family: "machine",
-        name: "build-box",
-        scopes: ["nodes.claim"],
+        prefix: "swk_b",
+        team: "team",
+        subject: { kind: "machine", id: "build-box" },
+        audience: "controller",
+        grants: ["nodes.claim"],
         created_by: "acct-1",
-        created_at: 1,
-        expires_at: null,
-        last_used_at: 3,
+        issued_at: "2026-10-14T12:00:00Z",
+        last_used_at: "2026-10-14T13:00:00Z",
         git_credentials: true,
       },
     ];
-    respond = () => new Response(JSON.stringify(rows), { status: 200 });
+    respond = () => new Response(JSON.stringify({ tokens: rows }), { status: 200 });
     assert.deepEqual(await teams.listTeamTokens(), rows);
     assert.equal(calls[0].method, "GET");
-    assert.equal(calls[0].url, "/api/v1/team/tokens");
+    assert.equal(calls[0].url, "/api/v1/tokens");
   });
 });
 

@@ -162,8 +162,6 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/runs/{id}/receipt":                                  resRun,
 	"GET /api/v1/runs/{id}/steps":                                    resRun,
 
-	"GET /api/v1/secrets/{name}": resSecret,
-
 	"GET /api/v1/storage": resNone,
 
 	"DELETE /api/v1/team": resNone,
@@ -200,13 +198,9 @@ var tenantRoutes = map[string]tenantResource{
 
 	"POST /api/v1/teams": resNone,
 
-	"GET /api/v1/team/tokens":  resNone,
 	"POST /api/v1/team/tokens": resNone,
 
-	"GET /api/v1/tokens":                   resNone,
-	"GET /api/v1/tokens/{token}":           resToken,
 	"POST /api/v1/tokens/{prefix}/metered": resToken,
-	"POST /api/v1/tokens/{prefix}/rotate":  resToken,
 
 	"GET /api/v1/trends": resNone,
 

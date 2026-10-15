@@ -248,10 +248,10 @@ func requireRunnerToken(controller, adminToken, prefix, configPath string) error
 	if err := json.Unmarshal(resp, &found); err != nil {
 		return fmt.Errorf("decode the token %s: %w", prefix, err)
 	}
-	if store.ActingKind(found.Kind, found.Principal) != store.TokenKindRunner {
+	if found.Subject.Kind != "machine" {
 		return fmt.Errorf("%s names the token %s, which is a %s token held by %q, not a runner token; "+
 			"revoke it with `sparkwing cluster tokens revoke` if that is what you meant",
-			configPath, prefix, found.Kind, found.Principal)
+			configPath, prefix, found.Subject.Kind, found.Subject.ID)
 	}
 	return nil
 }

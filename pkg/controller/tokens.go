@@ -79,28 +79,3 @@ func (s *Server) handleSetTokenMetered(w http.ResponseWriter, r *http.Request) {
 	s.logger.Info("token metering changed", "prefix", prefix, "metered", req.Metered, "by", who)
 	writeJSON(w, http.StatusOK, tokenToJSON(tok))
 }
-
-func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
-	kind := r.URL.Query().Get("kind")
-	includeRevoked := r.URL.Query().Get("include_revoked") == "1"
-	tokens, err := s.store.ListTokens(kind, includeRevoked)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	out := make([]tokenRecordJSON, 0, len(tokens))
-	for i := range tokens {
-		out = append(out, tokenToJSON(&tokens[i]))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"tokens": out})
-}
-
-func (s *Server) handleLookupTokenByPrefix(w http.ResponseWriter, r *http.Request) {
-	prefix := r.PathValue("token")
-	tok, err := s.store.LookupTokenByPrefix(prefix)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, tokenToJSON(tok))
-}

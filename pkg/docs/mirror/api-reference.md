@@ -94,7 +94,10 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/operator/teams/{team}/grants` | `operator` |
 | `POST` | `/api/v1/operator/teams/{team}/trust` | `operator` |
 | `POST` | `/api/v1/operator/teams/{team}/unfreeze` | `operator` |
+| `GET` | `/api/v1/operator/tokens` | `operator.tokens` or `operator` |
 | `DELETE` | `/api/v1/operator/tokens/{token}` | `operator.tokens` or `operator` |
+| `GET` | `/api/v1/operator/tokens/{token}` | `operator.tokens` or `operator` |
+| `POST` | `/api/v1/operator/tokens/{token}/rotate` | `operator.tokens` or `operator` |
 | `GET` | `/api/v1/operator/waitlist` | `operator` |
 | `POST` | `/api/v1/operator/waitlist/approve` | `operator` |
 | `GET` | `/api/v1/outputs/objects/{key...}` | `public` |
@@ -234,16 +237,15 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/team/members` | `runs.read` |
 | `DELETE` | `/api/v1/team/members/{account}` | `runs.read` |
 | `PATCH` | `/api/v1/team/members/{account}` | `team.admin` |
-| `GET` | `/api/v1/team/tokens` | `runs.read` |
 | `POST` | `/api/v1/team/tokens` | `runs.read` |
 | `POST` | `/api/v1/teams` | `authenticated` |
-| `GET` | `/api/v1/tokens` | `admin` |
+| `GET` | `/api/v1/tokens` | `runs.read` |
 | `POST` | `/api/v1/tokens` | `runs.read` |
 | `POST` | `/api/v1/tokens/{prefix}/metered` | `admin` |
-| `POST` | `/api/v1/tokens/{prefix}/rotate` | `admin` |
 | `DELETE` | `/api/v1/tokens/{token}` | `runs.read` |
-| `GET` | `/api/v1/tokens/{token}` | `admin` |
+| `GET` | `/api/v1/tokens/{token}` | `runs.read` |
 | `PUT` | `/api/v1/tokens/{token}/git-credentials` | `authenticated` |
+| `POST` | `/api/v1/tokens/{token}/rotate` | `runs.read` |
 | `GET` | `/api/v1/trends` | `runs.read` |
 | `GET` | `/api/v1/triggers` | `triggers.read` |
 | `POST` | `/api/v1/triggers` | `runs.write` |

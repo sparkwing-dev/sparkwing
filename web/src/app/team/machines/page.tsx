@@ -30,7 +30,6 @@ import {
   parseRepoPatterns,
   revokeTeamToken,
   runnerConnectCommand,
-  unixSecondsISO,
 } from "@/lib/teams";
 import { setMachineGitCredentials } from "@/lib/gitCredentials";
 import { fmtDateTime } from "@/lib/timeFormat";
@@ -67,7 +66,7 @@ function Machines({ me }: { me: Me }) {
   }, []);
 
   async function revoke(t: TeamToken) {
-    const label = t.name || t.prefix;
+    const label = t.subject.id || t.prefix;
     if (
       !window.confirm(
         `Revoke ${label}? A machine using this token stops taking work at once.`,
@@ -88,7 +87,7 @@ function Machines({ me }: { me: Me }) {
   }
 
   async function setGitCredentials(t: TeamToken, enabled: boolean) {
-    const label = t.name || t.prefix;
+    const label = t.subject.id || t.prefix;
     setBusy(t.prefix);
     try {
       await setMachineGitCredentials(t.prefix, enabled);
@@ -107,8 +106,8 @@ function Machines({ me }: { me: Me }) {
   }
 
   const owner = canManageTeam(role);
-  const machines = tokens?.filter((t) => t.family === "machine") ?? null;
-  const cliTokens = tokens?.filter((t) => t.family === "member") ?? null;
+  const machines = tokens?.filter((t) => t.subject.kind === "machine") ?? null;
+  const cliTokens = tokens?.filter((t) => t.subject.kind === "account") ?? null;
 
   // An editor may revoke only the tokens they minted; the controller decides,
   // so the button is offered to editors and a refusal is shown as it comes back.
@@ -143,21 +142,21 @@ function Machines({ me }: { me: Me }) {
                 className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border)] last:border-0"
               >
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm truncate">{t.name || t.prefix}</div>
+                  <div className="text-sm truncate">{t.subject.id || t.prefix}</div>
                   <div className="text-xs text-[var(--muted)] font-mono truncate">
                     {t.prefix}
                     {creatorSuffix(t, members)}
-                    {t.created_at
-                      ? ` · ${fmtDateTime(unixSecondsISO(t.created_at))}`
+                    {t.issued_at
+                      ? ` · ${fmtDateTime(t.issued_at)}`
                       : ""}
                     {t.expires_at
-                      ? ` · expires ${fmtDateTime(unixSecondsISO(t.expires_at))}`
+                      ? ` · expires ${fmtDateTime(t.expires_at)}`
                       : ""}
                   </div>
                 </div>
                 {t.last_used_at ? (
                   <span className="text-xs text-[var(--muted)]">
-                    last seen {fmtDateTime(unixSecondsISO(t.last_used_at))}
+                    last seen {fmtDateTime(t.last_used_at)}
                   </span>
                 ) : null}
                 {owner ? (
@@ -325,15 +324,15 @@ function CLIAccess({
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-mono truncate">{t.prefix}</div>
                   <div className="text-xs text-[var(--muted)] truncate">
-                    {cliTokenStartsRuns(t.scopes) ? "starts runs" : "read-only"}
-                    {t.created_at
-                      ? ` · ${fmtDateTime(unixSecondsISO(t.created_at))}`
+                    {cliTokenStartsRuns(t.grants) ? "starts runs" : "read-only"}
+                    {t.issued_at
+                      ? ` · ${fmtDateTime(t.issued_at)}`
                       : ""}
                     {t.expires_at
-                      ? ` · expires ${fmtDateTime(unixSecondsISO(t.expires_at))}`
+                      ? ` · expires ${fmtDateTime(t.expires_at)}`
                       : ""}
                     {t.last_used_at
-                      ? ` · last used ${fmtDateTime(unixSecondsISO(t.last_used_at))}`
+                      ? ` · last used ${fmtDateTime(t.last_used_at)}`
                       : ""}
                   </div>
                 </div>

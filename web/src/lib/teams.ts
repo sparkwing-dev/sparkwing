@@ -230,21 +230,18 @@ export interface CreatedInvitation {
 
 export type TokenFamily = "member" | "machine";
 
-// One row of the team token list. Member rows are the caller's own CLI
-// tokens; machine rows are runner tokens, every one of the team's for an
-// editor or owner.
 export interface TeamToken {
   prefix: string;
-  family: TokenFamily;
-  // Empty on member rows.
-  name: string;
-  scopes: string[];
+  team: string;
+  subject: { kind: "account" | "machine"; id: string };
+  audience: "controller";
+  grants: string[];
   created_by?: string;
-  // Unix seconds, as the controller reports them.
-  created_at?: number;
-  expires_at?: number | null;
-  last_used_at?: number | null;
+  issued_at: string;
+  expires_at?: string;
+  last_used_at?: string;
   git_credentials?: boolean;
+  metered?: boolean;
 }
 
 // unixSecondsISO turns the controller's unix-second stamps into the ISO
@@ -365,7 +362,7 @@ export async function acceptInvitation(id: string): Promise<void> {
 }
 
 export async function listTeamTokens(): Promise<TeamToken[]> {
-  const res = await send("GET", "/api/v1/team/tokens", "List tokens");
+  const res = await send("GET", "/api/v1/tokens", "List tokens");
   return asList<TeamToken>(await res.json(), "tokens");
 }
 

@@ -43,6 +43,7 @@ type Server struct {
 
 	auth                       *Authenticator
 	credentialIssuer           CredentialIssuer
+	resolveCapabilityManager   func(context.Context, store.Team) (CapabilityManager, error)
 	authorization              RouteAuthorization
 	dataController             *DataController
 	sourceController           *SourceController
@@ -895,9 +896,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/runs/{id}/approvals", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListApprovalsForRun)))
 	mux.Handle("GET /api/v1/approvals/pending", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListPendingApprovals)))
 
-	mux.Handle("GET /api/v1/tokens", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListTokens)))
-	mux.Handle("GET /api/v1/tokens/{token}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleLookupTokenByPrefix)))
-
 	mux.Handle("GET /api/v1/me", http.HandlerFunc(s.handleMe))
 	mux.Handle("DELETE /api/v1/me", http.HandlerFunc(s.handleDeleteMe))
 	mux.Handle("GET /api/v1/me/team-deletions", http.HandlerFunc(s.handleMyTeamDeletions))
@@ -914,7 +912,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/team/build-trust", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetBuildTrust)))
 	mux.Handle("PUT /api/v1/team/build-trust", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutBuildTrust)))
 	mux.Handle("POST /api/v1/team/tokens", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreateTeamToken)))
-	mux.Handle("GET /api/v1/team/tokens", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListTeamTokens)))
 	mux.Handle("GET /api/v1/team/github-runners", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubRunnerBindings)))
 	mux.Handle("POST /api/v1/team/github-runners", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleAddGitHubRunnerBinding)))
 	mux.Handle("DELETE /api/v1/team/github-runners/{repository_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleRemoveGitHubRunnerBinding)))
@@ -930,7 +927,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/team/github-app/extra-repos", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubAppExtraRepos)))
 	mux.Handle("PUT /api/v1/team/github-app/extra-repos", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitHubAppExtraRepos)))
 
-	mux.Handle("POST /api/v1/tokens/{prefix}/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateToken)))
 	mux.Handle("POST /api/v1/tokens/{prefix}/metered", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetTokenMetered)))
 
 	mux.Handle("GET /api/v1/storage", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleStorageShow)))
@@ -955,6 +951,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	s.registerEngineRoutes(router)
 	s.registerPolicyEndpoints(router, s.claimEndpoints())
 	s.registerAuthorityRoutes(router)
+	s.registerPolicyEndpoints(router, s.capabilityEndpoints())
 	s.registerCredentialRoutes(router)
 	s.registerPolicyEndpoints(router, s.sizingEndpoints())
 	s.registerPolicyEndpoints(router, s.creditEndpoints())

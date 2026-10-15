@@ -186,7 +186,7 @@ func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (stri
 func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (c *Client) RevokeToken(ctx context.Context, prefix string) error
 func (c *Client) RotateSecrets(ctx context.Context) (SecretRotation, error)
-func (c *Client) RotateToken(ctx context.Context, prefix string, grace, ttl time.Duration) (*RotatedToken, error)
+func (c *Client) RotateToken(ctx context.Context, prefix string, grace time.Duration, expires *time.Time) (*RotatedToken, error)
 func (c *Client) RunCronNow(ctx context.Context, name string) (*api.RunEnvelope, error)
 func (c *Client) RunnerIdentity() string
 func (c *Client) SealLog(ctx context.Context, runID, nodeID string, m logseg.Manifest) error
@@ -410,10 +410,10 @@ type RateLimitedError struct {
 func (e *RateLimitedError) Error() string
 func (e *RateLimitedError) Unwrap() error
 type RotatedToken struct {
-	Token         string
-	New           json.RawMessage
-	OldRevokedAt  int64
-	OldReplacedBy string
+	Capability   string
+	New          TokenInfo
+	OldPrefix    string
+	OldRevokedAt time.Time
 }
 type Secret struct {
 	Name      string
@@ -459,15 +459,24 @@ type TokenDeadError struct {
 func (e *TokenDeadError) Error() string
 func (e *TokenDeadError) Explain(token, remedy string) string
 type TokenInfo struct {
-	Prefix     string
-	Kind       string
-	Principal  string
-	Scopes     []string
-	Metered    bool
-	LastUsedAt *int64
-	RevokedAt  *int64
+	Prefix         string
+	Team           string
+	Subject        TokenSubject
+	Audience       string
+	Grants         []string
+	CreatedBy      string
+	IssuedAt       time.Time
+	ExpiresAt      *time.Time
+	LastUsedAt     *time.Time
+	RevokedAt      *time.Time
+	GitCredentials bool
+	Metered        bool
 }
 func TokenPrefix(token string) string
+type TokenSubject struct {
+	Kind string
+	ID   string
+}
 type TriggerMeta struct {
 	Source string
 	Env    map[string]string

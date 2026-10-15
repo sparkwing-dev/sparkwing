@@ -8,6 +8,18 @@ The primary inventory has 74 changed or added functions: 6 lifecycle, 6 state-ma
 
 ## Source snapshots
 
+`TestCapabilityManagementHTTPRotation` replaces the legacy controller tests
+`TestRotateToken_GraceCapRejected` and `TestRotateToken_GraceAtCapAccepted`.
+It checks the existing seven-day ceiling, default and zero grace, null and
+overflow refusal, and propagation of the authorized actor and absolute expiry
+through both member and deployment routes. `TestCapabilityManagementHTTPAuditProperty`
+replaces `TestAuditKeepsABearerInATargetOutOfTheLog`. Generated bearers pasted
+into token selectors or invalid roles never reach logs. Token targets retain
+only their public 16-character prefix. The three old tests and their obsolete
+rotation fixture are deleted. These are fake-backed HTTP proofs. They do not
+prove the committing rotation, grace, source-consent transfer or native route
+matrix and add no archived source-function identity to the inventory.
+
 The unfenced node/trigger reapers and their dispatcher-expiry helpers are removed.
 `pkg/controller/reaper_test.go:TestReaperRecoversExpiredOwnerAndKeepsLiveOwner`
 replaces its private ticker-based reaper with the real elected controller pass.

@@ -24,25 +24,34 @@ type CreatedToken struct {
 	Metadata json.RawMessage `json:"metadata"`
 }
 
-// TokenInfo is one token as GET /api/v1/tokens lists it. Times are Unix
-// seconds.
-type TokenInfo struct {
-	Prefix     string   `json:"prefix"`
-	Kind       string   `json:"kind"`
-	Principal  string   `json:"principal"`
-	Scopes     []string `json:"scopes"`
-	Metered    bool     `json:"metered,omitempty"`
-	LastUsedAt *int64   `json:"last_used_at,omitempty"`
-	RevokedAt  *int64   `json:"revoked_at,omitempty"`
+// TokenSubject identifies the account, machine, service or operator holding a credential.
+type TokenSubject struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
 }
 
-// RotatedToken is the replacement POST /api/v1/tokens/{prefix}/rotate mints.
-// The old token keeps authenticating until OldRevokedAt (Unix seconds).
+// TokenInfo is public capability metadata returned by the token resource.
+type TokenInfo struct {
+	Prefix         string       `json:"prefix"`
+	Team           string       `json:"team"`
+	Subject        TokenSubject `json:"subject"`
+	Audience       string       `json:"audience"`
+	Grants         []string     `json:"grants"`
+	CreatedBy      string       `json:"created_by"`
+	IssuedAt       time.Time    `json:"issued_at"`
+	ExpiresAt      *time.Time   `json:"expires_at,omitempty"`
+	LastUsedAt     *time.Time   `json:"last_used_at,omitempty"`
+	RevokedAt      *time.Time   `json:"revoked_at,omitempty"`
+	GitCredentials bool         `json:"git_credentials"`
+	Metered        bool         `json:"metered"`
+}
+
+// RotatedToken contains the one-time replacement and the old credential's grace deadline.
 type RotatedToken struct {
-	Token         string          `json:"token"`
-	New           json.RawMessage `json:"new"`
-	OldRevokedAt  int64           `json:"old_revoked_at"`
-	OldReplacedBy string          `json:"old_replaced_by"`
+	Capability   string    `json:"capability"`
+	New          TokenInfo `json:"new"`
+	OldPrefix    string    `json:"old_prefix"`
+	OldRevokedAt time.Time `json:"old_revoked_at"`
 }
 
 // CreateToken mints a token. It needs the admin scope.
@@ -92,17 +101,12 @@ func (c *Client) RevokeToken(ctx context.Context, prefix string) error {
 	return c.deleteJSON(ctx, "/api/v1/operator/tokens/"+url.PathEscape(prefix), http.StatusNoContent, nil)
 }
 
-// RotateToken mints a replacement for the token with prefix. The old token
-// keeps working for grace; a zero ttl keeps the old token's remaining
-// lifetime.
-func (c *Client) RotateToken(ctx context.Context, prefix string, grace, ttl time.Duration) (*RotatedToken, error) {
+// RotateToken replaces an owned capability once; a nil expiry preserves its original expiry.
+func (c *Client) RotateToken(ctx context.Context, prefix string, grace time.Duration, expires *time.Time) (*RotatedToken, error) {
 	body := struct {
-		GraceSecs int64 `json:"grace_secs"`
-		TTLSecs   int64 `json:"ttl_secs,omitempty"`
-	}{GraceSecs: int64(grace.Seconds())}
-	if ttl > 0 {
-		body.TTLSecs = int64(ttl.Seconds())
-	}
+		GraceSecs int64      `json:"grace_secs"`
+		ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	}{GraceSecs: int64(grace / time.Second), ExpiresAt: expires}
 	var out RotatedToken
 	if err := c.post(ctx, "/api/v1/tokens/"+url.PathEscape(prefix)+"/rotate", body, http.StatusOK, &out); err != nil {
 		return nil, err

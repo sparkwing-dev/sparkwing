@@ -13,7 +13,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // RequestIDHeader carries a request's correlation id. A caller's value is
@@ -64,7 +63,8 @@ var auditTargetIDs = map[string]map[string]auditTarget{
 	"/api/v1/invitations/{id}/accept":              {"id": invitationTarget},
 	"/api/v1/tokens/{token}":                       {"token": tokenTarget},
 	"/api/v1/operator/tokens/{token}":              {"token": tokenTarget},
-	"/api/v1/tokens/{prefix}/rotate":               {"prefix": tokenTarget},
+	"/api/v1/tokens/{token}/rotate":                {"token": tokenTarget},
+	"/api/v1/operator/tokens/{token}/rotate":       {"token": tokenTarget},
 	"/api/v1/tokens/{prefix}/metered":              {"prefix": tokenTarget},
 	"/api/v1/team/tokens/{prefix}/git-credentials": {"prefix": tokenTarget},
 }
@@ -77,10 +77,10 @@ func opaqueID(v string) string {
 }
 
 func tokenPrefixTarget(v string) string {
-	if store.TokenKindFromPrefix(v) == "" {
+	if len(v) < 16 || !strings.HasPrefix(v, capability.ControllerPrefix) || strings.Trim(v[4:16], "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") != "" {
 		return ""
 	}
-	return tokenPrefixOf(v)
+	return v[:16]
 }
 
 // safety: a read of these routes can hand out a secret, a credential or every

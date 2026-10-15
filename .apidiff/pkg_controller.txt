@@ -44,6 +44,12 @@ type CacheGrantResponse struct {
 	Team      string
 	ExpiresAt time.Time
 }
+type CapabilityManager interface {
+	Team() store.Team
+	ListCapabilities(context.Context, capability.Authorized, capability.InventoryFilter) ([]capability.Metadata, error)
+	ReadCapability(context.Context, capability.Authorized) (capability.Metadata, error)
+	RotateCapability(context.Context, capability.Authorized, time.Duration, *time.Time) (capability.Rotation, error)
+}
 const CardBillingCapability = "card-billing-v1"
 const CardBillingInterval = 30 * time.Second
 const CardNotTrustedCode = "card_not_trusted"
@@ -445,6 +451,7 @@ func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server
 func (s *Server) WithCacheGrantKey(key string) *Server
 func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server
+func (s *Server) WithCapabilityManager(resolve func(context.Context, store.Team) (CapabilityManager, error)) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithCredentialInventoryReader(resolve func(context.Context, store.Team) (CredentialInventoryReader, error)) *Server
 func (s *Server) WithCredentialIssuer(issuer CredentialIssuer) *Server
@@ -622,6 +629,7 @@ func (v *optionalCreditInt64) UnmarshalJSON(raw []byte) error
 func (t *optionalCreditRateTable) UnmarshalJSON(raw []byte) error
 func (pipeSink) Flush() error
 func (c planSecretCipher) OpenPlanSecret(ctx context.Context, team store.Team, secret store.Secret) (string, error)
+func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error)
 func (o s3LogObjects) Get(ctx context.Context, key string) (io.ReadCloser, error)
 func (o s3LogObjects) List(ctx context.Context, prefix string) ([]string, error)
 func (l segmentLogs) Append(context.Context, string, string, []byte) error

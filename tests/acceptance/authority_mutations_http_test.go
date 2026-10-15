@@ -204,14 +204,21 @@ func TestAuthorityMutationHTTPMissingStoreFailsClosed(t *testing.T) {
 
 func TestAuthorityMutationHTTPUnsupportedMethods(t *testing.T) {
 	for _, route := range [][2]string{
-		{"/api/v1/operator/tokens/target", "DELETE"},
+		{"/api/v1/operator/tokens/target", "DELETE, GET"},
 		{"/api/v1/team/members/member", "DELETE, PATCH"},
 	} {
 		for _, method := range []string{"POST", "GET", "PUT", "HEAD", "OPTIONS"} {
+			if method == "GET" && strings.HasSuffix(route[0], "/tokens/target") {
+				continue
+			}
 			w := httptest.NewRecorder()
 			controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler().ServeHTTP(w, httptest.NewRequest(method, route[0], nil))
 			assertEngineError(t, w, 405, apierr.MethodNotAllowed)
-			if w.Header().Get("Allow") != route[1] {
+			allowed := route[1]
+			if method == "HEAD" && strings.HasSuffix(route[0], "/tokens/target") {
+				allowed = "GET"
+			}
+			if w.Header().Get("Allow") != allowed {
 				t.Fatalf("%s %s: Allow = %q", method, route[0], w.Header().Get("Allow"))
 			}
 		}

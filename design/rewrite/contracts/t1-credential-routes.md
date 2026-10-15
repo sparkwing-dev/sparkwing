@@ -88,6 +88,13 @@ Token-specific lookup, revocation and rotation keep their own-token binding.
 
 ### Reconciled C2 permissions
 
+Capability inventory uses member `runs.read` with `none` for the collection.
+The persistence read filters owned credentials or the current team admin's
+tenant. A collection has no existing token selector. Detail and rotation keep
+`ownToken`. Rotation returns a one-time bearer and has retry policy `never`.
+The component proofs are `TestCapabilityManagementHTTP*`. Native matrix
+activation still needs the real persistence adapter and transports.
+
 C2's [route and liveness invariants](c2-credentials.md#route-and-liveness-invariants)
 and [billing contract](c2-credentials.md#billing) settle these expectations.
 The literals transcribe those documented responsibilities against frozen
