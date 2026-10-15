@@ -1,5 +1,107 @@
 # W9 handoff
 
+## Continuation from 261ae6289
+
+This section supersedes conflicting status below. W9 remains incomplete because
+the elected controller factory, private host-state transport and native placements
+are open. The worktree started clean. The lead owns commits, review and pipelines.
+
+### Implementation and deletion
+
+- Invariant: a successful selected-engine description retains the live SDK's
+  argument metadata, risks, extra-argument capability and secret classifications.
+  Named describe and `--secrets` now share one live protocol read. Acquisition,
+  invalid bindings, missing registrations and protocol errors fail without a
+  successful output. Catalog reads remain available to listings and completion.
+- `Pipeline` embeds the shared `nodeproto.PipelineDescription` instead of copying
+  its fields. This also retains `Extra`, which the copied CLI type dropped.
+  Project aliases, profile pins and trigger metadata remain separate.
+- Invariant: parent application manifests cannot select or obscure the pipeline's
+  SDK pin. Toolchain selection and `info` now pass the pipeline directory to the
+  real engine reader, matching source acquisition.
+- Retired W9's last production scaffold filenames. `internal/clisurface/contract.go`
+  moves to `grammar.go`, and `internal/controllerwire/contracts.go` moves to
+  `engine.go`. Their non-comment code is unchanged. GoDoc is shortened to one
+  line. No declaration, method, route or wire field was removed.
+- Physical production Go: **578 added, 639 removed, net -61**. The two removed
+  scaffold files contain 568 lines, replaced by 529 live lines. The budget excludes
+  the old filenames but counts their replacements, so this continuation's measured
+  budget delta is **+507**. W9 totals **-8,330 versus main**, within -2,900.
+  Counts exclude tests, testdata, acceptance and remaining contract declarations.
+  The previously committed legacy host/client cuts remain complete.
+
+### Verification and acceptance
+
+Every Go command used GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache and TMPDIR/GOTMPDIR under /tmp/sw-astra-W9. Tests use -p 4.
+
+- Whole-repository `go build -p 4 ./...` and scoped CLI, clisurface,
+  controllerwire and controller/client vet pass. Their focused CLI suite and the
+  full clisurface, controllerwire, controller/client and doccheck suites pass.
+- Cold/stale successful-description regressions failed before the fix. The live
+  schema property passes 64 generated cases over actual protocol pipes with fake
+  source acquisition. It covers alias/entrypoint isolation and `--secrets`.
+  Source, binding, registration and protocol failure cases pass.
+- The trigger component passes through the actual describe command, protocol
+  decoder, CLI JSON, trigger decoder and intake-argument preparation. Required
+  pipeline/job metadata, extra arguments, risks and secret classification survive.
+  Engine verification/acquisition remains a fake boundary.
+- Real Go and TypeScript manifest/lockfile properties each pass 64 cases for
+  missing, malformed and differently pinned parent manifests. The selection and
+  info regressions both failed before their caller fixes. Engine replay and
+  no-fallback tests pass. The new properties and retained owner components pass
+  under race.
+- Existing `TestSurface*` and `TestHere*` acceptance components pass. Native
+  scenario cells remain skipped. No native cell or archived T1 test port is newly
+  complete. Doctor's pruned-run regression still passes.
+- Commentcheck against main, embedded documentation equality and whitespace
+  checks pass. No sleeps or test waiting loops were added.
+
+### Contract changes needed and integration left open
+
+**W8 upgrade pin location:** a temporary overlay probe against the real
+`engine.Resolver.Upgrade` fails reading `<repository>/go.mod` when the valid pin
+is in `<repository>/.sparkwing/go.mod`. W9 passes the repository root because
+W8 stages the checkout and W9's verifier needs its `.sparkwing` and project files.
+W8 calls `ReadPin(request.Checkout)` and has no pipeline-directory field. Propose
+retaining the repository root and carrying a relative pipeline directory through
+pin reads, staging and edit collection, as SDKInstallRequest already does. W9 can
+then fill that selector. Passing only `.sparkwing` would break the verifier's
+checkout contract. The probe is failing evidence, not a passing native upgrade.
+No foreign contract was changed to bypass it.
+
+The prior open W2/W3 integrations remain: the elected LocalController factory,
+owned store/queue/reconciliation/maintenance, private authorized snapshot and
+host-write transport, typed step-report handler, captured environments, source
+authority, delegated processes, storage/log bindings and joined owner policies.
+Here reasons, source bundles, schedules/pins/ticks, result/log publication and
+debug release retain their recorded contract gaps. Publication failures must
+preserve local verdicts. Native backend/platform/placement QA remains open.
+Lead decisions 07:40 items 1 and 6, doctor and Windows packaging were already
+implemented and were not rewritten.
+
+### Shared files, assumptions and friction
+
+All production and test code changes are W9-owned. C4's source links follow
+`clisurface/grammar.go`. C3's wire/engine notes, docs/cli.md, CHANGELOG.md and their
+generated pkg/docs mirrors are updated. No foreign callers changed. Lead-owned
+handoffs.md and amendments remain untouched. Their historical pointers to
+controllerwire/contracts.go need a lead-owned update to controllerwire/engine.go.
+
+The command's source callback uses the existing withPipelineEntry implementation
+and permits a fake acquisition boundary in tests. It adds no flag, environment
+variable, timeout, retry policy or dependency. The shared description replaces a
+duplicate metadata type. There is no parallel protocol or compatibility path.
+
+An early broad test regex included the old slow describe subprocess fixture.
+It built and ran its isolated CLI and failed at the incorrect parent pin path.
+The real-reader properties above close that caller bug. The fixture's local SDK
+replacement still needs migration to verified-engine composition before it can
+supply native evidence. Later focused commands use -short. No installed CLI,
+real home/store, service, deployment or Git metadata was changed. Git resolves
+Korey's identity without a core.worktree override. Scratch is removed at shutdown,
+and /tmp/sw-gocache is retained.
+
 ## Continuation from 771a21140
 
 This section supersedes conflicting status below. W9 remains incomplete because

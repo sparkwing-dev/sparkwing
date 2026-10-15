@@ -1,5 +1,4 @@
 // Package controllerwire owns the fetched-engine/controller HTTP contract.
-// Local HTTP and api.sock use these same requests, responses and errors.
 package controllerwire
 
 import (
@@ -17,12 +16,6 @@ import (
 )
 
 // Compatibility fixes the API boundary independently of an engine's matching node protocol.
-// From launch freeze, requests emitted by each release remain accepted through
-// its release date plus twelve calendar months. Additive optional fields and
-// unknown error codes remain readable. Older releases continue until an explicit
-// signed security revocation or minimum policy takes effect, never merely age.
-// A new controller cannot reinterpret persisted seals or an older engine's node
-// protocol; that engine validates and runs its matching SDK itself.
 type Compatibility struct {
 	APIMajor        int       `json:"api_major"`
 	EngineRelease   string    `json:"engine_release"`
@@ -32,9 +25,7 @@ type Compatibility struct {
 
 const APIMajor = 1
 
-// CompatibilityFor derives the guaranteed boundary from the verified release date
-// using limits.ControllerCompatibilityMonths calendar months. It does not reject an
-// older release or decide revocation; internal/engine owns that separate policy.
+// CompatibilityFor derives the API guarantee using calendar months from the verified release date.
 func CompatibilityFor(release engine.VersionInfo) Compatibility {
 	return Compatibility{
 		APIMajor: APIMajor, EngineRelease: release.Version,
@@ -54,15 +45,12 @@ type CreateRunResponse struct {
 	RunID   string                `json:"run_id"`
 	Number  int64                 `json:"number"`
 	Request runspec.SealedRequest `json:"request"`
-	// HereBearer is issued once; lost handoffs need fresh intake, while resume requires the retained private bearer.
+	// HereBearer is issued once and retained privately for resume.
 	HereBearer string `json:"here_bearer,omitempty"`
 	Replayed   bool   `json:"replayed"`
 }
 
-// PlanSubmission has no client-selected acceptance timestamp, actor or authority.
-// Declarations preserve restricted pipeline/default checkout layers with origins.
-// Resolved settings are proposals; AcceptPlan reruns C3 validation and C4 resolution against
-// the stored first seal and operator ceilings before committing the second seal.
+// PlanSubmission proposes checkout declarations, resolved settings and a plan for store acceptance.
 type PlanSubmission struct {
 	Declarations runspec.CheckoutDeclarations `json:"declarations"`
 	Resolved     runspec.Resolved             `json:"resolved"`
@@ -77,11 +65,7 @@ type PlanAccepted struct {
 	Notices  []engine.Notice `json:"notices"`
 }
 
-// ClaimRequest carries self-asserted labels and available capacity only. Server
-// registration supplies granted identity, pools, repo authorization and billing.
-// RunnerVersion is checked against the signed software policy before a new award;
-// it is independent of the pipeline SDK pin. Existing renewals remain permitted to drain.
-// RunID/JobID select named claims; omission selects the same ordered queue scan.
+// ClaimRequest proposes selectors, labels and free capacity for a server-authorized award.
 type ClaimRequest struct {
 	RunnerVersion        string                `json:"runner_version"`
 	Kinds                []capability.UnitKind `json:"kinds"`
@@ -92,8 +76,7 @@ type ClaimRequest struct {
 	JobID                string                `json:"job_id,omitempty"`
 }
 
-// ClaimedUnit delivers the award once, over authenticated transport. It must never
-// be logged or copied into environment variables, public run detail or durable seals.
+// ClaimedUnit carries the one-time private execution award over authenticated transport.
 type ClaimedUnit struct {
 	Unit                   capability.UnitKind           `json:"unit"`
 	Purpose                capability.AwardPurpose       `json:"purpose"`
@@ -131,15 +114,13 @@ type LauncherSyncRequest struct {
 	Observed []LauncherObservation `json:"observed"`
 }
 
-// LauncherSyncResponse contains immutable execution inputs and cleanup identities, never new bearers.
-// Awards have an empty Capability. Lost bootstrap material recovers through lease expiry and re-award.
+// LauncherSyncResponse carries immutable execution inputs and cleanup identities without bearers.
 type LauncherSyncResponse struct {
 	Awards []ClaimedUnit    `json:"awards"`
 	Remove []LauncherJobRef `json:"remove"`
 }
 
 // ExchangeResponse returns the original unit with its exchanged in-memory authority once.
-// The bootstrap is presented by the authenticated transport; there is no caller-selected binding.
 type ExchangeResponse struct {
 	Claim ClaimedUnit `json:"claim"`
 }
@@ -149,8 +130,7 @@ type RenewalRequest struct {
 	Executing bool `json:"executing"`
 }
 
-// RenewalResponse is shared by trigger, job, plan and eval keepers. Only a
-// successful response extends liveness; 409 lock_held, 401 and 403 lose authority.
+// RenewalResponse carries liveness, cancellation and watch state for every unit keeper.
 type RenewalResponse struct {
 	ExpiresAt       time.Time `json:"expires_at"`
 	CancelRequested bool      `json:"cancel_requested"`
@@ -169,8 +149,7 @@ type JobResult struct {
 	Manifest *blob.RecordKey       `json:"manifest,omitempty"`
 }
 
-// JobTransitionRequest is the single report/transition body. The adapter derives
-// actor and claim fences from C2; the store derives events and its clock.
+// JobTransitionRequest carries a transition and the observed source attempt without caller authority.
 type JobTransitionRequest struct {
 	To            string     `json:"to"`
 	Cause         string     `json:"cause"`
@@ -187,9 +166,7 @@ type Applied struct {
 	Attempt         int64 `json:"attempt"`
 }
 
-// ExpansionSubmission requires exactly one Body or Failure. A successful empty
-// expansion is {"jobs":[]}. No authority is accepted from this body. Failure
-// uses apierr.DecodeInner and enters the same store.AcceptExpansion transaction.
+// ExpansionSubmission carries one expansion body or failure under its source generation.
 type ExpansionSubmission struct {
 	SourceGeneration int64           `json:"source_generation"`
 	Body             json.RawMessage `json:"body,omitempty"`
@@ -239,8 +216,7 @@ type ReconcileResponse struct {
 	Source *ReuseSource `json:"source,omitempty"`
 }
 
-// ExecutionJob is restricted to a live owner or awarded executor, never a public status response.
-// It preserves the persisted state needed to resume; only a new award carries a bearer in Claim.
+// ExecutionJob carries private persisted state for a live owner or awarded executor.
 type ExecutionJob struct {
 	JobDetail
 	Spec               json.RawMessage              `json:"spec"`
@@ -278,7 +254,6 @@ type RetryRequest struct {
 }
 
 // RetryMode selects reuse of successful jobs or execution of the complete sealed plan.
-// Neither mode changes the original request, plan, source trust or actor.
 type RetryMode string
 
 const (
@@ -324,8 +299,7 @@ type AttemptDetail struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 }
 
-// RunDetail is the shared dashboard, local and remote status result. Inputs must
-// come from runspec.DisplayRequest/DisplaySpec, never serialized execution seals.
+// RunDetail carries safe dashboard, local and remote status projections.
 type RunDetail struct {
 	ID                string            `json:"id"`
 	Number            int64             `json:"number"`
@@ -344,9 +318,7 @@ type RunDetail struct {
 	Notices           []engine.Notice   `json:"notices"`
 }
 
-// ScheduleSnapshot transports a consistent read for the remote owner. Graph
-// declarations include empty generators. The store adapter projects it through
-// the same RunSnapshot.Scheduling path used by controller settlement.
+// ScheduleSnapshot carries a consistent scheduling projection for the remote owner.
 type ScheduleSnapshot struct {
 	RunID           string              `json:"run_id"`
 	StoreNow        time.Time           `json:"store_now"`
@@ -371,11 +343,7 @@ type ScheduleGenerator struct {
 	Members   []string `json:"members"`
 }
 
-// Controller is implemented by the shared authenticated HTTP client. Request
-// retries use capability.Routes metadata; errors unwrap once via apierr.DecodeInner.
-// Identical lifecycle payloads replay. Clients must not retry arbitrary failures.
-// Award-capable claim/reconcile/exchange calls never retry automatically. Here
-// CreateRun/Retry also suppress automatic retries despite intake's idempotency policy.
+// Controller is the authenticated fetched-engine API shared by every placement.
 type Controller interface {
 	Compatibility(context.Context, string) (Compatibility, error)
 	CreateRun(context.Context, CreateRunRequest) (CreateRunResponse, error)

@@ -80,7 +80,8 @@ at seal point two. C3 hosts consume it on every execution placement.
 The Go pin is the `github.com/sparkwing-dev/sparkwing` module requirement in the
 pipeline's go.mod. The TypeScript pin is `@sparkwing/sdk`, resolved exactly by its
 manifest and native lockfile. `ReadPin` reads those files before executing pipeline
-code. A range alone cannot select an exact engine. Go `vX.Y.Z` and TypeScript
+code. CLI selection and `info` pass the pipeline directory to `ReadPin`, matching
+source acquisition. A range alone cannot select an exact engine. Go `vX.Y.Z` and TypeScript
 `X.Y.Z` select engine `vX.Y.Z`, retaining any prerelease suffix. A newer installed
 engine does not satisfy an older pin. Missing, conflicting and non-release pins
 produce an actionable `invalid_args` error.

@@ -1,4 +1,4 @@
-// safety: Package clisurface owns the final command grammar independently of execution.
+// Package clisurface owns the final command grammar independently of execution.
 package clisurface
 
 import (
@@ -6,19 +6,16 @@ import (
 	"strings"
 )
 
-// safety: Authority separates team credentials from deployment and in-pod powers.
+// Authority separates team credentials from deployment and in-pod powers.
 type Authority string
 
-// safety: These authorities never substitute for the operator-console session.
 const (
 	TeamCredential  Authority = "team"
 	DeploymentAdmin Authority = "deployment_admin"
 	InPodBreakGlass Authority = "in_pod_break_glass"
 )
 
-// safety: Flag is parser and help metadata; Argument empty means a boolean switch.
-// Minimum applies only when HasMinimum is true. Empty Values accepts the named value grammar.
-// Required means explicit presence, and Requires and Conflicts refer to long flag names.
+// Flag is parser and help metadata; Argument empty means a boolean switch.
 type Flag struct {
 	Name       string
 	Short      string
@@ -48,9 +45,7 @@ type Command struct {
 	Rules                      []string
 }
 
-// safety: GlobalFlags is inherited everywhere; profile selection is command-local,
-// but an accepted --profile may appear before the verb. A global flag after -- is a
-// pipeline argument. List JSON is NDJSON, single documents are one compact JSON line.
+// GlobalFlags returns flags inherited by every command.
 func GlobalFlags() []Flag {
 	return []Flag{
 		{Name: "output", Short: "o", Argument: "FORMAT", Values: []string{"pretty", "json", "plain"}, Meaning: "Pretty on a terminal; JSON when piped; explicit format wins."},
@@ -60,10 +55,9 @@ func GlobalFlags() []Flag {
 	}
 }
 
-// safety: ExitCode keeps usage failures distinguishable from incomplete observations.
+// ExitCode keeps usage failures distinguishable from incomplete observations.
 type ExitCode int
 
-// safety: These four values apply to every executable in the registry.
 const (
 	ExitOK      ExitCode = 0
 	ExitFailed  ExitCode = 1
@@ -71,8 +65,7 @@ const (
 	ExitUnknown ExitCode = 3
 )
 
-// safety: ErrorFormat delegates JSON encoding and codes to internal/apierr;
-// the CLI must not create another error envelope or leak pipeline secrets in hints.
+// ErrorFormat describes stderr framing owned by internal/apierr.
 type ErrorFormat struct {
 	Text        string
 	Hint        string
@@ -80,7 +73,7 @@ type ErrorFormat struct {
 	JSONFraming string
 }
 
-// safety: Errors keeps diagnostics on stderr even when stdout contains records.
+// Errors keeps diagnostics on stderr even when stdout contains records.
 func Errors() ErrorFormat {
 	return ErrorFormat{
 		Text:        "<binary>: <command path without binary>: <message>",
@@ -90,7 +83,7 @@ func Errors() ErrorFormat {
 	}
 }
 
-// safety: CommonRules fixes shared meanings so a new command cannot reinterpret a flag.
+// CommonRules fixes shared meanings so a new command cannot reinterpret a flag.
 func CommonRules() map[string]string {
 	return map[string]string{
 		"profile":    "Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile.",
@@ -111,7 +104,7 @@ func CommonRules() map[string]string {
 	}
 }
 
-// safety: Validate catches grammar drift before a parser or help generator consumes it.
+// Validate catches grammar drift before a parser or help generator consumes it.
 func Validate(commands []Command) error {
 	paths := make(map[string]bool, len(commands))
 	for _, c := range commands {

@@ -72,7 +72,7 @@ func (c pipelineEngineSwitcher) run(ctx context.Context, dir string, sdk engine.
 	if err != nil {
 		return &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
 	}
-	pin, err := c.readPin(filepath.Dir(dir), sdk)
+	pin, err := c.readPin(dir, sdk)
 	if err := errors.Join(err, ctx.Err()); err != nil {
 		return err
 	}

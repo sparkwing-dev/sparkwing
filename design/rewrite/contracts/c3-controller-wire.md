@@ -4,6 +4,12 @@
 
 ## Amendment 1: private execution and claim wire
 
+The selected-engine CLI describe handoff reads the acquired SDK's protocol
+response for the configured entrypoint. The invoked alias, required pipeline/job
+argument metadata, risks and secret classifications survive that handoff.
+Source or protocol failure returns no successful description. Catalog caches
+cannot supply this selected-engine describe handoff.
+
 Local, standalone and here hosting share one session lifecycle. The award supplies
 the run-host kind and trigger owner fence. The trigger fence retains the run ID,
 holder and generation with an empty name, matching C1's persisted projection.

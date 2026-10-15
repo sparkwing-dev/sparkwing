@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **pipeline engine:** Select and report the SDK pin from the pipeline directory's manifest and lockfile. A missing or different parent application manifest no longer selects or blocks that engine.
+- **pipeline describe:** Read the selected SDK's current arguments, risks and secret declarations. Cold or stale catalog caches no longer produce an incomplete successful schema during trigger inspection.
 - **owner hosting:** Local, standalone and here sessions derive their owner fence from the award, preserve authority-cancellation causes, and share resource cleanup.
 - **owner hosting:** Pass the sealed request body expected by the shared host. Local and runner retries retain the original seal while using the newly awarded execution run ID.
 - **local and here hosting:** Apply awarded authority deadlines before host binding and retain the granted runner labels when a binder changes its copy.
