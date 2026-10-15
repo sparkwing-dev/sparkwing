@@ -56,7 +56,7 @@ func TestConcurrency_BudgetOverflowDoesNotOverAdmit(t *testing.T) {
 	if granted > 2 {
 		t.Fatalf("granted %d holders; cost sum overflowed into over-admission", granted)
 	}
-	st, err := s.GetConcurrencyState(ctxT(t), "k")
+	st, err := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctxT(t), "k")
 	if err != nil {
 		t.Fatalf("state: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestConcurrency_CancelWaiterReclaimsPromotedHolder(t *testing.T) {
 	if got := activeHolders(t, s, "k"); got != 1 {
 		t.Fatalf("after A release: active holders = %d, want 1 (B promoted)", got)
 	}
-	matched, err := s.CancelWaiter(ctxT(t), "k", "rB", "n")
+	matched, err := tenantFor(t, s, store.DefaultTeam).CancelWaiter(ctxT(t), "k", "rB", "n")
 	if err != nil {
 		t.Fatalf("CancelWaiter: %v", err)
 	}
@@ -133,12 +133,12 @@ func TestConcurrency_ResolveWaiterBypassReadSkipsCache(t *testing.T) {
 	); err != nil {
 		t.Fatalf("seed cache: %v", err)
 	}
-	if res, err := s.ResolveWaiter(ctxT(t), "memo:k", "rF", "n", "h1", "", "", false); err != nil {
+	if res, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctxT(t), "memo:k", "rF", "n", "h1", "", "", false); err != nil {
 		t.Fatalf("resolve (no bypass): %v", err)
 	} else if res.Status != store.WaiterCached {
 		t.Fatalf("no-bypass follower status = %q, want Cached", res.Status)
 	}
-	if res, err := s.ResolveWaiter(ctxT(t), "memo:k", "rF2", "n", "h1", "", "", true); err != nil {
+	if res, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctxT(t), "memo:k", "rF2", "n", "h1", "", "", true); err != nil {
 		t.Fatalf("resolve (bypass): %v", err)
 	} else if res.Status == store.WaiterCached {
 		t.Fatalf("--no-cache follower got Cached; bypass-read ignored on the resolve path")
@@ -176,7 +176,7 @@ func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 	// safety: this test budget detects lease-scale stalls while allowing database overhead.
 	ctx, cancel := context.WithTimeout(ctxT(t), lease/2)
 	defer cancel()
-	r, err := s.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	r, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rX/n", RunID: "rX", NodeID: "n",
 		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue,
 	})
@@ -189,7 +189,7 @@ func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 	if got := activeHolders(t, s, "k"); got != 0 {
 		t.Fatalf("active holders after expiry = %d, want 0", got)
 	}
-	state, err := s.GetConcurrencyState(ctxT(t), "k")
+	state, err := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctxT(t), "k")
 	if err != nil {
 		t.Fatalf("state after fresh arrival: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestConcurrency_ResolveWaiterRejectsFailedLeaderOutcome(t *testing.T) {
 		"failed", "boom", nil, store.FailureOOMKilled, nil); err != nil {
 		t.Fatalf("FinishNodeWithReason: %v", err)
 	}
-	res, err := s.ResolveWaiter(ctxT(t), "k", "rF", "n", "", "rLeader", "n", false)
+	res, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctxT(t), "k", "rF", "n", "", "rLeader", "n", false)
 	if err != nil {
 		t.Fatalf("ResolveWaiter: %v", err)
 	}

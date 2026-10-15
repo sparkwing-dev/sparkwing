@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func usageSeconds(t *testing.T, s *store.Store, runID, nodeID string) int64 {
@@ -42,11 +43,11 @@ func TestExpiredClaimsSettleTheirLastInterval(t *testing.T) {
 				recover func(*store.Store, context.Context) error
 			}{
 				{"reap", func(s *store.Store, ctx context.Context) error {
-					_, err := s.ReapExpiredNodeClaims(ctx)
+					_, err := teststore.ReapUnits(ctx, s)
 					return err
 				}},
 				{"agent loss", func(s *store.Store, ctx context.Context) error {
-					_, err := store.Maintenance.RecoverExpiredNodeClaims(s, ctx)
+					_, err := teststore.ReapUnits(ctx, s)
 					return err
 				}},
 			} {
@@ -92,11 +93,11 @@ func TestExpiredClaimWhoseMachineNeverStartedIsRefunded(t *testing.T) {
 		recover func(*store.Store, context.Context) error
 	}{
 		{"reap", func(s *store.Store, ctx context.Context) error {
-			_, err := s.ReapExpiredNodeClaims(ctx)
+			_, err := teststore.ReapUnits(ctx, s)
 			return err
 		}},
 		{"agent loss", func(s *store.Store, ctx context.Context) error {
-			_, err := store.Maintenance.RecoverExpiredNodeClaims(s, ctx)
+			_, err := teststore.ReapUnits(ctx, s)
 			return err
 		}},
 	} {
@@ -148,7 +149,7 @@ func TestReaperLeavesAClaimItSkippedForTheNextPass(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := s.ReapExpiredNodeClaims(ctx)
+		_, err := teststore.ReapUnits(ctx, s)
 		done <- err
 	}()
 	// safety: the holder keeps the row until the pass ends, so the pass must skip it rather than block.
@@ -200,7 +201,7 @@ func TestReaperLeavesAClaimItSkippedForTheNextPass(t *testing.T) {
 	if got := usageSeconds(t, s, "run-b", "build"); got != 0 {
 		t.Fatalf("the skipped claim was billed %d seconds by a pass that skipped it", got)
 	}
-	if _, err := s.ReapExpiredNodeClaims(ctx); err != nil {
+	if _, err := teststore.ReapUnits(ctx, s); err != nil {
 		t.Fatal(err)
 	}
 	if claimed("run-b") || usageSeconds(t, s, "run-b", "build") == 0 {

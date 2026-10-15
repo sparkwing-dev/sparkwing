@@ -28,9 +28,6 @@ const (
 	MaxSmallOutputOverage int64 = 64 << 20
 )
 
-// OutputRetention is how long a run's outputs outlive the run, matching its logs.
-const OutputRetention = 30 * 24 * time.Hour
-
 // OutputRef names a node's output object: its key in the team's output store,
 // its size and its SHA-256.
 type OutputRef struct {
@@ -90,10 +87,6 @@ func checkOutputRefTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID
 	return nil
 }
 
-// safety: a new ref share-locks its object's rows and then finds no
-// tombstone, while retention update-locks them before it looks for refs and
-// tombstones, so each sees the other's commit and no byte is deleted while a
-// committed ref names it. SQLite's immediate transactions serialize both.
 func lockLiveOutputTx(ctx context.Context, tx *storeTx, team Team, key string) (size int64, sha string, err error) {
 	rows, err := tx.QueryContext(ctx, `SELECT size, sha256 FROM data_objects WHERE team = ? AND key = ?`+tx.forShare(),
 		string(team), key)
@@ -112,14 +105,6 @@ func lockLiveOutputTx(ctx context.Context, tx *storeTx, team Team, key string) (
 	}
 	if !found {
 		return 0, "", fmt.Errorf("%w: output %s is not committed", ErrInvalidInput, key)
-	}
-	var dying int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM output_tombstones WHERE team = ? AND key = ?`, string(team), key).Scan(&dying)
-	if err == nil {
-		return 0, "", fmt.Errorf("%w: output %s has expired", ErrInvalidInput, key)
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, "", err
 	}
 	return size, sha, nil
 }
@@ -152,12 +137,6 @@ type copySource struct{ run, node string }
 func writeNodeOutputTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string, attempt int64, ref *OutputRef) error {
 	if ref == nil {
 		return clearNodeOutputTx(ctx, tx, team, runID, nodeID)
-	}
-	// safety: a run whose ref names another run's object still needs its own
-	// retention row, or that object would outlive every run naming it.
-	if _, err := tx.ExecContext(ctx, `INSERT INTO output_runs (team, run_id) VALUES (?, ?) ON CONFLICT (team, run_id) DO NOTHING`,
-		string(team), runID); err != nil {
-		return err
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO node_outputs (team, run_id, node_id, attempt, key, size, sha256)
 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -193,9 +172,7 @@ func checkRunOutputRoomTx(ctx context.Context, tx *storeTx, team Team, runID str
 		return fmt.Errorf("%w: the run's outputs would reach %d bytes; the limit is %d (1 GiB)",
 			ErrOutputLimit, committed+pending+size, MaxRunOutputBytes)
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO output_runs (team, run_id) VALUES (?, ?) ON CONFLICT (team, run_id) DO NOTHING`,
-		string(team), runID)
-	return err
+	return nil
 }
 
 // RecordLocalOutput records an output object the caller already wrote to its
@@ -223,9 +200,6 @@ func (s *Store) RecordLocalOutput(ctx context.Context, runID, nodeID string, ref
 	return tx.Commit()
 }
 
-// safety: an object stored without an upload still counts toward its run's
-// limit, when checked, and its team's cache storage, as an uploaded one does,
-// so retention's decrement finds what it removes counted.
 func recordOutputObjectTx(ctx context.Context, tx *storeTx, team Team, runID string, ref OutputRef,
 	principal, provenance string, checkLimit bool, now time.Time,
 ) error {
@@ -236,9 +210,6 @@ func recordOutputObjectTx(ctx context.Context, tx *storeTx, team Team, runID str
 		if err := checkRunOutputRoomTx(ctx, tx, team, runID, ref.Size, now); err != nil {
 			return err
 		}
-	} else if _, err := tx.ExecContext(ctx, `INSERT INTO output_runs (team, run_id) VALUES (?, ?) ON CONFLICT (team, run_id) DO NOTHING`,
-		string(team), runID); err != nil {
-		return err
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO data_objects (team, key, store, size, sha256, principal, provenance, committed_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (team, key, provenance) DO NOTHING`,
@@ -263,7 +234,6 @@ func (s *Store) NodeOutputObject(ctx context.Context, team Team, runID, nodeID s
 	err := s.queryRow(ctx, `SELECT o.key, d.store, d.size, d.sha256, d.principal, d.provenance, d.committed_at
   FROM node_outputs o JOIN data_objects d ON d.team = o.team AND d.key = o.key
  WHERE o.team = ? AND o.run_id = ? AND o.node_id = ?
-   AND NOT EXISTS (SELECT 1 FROM output_tombstones t WHERE t.team = d.team AND t.key = d.key)
  ORDER BY CASE d.provenance WHEN 'cloud' THEN 0 ELSE 1 END LIMIT 1`, string(NormalizeTeam(team)), runID, nodeID).Scan(
 		&u.Key, &kind, &u.Size, &u.SHA256, &u.Principal, &u.Provenance, &committed)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -322,238 +292,6 @@ func (s *Store) NodeIsAncestor(ctx context.Context, team Team, runID, ancestor, 
 		}
 	}
 	return false, nil
-}
-
-// ExpiredOutputRun is a finished run whose outputs have passed retention.
-type ExpiredOutputRun struct {
-	Team  Team
-	RunID string
-}
-
-// ExpiredOutputRuns lists runs that hold outputs and either finished more
-// than [OutputRetention] before now or were deleted. The newest successful
-// run of each pipeline is kept, so a cross-pipeline ref to it still resolves.
-func (s *Store) ExpiredOutputRuns(ctx context.Context, now time.Time, limit int) (out []ExpiredOutputRun, err error) {
-	// safety: output rows carry no foreign key, so a deleted run's outputs
-	// expire here or nothing reclaims their bytes.
-	rows, err := s.query(ctx, `SELECT o.team, o.run_id FROM output_runs o
-  LEFT JOIN runs r ON r.id = o.run_id
- WHERE r.id IS NULL OR (r.finished_at IS NOT NULL AND r.finished_at <= ?
-   AND NOT (r.status = 'success' AND r.finished_at = (
-       SELECT MAX(r2.finished_at) FROM runs r2
-        WHERE r2.team = r.team AND r2.pipeline = r.pipeline AND r2.status = 'success')))
- ORDER BY COALESCE(r.finished_at, 0) LIMIT ?`, now.Add(-OutputRetention).UnixNano(), limit)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			err = errors.Join(err, closeErr)
-		}
-	}()
-	for rows.Next() {
-		var e ExpiredOutputRun
-		var team string
-		if err := rows.Scan(&team, &e.RunID); err != nil {
-			return nil, err
-		}
-		e.Team = Team(team)
-		out = append(out, e)
-	}
-	return out, rows.Err()
-}
-
-// ReleaseRunOutputs drops a run's cache entries and tombstones the objects
-// no other run's ref names: its own, and those of already expired runs its
-// refs copied. It returns every object the run has tombstoned, so a pass
-// that failed to delete them retries. The caller deletes their bytes and then
-// calls [Store.ForgetRunOutputs]. An object a newer run's ref still names
-// stays, and goes when the last run naming it expires.
-func (s *Store) ReleaseRunOutputs(ctx context.Context, team Team, runID string) (_ []Upload, err error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	copied, err := copiedKeysOfExpiredRunsTx(ctx, tx, team, runID)
-	if err != nil {
-		return nil, err
-	}
-	// safety: a cache entry whose origin's output is going reads as a miss
-	// rather than as a hit with nothing to hand over.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM concurrency_cache WHERE team = ? AND origin_run_id = ?`, string(team), runID); err != nil {
-		return nil, err
-	}
-	keys, err := outputKeysTx(ctx, tx, team, runID)
-	if err != nil {
-		return nil, err
-	}
-	for _, key := range append(keys, copied...) {
-		if err := tombstoneUnreferencedTx(ctx, tx, team, runID, key); err != nil {
-			return nil, err
-		}
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT d.key, d.size, d.provenance FROM data_objects d
-  JOIN output_tombstones t ON t.team = d.team AND t.key = d.key
- WHERE t.team = ? AND t.run_id = ?`, string(team), runID)
-	if err != nil {
-		return nil, err
-	}
-	out, err := scanOutputObjects(rows, team)
-	if err != nil {
-		return nil, err
-	}
-	return out, tx.Commit()
-}
-
-func outputKeysTx(ctx context.Context, tx *storeTx, team Team, runID string) (_ []string, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT key FROM data_objects WHERE team = ? AND key LIKE ? ESCAPE '\'`,
-		string(team), likePrefix(runOutputPrefix(runID)))
-	if err != nil {
-		return nil, err
-	}
-	var keys []string
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, errors.Join(err, rows.Close())
-		}
-		keys = append(keys, key)
-	}
-	return keys, errors.Join(rows.Err(), rows.Close())
-}
-
-// safety: the update lock is taken before the ref check, in its own
-// statement, so a ref a copy committed while retention waited is seen; see
-// [lockLiveOutputTx] for the other side.
-func tombstoneUnreferencedTx(ctx context.Context, tx *storeTx, team Team, runID, key string) error {
-	rows, err := tx.QueryContext(ctx, `SELECT key FROM data_objects WHERE team = ? AND key = ?`+tx.forUpdate(), string(team), key)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var locked string
-		if err := rows.Scan(&locked); err != nil {
-			return errors.Join(err, rows.Close())
-		}
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return err
-	}
-	var named int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM node_outputs WHERE team = ? AND key = ? AND run_id != ? LIMIT 1`,
-		string(team), key, runID).Scan(&named)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO output_tombstones (team, key, run_id) VALUES (?, ?, ?) ON CONFLICT (team, key) DO NOTHING`,
-		string(team), key, runID)
-	return err
-}
-
-// safety: an object another run owns is released here only once that run
-// has itself expired, so an object a live run may still report is never
-// taken.
-func copiedKeysOfExpiredRunsTx(ctx context.Context, tx *storeTx, team Team, runID string) (_ []string, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT o.key FROM node_outputs o WHERE o.team = ? AND o.run_id = ?`, string(team), runID)
-	if err != nil {
-		return nil, err
-	}
-	var keys []string
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, errors.Join(err, rows.Close())
-		}
-		keys = append(keys, key)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, key := range keys {
-		owner, ok := strings.CutPrefix(key, "outputs/")
-		owner, _, _ = strings.Cut(owner, "/")
-		if !ok || owner == runID {
-			continue
-		}
-		var live int
-		err := tx.QueryRowContext(ctx, `SELECT 1 FROM output_runs WHERE team = ? AND run_id = ?`, string(team), owner).Scan(&live)
-		if errors.Is(err, sql.ErrNoRows) {
-			out = append(out, key)
-		} else if err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
-}
-
-func scanOutputObjects(rows *sql.Rows, team Team) (_ []Upload, err error) {
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			err = errors.Join(err, closeErr)
-		}
-	}()
-	var out []Upload
-	for rows.Next() {
-		u := Upload{Team: team, Kind: StorageCache}
-		if err := rows.Scan(&u.Key, &u.Size, &u.Provenance); err != nil {
-			return nil, err
-		}
-		out = append(out, u)
-	}
-	return out, rows.Err()
-}
-
-// ForgetRunOutputs drops the rows of the tombstoned objects the caller
-// deleted after [Store.ReleaseRunOutputs], gives their bytes back to the
-// team, drops the run's refs, and ends the run's retention once none of its
-// tombstoned objects remain.
-func (s *Store) ForgetRunOutputs(ctx context.Context, team Team, runID string, deleted []Upload) (err error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	now := time.Now()
-	if _, _, err := lockTeamStorageTx(ctx, tx, team, StorageCache, now); err != nil {
-		return err
-	}
-	var freed int64
-	for _, obj := range deleted {
-		res, err := tx.ExecContext(ctx, `DELETE FROM data_objects WHERE team = ? AND key = ? AND provenance = ?
-   AND EXISTS (SELECT 1 FROM output_tombstones t WHERE t.team = data_objects.team AND t.key = data_objects.key AND t.run_id = ?)`,
-			string(team), obj.Key, obj.Provenance, runID)
-		if err != nil {
-			return err
-		}
-		if n, err := res.RowsAffected(); err != nil {
-			return err
-		} else if n == 1 {
-			freed += obj.Size
-		}
-	}
-	// safety: a filesystem store has no bucket listing to correct the count,
-	// so the bytes retention removes leave the team's storage here.
-	if _, err := tx.ExecContext(ctx, `UPDATE team_storage SET used_bytes = CASE WHEN used_bytes > ? THEN used_bytes - ? ELSE 0 END,
-       updated_at = ? WHERE team = ? AND store = ?`, freed, freed, now.UnixNano(), string(team), string(StorageCache)); err != nil {
-		return err
-	}
-	for _, q := range []string{
-		`DELETE FROM output_tombstones WHERE team = ? AND run_id = ?
-   AND NOT EXISTS (SELECT 1 FROM data_objects d WHERE d.team = output_tombstones.team AND d.key = output_tombstones.key)`,
-		`DELETE FROM node_outputs WHERE team = ? AND run_id = ?`,
-		`DELETE FROM output_runs WHERE team = ? AND run_id = ?
-   AND NOT EXISTS (SELECT 1 FROM output_tombstones t WHERE t.team = output_runs.team AND t.run_id = output_runs.run_id)`,
-	} {
-		if _, err := tx.ExecContext(ctx, q, string(team), runID); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
 }
 
 // OutputDir is the directory under which this store keeps output bytes it

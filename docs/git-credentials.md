@@ -1,179 +1,78 @@
 # Team git credentials
 
-A runner without the operator's git cache fetches each run's source straight
-from its host. It holds no git credential of its own, so the controller
-releases one for each run, at fetch time, to the runner's claim on the run.
-`POST /api/v1/runs/{id}/source-credential` is the one route that releases a
-source credential, to the claim token of a node or trigger claim on the run;
-a runner's own token, or any other bearer, gets `403 claim_token_required`.
+The shared source contract acquires an authorized checkout at the sealed SHA.
+The controller declares source-release and credential-management routes. Native
+source acquisition and transactional release still need integration evidence.
+The sections below describe their target behavior.
 
-A repository opted into controller dispatch on Sparkwing Cloud works
-differently: each Job's init container asks
-the same route with its claim token, at most three
-times, for a read-only GitHub App token covering the run's repository and its
-[extra repositories](#extra-repositories), named by their GitHub IDs, and checks the run out into
-`SPARKWING_SOURCE_DIR` on the Job's scratch volume before the pipeline's
-container starts, which reads the checkout from the same variable. Cloud fetches source only through the GitHub
-App; a team's stored git credentials serve self-hosted runners and machines,
-never Cloud Jobs. Submodules there must name a listed repository.
-
+<!-- design:begin -->
 ## Which credential a run gets
 
-The route resolves the credential in a fixed order, the same for every run:
+`POST /api/v1/runs/{run}/source-credential` requires a live claim with
+`source.read` and the source binding. The sealed repository must be authorized
+for that executor. A typed repository name or advertised runner label grants
+no fetch authority.
 
-1. **The team's GitHub App token**, when the run's repository is on github.com,
-   an installation bound to the run's team covers it, and the repository
-   qualifies: it is the one the App's webhook recorded on the run's trigger, or
-   the run names it by hand and one of the team's App trigger subscriptions
-   (Team > GitHub) names it. The token reads only that repository, by its
-   GitHub ID, with `contents: read`, for at most an hour. See
-   [GitHub App](github-app.md#source-for-cloud-runners).
-2. Otherwise **a git credential the team stored** for the host of the run's
-   repository.
-3. Otherwise the route answers 404 with `{"error": "no_source_credential"}`
-   and a message naming the remedies, and the run fails before anything is
-   fetched.
+A GitHub App credential is restricted to the authorized repository and approved
+extra repositories. Releasing a stored team credential requires a same-team cloud
+executor or explicit consent from the machine's owner. Team-admin token
+management alone cannot provide that owner's consent. SSH credentials also
+require confirmation of the pinned host key.
 
-A runner never falls back to credentials of the machine it runs on. The one
-exception is a runner its owner fenced with `--allow-repo`, such as a laptop:
-when the controller releases nothing, it fetches with the machine's own git
-config and credentials, and only from the repositories its list names. See
-[local-execution.md](local-execution.md#what-a-laptop-runner-trusts).
+The store rechecks the live claim, repository permission and consent in the
+transaction that records the release. A failed audit write releases nothing.
+Credentials stay out of the audit record. See [credentials](credentials.md) and
+[GitHub App](github-app.md#source-for-cloud-runners).
 
 ## Extra repositories
 
-A run's checkout may need more of the team's private GitHub repositories,
-such as submodules. By default a token reads only the run's repository,
-because a token for every repository of the installation would let a
-compromised pipeline read all of them.
-
-A team owner lists the further repositories per source repository, under
-**Team > GitHub > Extra repositories** in the dashboard or with
-`PUT /api/v1/team/github-app/extra-repos {repository, extra_repos}`. At most
-10, as `owner/name`, all of the source repository's owner, and each covered
-by the installation that covers the source repository when the list is set.
-An empty list clears it. Members read the lists with
-`GET /api/v1/team/github-app/extra-repos`. The list lives in the controller
-rather than in the repository, because code in the repository, including a
-pull request's, must not widen what its own token reads.
-
-When the run's repository has a list, the controller mints the run's App
-token for it and the listed repositories together, checking again that the
-installation covering the run's repository still covers each one; a listed
-repository it no longer covers, or one listed before its GitHub ID was
-recorded, fails the request with 409 until an owner saves the list again. The answer's `repositories` names the run's repository
-first and the listed ones after it. When it names any and the checkout has a `.gitmodules`,
-the runner runs `git submodule update --init --recursive --depth 1` with the
-same credential. `url.insteadOf` rewrites a submodule's ssh URL on the
-credential's host to https, so the one token serves every submodule. When no
-installation covers the run, the team's stored github.com credential serves
-the submodules the same way, rewritten to its transport, and the answer
-still names the listed repositories. A run of another host has no list, and
-a runner fetching with the machine's own credentials leaves submodules out.
+An owner manages the repository's allow-list through
+`PUT /api/v1/team/github-app/extra-repos`. Members read it through
+`GET /api/v1/team/github-app/extra-repos`. Source code cannot widen the list
+used to issue its own credential. Every listed private repository still needs
+live authorization when source is acquired.
 
 ## Store a credential
 
-A team owner stores one credential per host, under **Team > Git
-credentials** in the dashboard or with
-`POST /api/v1/team/git-credentials`. Only an owner stores, replaces,
-confirms or deletes one, and no route returns its value: the list shows the
-host, the kind, the pinned host key and who stored it. The controller seals
-the value under its secrets key, bound to the team and the host, so a
-controller started without `SPARKWING_SECRETS_KEY` holds none.
+| Operation | Route |
+| --- | --- |
+| List metadata | `GET /api/v1/team/git-credentials` |
+| Store or replace | `POST /api/v1/team/git-credentials` |
+| Confirm an SSH host | `POST /api/v1/team/git-credentials/{host}/confirm` |
+| Delete | `DELETE /api/v1/team/git-credentials/{host}` |
+| Inspect release audits | `GET /api/v1/team/git-credentials/releases` |
 
-A credential is one of these kinds:
+Listing requires run-read permission. Writes and audit reads require team-admin
+permission. Machine-owner consent uses
+`PUT /api/v1/tokens/{token}/git-credentials`. It is separate from permission to
+manage the team's stored credential.
 
-- **An SSH deploy key** (`kind: ssh`, `private_key`), unencrypted, since a
-  runner cannot type a passphrase. When it is stored, the controller opens an
-  ssh handshake to the host (port 22 unless `port` says otherwise), reads the
-  host key the way `ssh-keyscan` does, and pins it. The answer shows the key's
-  SHA256 fingerprint, and the credential is unusable until an owner confirms
-  that fingerprint with `POST /api/v1/team/git-credentials/{host}/confirm`.
-  Check it against the fingerprint your forge publishes. The controller
-  refuses a host that resolves inside its own network, and it dials the very
-  address it checked, so a name that resolves differently a second time
-  cannot steer the scan inward.
-- **An HTTPS token** (`kind: https`, `token`, optional `username`), such as a
-  GitLab or Bitbucket access token or a fine-grained GitHub token. The
-  username defaults to `x-access-token`; Bitbucket repository access tokens
-  need `x-token-auth`. It is usable once stored.
-
-Prefer a read-only deploy key or token scoped to the repositories the team
-builds. For a repository on github.com, connect the [GitHub App](github-app.md)
-instead: it covers the repository with a token that reads that repository
-alone and lives an hour, and it wins over a stored github.com credential
-whenever it covers the run's repository.
-
-A team stores at most 50 credentials.
-
-## Who receives it
-
-The controller releases a stored credential only when all of these hold:
-
-- the caller presents the claim token of a live node or trigger claim on the
-  run, made with a runner or machine token of the run's own team that still
-  authenticates, both when the request arrives and inside the transaction that
-  records the release, which locks the run, so a lease that lapses in between
-  releases nothing. A Cloud Job's claim never receives one;
-- the host of the run's repository is the credential's host;
-- the caller is a cloud runner, one whose token the operator meters, or a
-  machine a team owner opted in with
-  `PUT /api/v1/team/tokens/{prefix}/git-credentials` (the dashboard's
-  **Team > Machines** page).
-
-Otherwise the route answers 403 `git_credential_not_released`, or 409
-`git_credential_unconfirmed` for an ssh key whose host key nobody confirmed.
-A runner its owner fenced with `--allow-repo` then fetches with the machine's
-own credentials; any other runner fails the run with the message.
-
-Each release writes an audit row naming the host, the run, the runner and the
-time, as each App token the route issues does. An owner reads the latest 200
-at `GET /api/v1/team/git-credentials/releases`. A claim asks at most ten times
-a minute; past that the route answers 429. A node's claim gets at most three
-credentials and none once its attempt has started running the pipeline's code,
-since the node's own process holds the same claim token; past that the route
-answers `403 source_credential_spent`.
+Prefer a read-only deploy key or repository-scoped token. Values are sealed
+under the controller's secrets key. Management reads return metadata.
 
 ## How the runner uses it
 
-The runner hands the credential to the one `git fetch` that needs it and to
-nothing else:
+The source owner supplies credentials in memory or through a private temporary
+file. The Git process receives the filtered Git environment and source-owned
+argv/configuration. It cannot inherit a capability, ambient credential helper,
+SSH command override or arbitrary Git configuration from the runner's shell.
+Selected CA and proxy settings follow the shared process policy.
 
-- An SSH key goes to a fresh private directory on a tmpfs (`/dev/shm`, or
-  `$XDG_RUNTIME_DIR` or the temporary directory when one of those is a tmpfs)
-  as a mode 0600 file, beside a `known_hosts` file holding only the pinned
-  entry. A cloud runner, one its owner did not fence with `--allow-repo`,
-  refuses to write the key anywhere else and fails the fetch naming the
-  missing tmpfs; a fenced runner without one uses the temporary directory. The fetch runs with
-  `GIT_SSH_COMMAND="ssh -i <key> -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=<pinned> ..."`,
-  so no other identity, agent, ssh config or known host takes part, and a
-  changed host key fails the fetch. An https remote is fetched in its ssh form.
-- An HTTPS token reaches git on an inherited pipe, through a credential helper
-  scoped to the host, as the App token does. An ssh remote is fetched in its
-  https form.
-- The fetch reads none of the machine's git config and runs without its ssh
-  agent.
-- The runner deletes the key directory when the checkout returns, before it
-  compiles or runs anything the fetched tree names. A key it cannot delete
-  fails the run. A runner that crashes mid-fetch leaves the directory behind;
-  the next runner of the same user to start removes every `sparkwing-git-*`
-  directory in those places that it owns and no live fetch holds.
-- The credential is never in an environment variable, a command line, the
-  URL or `.git/config`, and the runner replaces it, and each line of a key,
-  with `***` in any error text it reports.
+Acquisition-owned files are removed after the fetch. Credentials stay out of
+clone URLs, execution seals and pipeline environments. Diagnostics use the shared
+masker. A local owner credential is usable only under the runner owner's
+repository allow-list.
 
-The team's own pipeline code runs as the same user and could read the key
-while the fetch runs, for example from a malicious commit in the team's own
-repository. That is the team's own key, which is why a read-only one is the
-recommendation.
+Pipeline code running as the same OS account can reach that account's credentials
+while they are in use. Repository scoping and a read-only credential limit the
+exposed authority.
 
 ## Rotate and revoke
 
-Storing a credential for the same host replaces it; the next release hands
-out the new value. Replacing an SSH key keeps its confirmation only while the
-host's key is the one already confirmed. Deleting it
-(`DELETE /api/v1/team/git-credentials/{host}`) makes every later release
-fail. Nothing the runner held outlives the fetch it was released for.
+Replacing or deleting a credential changes later releases. The source-release
+audit survives rotation. Controller revocation prevents new releases but cannot
+recall an upstream credential that has already been issued.
 
-`POST /api/v1/secrets/rotate` reseals every team's git credentials with the
-secrets under the new key.
+`POST /api/v1/secrets/rotate` uses the encrypted-secret rotation contract. Keep
+the preceding key until every encrypted value has been resealed successfully.
+<!-- design:end -->

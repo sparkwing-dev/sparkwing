@@ -10,7 +10,7 @@ import (
 )
 
 func TestResetPipelineProfile_DropsLearnedRowsAndReLearns(t *testing.T) {
-	st := storetest.Open(t)
+	st := tenantFor(t, storetest.Open(t), store.DefaultTeam)
 	ctx := context.Background()
 
 	for _, obs := range []store.ProfileObservation{
@@ -71,7 +71,7 @@ func TestResetPipelineProfile_DropsLearnedRowsAndReLearns(t *testing.T) {
 }
 
 func TestResetPipelineProfile_KeepsPin(t *testing.T) {
-	st := storetest.Open(t)
+	st := tenantFor(t, storetest.Open(t), store.DefaultTeam)
 	ctx := context.Background()
 
 	if err := st.RecordProfileObservation(ctx, "pinned", "", store.ProfileObservation{Duration: 10 * time.Second, PeakCores: 50, PeakMemoryBytes: 8 << 30, CPUMeasured: true}); err != nil {
@@ -105,7 +105,7 @@ func TestResetPipelineProfile_KeepsPin(t *testing.T) {
 }
 
 func TestResetAllProfiles_ClearsEverythingKeepingPins(t *testing.T) {
-	st := storetest.Open(t)
+	st := tenantFor(t, storetest.Open(t), store.DefaultTeam)
 	ctx := context.Background()
 
 	for _, name := range []string{"a", "b", "c"} {
@@ -141,7 +141,7 @@ func TestResetAllProfiles_ClearsEverythingKeepingPins(t *testing.T) {
 }
 
 func TestResetPipelineProfile_NoProfileIsNoOp(t *testing.T) {
-	st := storetest.Open(t)
+	st := tenantFor(t, storetest.Open(t), store.DefaultTeam)
 	summary, err := st.ResetPipelineProfile(context.Background(), "absent")
 	if err != nil {
 		t.Fatalf("ResetPipelineProfile: %v", err)

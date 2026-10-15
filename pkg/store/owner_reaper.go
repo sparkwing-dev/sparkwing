@@ -73,7 +73,7 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 			return nil, err
 		}
 	}
-	if err := cancelRunNodesTx(ctx, tx, target.team, run.ID, actor, now); err != nil {
+	if err := cancelRunNodesTx(ctx, tx, target.team, run.ID, actor, run.CancelReason, now); err != nil {
 		return nil, err
 	}
 	var claims int

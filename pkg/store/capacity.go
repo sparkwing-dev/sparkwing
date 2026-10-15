@@ -205,23 +205,7 @@ type profileMutState struct {
 	cpuMeasured         bool
 }
 
-// RecordProfileObservation folds one run's observation into the
-// (pipeline, node) profile. A clean run ages into the windowed percentiles
-// as before; partial readings enter only when they raise a resource dimension,
-// with the other dimensions held at their current values. A contended run
-// feeds the demand floor only, leaving the window, peaks, and sample
-// count untouched so contention never sets a measured price or graduates a
-// version. A plan-hash change clears the
-// version's learned window and floor (except a partial contended floor)
-// and carries its peak and sustained
-// figures into the Prev pair, so the changed version re-measures from a warm
-// start at what its predecessor was charged.
-func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error {
-	return s.defaultTenant().RecordProfileObservation(ctx, pipeline, nodeID, obs)
-}
-
-// RecordProfileObservation folds one observation into t's profile for
-// the (pipeline, node). See [Store.RecordProfileObservation].
+// RecordProfileObservation folds clean observations and resource floors into this tenant's windowed profile.
 func (t *Tenant) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error {
 	if obs.Duration < 0 || obs.PeakMemoryBytes < 0 || obs.FloorMemoryBytes < 0 {
 		return errors.New("profile duration and memory must be nonnegative")
@@ -387,16 +371,7 @@ type waitWindowDoc struct {
 
 const waitSchemaCurrent = 1
 
-// RecordWaitObservation folds one run's admission wait (submit to grant)
-// into the pipeline's rollup profile, aging out samples beyond
-// profileWindow and recomputing the persisted wait percentiles. It is
-// observability only: nothing in admission reads the wait columns.
-func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error {
-	return s.defaultTenant().RecordWaitObservation(ctx, pipeline, wait)
-}
-
-// RecordWaitObservation folds one admission wait into t's rollup profile
-// for the pipeline. See [Store.RecordWaitObservation].
+// RecordWaitObservation folds an admission wait into this tenant's pipeline rollup.
 func (t *Tenant) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error {
 	if pipeline == "" {
 		return nil
@@ -455,17 +430,7 @@ func (t *Tenant) loadWaitWindow(ctx context.Context, pipeline string) ([]int64, 
 	return doc.Samples, nil
 }
 
-// RecordContention increments a pipeline's tally of runs the admission
-// daemon flagged as throttled by host contention. It updates the rollup
-// row only and is a no-op when no profile exists yet -- a run cannot be
-// flagged contended without the measured baseline that first creates the
-// row, so the increment always lands.
-func (s *Store) RecordContention(ctx context.Context, pipeline string) error {
-	return s.defaultTenant().RecordContention(ctx, pipeline)
-}
-
-// RecordContention increments t's tally of throttled runs for the
-// pipeline. See [Store.RecordContention].
+// RecordContention increments this tenant's contention tally for an existing pipeline rollup.
 func (t *Tenant) RecordContention(ctx context.Context, pipeline string) error {
 	return retryOnBusy(func() error {
 		_, err := t.s.exec(ctx,
@@ -475,16 +440,7 @@ func (t *Tenant) RecordContention(ctx context.Context, pipeline string) error {
 	})
 }
 
-// SetProfilePin records the explicit .Resources() pin last seen for a
-// (pipeline, node), so a reader can judge the pin against the measured
-// peaks. It updates only the pin columns of an existing profile row and is
-// a no-op when no row exists yet.
-func (s *Store) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
-	return s.defaultTenant().SetProfilePin(ctx, pipeline, nodeID, cores, memoryBytes)
-}
-
-// SetProfilePin records the pin on t's existing profile row.
-// See [Store.SetProfilePin].
+// SetProfilePin updates the resource pin on this tenant's existing profile row.
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
 	return retryOnBusy(func() error {
 		_, err := t.s.exec(ctx, `
@@ -494,19 +450,7 @@ UPDATE pipeline_profiles SET pinned_cores = ?, pinned_memory_bytes = ?
 	})
 }
 
-// UpsertProfilePin records a pin for a (pipeline, node), creating a
-// measurement-less row when none exists yet so a cluster runner can report
-// what it applied before any run has been profiled. A later
-// [Store.RecordProfileObservation] folds measurements into the same row
-// without disturbing the pin; a pin-only row (zero samples) never trips a
-// drift warning, which needs measured peaks. Unlike [Store.SetProfilePin],
-// this is never a no-op.
-func (s *Store) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
-	return s.defaultTenant().UpsertProfilePin(ctx, pipeline, nodeID, cores, memoryBytes)
-}
-
-// UpsertProfilePin records a pin in t's team, creating a
-// measurement-less row when none exists. See [Store.UpsertProfilePin].
+// UpsertProfilePin records this tenant's resource pin, creating an unmeasured row when absent.
 func (t *Tenant) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
 	return retryOnBusy(func() error {
 		_, err := t.s.exec(ctx, `
@@ -543,34 +487,12 @@ type ProfileResetSummary struct {
 	FloorsDropped  int      `json:"floors_dropped"`
 }
 
-// ResetPipelineProfile clears one pipeline's learned capacity profile --
-// its windowed samples, duration and peak percentiles, queue waits,
-// contention tally, and contended-run demand floor across the rollup and
-// every node row -- so it re-learns from a cold start. The floor goes
-// whether or not measured samples sit behind it, since a pipeline can be
-// priced off a floor it earned before it ever finished a clean run. An
-// explicit .Resources() pin is preserved: a pinned row is zeroed in place
-// rather than deleted, so admission keeps charging the pin meanwhile.
-// Resetting a pipeline with no stored profile is a no-op that reports zero
-// counts.
-func (s *Store) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error) {
-	return s.defaultTenant().resetProfiles(ctx, pipeline)
-}
-
-// ResetPipelineProfile clears one of t's pipeline profiles.
-// See [Store.ResetPipelineProfile].
+// ResetPipelineProfile clears one tenant pipeline's learned observations and floors while preserving resource pins.
 func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error) {
 	return t.resetProfiles(ctx, pipeline)
 }
 
-// ResetAllProfiles clears every pipeline's learned capacity profile,
-// preserving pins, with the same semantics as [Store.ResetPipelineProfile].
-func (s *Store) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error) {
-	return s.defaultTenant().resetProfiles(ctx, "")
-}
-
-// ResetAllProfiles clears every profile of t's team.
-// See [Store.ResetAllProfiles].
+// ResetAllProfiles clears this tenant's learned observations and floors while preserving resource pins.
 func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error) {
 	return t.resetProfiles(ctx, "")
 }
@@ -665,14 +587,7 @@ UPDATE pipeline_profiles SET
 
 const profileColumns = `p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, pinned_cores, pinned_memory_bytes, samples_json, wait_p50_ms, wait_p99_ms, wait_sample_count, contended_count, plan_hash, floor_cores, floor_memory_bytes, prev_peak_cores, prev_peak_memory_bytes, sustained_cores, prev_sustained_cores`
 
-// GetPipelineProfile returns the (pipeline, node) profile, or nil when no
-// runs have been measured for it yet.
-func (s *Store) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*PipelineProfile, error) {
-	return s.defaultTenant().GetPipelineProfile(ctx, pipeline, nodeID)
-}
-
-// GetPipelineProfile returns t's (pipeline, node) profile, or nil when
-// t has measured no runs for it yet.
+// GetPipelineProfile returns this tenant's profile, or nil when absent.
 func (t *Tenant) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*PipelineProfile, error) {
 	row := t.s.queryRow(ctx, `
 SELECT `+profileColumns+`
@@ -687,15 +602,7 @@ SELECT `+profileColumns+`
 	return prof, nil
 }
 
-// ListPipelineProfiles returns every stored profile, node rows and the
-// pipeline rollup alike, ordered by pipeline then node id (the empty
-// rollup id sorts first). A non-empty pipeline restricts the result.
-func (s *Store) ListPipelineProfiles(ctx context.Context, pipeline string) ([]PipelineProfile, error) {
-	return s.defaultTenant().ListPipelineProfiles(ctx, pipeline)
-}
-
-// ListPipelineProfiles returns every profile stored for t's team.
-// See [Store.ListPipelineProfiles].
+// ListPipelineProfiles returns this tenant's profiles ordered by pipeline and job, optionally restricted to one pipeline.
 func (t *Tenant) ListPipelineProfiles(ctx context.Context, pipeline string) ([]PipelineProfile, error) {
 	q := `
 SELECT pipeline, node_id, ` + profileColumns + `
@@ -733,21 +640,7 @@ SELECT pipeline, node_id, ` + profileColumns + `
 	return out, nil
 }
 
-// CacheExcludedCounts reports, per pipeline, how many finished runs were
-// dominated by cache hits and so were excluded from run-level profile
-// learning: runs where at least fraction of their completed nodes carry
-// the cachedOutcome status. Such a run's executed nodes still fold into
-// their own node profiles; only the run rollup, whose wall time measured
-// the cache, is excluded. No counter is stored for this (unlike contention); the figure is
-// derived live from retained run history, so it reflects the runs still in the
-// store rather than every run ever excluded. Pass a pipeline to scope to one,
-// or "" for every pipeline. Pipelines with no cache-dominant runs are absent
-// from the map.
-func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error) {
-	return s.defaultTenant().CacheExcludedCounts(ctx, pipeline, cachedOutcome, fraction)
-}
-
-// CacheExcludedCounts is [Store.CacheExcludedCounts] confined to t's team.
+// CacheExcludedCounts counts this tenant's cache-dominant runs per pipeline using the given outcome and fraction.
 func (t *Tenant) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error) {
 	q := `
 SELECT r.pipeline, COUNT(*)
@@ -988,17 +881,7 @@ type ProfileSample struct {
 	PeakMemoryBytes int64         `json:"peak_memory_bytes"`
 }
 
-// ProfileSamples returns the (pipeline, node) profile's stored sample
-// window, oldest run first, or nil when nothing is stored for the key. A
-// window written under a sample schema too old to price from reads as empty,
-// the same way [Store.GetPipelineProfile] reports zeroes for such a row, so
-// the two never describe one profile differently.
-func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error) {
-	return s.defaultTenant().ProfileSamples(ctx, pipeline, nodeID)
-}
-
-// ProfileSamples returns t's stored sample window for the (pipeline,
-// node). See [Store.ProfileSamples].
+// ProfileSamples returns this tenant's stored sample window in arrival order, or nil for a missing or obsolete window.
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error) {
 	var raw []byte
 	if err := t.s.queryRow(ctx,

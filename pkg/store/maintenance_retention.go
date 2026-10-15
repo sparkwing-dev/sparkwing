@@ -68,13 +68,7 @@ func (o *Operator) maintainRetention(ctx context.Context, request RetentionReque
 	if err != nil {
 		return RetentionResult{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM flow_nonces WHERE (kind,nonce) IN (SELECT kind,nonce FROM flow_nonces WHERE expires_at <= ? ORDER BY expires_at,kind,nonce LIMIT ?)`, now.UnixNano(), request.Limit); err != nil {
-		return RetentionResult{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE hash IN (SELECT s.hash FROM sessions s WHERE s.expires_at <= ? AND NOT EXISTS (SELECT 1 FROM capabilities c WHERE c.parent_kind = 'session' AND c.parent_id = s.hash) ORDER BY s.expires_at,s.hash LIMIT ?)`, now.UnixNano(), request.Limit); err != nil {
-		return RetentionResult{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM github_app_deliveries WHERE digest IN (SELECT digest FROM github_app_deliveries WHERE received_at <= ? ORDER BY received_at,digest LIMIT ?)`, now.Add(-GitHubAppDeliveryRetention).UnixNano(), request.Limit); err != nil {
+	if err := deleteRetentionIdentityTx(ctx, tx, now, request.Limit, &result); err != nil {
 		return RetentionResult{}, err
 	}
 	if err := assertSingletonLeaseTx(ctx, tx, request.Lease, "maintenance", tx.now()); err != nil {

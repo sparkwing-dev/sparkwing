@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -218,7 +219,12 @@ type storeSlots struct {
 }
 
 func (s storeSlots) AcquireSlot(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
-	resp, err := s.st.AcquireConcurrencySlot(ctx, req)
+	tenant, err := s.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return store.AcquireSlotResponse{}, err
+	}
+
+	resp, err := tenant.AcquireConcurrencySlot(ctx, req)
 	if err == nil && resp.Kind == store.AcquireQueued && s.queued != nil {
 		s.queued <- req.NodeID
 	}
@@ -226,28 +232,58 @@ func (s storeSlots) AcquireSlot(ctx context.Context, req store.AcquireSlotReques
 }
 
 func (s storeSlots) ObserveSlot(ctx context.Context, key, holderID string) (*store.ConcurrencyHolder, error) {
-	return s.st.ConcurrencyHolder(ctx, key, holderID, time.Now())
+	tenant, err := s.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return nil, err
+	}
+
+	return tenant.ConcurrencyHolder(ctx, key, holderID, time.Now())
 }
 
 func (s storeSlots) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (time.Time, bool, error) {
-	return s.st.HeartbeatConcurrencySlot(ctx, key, holderID, lease)
+	tenant, err := s.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+
+	return tenant.HeartbeatConcurrencySlot(ctx, key, holderID, lease)
 }
 
 func (s storeSlots) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error {
-	_, _, _, err := s.st.ReleaseAndNotify(ctx, key, holderID, outcome, outputRef, cacheKeyHash, ttl, store.DefaultConcurrencyLease)
+	tenant, err := s.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return err
+	}
+
+	_, _, _, err = tenant.ReleaseAndNotify(ctx, key, holderID, outcome, outputRef, cacheKeyHash, ttl, store.DefaultConcurrencyLease)
 	return err
 }
 
 func (s storeSlots) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (store.WaiterResolution, error) {
-	return s.st.ResolveWaiter(ctx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID, bypassRead)
+	tenant, err := s.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return store.WaiterResolution{}, err
+	}
+
+	return tenant.ResolveWaiter(ctx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID, bypassRead)
 }
 
 func (s storeSlots) ForceReleaseSuperseded(ctx context.Context, key string) ([]store.ConcurrencyHolder, error) {
-	return s.st.ForceReleaseSupersededHolders(ctx, key)
+	tenant, err := s.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return nil, err
+	}
+
+	return tenant.ForceReleaseSupersededHolders(ctx, key)
 }
 
 func (s storeSlots) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
-	return s.st.CancelWaiter(ctx, key, runID, nodeID)
+	tenant, err := s.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return false, err
+	}
+
+	return tenant.CancelWaiter(ctx, key, runID, nodeID)
 }
 
 type gauge struct {
@@ -413,7 +449,7 @@ func TestAdmissionStoreGroupBoundsParallelNodes(t *testing.T) {
 
 func wantSlotsEmpty(t *testing.T, st *store.Store, key string) {
 	t.Helper()
-	state, err := st.GetConcurrencyState(t.Context(), key)
+	state, err := teststore.ForTeam(t, st, store.DefaultTeam).GetConcurrencyState(t.Context(), key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +460,7 @@ func wantSlotsEmpty(t *testing.T, st *store.Store, key string) {
 
 func holdSlotOutside(t *testing.T, st *store.Store, key string) {
 	t.Helper()
-	resp, err := st.AcquireConcurrencySlot(t.Context(), store.AcquireSlotRequest{Key: key, HolderID: "other/x", RunID: "other", NodeID: "x", Capacity: 1, Policy: "queue"})
+	resp, err := teststore.ForTeam(t, st, store.DefaultTeam).AcquireConcurrencySlot(t.Context(), store.AcquireSlotRequest{Key: key, HolderID: "other/x", RunID: "other", NodeID: "x", Capacity: 1, Policy: "queue"})
 	if err != nil || resp.Kind != store.AcquireGranted {
 		t.Fatalf("outside hold: %+v %v", resp, err)
 	}
@@ -445,7 +481,7 @@ func TestAdmissionCancelWhileQueuedInStore(t *testing.T) {
 		t.Fatalf("ran=%v result %+v, want cancelled before running", ran, res.Nodes["b"])
 	}
 	wantRow(t, st, "b", sparkwing.Cancelled, "")
-	state, err := st.GetConcurrencyState(ctx, "global:db")
+	state, err := teststore.ForTeam(t, st, store.DefaultTeam).GetConcurrencyState(ctx, "global:db")
 	if err != nil || len(state.Waiters) != 0 || len(state.Holders) != 1 {
 		t.Fatalf("state %+v %v, want the outside holder and no waiter", state, err)
 	}
@@ -473,7 +509,7 @@ func TestAdmissionStoreQueueTimeoutAndLimitPolicies(t *testing.T) {
 			if got := res.Nodes["b"]; got.Outcome != c.want || got.Reason != c.reason {
 				t.Fatalf("result %+v, want %s reason %q", got, c.want, c.reason)
 			}
-			if state, err := st.GetConcurrencyState(ctx, "global:db"); err != nil || len(state.Waiters) != 0 {
+			if state, err := teststore.ForTeam(t, st, store.DefaultTeam).GetConcurrencyState(ctx, "global:db"); err != nil || len(state.Waiters) != 0 {
 				t.Fatalf("state %+v %v, want no waiter", state, err)
 			}
 		})
@@ -662,7 +698,7 @@ func TestAdmissionStoreOutageToleranceMatchesTheDispatcher(t *testing.T) {
 			slots := resolveFlaky{storeSlots: storeSlots{st: st, queued: make(chan string, 1)}, clock: clock, outage: c.outage}
 			go func() {
 				recv(t, ctx, slots.queued)
-				if _, _, _, err := st.ReleaseAndNotify(ctx, "global:db", "other/x", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+				if _, _, _, err := teststore.ForTeam(t, st, store.DefaultTeam).ReleaseAndNotify(ctx, "global:db", "other/x", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
 					t.Error(err)
 				}
 			}()

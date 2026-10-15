@@ -370,7 +370,7 @@ and persists expansions before scheduling them. See
 
 | Modifier | Layer | Notes |
 |---|---|---|
-| `Retry(n, opts...)` | Plan only | `RetryBackoff(d)` + `RetryAuto()` options; `RetryAuto` re-dispatches the whole Job |
+| `Retry(n, opts...)` | Plan only | Application failures retry under the same claim with an increasing attempt ordinal. Lease-lapse recovery uses a separate disruption count |
 | `Timeout` | Plan only | per-attempt cap |
 | `OnFailure(id, job)` | Plan only | constructs a detached recovery node fired on parent failure |
 | `Memo` | Plan only | content-addressed result memoization |

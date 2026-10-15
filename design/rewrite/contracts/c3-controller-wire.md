@@ -4,6 +4,19 @@
 
 ## Amendment 1: private execution and claim wire
 
+`ReuseSource.Result` transports C1's materialized-result source as
+`{run_id, job_id, state_seq}`. It identifies the exact persisted terminal state
+when no execution attempt produced that result. It is exclusive with a nonzero
+`Attempt`; C1 validates the source, lineage, read edges and state sequence in its
+transaction. No source outcome is accepted from the caller. Existing attempt
+sources keep their team/run/job/generation/ordinal identity.
+
+`ScheduleSnapshot.GuardRefusal` preserves the accepted guard's refusal alongside
+`CancelRequested`. The controller projects both from C1's consistent scheduling
+read instead of refusing an otherwise valid snapshot. C1's decider retains
+cancellation precedence. Remote owners must consume both fields before dispatch.
+These W9 wire additions carry existing C1 facts and change no foreign contract.
+
 Claim with a single trigger kind and RunID uses `/runs/{run}/claim`, including
 the here Award under LiveHereClaim. Other Claim requests select one ordered scan
 through `/runners/claim`, or `/launcher/claim` when

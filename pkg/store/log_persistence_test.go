@@ -1,7 +1,11 @@
 package store
 
 import (
+	"errors"
+	"math/rand"
+	"slices"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -9,6 +13,140 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
+
+func TestLogPersistenceRetainedBytesCountSegmentsOnce(t *testing.T) {
+	s, tenant, actor, attempt := resultFixture(t)
+	commit := logCommit(actor, attempt)
+	for range 2 {
+		if err := tenant.RecordSegments(t.Context(), commit); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, change := range []func(*Segment){
+		func(s *Segment) { s.Digest = "b" + s.Digest[1:] },
+		func(s *Segment) { s.Size++ },
+		func(s *Segment) { s.Size = limits.LogSegmentUploadBytes + 1 },
+	} {
+		bad := commit
+		bad.Segments = slices.Clone(commit.Segments)
+		change(&bad.Segments[0])
+		if err := tenant.RecordSegments(t.Context(), bad); err == nil {
+			t.Fatal("conflicting or oversized segment accepted")
+		}
+	}
+	key, err := LogSegmentObjectKey(commit.Subject, "r30", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit.Segments = []Segment{{Index: 1, Offset: 3, Size: 2, Digest: commit.Segments[0].Digest, ObjectKey: key}}
+	commit.Final = true
+	for range 2 {
+		if err := tenant.RecordSegments(t.Context(), commit); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if size, err := tenant.StorageRetainedBytes(t.Context()); err != nil || size != 5 {
+		t.Fatalf("retained log bytes=%d, want 5: %v", size, err)
+	}
+	rewriteSchemaCount(t, s.db, "log_streams", 1)
+	rewriteSchemaCount(t, s.db, "log_segments", 2)
+	rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a' AND id='run'")
+	rewriteSchemaCount(t, s.db, "log_streams", 0)
+	rewriteSchemaCount(t, s.db, "log_segments", 0)
+	if size, err := tenant.StorageRetainedBytes(t.Context()); err != nil || size != 0 {
+		t.Fatalf("deleted run retained log bytes=%d: %v", size, err)
+	}
+}
+
+func TestLogPersistenceAttemptAuthorityDoesNotTransfer(t *testing.T) {
+	s, tenant, actor, attempt := resultFixture(t)
+	commit := logCommit(actor, attempt)
+	if err := tenant.RecordSegments(t.Context(), commit); err != nil {
+		t.Fatal(err)
+	}
+	property := func(suffix string, number uint16, field uint8) bool {
+		forged := attempt
+		switch field % 5 {
+		case 0:
+			forged.Team += "other_" + suffix
+		case 1:
+			forged.RunID += "other_" + suffix
+		case 2:
+			forged.NodeID += "other_" + suffix
+		case 3:
+			forged.Attempt += int64(number) + 1
+		case 4:
+			forged.Generation += int64(number) + 1
+		}
+		subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: forged.Team, RunID: forged.RunID, Attempt: &forged}
+		if err := tenant.RecordSegments(t.Context(), SegmentCommit{Subject: subject, Actor: actor, RetentionClass: "r30"}); err == nil {
+			t.Logf("forged writer=%+v: %v", forged, err)
+			return false
+		}
+		if _, err := tenant.ReadLogSegments(t.Context(), actor, blob.LogReadRequest{Subject: subject}); err == nil || errors.Is(err, ErrNotFound) {
+			t.Logf("forged reader=%+v: %v", forged, err)
+			return false
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(92075))}); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaCount(t, s.db, "log_streams", 1)
+	rewriteSchemaCount(t, s.db, "log_segments", 1)
+}
+
+func TestLogPersistenceAttemptByteLimitPreservesCommittedBytes(t *testing.T) {
+	_, tenant, actor, attempt := resultFixture(t)
+	commit := logCommit(actor, attempt)
+	segment := commit.Segments[0]
+	for offset := int64(0); offset < limits.AttemptLogBytes; offset += segment.Size {
+		segment.Offset = offset
+		segment.Size = min(limits.LogSegmentUploadBytes, limits.AttemptLogBytes-offset)
+		key, err := LogSegmentObjectKey(commit.Subject, "r30", segment.Index)
+		if err != nil {
+			t.Fatal(err)
+		}
+		segment.ObjectKey = key
+		commit.Segments = []Segment{segment}
+		if err := tenant.RecordSegments(t.Context(), commit); err != nil {
+			t.Fatal(err)
+		}
+		segment.Index++
+	}
+	segment.Offset, segment.Size = limits.AttemptLogBytes, 1
+	key, err := LogSegmentObjectKey(commit.Subject, "r30", segment.Index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	segment.ObjectKey = key
+	commit.Segments = []Segment{segment}
+	if err := tenant.RecordSegments(t.Context(), commit); err == nil {
+		t.Fatal("accepted a segment above the attempt byte limit")
+	}
+	if size, err := tenant.StorageRetainedBytes(t.Context()); err != nil || size != limits.AttemptLogBytes {
+		t.Fatalf("refused segment changed retained bytes=%d: %v", size, err)
+	}
+}
+
+func TestLogPersistenceLaterNodeFinishCannotExtendAttemptGrace(t *testing.T) {
+	s, tenant, actor, attempt := resultFixture(t)
+	now := s.now()
+	finished := now.Add(-2 * limits.LogSealGrace)
+	started := finished.Add(-time.Second).UnixNano()
+	rewriteSchemaExec(t, s.db, "UPDATE nodes SET status='done',outcome='success',started_at=?,finished_at=?,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND run_id='run'", started, now.UnixNano())
+	rewriteSchemaExec(t, s.db, "UPDATE node_attempts SET started_at=?,finished_at=?,outcome='success' WHERE team='a' AND run_id='run'", started, finished.UnixNano())
+	commit := logCommit(actor, attempt)
+	commit.Final = true
+	if err := tenant.RecordSegments(t.Context(), commit); err == nil {
+		t.Fatal("later node finish extended the attempt's write grace")
+	}
+	if _, err := tenant.ReadLogSegments(t.Context(), actor, blob.LogReadRequest{Subject: commit.Subject}); err == nil || errors.Is(err, ErrNotFound) {
+		t.Fatalf("later node finish extended the attempt's read grace: %v", err)
+	}
+	rewriteSchemaCount(t, s.db, "log_streams", 0)
+	rewriteSchemaCount(t, s.db, "log_segments", 0)
+}
 
 func TestLogPersistenceRejectsMalformedSubjects(t *testing.T) {
 	_, tenant, actor, attempt := resultFixture(t)

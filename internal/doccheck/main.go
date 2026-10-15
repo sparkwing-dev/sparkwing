@@ -55,6 +55,8 @@ func main() {
 	fmt.Println()
 	ok = checkCLIVerbs(contentDir) && ok
 	fmt.Println()
+	ok = checkAPIRoutes(contentDir) && ok
+	fmt.Println()
 	ok = checkServicePorts(contentDir, repoRoot) && ok
 	fmt.Println()
 	ok = checkAuxDocs(repoRoot) && ok

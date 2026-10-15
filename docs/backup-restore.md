@@ -29,11 +29,10 @@ restores a controller that starts and still cannot do its job.
 What the state database does not hold, and what a restore therefore
 does not bring back:
 
-- Node log segments, which the controller keeps in its cache bucket or
-  output directory (see [self-hosting](self-hosting.md#node-log-retention)).
-- Node artifacts and caches, which the object store owns.
-- Mirrored git repositories, which the gitcache owns. These rebuild
-  themselves from their upstreams.
+- Tagged job-attempt and owner-unit log segments in the selected storage backend
+  (see [self-hosting](self-hosting.md#node-log-retention)).
+- Artifact, output and dependency-cache bytes in the selected storage backend.
+- Machine-local pipeline binaries, which rebuild from source.
 
 Back those up on their own schedule, or accept losing them; the
 controller serves run and node records without them.

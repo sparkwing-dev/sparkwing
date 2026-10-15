@@ -64,7 +64,7 @@ func TestNodehostUsageReachesCapacityRecord(t *testing.T) {
 			}
 
 			recordRunProfile(ctx, localState{st: st}, "demo", "r1", nil, "", runCharge{}, false, start, start.Add(2*time.Second))
-			p, err := st.GetPipelineProfile(ctx, "demo", "build")
+			p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "build")
 			if err != nil || p == nil {
 				t.Fatalf("profile = %+v, %v", p, err)
 			}

@@ -304,5 +304,8 @@ func readableBlobsTx(ctx context.Context, tx *storeTx, team Team, request blob.H
 			result.Present = append(result.Present, digest)
 		}
 	}
+	if !request.Budget.Deadline.IsZero() && !tx.now().Before(request.Budget.Deadline) {
+		return blob.Presence{}, blob.ErrBudget
+	}
 	return result, nil
 }

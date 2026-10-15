@@ -66,7 +66,7 @@ func TestConcurrency_StateDerivesWaiterPositions(t *testing.T) {
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
 
-	st, err := s.GetConcurrencyState(ctxT(t), "k")
+	st, err := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctxT(t), "k")
 	if err != nil {
 		t.Fatalf("GetConcurrencyState: %v", err)
 	}

@@ -132,6 +132,7 @@ type NodeRow struct {
 	StartedAt             *time.Time
 	FinishedAt            *time.Time
 	CancelRequestedAt     *time.Time
+	CancelReason          string
 	StateSeq              int64
 	StateDigest           string
 	StateActor            Actor
@@ -463,7 +464,7 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 	if err := writeNodeStateTx(ctx, tx, team, row); err != nil {
 		return Applied{}, err
 	}
-	if result := change.Extra.Result; result != nil {
+	if result := change.Extra.Result; result != nil && !edge.RequestOnly {
 		var failure []byte
 		if result.Failure != nil {
 			if err := validateRecordedFailure(row.Ref, result.Failure); err != nil {
@@ -660,6 +661,9 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 	if edge.RequestOnly {
 		if row.CancelRequestedAt == nil {
 			row.CancelRequestedAt = &now
+			if change.Extra.Result != nil {
+				row.CancelReason = change.Extra.Result.Reason
+			}
 		}
 		return nil
 	}
@@ -774,7 +778,7 @@ func writeNodeStateTx(ctx context.Context, tx *storeTx, team Team, row NodeRow) 
 	if row.ClaimedBy != "" {
 		holder = row.ClaimedBy
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE nodes SET status=?,outcome=?,claimed_by=?,capability_prefix=?,owner_capability_prefix=?,generation=?,attempt=?,disruptions=?,ready_at=?,queue_started_at=?,lease_expires_at=?,started_at=?,finished_at=?,cancel_requested_at=?,state_seq=?,state_digest=?,state_actor=?,expansion=? WHERE team=? AND run_id=? AND node_id=? AND state_seq=?`, row.Status, row.Outcome, holder, row.CapabilityPrefix, row.OwnerCapabilityPrefix, row.Generation, row.Attempt, row.Disruptions, timeNS(row.ReadyAt), timeNS(row.QueueStartedAt), timeNS(row.LeaseExpiresAt), timeNS(row.StartedAt), timeNS(row.FinishedAt), timeNS(row.CancelRequestedAt), row.StateSeq, row.StateDigest, actor, row.Expansion, team, row.Ref.RunID, row.Ref.NodeID, row.StateSeq-1)
+	result, err := tx.ExecContext(ctx, `UPDATE nodes SET status=?,outcome=?,claimed_by=?,capability_prefix=?,owner_capability_prefix=?,generation=?,attempt=?,disruptions=?,ready_at=?,queue_started_at=?,lease_expires_at=?,started_at=?,finished_at=?,cancel_requested_at=?,cancel_reason=?,state_seq=?,state_digest=?,state_actor=?,expansion=? WHERE team=? AND run_id=? AND node_id=? AND state_seq=?`, row.Status, row.Outcome, holder, row.CapabilityPrefix, row.OwnerCapabilityPrefix, row.Generation, row.Attempt, row.Disruptions, timeNS(row.ReadyAt), timeNS(row.QueueStartedAt), timeNS(row.LeaseExpiresAt), timeNS(row.StartedAt), timeNS(row.FinishedAt), timeNS(row.CancelRequestedAt), row.CancelReason, row.StateSeq, row.StateDigest, actor, row.Expansion, team, row.Ref.RunID, row.Ref.NodeID, row.StateSeq-1)
 	if err != nil {
 		return err
 	}

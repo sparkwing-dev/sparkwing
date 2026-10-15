@@ -8,13 +8,17 @@ const DefaultClaimWait = 24 * time.Hour
 type Demand struct {
 	Selector []string
 
+	AllowedPools []string
+
+	Prefers []string
+
 	Repo *Repository
 
 	Trigger bool
 	Request Resources
 }
 func DetectTools(lookPath func(string) (string, error)) []string
-func Evaluate(p Profile, d Demand) Verdict
+func Evaluate(profile Profile, demand Demand) Verdict
 func Fits(capacity, available, request Resources) Verdict
 func IsKnownTool(name string) bool
 var KnownTools = []string{
@@ -23,6 +27,8 @@ var KnownTools = []string{
 }
 func ParseAccept(patterns []string) (RepoFilter, error)
 type Profile struct {
+	ReservedPools []string
+
 	Name, Class, Location string
 
 	Labels []string
@@ -36,6 +42,7 @@ type Profile struct {
 type Reason string
 const ReasonAvailability Reason = "availability"
 const ReasonRepo Reason = "repo"
+const ReasonReservation Reason = "reservation"
 const ReasonSelector Reason = "selector"
 const ReasonShape Reason = "shape"
 const ReasonTrustedPlacement Reason = "trusted_placement"
@@ -57,6 +64,8 @@ func ToolLabels(names []string) []string
 const ToolPrefix = "tool:"
 type Verdict struct {
 	Reason Reason
+
+	PreferenceScore int
 
 	Term string
 }

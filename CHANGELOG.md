@@ -110,10 +110,22 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
+- **controller wire:** reconciliation preserves materialized result identities by run, job and state sequence. Private snapshots retain sealed guard refusals alongside cancellation, using the store's scheduling projection. Native owner consumption and transactional result copying remain integration requirements.
+
+- **documentation:** guide route examples are checked against the final shared HTTP policy. Source, Actions, limits and log guides use claim-scoped source/data access, job routes and deployment operator namespaces. Native runtime boundaries remain explicit.
+
 - **cli (Breaking):** Profile selection, edits and completion use the final shared machine parser. Profiles contain only controller connections. Locked edits preserve concurrent additions and refuse to delete a connection changed during credential revocation. Auth probes use the shared authenticated run reader and refuse redirects or malformed success responses. The unused `configure init` handler is deleted. See [migration](docs/migrations/_unreleased.md#machine-connection-profiles).
 - **cli (Breaking):** Command parsing and help use the final command registry
   Removed command families and unknown flags fail before state access. Pipeline arguments require `--`. Discovery uses `--search`, `--all`, and positive page limits. Controller connections use `profiles add|list|show|set|remove` and come only from machine configuration. Run flags use `--sw-no-memo` and `--sw-allow-risk`. Cancellation uses the shared controller API for local and remote runs and preserves its applied result.
+- **store:** [(Breaking)](docs/migrations/_unreleased.md#unit-recovery-requires-the-elected-reaper-lease) removed the unfenced node and trigger reapers. `Store.ReapUnits` requires the current `controller.reaper` lease and returns tagged unit recovery results. Remote lease loss recovers within the same run. A started local owner fails in place.
 - **store (Breaking):** Remove the unused `Store.CreditRateTableSet` getter. Read rate-table presence through `CreditSettings.RateTableSet` with the prices from the same snapshot. See [migration guide](docs/migrations/_unreleased.md#rate-table-presence-uses-the-settings-snapshot).
+- **store (Breaking):** Move `TrustLocalBuilds` and `SetTrustLocalBuilds` from Store to Tenant. Build-trust policy stays scoped to the selected team. See [migration guide](docs/migrations/_unreleased.md#build-trust-uses-tenant-handles).
+- **store:** Deployment billing totals use immutable awards and intervals to exclude refundable reservations without advancing billing checkpoints. Operational run retention cannot change the totals, and storage time stays outside compute seconds.
+- **store (Breaking):** Remove the unused `Store.RunFinished` pruning query. Leased retention and tagged log streams own log lifetime. See [migration guide](docs/migrations/_unreleased.md#financial-totals-use-persisted-awards).
+- **store (Breaking):** Remove `Store.RecordCreditGrant`. Submit grant requests through a tenant handle. See [migration guide](docs/migrations/_unreleased.md#grant-requests-use-tenant-handles).
+- **store:** Read charge history from the final capability column and return tenant attribution on grant and charge history. Ledger history remains readable after run retention.
+- **store (Breaking):** Remove `Store.CreditBalanceMicro`, `Store.CreditState` and `Store.ListCreditGrants`. Read balances, billing state and grant history through a tenant handle. See [migration guide](docs/migrations/_unreleased.md#billing-reads-use-tenant-handles).
+- **store (Breaking):** Remove `Store.CreditRateTableSet`, `Store.CreditRateMicroPerSecond`, `Store.CreditGraceSeconds` and `Store.SetCreditRateTable`. Read presence, prices and grace through `CreditSettings` in one snapshot. Write rate tables through `SetCreditSettings`. See [migration guide](docs/migrations/_unreleased.md#rate-table-presence-uses-the-settings-snapshot).
 - **store:** Data authorization can run inside the transaction that owns a write. Receipt, reference, revocation and holder changes in that transaction govern access before commit.
 - **store + controller (Breaking):** Abandoned execution logs close as incomplete through `Operator.SealAbandonedLogStreams` under the maintenance lease. Tagged job streams keep their final tail grace, and owner streams check their own unit fences. The old `Store.AbandonedNodeLogs` API and periodic node-log sweep are removed. See [migration guide](docs/migrations/_unreleased.md#abandoned-logs-use-tagged-streams).
 - **store + controller (Breaking):** Remove the cache service's `POST /internal/egress/totals` endpoint and `Store.RecordEgressTotals` / `PruneEgressTotals`. Cache-service totals stay in memory. Tenant usage uses additive replica rows.
@@ -178,6 +190,9 @@ unlock.
 
 - **cli:** Keep local controller retries under the shared route policy and bind retained here authority to its API socket
 - **controller client:** Preserve an absent recorded recovery failure without synthesizing an error
+- **store:** Replaying an output or manifest commit accepts the same expiry instant in another timezone and preserves omitted metadata across restarts
+- **store:** Blob collection checks the persisted maintenance lease on empty passes and while tombstones are within their grace period. Expired and superseded collectors return a fence error.
+- **store:** HasMany returns a budget error when its final read reaches the deadline, with no partial presence result.
 - **store (Breaking):** Verified App redelivery returns the original run for each pipeline without requiring a client idempotency key
   One delivery can start several pipelines. The schema drops uniqueness on unsigned delivery headers, replay lookups accept only the signed replay key, and `TriggerWebhookDeliveryIndexName` is removed. Idempotent admission also rechecks authority after input hashing, so an expired credential cannot recover a prior run.
 - **store:** Memo output commits enforce the 16 MiB output cap. Oversized persisted memo outputs produce a cache miss before copying result edges. Required output lookups report corruption.
@@ -230,6 +245,7 @@ unlock.
 
 ### Removed
 - **cli (Breaking):** Remove `runs bounce` and `debug rerun`, including their help entries and rerun pod implementation
+- **store + controller (Breaking):** Removed `Store.ExpiredOutputRuns`, `Store.ReleaseRunOutputs`, `Store.ForgetRunOutputs`, `ExpiredOutputRun` and the store's duplicate `OutputRetention` constant. The controller no longer runs the old output-key sweep. Leased record expiry and blob reachability GC own output lifetime and preserve live copies after their source run expires.
 - **store + controller + cli (Breaking):** Remove dispatch snapshots and `sparkwing debug rerun`
   The store no longer exposes `NodeDispatch`, `WriteNodeDispatch`, `GetNodeDispatch` or `ListNodeDispatches`. The controller no longer serves the node `/dispatch` and `/dispatches` routes.
 - **runs bounce (Breaking):** Removed the command, controller routes and store APIs for restarting a job in place

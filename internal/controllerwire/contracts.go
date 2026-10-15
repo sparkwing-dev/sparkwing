@@ -212,9 +212,17 @@ type ExpansionAccepted struct {
 
 // ReuseSource proposes a persisted source; its outcome is never caller-supplied.
 type ReuseSource struct {
-	Policy  string                  `json:"policy"`
-	Attempt runspec.AttemptIdentity `json:"attempt"`
-	Record  blob.RecordKey          `json:"record"`
+	Policy  string                    `json:"policy"`
+	Attempt runspec.AttemptIdentity   `json:"attempt"`
+	Record  blob.RecordKey            `json:"record"`
+	Result  *MaterializedResultSource `json:"result,omitempty"`
+}
+
+// MaterializedResultSource names a committed terminal result independently of execution attempts.
+type MaterializedResultSource struct {
+	RunID    string `json:"run_id"`
+	JobID    string `json:"job_id"`
+	StateSeq int64  `json:"state_seq"`
 }
 
 type ReconcileRequest struct {
@@ -342,6 +350,7 @@ type ScheduleSnapshot struct {
 	RunID           string              `json:"run_id"`
 	StoreNow        time.Time           `json:"store_now"`
 	CancelRequested bool                `json:"cancel_requested"`
+	GuardRefusal    string              `json:"guard_refusal,omitempty"`
 	Jobs            []ScheduleJob       `json:"jobs"`
 	Generators      []ScheduleGenerator `json:"generators"`
 	Expansions      []AcceptedExpansion `json:"expansions"`

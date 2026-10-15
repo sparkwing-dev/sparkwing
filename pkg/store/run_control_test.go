@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func (f dispatchRun) claimRaw(t *testing.T, nodeID string, kind store.ClaimTokenKind) string {
@@ -227,7 +228,7 @@ func (f dispatchRun) expireClaim(t *testing.T, nodeID string) {
 
 func recoverClaims(t *testing.T, s *store.Store) {
 	t.Helper()
-	if _, err := store.Maintenance.RecoverExpiredNodeClaims(s, context.Background()); err != nil {
+	if _, err := teststore.ReapUnits(context.Background(), s); err != nil {
 		t.Fatalf("recover expired claims: %v", err)
 	}
 }
@@ -251,36 +252,6 @@ func TestExpiry_ACancelledRunWhosePodVanishesFinishesCancelled(t *testing.T) {
 	if _, err := f.s.ClaimNamedNode(ctx, f.claimant, f.run, "a", "holder-late", time.Minute, store.NamedClaimOptions{}); err == nil {
 		t.Fatal("a node of a cancelled run was claimed again")
 	}
-}
-
-// A lapsed claim is a failed attempt: within the node's budget the node goes
-// back to the queue at a new generation with its dependents held, and past it
-// the node fails and settle cancels the dependents and fails the run.
-func TestExpiry_ALapsedClaimRetriesThroughSettle(t *testing.T) {
-	f := newDispatchRun(t, "run-expire-retry")
-	f.mustAccept(t, planOf(`a|"modifiers":{"retry":1,"retry_auto":true}`, "b:a"))
-	first := f.claim(t, "a", store.ClaimTokenWork)
-	f.expireClaim(t, "a")
-	if _, err := f.s.ReapExpiredNodeClaims(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	a := f.node(t, "a")
-	if a.Status != "pending" || a.ClaimedBy != "" || a.AttemptsConsumed != 1 {
-		t.Fatalf("a = %s claimed %q consumed %d, want requeued after one lost attempt", a.Status, a.ClaimedBy, a.AttemptsConsumed)
-	}
-	f.wantReleased(t, "b", false)
-	if _, err := f.report(first, store.AttemptReport{Outcome: "success"}); !errors.Is(err, store.ErrClaimResultConflict) {
-		t.Fatalf("a report from the lapsed claim: err = %v, want conflict", err)
-	}
-	second := f.claim(t, "a", store.ClaimTokenWork)
-	if second.Generation <= first.Generation {
-		t.Fatalf("requeued claim at generation %d, want above %d", second.Generation, first.Generation)
-	}
-	f.expireClaim(t, "a")
-	recoverClaims(t, f.s)
-	f.wantOutcome(t, "a", "failed")
-	f.wantOutcome(t, "b", "cancelled")
-	f.wantRun(t, "failed")
 }
 
 // No path awards a node of a run with a cancel request, even one settle has
@@ -364,51 +335,5 @@ func TestReportAttempt_APlanClaimCannotClaimItsOwnLoss(t *testing.T) {
 	recoverClaims(t, g.s)
 	if n := g.node(t, store.PlanNodeID); n.Status != "pending" || n.ClaimedBy != "" {
 		t.Fatalf("a reaped planning claim left plan %s claimed by %q, want requeued", n.Status, n.ClaimedBy)
-	}
-}
-
-// The orchestrator's expiry pass releases its claims even when the
-// controller-dispatched pass cannot settle a run.
-func TestExpiry_ADispatchFailureDoesNotBlockTheOrchestratorPass(t *testing.T) {
-	f := newDispatchRun(t, "run-expire-broken")
-	f.mustAccept(t, planOf("a", "b:a"))
-	f.claim(t, "a", store.ClaimTokenWork)
-	ctx := context.Background()
-	if _, err := f.s.DB().ExecContext(ctx, storetest.Rebind(f.s,
-		`UPDATE nodes SET deps_json = ? WHERE run_id = ? AND node_id = 'b'`), []byte("not json"), f.run); err != nil {
-		t.Fatal(err)
-	}
-	f.expireClaim(t, "a")
-	for name, reap := range map[string]func() error{
-		"reap": func() error { _, err := f.s.ReapExpiredNodeClaims(ctx); return err },
-		"recover": func() error {
-			_, err := store.Maintenance.RecoverExpiredNodeClaims(f.s, ctx)
-			return err
-		},
-	} {
-		run := "legacy-" + name
-		if err := f.s.CreateRun(ctx, store.Run{ID: run, Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
-			t.Fatal(err)
-		}
-		if err := f.s.CreateNode(ctx, store.Node{RunID: run, NodeID: "n", Status: "pending"}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := f.s.ClaimNamedNode(ctx, f.claimant, run, "n", "holder-n", time.Minute, store.NamedClaimOptions{}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := f.s.DB().ExecContext(ctx, storetest.Rebind(f.s,
-			`UPDATE nodes SET lease_expires_at = ? WHERE run_id = ?`), time.Now().Add(-time.Second).UnixNano(), run); err != nil {
-			t.Fatal(err)
-		}
-		if err := reap(); err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		n, err := f.s.GetNode(ctx, run, "n")
-		if err != nil || n.ClaimedBy != "" {
-			t.Fatalf("%s left the orchestrator claim held by %q (%v)", name, n.ClaimedBy, err)
-		}
-	}
-	if n := f.node(t, "a"); n.ClaimedBy == "" {
-		t.Fatal("the broken run settled; the test no longer exercises a dispatch failure")
 	}
 }

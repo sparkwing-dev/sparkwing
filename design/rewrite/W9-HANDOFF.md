@@ -1,3 +1,151 @@
+# W9 integration-merge, result identity and guide continuation
+
+Started at 3718486f4 with an integration merge in progress. W9 remains incomplete.
+No Git write, Sparkwing executable, service, pipeline or release ran. Writes stayed
+inside this worktree and /tmp/sw-astra-W9, which is deleted before reporting.
+
+## Merge resolutions
+
+All six conflict contents are resolved. Retained NewLogReader in the client API
+snapshot and combined both migration-note additions. Kept the already-deleted
+legacy doctor and capacity files deleted. Their incoming copies contained 928
+lines (320 doctor test, 304 capacity implementation, 304 capacity tests). Those
+are rejected merge-side lines, not new deletions against this session's HEAD.
+The index still reports those six unmerged paths because the brief forbids Git
+writes. The lead must stage the resolutions and complete the merge.
+
+## Implemented
+
+- ReuseSource.Result transports the existing C1 MaterializedResultSource through
+  run_id, job_id and state_seq. It preserves a terminal result with no execution
+  attempt, including state sequences above JavaScript's exact-number range.
+  The controller projects both directions and leaves lineage, read-edge,
+  exclusivity and state-fence validation to C1. Ordinary attempt sources remain
+  unchanged. Transactional record copying still needs the W1/W7 binding.
+- ScheduleSnapshot.GuardRefusal carries the existing C1 sealed guard refusal
+  alongside cancellation. The controller returns the consistent projection
+  instead of an unavailable error. Cancellation and guard evidence both survive.
+  W3 must consume both before dispatch in its native remote owner.
+- These are local W9 C3 contract additions, documented in c3-controller-wire.md.
+  No foreign contract shape, authorization rule, retry policy or route changed.
+  OpenAPI and embedded documentation were regenerated.
+- Added an HTTP guide check against capability.Routes. It checks explicit
+  method/path examples, normalizes parameter names, retains methods and reports
+  file/line failures. Migration history remains excluded. It caught 22 stale
+  examples before the guide changes and passes all 69 retained references.
+- Removed cache-service deployment recipes, split claim routes, cache grants,
+  offer rounds, RetryAuto guidance, old node routes and conflicting output,
+  annotation, retention and billing limits. Source/Actions guides describe live
+  claim authority, consent and direct acquisition. Native boundaries stay stated.
+  Current docs/ guides contain no sparkwing-cache, gitcache, cache-grant-key or
+  /nodes/ path. Historical migration pages retain their original context.
+- The existing dead-token check now refuses removed cache recipes in published
+  guides/help and RetryAuto on its shared surfaces. Cache recipe rules stay in
+  the guide check because auxiliary scans also read still-live foreign runtime
+  source and chart documentation. Their retirement remains W7/W8 work.
+
+## Tests and deletions
+
+New acceptance checks pass on fake HTTP and api.sock transports:
+TestSurfaceMaterializedResultTransport and TestSurfaceSnapshotPreservesGuardRefusal.
+They preserve a memoized job with attempt zero, exact source state sequence and
+both cancellation states. No native T1 cell was unskipped.
+
+Ported the old unrepresentable-guard snapshot regression to the final field.
+The SQLite controller test preserves refusal and cancellation. Corruption,
+foreign-team, revoked-owner and stale-lease tests remain active.
+
+The invariants are: a reused result retains its exact persisted job/state identity
+without inventing an execution attempt, and a sealed guard refusal cannot vanish
+from the private scheduling projection. The properties vary source names and
+state sequences, and guard reasons/pass/cancellation respectively. Three-second
+fuzz runs with two workers completed 4,317 and 6,223 executions. Overlays dropping
+either projection make its seeds fail. Production source passes.
+
+Deleted pkg/controller/triggers_list_test.go, 134 lines calling the previously
+removed Client.ListTriggers. That file prevented the controller test package
+from compiling. Final run filtering remains covered through RunReader and the
+surface run-query acceptance. No removed trigger-list API was restored.
+
+Gross source-guide deletions are 1,115 lines against the starting HEAD, excluding
+mirrors. No additional whole production file was deleted. The two conversion
+helpers replace inline projections in the existing controller adapter.
+
+## Verification
+
+All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W9. Tests used -p 4 at most.
+Recreate cache and tmp children there before reproducing checks.
+
+- Whole-repository go build -p 4 ./... passes.
+- Vet passes for cmd/sparkwing, internal/doccheck, controllerwire, apispec,
+  pkg/controller, controller/client and tests/acceptance.
+- Full clisurface, controllerwire, doccheck, apispec and apiref tests pass.
+- All controller ^TestEngine tests and both new fuzz properties pass.
+- Client ^TestEngineClient and ^TestQueue pass. CLI ^TestDoctor, ^TestSizing,
+  command-reference and help selections pass.
+- Acceptance ^TestSurface and ^TestProtocolSchema pass, including both new cells.
+- Focused embedded-doc mirror, changelog, privacy, symbol, link and guide tests pass.
+- Full source doccheck passes: 308 CLI invocations, 69 explicit HTTP route
+  references, valid YAML, 397 resolved links and no schema/sidebar/auxiliary drift.
+  Its 72 Go blocks remain partial/non-self-contained, not full-program evidence.
+- commentcheck -base main is clean across 1,289 Go files. sleepcheck, mirror,
+  regenerated client snapshot comparison and diff --check pass.
+
+The broader tests/acceptance run failed in W5's native TypeScript cell because
+sdk/typescript/node_modules/typescript/bin/tsc is absent. The failure was preserved;
+no native pass or full acceptance pass is claimed. The first new HTTP fixture
+also omitted required execution fields and was corrected. An initial globally
+shared cache-token rule reached foreign build code; its final scope is the
+published guide/help check. Full doccheck then passed. These are separate from
+product behavior and do not change foreign runtime code.
+
+## Amendment and handoff audit
+
+Every amendments-1.md row naming W9 and every W9 handoff was checked against the
+retained implementation and prior ledger. Completed adapters were not rebuilt.
+
+| Rows / handoff | W9 state and remaining integration |
+| --- | --- |
+| A1-03/08/09/15/18/20/22/55 | Existing strict errors, claims, cancellation, ordinal delivery and authority boundaries retained. Native C1/C2 authorization and claims still need composition. |
+| A1-13/16/17/50 | Added result-state identity and sealed guard transport to existing private reconciliation/expansion/snapshot clients. C1/W7 result-copy binding and W3 native consumption remain. |
+| A1-14 | ReadFailure retains the persisted JobFailure. JobResult still lacks the complete failure/stage payload for reports; its existing Error field cannot reconstruct that stage. This needs the remaining W9 C3 report cut and W2/W3 consumption. |
+| A1-10/11/19; execution-identity and alias handoffs | Existing installer/inspection adapters retained. W3 source/host and W8 engine resolution remain unbound. Initial/local/detached execution, exact-engine/granted-identity construction and native alias execution remain unfinished. |
+| A1-29/30/34/37 | Existing signed-data/cache interfaces retained. Native remote-cache/publication composition, logical record copying and legacy service/build/chart retirement remain with W1/W3/W7/W8 and W9 callers. |
+| A1-38/39/40/41/49 | Existing cloud payload, enrollment, foreground and lifecycle adapters retained. Unified runner startup, native local services/endpoints, service refresh and schedule tick composition remain. |
+| A1-43/45/47 | Existing exact-upgrade, settings and guard behavior retained. Native engine/index, captured schedule intake and timer ownership remain. |
+| A1-51 | Guide/API-schema regeneration and final route/removed-recipe checks advanced. Remaining API body mappings and native consumer retirement are open. |
+| A1-52; Windows packaging handoff | W9 packaging/publication implementation remains delivered from the prior session. Native Windows executions and publication credentials remain unverified. |
+| A1-53 | New fake-transport and SQLite component evidence only. Native platform/placement/backend drivers and real-repository QA remain T1/lead work. |
+
+The new W1/W9/W3 retry-attempt handoff is still blocked on its C1/C3 amendment.
+Invariant: a report affects only its named attempt, and replay cannot consume a
+later attempt under the same claim. C1 NodeTransition still has no source attempt
+field. W9 did not invent a digest salt or redefine retry timing to conceal it.
+
+Other retained contract gaps are audited here reason, GitHub URL-to-numeric-ID
+resolution, source-bundle ownership, publication result copying, sizing reset,
+member annotation writes, local API endpoint projection, schedule tick/install
+and runner pool registration. No new human decision is requested.
+
+## Shared files and handoff
+
+Minimal W2 production projections: pkg/controller/engine_contract.go,
+engine_store.go and engine_snapshot.go. Shared tests: engine_snapshot_test.go,
+new engine_materialized_source_test.go and deletion of triggers_list_test.go.
+Other shared changes: internal/doccheck/{main,apiroutes,bannedtokens} and their
+tests, tests/acceptance/materialized_result_contract_test.go, CHANGELOG.md,
+api/openapi.yaml, generated pkg/docs artifacts, the W9 contract and this handoff.
+W9's remaining files are source docs and controllerwire/contracts.go.
+
+The only new mechanisms are the requested C3 transport fields and read-only
+source-guide checks. No runtime service, environment variable, flag, deadline,
+capability restriction, compatibility alias or replacement authority was added.
+Git identity/config remains unchanged. The lead owns independent review, staging,
+merge completion, native gates and landing. Scratch is removed at handoff.
+
+---
+
 # W9 OpenAPI and Windows release packaging continuation
 
 Started clean at c7e91e446. W9 remains incomplete. Changes stay in this worktree

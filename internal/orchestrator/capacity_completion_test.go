@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestRecordRunProfileRequiresCompletedContinuousExecution(t *testing.T) {
@@ -26,7 +27,7 @@ func TestRecordRunProfileRequiresCompletedContinuousExecution(t *testing.T) {
 			}
 			recordRunProfile(t.Context(), localState{st: st}, "completion", "r1", nil, "", runCharge{}, false, start, start.Add(time.Second))
 			for _, node := range []string{"", "build", "good"} {
-				profile, err := st.GetPipelineProfile(t.Context(), "completion", node)
+				profile, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "completion", node)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -49,7 +50,7 @@ func TestRecordRunProfileDoesNotAddCommandMemoryToTreeSample(t *testing.T) {
 	}}})
 	recordRunProfile(t.Context(), localState{st: st}, "tree-memory", "r1", nil, "", runCharge{}, false, start, start.Add(time.Second))
 	for _, node := range []string{"", "build"} {
-		profile, err := st.GetPipelineProfile(t.Context(), "tree-memory", node)
+		profile, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "tree-memory", node)
 		if err != nil || profile == nil || profile.SampleCount != 1 || profile.PeakMemoryBytes != 400 {
 			t.Fatalf("profile for %q = %+v, %v; want 400 bytes", node, profile, err)
 		}

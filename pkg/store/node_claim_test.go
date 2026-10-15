@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func seedRunAndNode(t *testing.T, s *store.Store, runID, nodeID string) {
@@ -307,11 +308,11 @@ func TestNodeClaim_ReapReleasesExpiredClaim(t *testing.T) {
 	}
 	expireNodeClaim(t, s, "run-1", "node-a")
 
-	pairs, err := s.ReapExpiredNodeClaims(ctx)
+	pairs, err := teststore.ReapUnits(ctx, s)
 	if err != nil {
-		t.Fatalf("ReapExpiredNodeClaims: %v", err)
+		t.Fatalf("ReapUnits: %v", err)
 	}
-	if len(pairs) != 1 || pairs[0] != [2]string{"run-1", "node-a"} {
+	if len(pairs) != 1 || (pairs[0].RunID != "run-1" || pairs[0].NodeID != "node-a") {
 		t.Fatalf("unexpected reap output: %v", pairs)
 	}
 

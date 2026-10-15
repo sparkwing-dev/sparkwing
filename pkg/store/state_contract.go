@@ -26,6 +26,7 @@ type RunRow struct {
 	Owner             *OwnerLeaseRef
 	CreatedAt         time.Time
 	CancelRequestedAt *time.Time
+	CancelReason      string
 	StartedAt         *time.Time
 	FinishedAt        *time.Time
 	StateSeq          int64

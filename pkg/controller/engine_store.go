@@ -130,6 +130,22 @@ func engineApplied(applied store.Applied) controllerwire.Applied {
 	return controllerwire.Applied{Replayed: applied.Replayed, CancelRequested: applied.CancelRequested, StateSeq: applied.StateSeq, Generation: applied.Generation, Attempt: applied.Attempt}
 }
 
+func reconcileSourceForStore(source controllerwire.ReuseSource) store.MaterializeSource {
+	result := store.MaterializeSource{Kind: store.SourcePolicy(source.Policy), Source: source.Attempt, Record: source.Record}
+	if source.Result != nil {
+		result.Result = &store.MaterializedResultSource{Ref: store.NodeRef{RunID: source.Result.RunID, NodeID: source.Result.JobID}, StateSeq: source.Result.StateSeq}
+	}
+	return result
+}
+
+func engineReuseSource(source store.MaterializeSource) controllerwire.ReuseSource {
+	result := controllerwire.ReuseSource{Policy: string(source.Kind), Attempt: source.Source, Record: source.Record}
+	if source.Result != nil {
+		result.Result = &controllerwire.MaterializedResultSource{RunID: source.Result.Ref.RunID, JobID: source.Result.Ref.NodeID, StateSeq: source.Result.StateSeq}
+	}
+	return result
+}
+
 func engineAdmission(result store.AdmissionResult) controllerwire.CreateRunResponse {
 	return controllerwire.CreateRunResponse{RunID: result.RunID, Number: result.Number, Request: result.Request, HereBearer: string(result.HereBearer), Replayed: result.Replayed}
 }

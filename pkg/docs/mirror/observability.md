@@ -63,26 +63,23 @@ observe execution rather than govern it. The warning does not repair the
 missing state. It uses the underlying log path, so loss of that log path can
 also prevent delivery of this diagnostic.
 
-## Claim-round events
+## Lifecycle events
 
-When a node becomes ready the controller opens a claim round of at most five
-seconds and writes its transitions to the run stream. The events carry the
-node's requirements, preferred labels, resources, slots and run priority.
-Events never carry a credential, token prefix, principal, holder, or internal
-controller ID. An execution-start request accepts at most 128 bytes for
-`executor_name`. Attempt display names strip terminal escapes and inline
-control characters.
+The store writes job lifecycle events in the transaction that changes the job.
+Application retries retain their claim and advance the attempt ordinal.
+Lease-lapse recovery records a separate disruption. Hosts do not emit a second
+terminal event after reporting a result.
 
 | Event | Meaning |
-|---|---|
-| `executor_offer_round_opened` | The controller opened a five-second claim round for the node. |
-| `executor_offer_round_empty` | No runner claimed the node before the round ended, so the dispatcher's own fallback took it (`outcome: coordinator_fallback`). |
-| `credits_unpriced_class` | A claim was refused because the node's cpu request is above the largest class the credit rate table prices. Carries `cores` and `max_cores`. |
+| --- | --- |
+| `job_started` | The awarded job began an execution attempt. |
+| `job_retrying` | An application failure started the next attempt under the same claim. |
+| `job_requeued` | Lease recovery released the job for another scheduling pass. |
+| `job_succeeded`, `job_failed`, `job_cancelled` | A terminal execution result committed. |
+| `job_skipped`, `job_superseded`, `job_memoized` | A scheduling or reuse decision committed. |
 
-Runs recorded before the assisted-offer protocol was removed may also hold
-`executor_offer_received`, `executor_offer_expired`,
-`executor_offer_declined`, `executor_offer_awarded` and `executor_selected`
-events; nothing emits them now.
+Exact replay creates no second event. Native host and controller integration
+must preserve these store decisions.
 
 ## Failure reasons
 
@@ -138,9 +135,11 @@ membership, holder, token, reservation, and internal executor identifiers.
 Public event reads also omit claim generations from attempt-lifecycle
 payloads.
 
-The ordered event stream records `execution_attempt_started`, `agent_lease_lost`, pre-start requeue or
-post-start scheduling with availability, and exhaustion or another explicit
-no-retry reason. These payloads carry attribution, not credentials.
+The store records `job_started`, `job_retrying`, `job_requeued` and terminal job
+events in each transition's transaction. Owner recovery records `run_requeued`.
+A started lease lapse closes the attempt with `agent_lost` and consumes one
+disruption within the same run. An unstarted lapse consumes none. These payloads
+carry attribution, not credentials.
 
 Remote logs use immutable substreams keyed by claim generation and execution
 attempt. A stale append is rejected, while an append that had already passed
@@ -151,115 +150,54 @@ trigger-owned node work, or `trigger_generation` alone for `_compile` output.
 
 ### API
 
-`GET /api/v1/runs/{id}/nodes` returns each node with its reason and exit
-code as top-level fields:
+`GET /api/v1/runs/{run}` returns a safe public run view with `jobs`,
+`attempts`, optional `steps` and tagged log subjects. Job detail uses
+`GET /api/v1/runs/{run}/jobs/{job}`. Display fields include status, outcome,
+state sequence, generation, attempt and timestamps. Raw declarations and
+execution credentials are excluded.
 
-```json
-{
-  "nodes": [
-    {
-      "id": "build",
-      "status": "done",
-      "outcome": "failed",
-      "error": "pod sparkwing-build-0 OOMKilled",
-      "failure_reason": "oom_killed",
-      "exit_code": 137
-    }
-  ]
-}
-```
+Recovery reads the persisted masked failure through
+`GET /api/v1/runs/{run}/jobs/{job}/failure` with `source_generation` and the
+authorized recovery read edge. A status string cannot substitute for that
+record. The failure contains its canonical error, job and stage.
 
-Logs are not part of this payload; fetch them separately with
-`sparkwing runs logs --run <id>`.
+Fetch logs separately with `sparkwing runs logs --run RUN`.
 
 ## Log completeness
 
-A node's log can lose lines between the node process and the store: a
-write that fails past its retries, a runner killed mid-stream, and
-similar. The node host receives the node's log records over the node
-protocol, numbers every line before it stores it, counts a line it cannot
-store as dropped, and seals the log when the node process exits.
+A log page contains `records`, `next_cursor`, `truncated` and `complete`.
+An incomplete page retains a cursor even when it has no records. A truncated
+page requires another read immediately. Follow polls only after reaching a
+nontruncated incomplete page. Completion requires both persisted terminal state
+and final log segments.
+
+Each output record names exactly one tagged subject. Job-attempt subjects retain
+team, run, job, generation and positive attempt ordinal. Trigger, plan and eval
+logs use owner-unit subjects with their own generation. Eval logs also name the
+terminal source job and source generation. They never invent a job or attempt
+for work that ran before one existed.
+
+Lifecycle event records carry their event kind and optional job/step attribution
+separately from output subjects. The cursor retains every selected subject,
+including descendant runs when a tree read is requested.
 
 ### Node logs kept as segments
 
-Every cluster runner keeps its nodes' logs as segments the controller
-stores when the controller advertises them (`logs.segments` in
-`GET /api/v1/capabilities`): a Kubernetes Job, warm runner, self-hosted
-agent, GitHub Actions runner, launcher Job, and the trigger runner's
-in-process nodes and compile output. A run started on a laptop whose
-profile keeps its state on that controller uploads its nodes' segments
-from the laptop the same way, and turns its live view on from its run
-heartbeat. The runner appends every line to a spool file and uploads a
-gzip-compressed segment every 10 seconds or 1 MiB, whichever comes first;
-an idle node uploads nothing. When the binary exits, the runner uploads
-the last segment and posts the controller a manifest that lists every
-segment with its SHA-256 and seals the log. The runner asks for each
-segment's upload URL once the segment is compressed
-(`POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments`), and the
-controller signs it for that segment's exact size and Content-MD5 and
-charges the team's log storage that size, presigned into its cache
-bucket when it has `--cache-blob-store`, otherwise signed against its
-own output directory. A node's stored segments are capped at 65 MiB.
-While the controller is unreachable the runner keeps cut segments in
-its spool and retries them at each later cut, so uploads pause for the
-outage and a runner lost during it loses what it had not uploaded.
-Segments live under
-`logs/<class>/teams/<team>/runs/<run>/<node>/a<attempt>-g<generation>/`,
-where `<class>` is the retention class (see
-[self-hosting.md](self-hosting.md#node-log-retention)).
+The log contract cuts masked segments at the shared size or interval, flushes
+on completion and records a manifest. Signing uses
+`POST /api/v1/claims/{claim}/log-segments` under the current tagged subject and
+claim fence. The controller selects retention class and storage keys. Segment
+PUT URLs grant no read authority.
 
-A controller with neither a cache bucket nor an output directory keeps no
-node logs: its runners keep each log on their own disk, and a laptop run
-against it fails at start naming the controller.
-`sparkwing profiles show --profile NAME` inspects the saved connection.
-It does not probe log retention. Use a controller run/log observation to verify
-that its persisted segments remain readable. A laptop run whose state stays local writes its node logs
-under `$SPARKWING_HOME/runs/`, where `sparkwing dashboard` reads them.
+Reads through `GET /api/v1/runs/{run}/logs` and
+`GET /api/v1/runs/{run}/jobs/{job}/logs` reauthorize each page. Live ring gaps
+fall back to persisted segments. Log reads remain controller-proxied and exempt
+from the team's daily data-download cap. Retention classes expire independently
+of the newest-successful run pin.
 
-A runner pushes a node's lines to the controller's live ring only while
-a viewer watches the node: the dashboard's log stream or `sparkwing runs
-logs --follow` holds a 30-second watch and renews it while open. The
-runner learns of the watch from replies it already receives: the node
-claim heartbeat (every 3 to 5 seconds), the run heartbeat (every 30
-seconds, for a trigger's in-process nodes) and its segment signing requests.
-On the first watched reply it pushes everything after the last uploaded
-segment, then each new line about every 250 ms, each push carrying its
-byte offset in the log; when the watch lapses it stops. An unwatched
-node sends nothing live, and a viewer sees its segments, up to 10
-seconds behind, until the runner joins.
-
-The dashboard and `sparkwing runs logs`, `--follow` and `--grep` read
-through the controller's log routes (scope `logs.read`), which serve a
-node from its segments and verify each one against the manifest's
-digest. A follow of a running node sends the segments uploaded so far,
-then the live ring from the byte where they end, so no line is sent
-twice; when the ring has already dropped bytes, it waits for the segment
-that covers them. A run's log search and the dashboard's cross-run grep
-read at most 256 MiB of logs and scan for at most 10 seconds; one that
-stops at a bound says so in its reply (`truncated`, `stopped`). A runner
-lost mid-node loses at most the segment it was filling: once the node
-has been finished for 60 seconds with no manifest, the controller writes
-one listing the segments that landed, and the log reads incomplete.
-
-Readers judge each finished node's newest execution attempt from its
-manifest, so a clean retry reads `complete` even when the attempt it
-replaced was cut off:
-
-| State | Meaning | The reader shows |
-|---|---|---|
-| `complete` | The manifest lists every line the runner stored and every segment verified. | Nothing. |
-| `incomplete` | A segment failed to upload or verify, the binary skipped sequence numbers or reported drops, or the runner was lost and the controller sealed the attempt. | `- logs incomplete: ... -` naming the reason |
-| `cut_off` | The binary was killed or never started, sent no seal after numbering its lines, or reached the 64 MiB node cap. | `- logs cut off after line N: ... -` |
-| `streaming` | The node is running, or finished less than 60 seconds ago and its manifest has not landed. | Nothing yet. |
-| `unknown` | The log store keeps no manifests: a local run's run directory. | Nothing. |
-
-`sparkwing runs logs` prints the line after the node's log and the
-dashboard draws it below the log. Neither stores it, counts it, or puts it
-in a download.
-
-Deleting a run deletes its segments, and so does deleting a team. Bucket
-lifecycle rules expire them by retention class; see
-[self-hosting.md](self-hosting.md#node-log-retention).
+Native log signing, cursor persistence, segment fallback and final completeness
+still need integration evidence. An incomplete follow returns exit 3 even if a
+separate status read already sees success.
 
 ## Failure excerpts
 
@@ -402,7 +340,7 @@ must be considered before using learned costs to reduce resource pins.
 
 ### API
 
-`GET /api/v1/runs/{id}/nodes/{nodeID}/metrics` (see
+`GET /api/v1/runs/{run}/jobs/{job}/metrics` (see
 [api-reference.md](api-reference.md)) returns the sample points:
 
 ```json
@@ -492,14 +430,17 @@ the stored attempt and matching claim have no usable executor identity.
 
 ## Data retention
 
-Finished runs (and their metrics) are kept until you prune them. There
-is no automatic time-based cleanup; use `sparkwing runs prune` to delete
-runs past a threshold or by id (see [cli-runs.md](cli-runs.md)).
+Leased maintenance removes eligible finished runs and metrics under separate
+retention policies. A self-hosted run window defaults to disabled. Each pipeline's
+newest successful run and output remain pinned, while log classes expire
+independently. Explicit pruning uses `sparkwing runs prune`. See
+[tenant limits](limits.md#what-prunes-automatically) for policy and native
+integration boundaries.
 
 ## Service logs
 
-`sparkwing-controller`, `sparkwing-cache`, `sparkwing-runner
-runner` and `sparkwing-runner launch` write their own log to stderr.
+`sparkwing-controller` and the runner's `start` and internal `launch` modes
+write service logs to stderr.
 `--log-format` picks `text` (the default) or `json`, and `--log-level` picks the
 lowest level written: `debug`, `info` (the default), `warn` or `error`. A value
 the service does not know stops it at startup. With an OTLP logs endpoint
@@ -660,14 +601,6 @@ every charge and is never pruned; read them as a slow-moving billing figure
 rather than a live gauge. Those totals come from the ledger rather than an
 in-process counter, so they survive a controller restart.
 
-**Cache** (`sparkwing-cache`, OTEL meter):
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `sparkwing.gitcache.fetch_duration` | Histogram | Background fetch time |
-| `sparkwing.gitcache.cache_hits` | Counter | Binary and dependency-archive cache hits, distinguished by `type` attribute |
-| `sparkwing.gitcache.cache_misses` | Counter | Binary and dependency-archive cache misses, distinguished by `type` attribute |
-
 ## Object-store request budget
 
 Every object-store client a Sparkwing process builds draws on one
@@ -737,31 +670,14 @@ limit or a caller that stops retrying, not a repeated reset.
 
 ## Storage ceilings
 
-Per-team quotas bound each team; a thousand teams under quota still add
-up, and one quota bug reaches every team at once. A storage ceiling
-bounds the total. Each service that stores what pipelines produce holds
-its own store to a byte ceiling and an object-count ceiling, and freezes
-writes once a measurement reaches either one: existing runs finish,
-further writes are refused with an error naming the ceiling and the
-measurement, and health reports the freeze. Reads and deletes keep
-working, because deleting is how a store gets back under its ceiling.
+Per-team quotas and deployment ceilings have separate scopes. The controller's
+object-store policy can freeze writes at a byte or object-count ceiling while
+retaining reads and deletes. A refusal names the ceiling and measurement.
 
-| Service | What it bounds | Refusal | State on |
-|--------|------|-------------|------|
-| `sparkwing-cache` | the dependency-archive, team and git mirror trees | `507` on upload | `GET /health` (`store_ceiling`), `sparkwing.cache.store_*` metrics |
-| `sparkwing-controller` | the object store it writes through, on the BYO-backend path | the write fails with the ceiling error | `GET /api/v1/health` (`object_store.ceiling`), `sparkwing_object_store_bucket_*` metrics |
-
-Each of the two reports `frozen`, `warning` and
-`measurement_incomplete` on its health route and raises a `problems`
-entry for each, so a frozen or warning store shows as degraded wherever
-health is read. Public health reports flags and measurement time without
-stored byte or object totals. Detailed totals remain in service metrics
-and the admin-scoped controller breaker route.
-
-The two are independent: each measures the store it owns and freezes
-only its own writes, so no service waits on another to decide. The
-controller's ceiling is the one that reaches an S3 bucket; the services'
-ceiling bounds the volume it writes.
+Public health exposes freeze, warning and incomplete-measurement flags without
+revealing stored totals. Deployment object-store authority opens detailed state
+through `GET /api/v1/operator/object-store/breaker`. Native backend enforcement
+and deployment configuration remain integration checks.
 
 ### The controller's bucket ceiling
 
@@ -827,7 +743,7 @@ in place of the listing.
 whenever a ceiling is set or a bucket is measured, because that route
 answers without a token; the totals
 and the ceilings sit behind the admin-scoped
-`GET /api/v1/object-store/breaker` and on `sparkwing operator object-store status`, which also reports `counted_at` (when the running
+`GET /api/v1/operator/object-store/breaker` and on `sparkwing operator object-store status`, which also reports `counted_at` (when the running
 count last moved) and `reconciled_at` (when the bucket was last
 measured). Alarm on
 `sparkwing_object_store_bucket_ceiling_frozen` for the freeze and on
@@ -852,169 +768,23 @@ while the bucket is still over the ceiling. Raise the ceiling on the
 controller to keep writes flowing, or delete objects until the
 measurement falls back under it.
 
-### The cache ceiling
-
-Artifact and dependency-archive uploads do not run through the
-controller: a runner uploads them to `sparkwing-cache`, which stores them
-itself. The cache therefore carries its own ceiling and refuses its own
-writes with `507` and an error naming its own flags:
-`--max-store-bytes`, `--max-store-objects`, `--warn-store-bytes`,
-`--warn-store-objects` and `--store-reconcile`.
-
-The cache counts what it stores as it stores it and walks its own
-trees on `--store-reconcile` (hourly by default, `0` measures once at
-startup). Git writes the cache's mirrors itself, so the cache re-measures
-its store whenever a mirror clone or fetch finishes instead. The walk is local file I/O rather than billed requests, it
-stops when the service's context does and reports the total as partial
-rather than folding a short one in, and a
-measurement that finds the store back under its ceiling thaws it.
-`--warn-store-bytes` and `--warn-store-objects` mark the store as
-warning on health without refusing anything. The chart carries all of
-these as `cache.limits.*`.
-
-The cache counts only its volume here: its `--blob-store` is the
-controller's to measure, and what each team holds in it, node log
-segments included, is counted by the controller
-([Tenant limits](limits.md)).
-
-The cache does not wait out the interval to recover. It
-serves no delete of its own, so it carries two admin routes, which take
-only the controller's operator grant and which an operator reaches through
-the controller with an `admin` bearer: `POST
-/api/v1/cache/store-ceiling/measure` starts a walk now, which is what turns
-freeing space on the volume into uploads flowing again, and `POST
-/api/v1/cache/store-ceiling/thaw` accepts uploads until the next
-measurement. The measure route answers `202` with the state as it stands
-and walks off the request path, so the caller pays no latency for a
-large store and a disconnect cannot abandon the walk; one runs at a
-time. The thaw is refused with `409` when no measurement is scheduled,
-and the refusal points at the measure route. The cache does not drop a
-request that arrives while a walk is running: it re-runs once when that
-walk finishes, so a delete the walk had already passed still lands.
-A reset clears every tripped class and both window counters; lifetime
-request and trip totals survive so the metrics keep their history. A
-budget that keeps tripping wants a larger limit or a caller that stops
-retrying, not a repeated reset.
-
 ## Egress budgets
 
-Egress is the bytes a Sparkwing service sends to clients: artifact and
-cache-archive downloads, log reads, the live log stream, and git proxy
-fetches. Object-store egress is about nine cents per gigabyte, so a
-terabyte a month is ninety dollars nobody authorised, and a user can
-spend it without writing a single pipeline.
+The controller authorizes logical data reads before signing short-lived download
+URLs. A signed URL is charged when issued and remains usable for its lifetime.
+The download counter is an abuse bound, because it cannot count every reuse of
+an already-issued URL.
 
-The controller and the cache each count the response
-bodies of those routes twice: once against the caller that asked for
-them, and once against the process total. The only byte limit is each
-team's daily download cap; the process total raises an alarm and refuses
-nothing. Every limit below is off until an operator sets one.
+Log reads stay controller-proxied, reauthorize each read and meter exact egress.
+They remain exempt from the team's daily data-download cap so a team can read
+why its work failed.
 
-| Flag | Controller | Cache | What it does |
-|------|-----------|-------|--------------|
-| `--team-daily-download-free-bytes` | yes | no | Bytes one team without credits may download in a UTC day, 5 GiB by default: artifacts and git fetches from the controller, and binaries, artifacts, dependency archives and git fetches from the cache. Log reads are not counted. Past it, the team's next download answers `429` with a `Retry-After` naming the wait until midnight UTC. `0` turns it off. |
-| `--team-daily-download-funded-bytes` | yes | no | The same cap for a team with credits, 50 GiB by default. `0` turns it off. |
-| `--egress-max-downloads` | yes | no | Metered downloads one caller may hold open at once. Past it, a further one answers `429`. |
-| `--egress-max-log-streams` | yes | no | Live log streams one caller may hold open at once. Past it, a further stream answers `429`. |
-| `--egress-daily-alarm-bytes` | yes | yes | Bytes the process may send in a UTC day before it raises the egress alarm. It refuses nothing. |
+Run-rate and usage quotas use store-wide counters. Request-rate, stream and
+download overload guards are per replica. A deployment-wide usage limit must
+not be presented as a process-local limiter. The supported topology is one
+controller replica while cross-replica live fan-out remains unfinished.
 
-The controller's alarm and concurrency caps are also supplied as a set by
-`--limits-profile`, which a hosted controller runs with instead of naming
-each guard; see [security.md](security.md#limits-profiles). A cache that
-verifies grants starts with a 200 GiB alarm unless the operator names
-another.
-
-Every service reads these budgets from its flags alone.
-
-### A team's daily download cap
-
-The controller counts each team's UTC day in its database. A team is the
-one the caller's credential belongs to, never a token's name, which is free
-text two teams may share. The controller charges its own artifact and git
-proxy downloads there directly, and the cache charges every `GET` it serves
-a grant with `POST /internal/downloads/charge`.
-
-A download is refused before its first byte only when the team is already at
-its cap. It is then charged the bytes it actually delivers, 8 MiB at a time as
-it streams and the rest when it ends, so a range or a resumed download pays for
-what it served and a response with no length is counted as it goes. A download
-that started is never cut off part way: the cap refuses the team's next
-download, not the one under way. A signed URL is charged the object's whole
-size when it is minted and expires after 60 seconds. While the
-controller cannot answer the cache, a free team's download is refused with
-`503`, and a team the controller answered funded within five minutes
-proceeds. The operator's own team carries no cap, because every in-cluster
-runner shares it, and neither does the controller's operator grant.
-
-Reading a run's logs, from the dashboard or the CLI, is never charged to
-the team, so a team past its cap can still read why its run failed.
-
-A service running with auth off resolves every request to `anonymous`,
-the laptop-local shape, where no limit is set anyway.
-
-### A bearer can be a pool
-
-A runner pool shares one token, so twenty pods are one caller. The
-concurrency caps key on that caller's team and name: a header naming a pod
-is the caller's to write, so a cap keyed on it let one bearer open as many
-downloads as it invented pod names. Size `--egress-max-downloads` and
-`--egress-max-log-streams` for the whole pool behind a bearer.
-
-The gitcache proxy routes take no slot at all. They are the checkout path
-every node walks, so a cap there refuses the clone rather than the download
-it was meant to bound. Those routes are still counted and charged to the
-team.
-
-### The alarm
-
-The daily threshold only alarms: a process's daily total is the
-operator's to answer for, and refusing on it would stop every team at once
-for the traffic of a few. The alarm appears as `egress.alarm` on each
-service's `/api/v1/health` (the cache serves it on `/health`), as a line
-in `problems`, as a `warn`-level log line carrying `day_bytes`,
-`threshold_bytes` and the principal whose bytes crossed it, and as the
-`sparkwing_egress_daily_alarm` and `sparkwing_egress_day_bytes` gauges on
-the controller's `/metrics`
-(`sparkwing.cache.egress_daily_alarm` and `sparkwing.cache.egress_day_bytes`
-on the cache's). Point CloudWatch alarms on the bucket's `BytesDownloaded`
-metric and the instance's `NetworkOut` at the same page, so the bill has a
-second witness that does not depend on a Sparkwing process being up.
-
-### What is and is not counted
-
-A byte counts when it is written to a `2xx` response to a request whose
-method carries a body. A `HEAD` counts nothing, because net/http
-discards what the handler writes to one, and an error body counts
-nothing, because it is not a download.
-
-### Persistence and history
-
-Counting is in memory, and only the controller persists it. It writes
-each principal's month total and its own total for the UTC day to its
-store on the maintenance sweep and reloads both at startup, so a restart
-resumes the month and the day rather than hiding a crash loop's spend from
-the alarm, and no response costs a store write; that sweep
-also prunes totals older than thirteen months, once a month rather than
-on every tick. Each team's download day is the controller's own row and
-needs no saving. Cache-service counters remain in memory and start over on
-restart. The controller does not accept cache-service egress-total reports.
-
-Read the controller's meter from `/metrics` (`sparkwing_egress_day_bytes`
-and `sparkwing_egress_daily_alarm`); `/api/v1/health` reports only whether
-the alarm is up.
-
-### One meter per process
-
-Like the object-store budget, an egress meter belongs to a process. Two
-controller replicas each count their own bytes, so an alarm sized for one
-replica sounds late across two. A team's daily download cap is counted in
-the database and holds across any number of replicas.
-
-The persisted number is the high-water mark of any one writer, not the
-sum of them. Within a writer the total only rises, which is what makes a
-restart safe; across writers the row reflects the busier replica and the
-quieter one's bytes are not added to it. Size the alarm for one
-process, and run one controller. The chart enforces that:
-`controller.replicas` above 1 fails to render, because the same second
-replica that would corrupt the local state DB would also split the daily
-alarm below its threshold.
+Operator object-store settings use deployment authority. A team-admin credential
+cannot change those ceilings. See [tenant limits](limits.md) and
+[self-hosting](self-hosting.md#bound-storage-growth). Native accounting and
+backend composition require separate acceptance evidence.

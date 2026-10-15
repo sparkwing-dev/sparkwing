@@ -22,7 +22,7 @@ func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
 		createLiveRunT(t, s, fmt.Sprintf("run-%d", i))
 	}
 
-	resp, err := s.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	resp, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: key, HolderID: "holder-0", RunID: "run-0", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
@@ -34,7 +34,7 @@ func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
 	}
 
 	for i := 1; i <= N; i++ {
-		resp, err := s.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		resp, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 			Key: key, HolderID: fmt.Sprintf("holder-%d", i),
 			RunID: fmt.Sprintf("run-%d", i), NodeID: "n",
 			Capacity: 1, Policy: store.OnLimitQueue,
@@ -49,18 +49,18 @@ func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
 
 	current := "holder-0"
 	for step := 1; step <= N+1; step++ {
-		released, err := s.ReleaseConcurrencySlot(ctx, key, current, "success", "", "", 0)
+		released, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, key, current, "success", "", "", 0)
 		if err != nil {
 			t.Fatalf("release %d: %v", step, err)
 		}
 		if !released {
 			t.Fatalf("release %d: not released (current=%s)", step, current)
 		}
-		_, err = s.ResolveCoalesceFollowers(ctx, key, "", "")
+		_, err = tenantFor(t, s, store.DefaultTeam).ResolveCoalesceFollowers(ctx, key, "", "")
 		if err != nil {
 			t.Fatalf("resolve followers: %v", err)
 		}
-		promoted, err := s.PromoteNextWaiters(ctx, key, store.DefaultConcurrencyLease)
+		promoted, err := tenantFor(t, s, store.DefaultTeam).PromoteNextWaiters(ctx, key, store.DefaultConcurrencyLease)
 		if err != nil {
 			t.Fatalf("promote %d: %v", step, err)
 		}
@@ -80,7 +80,7 @@ func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
 		}
 	}
 
-	state, err := s.GetConcurrencyState(ctx, key)
+	state, err := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, key)
 	if err != nil {
 		t.Fatalf("state: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestConcurrency_HolderIDPreservedThroughPromotion(t *testing.T) {
 	createLiveRunT(t, s, "r1")
 	createLiveRunT(t, s, "r2")
 
-	_, err := s.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	_, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: "k", HolderID: "leader-id", RunID: "r1", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
@@ -103,7 +103,7 @@ func TestConcurrency_HolderIDPreservedThroughPromotion(t *testing.T) {
 		t.Fatalf("leader: %v", err)
 	}
 
-	_, err = s.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	_, err = tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: "k", HolderID: "custom-follower", RunID: "r2", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
@@ -111,13 +111,13 @@ func TestConcurrency_HolderIDPreservedThroughPromotion(t *testing.T) {
 		t.Fatalf("waiter: %v", err)
 	}
 
-	_, _ = s.ReleaseConcurrencySlot(ctx, "k", "leader-id", "success", "", "", 0)
-	promoted, _ := s.PromoteNextWaiters(ctx, "k", time.Minute)
+	_, _ = tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, "k", "leader-id", "success", "", "", 0)
+	promoted, _ := tenantFor(t, s, store.DefaultTeam).PromoteNextWaiters(ctx, "k", time.Minute)
 	if len(promoted) != 1 {
 		t.Fatalf("expected 1 promoted, got %d", len(promoted))
 	}
 
-	_, _, err = s.HeartbeatConcurrencySlot(ctx, "k", "custom-follower", time.Minute)
+	_, _, err = tenantFor(t, s, store.DefaultTeam).HeartbeatConcurrencySlot(ctx, "k", "custom-follower", time.Minute)
 	if err != nil {
 		t.Fatalf("heartbeat custom-follower: %v (holder_id not preserved)", err)
 	}
@@ -146,7 +146,7 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 			holder := fmt.Sprintf("h-%d", i)
 			runID := fmt.Sprintf("r-%d", i)
 
-			resp, err := s.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+			resp, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 				Key: "k", HolderID: holder, RunID: runID, NodeID: "n",
 				Capacity: 1, Policy: store.OnLimitQueue,
 			})
@@ -167,7 +167,7 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 						errs <- fmt.Errorf("arrival %d: stuck queued past deadline", i)
 						return
 					}
-					res, err := s.ResolveWaiter(ctx, "k", runID, "n", "", "", "", false)
+					res, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "k", runID, "n", "", "", "", false)
 					if err != nil {
 						errs <- fmt.Errorf("arrival %d resolve: %w", i, err)
 						return
@@ -184,13 +184,13 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 				}
 			}
 
-			_, relErr := s.ReleaseConcurrencySlot(ctx, "k", holder, "success", "", "", 0)
+			_, relErr := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, "k", holder, "success", "", "", 0)
 			if relErr != nil {
 				errs <- fmt.Errorf("arrival %d release: %w", i, relErr)
 				return
 			}
-			_, _ = s.ResolveCoalesceFollowers(ctx, "k", "", "")
-			_, _ = s.PromoteNextWaiters(ctx, "k", store.DefaultConcurrencyLease)
+			_, _ = tenantFor(t, s, store.DefaultTeam).ResolveCoalesceFollowers(ctx, "k", "", "")
+			_, _ = tenantFor(t, s, store.DefaultTeam).PromoteNextWaiters(ctx, "k", store.DefaultConcurrencyLease)
 		}(i)
 	}
 
@@ -200,7 +200,7 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 		t.Errorf("%v", e)
 	}
 
-	state, _ := s.GetConcurrencyState(ctx, "k")
+	state, _ := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
 	if len(state.Holders) != 0 || len(state.Waiters) != 0 {
 		t.Fatalf("residual: holders=%d waiters=%d", len(state.Holders), len(state.Waiters))
 	}

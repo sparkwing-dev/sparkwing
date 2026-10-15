@@ -1745,6 +1745,21 @@ components:
         - truncated
       type: object
       x-sparkwing-go-type: controllerwire.LogSearchPage
+    internal.controllerwire.MaterializedResultSource:
+      additionalProperties: true
+      properties:
+        job_id:
+          type: string
+        run_id:
+          type: string
+        state_seq:
+          type: integer
+      required:
+        - run_id
+        - job_id
+        - state_seq
+      type: object
+      x-sparkwing-go-type: controllerwire.MaterializedResultSource
     internal.controllerwire.OverrideView:
       additionalProperties: true
       properties:
@@ -2276,6 +2291,10 @@ components:
           type: string
         record:
           $ref: '#/components/schemas/internal.blob.RecordKey'
+        result:
+          anyOf:
+            - $ref: '#/components/schemas/internal.controllerwire.MaterializedResultSource'
+            - type: "null"
       required:
         - policy
         - attempt
@@ -2785,6 +2804,8 @@ components:
                 $ref: '#/components/schemas/internal.controllerwire.ScheduleGenerator'
               type: array
             - type: "null"
+        guard_refusal:
+          type: string
         jobs:
           anyOf:
             - items:

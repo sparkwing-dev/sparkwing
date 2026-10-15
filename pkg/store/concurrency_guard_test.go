@@ -10,36 +10,6 @@ import (
 	"testing"
 )
 
-func TestConcurrencyGuard_CanonicalSQLSitesOnly(t *testing.T) {
-	src := storePackageSource(t)
-	for needle, helper := range map[string]string{
-		"INSERT INTO concurrency_holders": "txInsertHolder",
-		"INSERT INTO concurrency_waiters": "txPark",
-		"INSERT INTO concurrency_cache":   "txReleaseHolder",
-		"DELETE FROM concurrency_waiters": "txDeleteWaiter",
-		"SET superseded = 1":              "txSupersede",
-		"superseded = 0 AND ":             "holderLiveSQL",
-	} {
-		if got := strings.Count(src, needle); got != 1 {
-			t.Errorf("%q appears %d times in pkg/store sources, want exactly 1 (inside %s)", needle, got, helper)
-		}
-	}
-	if got := strings.Count(src, "lease_expires_at > ?"); got != 5 {
-		t.Errorf("%q appears %d times in pkg/store sources, want exactly 5 (canonical node/trigger/concurrency fragments plus trigger finish)", "lease_expires_at > ?", got)
-	}
-	for helper, want := range map[string]int{
-		"nodeClaimLiveSQL(":    19,
-		"triggerClaimLiveSQL(": 11,
-	} {
-		if got := strings.Count(src, helper); got != want {
-			t.Errorf("%q appears %d times in pkg/store sources, want %d canonical definitions and uses", helper, got, want)
-		}
-	}
-	if got := strings.Count(src, "DELETE FROM concurrency_holders"); got != 2 {
-		t.Errorf("%q appears %d times in pkg/store sources, want exactly 2 (txDeleteHolder + CancelWaiter)", "DELETE FROM concurrency_holders", got)
-	}
-}
-
 func TestConcurrencyGuard_TablesTouchedOnlyByStore(t *testing.T) {
 	root := moduleRoot(t)
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {

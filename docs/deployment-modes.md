@@ -130,12 +130,13 @@ after ten minutes of silence from a node that never reported finishing.
 refuses a non-positive value.
 
 A reader is told when it misses bytes: a stream of the ring alone
-(`GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream`) whose buffer dropped
+(`GET /api/v1/runs/{run}/jobs/{job}/logs/stream`) whose buffer dropped
 lines before the reader got to them emits one marker line naming the
 dropped byte count, and a reader still attached when the buffer is
-released gets a marker pointing it at the durable copy. The merged read
-(`GET /api/v1/runs/{id}/logs/{node}/stream`) instead waits for the segment
-that covers dropped bytes. Only a node the run actually has can write to a ring.
+released gets a marker pointing it at the durable copy. The shared paged read (`GET /api/v1/runs/{run}/logs`) carries tagged
+subjects, an opaque cursor and a completeness flag. Persisted segments cover
+live-ring gaps. Native cursor and final-segment integration still needs
+acceptance evidence.
 
 #### Schema versioning
 

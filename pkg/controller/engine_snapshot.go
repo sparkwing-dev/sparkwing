@@ -3,7 +3,6 @@ package controller
 import (
 	"encoding/json"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -14,10 +13,7 @@ func engineSchedule(snapshot store.RunSnapshot) (controllerwire.ScheduleSnapshot
 	if err != nil {
 		return controllerwire.ScheduleSnapshot{}, err
 	}
-	if projection.GuardRefusal != "" && !projection.CancelRequested {
-		return controllerwire.ScheduleSnapshot{}, &apierr.Error{Code: apierr.Unavailable, Message: "schedule transport cannot represent the sealed guard refusal"}
-	}
-	result := controllerwire.ScheduleSnapshot{RunID: snapshot.Run.ID, StoreNow: snapshot.StoreNow, CancelRequested: projection.CancelRequested, Jobs: []controllerwire.ScheduleJob{}, Generators: []controllerwire.ScheduleGenerator{}, Expansions: []controllerwire.AcceptedExpansion{}}
+	result := controllerwire.ScheduleSnapshot{RunID: snapshot.Run.ID, StoreNow: snapshot.StoreNow, CancelRequested: projection.CancelRequested, GuardRefusal: projection.GuardRefusal, Jobs: []controllerwire.ScheduleJob{}, Generators: []controllerwire.ScheduleGenerator{}, Expansions: []controllerwire.AcceptedExpansion{}}
 	rows := make(map[string]store.NodeRow, len(snapshot.Nodes))
 	for _, row := range snapshot.Nodes {
 		rows[row.Ref.NodeID] = row
