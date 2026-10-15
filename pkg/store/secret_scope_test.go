@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestSecrets_PipelineScopeResolution(t *testing.T) {
@@ -23,7 +24,7 @@ func TestSecrets_PipelineScopeResolution(t *testing.T) {
 		{"DEPLOY_KEY", "web-key", "deploy-web"},
 		{"DEPLOY_KEY", "api-key", "deploy-api"},
 	} {
-		if err := st.CreateOrReplaceSecret(store.Secret{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret(store.Secret{
 			Name: s.name, Value: s.value, Principal: "alice", Pipeline: s.pipeline, Masked: true,
 		}, now); err != nil {
 			t.Fatalf("CreateOrReplaceSecret %s/%s: %v", s.name, s.pipeline, err)
@@ -44,7 +45,7 @@ func TestSecrets_PipelineScopeResolution(t *testing.T) {
 		{"stranger pipeline has no row", "DEPLOY_KEY", "other-app", "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := st.GetSecretForPipeline(tc.secret, tc.pipeline)
+			got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretForPipeline(tc.secret, tc.pipeline)
 			if tc.wantErr {
 				if !errors.Is(err, store.ErrNotFound) {
 					t.Fatalf("GetSecretForPipeline(%q, %q) err = %v, want ErrNotFound", tc.secret, tc.pipeline, err)
@@ -60,10 +61,10 @@ func TestSecrets_PipelineScopeResolution(t *testing.T) {
 		})
 	}
 
-	if err := st.DeleteSecret("DEPLOY_KEY", "deploy-web"); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).DeleteSecret("DEPLOY_KEY", "deploy-web"); err != nil {
 		t.Fatalf("DeleteSecret scoped: %v", err)
 	}
-	if _, err := st.GetSecretForPipeline("DEPLOY_KEY", "deploy-api"); err != nil {
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretForPipeline("DEPLOY_KEY", "deploy-api"); err != nil {
 		t.Errorf("deleting one pipeline's row removed a sibling's: %v", err)
 	}
 }
@@ -76,24 +77,24 @@ func TestSecrets_UnscopedRowAnswersARunOnlyWhenShared(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	now := time.Now().UTC()
-	if err := st.CreateOrReplaceSecret(store.Secret{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret(store.Secret{
 		Name: "LEGACY", Value: "legacy", Principal: "alice", Masked: true,
 	}, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateOrReplaceSecret(store.Secret{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret(store.Secret{
 		Name: "NPM_TOKEN", Value: "npm", Principal: "alice", Masked: true, Shared: true,
 	}, now); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := st.GetSecretForRun("LEGACY", "deploy-web"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretForRun("LEGACY", "deploy-web"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("GetSecretForRun(LEGACY) err = %v, want ErrNotFound for an unshared unscoped row", err)
 	}
-	if sec, err := st.GetSecretForPipeline("LEGACY", "deploy-web"); err != nil || sec.Value != "legacy" {
+	if sec, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretForPipeline("LEGACY", "deploy-web"); err != nil || sec.Value != "legacy" {
 		t.Errorf("GetSecretForPipeline(LEGACY) = (%v, %v), want the row for an admin reader", sec, err)
 	}
-	sec, err := st.GetSecretForRun("NPM_TOKEN", "deploy-web")
+	sec, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretForRun("NPM_TOKEN", "deploy-web")
 	if err != nil {
 		t.Fatalf("GetSecretForRun(NPM_TOKEN): %v", err)
 	}

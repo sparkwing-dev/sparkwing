@@ -1201,3 +1201,23 @@ The shared recovery fixture is still used by other store, host and billing tests
 The two controller fixtures lose their obsolete planning-node insertion.
 Their legacy routes and log transport still require their owners' cutovers.
 No native placement is newly unskipped.
+
+## W1 secret tenant selection and unused fence readers
+
+The seven default-team secret methods on Store are removed. Existing secret
+CRUD, scope, limits, sampling and team-isolation checks use explicit Tenant
+handles. Their assertions remain. Test fixtures use teststore.ForTeam so failed
+tenant selection fails the fixture instead of dropping an error.
+
+| Retired check | Retained evidence |
+| --- | --- |
+| Live/stale node lookup assertions in `TestClaimNamedNodeAwardsAnUnqueuedNode` | The lookup reader has no production caller and is removed. The retained `NodeClaimFenceIsLive` assertion still checks the award's fence. `TestStoreClaimMatching` and `TestStoreLauncherSync` cover current award selection and immutable launcher correlation. |
+| Open-attempt assertion in `TestNodeExecutionAttemptBelongsToLiveClaimOutlivesTheAttempt` | The unused open-attempt reader is removed. The rest of this legacy execution-reporting test remains with its still-used claim-ownership reader. `TestAuthenticationSnapshotRetainsFinalAttemptFenceAndLogState` covers final attempt state. |
+| `TestTriggerExecutionAttemptBelongsToLiveClaimOutlivesTheAttempt` | Both unused trigger-attempt readers are removed. Current tagged logs use `TestLogPersistenceOwnerUnitsHaveIndependentFences`, `TestLogPersistenceTriggerReadRechecksItsOwnerLease` and `TestLogPersistenceLaterNodeFinishCannotExtendAttemptGrace`. |
+
+The current authentication, secret authority and store acceptance checks pass.
+Legacy named-claim and execution-reporting fixtures still fail while inserting
+removed runs.args_json. The old missing-run and missing-trigger lookups query
+removed columns. These failures also reproduce with the session's changed Go
+files restored from HEAD through an overlay. They remain part of the legacy
+cutover, not passing final-schema evidence. No native cell is newly unskipped.

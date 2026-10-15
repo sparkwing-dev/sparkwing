@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestLocalwsSealsTheSecretsItStores(t *testing.T) {
@@ -46,7 +47,7 @@ func TestLocalwsSealsTheSecretsItStores(t *testing.T) {
 		t.Fatalf("open the local state db: %v", err)
 	}
 	defer func() { _ = st.Close() }()
-	sec, err := st.GetSecretRow("TOKEN", "")
+	sec, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow("TOKEN", "")
 	if err != nil {
 		t.Fatalf("read TOKEN: %v", err)
 	}

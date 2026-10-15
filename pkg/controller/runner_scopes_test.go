@@ -63,7 +63,7 @@ func seedRepoTrigger(t *testing.T, st *store.Store, id, repo string) {
 
 func seedSecret(t *testing.T, st *store.Store, name, value, pipeline string, shared bool) {
 	t.Helper()
-	if err := st.CreateOrReplaceSecret(sealedSecret(t, store.DefaultTeam, store.Secret{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret(sealedSecret(t, store.DefaultTeam, store.Secret{
 		Name: name, Value: value, Principal: "root", Pipeline: pipeline, Masked: true, Shared: shared,
 	}), time.Now().UTC()); err != nil {
 		t.Fatalf("CreateOrReplaceSecret %s/%s: %v", name, pipeline, err)

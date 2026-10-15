@@ -102,50 +102,7 @@ func (s *Store) NodeClaimFenceIsLive(ctx context.Context, runID, nodeID string, 
 	return err == nil, err
 }
 
-// NodeClaimFenceNodeForRun returns the node held by an exact live claim in a run.
-func (s *Store) NodeClaimFenceNodeForRun(ctx context.Context, runID string, fence NodeClaimFence, now time.Time) (string, error) {
-	var nodeID string
-	err := s.queryRow(ctx, `SELECT node_id FROM nodes
-	WHERE run_id = ? AND claimed_by = ? AND claim_principal = ? AND claim_token_prefix = ?
-	  AND claim_membership_id = ? AND reservation_id = ? AND claim_generation = ?
-	  AND `+nodeClaimLiveSQL(""), runID, fence.HolderID, fence.Claimant.Principal,
-		fence.Claimant.TokenPrefix, fence.MembershipID, fence.ReservationID,
-		fence.ClaimGeneration, now.UnixNano()).Scan(&nodeID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	return nodeID, err
-}
-
-func (s *Store) NodeExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error) {
-	if ordinal < 1 {
-		return false, nil
-	}
-	var held int
-	err := s.queryRow(ctx, `SELECT 1 FROM nodes n
-	WHERE n.run_id = ? AND n.node_id = ? AND n.claimed_by = ?
-	  AND n.claim_principal = ? AND n.claim_token_prefix = ?
-	  AND n.claim_membership_id = ? AND n.reservation_id = ? AND n.claim_generation = ?
-		   AND `+nodeClaimLiveSQL("n.")+` AND n.`+nodeNotDone+`
-	   AND EXISTS (SELECT 1 FROM node_execution_attempts a
-       WHERE a.run_id = n.run_id AND a.node_id = n.node_id
-         AND a.claim_generation = n.claim_generation AND a.attempt_ordinal = ?
-         AND a.holder_id = n.claimed_by AND a.membership_id = n.claim_membership_id
-		 AND a.reservation_id = n.reservation_id AND a.finished_at IS NULL)`,
-		runID, nodeID, fence.HolderID, fence.Claimant.Principal, fence.Claimant.TokenPrefix,
-		fence.MembershipID, fence.ReservationID, fence.ClaimGeneration, now.UnixNano(), ordinal).Scan(&held)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return err == nil, err
-}
-
-// NodeExecutionAttemptBelongsToLiveClaim reports whether fence still holds the
-// node's claim and owns the attempt at ordinal, whether or not that attempt has
-// finished. An executor writes a node's closing lines after it closes the
-// attempt, so a log append is authorized by the claim rather than by the
-// attempt still being open; use [Store.NodeExecutionAttemptIsLive] where a
-// running attempt is what matters.
+// NodeExecutionAttemptBelongsToLiveClaim checks the live claim that owns an attempt.
 func (s *Store) NodeExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error) {
 	if ordinal < 1 {
 		return false, nil

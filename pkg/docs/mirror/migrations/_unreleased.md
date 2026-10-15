@@ -1,5 +1,19 @@
 # Migrating to the next release
 
+## Secret store calls select a tenant
+
+The default-team secret methods on `Store` are removed. Select the registered
+tenant with `store.ForTeam(ctx, team)` before calling `CreateOrReplaceSecret`,
+`GetSecret`, `GetSecretRow`, `GetSecretForPipeline`, `GetSecretForRun`,
+`ListSecrets` or `DeleteSecret`. Local readers select `store.DefaultTeam`.
+Controller writes continue to use `WriteSecret` and `RemoveSecret` under current
+administration authority.
+
+The unused `Store.NodeClaimFenceNodeForRun`, `NodeExecutionAttemptIsLive`,
+`TriggerExecutionAttemptIsLive` and `TriggerExecutionAttemptBelongsToLiveClaim`
+helpers are also removed. Execution authentication uses the capability snapshot
+and tagged attempt identity.
+
 ## Claim lifecycle and credential mutation APIs
 
 `Store.StartClaimExecution`, `Store.HeartbeatClaim`, `ClaimBeat` and the matching

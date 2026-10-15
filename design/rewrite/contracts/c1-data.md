@@ -2,6 +2,21 @@
 
 <!-- design:begin -->
 
+## Explicit secret tenants and unused fence readers
+
+`Store.CreateOrReplaceSecret`, `GetSecret`, `GetSecretRow`,
+`GetSecretForPipeline`, `GetSecretForRun`, `ListSecrets` and `DeleteSecret`
+are removed. Their tenant methods remain. Local store readers select
+`DefaultTeam` through `ForTeam(ctx, team)` and handle selection errors.
+Controller requests continue to use their authenticated tenant.
+
+The unused `Store.NodeClaimFenceNodeForRun`, `NodeExecutionAttemptIsLive`,
+`TriggerExecutionAttemptIsLive` and `TriggerExecutionAttemptBelongsToLiveClaim`
+readers are removed. Current authentication snapshots and tagged log persistence
+retain the attempt, owner, ancestry and tail-grace checks. The separate legacy
+`NodeExecutionAttemptBelongsToLiveClaim` reader still has an execution-reporting
+caller and remains until that path migrates.
+
 ## Claim lifecycle and credential mutation cuts
 
 `Store.StartClaimExecution`, `HeartbeatClaim` and `ClaimBeat` are removed.

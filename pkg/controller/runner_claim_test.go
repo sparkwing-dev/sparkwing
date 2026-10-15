@@ -53,7 +53,7 @@ func newRunnerClaimFixture(t *testing.T) runnerClaimFixture {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"DEPLOY_TOKEN", "UNDECLARED"} {
-		if err := st.CreateOrReplaceSecret(sealedSecret(t, store.DefaultTeam, store.Secret{Name: name, Value: "v-" + name, Pipeline: "demo", Masked: true}), now); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret(sealedSecret(t, store.DefaultTeam, store.Secret{Name: name, Value: "v-" + name, Pipeline: "demo", Masked: true}), now); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -247,7 +247,7 @@ func TestSecrets_ABearerReadsByNameOnlyAsOperatorOrTeamAdmin(t *testing.T) {
 	if got, body := f.do(t, "GET", "/api/v1/secrets/UNDECLARED?pipeline=demo", owner, ""); got != http.StatusForbidden || body["error"] != "write_only" {
 		t.Fatalf("a team owner's read of a masked row = %d %v, want 403 write_only", got, body)
 	}
-	if err := f.st.CreateOrReplaceSecret(sealedSecret(t, store.DefaultTeam, store.Secret{Name: "REGION", Value: "us-east-1", Pipeline: "demo"}), now); err != nil {
+	if err := teststore.ForTeam(t, f.st, store.DefaultTeam).CreateOrReplaceSecret(sealedSecret(t, store.DefaultTeam, store.Secret{Name: "REGION", Value: "us-east-1", Pipeline: "demo"}), now); err != nil {
 		t.Fatal(err)
 	}
 	if got, body := f.do(t, "GET", "/api/v1/secrets/REGION?pipeline=demo", owner, ""); got != http.StatusOK || body["value"] != "us-east-1" {

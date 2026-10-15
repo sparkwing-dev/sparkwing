@@ -82,7 +82,11 @@ func (s *storeSource) read(name string) (_ string, _ bool, err error) {
 	if s.setupErr != nil {
 		return "", false, s.setupErr
 	}
-	sec, err := st.GetSecretForPipeline(name, s.pipeline)
+	tenant, err := st.ForTeam(context.Background(), store.DefaultTeam)
+	if err != nil {
+		return "", false, err
+	}
+	sec, err := tenant.GetSecretForPipeline(name, s.pipeline)
 	if errors.Is(err, store.ErrNotFound) {
 		return "", false, secrets.ErrSecretMissing
 	}

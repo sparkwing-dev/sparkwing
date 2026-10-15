@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func keyFileIn(t *testing.T, dir string) string {
@@ -55,14 +56,14 @@ func sealRow(t *testing.T, c controller.Cipher, st *store.Store, name, value str
 		t.Fatalf("seal %s: %v", name, err)
 	}
 	row.Value = sealed
-	if err := st.CreateOrReplaceSecret(row, time.Now()); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret(row, time.Now()); err != nil {
 		t.Fatalf("store %s: %v", name, err)
 	}
 }
 
 func openRow(t *testing.T, c controller.Cipher, st *store.Store, name string) (string, error) {
 	t.Helper()
-	sec, err := st.GetSecretRow(name, "")
+	sec, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow(name, "")
 	if err != nil {
 		t.Fatalf("read %s: %v", name, err)
 	}
@@ -96,7 +97,7 @@ func TestKeyring_FirstSealCreatesAPrivateKeyFile(t *testing.T) {
 	if len(entries) != 1 || entries[0].Name() != "secrets.key" {
 		t.Fatalf("temporary key artifacts remain: %v", entries)
 	}
-	sec, _ := st.GetSecretRow("TOKEN", "")
+	sec, _ := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow("TOKEN", "")
 	if !secrets.IsBound(sec.Value) {
 		t.Errorf("stored value %q is not a sealed envelope", sec.Value)
 	}

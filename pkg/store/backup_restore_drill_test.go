@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type installFingerprint struct {
@@ -97,7 +98,7 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 		if err != nil {
 			t.Fatalf("seal %s: %v", name, err)
 		}
-		if err := st.CreateOrReplaceSecret(store.Secret{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret(store.Secret{
 			Name:      name,
 			Value:     sealed,
 			Principal: "operator",
@@ -148,12 +149,12 @@ func fingerprintInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) i
 		}
 	}
 
-	list, err := st.ListSecrets()
+	list, err := teststore.ForTeam(t, st, store.DefaultTeam).ListSecrets()
 	if err != nil {
 		t.Fatalf("list secrets: %v", err)
 	}
 	for _, sec := range list {
-		row, err := st.GetSecretRow(sec.Name, sec.Pipeline)
+		row, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow(sec.Name, sec.Pipeline)
 		if err != nil {
 			t.Fatalf("read secret %s: %v", sec.Name, err)
 		}
@@ -335,7 +336,7 @@ func drillSQLiteWithoutKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new cipher: %v", err)
 	}
-	list, err := rst.ListSecrets()
+	list, err := teststore.ForTeam(t, rst, store.DefaultTeam).ListSecrets()
 	if err != nil {
 		t.Fatalf("list secrets: %v", err)
 	}
@@ -343,7 +344,7 @@ func drillSQLiteWithoutKey(t *testing.T) {
 		t.Fatal("the restored store holds no secrets, so the check proves nothing")
 	}
 	for _, sec := range list {
-		row, err := rst.GetSecretRow(sec.Name, sec.Pipeline)
+		row, err := teststore.ForTeam(t, rst, store.DefaultTeam).GetSecretRow(sec.Name, sec.Pipeline)
 		if err != nil {
 			t.Fatalf("read secret %s: %v", sec.Name, err)
 		}

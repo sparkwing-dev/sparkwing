@@ -39,9 +39,9 @@ func TestRunnerReadsTheClaimedRunsTeamSecrets(t *testing.T) {
 		pipeline    string
 		shared      bool
 	}{
-		{st.CreateOrReplaceSecret, store.DefaultTeam, "API_KEY", "default-team-value", "deploy", false},
+		{teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret, store.DefaultTeam, "API_KEY", "default-team-value", "deploy", false},
 		{acme.CreateOrReplaceSecret, "acme", "API_KEY", "acme-value", "deploy", false},
-		{st.CreateOrReplaceSecret, store.DefaultTeam, "NPM_TOKEN", "default-npm", "", true},
+		{teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret, store.DefaultTeam, "NPM_TOKEN", "default-npm", "", true},
 		{acme.CreateOrReplaceSecret, "acme", "NPM_TOKEN", "acme-npm", "", true},
 	} {
 		if err := row.write(sealedSecret(t, row.team, store.Secret{

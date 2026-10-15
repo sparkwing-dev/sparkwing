@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestASignedUpTeamsSecretsAreBounded(t *testing.T) {
@@ -48,11 +49,11 @@ func TestASignedUpTeamsSecretsAreBounded(t *testing.T) {
 
 	// safety: negative control, the operator's own team keeps no secret cap.
 	for i := range store.MaxSecretsPerTeam + 1 {
-		if err := st.CreateOrReplaceSecret(store.Secret{Name: fmt.Sprintf("OP%d", i), Value: "v"}, now); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret(store.Secret{Name: fmt.Sprintf("OP%d", i), Value: "v"}, now); err != nil {
 			t.Fatalf("operator secret %d: %v", i, err)
 		}
 	}
-	if err := st.CreateOrReplaceSecret(store.Secret{Name: "OP_BIG", Value: big}, now); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret(store.Secret{Name: "OP_BIG", Value: big}, now); err != nil {
 		t.Fatalf("an operator's large secret: %v", err)
 	}
 }

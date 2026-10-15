@@ -2783,7 +2783,6 @@ func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl 
 func (s *Store) CreateDebugPause(ctx context.Context, p DebugPause) error
 func (s *Store) CreateIdentityAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error)
 func (s *Store) CreateNode(ctx context.Context, n Node) error
-func (s *Store) CreateOrReplaceSecret(sec Secret, now time.Time) error
 func (s *Store) CreateRun(ctx context.Context, r Run) error
 func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
@@ -2800,7 +2799,6 @@ func (s *Store) DB() *sql.DB
 func (s *Store) DelegateCapability(ctx context.Context, spec capability.DelegateSpec) (capability.Issued, error)
 func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Time) (AccountDeletion, error)
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
-func (s *Store) DeleteSecret(name, pipeline string) error
 func (s *Store) DeleteSession(rawSession string) error
 func (s *Store) Dialect() Dialect
 func (s *Store) DropCardAttempt(ctx context.Context, attemptID string, now time.Time) error
@@ -2834,10 +2832,6 @@ func (s *Store) GetNodeLog(ctx context.Context, team Team, runID, nodeID string,
 func (s *Store) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error)
 func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error)
-func (s *Store) GetSecret(name string) (*Secret, error)
-func (s *Store) GetSecretForPipeline(name, pipeline string) (*Secret, error)
-func (s *Store) GetSecretForRun(name, pipeline string) (*Secret, error)
-func (s *Store) GetSecretRow(name, pipeline string) (*Secret, error)
 func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error)
 func (s *Store) GitHubAppDeliverySeen(ctx context.Context, digest string) (bool, error)
 func (s *Store) GitHubRunnerAdmits(ctx context.Context, scope GitHubRunnerScope, runID string) (bool, error)
@@ -2864,7 +2858,6 @@ func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error)
 func (s *Store) ListPendingApprovals(ctx context.Context) ([]*Approval, error)
 func (s *Store) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error)
 func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error)
-func (s *Store) ListSecrets() ([]Secret, error)
 func (s *Store) ListTokens(kind string, includeRevoked bool) ([]Token, error)
 func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error)
 func (s *Store) LookupCapability(ctx context.Context, digest [32]byte) (capability.Principal, error)
@@ -2882,10 +2875,8 @@ func (s *Store) MintClaimToken(ctx context.Context, team Team, runID, nodeID str
 ) (string, error)
 func (s *Store) NewestWaitlisted(ctx context.Context, limit, offset int) ([]WaitlistedAccount, error)
 func (s *Store) NodeClaimFenceIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, now time.Time) (bool, error)
-func (s *Store) NodeClaimFenceNodeForRun(ctx context.Context, runID string, fence NodeClaimFence, now time.Time) (string, error)
 func (s *Store) NodeClaimOrigin(ctx context.Context, runID, nodeID string) (principal, holder, runner string, metered bool, err error)
 func (s *Store) NodeExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
-func (s *Store) NodeExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeIsAncestor(ctx context.Context, team Team, runID, ancestor, node string) (_ bool, err error)
 func (s *Store) NodeLogSegments(ctx context.Context, l NodeLog) (_ []NodeLogSegment, err error)
 func (s *Store) NodeLogSettled(ctx context.Context, team Team, runID, nodeID string) (settled, found bool, err error)
@@ -2972,8 +2963,6 @@ func (s *Store) TriggerClaimFenceIsLive(ctx context.Context, runID string, claim
 func (s *Store) TriggerClaimGeneration(ctx context.Context, id string) (int64, error)
 func (s *Store) TriggerClaimOrigin(ctx context.Context, runID string, generation int64) (principal string, metered bool, err error)
 func (s *Store) TriggerClaimant(ctx context.Context, triggerID string) (ClaimIdentity, error)
-func (s *Store) TriggerExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, ordinal int, now time.Time) (bool, error)
-func (s *Store) TriggerExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) TriggerRepoID(ctx context.Context, team Team, id string) (int64, error)
 func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSession string, now time.Time) (Identity, int64, error)
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error

@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type listedSecret struct {
@@ -129,7 +130,7 @@ func TestSecrets_ListOpensAVariablesEnvelope(t *testing.T) {
 			t.Fatalf("POST %v = %d", row["name"], resp.StatusCode)
 		}
 	}
-	row, err := st.GetSecret("REGION")
+	row, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecret("REGION")
 	if err != nil {
 		t.Fatal(err)
 	}

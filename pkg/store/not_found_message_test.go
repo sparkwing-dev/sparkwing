@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestAMissingLookupNamesWhatItLookedFor(t *testing.T) {
@@ -22,7 +23,10 @@ func TestAMissingLookupNamesWhatItLookedFor(t *testing.T) {
 		"GetTrigger":    {func() error { _, err := s.GetTrigger(ctx, "trig-absent"); return err }, []string{"trigger", "trig-absent"}},
 		"RequestCancel": {func() error { return s.RequestCancel(ctx, "cancel-absent") }, []string{"trigger", "cancel-absent"}},
 		"GetSecretForRun": {
-			func() error { _, err := s.GetSecretForRun("secret-absent", ""); return err },
+			func() error {
+				_, err := teststore.ForTeam(t, s, store.DefaultTeam).GetSecretForRun("secret-absent", "")
+				return err
+			},
 			[]string{"secret", "secret-absent"},
 		},
 	}

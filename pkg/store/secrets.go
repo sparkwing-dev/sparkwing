@@ -41,11 +41,6 @@ const (
 // or [MaxSecretValueBytes].
 var ErrSecretLimit = errors.New("store: secret limit reached")
 
-// CreateOrReplaceSecret upserts sec into the default team.
-func (s *Store) CreateOrReplaceSecret(sec Secret, now time.Time) error {
-	return s.defaultTenant().CreateOrReplaceSecret(sec, now)
-}
-
 // CreateOrReplaceSecret upserts sec into t's team; created_at is
 // preserved. Pipeline scopes the secret to one pipeline, and Shared
 // opens an unscoped row to every run.
@@ -113,21 +108,9 @@ func boolInt(b bool) int {
 	return 0
 }
 
-// GetSecret returns the default team's unscoped row including Value.
-func (s *Store) GetSecret(name string) (*Secret, error) {
-	return s.defaultTenant().GetSecret(name)
-}
-
 // GetSecret returns t's unscoped row including Value.
 func (t *Tenant) GetSecret(name string) (*Secret, error) {
 	return t.readSecret(name, "")
-}
-
-// GetSecretRow returns the row stored under exactly this name and
-// pipeline, and ErrNotFound when there is none. Unlike
-// GetSecretForPipeline it never falls back to the unscoped row.
-func (s *Store) GetSecretRow(name, pipeline string) (*Secret, error) {
-	return s.defaultTenant().GetSecretRow(name, pipeline)
 }
 
 // GetSecretRow returns t's row stored under exactly this name and
@@ -137,14 +120,6 @@ func (t *Tenant) GetSecretRow(name, pipeline string) (*Secret, error) {
 		return nil, errors.New("secrets: name required")
 	}
 	return t.readSecret(name, pipeline)
-}
-
-// GetSecretForPipeline returns the row named for pipeline, falling back
-// to the unscoped row when the pipeline has none of its own. ErrNotFound
-// when neither exists. This is the administrative read: it reaches an
-// unscoped row whether or not it is shared.
-func (s *Store) GetSecretForPipeline(name, pipeline string) (*Secret, error) {
-	return s.defaultTenant().GetSecretForPipeline(name, pipeline)
 }
 
 // GetSecretForPipeline returns t's row named for pipeline, falling back
@@ -160,13 +135,6 @@ func (t *Tenant) GetSecretForPipeline(name, pipeline string) (*Secret, error) {
 		}
 	}
 	return t.readSecret(name, "")
-}
-
-// GetSecretForRun returns the row pipeline owns, falling back to an
-// unscoped row only when that row is shared. ErrNotFound otherwise, so
-// an unshared unscoped secret is indistinguishable from a missing one.
-func (s *Store) GetSecretForRun(name, pipeline string) (*Secret, error) {
-	return s.defaultTenant().GetSecretForRun(name, pipeline)
 }
 
 // GetSecretForRun returns t's row that pipeline owns, falling back to
@@ -214,11 +182,6 @@ func (t *Tenant) readSecret(name, pipeline string) (*Secret, error) {
 	return &sec, nil
 }
 
-// ListSecrets returns the default team's rows.
-func (s *Store) ListSecrets() ([]Secret, error) {
-	return s.defaultTenant().ListSecrets()
-}
-
 // ListSecrets returns t's rows ordered by name then pipeline. HTTP
 // handlers must blank Value before serializing.
 func (t *Tenant) ListSecrets() ([]Secret, error) {
@@ -233,11 +196,6 @@ func (t *Tenant) ListSecrets() ([]Secret, error) {
 	}
 	defer func() { _ = rows.Close() }()
 	return scanSecretRows(rows)
-}
-
-// DeleteSecret removes the default team's row.
-func (s *Store) DeleteSecret(name, pipeline string) error {
-	return s.defaultTenant().DeleteSecret(name, pipeline)
 }
 
 // DeleteSecret removes t's row owned by pipeline ("" for the unscoped

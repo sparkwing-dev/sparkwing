@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Secret calls require an explicit tenant
+  The seven default-team secret methods on `Store` and four unused legacy fence readers are removed. Local readers select `DefaultTeam`. See [migration guide](docs/migrations/_unreleased.md#secret-store-calls-select-a-tenant).
 ### Changed
 - **store (Breaking):** Claim lifecycle and git-credential writes use current authority
   Removed legacy claim-token start and heartbeat methods, raw git-credential mutations and automatic secret resealing. Unit renewal and job transitions use their capability fences. Git-credential mutations use the authority-bearing tenant methods. See [migration guide](docs/migrations/_unreleased.md#claim-lifecycle-and-credential-mutation-apis).

@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestSampleSealedSecrets_ReturnsOnlySealedRowsWithTheirTeam(t *testing.T) {
@@ -20,7 +21,7 @@ func TestSampleSealedSecrets_ReturnsOnlySealedRowsWithTheirTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)
-	if err := s.CreateOrReplaceSecret(store.Secret{Name: "PLAIN", Value: "plain", Principal: "seed"}, now); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateOrReplaceSecret(store.Secret{Name: "PLAIN", Value: "plain", Principal: "seed"}, now); err != nil {
 		t.Fatal(err)
 	}
 	if err := acme.CreateOrReplaceSecret(store.Secret{Name: "SEALED", Value: "enc:v3:abc", Principal: "seed"}, now); err != nil {

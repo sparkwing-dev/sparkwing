@@ -42,11 +42,10 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).DueCardRefunds":      "the payment worker lists every team's queued refunds in one pass",
 	"(*Store).ReportCardRefund": "Stripe names a refund by its payment and refund ids alone; the team is what " +
 		"the queued row says",
-	"globalRunnerRefusal":               "the global concurrent runner cap counts live claims from every team",
-	"globalRunsPerHourRefusal":          "the global hourly cap counts runs from every team",
-	"(*Store).NodeClaimFenceNodeForRun": "the run ID is global, and the query matches its exact claimant and generation",
-	"runOwnerTx":                        "asks which team owns an id, so an answer scoped to the asker is no answer",
-	"(*Store).NodeOutputKey":            "the run ID is global, and the key only names an attempt the upload's own check binds",
+	"globalRunnerRefusal":      "the global concurrent runner cap counts live claims from every team",
+	"globalRunsPerHourRefusal": "the global hourly cap counts runs from every team",
+	"runOwnerTx":               "asks which team owns an id, so an answer scoped to the asker is no answer",
+	"(*Store).NodeOutputKey":   "the run ID is global, and the key only names an attempt the upload's own check binds",
 	"(*Store).RecordLocalOutput": "a laptop store records an output its own process wrote for a node it holds; " +
 		"the run ID is global and the row takes that node's team",
 	"(*Store).claimScope": "asks which team a claim credential belongs to, so an answer scoped to " +
@@ -115,14 +114,8 @@ var reviewedUnscopedSQL = map[string]string{
 		"generation, and a token prefix is unique across teams",
 	"(*Store).NodeClaimFenceIsLive": "matches the node's live claim against the exact holder, credential, reservation and " +
 		"generation, and a token prefix is unique across teams",
-	"(*Store).NodeExecutionAttemptIsLive": "matches the node's live claim and open attempt against the exact holder, " +
-		"credential and generation, and a token prefix is unique across teams",
 	"(*Store).NodeExecutionAttemptBelongsToLiveClaim": "matches the node's live claim and its attempt against the exact " +
 		"holder, credential and generation, and a token prefix is unique across teams",
-	"(*Store).TriggerExecutionAttemptIsLive": "matches the trigger's live claim and open attempt against the exact " +
-		"claimant credential and generation, and a token prefix is unique across teams",
-	"(*Store).TriggerExecutionAttemptBelongsToLiveClaim": "matches the trigger's live claim and its attempt against the " +
-		"exact claimant credential and generation, and a token prefix is unique across teams",
 	"(*Store).PrincipalHoldsRunClaim": "matches a live claim on the run's nodes against the exact claimant credential, and " +
 		"a token prefix is unique across teams",
 	"(*Store).PrincipalHoldsTriggerClaim": "matches the trigger's live claim against the exact claimant credential, and a " +
