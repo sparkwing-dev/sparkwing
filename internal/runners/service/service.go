@@ -5,9 +5,7 @@
 package service
 
 import (
-	"bytes"
 	"context"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
+	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
 )
 
 const (
@@ -32,9 +31,6 @@ const (
 	// PlistName is the file launchd reads the runner from.
 	PlistName = Label + ".plist"
 )
-
-// safety: the unit and plist name the operator's private configuration paths.
-const fileMode os.FileMode = 0o600
 
 // ErrUnsupported is returned, wrapped, for a GOOS that has no runner service.
 var ErrUnsupported = errors.New("no sparkwing runner service on this operating system")
@@ -193,6 +189,9 @@ func installLinux(ctx context.Context, h Host) (State, error) {
 	if existing.foreign() {
 		return foreignState(path), foreignError(path)
 	}
+	if err := unitfile.CheckSystemdSource(ctx, h.Exec, ServiceName, path); err != nil {
+		return State{}, err
+	}
 	if err := writeManaged(path, serviceUnit(h)); err != nil {
 		return State{Path: path}, err
 	}
@@ -229,6 +228,9 @@ func uninstallLinux(ctx context.Context, h Host) (State, error) {
 	if other := unitConfigPath(existing.body); !sameConfig(other, h.ConfigPath) {
 		return mismatchState(path, other, h.ConfigPath), nil
 	}
+	if err := unitfile.CheckSystemdSource(ctx, h.Exec, ServiceName, path); err != nil {
+		return State{}, err
+	}
 
 	var stopErr error
 	if out, err := h.run(ctx, "systemctl", "--user", "disable", "--now", ServiceName); err != nil && !notLoaded(out) {
@@ -262,6 +264,10 @@ func installDarwin(ctx context.Context, h Host) (State, error) {
 	if existing.foreign() {
 		return foreignState(path), foreignError(path)
 	}
+	loaded, _, err := agentRegistration(ctx, h)
+	if err != nil {
+		return State{}, err
+	}
 	if err := ensureLogDir(h.LogPath); err != nil {
 		return State{Path: path}, err
 	}
@@ -270,26 +276,19 @@ func installDarwin(ctx context.Context, h Host) (State, error) {
 	}
 
 	state := State{Installed: true, Path: path}
-	stale := bootoutStale(ctx, h)
+	if loaded {
+		if err := runRefresh(ctx, h, "launchctl", "bootout", h.serviceTarget()); err != nil {
+			return state, err
+		}
+	}
 	if out, err := h.run(ctx, "launchctl", "bootstrap", h.domainTarget(), path); err != nil {
 		state.Detail = "the plist is written but launchd did not load it"
-		return state, fmt.Errorf("runner service: launchctl bootstrap %s %s: %w: %s%s",
-			h.domainTarget(), path, err, strings.TrimSpace(out), stale)
+		return state, fmt.Errorf("runner service: launchctl bootstrap %s %s: %w: %s",
+			h.domainTarget(), path, err, strings.TrimSpace(out))
 	}
 	state.Running = true
 	state.Detail = fmt.Sprintf("%s is loaded and running %s start", Label, h.Binary)
 	return state, nil
-}
-
-// safety: launchd refuses to bootstrap a label already in the domain, and a first
-// install has nothing loaded, so failure here is ordinary and is only echoed when
-// the bootstrap that follows also fails.
-func bootoutStale(ctx context.Context, h Host) string {
-	out, err := h.run(ctx, "launchctl", "bootout", h.serviceTarget())
-	if err == nil || strings.TrimSpace(out) == "" {
-		return ""
-	}
-	return fmt.Sprintf(" (the preceding bootout said: %s)", strings.TrimSpace(out))
 }
 
 func uninstallDarwin(ctx context.Context, h Host) (State, error) {
@@ -311,9 +310,13 @@ func uninstallDarwin(ctx context.Context, h Host) (State, error) {
 		return mismatchState(path, other, h.ConfigPath), nil
 	}
 
+	loaded, _, err := agentRegistration(ctx, h)
+	if err != nil {
+		return State{}, err
+	}
 	var stopErr error
-	if out, err := h.run(ctx, "launchctl", "bootout", h.serviceTarget()); err != nil && !notLoaded(out) {
-		stopErr = fmt.Errorf("runner service: launchctl bootout %s: %w: %s", h.serviceTarget(), err, strings.TrimSpace(out))
+	if loaded {
+		stopErr = runRefresh(ctx, h, "launchctl", "bootout", h.serviceTarget())
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return State{Path: path}, errors.Join(stopErr, fmt.Errorf("runner service: remove %s: %w", path, err))
@@ -365,19 +368,8 @@ type managed struct {
 func (m managed) foreign() bool { return m.exists && !m.ours }
 
 func readManaged(path string) (managed, error) {
-	body, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return managed{}, nil
-	}
-	if err != nil {
-		return managed{}, fmt.Errorf("runner service: read %s: %w", path, err)
-	}
-	text := string(body)
-	return managed{
-		exists: true,
-		ours:   strings.Contains(text, Marker),
-		body:   text,
-	}, nil
+	body, exists, ours, err := unitfile.Read(path, Marker)
+	return managed{body: body, exists: exists, ours: ours}, err
 }
 
 func foreignState(path string) State {
@@ -389,35 +381,7 @@ func foreignError(path string) error {
 }
 
 func writeManaged(path, body string) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("runner service: create %s: %w", dir, err)
-	}
-	f, err := os.CreateTemp(dir, ".runner-service-*.tmp")
-	if err != nil {
-		return fmt.Errorf("runner service: create temp file in %s: %w", dir, err)
-	}
-	tmp := f.Name()
-	defer func() {
-		if err := os.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "sparkwing: could not clear the temporary file %s: %v\n", tmp, err)
-		}
-	}()
-	if _, err := f.WriteString(body); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("runner service: write %s: %w", tmp, err)
-	}
-	if err := f.Chmod(fileMode); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("runner service: chmod %s: %w", tmp, err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("runner service: close %s: %w", tmp, err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("runner service: rename %s to %s: %w", tmp, path, err)
-	}
-	return nil
+	return unitfile.Write(path, body)
 }
 
 // safety: launchd's StandardOutPath creates the log file but not its directory.
@@ -475,65 +439,12 @@ func unitConfigPath(unit string) string {
 }
 
 func unitArguments(unit string) []string {
-	for _, line := range strings.Split(unit, "\n") {
-		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "ExecStart=")
-		if !ok {
-			continue
-		}
-		return systemdWords(rest)
-	}
-	return nil
+	return unitfile.Arguments("linux", unit)
 }
 
 // safety: the plist is the only record of the config it runs; nothing keeps a sidecar.
 func plistConfigPath(body []byte) string {
-	return configArgument(plistArguments(body))
-}
-
-func plistArguments(body []byte) []string {
-	dec := xml.NewDecoder(bytes.NewReader(body))
-	inKey, inArgs := false, false
-	var args []string
-	for {
-		tok, err := dec.Token()
-		if err != nil {
-			return nil
-		}
-		switch t := tok.(type) {
-		case xml.StartElement:
-			switch t.Name.Local {
-			case "key":
-				inKey = true
-			case "string":
-				if !inArgs {
-					continue
-				}
-				var v string
-				if err := dec.DecodeElement(&v, &t); err != nil {
-					return nil
-				}
-				args = append(args, v)
-			case "array":
-			default:
-				if inArgs && t.Name.Local != "array" {
-					inArgs = false
-				}
-			}
-		case xml.CharData:
-			if inKey {
-				inArgs = strings.TrimSpace(string(t)) == "ProgramArguments"
-			}
-		case xml.EndElement:
-			switch t.Name.Local {
-			case "key":
-				inKey = false
-			case "array":
-				if inArgs {
-					return args
-				}
-			}
-		}
-	}
+	return configArgument(unitfile.PlistArguments(body))
 }
 
 func configArgument(words []string) string {
@@ -548,38 +459,6 @@ func configArgument(words []string) string {
 	return config
 }
 
-// safety: systemd's own splitting, so a quoted path with a space stays one word.
-func systemdWords(s string) []string {
-	var words []string
-	var b strings.Builder
-	quoted, started := false, false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c == '\\' && i+1 < len(s):
-			i++
-			b.WriteByte(s[i])
-			started = true
-		case c == '"':
-			quoted = !quoted
-			started = true
-		case !quoted && (c == ' ' || c == '\t'):
-			if started {
-				words = append(words, strings.ReplaceAll(b.String(), "%%", "%"))
-				b.Reset()
-				started = false
-			}
-		default:
-			b.WriteByte(c)
-			started = true
-		}
-	}
-	if started {
-		words = append(words, strings.ReplaceAll(b.String(), "%%", "%"))
-	}
-	return words
-}
-
 func serviceUnit(h Host) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n", Marker)
@@ -588,7 +467,7 @@ func serviceUnit(h Host) string {
 	b.WriteString("After=network-online.target\n")
 	b.WriteString("Wants=network-online.target\n\n")
 	b.WriteString("[Service]\nType=simple\n")
-	fmt.Fprintf(&b, "ExecStart=%s start --config %s\n", systemdWord(h.Binary), systemdWord(h.ConfigPath))
+	fmt.Fprintf(&b, "ExecStart=%s\n", unitfile.Command([]string{h.Binary, "start", "--config", h.ConfigPath}))
 	// safety: a runner the operator stopped must stay stopped.
 	b.WriteString("Restart=on-failure\nRestartSec=10\n")
 	b.WriteString("StandardOutput=journal\nStandardError=journal\n")
@@ -602,14 +481,14 @@ func agentPlist(h Host) string {
 	b.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
 	fmt.Fprintf(&b, "<!-- %s -->\n", Marker)
 	b.WriteString("<plist version=\"1.0\">\n<dict>\n")
-	fmt.Fprintf(&b, "  <key>Label</key>\n  <string>%s</string>\n\n", xmlText(Label))
+	fmt.Fprintf(&b, "  <key>Label</key>\n  <string>%s</string>\n\n", unitfile.XMLText(Label))
 	b.WriteString("  <key>ProgramArguments</key>\n  <array>\n")
 	for _, arg := range []string{h.Binary, "start", "--config", h.ConfigPath} {
-		fmt.Fprintf(&b, "    <string>%s</string>\n", xmlText(arg))
+		fmt.Fprintf(&b, "    <string>%s</string>\n", unitfile.XMLText(arg))
 	}
 	b.WriteString("  </array>\n\n")
 	b.WriteString("  <key>EnvironmentVariables</key>\n  <dict>\n")
-	fmt.Fprintf(&b, "    <key>HOME</key>\n    <string>%s</string>\n", xmlText(h.Home))
+	fmt.Fprintf(&b, "    <key>HOME</key>\n    <string>%s</string>\n", unitfile.XMLText(h.Home))
 	// safety: a launchd job inherits almost nothing, so the jobs' docker and git come from here.
 	b.WriteString("    <key>PATH</key>\n    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>\n")
 	b.WriteString("  </dict>\n\n")
@@ -621,31 +500,10 @@ func agentPlist(h Host) string {
 	b.WriteString("  <key>ThrottleInterval</key>\n  <integer>10</integer>\n")
 	b.WriteString("  <key>ProcessType</key>\n  <string>Background</string>\n\n")
 	if h.LogPath != "" {
-		fmt.Fprintf(&b, "  <key>StandardOutPath</key>\n  <string>%s</string>\n", xmlText(h.LogPath))
-		fmt.Fprintf(&b, "  <key>StandardErrorPath</key>\n  <string>%s</string>\n", xmlText(h.LogPath))
+		fmt.Fprintf(&b, "  <key>StandardOutPath</key>\n  <string>%s</string>\n", unitfile.XMLText(h.LogPath))
+		fmt.Fprintf(&b, "  <key>StandardErrorPath</key>\n  <string>%s</string>\n", unitfile.XMLText(h.LogPath))
 	}
-	fmt.Fprintf(&b, "  <key>WorkingDirectory</key>\n  <string>%s</string>\n", xmlText(h.Home))
+	fmt.Fprintf(&b, "  <key>WorkingDirectory</key>\n  <string>%s</string>\n", unitfile.XMLText(h.Home))
 	b.WriteString("</dict>\n</plist>\n")
 	return b.String()
-}
-
-// safety: systemd splits an argument on whitespace and reads % as a specifier, so quote one and double the other.
-func systemdWord(v string) string {
-	if v == "" {
-		return `""`
-	}
-	escaped := strings.ReplaceAll(v, "%", "%%")
-	if !strings.ContainsAny(escaped, " \t\n\"'\\") {
-		return escaped
-	}
-	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
-	return `"` + replacer.Replace(escaped) + `"`
-}
-
-func xmlText(s string) string {
-	var buf bytes.Buffer
-	if err := xml.EscapeText(&buf, []byte(s)); err != nil {
-		return ""
-	}
-	return buf.String()
 }

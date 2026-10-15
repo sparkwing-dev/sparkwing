@@ -76,14 +76,15 @@ type ClosureSpec struct {
 }
 
 // safety: ConcurrencySpec is shared at plan and job scope; only the host computes scoped keys.
+// Omitted concurrency and [] both mean no declarations. Explicit null is invalid.
 type ConcurrencySpec struct {
-	Group           string `json:"group"`
-	Scope           string `json:"scope"`
-	Capacity        int    `json:"capacity"`
-	Cost            int    `json:"cost"`
-	OnLimit         string `json:"on_limit"`
-	QueueTimeoutMS  *int64 `json:"queue_timeout_ms,omitempty"`
-	CancelTimeoutMS *int64 `json:"cancel_timeout_ms,omitempty"`
+	Group           string  `json:"group"`
+	Scope           *string `json:"scope,omitempty"`
+	Capacity        *int    `json:"capacity,omitempty"`
+	Cost            *int    `json:"cost,omitempty"`
+	OnLimit         *string `json:"on_limit,omitempty"`
+	QueueTimeoutMS  *int64  `json:"queue_timeout_ms,omitempty"`
+	CancelTimeoutMS *int64  `json:"cancel_timeout_ms,omitempty"`
 }
 
 // safety: ResourceSpec preserves unset values until the setting's seal point.

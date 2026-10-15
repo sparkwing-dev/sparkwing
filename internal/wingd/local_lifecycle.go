@@ -239,7 +239,8 @@ func (l *localLifecycle) Doctor(ctx context.Context, version string) ([]LocalDoc
 func validUnitArguments(unit ManagedUnit) bool {
 	for _, policy := range ManagedUnitPolicies() {
 		if policy.Kind == unit.Kind {
-			return len(unit.Arguments) >= len(policy.Arguments) && slices.Equal(unit.Arguments[:len(policy.Arguments)], policy.Arguments)
+			want := append(slices.Clone(policy.Arguments), "--home", unit.Home)
+			return filepath.IsAbs(unit.Home) && slices.Equal(unit.Arguments, want)
 		}
 	}
 	return false

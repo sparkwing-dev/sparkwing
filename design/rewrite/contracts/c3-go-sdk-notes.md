@@ -36,11 +36,13 @@ The author SDK owns declarations, typed input and output access, protocol servin
 | Mask acknowledgement followed by log, annotation and summary | No registration race, correct masking and host envelope |
 | Secret-bearing job, step, group and approval IDs | Decision 90 refusal without exposing the secret in diagnostics |
 | Retry with Backoff and no auto option | Application retries retain the claim |
-| Pinned SDK with unsupported protocol | Actionable mismatch and the A32 negotiated-version contract |
+| Older pinned SDK and active signed security policy | Exact matching engine and twelve-month controller API compatibility under D102-103; actionable revocation when required |
 
-## Open questions for the lead
+## Contract interpretations
 
-1. §3.2/A27 requires parity for approval plus SkipIf, while A28 and the chapter cut approval hooks. This contract keeps SkipIf as an admission condition and removes executable BeforeRun/AfterRun hooks, matching the shared validator and the all-features launch scope. The lead should confirm that distinction against A28.
+Amendment 1 ratifies the interpretations below. They are not approval gates.
+
+1. §3.2/A27 requires parity for approval plus SkipIf, while A28 and the chapter cut approval hooks. This contract keeps SkipIf as an admission condition and removes executable BeforeRun/AfterRun hooks, matching the shared validator and the all-features launch scope. Amendment 1 ratifies that distinction under A28 and decision 99.
 2. `JobNode` is the retained Go handle name because `Job` is the constructor. Renaming the handle would require a new name absent from the frozen design.
 ## Cross-area assumptions
 

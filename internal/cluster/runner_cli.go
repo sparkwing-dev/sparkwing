@@ -18,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
 // RunnerOptions carries machine settings to the shared runtime composition.
@@ -33,6 +32,7 @@ type RunnerOptions struct {
 	MemoryCeiling    *int64
 	Deadline         *time.Duration
 	Actions          *capability.Issued
+	Bearer           func(context.Context) (string, error) `json:"-"`
 	Output, Checkout string
 }
 
@@ -74,6 +74,24 @@ func (cli RunnerCLI) Run(ctx context.Context, command string, args []string, ver
 	if cli.Factory == nil {
 		return errors.New("runner runtime is unavailable: compose the capability controller, host library and signed update resolver")
 	}
+	if options.Actions != nil {
+		raw := options.Actions.Raw
+		options.Bearer = func(ctx context.Context) (string, error) {
+			if err := context.Cause(ctx); err != nil {
+				return "", err
+			}
+			return raw, nil
+		}
+	} else {
+		directory := ""
+		if options.Config.CredentialsDir != nil {
+			directory = *options.Config.CredentialsDir
+		}
+		options.Bearer, err = runners.FileBearer(directory, command == "start")
+		if err != nil {
+			return fmt.Errorf("runner credential: %w", err)
+		}
+	}
 	runner, err := cli.Factory(ctx, options)
 	if err != nil {
 		return err
@@ -88,8 +106,9 @@ func (cli RunnerCLI) Run(ctx context.Context, command string, args []string, ver
 func (cli RunnerCLI) config(command string, fs *flag.FlagSet) (userconfig.RunnerConfig, error) {
 	var cfg userconfig.RunnerConfig
 	if command == "start" {
-		if cli.ReadConfig == nil {
-			return cfg, errors.New("runner config reader is unavailable: compose userconfig.ReadConfig")
+		read := cli.ReadConfig
+		if read == nil {
+			read = userconfig.ReadConfig
 		}
 		path := textFlag(fs, "config")
 		if fs.Changed("config") && path == "" {
@@ -102,7 +121,7 @@ func (cli RunnerCLI) config(command string, fs *flag.FlagSet) (userconfig.Runner
 				return cfg, err
 			}
 		}
-		file, err := cli.ReadConfig(path)
+		file, err := read(path)
 		if err != nil {
 			return cfg, err
 		}
@@ -157,7 +176,7 @@ func runnerOptions(cfg userconfig.RunnerConfig, fs *flag.FlagSet, version string
 		return options, fmt.Errorf("runner repos: %w", err)
 	}
 	if cfg.KeepFree != nil {
-		if _, err := wingd.ParseBudget(*cfg.KeepFree); err != nil {
+		if _, err := userconfig.ParseBudget(*cfg.KeepFree); err != nil {
 			return options, fmt.Errorf("runner keep-free: %w", err)
 		}
 	}

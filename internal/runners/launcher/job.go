@@ -140,8 +140,8 @@ func cloudBudget(cfg CloudJobConfig, award CloudJobAward) (corev1.ResourceList, 
 
 func validateAward(a CloudJobAward) error {
 	b := a.Binding
-	if b.Team == "" || b.RunID == "" || b.Holder == "" || b.Generation <= 0 || b.Attempt < 0 || len(a.Bootstrap) == 0 {
-		return errors.New("award requires team, run, holder, generation and bootstrap, with a nonnegative attempt")
+	if b.UnitID == "" || b.Team == "" || b.RunID == "" || b.Holder == "" || b.Generation <= 0 || b.Attempt < 0 || len(a.Bootstrap) == 0 {
+		return errors.New("award requires unit, team, run, holder, generation and bootstrap, with a nonnegative attempt")
 	}
 	if math.IsNaN(a.CPUCores) || math.IsInf(a.CPUCores, 0) || a.CPUCores < 0.001 || a.Memory <= 0 {
 		return errors.New("award requires positive finite CPU and memory")
@@ -153,8 +153,8 @@ func validateAward(a CloudJobAward) error {
 			return errors.New("eval award requires its source generation")
 		}
 	case CloudWork:
-		if b.NodeID == "" || b.Attempt <= 0 {
-			return errors.New("work award requires a job and attempt")
+		if b.NodeID == "" {
+			return errors.New("work award requires a job")
 		}
 	default:
 		return errors.New("unknown Cloud unit kind")
@@ -178,7 +178,8 @@ func validateBoundary(namespace, team, name string, r CloudNodeReservation, n Cl
 func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secret, engineJSON string, budget corev1.ResourceList) corev1.PodSpec {
 	scratch := resource.NewQuantity(limits.JobScratchBytes, resource.BinarySI)
 	main := hostContainer(cfg, a, "run-node", engineJSON)
-	// safety: one container's ephemeral limit establishes the aggregate pod budget, including sidecar logs and writable layers.
+	// safety: one container's ephemeral limit establishes the aggregate pod budget,
+	// including sidecar logs and writable layers.
 	main.Resources = corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceEphemeralStorage: *scratch}, Limits: corev1.ResourceList{corev1.ResourceEphemeralStorage: *scratch}}
 	return corev1.PodSpec{
 		NodeName: r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: labelHash(a.Binding.Team)}, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
@@ -210,7 +211,7 @@ func dockerContainer(cfg CloudJobConfig) corev1.Container {
 }
 
 func jobName(b CloudJobBinding) string {
-	raw := fmt.Sprintf("%q/%q/%q/%q/%d/%d", b.Team, b.RunID, b.NodeID, b.Kind, b.Generation, b.Attempt)
+	raw := fmt.Sprintf("%q/%q/%q/%q/%q/%d/%d/%q/%d", b.UnitID, b.Team, b.RunID, b.NodeID, b.Kind, b.Generation, b.Attempt, b.SourceNodeID, b.SourceGeneration)
 	sum := sha256.Sum256([]byte(raw))
 	return "sw-" + hex.EncodeToString(sum[:24])
 }

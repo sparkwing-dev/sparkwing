@@ -139,9 +139,11 @@ type ManagedUnitPolicy struct {
 }
 
 // safety: ManagedUnitPolicies covers every Sparkwing-managed unit, with no socket activation.
+// Renderers append --home with the captured absolute Home to both entries. wingd run
+// stays foreground until shutdown; dashboard start remains a lifecycle client.
 func ManagedUnitPolicies() []ManagedUnitPolicy {
 	return []ManagedUnitPolicy{
-		{Kind: ManagedController, Arguments: []string{"dashboard", "start", "--stay"}, StartAtLogin: true, RestartOnFailure: true},
+		{Kind: ManagedController, Arguments: []string{"wingd", "run", "--stay"}, StartAtLogin: true, RestartOnFailure: true},
 		{Kind: ManagedSchedule, Arguments: []string{"__tick"}},
 	}
 }
@@ -153,6 +155,7 @@ type ManagedUnit struct {
 	Executable string
 	Version    string
 	Arguments  []string
+	Home       string
 }
 
 // safety: ManagedUnitManager is shared by update, dashboard installation and schedule installation.

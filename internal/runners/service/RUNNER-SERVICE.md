@@ -1,6 +1,11 @@
 # Runner services
 
 `Install` writes a systemd user service on Linux or a launchd agent on macOS.
+Native command inspection and file publication share `service/unitfile` with
+local controller units and timers. Files are private. Registration checks
+refuse another loaded file before install, refresh or uninstall can act on its
+unit name or label. Literal command arguments preserve dollar signs, spaces
+and percent signs without a shell.
 Both execute `sparkwing-runner start --config PATH` in the foreground. They
 start at login and restart on failure. Windows installation returns
 `ErrUnsupported` so the caller can use its existing service manager.
@@ -8,6 +13,13 @@ start at login and restart on failure. Windows installation returns
 The registration names the existing config path. It does not read or copy
 credentials. Files without the managed marker remain untouched. `Uninstall`
 also preserves a registration naming another config.
+
+Enrollment writes `runner.credentials_dir` and `runner.repos`. Machine startup
+reads the private `agent-token` file once and retains it in a transport callback.
+Warm service startup uses the shared credential reader so Kubernetes projected
+files keep working. A failed enrollment revokes its new authority, removes its
+new private files and service file, and restores the previous runner
+section. Existing service files and unrelated settings survive cleanup.
 
 `Inspect` reads the executable and arguments from the actual registration.
 It uses the runner's shared parser to identify the effective config, including

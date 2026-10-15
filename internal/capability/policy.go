@@ -151,6 +151,9 @@ type RoutePolicy struct {
 // BodyRunID includes parent lineage on POST /runs; it cannot be authorized inside the handler.
 // Unit fields project the resolved blob.LogSubject at the controller boundary without an import cycle.
 type Target struct {
+	// ClaimKinds is decoded before claimSelection, which requires every kind's grant.
+	ClaimKinds           []UnitKind
+	SourceGeneration     int64
 	Team                 string
 	ClaimID              string
 	Unit                 UnitKind
@@ -176,9 +179,10 @@ type Target struct {
 
 // Presentation is private authentication input. Raw never belongs in process env or diagnostics.
 type Presentation struct {
-	Raw   string
-	Class CredentialClass
-	Peer  Subject
+	Raw      string
+	Class    CredentialClass
+	Peer     Subject
+	Evidence RequestEvidence
 }
 
 // AuthorityResolver resolves persisted capability or session authority inside the caller's transaction.
@@ -213,6 +217,11 @@ type Authenticated struct {
 // BindingChecker supplies relational facts through the store or the nodehost's sealed plan.
 // It owns lookups for team ownership, declarations, pools, ancestry, slots and data edges.
 // Implementations return typed apierr errors and perform no external side effects.
+// claimSelection refuses empty, duplicate, unknown or unauthorized ClaimKinds before selection.
+// nodes.claim authorizes node, triggers.claim authorizes trigger, and claims.launch
+// authorizes plan/eval/node only. The request cannot combine alternatives to widen authority.
+// The named trigger route also accepts a here Award's trigger.host for its exact
+// reserved run under LiveHereClaim. This exception never opens an ordered queue scan.
 type BindingChecker interface {
 	CheckBinding(context.Context, Principal, BindingRule, Target) error
 }

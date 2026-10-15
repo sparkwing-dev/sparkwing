@@ -51,7 +51,7 @@ func (l *Launcher) Sync(ctx context.Context) error {
 			remove = true
 		}
 		if !remove {
-			retire, err := l.shouldRetire(ctx, binding)
+			retire, err := l.shouldRetire(ctx, binding, job.Name, reservation.NodeUID)
 			if err != nil {
 				errs = append(errs, err)
 				continue
@@ -67,8 +67,8 @@ func (l *Launcher) Sync(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (l *Launcher) shouldRetire(ctx context.Context, binding CloudJobBinding) (bool, error) {
-	states, err := l.Control.Sync(ctx, []CloudJobBinding{binding})
+func (l *Launcher) shouldRetire(ctx context.Context, binding CloudJobBinding, jobName, nodeUID string) (bool, error) {
+	states, err := l.Control.Sync(ctx, []CloudJobObservation{{Binding: binding, JobName: jobName, NodeUID: nodeUID}})
 	if err != nil {
 		return false, err
 	}

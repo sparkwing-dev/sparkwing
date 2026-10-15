@@ -213,22 +213,22 @@ func TestDisplayNameCarriesTheEntryNameForEveryEntryButDefault(t *testing.T) {
 	}
 }
 
-func TestDeclaredSchedulesReadsBothYAMLShapes(t *testing.T) {
+func TestDeclaredSchedulesReadsScheduleLists(t *testing.T) {
 	root := writeRepo(t, "svc", `  - name: nightly
     entrypoint: Nightly
     on:
       schedule:
-        cron: "0 3 * * *"
-        where: local
+        - cron: "0 3 * * *"
+          where: local
   - name: hourly
     entrypoint: Hourly
     on:
       schedule:
-        cron: "@hourly"
-        where: local
-        tz: America/Denver
-        overlap: queue
-        catch_up: 6h
+        - cron: "@hourly"
+          where: local
+          tz: America/Denver
+          overlap: queue
+          catch_up: 6h
   - name: manual
     entrypoint: Manual
 `)
@@ -240,14 +240,14 @@ func TestDeclaredSchedulesReadsBothYAMLShapes(t *testing.T) {
 		t.Fatalf("declared %d schedules, want 2: %+v", len(declared), declared)
 	}
 	if declared[0].Pipeline != "nightly" || declared[0].Trigger.Cron != "0 3 * * *" {
-		t.Errorf("scalar form: %+v", declared[0])
+		t.Errorf("unnamed schedule: %+v", declared[0])
 	}
 	if declared[0].Trigger.TZ != "" || declared[0].Trigger.OverlapPolicy() != store.CronOverlapSkip {
-		t.Errorf("scalar form should carry the defaults: %+v", declared[0].Trigger)
+		t.Errorf("unnamed schedule should carry the defaults: %+v", declared[0].Trigger)
 	}
 	m := declared[1].Trigger
 	if m.Cron != "@hourly" || m.TZ != "America/Denver" || m.Overlap != "queue" || m.CatchUp != "6h" {
-		t.Errorf("mapping form: %+v", m)
+		t.Errorf("configured schedule: %+v", m)
 	}
 	if declared[1].RepoPath != root {
 		t.Errorf("RepoPath = %q, want %q", declared[1].RepoPath, root)
@@ -1231,18 +1231,19 @@ func fakeTimerHost(t *testing.T, home string, installed bool) crontimer.Host {
 	t.Helper()
 	root := t.TempDir()
 	h := crontimer.Host{
-		GOOS:       "linux",
-		Home:       root,
-		ConfigHome: filepath.Join(root, ".config"),
-		Binary:     nativeTimerFixtureBinary(),
-		PathEnv:    "/usr/bin:/bin",
-		Env:        map[string]string{"SPARKWING_HOME": home},
-		LogPath:    filepath.Join(home, "crons.log"),
-		UID:        1000,
-		Exec:       func(string, ...string) (string, error) { return "", nil },
+		GOOS:          "linux",
+		Home:          root,
+		ConfigHome:    filepath.Join(root, ".config"),
+		Binary:        nativeTimerFixtureBinary(),
+		PathEnv:       "/usr/bin:/bin",
+		SparkwingHome: home,
+		Version:       "v1.2.3",
+		LogPath:       filepath.Join(home, "crons.log"),
+		UID:           1000,
+		Exec:          func(context.Context, string, ...string) (string, error) { return "", nil },
 	}
 	if installed {
-		if _, err := crontimer.Install(h); err != nil {
+		if _, err := crontimer.Install(t.Context(), h); err != nil {
 			t.Fatalf("install the timer fixture: %v", err)
 		}
 	}

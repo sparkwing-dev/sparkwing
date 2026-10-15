@@ -60,11 +60,30 @@ bootstrap mount is absent from Docker. Pipeline execution starts after source
 acquisition. Plan resolves the exact SDK pin. Eval and work use the accepted
 engine identity.
 
+`NewControllerControl` binds the launcher's claim and sync operations to the
+shared controller wire interface. Its client must use `EngineOptions.Launcher`.
+It captures observed labels/capacity and requests the configured Cloud unit
+kinds in one call. The server supplies team, holder, generation, resources and
+the one-time bootstrap. The launcher has no caller-selected holder override.
+Transport failures never trigger a second claim in the adapter.
+
+The adapter projects plan source through `source.ForRequest`, and eval/work
+through `source.ForExecution` using the accepted spec and matching engine.
+Each award must include resolved CPU and memory in `ClaimedUnit.Execution`.
+For eval, `Binding.Generation` fences the terminal source and
+`Binding.Expansion` identifies the eval's own live lease. Both survive dispatch.
+
+The Job's binding retains the controller unit ID. Sync sends that ID, the Job
+name and reserved node UID reconstructed from Kubernetes metadata. It accepts
+one live or removal decision per observed Job. Changed fences, duplicate or
+missing decisions and returned credentials fail before activation or teardown.
+No in-memory award map or replacement bootstrap is needed after restart.
+
 <!-- design:begin -->
 
-The controller claim/sync adapter, deployment network probes and node cleanup
-must supply their declared interfaces. Component tests use a fake controller
-and Kubernetes API. They do not prove that a deployed cluster enforces egress,
+The HTTP client, source projections, deployment network probes and node cleanup
+must supply their declared interfaces. Component tests use a fake controller,
+source projections and Kubernetes API. They do not prove that a deployed cluster enforces egress,
 node isolation, native sidecar shutdown or scratch accounting. Those checks
 also need real images, an explicit Kubernetes context and bootstrap/host
 composition from the owning areas.

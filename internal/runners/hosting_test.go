@@ -133,7 +133,7 @@ func TestHostingRefusesInvalidAuthorityBeforeRenewal(t *testing.T) {
 		func(u *controllerwire.ClaimedUnit) { u.Binding.NodeID = "other" },
 		func(u *controllerwire.ClaimedUnit) { u.Binding.Holder = "" },
 		func(u *controllerwire.ClaimedUnit) { u.Binding.Generation = 0 },
-		func(u *controllerwire.ClaimedUnit) { u.Binding.Attempt = 0 },
+		func(u *controllerwire.ClaimedUnit) { u.Binding.Attempt = -1 },
 		func(u *controllerwire.ClaimedUnit) { u.LeaseExpiresAt = time.Time{} },
 		func(u *controllerwire.ClaimedUnit) {
 			deadline := time.Now().Add(-time.Minute)

@@ -3,9 +3,41 @@
 <!-- design:begin -->
 
 The engine package implements these contracts. Component tests cover pin
-resolution, signed releases, policy, caching and upgrades. Source/host composition,
-CLI entrypoints and native installer integration remain separate work. The
+resolution, signed releases, policy, caching, selected-engine SDK installation
+and upgrades. Source/host composition and native platform evidence remain separate work. The
 implementation status is recorded in [the W8 handoff](../W8-IMPLEMENTATION.md).
+
+## Amendment 1: selected-engine installation
+
+`install_contract.go` declares `Resolved.InstallSDK(SDKInstallRequest) SDKCommand`.
+Source acquisition resolves the exact pin before calling it. The verified selected
+Sparkwing executable implements hidden `__sdk-install`, reads request JSON on stdin,
+inherits only procenv.Install's environment, and writes one SDKCommand JSON value.
+Diagnostics go to masked stderr. The command contains locally built Go argv or
+Node/main argv without protocol flags or a preload. Installation rechecks the pin
+against Resolved and cannot substitute the host's engine or a remote pipeline binary.
+Eval/work use the accepted identity and the same selected engine's host operations.
+
+`internal/engine/sdkinstall.Run` serves that request in the selected executable.
+It rechecks the build version, uses the existing local binary cache for Go and
+uses `npm ci` for TypeScript. Go dependency selection must retain the pinned SDK.
+The cache key includes the pin, source key and install environment, keeping these
+locally built entries separate from the retired remote binary path. TypeScript
+returns Node and its main file. Native tool diagnostics pass through the shared
+proxy masker. The hidden CLI route skips update and version-state startup hooks.
+
+`SDKInstallRequest.UnmarshalJSON` rejects duplicate and unknown fields, including
+an attempted environment field. `PipelineDirectory` keeps both sides on the same
+checkout-relative path validation. These are W8-local additions. The install
+adapter is a child package because the binary cache depends on store/runspec,
+which already imports the engine identity package.
+
+W8 retains historical signed asset matrices even after current cache-binary removal.
+W9 renders shared version notices and wires upgrade verification. W5/W9 package and
+stamp the TypeScript Windows bridge for supported architectures with its matching
+engine release. Decision 104 requires native Windows handle-inheritance evidence.
+These are integration obligations under decisions 102-104, not a new distribution
+origin, trust root, fallback-age cutoff or support-window expiry refusal.
 
 ## Ownership
 

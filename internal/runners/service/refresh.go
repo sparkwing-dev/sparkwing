@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
 )
 
 // Inspect reads the installed command without contacting the service manager or
@@ -32,7 +34,7 @@ func Inspect(ctx context.Context, h Host) (State, error) {
 	}
 	args := unitArguments(existing.body)
 	if h.GOOS == "darwin" {
-		args = plistArguments([]byte(existing.body))
+		args = unitfile.PlistArguments([]byte(existing.body))
 	}
 	if len(args) < 2 || !filepath.IsAbs(args[0]) {
 		return state, fmt.Errorf("runner service: unreadable command in %s", path)
@@ -72,6 +74,18 @@ func Refresh(ctx context.Context, h Host) (State, error) {
 	if err := ctx.Err(); err != nil {
 		return state, err
 	}
+	if h.GOOS == "linux" {
+		if err := unitfile.CheckSystemdSource(ctx, h.Exec, ServiceName, state.Path); err != nil {
+			return state, err
+		}
+	}
+	loaded, agentStatus := false, ""
+	if h.GOOS == "darwin" {
+		loaded, agentStatus, err = agentRegistration(ctx, h)
+		if err != nil {
+			return state, err
+		}
+	}
 	body := serviceUnit(h)
 	if h.GOOS == "darwin" {
 		body = agentPlist(h)
@@ -90,14 +104,10 @@ func Refresh(ctx context.Context, h Host) (State, error) {
 		// safety: updating software must not start a registration its operator stopped.
 		return state, runRefresh(ctx, h, "systemctl", "--user", "try-restart", ServiceName)
 	}
-	out, err := h.run(ctx, "launchctl", "print", h.serviceTarget())
-	if err != nil {
-		if ctx.Err() == nil && notLoaded(out) {
-			return state, nil
-		}
-		return state, fmt.Errorf("runner service: inspect active launchd registration: %w: %s", err, strings.TrimSpace(out))
+	if !loaded {
+		return state, nil
 	}
-	running, err := launchdRunning(out)
+	running, err := launchdRunning(agentStatus)
 	if err != nil || !running {
 		return state, err
 	}
@@ -109,6 +119,20 @@ func Refresh(ctx context.Context, h Host) (State, error) {
 	}
 	state.Running = true
 	return state, nil
+}
+
+func agentRegistration(ctx context.Context, h Host) (bool, string, error) {
+	out, err := h.run(ctx, "launchctl", "print", h.serviceTarget())
+	if err != nil && ctx.Err() == nil && notLoaded(out) {
+		return false, out, nil
+	}
+	if err != nil {
+		return false, out, fmt.Errorf("runner service: inspect launchd registration: %w: %s", err, strings.TrimSpace(out))
+	}
+	if err := unitfile.CheckAgentSource(out, PlistPath(h)); err != nil {
+		return false, out, err
+	}
+	return true, out, nil
 }
 
 func launchdRunning(output string) (bool, error) {

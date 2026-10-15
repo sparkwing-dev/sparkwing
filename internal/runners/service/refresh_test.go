@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
 )
 
 func TestRefreshLeavesForeignAndOtherRegistrationsUntouched(t *testing.T) {
@@ -49,6 +51,43 @@ func TestRefreshLeavesForeignAndOtherRegistrationsUntouched(t *testing.T) {
 	}
 }
 
+func TestServiceOperationsRefuseAnotherLoadedFile(t *testing.T) {
+	for _, fixture := range []struct {
+		name string
+		host func(*testing.T, *fakeExec) Host
+		path func(Host) string
+	}{{"linux", linuxHost, UnitPath}, {"darwin", darwinHost, PlistPath}} {
+		t.Run(fixture.name, func(t *testing.T) {
+			h := fixture.host(t, &fakeExec{})
+			state, err := Install(t.Context(), h)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(state.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, operation := range []func(context.Context, Host) (State, error){Install, Refresh, Uninstall} {
+				calls := 0
+				h.Exec = func(context.Context, string, ...string) (string, error) {
+					calls++
+					if h.GOOS == "linux" {
+						return "/other/sparkwing-runner.service\n", nil
+					}
+					return "path = /other/runner.plist\nstate = running\n", nil
+				}
+				if _, err := operation(t.Context(), h); err == nil || calls != 1 {
+					t.Fatalf("changed another loaded file: %v, calls=%d", err, calls)
+				}
+				after, err := os.ReadFile(fixture.path(h))
+				if err != nil || !slices.Equal(before, after) {
+					t.Fatalf("refused operation changed its file: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestRefreshPreservesStoppedLaunchdRegistration(t *testing.T) {
 	exec := &fakeExec{}
 	h := darwinHost(t, exec)
@@ -81,7 +120,7 @@ func TestRefreshPreservesLoadedButStoppedLaunchdRegistration(t *testing.T) {
 		var calls []string
 		h.Exec = func(_ context.Context, name string, args ...string) (string, error) {
 			calls = append(calls, name+" "+strings.Join(args, " "))
-			return output, nil
+			return "path = " + PlistPath(h) + "\n" + output, nil
 		}
 		state, err := Refresh(t.Context(), h)
 		if state.Running || (output == "unrecognized output" && err == nil) {
@@ -111,9 +150,9 @@ func TestRegistrationConfigUsesTheFinalFlag(t *testing.T) {
 			}
 			other := filepath.Join(h.Home, "other.yaml")
 			if h.GOOS == "linux" {
-				body = []byte(strings.Replace(string(body), " start --config "+systemdWord(h.ConfigPath), " start --config "+systemdWord(h.ConfigPath)+" --config="+systemdWord(other), 1))
+				body = []byte(strings.Replace(string(body), " start --config "+unitfile.SystemdWord(h.ConfigPath), " start --config "+unitfile.SystemdWord(h.ConfigPath)+" --config="+unitfile.SystemdWord(other), 1))
 			} else {
-				body = []byte(strings.Replace(string(body), "  </array>", "    <string>--config="+xmlText(other)+"</string>\n  </array>", 1))
+				body = []byte(strings.Replace(string(body), "  </array>", "    <string>--config="+unitfile.XMLText(other)+"</string>\n  </array>", 1))
 			}
 			if err := os.WriteFile(fixture.path(h), body, 0600); err != nil {
 				t.Fatal(err)
@@ -146,7 +185,7 @@ func TestRegistrationConfigConsumesValuesUsingTheRunnerGrammar(t *testing.T) {
 		"start --checkout --config=" + h.ConfigPath,
 		"start --repos --config=" + h.ConfigPath,
 	} {
-		body := []byte("# " + Marker + "\n[Service]\nExecStart=" + systemdWord(h.Binary) + " " + args + "\n")
+		body := []byte("# " + Marker + "\n[Service]\nExecStart=" + unitfile.SystemdWord(h.Binary) + " " + args + "\n")
 		if err := os.WriteFile(UnitPath(h), body, 0600); err != nil {
 			t.Fatal(err)
 		}

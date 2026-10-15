@@ -236,8 +236,9 @@ func TestLocalDoctorReportsVersionAndRemovedUnitVerbs(t *testing.T) {
 	runtime.status = LocalStatus{Running: true, Version: "v1"}
 	units := lifecycleUnits{[]ManagedUnit{
 		{Kind: ManagedController, Name: "dashboard", Version: "v1", Arguments: []string{"serve", "start"}},
-		{Kind: ManagedSchedule, Name: "timer", Version: "v2", Arguments: []string{"__tick"}},
+		{Kind: ManagedSchedule, Name: "timer", Version: "v2", Home: t.TempDir()},
 	}}
+	units.units[1].Arguments = []string{"__tick", "--home", units.units[1].Home}
 	lifecycle := NewLocalLifecycle(runtime, units)
 	findings, err := lifecycle.Doctor(context.Background(), "v2")
 	if err != nil {

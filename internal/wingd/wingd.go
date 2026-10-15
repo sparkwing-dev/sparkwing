@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -64,7 +65,7 @@ type Config struct {
 
 	HeadroomFraction float64
 
-	Budget Budget
+	Budget userconfig.Budget
 
 	BudgetSource BudgetSource
 	BudgetOrigin string

@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/cluster"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/service"
-	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 func TestRunnerServiceW8Components(t *testing.T) {
@@ -26,11 +26,18 @@ func TestRunnerServiceW8Components(t *testing.T) {
 				Exec: func(_ context.Context, name string, args ...string) (string, error) {
 					calls = append(calls, name+" "+strings.Join(args, " "))
 					if name == "launchctl" && args[0] == "print" {
-						return "state = running\n", nil
+						return "path = " + filepath.Join(root, "Library", "LaunchAgents", service.PlistName) + "\nstate = running\n", nil
 					}
 					return "", nil
 				}}
-			config := []byte("runner:\n  controller: https://controller.example.com\n  credentials_dir: /private/runner\n")
+			credentials, err := fssecure.MkdirPrivateTemp(root, "credentials-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := fssecure.WriteFile(filepath.Join(credentials, "agent-token"), []byte("private-runner-credential")); err != nil {
+				t.Fatal(err)
+			}
+			config := []byte("runner:\n  controller: https://controller.example.com\n  credentials_dir: " + credentials + "\n")
 			if err := os.MkdirAll(filepath.Dir(host.ConfigPath), 0700); err != nil {
 				t.Fatal(err)
 			}
@@ -50,16 +57,15 @@ func TestRunnerServiceW8Components(t *testing.T) {
 			if !state.Installed || state.Binary != host.Binary || !slices.Equal(state.Arguments, []string{"start", "--config", host.ConfigPath}) {
 				t.Fatalf("installed command=%+v", state)
 			}
-			controller := "https://controller.example.com"
 			reachedRuntime := errors.New("reached the unified runner")
 			cli := cluster.RunnerCLI{
-				ReadConfig: func(path string) (userconfig.Config, error) {
-					if path != host.ConfigPath {
-						t.Fatalf("config=%q", path)
+				Factory: func(ctx context.Context, options cluster.RunnerOptions) (*runners.ManagedRunner, error) {
+					if options.Bearer == nil {
+						t.Fatal("installed command did not load its private credential")
 					}
-					return userconfig.Config{Runner: &userconfig.RunnerConfig{Controller: &controller}}, nil
-				},
-				Factory: func(context.Context, cluster.RunnerOptions) (*runners.ManagedRunner, error) {
+					if bearer, err := options.Bearer(ctx); err != nil || bearer != "private-runner-credential" {
+						t.Fatalf("installed command lost its credential: %v", err)
+					}
 					return nil, reachedRuntime
 				},
 			}
@@ -75,7 +81,7 @@ func TestRunnerServiceW8Components(t *testing.T) {
 			if err != nil || state.Binary != host.Binary || !slices.Equal(state.Arguments, []string{"start", "--config", host.ConfigPath}) {
 				t.Fatalf("refreshed command=%+v err=%v", state, err)
 			}
-			if goos == "linux" && !slices.Equal(calls, []string{"systemctl --user daemon-reload", "systemctl --user try-restart sparkwing-runner.service"}) {
+			if goos == "linux" && !slices.Equal(calls, []string{"systemctl --user show -p FragmentPath --value sparkwing-runner.service", "systemctl --user daemon-reload", "systemctl --user try-restart sparkwing-runner.service"}) {
 				t.Fatalf("refresh changed registration: %v", calls)
 			}
 			if goos == "darwin" && !slices.Equal(calls, []string{"launchctl print gui/501/com.sparkwing.runner", "launchctl bootout gui/501/com.sparkwing.runner", "launchctl bootstrap gui/501 " + state.Path}) {

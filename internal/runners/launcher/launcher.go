@@ -21,8 +21,15 @@ import (
 // CloudControl supplies awarded bindings from the controller and checks their continued authority.
 // Sync must return exactly one decision for each supplied binding, including dead or cancelled claims.
 type CloudControl interface {
-	Claim(context.Context, string) (*CloudJobAward, error)
-	Sync(context.Context, []CloudJobBinding) ([]CloudJobState, error)
+	Claim(context.Context) (*CloudJobAward, error)
+	Sync(context.Context, []CloudJobObservation) ([]CloudJobState, error)
+}
+
+// CloudJobObservation retains the identities needed to reconcile after launcher restart.
+type CloudJobObservation struct {
+	Binding CloudJobBinding
+	JobName string
+	NodeUID string
 }
 
 // CloudJobState carries the controller's teardown decision for one immutable award.
@@ -37,7 +44,6 @@ type Launcher struct {
 	Control  CloudControl
 	Config   CloudJobConfig
 	Boundary CloudBoundary
-	Holder   string
 	Poll     time.Duration
 	Logger   *slog.Logger
 }
@@ -46,8 +52,8 @@ func (l *Launcher) validate() error {
 	if err := l.Config.Validate(); err != nil {
 		return err
 	}
-	if l.Kube == nil || l.Control == nil || l.Boundary == nil || l.Holder == "" {
-		return errors.New("launcher requires Kubernetes, controller, boundary and holder")
+	if l.Kube == nil || l.Control == nil || l.Boundary == nil {
+		return errors.New("launcher requires Kubernetes, controller and boundary")
 	}
 	return nil
 }
@@ -87,12 +93,9 @@ func (l *Launcher) LaunchOne(ctx context.Context) (bool, error) {
 	if err := l.validate(); err != nil {
 		return false, err
 	}
-	award, err := l.Control.Claim(ctx, l.Holder)
+	award, err := l.Control.Claim(ctx)
 	if err != nil || award == nil {
 		return false, err
-	}
-	if award.Binding.Holder != l.Holder {
-		return true, errors.New("controller awarded a different launcher holder")
 	}
 	r, err := BuildJob(ctx, time.Now(), l.Config, *award, l.Boundary)
 	if err != nil {
@@ -132,7 +135,7 @@ func (l *Launcher) LaunchOne(ctx context.Context) (bool, error) {
 		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
 	}
 	// safety: reservation probes and publication may outlive the award's execution authority.
-	retire, err := l.shouldRetire(ctx, award.Binding)
+	retire, err := l.shouldRetire(ctx, award.Binding, created.Name, r.Reservation.NodeUID)
 	if err == nil && retire {
 		err = errors.New("Cloud award ended before Job activation")
 	}

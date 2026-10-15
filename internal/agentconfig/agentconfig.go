@@ -18,16 +18,17 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type Config struct {
 	Contribution string `yaml:"contribution"`
 
-	Controller string `yaml:"controller"`
+	Controller     string `yaml:"controller"`
+	CredentialsDir string `yaml:"credentials_dir"`
 	// Gitcache is the git cache source is fetched through. Empty means the
 	// controller's gitcache proxy, unless AllowRepos is set.
 	Gitcache string `yaml:"gitcache"`
@@ -35,13 +36,13 @@ type Config struct {
 	// patterns. Given without a gitcache, the agent fetches each run's source
 	// directly: with the credential the controller releases, else with the
 	// machine owner's own git credentials.
-	AllowRepos []string `yaml:"allow_repos"`
+	AllowRepos []string `yaml:"repos"`
 	// AcceptWorkingTree lets an agent with AllowRepos build working-tree
 	// snapshots of the listed repositories. The controller supplies a
 	// snapshot's code, so the list alone cannot vouch for it.
 	AcceptWorkingTree bool          `yaml:"accept_working_tree"`
 	Profile           string        `yaml:"profile"`
-	Token             string        `yaml:"token"`
+	Token             string        `yaml:"-"`
 	MaxConcurrent     int           `yaml:"max_concurrent"`
 	Labels            []string      `yaml:"labels"`
 	SpawnPolicy       string        `yaml:"spawn_policy"`
@@ -52,7 +53,7 @@ type Config struct {
 
 	LocalAdmission *bool `yaml:"local_admission"`
 
-	LocalReserve string `yaml:"local_reserve"`
+	LocalReserve string `yaml:"keep_free"`
 }
 
 // EnrolledModeRemoved is the whole message a configuration carrying the
@@ -67,23 +68,33 @@ const EnrolledModeRemoved = "enrolled mode has been removed; " +
 func Load(path string) (*Config, error) {
 	// safety: the unknown-field error names the key without naming the mode it
 	// used to select, so the removed keys are answered before the ordinary parse.
-	section, err := userconfig.Node(path, userconfig.Agent)
+	section, err := userconfig.Node(path, userconfig.Runner)
 	if err != nil {
-		if cfg, legacy, lerr := loadLegacyFile(path); legacy {
-			return cfg, lerr
-		}
 		return nil, err
 	}
 	if carriesEnrolledKey(section, 0) {
 		return nil, fmt.Errorf("parse %s: %s", path, EnrolledModeRemoved)
 	}
 	var cfg Config
-	found, err := userconfig.Read(path, userconfig.Agent, &cfg)
+	found, err := userconfig.Read(path, userconfig.Runner, &cfg)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
-		return nil, fmt.Errorf("%s has no agent section; `sparkwing cluster runners add` writes one: %w", path, os.ErrNotExist)
+		return nil, fmt.Errorf("%s has no runner section; `sparkwing cluster runners add` writes one: %w", path, os.ErrNotExist)
+	}
+	if cfg.CredentialsDir != "" {
+		dir, err := credentials.Open(cfg.CredentialsDir)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Token, err = dir.ReadPrivate("agent-token")
+		if err != nil {
+			return nil, err
+		}
+		if cfg.Token == "" {
+			return nil, errors.New("runner credential file is empty")
+		}
 	}
 	return &cfg, nil
 }
@@ -155,10 +166,10 @@ func Validate(in Config) (Config, error) {
 	default:
 		return out, fmt.Errorf("agent: spawn_policy %q: expected return-to-queue | run-local | auto", out.SpawnPolicy)
 	}
-	if _, err := wingd.ParseBudget(out.LocalReserve); err != nil {
+	if _, err := userconfig.ParseBudget(out.LocalReserve); err != nil {
 		return out, fmt.Errorf("agent: local_reserve: %w", err)
 	}
-	if _, err := wingd.ParseBudget(out.Contribution); err != nil {
+	if _, err := userconfig.ParseBudget(out.Contribution); err != nil {
 		return out, fmt.Errorf("agent: contribution: %w", err)
 	}
 	if out.LocalAdmission == nil {

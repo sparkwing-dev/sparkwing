@@ -238,18 +238,21 @@ go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing-runner@latest
 sparkwing cluster runners add --profile prod --name dev-laptop
 ```
 
-It mints a runner token scoped to `nodes.claim`, `triggers.claim` and
-`runs.state`, writes
-the `agent` section of `~/.config/sparkwing/config.yaml` at mode `0600`,
-keeping the file's other sections, installs the user service, and
-prints the token prefix with the command that revokes it. The runner uploads
-its nodes' logs to the controller as segments. The config and the machine are checked
-before the mint, so a host with no `sparkwing-runner` or no
-user service session fails before a credential exists; a failure after the mint
-prints the live token and its revoke command. `--max-concurrent`,
-`--contribution` and `--labels` set the same fields the interactive installer
-asks for, `--no-service` writes the config for a machine you supervise
-yourself, and an existing config is replaced only with `--force`. Retire the
+Enrollment writes the validated `runner` section of
+`~/.config/sparkwing/config.yaml`, preserving other settings. The credential
+lives in a private `agent-token` file under `runner.credentials_dir`. It is
+absent from YAML and service arguments. `--allow-repo` writes `runner.repos`.
+The runner reads its credential once at startup.
+
+The config and service manager are checked before minting. If enrollment then
+fails, it attempts revocation and removes its private files and any new
+service file. Cleanup errors remain part of the enrollment failure. A forced replacement restores the prior runner section
+and leaves its credential intact. Unrelated settings survive cleanup. If
+revocation also fails, the error includes a command to revoke the prefix.
+
+`--max-concurrent`, `--contribution` and `--labels` set machine preferences.
+`--no-service` writes the configuration for a machine you supervise yourself.
+An existing runner section is replaced only with `--force`. Retire the
 machine with `sparkwing cluster runners remove --profile prod`, which stops the
 service and then revokes the token.
 
@@ -279,8 +282,7 @@ credential. The duplicate shell enrollment installer has been removed.
 
 <!-- design:begin -->
 
-Runner enrollment must write the validated `runner` section and its private
-credential files. The shared controller and host composition must be connected
+The shared controller and host composition must be connected
 before the installed runner can execute work. An updater outside the runner's
 service can refresh the managed registration while preserving its config path
 and stopped state. Automatic self-update must hand service replacement to an
@@ -288,32 +290,9 @@ external owner because a launchd reload stops the process performing it.
 
 <!-- design:end -->
 
-A runner warms its Go module cache at startup from `--warm-modules`, a comma-separated list of module paths with an
-optional `@version`; it defaults to the SDK at the runner's own version, and
-`off` disables it. The warm runs in the background and a failed download only
-logs, so a cold cache never blocks a claim.
-
-The installer writes the token to the `agent` section of a new
-`~/.config/sparkwing/config.yaml` with mode `0600`, and refuses when that file
-already exists, because a shell script cannot merge YAML without risking the
-other sections; `sparkwing cluster runners add` merges it instead. The service
-uses that file rather than embedding the token in its
-launchd plist or systemd unit. The contribution caps reported capacity; the
-reserve constrains local admission.
-
-The section carries claim-mode keys only. It has no `name` and no
-`coordinators`; a section that still sets either key fails to load and says
-enrolled mode has been removed. `allow_repos`, which `runners add --allow-repo`
-writes, makes the agent fetch source directly rather than through the
-controller's gitcache proxy; see
-[local-execution.md](local-execution.md#an-agent-that-fetches-source-itself).
-
-The native Windows runner uses the same YAML and `sparkwing-runner.exe agent
---config <path>` command, but neither installer creates a Windows service. On
-Windows `sparkwing cluster runners add` mints the token, writes the config, and
-prints those manual steps. Supervise the agent with the service manager you
-already use, or run the Linux installer inside WSL when systemd user services
-are enabled.
+The native Windows runner uses the same YAML and
+`sparkwing-runner.exe start --config <path>`. Enrollment prints manual service
+steps on Windows. Supervise that command with your service manager.
 
 ### Operate the service
 
@@ -340,8 +319,9 @@ remain active after logout.
 
 ### Troubleshooting
 
-**The runner returns `401 unauthorized`.** Confirm that `token:` in the `agent`
-section of `~/.config/sparkwing/config.yaml` is a valid controller token.
+**The runner returns `401 unauthorized`.** Confirm that `agent-token` under
+`runner.credentials_dir` holds a live controller credential. Restart the runner
+after replacing that file because it retains the credential read at startup.
 
 **The runner does not claim work.** Confirm that the pipeline was remotely
 triggered and that the runner can reach the configured controller and logs

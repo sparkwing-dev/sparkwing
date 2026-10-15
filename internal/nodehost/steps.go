@@ -206,7 +206,7 @@ func driveSteps(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun, a
 		if !lastAt.IsZero() {
 			latency = lastAt.Sub(failFastAt)
 		}
-		r.sink.emit(sparkwing.LogRecord{Level: "info", Event: sparkwing.EventWorkFailFast, Msg: fatalStep, Attrs: map[string]any{
+		r.sink.host(sparkwing.LogRecord{Level: "info", Event: sparkwing.EventWorkFailFast, Msg: fatalStep, Attrs: map[string]any{
 			"trigger_step":            fatalStep,
 			"cancelled_siblings":      len(cancelledSteps),
 			"cancelled_steps":         cancelledSteps,
@@ -299,7 +299,7 @@ func (r *stepRun) end(id string, elapsed time.Duration, err error, cancelled boo
 	case cancelled:
 		attrs["outcome"] = string(sparkwing.Cancelled)
 	case err != nil:
-		attrs["outcome"], attrs["error"], level = string(sparkwing.Failed), r.sink.cfg.Masker.Mask(err.Error()), "error"
+		attrs["outcome"], attrs["error"], level = string(sparkwing.Failed), err.Error(), "error"
 	}
 	r.record(level, sparkwing.EventStepEnd, id, attrs)
 }
@@ -325,10 +325,10 @@ func (r *stepRun) record(level, event, id string, attrs map[string]any) {
 		err = st.FinishNodeStep(ctx, run, node, id, status)
 	}
 	if err != nil {
-		r.sink.emit(sparkwing.LogRecord{
+		r.sink.host(sparkwing.LogRecord{
 			Level: "warn", Event: "state_write_failed", Step: id, Msg: "step state write failed",
-			Attrs: map[string]any{"run_id": run, "operation": event, "error": r.sink.cfg.Masker.Mask(err.Error())},
+			Attrs: map[string]any{"run_id": run, "operation": event, "error": err.Error()},
 		})
 	}
-	r.sink.emit(sparkwing.LogRecord{Level: level, Event: event, Msg: id, Attrs: attrs})
+	r.sink.host(sparkwing.LogRecord{Level: level, Event: event, Msg: id, Attrs: attrs})
 }

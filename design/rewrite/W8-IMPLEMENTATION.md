@@ -1,5 +1,8 @@
 # W8 implementation handoff
 
+Latest continuation: the Cloud controller adapter and persisted reconciliation
+identity are recorded at the end of this file. W8 remains incomplete.
+
 W8 remains incomplete. The runner, engine, launcher and local process runtime
 are exercised with component fixtures. Installed process composition, the shared
 controller adapter and native/Cloud acceptance remain open. The
@@ -203,9 +206,9 @@ Detached startup and dashboard commands still need CLI composition.
    omits them and requires `--job` even for plan units. Reconcile that contract
    before wiring plan/eval/work entrypoints. The source init and execution
    containers also need a defined handoff for their single-use bootstrap.
-5. **W2/W9 launcher transport.** Implement `CloudControl.Claim/Sync` with immutable
-   award, deadline and bootstrap bindings. Wire `RunLaunchCLI` to that transport
-   and the verified Cloud boundary. Its default factory is absent.
+5. **W2/W9 launcher transport.** `NewControllerControl` implements the award/sync
+   projection. Wire `RunLaunchCLI` to a shared client with Launcher selection and
+   the verified Cloud boundary. Its default factory and real HTTP client are absent.
 6. **W1/W2/W3 local services.** Bind `LocalRuntimeConfig.Open` to the final shared
    controller, its single store, queue consumer and orphan recovery. Final
    `EngineController`, capability authorization, claim/read/reaper and singleton
@@ -974,3 +977,363 @@ no-binary rule. No stateful Sparkwing command, candidate, pipeline or Git write
 followed. The shared Git config has no local identity or worktree override.
 Native fixtures remain unavailable. Standards discovery succeeds with its
 installed-binary staleness notice. Worker scratch is removed after final review.
+
+
+## Continuation: amendment merge and selected-engine installation
+
+The ten merge conflicts have resolved working-file contents. The four legacy
+modify/delete paths stay deleted, retaining the earlier removal of 928 lines
+from the incoming versions. No additional legacy subsystem was deleted. No Git
+write ran, so the lead must stage all resolutions and finish the merge.
+
+[The amendment audit](W8-AMENDMENTS-1.md) covers all 26 amendment rows assigned
+to W8. It records actions, open contracts and native integration points.
+
+Resolved.InstallSDK now rechecks the checkout pin and cached signed executable,
+uses the selected engine's hidden stdin/result transport, applies procenv.Install
+and masks proxy diagnostics. The hidden CLI route skips update/version-state
+startup hooks. The native adapter checks its build version, uses the existing
+local Go binary cache and runs TypeScript installation from the npm lockfile.
+The TypeScript result contains Node and main without a preload. The adapter lives
+in a child package because importing the cache into the engine identity package
+creates an import cycle through store and runspec.
+
+Runner hosting and Cloud work now accept ordinal zero before Start. They preserve
+that ordinal rather than inventing the first execution attempt. Negative values
+still fail. TestInitialAttemptW8Components covers both boundaries. The merged
+runner enrollment test now uses runners/service and its context-aware Exec. The
+cluster runner uses userconfig.ParseBudget after W6's package move.
+
+### Verification and limits
+
+- Whole-repository go build passes with -p 4.
+- Vet passes for engine, runners, wingd and their subpackages, cluster, both
+  acceptance packages and cmd/sparkwing.
+- Full engine, runner and component acceptance suites pass. Selected local
+  lifecycle tests, cluster tests excluding its socket listener, and CLI enrollment
+  tests pass. The new install tests also pass under the race detector.
+- The install adapter cross-compiles for Windows/amd64. Native Windows behavior
+  remains unverified. Tests substitute Go/npm dependency tools and signed engine
+  executables. No Sparkwing binary, pipeline or real dependency installation ran.
+- Engine commentcheck and git diff --check pass. The full comment scan reports a
+  merged controllerwire/contracts.go comment outside this continuation. The full
+  sleep scan reports two merged limits/deadline_test.go wall-clock cases. A scoped
+  sleep scan cannot run because its external-boundary registry expects controller
+  test paths under the repository root. These are reported, not counted as passes.
+- The independent snapshot review confirmed two open findings: standard Windows
+  npm.cmd invocation and ambient-workspace hashing despite GOWORK=off. Their
+  required shared contracts and reproduction are in the amendment audit. The
+  request-field ambiguity finding was fixed and its tests pass. Review is not clean.
+
+No native acceptance catalog cell was activated and no additional T1 test was
+ported. Newly passing component cells are initial_attempt/runner and
+initial_attempt/launcher. Full placement, source/host, local-store/controller,
+Actions, managed-unit, Windows SID/bridge and Cloud deployment proofs remain open.
+
+Shared edits beyond W8 packages are cmd/sparkwing/main.go and sdk_install.go for
+hidden dispatch, runner_enrollment_test.go for the service migration, cmd/sparkwing/runners.go, runners_test.go and secret_local_test.go for merge
+resolution, internal/limits/deadline.go, tests/acceptance/initial_attempt_w8_test.go
+and these design documents. Existing orchestrator deletions remain. No other area's
+contract was changed. The two requests above need the owning areas' contracts.
+
+Checks use GOWORK=off, GOFLAGS=-buildvcs=false and private caches/temp directories
+under /tmp/sw-astra-W8, with test package parallelism at most four. The shared Git
+config has no user identity or core.worktree override. The lead retains staging,
+committing, gates and landing. Worker scratch is removed at the end.
+
+
+## Continuation: native managed units
+
+`NewManagedUnitManager` now implements the existing home-bound managed-unit
+port. Linux controller services run foreground `wingd run --stay --home` from
+login with restart on failure. macOS uses a LaunchAgent with the same argv.
+Neither uses socket activation. Windows refuses native installation and names
+`--stay`. Read-only inspection supplies actual argv, captured Home and release
+metadata to status and doctor without opening a store.
+
+The native schedule renderer now invokes `__tick --home <absolute-home>`.
+It no longer restores `crons tick`, SPARKWING_HOME plumbing or legacy timer
+retirement. Refresh updates existing controller and schedule units while keeping
+their captured settings. It does not install absent units. Installed controllers
+restart. Installed macOS timers bootstrap again after an interrupted update.
+Schedule pause remains in the store. Linux timers keep their enabled state.
+
+Native units, timers and runner services share argument encoding, file
+inspection, private atomic publication and registration-source checks in
+`internal/runners/service/unitfile`. This extraction removes duplicate helpers.
+Source checks happen before mutations by native unit name or launchd label.
+They refuse another loaded file, foreign files, different homes and symlinks.
+Systemd commands use its literal ':' prefix because executable paths and argv
+must preserve dollar signs. Environment assignments keep their own semantics.
+Release metadata is encoded because a valid prerelease may contain '--', which
+cannot appear inside an XML comment.
+
+Doctor now checks the complete policy argv and absolute captured Home. The
+source lifecycle document and runner-service document describe these boundaries.
+The all-26-row amendment audit remains in W8-AMENDMENTS-1.md. A1-41 now records
+this implementation and the remaining CLI/native proofs.
+
+### Deletion and test ports
+
+This continuation deletes **99 legacy timer-retirement and home-detection lines**,
+including their obsolete test. It removes no whole file. Replaced argument and
+file helpers are extracted into one active owner. No additional parked T1 test
+is claimed as ported. The earlier sizing port remains the W8 inventory port.
+
+### Verification
+
+Every Go command used GOWORK=off and GOFLAGS=-buildvcs=false, with GOCACHE,
+GOTMPDIR and TMPDIR below /tmp/sw-astra-W8. Test package parallelism was four
+or less.
+
+- Whole-repository `go build -p 4 ./...` passed.
+- Vet passed for crontimer, runners and subpackages, wingd and subpackages,
+  engine and subpackages, cluster, crons, CLI, localws and acceptance tests.
+- Full engine, sdkinstall, runners, launcher, runner-service, shared unitfile,
+  crontimer and component acceptance package tests passed.
+- Wingd `^TestManaged|^TestLocal` and client `^TestLocalLifecycle` tests passed.
+- Cluster passed with only TestStartMetricsListener_ServesMetrics excluded.
+  The socket prohibition was already established in this sandbox.
+- Full crontimer, runner-service, unitfile and acceptance race suites passed.
+  Wingd `^TestManaged|^TestLocal` race tests passed.
+- Wingd tests cross-compiled for windows/amd64. This is not Windows execution.
+- TestManagedUnitsW8Components exercises native files and fake service managers
+  on Linux/macOS. The full acceptance package passed. **No native catalog cell
+  was activated.** Login, crash, drain, live OS registration and Cloud isolation
+  still require their platform drivers.
+- Independent review found literal-dollar handling, registration ownership,
+  retry-after-bootstrap-failure and XML-sensitive version issues. Regressions
+  cover them. Final bounded review reported no remaining actionable finding.
+  The reviewer also used systemd-analyze verify against a real fixture path with
+  dollar signs and spaces. No service or Sparkwing binary was executed.
+- `git diff --check` passed. All ten merge-conflict paths retain resolved file
+  contents, including four deletions. The index remains unmerged for the lead.
+
+### Checks that did not pass
+
+The broad internal/crons suite still has fixtures using scalar on.schedule,
+where W6 now requires a sequence, and pushed rows missing the final repo_key.
+Some fixture Git commits initially attempted inherited GPG signing. A rerun of
+TestHealthAcceptsAHostTickingFromItsOwnScheduler with fixture signing disabled
+still failed at YAML decoding before reaching the changed timer health call.
+No scheduler or store implementation was changed to hide those failures.
+
+Repository commentcheck reports only the merged HereBearer comment at
+internal/controllerwire/contracts.go:47. Sleepcheck reports only the merged
+wall-clock checks at internal/limits/deadline_test.go:58 and :66. None is in this
+continuation's unit-management changes. These checks remain failed for the lead
+and their owning workers. A broad wingd test filter also selected two older
+TestRefreshRunning socket tests, which could not run in this sandbox. The
+narrowed local/managed suites pass.
+
+### Contracts and remaining integration
+
+The frozen ManagedUnitManager signatures are unchanged. The new W8-local
+constructor accepts the existing crontimer.Host installation inputs. No other
+area's contract changed. The shared helper package replaces duplication because
+runner services, timers and controllers need the same native file semantics.
+Undoing this continuation removes the constructor and restores the previous
+unbound unit-management boundary. No environment variable, customer setting,
+trust root, timeout or compatibility command was added.
+
+W9 still needs to connect dashboard/schedule installation, update and doctor to
+this manager and to the foreground runtime. This manager covers all unit kinds
+for one captured home. An installer that updates several homes must invoke the
+corresponding home-bound managers. Local controller/store/consumer composition,
+runner factories, failed-enrollment cleanup, Windows schedules and native/Cloud
+proofs remain open. The declared source.Acquire, lease.Keeper.Run and
+client.NewEngineClient still panic. W3 host-construction, delegated-route and
+replay contracts remain required. The two earlier cross-area install findings
+(shared Windows npm invocation and workspace-off binary-cache hashing) remain
+unchanged. No new human product decision is requested.
+
+### Shared files touched in this continuation
+
+The native timer implementation is adjacent W8 lifecycle work in
+internal/crontimer. Removed context-free timer calls were migrated in
+cmd/sparkwing/crons.go, cmd/sparkwing/crons_install.go,
+cmd/sparkwing/crons_test.go, internal/crons/health.go and
+internal/crons/crons_test.go. These are the only production callers requiring
+migration. pkg/localws/crons.go keeps compiling with the updated DefaultExec
+function and needed no edit. tests/acceptance/runner_service_w8_test.go now
+includes registration preflight evidence. The new managed-unit component test,
+W8 amendment audit and this handoff are also included.
+
+The lead retains staging, the merge commit and landing. No repository Git write
+or Sparkwing binary invocation ran. Worker scratch is deleted after the final
+verification and reviewer completion.
+
+## Continuation: runner file credentials and enrollment failure cleanup
+
+Amendment A1-49 now has component implementations for file loading and failed
+enrollment cleanup. Start defaults to userconfig.ReadConfig, loads agent-token
+once and supplies a Bearer callback to runner composition. Machine files use
+the shared credentials.ReadPrivate/fssecure policy. Warm services keep the
+existing Kubernetes projected-file reader. Actions uses its exchanged credential
+in memory. The callback honors cancellation and contains no printable bearer.
+
+Enrollment captures absolute configuration and credential paths, including a
+relative SPARKWING_CONFIG override. It writes repos and credentials_dir and
+leaves claim-holder identity to controller registration. Failure attempts to
+revoke only the new token. Successful forced enrollment leaves the previous
+token and its files untouched.
+
+After configuration or service failure, cleanup removes the new credential
+file/directory and restores prior runner settings through userconfig.Update.
+Unrelated settings and later enrollments survive. A decoded snapshot retains
+YAML aliases, explicit empty collections and absent fields. A new service file
+is removed even when the manager becomes unreachable. Removal is bounded to
+the same regular-file inode. Replacement files and prior registrations survive.
+Manager/revocation failures remain visible. Native loaded-process cleanup after
+a manager outage remains a platform acceptance obligation.
+
+No whole files were deleted. The duplicated inline credential reader removed
+13 lines. The old configuration writer and keep-live-on-failure path were
+replaced. Superseded enrollment documentation was removed from self-hosting.
+No additional T1 inventory test was ported.
+
+### Evidence
+
+Commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and private
+GOCACHE, GOTMPDIR and TMPDIR under /tmp/sw-astra-W8. Package parallelism was
+at most four.
+
+- Final whole-repository go build -p 4 ./... passed.
+- Vet passed for CLI, cluster, runners and subpackages, engine and sdkinstall,
+  wingd and subpackages, credentials, agentconfig and acceptance tests.
+- Full runners, launcher, runner service, unitfile, engine, sdkinstall,
+  credentials, agentconfig and tests/acceptance suites passed.
+- Cluster passed with TestStartMetricsListener_ServesMetrics excluded because
+  its native TCP listener is unavailable in this sandbox. Local/managed wingd
+  component tests passed.
+- Focused race tests passed for file credentials, startup, installed argv,
+  enrollment failure and rollback. Final CLI/acceptance race tests include the
+  alias, empty-list, offline-manager and changed-working-directory regressions.
+- Cluster tests cross-compile for Windows/amd64. This is not native Windows
+  execution evidence.
+- TestRunnerCredentialW8Components passes. TestRunnerServiceW8Components now
+  reads actual private configuration/credentials through installed argv rather
+  than faking configuration. No native catalog cell was unskipped.
+- Independent immutable-snapshot review reproduced alias loss, empty-list loss,
+  offline-manager file residue and relative credential paths. Their regression
+  tests ran red, then green. Final independent overlays passed all original
+  probes and the enrollment filter, with no remaining finding.
+- Documentation mirror and git diff --check passed.
+
+Source checks retain the three earlier findings: controllerwire/contracts.go:47
+and limits/deadline_test.go:58/:66. None is in this continuation. Full HTTP
+enrollment/revocation tests require sockets and were not run. Cleanup tests use
+real private files and fake service-manager/revocation boundaries.
+
+### Shared files and remaining integration
+
+Shared production edits are cmd/sparkwing/runners.go, the new
+cmd/sparkwing/runner_config.go, internal/credentials/credentials.go and the
+minimal internal/agentconfig/agentconfig.go reader migration. Shared tests are
+cmd/sparkwing/runners_test.go and runner_enrollment_test.go. Source docs are
+docs/self-hosting.md and CHANGELOG.md, with generated copies at
+pkg/docs/mirror/self-hosting.md and pkg/docs/changelog.md. W8 cluster startup and
+tests, runner credential files, the runner-service source doc, two acceptance
+components and the W8 audit/handoff complete the change.
+
+No other area's frozen contract changed. RunnerOptions.Bearer and FileBearer
+are local composition helpers. ReadPrivate extends the existing credential
+owner instead of duplicating its policy. Rollback uses the existing settings
+lock and validator. Undo removes this continuation and restores the previous
+unbound credential/failure path. No setting, environment variable, timeout,
+trust root or compatibility alias was added.
+
+Real integration still needs final W1/W2 capability enrollment/revocation,
+W9 NewEngineClient transport and W3 source/keeper/host construction with bound
+storage. W3 host constructors, delegated node routes, generated-code replay
+and local shared-controller contracts remain required. Launcher wire adaptation,
+runner/Cloud factories and bootstrap host composition remain open. Native
+Linux/macOS/Windows lifecycle, Cloud node/network teardown and full real-repo QA
+remain unprovided. The two SDK-install contract findings above remain open.
+No new product question is raised.
+
+All ten merge-conflict contents remain resolved, including the four deletions.
+The index remains unmerged because the brief prohibits Git writes. No Sparkwing
+binary, Git metadata write or external service ran. The lead must stage the
+resolved files and finish the merge. Git configuration retains the default
+author with no local core.worktree override. Worker scratch is removed after
+verification and reviewer completion.
+
+## Continuation: Cloud controller adapter
+
+`NewControllerControl` now implements `CloudControl` against the shared wire
+client's Claim and SyncLauncher methods. It captures observed capacity/labels
+and requests the configured Cloud unit kinds in one call. The controller supplies
+team, holder, generation, resources and the one-time bootstrap. Claim errors
+return without retry. Plan source uses source.ForRequest. Eval/work source uses
+source.ForExecution with the accepted spec and matching engine.
+
+Jobs now persist the controller UnitID and send it with the reconstructed Job
+name and node UID during sync. No process-local award registry is required.
+Sync requires a complete, consistent decision for every observation and refuses
+returned credentials. An unavailable controller preserves teardown ownership.
+A removal decision retires the persisted Job and bootstrap through the existing
+container/reservation cleanup path.
+
+Eval's terminal source generation remains separate from its own live lease.
+Binding.Generation and SourceGeneration identify the source. Expansion carries
+the eval unit's ID, holder and generation. Both fences survive dispatch and sync.
+Job names include unit ID and source identity so distinct awards cannot alias
+one Kubernetes object under the same run/job/live generation.
+
+The W8-local contract additions are CloudJobBinding.UnitID and
+CloudJobObservation. CloudControl.Sync takes observations. CloudControl.Claim
+and Launcher no longer accept a caller-selected holder. Four lines containing
+the old holder field/check were deleted, and the former signatures were replaced.
+No whole file or additional legacy subsystem was deleted. Previous legacy
+removals and all ten conflict resolutions remain intact. No additional T1
+inventory test was ported.
+
+The final client still needs EngineOptions.Launcher=true. Each Cloud award must
+supply resolved CPU/memory through ClaimedUnit.Execution. These are server facts,
+never launcher defaults or admission inference. Source projections and the HTTP
+client remain other areas' panic stubs. Their interfaces are tested with fakes,
+not replaced with private implementations. LauncherFactory, bootstrap exchange,
+shared host/controller composition, Cloud probes/node cleanup and native platform
+proofs remain open. The Windows npm and workspace-off cache-key requests from the
+previous continuation remain unchanged. No other area's contract changed and
+no new human product decision is requested.
+
+Shared files changed in this continuation are
+tests/acceptance/launcher_boundary_w8_test.go,
+tests/acceptance/launcher_publication_w8_test.go,
+tests/acceptance/launcher_w8_test.go and the new
+tests/acceptance/launcher_controller_w8_test.go. These migrate the removed
+signatures and add the restart/transport component proof. All production changes
+are inside internal/runners/launcher. CLOUD-JOBS.md and the W8 audit/handoff
+record the local contract changes. There is no new public command or setting.
+
+### Evidence for the Cloud adapter
+
+Commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and private
+GOCACHE, GOTMPDIR and TMPDIR under /tmp/sw-astra-W8, with -p 4 throughout.
+
+- Final whole-repository go build passed.
+- Vet passed for cluster, runners and subpackages, engine and sdkinstall,
+  wingd and subpackages, tests/acceptance and internal/acceptance.
+- Full runners/engine/component acceptance suites passed. Cluster passed with
+  its existing native TCP listener test excluded. Local/managed wingd tests passed.
+- Focused controller/launcher and launcher acceptance tests passed under -race.
+- TestLauncherControllerW8Components passes persisted restart, live-award adoption,
+  transport failure and authorized teardown. No native catalog cell was unskipped.
+- Claim tests cover plan/eval/work, zero attempt, captured observations, incomplete
+  awards, cancellation and uncertain one-time delivery. Sync tests cover complete
+  decisions, refused credential material, both eval fences and changed holders.
+- Independent immutable-snapshot review reproduced three eval-lease failures.
+  The corrected fixture and independent overlays failed before the fix and passed
+  afterward. The Job-name collision regression also failed before its fix.
+  Final review of the adapter and naming delta found no remaining defect.
+- Scoped launcher commentcheck and git diff --check passed. No new global source
+  check was claimed. The earlier merged controllerwire/limits findings remain.
+
+The lead retains staging and the merge commit. This continuation verified all
+six resolved file contents and four retained deletions without writing Git
+metadata. Local Git config has no user identity or core.worktree override.
+No candidate runtime, external service or deployment was exercised. Initial
+bootstrap discovery queried installed sparkwing info only. Scratch is removed
+after all checks and the independent review finish.

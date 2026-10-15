@@ -32,8 +32,8 @@ const twoSidedRepo = `  - name: sweep
     entrypoint: Nightly
     on:
       schedule:
-        cron: "0 3 * * *"
-        where: local
+        - cron: "0 3 * * *"
+          where: local
 `
 
 // safety: the arm copies whatever the compiler names, so a stub file exercises
@@ -557,8 +557,8 @@ func TestTickFiresTheEffectiveCadenceAndRecordsItsArgs(t *testing.T) {
     entrypoint: Sweep
     on:
       schedule:
-        cron: "0 3 * * *"
-        where: local
+        - cron: "0 3 * * *"
+          where: local
         args:
           depth: shallow
 `)

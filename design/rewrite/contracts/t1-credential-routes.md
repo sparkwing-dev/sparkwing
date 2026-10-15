@@ -11,13 +11,19 @@ C2 owns the production route policy. T1 owns independent expected results and cr
 ## Final route permission coverage
 
 `internal/acceptance/credential_routes.go` contains committed literal expectations
-for all 235 declared final C2 method/path pairs, including the eight node-host
+for all 239 declared final C2 method/path pairs, including the eleven node-host
 routes and every public, browser and external-proof route. Each alternative pins
 its credential class, complete grant conjunction, binding and liveness together.
 Audience, resource owner and authentication proof are pinned per route. Empty
 grants are explicit, including account and discovery alternatives. No expected
 value is obtained from `capability.Routes`, its constants, or observed responses
 when the acceptance test runs.
+
+[Amendments 1](amendments-1.md) supplies the decisions for masks (A1-01),
+annotations and summaries (A1-05), unified runner claims (A1-08), failure reads
+(A1-14) and job cancellation (A1-15). The literals include those routes and
+remove the separate runner job/run claim routes. A mixed-kind claim still
+requires every requested kind's grant through claimSelection.
 
 `TestFinalCredentialRouteDeclarations` compares the expected inventory with
 `capability.Routes`. Missing, extra and duplicate routes fail. Missing, extra and duplicate

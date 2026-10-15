@@ -78,7 +78,7 @@ func (s *Service) Health(ctx context.Context, timer crontimer.Host) (Health, err
 	}
 	health.LastTick = tick
 
-	state, terr := crontimer.Status(timer)
+	state, terr := crontimer.Status(ctx, timer)
 	if terr != nil && !errors.Is(terr, crontimer.ErrUnsupported) {
 		return health, terr
 	}

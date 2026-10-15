@@ -3,11 +3,7 @@ package main
 import (
 	"fmt"
 	"regexp"
-	"strings"
 
-	"go.yaml.in/yaml/v3"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
@@ -27,13 +23,7 @@ func checkYAMLConfigs(contentDir string) bool {
 			continue
 		}
 		configs++
-		var cfg projectconfig.ConfigOld
-		dec := yaml.NewDecoder(strings.NewReader(b.body))
-		dec.KnownFields(true)
-		perr := dec.Decode(&cfg)
-		if perr == nil {
-			perr = (&pipelines.Config{Pipelines: cfg.Pipelines}).Validate()
-		}
+		_, perr := projectconfig.Parse([]byte(b.body))
 		if perr != nil {
 			failed++
 			failures = append(failures, fmt.Sprintf("%s:%d\n%s", b.file, b.line, indent(perr.Error())))

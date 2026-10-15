@@ -42,15 +42,15 @@ type controlFake struct {
 	fail   error
 }
 
-func (c *controlFake) Claim(context.Context, string) (*CloudJobAward, error) {
+func (c *controlFake) Claim(context.Context) (*CloudJobAward, error) {
 	c.claims++
 	return c.award, c.fail
 }
 
-func (c *controlFake) Sync(_ context.Context, bindings []CloudJobBinding) ([]CloudJobState, error) {
-	states := make([]CloudJobState, len(bindings))
-	for i, b := range bindings {
-		states[i] = CloudJobState{Binding: b, Delete: c.remove}
+func (c *controlFake) Sync(_ context.Context, observations []CloudJobObservation) ([]CloudJobState, error) {
+	states := make([]CloudJobState, len(observations))
+	for i, b := range observations {
+		states[i] = CloudJobState{Binding: b.Binding, Delete: c.remove}
 	}
 	return states, c.fail
 }
@@ -58,10 +58,10 @@ func (c *controlFake) Sync(_ context.Context, bindings []CloudJobBinding) ([]Clo
 func fixture() (*Launcher, *fake.Clientset, *boundaryFake, *controlFake) {
 	now := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
 	image := "registry/runner@sha256:" + strings.Repeat("a", 64)
-	control := &controlFake{award: &CloudJobAward{Binding: CloudJobBinding{Kind: CloudWork, Team: "team", RunID: "run", NodeID: "job", Holder: "holder", Generation: 1, Attempt: 1, OwnerDeadline: now.Add(time.Hour), AttemptDeadline: now, ParentCapabilityExpiry: now.Add(2 * time.Hour)}, Bootstrap: []byte("bootstrap-secret"), CPUCores: 1.5, Memory: 2 << 30, Engine: &engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("a", 64)}}}
+	control := &controlFake{award: &CloudJobAward{Binding: CloudJobBinding{UnitID: "unit", Kind: CloudWork, Team: "team", RunID: "run", NodeID: "job", Holder: "holder", Generation: 1, Attempt: 1, OwnerDeadline: now.Add(time.Hour), AttemptDeadline: now, ParentCapabilityExpiry: now.Add(2 * time.Hour)}, Bootstrap: []byte("bootstrap-secret"), CPUCores: 1.5, Memory: 2 << 30, Engine: &engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("a", 64)}}}
 	boundary := &boundaryFake{}
 	kube := fake.NewClientset()
-	l := &Launcher{Kube: kube, Control: control, Boundary: boundary, Holder: "holder", Config: CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: "https://controller.example", CPUCeiling: 4, MemoryCeiling: 8 << 30}}
+	l := &Launcher{Kube: kube, Control: control, Boundary: boundary, Config: CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: "https://controller.example", CPUCeiling: 4, MemoryCeiling: 8 << 30}}
 	return l, kube, boundary, control
 }
 
@@ -246,7 +246,7 @@ func TestSyncAdoptsLiveJobWithoutCreatingAnother(t *testing.T) {
 	if _, err := l.LaunchOne(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	restarted := &Launcher{Kube: kube, Control: control, Boundary: boundary, Holder: "new-launcher", Config: l.Config}
+	restarted := &Launcher{Kube: kube, Control: control, Boundary: boundary, Config: l.Config}
 	kube.ClearActions()
 	if err := restarted.Sync(t.Context()); err != nil {
 		t.Fatal(err)

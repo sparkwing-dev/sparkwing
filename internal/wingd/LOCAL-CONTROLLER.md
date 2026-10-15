@@ -138,12 +138,27 @@ Drain preserves cancellation and unreachable-owner errors and requires a
 `drain_ack` on the current admission protocol. A successful drain then waits for
 the socket and election lock to close. It never starts a replacement process.
 
-`ManagedUnitManager` remains the service-management port. Its policies specify
-`dashboard start --stay` and `__tick`. The CLI contract must settle how installed
-units select `LocalStartOptions.Home` through arguments and how a managed
-controller stays attached to systemd or launchd. The declared commands do not
-provide those semantics. Installation, refresh and OS unit tests require that
-contract before a renderer can be connected.
+`NewManagedUnitManager` implements `ManagedUnitManager` for one captured state
+home. Linux uses systemd user units. macOS uses LaunchAgents. Controller units
+run foreground `wingd run --stay --home <absolute-home>`. Timers run
+`__tick --home <absolute-home>`. Windows refuses native installation with
+`--stay` guidance. Inspect reads the installed argv and release without opening
+the store or contacting the service manager.
+
+Refresh updates both installed unit kinds. It keeps their captured settings and
+does not install missing units. Installed controllers restart after update.
+Installed macOS timers reload even if an earlier bootstrap failed. Schedule
+pause remains store state. Linux timer refresh preserves its enabled state.
+Registration checks refuse files loaded from another directory before commands
+can act on their names. Foreign files, different homes and symlinks are refused.
+Systemd commands disable variable expansion because captured paths must remain
+literal. Native files share private atomic publication and argument encoding
+with runner services. Release metadata survives XML-sensitive prerelease names.
+
+The W9 dashboard, schedule, update and doctor adapters still need to supply this
+manager. The foreground process still needs the shared-controller factory.
+File and service-manager fixtures exercise these ports. They do not establish
+native login, crash, shutdown or Windows behavior.
 
 `TestLocalRuntime*` exercises election-before-open, readiness, failure cleanup,
 restart after failed startup, all four activity holds and idle probes. It uses

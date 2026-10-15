@@ -32,7 +32,7 @@ func TestLauncherRefusesAdmittedNodeChangeW8Components(t *testing.T) {
 				return false, nil, nil
 			})
 			boundary := &cloudBoundaryFake{}
-			l := &launcher.Launcher{Kube: kube, Control: &cloudControlW8{award: &award}, Boundary: boundary, Holder: award.Binding.Holder, Config: cfg}
+			l := &launcher.Launcher{Kube: kube, Control: &cloudControlW8{award: &award}, Boundary: boundary, Config: cfg}
 			if claimed, err := l.LaunchOne(t.Context()); !claimed || err == nil {
 				t.Fatalf("changed node admitted: claimed=%t err=%v", claimed, err)
 			}
@@ -48,14 +48,14 @@ func TestLauncherRefusesAdmittedNodeChangeW8Components(t *testing.T) {
 	}
 }
 
-func (c *cloudControlW8) Claim(context.Context, string) (*launcher.CloudJobAward, error) {
+func (c *cloudControlW8) Claim(context.Context) (*launcher.CloudJobAward, error) {
 	return c.award, nil
 }
 
-func (c *cloudControlW8) Sync(_ context.Context, bindings []launcher.CloudJobBinding) ([]launcher.CloudJobState, error) {
+func (c *cloudControlW8) Sync(_ context.Context, bindings []launcher.CloudJobObservation) ([]launcher.CloudJobState, error) {
 	states := make([]launcher.CloudJobState, len(bindings))
 	for i, binding := range bindings {
-		states[i] = launcher.CloudJobState{Binding: binding, Delete: c.remove}
+		states[i] = launcher.CloudJobState{Binding: binding.Binding, Delete: c.remove}
 	}
 	return states, nil
 }
@@ -88,7 +88,7 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 				},
 				Clear: func(context.Context, launcher.CloudNodeReservation) error { clears++; return nil },
 			}
-			first := &launcher.Launcher{Kube: kube, Control: control, Boundary: boundary, Holder: award.Binding.Holder, Config: cfg}
+			first := &launcher.Launcher{Kube: kube, Control: control, Boundary: boundary, Config: cfg}
 			if claimed, err := first.LaunchOne(t.Context()); err != nil || !claimed {
 				t.Fatalf("launch: %t %v", claimed, err)
 			}
@@ -105,7 +105,7 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 				t.Fatal(err)
 			}
 			reconstructedBoundary := *boundary
-			restarted := &launcher.Launcher{Kube: kube, Control: control, Boundary: &reconstructedBoundary, Holder: "replacement-launcher", Config: cfg}
+			restarted := &launcher.Launcher{Kube: kube, Control: control, Boundary: &reconstructedBoundary, Config: cfg}
 			if err := restarted.Sync(t.Context()); err != nil {
 				t.Fatal(err)
 			}

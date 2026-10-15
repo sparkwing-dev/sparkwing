@@ -48,7 +48,7 @@ func renamedBootstrapFixtureW8(t *testing.T) (*launcher.Launcher, *fake.Clientse
 		return true, nil, kube.Tracker().Update(gvr, job, cfg.Namespace)
 	})
 	boundary, control := &cloudBoundaryFake{}, &cloudControlW8{award: &award}
-	l := &launcher.Launcher{Kube: kube, Control: control, Boundary: boundary, Holder: award.Binding.Holder, Config: cfg}
+	l := &launcher.Launcher{Kube: kube, Control: control, Boundary: boundary, Config: cfg}
 	return l, kube, boundary, control
 }
 
@@ -200,7 +200,7 @@ func TestLauncherRefusesChangedBootstrapW8Components(t *testing.T) {
 					return false, nil, nil
 				})
 				boundary := &cloudBoundaryFake{}
-				l := &launcher.Launcher{Kube: kube, Control: &cloudControlW8{award: &award}, Boundary: boundary, Holder: award.Binding.Holder, Config: cfg}
+				l := &launcher.Launcher{Kube: kube, Control: &cloudControlW8{award: &award}, Boundary: boundary, Config: cfg}
 				claimed, err := l.LaunchOne(t.Context())
 				if !claimed || err == nil {
 					t.Fatalf("changed bootstrap activated: claimed=%t err=%v", claimed, err)
@@ -268,9 +268,9 @@ func TestLauncherPublicationSurvivesConcurrentReconciliationW8Components(t *test
 			kube := fake.NewClientset()
 			boundary := &cloudBoundaryFake{}
 			control := &cloudControlW8{award: &award}
-			reconciler := &launcher.Launcher{Kube: kube, Control: control, Boundary: boundary, Holder: "another-launcher", Config: cfg}
+			reconciler := &launcher.Launcher{Kube: kube, Control: control, Boundary: boundary, Config: cfg}
 			observed := false
-			publishing := &launcher.Launcher{Control: control, Boundary: boundary, Holder: award.Binding.Holder, Config: cfg}
+			publishing := &launcher.Launcher{Control: control, Boundary: boundary, Config: cfg}
 			publishing.Kube = publicationKubeW8{Interface: kube, beforeSecret: func() {
 				observed = true
 				if err := reconciler.Sync(t.Context()); err != nil {
@@ -309,7 +309,7 @@ func TestLauncherCancellationDuringPublicationW8Components(t *testing.T) {
 			kube := fake.NewClientset()
 			boundary := &cloudBoundaryFake{}
 			control := &cloudControlW8{award: &award}
-			l := &launcher.Launcher{Control: control, Boundary: boundary, Holder: award.Binding.Holder, Config: cfg}
+			l := &launcher.Launcher{Control: control, Boundary: boundary, Config: cfg}
 			l.Kube = publicationKubeW8{Interface: kube, beforeSecret: func() { control.remove = true }}
 			if claimed, err := l.LaunchOne(t.Context()); !claimed || err == nil {
 				t.Fatalf("cancelled publication succeeded: claimed=%t err=%v", claimed, err)

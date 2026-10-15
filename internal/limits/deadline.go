@@ -4,7 +4,10 @@ package limits
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // ErrNoTime means the parent's remaining budget cannot leave the requested settlement margin.
@@ -15,12 +18,38 @@ var ErrNoTime = errors.New("no time remains before parent deadline")
 // returns the zero time. Expired parents and margins consuming all remaining time return ErrNoTime.
 // Negative margins are invalid. This helper never judges lease liveness; the store clock does that.
 func Child(now, parent time.Time, want, margin time.Duration) (time.Time, error) {
-	panic("unimplemented: c4-surface-config")
+	if margin < 0 {
+		return time.Time{}, errors.New("deadline margin must not be negative")
+	}
+	if parent.IsZero() {
+		if want <= 0 {
+			return time.Time{}, nil
+		}
+		return now.Add(want), nil
+	}
+	end := parent.Add(-margin)
+	if !end.After(now) {
+		return time.Time{}, ErrNoTime
+	}
+	if want > 0 && now.Add(want).Before(end) {
+		end = now.Add(want)
+	}
+	return end, nil
 }
 
 // ChildContext applies Child to ctx.Deadline, retaining cancellation when the result is unbounded.
 func ChildContext(ctx context.Context, want, margin time.Duration) (context.Context, context.CancelFunc, error) {
-	panic("unimplemented: c4-surface-config")
+	parent, _ := ctx.Deadline()
+	end, err := Child(time.Now(), parent, want, margin)
+	if err != nil {
+		return nil, nil, err
+	}
+	if end.IsZero() {
+		child, cancel := context.WithCancel(ctx)
+		return child, cancel, nil
+	}
+	child, cancel := context.WithDeadline(ctx, end)
+	return child, cancel, nil
 }
 
 // Renew returns ttl/3; callers validate positive TTLs before constructing a lease keeper.
@@ -54,10 +83,32 @@ func JobDeadline(now, ownerDeadline, attemptDeadline time.Time) (time.Time, erro
 }
 
 // Error bounds already-masked UTF-8 error text with a head and tail within ErrorBytes.
-func Error(text string) string { panic("unimplemented: c4-surface-config") }
+func Error(text string) string { return boundText(text, int(ErrorBytes)) }
 
 // Record bounds already-masked UTF-8 summary or annotation text within AnnotationBytes with an elision note.
-func Record(text string) string { panic("unimplemented: c4-surface-config") }
+func Record(text string) string { return boundText(text, int(AnnotationBytes)) }
 
 // Failure refuses an oversized already-masked failure record rather than producing malformed structured bytes.
-func Failure(raw []byte) ([]byte, error) { panic("unimplemented: c4-surface-config") }
+func Failure(raw []byte) ([]byte, error) {
+	if int64(len(raw)) > FailureBytes {
+		return nil, fmt.Errorf("failure record exceeds %d bytes", FailureBytes)
+	}
+	return raw, nil
+}
+
+func boundText(text string, bound int) string {
+	text = strings.ToValidUTF8(text, "�")
+	if len(text) <= bound {
+		return text
+	}
+	const note = "\n... [elided] ...\n"
+	head := (bound - len(note)) / 2
+	tail := len(text) - (bound - len(note) - head)
+	for head > 0 && !utf8.RuneStart(text[head]) {
+		head--
+	}
+	for tail < len(text) && !utf8.RuneStart(text[tail]) {
+		tail++
+	}
+	return text[:head] + note + text[tail:]
+}

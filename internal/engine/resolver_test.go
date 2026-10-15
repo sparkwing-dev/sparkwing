@@ -126,13 +126,17 @@ func TestIndexFirstUseFailure(t *testing.T) {
 }
 
 func fixtureExecutable(t *testing.T, version string, target releaseasset.Target) []byte {
+	return fixtureExecutableSource(t, version, target, "package main\nvar Version=\"dev\"\nfunc main(){println(Version)}\n")
+}
+
+func fixtureExecutableSource(t *testing.T, version string, target releaseasset.Target, source string) []byte {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "cmd", string(target.Binary)), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	writeFixture(t, dir, "go.mod", []byte("module "+GoModule+"\ngo 1.26\n"))
-	writeFixture(t, dir, filepath.Join("cmd", string(target.Binary), "main.go"), []byte("package main\nvar Version=\"dev\"\nfunc main(){println(Version)}\n"))
+	writeFixture(t, dir, filepath.Join("cmd", string(target.Binary), "main.go"), []byte(source))
 	out := filepath.Join(dir, "fixture.bin")
 	cmd := exec.Command("go", "build", "-p", "2", "-ldflags", "-X main.Version="+version, "-o", out, "./cmd/"+string(target.Binary))
 	cmd.Dir = dir

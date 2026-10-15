@@ -49,13 +49,14 @@ func TestStartAndWarmExecuteTriggerAndJobOnOneManagedLoop(t *testing.T) {
 	for _, command := range []string{"start", "warm"} {
 		t.Run(command, func(t *testing.T) {
 			controller := "https://controller.example"
+			credentials := runnerCredentials(t)
 			concurrency := 1
 			kinds := []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}
 			var hosted []capability.UnitKind
 			claims := 0
 			cli := RunnerCLI{
 				ReadConfig: func(string) (userconfig.Config, error) {
-					return userconfig.Config{Runner: &userconfig.RunnerConfig{Controller: &controller, MaxConcurrent: &concurrency}}, nil
+					return userconfig.Config{Runner: &userconfig.RunnerConfig{Controller: &controller, CredentialsDir: &credentials, MaxConcurrent: &concurrency}}, nil
 				},
 				Factory: func(_ context.Context, _ RunnerOptions) (*runners.ManagedRunner, error) {
 					var loop *runners.Loop
@@ -81,7 +82,7 @@ func TestStartAndWarmExecuteTriggerAndJobOnOneManagedLoop(t *testing.T) {
 			}
 			args := []string{"--config=/fixture/config.yaml"}
 			if command == "warm" {
-				args = []string{"--controller=" + controller, "--max-concurrent=1"}
+				args = []string{"--controller=" + controller, "--credentials-dir=" + credentials, "--max-concurrent=1"}
 			}
 			if err := cli.Run(t.Context(), command, args, "v1.2.3"); err != nil {
 				t.Fatal(err)
@@ -107,7 +108,7 @@ func TestRunnerRequiresSignedPolicyBeforeClaiming(t *testing.T) {
 			}),
 		}, Versions: cliVersions{err: failure}, Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}, nil
 	}}
-	if err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example"}, "v1.2.3"); !errors.Is(err, failure) {
+	if err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", "--credentials-dir=" + runnerCredentials(t)}, "v1.2.3"); !errors.Is(err, failure) {
 		t.Fatalf("Run = %v", err)
 	}
 }

@@ -2,6 +2,50 @@
 
 <!-- design:begin -->
 
+## Amendment 1: private execution and claim wire
+
+Claim with a single trigger kind and RunID uses `/runs/{run}/claim`, including
+the here Award under LiveHereClaim. Other Claim requests select one ordered scan
+through `/runners/claim`, or `/launcher/claim` when
+EngineOptions.Launcher is true. Selection cannot infer launcher identity from unit
+kinds. The server checks every kind's grant and derives granted runner identity,
+repository authorization, pools and billing from enrollment. New claims are not
+automatically retried after response loss. Store lease recovery resolves uncertainty. Named trigger/job claims and
+reconciliation also disable automatic retries because they can award a new bearer.
+Here intake/retry never transparently retries. Idempotent replay retains the run
+but cannot return its raw HereBearer. A lost first response is a failed handoff,
+with a fresh trigger request as the recovery and the abandoned reservation expiring
+at its original claim_by. Resume uses the retained private bearer.
+
+NewDataClient uses the same HTTP/api.sock transport to provide blob.DataSigner
+and blob.RecordStore. Each call reauthorizes server-derived scope/uploader facts.
+The signed-object client never receives the reusable controller credential.
+
+ClaimedUnit includes accepted engine, source generation and owner/attempt/parent
+expiry deadlines. Its sealed request carries Source.Location. CloudJobAward consumes
+that immutable source projection. SyncLauncher returns held awards and stale Job
+identities without raw bearers. Exchange presents the bootstrap in the authenticated
+transport and returns the exchanged ClaimedUnit once. The controller never mints
+replacement bootstraps from an observed Kubernetes Job. Lost bootstrap delivery
+recovers through lease expiry and re-award.
+
+ReconcileRequest.MaterializeOnly is sent unchanged to C1. ReconcileResponse.Job is
+ExecutionJob, which preserves raw declaration/hash, execution settings, retries,
+fences, lease/cancel timestamps and expansion state. It is restricted to execution
+authority. RunDetail and JobDetail remain safe public display projections.
+ExpandedJob.Current carries this same current state on first acceptance and replay.
+ScheduleSnapshot.Expansions carries accepted body/hash and source fence, including
+empty expansions, for deterministic code reconstruction without adding topology.
+
+Controller.CancelJob reaches the scoped cancellation route. Controller.ReadFailure
+uses the source-generation query and returns persisted nodeproto.JobFailure under
+a declared recovery edge. Actor/grants never enter request bodies. Adapters map
+private wire state directly to persisted state rather than inventing pending rows,
+retry counters or failures. Applied.Attempt from start/retry supplies the execution
+ordinal. The initial zero attempt is not a synthetic attempt for owner-unit logs.
+
+
+
 `internal/controllerwire` owns the HTTP request and response types shared by
 fetched engines, the controller, api.sock, local status and remote status.
 `capability.Routes` owns authentication, bindings, liveness and retry policy.

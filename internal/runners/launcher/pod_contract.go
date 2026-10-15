@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
 // safety: CloudUnitKind selects host work without weakening the common Cloud isolation contract.
@@ -50,8 +51,10 @@ type CloudJobConfig struct {
 
 // safety: CloudJobBinding is derived from an awarded row, not the launcher's requested team or fence.
 // Eval SourceNodeID and SourceGeneration bind expansion to the immutable terminal source generation.
+// UnitID is persisted with the Job for controller reconciliation after launcher restart.
 type CloudJobBinding struct {
 	Kind                           CloudUnitKind
+	UnitID                         string
 	Team, RunID, NodeID, Holder    string
 	Generation, Attempt            int64
 	SourceNodeID                   string
@@ -65,6 +68,7 @@ type CloudJobBinding struct {
 // Engine is required for eval/work; a first plan resolves its pin after source acquisition.
 type CloudJobAward struct {
 	Engine    *engine.Identity
+	Source    source.Spec
 	Binding   CloudJobBinding
 	Bootstrap []byte `json:"-"`
 	CPUCores  float64

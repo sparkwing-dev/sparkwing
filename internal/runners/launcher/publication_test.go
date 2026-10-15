@@ -13,10 +13,10 @@ import (
 
 type publicationControl struct {
 	CloudControl
-	sync func([]CloudJobBinding) ([]CloudJobState, error)
+	sync func([]CloudJobObservation) ([]CloudJobState, error)
 }
 
-func (c publicationControl) Sync(_ context.Context, bindings []CloudJobBinding) ([]CloudJobState, error) {
+func (c publicationControl) Sync(_ context.Context, bindings []CloudJobObservation) ([]CloudJobState, error) {
 	return c.sync(bindings)
 }
 
@@ -83,8 +83,8 @@ func TestSyncSuspendedJobRefusesMismatchedAuthority(t *testing.T) {
 	if _, err := kube.BatchV1().Jobs(l.Config.Namespace).Create(t.Context(), r.Job, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	l.Control = publicationControl{CloudControl: control, sync: func(bindings []CloudJobBinding) ([]CloudJobState, error) {
-		binding := bindings[0]
+	l.Control = publicationControl{CloudControl: control, sync: func(bindings []CloudJobObservation) ([]CloudJobState, error) {
+		binding := bindings[0].Binding
 		binding.Generation++
 		return []CloudJobState{{Binding: binding, Delete: true}}, nil
 	}}
@@ -131,7 +131,7 @@ func TestLauncherChecksAuthorityAfterBootstrapPublication(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			l, kube, boundary, control := fixture()
 			checked := false
-			l.Control = publicationControl{CloudControl: control, sync: func(bindings []CloudJobBinding) ([]CloudJobState, error) {
+			l.Control = publicationControl{CloudControl: control, sync: func(bindings []CloudJobObservation) ([]CloudJobState, error) {
 				checked = true
 				published := false
 				for _, action := range kube.Actions() {
@@ -142,7 +142,7 @@ func TestLauncherChecksAuthorityAfterBootstrapPublication(t *testing.T) {
 				if !published {
 					t.Fatal("authority check preceded bootstrap publication")
 				}
-				return test.state(bindings[0])
+				return test.state(bindings[0].Binding)
 			}}
 			claimed, err := l.LaunchOne(t.Context())
 			if !claimed || err == nil || !checked {
@@ -178,8 +178,8 @@ func TestLauncherAcceptsRoundTrippedBindingTimes(t *testing.T) {
 	control.award.Binding.OwnerDeadline = now.Add(time.Hour)
 	control.award.Binding.AttemptDeadline = now.Add(time.Minute)
 	control.award.Binding.ParentCapabilityExpiry = now.Add(2 * time.Hour)
-	l.Control = publicationControl{CloudControl: control, sync: func(bindings []CloudJobBinding) ([]CloudJobState, error) {
-		body, err := json.Marshal(bindings[0])
+	l.Control = publicationControl{CloudControl: control, sync: func(bindings []CloudJobObservation) ([]CloudJobState, error) {
+		body, err := json.Marshal(bindings[0].Binding)
 		if err != nil {
 			t.Fatal(err)
 		}

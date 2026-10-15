@@ -3,25 +3,28 @@ package cluster
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 func TestStartUsesRunnerSectionAndReplacesRepos(t *testing.T) {
 	controller, concurrent, heartbeat, lease := "https://controller.example", 2, "20s", "2m"
+	credentials := runnerCredentials(t)
 	boundary := errors.New("runtime boundary")
 	cli := RunnerCLI{
 		ReadConfig: func(path string) (userconfig.Config, error) {
 			if path != "/fixture/config.yaml" {
 				t.Errorf("config path %q", path)
 			}
-			return userconfig.Config{Runner: &userconfig.RunnerConfig{Controller: &controller, MaxConcurrent: &concurrent, Repos: []string{"github.com/old/*"}, Labels: []string{"linux"}, Heartbeat: &heartbeat, Lease: &lease}}, nil
+			return userconfig.Config{Runner: &userconfig.RunnerConfig{Controller: &controller, CredentialsDir: &credentials, MaxConcurrent: &concurrent, Repos: []string{"github.com/old/*"}, Labels: []string{"linux"}, Heartbeat: &heartbeat, Lease: &lease}}, nil
 		},
 		Factory: func(_ context.Context, options RunnerOptions) (*runners.ManagedRunner, error) {
 			if !reflect.DeepEqual(options.Config.Repos, []string{"github.com/a/*", "github.com/b/*", "github.com/c/*"}) {
@@ -104,10 +107,14 @@ func TestRunnerUnwiredCompositionReturnsErrorWithoutCallingStubs(t *testing.T) {
 			t.Fatal(err)
 		}
 		args := []string(nil)
+		cli := RunnerCLI{ReadConfig: func(string) (userconfig.Config, error) {
+			controller := "https://controller.example"
+			return userconfig.Config{Runner: &userconfig.RunnerConfig{Controller: &controller}}, nil
+		}}
 		if command == "warm" {
 			args = []string{"--controller=https://controller.example"}
 		}
-		if err := (RunnerCLI{}).Run(t.Context(), command, args, "v1.2.3"); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		if err := cli.Run(t.Context(), command, args, "v1.2.3"); err == nil || !strings.Contains(err.Error(), "unavailable") {
 			t.Fatalf("%s: %v", command, err)
 		}
 	}
@@ -124,7 +131,7 @@ func TestWarmMapsPollingKindsAndClaimBudgetToUnifiedLoop(t *testing.T) {
 		}
 		return nil, boundary
 	}}
-	err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", "--poll=2s", "--max-claims-before-restart=7", "--also-claim-triggers=false", "--claim-jobs=true", "--cpu-ceiling=500m", "--memory-ceiling=1Gi"}, "v1.2.3")
+	err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", "--credentials-dir=" + runnerCredentials(t), "--poll=2s", "--max-claims-before-restart=7", "--also-claim-triggers=false", "--claim-jobs=true", "--cpu-ceiling=500m", "--memory-ceiling=1Gi"}, "v1.2.3")
 	if !errors.Is(err, boundary) {
 		t.Fatal(err)
 	}
@@ -135,6 +142,18 @@ func TestWarmMapsPollingKindsAndClaimBudgetToUnifiedLoop(t *testing.T) {
 	if err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", "--also-claim-triggers=false", "--claim-jobs=false"}, "v1.2.3"); err == nil {
 		t.Error("runner accepted no work kinds")
 	}
+}
+
+func runnerCredentials(t *testing.T) string {
+	t.Helper()
+	directory, err := fssecure.MkdirPrivateTemp(t.TempDir(), "credentials-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fssecure.WriteFile(filepath.Join(directory, "agent-token"), []byte("private-runner-credential")); err != nil {
+		t.Fatal(err)
+	}
+	return directory
 }
 
 func TestActionsCancellationAndInvalidScopePreventRuntime(t *testing.T) {

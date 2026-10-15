@@ -128,7 +128,7 @@ func validateHostedAward(unit controllerwire.ClaimedUnit) error {
 		return errors.New("runner award has an invalid run or claim fence")
 	}
 	if unit.Unit == capability.UnitNode {
-		if binding.Kind != capability.BindingNode || unit.JobID == "" || binding.NodeID != unit.JobID || binding.Attempt <= 0 {
+		if binding.Kind != capability.BindingNode || unit.JobID == "" || binding.NodeID != unit.JobID || binding.Attempt < 0 {
 			return errors.New("runner award has an invalid job or attempt binding")
 		}
 	} else if binding.Kind != capability.BindingTrigger || unit.JobID != "" || binding.NodeID != "" {

@@ -10,9 +10,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
 )
 
 type fakeExec struct {
+	home  string
 	calls []string
 	fail  map[string]string
 }
@@ -26,7 +29,7 @@ func (f *fakeExec) run(_ context.Context, name string, args ...string) (string, 
 		}
 	}
 	if name == "launchctl" && len(args) > 0 && args[0] == "print" {
-		return "state = running\n", nil
+		return "path = " + filepath.Join(f.home, "Library", "LaunchAgents", PlistName) + "\nstate = running\n", nil
 	}
 	return "", nil
 }
@@ -41,6 +44,7 @@ func fixtureServiceBinary(root string) string {
 func linuxHost(t *testing.T, exec *fakeExec) Host {
 	t.Helper()
 	root := t.TempDir()
+	exec.home = root
 	return Host{
 		GOOS:       "linux",
 		Home:       root,
@@ -54,6 +58,7 @@ func linuxHost(t *testing.T, exec *fakeExec) Host {
 func darwinHost(t *testing.T, exec *fakeExec) Host {
 	t.Helper()
 	root := t.TempDir()
+	exec.home = root
 	return Host{
 		GOOS:       "darwin",
 		Home:       root,
@@ -86,7 +91,7 @@ func TestInstallLinuxWritesUnitAndStartsIt(t *testing.T) {
 	unit := string(body)
 	for _, want := range []string{
 		Marker,
-		"ExecStart=" + systemdWord(h.Binary) + " start --config " + systemdWord(h.ConfigPath),
+		"ExecStart=" + unitfile.Command([]string{h.Binary, "start", "--config", h.ConfigPath}),
 		"Restart=on-failure",
 		"WantedBy=default.target",
 	} {
@@ -98,10 +103,11 @@ func TestInstallLinuxWritesUnitAndStartsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm() != fileMode {
-		t.Errorf("unit mode = %04o, want %04o", info.Mode().Perm(), fileMode)
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
+		t.Errorf("unit mode = %04o, want %04o", info.Mode().Perm(), 0600)
 	}
 	want := []string{
+		"systemctl --user show -p FragmentPath --value sparkwing-runner.service",
 		"systemctl --user daemon-reload",
 		"systemctl --user enable --now sparkwing-runner.service",
 	}
@@ -138,6 +144,7 @@ func TestInstallDarwinWritesPlistAndLoadsIt(t *testing.T) {
 		t.Errorf("log directory was not created: %v", err)
 	}
 	want := []string{
+		"launchctl print gui/501/com.sparkwing.runner",
 		"launchctl bootout gui/501/com.sparkwing.runner",
 		"launchctl bootstrap gui/501 " + PlistPath(h),
 	}
@@ -180,10 +187,12 @@ func TestUninstallStopsAndRemoves(t *testing.T) {
 		calls []string
 	}{
 		{"linux", linuxHost, UnitPath, []string{
+			"systemctl --user show -p FragmentPath --value sparkwing-runner.service",
 			"systemctl --user disable --now sparkwing-runner.service",
 			"systemctl --user daemon-reload",
 		}},
 		{"darwin", darwinHost, PlistPath, []string{
+			"launchctl print gui/501/com.sparkwing.runner",
 			"launchctl bootout gui/501/com.sparkwing.runner",
 		}},
 	} {
@@ -194,6 +203,7 @@ func TestUninstallStopsAndRemoves(t *testing.T) {
 				t.Fatalf("Install: %v", err)
 			}
 			exec := &fakeExec{}
+			exec.home = h.Home
 			h.Exec = exec.run
 			state, err := Uninstall(t.Context(), h)
 			if err != nil {
@@ -236,6 +246,7 @@ func TestUninstallToleratesAServiceAlreadyGone(t *testing.T) {
 	exec := &fakeExec{fail: map[string]string{
 		"systemctl --user disable": "Failed to disable unit: Unit file sparkwing-runner.service does not exist.",
 	}}
+	exec.home = h.Home
 	h.Exec = exec.run
 	if _, err := Uninstall(t.Context(), h); err != nil {
 		t.Fatalf("Uninstall: %v", err)
@@ -275,8 +286,8 @@ func TestSystemdWordQuotesSpacesAndDoublesSpecifiers(t *testing.T) {
 		{"/opt/100%/runner", "/opt/100%%/runner"},
 		{"", `""`},
 	} {
-		if got := systemdWord(tc.in); got != tc.want {
-			t.Errorf("systemdWord(%q) = %q, want %q", tc.in, got, tc.want)
+		if got := unitfile.SystemdWord(tc.in); got != tc.want {
+			t.Errorf("unitfile.SystemdWord(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
@@ -386,8 +397,8 @@ func TestXMLTextEscapesMarkupAndKeepsSpaces(t *testing.T) {
 		{"/opt/r&d/config.yaml", "/opt/r&amp;d/config.yaml"},
 		{`/opt/<a>"b"/config.yaml`, "/opt/&lt;a&gt;&#34;b&#34;/config.yaml"},
 	} {
-		if got := xmlText(tc.in); got != tc.want {
-			t.Errorf("xmlText(%q) = %q, want %q", tc.in, got, tc.want)
+		if got := unitfile.XMLText(tc.in); got != tc.want {
+			t.Errorf("unitfile.XMLText(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 	h := Host{Binary: "/usr/local/bin/sparkwing-runner", Home: "/Users/r&d", ConfigPath: "/Users/r&d/config.yaml"}

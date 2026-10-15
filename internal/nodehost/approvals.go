@@ -41,11 +41,7 @@ func approvalGate(ctx context.Context, cfg *Config, n *NodeRun) Result {
 				run.Logger.Warn("nodehost: close node log", "run", run.ID, "node", id, "err", err)
 			}
 		}()
-		emit = func(rec sparkwing.LogRecord) {
-			rec.Msg = a.Masker.Mask(rec.Msg)
-			rec.Attrs = a.Masker.MaskAttrs(rec.Attrs)
-			nlog.Emit(rec)
-		}
+		emit = func(rec sparkwing.LogRecord) { nlog.Emit(maskRecord(a.Masker, rec)) }
 	}
 	if err := run.State.StartNode(writeCtx, run.ID, id); err != nil {
 		return failed(fmt.Errorf("start node %s: %w", id, err))

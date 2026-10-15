@@ -35,8 +35,10 @@ func init() {
 }
 
 func main() {
-	cleanupStaleUpdate()
-	toolchainActive = takeToolchainActive()
+	if len(os.Args) < 2 || os.Args[1] != "__sdk-install" {
+		cleanupStaleUpdate()
+		toolchainActive = takeToolchainActive()
+	}
 
 	if err := runSparkwing(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, color.Red(color.Bold("sparkwing error:")), err)
@@ -137,13 +139,6 @@ func dispatchRun(args []string) error {
 		return runDetached(context.Background(), pipelineName, flags, passthrough)
 	}
 	if err := refuseDetachedOnlyFlags(flags); err != nil {
-		return err
-	}
-	projectStart := ""
-	if cwd, workingDirectoryErr := os.Getwd(); workingDirectoryErr == nil {
-		projectStart = cwd
-	}
-	if err := projectconfig.CheckLegacy(projectStart); err != nil {
 		return err
 	}
 
@@ -271,11 +266,11 @@ func dispatchRun(args []string) error {
 }
 
 func pinnedPipeline(sparkwingDir, pipelineName string) (*pipelines.Pipeline, error) {
-	cfg, err := projectconfig.LoadOld(filepath.Join(sparkwingDir, projectconfig.Filename))
+	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
 	if err != nil || cfg == nil {
 		return nil, err
 	}
-	return (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipelineName), nil
+	return cfg.Registry().Find(pipelineName), nil
 }
 
 // safety: --sw-ref executes another revision, so its sparkwing.yaml, not the
@@ -303,11 +298,11 @@ func pinnedPipelineAt(sparkwingDir, ref, pipelineName string) (*pipelines.Pipeli
 	if err != nil {
 		return nil, fmt.Errorf("--sw-ref %s: read %s: %w", ref, path, err)
 	}
-	cfg, err := projectconfig.ParseOld(raw)
+	cfg, err := projectconfig.Parse(raw)
 	if err != nil {
 		return nil, fmt.Errorf("--sw-ref %s: %s: %w", ref, path, err)
 	}
-	return (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipelineName), nil
+	return cfg.Registry().Find(pipelineName), nil
 }
 
 func pinnedProfileHere(pipelineName string) (string, error) {
@@ -330,6 +325,9 @@ func printPin(pipelineName string) {
 }
 
 func runSparkwing(args []string) error {
+	if len(args) > 0 && args[0] == "__sdk-install" {
+		return runSDKInstall(args[1:])
+	}
 	args, err := moveRootFlags(args)
 	if err != nil {
 		return err
