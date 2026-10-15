@@ -16,7 +16,7 @@ async function mockCloud(page: Page, unsupported: string[]) {
       } });
       return;
     }
-    if (path === "/api/v1/approvals/pending") {
+    if (path === "/api/v1/approvals") {
       await route.fulfill({ json: { approvals: [] } });
       return;
     }

@@ -10,7 +10,7 @@ C2 owns the production route policy. T1 owns independent expected results and cr
 
 ## Final route permission coverage
 
-`internal/acceptance/credential_routes.go` contains committed literal expectations
+`pkg/controller/credential_route_expectations_test.go` contains committed literal expectations
 for all declared final C2 method/path pairs, including the eleven node-host
 routes and every public, browser and external-proof route. Each alternative pins
 its credential class, complete grant conjunction, binding and liveness together.
@@ -225,8 +225,8 @@ The exact source spelling is retained in the first column, including `/metrics`,
 
 | Old route | Disposition | Final resource/path or C2 assumption | Destination scenario ID | Independent rule / unresolved right |
 |---|---|---|---|---|
-| `DELETE /api/v1/accounts/{account}` | unresolved | Account deletion is console-only. C2 must confirm whether this path remains under console authority or is replaced. | `credentials-matrix-authentication-status` | OPS; U-ACCOUNT-DELETE |
-| `DELETE /api/v1/me` | unresolved | Self-service deletion authority is removed. C2 must confirm the final console deletion path. | `credentials-matrix-authentication-status` | OPS; U-ACCOUNT-DELETE |
+| `DELETE /api/v1/accounts/{account}` | rename | `DELETE /api/v1/operator/accounts/{account}`, operator-console session only. | `credentials-matrix-authentication-status` | OPS; U-ACCOUNT-DELETE |
+| `DELETE /api/v1/me` | delete | Use `DELETE /api/v1/operator/accounts/{account}` under console authority. | `credentials-matrix-authentication-status` | OPS; U-ACCOUNT-DELETE |
 
 ### Schedule resource renames
 
@@ -616,7 +616,7 @@ The exact source spelling is retained in the first column, including `/metrics`,
 
 | Old route | Disposition | Final resource/path or C2 assumption | Destination scenario ID | Independent rule / unresolved right |
 |---|---|---|---|---|
-| `POST /api/v1/runs/{id}/oidc-token` | unresolved | OIDC mint operation survives. C2 names its final path. | `credentials-matrix-node-child-slot` | OIDC |
+| `POST /api/v1/runs/{id}/oidc-token` | rename | PolicyRouter uses `/api/v1/runs/{run}/oidc-token` with live run-bound oidc.mint authority. W2 component signing/client tests pass against committed-fact fakes. C1 ReadOIDCFacts and native integration remain required. | `credentials-matrix-node-child-slot` | OIDC |
 | `POST /api/v1/runs/{id}/source-credential` | unresolved | Source release survives. C2 names its final path. | `credentials-matrix-node-child-slot` | SOURCE |
 
 ### Plan acceptance

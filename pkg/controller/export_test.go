@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"testing"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -10,14 +9,6 @@ import (
 // CardBillingPass runs one pass of the payment worker, so a test drives its
 // schedule instead of waiting on the ticker.
 func (s *Server) CardBillingPass(ctx context.Context) { s.cardBillingPass(ctx) }
-
-// MuxRouteScopes returns every route server.go registers on the authenticated
-// mux with the scope requireScope gates it on, read from the source so a route
-// added later is in the list without anyone adding it.
-func MuxRouteScopes(t *testing.T) map[string]string {
-	t.Helper()
-	return muxRoutes(t, "server.go")
-}
 
 // SetHostKeyScan replaces the ssh host key read a new git credential makes,
 // so a test serves a key without dialing a host.

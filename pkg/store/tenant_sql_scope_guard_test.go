@@ -16,6 +16,7 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"hasDeploymentAdministratorTx":  "deployment readiness and the bootstrap gate select only credentials whose team is NULL, then validate their complete live ancestry",
 	"(*Store).LookupCapability":     "a presentation digest identifies the credential before its tenant is known",
 	"loadCapabilityRecordTx":        "globally unique prefixes resolve the complete authority envelope before its tenant and ancestry are checked",
 	"persistCapabilityTx":           "indexed columns, including nullable team, are serialized from the complete authority envelope in one INSERT",
@@ -109,12 +110,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"account deletion can tell sole ownership from shared",
 	"nodeChargeTx": "reads the team, pipeline and plan of the run a charge names by global id, so the charge lands in that " +
 		"run's team",
-	"(*Store).TriggerClaimFenceIsLive": "matches the trigger's live claim against the exact claimant credential and " +
-		"generation, and a token prefix is unique across teams",
-	"(*Store).NodeClaimFenceIsLive": "matches the node's live claim against the exact holder, credential, reservation and " +
-		"generation, and a token prefix is unique across teams",
-	"(*Store).PrincipalHoldsRunClaim": "matches a live claim on the run's nodes against the exact claimant credential, and " +
-		"a token prefix is unique across teams",
 	"(*Store).PrincipalHoldsTriggerClaim": "matches the trigger's live claim against the exact claimant credential, and a " +
 		"token prefix is unique across teams",
 	"(*Store).ClaimedRunFor": "asks which team a run the exact claimant credential holds live work in belongs to, so an " +

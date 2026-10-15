@@ -1,5 +1,17 @@
 # Migrating to the next release
 
+## Legacy claim authentication and writers
+
+`Store.AuthorizeClaimToken`, `AuthorizeRunnerClaim`, `ReplayClaimResult`,
+`ReportAttempt`, `EnqueueChildRun` and `IsChildRunOf` are removed with their
+raw claim classes, result-commit types and attempt-report types. Use capability
+authentication, `Tenant.TransitionNode` and `Tenant.AdmitRun`. Current
+transitions own generation checks, result replay, retry ordinals, events and
+settlement. The unused `CheckClaimSlot`, `CheckClaimKey`,
+`PrincipalHoldsRunClaim`, `TriggerClaimFenceIsLive` and `NodeClaimFenceIsLive`
+readers are removed too. Current binding and mutation transactions recheck
+authority using the store clock.
+
 ## Named job claims and renewal
 
 `Store.ClaimNamedNode` and `NamedClaimOptions` are removed. Use `ClaimUnit` with
@@ -226,6 +238,81 @@ consumers use DefaultTeam; controller requests use the authenticated team.
 Declare `needs_generated` in the accepted plan and submit generated jobs with
 `Tenant.AcceptExpansion`. Read `RunSnapshot.Scheduling` to resolve group members
 and decide when dependents can run. Accepted declarations stay unchanged.
+
+## Data signing and authentication metrics
+
+Embedded controllers use `blob.NewFilesystem` or `blob.NewS3` as their physical
+backend and pass it through `WithDataController` or `WithDataObjects`. The duplicate
+controller filesystem and S3 signer types and `WithSignedDownloads` are removed.
+Wrap an S3 backend with `controller.NewCloudFrontDataBackend` to sign public-ingress
+downloads through CloudFront. Direct requests retain regional S3 URLs. Uploads keep
+the backend's size and checksum constraints. `WithS3Logs` replaces
+`WithDirectUploads` for retained S3 log readers.
+
+Replace the `user` and `runner` credential labels on
+`sparkwing_requests_by_principal_total` with `account` and `machine`. The other
+labels are `service`, `operator`, `local`, `anonymous` and `other`. Requests count
+once authentication succeeds, including later authorization refusals. Remove
+queries for `sparkwing_auth_token_cache_total`, because the token-table cache is
+removed.
+
+## Runner observation snapshots
+
+Embedded controllers supply `Server.WithRunnerInventory` with a tenant-scoped
+`RunnerInventoryReader`. Runner lists and queue headroom use the same committed
+snapshot. The old process-local presence, heartbeat and headroom registries and
+holder-name parser are removed. A missing snapshot adapter returns `policy_missing`.
+The `/api/v1/runners` response retains `agents`. Equal display names can appear in
+separate rows because they do not merge credentials. Last-seen and headroom
+observation times remain separate. Runner metrics read the same snapshots.
+
+`RunnerInventoryReader.ReadRunners` returns `capability.RunnerSnapshot`.
+The snapshot, observation and headroom types live in `internal/capability`,
+so the store adapter can implement the reader without a controller import.
+
+## Reporting credential routes
+
+Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.
+
+Job logs use `/api/v1/runs/{run}/jobs/{job}/logs`, with `/stream` and `/completeness` beneath it. The old `/runs/{run}/logs/{job}` paths are removed. Use `/api/v1/runners` instead of `/api/v1/agents`, `/api/v1/approvals` instead of `/api/v1/approvals/pending`, and `/api/v1/sizing` or `/api/v1/sizing/explain` instead of `/api/v1/capacity/profiles`. Read debug pauses at `/runs/{run}/debug-pauses`. The `paused` alias is removed.
+
+## Legacy execution credential routes
+
+The `/api/v1/triggers` and `/api/v1/runs/{run}/nodes` route families are
+removed, including heartbeat, execution-start, execution-finish, claim input,
+attempt results, node logs and direct node output upload. Raw
+`POST /api/v1/runs/{run}/events` is also removed. Events come from the
+committing state operation.
+
+Use capability-backed `POST /api/v1/runs` for intake, `/runs/{run}/plan`
+for plan acceptance, `/runs/{run}/jobs/{job}/transition` for job changes,
+and the run or job `heartbeat` route for renewal. Use `/api/v1/data` for
+authorized output uploads and records. Retired claim tokens and execution
+headers are no longer an execution credential. Rebuild runner and controller
+consumers together. No alias accepts the previous request shapes.
+
+Embedded controllers remove `Server.WithLocalExecution`. Local execution now
+uses the same capability and self-claim rules. The elected local runtime obtains
+verified peer identity through `Server.HTTP()`.
+
+Absent paths return canonical `not_found` before credential lookup. A
+removed method on a path that still has another method returns canonical
+`method_not_allowed` with `Allow`. Neither refusal renews a browser session.
+The unused `WriteUnsupportedRoute` helper and `UnsupportedRouteError` constant
+are removed. Embedded callers use the shared handler and canonical error envelope.
+
+## Browser identity linking
+
+Link start and completion use the shared browser proof policy. Use the account's
+direct provider session and the matching session-bound CSRF form. Account-token
+sessions and Authorization headers cannot link identities. Failures return the
+canonical JSON error envelope instead of a settings-page refusal redirect.
+Embedded controllers supply `WithIdentityLinkWriter` to recheck the session and
+commit one-use nonce consumption and identity attachment.
+
+Nonlocal dashboard pages always require a live session. `Dashboard.Local`
+selects local pages. Elected local controllers obtain the API and dashboard
+handlers from `Server.HTTP()` and supply them through `wingd.LocalHTTP`.
 
 ## CLI client retirement
 
@@ -1026,6 +1113,7 @@ the run's local publication authority. Caller-supplied holder and generation
 headers grant no authority. Step finish accepts `passed`, `failed` and
 `cancelled`, plus an optional inner error with a code and masked message.
 Annotations and summaries accept at most 128 KiB of masked text.
+
 ## Unit recovery requires the elected reaper lease
 
 `Store.ReapExpiredNodeClaims`, `Maintenance.RecoverExpiredNodeClaims`,
@@ -1895,3 +1983,210 @@ classification from the seal.
 and `NodeRow.ManifestRecord` from the committed terminal result. Use these
 selectors for materialized jobs, which may have no execution attempt. Authorize
 record reads through the data contract before reading bytes.
+
+Console-origin persistence must be provided before enabling console issuance.
+
+## Account discovery authorization
+
+The three account discovery reads under `/api/v1/me` require a live account
+session and use the common error object. They no longer enter the legacy bearer
+or renewing session middleware. GET requests do not switch the session's team.
+Use the active-team action when changing membership. Cookie and Session-header
+presentations use the same account policy.
+
+Credit-settings reads use the member `runs.read` policy. Configure shared
+route authorization before constructing an embedded controller's handler.
+
+## Account deletion is console-only
+
+`DELETE /api/v1/me` is removed with its `confirm_email` request and recent-sign-in
+check. Use `DELETE /api/v1/operator/accounts/{account}` from an operator-console
+session with CSRF proof. A member session or deployment bearer cannot delete an
+account. The existing last-owner and financial refusals still apply.
+
+## Account mutations use session policy
+
+Active-team selection, team creation, invitation acceptance and identity
+unlinking use the shared account-session policy. Cookie and Session-header
+mutations require session-bound CSRF and same-origin proof. These calls no
+longer renew the session. Bearer and local-peer authority cannot use them.
+Errors use the common object, and closed invitations return `conflict`.
+
+Embedded controllers supply `WithAccountWriter` with authority-bearing account
+transactions. Each operation rechecks the selected session at commit. Team
+changes commit account and session selection together. Unlinking retains the
+recent-sign-in and last-method checks. Missing transactions return
+`policy_missing`; raw account-store methods are not fallback adapters.
+
+## OIDC claim authorization
+
+OIDC minting uses `POST /api/v1/runs/{run}/oidc-token` with a live run-bound
+`oidc.mint` capability. Passing the runner’s machine root or an account token
+no longer works. Hosts use the awarded job capability. The audience request
+and signed-token response retain their shapes. Errors use the common envelope.
+Embedded controllers supply `WithOIDCReader` for authority-rechecked sealed
+identity and an effective ancestry expiry. The legacy claimed-run lookup and
+dispatched-node refusal are removed.
+
+## Concurrency credential routes
+
+Replace `/api/v1/concurrency/{key}/state` with
+`/api/v1/queue/groups/{group}`. Move `acquire`, `heartbeat`, `release`,
+`cancel-waiter`, `holder`, `resolve` and `force-release` under the same group
+path. Replace `node_id`, `leader_node_id` and `origin_node_id` with their
+`job_id`, `leader_job_id` and `origin_job_id` spellings. Group waiter positions
+are one-based. `cancel_timeout_ns` is a numeric duration in nanoseconds.
+
+Executable callers need a capability bound to the declared group and current
+work generation. Root runner tokens cannot acquire slots directly. Force
+release uses member `runs.control`. Embedded controllers supply
+`WithConcurrencyStore` for authority-bearing transactions. The old unfenced
+concurrency methods do not provide that adapter.
+
+## Typed step reports
+
+Send `StepReportRequest` to the job's `steps/start`, `steps/finish` or
+`steps/skip` route. Include `step_id`, `state` and the positive `source_attempt`
+captured when execution began. State `running` selects start, `skipped` selects
+skip, and `passed`, `failed` or `cancelled` selects finish. The old step-finish
+`status` field and structured `error` object are removed. `error` is masked
+text. Optional `started_at` and `finished_at` preserve nanoseconds.
+
+A successful write returns HTTP 200 with `{"recorded":true}`. Wait for that
+acknowledgement before emitting the step diagnostic. A source ordinal that no
+longer matches returns `lock_held`. Do not read the latest attempt to replace a
+captured ordinal when retrying the report.
+
+
+## Verified billing events and deployment bootstrap
+
+Automated billing callbacks use `POST /webhooks/stripe`. The signature verifier
+accepts checkout outcomes, `setup_intent.succeeded`, payment-intent success and
+failure, individual refund creation/update/failure, early fraud warning
+creation/update, and dispute creation/closure. It passes provider identities,
+minor-unit amounts and statuses to settlement. Provider metadata never selects
+a team, credit grant or card attempt. Card details are read from Stripe with the
+configured key and checked against the signed object. Test and live use the same
+path with different keys.
+
+The store must connect non-checkout outcomes to its committed billing records.
+That settlement integration is still incomplete. The removed service routes
+have no forwarding aliases. Keep provider retries enabled until settlement can
+commit their outcomes.
+
+Replace `swu_` bootstrap credentials with a `swk_` controller capability
+presentation. `EnsureBootstrapAdminToken` now takes a context, transactional
+issuer and raw presentation. It requires `BootstrapAdminIssuer` and forwards a
+trusted `ProvisionSpec.Seed` to its once-only transaction. It no longer calls
+`CreateTokenIfNoneExist` or accepts a caller clock. `Store.EnsureBootstrapCapability`
+commits the seed through `Store.Issue` and closes the persisted deployment gate.
+A live repeated seed is a no-op. A different seed or an ended seed is refused,
+including after restart or credential retention. `Store.HasDeploymentAdministrator`
+checks complete current ancestry for startup readiness. Bootstrap authority
+is operational only. Sign in with an account capability or OAuth for dashboard
+access.
+
+
+`EnableAuthFromStore` always requires credentials. It no longer disables
+authentication when the legacy token table is empty or unreadable. The
+single-team anonymous bootstrap mode is removed. Local access uses the
+controller's verified peer path. `--require-auth` retains a startup-readiness
+check for a live deployment administrator capability. The store must implement
+`HasDeploymentAdministrator(context.Context) (bool, error)` for that check.
+A missing reader refuses startup when the flag is set. It never falls back to
+`ListTokens`. Health reports authentication enabled before bootstrap completes.
+
+
+## Schedule and review credential routes
+
+Move `/api/v1/crons` and its descendants to `/api/v1/schedules`. Replace
+`POST /crons/{id}/disarm` with `DELETE /schedules/{schedule}`. Repository
+replacement and deletion remain `PUT` and `DELETE` beneath `/schedules/repos`.
+The retired routes have no aliases. Use member `runs.read` for schedule reads
+and `runs.control` for mutations. Deployment admin tokens and unbound runner
+roots do not substitute for member authority.
+
+Send one `Idempotency-Key` header when running a schedule, resolving an approval
+or creating a debug pause. Schedule run-now returns its `replayed` result.
+Approval resolution accepts only `approved` or `denied`, with optional `comment`;
+the server derives the approver. Its response is an `approval` envelope with
+`replayed`. Approval objects use `job_id`. Replace debug-pause `node_id` with
+`job_id` and omit lifecycle/release fields. The raw approval-request route is
+removed; execution owns gate creation.
+
+Embedded controllers must supply authority-bearing `ScheduleWriter` and
+`RunControlWriter` adapters. Legacy schedule, approval and debug-pause writes
+are not substitutes. The default refuses a missing adapter. Team invitation,
+trust, GitHub App, billing and storage reads now require the shared capability
+policy; API metrics requires `operator.limits` or console authority.
+
+## Remaining team credential routes
+
+Team rename/deletion, invitation writes, build trust, run deletion, GitHub App
+configuration and billing writes use the shared capability policy. The legacy
+token-table verifier, positive and negative caches, here/Actions route fences,
+legacy tenant-route table and browser API middleware are removed. The Go
+`Authenticator`, `NewAuthenticator`, `WithAuthenticator`, `EnableAuthFromStore`,
+`AuthEnabled` and controller `ScopesForRole` APIs are removed. Constructing a
+controller installs its policy boundary. Use `WithAuthorization` for an
+embedded authority reader and binding checker. Use `store.ScopesForRole` for
+role projection.
+
+Embedded transaction adapters use `WithTeamWriter`, `WithGitHubAppWriter` and
+`WithBillingWriter`. Missing adapters return `policy_missing`. A write must
+recheck current authority and membership inside its committing transaction.
+No former raw write is a fallback.
+
+Invitation creation and billing checkout, card setup and pay-now require an
+`Idempotency-Key` header. Their JSON failures use the canonical error envelope.
+Billing refusal fields live under `error.details`, with their business code in
+`reason`. A completed billing-page replay returns the saved URL. The checkout
+service must preserve its `key` across retries. Card setup also receives the
+committed `setup_id`.
+
+The account dashboard no longer calls the removed self-service account-deletion
+route. Account deletion belongs to the deployment operator console.
+
+## Browser connection and console transactions
+
+The GitHub App browser flow uses the shared policy router and current account
+session authority. Embedded controllers supply `WithGitHubConnectWriter` for
+linked GitHub identity reads, one-use flow consumption and installation binding.
+The old browser Principal lookup and standalone form middleware are removed.
+
+Console writes require `WithConsoleWriter`. Raw credit, billing, hold, deletion,
+waitlist, settings and installation methods are no longer HTTP fallbacks.
+Missing transaction adapters return `policy_missing`. Waitlist approval requires
+an `Idempotency-Key` header. Keep the same key when retrying an approval request.
+Console clients read failures from `error.message` in the canonical envelope.
+
+The unused token-table metering and HTTP billing-finalization helpers are removed.
+Claim billing and settlement belong to the store's immutable award lifecycle.
+
+
+## Final credential helpers and reporting writes
+
+The controller `Principal`, `PrincipalFromContext`, `HasScope` and `Scope*`
+exports are removed. Embedded handlers receive `capability.Authorized` from the
+shared policy router. Team selection comes from that value. An absent credential
+no longer selects the default team through a legacy helper.
+
+Replace `/api/v1/runs/{id}/nodes/{nodeID}/metrics` and `/usage` with
+`/api/v1/runs/{run}/jobs/{job}/metrics` and `/usage`. The Go client's metric and
+usage methods use the final paths. Embedded controllers supply `WithMetricWriter`
+for committing writes. A missing adapter returns `policy_missing`.
+
+Deployment settings writes require `WithOperatorSettingsWriter`. Its transactions
+recheck deployment authority, and a signup request commits its mode and limits
+in one transaction. Raw settings methods are no longer HTTP write fallbacks.
+
+Runner budgets use the verified team and holder after shared policy authorization.
+Empty claims spend the polling budget. Awarded work does not. Empty polls are not
+audited. Job path identifiers appear as `run_id` and `job_id` in audit records.
+The unused live-log HTTP handlers and their `LiveLogRead` type are removed.
+Dashboard log reads retain the shared policy routes and in-memory live reader.
+
+Egress concurrency refusals use `error.code=rate_limited`, with
+`egress_download_limit` or `egress_stream_limit` in `error.details.reason`.
+The exported `EgressDownloadLimitCode` and `EgressStreamLimitCode` constants are
+removed. Read the canonical error object instead of a top-level code.

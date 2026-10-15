@@ -127,11 +127,11 @@ func main() {
 		}
 	}()
 	now := time.Now().UTC()
-	token, _, err := st.CreateToken("browser-fixture", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	token, _, err := st.CreateToken("browser-fixture", store.TokenKindUser, []string{"admin"}, 0, now)
 	if err != nil {
 		log.Fatal(err)
 	}
-	srv := controller.New(st, nil).EnableAuthFromStore().WithDashboard(controller.Dashboard{
+	srv := controller.New(st, nil).WithDashboard(controller.Dashboard{
 		Bundle:  os.DirFS(config.webOut),
 		Version: "auth-browser-fixture",
 		Paths:   home,

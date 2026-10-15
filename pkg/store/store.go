@@ -2833,25 +2833,6 @@ func (t *Tenant) TriggerClaimant(ctx context.Context, triggerID string) (ClaimId
 	return claimant, nil
 }
 
-// PrincipalHoldsRunClaim reports whether claimant holds an unexpired
-// claim on any node of the run. An unbound claimant holds nothing.
-func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (bool, error) {
-	if !claimant.bound() {
-		return false, nil
-	}
-	var held int
-	err := s.queryRow(ctx,
-		`SELECT COUNT(*) FROM nodes
-		  WHERE run_id = ? AND claim_principal = ?
-		    AND claim_token_prefix = ?
-		    AND `+nodeClaimLiveSQL(""),
-		runID, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held)
-	if err != nil {
-		return false, err
-	}
-	return held > 0, nil
-}
-
 // Event is one audit/wire record for a run; Seq is per-run monotonic.
 type Event struct {
 	RunID   string          `json:"run_id"`

@@ -1,5 +1,37 @@
 # Controller HTTP API
 
+Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.
+
+Job logs use `/api/v1/runs/{run}/jobs/{job}/logs`, with `/stream` and `/completeness` beneath it. The old `/runs/{run}/logs/{job}` paths are removed. Use `/api/v1/runners` instead of `/api/v1/agents`, `/api/v1/approvals` instead of `/api/v1/approvals/pending`, and `/api/v1/sizing` or `/api/v1/sizing/explain` instead of `/api/v1/capacity/profiles`. Read debug pauses at `/runs/{run}/debug-pauses`. The `paused` alias is removed.
+
+Schedule reads and writes use `/api/v1/schedules`. Repository replacement uses
+`PUT /schedules/repos`; repository deletion uses `DELETE /schedules/repos`.
+Delete one schedule with `DELETE /schedules/{schedule}`. The `/api/v1/crons`
+family and `POST .../disarm` are removed. Reads require member `runs.read`;
+writes require member `runs.control`. List queries accept `all` and `next`;
+detail queries accept `fires` and `next`, including zero. Overrides preserve
+explicit empty argument sets, empty zones and zero catch-up.
+
+Approval decisions use `POST /runs/{run}/approvals/{job}` with `resolution`
+(`approved` or `denied`) and optional `comment`. The authenticated identity
+supplies the approver. Success returns `{"approval":{...},"replayed":false}`.
+Approval reads and decisions use `job_id`. The approval-request HTTP route is
+removed; the run owner creates gates through its execution lifecycle.
+
+Schedule run-now, approval decisions and debug-pause creation require one
+`Idempotency-Key` header. Debug-pause creation accepts `job_id`, `reason` and
+optional `expires_at`, with the run selected by the route. Caller-supplied
+approvers, release fields, run selectors and legacy `node_id` fields are refused.
+Embedded controllers supply `WithScheduleWriter` and `WithRunControlWriter`;
+these adapters recheck authority and commit state, events and replay together.
+Missing transaction adapters return `policy_missing`.
+
+Team invitation, build-trust, billing and storage reads use the same capability
+boundary, as do GitHub App installation, repository, trigger and extra-repository
+reads. Billing availability is checked after authentication.
+The API's `/metrics` route requires deployment `operator.limits` or a verified
+console session. A dedicated metrics listener keeps its existing network boundary.
+
 The CLI, runners, fetched engines and dashboard use `/api/v1`. The local
 controller exposes the same messages and authorization policy over its private API
 socket. The [HTTP reference](api-reference.md) is generated from the shared
@@ -219,6 +251,21 @@ read-set, metadata, signing and charging adapters are configured. Signed
 URLs work through the backend selected by the controller. Cache grants and
 `{kind,key}` download requests are removed. There is no cache-service fallback.
 Logs use controller-proxied reads, separate from byte-storage downloads.
+
+## Concurrency groups
+
+Concurrency operations use `/api/v1/queue/groups/{group}`. The former
+`/api/v1/concurrency/{key}` routes are removed. Requests and responses use
+`job_id`, `leader_job_id` and `origin_job_id`. A group read returns `QueueGroup`
+with one-based waiter positions and numeric `cancel_timeout_ns`.
+
+Acquire and waiter resolution require a live claim bound to the declared group.
+After cancellation, the holder can still heartbeat, release and cancel its
+waiter while its reporting authority remains live. Force release requires
+`runs.control`. The transaction checks the current authority, holder generation,
+sealed declaration and reference edges before reading or changing state.
+Embedded controllers provide `WithConcurrencyStore`. A missing transaction
+adapter refuses the operation with `policy_missing`.
 
 ## Version policy
 

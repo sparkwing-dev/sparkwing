@@ -38,7 +38,7 @@ func TestPaymentProof(t *testing.T) {
 		{"checkout.session.expired", "unpaid", PaymentCheckoutExpired},
 		{"checkout.session.async_payment_failed", "unpaid", PaymentCheckoutFailed},
 		{"checkout.session.completed", "unpaid", ""},
-		{"payment_intent.succeeded", "paid", ""},
+		{"customer.created", "paid", ""},
 	} {
 		t.Run(tc.kind+"/"+tc.paid, func(t *testing.T) {
 			body := paymentBody(tc.kind, tc.paid, false)

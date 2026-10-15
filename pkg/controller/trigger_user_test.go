@@ -23,11 +23,11 @@ func newTriggerUserServer(t *testing.T) (*store.Store, *httptest.Server, string)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	raw, _, err := st.CreateToken("alice", store.TokenKindUser,
-		[]string{controller.ScopeRunsWrite}, 0, time.Now().UTC())
+		[]string{"runs.write"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	ts := httptest.NewServer(controller.New(st, nil).Handler())
 	t.Cleanup(ts.Close)
 	return st, ts, raw
 }

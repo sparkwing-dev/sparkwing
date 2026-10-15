@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -260,5 +261,62 @@ func TestPaymentHTTPConcurrentRequestsKeepTheirProof(t *testing.T) {
 	}
 	if len(seen) != 24 {
 		t.Fatalf("settled %d of 24 requests", len(seen))
+	}
+}
+
+func TestPaymentHTTPFinancialProviderHandoffProperty(t *testing.T) {
+	for _, mode := range []capability.PaymentMode{capability.PaymentTest, capability.PaymentLive} {
+		verifier := paymentVerifier(t, mode)
+		for _, tc := range []struct {
+			kind, object string
+			want         capability.PaymentEventKind
+		}{
+			{"refund.updated", `{"id":"re_committed","object":"refund","payment_intent":"pi_committed","charge":"ch_committed","status":"succeeded","amount":500,"currency":"usd"}`, capability.PaymentRefund},
+			{"payment_intent.payment_failed", `{"id":"pi_committed","object":"payment_intent","status":"requires_payment_method","amount":500,"currency":"usd","last_payment_error":{"decline_code":"insufficient_funds"}}`, capability.PaymentCardFailed},
+			{"charge.dispute.created", `{"id":"dp_committed","object":"dispute","payment_intent":"pi_committed","charge":"ch_committed","status":"needs_response","amount":500,"currency":"usd","reason":"fraudulent"}`, capability.PaymentDisputeOpened},
+			{"charge.dispute.closed", `{"id":"dp_committed","object":"dispute","payment_intent":"pi_committed","charge":"ch_committed","status":"lost","amount":500,"currency":"usd","reason":"fraudulent"}`, capability.PaymentDisputeClosed},
+		} {
+			t.Run(string(mode)+"/"+tc.kind, func(t *testing.T) {
+				property := func(metadata string, mutation uint8) bool {
+					var object map[string]any
+					if json.Unmarshal([]byte(tc.object), &object) != nil {
+						return false
+					}
+					object["metadata"] = map[string]any{"team": metadata, "amount_micro": metadata, "attempt": metadata}
+					object["livemode"] = mode == capability.PaymentLive
+					encoded, _ := json.Marshal(object)
+					body := fmt.Sprintf(`{"id":"evt_provider","object":"event","created":900,"type":%q,"livemode":%t,"data":{"object":%s}}`, tc.kind, mode == capability.PaymentLive, encoded)
+					ledger := &paymentLedger{}
+					h := paymentServer(verifier, ledger).Handler()
+					r := httptest.NewRequest("POST", "https://controller.test/webhooks/stripe?team=forged", strings.NewReader(body))
+					r.Header.Set("Stripe-Signature", paymentSignature(body, time.Now()))
+					w := httptest.NewRecorder()
+					h.ServeHTTP(w, r)
+					if w.Code != 204 || len(ledger.events) != 1 {
+						t.Logf("HTTP %d %s", w.Code, w.Body)
+						return false
+					}
+					e := ledger.events[0]
+					if e.Kind != tc.want || e.PaymentID != "pi_committed" || e.AmountMinor != 500 || e.Currency != "usd" || e.Mode != mode || e.Created != 900 {
+						return false
+					}
+					ledger.events = nil
+					signature := paymentSignature(body, time.Now())
+					if mutation%2 == 0 {
+						body += " "
+					} else {
+						signature = paymentSignature(body, time.Now().Add(-time.Hour))
+					}
+					r = httptest.NewRequest("POST", "https://controller.test/webhooks/stripe", strings.NewReader(body))
+					r.Header.Set("Stripe-Signature", signature)
+					w = httptest.NewRecorder()
+					h.ServeHTTP(w, r)
+					return w.Code == 401 && len(ledger.events) == 0
+				}
+				if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
 	}
 }

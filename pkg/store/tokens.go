@@ -165,9 +165,7 @@ type tokenExecer interface {
 	QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error)
 }
 
-// MinSuppliedTokenLen is the shortest raw token [Store.CreateTokenIfNoneExist]
-// accepts. A minted token runs to 47 characters; provisioning that supplies
-// its own credential still has to carry entropy a guesser cannot walk.
+// MinSuppliedTokenLen is the minimum length of a supplied legacy token.
 const MinSuppliedTokenLen = 32
 
 // ValidateRawToken reports whether raw is shaped like a usable token of
@@ -187,55 +185,6 @@ func ValidateRawToken(raw, kind string) error {
 			kind, MinSuppliedTokenLen, len(raw))
 	}
 	return nil
-}
-
-// CreateTokenIfNoneExist stores raw as a token for principal when the
-// tokens table holds no token that authenticates at now, and reports
-// whether it wrote one. Live means the same thing here as it does to a
-// bearer lookup: not revoked, and not past its expiry. A table holding
-// only revoked or expired rows is therefore bootstrapped again, which is
-// what lets an operator recover a cluster whose only credential was
-// revoked or ran out.
-//
-// The test and the insert are one statement, so concurrent replicas write
-// one row between them: the second either matches the row the first wrote
-// or collides on the prefix index, and both answer false.
-//
-// Only the argon2 hash of raw reaches the table; the caller already holds
-// the credential itself.
-func (s *Store) CreateTokenIfNoneExist(raw, principal, kind string, scopes []string, now time.Time) (bool, error) {
-	if principal == "" {
-		return false, errors.New("tokens: principal is required")
-	}
-	if err := ValidateRawToken(raw, kind); err != nil {
-		return false, err
-	}
-	hash, err := hashToken(raw)
-	if err != nil {
-		return false, err
-	}
-	ts := now.UTC().Unix()
-	res, err := s.execNoCtx(`
-        INSERT INTO tokens (hash, prefix, principal, kind, scopes, created_at, expires_at)
-        SELECT ?, ?, ?, ?, ?, ?, NULL
-         WHERE NOT EXISTS (
-               SELECT 1 FROM tokens
-                WHERE revoked_at IS NULL
-                  AND (expires_at IS NULL OR expires_at > ?)
-         )
-    `, hash, raw[:PrefixLen], principal, kind, strings.Join(dedupeScopes(scopes), ","), ts, ts)
-	if err != nil {
-		// safety: the prefix is derived from raw, so a collision is the peer that wrote this same credential first.
-		if isTokenPrefixCollision(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("tokens: bootstrap: %w", err)
-	}
-	n, rerr := res.RowsAffected()
-	if rerr != nil {
-		return false, fmt.Errorf("tokens: bootstrap: %w", rerr)
-	}
-	return n == 1, nil
 }
 
 func createTokenRow(

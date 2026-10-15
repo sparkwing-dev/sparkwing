@@ -75,33 +75,6 @@ func WithoutClaimFences(ctx context.Context) context.Context {
 	return context.WithValue(ctx, triggerClaimFenceKey{}, struct{}{})
 }
 
-func (s *Store) TriggerClaimFenceIsLive(ctx context.Context, runID string, claimant ClaimIdentity, generation int64, now time.Time) (bool, error) {
-	var held int
-	err := s.queryRow(ctx, `SELECT 1 FROM triggers
-	WHERE id = ? AND claim_principal = ? AND claim_token_prefix = ?
-	  AND claim_seq = ? AND `+triggerClaimLiveSQL(""), runID, claimant.Principal, claimant.TokenPrefix,
-		generation, now.UnixNano()).Scan(&held)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return err == nil, err
-}
-
-func (s *Store) NodeClaimFenceIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, now time.Time) (bool, error) {
-	var held int
-	err := s.queryRow(ctx, `SELECT 1 FROM nodes
-	WHERE run_id = ? AND node_id = ? AND claimed_by = ?
-	  AND claim_principal = ? AND claim_token_prefix = ?
-	  AND claim_membership_id = ? AND reservation_id = ? AND claim_generation = ?
-	  AND `+nodeClaimLiveSQL(""),
-		runID, nodeID, fence.HolderID, fence.Claimant.Principal, fence.Claimant.TokenPrefix,
-		fence.MembershipID, fence.ReservationID, fence.ClaimGeneration, now.UnixNano()).Scan(&held)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return err == nil, err
-}
-
 // safety: the fence reads the node in the mutating handle's team; a caller without a handle passes
 // the run's own team, so the fence still binds the claim to the holder that owns that node.
 func (s *Store) assertNodeMutationFenceTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) error {

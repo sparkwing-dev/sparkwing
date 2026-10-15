@@ -21,6 +21,11 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 	if tx.rotatingRoot != nil && !sameRotationScope(*tx.rotatingRoot, c) {
 		return capability.Capability{}, bindingRefusal()
 	}
+	if spec.Kind == capability.ProvisionBootstrap && tx.rotatingRoot == nil {
+		if err := checkBootstrapGateTx(ctx, tx); err != nil {
+			return capability.Capability{}, err
+		}
+	}
 	if err := checkProvisionOriginTx(ctx, tx, spec, false); err != nil {
 		return capability.Capability{}, err
 	}
@@ -31,7 +36,7 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 	}
 	if spec.Kind != capability.ProvisionMember && !(tx.rotatingRoot != nil && spec.Kind == capability.ProvisionBootstrap) {
 		enrollment := spec.Kind == capability.ProvisionMachine || spec.Kind == capability.ProvisionService
-		if tx.store.provisions == nil && !enrollment {
+		if tx.store.provisions == nil && !enrollment && !(spec.Kind == capability.ProvisionBootstrap && spec.Seed != "") {
 			return capability.Capability{}, authorityError(apierr.Unavailable, "root origin verification is not configured")
 		}
 		if tx.store.provisions != nil {

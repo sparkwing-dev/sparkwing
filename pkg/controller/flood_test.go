@@ -170,17 +170,16 @@ func TestFloodPolicy_DedupeIsScopedToThePrincipal(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	now := time.Now().UTC()
 	tenantA, _, err := st.CreateToken("tenant-a", store.TokenKindUser,
-		[]string{controller.ScopeRunsWrite}, 0, now)
+		[]string{"runs.write"}, 0, now)
 	if err != nil {
 		t.Fatalf("tenant-a token: %v", err)
 	}
 	tenantB, _, err := st.CreateToken("tenant-b", store.TokenKindUser,
-		[]string{controller.ScopeRunsWrite}, 0, now)
+		[]string{"runs.write"}, 0, now)
 	if err != nil {
 		t.Fatalf("tenant-b token: %v", err)
 	}
 	ts := httptest.NewServer(controller.New(st, nil).
-		EnableAuthFromStore().
 		WithFloodPolicy(controller.FloodPolicy{DedupeWindow: time.Minute}).
 		Handler())
 	t.Cleanup(ts.Close)

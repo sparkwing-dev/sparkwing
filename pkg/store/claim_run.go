@@ -12,58 +12,6 @@ import (
 	"time"
 )
 
-// ErrSlotUndeclared refuses a claim a concurrency slot its node's accepted
-// plan does not declare with that key, policy, capacity and cost.
-var ErrSlotUndeclared = errors.New("store: the run's accepted plan declares no such slot for this node")
-
-// CheckClaimSlot allows tok's work claim to acquire key only as its node's
-// accepted plan declares it: the node's concurrency group, under the key its
-// scope names, with the declared policy, capacity and cost, or the node's
-// memoization under its own memo key.
-func (s *Store) CheckClaimSlot(ctx context.Context, tok ClaimToken, key, policy string, capacity, cost int) error {
-	m, memo, err := s.claimKey(ctx, tok, key)
-	if err != nil {
-		return err
-	}
-	if memo && policy == OnLimitCoalesce && capacity == 1 && cost == 1 {
-		return nil
-	}
-	if !memo && policy == m.ConcOnLimit && capacity == m.ConcCapacity && cost == m.ConcCost {
-		return nil
-	}
-	return ErrSlotUndeclared
-}
-
-// CheckClaimKey allows tok's work claim to touch key only when its node's
-// accepted plan declares it: the node's concurrency group key or its own memo
-// key.
-func (s *Store) CheckClaimKey(ctx context.Context, tok ClaimToken, key string) error {
-	_, _, err := s.claimKey(ctx, tok, key)
-	return err
-}
-
-func (s *Store) claimKey(ctx context.Context, tok ClaimToken, key string) (m declaredClaimModifiers, memo bool, err error) {
-	n, ok, err := s.declaredNode(ctx, tok.Team, tok.RunID, tok.NodeID)
-	if err != nil {
-		return m, false, err
-	}
-	if !ok {
-		return m, false, ErrSlotUndeclared
-	}
-	m = n.Modifiers
-	prefix, err := s.claimMemoPrefix(ctx, tok)
-	if err != nil {
-		return m, false, err
-	}
-	switch {
-	case m.Cache && strings.HasPrefix(key, prefix) && len(key) > len(prefix):
-		return m, true, nil
-	case m.ConcGroup != "" && key == declaredSlotKey(m, tok.RunID):
-		return m, false, nil
-	}
-	return m, false, ErrSlotUndeclared
-}
-
 type declaredPlanNode struct {
 	ID           string                 `json:"id"`
 	Modifiers    declaredClaimModifiers `json:"modifiers"`
@@ -308,15 +256,6 @@ func (s *Store) claimMemoPrefix(ctx context.Context, tok ClaimToken) (string, er
 		return "", err
 	}
 	return ClaimMemoKey(ClaimRepoSlug(owner, repo), pipeline, tok.NodeID, ""), nil
-}
-
-// safety: the SDK's key for a node's group: a run-scoped group is qualified
-// by its run, so a claim can name no other run's run-scoped key.
-func declaredSlotKey(m declaredClaimModifiers, runID string) string {
-	if m.ConcScope == "run" {
-		return "r:" + strconv.Itoa(len(runID)) + ":" + runID + m.ConcGroup
-	}
-	return "g:" + m.ConcGroup
 }
 
 // safety: a memoized result reaches a claim only from its own team,

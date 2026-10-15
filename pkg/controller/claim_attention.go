@@ -18,18 +18,6 @@ const (
 	agentOnlineWithin   = 2 * time.Minute
 )
 
-// safety: the platform is stored as os= and arch= labels, so an offline agent
-// is matched on the platform it last reported.
-func (s *Server) recordAgentLabels(ctx context.Context, tokenPrefix string, labels []string, profile match.Profile) {
-	labels = append([]string(nil), labels...)
-	if profile.OS != "" && profile.Arch != "" {
-		labels = append(labels, "os="+profile.OS, "arch="+profile.Arch)
-	}
-	if err := s.store.RecordAgentLabels(ctx, tokenPrefix, labels); err != nil {
-		s.logger.Warn("recording an agent's advertised labels failed", "err", err)
-	}
-}
-
 // perf: a tick judges at most this many nodes and resumes after the last one
 // next tick, so a large backlog costs bounded work per tick.
 const claimAttentionBatch = 1000
@@ -51,7 +39,6 @@ func (s *Server) sweepClaimAttention(ctx context.Context, now time.Time, batch i
 		last := waiting[len(waiting)-1]
 		s.attentionCursor = [2]string{last.RunID, last.NodeID}
 	}
-	online := s.runnerPresence.byToken(now, agentOnlineWithin)
 	agents := map[store.Team][]agentSighting{}
 	var updates []store.NodeAttention
 	for _, n := range waiting {
@@ -67,7 +54,7 @@ func (s *Server) sweepClaimAttention(ctx context.Context, now time.Time, batch i
 				s.logger.Error("claim attention sweep failed", "err", err)
 				return
 			}
-			sightings = sightAgents(registered, online, now)
+			sightings = sightAgents(registered, now)
 			agents[n.Team] = sightings
 		}
 		if reason := claimAttention(n, sightings, s.Metering()); reason != n.Attention {
@@ -84,20 +71,11 @@ type agentSighting struct {
 	online bool
 }
 
-// safety: an agent is judged on what it sends when online and on what it last
-// advertised when not.
-func sightAgents(registered []store.RegisteredAgent, online map[string]runnerPresence, now time.Time) []agentSighting {
+func sightAgents(registered []store.RegisteredAgent, now time.Time) []agentSighting {
 	out := make([]agentSighting, 0, len(registered))
 	for _, a := range registered {
-		sighting := agentSighting{RegisteredAgent: a}
-		if p, ok := online[a.CapabilityPrefix]; ok {
-			sighting.online = true
-			profile := a.Profile
-			profile.Name, profile.Class, profile.Labels = a.Name, match.ClassAgent, match.SelfAsserted(p.Labels)
-			profile.OS, profile.Arch = p.profile.OS, p.profile.Arch
-			sighting.Profile = profile
-		}
-		out = append(out, sighting)
+		online := !a.LastSeen.IsZero() && !a.LastSeen.After(now) && now.Sub(a.LastSeen) <= agentOnlineWithin
+		out = append(out, agentSighting{RegisteredAgent: a, online: online})
 	}
 	return out
 }

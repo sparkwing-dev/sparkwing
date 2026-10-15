@@ -12,6 +12,9 @@ let getNodeLogs!: typeof import("./api").getNodeLogs;
 let getConnectionStatus!: typeof import("./api").getConnectionStatus;
 let triggerRun!: typeof import("./api").triggerRun;
 let pipelinesByName!: typeof import("./api").pipelinesByName;
+let getNodeMetrics!: typeof import("./api").getNodeMetrics;
+let getPaused!: typeof import("./api").getPaused;
+let releaseNode!: typeof import("./api").releaseNode;
 
 before(async () => {
   const runtime = globalThis as unknown as { window?: RuntimeWindow };
@@ -27,6 +30,9 @@ before(async () => {
       getConnectionStatus,
       triggerRun,
       pipelinesByName,
+      getNodeMetrics,
+      getPaused,
+      releaseNode,
     } = await import("./api"));
   } finally {
     if (hadWindow) runtime.window = previousWindow;
@@ -39,7 +45,7 @@ describe("getNodeStreamUrl", () => {
     const url = getNodeStreamUrl("run-one", "verify");
     assert.equal(
       url,
-      "/api/v1/runs/run-one/logs/verify/stream?format=ndjson",
+      "/api/v1/runs/run-one/jobs/verify/logs/stream?format=ndjson",
     );
     assert.doesNotMatch(url, /format=ansi/);
   });
@@ -68,7 +74,7 @@ describe("run path segments", () => {
       assert.match(path, /^\/api\/v1\/runs\/[^/]+$/, `deleteRun(${id}) requested ${path}`);
     }
     const [logs] = await requestedPaths(() => getNodeLogs("run-one", "../../team"));
-    assert.match(logs, /^\/api\/v1\/runs\/run-one\/logs\/[^/]+$/);
+    assert.match(logs, /^\/api\/v1\/runs\/run-one\/jobs\/[^/]+\/logs$/);
   });
 
   it("refuses a dot-segment run id", async () => {
@@ -149,19 +155,25 @@ describe("triggerRun", () => {
     const runtime = globalThis as unknown as { fetch: typeof fetch };
     const previousFetch = runtime.fetch;
     let body = "";
-    runtime.fetch = async (_input, init) => {
+    runtime.fetch = async (input, init) => {
+      assert.equal(String(input), "/api/v1/runs");
+      assert.equal(init?.method, "POST");
+      assert.equal(new Headers(init?.headers).get("Content-Type"), "application/json");
       body = String(init?.body ?? "");
       return new Response(JSON.stringify({ run_id: "run-one" }), { status: 202 });
     };
     try {
-      await triggerRun("build", {}, git);
+      assert.deepEqual(await triggerRun("build", { tag: "nightly" }, git), { run_id: "run-one" });
     } finally {
       runtime.fetch = previousFetch;
     }
-    return JSON.parse(body) as Record<string, unknown>;
+    const envelope = JSON.parse(body) as Record<string, unknown>;
+    assert.deepEqual(Object.keys(envelope).sort(), ["idempotency_key", "request"]);
+    assert.match(String(envelope.idempotency_key), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    return envelope;
   }
 
-  it("names the repository and branch a team runner fetches", async () => {
+  it("submits the run envelope with repository display and source request fields", async () => {
     const git = {
       repo_url: "https://github.com/acme/app",
       branch: "main",
@@ -170,13 +182,80 @@ describe("triggerRun", () => {
       github_repo: "app",
     };
     const body = await sentBody(git);
-    assert.deepEqual(body.git, git);
-    assert.deepEqual(body.trigger, { source: "dashboard" });
+    assert.deepEqual(body.request, {
+      version: 1,
+      pipeline: "build",
+      mode: "execute",
+      origin: "trigger",
+      dispatch: "host",
+      requested_args: { tag: "nightly" },
+      git: { repository: { display: "https://github.com/acme/app" }, ref: "main" },
+      source: { ref: "https://github.com/acme/app" },
+    });
   });
 
-  it("sends no git block when the form names no repository", async () => {
+  it("omits source request fields when the form names no repository", async () => {
     const body = await sentBody();
-    assert.equal("git" in body, false);
+    assert.deepEqual(body.request, {
+      version: 1,
+      pipeline: "build",
+      mode: "execute",
+      origin: "trigger",
+      dispatch: "host",
+      requested_args: { tag: "nightly" },
+    });
+  });
+
+  it("uses a fresh idempotency key for each submitted run", async () => {
+    const first = await sentBody();
+    const second = await sentBody();
+    assert.notEqual(first.idempotency_key, second.idempotency_key);
+  });
+});
+
+describe("reporting reads", () => {
+  async function readErrors(call: () => Promise<unknown>, message: string) {
+    const previousFetch = globalThis.fetch;
+    try {
+      for (const status of [404, 503]) {
+        globalThis.fetch = async () => new Response(null, { status });
+        await assert.rejects(call(), new RegExp(`${message}: ${status}`));
+      }
+      globalThis.fetch = async () => { throw new Error("offline"); };
+      await assert.rejects(call(), /offline/);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  }
+
+  it("propagates missing or unavailable metrics instead of returning no points", async () => {
+    await readErrors(() => getNodeMetrics("run-one", "job"), "metrics failed");
+  });
+
+  it("propagates missing or unavailable debug pauses instead of returning none", async () => {
+    await readErrors(() => getPaused("run-one"), "debug pauses failed");
+  });
+});
+
+describe("releaseNode", () => {
+  it("resumes the selected job with a JSON object", async () => {
+    const previousFetch = globalThis.fetch;
+    let url = "";
+    let request: RequestInit | undefined;
+    globalThis.fetch = async (input, init) => {
+      url = String(input);
+      request = init;
+      return new Response(null, { status: 204 });
+    };
+    try {
+      await releaseNode("run-one", "job/nested");
+      assert.equal(url, "/api/v1/runs/run-one/jobs/job%2Fnested/resume");
+      assert.equal(request?.method, "POST");
+      assert.equal(new Headers(request?.headers).get("Content-Type"), "application/json");
+      assert.deepEqual(JSON.parse(String(request?.body)), {});
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
   });
 });
 

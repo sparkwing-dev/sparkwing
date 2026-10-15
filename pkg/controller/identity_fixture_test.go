@@ -81,7 +81,7 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 		}
 		t.Cleanup(func() { _ = st.Close() })
 	}
-	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, time.Now().UTC())
+	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	if key == nil {
 		key, _ = licensetest.NewKey(t)
 	}
-	srv := controller.New(st, o.logger).EnableAuthFromStore().WithSecretsCipher(testCipher(t)).
+	srv := controller.New(st, o.logger).WithSecretsCipher(testCipher(t)).
 		WithLicense(license.Resolve(o.license, key, time.Now(), nil)).
 		WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
 		WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect}).
@@ -303,22 +303,6 @@ func person(sub, email, given string) googletest.Person {
 	return googletest.Person{Subject: sub, Email: email, EmailVerified: true, Name: given + " Test", GivenName: given}
 }
 
-func splitLicense(t *testing.T, raw string) (payload, sig []byte) {
-	t.Helper()
-	p, s, ok := strings.Cut(raw, ".")
-	if !ok {
-		t.Fatalf("license %q has no signature half", raw)
-	}
-	var err error
-	if payload, err = base64.RawURLEncoding.DecodeString(p); err != nil {
-		t.Fatal(err)
-	}
-	if sig, err = base64.RawURLEncoding.DecodeString(s); err != nil {
-		t.Fatal(err)
-	}
-	return payload, sig
-}
-
 func (f *identityFixture) githubExchange(p githubtest.Person, out *exchangeBody) int {
 	f.t.Helper()
 	return f.oauthSignIn("github", func(verifier string) string {
@@ -389,4 +373,69 @@ func (f *identityFixture) browserSend(method, auth, path string, form url.Values
 
 func responseBody(_ *testing.T, resp *browserResponse) string {
 	return html.UnescapeString(resp.body)
+}
+
+type meBody struct {
+	User struct {
+		ID    string `json:"id"`
+		Email string `json:"email"`
+	} `json:"user"`
+	ActiveTeam *struct {
+		Slug        string `json:"slug"`
+		DisplayName string `json:"display_name"`
+		Role        string `json:"role"`
+	} `json:"active_team"`
+	Memberships []struct {
+		Slug string `json:"slug"`
+		Role string `json:"role"`
+	} `json:"memberships"`
+	Invitations []struct {
+		ID       string `json:"id"`
+		TeamSlug string `json:"team_slug"`
+		Role     string `json:"role"`
+	} `json:"invitations"`
+	Waitlisted bool `json:"waitlisted"`
+}
+
+type signedIn struct {
+	auth string
+	id   string
+	team string
+}
+
+func (f *identityFixture) user(sub, email string) signedIn {
+	f.t.Helper()
+	out := f.signIn(person(sub, email, strings.Split(email, "@")[0]))
+	return signedIn{auth: sessionAuth(out.SessionID), id: out.User.ID, team: out.ActiveTeam.Slug}
+}
+
+func (f *identityFixture) invite(owner signedIn, email, role string) string {
+	f.t.Helper()
+	var resp struct {
+		ID        string `json:"id"`
+		AcceptURL string `json:"accept_url"`
+	}
+	if code := f.call("POST", "/api/v1/team/invitations", owner.auth,
+		map[string]string{"email": email, "role": role}, &resp); code != http.StatusCreated {
+		f.t.Fatalf("invite %s = %d", email, code)
+	}
+	return resp.ID
+}
+
+func (f *identityFixture) join(owner, joiner signedIn, email, role string) {
+	f.t.Helper()
+	id := f.invite(owner, email, role)
+	if code := f.call("POST", "/api/v1/invitations/"+id+"/accept", joiner.auth, nil, nil); code != http.StatusNoContent {
+		f.t.Fatalf("accept = %d", code)
+	}
+}
+
+func teamOf(f *identityFixture) (owner, editor, reader signedIn) {
+	owner = f.user("o", "olga@example.com")
+	editor = f.user("e", "eddie@example.com")
+	reader = f.user("r", "rita@example.com")
+	f.join(owner, editor, "eddie@example.com", "editor")
+	f.join(owner, reader, "rita@example.com", "reader")
+	editor.team, reader.team = owner.team, owner.team
+	return owner, editor, reader
 }

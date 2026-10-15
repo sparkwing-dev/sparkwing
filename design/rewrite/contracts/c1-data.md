@@ -1,5 +1,26 @@
 # C1 data contract
 
+## Seeded bootstrap and legacy execution retirement
+
+`ProvisionSpec.Seed` is validated by `Store.Issue` before any origin can issue.
+Only the bootstrap origin accepts it. `Store.EnsureBootstrapCapability` supplies
+C2's startup adapter. The existing settings table retains the consumed
+`bootstrap_admin` gate independently of capability retention. Gate locking,
+first-administrator checking, digest persistence and gate consumption share the
+issuing transaction. A live repeated seed is a no-op. A consumed seed cannot
+revive after revocation, expiry, rotation or retention. Readiness uses
+`Store.HasDeploymentAdministrator` with full live ancestry and the store clock.
+The legacy `Store.CreateTokenIfNoneExist` issuer is removed.
+
+`Store.AuthorizeClaimToken`, `AuthorizeRunnerClaim`, `ReplayClaimResult`,
+`ReportAttempt`, `EnqueueChildRun`, `IsChildRunOf`, `CheckClaimSlot`,
+`CheckClaimKey`, `PrincipalHoldsRunClaim`, `TriggerClaimFenceIsLive` and
+`NodeClaimFenceIsLive` are removed. Their legacy route-class, runner-claim,
+result-commit and attempt-report types are removed too. Current capability
+snapshots, binding checks, node transitions and child admission own the retained
+behavior. The old attempt writer, child writer and retry-backoff helper have no
+remaining callers. Current child admission remains `Tenant.AdmitRun`.
+
 ## Named job awards and renewal
 
 `Store.ClaimNamedNode`, `NamedClaimOptions`, `HeartbeatNodeClaim` and
@@ -257,8 +278,8 @@ The unused `Tenant.SetRepoDispatch`, `Store.SeedToken`,
 `Store.PrincipalHoldsProfileClaim`, `Tenant.SpendSourceCredential`,
 `Tenant.SourceClaimant` and `Tenant.GitCredentialMachines` are removed.
 The capability issuer, binding transactions, sealed intake and source release
-own their retained responsibilities. Seeded startup bootstrap still needs C2's
-provisioning declaration. This cut adds no alternate bootstrap issuer.
+own their retained responsibilities. Seeded startup bootstrap uses the gated
+`Store.Issue` transaction described above.
 
 ## Launcher award snapshots
 

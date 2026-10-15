@@ -229,7 +229,7 @@ func TestComputeLimits_CronBelowTheMinimumIntervalIsRefused(t *testing.T) {
 	}
 	f := newCronsFixture(t)
 	admin, _, err := f.store.CreateToken("root", store.TokenKindUser,
-		[]string{controller.ScopeAdmin}, 0, time.Now().UTC())
+		[]string{"admin"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("admin token: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal(t *testin
 	ctx := context.Background()
 	setComputeLimit(t, f, store.ComputeLimitRunsPerHour, 1)
 	writer, _, err := f.store.CreateTokenWith(ctx, "pool", store.TokenKindUser,
-		[]string{controller.ScopeRunsWrite, controller.ScopeRunsControl, controller.ScopeRunsRead}, 0, time.Now().UTC(),
+		[]string{"runs.write", "runs.control", "runs.read"}, 0, time.Now().UTC(),
 		store.TokenOptions{})
 	if err != nil {
 		t.Fatalf("mint a writer for the metered principal: %v", err)
@@ -297,7 +297,7 @@ func TestComputeLimits_RetriesCountAgainstTheRetryingPrincipal(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	writer, _, err := f.store.CreateTokenWith(ctx, "pool", store.TokenKindUser,
-		[]string{controller.ScopeRunsWrite, controller.ScopeRunsControl, controller.ScopeRunsRead}, 0, time.Now().UTC(),
+		[]string{"runs.write", "runs.control", "runs.read"}, 0, time.Now().UTC(),
 		store.TokenOptions{})
 	if err != nil {
 		t.Fatalf("mint a writer for the metered principal: %v", err)

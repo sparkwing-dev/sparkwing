@@ -35,6 +35,11 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 	if variants != 1 {
 		return capability.Issued{}, authorityError(apierr.BadRequest, "issuance requires exactly one variant")
 	}
+	if request.Provision != nil {
+		if err := capability.ValidateProvisionSeed(*request.Provision); err != nil {
+			return capability.Issued{}, err
+		}
+	}
 	var c capability.Capability
 	var err error
 	switch {
@@ -61,6 +66,9 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 		prefix = capability.NodeHostPrefix
 	}
 	raw := prefix + base64.RawURLEncoding.EncodeToString(secret[:])
+	if request.Provision != nil && request.Provision.Seed != "" {
+		raw = request.Provision.Seed
+	}
 	c.Prefix = raw[:16]
 	c.Digest = sha256.Sum256([]byte(raw))
 	c.IssuedAt = tx.now()
@@ -74,6 +82,15 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 	if request.Provision != nil {
 		if err := recordProvisionCreatorTx(ctx, tx, *request.Provision, c); err != nil {
 			return capability.Issued{}, err
+		}
+		if request.Provision.Kind == capability.ProvisionBootstrap && tx.rotatingRoot == nil {
+			result, err := tx.ExecContext(ctx, `UPDATE settings SET value=? WHERE key='bootstrap_admin'`, []byte(c.Prefix))
+			if err != nil {
+				return capability.Issued{}, err
+			}
+			if err := requireOneRow(result, "bootstrap gate"); err != nil {
+				return capability.Issued{}, err
+			}
 		}
 	}
 	if request.Exchange != nil {

@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"slices"
@@ -35,9 +36,13 @@ func checkStoreProvisioningOrigins(t *testing.T) (err error) {
 	defer func() { err = errors.Join(err, s.Close()) }()
 	s.SetProvisionPolicy(storeProvisionPolicy{})
 	bootstrap := capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, RegistrationID: "acceptance", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens}}
+	bootstrap.Seed = capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	operator, err := s.ProvisionCapability(ctx, bootstrap)
 	if err != nil {
 		return err
+	}
+	if ready, err := s.HasDeploymentAdministrator(ctx); err != nil || !ready || operator.Raw != bootstrap.Seed {
+		return fmt.Errorf("seeded administrator readiness: %t, %v", ready, err)
 	}
 	operatorRef := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Capability.Prefix}
 	s.SetProvisionPolicy(nil)
@@ -79,6 +84,12 @@ func checkStoreProvisioningOrigins(t *testing.T) (err error) {
 	}
 	if _, err := s.LookupCapability(ctx, service.Capability.Digest); err == nil {
 		return errors.New("revoked service remains live")
+	}
+	if ready, err := s.HasDeploymentAdministrator(ctx); err != nil || ready {
+		return fmt.Errorf("ended administrator readiness: %t, %v", ready, err)
+	}
+	if issued, err := s.ProvisionCapability(ctx, bootstrap); err == nil || issued.Raw != "" {
+		return errors.New("ended bootstrap seed reopened issuance")
 	}
 	return nil
 }

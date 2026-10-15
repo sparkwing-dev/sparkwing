@@ -369,13 +369,73 @@
     {
       "route": "/login",
       "kind": "page",
-      "exempt": "Answers 404 unless the dashboard is configured to require a login, so this corpus cannot measure it. Baseline it from a listener started with that configuration and remove this exemption.",
+      "exempt": "Requires the remote dashboard and account-session configuration, absent from the local dashboard corpus. Login page latency, sign-in action, cold start and response bytes remain unmeasured. Baseline the authorized browser flow and remove this exemption.",
       "baselines": {}
     },
     {
       "route": "/api/v1/runners",
       "kind": "api",
       "exempt": "Enrollment commits a one-time root and requires a production origin policy plus authenticated registration corpus. These fixtures are absent from the dashboard performance corpus. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/queue/groups/{group}",
+      "kind": "api",
+      "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/queue/groups/{group}/acquire",
+      "kind": "api",
+      "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/queue/groups/{group}/heartbeat",
+      "kind": "api",
+      "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/queue/groups/{group}/release",
+      "kind": "api",
+      "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/queue/groups/{group}/cancel-waiter",
+      "kind": "api",
+      "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/queue/groups/{group}/holder",
+      "kind": "api",
+      "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/queue/groups/{group}/resolve",
+      "kind": "api",
+      "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/queue/groups/{group}/force-release",
+      "kind": "api",
+      "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/auth/{provider}/link",
+      "kind": "api",
+      "exempt": "Requires a disposable recently signed-in provider session, CSRF and PKCE flow, and authority-bearing nonce and identity transactions. The dashboard corpus has no such fixture. Probing real accounts would change their sign-in methods. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/auth/{provider}/link/complete",
+      "kind": "api",
+      "exempt": "Requires a disposable recently signed-in provider session, CSRF and PKCE flow, and authority-bearing nonce and identity transactions. The dashboard corpus has no such fixture. Probing real accounts would change their sign-in methods. Authorized latency, cold start and response bytes are unmeasured.",
       "baselines": {}
     }
   ]

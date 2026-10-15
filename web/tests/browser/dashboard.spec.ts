@@ -430,7 +430,7 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
       await route.fulfill({ json: { runs: options.runs ?? [] } });
       return;
     }
-    if (request.method() === "GET" && path === "/api/v1/approvals/pending") {
+    if (request.method() === "GET" && path === "/api/v1/approvals") {
       await route.fulfill({ json: { approvals: [] } });
       return;
     }
@@ -449,7 +449,7 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
     const readCrons = () =>
       (typeof options.crons === "function" ? options.crons() : options.crons) ??
       noCronsOverview;
-    if (request.method() === "GET" && path === "/api/v1/crons") {
+    if (request.method() === "GET" && path === "/api/v1/schedules") {
       await route.fulfill({ json: readCrons() });
       return;
     }
@@ -1536,7 +1536,7 @@ test("resumes the run event stream after a disconnect", async ({ page }) => {
       sendJSON({ pipelines: {} });
       return true;
     }
-    if (url.pathname === "/api/v1/approvals/pending") {
+    if (url.pathname === "/api/v1/approvals") {
       sendJSON({ approvals: [] });
       return true;
     }
@@ -2329,7 +2329,7 @@ test("cron history distinguishes empty and unavailable history", async ({ page }
   await installMockAPI(page, { crons: { ...cronsOverview, schedules: [armedCron] }, cronDetail: { ...cronDetail, fires: [] } });
   await page.goto("/crons");
   await expect(page.getByText("No fires yet", { exact: true })).toBeVisible();
-  await page.route("**/api/v1/crons/*", route => route.fulfill({ status: 503, body: "unavailable" }));
+  await page.route("**/api/v1/schedules/*", route => route.fulfill({ status: 503, body: "unavailable" }));
   await page.reload();
   await expect(page.getByText("History unavailable", { exact: true })).toBeVisible();
 });
@@ -2339,7 +2339,7 @@ test("cron detail deep links survive hidden and missing schedules", async ({ pag
   await installMockAPI(page, { crons: cronsOverview, cronDetail: { ...cronDetail, schedule: undeclaredCron } });
   await page.goto(`/crons?schedule=${undeclaredCron.id}`);
   await expect(page.getByRole("region", { name: "Schedule detail" }).getByRole("heading", { name: undeclaredCron.name, exact: true })).toBeVisible();
-  await page.route("**/api/v1/crons/missing", route => route.fulfill({ status: 404 }));
+  await page.route("**/api/v1/schedules/missing", route => route.fulfill({ status: 404 }));
   await page.goto("/crons?schedule=missing");
   await expect(page.getByText("That schedule is not on this host.")).toBeVisible();
 });
