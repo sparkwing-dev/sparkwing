@@ -3,31 +3,38 @@
 STATUS: CONTINUE
 
 This replaces accumulated session notes with the current working state at
-ff135f757. Prior evidence remains in Git history and the lead's session logs.
+a54e7aff3. Prior evidence remains in Git history and the lead's session logs.
 No Git write, candidate installation or Sparkwing executable ran.
 
 ## This continuation
 
-- Deleted the duplicate TokenInfo and TokenSubject types. Credential rotation
-  now decodes through RotatedToken, whose New field uses W2's capability.Metadata.
-  The generated OpenAPI response uses that same metadata schema. The runner
-  enrollment acceptance fixture uses the owner type too.
-- Regenerated OpenAPI. Besides dropping the duplicate credential schemas, it now
-  includes the existing ScheduleRepoRequest.mode field and its required presence.
-- Fixed the auth guide's route-check failure after the integration merge.
-  Active guidance names final intake, plan, transition, claim-heartbeat and
-  runner operations. The migration guide retains the removed-route details.
-  Synced the embedded guide. No checker exception was added.
-- Confirmed the daemon missing/cancelled test fix, source-scanning liveness test
-  deletion and legacy opsview sweep-facade deletion were already committed.
-  TestDaemonLifecycleMissingAndCancelledRuntime passes. These changes were not
-  repeated and their removals are not counted as new work.
+Fixed the last two retained short CLI failures without changing their
+expectations. TestSDKCheckRejectsFIFO now returns a refusal rather than blocking.
+TestSDKCheckRefusesOversizedModuleWithoutWriting now reports the existing 1 MiB
+inspection limit instead of returning a 1,048,606-byte parser diagnostic.
 
-W9-owned production Go: 10 added / 33 deleted this continuation, net **-23**.
-Versus main: 15,606 added / 23,758 deleted, net **-8,152**, within the -2,900
-budget. Tests, testdata and contract declaration files are excluded. No
-production file was deleted. OpenAPI shrinks by 62 lines. The auth guide and its
-embedded mirror each shrink by 5 lines.
+The new engine pin path had bypassed the CLI's regular-file and size checks.
+All manifest and lockfile reads, including digest reads, now use one internal
+engine reader. It checks the opened file's regular type and identity. Unix opens
+use O_NOFOLLOW and O_NONBLOCK. The existing Go-module limit applies before parsing
+and during reading. Go lockfiles and TypeScript manifests retain their prior
+size behavior. No public engine API or foreign contract changed.
+
+Invariant: pin inspection reads regular manifest and lockfile inputs and refuses
+linked or special-file inputs. A 100-case generated CLI property covers Go and
+TypeScript manifests and lockfiles, with links, dangling links, directories and
+FIFOs. A boundary test accepts exactly 1 MiB Go modules, larger go.sum files and
+larger TypeScript manifests. Source versioning guidance and its generated mirror
+now describe the inspection behavior.
+
+TestDaemonLifecycleMissingAndCancelledRuntime already contains the requested
+fix and passes. TestProcessLivenessRegressionDoesNotSleep and the legacy opsview
+sweep facade were already deleted in earlier commits. Their work was not repeated.
+
+W9-owned production Go: **0 net lines this continuation**. Versus main:
+15,606 added / 23,758 deleted, net **-8,152**, within the -2,900 budget.
+The shared engine fix adds 71 / deletes 5 production lines, net **+66**.
+No production file or legacy subsystem was deleted this continuation.
 
 ## Verification
 
@@ -35,26 +42,23 @@ Commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache,
 GOMAXPROCS=4 and TMPDIR/GOTMPDIR=/tmp/sw-astra-W9. Tests use -p 4.
 
 - Whole-repository `go build -p 4 ./...` passes.
-- `go vet -p 4 ./pkg/controller/client ./cmd/sparkwing ./internal/apispec
-  ./internal/opsview ./tests/acceptance` passes.
-- Full controller/client, clisurface, controllerwire, opsview, apispec and
-  doccheck suites pass. The initial doccheck run failed on the two auth guide
-  references fixed above. Its full rerun passes.
-- `go run ./internal/commentcheck -base main .` passes across 2,127 files.
+- `go vet -p 4 ./cmd/sparkwing ./internal/engine/... ./internal/opsview
+  ./internal/clisurface ./internal/controllerwire ./pkg/controller/client
+  ./tests/acceptance` passes.
+- Full engine (including npmcmd and sdkinstall), controller/client, clisurface,
+  controllerwire, opsview and doccheck suites pass.
+- `go run ./internal/commentcheck -base main .` passes across 2,130 files.
 - Focused CLI and acceptance checks pass with
-  `go test -p 4 ./cmd/sparkwing ./tests/acceptance -run '^(TestCommandReference|TestEmbeddedReference|TestRepoDocs|TestDaemonLifecycleMissingAndCancelledRuntime|TestDoctor|TestCLIOwnerComposition|TestLocalServices|TestLocalRun|TestLocalSchedule|TestSurface|TestHere|TestSchedule)' -count=1`.
-- Short CLI diagnostic: **952 pass, 15 skip, 2 fail** at top level. The remaining
-  failures are TestSDKCheckRejectsFIFO (subprocess killed after blocking) and
-  TestSDKCheckRefusesOversizedModuleWithoutWriting (a 1,048,606-byte parser
-  refusal instead of an oversized regular-file refusal). Both reach W8's pin
-  reader. Their retained expectations were not deleted or weakened.
-- The unrestricted short CLI run panics at httptest.NewServer because this
-  sandbox cannot bind a socket. The diagnostic selection omits the known socket
-  tests through the command below. No repository skip was added.
-- Generated schema drift, docs/mirror synchronization and git diff --check pass.
+  `go test -p 4 ./cmd/sparkwing ./tests/acceptance -run '^(TestCommandReference|TestEmbeddedReference|TestRepoDocs|TestDaemonLifecycleMissingAndCancelledRuntime|TestDoctor|TestCLIOwnerComposition|TestLocalServices|TestLocalRun|TestLocalSchedule|TestSurface|TestHere|TestSchedule|TestSDKPinInspection)' -count=1`.
+- Short CLI diagnostic: **956 pass, 15 skip, 0 fail** at top level.
+- Windows amd64 cross-build of internal/engine passes. No native Windows
+  execution is claimed.
+- Docs/mirror synchronization and git diff --check pass.
 
-Reproduce the diagnostic with `go test -p 4 -short ./cmd/sparkwing -count=1`
-and this `-skip` expression:
+The diagnostic selection omits the known socket tests because this sandbox
+cannot bind sockets. No repository skip or weakened assertion was added.
+Reproduce it with `go test -p 4 -short ./cmd/sparkwing -count=1` and this
+`-skip` expression:
 
 ```
 ^(TestDocsMigrationsValidatesWebBoundsBeforeFetching|TestDownloadAndInstall_.*|TestDownloadFile_BoundsBodySize|TestMaterialize_ColdCacheContactsNoController|TestResolveSparks_WithManifest_WritesOverlay|TestRunDocsListVersions_Web.*|TestRunDocsMigrations_VersionWebFetches|TestRunDocsRead_Web.*|TestRunUpdateBinary_Failure_SpawnsNoGo|TestRun_PinnedPipelineRunsWithTheNetworkDenied)$
@@ -63,7 +67,8 @@ and this `-skip` expression:
 Existing fake-backed surface and transport cells pass, including
 TestSurfaceRunnerEnrollmentCredentialTransport for HTTP and api.sock endpoint
 shapes. No native acceptance cell was newly completed or unskipped. No archived
-T1 test was newly ported. The retained runner credential fixture was migrated.
+T1 test was newly ported or deleted. Both retained SDK inspection regressions
+now pass through the shared engine reader.
 
 ## Production integration: findings 1 and 7 remain open
 
@@ -138,14 +143,16 @@ gaps. No unsupported path was made falsely successful.
 
 ## Shared files and friction
 
-Shared changes: api/openapi.yaml, pkg/docs/mirror/auth.md,
-tests/acceptance/runner_credentials_contract_test.go and this report. Other
-changes are W9-owned client source and docs. The acceptance fixture is the only
-foreign caller migrated for the removed types. No lead-owned amendment or
-handoff file changed.
+Shared production files touched: internal/engine/pin.go,
+internal/engine/pin_file.go, internal/engine/pin_file_unix.go and
+internal/engine/pin_file_windows.go. The only other shared file is the generated
+pkg/docs/mirror/versioning.md. Remaining edits are W9 tests, source docs and this
+report. No lead-owned amendment or handoff changed.
 
-Overwing discovery reports a stale installed binary but succeeds. Socket tests
-cannot run in this sandbox. The branch still lacks the concrete local-controller
-and doctor operation claimed by the task handoff. Existing named-interface
-components remain the available evidence. No service, setting, environment
-variable, timeout, retry policy or new production mechanism was added.
+Overwing discovery succeeds and reports a stale installed binary. Socket tests
+cannot run in this sandbox. The branch still has no concrete LocalController
+implementation or controller-owned doctor sweep. Production probes fail at
+those explicit gaps. The available constructors take dependencies; their presence
+alone does not close production composition. No Git write, Sparkwing executable,
+service or installer ran. The temporary directory is deleted at session end;
+/tmp/sw-gocache is retained.
