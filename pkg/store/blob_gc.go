@@ -95,7 +95,15 @@ func (o *Operator) CollectBlobTombstones(ctx context.Context, lease SingletonLea
 	if limit <= 0 || deleter == nil {
 		return 0, ErrInvalidInput
 	}
-	rows, err := o.s.query(ctx, "SELECT team,digest FROM blob_tombstones WHERE marked_at<=? ORDER BY team,digest LIMIT ?", o.s.now().Add(-limits.BlobGCGrace).UnixNano(), limit)
+	tx, err := o.s.beginTx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer rollbackOrLog(tx)
+	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
+		return 0, err
+	}
+	rows, err := tx.QueryContext(ctx, "SELECT team,digest FROM blob_tombstones WHERE marked_at<=? ORDER BY team,digest LIMIT ?", tx.now().Add(-limits.BlobGCGrace).UnixNano(), limit)
 	if err != nil {
 		return 0, err
 	}
@@ -108,6 +116,9 @@ func (o *Operator) CollectBlobTombstones(ctx context.Context, lease SingletonLea
 		candidates = append(candidates, b)
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	var removed int64

@@ -166,6 +166,10 @@ large requests. It checks the budget after its final read and returns an empty
 presence result with `blob.ErrBudget` when the deadline has passed.
 
 `MarkBlobTombstones` and `CollectBlobTombstones` require the maintenance lease.
+Collection checks its persisted holder, generation and expiry before selecting
+candidates, including empty passes and passes with only grace-period tombstones.
+Each deletion rechecks the fence in its own transaction. A supplied expiry cannot
+extend an expired lease or revive a generation replaced by the same holder.
 Records and live receipts root the graph, including transitive manifest members.
 Collection waits `limits.BlobGCGrace`, takes the same blob lock as writers,
 rechecks reachability and calls `BlobDeleter`. A deletion failure preserves the

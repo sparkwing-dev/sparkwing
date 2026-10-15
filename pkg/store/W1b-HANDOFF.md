@@ -1,9 +1,93 @@
 # W1b handoff
 
-Continues `189094152`. W1b remains incomplete. This continuation is uncommitted.
+Continues `7d6ce07bf`. W1b remains incomplete. This continuation is uncommitted.
 The lead owns review, commits, pipelines and native integration.
 
 ## Current continuation
+
+Closed the collection fence gap in A1-35. The invariant is that every
+CollectBlobTombstones call requires the current persisted maintenance fence,
+including an empty pass or an inventory whose tombstones are still in grace.
+The candidate scan now checks that fence inside its transaction. Each physical
+deletion retains its existing transaction and fence check. This uses the existing
+transaction and singleton helpers. No API, schema, setting or mechanism is added.
+
+The regression first failed for both empty and grace-period inventories. It
+also reproduced success at the exact persisted expiry. The property generates
+96 forged fences for each of empty, grace-period and ready inventories. A second
+test checks exact expiry, a forged future ExpiresAt, same-holder takeover, stale
+generation refusal and the replacement's successful empty pass. These tests
+exercise Operator.CollectBlobTombstones through its public interface and use a
+fake physical deleter. No test sleeps or starts a service.
+
+Extended storage-reachability-and-retention-tails/store-data-sqlite to refuse
+wrong holder, generation, worker and missing fences before marking and after
+reopening. Its final empty inventory now checks persisted expiry, same-holder
+takeover and the replacement fence. The existing graph, retention, grace and
+physical-deletion assertions still run. No native cell is newly activated.
+
+Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and -p 4.
+GOCACHE, GOTMPDIR and TMPDIR are beneath /tmp/sw-astra-W1b/. Go commands use
+`go -C /home/bombuntu/.xwing/envs/1088/sparkwing`.
+
+- Final whole-repository `go build -p 4 ./...` passed.
+- `go vet -p 4 ./pkg/store/... ./internal/acceptance/...
+  ./tests/acceptance/...` passed.
+- The expanded selection under Manual, including the additional grant,
+  reversal, history and tenant guard names listed in the prior continuation,
+  passed **195 top-level tests / 483 cases**, without skips.
+- `go test -json -p 4 ./internal/acceptance/... ./tests/acceptance/...
+  -run '^(TestStorage|TestBilling)$' -count=1` passed **2 top-level tests /
+  43 cases**, including all **12 SQLite data/billing proofs**. The selected
+  native/platform skeleton retains **562 skips**. Other acceptance families
+  were outside this continuation's verification scope.
+- `commentcheck -base main` passed across 902 files. Session sleepcheck,
+  sync-docs --check and whitespace checks passed. No public API snapshot changed.
+- The broader documentation selection failed TestDocsNameOnlySymbolsThatExist
+  on 17 removed SDK symbols, including Await, CacheKey and Memoize. The SDK and
+  every named source document are identical to HEAD. W9 owns that inherited
+  documentation cutover. Changelog/mirror, privacy and migration checks are
+  verified separately without the unrelated symbol-reference test.
+
+Legacy deletion is **0 lines**. The replaced unguarded query is not counted as
+retired legacy implementation. No archived T1 inventory row is newly ported.
+No W1 lifecycle file or other-package production caller was changed.
+
+A1-24 and A1-27 through A1-35 retain their prior implementation and integration
+boundaries. This continuation closes collection entry fencing under A1-35.
+A1-53 still needs native evidence. handoffs.md adds no W1b assignment. C1 now
+documents the existing maintenance-fence requirement and its expanded proof.
+No foreign contract shape was changed.
+
+Real integrations still open: W1's issuance, start, wait, renewal, disruption
+and finish transactions must join the immutable billing owner. Its current
+persistBillingAwardTx still writes unmetered awards directly. C2 SettleBilling,
+VerifiedPaymentEvent.Event and payment authentication remain panic stubs.
+The unstarted at_award refund operation and explicit customer-runner wait input
+still need an agreed cross-owner contract. W7's namespace, edge-policy,
+physical-byte verification/deletion and binary-execution implementations remain
+dependencies. Result attachment needs the verified manifest reader.
+Never-executed materialization destinations and published owner-log identities
+still need agreement. W2/W7/W9 must finish data and log transports, trusted
+replica wiring and native acceptance. Legacy claim-credit, paid-grant,
+raw-storage, output, direct-upload and log paths retain those owners' callers.
+No new human decision or cross-area contract request is introduced here.
+
+Shared edits are internal/acceptance/store_reachability.go, the new
+internal/acceptance/store_gc_fence.go, design/rewrite/contracts/c1-data.md,
+CHANGELOG.md and its generated pkg/docs/changelog.md mirror. Owned edits are
+blob_gc.go, new blob_gc_fence_test.go, STORE-DATA.md and this handoff.
+
+Friction was cold compilation and starting a build while creating the acceptance
+helper. That initial build missed its new symbols. The final build ran after
+source edits stopped and passed. The broader docs check found inherited W9
+SDK-reference drift. The unsupported standards-match --type flag
+was replaced by matching the actual diff. Bootstrap ran installed sparkwing
+info before the swarm prohibition was read. No subsequent Sparkwing binary,
+candidate, provider or pipeline ran. No Git writes occurred. HEAD and default
+Git identity are unchanged. Scratch is deleted after final inspection.
+
+## Previous continuation (committed in 7d6ce07bf)
 
 Moved local binary trust policy to owned build_trust.go. The only public methods
 are now Tenant.TrustLocalBuilds and Tenant.SetTrustLocalBuilds. Removed both raw

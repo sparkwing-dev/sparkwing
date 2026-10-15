@@ -47,6 +47,9 @@ func checkStoreReachabilityBoundary(ctx context.Context, root string) (err error
 	if err != nil {
 		return err
 	}
+	if err := checkStoreGCFences(ctx, operator, lease); err != nil {
+		return err
+	}
 	retained, err := operator.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 100})
 	if err != nil || retained.Runs != 0 || retained.Records != 1 || retained.PinnedOutputs != 1 {
 		return fmt.Errorf("pinned output and expired record retention=%+v: %v", retained, err)
@@ -63,6 +66,9 @@ func checkStoreReachabilityBoundary(ctx context.Context, root string) (err error
 	}
 	s = reopened
 	operator = s.AsOperator()
+	if err := checkStoreGCFences(ctx, operator, lease); err != nil {
+		return err
+	}
 	calls := 0
 	refusal := errors.New("physical deletion unavailable")
 	deleter := storeBoundaryDeleter(func(context.Context, blob.Blob) error { calls++; return refusal })
@@ -115,7 +121,10 @@ func checkStoreReachabilityBoundary(ctx context.Context, root string) (err error
 	if err := checkStoreGCRows(ctx, s.DB(), 1, 0); err != nil {
 		return err
 	}
-	return expireStoreSourceBoundary(ctx, s, lease, old)
+	if err := expireStoreSourceBoundary(ctx, s, lease, old); err != nil {
+		return err
+	}
+	return checkStoreGCTakeoverBoundary(ctx, s, lease)
 }
 
 func expireStoreSourceBoundary(ctx context.Context, s *store.Store, lease store.SingletonLease, old int64) error {

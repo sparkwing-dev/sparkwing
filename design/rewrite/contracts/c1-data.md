@@ -875,6 +875,10 @@ still repeat their locking checks before persisting a receipt or reference.
 The `storage-reachability-and-retention-tails/store-data-sqlite` proof exercises
 leased record expiry, newest-success output pins, receipt roots, transitive
 members, persisted tombstones, grace and failed physical deletion. Collection
+requires the persisted maintenance fence even when no tombstones are ready.
+The proof refuses forged fences before and after reopening, then refuses an
+expired or superseded generation on an empty inventory. A same-holder takeover
+must acquire a new generation before collection resumes. Collection
 rechecks references added after marking, then removes tails after their last
 root disappears. An old source bundle survives its originating run and becomes
 collectible only after its record expires and the tombstone grace passes.
