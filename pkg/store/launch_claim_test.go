@@ -121,56 +121,6 @@ func TestRepoDispatch_OnlyAnOptedInRepoSkipsTheTriggerPath(t *testing.T) {
 	}
 }
 
-// The token the launcher gets is the claim's own: it answers for that one node
-// at that generation and ends when the lease does.
-func TestClaimLaunch_MintsATokenBoundToTheClaim(t *testing.T) {
-	ctx := context.Background()
-	f := newDispatchRun(t, "run-token")
-	claimedAt := time.Now()
-	claim, err := f.s.ClaimLaunch(ctx, launcherIdentity, launchRequest(), claimedAt)
-	if err != nil || claim == nil {
-		t.Fatalf("launch claim: %+v %v", claim, err)
-	}
-	now := time.Now()
-	tok, err := f.s.AuthorizeClaimToken(ctx, claim.Token, store.ClaimSensitive, now)
-	if err != nil || tok.RunID != "run-token" || tok.NodeID != store.PlanNodeID || tok.Generation != claim.Generation {
-		t.Fatalf("authorize = %+v %v", tok, err)
-	}
-	if claim.LifetimeSecs != 3600 || !tok.ExpiresAt.Equal(claimedAt.Add(time.Hour)) {
-		t.Fatalf("token expiry %v, claim lifetime %ds; want one hour from the claim", tok.ExpiresAt, claim.LifetimeSecs)
-	}
-	if again, err := f.s.ClaimLaunch(ctx, launcherIdentity, launchRequest(), time.Now()); err != nil || again != nil {
-		t.Fatalf("a held node was claimed twice: %+v %v", again, err)
-	}
-	if _, err := f.s.AuthorizeClaimToken(ctx, claim.Token, store.ClaimSensitive, now.Add(2*time.Minute)); !errors.Is(err, store.ErrClaimNotLive) {
-		t.Fatalf("after the lease lapsed: err = %v, want ErrClaimNotLive", err)
-	}
-	for _, bad := range []time.Duration{0, time.Second, store.MinLaunchLifetime - time.Second, store.MaxClaimTokenLifetime + time.Second} {
-		req := launchRequest()
-		req.Deadline = bad
-		if _, err := f.s.ClaimLaunch(ctx, launcherIdentity, req, time.Now()); !errors.Is(err, store.ErrInvalidInput) {
-			t.Fatalf("deadline %s: err = %v", bad, err)
-		}
-	}
-}
-
-// A retry waits out its backoff: the launcher must not claim a node whose
-// ready time is still ahead, and a node that needs executor labels is not a
-// Job's to run.
-func TestClaimLaunch_HonorsReadyAtAndLabels(t *testing.T) {
-	ctx := context.Background()
-	f := newDispatchRun(t, "run-ready")
-	f.mustAccept(t, planOf(`a|"modifiers":{"retry":1,"retry_auto":true,"retry_backoff_ms":60000}`, `gpu|"modifiers":{"runs_on":["gpu"]}`))
-	f.mustReport(t, "a", "failed")
-	if claim, err := f.s.ClaimLaunch(ctx, launcherIdentity, launchRequest(), time.Now()); err != nil || claim != nil {
-		t.Fatalf("claimed during backoff or a labeled node: %+v %v", claim, err)
-	}
-	later, err := f.s.ClaimLaunch(ctx, launcherIdentity, launchRequest(), time.Now().Add(2*time.Minute))
-	if err != nil || later == nil || later.NodeID != "a" || later.Kind != store.ClaimTokenWork {
-		t.Fatalf("after the backoff: %+v %v", later, err)
-	}
-}
-
 // A manual retry of an opted-in repository's run takes the controller path
 // too, so a retry is never a way back onto the trigger path.
 func TestRepoDispatch_ARetryOfAnOptedInRunIsControllerDispatched(t *testing.T) {
@@ -237,58 +187,6 @@ func TestClaimLaunch_BillsEveryClaimAndPagesPastUnpaidTeams(t *testing.T) {
 	balance, err := paying.CreditBalanceMicro(ctx)
 	if err != nil || balance >= 100*store.MicroCreditsPerCent {
 		t.Fatalf("paying balance after the claim = %d (%v); the claim reserved nothing", balance, err)
-	}
-}
-
-// The claim token, and so the Job, lives the node's declared timeout plus the
-// slack, never the launcher's whole cap, and the timeout never extends it.
-func TestClaimLaunch_ExpiryFollowsTheNodesTimeout(t *testing.T) {
-	ctx := context.Background()
-	f := newDispatchRun(t, "run-timeout")
-	f.mustAccept(t, planOf(`short|"modifiers":{"timeout_ms":60000}`, `long|"modifiers":{"timeout_ms":86400000}`,
-		`huge|"modifiers":{"timeout_ms":288230376151771744}`, "none"))
-	now := time.Now()
-	for node, want := range map[string]time.Duration{
-		"short": time.Minute + store.LaunchDeadlineSlack, "long": time.Hour, "huge": time.Hour, "none": time.Hour,
-	} {
-		req := launchRequest()
-		req.RunID, req.NodeID = f.run, node
-		c, err := f.s.ClaimLaunch(ctx, launcherIdentity, req, now)
-		if err != nil || c == nil {
-			t.Fatalf("%s: %+v %v", node, c, err)
-		}
-		if got := time.Duration(c.LifetimeSecs) * time.Second; got != want {
-			t.Errorf("%s: token lives %s, want %s", node, got, want)
-		}
-	}
-}
-
-// The launch award takes its run's row lock before the node's, the order
-// settle and plan accept take, so it waits behind a holder of the run row
-// rather than taking the node out from under it.
-func TestClaimLaunch_WaitsForTheRunRowLock(t *testing.T) {
-	f := newDispatchRun(t, "run-lock")
-	if f.s.Dialect() != store.DialectPostgres {
-		t.Skip("row locks are Postgres's; SQLite serializes every writer")
-	}
-	holder, err := f.s.DB().BeginTx(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = holder.Rollback() }()
-	if _, err := holder.Exec(`SELECT id FROM runs WHERE id = $1 FOR NO KEY UPDATE`, f.run); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	if claim, err := f.s.ClaimLaunch(ctx, launcherIdentity, launchRequest(), time.Now()); err == nil {
-		t.Fatalf("the launch claim took %+v while another transaction held its run row", claim)
-	}
-	if err := holder.Rollback(); err != nil {
-		t.Fatal(err)
-	}
-	if claim, err := f.s.ClaimLaunch(context.Background(), launcherIdentity, launchRequest(), launchClock(t, f.s)); err != nil || claim == nil {
-		t.Fatalf("after the holder released the run: %+v %v", claim, err)
 	}
 }
 

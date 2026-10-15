@@ -65,3 +65,31 @@ func TestResultRecordsCommitWithTerminalState(t *testing.T) {
 		})
 	}
 }
+
+func TestResultRecordsFromAnEarlierAttemptCannotFinishARetry(t *testing.T) {
+	s, records, finish := blobResultFixture(t)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"retry":{"set":true,"value":1}}`))
+	retry := NodeTransition{Ref: finish.Ref, Actor: finish.Actor, To: NodeRunning, Cause: CauseRetry, SourceAttempt: sourceAttempt(2), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "verify"}}}
+	if applied, err := records.tenant.TransitionNode(t.Context(), retry); err != nil || applied.Attempt != 3 {
+		t.Fatalf("retry: %+v, %v", applied, err)
+	}
+	before, err := records.tenant.ReadNode(t.Context(), finish.Ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ordinal := range []int64{2, 3} {
+		finish.SourceAttempt = sourceAttempt(ordinal)
+		if _, err := records.tenant.TransitionNode(t.Context(), finish); err == nil {
+			t.Fatalf("attempt %d attached earlier output", ordinal)
+		}
+		after, err := records.tenant.ReadNode(t.Context(), finish.Ref)
+		if err != nil || after.Status != before.Status || after.Attempt != before.Attempt || after.StateSeq != before.StateSeq || after.CapabilityPrefix != before.CapabilityPrefix {
+			t.Fatalf("stale output changed retry: %+v, %v", after, err)
+		}
+	}
+	rewriteSchemaCount(t, s.db, "events", 1)
+	finish.Extra.Result = &NodeResult{Outcome: NodeSuccess}
+	if _, err := records.tenant.TransitionNode(t.Context(), finish); err != nil {
+		t.Fatalf("clean retry result refused: %v", err)
+	}
+}

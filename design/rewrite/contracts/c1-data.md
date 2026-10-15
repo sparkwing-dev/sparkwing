@@ -4,6 +4,24 @@
 
 ## Amendment 1: authority and execution seams
 
+`Tenant.AcceptPlan` is the sole plan-acceptance API. The raw `Store.AcceptPlan`,
+its separate decoder/validator/inserter and `Client.SubmitPlan` are removed.
+The controller's claim-token acceptance branch and old launched planner are
+removed with them. Legacy plan-node bootstrap, snapshots, claims and lifecycle
+writers remain pending their caller migrations. They are not v2 acceptance paths.
+
+Required-secret preflight returns canonical `plan_invalid`. After acceptance
+rolls back, its diagnostic transaction rechecks the current owner, serializes
+on the tenant's run and records the detail once using the store clock. It
+rechecks the owner before commit. A failed or stale diagnostic write leaves
+no diagnostic. The original refusal is retained if recording fails.
+
+The SQLite `lifecycle-request-and-plan-seals/store-sqlite` cell exercises real
+admission, owner claim, strict validation, settings resolution and sealing. It
+checks invalid-input refusal, rollback on the second job insertion, immutable
+replay and drift after reopening. Intake policy and enrollment use contract
+fakes. Native execution and HTTP transport remain separate evidence.
+
 Schedule reads, edits, deletion and fire history belong to `Tenant`. The thirteen
 implicit-default-team `Store` schedule methods are removed. Local CLI and
 dashboard constructors select the registered DefaultTeam. Controller requests

@@ -130,3 +130,20 @@ calculator. W3 must report current owner compute with Executing, including false
 during customer-runner waits. W1b still owns spend-exhaustion/grace policy and
 legacy credit retirement. W1b implementation files are unchanged. The legacy
 store API cuts and the previously recorded foreign contract gaps remain open.
+
+W1's legacy plan-acceptance cut is complete. `Store.AcceptPlan`, its separate
+validator and inserter, `Client.SubmitPlan`, the controller's old claim-token
+acceptance branch and the old launched planner are removed. `Tenant.AcceptPlan`
+retains required-secret diagnostics under the current owner and store clock.
+The SQLite `lifecycle-request-and-plan-seals/store-sqlite` cell passes through
+second-insert rollback, replay, drift and reopening. Shared strict-validator,
+identifier secrecy, child intake and stale result-record ports pass.
+
+The lead's caller-migration exception is used for `node_output_test.go` and one
+`SourceAttempt` addition in W1b's `blob_result_records_test.go`. W1b persistence
+and accounting implementations are unchanged. `CreatePlanNode` still has four
+legacy controller/log fixture callers. StateStoreOld, raw lifecycle, readiness,
+claim/trigger writers and old controller fixtures still need retirement. W2's
+calculator and cancellation-reason shape, W9/W3 source-attempt transport and
+W8/W9 launcher correlation remain foreign integration points. See
+`../w1-session19-progress.md` for the cut, ports and verification.

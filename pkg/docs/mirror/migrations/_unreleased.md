@@ -1,5 +1,19 @@
 # Migrating to the next release
 
+## Plan acceptance uses tenant seals
+
+`Store.AcceptPlan`, its legacy plan validator and `Client.SubmitPlan` are removed.
+Use `Tenant.AcceptPlan` with `PlanAcceptance`, including the admitted request,
+checkout declarations, resolved settings and the v2 `jobs` document. The store
+reruns the shared validator and settings resolver before committing both the
+second seal and jobs. Identical submissions replay. Changed sealed input returns
+`spec_drift`. The controller's legacy claim-token plan-acceptance branch and the
+old launched planner are removed.
+
+Missing required secrets return canonical `plan_invalid`. The detailed refusal
+is saved once for run status, after the failed acceptance rolls back, under the
+current owner fence and store clock. No seal or job is committed by that refusal.
+
 ## Unit claims reserve compute credit
 
 Metered `Store.ClaimUnit` awards commit a refundable compute reservation with

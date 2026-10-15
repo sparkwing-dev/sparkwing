@@ -119,6 +119,10 @@ func (t *Tenant) AcceptPlan(ctx context.Context, request PlanAcceptance) (Accept
 		return err
 	})
 	if err != nil {
+		var refused *SecretPreflightError
+		if errors.As(err, &refused) {
+			return AcceptedPlan{}, errors.Join(err, t.s.recordSecretPreflight(ctx, t.team, request, refused))
+		}
 		return AcceptedPlan{}, err
 	}
 	return result, nil
