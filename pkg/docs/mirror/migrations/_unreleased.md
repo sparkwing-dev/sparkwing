@@ -12,10 +12,16 @@ authorized tagged job-attempt or owner-unit subject. The elected
 `Operator.SealAbandonedLogStreams` pass seals lost writers. Reads do not write
 seals. This preserves the successful job outcome when its log tail is lost.
 
-The legacy client uploader still needs its final transport cutover. Old log
-reads still use retired tables and do not establish final log integration.
-C2's authenticated transport must compose signing, physical verification,
-commits and metered reads before that path is operational.
+`Client.LogSegment`, `SealLog`, `NewLogSegmentUploader`, `LogSegmentUploader`,
+`store.LogSegmentRequest` and `LogSegmentGrant` are removed. Bind the host sink
+with `logseg.Data` and use `SubjectUploader` for immutable uploads and segment
+commits. The unused `orchestrator.EngineNodeLog` wrapper is removed.
+
+Controller reads select committed tagged subjects. Authenticated signing,
+physical verification and recording adapters still need their production
+bindings. The host must supply the persisted subject and its authenticated
+transport. A missing binding leaves the pod's stdout available and reports the
+missing remote log binding.
 
 ## Direct uploads use tenant blob tickets
 

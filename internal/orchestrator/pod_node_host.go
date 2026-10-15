@@ -25,6 +25,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -35,6 +36,7 @@ type podNode struct {
 	controllerURL, token, runID, nodeID string
 	// safety: the accepted plan's hash for the node, which the pod's own plan of it must match.
 	specHash string
+	logs     logseg.Data
 	engine   nodeproto.EngineIdentity
 	identity nodeproto.RunnerIdentity
 	state    storage.StateStoreOld
@@ -77,7 +79,7 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 		p.logger.Warn("pod node: the forwarded routes are off", "run_id", p.runID, "node_id", p.nodeID, "err", err)
 		claim = nil
 	}
-	nlog := &podNodeLog{sink: openNodeLogSink(ctx, c, p.runID, p.nodeID, p.logger), out: os.Stdout, logger: p.logger}
+	nlog := &podNodeLog{sink: openNodeLogSink(ctx, p.logs, c, p.logger), out: os.Stdout, logger: p.logger}
 	planSink, err := newPodPlanSink(ctx, p.runID, masker, os.Stderr)
 	if err != nil {
 		return nodehost.Result{}, err

@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // safety: a slow controller cannot hold the runner past a stopped node's final log seal.
@@ -27,37 +28,30 @@ type nodeLogSink struct {
 	closeOnce sync.Once
 }
 
-func openNodeLogSink(ctx context.Context, ctrl *client.Client, runID, nodeID string, logger *slog.Logger) *nodeLogSink {
-	return openNodeLogSinkLive(ctx, ctrl, runID, nodeID, true, logger)
-}
-
-func openNodeLogSinkLive(ctx context.Context, ctrl *client.Client, runID, nodeID string, live bool, logger *slog.Logger) *nodeLogSink {
-	up := ctrl.NewLogSegmentUploader(ctx, runID, nodeID)
-	openCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	if err := up.Open(openCtx); err != nil {
-		logger.WarnContext(ctx, "node log stays on this runner's disk: the controller issued no segment URLs",
-			"run_id", runID, "node_id", nodeID, "err", err)
+func openNodeLogSink(ctx context.Context, data logseg.Data, ctrl *client.Client, logger *slog.Logger) *nodeLogSink {
+	up, err := logseg.NewSubjectUploader(data)
+	if err != nil {
+		logger.WarnContext(ctx, "remote log binding is unavailable", "err", err)
 		return nil
 	}
-	nodeCtx := context.WithoutCancel(ctx)
-	n := &nodeLogSink{runID: runID, nodeID: nodeID, logger: logger}
-	opts := logseg.Options{Subject: up.Subject(), Logger: logger}
-	if live {
-		n.live = startLivePusher(nodeCtx, ctrl, runID, nodeID, up.LiveAttempt(), logger)
-		opts.Live = n.live.push
+	n := &nodeLogSink{runID: data.Subject.RunID, logger: logger}
+	opts := logseg.Options{Subject: data.Subject, Logger: logger}
+	if attempt := data.Subject.Attempt; attempt != nil {
+		n.nodeID = attempt.NodeID
+		if ctrl != nil {
+			n.live = startLivePusher(context.WithoutCancel(ctx), ctrl, n.runID, n.nodeID, store.LiveLogAttempt(attempt.Attempt, attempt.Generation), logger)
+			opts.Live = n.live.push
+		}
 	}
-	sink, err := logseg.NewSink(nodeCtx, up, opts)
+	sink, err := logseg.NewSink(context.WithoutCancel(ctx), up, opts)
 	if err != nil {
-		logger.Warn("node log stays on this runner's disk: the log spool could not be opened",
-			"run_id", runID, "node_id", nodeID, "err", err)
+		logger.WarnContext(ctx, "log spool could not be opened", "run_id", n.runID, "err", err)
 		n.live.close()
 		return nil
 	}
 	n.sink = sink
-	if live {
-		up.OnWatched(sink.SetWatched)
-		watchedSinks.Store(watchKey(runID, nodeID), n)
+	if n.live != nil {
+		watchedSinks.Store(watchKey(n.runID, n.nodeID), n)
 	}
 	return n
 }
@@ -190,52 +184,6 @@ func (p *livePusher) close() {
 	}
 	p.mu.Unlock()
 	<-p.done
-}
-
-// EngineNodeLog writes the engine's own lines into one node of a run,
-// such as a trigger's compile output, as segments when the controller
-// keeps them and nowhere otherwise. Close seals it.
-type EngineNodeLog struct {
-	controllerURL, token, runID, nodeID string
-	logger                              *slog.Logger
-
-	mu     sync.Mutex
-	opened bool
-	sink   *nodeLogSink
-}
-
-// NewEngineNodeLog returns a log for nodeID of runID that opens on the
-// first Append, under the claim fence that Append's context carries.
-func NewEngineNodeLog(controllerURL, token, runID, nodeID string, logger *slog.Logger) *EngineNodeLog {
-	return &EngineNodeLog{controllerURL: controllerURL, token: token, runID: runID, nodeID: nodeID, logger: logger}
-}
-
-// Append writes data, one or more lines, to the node's log. It outlives
-// ctx's cancellation, so a line about a failure still lands.
-func (l *EngineNodeLog) Append(ctx context.Context, data []byte) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if !l.opened {
-		l.opened = true
-		if l.controllerURL != "" {
-			l.sink = openNodeLogSinkLive(context.WithoutCancel(ctx), client.NewWithToken(l.controllerURL, nil, l.token),
-				l.runID, l.nodeID, false, l.logger)
-		}
-	}
-	if l.sink == nil {
-		return nil
-	}
-	return l.sink.sink.Append(data, "", 0, 0)
-}
-
-// Close seals the log when it went to segments.
-func (l *EngineNodeLog) Close(ctx context.Context) {
-	l.mu.Lock()
-	sink := l.sink
-	l.mu.Unlock()
-	if sink != nil {
-		sink.close(ctx, false)
-	}
 }
 
 // safety: one process hosts every sink of the nodes it supervises, so a

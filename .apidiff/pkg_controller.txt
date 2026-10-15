@@ -291,7 +291,6 @@ type LiveLogRead struct {
 const LiveLogWatchLease = 30 * time.Second
 func LongestHonoredIdlePoll(d time.Duration) time.Duration
 const MaxHonoredIdleClaimPoll = 8 * time.Second
-const MeteredInProcessNodesCode = "metered_inprocess_nodes"
 func New(st *store.Store, logger *slog.Logger) *Server
 func NewAuthenticator(st *store.Store, cacheTTL time.Duration) *Authenticator
 func NewFilesystemDataSigner(baseURL string, key []byte) (*FilesystemDataSigner, error)

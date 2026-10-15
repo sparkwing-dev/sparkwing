@@ -54,6 +54,21 @@ remain separate integrations.
 Remote log follow opens the stream without probing legacy segment capabilities.
 Stream refusals remain errors. The old segment-unavailable classification is removed.
 
+## Host log uploads
+
+The pod log sink consumes `logseg.Data` and uses `logseg.SubjectUploader` for
+signed uploads and transactional segment commits. Its subject comes from the
+authenticated binding. It never infers a team or attempt from an object prefix.
+An absent binding leaves the pod's stdout log intact and reports the missing
+binding. Job sinks keep live watch delivery under that exact attempt fence.
+
+`Client.LogSegment`, `SealLog`, `LogSegmentUploader`, `store.LogSegmentRequest`
+and `LogSegmentGrant` are removed with the unused `EngineNodeLog` wrapper.
+The generated sink property covers job, trigger, plan and eval subjects and
+mutated input identities. The watch test uses an in-process transport.
+W2 still supplies authenticated `LogTransport` and `SegmentRecorder` adapters.
+W3 still supplies the production `logseg.Data` binding to the pod host.
+
 ## Log byte accounting
 
 `Segment.Offset` and `Segment.Size` describe decoded log bytes. `StoredBytes`

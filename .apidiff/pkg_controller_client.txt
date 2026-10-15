@@ -140,7 +140,6 @@ func (c *Client) HeartbeatClaim(ctx context.Context, runID, nodeID string, lease
 func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration, headroom *Headroom) error
 func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (*HeartbeatSlotResponse, error)
 func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatStatus, error)
-func (c *Client) KeepsLogSegments(ctx context.Context) (bool, error)
 func (c *Client) LauncherSync(ctx context.Context, jobs []store.LaunchJob) ([]store.LaunchJobResult, error)
 func (c *Client) ListApprovalsForRun(ctx context.Context, runID string) ([]*store.Approval, error)
 func (c *Client) ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error)
@@ -153,10 +152,8 @@ func (c *Client) ListPendingTriggersForParent(ctx context.Context, parentRunID s
 func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run, error)
 func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error)
 func (c *Client) ListTokens(ctx context.Context, kind string, includeRevoked bool) ([]TokenInfo, error)
-func (c *Client) LogSegment(ctx context.Context, runID, nodeID string, req store.LogSegmentRequest) (store.LogSegmentGrant, error)
 func (c *Client) LookupToken(ctx context.Context, prefix string) (json.RawMessage, error)
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
-func (c *Client) NewLogSegmentUploader(base context.Context, runID, nodeID string) *LogSegmentUploader
 func (c *Client) NodeLogs() NodeLogs
 func (c *Client) OIDCToken(ctx context.Context, runID, audience string) (*OIDCToken, error)
 func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*WaiterHolder, error)
@@ -173,7 +170,6 @@ func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 func (c *Client) RevokeToken(ctx context.Context, prefix string) error
 func (c *Client) RotateToken(ctx context.Context, prefix string, grace time.Duration, expires *time.Time) (*RotatedToken, error)
 func (c *Client) RunnerIdentity() string
-func (c *Client) SealLog(ctx context.Context, runID, nodeID string, m logseg.Manifest) error
 func (c *Client) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
 func (c *Client) SetPipelinePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (c *Client) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
@@ -235,7 +231,6 @@ type EnrollRunnerRequest struct {
 var ErrControllerFailed = errors.New("the controller failed to answer")
 var ErrControllerLacksRoute = errors.New("controller/client: controller does not serve this route")
 var ErrForeignNotFound = errors.New("controller/client: 404 from something other than the controller")
-var ErrLogSegmentsUnavailable = errors.New("controller/client: the controller keeps no log segments")
 var ErrLogStreamRefused = errors.New("controller/client: the controller refused the log stream")
 var ErrNoLiveLog = errors.New("controller holds no live log for this node")
 const FailureBackoffBase = time.Second
@@ -271,14 +266,6 @@ type LiveLogChunk struct {
 	Done bool
 }
 func LoadSignal(err error) (time.Duration, bool)
-type LogSegmentUploader struct {
-}
-func (u *LogSegmentUploader) LiveAttempt() string
-func (u *LogSegmentUploader) OnWatched(fn func(bool))
-func (u *LogSegmentUploader) Open(ctx context.Context) error
-func (u *LogSegmentUploader) PutManifest(ctx context.Context, m logseg.Manifest) error
-func (u *LogSegmentUploader) PutSegment(ctx context.Context, seg logseg.Segment, body []byte) error
-func (u *LogSegmentUploader) Subject() blob.LogSubject
 const MaxClaimBackoff = 30 * time.Second
 const MaxPollAdvice = 8 * time.Second
 const MaxUnavailableWait = 5 * time.Second

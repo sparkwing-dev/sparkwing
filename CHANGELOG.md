@@ -22,7 +22,7 @@ unlock.
 
 ### Changed
 - **billing:** Fraud-warning replays retain their original payment and card. Conflicting payer evidence fails without recording a warning or freezing a team. Released warning holds remain released after restart and replay.
-- **store (Breaking):** Remove legacy node-log upload, signing and seal APIs and their two HTTP writers. Tagged log commits and leased maintenance own persistence and abandoned-stream sealing. See [migration guide](docs/migrations/_unreleased.md#log-writes-use-tagged-subjects).
+- **store + controller (Breaking):** Remove legacy node-log upload, signing and seal APIs, their HTTP writers and the segment upload client. Tagged log bindings, commits and leased maintenance own uploads, persistence and abandoned-stream sealing. See [migration guide](docs/migrations/_unreleased.md#log-writes-use-tagged-subjects).
 - **store:** `Tenant.ReadBlob` returns committed blob metadata only after checking live tenant authority and read edges. Tombstoned digests return no metadata.
 - **store (Breaking):** Remove legacy direct-upload reservation, commit, lookup and release APIs and the two node output-upload writers. Tenant blob tickets own quota and verified settlement. See [migration guide](docs/migrations/_unreleased.md#direct-uploads-use-tenant-blob-tickets).
 - **store (Breaking):** Refunds and payment lookups use `Operator`. Dispute holds and releases use the selected `Tenant`. The raw Store methods are removed. See [migration guide](docs/migrations/_unreleased.md#operator-powers-need-the-operator-console).
