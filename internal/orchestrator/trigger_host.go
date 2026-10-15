@@ -162,18 +162,23 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 // defaults, as a local run's do. Layering them again under a run row's arguments, which already hold them, changes
 // nothing, so every planner of a run calls this and their plans agree.
 func checkoutRunArgs(dir, pipeline string, args map[string]string) (map[string]string, pipelines.Guards, error) {
-	_, cfg, err := projectconfig.DiscoverOld(dir)
+	_, cfg, err := projectconfig.Discover(dir)
 	if err != nil {
 		return nil, pipelines.Guards{}, &projectConfigError{err: err}
 	}
 	if cfg == nil {
 		return args, pipelines.Guards{}, nil
 	}
-	opts := Options{Pipeline: pipeline, Args: args, DefaultArgs: cfg.Defaults.Args}
-	opts.PipelineYAML = (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline)
-	rules := cfg.Defaults.Guards
-	if p := opts.PipelineYAML; p != nil && !p.Guards.IsEmpty() {
+	opts := Options{Pipeline: pipeline, Args: args}
+	if cfg.Defaults != nil {
+		opts.DefaultArgs = cfg.Defaults.Args
+	}
+	opts.PipelineYAML = cfg.Registry().Find(pipeline)
+	var rules pipelines.Guards
+	if p := opts.PipelineYAML; p != nil {
 		rules = p.Guards
+	} else if cfg.Defaults != nil && cfg.Defaults.Guards != nil {
+		rules = pipelines.Guards{Require: cfg.Defaults.Guards.When, Reject: cfg.Defaults.Guards.Unless}
 	}
 	return mergeInvokeArgs(opts), rules, nil
 }

@@ -61,8 +61,8 @@ type GuardContext struct {
 //
 // Vocabulary (case-sensitive):
 //
-//	profile:local            -- this machine dispatches the run
-//	profile:controller       -- a controller dispatched the run
+//	where:local            -- this machine dispatches the run
+//	where:controller       -- a controller dispatched the run
 //	git:branch=default       -- dispatch on the supplied default branch
 //	git:branch=NAME          -- dispatch on the named branch
 //	arg:FLAG=VALUE           -- resolved arg equals the value
@@ -70,17 +70,17 @@ func ParseGuardToken(raw string) (GuardToken, error) {
 	tok := GuardToken{Raw: raw}
 	namespace, rest, hasColon := strings.Cut(raw, ":")
 	if !hasColon {
-		return tok, fmt.Errorf("guard %q: expected namespace:rest (e.g. profile:controller, git:branch=main, arg:flag=value)", raw)
+		return tok, fmt.Errorf("guard %q: expected namespace:rest (e.g. where:controller, git:branch=main, arg:flag=value)", raw)
 	}
 	switch namespace {
-	case "profile":
+	case "where":
 		return parseProfileGuard(raw, rest)
 	case "git":
 		return parseGitGuard(raw, rest)
 	case "arg":
 		return parseArgGuard(raw, rest)
 	default:
-		return tok, fmt.Errorf("guard %q: unknown namespace %q (valid: profile, git, arg)", raw, namespace)
+		return tok, fmt.Errorf("guard %q: unknown namespace %q (valid: where, git, arg)", raw, namespace)
 	}
 }
 
@@ -95,10 +95,10 @@ func parseProfileGuard(raw, rest string) (GuardToken, error) {
 		return tok, nil
 	}
 	if strings.HasPrefix(rest, "name=") {
-		return tok, fmt.Errorf("guard %q: profile:name= is removed because a run no longer takes a profile; "+
-			"guard on profile:local or profile:controller instead", raw)
+		return tok, fmt.Errorf("guard %q: where:name= is removed because a run no longer takes a profile; "+
+			"guard on where:local or where:controller instead", raw)
 	}
-	return tok, fmt.Errorf("guard %q: profile: expects 'local' or 'controller'", raw)
+	return tok, fmt.Errorf("guard %q: where: expects 'local' or 'controller'", raw)
 }
 
 func parseGitGuard(raw, rest string) (GuardToken, error) {

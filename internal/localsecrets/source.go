@@ -60,9 +60,6 @@ type storeSource struct {
 
 func (s *storeSource) read(name string) (_ string, _ bool, err error) {
 	if _, err := os.Stat(s.path); errors.Is(err, fs.ErrNotExist) {
-		if err := PendingImport(context.Background(), nil); err != nil {
-			return "", false, err
-		}
 		return "", false, secrets.ErrSecretMissing
 	}
 	st, err := store.OpenReadOnly(s.path)
@@ -75,10 +72,6 @@ func (s *storeSource) read(name string) (_ string, _ bool, err error) {
 		}
 	}()
 	s.once.Do(func() {
-		// safety: a name the import has not brought in would read as missing.
-		if s.setupErr = PendingImport(context.Background(), st); s.setupErr != nil {
-			return
-		}
 		ring, err := LoadKeyring(KeyringOptions{})
 		if err != nil {
 			s.setupErr = err

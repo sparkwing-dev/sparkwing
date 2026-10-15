@@ -2,10 +2,13 @@
 
 <!-- design:begin -->
 
-Status: target contracts for the frozen v4 architecture. Tables are populated;
-execution, parsing, resolution and lifecycle signatures panic until implemented.
-The current CLI and hosts are not wired to these contracts. An `Old` suffix marks
-only a colliding implementation kept compilable for the implementation phase.
+Status: process environments, limits, settings and both YAML schemas are implemented.
+Project-file readers use the strict schema. `Config.Registry` projects validated
+project declarations into dispatch metadata for the existing CLI and hosts.
+Settings winners remain owned by `settings.ResolvePlan` and the store seals.
+CLI grammar, host execution and local lifecycle have separate owners.
+The acceptance suite runs each configuration boundary under its scenario's
+`runspec-config` cell. Placement cells require the T1 driver and real hosts.
 
 ## Ownership
 
@@ -28,8 +31,8 @@ env after planning; C4 decides which env belongs at process startup.
 
 These packages use the final import root `github.com/sparkwing-dev/sparkwing`.
 The schemas are the tagged Go types plus their validation contracts. They are not
-an additional copy of the accepted run spec. Existing userconfig section loaders
-and projectconfig functions with `Old` names do not validate the target schemas.
+an additional copy of the accepted run spec. Machine section reads validate the complete file before decoding a section.
+Project connections and legacy file migrations are refused or removed.
 
 ## Invariants
 
@@ -548,6 +551,7 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`Load`](../../../pkg/projectconfig/contract.go#L91) | Load preserves absence as nil; invalid or unreadable files fail with their path. |
 | [`Discover`](../../../pkg/projectconfig/contract.go#L95) | Discover searches from a checkout for its project file without reading machine connections or resolving run settings before the checkout has been acquired. |
 | [`Validate`](../../../pkg/projectconfig/contract.go#L101) | Validate is shared by file parsing and server-side seal-point validation. |
+| [`Config.Registry`](../../../pkg/projectconfig/registry.go) | Projects validated declarations into dispatch metadata with explicit empty guards and requirements preserved. |
 
 ### internal/userconfig
 

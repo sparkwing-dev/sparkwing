@@ -231,18 +231,18 @@ func hostedInterruptCancel(parent context.Context) (context.Context, func()) {
 // its own working directory, so a --sw-ref or declared-source run gets that
 // checkout's defaults and guards rather than the caller's.
 func applyHostedProjectConfig(opts *Options, dir string) error {
-	_, cfg, err := projectconfig.DiscoverOld(dir)
+	_, cfg, err := projectconfig.Discover(dir)
 	if err != nil {
 		return &projectConfigError{err: err}
 	}
 	if cfg == nil {
 		return nil
 	}
-	opts.DefaultArgs = cfg.Defaults.Args
-	opts.PipelineYAML = (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(opts.Pipeline)
-	if p := opts.PipelineYAML; p != nil {
-		if p.Guards.IsEmpty() {
-			p.Guards = cfg.Defaults.Guards
+	opts.PipelineYAML = cfg.Registry().Find(opts.Pipeline)
+	if cfg.Defaults != nil {
+		opts.DefaultArgs = cfg.Defaults.Args
+		if opts.PipelineYAML == nil && cfg.Defaults.Guards != nil {
+			opts.PipelineYAML = &pipelines.Pipeline{Name: opts.Pipeline, Guards: pipelines.Guards{Require: cfg.Defaults.Guards.When, Reject: cfg.Defaults.Guards.Unless}}
 		}
 	}
 	return RefusePinnedLocalRun(opts.PipelineYAML)

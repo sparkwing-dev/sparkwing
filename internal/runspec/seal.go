@@ -41,6 +41,12 @@ func SealRequest(request Request, facts IntakeFacts) (SealedRequest, error) {
 			}
 		}
 	}
+	if app := request.Git.App; app.Set && app.Value.DefaultBranch != "" {
+		if branch := request.Git.DefaultBranch; branch.Set && branch.Value != app.Value.DefaultBranch {
+			return SealedRequest{}, errors.New("request default branch differs from App facts")
+		}
+		request.Git.DefaultBranch = Optional[string]{Set: true, Value: app.Value.DefaultBranch}
+	}
 	if err := ValidateRepoUse(request.Git.Repository.Key, RepoMachineStore); err != nil {
 		return SealedRequest{}, err
 	}

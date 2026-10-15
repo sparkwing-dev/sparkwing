@@ -323,3 +323,50 @@ func TestRequestRefusesEmbeddedSourceCredentials(t *testing.T) {
 		t.Fatal("SSH transport username refused", err)
 	}
 }
+
+func TestAppDefaultBranchIsSealedBeforeCheckoutDiscovery(t *testing.T) {
+	original := fixture(t)
+	input := original.Request.Request
+	input.Git.DefaultBranch = Optional[string]{}
+	request, err := SealRequest(input, IntakeFacts{RunID: "run"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !request.Request.Git.DefaultBranch.Set || request.Request.Git.DefaultBranch.Value != "main" {
+		t.Fatal("App default branch missing from request seal")
+	}
+	resolved := original.Resolved
+	resolved.DefaultBranch = Optional[string]{Set: true, Value: "trunk"}
+	resolved.DefaultBranchSource = DefaultBranchOriginHEAD
+	if _, err := SealSpec(SealInput{Request: request, Resolved: resolved, Plan: []byte(`{}`)}); err == nil {
+		t.Fatal("checkout discovery replaced App default branch")
+	}
+	input.Git.DefaultBranch = Optional[string]{Set: true, Value: "trunk"}
+	if _, err := SealRequest(input, IntakeFacts{RunID: "run"}); err == nil {
+		t.Fatal("conflicting App and request branches sealed")
+	}
+}
+
+func TestOriginHeadFillsOnlyMissingDefaultBranch(t *testing.T) {
+	original := fixture(t)
+	input := original.Request.Request
+	input.Git.App = Optional[AppFacts]{}
+	input.Git.DefaultBranch = Optional[string]{}
+	request, err := SealRequest(input, IntakeFacts{RunID: "run"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := original.Resolved
+	resolved.DefaultBranch = Optional[string]{Set: true, Value: "trunk"}
+	resolved.DefaultBranchSource = DefaultBranchOriginHEAD
+	spec, err := SealSpec(SealInput{Request: request, Resolved: resolved, Plan: []byte(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := spec.GuardContext().Git; got.DefaultBranch.Value != "trunk" || got.App.Set {
+		t.Fatal("origin HEAD changed repository trust")
+	}
+	if spec.Request.Request.Git.DefaultBranch.Set {
+		t.Fatal("second seal rewrote intake")
+	}
+}

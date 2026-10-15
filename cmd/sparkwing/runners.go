@@ -293,7 +293,7 @@ func agentConfigPath(override string) (string, error) {
 }
 
 func checkAgentConfigAbsent(path string, force bool) error {
-	section, err := userconfig.Node(path, userconfig.Agent)
+	section, err := userconfig.Node(path, userconfig.Runner)
 	if err != nil || section == nil || force {
 		return err
 	}
@@ -308,7 +308,7 @@ func errAgentSectionExists(path string) error {
 // enrollment racing this one cannot overwrite the section it wrote.
 func writeAgentConfig(path string, cfg agentFileConfig, force bool) error {
 	var section yaml.Node
-	return userconfig.Update(path, userconfig.Agent, "the agent config", &section, func(found bool) error {
+	return userconfig.Update(path, userconfig.Runner, "the agent config", &section, func(found bool) error {
 		if found && !force {
 			return errAgentSectionExists(path)
 		}

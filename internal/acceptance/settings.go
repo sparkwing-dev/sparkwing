@@ -15,12 +15,16 @@ import (
 
 // SettingsBoundaryScenarios identifies in-process W6 proofs; transaction and process drivers remain separate.
 func SettingsBoundaryScenarios() []string {
-	return []string{"environment-setting-precedence", "environment-owner-queue-approval-limits", "environment-author-limit-boundaries", "lifecycle-request-and-plan-seals", "lifecycle-retry-sealed-lineage", "storage-repository-identity", "credentials-secret-display-classification"}
+	return []string{"environment-setting-precedence", "environment-owner-queue-approval-limits", "environment-author-limit-boundaries", "lifecycle-request-and-plan-seals", "lifecycle-retry-sealed-lineage", "storage-repository-identity", "credentials-secret-display-classification", "environment-origin-head-and-guards", "environment-no-progress-versus-execution-timeout"}
 }
 
 // CheckSettingsBoundary exercises public settings and run-spec contracts without claiming store or SDK coverage.
 func CheckSettingsBoundary(id string) error {
 	switch id {
+	case "environment-origin-head-and-guards":
+		return defaultBranchSeals()
+	case "environment-no-progress-versus-execution-timeout":
+		return independentJobTimeouts()
 	case "environment-setting-precedence", "lifecycle-request-and-plan-seals":
 		return settingSeals()
 	case "environment-owner-queue-approval-limits":

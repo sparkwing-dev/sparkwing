@@ -257,7 +257,9 @@ storage retains the execution/retry contract; secret argument classification
 controls display. Before describe has classified arguments, display redacts all
 requested values. Reproduction and display omit secret values and public hashes
 of secret-bearing input. App trust comes only from verified, deduplicated webhook
-facts. Origin HEAD can fill a missing default branch without manufacturing trust.
+facts. Intake copies an available App default branch into the request and refuses
+a conflicting supplied branch. Origin HEAD can fill a missing default branch
+without manufacturing trust.
 
 Repository identity is distinct from access. GitHub uses its numeric ID;
 other hosts lowercase the host and preserve ports and path case, except

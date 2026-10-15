@@ -25,7 +25,6 @@ import (
 	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -297,22 +296,20 @@ func maskUserinfo(masker *secrets.Masker, s string) {
 // file or entry. The host joins them to the plan, which plan code cannot
 // drop them from.
 func PipelineRequires(dir, pipeline string) ([]string, error) {
-	path, cfg, err := projectconfig.DiscoverOld(dir)
+	path, cfg, err := projectconfig.Discover(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read the pipeline's placement: %w", err)
 	}
 	if path == "" || cfg == nil {
 		return nil, nil
 	}
-	p := (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline)
-	switch {
-	case p == nil:
-		return nil, nil
-	case len(p.Requires) == 0:
-		// safety: a pipeline that names no requires takes the project's defaults, as the dispatcher's did.
+	if p := cfg.Registry().Find(pipeline); p != nil {
+		return slices.Clone(p.Requires), nil
+	}
+	if cfg.Defaults != nil {
 		return slices.Clone(cfg.Defaults.Requires), nil
 	}
-	return slices.Clone(p.Requires), nil
+	return nil, nil
 }
 
 // safety: the planning claim and every node's pod plan from one context, so their spec hashes compare.

@@ -27,7 +27,8 @@ import (
 type Config struct {
 	Contribution string `yaml:"contribution"`
 
-	Controller string `yaml:"controller"`
+	Controller     string `yaml:"controller"`
+	CredentialsDir string `yaml:"credentials_dir"`
 	// Gitcache is the git cache source is fetched through. Empty means the
 	// controller's gitcache proxy, unless AllowRepos is set.
 	Gitcache string `yaml:"gitcache"`
@@ -35,7 +36,7 @@ type Config struct {
 	// patterns. Given without a gitcache, the agent fetches each run's source
 	// directly: with the credential the controller releases, else with the
 	// machine owner's own git credentials.
-	AllowRepos []string `yaml:"allow_repos"`
+	AllowRepos []string `yaml:"repos"`
 	// AcceptWorkingTree lets an agent with AllowRepos build working-tree
 	// snapshots of the listed repositories. The controller supplies a
 	// snapshot's code, so the list alone cannot vouch for it.
@@ -52,7 +53,7 @@ type Config struct {
 
 	LocalAdmission *bool `yaml:"local_admission"`
 
-	LocalReserve string `yaml:"local_reserve"`
+	LocalReserve string `yaml:"keep_free"`
 }
 
 // EnrolledModeRemoved is the whole message a configuration carrying the
@@ -67,23 +68,20 @@ const EnrolledModeRemoved = "enrolled mode has been removed; " +
 func Load(path string) (*Config, error) {
 	// safety: the unknown-field error names the key without naming the mode it
 	// used to select, so the removed keys are answered before the ordinary parse.
-	section, err := userconfig.Node(path, userconfig.Agent)
+	section, err := userconfig.Node(path, userconfig.Runner)
 	if err != nil {
-		if cfg, legacy, lerr := loadLegacyFile(path); legacy {
-			return cfg, lerr
-		}
 		return nil, err
 	}
 	if carriesEnrolledKey(section, 0) {
 		return nil, fmt.Errorf("parse %s: %s", path, EnrolledModeRemoved)
 	}
 	var cfg Config
-	found, err := userconfig.Read(path, userconfig.Agent, &cfg)
+	found, err := userconfig.Read(path, userconfig.Runner, &cfg)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
-		return nil, fmt.Errorf("%s has no agent section; `sparkwing cluster runners add` writes one: %w", path, os.ErrNotExist)
+		return nil, fmt.Errorf("%s has no runner section; `sparkwing cluster runners add` writes one: %w", path, os.ErrNotExist)
 	}
 	return &cfg, nil
 }
