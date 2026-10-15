@@ -290,9 +290,6 @@ func (t *Tenant) revokeAllTokensTx(ctx context.Context, tx *storeTx, at int64) (
 	return prefixes, nil
 }
 
-// safety: a queued trigger is finished here the way CancelPendingTrigger
-// finishes one, so no claimant takes it; a claimed one gets the cancel request
-// its runner already watches for.
 func (t *Tenant) cancelActiveRunsTx(ctx context.Context, tx *storeTx, now time.Time) error {
 	ns := now.UnixNano()
 	if _, err := tx.ExecContext(ctx, `

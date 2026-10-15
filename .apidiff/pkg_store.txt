@@ -1124,7 +1124,6 @@ const FailureTimeout = "timeout"
 const FailureUnknown = ""
 const FailureUnpricedCPUClass = "unpriced_cpu_class"
 const FailureVerify = "verify"
-func FilterRuns(runs []*Run, f RunFilter) ([]*Run, error)
 func FinancialTables() []string
 type FinishRunRequest struct {
 	Transition RunTransition
@@ -2729,7 +2728,6 @@ func (s *Store) CancelNodeForComputeLimit(
 func (s *Store) CancelNodeForExhaustedCredits(
 	ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time,
 ) error
-func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (s *Store) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) error
 func (s *Store) CheckClaimKey(ctx context.Context, tok ClaimToken, key string) error
 func (s *Store) CheckClaimSlot(ctx context.Context, tok ClaimToken, key, policy string, capacity, cost int) error
@@ -2888,7 +2886,6 @@ func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executin
 func (s *Store) ReplayClaimResult(ctx context.Context, tok ClaimToken, digest string) error
 func (s *Store) ReportAttempt(ctx context.Context, commit ClaimResultCommit, report AttemptReport, now time.Time) (replayed bool, err error)
 func (s *Store) ReportCardRefund(ctx context.Context, key, refundID, status string, now time.Time) (bool, error)
-func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ StorageReservation, err error)
 func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload, err error)
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
@@ -3019,7 +3016,6 @@ func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInst
 func (t *Tenant) BlobRecords(manifests BlobManifestReader) blob.RecordStore
 func (t *Tenant) BusinessEvents(ctx context.Context, kind string) (_ []BusinessEvent, err error)
 func (t *Tenant) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
-func (t *Tenant) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (t *Tenant) ChargeDownload(ctx context.Context, c DownloadCharge) (_ DownloadCharged, err error)
 func (t *Tenant) CheckDataAccess(ctx context.Context, authorized capability.Authorized, target capability.DataTarget) error
@@ -3189,7 +3185,6 @@ func (t *Tenant) RenameGitHubCronRepository(ctx context.Context, installationID,
 func (t *Tenant) RenewNodeClaim(ctx context.Context, ref NodeRef, actor Actor) (LeaseBeat, error)
 func (t *Tenant) RenewOwner(ctx context.Context, actor Actor) (LeaseBeat, error)
 func (t *Tenant) ReportGitHubCheck(ctx context.Context, runID string, fn func(ctx context.Context, checkRun int64) (int64, error)) error
-func (t *Tenant) RequestCancel(ctx context.Context, id string) error
 func (t *Tenant) RequestDeletion(ctx context.Context, actorID string, now time.Time) (TeamDeletion, []string, error)
 func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservationRequest) (UploadReservation, error)
 func (t *Tenant) ReserveQuota(ctx context.Context, quota string, amount int64) (QuotaReservation, error)

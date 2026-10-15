@@ -179,12 +179,6 @@ func TestTenantRunControlStaysInTheRunsTeam(t *testing.T) {
 	if err := globex.DeleteRun(ctx, "run-a"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("globex.DeleteRun = %v, want ErrNotFound", err)
 	}
-	if err := globex.RequestCancel(ctx, "run-a"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("globex.RequestCancel = %v, want ErrNotFound", err)
-	}
-	if cancelled, err := globex.CancelPendingTrigger(ctx, "run-a"); err != nil || cancelled {
-		t.Fatalf("globex.CancelPendingTrigger = %v, %v, want nothing cancelled", cancelled, err)
-	}
 	run, err := acme.GetRun(ctx, "run-a")
 	if err != nil {
 		t.Fatalf("another team's delete removed the run: %v", err)

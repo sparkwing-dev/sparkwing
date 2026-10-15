@@ -96,39 +96,6 @@ func (s *Store) authorizeTriggerClaim(ctx context.Context, digest string, class 
 	return s.applyClaimClass(ctx, tok, live, class, now)
 }
 
-// safety: the caller's writing transaction re-reads the trigger under the
-// run row's lock, in the store's order, so a release or cancel either
-// committed first or waits for the write.
-func fenceSensitiveTriggerClaimTx(ctx context.Context, tx *storeTx, tok ClaimToken, now time.Time) error {
-	found, err := lockTeamRunRowTx(ctx, tx, tok.Team, tok.RunID)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return ErrClaimNotLive
-	}
-	var held int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM trigger_claim_tokens c
-  JOIN triggers t ON t.id = c.trigger_id AND t.team = c.team
- WHERE c.team = ? AND c.trigger_id = ? AND c.claim_seq = ? AND c.prefix = ?
-   AND t.claim_seq = c.claim_seq AND `+triggerClaimLiveSQL("t."),
-		string(tok.Team), tok.RunID, tok.Generation, tok.Prefix, now.UnixNano()).Scan(&held)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrClaimNotLive
-	}
-	if err != nil {
-		return err
-	}
-	cancelled, err := claimRunCancelled(ctx, tx.QueryRowContext, tok.Team, tok.RunID)
-	if err != nil {
-		return err
-	}
-	if cancelled {
-		return ErrClaimCancelRequested
-	}
-	return nil
-}
-
 // AuthorizeRunnerClaim resolves raw to the runner node claim it was minted
 // for. It reads the token and the node row on every call, so the token stops
 // with the claim: a finished node, a lapsed lease or a later claim of the node

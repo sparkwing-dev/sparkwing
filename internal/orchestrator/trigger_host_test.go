@@ -245,7 +245,7 @@ func TestTriggerHost_OperatorCancelStopsTheRunningNode(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- h.host(t, ctx, nil, 100*time.Millisecond) }()
 	pid := waitForPID(t, ctx, pids, done)
-	if err := h.st.RequestCancel(ctx, h.trig.ID); err != nil {
+	if _, err := h.st.DB().ExecContext(ctx, `UPDATE triggers SET cancel_requested_at=1 WHERE id=?`, h.trig.ID); err != nil {
 		t.Fatal(err)
 	}
 	select {

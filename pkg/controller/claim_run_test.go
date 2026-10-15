@@ -282,7 +282,7 @@ func TestClaimRun_ConcurrencySlotsFollowTheAcceptedPlan(t *testing.T) {
 			t.Fatalf("team %s holds %d slots of deploy, want %d", team, held, want)
 		}
 	}
-	if err := f.teamOf(olga).RequestCancel(ctx, "run-slot"); err != nil {
+	if _, err := f.store.DB().ExecContext(ctx, `UPDATE runs SET cancel_requested_at=1 WHERE team=? AND id=?`, olga.team, "run-slot"); err != nil {
 		t.Fatal(err)
 	}
 	if code := f.call("POST", "/api/v1/concurrency/g:deploy/acquire", wk, body("run-slot", "a", "queue", 0), nil); code != http.StatusForbidden {

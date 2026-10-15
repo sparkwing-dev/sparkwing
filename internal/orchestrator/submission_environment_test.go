@@ -104,8 +104,8 @@ func TestReconcileSubmissionEnvironmentsRemovesTerminalSnapshots(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if cancelled, err := st.CancelPendingTrigger(ctx, runID); err != nil || !cancelled {
-		t.Fatalf("cancel pending trigger = %v, %v", cancelled, err)
+	if err := st.FinishTrigger(ctx, runID); err != nil {
+		t.Fatal(err)
 	}
 	removed, err := ReconcileSubmissionEnvironments(ctx, home, st, 100)
 	if err != nil {
@@ -137,8 +137,8 @@ func TestReconcileSubmissionEnvironmentsRemovesMalformedResidueAndContinues(t *t
 	if err := st.CreateTrigger(ctx, store.Trigger{ID: runID, Pipeline: "build", Status: "pending", CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	if cancelled, err := st.CancelPendingTrigger(ctx, runID); err != nil || !cancelled {
-		t.Fatalf("cancel pending trigger = %v, %v", cancelled, err)
+	if err := st.FinishTrigger(ctx, runID); err != nil {
+		t.Fatal(err)
 	}
 	removed, err := ReconcileSubmissionEnvironments(ctx, home, st, 100)
 	if err != nil {

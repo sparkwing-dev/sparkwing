@@ -382,7 +382,7 @@ func TestConsumer_CancelRequestedBeforeClaimNeverDispatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RequestCancel(ctx, claimed.ID); err != nil {
+	if _, err := st.DB().ExecContext(ctx, `UPDATE triggers SET cancel_requested_at=1 WHERE id=?`, claimed.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -625,7 +625,7 @@ func TestHeartbeat_SurfacesAnOperatorCancelRequest(t *testing.T) {
 		t.Fatalf("uncancelled claim reported cancel=%v keepGoing=%v", cancelRequested, keepGoing)
 	}
 
-	if err := st.RequestCancel(ctx, claimed.ID); err != nil {
+	if _, err := st.DB().ExecContext(ctx, `UPDATE triggers SET cancel_requested_at=1 WHERE id=?`, claimed.ID); err != nil {
 		t.Fatal(err)
 	}
 	cancelRequested, keepGoing := heartbeatOnce(ctx, st, claimed.ID, claimed.ClaimSeq,

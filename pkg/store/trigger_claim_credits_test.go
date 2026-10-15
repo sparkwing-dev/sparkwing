@@ -371,7 +371,7 @@ func TestTriggerNewClaimRefusesAnUnsettledPriorCreditWindow(t *testing.T) {
 			ctx := context.Background()
 			metered := meteredClaimant(t, st, "agent:cloud")
 			floor := triggerFloor(t, st, metered)
-			if _, err := st.CancelPendingTrigger(ctx, "run-floor"); err != nil {
+			if err := st.FinishTrigger(ctx, "run-floor"); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 3*floor, "", "operator"); err != nil {

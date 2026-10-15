@@ -3,7 +3,6 @@ package store
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -101,8 +100,7 @@ func runDisplayFilterClauses(dialect Dialect, f RunFilter) []sqlClause {
 		parts := make([]string, len(names))
 		var args []any
 		for i, name := range names {
-			// safety: = on a computed suffix, because SQLite's LIKE ignores ASCII case and would
-			// select owner/Web for web where PostgreSQL and FilterRuns do not.
+			// safety: equality preserves repository-name case on both SQL dialects.
 			suffix := "/" + name
 			n := utf8.RuneCountInString(suffix)
 			parts[i] = "(" + runRepoNameSQL + " = ? OR (LENGTH(" + runRepoNameSQL + ") >= ? AND SUBSTR(" + runRepoNameSQL +
@@ -156,17 +154,6 @@ func runBeforeCursorArgs(f RunFilter) []any {
 	return []any{f.BeforeStartedAt, f.BeforeStartedAt, f.BeforeID}
 }
 
-// safety: mirrors runRepoNameSQL, so the in-memory filter selects the runs the store does.
-func runRepoName(r *Run) string {
-	switch {
-	case r.DeclaredRepo != "":
-		return r.DeclaredRepo
-	case r.GithubRepo != "":
-		return r.GithubRepo
-	}
-	return "unknown"
-}
-
 // RunCursorKey is the started_at value a cursor names for a run that started at
 // startedAt; a run that never started stores zero.
 func RunCursorKey(startedAt time.Time) int64 {
@@ -174,124 +161,4 @@ func RunCursorKey(startedAt time.Time) int64 {
 		return 0
 	}
 	return startedAt.UnixNano()
-}
-
-// FilterRuns applies f to runs a backend fetched whole, with the order, cursors and
-// limit [Store.ListRuns] gives the same filter.
-func FilterRuns(runs []*Run, f RunFilter) ([]*Run, error) {
-	var err error
-	if f.GitSHAPrefixes, err = normalizeSHAPrefixes(f.GitSHAPrefixes); err != nil {
-		return nil, err
-	}
-	if f.ExcludeGitSHAPrefixes, err = normalizeSHAPrefixes(f.ExcludeGitSHAPrefixes); err != nil {
-		return nil, err
-	}
-	if f.HasCursor() && f.HasBeforeCursor() {
-		return nil, errBothCursors
-	}
-	out := make([]*Run, 0, len(runs))
-	for _, r := range runs {
-		if r != nil && runMatches(r, f) {
-			out = append(out, r)
-		}
-	}
-	newerFirst := func(a, b *Run) int {
-		if ka, kb := RunCursorKey(a.StartedAt), RunCursorKey(b.StartedAt); ka != kb {
-			if ka > kb {
-				return -1
-			}
-			return 1
-		}
-		return -strings.Compare(a.ID, b.ID)
-	}
-	slices.SortFunc(out, newerFirst)
-	limit := f.Limit
-	if limit <= 0 {
-		limit = 50
-	}
-	limit = min(limit, maxRunListFetch)
-	if f.HasBeforeCursor() {
-		cursor := &Run{ID: f.BeforeID, StartedAt: time.Unix(0, f.BeforeStartedAt)}
-		if f.BeforeStartedAt <= 0 {
-			cursor.StartedAt = time.Time{}
-		}
-		newer := out[:0]
-		for _, r := range out {
-			if newerFirst(r, cursor) < 0 {
-				newer = append(newer, r)
-			}
-		}
-		return newer[max(len(newer)-limit, 0):], nil
-	}
-	if f.HasCursor() {
-		cursor := &Run{ID: f.AfterID, StartedAt: time.Unix(0, f.AfterStartedAt)}
-		if f.AfterStartedAt <= 0 {
-			cursor.StartedAt = time.Time{}
-		}
-		older := out[:0]
-		for _, r := range out {
-			if newerFirst(r, cursor) > 0 {
-				older = append(older, r)
-			}
-		}
-		out = older
-	}
-	return out[:min(len(out), limit)], nil
-}
-
-func runMatches(r *Run, f RunFilter) bool {
-	in := func(values []string, v string) bool { return slices.Contains(values, v) }
-	shaMatch := func(prefixes []string) bool {
-		for _, p := range prefixes {
-			if strings.HasPrefix(r.GitSHA, p) {
-				return true
-			}
-		}
-		return false
-	}
-	repoMatch := func(names []string) bool {
-		repo := runRepoName(r)
-		for _, n := range names {
-			if repo == n || strings.HasSuffix(repo, "/"+n) {
-				return true
-			}
-		}
-		return false
-	}
-	text := asciiLower(strings.Join([]string{r.ID, r.Pipeline, r.DeclaredRepo, r.GithubRepo, r.GitBranch, r.GitSHA, r.Error, r.TriggerSource, r.Status}, "\x00"))
-	started := RunCursorKey(r.StartedAt)
-	switch {
-	case len(f.Pipelines) > 0 && !in(f.Pipelines, r.Pipeline),
-		len(f.Statuses) > 0 && !in(f.Statuses, r.Status),
-		len(f.GitBranches) > 0 && !in(f.GitBranches, r.GitBranch),
-		len(f.DeclaredRepos) > 0 && !in(f.DeclaredRepos, r.DeclaredRepo),
-		len(f.RepoURLs) > 0 && !in(f.RepoURLs, r.RepoURL),
-		len(f.TriggerSources) > 0 && !in(f.TriggerSources, r.TriggerSource),
-		len(f.GitSHAPrefixes) > 0 && !shaMatch(f.GitSHAPrefixes),
-		len(f.RepoNames) > 0 && !repoMatch(f.RepoNames),
-		in(f.ExcludePipelines, r.Pipeline),
-		in(f.ExcludeStatuses, r.Status),
-		in(f.ExcludeGitBranches, r.GitBranch),
-		in(f.ExcludeTriggerSources, r.TriggerSource),
-		len(f.ExcludeGitSHAPrefixes) > 0 && shaMatch(f.ExcludeGitSHAPrefixes),
-		len(f.ExcludeRepoNames) > 0 && repoMatch(f.ExcludeRepoNames),
-		f.ParentRunID != "" && r.ParentRunID != f.ParentRunID,
-		f.ParentRunID == "" && f.RootOnly && r.ParentRunID != "",
-		!f.Since.IsZero() && started < f.Since.UnixNano(),
-		!f.StartedBefore.IsZero() && started > f.StartedBefore.UnixNano(),
-		!f.FinishedAfter.IsZero() && (r.FinishedAt == nil || r.FinishedAt.Before(f.FinishedAfter)),
-		!f.FinishedBefore.IsZero() && (r.FinishedAt == nil || r.FinishedAt.After(f.FinishedBefore)):
-		return false
-	}
-	for _, term := range f.Text {
-		if !strings.Contains(text, asciiLower(term)) {
-			return false
-		}
-	}
-	for _, term := range f.ExcludeText {
-		if strings.Contains(text, asciiLower(term)) {
-			return false
-		}
-	}
-	return true
 }

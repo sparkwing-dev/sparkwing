@@ -1,3 +1,21 @@
+The raw cancellation tests now run through `TransitionRun`, `ClaimUnit`,
+`RenewUnit` and `ReapUnits`. `TestRunCancellationPreventsUnclaimedAwards`
+retains unclaimed trigger/plan cancellation and reaper replay.
+`TestRunCancellationReachesClaimedOwner` retains cooperative cancellation
+through both trigger and exchanged plan authority.
+`TestRunCancellationRacesOwnerAwardProperty` ports cancel-versus-claim races.
+`TestRunCancellationCannotOverwriteTerminalProperty` replaces
+`TestCancellingATriggerDoesNotOverwriteARunThatAlreadyEnded`.
+`TestRunCancellationRequiresCurrentTeamAuthorityProperty` checks tenant,
+membership, role, session, expiry and revocation refusals without state,
+event or effect writes. Existing holder-result and cancellation-intent
+properties remain. Legacy transport tests seed cancellation state because
+they test response to that state rather than its mutation authority.
+
+The unused in-memory `FilterRuns` selector is removed. Its parallel assertions
+are deleted while the SQL listing, counting, case, literal and cursor checks
+remain. Those legacy SQL fixtures still need their final-schema migration.
+
 The legacy claim-token heartbeat/start cell
 `TestClaimRun_PodRoutesServeOnlyTheirOwnClaim` is retired with those store
 methods and HTTP branches. Its retained requirements run in

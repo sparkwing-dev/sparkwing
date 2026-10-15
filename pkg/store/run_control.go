@@ -135,41 +135,6 @@ type teamNodeRef struct {
 	runID, nodeID string
 }
 
-// safety: a run with no controller planning node reports handled false and
-// writes nothing, so a run a trigger holder drives keeps the cooperative cancel.
-func (s *Store) requestControllerRunCancel(ctx context.Context, team Team, runID string, now time.Time) (handled bool, err error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	var one int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM nodes WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ?`,
-		string(team), runID, PlanNodeID, nodeKindPlan).Scan(&one)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if err := lockDispatchRunTx(ctx, tx, team, runID); err != nil {
-		return true, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET cancel_requested_at = COALESCE(cancel_requested_at, ?)
- WHERE team = ? AND id = ? AND NOT (`+runTerminalIn+`)`, now.UnixNano(), string(team), runID); err != nil {
-		return true, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE nodes SET cancel_requested_at = COALESCE(cancel_requested_at, ?)
- WHERE team = ? AND run_id = ? AND claimed_by IS NOT NULL AND `+nodeNotDone,
-		now.UnixNano(), string(team), runID); err != nil {
-		return true, err
-	}
-	if err := settleTx(ctx, tx, team, runID, now); err != nil {
-		return true, err
-	}
-	return true, tx.Commit()
-}
-
 // safety: a node of a run with a cancel request is never awarded, so a claim
 // that ends on such a run cannot be replaced by a new one.
 const nodeRunNotCancelled = ` AND NOT EXISTS (SELECT 1 FROM runs cr

@@ -3679,59 +3679,6 @@ func (t *Tenant) TriggerClaimGeneration(ctx context.Context, id string) (int64, 
 	return seq, nil
 }
 
-// CancelPendingTrigger cancels a submitted run that no consumer has
-// claimed yet, in one transaction: the trigger leaves the pending queue
-// and its run row becomes terminal. It reports false without touching
-// anything when the trigger is not pending -- already claimed, already
-// done, or unknown -- which is what makes it safe to try first and fall
-// back to the running-run cancellation path.
-//
-// The status guard in the UPDATE is the whole race defense. A consumer
-// claiming the same trigger runs the mirror-image statement, so exactly
-// one of the two sees a row affected; a cancel that loses reports false
-// and the caller escalates to cancelling the now-running run.
-func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error) {
-	return s.defaultTenant().CancelPendingTrigger(ctx, id)
-}
-
-// CancelPendingTrigger is [Store.CancelPendingTrigger] confined to t's team.
-func (t *Tenant) CancelPendingTrigger(ctx context.Context, id string) (bool, error) {
-	now := time.Now()
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	res, err := tx.ExecContext(ctx,
-		`UPDATE triggers
-		    SET status = ?, cancel_requested_at = COALESCE(cancel_requested_at, ?)
-		  WHERE team = ? AND id = ? AND status = ?`,
-		triggerStatusDone, now.UnixNano(), string(t.team), id, triggerStatusPending)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	if n == 0 {
-		return false, nil
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE runs
-		    SET status = ?, finished_at = ?, error = ?
-		  WHERE team = ? AND id = ? AND status = ?`,
-		runStatusCancelled, now.UnixNano(),
-		"cancelled before dispatch", string(t.team), id, runStatusPending); err != nil {
-		return false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 // safety: a trigger cancelled while claimed, then released or lapsed back to the queue, is refused by
 // the claim filter, so without finalizing it here it would sit in the queue forever.
 func cancelRequeuedCancelledTriggersTx(ctx context.Context, tx *storeTx, now time.Time) error {
@@ -4049,47 +3996,6 @@ func (t *Tenant) HeartbeatTrigger(ctx context.Context, id string, lease time.Dur
 		return false, err
 	}
 	return cancelNS.Valid, nil
-}
-
-// RequestCancel cancels a run; idempotent. A trigger no consumer has
-// claimed is finalized on the spot through [Store.CancelPendingTrigger];
-// a claimed one is only flagged, and its holder sees the flag on its next
-// lease renewal and winds the run down. A claim that lands between the
-// two statements leaves the flag on a claimed trigger, which is the
-// cooperative path again.
-func (s *Store) RequestCancel(ctx context.Context, id string) error {
-	return s.defaultTenant().RequestCancel(ctx, id)
-}
-
-// RequestCancel is [Store.RequestCancel] confined to t's team.
-func (t *Tenant) RequestCancel(ctx context.Context, id string) error {
-	if handled, err := t.s.requestControllerRunCancel(ctx, t.team, id, time.Now()); handled || err != nil {
-		return err
-	}
-	cancelled, err := t.CancelPendingTrigger(ctx, id)
-	if err != nil {
-		return err
-	}
-	if cancelled {
-		return nil
-	}
-	now := time.Now().UnixNano()
-	res, err := t.s.exec(ctx,
-		`UPDATE triggers
-		    SET cancel_requested_at = COALESCE(cancel_requested_at, ?)
-		  WHERE team = ? AND id = ?`,
-		now, string(t.team), id)
-	if err != nil {
-		return err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return notFound("trigger", id)
-	}
-	return nil
 }
 
 // FinishTrigger closes a trigger, recording a failed run as a failed trigger; idempotent.

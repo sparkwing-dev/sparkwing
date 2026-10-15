@@ -325,44 +325,6 @@ func (s *Store) claimLogTail(ctx context.Context, tok ClaimToken, now time.Time)
 	return tok, nil
 }
 
-// safety: a sensitive route that writes calls this inside its writing transaction. The run row is locked
-// first, in the store's order (eligibility, trigger, run, node, ledger) that settle and cancel take, so a
-// cancel or a lost lease either committed before these reads or waits until the write commits.
-func fenceSensitiveClaimTx(ctx context.Context, tx *storeTx, tok ClaimToken, now time.Time) error {
-	found, err := lockTeamRunRowTx(ctx, tx, tok.Team, tok.RunID)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return ErrClaimNotLive
-	}
-	var expires int64
-	err = tx.QueryRowContext(ctx, `SELECT expires_at FROM claim_tokens
- WHERE team = ? AND run_id = ? AND node_id = ? AND claim_generation = ? AND prefix = ?`,
-		string(tok.Team), tok.RunID, tok.NodeID, tok.Generation, tok.Prefix).Scan(&expires)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && !now.Before(time.Unix(0, expires))) {
-		return ErrClaimTokenInvalid
-	}
-	if err != nil {
-		return err
-	}
-	live, err := claimLiveTx(ctx, tx, tok.Team, tok.RunID, tok.NodeID, tok.Generation, now)
-	if err != nil {
-		return err
-	}
-	if !live {
-		return ErrClaimNotLive
-	}
-	cancelled, err := claimRunCancelled(ctx, tx.QueryRowContext, tok.Team, tok.RunID)
-	if err != nil {
-		return err
-	}
-	if cancelled {
-		return ErrClaimCancelRequested
-	}
-	return nil
-}
-
 // safety: the run's own row decides, and a run with no row reads as cancelled,
 // so a run no trigger names can never pass as "not cancelled" through a NULL.
 // A cancel request lands on the run for a controller-dispatched run and on its

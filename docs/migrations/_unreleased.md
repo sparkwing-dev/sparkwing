@@ -1,5 +1,18 @@
 # Migrating to the next release
 
+## Raw cancellation and unused readers removed
+
+`Store.RequestCancel`, `Tenant.RequestCancel`, `Store.CancelPendingTrigger`
+and `Tenant.CancelPendingTrigger` are removed. Cancellation uses the tenant's
+`TransitionRun` with current authority and `RunCancel`. It records the first
+intent without taking result rights from live holders. The elected unit reaper
+finishes cancelled unclaimed owner units. Terminal run outcomes never change.
+The separate controller-plan cancellation writer is also removed.
+
+The unused `FilterRuns` in-memory run selector is removed. SQL listing and
+counting keep their filters and cursors. The unused transaction helpers
+`fenceSensitiveClaimTx` and `fenceSensitiveTriggerClaimTx` are removed.
+
 ## Legacy store issuance and reports
 
 `Store.RotateToken` is removed. Use the tenant's `RotateCapability` with

@@ -168,7 +168,7 @@ func TestClaimRoute_CancelAndFinishRefuseTheVeryNextRequest(t *testing.T) {
 	f := newClaimRouteFixture(t)
 	ctx := context.Background()
 	wantStatus(t, f, http.MethodGet, probeA, f.raw, http.StatusOK, "")
-	if err := f.st.RequestCancel(ctx, "run-a"); err != nil {
+	if _, err := f.st.DB().ExecContext(ctx, `UPDATE triggers SET cancel_requested_at=1 WHERE id=?`, "run-a"); err != nil {
 		t.Fatal(err)
 	}
 	wantStatus(t, f, http.MethodGet, probeA, f.raw, http.StatusForbidden, "claim_cancelled")

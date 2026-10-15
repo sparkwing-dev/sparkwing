@@ -59,37 +59,6 @@ func TestFinishedTriggerIsNeverReturnedToTheQueue(t *testing.T) {
 	}
 }
 
-func TestCancellingATriggerDoesNotOverwriteARunThatAlreadyEnded(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	const id = "run-settled"
-	if err := s.CreateTrigger(ctx, store.Trigger{ID: id, Pipeline: "p", CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("CreateTrigger: %v", err)
-	}
-	if err := s.CreateRun(ctx, store.Run{
-		ID: id, Pipeline: "p", Status: "success", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-
-	cancelled, err := s.CancelPendingTrigger(ctx, id)
-	if err != nil {
-		t.Fatalf("CancelPendingTrigger: %v", err)
-	}
-	if !cancelled {
-		t.Fatal("cancelling a pending trigger reported it reached nothing")
-	}
-
-	run, gerr := s.GetRun(ctx, id)
-	if gerr != nil {
-		t.Fatalf("GetRun: %v", gerr)
-	}
-	if run.Status != "success" {
-		t.Errorf("run status = %q, want success: a cancel must not overwrite an outcome "+
-			"the finished trigger already produced", run.Status)
-	}
-}
-
 func TestFinishingATriggerClearsItsLease(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()

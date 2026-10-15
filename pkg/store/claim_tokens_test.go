@@ -136,7 +136,7 @@ func TestClaimToken_CancelRefusesSensitiveButNotReportingOrResult(t *testing.T) 
 		t.Fatalf("trigger: %v", err)
 	}
 	wantClaimAuth(t, f.s, raw, store.ClaimSensitive, now, nil)
-	if err := f.s.RequestCancel(ctx, "run-cancel"); err != nil {
+	if _, err := f.s.DB().ExecContext(ctx, `UPDATE triggers SET cancel_requested_at=1 WHERE id=?`, "run-cancel"); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	wantClaimAuth(t, f.s, raw, store.ClaimSensitive, now, store.ErrClaimCancelRequested)
