@@ -1080,3 +1080,19 @@ environment selection to ScheduleManager with a stable due-instant key.
 The native nodehost suite remains green. Native workers, source overrides,
 sealed step selections and usage/profile bindings remain open. No additional
 archived inventory row or full native acceptance cell is claimed complete.
+
+## W3 native store composition
+
+`TestNativeHostFromIntakeThroughSDKAndPersistedCompletion` replaces
+`TestNativeHostRunsSharedTransportForOwnerAndClaimedWork` and its fake owner
+state machine. Both roles use real tenant intake, claims, acceptance, starts,
+step/result writes and completion. Acquired local Git source, captured
+environments, the Go SDK and process-authority validators are real. The claimed
+case runs the same accepted work under its own keeper, then resumes its owner
+to settle the run. Engine resolution/install, byte transport and admission are
+test adapters. Full placement cells remain blocked.
+
+Scope-label tests and their tuple-injectivity property move beside the shared
+codec in nodehost. The CLI queue fixture uses that codec. The state-path test
+moves to paths when the orchestrator aliases are deleted. These preserve
+existing assertions and claim no additional archived source identity.

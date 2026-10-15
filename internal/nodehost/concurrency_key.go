@@ -44,3 +44,22 @@ func ParseConcurrencyKey(key string) (scope, identity, group string, ok bool) {
 	}
 	return scope, rest[:n], rest[n+1:], true
 }
+
+const memoKeyPrefix = "memo:"
+
+// ScopeLabelFromKey renders the scope and complete host identity of a concurrency key.
+func ScopeLabelFromKey(key string) string {
+	if strings.HasPrefix(key, memoKeyPrefix) {
+		return "content-cache"
+	}
+	scope, identity, _, ok := ParseConcurrencyKey(key)
+	if !ok {
+		return "unknown"
+	}
+	switch scope {
+	case "global":
+		return "global"
+	default:
+		return scope + " (" + identity + ")"
+	}
+}

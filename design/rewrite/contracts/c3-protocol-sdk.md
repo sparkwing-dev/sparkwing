@@ -1,5 +1,13 @@
 # C3 protocol and SDK contract
 
+[The native store composition proof](../w3-native-composition-progress.md) runs
+the shared native owner and claimed host with real SQLite transitions, Git
+checkout acquisition, SDK pipes, process delegation and result-record commits.
+It replaces the fake owner state machine. Engine resolution/install, byte
+transport and local admission remain test adapters. Production placement
+factories, private execution snapshots and complete owner-policy edges remain
+open. Legacy Session, Server, scheduler and hosting callers are deleted.
+
 [The consumer and intake cut](../w3-consumer-cut-progress.md) removes the raw
 local trigger consumer, run-ID environment snapshots and orphan hosting adapters.
 Detached intake uses sealed controller requests and retained environment identities.

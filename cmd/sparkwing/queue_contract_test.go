@@ -13,6 +13,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -81,8 +83,13 @@ func TestQueueCommandUsesOneControllerProjection(t *testing.T) {
 
 func TestQueueCommandPreflight(t *testing.T) {
 	for _, args := range [][]string{
-		{"list", "unexpected"}, {"list", "-o", "yaml"}, {"list", "--unknown"}, {"list", "--group", ".."},
-		{"priority", "--set", "3"}, {"priority", "--run", "r1"}, {"priority", "--run", "r1", "--set", "bad"},
+		{"list", "unexpected"},
+		{"list", "-o", "yaml"},
+		{"list", "--unknown"},
+		{"list", "--group", ".."},
+		{"priority", "--set", "3"},
+		{"priority", "--run", "r1"},
+		{"priority", "--run", "r1", "--set", "bad"},
 		{"priority", "--run", "r1", "--set", "2", "extra"},
 	} {
 		var out bytes.Buffer
@@ -123,7 +130,8 @@ func TestQueueCommandKeepsFailureDistinctFromEmptyQueue(t *testing.T) {
 func TestQueueCommandPreservesGroupFacts(t *testing.T) {
 	at := time.Date(2026, 10, 14, 1, 2, 3, 0, time.UTC)
 	for _, format := range []string{"json", "plain", "pretty"} {
-		manager := &queueManagerFake{group: controllerwire.QueueGroup{Group: "deploy", Capacity: 2, EffectiveCapacity: 1, UsedCost: 2,
+		manager := &queueManagerFake{group: controllerwire.QueueGroup{
+			Group: "deploy", Capacity: 2, EffectiveCapacity: 1, UsedCost: 2,
 			Holders: []controllerwire.QueueGroupHolder{{HolderID: "h1", RunID: "r1", JobID: "job1", Cost: 2, Superseded: true, ClaimedAt: at, LeaseExpiresAt: at.Add(time.Minute)}},
 			Waiters: []controllerwire.QueueGroupWaiter{{RunID: "r2", JobID: "job2", Position: 1, Policy: "queue", Cost: 1, ArrivedAt: at}},
 		}}
@@ -147,7 +155,11 @@ func TestQueueCommandPreservesGroupFacts(t *testing.T) {
 }
 
 func TestQueueGroupScope(t *testing.T) {
-	for group, scope := range map[string]string{"g:payments@db": "global", "b:5:host1db": "box (host1)", "memo:abc123": "content-cache"} {
+	for group, scope := range map[string]string{
+		nodehost.ConcurrencyKey(nodeproto.ConcurrencySpec{Group: "payments@db"}, "run", "host1"):           "global",
+		nodehost.ConcurrencyKey(nodeproto.ConcurrencySpec{Group: "db", Scope: new("box")}, "run", "host1"): "box (host1)",
+		"memo:abc123": "content-cache",
+	} {
 		var out bytes.Buffer
 		if err := renderQueueGroup(&out, controllerwire.QueueGroup{Group: group}, "pretty"); err != nil || !strings.Contains(out.String(), scope) {
 			t.Fatalf("scope for %s: %v %s", group, err, &out)

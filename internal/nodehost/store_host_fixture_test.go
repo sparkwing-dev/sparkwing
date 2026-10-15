@@ -107,6 +107,40 @@ func newStoreHostFixtureOn(t *testing.T, database *store.Store, plan nodeproto.P
 
 func newStoreHostFixtureForRequest(t *testing.T, database *store.Store, plan nodeproto.PlanDoc, request runspec.Request) *storeHostFixture {
 	t.Helper()
+	f := newStoreOwnerFixture(t, database, request)
+	ctx, tenant, actor := t.Context(), f.Tenant, f.Actor
+	admitted, err := tenant.ReadRun(ctx, f.Input.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations := runspec.CheckoutDeclarations{Version: 1}
+	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
+	accepted, err := tenant.AcceptPlan(ctx, store.PlanAcceptance{RunID: f.Input.RunID, Actor: actor, Seal: runspec.SealInput{Request: admitted.Request, Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Engine: selected, Args: map[string]string{}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.TransitionRun(ctx, store.RunTransition{RunID: f.Input.RunID, Actor: actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
+		t.Fatal(err)
+	}
+	spec, _ := json.Marshal(accepted.Spec)
+	f.Accepted = AcceptedRun{RunID: f.Input.RunID, Spec: spec, SpecHash: string(accepted.Spec.Hash), Plan: plan, PlanHash: accepted.PlanHash}
+	f.Input.Accepted = &f.Accepted
+	f.Host.Acquire = func(context.Context, RunInput) (*source.Entry, error) {
+		return &source.Entry{Engine: engine.Resolved{Identity: selected}}, nil
+	}
+	return f
+}
+
+func newStoreOwnerFixture(t *testing.T, database *store.Store, request runspec.Request) *storeHostFixture {
+	t.Helper()
 	ctx := t.Context()
 	database.SetIntakePolicy(hostIntakePolicy{})
 	database.SetClaimProfileResolver(hostEnrollment{})
@@ -139,33 +173,16 @@ func newStoreHostFixtureForRequest(t *testing.T, database *store.Store, plan nod
 		t.Fatal(err)
 	}
 	actor := store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
-	declarations := runspec.CheckoutDeclarations{Version: 1}
-	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan})
+	requestBody, err := json.Marshal(admitted.Request.Request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := json.Marshal(plan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	selected := engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
-	accepted, err := tenant.AcceptPlan(ctx, store.PlanAcceptance{RunID: admitted.RunID, Actor: actor, Seal: runspec.SealInput{Request: admitted.Request, Declarations: declarations, Plan: body, Resolved: runspec.Resolved{Engine: selected, Args: map[string]string{}, SecretArgs: []string{}, Settings: resolved, Guards: runspec.Guards{Passed: true}}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tenant.TransitionRun(ctx, store.RunTransition{RunID: admitted.RunID, Actor: actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
-		t.Fatal(err)
-	}
-	spec, _ := json.Marshal(accepted.Spec)
-	requestBody, _ := json.Marshal(admitted.Request.Request)
 	f := &storeHostFixture{Store: database, Tenant: tenant, Actor: actor, Control: store.Actor{Kind: store.ActorOperator, Authority: authority, CapabilityPrefix: root}}
-	f.Accepted = AcceptedRun{RunID: admitted.RunID, Spec: spec, SpecHash: string(accepted.Spec.Hash), Plan: plan, PlanHash: accepted.PlanHash}
-	f.Input = RunInput{RunID: admitted.RunID, Owner: actor, SealedRequest: requestBody, RequestHash: string(admitted.Request.Hash), Accepted: &f.Accepted, GrantedRunner: nodeproto.RunnerIdentity{Name: "host", Type: "agent", Labels: []string{}}}
+	f.Input = RunInput{RunID: admitted.RunID, Owner: actor, SealedRequest: requestBody, RequestHash: string(admitted.Request.Hash), GrantedRunner: nodeproto.RunnerIdentity{Name: "host", Type: "agent", Labels: []string{}}}
+
 	f.State = &hostState{Tenant: tenant}
 	f.Host = OwnerHost{Store: f.State, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Mask: func(s string) string { return s }, Renew: func(ctx context.Context, actor store.Actor, executing bool) (store.LeaseBeat, error) {
 		return database.RenewUnit(ctx, actor.CapabilityPrefix, executing)
-	}, Acquire: func(context.Context, RunInput) (*source.Entry, error) {
-		return &source.Entry{Engine: engine.Resolved{Identity: selected}}, nil
 	}, Local: func(store.NodeRow) bool { return true }, AdoptClaim: func(context.Context, store.ReconciledNode) error { return nil }, Layer: func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 		return OwnerLayerResult{}, nil
 	}}
