@@ -325,7 +325,7 @@ func TestNodeExecutorClosureTimeoutRunsAfterRun(t *testing.T) {
 	for _, stage := range []string{"before_run", "verify"} {
 		t.Run(stage, func(t *testing.T) {
 			input, s, deps, _ := executorFixture(t)
-			input.Attempt, s.row.Attempt = 1, 1
+			input.Attempt, s.row.Attempt = 0, 0
 			job := input.Accepted.Plan.Jobs[0]
 			job.Closures.AfterRun = []string{"after"}
 			if stage == "before_run" {

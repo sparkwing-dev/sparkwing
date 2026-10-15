@@ -17,8 +17,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -35,22 +38,24 @@ func (r claimEngine) Ensure(_ context.Context, identity engine.Identity, target 
 	return r.resolved, nil
 }
 
-type claimInstaller func(context.Context, engine.Resolved, string, []string) ([]string, error)
-
-func (f claimInstaller) Install(ctx context.Context, engine engine.Resolved, directory string, env []string) ([]string, error) {
-	return f(ctx, engine, directory, env)
-}
-
 func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 	for _, lost := range []bool{false, true} {
 		t.Run(map[bool]string{false: "success", true: "lease_lost"}[lost], func(t *testing.T) {
 			input, s, host, _ := claimedNodeFixture(t)
 			host.Mask = func(s string) string { return s }
 			root, sha := hostSourceCheckout(t)
-			s.run.Spec.Request.Request.Options.RepoLocation.Value = root
+			s.run.Spec.Request.Request.Source.Location = runspec.SourceLocation{LocalCheckout: root, PipelineDir: "."}
 			s.run.Spec.Request.Request.Git.SHA = sha
+			snapshots, err := NewFileEnvironmentSnapshots(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.run.Spec.Request.Request.Env, err = snapshots.Capture(t.Context(), []string{"PATH=" + os.Getenv("PATH")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			host.Snapshots = snapshots
 			s.run.Spec.Resolved.Entrypoint = "."
-			var err error
 			input.Accepted.Spec, err = json.Marshal(s.run.Spec)
 			if err != nil {
 				t.Fatal(err)
@@ -69,15 +74,16 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 			installed := false
 			host.Source = source.Options{
 				Engines: claimEngine{resolved: resolved}, Target: resolved.Target, SDK: engine.GoSDK,
-				InstallEnvironment: []string{"PATH=" + os.Getenv("PATH")}, GitEnvironment: []string{"PATH=" + os.Getenv("PATH")},
+				Base: procenv.Base{Local: true, Captured: []string{"PATH=/daemon/bin"}}, BuildEnvironment: sourcetest.BuildEnvironment,
 				ReadPin: func(string, engine.SDKKind) (engine.Pin, error) { return resolved.Identity.Pin, nil },
-				Installer: claimInstaller(func(_ context.Context, got engine.Resolved, directory string, env []string) ([]string, error) {
+				InstallSDK: func(_ context.Context, got engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
+					directory, env := filepath.Join(request.Directory, request.PipelineDir), request.Environment
 					installed = true
 					if !reflect.DeepEqual(got, resolved) || directory != root || len(env) != 1 || !strings.HasPrefix(env[0], "PATH=") {
 						t.Error("installer lost sealed engine, source or base environment")
 					}
-					return []string{exe, "-test.run=^TestProtocolSessionChild$", "--", mode}, nil
-				}),
+					return engine.SDKCommand{Directory: directory, Command: []string{exe, "-test.run=^TestProtocolSessionChild$", "--", mode}}, nil
+				},
 			}
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(nil)

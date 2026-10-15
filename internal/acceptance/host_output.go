@@ -151,6 +151,7 @@ func outputFixture(t *testing.T, mode string) (nodehost.NodeInput, nodehost.Outp
 	input.Accepted.Spec, _ = json.Marshal(spec)
 	st.snapshot.Run.Spec = &spec
 	input.Entry = &source.Entry{Engine: input.Engine}
+	input.Attempt++
 	attempt := runspec.AttemptIdentity{Team: "team", RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: input.Generation, Attempt: input.Attempt}
 	identity := blob.UploadIdentity{Kind: blob.UploadJob, Team: "team", RunID: input.Accepted.RunID, Principal: "principal", CapabilityRef: "live-claim", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: attempt}}
 	upload := nodehost.OutputUpload{Identity: identity, Authority: blob.Authority{CapabilityRef: identity.CapabilityRef, Principal: identity.Principal, Attempt: identity.Attempt, Repo: "example.com/acme/repo"}, Key: blob.RecordKey{Team: "team", Kind: blob.KindOutput, Scope: blob.Scope{Repo: "example.com/acme/repo", Pipeline: "build", Job: input.NodeID}, Name: "bound-output"}}
@@ -171,12 +172,15 @@ func outputFixture(t *testing.T, mode string) (nodehost.NodeInput, nodehost.Outp
 // upload and record commit. Persistence and byte authorization use contract fakes.
 func CheckOutputRecordCommit(t *testing.T) {
 	t.Helper()
-	for _, mode := range []string{"success", "null", "at_limit", "invalid", "invalid_seal", "oversized", "bind", "foreign_attempt", "foreign_generation", "foreign_run", "owner_receipt", "foreign_key", "foreign_ref", "foreign_authority", "foreign_principal", "cancelled", "put", "receipt_digest", "receipt_attempt", "commit", "record_key", "record_digest", "record_attempt"} {
+	for _, mode := range []string{"success", "bound_storage", "null", "at_limit", "invalid", "invalid_seal", "oversized", "bind", "foreign_attempt", "foreign_generation", "foreign_run", "owner_receipt", "foreign_key", "foreign_ref", "foreign_authority", "foreign_principal", "cancelled", "put", "receipt_digest", "receipt_attempt", "commit", "record_key", "record_digest", "record_attempt"} {
 		t.Run(mode, func(t *testing.T) {
 			input, adapter, b, _ := outputFixture(t, mode)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			switch mode {
+			case "bound_storage":
+				input.Storage = nodehost.StorageBinding{Bytes: b, Records: b, Authority: b.upload.Authority}
+				adapter.Blobs, adapter.Records = nil, nil
 			case "null":
 				b.value = []byte("null")
 			case "invalid":
@@ -207,7 +211,7 @@ func CheckOutputRecordCommit(t *testing.T) {
 				cancel()
 			}
 			key, err := adapter.PublishOutput(ctx, input, b.value)
-			ok := mode == "success" || mode == "null" || mode == "at_limit"
+			ok := mode == "success" || mode == "bound_storage" || mode == "null" || mode == "at_limit"
 			if ok {
 				if err != nil || key == nil || *key != b.upload.Key || b.commit == nil || b.commit.Source != b.upload.Identity || b.commit.Authority != b.upload.Authority || b.commit.Digest != outputDigest(b.value) {
 					t.Fatalf("key=%v commit=%+v error=%v", key, b.commit, err)
@@ -280,6 +284,7 @@ func CheckExecutorOutputCommit(t *testing.T) {
 	for _, mode := range []string{"success", "put", "commit", "result_refused"} {
 		t.Run(mode, func(t *testing.T) {
 			input, records, b, st := outputFixture(t, mode)
+			input.Attempt--
 			if mode == "result_refused" {
 				st.reject = store.CauseReport
 			}
@@ -293,7 +298,8 @@ func CheckExecutorOutputCommit(t *testing.T) {
 					process.input.RouteBinding = binding
 					return binding, nil
 				},
-				Start: func(context.Context, nodehost.NodeInput, nodehost.ExecutorActivity) (nodehost.ExecutorProcess, error) {
+				Start: func(_ context.Context, in nodehost.NodeInput, _ nodehost.ExecutorActivity) (nodehost.ExecutorProcess, error) {
+					process.input = in
 					return process, nil
 				},
 				EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {

@@ -47,6 +47,10 @@ type UnitClaim struct {
 // C2 Award in the same transaction. Named and queued trigger, plan, eval and job
 // claims use the same path; only launcher service scope can cross teams.
 // ReconcileNode self-claims use the same matching inputs and reservation checks.
+// Each requested kind requires its own live grant before one ordered scan. Empty,
+// duplicate, unknown and unauthorized kinds fail instead of being filtered silently.
+// A named trigger Target also accepts the matching here Award's trigger.host after
+// rechecking its first-claim/reclaim window, reservation and requester authority.
 func (s *Store) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error) {
 	panic("unimplemented: c1-data")
 }

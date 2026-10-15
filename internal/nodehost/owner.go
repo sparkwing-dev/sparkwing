@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -51,22 +53,25 @@ type OwnerLayerResult struct {
 // Source supplies the shared acquisition path. Acquire may replace it with a
 // trusted adapter that uses RunInput's sealed request and persisted acceptance.
 type OwnerHost struct {
-	Store    OwnerStore
-	Lease    lease.Keeper
-	Source   source.Options
-	Acquire  func(context.Context, RunInput) (*source.Entry, error)
-	Prepare  func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
-	Project  func(store.RunSnapshot) (store.ScheduleSnapshot, error)
-	Decide   func(store.ScheduleSnapshot) store.ScheduleDecision
-	Wait     func(context.Context, store.RunSnapshot) error
-	WaitNode WaitNodeChange
-	Layer    func(context.Context, LayerSpec, AcceptedRun, store.NodeRow) (OwnerLayerResult, error)
-	Local    func(store.NodeRow) bool
-	Bind     func(context.Context, AcceptedRun, store.ReconciledNode, *source.Entry) (NodeInput, error)
-	Executor NodeHost
-	Expand   func(context.Context, AcceptedRun, store.NodeRow) (json.RawMessage, *store.ExpansionFailure, error)
+	Snapshots CapturedEnvironmentLoader
+	Store     OwnerStore
+	Lease     lease.Keeper
+	Source    source.Options
+	Acquire   func(context.Context, RunInput) (*source.Entry, error)
+	Prepare   func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
+	Project   func(store.RunSnapshot) (store.ScheduleSnapshot, error)
+	Decide    func(store.ScheduleSnapshot) store.ScheduleDecision
+	Wait      func(context.Context, store.RunSnapshot) error
+	WaitNode  WaitNodeChange
+	Layer     func(context.Context, LayerSpec, AcceptedRun, store.NodeRow, StorageBinding) (OwnerLayerResult, error)
+	Local     func(store.NodeRow) bool
+	Bind      func(context.Context, AcceptedRun, store.ReconciledNode, *source.Entry, StorageBinding) (NodeInput, error)
+	Executor  NodeHost
+	Expand    func(context.Context, AcceptedRun, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error)
 	// Mask shares the source and SDK secret registry and protects returned errors.
 	Mask func(string) string
+	// Masks serializes accepted identifiers with the shared process service registry.
+	Masks *MaskRegistry
 }
 
 var (
@@ -99,6 +104,13 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 	if err := ownerRequestMatches(input, snapshot.Run); err != nil {
 		return completion, err
 	}
+	if h.Masks != nil && snapshot.Run.Request.Request.SecretArgs.Set {
+		for _, name := range snapshot.Run.Request.Request.SecretArgs.Value {
+			if err := h.Masks.Register(snapshot.Run.Request.Request.RequestedArgs[name]); err != nil {
+				return completion, err
+			}
+		}
+	}
 	if snapshot.Run.Spec != nil {
 		persisted, err := ownerAccepted(snapshot.Run)
 		if err != nil {
@@ -108,6 +120,19 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 			return completion, errors.New("resume differs from persisted acceptance")
 		}
 		input.Accepted = &persisted
+		if h.Masks != nil {
+			namespace := persisted.Plan
+			for _, row := range snapshot.Nodes {
+				var job nodeproto.JobSpec
+				if len(row.Spec) == 0 || json.Unmarshal(row.Spec, &job) != nil || job.ID != row.Ref.NodeID {
+					return completion, errors.New("persisted mask namespace has an invalid job")
+				}
+				namespace.Jobs = append(namespace.Jobs, job)
+			}
+			if err := h.Masks.Accept(namespace, func() error { return nil }); err != nil {
+				return completion, err
+			}
+		}
 	} else if input.Accepted != nil {
 		return completion, errors.New("resume has no persisted acceptance")
 	}
@@ -152,6 +177,10 @@ func (h *OwnerHost) acquire(ctx context.Context, input RunInput, row store.RunRo
 		return nil, err
 	}
 	options := h.Source
+	options.Base, err = capturedBase(ctx, options.Base, h.Snapshots, row.Request.Request.Env)
+	if err != nil {
+		return nil, err
+	}
 	if options.Engines == nil && input.Engines != nil {
 		options.Engines = input.Engines
 	}
@@ -208,16 +237,35 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	if err != nil {
 		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
+	if row.Request.Request.SecretArgs.Set {
+		for _, name := range row.Request.Request.SecretArgs.Value {
+			if !slices.Contains(prepared.Resolved.SecretArgs, name) {
+				prepared.Resolved.SecretArgs = append(prepared.Resolved.SecretArgs, name)
+			}
+		}
+	}
 	if input.PlanCache != nil {
 		prepared.Planning.Cache = input.PlanCache
+	}
+	if h.Masks != nil {
+		prepared.Planning.Validation.Secrets = planningSecrets{prior: prepared.Planning.Validation.Secrets, masker: h.Masks.masker}
 	}
 	plan, err := PlanInitial(ctx, prepared.Planning, prepared.Functions)
 	if err != nil {
 		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
-	accepted, err := h.Store.AcceptPlan(ctx, store.PlanAcceptance{RunID: input.RunID, Actor: input.Owner, Seal: runspec.SealInput{
-		Request: row.Request, Declarations: prepared.Declarations, Resolved: prepared.Resolved, Plan: plan.CanonicalPlan,
-	}})
+	var accepted store.AcceptedPlan
+	commit := func() error {
+		accepted, err = h.Store.AcceptPlan(ctx, store.PlanAcceptance{RunID: input.RunID, Actor: input.Owner, Seal: runspec.SealInput{
+			Request: row.Request, Declarations: prepared.Declarations, Resolved: prepared.Resolved, Plan: plan.CanonicalPlan,
+		}})
+		return err
+	}
+	if h.Masks != nil {
+		err = h.Masks.Accept(plan.Plan, commit)
+	} else {
+		err = commit()
+	}
 	if err != nil {
 		return AcceptedRun{}, err
 	}

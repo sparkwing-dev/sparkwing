@@ -158,6 +158,8 @@ type Authority struct {
 	Attempt       runspec.Optional[runspec.AttemptIdentity]
 	Repo          runspec.RepoKey
 	Ref           RefFacts
+	// Upload binds owner and publication writes, which may have no job attempt.
+	Upload runspec.Optional[UploadIdentity]
 }
 
 // safety: EdgeRequest checks authority independently from integrity and existence.
@@ -410,6 +412,7 @@ type RemoteCacheOptions struct {
 	Profile      string
 	AuthorityRef string
 	Repo         runspec.RepoKey
+	Records      RecordStore
 }
 
 // safety: RemoteCache exposes reads only, with no binary fetch or shared-cache write method.
@@ -451,6 +454,9 @@ type RecordLookup struct {
 	Authority Authority
 	Key       RecordKey
 	Budget    Budget
+	// VerifiedDefaultOnly requires the store to resolve sealed default-branch evidence.
+	// The caller's key cannot manufacture that evidence or widen its repo read scope.
+	VerifiedDefaultOnly bool
 }
 
 // safety: RecordLookupResult distinguishes a cache miss from a record with required missing bytes.

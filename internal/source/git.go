@@ -21,14 +21,7 @@ type gitClient struct {
 }
 
 func gitEnvironment(base []string) []string {
-	var env []string
-	for _, assignment := range base {
-		name, _, _ := strings.Cut(assignment, "=")
-		if !strings.HasPrefix(strings.ToUpper(name), "GIT_") {
-			env = append(env, assignment)
-		}
-	}
-	return append(env, "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:ssh", "GIT_LFS_SKIP_SMUDGE=1")
+	return append(append([]string{}, base...), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:ssh", "GIT_LFS_SKIP_SMUDGE=1")
 }
 
 func (g *gitClient) run(ctx context.Context, directory, remote string, args ...string) (output string, err error) {

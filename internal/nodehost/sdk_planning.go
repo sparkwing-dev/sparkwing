@@ -22,10 +22,13 @@ import (
 // PlanningProcessInput holds acquired code and host-resolved inputs. Args contains
 // request/YAML winners; describe fills only absent keys. Planning has no job bearer.
 type PlanningProcessInput struct {
-	Entry  *source.Entry
-	Runner nodeproto.RunnerIdentity
-	Run    nodeproto.RunContext
-	Args   map[string]string
+	Entry       *source.Entry
+	Runner      nodeproto.RunnerIdentity
+	Run         nodeproto.RunContext
+	Args        map[string]string
+	Environment runspec.EnvSnapshot
+	// SecretArgs retains classifications sealed at intake even if describe marks them public.
+	SecretArgs []string
 }
 
 // PreparedPlanning supplies OwnerPlanning's cache inputs and lazy SDK planner.
@@ -63,6 +66,9 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 		return PreparedPlanning{}, errors.New("SDK planning requires acquired code and sealed run identity")
 	}
 	input = clonePlanningProcessInput(input)
+	for _, name := range input.SecretArgs {
+		p.Masker.Register(input.Args[name])
+	}
 	functions := (PlanningFunctions{Validate: p.ValidatePlan, Hash: p.CanonicalHash, Warn: p.Warn}).defaults()
 	validate, hash := functions.Validate, functions.Hash
 	functions.Validate = func(raw json.RawMessage, validation nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
@@ -78,6 +84,17 @@ func (p SDKPlanner) Prepare(ctx context.Context, input PlanningProcessInput, pla
 			return "", p.planningError(context.Background(), err, true)
 		}
 		return digest, nil
+	}
+	if input.Environment.Digest != "" && planCacheDigestValid(planning.Inputs.EnvironmentDigest) {
+		if !planCacheDigestValid(input.Environment.Digest) {
+			planning.Inputs.EnvironmentDigest = ""
+		} else {
+			digest, err := functions.Hash(struct{ Host, Captured runspec.Hash }{planning.Inputs.EnvironmentDigest, input.Environment.Digest})
+			if err != nil {
+				return PreparedPlanning{}, err
+			}
+			planning.Inputs.EnvironmentDigest = digest
+		}
 	}
 	logs := planningLogs{masker: p.Masker, sink: p.Log}
 	var raw json.RawMessage
@@ -137,6 +154,8 @@ func clonePlanningProcessInput(input PlanningProcessInput) PlanningProcessInput 
 	entry.Command = slices.Clone(entry.Command)
 	input.Entry = &entry
 	input.Args = maps.Clone(input.Args)
+	input.SecretArgs = slices.Clone(input.SecretArgs)
+	input.Environment.Names = slices.Clone(input.Environment.Names)
 	input.Runner.Labels = slices.Clone(input.Runner.Labels)
 	if input.Run.Git != nil {
 		git := *input.Run.Git

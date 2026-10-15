@@ -119,6 +119,26 @@ The final three comparisons include all changes since the recorded merge base. E
 
 ## Required case details
 
+`CheckArtifactStaging` and `CheckExecutorArtifactStaging` exercise the host's
+required artifact read boundary under `storage-cas-integrity`. Missing records,
+missing or corrupt manifest/member bytes, reader-close errors and invalid paths
+fail. Verified downloads replace destinations after EOF and close. The real
+executor stages once around application retries, uses the committed attempt's
+storage binding, and reports failure before SDK startup when staging fails.
+These checks carry the consumed-artifact failure and workspace-safety behaviors
+of the old artifact tests. They do not close memo materialization, publication,
+native read-edge authorization or the legacy runtime cut.
+
+Amendment 1 adds `CheckHostServices` under the secret-identifier and SDK service
+scenarios. It drives registered endpoint handlers with policy/persistence fakes,
+checks acknowledged dynamic masks, short identifier collisions, optional step
+membership, end_line and masked markdown. Native authentication and SDK clients
+remain separate requirements. The application-retry cell also drives
+`CheckExecutorEnvelope` from persisted ordinal zero through start and retry.
+The source/output/replay fixtures now use sealed Source.Location and committed
+start ordinals. See [W3's handoff](w3-amendment-handoff.md) for unresolved native
+and cross-area contracts.
+
 `internal/nodehost/lifecycle_test.go:TestLayerOwnership` ports
 `TestLifecycleLayersPerPlacement` to the final owner/executor table. The old
 retry-auto, bounce and workers rows are removed from that proof.
@@ -129,7 +149,7 @@ remain separate requirements.
 The legacy retry-auto dispatch event and duplicate start-event conditions are
 removed from the scheduler and pod envelope. Its dedicated fixture and test rows
 are deleted. Application retry budget and backoff tests remain. The target
-`CheckExecutorEnvelope/retries` case checks one generation, advancing attempt
+`CheckExecutorEnvelope/retry` case checks one generation, advancing attempt
 ordinals and fresh process bindings without redispatch.
 
 `CheckHostReconciliation` uses `StateFollower.WaitNode` for terminal and requeued

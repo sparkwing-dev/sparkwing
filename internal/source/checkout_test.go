@@ -10,13 +10,14 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
 func TestPrepareCheckoutLocalPreservesWorkingTreeAndOriginHead(t *testing.T) {
 	dir, sha := sourcetest.Repository(t)
 	sourcetest.Write(t, filepath.Join(dir, ".sparkwing", "pipeline.go"), "package main // working tree\n")
-	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "local:" + dir, LocalCheckout: dir}, source.Options{GitEnvironment: sourcetest.Environment(t)})
+	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "local:" + dir, LocalCheckout: dir}, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +39,7 @@ func TestPrepareCheckoutLocalPreservesWorkingTreeAndOriginHead(t *testing.T) {
 func TestPrepareCheckoutKeepsSealedDefaultAndRefusesMovedLocalHEAD(t *testing.T) {
 	dir, sha := sourcetest.Repository(t)
 	spec := source.Spec{RepoKey: "local:" + dir, LocalCheckout: dir, SHA: sha, DefaultBranch: "release"}
-	entry, err := source.PrepareCheckout(t.Context(), spec, source.Options{GitEnvironment: sourcetest.Environment(t)})
+	entry, err := source.PrepareCheckout(t.Context(), spec, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +50,7 @@ func TestPrepareCheckoutKeepsSealedDefaultAndRefusesMovedLocalHEAD(t *testing.T)
 	sourcetest.Write(t, filepath.Join(dir, "new"), "later")
 	sourcetest.Git(t, dir, "add", "new")
 	sourcetest.Git(t, dir, "commit", "-qm", "later")
-	if _, err := source.PrepareCheckout(t.Context(), spec, source.Options{GitEnvironment: sourcetest.Environment(t)}); err == nil {
+	if _, err := source.PrepareCheckout(t.Context(), spec, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment}); err == nil {
 		t.Fatal("accepted a different local HEAD")
 	}
 }
@@ -57,7 +58,7 @@ func TestPrepareCheckoutKeepsSealedDefaultAndRefusesMovedLocalHEAD(t *testing.T)
 func TestPrepareCheckoutUnresolvedDefaultStaysAbsent(t *testing.T) {
 	dir, _ := sourcetest.Repository(t)
 	sourcetest.Git(t, dir, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
-	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "local:" + dir, LocalCheckout: dir}, source.Options{GitEnvironment: sourcetest.Environment(t)})
+	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "local:" + dir, LocalCheckout: dir}, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +76,7 @@ func TestPrepareCheckoutRefusesEscapingEntrypoint(t *testing.T) {
 	}
 	for _, path := range []string{"../", outside, "escape"} {
 		t.Run(path, func(t *testing.T) {
-			_, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "local:" + dir, LocalCheckout: dir, PipelineDir: path}, source.Options{GitEnvironment: sourcetest.Environment(t)})
+			_, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "local:" + dir, LocalCheckout: dir, PipelineDir: path}, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment})
 			if err == nil {
 				t.Fatal("accepted entry outside checkout")
 			}
@@ -100,7 +101,7 @@ func (a *access) BundleURL(context.Context, string) (string, error) {
 
 func TestPrepareCheckoutRequiresSealedSHAAndAuthorizedCredential(t *testing.T) {
 	for _, sha := range []string{"", "main", "--upload-pack=evil", strings.Repeat("z", 40)} {
-		_, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:github.com/team/repo", RemoteURL: "https://github.com/team/repo", SHA: sha}, source.Options{GitEnvironment: sourcetest.Environment(t), Workspace: t.TempDir()})
+		_, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:github.com/team/repo", RemoteURL: "https://github.com/team/repo", SHA: sha}, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir()})
 		if err == nil {
 			t.Fatalf("accepted noncommit %q", sha)
 		}
@@ -108,12 +109,12 @@ func TestPrepareCheckoutRequiresSealedSHAAndAuthorizedCredential(t *testing.T) {
 	spec := source.Spec{RepoKey: "git:github.com/team/repo", RemoteURL: "https://github.com/team/repo", SHA: strings.Repeat("a", 40)}
 	denied := errors.New("source release denied")
 	a := &access{err: denied}
-	_, err := source.PrepareCheckout(t.Context(), spec, source.Options{GitEnvironment: sourcetest.Environment(t), Workspace: t.TempDir(), Access: a})
+	_, err := source.PrepareCheckout(t.Context(), spec, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: a})
 	if !errors.Is(err, denied) || a.calls != 1 {
 		t.Fatalf("release denial = %v; calls = %d", err, a.calls)
 	}
 	a = &access{credential: source.Credential{Kind: "https", Host: "other.example", Username: "owner", Secret: "private-password"}}
-	_, err = source.PrepareCheckout(t.Context(), spec, source.Options{GitEnvironment: sourcetest.Environment(t), Workspace: t.TempDir(), Access: a})
+	_, err = source.PrepareCheckout(t.Context(), spec, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: a})
 	if err == nil || strings.Contains(err.Error(), a.credential.Secret) {
 		t.Fatalf("credential host refusal = %v", err)
 	}

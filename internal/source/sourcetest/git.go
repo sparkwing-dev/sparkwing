@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 // Remote redirects git fetches to local fixtures and records argv, env and private file paths.
@@ -114,4 +116,12 @@ func Write(t *testing.T, name, body string) {
 	if err := os.WriteFile(name, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// BuildEnvironment supplies fixture git controls while installation uses the shared policy.
+func BuildEnvironment(kind procenv.Kind, base procenv.Base, rt procenv.Runtime) ([]string, error) {
+	if kind == procenv.Git {
+		return append([]string{}, base.Captured...), nil
+	}
+	return procenv.Build(kind, base, rt)
 }

@@ -3,6 +3,7 @@ package nodehost
 import (
 	"encoding/json"
 	"maps"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -40,7 +41,7 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 	if selected == nil {
 		return PreparedPlanning{}, executorError(apierr.UnknownPipeline, "SDK describe does not declare the requested pipeline")
 	}
-	prepared := PreparedPlanning{Description: *selected, Args: maps.Clone(input.Args), SecretArgs: []string{}}
+	prepared := PreparedPlanning{Description: *selected, Args: maps.Clone(input.Args), SecretArgs: append([]string{}, input.SecretArgs...)}
 	if prepared.Args == nil {
 		prepared.Args = map[string]string{}
 	}
@@ -49,7 +50,9 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput) (P
 			prepared.Args[arg.Name] = *arg.Default
 		}
 		if arg.Secret {
-			prepared.SecretArgs = append(prepared.SecretArgs, arg.Name)
+			if !slices.Contains(prepared.SecretArgs, arg.Name) {
+				prepared.SecretArgs = append(prepared.SecretArgs, arg.Name)
+			}
 			p.Masker.Register(prepared.Args[arg.Name])
 		}
 	}

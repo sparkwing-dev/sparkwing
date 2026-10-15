@@ -14,9 +14,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspec.Spec, job nodeproto.JobSpec, first, retryAllowed bool) (result store.NodeResult, err error) {
+func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspec.Spec, job nodeproto.JobSpec, retryAllowed bool) (result store.NodeResult, err error) {
 	parent := ctx
-	started := !first
 	ctx, cancel, err := h.deps.ChildContext(ctx, input.Execution.Timeout.Value, 0)
 	if err != nil {
 		return h.failure(err), err
@@ -34,10 +33,10 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			var cleanupErr *executorCleanupError
 			if errors.As(err, &cleanupErr) {
 				result = h.failure(errors.Join(timeout, cleanupErr))
-			} else if started {
+			} else {
 				err = nil
 			}
-			if started && !retryAllowed && !afterRun && session != nil && parent.Err() == nil {
+			if !retryAllowed && !afterRun && session != nil && parent.Err() == nil {
 				afterCtx, afterCancel := context.WithTimeout(parent, limits.CleanupTimeout)
 				afterErr := h.afterRun(afterCtx, session, input, job, result)
 				afterCancel()
@@ -109,26 +108,15 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			err = executorError(apierr.SpecDrift, "recovery source is not a failed job")
 			return h.failure(err), err
 		}
-		failure, readErr := h.deps.ReadFailure(ctx, source)
+		failure, readErr := h.deps.ReadFailure(ctx, source, row.Generation)
 		if readErr != nil {
 			return h.failure(readErr), readErr
 		}
-		if failure.Job != job.OnFailureOf || failure.Error == nil {
+		if failure == nil || failure.Job != job.OnFailureOf || failure.Error == nil {
 			err = executorError(apierr.SpecDrift, "recovery failure does not match its source")
 			return h.failure(err), err
 		}
-		session.failure = &failure
-	}
-	if first {
-		applied, startErr := h.transition(ctx, input, store.CauseStart, store.NodeRunning, store.TransitionExtra{Attempt: &store.NodeAttempt{Identity: runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: input.Attempt, Generation: input.Generation}, Holder: input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, ExecutorName: input.GrantedRunner.Name, ExecutorKind: input.GrantedRunner.Type}})
-		if startErr != nil {
-			return h.failure(startErr), startErr
-		}
-		if applied.Generation != input.Generation || applied.Attempt != input.Attempt {
-			err = errors.New("start transition returned an inconsistent claim or attempt")
-			return h.failure(err), err
-		}
-		started = true
+		session.failure = failure
 	}
 	if input.Attempt == 1 {
 		for _, closure := range job.Closures.BeforeRun {

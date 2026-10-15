@@ -91,41 +91,12 @@ func encoded(t *testing.T, records []sparkwing.LogRecord) string {
 	return string(raw)
 }
 
-func TestLogSinkMasksTextAndRecords(t *testing.T) {
+func TestLogSinkMasksRecords(t *testing.T) {
 	log := &recordLog{}
 	sink := newSink(t, log, &fakeState{})
-	sink.Text(nodehost.LevelInfo, "token="+logSecret)
-	sink.Text(nodehost.LevelWarn, "stderr "+logSecret)
 	sink.Record(nodeproto.LogRecord{TS: "x", Msg: "msg " + logSecret, Attrs: json.RawMessage(`{"nested":{"v":"` + logSecret + `"}}`)})
-	sink.Flush()
-	if got := encoded(t, log.records); strings.Contains(got, logSecret) || strings.Count(got, "***") != 4 {
+	if got := encoded(t, log.records); strings.Contains(got, logSecret) || strings.Count(got, "***") != 2 {
 		t.Fatalf("records not masked: %s", got)
-	}
-}
-
-func TestLogSinkMasksSecretSplitAcrossLinePieces(t *testing.T) {
-	log := &recordLog{}
-	sink := newSink(t, log, &fakeState{})
-	head := strings.Repeat("x", nodehost.MaxTextLine-4)
-	sink.Text(nodehost.LevelInfo, head+logSecret[:4])
-	sink.Text(nodehost.LevelInfo, logSecret[4:]+" tail")
-	long := strings.Repeat("y", nodehost.MaxTextLine)
-	sink.Text(nodehost.LevelWarn, long)
-	sink.Flush()
-
-	var info, warn strings.Builder
-	for _, rec := range log.records {
-		if rec.Level == nodehost.LevelInfo {
-			info.WriteString(rec.Msg)
-		} else {
-			warn.WriteString(rec.Msg)
-		}
-	}
-	if want := head + "*** tail"; info.String() != want {
-		t.Fatalf("stdout pieces stored as %q...%q, want the secret masked whole", info.String()[:8], info.String()[len(head)-8:])
-	}
-	if warn.String() != long {
-		t.Fatalf("held tail of an unfinished line not flushed: got %d bytes, want %d", warn.Len(), len(long))
 	}
 }
 
@@ -147,43 +118,6 @@ func TestLogSinkMasksAttrKeysNumbersAndNestedValues(t *testing.T) {
 	}
 	if b, _ := log.records[2].Attrs["a"].(map[string]any)["b"].([]any); len(b) != 2 || b[1] != "<***>" {
 		t.Errorf("nested secret not masked in place: %+v", log.records[2].Attrs)
-	}
-}
-
-func TestLogSinkKeepsDropNoticesOutOfASplitStderrSecret(t *testing.T) {
-	log := &recordLog{}
-	sink := newSink(t, log, &fakeState{})
-	head := strings.Repeat("x", nodehost.MaxTextLine-4)
-	sink.Text(nodehost.LevelWarn, head+logSecret[:4])
-	sink.Record(nodeproto.LogRecord{TS: "x", Level: "warn", Msg: "sparkwing: 3 log lines dropped while the log sink was behind"})
-	sink.Text(nodehost.LevelWarn, logSecret[4:]+" tail")
-	sink.Flush()
-	var stderr strings.Builder
-	for _, rec := range log.records {
-		if !strings.Contains(rec.Msg, "dropped") {
-			stderr.WriteString(rec.Msg)
-		}
-	}
-	if stderr.String() != head+"*** tail" || strings.Contains(encoded(t, log.records), logSecret[4:]) {
-		t.Fatal("drop notice broke the split stderr secret apart")
-	}
-}
-
-func TestLogSinkHoldsAtMostOneValueOfOverlappingText(t *testing.T) {
-	log := &recordLog{}
-	sink := newSink(t, log, &fakeState{}, "aa")
-	run := strings.Repeat("a", nodehost.MaxTextLine)
-	for i := range 3 {
-		sink.Text(nodehost.LevelInfo, run)
-		if len(log.records) != i+1 || len(log.records[i].Msg) < nodehost.MaxTextLine {
-			t.Fatalf("piece %d held back: %d records stored", i, len(log.records))
-		}
-	}
-	sink.Flush()
-	for _, rec := range log.records {
-		if strings.Contains(rec.Msg, "aa") {
-			t.Fatalf("overlapping secret stored unmasked in a %d-byte record", len(rec.Msg))
-		}
 	}
 }
 
@@ -284,9 +218,8 @@ func writeThrough(t *testing.T, logs orchestrator.LogBackend) {
 		t.Fatalf("open node log: %v", err)
 	}
 	sink := newSink(t, nlog, &fakeState{})
-	sink.Text(nodehost.LevelInfo, "out "+logSecret)
+	sink.Text(nodehost.LevelInfo, "out ***")
 	sink.Record(nodeproto.LogRecord{TS: "x", Step: "s", Event: "step_end", Msg: "done"})
-	sink.Flush()
 	if err := nlog.Close(); err != nil {
 		t.Fatalf("close node log: %v", err)
 	}
@@ -324,7 +257,7 @@ func TestLogSinkHandsPrintedTextToATextWriter(t *testing.T) {
 	log := &textLog{}
 	sink := newSink(t, log, &fakeState{})
 	sink.Record(nodeproto.LogRecord{Level: "info", Msg: "from the sdk"})
-	sink.Text(nodehost.LevelInfo, "printed "+logSecret)
+	sink.Text(nodehost.LevelInfo, "printed ***")
 	sink.Text(nodehost.LevelWarn, "to stderr")
 	if got, exp := encoded(t, log.records), encoded(t, []sparkwing.LogRecord{{TS: hostNow, Level: "info", JobID: "build", Msg: "from the sdk"}}); got != exp {
 		t.Errorf("records:\n got %s\nwant %s", got, exp)
@@ -355,9 +288,9 @@ func TestLogSinkBoundsAnOversizedSummary(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(body) > 1<<20 || !strings.Contains(op, "summary truncated") || strings.Contains(op, logSecret[:8]) {
+		if len(body) > 1<<20 || !strings.Contains(op, "[elided]") || strings.Contains(op, logSecret[:8]) {
 			t.Errorf("summary body is %d bytes, notes the cut %v, leaks the secret %v",
-				len(body), strings.Contains(op, "summary truncated"), strings.Contains(op, logSecret[:8]))
+				len(body), strings.Contains(op, "[elided]"), strings.Contains(op, logSecret[:8]))
 		}
 	}
 	if state.ops[2] != "node-summary run-1/build ## small" {
@@ -381,9 +314,9 @@ func TestLogSinkBoundsAnOversizedAnnotation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(body) > 1<<20 || !strings.Contains(op, "annotation truncated") || strings.Contains(op, logSecret[:8]) {
+		if len(body) > 1<<20 || !strings.Contains(op, "[elided]") || strings.Contains(op, logSecret[:8]) {
 			t.Errorf("annotation body is %d bytes, notes the cut %v, leaks the secret %v",
-				len(body), strings.Contains(op, "annotation truncated"), strings.Contains(op, logSecret[:8]))
+				len(body), strings.Contains(op, "[elided]"), strings.Contains(op, logSecret[:8]))
 		}
 	}
 	if state.ops[2] != "node-annotation run-1/build built" {

@@ -81,7 +81,7 @@ func TestInstallOutputMasksACredentialSplitAtTheLineLimit(t *testing.T) {
 	masker := secrets.NewMasker()
 	masker.Register(secret)
 	var dst bytes.Buffer
-	out, finish, err := maskedInstallOutput(t.Context(), masker, &dst)
+	out, err := maskedInstallOutput(t.Context(), masker, &dst)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestInstallOutputMasksACredentialSplitAtTheLineLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	finish()
+	out.Flush()
 	// safety: each piece is printed on its own line, so the check joins them back before looking for the value.
 	if joined := strings.ReplaceAll(dst.String(), "\n", ""); strings.Contains(joined, secret) || strings.Contains(joined, "proxy-pass") {
 		t.Fatal("a credential split at the line limit reached the output unmasked")

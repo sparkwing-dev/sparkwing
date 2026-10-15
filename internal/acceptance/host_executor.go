@@ -37,7 +37,7 @@ func (s *executionHostStore) TransitionNode(_ context.Context, change store.Node
 	if change.Cause == s.reject {
 		return store.Applied{}, errors.New("result transaction refused")
 	}
-	if change.Cause == store.CauseRetry {
+	if change.Cause == store.CauseRetry || change.Cause == store.CauseStart {
 		s.attempt++
 	}
 	return store.Applied{Generation: row.Generation, Attempt: s.attempt}, nil
@@ -73,7 +73,7 @@ func (p *executionSDK) Request(ctx context.Context, request nodeproto.Request) (
 		}
 		*p.trace = append(*p.trace, fmt.Sprintf("body:%d", request.Attempt))
 		outcome := "success"
-		if p.mode == "retry" && request.Attempt < 3 {
+		if (p.mode == "retry" || p.mode == "artifact_retry") && request.Attempt < 3 {
 			outcome = "failed"
 		}
 		result = nodeproto.RunResult{Outcome: outcome}
@@ -97,15 +97,23 @@ func (p *executionSDK) Cleanup(ctx context.Context) error {
 	return nil
 }
 
-func executionHostFixture(t *testing.T, mode string, trace *[]string, processes *[]*executionSDK) (nodehost.NodeInput, *executionHostStore, *nodehost.ClaimedNodeHost) {
+func executionHostFixture(t *testing.T, mode string, trace *[]string, processes *[]*executionSDK, configure ...func(*nodehost.ExecutorDependencies)) (nodehost.NodeInput, *executionHostStore, *nodehost.ClaimedNodeHost) {
 	t.Helper()
-	job := nodeproto.JobSpec{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body", Risks: []string{"prod"}}},
+	job := nodeproto.JobSpec{
+		ID: "job", Steps: []nodeproto.StepSpec{{ID: "body", Risks: []string{"prod"}}},
 		Closures: nodeproto.ClosureSpec{SkipIf: []string{"owner_skip"}, MemoKey: "owner_key", BeforeRun: []string{"before"}, AfterRun: []string{"after"}},
 	}
 	if mode == "output_refused" {
 		job.ResultStep = "body"
 	}
+	if mode == "artifact_retry" {
+		job.Needs = []string{"producer"}
+		job.Consumes = []nodeproto.ArtifactInput{{Producer: "producer"}}
+	}
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
+	if mode == "artifact_retry" {
+		plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: "producer", Artifacts: []string{"bin/program"}})
+	}
 	planHash, _ := expansionHash(plan)
 	jobHash, _ := expansionHash(job)
 	identity := engine.Identity{Version: "v1.0.0", ManifestDigest: "verified", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
@@ -113,7 +121,10 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	execution := runspec.JobExecutionSettings{}
 	execution.Retry.Set, execution.Retry.Value = true, 2
 	request := runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "build"}}
-	request.Request.Options.RepoLocation.Set, request.Request.Options.RepoLocation.Value = true, "https://example.com/acme/repo.git"
+	if mode == "artifact_retry" {
+		request.Request.Team = "team"
+	}
+	request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://example.com/acme/repo.git", PipelineDir: ".sparkwing"}
 	request.Request.Git.SHA, request.Request.Git.Repository.Key = strings.Repeat("a", 40), "example.com/acme/repo"
 	spec := runspec.Spec{Hash: "spec", PlanHash: planHash, Request: request, Resolved: runspec.Resolved{Engine: identity, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"job": execution}}}}
 	if mode != "risk_refused" {
@@ -122,14 +133,19 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	raw, _ := json.Marshal(spec)
 	body, _ := json.Marshal(plan)
 	jobBody, _ := json.Marshal(job)
-	row := store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 2, Attempt: 1, Spec: jobBody, SpecHash: string(jobHash), Execution: execution}
-	s := &executionHostStore{claimedHostStore: claimedHostStore{snapshot: store.RunSnapshot{Run: store.RunRow{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: body}, Nodes: []store.NodeRow{row}}}, attempt: 1}
+	row := store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 2, Attempt: 0, Spec: jobBody, SpecHash: string(jobHash), Execution: execution}
+	s := &executionHostStore{claimedHostStore: claimedHostStore{snapshot: store.RunSnapshot{Run: store.RunRow{ID: "run", Spec: &spec, PlanHash: string(planHash), Plan: body}, Nodes: []store.NodeRow{row}}}, attempt: 0}
+	if mode == "artifact_retry" {
+		producer, _ := json.Marshal(plan.Jobs[1])
+		producerHash, _ := expansionHash(plan.Jobs[1])
+		s.snapshot.Nodes = append(s.snapshot.Nodes, store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "producer"}, Status: store.StatusDone, Outcome: "success", Spec: producer, SpecHash: string(producerHash)})
+	}
 	if mode == "result_refused" {
 		s.reject = store.CauseReport
 	}
-	input := nodehost.NodeInput{Accepted: nodehost.AcceptedRun{RunID: "run", Spec: raw, SpecHash: "spec", PlanHash: string(planHash), Plan: plan}, NodeID: "job", Generation: 2, Attempt: 1, SpecHash: string(jobHash), Execution: execution, Engine: resolved, Authority: nodehost.ClaimAuthority{Holder: "runner", CapabilityPrefix: "claim"}, RouteBinding: nodeproto.ProcessBinding{RunID: "run", JobID: "job"}}
+	input := nodehost.NodeInput{Accepted: nodehost.AcceptedRun{RunID: "run", Spec: raw, SpecHash: "spec", PlanHash: string(planHash), Plan: plan}, NodeID: "job", Generation: 2, Attempt: 0, SpecHash: string(jobHash), Execution: execution, Engine: resolved, Authority: nodehost.ClaimAuthority{Holder: "runner", CapabilityPrefix: "claim"}, RouteBinding: nodeproto.ProcessBinding{RunID: "run", JobID: "job"}}
 	input.RouteBinding.Routes.Bearer = "parent-authority"
-	executor, err := nodehost.NewNodeExecutor(nodehost.ExecutorDependencies{
+	dependencies := nodehost.ExecutorDependencies{
 		Store: s, Mask: func(text string) string { return strings.ReplaceAll(text, "private", "***") },
 		Bind: func(_ context.Context, in nodehost.NodeInput) (nodeproto.ProcessBinding, error) {
 			binding := in.RouteBinding
@@ -159,16 +175,24 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 		},
 		PrepareLayer: func(_ context.Context, layer nodehost.LayerSpec, _ nodehost.NodeInput, _ nodeproto.JobSpec) (nodehost.ExecutorFinalizer, error) {
 			*trace = append(*trace, layer.Name+":in")
-			return func(context.Context, *store.NodeResult) error { *trace = append(*trace, layer.Name+":out"); return nil }, nil
+			return func(context.Context, nodehost.NodeInput, *store.NodeResult) error {
+				*trace = append(*trace, layer.Name+":out")
+				return nil
+			}, nil
 		},
 		PublishOutput: func(context.Context, nodehost.NodeInput, json.RawMessage) (*blob.RecordKey, error) {
 			return nil, errors.New("private output refused")
 		},
-	})
+	}
+	for _, apply := range configure {
+		apply(&dependencies)
+	}
+	executor, err := nodehost.NewNodeExecutor(dependencies)
 	if err != nil {
 		t.Fatal(err)
 	}
-	host := &nodehost.ClaimedNodeHost{Store: s, Executor: executor, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Mask: func(string) string { return "masked" },
+	host := &nodehost.ClaimedNodeHost{
+		Store: s, Executor: executor, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Mask: func(string) string { return "masked" },
 		Acquire: func(_ context.Context, in source.Spec, _ source.Options) (*source.Entry, error) {
 			return &source.Entry{Engine: resolved, SHA: in.SHA, RepoKey: in.RepoKey}, nil
 		},

@@ -38,8 +38,9 @@ type ExecutorProcess interface {
 }
 
 // ExecutorFinalizer saves an executor layer's state after its inner layers end.
+// Finalizers receive the last committed attempt and its refreshed storage binding.
 // Artifact publication returns verified references; the store authorizes attachment.
-type ExecutorFinalizer func(context.Context, *store.NodeResult) error
+type ExecutorFinalizer func(context.Context, NodeInput, *store.NodeResult) error
 
 // ExecutorActivity connects logs and authorized child waits to the idle budget.
 // Await pauses that budget until its returned function is called. Concurrent
@@ -57,7 +58,10 @@ type ExecutorActivity struct {
 // Bind delegates a fresh process bearer for each attempt. Start takes ownership
 // of that binding and must revoke it on failed startup as well as on Close.
 // A bearer-bearing input requires Bind; unbound transports may omit it.
+// BindStorage refreshes byte/record authority after each start or retry commit.
+// Configured storage requires this factory; failed refresh suppresses finalizer writes.
 type ExecutorDependencies struct {
+	BindStorage   func(context.Context, NodeInput) (StorageBinding, error)
 	Store         NodeTransitionStore
 	Bind          func(context.Context, NodeInput) (nodeproto.ProcessBinding, error)
 	Start         func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error)
@@ -68,7 +72,7 @@ type ExecutorDependencies struct {
 	Validation    nodeproto.ValidationContext
 	PrepareLayer  func(context.Context, LayerSpec, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
 	PublishOutput func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error)
-	ReadFailure   func(context.Context, store.NodeRef) (nodeproto.JobFailure, error)
+	ReadFailure   func(context.Context, store.NodeRef, int64) (*nodeproto.JobFailure, error)
 	Mask          func(string) string
 }
 
@@ -116,7 +120,15 @@ func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error)
 	if row.CancelRequestedAt != nil {
 		return h.report(ctx, input, store.NodeResult{Outcome: store.NodeCancelled, Reason: string(apierr.ReasonCancelled)}, nil)
 	}
-	result, runErr := h.layers(ctx, input, job, func() (store.NodeResult, error) { return h.attempts(ctx, input, spec, row, job) })
+	input, err = h.startExecution(ctx, input, spec)
+	if err != nil {
+		return h.report(ctx, input, h.failure(err), err)
+	}
+	input, err = h.bindStorage(ctx, input)
+	if err != nil {
+		return h.report(ctx, input, h.failure(err), err)
+	}
+	result, runErr := h.layers(ctx, &input, job, func() (store.NodeResult, error) { return h.attempts(ctx, &input, spec, row, job) })
 	return h.report(ctx, input, result, runErr)
 }
 
@@ -124,7 +136,7 @@ func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.S
 	var spec runspec.Spec
 	var row store.NodeRow
 	var job nodeproto.JobSpec
-	if input.Accepted.RunID == "" || input.NodeID == "" || input.Attempt < 1 || input.Generation < 1 || input.Authority.Holder == "" || input.Authority.CapabilityPrefix == "" || input.Entry == nil {
+	if input.Accepted.RunID == "" || input.NodeID == "" || input.Attempt < 0 || input.Generation < 1 || input.Authority.Holder == "" || input.Authority.CapabilityPrefix == "" || input.Entry == nil {
 		return spec, row, job, errors.New("node execution lacks an accepted claim or source entry")
 	}
 	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
@@ -178,15 +190,15 @@ func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.S
 	return spec, row, job, nil
 }
 
-func (h *nodeExecutor) layers(ctx context.Context, input NodeInput, job nodeproto.JobSpec, body func() (store.NodeResult, error)) (result store.NodeResult, err error) {
+func (h *nodeExecutor) layers(ctx context.Context, input *NodeInput, job nodeproto.JobSpec, body func() (store.NodeResult, error)) (result store.NodeResult, err error) {
 	var finalizers []ExecutorFinalizer
 	defer func() {
 		for i := len(finalizers) - 1; i >= 0; i-- {
 			var refused *executorTransitionError
-			if executorLostAuthority(ctx) != nil || errors.As(err, &refused) {
+			if executorLostAuthority(ctx) != nil || errors.As(err, &refused) || h.deps.BindStorage != nil && input.Storage.Bytes == nil {
 				break
 			}
-			if finishErr := finalizers[i](ctx, &result); finishErr != nil {
+			if finishErr := finalizers[i](ctx, *input, &result); finishErr != nil {
 				err = errors.Join(err, finishErr)
 				result = h.failure(err)
 			}
@@ -204,7 +216,7 @@ func (h *nodeExecutor) layers(ctx context.Context, input NodeInput, job nodeprot
 			}
 			continue
 		}
-		finish, prepareErr := h.deps.PrepareLayer(ctx, layer, input, job)
+		finish, prepareErr := h.deps.PrepareLayer(ctx, layer, *input, job)
 		if prepareErr != nil {
 			return h.failure(prepareErr), prepareErr
 		}
@@ -215,10 +227,29 @@ func (h *nodeExecutor) layers(ctx context.Context, input NodeInput, job nodeprot
 	return body()
 }
 
-func (h *nodeExecutor) attempts(ctx context.Context, input NodeInput, spec runspec.Spec, row store.NodeRow, job nodeproto.JobSpec) (store.NodeResult, error) {
+func (h *nodeExecutor) startExecution(ctx context.Context, input NodeInput, spec runspec.Spec) (NodeInput, error) {
+	if input.Attempt == math.MaxInt64 {
+		return input, &executorTransitionError{err: errors.New("attempt ordinal exhausted")}
+	}
+	expected := input.Attempt + 1
+	applied, err := h.transition(ctx, input, store.CauseStart, store.NodeRunning, store.TransitionExtra{Attempt: &store.NodeAttempt{
+		Identity: runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: expected, Generation: input.Generation},
+		Holder:   input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, ExecutorName: input.GrantedRunner.Name, ExecutorKind: input.GrantedRunner.Type,
+	}})
+	if err != nil {
+		return input, err
+	}
+	if applied.Generation != input.Generation || applied.Attempt != expected {
+		return input, &executorTransitionError{err: errors.New("start transition returned an inconsistent claim or attempt")}
+	}
+	input.Attempt = applied.Attempt
+	return input, nil
+}
+
+func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runspec.Spec, row store.NodeRow, job nodeproto.JobSpec) (store.NodeResult, error) {
 	remaining := max(0, input.Execution.Retry.Value-row.ApplicationRetries)
 	for retry := 0; ; retry++ {
-		result, err := h.attempt(ctx, input, spec, job, retry == 0, retry < remaining)
+		result, err := h.attempt(ctx, *input, spec, job, retry < remaining)
 		if ctx.Err() != nil {
 			return h.failure(context.Cause(ctx)), context.Cause(ctx)
 		}
@@ -230,7 +261,7 @@ func (h *nodeExecutor) attempts(ctx context.Context, input NodeInput, spec runsp
 		}
 		wait := executorBackoff(input.Execution.RetryBackoff.Value, retry+1)
 		retryAt := time.Now().Add(wait)
-		applied, err := h.transition(ctx, input, store.CauseRetry, store.NodeRunning, store.TransitionExtra{Result: &result, RetryAt: &retryAt})
+		applied, err := h.transition(ctx, *input, store.CauseRetry, store.NodeRunning, store.TransitionExtra{Result: &result, RetryAt: &retryAt})
 		if err != nil {
 			return result, err
 		}
@@ -238,6 +269,12 @@ func (h *nodeExecutor) attempts(ctx context.Context, input NodeInput, spec runsp
 			return result, errors.New("retry transition returned an inconsistent claim or attempt")
 		}
 		input.Attempt = applied.Attempt
+		bound, bindErr := h.bindStorage(ctx, *input)
+		if bindErr != nil {
+			input.Storage = StorageBinding{}
+			return h.failure(bindErr), bindErr
+		}
+		*input = bound
 		if err = executorWait(ctx, wait); err != nil {
 			return h.failure(err), err
 		}
@@ -264,7 +301,7 @@ func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result store
 		return errors.Join(runErr, err)
 	}
 	if ctx.Err() != nil {
-		result = store.NodeResult{Outcome: store.NodeCancelled, Reason: string(apierr.ReasonCancelled), MaskedError: h.deps.Mask(context.Cause(ctx).Error())}
+		result = store.NodeResult{Outcome: store.NodeCancelled, Reason: string(apierr.ReasonCancelled), MaskedError: limits.Error(h.deps.Mask(context.Cause(ctx).Error()))}
 	}
 	if result.Outcome == "" {
 		result = h.failure(runErr)
@@ -284,7 +321,7 @@ func (e *executorTransitionError) Unwrap() error { return e.err }
 func (h *nodeExecutor) failure(err error) store.NodeResult {
 	result := store.NodeResult{Outcome: store.NodeFailed}
 	if err != nil {
-		result.MaskedError = h.deps.Mask(err.Error())
+		result.MaskedError = limits.Error(h.deps.Mask(err.Error()))
 	}
 	var failure *apierr.Error
 	if errors.As(err, &failure) {
@@ -331,3 +368,27 @@ func executorWait(ctx context.Context, wait time.Duration) error {
 }
 
 var _ NodeTransitionStore = (*store.Tenant)(nil)
+
+func (h *nodeExecutor) bindStorage(ctx context.Context, input NodeInput) (NodeInput, error) {
+	if h.deps.BindStorage == nil {
+		if input.Storage.Bytes != nil || input.Storage.Records != nil || input.Storage.RemoteCache != nil || input.Storage.Authority.CapabilityRef != "" {
+			return input, errors.New("job storage requires a fresh binding factory")
+		}
+		return input, nil
+	}
+	binding, err := h.deps.BindStorage(ctx, input)
+	if err != nil {
+		return input, err
+	}
+	var spec runspec.Spec
+	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
+		return input, err
+	}
+	authority := binding.Authority
+	attempt := runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Attempt: input.Attempt, Generation: input.Generation}
+	if binding.Bytes == nil || binding.Records == nil || authority.CapabilityRef == "" || authority.Principal == "" || !authority.Attempt.Set || authority.Attempt.Value != attempt || authority.Repo == "" || spec.Request.Request.Git.Repository.Key != "" && authority.Repo != spec.Request.Request.Git.Repository.Key {
+		return input, errors.New("storage binding differs from its committed job attempt")
+	}
+	input.Storage = binding
+	return input, nil
+}

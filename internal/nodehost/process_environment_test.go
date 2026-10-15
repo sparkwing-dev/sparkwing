@@ -21,6 +21,7 @@ func TestSDKEnvironmentProjectsSealedValuesAndPersistedGeneratedJob(t *testing.T
 	}
 	spec.Request.Request.Git = runspec.Git{Ref: "feature", SHA: "sealed-sha", Repository: runspec.Repository{Display: "acme/repo"}}
 	spec.Request.Request.Origin = runspec.OriginApp
+	spec.Request.Request.Env, _ = runspec.EnvironmentDigest(map[string]string{"CAPTURED": "snapshot"})
 	spec.Resolved.Settings.Options.DryRun.Set, spec.Resolved.Settings.Options.DryRun.Value = true, true
 	input.Accepted.Spec, _ = json.Marshal(spec)
 	input.GrantedRunner = nodeproto.RunnerIdentity{Name: "awarded", Type: "cloud", Labels: []string{"gpu"}}
@@ -68,7 +69,7 @@ func TestSDKPlanningEnvironmentHasNoJobStartup(t *testing.T) {
 		}
 		return []string{}, nil
 	}}
-	if _, err := policy.planning(input); err != nil {
+	if _, err := policy.planning(t.Context(), input); err != nil {
 		t.Fatal(err)
 	}
 }

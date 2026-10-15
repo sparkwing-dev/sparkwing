@@ -185,7 +185,7 @@ func TestOwnerHostPolicyFailureCannotHideBehindTerminalNode(t *testing.T) {
 		}
 		return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
 	}
-	h.Layer = func(ctx context.Context, _ LayerSpec, _ AcceptedRun, row store.NodeRow) (OwnerLayerResult, error) {
+	h.Layer = func(ctx context.Context, _ LayerSpec, _ AcceptedRun, row store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		_, err := f.TransitionNode(ctx, store.NodeTransition{Ref: row.Ref, To: store.NodeSkipped})
 		return OwnerLayerResult{}, errors.Join(failure, err)
 	}

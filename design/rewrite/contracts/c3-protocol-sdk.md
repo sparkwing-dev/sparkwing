@@ -1,5 +1,58 @@
 # C3 protocol and SDK contract
 
+[W3 amendment implementation and remaining integration](w3-amendment-handoff.md)
+records the current host boundary. Native placement assembly remains incomplete.
+[Required artifact staging](w3-artifact-continuation.md) adds the verified read
+boundary and its executor acceptance checks. Publication and cache assembly remain open.
+
+## Amendment 1: shared host inputs
+
+[Amendments 1](amendments-1.md) defines the required worker integrations.
+RunInput and NodeInput now carry StorageBinding: verified byte storage,
+transactional records, current authority and optional read-only remote cache.
+Refresh the binding for each attempt/generation. The shared host layers use these
+clients for artifacts, memo and depcache. No cache-service or ArtifactStore adapter
+is restored. The SDK's declared Cache helpers remain author declarations, and
+pipeline tooling uses their public workdir-safe keys.
+
+Source acquisition consumes Source.Location from the request seal, separately
+from repo identity and checkout policy. RemoteURL contains no credential and
+remote acquisition uses the sealed SHA. LocalCheckout is authorized on the
+machine whose store admitted it. PipelineDir stays inside that checkout.
+Intake verifies that the location belongs to the sealed repository before any
+credential release. Repo display text is never a clone location. Source.Options.Base feeds procenv
+for Git and Install. Resolve the pin after acquisition, then call the selected
+engine's InstallSDK. Accepted executions Ensure the sealed engine identity before
+reconstruction. Host-version binaries and ambient runner identity are not substitutes.
+
+Reconciliation supports MaterializeOnly: an authorized cache/retry hit is committed,
+while a miss returns Dispatch without stealing remote execution. Private execution
+responses preserve declaration bytes/hash, settings, retries, fences, cancellation
+and expansion state. Expansion replay returns current persisted jobs, which may
+already be running or terminal. Accepted expansion bodies preserve empty groups.
+ReadFailure supplies persisted recovery context through the declared read edge.
+DecisionCancelHolder uses the owner's scoped cancellation request and lets the
+holder finish. Both owners continue to use the same scheduling projection/Decide.
+
+Protocol cancel accepts job with an optional step, or target with the active request
+ID. Job-only cancels that job's active run_step/eval operations. Target handles eval
+without synthetic job/step values. Selectors are mutually exclusive and never
+cross the process binding. Acknowledgement follows cancellation and completion
+of the selected operation. Cleanup waits for the original request to finish.
+
+Both SDKs use nodeproto's MaskRequest, AnnotationRequest and SummaryRequest on
+C2's declared node-host routes. Mask waits for acknowledgement, and annotation/
+summary errors propagate. Body env is applied after plan, startup env before spawn,
+and neither SDK reads credentials from env. Approval SkipIf remains an admission
+condition on every placement. Executable approval before/after hooks are removed.
+
+Concurrency declaration options preserve omission with pointers. The host resolves
+scope=global, capacity=1, cost=1 and on_limit=queue only when absent, persists winners
+in ExecutionSettings/JobExecutionSettings, and leaves declaration hashes unchanged.
+Explicit zero capacity/cost fails. Both SDKs share canonical v2 vectors for these
+presence cases, error objects, generated hashes and secret-containing identifiers.
+
+
 This is the implementation contract for node protocol 2, both author SDKs,
 the fake host, and the shared host library. It follows the frozen architecture
 and decisions 87-104. Declarations compile, but bodies marked
@@ -66,10 +119,12 @@ are part of this contract.
 | `nodehost.NodeHost.Execute` | Replans, checks drift, runs executor layers and reports through store transitions. |
 | `nodehost.NewNodeExecutor`, `ExecutorDependencies`, `ExecutorProcess` | Connect the common executor to the fenced store, matched engine, SDK process and storage adapters. |
 | `nodehost.OutputRecords`, `OutputUpload` | Publish typed output through verified uploads and record commits; read authorized output only after verified EOF. |
+| `nodehost.ArtifactRecords`, `ArtifactRecords.Stage` | Stage authorized manifest members inside a workspace. Required manifest/file reads verify EOF and close before replacing a destination. |
 | `nodehost.ClaimedNodeHost`, `ClaimStore` | Own source acquisition and renewal around the common executor for an awarded remote job. |
 | `nodehost.ExecutorActivity` | Reports progress and brackets authorized child awaits without extending the execution deadline. |
 | `nodehost.ProtocolSessionConfig`, `ProtocolSession`, `StartProtocolSession` | Launch protocol-v2 SDK processes with private pipes, request correlation, cancellation, log attribution and joined cleanup. |
 | `nodehost.SDKEnvironment`, `ProtocolSessionConfig.Environments` | Project captured host inputs, sealed run facts and persisted job environment through the shared process policy before native SDK startup. |
+| `nodehost.FileEnvironmentSnapshots`, `NewFileEnvironmentSnapshots`, `CapturedEnvironmentLoader` | Store private local values and verify the request's environment identity before source acquisition or SDK startup. |
 | `nodehost.LayerSide` | Distinguishes owner decisions from executor work. |
 | `nodehost.OwnerSide`, `nodehost.ExecutorSide` | Name the two layer owners. |
 | `nodehost.LayerSpec`, `nodehost.LayerTable` | Declare the complete outer-to-inner envelope and retry scope. |
@@ -107,7 +162,7 @@ are part of this contract.
 | `source.Access.BundleURL` | Obtains a signed URL for an authorized source-bundle seed. |
 | `source.Credential` | Carries host-bound App, HTTPS or SSH material in memory. |
 | `source.Options` | Supplies host workspace and source access separately from sealed source data. |
-| `source.EngineResolver`, `source.EntryInstaller` | Resolve the pinned engine and install the SDK entry with that engine and an explicit install environment. |
+| `source.EngineResolver`, `source.Options.InstallSDK` | Resolve the pinned engine and install the SDK entry with that engine and an explicit install environment. |
 | `source.Entry` | Returns acquired checkout, exact commit, resolved default branch and SDK argv. |
 | `source.ForRequest`, `source.ForExecution` | Project intake acquisition inputs or the accepted execution checkout policy without rereading mutable settings. |
 | `source.Acquire` | Acquires source and builds or resolves the SDK entry through one placement-independent path. |
@@ -320,7 +375,7 @@ Without a custom acquisition adapter, `OwnerHost.Source` supplies the shared
 `source.Acquire` path. New owners project `source.ForRequest` from persisted
 intake. Resumed owners project `source.ForExecution` from persisted acceptance,
 including its checkout policy and sealed engine. The explicit source options
-supply install and git environments. `RunInput.Engines` fills an absent resolver.
+supply the captured process base. `RunInput.Engines` fills an absent resolver.
 Owner policy tasks run independently so a waiting approval or admission does
 not stop ready siblings. Completed executor errors are checked against persisted
 terminal state because a committed failure must still release recovery jobs.
@@ -347,10 +402,9 @@ Tests inject those functions while their owning area is unimplemented. Wire
 request IDs are private and opaque. A cancelled request joins its SDK work before
 returning so finally steps cannot overlap a timed-out body. Windows protocol
 handles travel in argv. The session does not own controller credentials.
-The protocol defines cancellation by job and step, but eval carries only a
-closure ID. Until C3's protocol owner defines eval cancellation, the native
-session terminates and joins on an eval timeout. Host-registered cleanup still
-runs. Finally or after_run requiring that SDK process cannot run after this cut.
+Protocol cancellation now targets the active private request ID for evals,
+including evals with no job. Cancellation joins the original operation before
+cleanup and preserves the SDK process after successful acknowledgement.
 
 Process startup owns route revocation even when no process starts. Failed
 validation, cancelled setup and exec errors revoke the delegated route once and
@@ -375,7 +429,31 @@ an explicit Environment. Native adapters always replace that transport input wit
 the built result. Native tests launch real SDK fixture processes and verify that
 exact environment. The environment acceptance cell uses store and procenv fakes
 and proves projection and startup refusal. W6 filtering, SDK body application,
-captured-snapshot loading and native placement assembly remain integration work.
+snapshot capture at intake and native placement assembly remain integration work.
+
+Local source and SDK startup verify the captured environment against the request's
+names and digest. `FileEnvironmentSnapshots.Capture` writes host-selected values
+to an owner-only file before intake. Its returned `EnvSnapshot` belongs in the
+first seal. Files preserve native value bytes and explicit empty values. Loading
+does not consume a snapshot because replacement owners, retries and children
+need the same inputs. `OwnerHost.Snapshots`, `ClaimedNodeHost.Snapshots` and
+`SDKEnvironment.Snapshots` load that identity. Without a loader, a local
+`Base.Captured` must still match the seal. Changed, missing, malformed or
+nonprivate snapshots fail before acquisition or process startup. A read failure
+cannot select the daemon's environment.
+
+`PlanningProcessInput.Environment` carries the intake snapshot metadata through
+describe and plan. `SDKPlanner` includes its digest beside the host environment
+digest in the planning-cache inputs. Snapshot identity cannot replace missing
+host inputs or hide changes to a remote base.
+Attempt and eval startup read the identity from the accepted request, including
+retry seals that retain the source run ID. Native child-process tests use the
+real procenv policy to check credential filtering and runtime identity after
+snapshot loading. The new `environment-captured-local-base/hermetic-private-snapshots`
+cell checks the file and startup boundaries. Intake, schedule installation,
+child submission and snapshot retention still need placement wiring. C4's
+`EnvironmentDigest` also needs byte-preserving hashing for non-UTF-8 values.
+Distinct native values currently collapse through JSON replacement characters.
 
 Retry intake preserves the source run's sealed request, spec and plan. SDK
 environment and replan requests use the destination row's run ID while git,
@@ -393,7 +471,8 @@ that process binding. Unbound transports may omit the factory.
 
 `OwnerEvaluator.SkipIf` evaluates predicates in declaration order and stops at
 the first true result. Each predicate reconstructs and checks the accepted code
-in its own process because protocol v2 cannot cancel one eval in place. The
+in its own process. An expired eval is cancelled by private request ID and joined
+before that process closes. The
 per-predicate budget is 30 seconds unless declared otherwise. Timeout means
 don't skip and records the predicate index in `SkipEvaluation.TimedOut` for host
 diagnostics. The next predicate starts after close and cleanup join. Null and
@@ -474,12 +553,10 @@ record. `NodeRow` exposes no result reference, so the host cannot construct that
 lookup from a node read. Owner evaluation and generated-code replay must use
 the persisted reference through live read authority.
 
-Owner operations need cross-area contract completion. Remote result reuse
-needs a materialize-only reconciliation choice because a cache miss must remain
-available to the selected remote executor. The run-host actor also needs an
-authorized route for `DecisionCancelHolder`; the node transition table reserves
-that edge for controller, operator and reaper actors. These paths return errors
-until their authority and transaction contracts are supplied.
+Owner reuse now probes MaterializeOnly before admission. A hit materializes;
+a miss returns Dispatch without awarding execution. DecisionCancelHolder uses
+the run owner's scoped cancellation transition. Native store/HTTP assembly must
+still supply those transactions.
 
 Owner policy also needs a fenced store edge for a skip predicate that errors
 before dispatch. `NodeTransitions` permits owner dependency skips and cancels,
@@ -493,14 +570,12 @@ Eval log identity must allow a materialized source at generation zero because
 `nodes.generation` starts at zero and unclaimed materialization needs no award.
 The `log_streams.source_generation > 0` constraint does not cover that source.
 
-The controller wire reconciliation response must carry enough persisted state
-to reconstruct `ReconciledNode`, including claim identity, retry consumption,
-job spec and execution settings. Expansion responses must distinguish newly
-inserted rows from replayed rows with subsequent lifecycle changes. The host
-cannot infer those facts from public job details or declaration bytes.
-Recovery execution also needs a store reader for the source's persisted failure
-stage and masked structured error. `ExecutorDependencies.ReadFailure` is the
-host adapter for that reader. It must not synthesize a failure from a status string.
+The amended ReconcileResponse and ExpandedJob.Current carry the persisted
+execution state, and the remote adapters preserve it. ScheduleSnapshot remains
+insufficient for full execution reads. Owner expansion and replay also need
+terminal record references. ExecutorDependencies.ReadFailure carries the source
+generation and requires the recorded masked failure. Its native authenticated
+adapter remains an integration point.
 
 `StateFollower.Wait` and `WaitNode` supply the shared state follower for
 `OwnerHost.Wait` and `WaitNodeChange`. Each wait arms its run subscription before
@@ -575,9 +650,9 @@ The old generated reference is not proof of the target API.
 
 ## Open questions for the lead
 
-- A28 removes approval hook methods while §3.2/A27 require approval-condition
-  parity. Both SDKs retain SkipIf as a condition and omit executable before/after
-  hooks. Confirm that reading before implementation.
+Amendment A1-54 resolves approval SkipIf: retain the condition and cut only
+executable before/after hooks. Remaining W3 contract gaps are listed in the
+[amendment handoff](w3-amendment-handoff.md).
 
 ## Verification boundary
 

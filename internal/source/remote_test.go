@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
@@ -37,7 +38,7 @@ func TestPrepareCheckoutLFSKeepsAuthorizedSSHTransport(t *testing.T) {
 			entry, err := source.PrepareCheckout(t.Context(), source.Spec{
 				RepoKey: "git:8.8.8.8/team/repo", RemoteURL: test.remote, SHA: sha, DefaultBranch: "trunk",
 				Checkout: runspec.CheckoutPolicy{Policy: nodeproto.SourceSpec{LFS: new(true)}},
-			}, source.Options{GitEnvironment: sourcetest.Environment(t), Workspace: t.TempDir(), Access: &access{credential: credential}})
+			}, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{credential: credential}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -85,7 +86,7 @@ func TestPrepareCheckoutFetchesSealedCommitAfterHeadAdvances(t *testing.T) {
 	t.Setenv("GIT_TRACE", filepath.Join(t.TempDir(), "trace"))
 	workspace := t.TempDir()
 	a := &access{credential: source.Credential{Kind: "https", Host: "8.8.8.8", Username: "source", Secret: "private-source-password"}}
-	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sealed}, source.Options{GitEnvironment: sourcetest.Environment(t), Workspace: workspace, Access: a})
+	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sealed}, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: workspace, Access: a})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +131,7 @@ func TestPrepareCheckoutFailedFetchRemovesWorkspace(t *testing.T) {
 	remote := "https://8.8.8.8/team/repo"
 	sourcetest.Remote(t, map[string]string{remote: dir})
 	workspace := t.TempDir()
-	_, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: strings.Repeat("a", 40)}, source.Options{GitEnvironment: sourcetest.Environment(t), Workspace: workspace, Access: &access{}})
+	_, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: strings.Repeat("a", 40)}, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: workspace, Access: &access{}})
 	if err == nil {
 		t.Fatal("accepted a commit absent from the source")
 	}
@@ -153,7 +154,7 @@ func TestPrepareCheckoutChecksSubmoduleAllowlistBeforeFetching(t *testing.T) {
 	log := sourcetest.Remote(t, map[string]string{remote: parent, subremote: child})
 	spec := source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk", Checkout: runspec.CheckoutPolicy{Policy: nodeproto.SourceSpec{Submodules: new(true)}}}
 	credential := source.Credential{Kind: "https", Host: "8.8.8.8", Username: "source", Secret: "private-source-password"}
-	if _, err := source.PrepareCheckout(t.Context(), spec, source.Options{GitEnvironment: sourcetest.Environment(t), Workspace: t.TempDir(), Access: &access{credential: credential}}); err == nil {
+	if _, err := source.PrepareCheckout(t.Context(), spec, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{credential: credential}}); err == nil {
 		t.Fatal("fetched an unauthorized submodule")
 	}
 	commands, err := os.ReadFile(log)
@@ -161,7 +162,7 @@ func TestPrepareCheckoutChecksSubmoduleAllowlistBeforeFetching(t *testing.T) {
 		t.Fatalf("unauthorized fetch: %s, %v", commands, err)
 	}
 	credential.ExtraRepositories = []string{"team/library"}
-	entry, err := source.PrepareCheckout(t.Context(), spec, source.Options{GitEnvironment: sourcetest.Environment(t), Workspace: t.TempDir(), Access: &access{credential: credential}})
+	entry, err := source.PrepareCheckout(t.Context(), spec, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{credential: credential}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +192,7 @@ func TestPrepareCheckoutAppliesHistoryAndTagPolicy(t *testing.T) {
 		{"full history and tags", nodeproto.SourceSpec{FullHistory: new(true), Tags: new(true)}, "2", "v1"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk", Checkout: runspec.CheckoutPolicy{Policy: test.policy}}, source.Options{GitEnvironment: sourcetest.Environment(t), Workspace: t.TempDir(), Access: &access{}})
+			entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk", Checkout: runspec.CheckoutPolicy{Policy: test.policy}}, source.Options{Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -212,7 +213,7 @@ func TestPrepareCheckoutOwnerHelperFailureDoesNotFallBackToAnonymous(t *testing.
 	log := sourcetest.Remote(t, map[string]string{remote: dir})
 	ownerHome := t.TempDir()
 	sourcetest.Write(t, filepath.Join(ownerHome, ".gitconfig"), "[credential]\n\thelper = !exit 1\n")
-	_, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha}, source.Options{GitEnvironment: []string{"PATH=" + os.Getenv("PATH"), "HOME=" + ownerHome}, Workspace: t.TempDir(), Access: &access{}})
+	_, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha}, source.Options{Base: procenv.Base{Local: true, Captured: []string{"PATH=" + os.Getenv("PATH"), "HOME=" + ownerHome}}, BuildEnvironment: sourcetest.BuildEnvironment, Workspace: t.TempDir(), Access: &access{}})
 	if err == nil || !strings.Contains(err.Error(), "helper failed") {
 		t.Fatalf("helper failure = %v", err)
 	}

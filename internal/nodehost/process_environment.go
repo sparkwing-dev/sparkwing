@@ -17,19 +17,21 @@ import (
 // SDKEnvironment projects sealed runtime facts and persisted job declarations
 // into procenv's process policy. Base contains the host's captured inputs;
 // native SDK starts never consult the host process's ambient environment.
+// Local bases must match the request's snapshot, loaded through Snapshots when supplied.
 // Build and Split default to the shared procenv implementations.
 type SDKEnvironment struct {
-	Base  procenv.Base
-	Store EvaluationStore
-	Build func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error)
-	Split func([]procenv.Assignment) (procenv.JobEnv, error)
+	Base      procenv.Base
+	Store     EvaluationStore
+	Snapshots CapturedEnvironmentLoader
+	Build     func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error)
+	Split     func([]procenv.Assignment) (procenv.JobEnv, error)
 }
 
-func (e SDKEnvironment) planning(input PlanningProcessInput) ([]string, error) {
+func (e SDKEnvironment) planning(ctx context.Context, input PlanningProcessInput) ([]string, error) {
 	if input.Run.RunID == "" || input.Run.Pipeline == "" {
 		return nil, errors.New("SDK planning environment requires sealed run identity")
 	}
-	return e.build(procenv.Plan, sdkRuntime(input.Run, input.Runner))
+	return e.build(ctx, procenv.Plan, input.Environment, sdkRuntime(input.Run, input.Runner))
 }
 
 func (e SDKEnvironment) job(ctx context.Context, kind procenv.Kind, accepted AcceptedRun, nodeID string, generation int64, specHash string, runner nodeproto.RunnerIdentity) ([]string, error) {
@@ -75,18 +77,23 @@ func (e SDKEnvironment) job(ctx context.Context, kind procenv.Kind, accepted Acc
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
-	return e.build(kind, runtime)
+	return e.build(ctx, kind, spec.Request.Request.Env, runtime)
 }
 
-func (e SDKEnvironment) build(kind procenv.Kind, runtime procenv.Runtime) ([]string, error) {
+func (e SDKEnvironment) build(ctx context.Context, kind procenv.Kind, seal runspec.EnvSnapshot, runtime procenv.Runtime) ([]string, error) {
 	build := e.Build
 	if build == nil {
 		build = procenv.Build
 	}
-	base := e.Base
-	base.Captured, base.Ambient, base.SubmitEnvAllow = slices.Clone(base.Captured), slices.Clone(base.Ambient), slices.Clone(base.SubmitEnvAllow)
+	base, err := capturedBase(ctx, e.Base, e.Snapshots, seal)
+	if err != nil {
+		return nil, err
+	}
 	env, err := build(kind, base, runtime)
 	if err != nil {
+		return nil, err
+	}
+	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
 	// safety: an empty built environment must remain explicit to os/exec.

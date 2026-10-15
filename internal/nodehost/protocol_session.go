@@ -79,7 +79,7 @@ func (cfg ProtocolSessionConfig) StartPlanning(ctx context.Context, input Planni
 	if err := context.Cause(ctx); err != nil {
 		return nil, cfg.failedStartup(err)
 	}
-	env, err := cfg.Environments.planning(input)
+	env, err := cfg.Environments.planning(ctx, input)
 	if err != nil {
 		return nil, cfg.failedStartup(err)
 	}
@@ -135,11 +135,6 @@ type ProtocolSession struct {
 }
 
 var errProtocolSessionClosed = errors.New("SDK protocol session closed")
-
-type protocolEvalStopped struct{ cause error }
-
-func (e *protocolEvalStopped) Error() string { return "SDK evaluation stopped: " + e.cause.Error() }
-func (e *protocolEvalStopped) Unwrap() error { return e.cause }
 
 // StartProtocolSession starts the acquired command with private protocol pipes.
 // Callers must Close every returned session, including after a rejected hello.
@@ -256,13 +251,10 @@ func (s *ProtocolSession) Request(ctx context.Context, request nodeproto.Request
 	case reply := <-c.reply:
 		return reply, nil
 	case <-ctx.Done():
-		if request.Op == nodeproto.OpRunStep {
+		if request.Op == nodeproto.OpRunStep || request.Op == nodeproto.OpEval {
 			return nodeproto.Reply{}, s.cancelProtocolRequest(c, context.Cause(ctx))
 		}
 		err := context.Cause(ctx)
-		if request.Op == nodeproto.OpEval {
-			err = &protocolEvalStopped{cause: err}
-		}
 		s.failProtocol(err)
 		<-s.joined
 		return nodeproto.Reply{}, err
@@ -332,7 +324,13 @@ func (s *ProtocolSession) cancelProtocolRequest(call protocolCall, cause error) 
 	}
 	ctx, cancel := context.WithTimeout(s.logCtx, limits.CleanupTimeout)
 	defer cancel()
-	reply, err := s.Request(ctx, nodeproto.Request{Op: nodeproto.OpCancel, Job: call.request.Job, Step: call.request.Step})
+	request := nodeproto.Request{Op: nodeproto.OpCancel}
+	if call.request.Op == nodeproto.OpEval {
+		request.Target = call.request.ID
+	} else {
+		request.Job, request.Step = call.request.Job, call.request.Step
+	}
+	reply, err := s.Request(ctx, request)
 	if err == nil && reply.Error != nil {
 		err = reply.Error
 	}
@@ -525,9 +523,7 @@ func (s *ProtocolSession) Close() error {
 		}
 		s.stopLogs()
 		err := s.protocolFailure()
-		_, evalStopped := err.(*protocolEvalStopped)
-		// safety: the request reports intentional eval cancellation; revocation and reaping failures remain errors.
-		if errors.Is(err, errProtocolSessionClosed) || evalStopped {
+		if errors.Is(err, errProtocolSessionClosed) {
 			err = nil
 		}
 		s.closeErr = errors.Join(revokeErr, err, s.reapErr)

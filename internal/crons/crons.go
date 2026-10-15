@@ -181,7 +181,7 @@ func DeclaredSchedules(repoRoot string) ([]Declared, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	cfg, err := projectconfig.LoadOld(path)
+	cfg, err := projectconfig.Load(path)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +189,7 @@ func DeclaredSchedules(repoRoot string) ([]Declared, error) {
 		return nil, fmt.Errorf("read %s: it went away while it was being read", path)
 	}
 	var out []Declared
-	for _, p := range cfg.Pipelines {
+	for _, p := range cfg.Registry().Pipelines {
 		for i := range p.On.Schedule {
 			entry := p.On.Schedule[i]
 			out = append(out, Declared{

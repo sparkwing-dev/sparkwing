@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -549,7 +550,7 @@ func writeContainerFixture(t *testing.T, cpuMax, memMax string) string {
 func TestQueueState_ClampsCapacityToContainerLimit(t *testing.T) {
 	home := shortHome(t)
 	root := writeContainerFixture(t, "600000 100000", "6442450944")
-	budget, err := wingd.ParseBudget("4,4gb")
+	budget, err := userconfig.ParseBudget("4,4gb")
 	if err != nil {
 		t.Fatalf("parse budget: %v", err)
 	}

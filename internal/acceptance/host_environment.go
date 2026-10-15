@@ -32,6 +32,7 @@ func CheckSDKEnvironmentProjection(t *testing.T) {
 				t.Fatal(err)
 			}
 			spec.Resolved.Settings.Options.DryRun.Value = true
+			spec.Request.Request.Env, _ = runspec.EnvironmentDigest(map[string]string{"CAPTURED": "sealed"})
 			if operation != name {
 				// safety: retry intake preserves the source envelope while rows and SDK execution name the destination.
 				spec.Request.RunID = "source-run"
@@ -69,7 +70,7 @@ func CheckSDKEnvironmentProjection(t *testing.T) {
 			var err error
 			switch operation {
 			case "plan":
-				process, err = cfg.StartPlanning(t.Context(), nodehost.PlanningProcessInput{Entry: input.Entry, Runner: input.GrantedRunner, Run: nodeproto.RunContext{RunID: input.Accepted.RunID, Pipeline: "build", DryRun: true}}, func(context.Context, nodeproto.FrameLog) error { return nil })
+				process, err = cfg.StartPlanning(t.Context(), nodehost.PlanningProcessInput{Entry: input.Entry, Runner: input.GrantedRunner, Environment: spec.Request.Request.Env, Run: nodeproto.RunContext{RunID: input.Accepted.RunID, Pipeline: "build", DryRun: true}}, func(context.Context, nodeproto.FrameLog) error { return nil })
 			case "attempt":
 				process, err = cfg.Start(t.Context(), input, nodehost.ExecutorActivity{})
 			case "eval":

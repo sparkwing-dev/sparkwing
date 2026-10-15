@@ -2,6 +2,7 @@ package nodehost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -23,15 +25,16 @@ type ClaimStore interface {
 
 // ClaimedNodeHost owns source and lease lifetime for an awarded remote job.
 // The owner executes self-claimed jobs directly because its renewal covers them.
-// Source contains explicit install/git environments and live source authority;
+// Source contains the captured process base and live source authority;
 // it must be built by the placement before entry acquisition starts.
 type ClaimedNodeHost struct {
-	Store    ClaimStore
-	Lease    lease.Keeper
-	Source   source.Options
-	Acquire  func(context.Context, source.Spec, source.Options) (*source.Entry, error)
-	Executor NodeHost
-	Mask     func(string) string
+	Snapshots CapturedEnvironmentLoader
+	Store     ClaimStore
+	Lease     lease.Keeper
+	Source    source.Options
+	Acquire   func(context.Context, source.Spec, source.Options) (*source.Entry, error)
+	Executor  NodeHost
+	Mask      func(string) string
 }
 
 // Execute accepts only store-derived inputs, without a pre-acquired entry.
@@ -41,7 +44,7 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 		return errors.New("claimed node host requires store, executor and masking adapters")
 	}
 	defer func() { err = maskHostError(err, h.Mask) }()
-	if input.Entry != nil || input.Accepted.RunID == "" || input.NodeID == "" || input.Authority.CapabilityPrefix == "" || input.Authority.Holder == "" || input.Generation < 1 || input.Attempt < 1 {
+	if input.Entry != nil || input.Accepted.RunID == "" || input.NodeID == "" || input.Authority.CapabilityPrefix == "" || input.Authority.Holder == "" || input.Generation < 1 || input.Attempt < 0 {
 		return errors.New("claimed node host requires an unacquired, accepted award")
 	}
 	if h.Lease.Interval <= 0 || h.Lease.Lease <= h.Lease.Interval {
@@ -70,7 +73,16 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 	if acquire == nil {
 		acquire = source.Acquire
 	}
-	entry, err := acquire(ctx, spec, h.Source)
+	var accepted runspec.Spec
+	if err := json.Unmarshal(input.Accepted.Spec, &accepted); err != nil {
+		return h.setupFailure(ctx, ref, actor, err)
+	}
+	options := h.Source
+	options.Base, err = capturedBase(ctx, options.Base, h.Snapshots, accepted.Request.Request.Env)
+	if err != nil {
+		return h.setupFailure(ctx, ref, actor, err)
+	}
+	entry, err := acquire(ctx, spec, options)
 	if entry != nil {
 		defer func() {
 			if closeErr := entry.Close(); closeErr != nil {

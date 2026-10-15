@@ -161,6 +161,7 @@ type Run struct {
 	StopAt    string
 	State     storage.StateStoreOld
 	Logger    *slog.Logger
+	Masker    *secrets.Masker
 	adds      chan addRequest
 	onlySkips map[string]string
 	// safety: set once, before any node starts, so node goroutines read it unlocked.
@@ -234,8 +235,13 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	if cfg.Run.Trigger == nil {
 		cfg.Run.Trigger = &nodeproto.Trigger{Source: "manual"}
 	}
+	var masker *secrets.Masker
+	if cfg.Attempts != nil {
+		masker = cfg.Attempts.Masker
+	}
+	cfg.State, cfg.Logger = maskState(cfg.State, masker), maskLogger(cfg.Logger, masker)
 	scfg := planSession(cfg)
-	scfg.HoldOutput = true
+	scfg.HoldOutput, scfg.Masker = true, masker
 	sess, err := StartSession(ctx, scfg)
 	if err != nil {
 		return RunResult{}, err
@@ -245,21 +251,17 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 			cfg.Logger.Warn("nodehost: plan process", "err", err)
 		}
 	}
-	var masker *secrets.Masker
-	if cfg.Attempts != nil {
-		masker = cfg.Attempts.Masker
-	}
 	args, known, err := describeArgs(ctx, sess, cfg.Pipeline, cfg.Args, masker)
 	if err == nil && cfg.CheckArgs != nil {
 		err = cfg.CheckArgs(args)
 	}
-	err = releaseDescribed(sess, known, masker, err)
+	err = releaseDescribed(sess, known, err)
 	if err == nil {
 		err = cfg.State.CreateRun(ctx, runRow(cfg, args))
 	}
 	if err != nil {
 		closeSession()
-		return RunResult{}, err
+		return RunResult{}, maskErr(masker, err)
 	}
 
 	res = RunResult{RunID: cfg.Run.RunID, Nodes: map[string]Result{}}
@@ -307,12 +309,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		res.Status = runStatus(res.Err)
 		return res, nil
 	}
-	run := &Run{
-		ID: res.RunID, Doc: doc, Pipeline: cfg.Pipeline, Args: args, Context: cfg.Run,
-		StartAt: cfg.StartAt, StopAt: cfg.StopAt, State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest),
-		onlySkips: skips,
-	}
-	releaseLease = runPlanned(ctx, &cfg, run, &res)
+	releaseLease = runPlanned(ctx, &cfg, newRun(&cfg, doc, args, skips), &res)
 	return res, nil
 }
 
@@ -354,6 +351,18 @@ func runPlanned(ctx context.Context, cfg *Config, run *Run, res *RunResult) (rel
 	res.Order = s.order
 	res.Status, res.Err = end.status, end.err
 	return release
+}
+
+func newRun(cfg *Config, doc nodeproto.PlanDocOld, args, skips map[string]string) *Run {
+	run := &Run{
+		ID: cfg.Run.RunID, Doc: doc, Pipeline: cfg.Pipeline, Args: args, Context: cfg.Run,
+		StartAt: cfg.StartAt, StopAt: cfg.StopAt, State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest),
+		onlySkips: skips,
+	}
+	if cfg.Attempts != nil {
+		run.Masker = cfg.Attempts.Masker
+	}
+	return run
 }
 
 func runRow(cfg Config, args map[string]string) store.Run {
@@ -564,22 +573,7 @@ func (s *scheduler) finish(ctx context.Context, id string, res Result) {
 	case res.Outcome == sparkwing.Failed && errors.Is(ctx.Err(), context.Canceled):
 		res.Outcome, res.Err = sparkwing.Cancelled, errors.New("cancelled: run failing")
 	}
-	writeCtx := context.WithoutCancel(ctx)
-	var err error
-	if !res.recorded {
-		err = s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), recordedErrText(res.Err), res.Output, res.Reason, nil)
-	}
-	if errors.Is(err, store.ErrOutputNotStored) {
-		// safety: a refused output fails the node in its row too, so the row never stays running.
-		res = Result{Outcome: sparkwing.Failed, Err: err}
-		err = s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), recordedErrText(err), nil, store.FailureUnknown, nil)
-	}
-	if err != nil {
-		// safety: a result the store never took must not read as a success downstream.
-		s.run.Logger.Error("nodehost: record node result", "node", id, "err", err)
-		res.Outcome, res.Err = sparkwing.Failed, errors.Join(res.Err, fmt.Errorf("record node result: %w", err))
-	}
-	nodeEndEvent(writeCtx, s.run, id, res)
+	res = recordResult(ctx, s.run, id, res)
 	s.results[id] = res
 	s.expand(ctx, id, res)
 }
@@ -701,7 +695,7 @@ func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.PlanNode, row *sto
 }
 
 func recordedOutput(ctx context.Context, st storage.StateStoreOld, runID, id string) (json.RawMessage, error) {
-	outputs, ok := st.(sourceOutputs)
+	outputs, ok := baseState(st).(sourceOutputs)
 	if !ok {
 		return nil, fmt.Errorf("read node %s output: the runs store cannot read it", id)
 	}
@@ -791,6 +785,38 @@ func (s *scheduler) nodeVerdict() (string, error) {
 		return "cancelled", fmt.Errorf("nodes superseded by a newer arrival: %v", superseded)
 	}
 	return "success", nil
+}
+
+// safety: the one writer of a node's result, for the scheduler and a pod host. A refused output fails the node in
+// its row too, so the row never stays running, and a result the store never took never reads as a success. Layers
+// outside the attempt, and the store itself, fail with text no attempt masked, so the result is masked after its
+// last change and every text it records is masked before it is bounded.
+func recordResult(ctx context.Context, run *Run, id string, res Result) Result {
+	writeCtx := context.WithoutCancel(ctx)
+	var err error
+	if !res.recorded {
+		err = run.State.FinishNodeWithReason(writeCtx, run.ID, id, string(res.Outcome), recordedErrText(maskErr(run.Masker, res.Err)), res.Output, res.Reason, nil)
+	}
+	if errors.Is(err, store.ErrOutputNotStored) {
+		res = Result{Outcome: sparkwing.Failed, Err: err}
+		err = run.State.FinishNodeWithReason(writeCtx, run.ID, id, string(res.Outcome), recordedErrText(maskErr(run.Masker, err)), nil, store.FailureUnknown, nil)
+	}
+	if err != nil {
+		run.Logger.Error("nodehost: record node result", "node", id, "err", err)
+		res.Outcome, res.Err = sparkwing.Failed, errors.Join(res.Err, fmt.Errorf("record node result: %w", err))
+	}
+	if res.Err != nil {
+		res.Err = errors.New(run.Masker.Mask(res.Err.Error()))
+	}
+	nodeEndEvent(writeCtx, run, id, res)
+	return res
+}
+
+func maskErr(m *secrets.Masker, err error) error {
+	if err == nil || m == nil {
+		return err
+	}
+	return maskHostError(err, m.Mask)
 }
 
 type discardSink struct{}

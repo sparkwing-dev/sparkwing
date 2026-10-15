@@ -90,7 +90,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 
 	// safety: nodehost registers the secret-flagged args with this masker while it plans, before any node runs.
 	masker := secrets.NewMasker()
-	delegate := secrets.MaskingLogger(opts.Delegate, masker)
+	opts.Delegate = nodehost.MaskingLogger(opts.Delegate, masker)
 	routes, err := nodehost.Start(slog.Default())
 	if err != nil {
 		return nil, err
@@ -98,7 +98,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	//nolint:contextcheck // Close bounds its own shutdown; the run's context may already be cancelled here.
 	defer func() { warnHostedClose("node routes", routes.Close()) }()
 	state := &hostedRunState{
-		StateBackend: backends.State, logs: backends.Logs, delegate: delegate, diskRoot: backends.DiskRoot, starts: map[string]time.Time{},
+		StateBackend: backends.State, logs: backends.Logs, delegate: opts.Delegate, diskRoot: backends.DiskRoot, starts: map[string]time.Time{},
 		lineage:       store.Run{ParentRunID: opts.ParentRunID, RetryOf: opts.RetryOf, RetrySource: opts.RetrySource, TriggerSource: opts.Trigger.Source},
 		retryPlanHash: opts.RetryPlanHash,
 	}
@@ -154,7 +154,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 			if err != nil {
 				return nil, err
 			}
-			return hostedNodeLog{NodeLog: log, delegate: delegate}, nil
+			return hostedNodeLog{NodeLog: log, delegate: opts.Delegate}, nil
 		},
 	}
 	if backends.LocalCoordination {
@@ -164,7 +164,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	if err != nil {
 		return nil, err
 	}
-	planSink, err := newHostedPlanSink(ctx, runID, masker, delegate)
+	planSink, err := newHostedPlanSink(ctx, runID, masker, opts.Delegate)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +195,6 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	}
 	execStart := time.Now()
 	out, err := nodehost.Execute(ctx, cfg)
-	planSink.Flush()
 	if err != nil {
 		return nil, err
 	}
@@ -230,18 +229,18 @@ func hostedInterruptCancel(parent context.Context) (context.Context, func()) {
 // its own working directory, so a --sw-ref or declared-source run gets that
 // checkout's defaults and guards rather than the caller's.
 func applyHostedProjectConfig(opts *Options, dir string) error {
-	_, cfg, err := projectconfig.DiscoverOld(dir)
+	_, cfg, err := projectconfig.Discover(dir)
 	if err != nil {
 		return &projectConfigError{err: err}
 	}
 	if cfg == nil {
 		return nil
 	}
-	opts.DefaultArgs = cfg.Defaults.Args
-	opts.PipelineYAML = (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(opts.Pipeline)
-	if p := opts.PipelineYAML; p != nil {
-		if p.Guards.IsEmpty() {
-			p.Guards = cfg.Defaults.Guards
+	opts.PipelineYAML = cfg.Registry().Find(opts.Pipeline)
+	if cfg.Defaults != nil {
+		opts.DefaultArgs = cfg.Defaults.Args
+		if opts.PipelineYAML == nil && cfg.Defaults.Guards != nil {
+			opts.PipelineYAML = &pipelines.Pipeline{Name: opts.Pipeline, Guards: pipelines.Guards{Require: cfg.Defaults.Guards.When, Reject: cfg.Defaults.Guards.Unless}}
 		}
 	}
 	return RefusePinnedLocalRun(opts.PipelineYAML)
@@ -259,11 +258,10 @@ func hostedRunContext(opts Options, runID string) nodeproto.RunContextOld {
 }
 
 // safety: plan code's logs have no node log to land in, so they go to the
-// renderer through a node-host log sink, which masks a value even across the
-// session's split of a long line. Flush it once the run's sessions end.
+// renderer through a node-host log sink, which masks its records as a node's.
 func newHostedPlanSink(ctx context.Context, runID string, masker *secrets.Masker, delegate sparkwing.Logger) (*nodehost.LogSink, error) {
 	return nodehost.NewLogSink(ctx, nodehost.LogSinkConfig{
-		RunID: runID, NodeID: store.PlanNodeID, Log: hostedPlanLog{delegate}, State: podPlanState{}, Masker: masker,
+		RunID: runID, NodeID: store.PlanNodeID, Log: hostedPlanLog{delegate}, Masker: masker,
 	})
 }
 
@@ -601,7 +599,7 @@ func (h hostedChildren) StartChild(ctx context.Context, parent nodehost.ChildPar
 		return "", err
 	}
 	if payload, err := json.Marshal(map[string]any{"child_run_id": id, "pipeline": req.Pipeline, "args": req.Args}); err == nil {
-		noteEvent(ctx, h.state, parent.RunID, parent.NodeID, "child_run_start", maskEventPayload(h.masker, payload))
+		noteEvent(ctx, h.state, parent.RunID, parent.NodeID, "child_run_start", h.masker.MaskJSON(payload))
 	}
 	return id, nil
 }

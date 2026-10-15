@@ -8,12 +8,12 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
-
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 )
 
 type engineResolver struct {
@@ -36,12 +36,6 @@ func (r *engineResolver) Ensure(_ context.Context, identity engine.Identity, tar
 		return engine.Resolved{}, errors.New("wrong sealed identity or target")
 	}
 	return r.resolved, r.err
-}
-
-type entryInstaller func(context.Context, engine.Resolved, string, []string) ([]string, error)
-
-func (install entryInstaller) Install(ctx context.Context, resolved engine.Resolved, directory string, environment []string) ([]string, error) {
-	return install(ctx, resolved, directory, environment)
 }
 
 type cancelledEngine struct {
@@ -94,20 +88,22 @@ func acquisitionOptions(t *testing.T, directory string) (source.Options, *engine
 	installed := new(int)
 	options := source.Options{
 		Engines: resolver, Target: target, SDK: engine.GoSDK,
-		GitEnvironment: sourcetest.Environment(t), InstallEnvironment: []string{"PATH=/host/install/bin"},
+		Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment,
 		ReadPin: func(checkout string, sdk engine.SDKKind) (engine.Pin, error) {
 			if checkout != directory || sdk != pin.SDK {
 				t.Fatalf("read pin from %s for %s", checkout, sdk)
 			}
 			return pin, nil
 		},
-		Installer: entryInstaller(func(_ context.Context, resolved engine.Resolved, checkout string, environment []string) ([]string, error) {
+		InstallSDK: func(_ context.Context, resolved engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
+			checkout := filepath.Join(request.Directory, request.PipelineDir)
+			environment := request.Environment
 			*installed++
-			if len(resolver.calls) != 1 || !reflect.DeepEqual(resolved, resolver.resolved) || checkout != directory || !reflect.DeepEqual(environment, []string{"PATH=/host/install/bin"}) {
+			if len(resolver.calls) != 1 || !reflect.DeepEqual(resolved, resolver.resolved) || checkout != directory || len(environment) != 2 || request.SDK != engine.GoSDK {
 				t.Fatalf("install did not receive the resolved engine and isolated environment: %+v, %s, %v", resolved, checkout, environment)
 			}
-			return []string{filepath.Join(directory, "entry")}, nil
-		}),
+			return engine.SDKCommand{Directory: checkout, Command: []string{filepath.Join(directory, "entry")}}, nil
+		},
 	}
 	return options, resolver, installed
 }
@@ -179,17 +175,17 @@ func TestAcquireRemovesRemoteCheckoutAfterInstallationFailure(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			sentinel := errors.New("installer failed")
-			options.Installer = entryInstaller(func(context.Context, engine.Resolved, string, []string) ([]string, error) {
+			options.InstallSDK = func(_ context.Context, _ engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
 				switch failure {
 				case "installer":
-					return nil, sentinel
+					return engine.SDKCommand{}, sentinel
 				case "cancelled":
 					cancel()
-					return []string{"entry"}, nil
+					return engine.SDKCommand{Directory: filepath.Join(request.Directory, request.PipelineDir), Command: []string{"entry"}}, nil
 				default:
-					return nil, nil
+					return engine.SDKCommand{}, nil
 				}
-			})
+			}
 			entry, err := source.Acquire(ctx, source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk"}, options)
 			if entry != nil || err == nil {
 				t.Fatalf("failed installation = %+v, %v", entry, err)
@@ -200,6 +196,49 @@ func TestAcquireRemovesRemoteCheckoutAfterInstallationFailure(t *testing.T) {
 			remaining, err := os.ReadDir(options.Workspace)
 			if err != nil || len(remaining) != 0 {
 				t.Fatalf("failed installation left workspace contents: %v, %v", remaining, err)
+			}
+		})
+	}
+}
+
+func TestAcquireUsesSharedEnvironmentPolicyForGitAndInstallation(t *testing.T) {
+	for _, failure := range []string{"none", "git", "install"} {
+		t.Run(failure, func(t *testing.T) {
+			dir, sha := sourcetest.Repository(t)
+			options, resolver, _ := acquisitionOptions(t, filepath.Join(dir, ".sparkwing"))
+			sentinel := errors.New("environment rejected")
+			var kinds []procenv.Kind
+			options.BuildEnvironment = func(kind procenv.Kind, base procenv.Base, rt procenv.Runtime) ([]string, error) {
+				kinds = append(kinds, kind)
+				if !reflect.DeepEqual(base, options.Base) || !reflect.DeepEqual(rt, procenv.Runtime{}) {
+					t.Fatal("source supplied ambient or runtime input to shared builder")
+				}
+				if kind == procenv.Git && failure == "git" || kind == procenv.Install && failure == "install" {
+					return []string{"PARTIAL=private"}, sentinel
+				}
+				if kind == procenv.Git {
+					return sourcetest.BuildEnvironment(kind, base, rt)
+				}
+				return []string{"PATH=/filtered/install"}, nil
+			}
+			installed := false
+			options.InstallSDK = func(_ context.Context, selected engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
+				installed = true
+				if !reflect.DeepEqual(selected, resolver.resolved) || request.Directory != dir || request.PipelineDir != ".sparkwing" || request.SDK != engine.GoSDK || !reflect.DeepEqual(request.Environment, []string{"PATH=/filtered/install"}) {
+					t.Fatalf("selected-engine request=%+v", request)
+				}
+				return engine.SDKCommand{Directory: filepath.Join(dir, ".sparkwing"), Command: []string{"entry"}}, nil
+			}
+			entry, err := source.Acquire(t.Context(), source.Spec{RepoKey: "local:" + dir, LocalCheckout: dir, SHA: sha}, options)
+			if failure == "none" {
+				if err != nil || entry == nil || !installed || !reflect.DeepEqual(kinds, []procenv.Kind{procenv.Git, procenv.Install}) {
+					t.Fatalf("entry=%v kinds=%v install=%t err=%v", entry, kinds, installed, err)
+				}
+				if err := entry.Close(); err != nil {
+					t.Fatal(err)
+				}
+			} else if !errors.Is(err, sentinel) || entry != nil || installed {
+				t.Fatalf("environment failure continued: entry=%v installed=%t err=%v", entry, installed, err)
 			}
 		})
 	}

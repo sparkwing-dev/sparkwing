@@ -39,8 +39,13 @@ func FollowReconciliation(ctx context.Context, reconciler Reconciler, request st
 				return store.ReconciledNode{}, errors.New("reconciliation returned an unfinished result")
 			}
 			return result, nil
+		case store.Dispatch:
+			if !request.MaterializeOnly || result.Claim != nil || len(result.Bearer) != 0 || result.Node.Status != store.StatusPending || result.Node.Outcome != "" || result.Node.ClaimedBy != "" {
+				return store.ReconciledNode{}, errors.New("reconciliation returned an invalid dispatch miss")
+			}
+			return result, nil
 		case store.Execute:
-			if !reconciledClaimMatches(result) {
+			if request.MaterializeOnly || !reconciledClaimMatches(result) {
 				return store.ReconciledNode{}, errors.New("reconciliation returned execution without a matching claim")
 			}
 			return result, nil

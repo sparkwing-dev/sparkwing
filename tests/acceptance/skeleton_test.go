@@ -25,13 +25,22 @@ func pendingScenarios(t *testing.T, group string) {
 				t.Run("hermetic-executor-output", acceptance.CheckExecutorOutputCommit)
 			case "storage-cas-integrity":
 				t.Run("hermetic-required-output", acceptance.CheckOutputRecordRead)
+				t.Run("hermetic-required-artifacts", acceptance.CheckArtifactStaging)
+				t.Run("hermetic-executor-artifacts", acceptance.CheckExecutorArtifactStaging)
 			case "lifecycle-generator-reconstruct-code":
 				t.Run("hermetic-replay", acceptance.CheckGeneratorReplay)
 			case "environment-startup-versus-body":
 				t.Run("hermetic-native-environment-policy", acceptance.CheckSDKEnvironmentProjection)
+			case "environment-captured-local-base":
+				t.Run("hermetic-private-snapshots", acceptance.CheckCapturedHostEnvironment)
+			case "protocol-sdk-secrets-mask-annotations":
+				t.Run("hermetic-process-services", acceptance.CheckHostServices)
+			case "recovery-application-retry-ordinal":
+				t.Run("hermetic-executor-ordinals", acceptance.CheckExecutorEnvelope)
 			case "protocol-host-layers-risk-cleanup":
 				t.Run("hermetic-claimed-executor", acceptance.CheckExecutorEnvelope)
 			case "credentials-secret-identifiers":
+				t.Run("hermetic-process-services", acceptance.CheckHostServices)
 				t.Run("hermetic-planning-defaults", acceptance.CheckPlanningDefaults)
 			case "lifecycle-approval-decisions-and-owner-rights":
 				t.Run("hermetic-policy-evaluation", acceptance.CheckOwnerApprovalPolicies)
@@ -46,6 +55,13 @@ func pendingScenarios(t *testing.T, group string) {
 				t.Run("hermetic-library", acceptance.CheckKeeperConflictAndStop)
 			case "recovery-reconciler-waits-and-reclaims":
 				t.Run("hermetic-library", acceptance.CheckHostReconciliation)
+			}
+			if check, ok := runspecConfigBoundaries()[scenario.ID]; ok {
+				t.Run("runspec-config", func(t *testing.T) {
+					if err := check(scenario.ID); err != nil {
+						t.Fatal(err)
+					}
+				})
 			}
 			var areas []string
 			for _, area := range scenario.Requires {
@@ -65,4 +81,18 @@ func pendingScenarios(t *testing.T, group string) {
 	if count == 0 {
 		t.Fatalf("no acceptance scenarios registered for group %q", group)
 	}
+}
+
+func runspecConfigBoundaries() map[string]func(string) error {
+	out := map[string]func(string) error{}
+	for _, id := range acceptance.EnvironmentBoundaryScenarios() {
+		out[id] = acceptance.CheckEnvironmentBoundary
+	}
+	for _, id := range acceptance.SettingsBoundaryScenarios() {
+		out[id] = acceptance.CheckSettingsBoundary
+	}
+	for _, id := range acceptance.ConfigBoundaryScenarios() {
+		out[id] = acceptance.CheckConfigBoundary
+	}
+	return out
 }

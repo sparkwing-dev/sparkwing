@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -80,16 +81,17 @@ func (a *sourceAdapters) Ensure(_ context.Context, identity engine.Identity, tar
 	return a.resolved, nil
 }
 
-func (a *sourceAdapters) Install(_ context.Context, resolved engine.Resolved, directory string, environment []string) ([]string, error) {
-	if !reflect.DeepEqual(resolved, a.resolved) || !reflect.DeepEqual(environment, []string{"PATH=/fixture/install/bin"}) {
-		return nil, errors.New("installer lost engine or explicit environment")
+func (a *sourceAdapters) Install(_ context.Context, resolved engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
+	directory, environment := filepath.Join(request.Directory, request.PipelineDir), request.Environment
+	if !reflect.DeepEqual(resolved, a.resolved) || len(environment) != 2 {
+		return engine.SDKCommand{}, errors.New("installer lost engine or explicit environment")
 	}
 	body, err := os.ReadFile(filepath.Join(directory, "pipeline.go"))
 	if err != nil || string(body) != "package main // sealed\n" {
-		return nil, errors.New("installer did not receive the sealed source")
+		return engine.SDKCommand{}, errors.New("installer did not receive the sealed source")
 	}
 	a.trace = append(a.trace, "install")
-	return []string{filepath.Join(directory, "entry")}, nil
+	return engine.SDKCommand{Directory: directory, Command: []string{filepath.Join(directory, "entry")}}, nil
 }
 
 func sourceAcquisitionFixture(t *testing.T) (runspec.Spec, source.Options, *sourceAdapters, string) {
@@ -117,12 +119,12 @@ func sourceAcquisitionFixture(t *testing.T) (runspec.Spec, source.Options, *sour
 		Target:   releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: "linux", GOARCH: "amd64"}, Executable: filepath.Join(t.TempDir(), "matched-engine"),
 	}}
 	spec := runspec.Spec{Request: runspec.SealedRequest{RunID: "original"}, Resolved: runspec.Resolved{Engine: a.resolved.Identity}}
-	spec.Request.Request.Options.RepoLocation.Set, spec.Request.Request.Options.RepoLocation.Value = true, sourceRemote
+	spec.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: sourceRemote, PipelineDir: ".sparkwing"}
 	spec.Request.Request.Git.Repository.Key, spec.Request.Request.Git.SHA = "git:8.8.8.8/team/repo", sealed
 	spec.Request.Request.Git.DefaultBranch.Set, spec.Request.Request.Git.DefaultBranch.Value = true, "trunk"
 	options := source.Options{
-		Workspace: t.TempDir(), Access: a, Engines: a, Target: a.resolved.Target, Installer: a,
-		GitEnvironment: sourcetest.Environment(t), InstallEnvironment: []string{"PATH=/fixture/install/bin"},
+		Workspace: t.TempDir(), Access: a, Engines: a, Target: a.resolved.Target, InstallSDK: a.Install,
+		Base: procenv.Base{Local: true, Captured: sourcetest.Environment(t)}, BuildEnvironment: sourcetest.BuildEnvironment,
 		ReadPin:         func(string, engine.SDKKind) (engine.Pin, error) { return a.resolved.Identity.Pin, nil },
 		BundleTransport: a,
 	}

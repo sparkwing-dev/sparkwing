@@ -130,6 +130,9 @@ type NodeRow struct {
 }
 
 // NodeAttempt preserves the node-wide ordinal across claims; generation is an attribute of that ordinal.
+// A node starts at attempt zero. CauseStart allocates one on first execution and
+// the next ordinal after a started disruption. CauseRetry allocates the next ordinal
+// under the same claim. An unstarted release consumes no ordinal. Applied.Attempt is authoritative.
 type NodeAttempt struct {
 	Identity         runspec.AttemptIdentity
 	Holder           string
@@ -225,6 +228,8 @@ func NodeTransitions() []NodeEdge {
 		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeCancelled}, []ActorKind{ActorReaper}, CauseLeaseLapse, []EdgeGuard{GuardCancelLapse}, false},
 		{[]NodeState{NodePending, NodeReady, NodeApprovalPending}, []NodeState{NodeCancelled}, cancellers, CauseCancel, []EdgeGuard{GuardCancel, GuardUnclaimed}, false},
 		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeCancelled}, cancellers, CauseCancel, []EdgeGuard{GuardCancel}, true},
+		{[]NodeState{NodePending, NodeReady, NodeApprovalPending}, []NodeState{NodeCancelled}, []ActorKind{ActorRunHost}, CauseCancel, []EdgeGuard{GuardOwner, GuardCancel, GuardUnclaimed}, false},
+		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeCancelled}, []ActorKind{ActorRunHost}, CauseCancel, []EdgeGuard{GuardOwner, GuardCancel}, true},
 	}
 }
 

@@ -164,18 +164,19 @@ func CheckGeneratorReplay(t *testing.T) {
 			}}
 			validated := 0
 			executor, err := nodehost.NewNodeExecutor(nodehost.ExecutorDependencies{
-				Store: s, Start: func(context.Context, nodehost.NodeInput, nodehost.ExecutorActivity) (nodehost.ExecutorProcess, error) {
+				Store: s, Start: func(_ context.Context, in nodehost.NodeInput, _ nodehost.ExecutorActivity) (nodehost.ExecutorProcess, error) {
+					sdk.input = in
 					return process, nil
 				},
 				EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 					return input.Engine, nil
 				},
 				CanonicalHash: expansionHash, Mask: func(text string) string { return text },
-				ReadFailure: func(_ context.Context, ref store.NodeRef) (nodeproto.JobFailure, error) {
-					if recovery == nil || ref != s.nodes["peer"].Ref {
-						return nodeproto.JobFailure{}, errors.New("undeclared recovery read")
+				ReadFailure: func(_ context.Context, ref store.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
+					if recovery == nil || ref != s.nodes["peer"].Ref || generation != s.nodes["peer"].Generation {
+						return nil, errors.New("undeclared recovery read")
 					}
-					return *recovery, nil
+					return recovery, nil
 				},
 				ChildContext: func(ctx context.Context, _, _ time.Duration) (context.Context, context.CancelFunc, error) {
 					child, cancel := context.WithCancel(ctx)

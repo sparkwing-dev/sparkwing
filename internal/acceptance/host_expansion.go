@@ -158,7 +158,7 @@ func CheckOwnerExpansion(t *testing.T) {
 					outcome = "failed"
 				}
 				return store.ScheduleDecision{Outcome: outcome}
-			}, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("expansion did not settle") }, Expand: func(ctx context.Context, accepted nodehost.AcceptedRun, row store.NodeRow) (json.RawMessage, *store.ExpansionFailure, error) {
+			}, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("expansion did not settle") }, Expand: func(ctx context.Context, accepted nodehost.AcceptedRun, row store.NodeRow, binding nodehost.StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
 				if s.finished.Transition.RunID != "" || s.count != 0 {
 					t.Fatal("owner settled before expansion")
 				}

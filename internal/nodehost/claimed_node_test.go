@@ -70,7 +70,7 @@ func claimedNodeFixture(t *testing.T) (NodeInput, *acquiredClaimStore, ClaimedNo
 	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
 		t.Fatal(err)
 	}
-	spec.Request.Request.Options.RepoLocation = runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "https://example.com/acme/repo.git"}}
+	spec.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://example.com/acme/repo.git", PipelineDir: ".sparkwing"}
 	spec.Request.Request.Git.SHA = strings.Repeat("a", 40)
 	spec.Request.Request.Git.Repository.Key = "example.com/acme/repo"
 	input.Accepted.Spec, _ = json.Marshal(spec)

@@ -40,6 +40,12 @@ func (o OutputRecords) PublishOutput(ctx context.Context, input NodeInput, value
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
+	if input.Storage.Bytes != nil || input.Storage.Records != nil {
+		if input.Storage.Bytes == nil || input.Storage.Records == nil {
+			return nil, errors.New("output storage binding is incomplete")
+		}
+		o.Blobs, o.Records = input.Storage.Bytes, input.Storage.Records
+	}
 	if o.Blobs == nil || o.Records == nil || o.Bind == nil {
 		return nil, errors.New("output publication requires bytes, records and authenticated binding")
 	}
@@ -49,6 +55,9 @@ func (o OutputRecords) PublishOutput(ctx context.Context, input NodeInput, value
 	upload, err := o.Bind(ctx, input)
 	if err != nil {
 		return nil, err
+	}
+	if input.Storage.Authority.CapabilityRef != "" && input.Storage.Authority != upload.Authority {
+		return nil, errors.New("output authority differs from the current storage binding")
 	}
 	if err := upload.check(input); err != nil {
 		return nil, err

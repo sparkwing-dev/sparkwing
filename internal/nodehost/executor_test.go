@@ -8,13 +8,17 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -49,9 +53,11 @@ func (s *executorStore) TransitionNode(_ context.Context, c store.NodeTransition
 	if c.Cause == s.fail {
 		return store.Applied{}, errors.New("transition refused")
 	}
-	if c.Cause == store.CauseRetry {
+	if c.Cause == store.CauseRetry || c.Cause == store.CauseStart {
 		s.row.Attempt++
-		s.row.ApplicationRetries++
+		if c.Cause == store.CauseRetry {
+			s.row.ApplicationRetries++
+		}
 	}
 	return store.Applied{Generation: s.row.Generation, Attempt: s.row.Attempt}, nil
 }
@@ -127,9 +133,9 @@ func executorFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDependenc
 	execution := runspec.JobExecutionSettings{}
 	spec := runspec.Spec{Hash: "seal", PlanHash: planHash, Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "ci"}}, Resolved: runspec.Resolved{Engine: identity, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"build": execution}}}}
 	raw, _ := json.Marshal(spec)
-	input := NodeInput{Accepted: AcceptedRun{RunID: "run", Spec: raw, SpecHash: "seal", Plan: plan, PlanHash: string(planHash)}, Engine: resolved, Entry: &source.Entry{Engine: resolved}, NodeID: "build", Generation: 3, Attempt: 5, SpecHash: string(jobHash), Execution: execution, Authority: ClaimAuthority{Holder: "runner", CapabilityPrefix: "claim"}, RouteBinding: nodeproto.ProcessBinding{RunID: "run", JobID: "build"}}
+	input := NodeInput{Accepted: AcceptedRun{RunID: "run", Spec: raw, SpecHash: "seal", Plan: plan, PlanHash: string(planHash)}, Engine: resolved, Entry: &source.Entry{Engine: resolved}, NodeID: "build", Generation: 3, Attempt: 4, SpecHash: string(jobHash), Execution: execution, Authority: ClaimAuthority{Holder: "runner", CapabilityPrefix: "claim"}, RouteBinding: nodeproto.ProcessBinding{RunID: "run", JobID: "build"}}
 	jobJSON, _ := json.Marshal(job)
-	s := &executorStore{row: store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "build"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 3, Attempt: 5, Spec: jobJSON, SpecHash: string(jobHash), Execution: execution}}
+	s := &executorStore{row: store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "build"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 3, Attempt: 4, Spec: jobJSON, SpecHash: string(jobHash), Execution: execution}}
 	processes := []*executorProcess{}
 	deps := ExecutorDependencies{Store: s, Start: func(_ context.Context, _ NodeInput, _ ExecutorActivity) (ExecutorProcess, error) {
 		p := &executorProcess{plan: plan, result: nodeproto.RunResult{Outcome: "success"}}
@@ -263,7 +269,7 @@ func TestNodeExecutorDriftPreventsBody(t *testing.T) {
 			}
 		}
 	}
-	if len(s.changes) != 1 || s.changes[0].Cause != store.CauseReport || s.changes[0].To != store.NodeFailed {
+	if len(s.changes) != 2 || s.changes[0].Cause != store.CauseStart || s.changes[1].Cause != store.CauseReport || s.changes[1].To != store.NodeFailed {
 		t.Fatalf("changes = %+v", s.changes)
 	}
 }
@@ -351,7 +357,11 @@ func TestNodeExecutorTransitionRefusalStopsExecution(t *testing.T) {
 			if err = host.Execute(context.Background(), input); err == nil {
 				t.Fatal("transition refusal was ignored")
 			}
-			if len(*processes) != 1 {
+			wantProcesses := 1
+			if cause == store.CauseStart {
+				wantProcesses = 0
+			}
+			if len(*processes) != wantProcesses {
 				t.Fatalf("process count = %d", len(*processes))
 			}
 			want := 2
@@ -414,7 +424,10 @@ func TestNodeExecutorStorageLayersWrapRetriesOnce(t *testing.T) {
 	var events []string
 	deps.PrepareLayer = func(_ context.Context, layer LayerSpec, _ NodeInput, _ nodeproto.JobSpec) (ExecutorFinalizer, error) {
 		events = append(events, layer.Name+" in")
-		return func(context.Context, *store.NodeResult) error { events = append(events, layer.Name+" out"); return nil }, nil
+		return func(context.Context, NodeInput, *store.NodeResult) error {
+			events = append(events, layer.Name+" out")
+			return nil
+		}, nil
 	}
 	start := deps.Start
 	attempts := 0
@@ -512,7 +525,7 @@ func TestNodeExecutorRejectsSDKMismatchBeforeBody(t *testing.T) {
 	if err = host.Execute(context.Background(), input); err == nil {
 		t.Fatal("SDK mismatch accepted")
 	}
-	if len(*processes) != 1 || len((*processes)[0].requests) != 1 || len(s.changes) != 1 || s.changes[0].To != store.NodeFailed {
+	if len(*processes) != 1 || len((*processes)[0].requests) != 1 || len(s.changes) != 2 || s.changes[1].To != store.NodeFailed {
 		t.Fatalf("body ran: %+v", s.changes)
 	}
 }
@@ -653,7 +666,12 @@ func TestNodeExecutorRecoveryReceivesPersistedFailure(t *testing.T) {
 	executorChangeJob(t, &input, s, job)
 	s.nodes = map[string]store.NodeRow{"source": {Ref: store.NodeRef{RunID: "run", NodeID: "source"}, Status: store.StatusDone, Outcome: store.NodeFailed}}
 	failure := nodeproto.JobFailure{Job: "source", Stage: "action", Error: &apierr.Error{Code: apierr.SDKError, Message: "recorded failure"}}
-	deps.ReadFailure = func(context.Context, store.NodeRef) (nodeproto.JobFailure, error) { return failure, nil }
+	deps.ReadFailure = func(_ context.Context, ref store.NodeRef, generation int64) (*nodeproto.JobFailure, error) {
+		if generation != s.nodes[ref.NodeID].Generation {
+			t.Fatal("failure reader lost the source generation")
+		}
+		return &failure, nil
+	}
 	start := deps.Start
 	deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
 		process, err := start(ctx, in, p)
@@ -688,5 +706,117 @@ func TestNodeExecutorAcceptedDriftReportsWithoutStarting(t *testing.T) {
 	}
 	if len(*processes) != 0 || len(s.changes) != 1 || s.changes[0].To != store.NodeFailed {
 		t.Fatalf("changes = %+v", s.changes)
+	}
+}
+
+func TestNodeExecutorFirstStartAllocatesOrdinal(t *testing.T) {
+	input, s, deps, processes := executorFixture(t)
+	input.Attempt, s.row.Attempt = 0, 0
+	original := deps.Start
+	deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+		if input.Attempt != 1 || len(s.changes) != 1 || s.changes[0].Cause != store.CauseStart {
+			t.Fatal("SDK started without the committed ordinal")
+		}
+		return original(ctx, input, activity)
+	}
+	host, err := NewNodeExecutor(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := host.Execute(t.Context(), input); err != nil {
+		t.Fatal(err)
+	}
+	if len(*processes) != 1 || s.row.Attempt != 1 {
+		t.Fatal("first execution did not consume exactly one ordinal")
+	}
+}
+
+type executorStorageBytes struct{ blob.Store }
+type executorStorageRecords struct{ blob.RecordStore }
+
+func TestNodeExecutorRefreshesStorageAndFinalizesLastAttempt(t *testing.T) {
+	input, st, deps, processes := executorFixture(t)
+	input.Attempt, st.row.Attempt = 0, 0
+	executorRetryBudget(t, &input, st, 1)
+	var binds, starts, finalized []int64
+	deps.BindStorage = func(_ context.Context, in NodeInput) (StorageBinding, error) {
+		binds = append(binds, in.Attempt)
+		return StorageBinding{Bytes: executorStorageBytes{}, Records: executorStorageRecords{}, Authority: blob.Authority{CapabilityRef: "storage-claim", Principal: "executor", Repo: "repo", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{RunID: in.Accepted.RunID, NodeID: in.NodeID, Attempt: in.Attempt, Generation: in.Generation}}}}, nil
+	}
+	deps.PrepareLayer = func(_ context.Context, _ LayerSpec, in NodeInput, _ nodeproto.JobSpec) (ExecutorFinalizer, error) {
+		if in.Storage.Authority.Attempt.Value.Attempt != 1 {
+			t.Fatal("layer preparation did not receive first bound attempt")
+		}
+		return func(_ context.Context, latest NodeInput, _ *store.NodeResult) error {
+			finalized = append(finalized, latest.Storage.Authority.Attempt.Value.Attempt)
+			return nil
+		}, nil
+	}
+	start := deps.Start
+	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+		starts = append(starts, in.Storage.Authority.Attempt.Value.Attempt)
+		p, err := start(ctx, in, activity)
+		if len(*processes) == 1 {
+			p.(*executorProcess).result.Outcome = "failed"
+		}
+		return p, err
+	}
+	host, err := NewNodeExecutor(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := host.Execute(t.Context(), input); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(binds, []int64{1, 2}) || !reflect.DeepEqual(starts, binds) || !reflect.DeepEqual(finalized, []int64{2, 2}) {
+		t.Fatalf("bindings=%v starts=%v finalizers=%v", binds, starts, finalized)
+	}
+}
+
+func TestNodeExecutorStorageRefreshFailureSuppressesStaleFinalizers(t *testing.T) {
+	input, st, deps, processes := executorFixture(t)
+	executorRetryBudget(t, &input, st, 1)
+	sentinel := errors.New("storage authority unavailable")
+	binds, finalized := 0, 0
+	deps.BindStorage = func(_ context.Context, in NodeInput) (StorageBinding, error) {
+		binds++
+		if binds == 2 {
+			return StorageBinding{}, sentinel
+		}
+		return StorageBinding{Bytes: executorStorageBytes{}, Records: executorStorageRecords{}, Authority: blob.Authority{CapabilityRef: "claim", Principal: "executor", Repo: "repo", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{RunID: in.Accepted.RunID, NodeID: in.NodeID, Attempt: in.Attempt, Generation: in.Generation}}}}, nil
+	}
+	deps.PrepareLayer = func(context.Context, LayerSpec, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
+		return func(context.Context, NodeInput, *store.NodeResult) error { finalized++; return nil }, nil
+	}
+	start := deps.Start
+	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+		p, err := start(ctx, in, activity)
+		p.(*executorProcess).result.Outcome = "failed"
+		return p, err
+	}
+	host, err := NewNodeExecutor(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = host.Execute(t.Context(), input)
+	if !errors.Is(err, sentinel) || len(*processes) != 1 || finalized != 0 || st.changes[len(st.changes)-1].To != store.NodeFailed {
+		t.Fatalf("error=%v processes=%d finalizers=%d", err, len(*processes), finalized)
+	}
+}
+
+func TestNodeExecutorReportsOnlyBoundedMaskedFailureText(t *testing.T) {
+	input, st, deps, _ := executorFixture(t)
+	secret := "private-start-credential"
+	sentinel := errors.New(secret + strings.Repeat("界", int(limits.ErrorBytes)) + "failure-tail")
+	deps.Mask = func(text string) string { return strings.ReplaceAll(text, secret, "***") }
+	deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) { return nil, sentinel }
+	host, err := NewNodeExecutor(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = host.Execute(t.Context(), input)
+	report := st.changes[len(st.changes)-1].Extra.Result
+	if !errors.Is(err, sentinel) || report == nil || len(report.MaskedError) > int(limits.ErrorBytes) || strings.Contains(report.MaskedError, secret) || !strings.HasSuffix(report.MaskedError, "failure-tail") || !utf8.ValidString(report.MaskedError) {
+		t.Fatalf("failure report=%+v error=%v", report, err)
 	}
 }

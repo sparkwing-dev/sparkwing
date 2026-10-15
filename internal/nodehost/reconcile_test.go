@@ -121,3 +121,21 @@ func TestFollowReconciliationRejectsUnfencedExecution(t *testing.T) {
 		})
 	}
 }
+
+func TestFollowReconciliationMaterializeMissNeverAwardsExecution(t *testing.T) {
+	ref := store.NodeRef{RunID: "run", NodeID: "job"}
+	for _, kind := range []store.ReconcileKind{store.Dispatch, store.Execute} {
+		f := &reconciliationFixture{results: []store.ReconciledNode{{Kind: kind, Node: store.NodeRow{Ref: ref, Status: store.StatusPending}}}}
+		got, err := FollowReconciliation(t.Context(), f, store.ReconcileRequest{Ref: ref, MaterializeOnly: true}, nil)
+		if kind == store.Dispatch && (err != nil || got.Kind != store.Dispatch) {
+			t.Fatalf("dispatch miss: %+v, %v", got, err)
+		}
+		if kind == store.Execute && err == nil {
+			t.Fatal("probe acquired execution")
+		}
+	}
+	f := &reconciliationFixture{results: []store.ReconciledNode{{Kind: store.Dispatch, Node: store.NodeRow{Ref: ref, Status: store.StatusPending}}}}
+	if _, err := FollowReconciliation(t.Context(), f, store.ReconcileRequest{Ref: ref}, nil); err == nil {
+		t.Fatal("execution reconcile silently returned dispatch")
+	}
+}

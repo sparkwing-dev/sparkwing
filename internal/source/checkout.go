@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -26,8 +27,9 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 	if err := validateSpec(spec); err != nil {
 		return nil, err
 	}
-	if options.GitEnvironment == nil {
-		return nil, errors.New("source checkout requires an explicit host-built Git environment")
+	environment, err := sourceEnvironment(options, procenv.Git)
+	if err != nil {
+		return nil, err
 	}
 	entry = &Entry{RepoKey: spec.RepoKey, DefaultBranch: spec.DefaultBranch}
 	defer func() {
@@ -37,7 +39,7 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 		}
 	}()
 	checkout := spec.LocalCheckout
-	client := gitClient{env: gitEnvironment(options.GitEnvironment), bundleTransport: options.BundleTransport}
+	client := gitClient{env: gitEnvironment(environment), bundleTransport: options.BundleTransport}
 	if checkout == "" {
 		if !filepath.IsAbs(options.Workspace) {
 			return entry, errors.New("remote source requires an absolute host workspace")
@@ -86,6 +88,7 @@ func PrepareCheckout(ctx context.Context, spec Spec, options Options) (entry *En
 			return entry, err
 		}
 	}
+	entry.checkoutDirectory = checkout
 	entry.Directory, err = pipelineDirectory(checkout, spec.PipelineDir)
 	return entry, err
 }

@@ -2,7 +2,6 @@ package source
 
 import (
 	"errors"
-	"fmt"
 	"maps"
 	"path/filepath"
 
@@ -12,17 +11,23 @@ import (
 
 func requestSource(sealed runspec.SealedRequest) (Spec, error) {
 	r := sealed.Request
-	if !r.Options.RepoLocation.Set || r.Options.RepoLocation.Value == "" {
-		return Spec{}, errors.New("sealed request has no source location; repository display is not acquisition authority")
+	location := r.Source.Location
+	if (location.RemoteURL == "") == (location.LocalCheckout == "") {
+		return Spec{}, errors.New("sealed source requires exactly one acquisition location")
 	}
-	spec := Spec{RepoKey: string(r.Git.Repository.Key), SHA: r.Git.SHA, PipelineDir: r.Source.Entrypoint}
-	location := r.Options.RepoLocation.Value
-	if filepath.IsAbs(location) {
-		spec.LocalCheckout = filepath.Clean(location)
+	if !filepath.IsLocal(location.PipelineDir) {
+		return Spec{}, errors.New("sealed pipeline directory must stay inside the checkout")
+	}
+	spec := Spec{RepoKey: string(r.Git.Repository.Key), SHA: r.Git.SHA, PipelineDir: location.PipelineDir}
+	if location.LocalCheckout != "" {
+		if !filepath.IsAbs(location.LocalCheckout) {
+			return Spec{}, errors.New("sealed local checkout must be absolute")
+		}
+		spec.LocalCheckout = filepath.Clean(location.LocalCheckout)
 	} else {
-		remote, err := sourceurl.ValidateCloneURL(location)
+		remote, err := sourceurl.ValidateCloneURL(location.RemoteURL)
 		if err != nil {
-			return Spec{}, fmt.Errorf("sealed source location: %w", err)
+			return Spec{}, errors.New("sealed remote acquisition location is invalid")
 		}
 		spec.RemoteURL = remote
 	}
@@ -49,9 +54,6 @@ func executionSource(sealed runspec.Spec) (Spec, error) {
 	spec.Checkout = runspec.CheckoutPolicy{}
 	if winner := sealed.Resolved.Settings.Options.Checkout; winner.Set {
 		spec.Checkout = clonePolicy(winner.Value)
-	}
-	if sealed.Resolved.Entrypoint != "" {
-		spec.PipelineDir = sealed.Resolved.Entrypoint
 	}
 	if spec.DefaultBranch == "" && sealed.Resolved.DefaultBranch.Set {
 		spec.DefaultBranch = sealed.Resolved.DefaultBranch.Value

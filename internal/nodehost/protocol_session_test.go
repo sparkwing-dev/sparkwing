@@ -206,7 +206,7 @@ func TestProtocolSessionRejectsDuplicateAndUnknownReplies(t *testing.T) {
 	}
 }
 
-func TestProtocolSessionCancelledEvalReapsWithoutSendingCancel(t *testing.T) {
+func TestProtocolSessionCancelledEvalJoinsTargetAndKeepsSession(t *testing.T) {
 	entered := make(chan struct{})
 	var cancelSeen, cleaned atomic.Bool
 	session := protocolTestSession(t, "eval_cancel", func(cfg *ProtocolSessionConfig) {
@@ -226,7 +226,7 @@ func TestProtocolSessionCancelledEvalReapsWithoutSendingCancel(t *testing.T) {
 	defer cancel(nil)
 	result := make(chan error, 1)
 	go func() {
-		_, err := session.Request(ctx, nodeproto.Request{Op: nodeproto.OpEval, Job: "job", Closure: "before_run"})
+		_, err := session.Request(ctx, nodeproto.Request{ID: "caller-eval", Op: nodeproto.OpEval, Closure: "before_run"})
 		result <- err
 	}()
 	<-entered
@@ -236,14 +236,14 @@ func TestProtocolSessionCancelledEvalReapsWithoutSendingCancel(t *testing.T) {
 	if !errors.Is(err, cause) {
 		t.Fatalf("eval cancellation lost its cause: %v", err)
 	}
-	if session.cmd.ProcessState == nil {
-		t.Fatal("cancelled eval returned before process joined")
+	if !cancelSeen.Load() {
+		t.Fatal("eval cancellation did not target and join its private request")
+	}
+	if _, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpDescribe}); err != nil {
+		t.Fatalf("session unavailable after eval cancellation: %v", err)
 	}
 	if err := session.Close(); err != nil {
 		t.Fatalf("intentional eval stop became a close failure: %v", err)
-	}
-	if cancelSeen.Load() {
-		t.Fatal("sent job-only cancel for eval")
 	}
 	if err := session.Cleanup(t.Context()); err != nil || !cleaned.Load() {
 		t.Fatalf("host cleanup did not run: %v", err)
@@ -492,10 +492,18 @@ func TestProtocolSessionChild(t *testing.T) {
 				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{ownerPolicyJob()}})
 			case nodeproto.OpEval:
 				if request.Closure == "slow" {
+					held = append(held, request)
 					send(nodeproto.FrameLog{Level: "info", Message: "slow entered"})
 				} else {
 					reply(request, nodeproto.EvalResult{Value: json.RawMessage("true")})
 				}
+			case nodeproto.OpCancel:
+				if len(held) != 1 || request.Target != held[0].ID || request.Job != "" || request.Step != "" {
+					os.Exit(13)
+				}
+				reply(held[0], nodeproto.EvalResult{Value: json.RawMessage("null")})
+				held = nil
+				reply(request, nodeproto.ServiceAcknowledged{})
 			default:
 				os.Exit(7)
 			}
@@ -519,7 +527,10 @@ func TestProtocolSessionChild(t *testing.T) {
 				continue
 			}
 			if request.Op == nodeproto.OpCancel {
-				send(nodeproto.FrameLog{TS: "now", Message: "cancel_seen"})
+				if len(held) != 1 || request.Target != held[0].ID || request.Target == "caller-eval" || request.Job != "" || request.Step != "" {
+					os.Exit(13)
+				}
+				send(nodeproto.FrameLog{Message: "cancel_seen"})
 			}
 			reply(request, map[string]bool{})
 			for _, pending := range held {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
 
@@ -15,8 +16,8 @@ func acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
-	if options.Engines == nil || options.Installer == nil || options.InstallEnvironment == nil {
-		return nil, errors.New("source acquisition requires an engine resolver, entry installer and explicit install environment")
+	if options.Engines == nil {
+		return nil, errors.New("source acquisition requires an engine resolver")
 	}
 	if options.Target.Binary != releaseasset.Sparkwing {
 		return nil, errors.New("source acquisition requires the SDK-matched sparkwing engine")
@@ -44,22 +45,38 @@ func acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 	if err := context.Cause(ctx); err != nil {
 		return entry, err
 	}
-	command, err := options.Installer.Install(ctx, entry.Engine, entry.Directory, append([]string{}, options.InstallEnvironment...))
+	environment, err := sourceEnvironment(options, procenv.Install)
+	if err != nil {
+		return entry, err
+	}
+	install := options.InstallSDK
+	if install == nil {
+		install = func(ctx context.Context, selected engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
+			return selected.InstallSDK(ctx, request)
+		}
+	}
+	relative, err := filepath.Rel(entry.checkoutDirectory, entry.Directory)
+	if err != nil {
+		return entry, err
+	}
+	command, err := install(ctx, entry.Engine, engine.SDKInstallRequest{
+		Directory: entry.checkoutDirectory, PipelineDir: relative, SDK: options.SDK, Environment: environment,
+	})
 	if err != nil {
 		return entry, fmt.Errorf("install source entry: %w", err)
 	}
 	if err := context.Cause(ctx); err != nil {
 		return entry, err
 	}
-	if len(command) == 0 || command[0] == "" {
+	if command.Directory != entry.Directory || len(command.Command) == 0 || command.Command[0] == "" {
 		return entry, errors.New("source installer returned no SDK command")
 	}
-	for _, arg := range command {
+	for _, arg := range command.Command {
 		if strings.ContainsRune(arg, '\x00') {
 			return entry, errors.New("source installer returned an invalid SDK command")
 		}
 	}
-	entry.Command = append([]string{}, command...)
+	entry.Command = append([]string{}, command.Command...)
 	return entry, nil
 }
 
@@ -97,4 +114,16 @@ func resolveEngine(ctx context.Context, spec Spec, options Options, directory st
 		return engine.Resolved{}, errors.New("source engine resolution differs from the sealed engine")
 	}
 	return resolved, nil
+}
+
+func sourceEnvironment(options Options, kind procenv.Kind) ([]string, error) {
+	build := options.BuildEnvironment
+	if build == nil {
+		build = procenv.Build
+	}
+	env, err := build(kind, options.Base, procenv.Runtime{})
+	if err != nil {
+		return nil, fmt.Errorf("source process environment: %w", err)
+	}
+	return append([]string{}, env...), nil
 }

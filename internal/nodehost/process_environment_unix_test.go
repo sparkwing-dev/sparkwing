@@ -100,6 +100,80 @@ func TestNativeSDKStartsUseEnvironmentPolicyAndRevokeFailures(t *testing.T) {
 	}
 }
 
+func TestNativeSDKStartsLoadCapturedValuesBeforeSharedEnvironmentPolicy(t *testing.T) {
+	for _, placement := range []string{"plan", "attempt", "eval", "retry_attempt", "retry_eval"} {
+		t.Run(placement, func(t *testing.T) {
+			input, st, _, _ := executorFixture(t)
+			snapshots, err := NewFileEnvironmentSnapshots(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			seal, err := snapshots.Capture(t.Context(), []string{"GORACE=atexit_sleep_ms=0", "CAPTURED=original", "EMPTY=", "API_TOKEN=private-token", "SPARKWING_RUN_ID=spoofed"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var spec runspec.Spec
+			if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
+				t.Fatal(err)
+			}
+			spec.Request.Request.Env = seal
+			if strings.HasPrefix(placement, "retry_") {
+				spec.Request.RunID = "source-run"
+			}
+			input.Accepted.Spec, _ = json.Marshal(spec)
+			exe, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			input.Entry.Command = []string{exe, "-test.run=^TestProtocolSessionChild$", "--", "environment"}
+			revocations := 0
+			cfg := ProtocolSessionConfig{
+				Environments: SDKEnvironment{Snapshots: snapshots, Store: st, Base: procenv.Base{Local: true, Captured: []string{"CAPTURED=changed"}, Ambient: []string{"AMBIENT=daemon"}}},
+				ParseFrame:   protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil },
+				Revoke: func() error { revocations++; return nil },
+			}
+			var process ExecutorProcess
+			kind := strings.TrimPrefix(placement, "retry_")
+			switch kind {
+			case "plan":
+				process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Environment: seal, Run: nodeproto.RunContext{RunID: input.Accepted.RunID, Pipeline: "build"}}, func(context.Context, nodeproto.FrameLog) error { return nil })
+			case "attempt":
+				process, err = cfg.Start(t.Context(), input, ExecutorActivity{})
+			case "eval":
+				process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: input.Generation, SpecHash: input.SpecHash})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = process.Close() })
+			protocolTestHello(t, process.(*ProtocolSession))
+			reply, err := process.Request(t.Context(), nodeproto.Request{ID: "environment", Op: nodeproto.OpDescribe})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var environment []string
+			if err := json.Unmarshal(reply.Result, &environment); err != nil {
+				t.Fatal(err)
+			}
+			values := map[string]string{}
+			for _, entry := range environment {
+				name, value, _ := strings.Cut(entry, "=")
+				values[name] = value
+			}
+			empty, present := values["EMPTY"]
+			if values["CAPTURED"] != "original" || !present || empty != "" || values["SPARKWING_RUN_ID"] != input.Accepted.RunID {
+				t.Fatalf("SDK lost the captured base or sealed identity: %v", environment)
+			}
+			if _, ok := values["API_TOKEN"]; ok || values["AMBIENT"] != "" || kind != "plan" && values["SPARKWING_JOB_ID"] != input.NodeID {
+				t.Fatal("SDK inherited credentials, daemon input or the wrong job identity")
+			}
+			if err := process.Close(); err != nil || revocations != 1 {
+				t.Fatalf("close=%v revocations=%d", err, revocations)
+			}
+		})
+	}
+}
+
 func sdkStartupJob(value string) nodeproto.JobSpec {
 	return nodeproto.JobSpec{ID: "build", Env: map[string]nodeproto.EnvValue{"SDK_STARTUP": {Value: value, Startup: true}}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 }

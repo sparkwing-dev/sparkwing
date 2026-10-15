@@ -2,9 +2,12 @@ package nodehost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -81,7 +84,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 					if err != nil || request == nil {
 						return err
 					}
-					return h.execute(ctx, accepted, entry, *request)
+					return h.execute(ctx, input.Storage, accepted, entry, *request)
 				})
 				continue
 			}
@@ -90,7 +93,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				return RunCompletion{}, err
 			}
 			if request != nil {
-				launch(request.Ref.NodeID, func() error { return h.execute(ctx, accepted, entry, *request) })
+				launch(request.Ref.NodeID, func() error { return h.execute(ctx, input.Storage, accepted, entry, *request) })
 			}
 			expanded[action.NodeID] = action.Kind == store.DecisionExpand
 			changed = true
@@ -102,7 +105,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			}
 			if row.ReadyAt != nil || row.ClaimedBy != "" {
 				launch(row.Ref.NodeID, func() error {
-					return h.execute(ctx, accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: store.SourceNone})
+					return h.execute(ctx, input.Storage, accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: store.SourceNone})
 				})
 			}
 		}
@@ -167,7 +170,8 @@ func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted Accepted
 		change.To, change.Cause = store.NodeState(action.Outcome), store.CauseDependency
 		change.Extra.Result = &store.NodeResult{Outcome: change.To, Reason: action.Reason}
 	case store.DecisionCancelHolder:
-		return nil, errors.New("run-host cancellation requires a controller-authorized cancellation adapter")
+		change.To, change.Cause = store.NodeCancelled, store.CauseCancel
+		change.Extra.Result = &store.NodeResult{Outcome: store.NodeCancelled, Reason: action.Reason}
 	case store.DecisionExpand:
 		return nil, h.expand(ctx, input, accepted, row)
 	default:
@@ -186,7 +190,7 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 		if layer.Side != OwnerSide {
 			continue
 		}
-		result, err := h.Layer(ctx, layer, accepted, row)
+		result, err := h.Layer(ctx, layer, accepted, row, input.Storage)
 		if err != nil {
 			return nil, err
 		}
@@ -198,13 +202,20 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 		}
 		if result.Source != nil {
 			request.Source, request.Policy = result.Source, result.Source.Kind
+			probe := request
+			probe.MaterializeOnly = true
+			reused, err := FollowReconciliation(ctx, h.Store, probe, h.WaitNode)
+			if err != nil {
+				return nil, err
+			}
+			if reused.Kind != store.Dispatch {
+				return nil, nil
+			}
+			request.Source, request.Policy = nil, store.SourceNone
 		}
 		if kind == store.DecisionApproval && layer.Name == "approval" {
 			break
 		}
-	}
-	if request.Source != nil && (h.Local == nil || !h.Local(row)) {
-		return nil, errors.New("remote result reuse requires materialize-only reconciliation")
 	}
 	change := store.NodeTransition{Ref: row.Ref, Actor: input.Owner, To: store.NodeReady, Cause: store.CauseRelease}
 	if kind == store.DecisionApproval {
@@ -219,7 +230,7 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 	return &request, nil
 }
 
-func (h *OwnerHost) execute(ctx context.Context, accepted AcceptedRun, entry *source.Entry, request store.ReconcileRequest) error {
+func (h *OwnerHost) execute(ctx context.Context, storageBinding StorageBinding, accepted AcceptedRun, entry *source.Entry, request store.ReconcileRequest) error {
 	if h.Executor == nil || h.Bind == nil {
 		return errors.New("self execution requires a node host and claim binding")
 	}
@@ -230,7 +241,7 @@ func (h *OwnerHost) execute(ctx context.Context, accepted AcceptedRun, entry *so
 	if result.Kind != store.Execute {
 		return nil
 	}
-	input, err := h.Bind(ctx, accepted, result, entry)
+	input, err := h.Bind(ctx, accepted, result, entry, storageBinding)
 	if err != nil {
 		return err
 	}
@@ -244,15 +255,25 @@ func (h *OwnerHost) expand(ctx context.Context, input RunInput, accepted Accepte
 	if h.Expand == nil {
 		return errors.New("run host requires a generator evaluator")
 	}
-	body, failure, err := h.Expand(ctx, accepted, row)
+	body, failure, err := h.Expand(ctx, accepted, row, input.Storage)
 	if err != nil {
 		return err
 	}
 	if (len(body) == 0) == (failure == nil) {
 		return errors.New("generator must return declarations or a structured failure")
 	}
-	_, err = h.Store.AcceptExpansion(ctx, store.ExpansionSubmission{Source: row.Ref, SourceGeneration: row.Generation, Actor: input.Owner, Body: body, Failure: failure})
-	return err
+	commit := func() error {
+		_, err := h.Store.AcceptExpansion(ctx, store.ExpansionSubmission{Source: row.Ref, SourceGeneration: row.Generation, Actor: input.Owner, Body: body, Failure: failure})
+		return err
+	}
+	if h.Masks != nil && failure == nil {
+		var proposal nodeproto.PlanDoc
+		if err := json.Unmarshal(body, &proposal); err != nil {
+			return err
+		}
+		return h.Masks.Accept(proposal, commit)
+	}
+	return commit()
 }
 
 func (h *OwnerHost) finish(ctx context.Context, input RunInput, decision store.ScheduleDecision) (RunCompletion, error) {

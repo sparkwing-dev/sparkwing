@@ -37,6 +37,9 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 		ValidatePlan: f.functions().Validate, CanonicalHash: f.functions().Hash,
 	}
 	planner.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+		if planner.Masker.Mask(input.Args["label"]) != "***" {
+			t.Fatal("intake secret classification was not registered before describe")
+		}
 		if input.Entry.Engine.Identity != resolved.Identity {
 			t.Fatal("planning changed its selected engine")
 		}
@@ -70,12 +73,12 @@ func TestSDKPlanningDescribesDefaultsBeforePlanning(t *testing.T) {
 		processes = append(processes, process)
 		return process, nil
 	}
-	input := PlanningProcessInput{Entry: &source.Entry{Engine: resolved}, Runner: nodeproto.RunnerIdentity{Name: "granted", Type: "local"}, Run: nodeproto.RunContext{RunID: "run", Pipeline: "build"}, Args: map[string]string{"token": supplied, "label": "explicit"}}
+	input := PlanningProcessInput{Entry: &source.Entry{Engine: resolved}, Runner: nodeproto.RunnerIdentity{Name: "granted", Type: "local"}, Run: nodeproto.RunContext{RunID: "run", Pipeline: "build"}, Args: map[string]string{"token": supplied, "label": "explicit"}, SecretArgs: []string{"label"}}
 	prepared, err := planner.Prepare(t.Context(), input, f.input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(prepared.SecretArgs, []string{"token"}) || prepared.Args["empty"] != "" || len(prepared.Args) != 3 {
+	if !reflect.DeepEqual(prepared.SecretArgs, []string{"label", "token"}) || prepared.Args["empty"] != "" || len(prepared.Args) != 3 {
 		t.Fatalf("description = %+v", prepared)
 	}
 	if len(logs) != 1 || strings.Contains(logs[0].Message, "private") || strings.Contains(string(logs[0].Attrs), "private") {
@@ -122,6 +125,36 @@ func sdkPlanningFixture(t *testing.T) (SDKPlanner, PlanningProcessInput, *planni
 		},
 	}
 	return p, input, f, processes
+}
+
+func TestSDKPlanningCacheKeepsCapturedAndHostEnvironmentIdentity(t *testing.T) {
+	seen := map[runspec.Hash]bool{}
+	for _, captured := range []string{"original", "changed"} {
+		for _, host := range []string{strings.Repeat("a", 64), strings.Repeat("b", 64), ""} {
+			planner, input, fixture, _ := sdkPlanningFixture(t)
+			seal, err := runspec.EnvironmentDigest(map[string]string{"CAPTURED": captured})
+			if err != nil {
+				t.Fatal(err)
+			}
+			input.Environment = seal
+			fixture.input.Inputs.EnvironmentDigest = runspec.Hash(host)
+			prepared, err := planner.Prepare(t.Context(), input, fixture.input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			digest := prepared.Input.Inputs.EnvironmentDigest
+			if host == "" {
+				if digest != "" {
+					t.Fatal("snapshot identity hid missing host environment inputs")
+				}
+				continue
+			}
+			if seen[digest] {
+				t.Fatal("planning cache ignored a changed snapshot or host environment")
+			}
+			seen[digest] = true
+		}
+	}
 }
 
 func TestSDKPlanningRetainsSealedRunContext(t *testing.T) {

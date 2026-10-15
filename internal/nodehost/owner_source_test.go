@@ -6,14 +6,18 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 )
 
 type ownerSourceEngine struct {
@@ -41,10 +45,20 @@ func TestOwnerHostAcquiresSealedSourceWithExplicitEnvironment(t *testing.T) {
 			f, host, input := newOwnerFixture(t, resumed)
 			root, sha := hostSourceCheckout(t)
 			request := &f.snapshot.Run.Request.Request
-			request.Options.RepoLocation.Set, request.Options.RepoLocation.Value = true, root
+			request.Source.Location = runspec.SourceLocation{LocalCheckout: root, PipelineDir: "."}
 			request.Git.SHA, request.Git.Repository.Key = sha, "example.com/acme/repo"
 			request.Git.DefaultBranch.Set, request.Git.DefaultBranch.Value = true, "main"
 			request.Source.Entrypoint = "."
+			captured := []string{"PATH=" + os.Getenv("PATH")}
+			snapshots, err := NewFileEnvironmentSnapshots(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Env, err = snapshots.Capture(t.Context(), captured)
+			if err != nil {
+				t.Fatal(err)
+			}
+			host.Snapshots = snapshots
 			input.SealedRequest, _ = json.Marshal(request)
 			input.Accepted = nil
 			exe, err := os.Executable()
@@ -60,15 +74,16 @@ func TestOwnerHostAcquiresSealedSourceWithExplicitEnvironment(t *testing.T) {
 			installed := 0
 			host.Acquire = nil
 			host.Source = source.Options{Engines: engines, Target: resolved.Target, SDK: engine.GoSDK,
-				InstallEnvironment: []string{"PATH=" + os.Getenv("PATH")}, GitEnvironment: []string{"PATH=" + os.Getenv("PATH")},
+				Base: procenv.Base{Local: true, Captured: []string{"PATH=/daemon/bin"}}, BuildEnvironment: sourcetest.BuildEnvironment,
 				ReadPin: func(string, engine.SDKKind) (engine.Pin, error) { return resolved.Identity.Pin, nil },
-				Installer: claimInstaller(func(_ context.Context, engine engine.Resolved, directory string, env []string) ([]string, error) {
+				InstallSDK: func(_ context.Context, got engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
+					directory, env := filepath.Join(request.Directory, request.PipelineDir), request.Environment
 					installed++
-					if !reflect.DeepEqual(engine, resolved) || directory != root || !reflect.DeepEqual(env, host.Source.InstallEnvironment) {
+					if !reflect.DeepEqual(got, resolved) || directory != root || !reflect.DeepEqual(env, captured) {
 						t.Error("source installation lost its selected engine, checkout or explicit base environment")
 					}
-					return []string{"SDK-entry"}, nil
-				}),
+					return engine.SDKCommand{Directory: directory, Command: []string{"SDK-entry"}}, nil
+				},
 			}
 			prepare := host.Prepare
 			host.Prepare = func(ctx context.Context, in RunInput, entry *source.Entry) (OwnerPlanning, error) {

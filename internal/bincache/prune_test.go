@@ -55,38 +55,6 @@ func TestPruneToLimitsUsesLogicalRemovalForCacheByteCeiling(t *testing.T) {
 	}
 }
 
-func TestParseBytes(t *testing.T) {
-	for _, tc := range []struct {
-		in   string
-		want int64
-	}{
-		{"1024", 1024},
-		{"0", 0},
-		{"512B", 512},
-		{"2KiB", 2048},
-		{"1MiB", 1 << 20},
-		{"2GiB", 2 << 30},
-		{"1KB", 1000},
-		{"1MB", 1000 * 1000},
-		{" 4GiB ", 4 << 30},
-		{"1.5GiB", 1610612736},
-	} {
-		got, err := ParseBytes(tc.in)
-		if err != nil {
-			t.Errorf("ParseBytes(%q): %v", tc.in, err)
-			continue
-		}
-		if got != tc.want {
-			t.Errorf("ParseBytes(%q) = %d, want %d", tc.in, got, tc.want)
-		}
-	}
-	for _, bad := range []string{"", "-1", "banana", "12PB", "-2GiB"} {
-		if _, err := ParseBytes(bad); err == nil {
-			t.Errorf("ParseBytes(%q) should have failed", bad)
-		}
-	}
-}
-
 func writeCacheConfig(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")

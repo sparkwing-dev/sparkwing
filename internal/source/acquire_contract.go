@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -52,13 +53,6 @@ type EngineResolver interface {
 	Ensure(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
 }
 
-// EntryInstaller delegates SDK build or installation to the selected engine.
-// Install receives only the procenv.Install environment and returns SDK argv,
-// excluding protocol arguments. Installation must not run through the ambient engine.
-type EntryInstaller interface {
-	Install(context.Context, engine.Resolved, string, []string) ([]string, error)
-}
-
 // Options supplies host-owned workspace and authority, separate from sealed source data.
 type Options struct {
 	Workspace string
@@ -66,17 +60,16 @@ type Options struct {
 	Engines   EngineResolver
 	Target    releaseasset.Target
 	SDK       engine.SDKKind
-	Installer EntryInstaller
 	// ReadPin defaults to engine.ReadPin and must not execute repository code.
 	ReadPin func(string, engine.SDKKind) (engine.Pin, error)
-	// InstallEnvironment is the host's procenv.Install output, never ambient input.
-	InstallEnvironment []string
-	// GitEnvironment is a host-built procenv base, never implicit ambient input.
-	// The source authority may add its owner's SSH_AUTH_SOCK after authorization.
-	GitEnvironment []string
+	// InstallSDK defaults to the verified selected engine's InstallSDK method.
+	InstallSDK func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error)
+	// BuildEnvironment defaults to procenv.Build; adapters may supply the shared policy implementation.
+	BuildEnvironment func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error)
 	// BundleTransport supplies signed-object transfers; the source client always refuses redirects.
 	// Nil uses the standard HTTP transport.
 	BundleTransport http.RoundTripper
+	Base            procenv.Base
 }
 
 // Entry is the acquired checkout and SDK command. Command excludes protocol argv.
@@ -89,8 +82,9 @@ type Entry struct {
 	RepoKey   string
 	SHA       string
 	// DefaultBranch is resolved from origin HEAD only when the sealed request lacks it.
-	DefaultBranch  string
-	ownedDirectory string
+	DefaultBranch     string
+	ownedDirectory    string
+	checkoutDirectory string
 }
 
 // Acquire clones the sealed SHA exactly or uses the authorized local checkout.
@@ -109,6 +103,7 @@ func (e *Entry) Close() error { return e.close() }
 
 // ForRequest uses the captured intake checkout policy for planning acquisition.
 // Code and checkout-derived policy can resolve only at AcceptPlan.
+// Source.Location supplies URL/local path/pipeline directory. Repo display is never a clone URL.
 func ForRequest(request runspec.SealedRequest) (Spec, error) {
 	return requestSource(request)
 }
@@ -116,6 +111,7 @@ func ForRequest(request runspec.SealedRequest) (Spec, error) {
 // ForExecution uses the accepted checkout winner and immutable acquisition identity.
 // Executors never inspect raw PlanDoc.Source or a host's machine preferences.
 // The projection also carries the accepted portable engine identity.
+// It preserves the first seal's source location, never the executor's ambient checkout.
 func ForExecution(spec runspec.Spec) (Spec, error) {
 	return executionSource(spec)
 }

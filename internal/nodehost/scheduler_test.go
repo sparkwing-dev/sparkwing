@@ -506,7 +506,7 @@ func TestNodeErrorBoundingNeverSplitsASecret(t *testing.T) {
 			if len(log.records) != 1 || strings.Contains(log.records[0].Msg, tc.fragment) {
 				t.Errorf("a hook logging its error leaked %q: %+v", tc.fragment, log.records)
 			}
-			recorded := recordedErrText(errors.New(masker.Mask(tc.raw)))
+			recorded := recordedErrText(maskErr(masker, errors.New(tc.raw)))
 			if strings.Contains(recorded, tc.fragment) || len(recorded) > nodeErrTextMaxBytes {
 				t.Errorf("recorded error is %d bytes and leaks %q: %q", len(recorded), tc.fragment, recorded)
 			}

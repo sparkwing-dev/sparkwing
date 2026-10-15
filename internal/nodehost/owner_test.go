@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -252,11 +253,11 @@ func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 		return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
 	}
 	h.Local = func(store.NodeRow) bool { return true }
-	h.Layer = func(_ context.Context, layer LayerSpec, _ AcceptedRun, _ store.NodeRow) (OwnerLayerResult, error) {
+	h.Layer = func(_ context.Context, layer LayerSpec, _ AcceptedRun, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		f.record(layer.Name)
 		return OwnerLayerResult{}, nil
 	}
-	h.Bind = func(_ context.Context, a AcceptedRun, r store.ReconciledNode, e *source.Entry) (NodeInput, error) {
+	h.Bind = func(_ context.Context, a AcceptedRun, r store.ReconciledNode, e *source.Entry, binding StorageBinding) (NodeInput, error) {
 		return NodeInput{Accepted: a, Entry: e, NodeID: r.Node.Ref.NodeID, Generation: r.Node.Generation, Authority: ClaimAuthority{Holder: r.Claim.Holder, CapabilityPrefix: r.Claim.CapabilityPrefix}}, nil
 	}
 	h.Executor = ownerNodeFunc(func(ctx context.Context, n NodeInput) error {
@@ -270,5 +271,30 @@ func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 	want := []string{"renew", "acquire", "start", "debug", "skip_if", "approval", "memo", "admission", "ready", "claim", "execute", "success", "finish"}
 	if !reflect.DeepEqual(f.trace, want) {
 		t.Fatalf("trace=%v", f.trace)
+	}
+}
+
+func TestOwnerHostRetainsIntakeSecretClassifications(t *testing.T) {
+	f, host, input := newOwnerFixture(t, false)
+	f.snapshot.Run.Request.Request.RequestedArgs = map[string]string{"token": "private-value"}
+	f.snapshot.Run.Request.Request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"token"}}
+	input.SealedRequest, _ = json.Marshal(f.snapshot.Run.Request.Request)
+	masker := secrets.NewMasker()
+	host.Masks = NewMaskRegistry(masker)
+	host.Mask = masker.Mask
+	prepare := host.Prepare
+	host.Prepare = func(ctx context.Context, in RunInput, entry *source.Entry) (OwnerPlanning, error) {
+		if masker.Mask("private-value") != "***" {
+			t.Fatal("intake secret was unregistered at preparation")
+		}
+		planning, err := prepare(ctx, in, entry)
+		planning.Resolved.SecretArgs = []string{"sdk-secret"}
+		return planning, err
+	}
+	if _, err := host.Run(t.Context(), input); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(f.accepted.Seal.Resolved.SecretArgs, []string{"sdk-secret", "token"}) {
+		t.Fatalf("secret classification=%v", f.accepted.Seal.Resolved.SecretArgs)
 	}
 }
