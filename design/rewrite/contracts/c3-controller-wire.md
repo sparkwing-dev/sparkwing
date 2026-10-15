@@ -591,4 +591,34 @@ admission operation connected to its queue. Fake transports establish W9 parsing
 rendering and request behavior, not those runtime integrations. No C2 policy or
 other owner's interface changed.
 
+### Deployment operations
+
+`OperatorManager` uses the shared authenticated transport and C2's existing
+deployment routes. `ReadOperatorLimits` and `WriteOperatorLimits` use GET and PUT
+`/api/v1/operator/limits`. `OperatorLimits` retains the returned guard map,
+optional usage observations and request budgets. `OperatorLimitsWrite` carries
+nonnegative integer guard values, including explicit zero. The controller owns
+supported setting names. A write succeeds only when every supplied key and value
+appears unchanged in the response. Reads render the supplied keys without
+inventing missing guards or usage observations.
+
+`ReadObjectStoreBreaker` uses GET
+`/api/v1/operator/object-store/breaker`. `ResetObjectStoreBreaker` uses POST
+`/api/v1/operator/object-store/reset-breaker` and requires one header idempotency
+key. Transport retries retain that key and the exact mutation body. The shared
+breaker projection preserves class counters, bucket ceilings, freeze state,
+measurement timestamps, incomplete-measurement state and its error. Unknown
+additive fields stay out of typed command output.
+
+Both CLI command families use the registry parser and support pretty, JSON and
+plain output through local api.sock or an explicit profile. Input validation and
+help finish before connection resolution. Output failures are returned. The old
+Client.ComputeLimits, SetComputeLimits, ObjectStoreBreakerState and
+ResetObjectStoreBreaker methods and their client-owned types are deleted.
+
+W2 must serve these messages on its declared policy routes and map persisted
+settings to C4's final job and schedule names. C2 continues to own deployment
+authorization and reset replay. Fake transport and CLI component tests do not
+establish native store, quota, reset or console authorization behavior.
+
 <!-- design:end -->

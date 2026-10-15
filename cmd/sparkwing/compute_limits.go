@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,55 +13,32 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-
-	flag "github.com/spf13/pflag"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func runComputeLimits(args []string) error {
-	if handleParentHelp(cmdLimits, args) {
-		return nil
+type operatorConnector func(context.Context, string) (controllerwire.OperatorManager, func(), error)
+
+func resolveOperatorManager(ctx context.Context, profile string) (controllerwire.OperatorManager, func(), error) {
+	options, closeTransport, err := controllerOptions(ctx, profile)
+	if err != nil {
+		return nil, nil, err
 	}
-	if len(args) == 0 {
-		PrintHelp(cmdLimits, os.Stderr)
-		return errors.New("limits: subcommand required (show|set)")
+	manager, err := client.NewOperatorManager(options)
+	if err != nil {
+		closeTransport()
+		return nil, nil, err
 	}
-	switch args[0] {
-	case "show":
-		return runComputeLimitsShow(args[1:])
-	case "set":
-		return runComputeLimitsSet(args[1:])
-	default:
-		PrintHelp(cmdLimits, os.Stderr)
-		return fmt.Errorf("limits: unknown subcommand %q", args[0])
-	}
+	return manager, closeTransport, nil
 }
 
-type computeLimitsResp struct {
-	Limits map[string]int64 `json:"limits"`
-	Usage  struct {
-		Runners      *int64           `json:"runners,omitempty"`
-		ByPrincipal  map[string]int64 `json:"by_principal,omitempty"`
-		AlarmReached *bool            `json:"alarm_reached,omitempty"`
-	} `json:"usage"`
-	Budgets struct {
-		ClaimsPerRunnerMinute     int64 `json:"claims_per_runner_minute"`
-		HeartbeatsPerRunnerMinute int64 `json:"heartbeats_per_runner_minute"`
-		IdleClaimPollSeconds      int64 `json:"idle_claim_poll_seconds"`
-		IdleClaimPollEnforced     bool  `json:"idle_claim_poll_enforced"`
-		MaxLogStreamsPerPrincipal int64 `json:"max_log_streams_per_principal"`
-		MaxDownloadsPerPrincipal  int64 `json:"max_downloads_per_principal"`
-		RequestsPerTokenMinute    int64 `json:"requests_per_token_minute"`
-		RequestsPerMinuteAlarm    int64 `json:"requests_per_minute_alarm"`
-	} `json:"budgets"`
+func runOperatorLimits(args []string) error {
+	return runOperatorLimitsCommand(context.Background(), args, os.Stdout, resolveOperatorManager)
 }
 
-// safety: the budgets are process configuration the controller reports beside
-// the stored guards, so they are named here in the order an operator sizes
-// them rather than sorted with the guards `limits set` writes.
-func budgetRows(view computeLimitsResp) [][2]string {
+func budgetRows(view controllerwire.OperatorLimits) [][2]string {
 	idle := computeLimitLabel(view.Budgets.IdleClaimPollSeconds)
 	if view.Budgets.IdleClaimPollSeconds > 0 {
 		idle = strconv.FormatInt(view.Budgets.IdleClaimPollSeconds, 10) + "s"
@@ -79,87 +57,62 @@ func budgetRows(view computeLimitsResp) [][2]string {
 	}
 }
 
-func runComputeLimitsShow(args []string) error {
-	fs := flag.NewFlagSet(cmdLimitsShow.Path, flag.ContinueOnError)
-	on := addProfileFlag(fs)
-	outputFormat := fs.StringP("output", "o", "",
-		"output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-	if err := parseAndCheck(cmdLimitsShow, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
+func runOperatorLimitsCommand(ctx context.Context, args []string, out io.Writer, connect operatorConnector) error {
+	inv, err := clisurface.Parse("sparkwing", append([]string{"operator", "limits"}, args...))
+	if err != nil {
+		return err
+	}
+	format := inv.Output(color.IsInteractiveStdout())
+	if inv.Help() || inv.Command.Path == "sparkwing operator limits" {
+		return writeCommandHelp(surfaceHelp(inv.Command), out, format)
+	}
+	var input controllerwire.OperatorLimitsWrite
+	if inv.Command.Path == "sparkwing operator limits set" {
+		value, err := strconv.ParseInt(inv.Value("value"), 10, 64)
+		if err != nil {
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: "--value must be a nonnegative integer"}
 		}
+		input.Limits = map[string]int64{inv.Value("setting"): value}
+		if err := input.Validate(); err != nil {
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
+		}
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	format, err := resolveTTYAwareOutput(*outputFormat, cmdLimitsShow.Path)
+	manager, closeTransport, err := connect(ctx, inv.Value("profile"))
 	if err != nil {
 		return err
 	}
-	prof, err := resolveProfile(*on)
-	if err != nil {
+	defer closeTransport()
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := requireController(prof, "cluster limits show"); err != nil {
-		return err
+	var view controllerwire.OperatorLimits
+	if input.Limits != nil {
+		view, err = manager.WriteOperatorLimits(ctx, input)
+	} else {
+		view, err = manager.ReadOperatorLimits(ctx)
 	}
-	resp, err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).ComputeLimits(context.Background())
 	if err != nil {
 		return err
 	}
 	if format == "json" {
-		_, err := os.Stdout.Write(append(resp, '\n'))
-		return err
+		return json.NewEncoder(out).Encode(view)
 	}
-	var view computeLimitsResp
-	if err := json.Unmarshal(resp, &view); err != nil {
-		return fmt.Errorf("decode: %w", err)
-	}
+	var buffer bytes.Buffer
 	if format == "plain" {
-		return writeComputeLimitsPlain(os.Stdout, view)
+		err = writeComputeLimitsPlain(&buffer, view)
+	} else {
+		err = renderComputeLimits(&buffer, view)
 	}
-	return renderComputeLimits(os.Stdout, view)
+	_, writeErr := out.Write(buffer.Bytes())
+	return errors.Join(err, writeErr)
 }
 
-func runComputeLimitsSet(args []string) error {
-	fs := flag.NewFlagSet(cmdLimitsSet.Path, flag.ContinueOnError)
-	on := addProfileFlag(fs)
-	name := fs.String("setting", "", "guard name")
-	value := fs.Int64("value", -1, "ceiling; 0 removes it")
-	if err := parseAndCheck(cmdLimitsSet, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if !store.ValidComputeLimit(*name) {
-		return fmt.Errorf("limits set: --setting must be one of %s",
-			strings.Join(store.ComputeLimitNames(), ", "))
-	}
-	if *value < 0 {
-		return errors.New("limits set: --value must be zero or a positive number")
-	}
-	prof, err := resolveProfile(*on)
-	if err != nil {
-		return err
-	}
-	if err := requireController(prof, "cluster limits set"); err != nil {
-		return err
-	}
-	resp, err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).
-		SetComputeLimits(context.Background(), map[string]int64{*name: *value})
-	if err != nil {
-		return err
-	}
-	var view computeLimitsResp
-	if err := json.Unmarshal(resp, &view); err != nil {
-		return fmt.Errorf("decode: %w", err)
-	}
-	fmt.Printf("%s = %s\n", *name, computeLimitLabel(view.Limits[*name]))
-	return nil
-}
-
-func renderComputeLimits(w io.Writer, view computeLimitsResp) error {
+func renderComputeLimits(w io.Writer, view controllerwire.OperatorLimits) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	for _, name := range store.ComputeLimitNames() {
+	for _, name := range sortedPrincipals(view.Limits) {
 		fmt.Fprintf(tw, "%s\t%s\n", strings.ToUpper(name), computeLimitLabel(view.Limits[name]))
 	}
 	if view.Usage.Runners != nil {
@@ -177,8 +130,8 @@ func renderComputeLimits(w io.Writer, view computeLimitsResp) error {
 	return tw.Flush()
 }
 
-func writeComputeLimitsPlain(w io.Writer, view computeLimitsResp) error {
-	for _, name := range store.ComputeLimitNames() {
+func writeComputeLimitsPlain(w io.Writer, view controllerwire.OperatorLimits) error {
+	for _, name := range sortedPrincipals(view.Limits) {
 		if _, err := fmt.Fprintf(w, "%s\t%d\n", name, view.Limits[name]); err != nil {
 			return err
 		}

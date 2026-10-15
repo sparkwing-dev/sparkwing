@@ -5,13 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
 func TestRenderComputeLimitsPlain(t *testing.T) {
 	t.Parallel()
-	var view computeLimitsResp
-	view.Limits = map[string]int64{store.ComputeLimitGlobalRunners: 50}
+	var view controllerwire.OperatorLimits
+	view.Limits = map[string]int64{"max_global_runners": 50}
 	runners := int64(3)
 	view.Usage.Runners = &runners
 	view.Usage.ByPrincipal = map[string]int64{"agent:b": 1, "agent:a": 2}
@@ -34,10 +34,11 @@ func TestRenderComputeLimitsPlain(t *testing.T) {
 
 func TestRenderComputeLimits(t *testing.T) {
 	t.Parallel()
-	var view computeLimitsResp
+	var view controllerwire.OperatorLimits
 	view.Limits = map[string]int64{
-		store.ComputeLimitConcurrentRunners: 4,
-		store.ComputeLimitGlobalRunners:     50,
+		"max_concurrent_runners": 4,
+		"max_global_runners":     50,
+		"max_jobs_per_run":       0,
 	}
 	runners, alarm := int64(4), true
 	view.Usage.Runners = &runners
@@ -51,13 +52,13 @@ func TestRenderComputeLimits(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"MAX_CONCURRENT_RUNNERS", "4", "MAX_GLOBAL_RUNNERS", "50",
-		"MAX_NODES_PER_RUN", "unlimited", "CLOUD RUNNERS", "agent:cloud", "ALARM",
+		"MAX_JOBS_PER_RUN", "unlimited", "CLOUD RUNNERS", "agent:cloud", "ALARM",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("compute limits output is missing %q:\n%s", want, out)
 		}
 	}
-	for _, name := range store.ComputeLimitNames() {
+	for name := range view.Limits {
 		if !strings.Contains(out, strings.ToUpper(name)) {
 			t.Errorf("output omits the guard %q:\n%s", name, out)
 		}
@@ -66,7 +67,7 @@ func TestRenderComputeLimits(t *testing.T) {
 
 func TestRenderComputeLimitsOmitsUnavailableFleetUsage(t *testing.T) {
 	t.Parallel()
-	view := computeLimitsResp{Limits: map[string]int64{}}
+	view := controllerwire.OperatorLimits{Limits: map[string]int64{}}
 	var pretty, plain bytes.Buffer
 	if err := renderComputeLimits(&pretty, view); err != nil {
 		t.Fatal(err)
@@ -75,14 +76,14 @@ func TestRenderComputeLimitsOmitsUnavailableFleetUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(pretty.String(), "CLOUD RUNNERS") || strings.Contains(pretty.String(), "\nALARM") ||
-		strings.Contains(plain.String(), "\nrunners\t") {
+		strings.Contains(plain.String(), "\nrunners\t") || strings.Contains(pretty.String(), "MAX_JOBS_PER_RUN") || strings.Contains(plain.String(), "max_jobs_per_run") {
 		t.Fatalf("unavailable fleet usage printed as zero: pretty=%q plain=%q", pretty.String(), plain.String())
 	}
 }
 
 func TestRenderComputeLimitsShowsTheRequestBudgets(t *testing.T) {
 	t.Parallel()
-	var view computeLimitsResp
+	var view controllerwire.OperatorLimits
 	view.Budgets.ClaimsPerRunnerMinute = 9600
 	view.Budgets.HeartbeatsPerRunnerMinute = 1200
 	view.Budgets.IdleClaimPollSeconds = 5

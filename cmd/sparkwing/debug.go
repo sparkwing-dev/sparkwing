@@ -26,8 +26,6 @@ func runDebug(args []string) error {
 		return errors.New("debug: subcommand required")
 	}
 	switch args[0] {
-	case "run":
-		return runDebugRun(args[1:])
 	case "resume":
 		return runDebugRelease(args[1:])
 	case "attach":
@@ -38,91 +36,6 @@ func runDebug(args []string) error {
 		PrintHelp(cmdDebug, os.Stderr)
 		return fmt.Errorf("debug: unknown subcommand %q", args[0])
 	}
-}
-
-func runDebugRun(args []string) error {
-	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
-		PrintHelp(cmdDebugRun, os.Stdout)
-		return nil
-	}
-
-	var pauseBefore, pauseAfter []string
-	var pauseOnFailure bool
-	pipelineName := ""
-	remaining := make([]string, 0, len(args))
-	i := 0
-	for i < len(args) {
-		a := args[i]
-		switch {
-		case a == "--pipeline":
-			if i+1 >= len(args) {
-				return errors.New("--pipeline requires a value")
-			}
-			pipelineName = args[i+1]
-			i += 2
-		case strings.HasPrefix(a, "--pipeline="):
-			pipelineName = strings.TrimPrefix(a, "--pipeline=")
-			i++
-		case a == "--pause-before":
-			if i+1 >= len(args) {
-				return errors.New("--pause-before requires a node id")
-			}
-			pauseBefore = append(pauseBefore, args[i+1])
-			i += 2
-		case strings.HasPrefix(a, "--pause-before="):
-			pauseBefore = append(pauseBefore, strings.TrimPrefix(a, "--pause-before="))
-			i++
-		case a == "--pause-after":
-			if i+1 >= len(args) {
-				return errors.New("--pause-after requires a node id")
-			}
-			pauseAfter = append(pauseAfter, args[i+1])
-			i += 2
-		case strings.HasPrefix(a, "--pause-after="):
-			pauseAfter = append(pauseAfter, strings.TrimPrefix(a, "--pause-after="))
-			i++
-		case a == "--pause-on-failure", a == "--pause-on-failure=true":
-			pauseOnFailure = true
-			i++
-		case a == "--pause-on-failure=false":
-			pauseOnFailure = false
-			i++
-		default:
-			remaining = append(remaining, a)
-			i++
-		}
-	}
-	if pipelineName == "" {
-		PrintHelp(cmdDebugRun, os.Stderr)
-		return errors.New("debug run: --pipeline is required")
-	}
-	if len(pauseBefore) == 0 && len(pauseAfter) == 0 && !pauseOnFailure {
-		return errors.New("debug run: need at least one of --pause-before / --pause-after / --pause-on-failure (use `sparkwing run` for unpaused runs)")
-	}
-
-	if len(pauseBefore) > 0 {
-		_ = os.Setenv("SPARKWING_DEBUG_PAUSE_BEFORE", strings.Join(pauseBefore, ","))
-	}
-	if len(pauseAfter) > 0 {
-		_ = os.Setenv("SPARKWING_DEBUG_PAUSE_AFTER", strings.Join(pauseAfter, ","))
-	}
-	if pauseOnFailure {
-		_ = os.Setenv("SPARKWING_DEBUG_PAUSE_ON_FAILURE", "1")
-	}
-
-	fmt.Fprintln(os.Stderr, "debug: starting pipeline with pause directives")
-	if len(pauseBefore) > 0 {
-		fmt.Fprintf(os.Stderr, "  pause-before: %s\n", strings.Join(pauseBefore, ", "))
-	}
-	if len(pauseAfter) > 0 {
-		fmt.Fprintf(os.Stderr, "  pause-after:  %s\n", strings.Join(pauseAfter, ", "))
-	}
-	if pauseOnFailure {
-		fmt.Fprintln(os.Stderr, "  pause-on-failure: true")
-	}
-	fmt.Fprintln(os.Stderr, "  release with: sparkwing debug release --run <id> --job <name>")
-
-	return dispatchRun(append([]string{pipelineName}, remaining...))
 }
 
 type debugTargetFlags struct {
@@ -137,8 +50,8 @@ const defaultDebugNamespace = "sparkwing"
 func parseDebugTarget(cmd Command, args []string) (debugTargetFlags, error) {
 	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
-	nodeID := fs.String("job", "", "node id")
-	on := fs.String("profile", "", "profile name (cluster mode)")
+	nodeID := fs.String("job", "", "job id")
+	on := fs.String("profile", "", "controller profile name")
 	namespace := defaultDebugNamespace
 	if cmd.Path == cmdDebugAttach.Path {
 		fs.StringVar(&namespace, "namespace", defaultDebugNamespace, "Kubernetes namespace of the runner pods")
@@ -168,7 +81,7 @@ func runDebugRelease(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := requireController(prof, "debug release"); err != nil {
+		if err := requireController(prof, "debug resume"); err != nil {
 			return err
 		}
 		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
@@ -210,9 +123,9 @@ func runDebugAttach(args []string) error {
 
 	if t.on == "" {
 		fmt.Fprintln(os.Stdout,
-			"attach does not apply in local mode; the node's process runs in your current shell's world.")
+			"attach does not apply in local mode; the job's process runs in your current shell's world.")
 		fmt.Fprintln(os.Stdout,
-			"Use `sparkwing debug env` to inspect, or `sparkwing debug release` to resume.")
+			"Use `sparkwing debug env` to inspect, or `sparkwing debug resume` to resume.")
 		return nil
 	}
 
@@ -226,10 +139,10 @@ func runDebugAttach(args []string) error {
 	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	node, err := c.GetNode(ctx, t.run, t.node)
 	if err != nil {
-		return fmt.Errorf("get node %s/%s: %w", t.run, t.node, err)
+		return fmt.Errorf("get job %s/%s: %w", t.run, t.node, err)
 	}
 	if node.ClaimedBy == "" {
-		return fmt.Errorf("node %s/%s has no claim holder (not currently running on a runner)",
+		return fmt.Errorf("job %s/%s has no claim holder (not currently running on a runner)",
 			t.run, t.node)
 	}
 	pod := claimToPod(node.ClaimedBy)
@@ -269,7 +182,7 @@ func runDebugEnv(args []string) error {
 		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		node, err = c.GetNode(ctx, t.run, t.node)
 		if err != nil {
-			return fmt.Errorf("get node: %w", err)
+			return fmt.Errorf("get job: %w", err)
 		}
 		p, perr := c.GetActiveDebugPause(ctx, t.run, t.node)
 		if perr == nil {
@@ -296,7 +209,7 @@ func runDebugEnv(args []string) error {
 	}
 
 	w := os.Stdout
-	fmt.Fprintf(w, "run:    %s\nnode:   %s\nstatus: %s\n", t.run, t.node, node.Status)
+	fmt.Fprintf(w, "run:    %s\njob:    %s\nstatus: %s\n", t.run, t.node, node.Status)
 	if node.ClaimedBy != "" {
 		fmt.Fprintf(w, "claim:  %s\n", node.ClaimedBy)
 	}

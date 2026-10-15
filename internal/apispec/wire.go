@@ -27,6 +27,10 @@ func query(name, kind string) schema {
 
 func wireOperations() map[string]wireOperation {
 	result := map[string]wireOperation{
+		"GET /api/v1/operator/limits":                          operation("Read deployment operational guards", nil, wire.OperatorLimits{}),
+		"PUT /api/v1/operator/limits":                          operation("Set deployment operational guards", wire.OperatorLimitsWrite{}, wire.OperatorLimits{}),
+		"GET /api/v1/operator/object-store/breaker":            operation("Read object-store request budgets", nil, wire.ObjectStoreBreaker{}),
+		"POST /api/v1/operator/object-store/reset-breaker":     operation("Reset object-store request budgets", nil, wire.ObjectStoreBreaker{}),
 		"GET /api/v1/capabilities":                             operation("Read engine compatibility", nil, wire.Compatibility{}, query("engine_version", "string")),
 		"POST /api/v1/runs":                                    operation("Create a run", wire.CreateRunRequest{}, wire.CreateRunResponse{}),
 		"GET /api/v1/runs":                                     operation("List runs", nil, wire.RunPage{}),

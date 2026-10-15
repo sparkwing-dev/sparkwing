@@ -413,9 +413,9 @@ func dispatchCommand(args []string) error {
 	case "operator":
 		switch args[1] {
 		case "limits":
-			return runComputeLimits(args[2:])
+			return runOperatorLimits(args[2:])
 		case "object-store":
-			return runClusterObjectStore(args[2:])
+			return runOperatorObjectStore(args[2:])
 		case "tokens":
 			return runTokenCommand(context.Background(), args[2:], true)
 		}

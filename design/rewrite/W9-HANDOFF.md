@@ -1,11 +1,41 @@
 # W9 handoff
 
-W9 remains incomplete. This continuation started clean at b75cf16a2. No Git
+W9 remains incomplete. This continuation started clean at 343536d14. No Git
 writes, Sparkwing executables, services, pipelines or releases ran. The lead
 owns commits, independent review and native integration. Earlier implementation
-and verification details are in this file's Git history through b75cf16a2.
+and verification details are in this file's Git history through 343536d14.
 
 ## This continuation
+
+Public operator limits and object-store commands use the shared authenticated
+client and C2's final /operator routes. Their messages now live in controllerwire.
+Both local api.sock and explicit profiles use the same adapter. The registry
+parser validates arguments and help before connection resolution. All three
+output formats preserve their documented shape and return write failures.
+
+Limit writes preserve explicit zero and require the response to confirm each
+supplied key and value. The controller owns supported setting names. Rendering
+uses returned keys instead of inventing omitted guards with zero values. Storage
+projections retain class counters, incomplete measurements and their errors.
+Breaker resets generate one idempotency key. Transport retries retain the key
+and exact body. The common client owns credentials, canonical errors and retry
+policy. No route, authority rule, environment variable, service, timeout or cap
+was added.
+
+The old client admin.go and objectstore.go files are deleted, removing 122 lines.
+The unreachable debug run function block is deleted, removing 85 lines. Its
+two-line dispatch case and seven unused help bindings are also deleted. These
+216 lines are obsolete code, separate from the replaced operator CLI paths.
+The retained debug commands use job/resume in diagnostics but still need their
+controller cutover. No foreign production caller required migration.
+
+OpenAPI binds all four operator operations to the shared messages. Source limits
+documentation and its embedded mirror are updated. Fake transport and command
+tests prove the W9 boundaries. W2 still needs to serve the final projections,
+supported setting names and reset replay through its policy routes. Native
+authorization, persistence and storage operations remain unverified.
+
+## Retained source preparation
 
 Committed-source preparation preserves separate execution and pipeline commits.
 The execution commit supplies configuration and Git.SHA. Its configured source
@@ -89,7 +119,8 @@ Native selected-engine process-tree cancellation remains unverified.
    native lifecycle endpoints, managed units, logs and runner startup/refresh.
 5. Finish local schedule install/pin/uninstall, captured schedule intake and
    controller-owned __tick. Integrate W1/W2 schedule persistence and projections.
-6. Finish remaining legacy client/management retirement and the runtime-guide,
+6. Finish remaining legacy client/management retirement, including debug's
+   direct store and old client paths, and the runtime-guide,
    script/example and OpenAPI audit. Regenerate owning references when public
    behavior changes. Run every native surface/placement cell and launch QA with
    the lead after the owners are implemented.
@@ -111,7 +142,9 @@ Native selected-engine process-tree cancellation remains unverified.
   Specify authorized sizing reset and preserve explicit resource pins.
 - W2: profile scope enrollment, pool-reserving runner provisioning, run/member
   annotation authority, remote admission priority without a group and final read
-  projections remain owner integration or route-contract gaps.
+  projections remain owner integration or route-contract gaps. Serve the new
+  OperatorManager projections on existing C2 deployment routes, including reset
+  idempotency and C4's final job/schedule setting names.
 - W8: managed schedule installation and controller scheduler-pass operations,
   dashboard access/install-force policy, native endpoints and unit refresh remain.
 - W7: native remote-cache/storage bindings and final persisted log completeness.
@@ -134,42 +167,44 @@ acceptance from component tests.
 | A1-20/39/40/41/49 | Credential, runner and lifecycle adapters retained. Native provisioning, shared runner, local runtime, services and timers remain. |
 | A1-29/30/34/37/50 | Signed-data, local-cache, here and prepared-intake components retained. Public cutover, cache/publication and old runtime/client removal remain. |
 | A1-43/45/47 | Notices, upgrade, settings and guards retained. Inspection now renders selected-engine notices. Native version policy and scheduled intake remain. |
-| A1-51 | C3 and eight intake transport combinations retain separate source commits. Final public/runtime retirement and reference regeneration remain. |
+| A1-51 | C3 and eight intake transport combinations retain separate source commits. Operator clients and dead debug run are removed. Operator OpenAPI messages are generated. Remaining public/runtime retirement and reference audit stay open. |
 | A1-52; Windows packaging handoff | Packaging implementation retained. Native Windows and publication evidence remain unclaimed. |
 | A1-53 | New native Git and shell-fixture evidence only. No native T1 scenario was unskipped. |
 
-## Evidence and accounting
+## Verification and accounting
 
-Invariants: source selection and inspection cannot substitute the captured
-execution SHA, pipeline commit or invoked name/entrypoint pair. Registered proxy
-credentials cannot appear in inspection errors, hints, detail values or keys.
+Invariant: operator input may change operational request bodies, never the
+route or credential that authorizes them. FuzzOperatorMutationsStayOnDeclaredRoutes
+passed 10,828 generated executions with four workers and three requested seconds.
+Ten new test functions cover final routes, explicit zero, confirmed writes,
+malformed responses, canonical refusals, exact replay, all output formats,
+preflight, cancellation and transport cleanup. The acceptance transport test
+covers both HTTP and api.sock endpoint shapes with fakes. No native cell was
+unskipped.
 
-Seven new test functions cover revision/pin selection, origin preflight,
-acquisition inputs, twenty failure/cancellation cases, final intake and the
-native shell boundary. Two new fuzz properties passed generated runs with four
-workers and three requested seconds: 6,856 identity and 4,223 masking executions.
-The masking
-property first reproduced raw notice output, then passed 4,223 generated cases
-after notices used the shared stream and the process base registered masks first.
-The preflight expectations port TestCommitOnOriginSeesOnlyPushedCommits and
-TestOfferTriggerSourceRequiresPushedCommit. Their legacy callers remain connected.
-T1's parked inventory assigns no original test function directly to W9.
-
-TestSurfaceInitialTriggerIntakeTransport passes eight fake-transport combinations:
-HTTP/api.sock, ordinary/here and shared/separate pipeline commits. No native
-scenario was unskipped. No legacy code was deleted: 0 lines. The source reader's
-replaced closure is a refactor, not runtime retirement. No foreign production
-caller migrated. The repeated historical handoff was consolidated here.
+Four retained tests were ported from CLI-owned models to the shared wire:
+TestRenderComputeLimitsPlain, TestRenderComputeLimits,
+TestRenderComputeLimitsOmitsUnavailableFleetUsage and
+TestRenderComputeLimitsShowsTheRequestBudgets. Missing guards no longer acquire
+invented zero values. T1's parked inventory assigns no original test directly
+to W9. Earlier source-preparation test evidence remains in Git history.
 
 Checks use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and cache/tmp paths
-under /tmp/sw-astra-W9. Tests use -p 4 or less. Whole-repository build, scoped vet,
-focused CLI/client tests, full clisurface/controllerwire tests, TestSurface,
-TestProtocolSchema, commentcheck, sleepcheck, gofmt and diff checks pass.
-Full legacy CLI/client suites, services/sockets, verified releases, native SDKs,
-Postgres/Darwin/Windows, pipelines and launch QA remain unverified.
+under /tmp/sw-astra-W9. Tests use -p 4 or less. Whole-repository build and scoped
+vet pass. Full clisurface, controllerwire, apispec and apiref tests pass. Focused
+CLI/client, TestSurface, protocol-schema, command-reference and doccheck tests
+pass. Commentcheck and sleepcheck against main, gofmt, embedded-doc drift and
+diff checks pass. An unscoped sleepcheck also ran and reported 390 existing
+wall-clock wait sites. This continuation adds none.
 
-Shared files touched are tests/acceptance/trigger_contract_test.go,
-contracts/c3-controller-wire.md and this report. Other changes are W9 CLI source
-and tests. Friction remains the missing Git environment and native owner
-bindings. Overwing discovery worked with its stale-binary notice. Scratch is
-removed before the final report. No Git write occurs.
+Full legacy CLI/client suites, real services/sockets, verified releases, native
+SDKs, Postgres/Darwin/Windows, pipelines and launch QA remain unverified. Native
+W2 deployment-route integration is the new open integration point. Existing
+Git environment, source, host, storage and lifecycle gaps remain as listed above.
+Overwing discovery worked with its stale-binary notice.
+
+Shared edits are internal/apispec/wire.go (four bindings), api/openapi.yaml,
+pkg/docs/mirror/limits.md, tests/acceptance/operator_contract_test.go, C3's wire
+contract and this report. Other edits are W9-owned source, tests and docs.
+No foreign contract or production caller changed. Scratch is removed before
+the final report. No Git write occurs.

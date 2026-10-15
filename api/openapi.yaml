@@ -1760,6 +1760,218 @@ components:
         - state_seq
       type: object
       x-sparkwing-go-type: controllerwire.MaterializedResultSource
+    internal.controllerwire.ObjectStoreBreaker:
+      additionalProperties: true
+      properties:
+        ceiling:
+          $ref: '#/components/schemas/internal.controllerwire.ObjectStoreCeiling'
+        classes:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.controllerwire.ObjectStoreClassState'
+              type: array
+            - type: "null"
+        cleared:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        enabled:
+          type: boolean
+        reset:
+          type: string
+        thawed:
+          type: boolean
+        tripped:
+          type: boolean
+      required:
+        - enabled
+        - reset
+        - tripped
+        - classes
+        - ceiling
+      type: object
+      x-sparkwing-go-type: controllerwire.ObjectStoreBreaker
+    internal.controllerwire.ObjectStoreCeiling:
+      additionalProperties: true
+      properties:
+        bytes:
+          type: integer
+        counted_at:
+          format: date-time
+          type: string
+        enforced:
+          type: boolean
+        freezes_total:
+          type: integer
+        frozen:
+          type: boolean
+        frozen_at:
+          format: date-time
+          type: string
+        frozen_reason:
+          type: string
+        max_bytes:
+          type: integer
+        max_objects:
+          type: integer
+        measure_error:
+          type: string
+        measurement_incomplete:
+          type: boolean
+        objects:
+          type: integer
+        reconcile_interval:
+          type: string
+        reconciled_at:
+          format: date-time
+          type: string
+        refused_total:
+          type: integer
+        thawed:
+          type: boolean
+        warn_bytes:
+          type: integer
+        warn_objects:
+          type: integer
+        warning:
+          type: boolean
+      required:
+        - enforced
+        - max_bytes
+        - max_objects
+        - warn_bytes
+        - warn_objects
+        - bytes
+        - objects
+        - warning
+        - frozen
+        - thawed
+        - freezes_total
+        - refused_total
+        - measurement_incomplete
+      type: object
+      x-sparkwing-go-type: controllerwire.ObjectStoreCeiling
+    internal.controllerwire.ObjectStoreClassState:
+      additionalProperties: true
+      properties:
+        allowed_total:
+          type: integer
+        class:
+          type: string
+        day_used:
+          type: integer
+        minute_used:
+          type: integer
+        per_day:
+          type: integer
+        per_minute:
+          type: integer
+        refused_total:
+          type: integer
+        tripped:
+          type: boolean
+        tripped_at:
+          format: date-time
+          type: string
+        tripped_window:
+          type: string
+        trips_total:
+          type: integer
+      required:
+        - class
+        - per_minute
+        - per_day
+        - minute_used
+        - day_used
+        - allowed_total
+        - refused_total
+        - trips_total
+        - tripped
+      type: object
+      x-sparkwing-go-type: controllerwire.ObjectStoreClassState
+    internal.controllerwire.OperatorBudgets:
+      additionalProperties: true
+      properties:
+        claims_per_runner_minute:
+          type: integer
+        heartbeats_per_runner_minute:
+          type: integer
+        idle_claim_poll_enforced:
+          type: boolean
+        idle_claim_poll_seconds:
+          type: integer
+        max_downloads_per_principal:
+          type: integer
+        max_log_streams_per_principal:
+          type: integer
+        requests_per_minute_alarm:
+          type: integer
+        requests_per_token_minute:
+          type: integer
+      required:
+        - claims_per_runner_minute
+        - heartbeats_per_runner_minute
+        - idle_claim_poll_seconds
+        - idle_claim_poll_enforced
+        - max_log_streams_per_principal
+        - max_downloads_per_principal
+        - requests_per_token_minute
+        - requests_per_minute_alarm
+      type: object
+      x-sparkwing-go-type: controllerwire.OperatorBudgets
+    internal.controllerwire.OperatorLimits:
+      additionalProperties: true
+      properties:
+        budgets:
+          $ref: '#/components/schemas/internal.controllerwire.OperatorBudgets'
+        limits:
+          anyOf:
+            - additionalProperties:
+                type: integer
+              type: object
+            - type: "null"
+        usage:
+          $ref: '#/components/schemas/internal.controllerwire.OperatorUsage'
+      required:
+        - limits
+        - usage
+        - budgets
+      type: object
+      x-sparkwing-go-type: controllerwire.OperatorLimits
+    internal.controllerwire.OperatorLimitsWrite:
+      additionalProperties: true
+      properties:
+        limits:
+          anyOf:
+            - additionalProperties:
+                type: integer
+              type: object
+            - type: "null"
+      required:
+        - limits
+      type: object
+      x-sparkwing-go-type: controllerwire.OperatorLimitsWrite
+    internal.controllerwire.OperatorUsage:
+      additionalProperties: true
+      properties:
+        alarm_reached:
+          anyOf:
+            - type: boolean
+            - type: "null"
+        by_principal:
+          anyOf:
+            - additionalProperties:
+                type: integer
+              type: object
+            - type: "null"
+        runners:
+          anyOf:
+            - type: integer
+            - type: "null"
+      type: object
+      x-sparkwing-go-type: controllerwire.OperatorUsage
     internal.controllerwire.OverrideView:
       additionalProperties: true
       properties:
@@ -6622,15 +6834,20 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/operator/limits:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.OperatorLimits'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/operator/limits
+      summary: Read deployment operational guards
       x-sparkwing-policy:
         method: GET
         path: /api/v1/operator/limits
@@ -6649,17 +6866,27 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
     put:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.OperatorLimitsWrite'
+        required: true
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.OperatorLimits'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: PUT /api/v1/operator/limits
+      summary: Set deployment operational guards
       x-sparkwing-policy:
         method: PUT
         path: /api/v1/operator/limits
@@ -6678,7 +6905,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/operator/maintenance/reconcile-orphans:
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -6742,15 +6968,20 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/operator/object-store/breaker:
     get:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.ObjectStoreBreaker'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: GET /api/v1/operator/object-store/breaker
+      summary: Read object-store request budgets
       x-sparkwing-policy:
         method: GET
         path: /api/v1/operator/object-store/breaker
@@ -6769,7 +7000,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-      x-sparkwing-wire: undocumented
   /api/v1/operator/object-store/quotas/{team}:
     put:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -6844,7 +7074,6 @@ paths:
       x-sparkwing-wire: undocumented
   /api/v1/operator/object-store/reset-breaker:
     post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - description: Retain one key and the exact body when replaying a request.
           in: header
@@ -6852,13 +7081,19 @@ paths:
           schema:
             type: string
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.ObjectStoreBreaker'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: POST /api/v1/operator/object-store/reset-breaker
+      summary: Reset object-store request budgets
       x-sparkwing-policy:
         method: POST
         path: /api/v1/operator/object-store/reset-breaker
@@ -6877,7 +7112,6 @@ paths:
             binding: none
             liveness: credential
         retry: idempotency_key
-      x-sparkwing-wire: undocumented
   /api/v1/operator/object-store/settings:
     put:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.

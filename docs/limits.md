@@ -16,6 +16,26 @@ Intake seals request inputs once. Plan acceptance resolves checkout and code
 declarations against that request and the operator ceilings in one transaction.
 Retry and resume retain the accepted values.
 
+## Operational guards
+
+Read deployment guards and request budgets with
+`sparkwing operator limits show --profile deployment -o json`. Set a guard with
+`sparkwing operator limits set --profile deployment --setting max_jobs_per_run --value 256`.
+These commands use `/api/v1/operator/limits`. The controller validates supported
+setting names and returns the applied values. An explicit zero retains the
+setting's documented meaning. Missing observations stay absent.
+
+Read storage request budgets with
+`sparkwing operator object-store status --profile deployment`. The result includes
+per-class counters, bucket ceilings and whether the last measurement completed.
+An incomplete measurement keeps its error and running totals.
+`sparkwing operator object-store reset-breaker --profile deployment` resets the
+breaker with one idempotency key, retained across transport retries.
+
+Each command supports `-o pretty|json|plain`. Deployment credentials require
+`operator.limits` or `operator.object_store` for the corresponding operation.
+These grants do not confer operator-console powers.
+
 ## Execution and records
 
 | Concern | Shared policy |
