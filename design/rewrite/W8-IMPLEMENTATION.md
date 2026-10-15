@@ -177,9 +177,9 @@ cross-area contracts listed below remain explicit integration work.
 
 ## Remaining integration and contract changes needed
 
-The fourth session below completes status/stay transport and dynamic dashboard
-startup inside the runtime. Foreign-owner startup and dashboard commands still
-need CLI composition.
+The fourth and fifth sessions below complete status/stay transport and dynamic
+dashboard startup in process and through the admission client. Foreign-owner
+startup and dashboard commands still need CLI composition.
 
 1. **W3/W9 runner composition.** Bind `RunnerFactory` to the authenticated
    controller, `Hosting` preparation/renewal callbacks, source acquisition,
@@ -210,8 +210,8 @@ need CLI composition.
    cleanup in the final adapters; the deleted server no longer supplies them.
 7. **W8/W9 local transport and services.** Bind `client.QueryLocalController`,
    `client.SetLocalStay` and admission drain into the foreign-owner lifecycle.
-   Dynamic dashboard startup also needs a foreign-owner command. Implement
-   native managed units once W9 specifies
+   `client.StartLocalDashboard` now supplies the foreign-owner dashboard
+   operation. Implement native managed units once W9 specifies
    Home and foreground arguments for `dashboard start --stay` and `__tick`.
    Native runner replacement needs actual service registration hooks. Windows
    needs a native SID-authenticated transport; missing identity still refuses.
@@ -355,6 +355,101 @@ external contract question was introduced. Socket restrictions prevent native
 execution evidence. The review fixture also had to initialize Go signal
 handling before entering a virtual-clock test bubble.
 
-Fourth-session changes remain uncommitted for the lead. No Sparkwing executable,
-pipeline or git-writing command ran. Worker scratch is deleted after the final
-checks and review complete.
+The lead committed the fourth-session changes before this continuation. No
+Sparkwing executable, pipeline or git-writing command ran in that session.
+
+## Fifth session: dashboard transport and Cloud resource budgets
+
+`client.StartLocalDashboard` starts the UI on an elected owner through the
+authenticated admission socket. The `local_dashboard` request waits for
+`local_dashboard_ack` after the serving loop starts. Repeating an address reuses
+its listener. A different address or failed bind reaches the caller as an error.
+The same runtime supplies startup and shutdown. No store opener or process
+fallback is added.
+
+The request owns one connection. A joined reader cancels readiness when the
+peer disconnects. Daemon shutdown closes that connection before joining its
+handler, so a failed dashboard service cannot make the handler and runtime wait
+on each other. Probe connections and admission-only daemons refuse startup.
+The handshake retains the existing health-probe budget. Listener readiness uses
+the caller's context. Cancellation closes the connection and preserves the
+context error even during the deadline change after handshake.
+
+Cloud Jobs now refuse CPU or memory above operator ceilings before reserving
+a node. The old `min` calls silently reduced awarded resources. CPU conversion
+uses Kubernetes decimal quantities, rounds up to a millicore, then checks the
+result against the original ceiling. Exact 2.007 and 4.001 core requests retain
+their value. A rounded allocation above the ceiling is refused, including a
+ceiling that Kubernetes would round upward at nano precision.
+
+`TestLauncherKubernetesBoundaryW8Components` composes the actual launcher,
+Job builder, reservation boundary and reconstruction code against a fake
+controller and Kubernetes API. Plan, eval and work cover launch, adoption by a
+replacement launcher, exclusive placement, bootstrap deletion on cancellation,
+retained reservation while Docker runs, cleanup after pod removal and node
+reuse. The acceptance refusal test also covers CPU, memory and precision.
+These are component proofs. No native catalog cell was unskipped.
+
+### Fifth-session contracts and shared files
+
+The two dashboard messages and `client.StartLocalDashboard` extend the W8-owned
+local transport. The separate request uses a one-request connection because its
+readiness wait needs peer cancellation. Reusing the synchronous status operation
+would leave that wait unable to observe disconnect. A shared dial helper retains
+the existing absent, unreachable and cancelled-owner classifications.
+
+No new setting, environment variable, service, timeout or fallback was added.
+No other area's contract changed. The open contracts and integrations listed
+above still apply, with foreign-owner dashboard transport now supplied. In
+particular, W9 still needs to bind the client operations into CLI lifecycle and
+settle managed-unit Home/foreground arguments and Cloud bootstrap grammar.
+W1/W2/W3 still need to supply the shared controller/services and authenticated
+host/claim adapters. Deployment probes and node cleanup, native Windows identity
+and installed-service execution remain unverified.
+
+Shared edits outside W8 product packages are:
+
+- `pkg/wingwire/local.go`, `wingwire.go`, `wingwire_test.go` and
+  `testdata/shapes.json`.
+- `tests/acceptance/launcher_w8_test.go` and
+  `tests/acceptance/launcher_boundary_w8_test.go`.
+- This handoff. Source documentation is
+  `internal/wingd/LOCAL-CONTROLLER.md` and
+  `internal/runners/launcher/CLOUD-JOBS.md`.
+
+No API was removed, so no callers outside W8 needed migration. This session
+deletes **0 obsolete files and 0 legacy-code lines**. It removes the resource
+clamp and extracts the dial/test-peer helpers. No additional T1 inventory test
+is claimed as ported.
+
+Independent review found CPU rounding across a ceiling, float multiplication
+adding a millicore, loss of cancellation error identity at a deadline change,
+and nano rounding of the ceiling. The regression tests ran red before each
+correction. The final re-review found no remaining defect in those corrections.
+
+### Fifth-session evidence
+
+All Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, and private
+`GOCACHE`, `GOTMPDIR` and `TMPDIR` paths under `/tmp/sw-astra-W8/`. Package
+parallelism was at most four, and race checks used two.
+
+- Whole-repository `go build -p 4 ./...` passed on the final implementation.
+- Vet passed for wingd and its subpackages, engine, runners and launcher,
+  cluster, wingwire and both acceptance packages.
+- Full engine, runners, launcher, wingwire and component acceptance tests
+  passed. Final launcher corrections also passed the complete focused race
+  selection. `internal/acceptance` compiles and has no runtime tests.
+- `go test -race -p 2 ./internal/wingd ./internal/wingd/client
+  ./internal/runners/launcher -run
+  '^TestLocal|^TestBuildJob|^TestBoundary|^TestSync|^TestLauncher|^TestSizing'
+  -count=1 -timeout 120s` passed after the final corrections.
+- Wingd and its client cross-compiled for Windows/amd64 with `go test -c`.
+  Native Windows execution and SID authentication remain unverified.
+- The generated wire shape, round-trip registry checks, commentcheck,
+  sleepcheck and `git diff --check` passed.
+
+Native socket and Kubernetes proofs were not rerun because the sandbox cannot
+supply those boundaries. No Sparkwing executable, pipeline or git-writing
+command ran. No local Git identity or worktree configuration override was
+introduced. Worker scratch was removed after all checks and review finished.
+Changes remain uncommitted for the lead.

@@ -153,6 +153,7 @@ func (r *localRuntime) Run(ctx context.Context, opts LocalStartOptions) (err err
 	}
 	d.cfg.Runs = controller
 	d.localControl = func(stay *bool) LocalStatus { return r.control(session, stay) }
+	d.localDashboard = r.EnsureDashboard
 	return r.serve(ctx, session, controller, opts.DashboardAddress)
 }
 

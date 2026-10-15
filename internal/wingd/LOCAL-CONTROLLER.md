@@ -95,11 +95,26 @@ Only an elected `LocalRuntime` serves it. A health probe may read status but
 cannot change policy. `local_control_status` is the process snapshot, not an
 installed-service claim. Native service inspection supplies that separate fact.
 
-The CLI must bind these operations to its owner lifecycle and process startup.
-Dynamic dashboard startup is an in-process runtime operation and still needs a
-foreign-owner command. `NewLocalRuntime` refuses a foreign election before
-opening its store. Windows transport still refuses API access when it cannot
-supply a client SID.
+`client.StartLocalDashboard` requests dashboard startup from an existing owner.
+Its `local_dashboard` request waits for `local_dashboard_ack` after the serving
+loop reaches readiness. An identical address reuses the listener. A bind failure
+returns the owner's error and leaves the controller available. Probe connections
+and admission-only daemons refuse the operation.
+
+The dashboard request uses one connection. Peer disconnect cancels the readiness
+wait, and the handler joins its reader before returning. Shutdown closes the
+connection before joining handlers because a readiness waiter may be waiting
+for that same runtime to finish. Service failure therefore reaches a foreign
+caller as a transport error. The runtime retains the service error through
+shutdown. Client cancellation closes its connection and returns its context
+error, including cancellation during the switch from handshake to readiness.
+The handshake has the existing probe budget. Readiness follows the caller's
+context because dashboard startup can take longer than a health probe.
+
+The CLI must bind status, stay, dashboard startup and drain to its owner lifecycle
+and process startup. `NewLocalRuntime` refuses a foreign election before opening
+its store. Windows transport still refuses API access when it cannot supply a
+client SID.
 
 `ManagedUnitManager` remains the service-management port. Its policies specify
 `dashboard start --stay` and `__tick`. The CLI contract must settle how installed
@@ -114,7 +129,9 @@ in-memory listeners and fake shared-controller services. `TestLocalControl*`
 exercises the new wire exchange with `net.Pipe`, including probe restrictions,
 response validation, cancellation and stalled peers. `TestLocalDashboard*`
 covers starting the UI on an existing owner, failed binds, readiness and joined
-shutdown. The wire shape and round-trip tests cover both control messages.
+shutdown. Its wire tests also cover probe refusal, peer cancellation and service
+failure during a remote start. The wire shape and round-trip tests cover the
+status/stay and dashboard messages.
 The process/store
 scenarios remain open: local controller
 idle lifecycle, health-probe process exit, dashboard install/update, Windows

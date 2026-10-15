@@ -96,7 +96,7 @@ func TestLauncherCloudPodContract(t *testing.T) {
 					modes = append(modes, *volume.Secret.DefaultMode)
 				}
 			}
-			if len(modes) != 1 || modes[0] != 0400 {
+			if len(modes) != 1 || modes[0] != 0o400 {
 				t.Fatalf("bootstrap modes = %v", modes)
 			}
 			raw, err := json.Marshal(resources.Job)
@@ -124,7 +124,7 @@ func TestLauncherCloudPodContract(t *testing.T) {
 }
 
 func TestLauncherCloudBoundaryRefusal(t *testing.T) {
-	for _, name := range []string{"network", "team", "expired", "engine"} {
+	for _, name := range []string{"network", "team", "expired", "engine", "cpu", "memory", "cpu_precision"} {
 		t.Run(name, func(t *testing.T) {
 			now, cfg, award := cloudFixture(launcher.CloudWork)
 			boundary := &cloudBoundaryFake{}
@@ -137,6 +137,12 @@ func TestLauncherCloudBoundaryRefusal(t *testing.T) {
 				award.Binding.ParentCapabilityExpiry = now
 			case "engine":
 				award.Engine = nil
+			case "cpu":
+				award.CPUCores = 4.5
+			case "memory":
+				award.Memory = 9 << 30
+			case "cpu_precision":
+				award.CPUCores, cfg.CPUCeiling = 3.9995, 3.9995
 			}
 			resources, err := launcher.BuildJob(t.Context(), now, cfg, award, boundary)
 			if err == nil || resources.Job != nil || resources.BootstrapSecret != nil {

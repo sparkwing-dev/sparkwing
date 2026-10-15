@@ -26,3 +26,20 @@ type LocalControlStatus struct {
 
 func (*LocalControl) wireType() MessageType       { return TypeLocalControl }
 func (*LocalControlStatus) wireType() MessageType { return TypeLocalControlStatus }
+
+// LocalDashboard starts the dashboard on the elected owner and waits for its
+// serving loop. This is a one-request connection; disconnect cancels the wait.
+// Health probes and admission-only daemons cannot serve this operation.
+type LocalDashboard struct {
+	Address string `json:"address"`
+}
+
+// LocalDashboardAck acknowledges readiness, or names a failed start. A
+// failed transport is an error even if no result arrived. Retrying an identical
+// address reuses the owner's listener; it never spawns another controller.
+type LocalDashboardAck struct {
+	Error string `json:"error,omitempty"`
+}
+
+func (*LocalDashboard) wireType() MessageType    { return TypeLocalDashboard }
+func (*LocalDashboardAck) wireType() MessageType { return TypeLocalDashboardAck }

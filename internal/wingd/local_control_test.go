@@ -13,6 +13,11 @@ import (
 )
 
 func localControlPipe(t *testing.T, d *Daemon, probe bool) func(wingwire.Message) wingwire.Message {
+	_, exchange := localControlConnection(t, d, probe)
+	return exchange
+}
+
+func localControlConnection(t *testing.T, d *Daemon, probe bool) (net.Conn, func(wingwire.Message) wingwire.Message) {
 	t.Helper()
 	peer, server := net.Pipe()
 	d.startConn(newConn(d, server))
@@ -39,7 +44,7 @@ func localControlPipe(t *testing.T, d *Daemon, probe bool) func(wingwire.Message
 	if _, ok := exchange(&wingwire.Hello{ProtocolMajor: ProtocolMajor, HealthProbe: probe}).(*wingwire.HelloAck); !ok {
 		t.Fatal("handshake refused")
 	}
-	return exchange
+	return peer, exchange
 }
 
 func TestLocalControlReportsOwnerAndStay(t *testing.T) {

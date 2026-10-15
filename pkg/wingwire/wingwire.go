@@ -39,7 +39,7 @@ import (
 // BuildIdentity changes whenever same-major wire behavior changes. It lets
 // source and installed builds compiled from the same protocol implementation
 // recognize each other even when their display versions differ.
-const BuildIdentity = "wingwire-v1-local-controller-control"
+const BuildIdentity = "wingwire-v1-local-dashboard-control"
 
 // ProtocolMajor is the newest wire protocol major this build speaks.
 // Clients send it in [Hello]; a daemon answers on it whenever the client
@@ -166,6 +166,8 @@ const (
 	TypeUnsupported        MessageType = "unsupported"
 	TypeLocalControl       MessageType = "local_control"
 	TypeLocalControlStatus MessageType = "local_control_status"
+	TypeLocalDashboard     MessageType = "local_dashboard"
+	TypeLocalDashboardAck  MessageType = "local_dashboard_ack"
 )
 
 // Message is implemented by every concrete wire message. The
@@ -273,6 +275,8 @@ var messageRegistry = map[MessageType]func() Message{
 	TypeUnsupported:        func() Message { return &Unsupported{} },
 	TypeLocalControl:       func() Message { return &LocalControl{} },
 	TypeLocalControlStatus: func() Message { return &LocalControlStatus{} },
+	TypeLocalDashboard:     func() Message { return &LocalDashboard{} },
+	TypeLocalDashboardAck:  func() Message { return &LocalDashboardAck{} },
 }
 
 func emptyMessage(t MessageType) (Message, error) {

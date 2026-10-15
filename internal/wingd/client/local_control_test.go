@@ -13,6 +13,18 @@ import (
 
 func controlPeer(t *testing.T, nc net.Conn, respond func(*wingwire.Hello, *wingwire.LocalControl) wingwire.Message) <-chan struct{} {
 	t.Helper()
+	return localCommandPeer(t, nc, func(hello *wingwire.Hello, message wingwire.Message) wingwire.Message {
+		request, ok := message.(*wingwire.LocalControl)
+		if !ok {
+			t.Errorf("expected local control, got %T", message)
+			return &wingwire.Unsupported{Type: string(wingwire.TypeOf(message))}
+		}
+		return respond(hello, request)
+	})
+}
+
+func localCommandPeer(t *testing.T, nc net.Conn, respond func(*wingwire.Hello, wingwire.Message) wingwire.Message) <-chan struct{} {
+	t.Helper()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -46,12 +58,9 @@ func controlPeer(t *testing.T, nc net.Conn, respond func(*wingwire.Hello, *wingw
 			t.Error(err)
 			return
 		}
-		request, ok := message.(*wingwire.LocalControl)
-		if !ok {
-			t.Errorf("expected local control, got %T", message)
-			return
+		if reply := respond(hello, message); reply != nil {
+			write(reply)
 		}
-		write(respond(hello, request))
 	}()
 	return done
 }

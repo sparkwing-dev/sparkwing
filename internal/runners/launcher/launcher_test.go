@@ -20,13 +20,16 @@ import (
 )
 
 type boundaryFake struct {
-	releases int
-	err      error
+	reservations int
+	releases     int
+	err          error
 }
 
 func (b *boundaryFake) Reserve(_ context.Context, a CloudJobBinding, name string) (CloudNodeReservation, CloudNetworkEvidence, error) {
+	b.reservations++
 	return CloudNodeReservation{NodeName: "node", NodeUID: "uid", Team: a.Team, JobName: name, ReservationID: "reservation"}, CloudNetworkEvidence{Namespace: "cloud", NodeUID: "uid", PolicyRevision: "revision", DefaultDenyEgressEnforced: true, RequiredDestinationsAllowed: true, DaemonSetPortsInventoried: true, EscapeProbePassed: true}, nil
 }
+
 func (b *boundaryFake) Release(context.Context, CloudNodeReservation) error {
 	b.releases++
 	return b.err
@@ -43,6 +46,7 @@ func (c *controlFake) Claim(context.Context, string) (*CloudJobAward, error) {
 	c.claims++
 	return c.award, c.fail
 }
+
 func (c *controlFake) Sync(_ context.Context, bindings []CloudJobBinding) ([]CloudJobState, error) {
 	states := make([]CloudJobState, len(bindings))
 	for i, b := range bindings {
@@ -191,5 +195,61 @@ func TestSizingBelowCeiling(t *testing.T) {
 	resources := r.Job.Spec.Template.Spec.Resources
 	if resources.Limits.Cpu().MilliValue() != 1500 || resources.Limits.Memory().Value() != 2<<30 {
 		t.Fatalf("under-ceiling resources changed: %v", resources)
+	}
+}
+
+func TestBuildJobRefusesOverCeilingBeforeReservation(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		cpu     float64
+		ceiling float64
+		memory  int64
+		want    []string
+	}{
+		{name: "cpu", cpu: 4.5, memory: 2 << 30, want: []string{"CPU", "4.5", "4", "ceiling"}},
+		{name: "cpu_precision", cpu: 3.9995, ceiling: 3.9995, memory: 2 << 30, want: []string{"CPU", "4", "3.9995", "ceiling"}},
+		{name: "cpu_nano_precision", cpu: 1.0009999999, ceiling: 1.0009999999, memory: 2 << 30, want: []string{"CPU", "1001m", "1.0009999999", "ceiling"}},
+		{name: "memory", cpu: 1.5, memory: 9 << 30, want: []string{"memory", "9663676416", "8589934592", "ceiling"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			l, _, boundary, control := fixture()
+			if test.ceiling > 0 {
+				l.Config.CPUCeiling = test.ceiling
+			}
+			control.award.CPUCores, control.award.Memory = test.cpu, test.memory
+			_, err := BuildJob(t.Context(), time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC), l.Config, *control.award, boundary)
+			if err == nil {
+				t.Fatal("over-ceiling award silently changed resources")
+			}
+			for _, word := range test.want {
+				if !strings.Contains(err.Error(), word) {
+					t.Fatalf("missing %q in %v", word, err)
+				}
+			}
+			if boundary.reservations != 0 {
+				t.Fatal("invalid award reserved a Cloud node")
+			}
+		})
+	}
+}
+
+func TestBuildJobRoundsFractionalCPUUpToKubernetesPrecision(t *testing.T) {
+	for _, test := range []struct {
+		cpu, ceiling float64
+		milli        int64
+	}{
+		{1.2345, 4, 1235},
+		{2.007, 4, 2007},
+		{4.001, 4.001, 4001},
+	} {
+		l, _, boundary, control := fixture()
+		control.award.CPUCores, l.Config.CPUCeiling = test.cpu, test.ceiling
+		resources, err := BuildJob(t.Context(), time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC), l.Config, *control.award, boundary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := resources.Job.Spec.Template.Spec.Resources.Limits.Cpu().MilliValue(); got != test.milli {
+			t.Fatalf("CPU %g=%dm, want %dm", test.cpu, got, test.milli)
+		}
 	}
 }

@@ -74,6 +74,7 @@ type Daemon struct {
 	localActivity       LocalActivity
 	stay                bool
 	localControl        func(*bool) LocalStatus
+	localDashboard      func(context.Context, string) error
 	lastActivity        time.Time
 	startedAt           time.Time
 
@@ -706,6 +707,8 @@ func (d *Daemon) dispatch(c *conn, msg wingwire.Message) bool {
 		d.handleStatsReset(c)
 	case *wingwire.LocalControl:
 		return d.handleLocalControl(c, m)
+	case *wingwire.LocalDashboard:
+		return d.handleLocalDashboard(c, m)
 	case *wingwire.DrainRequest:
 		d.handleDrain(c, m)
 		return true

@@ -23,25 +23,33 @@ func SetLocalStay(ctx context.Context, home string, stay bool) (wingd.LocalStatu
 }
 
 func localControl(ctx context.Context, home string, stay *bool) (wingd.LocalStatus, error) {
-	if err := ctx.Err(); err != nil {
+	nc, sock, err := dialLocalController(ctx, home)
+	if err != nil {
 		return wingd.LocalStatus{}, err
+	}
+	defer nc.Close()
+	return exchangeLocalControl(ctx, nc, sock, stay)
+}
+
+func dialLocalController(ctx context.Context, home string) (net.Conn, string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
 	}
 	sock, err := wingd.SocketPath(home)
 	if err != nil {
-		return wingd.LocalStatus{}, err
+		return nil, "", err
 	}
 	nc, err := dial(ctx, sock, probeTimeout)
 	if err != nil {
 		if ctx.Err() != nil {
-			return wingd.LocalStatus{}, ctx.Err()
+			return nil, "", ctx.Err()
 		}
 		if err := unreachable(sock, err); err != nil {
-			return wingd.LocalStatus{}, err
+			return nil, "", err
 		}
-		return wingd.LocalStatus{}, ErrNoDaemon
+		return nil, "", ErrNoDaemon
 	}
-	defer nc.Close()
-	return exchangeLocalControl(ctx, nc, sock, stay)
+	return nc, sock, nil
 }
 
 func exchangeLocalControl(ctx context.Context, nc net.Conn, sock string, stay *bool) (wingd.LocalStatus, error) {

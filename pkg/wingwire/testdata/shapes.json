@@ -467,6 +467,26 @@
       ]
     },
     {
+      "type": "local_dashboard",
+      "fields": [
+        {
+          "name": "address",
+          "kind": "string",
+          "omitempty": false
+        }
+      ]
+    },
+    {
+      "type": "local_dashboard_ack",
+      "fields": [
+        {
+          "name": "error",
+          "kind": "string",
+          "omitempty": true
+        }
+      ]
+    },
+    {
       "type": "queue_state",
       "fields": [
         {
