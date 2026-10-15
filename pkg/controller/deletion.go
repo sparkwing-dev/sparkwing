@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -366,7 +367,7 @@ func (s *Server) teamLogClasses(ctx context.Context, objs logObjectStore, team s
 		return nil, fmt.Errorf("list the log retention classes: %w", err)
 	}
 	for _, class := range held {
-		if _, valid := logseg.ClassDays(class); valid && !slices.Contains(classes, class) {
+		if _, valid := blob.LogClassDays(class); valid && !slices.Contains(classes, class) {
 			classes = append(classes, class)
 		}
 	}

@@ -84,7 +84,23 @@ shared segment or manifest size bound. The first payload wins. An identical
 retry succeeds, and different bytes cannot replace it. This path reuses the
 filesystem signer and immutable writer. Its URLs grant no log download access.
 `Get` opens a log object only for a controller-side authorized segment read.
-The controller still owns record checks, retention sweeps and egress accounting.
+The S3 backend also opens exact log keys and refuses objects beyond the shared
+segment or manifest size bound. The committed reader verifies each persisted
+segment before sending bytes. Missing or corrupt objects remain read failures.
+
+`S3.LogClassReady` checks the bucket's lifecycle configuration for the batch
+signer's callback. It requires an enabled prefix rule with the class's days.
+Rules limited by tags or object size cannot establish expiry for the whole
+class. The backend reads the rules and leaves their configuration to the operator.
+
+`Filesystem.ExpireLogs` removes log objects whose file age reaches their stored
+class. The controller must call it under its maintenance lease before treating
+filesystem retention as configured. Identical uploads preserve the file age.
+The sweep includes retired classes, ignores upload temporary files and leaves
+CAS bytes to their separate reachability rules. Cancellation and filesystem
+errors return a count of objects already removed and an error.
+`LogClassDays` owns canonical class parsing for both backends and log key builders.
+The controller still owns record checks, maintenance scheduling and egress accounting.
 
 An object commit does not create a live blob or a receipt. The controller must
 reauthorize the immutable upload ticket, call `CommitObject`, and commit the blob

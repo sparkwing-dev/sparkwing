@@ -428,8 +428,12 @@ func TestSinkPushesLiveOnlyWhileWatched(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(pushed) != 2 || pushed[0] != line(3) || offsets[0] != 2*n || pushed[1] != line(4) || offsets[1] != 3*n {
-		t.Fatalf("live view got %q at %v, want line 3 at %d then line 4 at %d", pushed, offsets, 2*n, 3*n)
+	if len(pushed) != 2 || (offsets[0] != 0 && offsets[0] != 2*n) || pushed[1] != line(4) || offsets[1] != 3*n {
+		t.Fatalf("live view got %q at %v, want a pending suffix then line 4 at %d", pushed, offsets, 3*n)
+	}
+	// safety: storage may signal before the sink records its upload, so the pending suffix can overlap it.
+	if want := (line(1) + line(2) + line(3))[offsets[0]:]; pushed[0] != want {
+		t.Fatalf("pending suffix = %q at %d, want %q", pushed[0], offsets[0], want)
 	}
 }
 

@@ -65,10 +65,20 @@ URLs and one manifest URL with a fifteen-minute expiry. The filesystem signer
 accepts an identical retry and refuses different bytes under an existing key.
 These URLs grant no log download access.
 
+S3 lifecycle readiness requires an enabled prefix rule with the stored class's
+days. Tag and size conditions cannot establish expiry for all objects. The
+backend reads the rules and leaves their configuration to the operator.
+The filesystem backend provides an expiry pass for the controller's maintenance
+lease. It expires objects by their stored class, including retired classes.
+An identical upload retry preserves the original age. The pass leaves CAS data
+to its separate reachability rules. Maintenance scheduling remains to be bound.
+
 The reader uses authorized segment records, verifies each segment before sending
 its bytes and resumes at an uncompressed byte offset. It reports how many bytes
 it sent even when a later segment fails. Objects without a persisted log record
 do not establish a readable log. The tagged components still need controller
 and host bindings.
+Both backends open exact log keys for this reader. The S3 backend checks response
+lengths against the segment or manifest bound before returning a stream.
 
 <!-- design:end -->

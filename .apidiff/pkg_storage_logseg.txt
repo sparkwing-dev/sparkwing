@@ -8,7 +8,6 @@ type BatchSigner struct {
 	Now        func() time.Time
 }
 func (s BatchSigner) Sign(ctx context.Context, request blob.LogSigningRequest, class string) (blob.LogUploadBatch, error)
-func ClassDays(class string) (int, bool)
 const ClassFree = "r30"
 func ClassPrefix(class string) string
 const ClassStandard = "r90"

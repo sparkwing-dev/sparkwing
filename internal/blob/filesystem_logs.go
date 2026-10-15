@@ -49,6 +49,9 @@ func logObjectLimit(key string) (int64, error) {
 			return 0, fmt.Errorf("invalid log object key")
 		}
 	}
+	if _, ok := LogClassDays(p[1]); !ok {
+		return 0, fmt.Errorf("invalid log retention class")
+	}
 	name := p[len(p)-1]
 	if name == "manifest.json" {
 		return limits.LogManifestBytes, nil

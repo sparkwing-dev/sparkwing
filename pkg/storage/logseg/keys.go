@@ -30,27 +30,13 @@ const (
 	segmentSuffix = ".ndjson.gz"
 )
 
-// ClassDays returns the days a retention class keeps a log, and false
-// for a name that is not a class.
-func ClassDays(class string) (int, bool) {
-	digits, ok := strings.CutPrefix(class, "r")
-	if !ok || digits == "" || digits[0] == '0' {
-		return 0, false
-	}
-	days, err := strconv.Atoi(digits)
-	if err != nil || days < 1 {
-		return 0, false
-	}
-	return days, true
-}
-
 // ClassPrefix is the key prefix every log of one retention class sits
 // under, which the class's lifecycle rule names.
 func ClassPrefix(class string) string { return "logs/" + class + "/" }
 
 // RunPrefix is the key prefix under which every log of one run sits.
 func RunPrefix(class, team, runID string) (string, error) {
-	if _, ok := ClassDays(class); !ok {
+	if _, ok := blob.LogClassDays(class); !ok {
 		return "", fmt.Errorf("logseg: retention class %q is not r<days>", class)
 	}
 	if team != NoTeam && !teamblob.ValidTeam(team) {

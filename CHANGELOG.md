@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Removed
+- **logs (Breaking):** moved retention-class parsing from `logseg.ClassDays` into the internal byte-storage owner
+  Log keys, expiry and controller cleanup use the same canonical class check.
 - **logs (Breaking):** removed reads of unrecorded exported log objects
   The controller reads logs indexed by the store. Object listings no longer make an unrecorded log readable.
 - **storage (Breaking):** removed runner and launcher gitcache/package-proxy options, agent `gitcache`, controller cache URL announcements, and the CLI cache-health probe. Runners fetch source directly. Custom registry settings use `run.submit_env_allow`.
@@ -30,6 +32,8 @@ unlock.
   Source bundles use verified blob transfers and exact uploader records. Working-tree triggers fail before upload or submission until intake and host storage bindings are connected.
 
 ### Added
+- **logs:** added filesystem expiry and S3 lifecycle checks and segment reads
+  Storage components expire files by their stored class and verify S3 segments through committed records. Controller maintenance and tagged-log routes remain pending.
 - **logs:** Added batch signing and filesystem transfer support for tagged logs
   The storage components issue fifteen-minute PUT-only URLs and preserve the first payload at each segment or manifest key. Controller and host bindings remain pending.
 - **cli + controller:** `sparkwing pipeline trigger --runner here --reason TEXT` hosts a hotfix run on the caller's machine under a one-shot runner credential bound to that run

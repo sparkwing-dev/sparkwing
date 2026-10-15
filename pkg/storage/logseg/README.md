@@ -24,6 +24,9 @@ retention class after authorizing its writer. A required callback checks the
 class lifecycle before any URL is signed. The signer copies the subject and
 derives every key from it. It accepts `blob.Filesystem` through `LogPutSigner`.
 That backend permits only an identical retry at an existing key.
+`blob.S3.LogClassReady` supplies the lifecycle callback for the S3 bucket.
+The filesystem backend exposes an expiry pass for the controller's maintenance
+lease. Its scheduling must be connected before enabling filesystem log signing.
 
 `CommittedReader` calls `ReadLogSegments` on each read. It checks the returned
 subject, keys and contiguous ranges before reading any object. Each segment must
@@ -32,6 +35,8 @@ reach the response. `ReadResult.Bytes` counts bytes emitted, including partial
 writes before an error. The controller must meter that count on success and
 failure. It joins the returned ranges to its live ring and polls for follow
 requests. `Data.Read` is the host-side entry to the controller-proxied stream.
+Both filesystem and S3 backends open exact log keys for this reader. S3 response
+lengths must fit the shared object bound before the reader consumes their bytes.
 
 The component tests include a filesystem signer and HTTP handler round trip
 through the real uploader, sink, compressed files and committed reader. Only
@@ -41,7 +46,7 @@ uploads and uncertain commit retries. These proofs do not count as native
 acceptance receipts.
 
 The store's transactional authorization and log persistence, controller routes,
-egress settlement, retention sweeps and host bindings still need integration.
+egress settlement, retention scheduling and host bindings still need integration.
 S3 log signing also needs a contract for required signed headers and verified
 replays after an uncertain upload. The existing controller and host paths still
 use the older attempt-only uploader and manifest fields. Those paths have no

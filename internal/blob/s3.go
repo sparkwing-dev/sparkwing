@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
@@ -132,6 +134,33 @@ func (s *S3) DeleteObject(ctx context.Context, key string) error {
 		return nil
 	}
 	return err
+}
+
+// Get opens an exact log key for a controller-authorized read. The committed
+// reader verifies the recorded digest and range before emitting any bytes.
+// Listings and signed downloads never authorize log access.
+func (s *S3) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	limit, err := logObjectLimit(key)
+	if err != nil {
+		return nil, err
+	}
+	object, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)})
+	if s3Error(err, "NoSuchKey", "NotFound") {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if object.Body == nil {
+		return nil, ErrIntegrity
+	}
+	if object.ContentLength == nil || *object.ContentLength < 0 || *object.ContentLength > limit {
+		return nil, errors.Join(ErrIntegrity, object.Body.Close())
+	}
+	return object.Body, nil
 }
 
 func s3Error(err error, codes ...string) bool {
