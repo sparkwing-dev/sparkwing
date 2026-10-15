@@ -57,6 +57,7 @@ repeated flags and values that resemble flags.
 Systemd inspection requires one complete `ExecStart` command. Leading empty
 reset directives remain valid. A malformed nonempty command cannot be hidden
 by a later valid command.
+Refresh preserves empty reset directives when replacing the executable.
 Plist inspection decodes one dictionary and a string-only `ProgramArguments`
 array. Duplicate commands, incomplete XML and extra documents are refused.
 `FuzzPlistArguments` covers literal argument recovery and those refusals.

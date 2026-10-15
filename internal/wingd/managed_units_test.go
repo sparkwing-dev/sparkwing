@@ -18,7 +18,8 @@ func TestManagedUnitsInstallRefreshAndRemove(t *testing.T) {
 		t.Run(goos, func(t *testing.T) {
 			var calls []string
 			root := t.TempDir()
-			host := crontimer.Host{GOOS: goos, Home: root, ConfigHome: filepath.Join(root, "config"),
+			host := crontimer.Host{
+				GOOS: goos, Home: root, ConfigHome: filepath.Join(root, "config"),
 				SparkwingHome: filepath.Join(root, ".sparkwing"), Binary: filepath.Join(root, "bin with spaces", "sparkwing"), Version: "v1.2.3-foo--bar", UID: 501,
 				PathEnv: "/captured/tools:/usr/bin", Exec: func(_ context.Context, name string, args ...string) (string, error) {
 					calls = append(calls, name+" "+strings.Join(args, " "))
@@ -26,7 +27,8 @@ func TestManagedUnitsInstallRefreshAndRemove(t *testing.T) {
 						return "path = " + filepath.Join(root, "Library", "LaunchAgents", filepath.Base(args[1])+".plist") + "\n", nil
 					}
 					return "", nil
-				}}
+				},
+			}
 			manager, err := NewManagedUnitManager(host)
 			if err != nil {
 				t.Fatal(err)
@@ -68,6 +70,12 @@ func TestManagedUnitsInstallRefreshAndRemove(t *testing.T) {
 						t.Fatalf("controller is not a foreground service:\n%s", body)
 					}
 				}
+				if goos == "linux" {
+					body = []byte(strings.Replace(string(body), "ExecStart=", "ExecStart=\nExecStart= \t\nExecStart=", 1))
+					if err := os.WriteFile(unit.Name, body, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
 			}
 			calls = nil
 			next := filepath.Join(root, "next bin", "sparkwing")
@@ -105,7 +113,8 @@ func TestManagedControllerRefreshRetriesFailedBootstrap(t *testing.T) {
 	root := t.TempDir()
 	registered, fail := false, false
 	want := errors.New("bootstrap failed")
-	host := crontimer.Host{GOOS: "darwin", Home: root, SparkwingHome: filepath.Join(root, ".sparkwing"), UID: 501,
+	host := crontimer.Host{
+		GOOS: "darwin", Home: root, SparkwingHome: filepath.Join(root, ".sparkwing"), UID: 501,
 		Exec: func(_ context.Context, _ string, args ...string) (string, error) {
 			switch args[0] {
 			case "print":
@@ -123,7 +132,8 @@ func TestManagedControllerRefreshRetriesFailedBootstrap(t *testing.T) {
 				registered = true
 			}
 			return "", nil
-		}}
+		},
+	}
 	manager, err := NewManagedUnitManager(host)
 	if err != nil {
 		t.Fatal(err)
@@ -146,8 +156,10 @@ func TestManagedUnitsRefuseWindowsAndOtherHomes(t *testing.T) {
 	for _, goos := range []string{"linux", "darwin", "windows"} {
 		t.Run(goos, func(t *testing.T) {
 			calls := 0
-			host := crontimer.Host{GOOS: goos, Home: root, ConfigHome: filepath.Join(root, "config"), SparkwingHome: filepath.Join(root, "state"),
-				Exec: func(context.Context, string, ...string) (string, error) { calls++; return "", nil }}
+			host := crontimer.Host{
+				GOOS: goos, Home: root, ConfigHome: filepath.Join(root, "config"), SparkwingHome: filepath.Join(root, "state"),
+				Exec: func(context.Context, string, ...string) (string, error) { calls++; return "", nil },
+			}
 			manager, err := NewManagedUnitManager(host)
 			if err != nil {
 				t.Fatal(err)
@@ -175,11 +187,13 @@ func TestManagedUnitsRefuseWindowsAndOtherHomes(t *testing.T) {
 func TestManagedControllerInstallRefusesAnotherLoadedFile(t *testing.T) {
 	root := t.TempDir()
 	var calls []string
-	host := crontimer.Host{GOOS: "linux", Home: root, ConfigHome: filepath.Join(root, "config"), SparkwingHome: filepath.Join(root, ".sparkwing"),
+	host := crontimer.Host{
+		GOOS: "linux", Home: root, ConfigHome: filepath.Join(root, "config"), SparkwingHome: filepath.Join(root, ".sparkwing"),
 		Exec: func(_ context.Context, name string, args ...string) (string, error) {
 			calls = append(calls, name+" "+strings.Join(args, " "))
 			return "/another/config/sparkwing-controller.service\n", nil
-		}}
+		},
+	}
 	manager, err := NewManagedUnitManager(host)
 	if err != nil {
 		t.Fatal(err)

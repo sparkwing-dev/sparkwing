@@ -42,6 +42,7 @@ func FuzzRefreshPreservesInstalledSettings(f *testing.F) {
 			policy = "<key>CustomSetting</key><string>" + unitfile.XMLText(setting) + "</string>"
 			installed = strings.Replace(installed, "</dict>\n</plist>", policy+"</dict>\n</plist>", 1)
 		} else {
+			installed = strings.Replace(installed, "ExecStart=", "ExecStart=\nExecStart= \t\nExecStart=", 1)
 			installed += policy
 		}
 		if err := os.WriteFile(state.Path, []byte(installed), 0o600); err != nil {
@@ -59,6 +60,9 @@ func FuzzRefreshPreservesInstalledSettings(f *testing.F) {
 		args[0] = h.Binary
 		if !slices.Equal(unitfile.Arguments(h.GOOS, string(updated)), args) || !strings.Contains(string(updated), policy) || state.Binary != h.Binary || !slices.Equal(state.Arguments, args[1:]) {
 			t.Fatalf("refresh discarded installed settings: state=%+v body=%s", state, updated)
+		}
+		if inspected, err := Inspect(t.Context(), h); err != nil || inspected.Mismatch || inspected.Binary != h.Binary || !slices.Equal(inspected.Arguments, args[1:]) {
+			t.Fatalf("refreshed registration is unusable: %+v: %v", inspected, err)
 		}
 	})
 }

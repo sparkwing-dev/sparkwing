@@ -101,15 +101,8 @@ func (l *Loop) start() (<-chan struct{}, error) {
 	return l.drain, nil
 }
 
-type unitKey struct {
-	kind       capability.UnitKind
-	id         string
-	holder     string
-	generation int64
-}
-
 type unitResult struct {
-	key unitKey
+	key capability.LeaseRef
 	err error
 }
 
@@ -139,7 +132,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	policyRefresh := time.NewTicker(limits.VersionIndexRefresh)
 	defer policyRefresh.Stop()
 	results := make(chan unitResult, l.Config.MaxConcurrent)
-	active := make(map[unitKey]struct{})
+	active := make(map[capability.LeaseRef]struct{})
 	idleSince := time.Now()
 	claimed := 0
 	var hostErr error
@@ -233,7 +226,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			if !slices.Contains(l.Config.Kinds, unit.Unit) || (l.Config.RunID != "" && unit.RunID != l.Config.RunID) {
 				return outcome.stopErr, errors.New("controller awarded work outside the runner's requested selection")
 			}
-			key := unitKey{kind: unit.Unit, id: unit.UnitID, holder: unit.Binding.Holder, generation: unit.Binding.Generation}
+			key := capability.LeaseRef{Kind: unit.Unit, ID: unit.UnitID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation}
 			if _, exists := active[key]; exists {
 				return outcome.stopErr, errors.New("controller awarded a unit already held by this runner")
 			}
