@@ -616,6 +616,12 @@ its authority parent. Credential issuance through that session delegates from
 its existing ancestry and inherits the shortest remaining lifetime. Independent
 member roots and owner-consent routes require a direct account sign-in session.
 Changing a token into a browser cookie does not establish that consent.
+Account credentials carrying a data scope cannot sign in because browser
+sessions cannot preserve that scope.
+
+Machine roots require a direct account sign-in session or deployment authority.
+Their grants are limited to `nodes.claim` and `triggers.claim`. The store checks
+these rules in the transaction that issues the root.
 
 ### Linked sign-ins
 

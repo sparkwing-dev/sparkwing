@@ -75,9 +75,14 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 			return bindingRefusal()
 		}
 	case capability.ProvisionMachine:
-		account := spec.Authority != nil && c.Subject.Kind == capability.SubjectAccount && c.Team == spec.Team && c.Audience == capability.Controller && c.Binding.Kind == capability.BindingNone
+		account := spec.Authority != nil && p.DirectAccountSession() && c.Team == spec.Team && c.Audience == capability.Controller
 		if spec.Team == "" || spec.Subject.Kind != capability.SubjectMachine || spec.Binding.Kind != capability.BindingNone || (!account && !deployment) {
 			return bindingRefusal()
+		}
+		for _, grant := range spec.Grants {
+			if grant != capability.NodesClaim && grant != capability.TriggersClaim {
+				return authorityError(apierr.Forbidden, "machine roots require claim grants")
+			}
 		}
 		if !deployment && len(spec.ReservedPools) != 0 && !slices.Contains(c.Grants, capability.TeamAdmin) {
 			return authorityError(apierr.Forbidden, "reserved pools require team administration")

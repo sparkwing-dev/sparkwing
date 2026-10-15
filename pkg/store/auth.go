@@ -78,8 +78,8 @@ func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl 
 		return "", nil, err
 	}
 	c := p.Capability
-	if c.Subject.Kind != capability.SubjectAccount || c.Team == "" || c.Audience != capability.Controller || c.Binding.Kind != capability.BindingNone || c.Unit != "" {
-		return "", nil, authorityError(apierr.Forbidden, "session requires an unbound account capability")
+	if c.Subject.Kind != capability.SubjectAccount || c.Team == "" || c.Audience != capability.Controller || c.Binding.Kind != capability.BindingNone || c.Unit != "" || c.Data != nil {
+		return "", nil, authorityError(apierr.Forbidden, "session requires an unbound account capability without data scope")
 	}
 	var email string
 	if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, c.Subject.ID).Scan(&email); err != nil {

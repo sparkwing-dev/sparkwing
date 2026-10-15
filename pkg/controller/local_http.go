@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -15,11 +16,17 @@ func (s *Server) HTTP() wingd.LocalHTTP {
 			if !ok {
 				return capability.Subject{}
 			}
-			subject, err := wingd.LocalSubject(peer, peer)
-			if err != nil {
-				return capability.Subject{}
+			switch peer.GOOS {
+			case "linux", "darwin":
+				if peer.UID != nil {
+					return capability.Subject{Kind: capability.SubjectLocal, ID: fmt.Sprintf("local:%d", *peer.UID)}
+				}
+			case "windows":
+				if peer.SID != "" {
+					return capability.Subject{Kind: capability.SubjectLocal, ID: "local:" + peer.SID}
+				}
 			}
-			return capability.Subject{Kind: capability.SubjectLocal, ID: subject}
+			return capability.Subject{}
 		})
 		router := s.routers()
 		router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
