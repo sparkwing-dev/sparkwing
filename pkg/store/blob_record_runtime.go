@@ -72,6 +72,14 @@ func (r *blobRecords) manifestMembers(ctx context.Context, request blob.CommitRe
 }
 
 func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecordRequest) (blob.Record, error) {
+	if request.ExpiresAt.Set {
+		request.ExpiresAt.Value = request.ExpiresAt.Value.UTC()
+	} else {
+		request.ExpiresAt.Value = time.Time{}
+	}
+	if !request.ManifestDigest.Set {
+		request.ManifestDigest.Value = ""
+	}
 	tx, err := r.tenant.s.beginTx(ctx)
 	if err != nil {
 		return blob.Record{}, err

@@ -1,9 +1,81 @@
 # W1b handoff
 
-Continues `7d6ce07bf`. W1b remains incomplete. This continuation is uncommitted.
+Continues `9c5e341a8` after integration merge `5171ae77c`. W1b remains incomplete.
+This continuation is uncommitted.
 The lead owns review, commits, pipelines and native integration.
 
 ## Current continuation
+
+Closed record metadata replay under A1-29/A1-35. The invariant is that equivalent
+record metadata returns the same committed record across replay and reopening.
+Record commits normalize expiry instants to UTC and clear values in unset optional
+expiry and manifest fields before validation and persistence. The existing
+immutable-record comparison then uses the same representation as the database.
+A changed expiry still conflicts. No helper, API, schema or setting is added.
+
+The minimal regression reproduced `job output record is immutable` when an output
+commit replayed its expiry instant in another timezone. The property also
+reproduced unset expiry values surviving the first response. It generates 48
+cases each for output and manifest records, covering timezone offsets, nanosecond
+precision, optional presence, ignored values, reopening and changed-expiry refusal.
+After refusal, lookup must return the original record and the database must hold
+one record. Namespace and edge rules are explicit contract fakes because W7's
+implementations remain stubs. The tests use real SQLite persistence and no sleeps.
+
+Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and -p 4.
+GOCACHE, GOTMPDIR and TMPDIR are beneath /tmp/sw-astra-W1b/. Go commands use
+`go -C /home/bombuntu/.xwing/envs/1088/sparkwing`.
+
+- Final whole-repository `go build -p 4 ./...` passed.
+- `go vet -p 4 ./pkg/store/... ./internal/acceptance/...
+  ./tests/acceptance/...` passed.
+- The expanded store selection from the prior continuation passed **197
+  top-level tests / 487 cases**, without skips. Both new tests are selected by
+  TestBlob. It is the Manual selection below plus TestGrantCredits,
+  TestCreditGrant, TestCreditReversal, TestCreditHistory, TestCreditsBalanceIs,
+  TestCreditsDefaultTenant, TestTenantSQLScope, TestTenantWriters and
+  TestTenantTwins.
+- `go test -json -p 4 ./internal/acceptance/... ./tests/acceptance/...
+  -run '^(TestStorage|TestBilling)$' -count=1` passed **2 top-level tests /
+  43 cases**, including all **12 existing SQLite data/billing proofs**.
+  The selected native/platform skeleton retains **562 skips**. No new native
+  cell or archived T1 inventory port is claimed complete.
+- Required `commentcheck -base main` passed across 905 files. Session
+  `sleepcheck -base HEAD`, focused embedded/changelog documentation tests,
+  `sync-docs --check` and whitespace checks passed. The public API is unchanged.
+
+Legacy deletion is **0 lines**. No W1 lifecycle file or other-package production
+caller changed. Shared files are design/rewrite/contracts/c1-data.md,
+CHANGELOG.md and generated pkg/docs/changelog.md. Owned files are
+blob_record_runtime.go, new blob_record_replay_test.go, STORE-DATA.md and this
+handoff. C1 documents an implementation correction without changing contract
+shape. No foreign contract change or new human decision is introduced.
+
+Amendment audit retains the previous boundaries. A1-24 has the transactional
+data checker. A1-27 has immutable billing helpers but needs W1's lifecycle joins
+and the existing unstarted at_award refund and explicit customer-wait contract
+decisions. C2 SettleBilling, VerifiedPaymentEvent.Event and payment verification
+remain stubs. A1-28 has committed-checkout persistence but still needs W2's
+verified-provider route cutover. A1-29 through A1-35 have the owned persistence
+implementation and this replay correction. W7 namespace/edge policy, verified
+manifests, physical transfer/deletion, W2/W9 data/log transports, trusted replica
+wiring and proxy egress remain real integrations. Result attachment needs its
+verified manifest reader. Never-executed materialization destination identities
+and published owner-unit log identities still need agreement. A1-53 still needs
+native evidence. handoffs.md has no new W1b assignment.
+
+Old claim-credit, paid-grant, raw-storage, output, upload and log paths retain
+other owners' callers. Their retirement and the cross-owner contracts above
+prevent area completion. The full legacy suite, native placements, PostgreSQL,
+providers, physical backends, binary execution and race checks were not run.
+Pipelines and independent review remain with the lead under the swarm brief.
+
+Friction was cold compilation and an initial generated result-key fixture that
+violated the exact destination contract. The fixture was corrected before the
+timezone regression ran red. No Sparkwing binary, service, provider, deployment,
+release or Git write ran. Scratch is deleted after final inspection.
+
+## Previous continuation (committed in 9c5e341a8)
 
 Closed the collection fence gap in A1-35. The invariant is that every
 CollectBlobTombstones call requires the current persisted maintenance fence,

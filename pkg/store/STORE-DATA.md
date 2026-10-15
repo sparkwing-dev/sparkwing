@@ -113,6 +113,11 @@ encoding and the pure edge rule. The direct `Tenant` record methods use those
 same rules and have no manifest reader. Manifest operations through them fail
 until the caller uses the configured record store.
 
+Record commits return UTC expiry instants and zero values for unset optional
+expiry and manifest fields. Equivalent metadata replays after reopening, including
+an expiry expressed in another timezone. Changing the expiry instant still
+conflicts with an immutable output or manifest record.
+
 `SetResultBlobRecords(manifestReader)` configures result attachment before the
 store is shared. The result transaction verifies each output or manifest key
 against the current tenant, run, job, attempt and generation. It reads existing

@@ -245,6 +245,11 @@ removed with the legacy manifest-pointer endpoint. W7/W9 wire final publication
 and member validation through the record and result contracts. No manifest
 column or mutable pointer route is restored to the final schema.
 
+Record commits normalize expiry instants to UTC and clear values in unset optional
+expiry and manifest fields. Returned metadata matches persisted metadata across
+replay and reopening. A different expiry instant still conflicts with an immutable
+output or manifest record.
+
 The `storage-quota-settlement-crash-replay/store-data-sqlite` proof exercises
 upload admission, commit, abort and deduplication. Child processes exit without
 closing their store at before/after commit and abort checkpoints. The parent
