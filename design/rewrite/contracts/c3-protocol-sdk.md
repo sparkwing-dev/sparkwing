@@ -80,18 +80,20 @@ W8's `StoreHosting` authenticates the award against its owned store and construc
 the shared native hosts. `nodehost.ClaimedNodeHost` owns source acquisition and
 renewal. It receives an unacquired input and validates persisted acceptance,
 engine, execution settings and claim identity before acquiring source.
-The `Hosting` transport adapter captures accepted seals, job settings, engine,
-runner and claim identity before renewal or preparation and copies nested mutable
-settings. Bound services supply the job hash, delegated routes, storage and
-replay. `NewManagedRunner` composes claim and award clients over the same HTTP
-transport with separate bearers. Remote native-store construction and Cloud
-plan/eval execution remain W3 integration points.
+The `Hosting` transport adapter captures the award before renewal or service
+binding. Its binder returns native services and the current authenticated C2
+principal. The services contain an award-bound `NativeHostStore`. Both hosting
+placements check the persisted request, acceptance and claim and construct shared
+native hosts. Jobs use `nodehost.NewNodeInput` with the persisted row and captured
+runner. The shared hosts acquire the selected engine and own the only renewal
+keeper. No prepared input or outer runner keeper remains.
 
-For trigger and here awards, Hosting constructs RunInput's run ID, first seal
-and accepted second seal before renewal or preparation. Prepared host services
-supply storage, authority, engine resolution and plan caching. They cannot
-replace the awarded seals or add an accepted plan to a new run. Trigger and node
-preparation share the accepted-plan projection.
+For trigger and here awards, the runner constructs the first seal and accepted
+second seal from the captured award. Owner authority comes from the authenticated
+principal and persisted owner lease. Service construction cannot replace either
+seal. `NewManagedRunner` keeps claimant and awarded transports separate.
+The production remote native-store adapter and its authenticated-principal binding,
+and Cloud plan/eval execution, remain W3/W2 integration points.
 
 Reconciliation supports MaterializeOnly: an authorized cache/retry hit is committed,
 while a miss returns Dispatch without stealing remote execution. Private execution

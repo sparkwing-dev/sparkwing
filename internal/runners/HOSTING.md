@@ -5,8 +5,13 @@ claimant transport. The host owns each award's execution lifetime. An embedded
 controller uses `NewStoreRunner` with its existing `EngineController` and store.
 The local controller constructs that queue in `Config.Open` from its service
 binder's `StoreRunnerConfig`.
-An HTTP placement supplies `Hosting` with its award-specific controller factory,
-source preparation and shared host adapters.
+An HTTP placement supplies `Hosting` with its award-specific controller factory
+and native service binder. The binder returns `NativeServices` with an authenticated
+`NativeHostStore` and the current C2 principal. It must derive that principal from
+the authenticated transport. Decoding the opaque bearer does not establish authority.
+`Hosting` confirms renewal before binding and captures the wire award before callbacks.
+Both placements use the same persisted-input checks and `nodehost.NewNativeHost`.
+The native owner and claimed hosts own source acquisition and their only lease keeper.
 
 `RunnerCLI` serves the existing metrics address alongside its bound factory's
 managed loop. Binding fails before any claim. Every claim records claimed,
@@ -35,8 +40,9 @@ Narrowed reporting delegations cannot construct hosts. Jobs use
 runner and request bytes are captured before any service callback runs.
 
 The service binder returns `NativeServices`. It supplies source, engine, process,
-policy, logging and storage adapters for `nodehost.NewNativeHost`. The constructor
-always receives the authenticated tenant over the controller's store. The shared
+policy, logging and storage adapters for `nodehost.NewNativeHost`. Embedded hosting
+overrides the constructor's store with the authenticated tenant. Remote hosting
+uses the bound `NativeHostStore` adapter. The shared
 owner and claimed host own acquisition, lease renewal and joining. Services close
 after those hosts return, including partial construction failures. Configured
 storage still needs fresh per-attempt bindings in the shared executor.
@@ -49,8 +55,10 @@ identity before SDK execution.
 
 `TestNativeStoreOwnerW8` constructs the embedded queue through the local binding
 and through `Config.Open`. It runs real C2 claim authentication, shared controller
-issuance, the native owner and C1 completion before joining local workers. Enrollment, version policy, source entry and unused
-process services are fixtures. `FuzzStoreQueueClaimAuthorityW8` checks named and
+issuance, the native owner and C1 completion before joining local workers. The remote-award and managed-runner variants use the same native owner, with an
+in-process controller transport and tenant standing in for the remote store adapter.
+They retain awarded labels across service-binding mutation. Enrollment, version
+policy, source entry and unused process services are fixtures. `FuzzStoreQueueClaimAuthorityW8` checks named and
 ordered claims against revoked, changed and narrowed credentials, duplicate and
 unsupported kinds, and omitted selection. Refusals leave the queue unclaimed.
 The direct-award case retains the runner-label mutation regression.

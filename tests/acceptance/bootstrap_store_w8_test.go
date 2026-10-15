@@ -11,9 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/runners"
+
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -114,49 +112,32 @@ func TestCloudStoreBootstrapW8Components(t *testing.T) {
 	}
 	bootstrapFile := writeBootstrapW8(t, resources.BootstrapSecret.Data)
 	transport := cloudStoreClientW8(t, server)
-	joined, closed, executed := false, false, false
+	executed := false
 	var held controllerwire.ClaimedUnit
-	hosting := runners.Hosting{
-		ControllerURL: cfg.ControllerURL, NewController: transport, Lease: time.Minute, Interval: 10 * time.Second,
-		StartKeeper: func(ctx context.Context, keeper lease.Keeper) (context.Context, func()) {
-			if _, err := keeper.Renew(ctx); err != nil {
-				t.Fatal(err)
-			}
-			return ctx, func() { joined = true }
-		},
-		PrepareNode: func(ctx context.Context, unit controllerwire.ClaimedUnit, bound controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
-			held = unit
-			if unit.Capability == string(award.Bootstrap) || unit.Delivery != capability.DeliveryDirect || unit.Binding.Attempt != 0 || unit.Runner.Name != "launcher" || unit.Runner.Type != "cloud" {
-				t.Fatal("Cloud preparation lost its exchanged authority or granted execution identity")
-			}
-			principal, err := server.Store.LookupCapability(ctx, sha256.Sum256([]byte(unit.Capability)))
-			if err != nil || principal.Capability.Issuance != capability.Exchange || !reflect.DeepEqual(principal.Capability.Parent, parent) {
-				t.Fatalf("Cloud exchange lost claimant ancestry: %v", err)
-			}
-			if replay, err := bootstrap.Exchange(ctx); err == nil || replay.Claim.Capability != "" {
-				t.Fatal("live Cloud bootstrap returned a second bearer")
-			}
-			return identityNodeW8(func(input nodehost.NodeInput) {
-					executed = true
-					if input.Engine.Identity != *award.Engine || input.Generation != award.Binding.Generation || input.Attempt != 0 || !reflect.DeepEqual(input.GrantedRunner, unit.Runner) {
-						t.Fatal("Cloud execution lost the accepted engine, runner or claim fence")
-					}
-					started, err := bound.TransitionJob(ctx, unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: &input.Attempt})
-					if err != nil || started.Attempt != 1 {
-						t.Fatalf("Cloud start: attempt=%d error=%v", started.Attempt, err)
-					}
-					if _, err := bound.TransitionJob(ctx, unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "success", Cause: "report", SourceAttempt: &started.Attempt, Result: &controllerwire.JobResult{Outcome: "success"}}); err != nil {
-						t.Fatal(err)
-					}
-				}), runnerIdentityInputW8(unit), func() error {
-					if !joined {
-						t.Error("Cloud source released before keeper joined")
-					}
-					closed = true
-					return nil
-				}, nil
-		},
-	}
+	hosting := bootstrapHostW8(func(ctx context.Context, unit controllerwire.ClaimedUnit) error {
+		held = unit
+		if unit.Capability == string(award.Bootstrap) || unit.Delivery != capability.DeliveryDirect || unit.Binding.Attempt != 0 || unit.Runner.Name != "launcher" || unit.Runner.Type != "cloud" {
+			t.Fatal("Cloud exchange lost its awarded authority or identity")
+		}
+		principal, err := server.Store.LookupCapability(ctx, sha256.Sum256([]byte(unit.Capability)))
+		if err != nil || principal.Capability.Issuance != capability.Exchange || !reflect.DeepEqual(principal.Capability.Parent, parent) {
+			t.Fatalf("Cloud ancestry: %v", err)
+		}
+		if replay, err := bootstrap.Exchange(ctx); err == nil || replay.Claim.Capability != "" {
+			t.Fatal("Cloud bootstrap returned a second bearer")
+		}
+		bound, err := storedRunnerClientW8(ctx, server, unit.Capability)
+		if err != nil {
+			return err
+		}
+		started, err := bound.TransitionJob(ctx, unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: &unit.Binding.Attempt})
+		if err != nil || started.Attempt != 1 {
+			t.Fatalf("Cloud start: attempt=%d error=%v", started.Attempt, err)
+		}
+		_, err = bound.TransitionJob(ctx, unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "success", Cause: "report", SourceAttempt: &started.Attempt, Result: &controllerwire.JobResult{Outcome: "success"}})
+		executed = err == nil
+		return err
+	})
 	restored, err := launcher.ReadBootstrapAward(bootstrapFile)
 	if err != nil {
 		t.Fatal(err)
@@ -165,8 +146,8 @@ func TestCloudStoreBootstrapW8Components(t *testing.T) {
 	if err := host.Run(t.Context(), restored); err != nil {
 		t.Fatal(err)
 	}
-	if !executed || !joined || !closed {
-		t.Fatalf("Cloud lifecycle: executed=%v joined=%v closed=%v", executed, joined, closed)
+	if !executed {
+		t.Fatal("Cloud award was not completed")
 	}
 	if err := host.Run(t.Context(), restored); err == nil {
 		t.Fatal("Cloud bootstrap was usable twice")

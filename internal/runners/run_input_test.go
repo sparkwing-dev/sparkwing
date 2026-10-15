@@ -3,188 +3,154 @@ package runners
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func FuzzHostingNodeInputKeepsAwardSeals(f *testing.F) {
-	f.Add("other-run", "other-hash", int64(999))
-	f.Add("run", "spec-hash", int64(0))
-	f.Fuzz(func(t *testing.T, preparedRun, preparedHash string, retry int64) {
-		unit := hostingAward(capability.UnitNode)
-		unit.Accepted.Spec.Hash, unit.Accepted.PlanHash = "spec-hash", "plan-hash"
-		unit.Accepted.Spec.Request.Request.RequestedArgs = map[string]string{"key": "sealed"}
-		unit.Accepted.Plan = json.RawMessage(`{"jobs":[{"id":"job"}]}`)
-		wait := int64(100)
-		unit.Execution = &runspec.JobExecutionSettings{
-			Retry:       runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: 2}},
-			Requires:    runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"sealed"}}},
-			Concurrency: []runspec.Concurrency{{Group: "sealed", Capacity: 3, Cost: 1, QueueTimeoutMS: &wait}},
-		}
-		wantSpec, err := json.Marshal(unit.Accepted.Spec)
-		if err != nil {
-			t.Fatal(err)
-		}
-		wantExecution, err := json.Marshal(unit.Execution)
-		if err != nil {
-			t.Fatal(err)
-		}
-		prepared := hostingInput(unit)
-		prepared.Accepted = nodehost.AcceptedRun{RunID: preparedRun, SpecHash: preparedHash}
-		prepared.Execution.Retry = runspec.Setting[int]{Optional: runspec.Optional[int]{Set: true, Value: int(retry)}}
-		executed := false
-		host := Hosting{
-			ControllerURL: "http://controller", Lease: time.Minute, Interval: time.Second,
-			NewController: hostingClient(func(context.Context) (lease.Beat, error) {
-				unit.Accepted.Spec.Request.Request.RequestedArgs["key"] = "changed"
-				unit.Accepted.Plan[0] = '!'
-				unit.Execution.Requires.Value[0] = "changed"
-				unit.Execution.Concurrency[0].Cost = 9
-				wait = 900
-				return lease.Beat{}, nil
-			}),
-			StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) { return ctx, func() {} },
-			PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
-				return nodeHostFunc(func(_ context.Context, input nodehost.NodeInput) error {
-					executed = true
-					accepted := input.Accepted
-					if accepted.RunID != "run" || accepted.SpecHash != "spec-hash" || accepted.PlanHash != "plan-hash" || string(accepted.Spec) != string(wantSpec) || len(accepted.Plan.Jobs) != 1 || accepted.Plan.Jobs[0].ID != "job" {
-						t.Fatal("node execution replaced the awarded seals")
-					}
-					gotExecution, err := json.Marshal(input.Execution)
-					if err != nil || string(gotExecution) != string(wantExecution) {
-						t.Fatal("node execution replaced the awarded settings")
-					}
-					input.Execution.Requires.Value[0] = "executor"
-					*input.Execution.Concurrency[0].QueueTimeoutMS = 7
-					return nil
-				}), prepared, nil, nil
-			},
-		}
-		if err := host.Host(t.Context(), unit); err != nil || !executed {
-			t.Fatalf("node seals: executed=%v error=%v", executed, err)
-		}
-		if unit.Execution.Requires.Value[0] != "changed" || wait != 900 {
-			t.Fatal("executor mutated the award's settings")
-		}
-	})
+type hostingState struct {
+	nodehost.NativeHostStore
+	snapshot store.RunSnapshot
+	node     store.NodeRow
 }
 
-func FuzzHostingRunInputKeepsAwardSeals(f *testing.F) {
-	f.Add("other-run", "other-hash", false, false)
-	f.Add("run", "request-hash", true, true)
-	f.Fuzz(func(t *testing.T, preparedRun, preparedHash string, resume, here bool) {
-		unit := hostingAward(capability.UnitTrigger)
-		unit.Runner = nodeproto.RunnerIdentity{Name: "granted", Type: "runner", Labels: []string{"awarded"}}
-		if here {
-			unit.Purpose = capability.PurposeHere
-		}
-		unit.Request.Hash = "request-hash"
-		unit.Request.Request.RequestedArgs = map[string]string{"key": "sealed"}
-		if resume {
-			unit.Accepted = &controllerwire.PlanAccepted{
-				Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash"},
-				Plan: json.RawMessage(`{"jobs":[{"id":"sealed-job"}]}`), PlanHash: "plan-hash",
+func (s *hostingState) ReadSnapshot(context.Context, string) (store.RunSnapshot, error) {
+	return s.snapshot, nil
+}
+
+func (s *hostingState) ReadNode(context.Context, store.NodeRef) (store.NodeRow, error) {
+	return s.node, nil
+}
+
+func hostingStateFor(t *testing.T, kind capability.UnitKind) (controllerwire.ClaimedUnit, capability.Principal, *hostingState) {
+	t.Helper()
+	unit := hostingAward(kind)
+	if kind == capability.UnitNode {
+		unit.Engine.Pin = engine.Pin{SDK: engine.GoSDK, Version: unit.Engine.Version}
+		unit.Engine.ManifestDigest = "manifest"
+		unit.Accepted.Spec.Resolved.Engine = *unit.Engine
+		unit.Accepted.Spec.PlanHash = unit.Accepted.PlanHash
+		unit.Runner.Labels = []string{}
+	}
+	unit.Request.Request.RequestedArgs = map[string]string{"arg": "sealed"}
+	p := capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "award"}, Capability: capability.Capability{
+		Prefix: "award", Issuance: capability.Award, Team: "team", Unit: kind, UnitID: unit.UnitID, Purpose: unit.Purpose, Delivery: unit.Delivery, Binding: unit.Binding,
+	}}
+	row := store.RunRow{ID: unit.RunID, Team: "team", Request: unit.Request, Owner: &store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: unit.RunID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation}}
+	state := &hostingState{snapshot: store.RunSnapshot{Run: row}}
+	if kind == capability.UnitNode {
+		unit.Accepted.Spec.Request = unit.Request
+		state.snapshot.Run.Spec = &unit.Accepted.Spec
+		state.snapshot.Run.Plan = unit.Accepted.Plan
+		state.snapshot.Run.PlanHash = string(unit.Accepted.PlanHash)
+		state.node = store.NodeRow{Ref: store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}, CapabilityPrefix: p.Capability.Prefix, ClaimedBy: unit.Binding.Holder, Generation: unit.Binding.Generation, Attempt: unit.Binding.Attempt, SpecHash: "job-hash", Status: store.StatusPending, Execution: *unit.Execution}
+	}
+	// safety: the store's snapshot must not share mutable objects with the received award.
+	body, err := json.Marshal(state.snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.snapshot = store.RunSnapshot{}
+	if err := json.Unmarshal(body, &state.snapshot); err != nil {
+		t.Fatal(err)
+	}
+	return unit, p, state
+}
+
+func TestNativeInputsUsePersistedAuthority(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitNode} {
+		t.Run(string(kind), func(t *testing.T) {
+			unit, p, state := hostingStateFor(t, kind)
+			input, err := runInputFor(unit)
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
-		executed, joined, closed := false, false, false
-		host := Hosting{
-			ControllerURL: "http://controller", Lease: time.Minute, Interval: time.Second,
-			NewController: hostingClient(func(context.Context) (lease.Beat, error) {
-				unit.Request.Request.RequestedArgs["key"] = "changed-after-award"
-				unit.Runner.Labels[0] = "ambient"
-				if unit.Accepted != nil {
-					unit.Accepted.Plan[0] = '!'
+			got, err := nativeInputs(t.Context(), state, unit, p, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind == capability.UnitNode {
+				if got.node.Entry != nil || got.node.Authority.CapabilityPrefix != p.Capability.Prefix || got.node.Engine.Identity != *unit.Engine || !reflect.DeepEqual(got.node.GrantedRunner, unit.Runner) || got.node.SpecHash != state.node.SpecHash || got.node.Generation != unit.Binding.Generation || got.node.Attempt != unit.Binding.Attempt {
+					t.Fatalf("node input=%+v", got.node)
 				}
-				return lease.Beat{}, nil
-			}),
-			StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) {
-				return ctx, func() { joined = true }
-			},
-			PrepareRun: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
-				prepared := nodehost.RunInput{RunID: preparedRun, RequestHash: preparedHash, SealedRequest: json.RawMessage(`{"ambient":true}`), Accepted: &nodehost.AcceptedRun{RunID: preparedRun}}
-				return runHostFunc(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
-						executed = true
-						var request runspec.Request
-						if err := json.Unmarshal(input.SealedRequest, &request); err != nil {
-							t.Fatal(err)
-						}
-						if input.RunID != "run" || input.RequestHash != "request-hash" || request.RequestedArgs["key"] != "sealed" {
-							t.Fatal("run execution lost the awarded first seal")
-						}
-						if input.GrantedRunner.Name != "granted" || input.GrantedRunner.Type != "runner" || len(input.GrantedRunner.Labels) != 1 || input.GrantedRunner.Labels[0] != "awarded" {
-							t.Fatal("run execution replaced the awarded runner identity")
-						}
-						if resume {
-							accepted := input.Accepted
-							if accepted == nil || accepted.RunID != "run" || accepted.SpecHash != "spec-hash" || accepted.PlanHash != "plan-hash" || len(accepted.Plan.Jobs) != 1 || accepted.Plan.Jobs[0].ID != "sealed-job" {
-								t.Fatal("run resume lost the awarded second seal")
-							}
-							var spec runspec.Spec
-							if err := json.Unmarshal(accepted.Spec, &spec); err != nil || spec.Request.Request.RequestedArgs["key"] != "sealed" {
-								t.Fatal("run resume reread mutable award data")
-							}
-						} else if input.Accepted != nil {
-							t.Fatal("new run inherited a prepared second seal")
-						}
-						return nodehost.RunCompletion{}, nil
-					}), prepared, func() error {
-						if !joined {
-							t.Error("run services closed before joining the keeper")
-						}
-						closed = true
-						return nil
-					}, nil
-			},
-		}
-		if err := host.Host(t.Context(), unit); err != nil || !executed || !joined || !closed {
-			t.Fatalf("run composition: executed=%v joined=%v closed=%v error=%v", executed, joined, closed, err)
-		}
-	})
-}
-
-func TestHostingRefusesDifferentRunSealsBeforeRenewal(t *testing.T) {
-	for name, change := range map[string]func(*controllerwire.ClaimedUnit){
-		"request_run":   func(u *controllerwire.ClaimedUnit) { u.Request.RunID = "other" },
-		"request_team":  func(u *controllerwire.ClaimedUnit) { u.Request.Request.Team = "" },
-		"request_hash":  func(u *controllerwire.ClaimedUnit) { u.Request.Hash = "" },
-		"accepted_run":  func(u *controllerwire.ClaimedUnit) { u.Accepted.Spec.Request.RunID = "other" },
-		"accepted_team": func(u *controllerwire.ClaimedUnit) { u.Accepted.Spec.Request.Request.Team = "other" },
-		"accepted_request_hash": func(u *controllerwire.ClaimedUnit) {
-			u.Accepted.Spec.Request.Hash = "other"
-		},
-		"accepted_spec_hash": func(u *controllerwire.ClaimedUnit) { u.Accepted.Spec.Hash = "" },
-		"accepted_plan_hash": func(u *controllerwire.ClaimedUnit) { u.Accepted.PlanHash = "" },
-		"accepted_plan":      func(u *controllerwire.ClaimedUnit) { u.Accepted.Plan = json.RawMessage(`!`) },
-	} {
-		t.Run(name, func(t *testing.T) {
-			unit := hostingAward(capability.UnitTrigger)
-			unit.Accepted = &controllerwire.PlanAccepted{
-				Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash"},
-				Plan: json.RawMessage(`{"jobs":[]}`), PlanHash: "plan-hash",
-			}
-			change(&unit)
-			host := Hosting{
-				ControllerURL: "http://controller", Lease: time.Minute, Interval: time.Second,
-				NewController: hostingClient(func(context.Context) (lease.Beat, error) {
-					t.Fatal("renewed an award with different run seals")
-					return lease.Beat{}, nil
-				}),
-				PrepareRun: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
-					t.Fatal("prepared an award with different run seals")
-					return nil, nodehost.RunInput{}, nil, nil
-				},
-			}
-			if err := host.Host(t.Context(), unit); err == nil {
-				t.Fatal("accepted different run seals")
+			} else if got.run.Owner.Authority != p.Authority || got.run.Owner.Owner != *state.snapshot.Run.Owner {
+				t.Fatalf("owner=%+v", got.run.Owner)
 			}
 		})
 	}
+}
+
+func FuzzNativeInputsRejectChangedAwards(f *testing.F) {
+	for field := uint8(0); field < 10; field++ {
+		f.Add(field, "foreign", int64(5))
+	}
+	f.Fuzz(func(t *testing.T, field uint8, value string, delta int64) {
+		if value == "" {
+			value = "foreign"
+		}
+		unit, p, state := hostingStateFor(t, capability.UnitNode)
+		switch field % 10 {
+		case 0:
+			unit.Binding.Holder += value
+		case 1:
+			unit.Binding.Generation ^= delta | 1
+		case 2:
+			unit.Binding.Attempt ^= delta | 1
+		case 3:
+			unit.Request.Hash += runspec.Hash(value)
+		case 4:
+			unit.Request.Request.RequestedArgs["arg"] += value
+		case 5:
+			unit.Accepted.Spec.Hash += runspec.Hash(value)
+		case 6:
+			unit.Accepted.PlanHash += runspec.Hash(value)
+		case 7:
+			unit.Execution.Retry.Value++
+		case 8:
+			unit.Accepted.Spec.Resolved.Engine.Version += value
+		case 9:
+			unit.JobID += value
+		}
+		input, err := runInputFor(unit)
+		if err == nil {
+			_, err = nativeInputs(t.Context(), state, unit, p, input)
+		}
+		if err == nil {
+			t.Fatal("changed award crossed the persisted execution fence")
+		}
+	})
+}
+
+func FuzzNativePrincipalBindingFence(f *testing.F) {
+	f.Add(int64(2000000000), int32(-7*3600), false)
+	f.Add(int64(1), int32(0), true)
+	f.Fuzz(func(t *testing.T, seconds int64, offset int32, changed bool) {
+		seconds = seconds % 4000000000
+		unit, p, _ := hostingStateFor(t, capability.UnitTrigger)
+		instant := time.Unix(seconds, 0).In(time.FixedZone("local", int(offset%841)*60))
+		unit.Binding.ClaimBy, unit.Binding.Deadline = &instant, &instant
+		p.Capability.Binding = unit.Binding
+		body, err := json.Marshal(unit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var captured controllerwire.ClaimedUnit
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Fatal(err)
+		}
+		if changed {
+			value := instant.Add(time.Nanosecond)
+			captured.Binding.Deadline = &value
+		}
+		if principalMatches(captured, p) == changed {
+			t.Fatal("binding equality changed a claim fence or its deadline")
+		}
+	})
 }

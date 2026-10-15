@@ -24,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -93,21 +94,22 @@ func (nativeStoreEnginesW8) Ensure(context.Context, engine.Identity, releaseasse
 }
 
 func TestNativeStoreOwnerW8(t *testing.T) {
-	for _, mode := range []string{"embedded_queue", "award_snapshot", "local_controller"} {
+	for _, mode := range []string{"embedded_queue", "award_snapshot", "remote_award", "managed_remote", "local_controller"} {
 		t.Run(mode, func(t *testing.T) { checkNativeStoreOwnerW8(t, mode) })
 	}
 }
 
 func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	t.Helper()
-	direct := mode == "award_snapshot"
+	direct := mode == "award_snapshot" || mode == "remote_award"
 	var server *controller.EngineController
 	var root capability.Issued
 	var s *store.Store
 	var unit controllerwire.ClaimedUnit
 	if direct {
 		s, unit = nativeStoreAwardW8(t, capability.UnitTrigger)
-	} else if mode == "embedded_queue" {
+		server = &controller.EngineController{Store: s, RunnerPolicy: runnerStorePolicyW8{}}
+	} else if mode == "embedded_queue" || mode == "managed_remote" {
 		server, root = nativeStoreFixtureW8(t, capability.UnitTrigger)
 		s = server.Store
 	}
@@ -167,7 +169,29 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	var executionErr error
-	if direct {
+	remote := runners.Hosting{ControllerURL: "https://controller.example", NewController: cloudStoreClientW8(t, server), Bind: func(ctx context.Context, unit controllerwire.ClaimedUnit, control controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
+		principal := control.(*storedRunnerW8).authorized.Principal
+		tenant, err := s.ForTeam(ctx, store.Team(principal.Capability.Team))
+		if err != nil {
+			return runners.NativeServices{}, principal, err
+		}
+		services, err := bind(ctx, runners.StoreBinding{Tenant: tenant, Principal: principal})
+		services.Config.Store = tenant
+		return services, principal, err
+	}}
+	if mode == "remote_award" {
+		executionErr = remote.Host(ctx, unit)
+	} else if mode == "managed_remote" {
+		runner, err := runners.NewManagedRunner(ctx, runners.RuntimeConfig{
+			Controller: client.EngineOptions{URL: "https://controller.example", Bearer: func(context.Context) (string, error) { return root.Raw, nil }}, NewController: cloudStoreClientW8(t, server),
+			Loop: runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1, MaxClaims: 1}, Hosting: remote,
+			Versions: runnerVersionPolicyW8(t, "v0.71.0"), Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner}, RequestCapacity: func() (float64, int64) { return 2, 1 << 30 },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		executionErr = runner.Run(ctx)
+	} else if direct {
 		executionErr = (runners.StoreHosting{Store: s, Bind: bind}).Host(ctx, unit)
 	} else if mode == "embedded_queue" {
 		runner, err := runners.NewStoreRunner(server, runners.StoreRunnerConfig{

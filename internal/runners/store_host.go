@@ -74,17 +74,7 @@ func (h StoreHosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit)
 		return err
 	}
 	services.Config.Store = inputs.binding.Tenant
-	owner, claimed, _, err := nodehost.NewNativeHost(services.Config)
-	if err != nil {
-		return err
-	}
-	if unit.Unit == capability.UnitNode {
-		inputs.node.Storage = services.Storage
-		return claimed.Execute(ctx, inputs.node)
-	}
-	inputs.run.Storage = services.Storage
-	_, err = owner.Run(ctx, inputs.run)
-	return err
+	return hostNative(ctx, unit, services, inputs)
 }
 
 type storeInputs struct {
@@ -102,7 +92,13 @@ func (h StoreHosting) inputs(ctx context.Context, unit controllerwire.ClaimedUni
 	if err != nil {
 		return storeInputs{}, err
 	}
-	snapshot, err := tenant.ReadSnapshot(ctx, unit.RunID)
+	inputs, err := nativeInputs(ctx, tenant, unit, principal, input)
+	inputs.binding = StoreBinding{Tenant: tenant, Principal: principal}
+	return inputs, err
+}
+
+func nativeInputs(ctx context.Context, state nodehost.NativeHostStore, unit controllerwire.ClaimedUnit, principal capability.Principal, input nodehost.RunInput) (storeInputs, error) {
+	snapshot, err := state.ReadSnapshot(ctx, unit.RunID)
 	if err != nil {
 		return storeInputs{}, err
 	}
@@ -120,7 +116,7 @@ func (h StoreHosting) inputs(ctx context.Context, unit controllerwire.ClaimedUni
 	}
 	var node nodehost.NodeInput
 	if unit.Unit == capability.UnitNode {
-		row, err := tenant.ReadNode(ctx, store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID})
+		row, err := state.ReadNode(ctx, store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID})
 		if err != nil {
 			return storeInputs{}, err
 		}
@@ -128,7 +124,7 @@ func (h StoreHosting) inputs(ctx context.Context, unit controllerwire.ClaimedUni
 		if err != nil {
 			return storeInputs{}, err
 		}
-		if row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != unit.Binding.Holder || row.Generation != unit.Binding.Generation || row.Attempt != unit.Binding.Attempt || !reflect.DeepEqual(row.Execution, *unit.Execution) {
+		if row.Ref != (store.NodeRef{RunID: unit.RunID, NodeID: unit.JobID}) || row.CapabilityPrefix != principal.Capability.Prefix || row.ClaimedBy != unit.Binding.Holder || row.Generation != unit.Binding.Generation || row.Attempt != unit.Binding.Attempt || !reflect.DeepEqual(row.Execution, *unit.Execution) {
 			return storeInputs{}, awardMismatch()
 		}
 	} else {
@@ -137,10 +133,12 @@ func (h StoreHosting) inputs(ctx context.Context, unit controllerwire.ClaimedUni
 		if owner == nil || owner.Kind != store.OwnerTrigger || owner.RunID != binding.RunID || owner.Holder != binding.Holder || owner.Generation != binding.Generation {
 			return storeInputs{}, awardMismatch()
 		}
-		input.Owner = store.Actor{Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Holder: binding.Holder, Generation: binding.Generation,
-			Owner: *owner}
+		input.Owner = store.Actor{
+			Kind: store.ActorRunHost, Authority: principal.Authority, CapabilityPrefix: principal.Capability.Prefix, Holder: binding.Holder, Generation: binding.Generation,
+			Owner: *owner,
+		}
 	}
-	return storeInputs{binding: StoreBinding{Tenant: tenant, Principal: principal}, run: input, node: node}, nil
+	return storeInputs{run: input, node: node}, nil
 }
 
 func (h StoreHosting) authenticate(ctx context.Context, unit controllerwire.ClaimedUnit) (capability.Principal, error) {
@@ -167,11 +165,22 @@ func (h StoreHosting) authenticate(ctx context.Context, unit controllerwire.Clai
 		return capability.Principal{}, err
 	}
 	principal := authorized.Principal
-	c := principal.Capability
-	if (c.Issuance != capability.Award && c.Issuance != capability.Exchange) || c.Team != target.Team || c.Unit != unit.Unit || c.UnitID != unit.UnitID || c.Purpose != unit.Purpose || c.Delivery != unit.Delivery || !reflect.DeepEqual(c.Binding, unit.Binding) {
+	if !principalMatches(unit, principal) {
 		return capability.Principal{}, awardMismatch()
 	}
 	return principal, nil
+}
+
+func principalMatches(unit controllerwire.ClaimedUnit, principal capability.Principal) bool {
+	c := principal.Capability
+	binding := c.Binding
+	if binding.ClaimBy != nil && unit.Binding.ClaimBy != nil && binding.ClaimBy.Equal(*unit.Binding.ClaimBy) {
+		binding.ClaimBy = unit.Binding.ClaimBy
+	}
+	if binding.Deadline != nil && unit.Binding.Deadline != nil && binding.Deadline.Equal(*unit.Binding.Deadline) {
+		binding.Deadline = unit.Binding.Deadline
+	}
+	return c.Prefix != "" && principal.Authority == (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}) && (c.Issuance == capability.Award || c.Issuance == capability.Exchange) && c.Team == unit.Request.Request.Team && c.Unit == unit.Unit && c.UnitID == unit.UnitID && c.Purpose == unit.Purpose && c.Delivery == unit.Delivery && reflect.DeepEqual(binding, unit.Binding)
 }
 
 func awardMismatch() error {
