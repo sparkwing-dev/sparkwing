@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 )
 
@@ -66,7 +67,7 @@ func (r Ref[T]) Job() string { return r.JobID }
 //     upstream hasn't completed.
 //
 //   - Cross-pipeline (Pipeline!=""): asks the pipeline resolver
-//     installed via WithPipelineResolver. Panics if no resolver, if
+//     supplied by the host. Panics if no resolver, if
 //     no successful run within MaxAge exists, or if the JSON output
 //     fails to unmarshal into T.
 //
@@ -104,7 +105,7 @@ func (r Ref[T]) Get(ctx context.Context) T {
 // every miss is logged at warn naming the pipeline and node.
 //
 // One input divides the two accessors: a cross-pipeline run that stored
-// empty or null output. Get renders that as the zero T and carries on;
+// JSON null. Get renders that as the zero T and carries on;
 // TryGet reports it as a miss. Swapping one for the other on such a ref
 // changes which branch runs.
 //
@@ -155,13 +156,6 @@ func (r Ref[T]) TryGet(ctx context.Context) (T, bool) {
 // Every failure a resolver leaves unmarked is treated as unreachable.
 var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
 
-// absentInRun names an upstream sibling that has not completed. The
-// marker prints nothing, so the warn log unwraps this error and shows
-// what it names.
-func absentInRun(nodeID string) error {
-	return fmt.Errorf("node %q has not completed%.0w", nodeID, ErrRefAbsent)
-}
-
 func (r Ref[T]) describe() string {
 	if r.Pipeline != "" {
 		return fmt.Sprintf("%s/%s", r.Pipeline, r.JobID)
@@ -169,9 +163,7 @@ func (r Ref[T]) describe() string {
 	return r.JobID
 }
 
-// resolve reads the referenced output. present is true only when a
-// stored output was read and unmarshalled; Get renders the absent case
-// as the zero T and TryGet reports it as a miss.
+// safety: TryGet must not mistake a read or decoding failure for a missing upstream.
 func (r Ref[T]) resolve(ctx context.Context) (value T, present bool, err error) {
 	if r.Pipeline != "" {
 		return r.getCrossPipeline(ctx)
@@ -209,7 +201,10 @@ func (r Ref[T]) getCrossPipeline(ctx context.Context) (T, bool, error) {
 		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get failed (pipeline=%q node=%q): %w",
 			out, r.Pipeline, r.JobID, err)
 	}
-	if len(resolved.Data) == 0 || string(resolved.Data) == "null" {
+	if resolved == nil || len(resolved.Data) == 0 {
+		return out, false, fmt.Errorf("sparkwing: Ref.Get(%s): %w", r.describe(), ErrRefAbsent)
+	}
+	if strings.Trim(string(resolved.Data), " \t\r\n") == "null" {
 		return out, false, nil
 	}
 	if err := json.Unmarshal(resolved.Data, &out); err != nil {
@@ -237,8 +232,8 @@ func (r Ref[T]) getCrossPipeline(ctx context.Context) (T, bool, error) {
 // not match the marker's declared type.
 func RefTo[T any](n *JobNode) Ref[T] {
 	var zero T
-	want := reflect.TypeOf(zero)
-	got := n.OutputType()
+	want := reflect.TypeFor[T]()
+	got := n.outType
 	if got == nil {
 		panic(fmt.Sprintf(
 			"sparkwing: RefTo[%T]: node %q does not embed sparkwing.Produces[%T] "+
@@ -313,25 +308,15 @@ func RefToLastRun[T any](pipeline, nodeID string, opts ...RefOption) Ref[T] {
 // with ErrRefAbsent, from one it failed to read, which Ref.TryGet must not
 // take for a miss; a resolver returning a bool cannot.
 func jsonResolverFromContext(ctx context.Context) func(context.Context, string) ([]byte, error) {
-	switch f := ctx.Value(keyJSONRefResolver).(type) {
-	case func(context.Context, string) ([]byte, error):
-		return f
-	case func(string) ([]byte, bool):
-		return func(_ context.Context, nodeID string) ([]byte, error) {
-			if data, ok := f(nodeID); ok {
-				return data, nil
-			}
-			return nil, absentInRun(nodeID)
-		}
-	}
-	return nil
+	f, _ := ctx.Value(keyJSONRefResolver).(func(context.Context, string) ([]byte, error))
+	return f
 }
 
 // PipelineRefs returns the other pipelines' nodes this node's job holds a
 // RefToLastRun field for, in field order. A controller-dispatched node reads
 // only these, so a ref built elsewhere than a job field is refused there.
-func (n *JobNode) PipelineRefs() []RefTarget {
-	var out []RefTarget
+func (n *JobNode) pipelineRefs() []refTarget {
+	var out []refTarget
 	for _, r := range collectRefs(n.job) {
 		if r.Pipeline != "" {
 			out = append(out, r)
@@ -340,11 +325,11 @@ func (n *JobNode) PipelineRefs() []RefTarget {
 	return out
 }
 
-func (r Ref[T]) target() RefTarget { return RefTarget{Pipeline: r.Pipeline, NodeID: r.JobID} }
+func (r Ref[T]) target() refTarget { return refTarget{Pipeline: r.Pipeline, NodeID: r.JobID} }
 
-type refField interface{ target() RefTarget }
+type refField interface{ target() refTarget }
 
-func collectRefs(job any) []RefTarget {
+func collectRefs(job any) []refTarget {
 	v := reflect.ValueOf(job)
 	for v.Kind() == reflect.Pointer {
 		if v.IsNil() {
@@ -355,7 +340,7 @@ func collectRefs(job any) []RefTarget {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
-	var out []RefTarget
+	var out []refTarget
 	for i := range v.NumField() {
 		if !v.Type().Field(i).IsExported() {
 			continue
@@ -374,7 +359,7 @@ func collectRefs(job any) []RefTarget {
 // RefTarget is one (pipeline, node) pair discovered on a job struct
 // via collectRefs. Dashboard / audit code uses it to
 // annotate cross-pipeline dependencies.
-type RefTarget struct {
+type refTarget struct {
 	Pipeline string
 	NodeID   string
 }

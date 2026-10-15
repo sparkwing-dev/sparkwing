@@ -176,22 +176,14 @@ with `Allow: POST`.
 
 ## Token format
 
-Raw tokens are `<prefix>_<entropy>`:
+Member issuance and rewritten claim routes return opaque reference capabilities.
+Controller capabilities start `swk_`. Node-host capabilities start `swn_`.
+The stored authority determines subject, grants, binding and billing. A prefix
+does not grant a role. The response's `prefix` is the first 16 characters and
+is safe to use as an identifier. The controller keeps a SHA-256 presentation
+digest and returns the reusable bearer only at issuance.
 
-- `swu_...` -- user. Created for humans (`sparkwing cluster tokens create --type user`,
-  or `sparkwing cloud connect --admin-token-stdin`, which mints one and writes the
-  profile that holds it).
-- `swr_...` -- runner. Created for remote machine agents or pool replicas.
-- `swt_...` -- team. Minted by a team member, either for the CLI or for a
-  machine, with `POST /api/v1/team/tokens` (see [team tokens](#team-tokens)).
-- `sws_...` -- service. Created for in-cluster back-channel callers.
-- `swc_...` -- claim. Minted by the controller with each claim it awards and
-  returned once in the claim's answer; nobody creates one by hand (see
-  [claim tokens](#claim-tokens)).
-
-The **prefix segment** is the first 12 characters of a raw token. It's
-a non-secret identifier used in `sparkwing cluster tokens list`, `revoke`, and
-audit logs. The remaining ~35 characters carry the secret entropy.
+Member issuance uses `POST /api/v1/tokens` (see [team tokens](#team-tokens)).
 
 ## Metered runners
 
@@ -375,9 +367,9 @@ service token carrying `credits.grant`: an admin token, a session, a user or
 runner token and an anonymous caller are refused, the last even on a
 controller that serves without credentials.
 
-No API call mints or rotates that scope: `POST /api/v1/tokens` and
-`POST /api/v1/tokens/{prefix}/rotate` answer `403` for it, an admin token
-included. The controller seeds the token from the `credits-token` file in its
+`credits.grant` is outside the capability grant vocabulary.
+`POST /api/v1/tokens` rejects it with `400`. The remaining legacy rotation
+route also refuses that service credential. The controller seeds the token from the `credits-token` file in its
 credentials directory, as it seeds the bootstrap admin token. Generate the
 value once and give the same string to the checkout service:
 
@@ -986,14 +978,11 @@ for it by name, a claim reads only its own run's declared secrets, and every
 node read leaves a `secret_released` event. `GET /api/v1/secrets` (the list) and the secret writes
 stay `admin`; the list carries each row's pipeline and shared flag.
 
-Token creation validates scopes against that same set: a scope the
-controller does not honor is rejected with a `400` naming the offending
-scope and the valid set, so a typo fails at mint time instead of
-producing a token that authenticates and then fails every scope check.
-A token with no scopes is still legal; it just unlocks nothing.
-
-Per-endpoint scope annotations live in `pkg/controller/server.go`. If
-you add a new route, annotate it with `requireScope`.
+`POST /api/v1/tokens` rejects unknown or duplicate grants and caller-selected
+authority fields with `400`. Issuance beyond current grants or expiry is
+refused with `403`. An explicit empty grants array is legal and unlocks
+nothing. Endpoints check the credential's audience, complete grant conjunction,
+resource binding and liveness before entering their handler.
 
 Identity and service discovery use the shared policy described in
 [Credential discovery](#credential-discovery).
@@ -1146,20 +1135,24 @@ secrets.
 
 ### Team tokens
 
-A member mints a team token with `POST /api/v1/team/tokens`, from a signed-in
-session only; a bearer token cannot mint one. The raw token starts `swt_` and
-belongs to the team that minted it. Its `scopes` come from exactly one of two
-families, and a request that mixes them, names an unknown scope or sends an
-empty list answers `400`:
+`POST /api/v1/tokens` accepts `{grants, expires_at?}`. A signed-in account
+session provisions a controller root for its own account and active team.
+A member bearer creates a narrowed child that keeps the bearer's revocation
+ancestry. The request cannot choose a subject, team, origin, metering, pool or
+registration. Cookies require the session-bound CSRF proof.
 
-- A **member** token is for the CLI. Its scopes are a subset of the caller's
-  role scopes without `team.admin`, so a reader's token only reads, and a
-  scope above the caller's role answers `403`. Any member mints one, and the
-  request sends no `name` or `repos`. The token acts as the member and expires
-  90 days after it is minted. A member holds at most 10 live ones in a team.
-  The response carries `token`, `prefix`, `family`, `scopes`, `expires_at`,
-  and the `profile`, `setup` and `run` values the dashboard shows for
-  connecting the CLI.
+The transaction checks current membership, grants and expiry. A provisioned
+member root survives the issuing session ending, but loses authority when its
+membership ends. Delegation cannot outlive or exceed its parent. Omitting a
+delegation expiry inherits the parent's expiry. No automatic retry is permitted
+because the raw bearer is returned once.
+
+The response carries `capability`, `prefix`, `team`, `grants` and optional
+`expires_at`. Expiry is an RFC3339 timestamp. The dashboard sends its selected
+member grants to this route. The former member mint through
+`POST /api/v1/team/tokens` is removed. That legacy route still handles machine
+registration while the runner enrollment cutover is pending.
+
 - A **machine** token is for a runner. Its scopes are a subset of
   `nodes.claim`, `triggers.claim` and `runs.state` that includes
   `nodes.claim` or `triggers.claim`. Minting one
@@ -1172,7 +1165,7 @@ empty list answers `400`:
   hour, and the token list shows when. A team holds at most 100 live machine
   tokens.
 
-Token creation uses the role held when the token is written, so a pending
+Token issuance uses the role held when the token is written, so a pending
 request cannot restore authority after a demotion. No token minted into a team
 carries `admin`.
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -31,8 +32,8 @@ func skipIfLayer(cfg *Config, next Executor) Executor {
 			return next(ctx, n)
 		}
 		budget := defaultSkipBudget
-		if m := n.Plan.Modifiers; m != nil && m.SkipIfBudgetMS > 0 {
-			budget = time.Duration(m.SkipIfBudgetMS) * time.Millisecond
+		if m := n.Plan; value(m.SkipIfBudgetMS) > 0 {
+			budget = time.Duration(value(m.SkipIfBudgetMS)) * time.Millisecond
 		}
 		reason := ""
 		res := cfg.Attempts.process(ctx, cfg.Session, n, func(ctx context.Context, sess *Session, log *LogSink) Result {
@@ -72,8 +73,8 @@ func skipIfLayer(cfg *Config, next Executor) Executor {
 func skipIfEval(ctx context.Context, sess *Session, log Sink, id string, i int, budget time.Duration) (bool, error) {
 	bctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	var er nodeproto.EvalResultOld
-	err := ask(bctx, sess, nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: id}, &er)
+	var er nodeproto.EvalResult
+	err := ask(bctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: id}, &er)
 	switch {
 	case err != nil && ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded):
 		closureNote(log, "error", fmt.Sprintf("SkipIf predicate %d exceeded %s budget (defaulting to don't-skip); raise via SkipIf(fn, sparkwing.SkipBudget(d))", i, budget))
@@ -81,13 +82,16 @@ func skipIfEval(ctx context.Context, sess *Session, log Sink, id string, i int, 
 	case err != nil:
 		return false, err
 	case er.Error != nil:
-		err := fmt.Errorf("SkipIf predicate %d failed: %s", i, *er.Error)
+		err := fmt.Errorf("SkipIf predicate %d failed: %w", i, er.Error)
 		closureNote(log, "error", err.Error()+" (the node does not run)")
+		return false, err
+	}
+	if err := er.ValidateValue("skip_if"); err != nil {
 		return false, err
 	}
 	var skip bool
 	if err := json.Unmarshal(er.Value, &skip); err != nil {
-		return false, hostError(nodeproto.CodeProtocolError, "skip_if %s returned %s, not a boolean", id, er.Value)
+		return false, hostError(apierr.ProtocolError, "skip_if %s returned %s, not a boolean", id, er.Value)
 	}
 	return skip, nil
 }
@@ -98,12 +102,12 @@ func withClosures(ctx context.Context, sess *Session, log Sink, n *NodeRun, body
 	c := closuresOf(n)
 	if max(n.Attempt, 1) == 1 || n.BeforeRunEachAttempt {
 		for i, id := range c.BeforeRun {
-			msg, err := closureEval(ctx, sess, id, nil)
+			msg, err := closureEval(ctx, sess, "before_run", id, nil)
 			if err == nil && msg == nil {
 				continue
 			}
 			if err == nil {
-				err = fmt.Errorf("BeforeRun hook %d: %s", i, *msg)
+				err = fmt.Errorf("BeforeRun hook %d: %w", i, msg)
 				closureNote(log, "error", err.Error())
 			}
 			res := failed(err)
@@ -113,12 +117,12 @@ func withClosures(ctx context.Context, sess *Session, log Sink, n *NodeRun, body
 	}
 	res := body()
 	if res.Outcome == sparkwing.Success && c.Verify != "" {
-		msg, err := closureEval(ctx, sess, c.Verify, nil)
+		msg, err := closureEval(ctx, sess, "verify", c.Verify, nil)
 		switch {
 		case err != nil:
 			res = failed(err)
 		case msg != nil:
-			verr := &sparkwing.VerifyError{Err: errors.New(*msg)}
+			verr := &sparkwing.VerifyError{Err: msg}
 			closureNote(log, "error", verr.Error())
 			res = Result{Outcome: sparkwing.Failed, Err: verr, Reason: store.FailureVerify}
 		}
@@ -146,14 +150,14 @@ func afterRunEval(ctx context.Context, sess *Session, log Sink, ids []string, re
 		return failed(err)
 	}
 	for i, id := range ids {
-		msg, err := closureEval(ctx, sess, id, input)
+		msg, err := closureEval(ctx, sess, "after_run", id, input)
 		switch {
 		case err != nil && res.Outcome == sparkwing.Success:
 			res = failed(fmt.Errorf("AfterRun hook %d: %w", i, err))
 		case err != nil:
 			closureNote(log, "error", fmt.Sprintf("AfterRun hook %d: %v", i, err))
 		case msg != nil:
-			closureNote(log, "error", fmt.Sprintf("AfterRun hook %d: %s", i, *msg))
+			closureNote(log, "error", fmt.Sprintf("AfterRun hook %d: %v", i, msg))
 		}
 	}
 	return res
@@ -175,34 +179,31 @@ func afterRunAfterTimeout(ctx context.Context, cfg *Config, n *NodeRun, res Resu
 	})
 }
 
-type afterRunArg struct {
-	Outcome nodeproto.Outcome `json:"outcome"`
-	Error   string            `json:"error,omitempty"`
-}
-
-func afterRunArgOf(res Result) afterRunArg {
+func afterRunArgOf(res Result) nodeproto.RunResult {
 	if res.Outcome == sparkwing.Success {
-		return afterRunArg{Outcome: nodeproto.OutcomeSuccess}
+		return nodeproto.RunResult{Outcome: "success"}
 	}
-	return afterRunArg{Outcome: nodeproto.OutcomeFailed, Error: errText(resultErr(res))}
+	var failure *apierr.Error
+	if !errors.As(resultErr(res), &failure) {
+		failure = &apierr.Error{Code: apierr.SDKError, Message: errText(resultErr(res))}
+	}
+	return nodeproto.RunResult{Outcome: "failed", Error: failure}
 }
 
 // safety: msg is the closure's own error and err a failed reply or broken session, which callers treat differently.
-func closureEval(ctx context.Context, sess *Session, id string, input json.RawMessage) (msg *string, err error) {
-	var er nodeproto.EvalResultOld
-	if err := ask(ctx, sess, nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: id, Input: input}, &er); err != nil {
+func closureEval(ctx context.Context, sess *Session, kind, id string, input json.RawMessage) (msg error, err error) {
+	var er nodeproto.EvalResult
+	if err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: id, Input: input}, &er); err != nil {
 		return nil, err
 	}
-	return er.Error, nil
+	if er.Error != nil {
+		return er.Error, nil
+	}
+	return nil, er.ValidateValue(kind)
 }
 
-func closuresOf(n *NodeRun) nodeproto.PlanClosures {
-	if c := n.Plan.Closures; c != nil {
-		return *c
-	}
-	return nodeproto.PlanClosures{}
-}
+func closuresOf(n *NodeRun) nodeproto.ClosureSpec { return n.Plan.Closures }
 
 func closureNote(log Sink, level, msg string) {
-	log.Record(nodeproto.LogRecord{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: level, Msg: msg})
+	log.Record(nodeproto.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: level, Message: msg})
 }

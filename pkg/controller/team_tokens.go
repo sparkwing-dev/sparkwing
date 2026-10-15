@@ -57,8 +57,8 @@ func (s *Server) handleCreateTeamToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if family == store.TokenFamilyMember {
-		s.createMemberToken(w, r, p, t, req)
+	if family != store.TokenFamilyMachine {
+		writeError(w, http.StatusBadRequest, errors.New("machine enrollment requires claim scopes"))
 		return
 	}
 	if !store.Role(p.Role).AtLeast(store.RoleEditor) {
@@ -68,30 +68,6 @@ func (s *Server) handleCreateTeamToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.createMachineToken(w, r, p, t, req)
-}
-
-func (s *Server) createMemberToken(w http.ResponseWriter, r *http.Request, p *Principal, t *store.Tenant, req teamTokenReq) {
-	if req.Name != "" || len(req.Repos) > 0 {
-		writeError(w, http.StatusBadRequest, errors.New("name and repos describe a machine token; a member token takes only scopes"))
-		return
-	}
-	raw, tok, err := t.CreateMemberToken(r.Context(), p.Name, req.Scopes, p.AccountID, time.Now().UTC())
-	if errors.Is(err, store.ErrCLITokenLimit) {
-		writeError(w, http.StatusConflict, err)
-		return
-	}
-	if err != nil {
-		writeIdentityError(w, s, r, "mint member token", err)
-		return
-	}
-	s.logger.Info("member token minted", "team", string(p.Team), "prefix", tok.Prefix, "by", p.AccountID)
-	profile := string(p.Team)
-	writeJSON(w, http.StatusCreated, teamTokenResp{
-		Token: raw, Prefix: tok.Prefix, Family: store.TokenFamilyMember, Scopes: tok.Scopes,
-		ExpiresAt: tok.ExpiresAt.Unix(), Profile: profile,
-		Setup: "sparkwing cloud connect --controller " + s.controllerURL(r) + " --name " + profile + " --token-stdin",
-		Run:   "sparkwing pipeline trigger <pipeline> --profile " + profile,
-	})
 }
 
 func (s *Server) createMachineToken(w http.ResponseWriter, r *http.Request, p *Principal, t *store.Tenant, req teamTokenReq) {

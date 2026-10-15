@@ -929,3 +929,13 @@ Browser mutations require CSRF proof. Last-owner refusals use the shared
 `conflict` error with HTTP 409. Dead credentials use `unauthenticated` with
 HTTP 401. The old token-state response fields and one-hour retry hint do not
 apply to these routes.
+
+### Member credential issuance
+
+Replace member requests to `/api/v1/team/tokens` and the former global token
+mint with `POST /api/v1/tokens`. Send `grants` and optional RFC3339
+`expires_at`. Read `capability`, `prefix`, `team`, `grants` and optional
+`expires_at`. The request no longer accepts principal, kind, scopes, TTL or
+metering. A session provisions its own member root. A member bearer narrows
+its authority through delegation. Save the returned capability privately and
+do not automatically retry issuance.

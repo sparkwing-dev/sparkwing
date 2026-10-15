@@ -134,11 +134,11 @@ func TestHostedRunRecordsHandleReproducerAndRequires(t *testing.T) {
 			t.Errorf("reproducer %q omits %s", line, flag)
 		}
 	}
-	var doc nodeproto.PlanDocOld
+	var doc nodeproto.PlanDoc
 	if err := json.Unmarshal(row.PlanSnapshot, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(doc.Requires, []string{"linux"}) {
-		t.Errorf("accepted plan requires %v, want the project default [linux]", doc.Requires)
+	if len(doc.Jobs) != 1 || !slices.Equal(doc.Jobs[0].Requires, []string{"linux"}) {
+		t.Errorf("accepted plan requires %v, want the project default [linux]", doc.Jobs)
 	}
 }

@@ -265,14 +265,11 @@ export interface MintedMachineToken {
 }
 
 export interface MintedMemberToken {
-  token: string;
+  capability: string;
   prefix: string;
-  family: "member";
-  scopes: string[];
-  expires_at: number;
-  profile: string;
-  setup: string;
-  run: string;
+  team: string;
+  grants: string[];
+  expires_at?: string;
 }
 
 // A list route may answer with a bare array or wrap it under one key; both read
@@ -388,7 +385,7 @@ export async function mintMachineToken(
   return (await res.json()) as MintedMachineToken;
 }
 
-const readerScopes = ["runs.read", "logs.read", "triggers.read"];
+const readerScopes = ["runs.read", "logs.read"];
 const writerScopes = ["runs.write", "runs.control", "approvals.write"];
 
 // The controller refuses a member scope the role lacks, so the default is the
@@ -402,8 +399,8 @@ export function memberScopesForRole(role: Role): string[] {
 export async function mintMemberToken(
   scopes: string[],
 ): Promise<MintedMemberToken> {
-  const res = await send("POST", "/api/v1/team/tokens", "Create CLI token", {
-    scopes,
+  const res = await send("POST", "/api/v1/tokens", "Create CLI token", {
+    grants: scopes,
   });
   return (await res.json()) as MintedMemberToken;
 }

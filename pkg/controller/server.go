@@ -42,6 +42,7 @@ type Server struct {
 	identityLinkLimit perMinuteLimiter
 
 	auth                *Authenticator
+	credentialIssuer    CredentialIssuer
 	authorization       RouteAuthorization
 	dataController      *DataController
 	sourceController    *SourceController
@@ -199,6 +200,9 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		idleClaimPoll:       DefaultMaxIdleClaimPoll,
 		downloadFree:        DefaultTeamDailyDownloadFreeBytes,
 		downloadFunded:      DefaultTeamDailyDownloadFundedBytes,
+	}
+	if st != nil {
+		srv.credentialIssuer = st
 	}
 	srv.authorization = srv.storeRouteAuthorization()
 	srv.recordQueueActivity(time.Now())
@@ -890,7 +894,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/runs/{id}/approvals", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListApprovalsForRun)))
 	mux.Handle("GET /api/v1/approvals/pending", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListPendingApprovals)))
 
-	mux.Handle("POST /api/v1/tokens", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateToken)))
 	mux.Handle("GET /api/v1/tokens", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListTokens)))
 	mux.Handle("GET /api/v1/tokens/{token}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleLookupTokenByPrefix)))
 

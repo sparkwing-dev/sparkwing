@@ -235,7 +235,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/team/tokens` | `runs.read` |
 | `POST` | `/api/v1/teams` | `authenticated` |
 | `GET` | `/api/v1/tokens` | `admin` |
-| `POST` | `/api/v1/tokens` | `admin` |
+| `POST` | `/api/v1/tokens` | `runs.read` |
 | `POST` | `/api/v1/tokens/{prefix}/metered` | `admin` |
 | `POST` | `/api/v1/tokens/{prefix}/rotate` | `admin` |
 | `DELETE` | `/api/v1/tokens/{token}` | `runs.read` |

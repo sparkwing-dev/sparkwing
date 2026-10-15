@@ -51,6 +51,43 @@ PolicyRouter declarations bind actual registrations to this verifier. Authentica
 before returning existence-sensitive decoding errors. Session mutations require
 CSRF and external-proof routes use their named proof mechanism.
 
+### Plan secret integration
+
+The controller opener is exercised through C1 plan acceptance with the shared
+C3 validator and C4 settings resolver. A valid encrypted-secret plan persists.
+Property checks place a decrypted stored secret in job, step, group and
+concurrency identifiers. Every check returns `secret_in_identifier`, omits
+the value from its error and commits no plan or jobs. Missing or failed
+decryption still refuses acceptance. The former validator-stub gap is closed
+for this controller/store path. Native host and generated-expansion evidence
+remain separate obligations.
+
+### Member credential issuance
+
+`POST /api/v1/tokens` uses `PolicyRouter` and accepts `grants` plus optional
+absolute `expires_at`. A session creates its own member root through
+`Store.ProvisionCapability`. A member bearer uses `Store.DelegateCapability`.
+Both wrappers commit through the sole `Store.Issue` path. The request carries
+no issuer, subject, team, registration, pools, metering or binding.
+
+Creation uses the member `runs.read` rule with `BindNone`. The prior
+`ownToken` declaration required an existing token selector and could not
+represent creation. Token-specific operations retain `ownToken`. Creation's
+retry policy is `never` because the issuer returns a new one-time bearer and
+has no idempotent secret replay contract. These are local C2 corrections.
+The independent T1 creation expectation follows this correction.
+
+`CredentialIssuer` preserves C1's existing provision and delegation signatures.
+`Server.New` uses its store. `WithCredentialIssuer` injects that same contract
+for embedded controllers and tests. Session ancestry/digest/CSRF integration
+remains required before the default browser path is usable. No identity or
+CSRF fallback is added. Machine, service, bootstrap, Actions provisioning,
+credential listing and rotation still require their final adapters.
+
+The old global token mint and old member-family mint are removed. The remaining
+legacy team-token path only handles machine registration. The dashboard's member
+caller and response use the new route, grants and timestamp representation.
+
 ProvisionSpec is ratified as trusted root-only Delegate input, with the origin
 checks in issuance.go. It is never decoded from a delegation body. Root authority
 is derived from the bootstrap gate, current membership, machine/service registration

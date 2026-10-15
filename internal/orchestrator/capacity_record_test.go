@@ -382,7 +382,7 @@ func TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks(t *testing.T)
 		if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.FinishNode(ctx, runID, "build", string(sparkwing.Cached), "", nil); err != nil {
+		if err := st.FinishNode(ctx, runID, "build", string(sparkwing.Memoized), "", nil); err != nil {
 			t.Fatal(err)
 		}
 		recordRunProfile(ctx, localState{st: st}, "demo", runID, nil, "", runCharge{}, false, start, start.Add(41*time.Millisecond))
@@ -414,7 +414,7 @@ func TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks(t *testing.T)
 		t.Errorf("P50Duration moved from %s to %s after a cached burst", before.P50Duration, after.P50Duration)
 	}
 
-	counts, err := st.CacheExcludedCounts(ctx, "demo", string(sparkwing.Cached), capacity.CacheDominantFraction)
+	counts, err := st.CacheExcludedCounts(ctx, "demo", string(sparkwing.Memoized), capacity.CacheDominantFraction)
 	if err != nil {
 		t.Fatalf("CacheExcludedCounts: %v", err)
 	}
@@ -443,7 +443,7 @@ func TestRecordRunProfile_CacheDominantRunStillFoldsItsExecutedNodes(t *testing.
 		if err := st.CreateNode(ctx, store.Node{RunID: "land1", NodeID: nodeID, Status: "pending"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.FinishNode(ctx, "land1", nodeID, string(sparkwing.Cached), "", nil); err != nil {
+		if err := st.FinishNode(ctx, "land1", nodeID, string(sparkwing.Memoized), "", nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -508,7 +508,7 @@ func TestRecordRunProfile_MixedRunBelowThresholdStillFolds(t *testing.T) {
 	if err := st.FinishNode(ctx, "r1", "build", string(sparkwing.Success), "", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.FinishNode(ctx, "r1", "fetch", string(sparkwing.Cached), "", nil); err != nil {
+	if err := st.FinishNode(ctx, "r1", "fetch", string(sparkwing.Memoized), "", nil); err != nil {
 		t.Fatal(err)
 	}
 

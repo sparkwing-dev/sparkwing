@@ -1770,27 +1770,24 @@ paths:
 
   /api/v1/tokens:
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.read
       tags: [tokens]
-      summary: Mint a new bearer token.
+      summary: Issue a member root or a narrowed controller capability.
+      description: A signed-in session provisions its own member root. A bearer delegates with its revocation ancestry retained. Team, subject and issuance authority come from authentication. Recheck grants, membership and expiry in the issuance transaction. The bearer is returned once. Clients must not automatically retry issuance.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/CreateTokenRequest"}
+            schema: {$ref: "#/components/schemas/CredentialRequest"}
       responses:
         "201":
-          description: New token (raw value is included **once** in this response).
+          description: Committed credential with its one-time bearer.
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/CreateTokenResponse"}
-        "400":
-          description: >-
-            Invalid request: missing principal or kind, or a scope the controller does not honor (the message names the offending scope and the valid set).
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/Error"}
-        "403": {description: "The request names the checkout service's scope, which only the controller's `credits-token` credential provisions."}
+              schema: {$ref: "#/components/schemas/CredentialResponse"}
+        "400": {description: "Invalid grant array, expiry or request shape."}
+        "401": {description: "Missing, revoked or expired authority or membership."}
+        "403": {description: "Missing route grant, invalid CSRF or issuance exceeding current authority."}
     get:
       x-sparkwing-scope: admin
       tags: [tokens]
@@ -1849,7 +1846,7 @@ paths:
           description: New token.
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/CreateTokenResponse"}
+              schema: {$ref: "#/components/schemas/RotateTokenResponse"}
         "403": {description: "The token is the checkout service's; replace the controller's `credits-token` credential instead."}
 
   /api/v1/runs/{id}/children:
@@ -8270,33 +8267,40 @@ components:
         code: {type: string, enum: [insufficient_credits, credits_frozen, spend_limit], description: "credits_frozen when the team is held; spend_limit when the 30-day ceiling, the daily cap, the owner's budget or a failed card charge refuses it."}
         balance_micro: {type: integer, format: int64}
         required_micro: {type: integer, format: int64}
-    CreateTokenRequest:
-      x-sparkwing-go-type: pkg/controller.createTokenReq
+    CredentialRequest:
+      x-sparkwing-go-type: pkg/controller.credentialRequest
       type: object
-      required: [principal, scopes]
+      required: [grants]
       properties:
-        principal: {type: string}
-        kind: {type: string}
-        scopes:
+        grants:
           type: array
           items: {type: string}
-        ttl_secs:
-          type: integer
-          format: int64
-          description: Lifetime in seconds from mint time. Omit or zero for a token that does not expire.
-        metered:
-          type: boolean
-          description: Mint the token as one whose node claims cost credits.
-    CreateTokenResponse:
-      x-sparkwing-go-type: pkg/controller.createTokenResp
-      type: object
-      description: Returned only at mint time. The raw `token` is never re-served.
-      required: [token, metadata]
-      properties:
-        token:
+          description: Unique known permissions bounded by the issuer's current authority.
+        expires_at:
           type: string
-          description: Full bearer token. Copy now; the controller never re-shows it.
-        metadata: {$ref: "#/components/schemas/Token"}
+          format: date-time
+          description: Absolute expiry. A delegation inherits its parent's expiry when omitted.
+    CredentialResponse:
+      x-sparkwing-go-type: pkg/controller.credentialResponse
+      type: object
+      required: [capability, prefix, team, grants]
+      properties:
+        capability: {type: string, description: One-time bearer.}
+        prefix: {type: string}
+        team: {type: string}
+        grants:
+          type: array
+          items: {type: string}
+        expires_at: {type: string, format: date-time}
+    RotateTokenResponse:
+      x-sparkwing-go-type: pkg/controller.rotateResp
+      type: object
+      required: [token, new, old_revoked_at, old_replaced_by]
+      properties:
+        token: {type: string}
+        new: {$ref: "#/components/schemas/Token"}
+        old_revoked_at: {type: integer, format: int64}
+        old_replaced_by: {type: string}
     Secret:
       x-sparkwing-go-type: pkg/controller.secretJSON
       type: object

@@ -118,7 +118,7 @@ var Routes = []RoutePolicy{
 	route("GET", "/api/v1/queue/groups/{group}/holder", OwnerTeam, RetrySafe, claim(NodeReport, BindSlotOfBoundNode, LiveReporting), claim(RunsState, BindSlotOfBoundNode, LiveReporting)),
 	route("GET", "/api/v1/queue/groups/{group}/resolve", OwnerTeam, RetrySafe, claim(NodeReport, BindSlotOfBoundNode, LiveSensitive), claim(RunsState, BindSlotOfBoundNode, LiveSensitive)),
 	route("GET", "/api/v1/tokens", OwnerTeam, RetrySafe, tokenOwner()),
-	route("POST", "/api/v1/tokens", OwnerTeam, RetryIdempotencyKey, tokenOwner()),
+	route("POST", "/api/v1/tokens", OwnerTeam, RetryNever, member(RunsRead)),
 	route("GET", "/api/v1/tokens/{token}", OwnerTeam, RetrySafe, tokenOwner()),
 	route("DELETE", "/api/v1/tokens/{token}", OwnerTeam, RetrySafe, tokenOwner()),
 	route("POST", "/api/v1/tokens/{token}/rotate", OwnerTeam, RetryIdempotencyKey, tokenOwner()),

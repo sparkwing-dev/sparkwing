@@ -2,9 +2,7 @@ package controller
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -46,70 +44,6 @@ func tokenToJSON(t *store.Token) tokenRecordJSON {
 		out.RevokedAt = &v
 	}
 	return out
-}
-
-type createTokenReq struct {
-	Principal string   `json:"principal"`
-	Kind      string   `json:"kind"`
-	Scopes    []string `json:"scopes"`
-	TTLSecs   int64    `json:"ttl_secs,omitempty"`
-	Metered   bool     `json:"metered,omitempty"`
-}
-
-type createTokenResp struct {
-	Token    string          `json:"token"`
-	Metadata tokenRecordJSON `json:"metadata"`
-}
-
-func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
-	var req createTokenReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if req.Metered && !s.Metering() {
-		http.NotFound(w, r)
-		return
-	}
-	if req.Principal == "" {
-		writeError(w, http.StatusBadRequest, errors.New("principal required"))
-		return
-	}
-	if req.Kind == "" {
-		writeError(w, http.StatusBadRequest, errors.New("kind required (user|runner|service)"))
-		return
-	}
-	scopes, err := normalizeScopes(req.Scopes)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	req.Scopes = scopes
-	if scope := provisionedOnlyScope(req.Scopes); scope != "" {
-		writeError(w, http.StatusForbidden, fmt.Errorf(
-			"%s is never minted through the API; the controller seeds it from its credits-token credential", scope))
-		return
-	}
-	ttl := time.Duration(req.TTLSecs) * time.Second
-	now := time.Now().UTC()
-	raw, tok, err := s.store.CreateTokenWith(r.Context(), req.Principal, req.Kind, req.Scopes, ttl, now,
-		store.TokenOptions{Metered: req.Metered})
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	s.logger.Info(
-		"token created",
-		"principal", tok.Principal,
-		"kind", tok.Kind,
-		"prefix", tok.Prefix,
-		"scopes", tok.Scopes,
-		"metered", tok.Metered,
-	)
-	writeJSON(w, http.StatusCreated, createTokenResp{
-		Token:    raw,
-		Metadata: tokenToJSON(tok),
-	})
 }
 
 type setTokenMeteredReq struct {

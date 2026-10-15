@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/git"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
 // ImageTag holds the deterministic image-tag components for a single
@@ -54,14 +54,14 @@ func (t ImageTag) All() []string {
 // is a hard error. Pipelines that operate on a sibling clone use
 // ComputeTagsIn instead.
 func ComputeTags(ctx context.Context) (ImageTag, error) {
-	planguard.Guard(ctx, "docker.ComputeTags")
+	sdkserve.RequireExecution(ctx, "docker.ComputeTags")
 	return ComputeTagsIn(ctx, "")
 }
 
 // ComputeTagsIn reads the git repo state in repoDir and returns an
 // ImageTag describing it. Empty repoDir falls back to process CWD.
 func ComputeTagsIn(ctx context.Context, repoDir string) (ImageTag, error) {
-	planguard.Guard(ctx, "docker.ComputeTagsIn")
+	sdkserve.RequireExecution(ctx, "docker.ComputeTagsIn")
 	commit, err := git.ShortCommit(ctx, repoDir)
 	if err != nil {
 		return ImageTag{}, fmt.Errorf("docker: ComputeTags commit: %w", err)

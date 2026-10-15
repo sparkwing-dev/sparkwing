@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **controller (Breaking):** Member credential creation uses `/api/v1/tokens` with explicit grants. Sessions issue personal roots, bearer delegation keeps revocation ancestry, and the response returns its capability once. See [migration guide](docs/migrations/_unreleased.md#member-credential-issuance).
 - **controller (Breaking):** Source release uses the shared capability policy and commits a store audit before decryption. Machine consent requires its owner's account session at `/api/v1/tokens/{token}/git-credentials`. Plan acceptance uses the configured secrets cipher for stored-secret validation. See [migration guide](docs/migrations/_unreleased.md#source-credentials).
 - **controller (Breaking):** Data upload, commit and record routes use live capability policy and server-derived uploader scope. Upload accepts a digest and size. Commit returns a receipt after physical verification. Cache-grant uploads and caller-selected object keys are removed. See [migration guide](docs/migrations/_unreleased.md#data-writes-and-records).
 - **controller (Breaking):** Runner queues use `/api/v1/runners/claim` for mixed trigger and job selection. Named triggers use `/api/v1/runs/{run}/claim`. Claim, exchange, renewal and launcher sync use the shared capability policy. Split queue endpoints are removed. See [migration guide](docs/migrations/_unreleased.md#work-claims).

@@ -34,7 +34,7 @@ type Node struct {
 	Local LocalOutputs
 	// Refs are the other pipelines' outputs the node's plan declares it
 	// reads; Local answers a latest-output read for these alone.
-	Refs []nodeproto.PlanPipelineRef
+	Refs []nodeproto.PipelineReference
 	// Children starts and reads child runs through this machine's trigger
 	// queue when no controller holds the run.
 	Children LocalChildren

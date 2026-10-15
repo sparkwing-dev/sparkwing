@@ -30,7 +30,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing/docker"
 )
@@ -115,7 +115,7 @@ func WithServicesAddrs(ctx context.Context, services []Service, fn func(context.
 }
 
 func withServices(ctx context.Context, guard string, services []Service, fn func(context.Context, []Addr) error) error {
-	planguard.Guard(ctx, guard)
+	sdkserve.RequireExecution(ctx, guard)
 	if len(services) == 0 {
 		return fn(ctx, nil)
 	}

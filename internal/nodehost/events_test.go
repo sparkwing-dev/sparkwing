@@ -40,12 +40,12 @@ func eventBackends(t *testing.T, body func(t *testing.T, st *store.Store, state 
 	})
 }
 
-func hostEvents(t *testing.T, ctx context.Context, state storage.StateStoreOld, cfg Config, doc nodeproto.PlanDocOld) RunResult {
+func hostEvents(t *testing.T, ctx context.Context, state storage.StateStoreOld, cfg Config, doc nodeproto.PlanDoc) RunResult {
 	t.Helper()
 	if err := state.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	run := &Run{ID: testRunID, Doc: doc, State: state, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), leaseToken: "tok"}
+	run := &Run{ID: testRunID, Doc: doc, State: state, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), leaseToken: "tok", validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
 	runPlanned(ctx, &cfg, run, &res)()
 	return res
@@ -134,22 +134,18 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 		}
 		workspace := t.TempDir()
 		logs := &eventLog{records: map[string][]sparkwing.LogRecord{}}
-		retry := func(auto bool) *nodeproto.PlanModifiers {
-			return &nodeproto.PlanModifiers{Retry: 1, RetryAuto: auto}
-		}
-		doc := nodeproto.PlanDocOld{Pipeline: "p", Nodes: []nodeproto.PlanNode{
-			{ID: "ok"},
-			{ID: "boom"},
-			{ID: "after-boom", Deps: deps("boom")},
-			{ID: "skipper"},
-			{ID: "concurrent"},
-			{ID: "superseded"},
-			{ID: "flaky", Modifiers: retry(false)},
-			{ID: "auto", Modifiers: retry(true)},
-			{ID: "produce", Outputs: []string{"out.txt"}},
-			{ID: "consume", Deps: deps("produce"), Consumes: []nodeproto.PlanConsume{{Producer: "produce", Into: "in"}}},
-			{ID: "gate", Approval: &nodeproto.PlanApproval{Message: "ship it?"}},
-			{ID: "targets", Closures: &nodeproto.PlanClosures{Generator: []string{testGenerator}}},
+
+		doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+			{ID: "ok", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			{ID: "boom", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			{ID: "after-boom", Needs: deps("boom"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			{ID: "skipper", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			{ID: "superseded", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			{ID: "flaky", Retry: &nodeproto.RetrySpec{Attempts: 1}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			{ID: "produce", Artifacts: []string{"out.txt"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			{ID: "consume", Needs: deps("produce"), Consumes: []nodeproto.ArtifactInput{{Producer: "produce", Into: "in"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			{ID: "gate", Approval: &nodeproto.ApprovalSpec{Message: "ship it?"}},
+			{ID: "targets", Closures: nodeproto.ClosureSpec{Generate: []string{testGenerator}}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		}}
 		var mu sync.Mutex
 		calls := map[string]int{}
@@ -163,19 +159,17 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 				return Result{Outcome: sparkwing.Failed, Err: errors.New("boom")}
 			case "skipper":
 				return Result{Outcome: sparkwing.Skipped, Err: errors.New("skip reason")}
-			case "concurrent":
-				return Result{Outcome: sparkwing.SkippedConcurrent}
 			case "superseded":
 				return Result{Outcome: sparkwing.Superseded, Err: errors.New("lost the slot")}
-			case "flaky", "auto":
+			case "flaky":
 				if call == 1 {
 					return Result{Outcome: sparkwing.Failed, Err: errors.New("first try")}
 				}
 			case "produce":
 				return writeFile(workspace, "out.txt", "artifact")
 			case "targets":
-				return Result{Outcome: sparkwing.Success, expansions: []expansion{{closure: testGenerator, nodes: []nodeproto.PlanNode{
-					{ID: "child-0", Deps: deps("targets")}, {ID: "child-1", Deps: deps("targets")},
+				return Result{Outcome: sparkwing.Success, expansions: []expansion{{closure: testGenerator, nodes: []nodeproto.JobSpec{
+					{ID: "child-0", Needs: deps("targets"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "child-1", Needs: deps("targets"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 				}}}}
 			}
 			return Result{Outcome: sparkwing.Success}
@@ -190,7 +184,7 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 			}
 		}()
 		cfg := Config{
-			Execute: exec, Artifacts: art, Session: SessionConfig{Dir: workspace},
+			Execute: exec, Artifacts: art, Session: SessionConfig{Dir: workspace, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
 			Attempts: &Attempts{OpenLog: logs.open, Masker: secrets.NewMasker()},
 		}
 		res := hostEvents(t, ctx, asking, cfg, doc)
@@ -199,13 +193,10 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 		}
 
 		events := storedEvents(t, st)
-		for _, id := range []string{"ok", "boom", "skipper", "concurrent", "superseded", "flaky", "produce", "consume", "gate", "targets", "child-0"} {
+		for _, id := range []string{"ok", "boom", "skipper", "superseded", "flaky", "produce", "consume", "gate", "targets", "child-0"} {
 			if got := countEvents(events, id, "node_started"); got != 1 {
 				t.Errorf("%s: %d node_started events, want 1", id, got)
 			}
-		}
-		if got := countEvents(events, "auto", "node_started"); got != 2 {
-			t.Errorf("auto: %d node_started events, want one per retry_auto dispatch", got)
 		}
 		if got := countEvents(events, "after-boom", "node_started"); got != 0 {
 			t.Errorf("after-boom: %d node_started events, want none for a node that never ran", got)
@@ -214,10 +205,8 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 		wantEvent(t, events, "boom", "node_failed", `"boom"`)
 		wantEvent(t, events, "after-boom", "node_cancelled", `"upstream-failed"`)
 		wantEvent(t, events, "skipper", "node_skipped", `"skip reason"`)
-		wantEvent(t, events, "concurrent", "node_skipped_concurrent", "")
 		wantEvent(t, events, "superseded", "node_superseded", `"lost the slot"`)
 		wantEvent(t, events, "flaky", "attempt_retry", `"attempt 2/2"`)
-		wantEvent(t, events, "auto", "node_auto_retry", `"dispatch 2/2"`)
 		wantEvent(t, events, "produce", "artifacts_published", `{"manifest_digest":"`+nodeRow(t, st, "produce").ArtifactManifest+`"}`)
 		wantEvent(t, events, "consume", "artifacts_staged", `{"files":1}`)
 		wantEvent(t, events, "gate", "approval_requested", `{"message":"ship it?","timeout_ms":0}`)
@@ -230,9 +219,6 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 		}) {
 			t.Errorf("flaky log %+v, want the retry record", logs.records["flaky"])
 		}
-		if !slices.ContainsFunc(logs.records["auto"], func(r sparkwing.LogRecord) bool { return r.Msg == "auto-retry dispatch 2/2" }) {
-			t.Errorf("auto log %+v, want the auto-retry line", logs.records["auto"])
-		}
 	})
 }
 
@@ -240,18 +226,18 @@ func TestHostedRunEmitsConcurrencyEvents(t *testing.T) {
 	eventBackends(t, func(t *testing.T, st *store.Store, state storage.StateStoreOld) {
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		defer cancel()
-		holdSlotOutside(t, st, "g:db")
+		holdSlotOutside(t, st, "global:db")
 		slots := storeSlots{st: st, queued: make(chan string, 1)}
 		go func() {
 			recv(t, ctx, slots.queued)
-			if _, _, _, err := st.ReleaseAndNotify(ctx, "g:db", "other/x", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+			if _, _, _, err := st.ReleaseAndNotify(ctx, "global:db", "other/x", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
 				t.Errorf("release outside hold: %v", err)
 			}
 		}()
 		res := hostEvents(t, ctx, state, Config{
 			Execute:   func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} },
 			Admission: &Admission{Slots: slots},
-		}, nodeproto.PlanDocOld{Nodes: grouped("global", "queue", 1, 0, "b")})
+		}, nodeproto.PlanDoc{Jobs: grouped("global", "queue", 1, 0, "b")})
 		if res.Nodes["b"].Outcome != sparkwing.Success {
 			t.Fatalf("b %+v, want success once promoted", res.Nodes["b"])
 		}
@@ -266,8 +252,8 @@ func TestHostedRunEmitsConcurrencyEvents(t *testing.T) {
 				RunID string `json:"run_id"`
 			}
 		}
-		if err := json.Unmarshal(events[i].Payload, &wait); err != nil || wait.Key != "g:db" || wait.Kind != "queued" || len(wait.Holders) != 1 || wait.Holders[0].RunID != "other" {
-			t.Errorf("concurrency_wait payload %s (%v), want key g:db, kind queued, held by run other", events[i].Payload, err)
+		if err := json.Unmarshal(events[i].Payload, &wait); err != nil || wait.Key != "global:db" || wait.Kind != "queued" || len(wait.Holders) != 1 || wait.Holders[0].RunID != "other" {
+			t.Errorf("concurrency_wait payload %s (%v), want key global:db, kind queued, held by run other", events[i].Payload, err)
 		}
 		wantEvent(t, events, "b", "concurrency_promoted", "")
 	})
@@ -277,11 +263,11 @@ func TestHostedRunEmitsPlanConcurrencyRefusals(t *testing.T) {
 	eventBackends(t, func(t *testing.T, st *store.Store, state storage.StateStoreOld) {
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		defer cancel()
-		holdSlotOutside(t, st, "g:deploys")
+		holdSlotOutside(t, st, "global:deploys")
 		res := hostEvents(t, ctx, state, Config{
 			Execute:   func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} },
 			Admission: &Admission{Slots: storeSlots{st: st}},
-		}, planGrouped("g:deploys", "skip", "a"))
+		}, planGrouped("global:deploys", "skip", "a"))
 		if res.Status != "success" {
 			t.Fatalf("run %s %v, want a skipped run to succeed", res.Status, res.Err)
 		}

@@ -15,7 +15,7 @@ func TestResumeOnlyAdoptsTerminalRecoveryResults(t *testing.T) {
 			if terminal {
 				row.Status, row.Outcome, row.FailureReason = "done", "failed", store.FailureAgentLost
 			}
-			s.reuseRow(t.Context(), nodeproto.PlanNode{ID: "job"}, row)
+			s.reuseRow(t.Context(), nodeproto.JobSpec{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}, row)
 			result, adopted := s.results["job"]
 			if adopted != terminal || s.started["job"] != terminal {
 				t.Fatalf("adopted=%t, started=%t, terminal=%t", adopted, s.started["job"], terminal)

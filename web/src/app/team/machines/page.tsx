@@ -259,7 +259,7 @@ function CLIAccess({
     <div className="mt-6">
       <Panel
         title="CLI access"
-        hint={`A personal token lets the sparkwing CLI start and follow ${team}'s runs as you. It lapses after 90 days and goes when you leave the team.`}
+        hint={`A personal token lets the sparkwing CLI start and follow ${team}'s runs as you. It loses access when you leave the team.`}
       >
         <div className="flex items-center gap-2 p-4">
           <button
@@ -277,16 +277,16 @@ function CLIAccess({
               This token is shown once. Sparkwing keeps only its prefix,{" "}
               <span className="font-mono">{minted.prefix}</span>.
             </div>
-            {cliTokenStartsRuns(minted.scopes) ? null : (
+            {cliTokenStartsRuns(minted.grants) ? null : (
               <div className="text-xs text-[var(--muted)]">
                 Your role reads runs, so this token cannot start one.
               </div>
             )}
             <div>
               <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
-                1. Save it as the {minted.profile} profile
+                1. Save it as the {minted.team} profile
               </div>
-              <CopyField value={minted.setup} label="Setup command" multiline />
+              <CopyField value={`sparkwing cloud connect --controller ${window.location.origin} --name ${minted.team} --token-stdin`} label="Setup command" multiline />
               <div className="text-xs text-[var(--muted)] mt-1">
                 Paste the token below when the command asks for it.
               </div>
@@ -295,14 +295,14 @@ function CLIAccess({
               <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
                 Token
               </div>
-              <CopyField value={minted.token} label="CLI token" />
+              <CopyField value={minted.capability} label="CLI token" />
             </div>
-            {cliTokenStartsRuns(minted.scopes) ? (
+            {cliTokenStartsRuns(minted.grants) ? (
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
                   2. Start a run from a checkout of a pushed commit
                 </div>
-                <CopyField value={minted.run} label="Run command" />
+                <CopyField value={`sparkwing pipeline trigger <pipeline> --profile ${minted.team}`} label="Run command" />
               </div>
             ) : null}
           </div>

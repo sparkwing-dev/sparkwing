@@ -30,6 +30,7 @@ func (s *Server) authorityEndpoints() []Endpoint {
 			Method: "DELETE", Pattern: "/api/v1/tokens/{token}", Authentication: capability.AuthCapability,
 			Decode: authorityTarget, Handle: e.handleRevokeAuthority,
 		},
+		{Method: "POST", Pattern: "/api/v1/tokens", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleIssueCredential},
 		{
 			Method: "DELETE", Pattern: "/api/v1/operator/tokens/{token}", Authentication: capability.AuthCapability,
 			Decode: authorityTarget, Handle: e.handleRevokeAuthority,
@@ -65,14 +66,16 @@ func (s *Server) authorityEndpoints() []Endpoint {
 
 func (s *Server) registerAuthorityRoutes(mux *http.ServeMux) {
 	endpoints := s.authorityEndpoints()
-	// safety: the token read still has a separate registration on this shared path.
-	router := NewPolicyRouter(s.authorization)
-	if err := router.Register(endpoints[0]); err != nil {
-		mux.HandleFunc("DELETE /api/v1/tokens/{token}", func(w http.ResponseWriter, _ *http.Request) { writePolicyError(w, err) })
-	} else {
-		mux.Handle("DELETE /api/v1/tokens/{token}", noStore(router))
+	// safety: token reads still have separate registrations on these shared paths.
+	for _, endpoint := range endpoints[:2] {
+		router := NewPolicyRouter(s.authorization)
+		var handler http.Handler = router
+		if err := router.Register(endpoint); err != nil {
+			handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { writePolicyError(w, err) })
+		}
+		mux.Handle(endpoint.Method+" "+endpoint.Pattern, noStore(handler))
 	}
-	s.registerPolicyEndpoints(mux, endpoints[1:])
+	s.registerPolicyEndpoints(mux, endpoints[2:])
 }
 
 func authorityTarget(r *http.Request) (capability.RequestEvidence, error) {

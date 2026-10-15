@@ -20,24 +20,24 @@ func TestAResumedRetryRegeneratesTheGeneratorItAdopts(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := fanOutDoc()
-	if err := st.CreateNode(ctx, pendingRow(&Run{ID: testRunID, Doc: doc}, doc.Nodes[0])); err != nil {
+	if err := st.CreateNode(ctx, pendingRow(&Run{ID: testRunID, Doc: doc, validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}, doc.Jobs[0])); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.FinishNodeWithReason(ctx, testRunID, "targets", "success", "", []byte(`"from-targets"`), "", nil); err != nil {
 		t.Fatal(err)
 	}
 	cfg := Config{Dispatch: remoteHost(st, sparkwing.Success, "", nil)}
-	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
+	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	var regenerated json.RawMessage
 	s := &scheduler{
 		run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg), resume: true,
 		rehydrate: &Rehydration{SourceRunID: sourceRunID, Causes: []string{"test-a"}}, rerun: map[string]bool{},
 		regenerate: func(_ context.Context, n *NodeRun, out json.RawMessage) []expansion {
 			regenerated = out
-			return []expansion{{closure: testGenerator, nodes: []nodeproto.PlanNode{{ID: "test-a", Deps: deps(n.Plan.ID)}}}}
+			return []expansion{{closure: testGenerator, nodes: []nodeproto.JobSpec{{ID: "test-a", Needs: deps(n.Plan.ID), Steps: []nodeproto.StepSpec{{ID: "body"}}}}}}
 		},
 	}
-	if err := s.add(ctx, ctx, doc.Nodes, nil); err != nil {
+	if err := s.add(ctx, ctx, doc.Jobs, nil); err != nil {
 		t.Fatal(err)
 	}
 	s.loop(ctx)
@@ -81,12 +81,12 @@ func TestARetryNeverCopiesOverARowItsRunAlreadyHolds(t *testing.T) {
 				}
 			}
 			cfg := Config{Dispatch: remoteHost(st, sparkwing.Success, "", nil)}
-			run := &Run{ID: testRunID, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
+			run := &Run{ID: testRunID, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 			s := &scheduler{
 				run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg), resume: true,
 				rehydrate: &Rehydration{SourceRunID: sourceRunID}, rerun: map[string]bool{},
 			}
-			if err := s.add(ctx, ctx, []nodeproto.PlanNode{{ID: "a"}}, nil); err != nil {
+			if err := s.add(ctx, ctx, []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}, nil); err != nil {
 				t.Fatal(err)
 			}
 			s.loop(ctx)

@@ -390,7 +390,7 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 		}
 		base["GITHUB_BEFORE"], base["GITHUB_AFTER"] = p.Before, p.After
 		base["GITHUB_REF"] = p.Ref
-		base[sparkwing.EnvGitHubEventName] = githubEventPush
+		base["GITHUB_EVENT_NAME"] = githubEventPush
 		if isTag {
 			base["GITHUB_REF_TYPE"], base["GITHUB_TAG"] = "tag", tag
 		} else {
@@ -488,11 +488,11 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 	if !githubCommit(pr.Head.SHA) {
 		return githubAppIntake{}, "the pull request names no head commit", nil
 	}
-	base[sparkwing.EnvGitHubEventName] = sparkwing.EventPullRequest
-	base[sparkwing.EnvPRNumber] = strconv.Itoa(p.Number)
-	base[sparkwing.EnvPRAction] = env.Action
-	base[sparkwing.EnvPRBaseRef], base[sparkwing.EnvPRBaseSHA] = pr.Base.Ref, pr.Base.SHA
-	base[sparkwing.EnvPRHeadRef], base[sparkwing.EnvPRHeadSHA] = pr.Head.Ref, pr.Head.SHA
+	base["GITHUB_EVENT_NAME"] = "pull_request"
+	base["GITHUB_PR_NUMBER"] = strconv.Itoa(p.Number)
+	base["GITHUB_PR_ACTION"] = env.Action
+	base["GITHUB_BASE_REF"], base["GITHUB_BASE_SHA"] = pr.Base.Ref, pr.Base.SHA
+	base["GITHUB_HEAD_REF"], base["GITHUB_HEAD_SHA"] = pr.Head.Ref, pr.Head.SHA
 	base["GITHUB_REF"], base["GITHUB_REF_TYPE"] = "refs/pull/"+strconv.Itoa(p.Number)+"/head", "branch"
 	base["GITHUB_LABEL"] = p.Label.Name
 	base["GITHUB_MERGED"] = strconv.FormatBool(pr.Merged)
@@ -504,8 +504,21 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 	}
 	return githubAppIntake{
 		user: pr.User.Login, branch: pr.Head.Ref, sha: pr.Head.SHA, env: base, at: updated,
-		prInfo: sparkwing.PullRequestFromEnv(base),
+		prInfo: PullRequestForTrigger(base),
 	}, "", nil
+}
+
+// PullRequestForTrigger projects authenticated trigger metadata into the SDK run context.
+func PullRequestForTrigger(env map[string]string) *sparkwing.PullRequest {
+	if env["GITHUB_EVENT_NAME"] != "pull_request" {
+		return nil
+	}
+	number, _ := strconv.Atoi(env["GITHUB_PR_NUMBER"])
+	return &sparkwing.PullRequest{
+		Number: number, Action: env["GITHUB_PR_ACTION"],
+		BaseRef: env["GITHUB_BASE_REF"], BaseSHA: env["GITHUB_BASE_SHA"],
+		HeadRef: env["GITHUB_HEAD_REF"], HeadSHA: env["GITHUB_HEAD_SHA"],
+	}
 }
 
 const githubAppForkReason = "pull requests from forks are not run"
@@ -885,7 +898,7 @@ func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.R
 
 // safety: Branch filters gate every event that runs branch code; tag patterns alone select tag pushes.
 func githubAppSubscribes(sub store.GitHubAppTrigger, event, action string, env map[string]string, branch string) bool {
-	baseMatches := githubAppBranchMatches(sub.BaseBranches, env[sparkwing.EnvPRBaseRef])
+	baseMatches := githubAppBranchMatches(sub.BaseBranches, env["GITHUB_BASE_REF"])
 	switch event {
 	case "push":
 		if env["GITHUB_REF_TYPE"] == "tag" {

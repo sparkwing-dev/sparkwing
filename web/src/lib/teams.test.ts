@@ -456,33 +456,29 @@ describe("unixSecondsISO", () => {
 });
 
 describe("member tokens", () => {
-  it("mints the given scopes with the session's CSRF token and returns the setup commands", async () => {
+  it("mints grants through the session's authenticated token route", async () => {
     const minted = {
-      token: "swu_x",
-      prefix: "swu_x",
-      family: "member",
-      scopes: ["runs.read", "runs.write"],
-      expires_at: 1,
-      profile: "acme",
-      setup:
-        "sparkwing cloud connect --controller https://c.example --name acme --token-stdin",
-      run: "sparkwing pipeline trigger <pipeline> --profile acme",
+      capability: "swk_x",
+      prefix: "new-prefix",
+      team: "acme",
+      grants: ["runs.read", "runs.write"],
+      expires_at: "2100-01-01T00:00:00Z",
     };
     respond = () => new Response(JSON.stringify(minted), { status: 201 });
     assert.deepEqual(
       await teams.mintMemberToken(["runs.read", "runs.write"]),
       minted,
     );
-    assert.equal(calls[0].url, "/api/v1/team/tokens");
+    assert.equal(calls[0].url, "/api/v1/tokens");
     assert.equal(calls[0].method, "POST");
     assert.deepEqual(JSON.parse(calls[0].body), {
-      scopes: ["runs.read", "runs.write"],
+      grants: ["runs.read", "runs.write"],
     });
     assert.equal(calls[0].headers.get("X-CSRF-Token"), "session-csrf");
   });
 
-  it("gives each role its full member scope set without team.admin", () => {
-    const read = ["runs.read", "logs.read", "triggers.read"];
+  it("gives each role its member grants without team administration", () => {
+    const read = ["runs.read", "logs.read"];
     const write = [...read, "runs.write", "runs.control", "approvals.write"];
     assert.deepEqual(teams.memberScopesForRole("reader"), read);
     assert.deepEqual(teams.memberScopesForRole("editor"), write);

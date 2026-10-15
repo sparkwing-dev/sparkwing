@@ -15,13 +15,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func describeCachePath(key string) string {
 	return filepath.Join(bincache.SparkwingHome(),
-		"cache", "describe", key+".json")
+		"cache", "describe-v2", key+".json")
 }
 
 func byRepoDescribePath(sparkwingDir string) string {
@@ -31,10 +29,10 @@ func byRepoDescribePath(sparkwingDir string) string {
 	}
 	sum := sha256.Sum256([]byte(abs))
 	return filepath.Join(bincache.SparkwingHome(),
-		"cache", "describe", "by-repo", hex.EncodeToString(sum[:16])+".json")
+		"cache", "describe-v2", "by-repo", hex.EncodeToString(sum[:16])+".json")
 }
 
-func readDescribeCache(ctx context.Context, sparkwingDir string) ([]sparkwing.DescribePipeline, error) {
+func readDescribeCache(ctx context.Context, sparkwingDir string) ([]nodeproto.PipelineDescription, error) {
 	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
 	if err != nil {
 		return nil, err
@@ -79,21 +77,20 @@ func builtEntry(ctx context.Context, sparkwingDir, key string) (pipelineentry.Co
 	return pipelineentry.Binary(lease.Path()), func() { _ = lease.Release() }, true //nolint:errcheck // a lease left held only delays pruning
 }
 
-// safety: a document another protocol version wrote reads as a miss, so it
-// is described again rather than trusted.
-func readDescribeFile(path string) []sparkwing.DescribePipeline {
+// safety: the versioned cache directory separates protocol document shapes.
+func readDescribeFile(path string) []nodeproto.PipelineDescription {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
-	var doc sdkserve.DescribeDoc
-	if err := json.Unmarshal(raw, &doc); err != nil || doc.Protocol != nodeproto.VersionOld || doc.Pipelines == nil {
+	var doc nodeproto.DescribeDoc
+	if err := json.Unmarshal(raw, &doc); err != nil || doc.Pipelines == nil {
 		return nil
 	}
 	return doc.Pipelines
 }
 
-func refreshDescribe(ctx context.Context, sparkwingDir string, entry pipelineentry.Command, key string) ([]sparkwing.DescribePipeline, error) {
+func refreshDescribe(ctx context.Context, sparkwingDir string, entry pipelineentry.Command, key string) ([]nodeproto.PipelineDescription, error) {
 	doc, err := describeEntry(ctx, sparkwingDir, entry)
 	if err != nil {
 		return nil, err
@@ -117,7 +114,7 @@ func writeDescribeCache(ctx context.Context, sparkwingDir string, entry pipeline
 	return storeDescribe(sparkwingDir, key, doc)
 }
 
-func storeDescribe(sparkwingDir, key string, doc sdkserve.DescribeDoc) error {
+func storeDescribe(sparkwingDir, key string, doc nodeproto.DescribeDoc) error {
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		return err
@@ -133,7 +130,7 @@ func storeDescribe(sparkwingDir, key string, doc sdkserve.DescribeDoc) error {
 	return nil
 }
 
-func pipelineFlagsFromCache(ctx context.Context, sparkwingDir, pipelineName string) ([]sparkwing.DescribeArg, error) {
+func pipelineFlagsFromCache(ctx context.Context, sparkwingDir, pipelineName string) ([]nodeproto.ArgumentDescription, error) {
 	schemas, err := readDescribeCache(ctx, sparkwingDir)
 	if err != nil {
 		return nil, err
@@ -146,7 +143,7 @@ func pipelineFlagsFromCache(ctx context.Context, sparkwingDir, pipelineName stri
 	return nil, nil
 }
 
-func describeEntry(ctx context.Context, sparkwingDir string, entry pipelineentry.Command) (sdkserve.DescribeDoc, error) {
+func describeEntry(ctx context.Context, sparkwingDir string, entry pipelineentry.Command) (nodeproto.DescribeDoc, error) {
 	doc, err := repos.Describe(ctx, entry, filepath.Dir(sparkwingDir))
 	if err != nil {
 		return doc, fmt.Errorf("describe %s: %w", entry[len(entry)-1], err)

@@ -83,15 +83,15 @@ func ExampleExec() {
 	_ = plan
 }
 
-func ExampleJobApproval() {
+func ExamplePlan_Approval() {
 	plan := sw.NewPlan()
 	b := sw.Job(plan, "build", &demoBuild{})
-	gate := sw.JobApproval(plan, "promote-to-prod", sw.ApprovalConfigOld{
-		Message:  "Promote build to production?",
-		Timeout:  2 * time.Hour,
-		OnExpiry: sw.ApprovalDeny,
+	gate := plan.Approval("promote-to-prod", sw.ApprovalConfig{
+		Message:   "Promote build to production?",
+		Timeout:   2 * time.Hour,
+		OnTimeout: sw.ApprovalDeny,
 	})
-	gate.Job().Needs(b)
+	gate.Needs(b)
 	d := sw.Job(plan, "deploy", &demoDeploy{Build: sw.RefTo[demoBuildOut](b)})
-	d.Needs(gate.Job())
+	d.Needs(gate)
 }

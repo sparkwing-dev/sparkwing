@@ -66,6 +66,14 @@ accepted by regenerating a golden file from C2 or a running controller.
 | Public, browser, signed-object, GitHub webhook, Actions exchange and payment webhook | Frozen §§3.5, 5.1, 5.5, 8.1; decision 98; C2's billing contract: webhook-derived trust, exact signed-object scope, separate Actions proof and signed Stripe settlement | Browser endpoint paths and account-flow choices remain C2 assumptions. Payment proof and settlement still require runtime evidence. |
 | Node-host process operations | Frozen §§5.1, 5.5, 6.2–6.3: nodehost audience, process lifetime and declared operation bindings | C3 must expose actual node-host registrations; no controller credential or process-env bearer fallback is permitted. |
 
+### Credential creation correction
+
+`POST /api/v1/tokens` requires member `runs.read` with `none` binding.
+Creation has no existing token selector. The issuer derives the member subject
+and team from live authority and checks grants in the committing transaction.
+Its one-time bearer makes automatic retries unsafe, so retry policy is `never`.
+Token-specific lookup, revocation and rotation keep their own-token binding.
+
 ### Reconciled C2 permissions
 
 C2's [route and liveness invariants](c2-credentials.md#route-and-liveness-invariants)

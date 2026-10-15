@@ -28,7 +28,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -421,13 +420,13 @@ var submittedTriggerEnvKeys = map[string]bool{
 	"GITHUB_MERGED":                   true,
 	"GITHUB_TAG_NAME":                 true,
 	"GITHUB_TAG":                      true,
-	sparkwing.EnvGitHubEventName:      true,
-	sparkwing.EnvPRNumber:             true,
-	sparkwing.EnvPRAction:             true,
-	sparkwing.EnvPRBaseRef:            true,
-	sparkwing.EnvPRBaseSHA:            true,
-	sparkwing.EnvPRHeadRef:            true,
-	sparkwing.EnvPRHeadSHA:            true,
+	"GITHUB_EVENT_NAME":               true,
+	"GITHUB_PR_NUMBER":                true,
+	"GITHUB_PR_ACTION":                true,
+	"GITHUB_BASE_REF":                 true,
+	"GITHUB_BASE_SHA":                 true,
+	"GITHUB_HEAD_REF":                 true,
+	"GITHUB_HEAD_SHA":                 true,
 	"SPARKWING_START_AT":              true,
 	"SPARKWING_STOP_AT":               true,
 	"SPARKWING_ONLY":                  true,
@@ -439,20 +438,20 @@ var submittedTriggerEnvKeys = map[string]bool{
 }
 
 var githubProvenanceEnvKeys = map[string]bool{
-	"GITHUB_REF":                 true,
-	"GITHUB_REF_TYPE":            true,
-	"GITHUB_ACTION":              true,
-	"GITHUB_LABEL":               true,
-	"GITHUB_MERGED":              true,
-	"GITHUB_TAG_NAME":            true,
-	"GITHUB_TAG":                 true,
-	sparkwing.EnvGitHubEventName: true,
-	sparkwing.EnvPRNumber:        true,
-	sparkwing.EnvPRAction:        true,
-	sparkwing.EnvPRBaseRef:       true,
-	sparkwing.EnvPRBaseSHA:       true,
-	sparkwing.EnvPRHeadRef:       true,
-	sparkwing.EnvPRHeadSHA:       true,
+	"GITHUB_REF":        true,
+	"GITHUB_REF_TYPE":   true,
+	"GITHUB_ACTION":     true,
+	"GITHUB_LABEL":      true,
+	"GITHUB_MERGED":     true,
+	"GITHUB_TAG_NAME":   true,
+	"GITHUB_TAG":        true,
+	"GITHUB_EVENT_NAME": true,
+	"GITHUB_PR_NUMBER":  true,
+	"GITHUB_PR_ACTION":  true,
+	"GITHUB_BASE_REF":   true,
+	"GITHUB_BASE_SHA":   true,
+	"GITHUB_HEAD_REF":   true,
+	"GITHUB_HEAD_SHA":   true,
 }
 
 var githubRepoSlug = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`)

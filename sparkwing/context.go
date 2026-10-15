@@ -3,7 +3,6 @@ package sparkwing
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 )
 
@@ -12,12 +11,11 @@ import (
 type RunContext struct {
 	RunID string
 
-	// Pipeline is the registered name of the invoked pipeline
-	// (e.g. "lint", "build-test-deploy").
+	// Pipeline is the invoked project name, including any alias.
 	Pipeline string
 
-	// Git is the run's view of the cloned working tree. Same instance
-	// as `Runtime().Git`. Live methods (IsDirty, FilesetHash, …) shell
+	// Git is the run's view of the cloned working tree.
+	// Live methods (IsDirty, FilesetHash, …) shell
 	// out fresh each call; data fields (SHA, Branch, Repo, RepoURL)
 	// are the trigger-time snapshot.
 	Git *Git
@@ -26,26 +24,16 @@ type RunContext struct {
 
 	StartedAt time.Time
 
-	// NoMemo reports that this run was asked to ignore cached per-node
-	// results; cache writes still happen. Plan code reads the signal here
-	// because the orchestrator installs it on the context only after the
-	// plan is built.
+	// NoMemo bypasses memo reads while retaining writes.
 	NoMemo bool
 
-	// DryRun reports that this run was asked to describe its work rather
-	// than apply it. A step body reads the same answer from [IsDryRun];
-	// this field is what a Plan reads, which runs before the orchestrator
-	// installs the mode on the context.
+	// DryRun carries the same sealed mode as IsDryRun during planning and execution.
 	DryRun bool
 }
 
 // TriggerInfo describes the trigger that started the run.
 //
-// Trigger-supplied values flow through the pipeline's typed Config
-// struct. Declare them under the trigger's values: block in
-// sparkwing.yaml (e.g. on.push.values) with a matching `sw:"..."`
-// tag on a Config struct field, then read via
-// sparkwing.PipelineConfig[T](ctx).
+// Trigger-supplied arguments resolve into the pipeline's registered Inputs.
 type TriggerInfo struct {
 	Source string // "manual", "push", "schedule", "webhook"
 	User   string // invoker identity, when known
@@ -69,43 +57,6 @@ type PullRequest struct {
 	HeadRef string
 	// HeadSHA is the PR head commit the run checks out.
 	HeadSHA string
-}
-
-// Trigger-env keys carrying GitHub pull_request metadata. The
-// controller stamps these onto the persisted trigger; the orchestrator
-// reads them back via PullRequestFromEnv when it builds the run
-// context.
-const (
-	EnvGitHubEventName = "GITHUB_EVENT_NAME"
-	EnvPRNumber        = "GITHUB_PR_NUMBER"
-	EnvPRAction        = "GITHUB_PR_ACTION"
-	EnvPRBaseRef       = "GITHUB_BASE_REF"
-	EnvPRBaseSHA       = "GITHUB_BASE_SHA"
-	EnvPRHeadRef       = "GITHUB_HEAD_REF"
-	EnvPRHeadSHA       = "GITHUB_HEAD_SHA"
-)
-
-// EventPullRequest is the EnvGitHubEventName value that marks a
-// pull_request-triggered run.
-const EventPullRequest = "pull_request"
-
-// PullRequestFromEnv reconstructs a PullRequest from a trigger's env
-// map, or returns nil when the map does not describe a pull_request
-// event. A malformed number degrades to zero rather than failing the
-// run.
-func PullRequestFromEnv(env map[string]string) *PullRequest {
-	if env[EnvGitHubEventName] != EventPullRequest {
-		return nil
-	}
-	num, _ := strconv.Atoi(env[EnvPRNumber])
-	return &PullRequest{
-		Number:  num,
-		Action:  env[EnvPRAction],
-		BaseRef: env[EnvPRBaseRef],
-		BaseSHA: env[EnvPRBaseSHA],
-		HeadRef: env[EnvPRHeadRef],
-		HeadSHA: env[EnvPRHeadSHA],
-	}
 }
 
 // LogRecord is the structured unit every Logger receives. The
@@ -151,7 +102,6 @@ const (
 	keyPipelineAwaiter
 	keyInputs
 	keyStep
-	keyPipelineConfig
 	keyPipelineSecrets
 	keyResourceReporter
 )
@@ -159,7 +109,7 @@ const (
 // ResourceSample is one measured resource reading for a spawned command:
 // the CPU it drew, averaged over its wall-clock span, and the peak resident
 // memory of its process subtree.
-type ResourceSample struct {
+type resourceSample struct {
 	// CPUMillicores is the command's average CPU draw over its run, in
 	// thousandths of a core (1000 == one core busy for the whole span).
 	CPUMillicores int64
@@ -174,26 +124,26 @@ type ResourceSample struct {
 
 // ResourceReporter absorbs a [ResourceSample] measured when a spawned
 // command finishes.
-type ResourceReporter func(ResourceSample)
+type resourceReporter func(resourceSample)
 
 // WithResourceReporter installs fn so that sparkwing.Bash / sparkwing.Exec
 // report each finished command's measured CPU and memory. Pipeline authors
 // do not call it.
-func WithResourceReporter(ctx context.Context, fn ResourceReporter) context.Context {
+func withResourceReporter(ctx context.Context, fn resourceReporter) context.Context {
 	if fn == nil {
 		return ctx
 	}
 	return context.WithValue(ctx, keyResourceReporter, fn)
 }
 
-func reportResource(ctx context.Context, sample ResourceSample) {
-	if fn, ok := ctx.Value(keyResourceReporter).(ResourceReporter); ok && fn != nil {
+func reportResource(ctx context.Context, sample resourceSample) {
+	if fn, ok := ctx.Value(keyResourceReporter).(resourceReporter); ok && fn != nil {
 		fn(sample)
 	}
 }
 
 // LoggerFromContext returns the active logger or a no-op if none is set.
-func LoggerFromContext(ctx context.Context) Logger {
+func loggerFromContext(ctx context.Context) Logger {
 	if l, ok := ctx.Value(keyLogger).(Logger); ok {
 		return l
 	}
@@ -201,7 +151,7 @@ func LoggerFromContext(ctx context.Context) Logger {
 }
 
 // NodeFromContext returns the currently-executing node ID, or "" if unset.
-func NodeFromContext(ctx context.Context) string {
+func nodeFromContext(ctx context.Context) string {
 	if id, ok := ctx.Value(keyNode).(string); ok {
 		return id
 	}
@@ -212,12 +162,12 @@ func NodeFromContext(ctx context.Context) string {
 // records emitted *inside* the step body carries it. A step's own
 // start and end events render at the node level instead, so the
 // breadcrumb does not repeat the step name.
-func WithStep(ctx context.Context, stepID string) context.Context {
+func withStep(ctx context.Context, stepID string) context.Context {
 	return context.WithValue(ctx, keyStep, stepID)
 }
 
 // StepFromContext returns the active step ID, or "" outside a step.
-func StepFromContext(ctx context.Context) string {
+func stepFromContext(ctx context.Context) string {
 	if s, ok := ctx.Value(keyStep).(string); ok {
 		return s
 	}
@@ -226,7 +176,7 @@ func StepFromContext(ctx context.Context) string {
 
 func recordEnvelope(ctx context.Context, rec LogRecord) LogRecord {
 	if rec.Step == "" {
-		rec.Step = StepFromContext(ctx)
+		rec.Step = stepFromContext(ctx)
 	}
 	return rec
 }
@@ -246,86 +196,29 @@ func Error(ctx context.Context, format string, args ...any) {
 	emitLevel(ctx, "error", format, args...)
 }
 
-// AnnotateOld records a persistent, human-readable summary string on the
-// currently-executing Job. Unlike Info, which writes to the run log,
-// annotations are stored on the Job row itself and surface on the
-// dashboard alongside the node's status -- a place for the step to
-// say "processed 1,234 records · 12 failed" without an operator
-// having to dig through logs.
-//
-// Multiple calls within a node accumulate; the orchestrator appends
-// each message to the node's annotations list in call order. Outside
-// a node context (no logger installed, or no node ID in ctx) AnnotateOld
-// is a no-op, matching the Info/Warn/Error convention.
-func AnnotateOld(ctx context.Context, msg string) {
-	if NodeFromContext(ctx) == "" {
-		return
-	}
-	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
-		TS:    time.Now(),
-		Level: "info",
-		JobID: NodeFromContext(ctx),
-		Event: EventNodeAnnotation,
-		Msg:   msg,
-		Attrs: map[string]any{"message": msg},
-	}))
-}
-
-// EventNodeAnnotation is the LogRecord.Event value emitted by
-// AnnotateOld. Persistence layers observing the log stream should
-// dispatch on this constant rather than the raw string.
-const EventNodeAnnotation = "node_annotation"
-
-// Summary records a persistent markdown run summary on the
-// currently-executing Job or Step. Unlike AnnotateOld, which appends a
-// short scannable line, Summary stores a larger overwrite-on-write
-// markdown blob.
-//
-// Multiple calls within the same scope keep only the last value: the
-// later call replaces the earlier one. Summaries fired inside a step
-// body land on that step's row; summaries fired between steps (or
-// before any step starts) land on the node row. Outside a node
-// context (no logger installed, or no node ID in ctx) Summary is a
-// no-op, matching the Info/Warn/Error convention.
-//
-// The markdown is stored opaquely; the dashboard sanitizes and
-// renders later.
+// Summary emits markdown for the active job or step. The host masks and
+// bounds the record before storing it.
 func Summary(ctx context.Context, markdown string) {
-	if NodeFromContext(ctx) == "" {
+	if nodeFromContext(ctx) == "" {
 		return
 	}
-	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
+	loggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
 		TS:    time.Now(),
 		Level: "info",
-		JobID: NodeFromContext(ctx),
-		Event: EventNodeSummary,
+		JobID: nodeFromContext(ctx),
+		Event: eventSummary,
 		Msg:   markdown,
 		Attrs: map[string]any{"markdown": markdown},
 	}))
 }
 
-// EventNodeSummary is the LogRecord.Event value emitted by Summary.
-// Persistence layers observing the log stream should dispatch on
-// this constant rather than the raw string. Overwrite-on-write
-// semantics: the last record per (node, step) scope wins.
-const EventNodeSummary = "node_summary"
-
-// Per-step lifecycle events. Emitted by the Work-runner before / after
-// each step body. EventStepSkipped fires for skipIf / dry-run guards
-// that short-circuit the step before its body runs. EventWorkFailFast
-// summarizes the decisive failure and sibling cancellation latency.
-const (
-	EventStepStart    = "step_start"
-	EventStepEnd      = "step_end"
-	EventStepSkipped  = "step_skipped"
-	EventWorkFailFast = "work_fail_fast"
-)
+const eventSummary = "summary"
 
 func emitLevel(ctx context.Context, level, format string, args ...any) {
-	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
+	loggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
 		TS:    time.Now(),
 		Level: level,
-		JobID: NodeFromContext(ctx),
+		JobID: nodeFromContext(ctx),
 		Msg:   fmt.Sprintf(format, args...),
 	}))
 }
