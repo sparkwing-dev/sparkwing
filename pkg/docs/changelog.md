@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+- **storage (Breaking):** Run and team log cleanup uses the shared filesystem
+  or S3 backend, including retired retention classes and late signed uploads.
+  Removed `fs.ArtifactStore.PutIfAbsent`, `Delete` and conditional-write locks.
+  See [migration steps](docs/migrations/_unreleased.md#filesystem-object-writes-use-signed-transfers).
+
 - **storage (Breaking):** Standalone controllers configure the shared filesystem
   data backend and signed transfer routes. Removed the older filesystem output
   signer, output routes, raw log adapter and `Server.WithOutputSignKey`. See

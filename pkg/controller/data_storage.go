@@ -44,3 +44,14 @@ func (s *Server) maintainDataObjects(ctx context.Context, lease store.SingletonL
 	}
 	return nil
 }
+
+func (s *Server) deleteDataLogs(ctx context.Context, team store.Team, run string) (int64, error) {
+	if s.data == nil || s.data.Objects == nil {
+		return 0, nil
+	}
+	objects, ok := s.data.Objects.(blob.LogDeleter)
+	if !ok {
+		return 0, fmt.Errorf("data backend cannot delete logs")
+	}
+	return objects.DeleteLogs(ctx, string(team), run)
+}

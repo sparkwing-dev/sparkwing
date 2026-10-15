@@ -3,9 +3,7 @@
 type ArtifactStore struct {
 	Root string
 }
-func (s *ArtifactStore) Delete(_ context.Context, key string) error
 func (s *ArtifactStore) Get(_ context.Context, key string) (io.ReadCloser, error)
 func (s *ArtifactStore) List(_ context.Context, prefix string) ([]string, error)
-func (s *ArtifactStore) PutIfAbsent(ctx context.Context, key string, r io.Reader) error
 func (s *ArtifactStore) Usage(ctx context.Context) (storage.StoreUsage, error)
 func NewArtifactStore(root string) (*ArtifactStore, error)

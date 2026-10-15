@@ -1,5 +1,16 @@
 # Migrating to the next release
 
+## Filesystem object writes use signed transfers
+
+`fs.ArtifactStore.PutIfAbsent` and `Delete` are removed with the old sharded
+writer and its conditional-write locks. Use the shared signed-data backend for
+object writes and the controller for log deletion. Read-only fixture objects
+and filesystem usage measurement remain. No object conversion is provided.
+
+Run deletion and team purge/recheck use the configured common backend to remove
+logs across stored retention classes. They leave CAS objects to reachability
+collection. Authenticated log and host bindings remain integration work.
+
 ## Filesystem transfers use the shared data backend
 
 The standalone controller opens its filesystem data backend under its home

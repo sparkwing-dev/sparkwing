@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -341,35 +339,8 @@ func (s *Server) recheckTeam(ctx context.Context, team store.Team, now time.Time
 }
 
 func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team) error {
-	if objs := s.logObjects(); objs != nil {
-		classes, err := s.teamLogClasses(ctx, objs, team)
-		if err != nil {
-			return err
-		}
-		for _, class := range classes {
-			prefix := blob.LogClassPrefix(class) + "teams/" + string(team) + "/"
-			if _, err := objs.deletePrefix(ctx, prefix); err != nil {
-				return fmt.Errorf("delete the team's log segments under %s: %w", prefix, err)
-			}
-		}
-	}
-	return nil
-}
-
-// safety: an attempt keeps the class it was written under, so a class the operator has since retired still holds
-// logs; the store's own class directories name it even once the configuration and the team's records no longer do.
-func (s *Server) teamLogClasses(ctx context.Context, objs logObjectStore, team store.Team) ([]string, error) {
-	classes := s.logClasses()
-	held, err := objs.classes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list the log retention classes: %w", err)
-	}
-	for _, class := range held {
-		if _, valid := blob.LogClassDays(class); valid && !slices.Contains(classes, class) {
-			classes = append(classes, class)
-		}
-	}
-	return classes, nil
+	_, err := s.deleteDataLogs(ctx, team, "")
+	return err
 }
 
 // safety: An unsettled checkout or dispute hold blocks account deletion until money is resolved.

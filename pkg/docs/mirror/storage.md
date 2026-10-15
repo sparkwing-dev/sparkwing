@@ -127,6 +127,14 @@ and host bindings.
 Both backends open exact log keys for this reader. The S3 backend checks response
 lengths against the segment or manifest bound before returning a stream.
 
+Run deletion and team purges use the configured physical data backend to remove
+logs across stored retention classes, including retired classes. The team recheck
+also removes logs uploaded through a still-valid URL after the first purge.
+Scoped deletion leaves other tenants, other runs and CAS objects untouched.
+Object listings select physical cleanup only and grant no read authority.
+The old sharded filesystem writer and its conditional-write locks are removed.
+Read-only fixtures and deployment usage measurement remain.
+
 Physical log keys have one owner in `internal/blob`. Signed slots use
 `LogObjectKey`: zero names the final manifest and positive indexes name immutable
 segments. The physical uploader-to-store proofs use real tenant segment commits

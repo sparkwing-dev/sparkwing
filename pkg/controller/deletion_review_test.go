@@ -2,46 +2,13 @@ package controller_test
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-// A log upload URL issued before the deletion stays valid after the purge
-// and can write the team's logs again, so the recheck deletes them too.
-func TestTeamDeletionDeletesLogsAgainAfterUploadURLsLapse(t *testing.T) {
-	f := newDeletionFixture(t)
-	f.store.SetOutputDir(t.TempDir())
-	objs, err := fs.NewArtifactStore(f.store.OutputDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	owner := f.user("o", "olga@example.com")
-	f.createTeam(&owner, "acme")
-	if code := f.call("DELETE", "/api/v1/team", owner.auth, map[string]string{"confirm_slug": "acme"}, nil); code != http.StatusAccepted {
-		t.Fatalf("delete = %d", code)
-	}
-	ctx := context.Background()
-	start := time.Now()
-	f.srv.ProcessTeamDeletions(ctx, start.Add(5*time.Minute))
-	key := blob.LogSegmentKey("logs/"+logseg.ClassStandard+"/teams/acme/runs/run-1/a/a1-g1/", 1)
-	if err := objs.PutIfAbsent(ctx, key, strings.NewReader("written through a URL issued before the purge")); err != nil {
-		t.Fatal(err)
-	}
-	f.srv.ProcessTeamDeletions(ctx, start.Add(8*time.Hour))
-	if _, err := objs.Get(ctx, key); !errors.Is(err, storage.ErrNotFound) {
-		t.Fatalf("a log written after the purge survives the recheck: %v", err)
-	}
-}
 
 // Another replica may still accept a revoked token from its cache, so the
 // purge waits out at least twice that cache's lifetime.

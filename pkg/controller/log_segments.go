@@ -41,11 +41,8 @@ var errLogsUnavailable = errors.New("this controller has no log object store")
 type logObjectStore interface {
 	logseg.Objects
 	putIfAbsent(ctx context.Context, key string, body []byte) error
-	deletePrefix(ctx context.Context, prefix string) (int64, error)
 	// safety: the URL accepts only a body of exactly size bytes whose base64 MD5 is contentMD5.
 	presignPut(ctx context.Context, r *http.Request, team store.Team, key string, size int64, contentMD5 string) (string, map[string]string, error)
-	// safety: classes are read from the store, not the configuration, so a retired class's logs stay reachable.
-	classes(ctx context.Context) ([]string, error)
 }
 
 func (s *Server) logObjects() logObjectStore {
@@ -72,55 +69,6 @@ func (o s3LogObjects) List(ctx context.Context, prefix string) ([]string, error)
 
 func (o s3LogObjects) putIfAbsent(ctx context.Context, key string, body []byte) error {
 	return sealedOnConflict(o.objs.PutIfAbsent(ctx, key, bytes.NewReader(body)))
-}
-
-// safety: the listing carries each object's size, so the bytes reported are the ones removed, which is what a
-// prune counts against a team's overage.
-func (o s3LogObjects) deletePrefix(ctx context.Context, prefix string) (int64, error) {
-	root := o.d.prefix + "/"
-	var deleted int64
-	var errs []error
-	var token *string
-	for {
-		page, err := o.d.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-			Bucket: aws.String(o.d.bucket), Prefix: aws.String(root + prefix), ContinuationToken: token,
-		})
-		if err != nil {
-			return deleted, errors.Join(append(errs, err)...)
-		}
-		for _, obj := range page.Contents {
-			if err := o.objs.Delete(ctx, strings.TrimPrefix(aws.ToString(obj.Key), root)); err != nil {
-				errs = append(errs, err)
-				continue
-			}
-			deleted += aws.ToInt64(obj.Size)
-		}
-		if !aws.ToBool(page.IsTruncated) {
-			return deleted, errors.Join(errs...)
-		}
-		token = page.NextContinuationToken
-	}
-}
-
-func (o s3LogObjects) classes(ctx context.Context) ([]string, error) {
-	root := o.d.prefix + "/logs/"
-	var out []string
-	var token *string
-	for {
-		page, err := o.d.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-			Bucket: aws.String(o.d.bucket), Prefix: aws.String(root), Delimiter: aws.String("/"), ContinuationToken: token,
-		})
-		if err != nil {
-			return nil, err
-		}
-		for _, p := range page.CommonPrefixes {
-			out = append(out, strings.TrimSuffix(strings.TrimPrefix(aws.ToString(p.Prefix), root), "/"))
-		}
-		if !aws.ToBool(page.IsTruncated) {
-			return out, nil
-		}
-		token = page.NextContinuationToken
-	}
 }
 
 func (o s3LogObjects) presignPut(ctx context.Context, _ *http.Request, _ store.Team, key string, size int64, contentMD5 string) (string, map[string]string, error) {

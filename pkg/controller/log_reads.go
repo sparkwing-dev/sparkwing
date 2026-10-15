@@ -9,8 +9,6 @@ import (
 	"io"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
-
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
@@ -317,39 +315,4 @@ func (l segmentLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID stri
 		}
 	}
 	return log.Completeness(node, now), true, nil
-}
-
-// safety: the records are the only index of a run's segments, so they go only after every object did.
-// It returns the bytes it removed.
-func (s *Server) deleteRunSegments(ctx context.Context, objs logObjectStore, team store.Team, runID string) (int64, error) {
-	recs, err := s.store.RunNodeLogs(ctx, team, runID)
-	if err != nil {
-		return 0, err
-	}
-	if objs == nil {
-		if len(recs) > 0 {
-			return 0, errLogsUnavailable
-		}
-		return 0, nil
-	}
-	var deleted int64
-	for _, rec := range recs {
-		n, err := objs.deletePrefix(ctx, rec.Prefix)
-		deleted += n
-		if err != nil {
-			return deleted, err
-		}
-	}
-	for _, class := range s.logClasses() {
-		prefix, err := blob.LogRunPrefix(class, string(team), runID)
-		if err != nil {
-			return deleted, err
-		}
-		n, err := objs.deletePrefix(ctx, prefix)
-		deleted += n
-		if err != nil {
-			return deleted, err
-		}
-	}
-	return deleted, s.store.DeleteRunNodeLogs(ctx, team, runID)
 }

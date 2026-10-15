@@ -140,7 +140,7 @@ func (r *launchedRun) host(t *testing.T, nodeID string) (token string, err error
 	return token, runLaunchedNode(ctx, r.url, r.runID, nodeID, token, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
-func (r *launchedRun) objects(t *testing.T) storage.ArtifactStore {
+func (r *launchedRun) objects(t *testing.T) logseg.Objects {
 	t.Helper()
 	objs, err := fs.NewArtifactStore(r.st.OutputDir())
 	if err != nil {

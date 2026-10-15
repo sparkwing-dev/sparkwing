@@ -1,9 +1,7 @@
 package fs_test
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -44,12 +42,6 @@ func TestArtifactStore_RejectsPathEscapingKeys(t *testing.T) {
 			if _, err := as.Get(ctx, tc.key); err == nil {
 				t.Error("Get succeeded")
 			}
-			if err := as.Delete(ctx, tc.key); err == nil {
-				t.Error("Delete succeeded")
-			}
-			if err := as.PutIfAbsent(ctx, tc.key, bytes.NewReader([]byte("owned"))); err == nil {
-				t.Error("PutIfAbsent succeeded")
-			}
 		})
 	}
 
@@ -66,28 +58,5 @@ func TestArtifactStore_RejectsPathEscapingKeys(t *testing.T) {
 	}
 	if len(entries) != 2 {
 		t.Fatalf("rejected keys created entries outside the store root: %v", entries)
-	}
-}
-
-func TestArtifactStore_AcceptsRealKeys(t *testing.T) {
-	as, err := fs.NewArtifactStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-
-	for _, key := range []string{"a", "ab", "abcd1234", "runs/r1/state.ndjson", "bin/some-key"} {
-		if err := as.PutIfAbsent(ctx, key, bytes.NewReader([]byte(key))); err != nil {
-			t.Fatalf("Put %q: %v", key, err)
-		}
-		rc, err := as.Get(ctx, key)
-		if err != nil {
-			t.Fatalf("Get %q: %v", key, err)
-		}
-		got, _ := io.ReadAll(rc)
-		rc.Close()
-		if string(got) != key {
-			t.Fatalf("Get %q = %q", key, got)
-		}
 	}
 }

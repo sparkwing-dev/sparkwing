@@ -323,6 +323,16 @@ marking. The controller's age-based output pruner and the bucket measurement
 expiry callback are removed. The maintenance coordinator must bind the final
 physical backend before collecting objects.
 
+`blob.LogDeleter.DeleteLogs(ctx, team, run)` removes physical logs in the selected
+tenant across stored retention classes. An empty run selects that tenant's logs.
+Both common backends implement it and return the removed byte count. Invalid
+selectors fail before I/O. Filesystem traversal follows no symlink. S3 deletion
+checks each listed key against the selected prefix and rejects stalled pages.
+Neither backend removes CAS objects through this operation. Run deletion and
+the team's leased purge/recheck call it through the configured data backend
+before removing rows. Listings establish no record or read authority.
+This is a W7-local contract addition. Authenticated log bindings remain with W2.
+
 `internal/teamblob` retains scoped key construction and team validation for
 legacy S3 output reads. Its cache byte/multipart APIs, prefix deletion,
 directory listing, measurement and write breaker are removed. Deployment

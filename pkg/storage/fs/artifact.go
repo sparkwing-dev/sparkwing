@@ -1,4 +1,4 @@
-// Package fs stores immutable raw log objects and measures filesystem usage.
+// Package fs reads filesystem objects and measures filesystem usage.
 package fs
 
 import (
@@ -6,19 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand/v2"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
-// ArtifactStore is a content-addressed blob store under Root. The
-// on-disk path is a 2-char shard prefix followed by the rest of the
-// key, so 100K-blob trees don't blow up any one directory.
+// ArtifactStore reads sharded fixture objects and reports filesystem usage.
 type ArtifactStore struct {
 	Root string
 }
@@ -34,8 +30,6 @@ func NewArtifactStore(root string) (*ArtifactStore, error) {
 	}
 	return &ArtifactStore{Root: root}, nil
 }
-
-var _ storage.ArtifactStore = (*ArtifactStore)(nil)
 
 // safety: keys arrive from HTTP path segments, so a key is validated and
 // its shard join confirmed inside the root before any filesystem call.
@@ -86,61 +80,6 @@ func (s *ArtifactStore) Get(_ context.Context, key string) (io.ReadCloser, error
 	return f, nil
 }
 
-func writeThroughRoot(root *os.Root, rel string, r io.Reader) error {
-	dir := filepath.Dir(rel)
-	if err := root.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	tmp, tmpRel, err := createTemp(root, dir)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(tmp, r); err != nil {
-		_ = tmp.Close()
-		_ = root.Remove(tmpRel)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = root.Remove(tmpRel)
-		return err
-	}
-	if err := root.Rename(tmpRel, rel); err != nil {
-		_ = root.Remove(tmpRel)
-		return err
-	}
-	return nil
-}
-
-func createTemp(root *os.Root, dir string) (*os.File, string, error) {
-	for range 1000 {
-		// #nosec G404 -- a candidate name; the exclusive create, not the generator, keeps it unique
-		name := filepath.Join(dir, ".put-"+strconv.FormatUint(rand.Uint64(), 36))
-		f, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
-		if err == nil {
-			return f, name, nil
-		}
-		if !errors.Is(err, os.ErrExist) {
-			return nil, "", err
-		}
-	}
-	return nil, "", errors.New("fs: no free temp file name")
-}
-
-func (s *ArtifactStore) Delete(_ context.Context, key string) error {
-	root, rel, err := s.openRoot(key)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("fs delete %s: %w", key, err)
-	}
-	defer func() { _ = root.Close() }()
-	if err := root.Remove(rel); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("fs delete %s: %w", key, err)
-	}
-	return nil
-}
-
 // List walks Root and returns every blob whose logical key starts
 // with prefix. The on-disk shard segment is stripped so callers see
 // the same stored keyspace.
@@ -154,7 +93,7 @@ func (s *ArtifactStore) List(_ context.Context, prefix string) ([]string, error)
 			return walkErr
 		}
 		if d.IsDir() {
-			if rel, relErr := filepath.Rel(s.Root, path); relErr == nil && rel == casLockDir {
+			if rel, relErr := filepath.Rel(s.Root, path); relErr == nil && rel == ".cas-locks" {
 				return filepath.SkipDir
 			}
 			return nil
@@ -204,7 +143,7 @@ func (s *ArtifactStore) Usage(ctx context.Context) (storage.StoreUsage, error) {
 			return walkErr
 		}
 		if d.IsDir() {
-			if rel, relErr := filepath.Rel(s.Root, path); relErr == nil && rel == casLockDir {
+			if rel, relErr := filepath.Rel(s.Root, path); relErr == nil && rel == ".cas-locks" {
 				return filepath.SkipDir
 			}
 			return nil

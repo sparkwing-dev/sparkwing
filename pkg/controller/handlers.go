@@ -1444,7 +1444,7 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 	}
 	// safety: the run's log records are the only index of its segments, so
 	// the segments go first.
-	if _, err := s.deleteRunSegments(r.Context(), s.logObjects(), tenant.Team(), id); err != nil {
+	if _, err := s.deleteDataLogs(r.Context(), tenant.Team(), id); err != nil {
 		s.writeInternalError(w, r, "delete the run's log segments", err)
 		return
 	}

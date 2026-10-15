@@ -2,6 +2,42 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+## From W7 scoped physical log deletion
+
+**Completed W7 cleanup construction.** Run deletion and team purge/recheck now
+use the configured common backend's `blob.LogDeleter.DeleteLogs`. Filesystem
+and S3 remove the selected tenant/run across stored classes, including retired
+classes, without consulting legacy node-log tables. Invalid selectors fail before
+I/O. Filesystem traversal follows no symlink. S3 validates listed keys and
+pagination. Listings grant no read or record authority. This is a W7-local
+contract addition. The existing deletion lease still belongs to the controller.
+
+Removed the old controller prefix deleter and class-listing adapter. Removed
+the unused sharded filesystem writer, Delete method, conditional-write locks
+and obsolete writer tests. The read-only filesystem fixture/measurement paths
+remain. The pod-host fixture now asks only for `logseg.Objects`. No new
+acceptance cell or native skip change was added.
+
+Ported competing-writer immutability to signed common-backend transfers and
+late-upload purge to the registered physical router. Generated filesystem and
+S3 properties cover tenant/run separation, retired classes, replay and CAS
+preservation. These prove physical cleanup, not the unfinished authentication
+or final-schema team-deletion workflow. The replaced fixture failed while
+creating a removed `tokens` row.
+
+**W1b record mutation redesign remains open.** The existing
+`TestBlobRecordsMutationCannotOutliveAuthority` still fails all six
+CommitRecord/CopyMemo lease/leaf/ancestor expiry cases. W7 changed no part of
+that mechanism. The approved transaction-local redesign below remains W1b's.
+
+**Remaining W1b/W2/W3/W8/W9 joins.** Authenticated DataAuthority, BindData,
+NewDataClient and PolicyRouter remain stubs. Bound LogTransport and
+SegmentRecorder construction and the segment-commit wire operation are still
+missing. Expired staging needs its leased store contract. Hosts and wingd need
+fresh storage construction. Legacy S3 output/log handlers, clients and
+store-local output/read paths remain live and are unfinished hard cuts.
+See [w7-storage-report.md](w7-storage-report.md).
+
 ## From W7 filesystem startup and transport cut
 
 **Completed W7 filesystem construction.** A standalone controller without the
