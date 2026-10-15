@@ -145,7 +145,11 @@ attempt, generation, current credential ancestry/expiry/membership and absence
 of a newer claim. After sealing, only an identical final commit may replay.
 Owner-unit liveness stays separate; eval gains no job-attempt grace exception.
 `LogTransport.SignSegments` derives object keys and retention from the authorized
-subject and run. `ReadLogSegments` and `LogTransport.ReadLog` reauthorize the same
+subject and run. Each segment URL includes its required `Headers`; the final
+manifest uses `ManifestURL` and `ManifestHeaders`. Storage transports must send
+those headers, including S3's signed create-only condition. HTTP 412 proves only
+that the key exists and cannot authorize a commit or an identical replay.
+`ReadLogSegments` and `LogTransport.ReadLog` reauthorize the same
 subject, proxy bytes through the controller, meter egress and apply the log
 exception to download caps. Persisted segments fill gaps or stalls in the ring.
 

@@ -20,7 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-type filesystemLogFixture struct {
+type logDataFixture struct {
 	signer    logseg.BatchSigner
 	reader    logseg.CommittedReader
 	view      store.LogSegments
@@ -29,12 +29,12 @@ type filesystemLogFixture struct {
 	actor     store.Actor
 }
 
-func (f *filesystemLogFixture) SignSegments(ctx context.Context, req blob.LogSigningRequest) (blob.LogUploadBatch, error) {
+func (f *logDataFixture) SignSegments(ctx context.Context, req blob.LogSigningRequest) (blob.LogUploadBatch, error) {
 	f.signs++
 	return f.signer.Sign(ctx, req, "r90")
 }
 
-func (f *filesystemLogFixture) ReadLog(ctx context.Context, req blob.LogReadRequest) (io.ReadCloser, error) {
+func (f *logDataFixture) ReadLog(ctx context.Context, req blob.LogReadRequest) (io.ReadCloser, error) {
 	var out bytes.Buffer
 	_, err := f.reader.Read(ctx, f.actor, req, &out)
 	if err != nil {
@@ -43,7 +43,7 @@ func (f *filesystemLogFixture) ReadLog(ctx context.Context, req blob.LogReadRequ
 	return io.NopCloser(&out), nil
 }
 
-func (f *filesystemLogFixture) RecordSegments(_ context.Context, commit store.SegmentCommit) error {
+func (f *logDataFixture) RecordSegments(_ context.Context, commit store.SegmentCommit) error {
 	if f.commitErr != nil {
 		return f.commitErr
 	}
@@ -62,7 +62,7 @@ func (f *filesystemLogFixture) RecordSegments(_ context.Context, commit store.Se
 	return nil
 }
 
-func (f *filesystemLogFixture) ReadLogSegments(_ context.Context, actor store.Actor, req blob.LogReadRequest) (store.LogSegments, error) {
+func (f *logDataFixture) ReadLogSegments(_ context.Context, actor store.Actor, req blob.LogReadRequest) (store.LogSegments, error) {
 	if !reflect.DeepEqual(req.Subject, f.view.Subject) || actor != f.actor {
 		return store.LogSegments{}, blob.ErrDigestNotReadable
 	}
@@ -77,14 +77,14 @@ func (t handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return response.Result(), nil
 }
 
-func bindFilesystemLogs(t *testing.T, subject blob.LogSubject) (*filesystemLogFixture, *blob.Filesystem, logseg.Data) {
+func bindFilesystemLogs(t *testing.T, subject blob.LogSubject) (*logDataFixture, *blob.Filesystem, logseg.Data) {
 	t.Helper()
 	backend, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.test/objects", SigningKey: []byte(strings.Repeat("x", 32))})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = backend.Close() })
-	f := &filesystemLogFixture{view: store.LogSegments{Subject: subject}, actor: store.Actor{Holder: "writer", Generation: 7}}
+	f := &logDataFixture{view: store.LogSegments{Subject: subject}, actor: store.Actor{Holder: "writer", Generation: 7}}
 	f.signer = logseg.BatchSigner{Objects: backend, ClassReady: func(_ context.Context, class string) error {
 		if class != "r90" {
 			return errors.New("missing lifecycle rule")

@@ -62,14 +62,18 @@ func (s *S3) Sign(ctx context.Context, object capability.ObjectToSign) (capabili
 	if err != nil {
 		return capability.SignedObject{}, err
 	}
-	headers := make(map[string]string, len(signed.SignedHeader))
-	for k, values := range signed.SignedHeader {
+	return capability.SignedObject{URL: signed.URL, Headers: signedHeaders(signed.SignedHeader), Size: object.Size, SHA256: object.SHA256, ExpiresAt: object.ExpiresAt}, nil
+}
+
+func signedHeaders(signed http.Header) map[string]string {
+	headers := make(map[string]string, len(signed))
+	for k, values := range signed {
 		// safety: the URL supplies Host; net/http ignores a Host header map entry.
 		if !strings.EqualFold(k, "Host") {
 			headers[k] = strings.Join(values, ",")
 		}
 	}
-	return capability.SignedObject{URL: signed.URL, Headers: headers, Size: object.Size, SHA256: object.SHA256, ExpiresAt: object.ExpiresAt}, nil
+	return headers
 }
 
 func (s *S3) head(ctx context.Context, key string, expected Blob) (*s3.HeadObjectOutput, error) {

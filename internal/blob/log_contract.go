@@ -90,20 +90,23 @@ type LogSigningRequest struct {
 }
 
 // LogUploadURL permits a PUT to one segment; it grants no read authority.
+// Headers must accompany the PUT, including signed create-only conditions.
 type LogUploadURL struct {
-	Index     int64     `json:"index"`
-	URL       string    `json:"url"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Index     int64             `json:"index"`
+	URL       string            `json:"url"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	ExpiresAt time.Time         `json:"expires_at"`
 }
 
 // LogUploadBatch uses the configured log batch limit and 15-minute PUT lifetime.
 // Signing refuses retention classes without a configured lifecycle rule.
 type LogUploadBatch struct {
-	Subject        LogSubject     `json:"subject"`
-	Segments       []LogUploadURL `json:"segments"`
-	ManifestURL    string         `json:"manifest_url"`
-	ExpiresAt      time.Time      `json:"expires_at"`
-	RetentionClass string         `json:"retention_class"`
+	Subject         LogSubject        `json:"subject"`
+	Segments        []LogUploadURL    `json:"segments"`
+	ManifestURL     string            `json:"manifest_url"`
+	ManifestHeaders map[string]string `json:"manifest_headers,omitempty"`
+	ExpiresAt       time.Time         `json:"expires_at"`
+	RetentionClass  string            `json:"retention_class"`
 }
 
 // LogReadRequest resumes by byte offset within exactly one subject and generation.

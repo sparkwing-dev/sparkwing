@@ -134,7 +134,7 @@ func (u *SubjectUploader) PutSegment(ctx context.Context, seg Segment, body []by
 	}
 	u.pending = &seg
 	slot := u.batch.Segments[int64(seg.N)-u.batch.Segments[0].Index]
-	if err := u.put(ctx, slot.URL, slot.ExpiresAt, body); err != nil {
+	if err := u.put(ctx, slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {
 		return err
 	}
 	record := store.Segment{Index: int64(seg.N), Offset: u.bytes, Size: seg.Bytes, Digest: seg.SHA256, ObjectKey: SegmentKey(u.prefix, seg.N)}
@@ -208,7 +208,7 @@ func validLogURL(raw string) bool {
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.User == nil && u.Fragment == ""
 }
 
-func (u *SubjectUploader) put(ctx context.Context, url string, expiry time.Time, body []byte) error {
+func (u *SubjectUploader) put(ctx context.Context, url string, headers map[string]string, expiry time.Time, body []byte) error {
 	ctx, cancel := context.WithDeadline(ctx, expiry)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
@@ -216,7 +216,7 @@ func (u *SubjectUploader) put(ctx context.Context, url string, expiry time.Time,
 	}
 	sum := sha256.Sum256(body)
 	reader := bytes.NewReader(body)
-	response, err := u.data.HTTPClient.Transfer(ctx, blob.SignedTransfer{URL: url, ExpiresAt: expiry, Size: int64(len(body)), Digest: blob.Digest(hex.EncodeToString(sum[:]))}, reader)
+	response, err := u.data.HTTPClient.Transfer(ctx, blob.SignedTransfer{URL: url, Headers: headers, ExpiresAt: expiry, Size: int64(len(body)), Digest: blob.Digest(hex.EncodeToString(sum[:]))}, reader)
 	if response != nil {
 		err = errors.Join(err, response.Close())
 	}
@@ -284,7 +284,7 @@ func (u *SubjectUploader) PutManifest(ctx context.Context, m Manifest) error {
 	}
 	// safety: retain the first final payload even after an uncertain PUT so retries cannot overwrite it.
 	u.final = bytes.Clone(raw)
-	if err := u.put(ctx, u.batch.ManifestURL, u.batch.ExpiresAt, raw); err != nil {
+	if err := u.put(ctx, u.batch.ManifestURL, u.batch.ManifestHeaders, u.batch.ExpiresAt, raw); err != nil {
 		return err
 	}
 	var records []store.Segment

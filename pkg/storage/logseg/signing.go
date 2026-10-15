@@ -9,10 +9,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
-// LogPutSigner issues PUT-only URLs to server-derived log keys. Implementations
-// must preserve existing bytes and permit only identical upload retries.
+// LogPutSigner issues PUT-only URLs and their required headers to server-derived
+// log keys. Existing bytes must be preserved. A precondition failure grants no
+// proof that the object matches the retried payload.
 type LogPutSigner interface {
-	SignLogPut(context.Context, string, time.Time) (string, error)
+	SignLogPut(context.Context, string, time.Time) (string, map[string]string, error)
 }
 
 // BatchSigner assembles storage URLs after controller authorization. ClassReady
@@ -54,13 +55,13 @@ func (s BatchSigner) Sign(ctx context.Context, request blob.LogSigningRequest, c
 			return blob.LogUploadBatch{}, err
 		}
 		index := request.FirstSegment + int64(i)
-		u, err := s.Objects.SignLogPut(ctx, SegmentKey(prefix, int(index)), batch.ExpiresAt)
+		u, headers, err := s.Objects.SignLogPut(ctx, SegmentKey(prefix, int(index)), batch.ExpiresAt)
 		if err != nil {
 			return blob.LogUploadBatch{}, err
 		}
-		batch.Segments = append(batch.Segments, blob.LogUploadURL{Index: index, URL: u, ExpiresAt: batch.ExpiresAt})
+		batch.Segments = append(batch.Segments, blob.LogUploadURL{Index: index, URL: u, Headers: headers, ExpiresAt: batch.ExpiresAt})
 	}
-	batch.ManifestURL, err = s.Objects.SignLogPut(ctx, ManifestKey(prefix), batch.ExpiresAt)
+	batch.ManifestURL, batch.ManifestHeaders, err = s.Objects.SignLogPut(ctx, ManifestKey(prefix), batch.ExpiresAt)
 	if err != nil {
 		return blob.LogUploadBatch{}, err
 	}

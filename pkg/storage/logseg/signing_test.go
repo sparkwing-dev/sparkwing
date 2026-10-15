@@ -19,10 +19,10 @@ type logPutSigner struct {
 	err     error
 }
 
-func (s *logPutSigner) SignLogPut(_ context.Context, key string, expiry time.Time) (string, error) {
+func (s *logPutSigner) SignLogPut(_ context.Context, key string, expiry time.Time) (string, map[string]string, error) {
 	s.keys = append(s.keys, key)
 	s.expires = append(s.expires, expiry)
-	return "https://objects.test/" + key, s.err
+	return "https://objects.test/" + key, map[string]string{"X-Object-Key": key}, s.err
 }
 
 func TestLogBatchSigning(t *testing.T) {
@@ -50,11 +50,11 @@ func TestLogBatchSigning(t *testing.T) {
 				}
 				for i, slot := range batch.Segments {
 					key := logseg.SegmentKey(prefix, 17+i)
-					if slot.Index != int64(17+i) || slot.URL != "https://objects.test/"+key || !slot.ExpiresAt.Equal(batch.ExpiresAt) || backend.keys[i] != key || !backend.expires[i].Equal(batch.ExpiresAt) {
+					if slot.Index != int64(17+i) || slot.URL != "https://objects.test/"+key || slot.Headers["X-Object-Key"] != key || !slot.ExpiresAt.Equal(batch.ExpiresAt) || backend.keys[i] != key || !backend.expires[i].Equal(batch.ExpiresAt) {
 						t.Fatalf("slot %d = %+v", i, slot)
 					}
 				}
-				if len(backend.keys) != 17 || backend.keys[16] != logseg.ManifestKey(prefix) || batch.ManifestURL != "https://objects.test/"+backend.keys[16] {
+				if len(backend.keys) != 17 || backend.keys[16] != logseg.ManifestKey(prefix) || batch.ManifestURL != "https://objects.test/"+backend.keys[16] || batch.ManifestHeaders["X-Object-Key"] != backend.keys[16] {
 					t.Fatalf("manifest = %q, keys = %v", batch.ManifestURL, backend.keys)
 				}
 				if batch.Subject.Attempt != nil {

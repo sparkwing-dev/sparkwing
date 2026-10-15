@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
@@ -32,6 +33,50 @@ type subjectFixture struct {
 	commitErr, transferErr, closeErr error
 	read                             blob.LogReadRequest
 }
+
+func TestSubjectUploaderSendsSignedHeaders(t *testing.T) {
+	f, data := newSubjectFixture(jobSubject())
+	f.changeBatch = func(batch *blob.LogUploadBatch) {
+		batch.ManifestHeaders = map[string]string{"If-None-Match": "*", "X-Object": "manifest"}
+		for i := range batch.Segments {
+			batch.Segments[i].Headers = map[string]string{"If-None-Match": "*", "X-Object": fmt.Sprint(batch.Segments[i].Index)}
+		}
+	}
+	var paths []string
+	data.HTTPClient = blob.TransferClient{Transport: logHTTPTransport(func(r *http.Request) (*http.Response, error) {
+		want := "1"
+		if r.URL.Path == "/manifest" {
+			want = "manifest"
+		}
+		if r.Method != http.MethodPut || r.Header.Get("If-None-Match") != "*" || r.Header.Get("X-Object") != want {
+			t.Fatalf("PUT lost signed headers: %s %s, %v", r.Method, r.URL.Path, r.Header)
+		}
+		raw, err := io.ReadAll(r.Body)
+		if err != nil || r.ContentLength != int64(len(raw)) {
+			t.Fatalf("PUT body = %d, content length = %d, %v", len(raw), r.ContentLength, err)
+		}
+		paths = append(paths, r.URL.Path)
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+	})}
+	u, err := logseg.NewSubjectUploader(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seg, body := subjectSegment(t, 1, "line\n")
+	if err := u.PutSegment(t.Context(), seg, body); err != nil {
+		t.Fatal(err)
+	}
+	if err := u.PutManifest(t.Context(), logseg.Manifest{Status: logseg.StatusComplete, Segments: []logseg.Segment{seg}}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(paths, []string{"/segment-1", "/manifest"}) || len(f.commits) != 2 || !f.commits[1].Final {
+		t.Fatalf("uploads = %v, commits = %+v", paths, f.commits)
+	}
+}
+
+type logHTTPTransport func(*http.Request) (*http.Response, error)
+
+func (f logHTTPTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func jobSubject() blob.LogSubject {
 	return blob.LogSubject{Kind: blob.LogJobAttempt, Team: "acme", RunID: "run-1", Attempt: &runspec.AttemptIdentity{Team: "acme", RunID: "run-1", NodeID: "build/linux", Attempt: 2, Generation: 7}}

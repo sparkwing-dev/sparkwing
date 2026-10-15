@@ -78,13 +78,20 @@ then copies with a source ETag fence and a destination create-only condition.
 Both backends verify an existing final object before adopting it on a retry.
 Filesystem reads remain subject to the client's EOF verification.
 
-The filesystem backend also exposes `SignLogPut` for the separate tagged-log
-upload path. These PUT-only slots expire after fifteen minutes and enforce the
-shared segment or manifest size bound. The first payload wins. An identical
-retry succeeds, and different bytes cannot replace it. This path reuses the
-filesystem signer and immutable writer. Its URLs grant no log download access.
+Both backends expose `SignLogPut` for the separate tagged-log upload path.
+It returns the URL and its required signed headers. These PUT-only slots expire
+after fifteen minutes and grant no log download access. The filesystem path
+enforces the shared segment or manifest size bound and reuses the immutable
+writer. The first payload wins, an identical retry succeeds, and different bytes
+cannot replace it.
+S3 signs `If-None-Match: *` because future slots have no known payload digest or
+length. The batch and uploader carry that header through the PUT. S3 refuses
+every existing object with HTTP 412, including an identical retry. The uploader
+returns that error without committing a segment or final manifest. Controller
+replay verification and upload admission for unknown future payloads still need
+integration. A precondition failure alone never proves matching bytes.
 `Get` opens a log object only for a controller-side authorized segment read.
-The S3 backend also opens exact log keys and refuses objects beyond the shared
+The S3 backend opens exact log keys and refuses objects beyond the shared
 segment or manifest size bound. The committed reader verifies each persisted
 segment before sending bytes. Missing or corrupt objects remain read failures.
 

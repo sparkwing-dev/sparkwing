@@ -23,20 +23,20 @@ import (
 // SignLogPut signs a bounded PUT to one server-derived log key. Writer authority
 // and the run's retention lifecycle must be checked before calling it. Unlike
 // data uploads, future batch slots have no known digest or length at signing.
-func (f *Filesystem) SignLogPut(ctx context.Context, key string, expiry time.Time) (string, error) {
+func (f *Filesystem) SignLogPut(ctx context.Context, key string, expiry time.Time) (string, map[string]string, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	limit, err := logObjectLimit(key)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	object := capability.ObjectToSign{Method: http.MethodPut, Key: key, Size: limit, ExpiresAt: expiry}
 	if err := validateFilesystemLog(object, f.now()); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	signed, err := f.signObject(object)
-	return signed.URL, err
+	return signed.URL, signed.Headers, err
 }
 
 func logObjectLimit(key string) (int64, error) {
