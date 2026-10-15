@@ -1596,5 +1596,9 @@ Go callers use `EnrollRunner` and `CreateServiceToken`. Member `CreateToken`
 accepts `Grants` and `ExpiresAt`; the old kind/principal/scopes/TTL request and
 Token/Metadata response fields are removed. Controller integrations retain the
 existing `WithCredentialIssuer` and C1 `ProvisionPolicy` transaction boundary.
-Missing origin policy refuses with `unavailable`. Production enrollment and
-console-origin persistence must be provided before enabling those flows.
+Machine and service enrollment use persisted root registrations by default.
+The store checks current authority, canonical registration selectors, repository
+patterns, pools, active names and the existing machine limit before commit.
+An active name returns `conflict`. The runner limit returns `quota_exceeded`.
+Bootstrap and Actions provisioning still require their trusted origin verifier.
+Console-origin persistence remains a separate integration.

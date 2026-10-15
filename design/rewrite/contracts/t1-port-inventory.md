@@ -19,6 +19,26 @@ pending. This adds no archived source-function port identity.
 
 # Acceptance test port inventory
 
+W1's persisted-enrollment continuation ports active-name uniqueness, team scope,
+reuse after revocation or expiry, rotation grace and concurrent mint limits to
+`TestMachineEnrollmentUsesStoreOrigin`, `TestMachineEnrollmentNameReuseProperty`,
+`TestMachineEnrollmentNamesAreTeamScoped` and
+`TestMachineEnrollmentSerializesNamesAndLimits`. These retain the concerns from
+`TestRunnerTokenRefusesADuplicateAgentName`, `TestAgentNameIsUniqueOnEveryMintPath`
+and `TestIdentityRunnerTokenCapHoldsUnderConcurrentMints`. Retired token-kind
+entry points remain pending their caller cut. Their old tests are retained.
+The final machine origin requires current team administration, as C2 specifies.
+
+`TestMachineEnrollmentAuthorityProperty` generates invalid registration, role,
+grant, repository, pool, data and name inputs even with a permissive extra policy.
+`TestEnrolledClaimRepositoryAncestryProperty` varies direct and delegated claims
+against allowed and foreign repositories. `CheckStoreEnrolledClaims` extends
+`placement-granted-identity-and-capacity/store-sqlite` with default store enrollment,
+profile reopening, filtered claims and persisted award ancestry. Its run and owner
+rows remain fixtures. The HTTP root proofs now use the production enrollment
+transaction. Bootstrap origin, provider proof, host observations and native
+placements remain separate integrations. No native cell is newly closed.
+
 The raw `RequeueUnstartedClaim` suite and its controller/orchestrator callers are
 retired. `TestOwnerUnstartedRecoveryFencesPriorAwardsProperty` varies initial
 generations, pending/running runs, runner/launcher owners and repeated recovery.

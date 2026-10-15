@@ -471,16 +471,17 @@ func TestCapabilityRotationRefusesWideningAndOriginLoss(t *testing.T) {
 					return errors.New("origin refused")
 				}))
 			}
-			if problem == "registration" {
-				s.SetProvisionPolicy(nil)
-			}
-			if problem == "missing_origin" {
+			if problem == "missing_origin" || problem == "registration" {
 				if err := s.inTx(t.Context(), func(tx *storeTx) error {
 					record, err := loadCapabilityRecordTx(t.Context(), tx, old.Capability.Prefix)
 					if err != nil {
 						return err
 					}
-					record.Origin = nil
+					if problem == "registration" {
+						record.Origin.RegistrationID = "runner:b:machine"
+					} else {
+						record.Origin = nil
+					}
 					body, err := json.Marshal(record)
 					if err != nil {
 						return err

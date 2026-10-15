@@ -26,6 +26,9 @@ func TestPlacement(t *testing.T) {
 		if err := acceptance.CheckStoreClaimMatching(t.Context(), t.TempDir()); err != nil {
 			t.Fatal(err)
 		}
+		if err := acceptance.CheckStoreEnrolledClaims(t.Context(), t.TempDir()); err != nil {
+			t.Fatal(err)
+		}
 	})
 	pendingScenarios(t, "placement")
 }

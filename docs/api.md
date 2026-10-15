@@ -35,6 +35,13 @@ GitHub Actions OIDC, browser CSRF/nonce or exact signed-object URL. A missing or
 invalid credential returns 401. A live credential without the route's authority
 returns 403. Resource conflicts use their canonical code, including `lock_held`.
 
+Machine enrollment at `POST /api/v1/runners` rechecks current team administration,
+repository patterns, reserved pools, the existing runner limit and active name
+uniqueness in the issuing transaction. Service issuance at
+`POST /api/v1/operator/tokens` rechecks deployment authority and active service
+names. Registration facts persist with the capability root. Machine claims retain
+every ancestor's repository restriction, including after delegation and rotation.
+
 ## Errors and retries
 
 HTTP errors use one envelope:

@@ -3635,6 +3635,7 @@ type UsageWeek struct {
 func UsageWeekStart(at time.Time) time.Time
 func ValidComputeLimit(name string) bool
 func ValidCreditGrantKind(kind string) bool
+func ValidRunnerName(name string) bool
 func ValidateEventKind(kind string) error
 func ValidateGitHubTagPatterns(patterns []string) error
 func ValidateRawToken(raw, kind string) error

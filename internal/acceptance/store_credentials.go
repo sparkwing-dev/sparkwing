@@ -49,7 +49,8 @@ func CheckStoreCredentialBoundary(ctx context.Context, root, id string) (err err
 		return err
 	}
 	operatorRef := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Capability.Prefix}
-	serviceSpec := capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "acceptance", Authority: &operatorRef, Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch, capability.OperatorTokens}, Metered: true}
+	s.SetProvisionPolicy(nil)
+	serviceSpec := capability.ProvisionSpec{Kind: capability.ProvisionService, RegistrationID: "service:launcher", Authority: &operatorRef, Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.ClaimsLaunch, capability.OperatorTokens}, Metered: true}
 	service, err := s.ProvisionCapability(ctx, serviceSpec)
 	if err != nil {
 		return err

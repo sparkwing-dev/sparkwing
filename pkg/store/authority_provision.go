@@ -30,11 +30,19 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 		}
 	}
 	if spec.Kind != capability.ProvisionMember && !(tx.rotatingRoot != nil && spec.Kind == capability.ProvisionBootstrap) {
-		if tx.store.provisions == nil {
+		enrollment := spec.Kind == capability.ProvisionMachine || spec.Kind == capability.ProvisionService
+		if tx.store.provisions == nil && !enrollment {
 			return capability.Capability{}, authorityError(apierr.Unavailable, "root origin verification is not configured")
 		}
-		if err := tx.store.provisions.AuthorizeProvision(ctx, tx, spec); err != nil {
-			return capability.Capability{}, err
+		if tx.store.provisions != nil {
+			if err := tx.store.provisions.AuthorizeProvision(ctx, tx, spec); err != nil {
+				return capability.Capability{}, err
+			}
+		}
+		if enrollment {
+			if err := authorizeEnrollmentTx(ctx, tx, spec); err != nil {
+				return capability.Capability{}, err
+			}
 		}
 		if err := checkProvisionOriginTx(ctx, tx, spec, true); err != nil {
 			return capability.Capability{}, err
@@ -90,11 +98,8 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 		}
 	case capability.ProvisionMachine:
 		account := spec.Authority != nil && c.Subject.Kind == capability.SubjectAccount && c.Team == spec.Team && c.Audience == capability.Controller && c.Binding.Kind == capability.BindingNone
-		if spec.Team == "" || spec.Subject.Kind != capability.SubjectMachine || spec.Binding.Kind != capability.BindingNone || (!account && !deployment) {
+		if spec.Team == "" || spec.Subject.Kind != capability.SubjectMachine || spec.Binding.Kind != capability.BindingNone || (!account && !deployment) || account && !slices.Contains(c.Grants, capability.TeamAdmin) {
 			return bindingRefusal()
-		}
-		if !deployment && len(spec.ReservedPools) != 0 && !slices.Contains(c.Grants, capability.TeamAdmin) {
-			return authorityError(apierr.Forbidden, "reserved pools require team administration")
 		}
 	case capability.ProvisionService:
 		if !deployment || spec.Team != "" || spec.Subject.Kind != capability.SubjectService || spec.Binding.Kind != capability.BindingNone || spec.Data != nil || len(spec.ReservedPools) != 0 || len(spec.Repositories) != 0 {

@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type rootIssuer struct {
@@ -226,6 +227,21 @@ func TestRootProvisioningHTTPExpiryAndCSRF(t *testing.T) {
 	}
 }
 
+func TestRootProvisioningHTTPEnrollmentConflicts(t *testing.T) {
+	for _, service := range []bool{false, true} {
+		for _, err := range []error{store.ErrAgentNameTaken, store.ErrRunnerTokenLimit} {
+			b, path, body := rootFixture(service)
+			issuer := &rootIssuer{err: err}
+			w := authorityHTTP(rootServer(b, issuer), b, "POST", path, body)
+			code := apierr.Conflict
+			if errors.Is(err, store.ErrRunnerTokenLimit) {
+				code = apierr.QuotaExceeded
+			}
+			assertEngineError(t, w, apierr.Status(code), code)
+		}
+	}
+}
+
 func TestRootProvisioningHTTPClaimGrantCeilings(t *testing.T) {
 	for _, service := range []bool{false, true} {
 		for _, grant := range capability.Grants {
@@ -268,20 +284,12 @@ func TestRootProvisioningHTTPCommitsThroughSoleIssuer(t *testing.T) {
 	body := `{"name":"builder","repos":["github.com/acme/*"],"reserved_pools":["trusted"]}`
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, f.request("POST", "/api/v1/runners", body))
-	assertEngineError(t, w, 503, apierr.Unavailable)
-	var seen []capability.ProvisionSpec
-	f.store.SetProvisionPolicy(actionsProvisionPolicy(func(spec capability.ProvisionSpec) error {
-		seen = append(seen, spec)
-		return nil
-	}))
-	w = httptest.NewRecorder()
-	h.ServeHTTP(w, f.request("POST", "/api/v1/runners", body))
 	var got struct{ Capability, Prefix string }
-	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Capability == "" || len(seen) != 1 {
+	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Capability == "" {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
 	p, err := f.store.LookupCapability(t.Context(), sha256.Sum256([]byte(got.Capability)))
-	if err != nil || p.Capability.Prefix != got.Prefix || p.Capability.Parent != nil || p.Capability.Subject != seen[0].Subject || p.Capability.Team != "team" || !reflect.DeepEqual(p.Capability.Repositories, seen[0].Repositories) || !reflect.DeepEqual(p.Capability.ReservedPools, seen[0].ReservedPools) || !reflect.DeepEqual(p.Capability.Grants, seen[0].Grants) {
+	if err != nil || p.Capability.Prefix != got.Prefix || p.Capability.Parent != nil || p.Capability.Subject != (capability.Subject{Kind: capability.SubjectMachine, ID: "builder"}) || p.Capability.Team != "team" || !reflect.DeepEqual(p.Capability.Repositories, []string{"github.com/acme/*"}) || !reflect.DeepEqual(p.Capability.ReservedPools, []string{"trusted"}) || !reflect.DeepEqual(p.Capability.Grants, []capability.Grant{capability.NodesClaim, capability.TriggersClaim}) {
 		t.Fatalf("root=%+v err=%v", p, err)
 	}
 	for _, status := range []int{403, 201} {
@@ -337,8 +345,7 @@ func TestRootProvisioningHTTPServiceCommitsThroughSoleIssuer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var seen []capability.ProvisionSpec
-	f.store.SetProvisionPolicy(actionsProvisionPolicy(func(spec capability.ProvisionSpec) error { seen = append(seen, spec); return nil }))
+	f.store.SetProvisionPolicy(nil)
 	h := f.server.Handler()
 	r := httptest.NewRequest("POST", "/api/v1/operator/tokens", strings.NewReader(`{"name":"launcher","grants":["claims.launch"]}`))
 	r.Header.Set("Authorization", "Bearer "+root.Raw)
@@ -346,8 +353,8 @@ func TestRootProvisioningHTTPServiceCommitsThroughSoleIssuer(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	var got struct{ Capability, Prefix, Team string }
-	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Capability == "" || got.Team != "" || len(seen) != 1 || seen[0].Authority == nil || seen[0].Authority.ID != root.Capability.Prefix {
-		t.Fatalf("HTTP %d %s origin=%+v", w.Code, w.Body.String(), seen)
+	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Capability == "" || got.Team != "" {
+		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
 	p, err := f.store.LookupCapability(t.Context(), sha256.Sum256([]byte(got.Capability)))
 	if err != nil || p.Capability.Prefix != got.Prefix || p.Capability.Parent != nil || p.Capability.Team != "" || p.Capability.Subject != (capability.Subject{Kind: capability.SubjectService, ID: "launcher"}) || !reflect.DeepEqual(p.Capability.Grants, []capability.Grant{capability.ClaimsLaunch}) {

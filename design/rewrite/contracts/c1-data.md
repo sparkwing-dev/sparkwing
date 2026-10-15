@@ -57,8 +57,8 @@ or new issuance variant exists.
 The SQLite credentials-delegation-subset/store-sqlite cell verifies inventory,
 root and descendant behavior, rotation and revocation through two reopenings.
 The real HTTP component uses the default Tenant manager with session proof and
-CSRF. Machine/service origin components use the declared ProvisionPolicy fake.
-Production enrollment policy, console sessions and native PostgreSQL remain
+CSRF. Machine/service enrollment uses persisted capability registrations by default.
+Console sessions, host observations and native PostgreSQL remain
 integration obligations.
 
 ## Controller result verification
@@ -273,6 +273,10 @@ These declarations leave transaction implementation with W1.
   a caller-selected runner name. Enrollment configuration and claim observation
   remain separate. No new registration table is required by this seam.
   `Store.ReadClaimProfile` gives controller adapters that same enrollment owner.
+  Without an injected resolver it reads the registered machine, service or Actions
+  root in the authentication snapshot. Machine acceptance comes from its persisted
+  canonical repository patterns. Capacity remains unknown until supplied as a host
+  observation. Self-claims still require their configured host observer.
   Transactional matching re-reads registered capacity before awarding work, so a
   stale controller observation cannot widen it. Unknown capacity retains the
   matcher's existing meaning.
@@ -289,10 +293,16 @@ These declarations leave transaction implementation with W1.
   issuance and does not become their lifetime or revocation parent. Current
   account membership still constrains each subsequent use.
 - `provision_contract.go` declares `ProvisionPolicy.AuthorizeProvision` for trusted
-  bootstrap, machine/service enrollment and verified Actions evidence. W2 installs
-  the policy before serving. It receives the issuing transaction's authority
-  resolver and the complete trusted `ProvisionSpec`. Missing verification refuses
-  issuance. The store rechecks current authorizer scope, expiry, root shape and
+  bootstrap and verified Actions evidence, and optional additional enrollment policy.
+  It receives the issuing transaction's authority resolver and trusted `ProvisionSpec`.
+  Bootstrap and Actions origins require that verifier. Machine/service enrollment
+  uses the existing capability rows and their persisted `CapabilityRecord.Origin`.
+  Current team administration, canonical registration selectors, claim-only machine
+  grants, deployment-only service grants, repository patterns, unique pools, active
+  names and the existing machine cap are checked inside the issuing transaction.
+  Team locks serialize machine enrollment. One advisory lock serializes service names.
+  Rotation preserves registration and counts overlapping grace roots as one machine.
+  An optional verifier cannot bypass these checks. The store rechecks authorizer scope, expiry, root shape and
   registered team after verification. Only deployment token authority can set
   metering or authorize service issuance. Provisioning never grants console
   authority. Machine enrollment records the account authorizer in `created_by`,
@@ -896,6 +906,11 @@ class and reserved pools with authenticated capability facts. Self-claims
 require this resolver because `ReconcileRequest` carries no machine observations.
 Named and queued claims still carry their observed labels and capacity in
 `UnitDemand`.
+
+Repository matching checks every capability ancestor. Canonical repository keys
+match exactly. Machine host/path patterns match the sealed repository display
+through the shared repository parser. Omitting a delegated repository list cannot
+remove an ancestor's restriction. Named and queued claims use the same check.
 
 Advisory runner discovery reads live unbound machine capabilities and rechecks
 their ancestry and current claim grants. `RecordAgentLabels` persists only
