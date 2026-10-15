@@ -1,13 +1,13 @@
 package nodehost
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -116,15 +116,16 @@ func memoHash(ctx context.Context, cfg *Config, n *NodeRun) (string, Result) {
 		if err := ask(kctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: id}, &er); err != nil {
 			return keyFailed(err)
 		}
-		if err := er.ValidateValue("memo_key"); err != nil {
+		value, err := evalValue(er, "memo_key")
+		if err != nil {
 			return keyFailed(err)
 		}
-		if len(er.Value) == 0 || string(er.Value) == "null" {
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
 			closureNote(log, LevelInfo, fmt.Sprintf("Memoize(%s) returned NoCache; memoization skipped", n.Plan.ID))
 			return Result{Outcome: sparkwing.Success}
 		}
-		if err := json.Unmarshal(er.Value, &hash); err != nil {
-			return keyFailed(hostError(apierr.ProtocolError, "cache_key %s returned %s, not a string or null", id, er.Value))
+		if err := json.Unmarshal(value, &hash); err != nil {
+			return keyFailed(err)
 		}
 		if hash == "" {
 			return keyFailed(errors.New("empty key"))

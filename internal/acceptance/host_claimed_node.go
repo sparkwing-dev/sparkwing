@@ -89,7 +89,10 @@ func CheckClaimedNodeLifecycle(t *testing.T) {
 				}
 				row := store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 2, Attempt: 4, SpecHash: "job-spec"}
 				s := &claimedHostStore{mode: mode, snapshot: store.RunSnapshot{Run: store.RunRow{ID: "run", Spec: &spec, PlanHash: ownerPlanHash, Plan: body}, Nodes: []store.NodeRow{row}}}
-				input := nodehost.NodeInput{Accepted: nodehost.AcceptedRun{RunID: "run", Spec: raw, SpecHash: "spec", PlanHash: ownerPlanHash, Plan: plan}, NodeID: "job", Generation: 2, Attempt: 4, SpecHash: "job-spec", Engine: engine.Resolved{Identity: identity}, Authority: nodehost.ClaimAuthority{Holder: "runner", CapabilityPrefix: "claim"}}
+				input, err := nodehost.NewNodeInput(nodehost.AcceptedRun{RunID: "run", Spec: raw, SpecHash: "spec", PlanHash: ownerPlanHash, Plan: plan}, row, engine.Resolved{Identity: identity}, nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}})
+				if err != nil {
+					t.Fatal(err)
+				}
 				acquired, executed, joined := false, false, false
 				host := nodehost.ClaimedNodeHost{
 					Store: s, Lease: lease.Keeper{Interval: 10 * time.Second, Lease: time.Minute}, Mask: func(string) string { return "masked" },

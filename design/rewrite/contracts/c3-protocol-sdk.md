@@ -137,6 +137,8 @@ are part of this contract.
 | `nodehost.ProtocolSessionConfig.StartPlanning` | Launches unbound describe/plan processes and routes every output stream through the planning secret gate. |
 | `nodehost.ClaimAuthority` | Refers to authenticated executor authority without granting it from a request body. |
 | `nodehost.NodeInput` | Binds an attempt to accepted spec, node, generation, runner and route bearer. |
+| `nodehost.NewNodeInput` | Constructs execution from a persisted awarded row, its accepted seal, the selected engine and the granted runner. |
+| `nodehost.ConcurrencyKey`, `nodehost.ParseConcurrencyKey` | Encode and decode scoped group identity without separator collisions. |
 | `nodehost.NodeHost.Execute` | Replans, checks drift, runs executor layers and reports through store transitions. |
 | `nodehost.NewNodeExecutor`, `ExecutorDependencies`, `ExecutorProcess` | Connect the common executor to the fenced store, matched engine, SDK process and storage adapters. |
 | `nodehost.OutputRecords`, `nodehost.JobUpload` | Publish typed output through verified uploads and record commits; read authorized output only after verified EOF. JobUpload supplies the common attempt/scope binding for output and artifact writes. |

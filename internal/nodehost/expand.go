@@ -49,11 +49,12 @@ func evalGenerator(ctx context.Context, sess *Session, closure string) ([]nodepr
 	if err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: closure}, &res); err != nil {
 		return nil, err
 	}
-	if err := res.ValidateValue("generate"); err != nil {
+	value, err := evalValue(res, "generate")
+	if err != nil {
 		return nil, err
 	}
 	var raws []json.RawMessage
-	if err := json.Unmarshal(res.Value, &raws); err != nil {
+	if err := json.Unmarshal(value, &raws); err != nil {
 		return nil, invalid("generator %s returned no array of node documents: %v", closure, err)
 	}
 	nodes := make([]nodeproto.JobSpec, 0, len(raws))

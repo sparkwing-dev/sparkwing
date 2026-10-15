@@ -18,10 +18,46 @@ import (
 )
 
 func TestV2SessionRequiresGrantedIdentity(t *testing.T) {
-	_, err := StartSession(t.Context(), SessionConfig{Entry: pipelineentry.Binary("/missing/sdk"), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}})
-	if err == nil || !strings.Contains(err.Error(), "granted runner") {
-		t.Fatalf("missing identity: %v", err)
+	for _, missing := range []string{"engine", "name", "type", "labels"} {
+		t.Run(missing, func(t *testing.T) {
+			cfg := SessionConfig{Entry: pipelineentry.Binary("/missing/sdk"), Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}
+			switch missing {
+			case "engine":
+				cfg.Engine.Version = ""
+			case "name":
+				cfg.Runner.Name = ""
+			case "type":
+				cfg.Runner.Type = ""
+			case "labels":
+				cfg.Runner.Labels = nil
+			}
+			_, err := StartSession(t.Context(), cfg)
+			if err == nil || err.Error() != "sdk session needs the selected engine version and granted runner identity" {
+				t.Fatalf("missing %s identity: %v", missing, err)
+			}
+		})
 	}
+}
+
+func FuzzV2SessionRefusesIncompleteIdentity(f *testing.F) {
+	f.Add("test", "runner", "cloud", uint8(0))
+	f.Fuzz(func(t *testing.T, engine, name, kind string, missing uint8) {
+		cfg := SessionConfig{Entry: pipelineentry.Binary("/missing/sdk"), Engine: nodeproto.EngineIdentity{Version: engine}, Runner: nodeproto.RunnerIdentity{Name: name, Type: kind, Labels: []string{}}}
+		switch missing % 4 {
+		case 0:
+			cfg.Engine.Version = ""
+		case 1:
+			cfg.Runner.Name = ""
+		case 2:
+			cfg.Runner.Type = ""
+		case 3:
+			cfg.Runner.Labels = nil
+		}
+		_, err := StartSession(t.Context(), cfg)
+		if err == nil || err.Error() != "sdk session needs the selected engine version and granted runner identity" {
+			t.Fatalf("incomplete identity reached process startup: %v", err)
+		}
+	})
 }
 
 func TestV2SessionHelloKeepsAuthorityOffEnvironment(t *testing.T) {

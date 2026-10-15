@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -132,7 +131,7 @@ func planConcurrencyKeys(raw []byte, runID string) ([]string, error) {
 func filterGlobalScopeKeys(keys []string) []string {
 	out := make([]string, 0, len(keys))
 	for _, key := range keys {
-		if strings.HasPrefix(key, "global:") {
+		if scope, _, _, ok := nodehost.ParseConcurrencyKey(key); ok && scope == "global" {
 			out = append(out, key)
 		}
 	}

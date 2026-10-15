@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -267,21 +266,18 @@ func (r *stepRun) run(ctx context.Context, st nodeproto.StepSpec, settled []stri
 // safety: a skip_if that throws fails its step, as a panicking predicate
 // does in process, so a broken guard never runs what it was meant to skip.
 func (r *stepRun) skipIf(ctx context.Context, st nodeproto.StepSpec, settled []string) (bool, error) {
-
 	for _, id := range st.Closures.SkipIf {
 		var res nodeproto.EvalResult
 		if err := ask(ctx, r.sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: id, Attempt: r.attempt, Settled: settled}, &res); err != nil {
 			return false, err
 		}
-		if res.Error != nil {
-			return false, res.Error
-		}
-		if err := res.ValidateValue("skip_if"); err != nil {
+		value, err := evalValue(res, "skip_if")
+		if err != nil {
 			return false, err
 		}
 		var skip bool
-		if err := json.Unmarshal(res.Value, &skip); err != nil {
-			return false, hostError(apierr.ProtocolError, "skip_if %s answered %s, not a boolean", id, res.Value)
+		if err := json.Unmarshal(value, &skip); err != nil {
+			return false, err
 		}
 		if skip {
 			return true, nil

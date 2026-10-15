@@ -166,10 +166,11 @@ func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.S
 	if row.Ref.RunID != input.Accepted.RunID || row.Ref.NodeID != input.NodeID || row.Generation != input.Generation || row.Attempt != input.Attempt || row.ClaimedBy != input.Authority.Holder || row.CapabilityPrefix != input.Authority.CapabilityPrefix {
 		return spec, row, job, executorError(apierr.LockHeld, "node execution no longer holds the accepted claim")
 	}
-	if row.Status != store.StatusPending || row.Outcome != "" {
-		return spec, row, job, executorError(apierr.IllegalTransition, "node execution requires a claimed, unstarted job")
+	constructed, err := NewNodeInput(input.Accepted, row, input.Engine, input.GrantedRunner)
+	if err != nil {
+		return spec, row, job, err
 	}
-	if row.SpecHash == "" || row.SpecHash != input.SpecHash || !reflect.DeepEqual(row.Execution, input.Execution) || row.ApplicationRetries < 0 {
+	if constructed.SpecHash != input.SpecHash || !reflect.DeepEqual(constructed.Execution, input.Execution) || row.ApplicationRetries < 0 {
 		return spec, row, job, executorError(apierr.SpecDrift, "node settings do not match the accepted job")
 	}
 	if input.Execution.Retry.Value < 0 || input.Execution.RetryBackoff.Value < 0 || input.Execution.Timeout.Value < 0 || input.Execution.NoProgressTimeout.Value < 0 {
@@ -184,9 +185,6 @@ func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.S
 	}
 	if string(hash) != row.SpecHash {
 		return spec, row, job, executorError(apierr.PlanDrift, "persisted job hash does not match its declarations")
-	}
-	if sealed, ok := spec.Resolved.Settings.Jobs[input.NodeID]; ok && !reflect.DeepEqual(sealed, input.Execution) {
-		return spec, row, job, executorError(apierr.SpecDrift, "job settings differ from the accepted run")
 	}
 	return spec, row, job, nil
 }

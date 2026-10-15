@@ -137,10 +137,11 @@ func (h *ClaimedNodeHost) sourceSpec(ctx context.Context, input NodeInput) (sour
 	if row.Ref != ref || row.ClaimedBy != input.Authority.Holder || row.CapabilityPrefix != input.Authority.CapabilityPrefix || row.Generation != input.Generation || row.Attempt != input.Attempt {
 		return source.Spec{}, executorError(apierr.LockHeld, "job award no longer holds the persisted claim")
 	}
-	if row.Status != store.StatusPending || row.Outcome != "" {
-		return source.Spec{}, executorError(apierr.IllegalTransition, "job award requires a claimed, unstarted job")
+	constructed, err := NewNodeInput(accepted, row, input.Engine, input.GrantedRunner)
+	if err != nil {
+		return source.Spec{}, err
 	}
-	if row.SpecHash == "" || row.SpecHash != input.SpecHash || !reflect.DeepEqual(row.Execution, input.Execution) {
+	if constructed.SpecHash != input.SpecHash || !reflect.DeepEqual(constructed.Execution, input.Execution) {
 		return source.Spec{}, executorError(apierr.SpecDrift, "job award differs from persisted execution settings")
 	}
 	return source.ForExecution(*snapshot.Run.Spec)

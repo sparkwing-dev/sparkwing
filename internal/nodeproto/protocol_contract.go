@@ -12,13 +12,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
-// safety: Version is checked once in hello; documents and HTTP headers carry no protocol version.
+// Version is checked once in hello; documents and HTTP headers carry no protocol version.
 const Version = 2
 
-// safety: Op keeps the complete launch operation vocabulary separate from optional hello features.
+// Op keeps the complete launch operation vocabulary separate from optional hello features.
 type Op string
 
-// safety: No run_node operation remains; body-only jobs declare one step.
+// OpHello through OpCancel name the supported protocol operations.
 const (
 	OpHello    Op = "hello"
 	OpDescribe Op = "describe"
@@ -28,7 +28,7 @@ const (
 	OpCancel   Op = "cancel"
 )
 
-// safety: Request binds execution by job and step while keeping credentials only in hello memory.
+// Request binds execution by job and step while keeping credentials only in hello memory.
 type Request struct {
 	ID       string            `json:"id"`
 	Op       Op                `json:"op"`
@@ -50,45 +50,45 @@ type Request struct {
 	Target string `json:"target,omitempty"`
 }
 
-// safety: EngineIdentity permits actionable mismatch diagnostics without stamping every request.
+// EngineIdentity permits actionable mismatch diagnostics without stamping every request.
 type EngineIdentity struct {
 	Version string `json:"version"`
 }
 
-// safety: RunnerIdentity comes from the granted claim, never self-reported SDK environment.
+// RunnerIdentity comes from the granted claim, never self-reported SDK environment.
 type RunnerIdentity struct {
 	Name   string   `json:"name"`
 	Type   string   `json:"type"`
 	Labels []string `json:"labels"`
 }
 
-// safety: ProcessBinding is absent during describe and plan, where no job routes may be used.
+// ProcessBinding is absent during describe and plan, where no job routes may be used.
 type ProcessBinding struct {
 	RunID  string        `json:"run_id"`
 	JobID  string        `json:"job_id"`
 	Routes ProcessRoutes `json:"routes"`
 }
 
-// safety: ProcessRoutes holds only the delegated node-host bearer, never a controller credential.
+// ProcessRoutes holds only the delegated node-host bearer, never a controller credential.
 type ProcessRoutes struct {
 	URL    string `json:"url"`
 	Bearer string `json:"bearer"`
 }
 
-// safety: HelloResult advertises optional operations so additive protocol changes need no major bump.
+// HelloResult advertises optional operations so additive protocol changes need no major bump.
 type HelloResult struct {
 	Protocol int         `json:"protocol"`
 	SDK      SDKIdentity `json:"sdk"`
 	Features []string    `json:"features"`
 }
 
-// safety: SDKIdentity lets a mismatch name the package that must be rebuilt or upgraded.
+// SDKIdentity lets a mismatch name the package that must be rebuilt or upgraded.
 type SDKIdentity struct {
 	Language string `json:"language"`
 	Version  string `json:"version"`
 }
 
-// safety: RunContext is a sealed host snapshot; SDKs never query the controller for these facts.
+// RunContext is a sealed host snapshot; SDKs never query the controller for these facts.
 type RunContext struct {
 	RunID     string    `json:"run_id"`
 	Pipeline  string    `json:"pipeline"`
@@ -99,15 +99,14 @@ type RunContext struct {
 	DryRun    bool      `json:"dry_run,omitempty"`
 }
 
-// safety: JobFailure gives recovery code the source failure without inventing a second error envelope.
+// JobFailure gives recovery code the source failure without inventing a second error envelope.
 type JobFailure struct {
 	Job   string        `json:"job"`
 	Stage string        `json:"stage"`
 	Error *apierr.Error `json:"error"`
 }
 
-// safety: Reply.Error is decoded by apierr.DecodeInner, without a second envelope.
-// Exactly one of Result or Error is present; error codes have no registry in this package.
+// Reply carries exactly one result or canonical error, decoded by apierr.DecodeInner.
 type Reply struct {
 	ID     string          `json:"reply"`
 	OK     bool            `json:"ok"`
@@ -115,20 +114,20 @@ type Reply struct {
 	Error  *apierr.Error   `json:"error,omitempty"`
 }
 
-// safety: RunResult separates body failure from an SDK failure to execute the request.
+// RunResult separates body failure from an SDK failure to execute the request.
 type RunResult struct {
 	Outcome string          `json:"outcome"`
 	Error   *apierr.Error   `json:"error,omitempty"`
 	Output  json.RawMessage `json:"output,omitempty"`
 }
 
-// safety: EvalResult can carry scalar closure values or generated jobs without changing framing.
+// EvalResult can carry scalar closure values or generated jobs without changing framing.
 type EvalResult struct {
 	Value json.RawMessage `json:"value"`
 	Error *apierr.Error   `json:"error,omitempty"`
 }
 
-// safety: FrameLog has no job field because the host, not pipeline code, assigns log attribution.
+// FrameLog has no job field because the host, not pipeline code, assigns log attribution.
 type FrameLog struct {
 	TS      string          `json:"ts"`
 	Level   string          `json:"level,omitempty"`
@@ -138,13 +137,13 @@ type FrameLog struct {
 	Attrs   json.RawMessage `json:"attrs,omitempty"`
 }
 
-// safety: Frame represents either a reply or log record on the isolated frame pipe, never stdout.
+// Frame represents either a reply or log record on the isolated frame pipe, never stdout.
 type Frame struct {
 	Reply *Reply
 	Log   *FrameLog
 }
 
-// safety: ParseRequest ignores additive fields, checks operation fields and decodes failure.error with apierr.DecodeInner.
+// ParseRequest ignores additive fields, checks operation fields and decodes failure.error with apierr.DecodeInner.
 func ParseRequest(line []byte) (Request, error) {
 	obj, err := protocolObject(line)
 	if err != nil {
@@ -172,7 +171,7 @@ func ParseRequest(line []byte) (Request, error) {
 	return r, r.Validate()
 }
 
-// safety: ParseFrame rejects ambiguous frames and uses apierr.DecodeInner for reply errors; unknown log events remain readable.
+// ParseFrame rejects ambiguous frames and uses apierr.DecodeInner for reply errors; unknown log events remain readable.
 func ParseFrame(line []byte) (Frame, error) {
 	obj, err := protocolObject(line)
 	if err != nil {
@@ -230,7 +229,7 @@ func ParseFrame(line []byte) (Frame, error) {
 	return Frame{Log: &log}, nil
 }
 
-// safety: Validate refuses fields that contradict the selected operation before invoking pipeline code.
+// Validate refuses fields that contradict the selected operation before invoking pipeline code.
 func (r Request) Validate() error {
 	bad := func(message string) error { return &apierr.Error{Code: apierr.BadRequest, Message: message} }
 	if r.ID == "" {
@@ -296,7 +295,7 @@ func (r Request) Validate() error {
 	return nil
 }
 
-// safety: Decode validates reply, RunResult and EvalResult errors with apierr.DecodeInner before returning typed results.
+// Decode validates reply, RunResult and EvalResult errors with apierr.DecodeInner before returning typed results.
 func (r Reply) Decode(result any) error {
 	if r.ID == "" || r.OK == (r.Error != nil) || r.OK != (len(r.Result) != 0) {
 		return fmt.Errorf("%w: inconsistent reply", ErrMalformed)

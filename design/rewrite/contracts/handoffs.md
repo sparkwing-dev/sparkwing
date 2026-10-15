@@ -1,11 +1,12 @@
 # Cross-area handoffs
 
-W3's [settlement continuation](w3-settlement-continuation.md) records the latest
-disposition of every W3 entry below. Findings 5 and 6 now have shared scheduler
-and real Go process evidence. Native router/constructor migration, legacy event
-ports and the remaining runtime deletion are still open. The merged W4
-concurrency tests accept differing memberships, which needs reconciliation with
-finding 5's mismatch-refusal wording.
+W3's [execution continuation](w3-execution-continuation.md) updates the earlier
+[settlement audit](w3-settlement-continuation.md). Finding 4 now uses one decoder
+across both executors, with real SDK failures for predicates, memo and generation.
+The concurrency codec regression is fixed. Five event cases run the common
+executor against SQLite transitions. Native router/placement wiring, the complete
+legacy event port and runtime deletion remain open. The merged W4 concurrency
+tests still differ from finding 5's mismatch-refusal wording.
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
@@ -30,3 +31,9 @@ W3 also owns finding 1's retained test port. `go test -p 4 -gcflags=-e ./interna
 
 
 **W3: `internal/nodehost` tests fail after the W4 protocol merge (c30046f22).** `go test ./internal/nodehost/` fails TestAdmissionLeasesHostAroundEachNode, TestAdmissionPriorityAndClassPrecedence and TestAdmissionRunHoldingTheHostTakesOnlySemaphores, then hangs until the 10-minute test timeout. The W4 review (review/areas/W4-review-3.md, findings 2, 4, 5, 9) names node-host gaps against protocol v2: `routes.go` still installs the old version-header/426 gate and `/nodes` routes, eval results ignore `EvalResult.Error`, generated declarations skip strict expansion validation, and startup/cleanup environments bypass procenv. Fix those, and make no test able to hang: a test that waits must fail on a deadline.
+
+**DESIGN: W3 concurrency identity codec (from W4 review-3 fixes).** Invariant: encoding a validated `(scope, host identity, group)` tuple is injective, and its label recovers the whole host identity. `ConcurrencyKey` joins fields with colons while `ScopeLabelFromKey` splits at the first colon, so `(a, :b)` and `(a:, b)` both encode as `run:a::b`, and labels lose `:with@seps`. Own one tuple codec, with unambiguous field encoding and a single decoder, used by admission and every label reader; do not add another separator special case. W4 restored the failing tests on its branch: `go test -p 4 ./internal/orchestrator -run '^(TestScopeKey|FuzzConcurrencyKeyPreservesIdentity)' -count=1`.
+
+**W1 scope clarification (lead).** When W1 removes a legacy store API (Store.AcceptPlan and its validator, StateStoreOld, old claim and trigger writers, offer rounds, old maintenance APIs), W1 migrates or deletes every remaining caller, including callers in W1b-owned test fixtures such as the output and log fixtures reached through dispatchRun. Keep each caller change minimal and list the files in your report. This overrides the "do not edit W1b's files" line for caller migration only. W1b does not reintroduce removed APIs.
+
+**W1: separate cancellation intent for W2.** W2's cancellation-reason persistence test fails because the store has no cancellation-intent field separate from the terminal reason. Add it to the store's authentication/cancellation snapshot (amendment A1-21), and finish the session digest and CSRF persistence W2 reads. W2 consumes it through the contract interface.

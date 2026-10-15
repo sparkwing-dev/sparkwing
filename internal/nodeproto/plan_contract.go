@@ -2,7 +2,7 @@ package nodeproto
 
 import "encoding/json"
 
-// safety: PlanDoc excludes host-owned state so SDK declarations cannot rewrite sealed authority.
+// PlanDoc excludes host-owned state so SDK declarations cannot rewrite sealed authority.
 type PlanDoc struct {
 	Jobs           []JobSpec         `json:"jobs"`
 	Concurrency    []ConcurrencySpec `json:"concurrency,omitempty"`
@@ -13,7 +13,7 @@ type PlanDoc struct {
 	Source         *SourceSpec       `json:"source,omitempty"`
 }
 
-// safety: JobSpec is flat so every placement validates the same execution envelope.
+// JobSpec is flat so every placement validates the same execution envelope.
 type JobSpec struct {
 	ID                  string              `json:"id"`
 	Needs               []string            `json:"deps,omitempty"`
@@ -45,13 +45,13 @@ type JobSpec struct {
 	FailurePolicy       string              `json:"failure_policy,omitempty"`
 }
 
-// safety: EnvValue distinguishes interpreter startup from SDK-applied body environment.
+// EnvValue distinguishes interpreter startup from SDK-applied body environment.
 type EnvValue struct {
 	Value   string `json:"value"`
 	Startup bool   `json:"startup,omitempty"`
 }
 
-// safety: StepSpec carries author declarations, never a host-computed spec hash or lifecycle state.
+// StepSpec carries author declarations, never a host-computed spec hash or lifecycle state.
 type StepSpec struct {
 	ID                string      `json:"id"`
 	Needs             []string    `json:"needs,omitempty"`
@@ -65,7 +65,7 @@ type StepSpec struct {
 	Closures          ClosureSpec `json:"closures,omitzero"`
 }
 
-// safety: ClosureSpec references executable code; persisted generated specs never serialize closures.
+// ClosureSpec references executable code; persisted generated specs never serialize closures.
 type ClosureSpec struct {
 	SkipIf    []string `json:"skip_if,omitempty"`
 	BeforeRun []string `json:"before_run,omitempty"`
@@ -75,8 +75,7 @@ type ClosureSpec struct {
 	Generate  []string `json:"generate,omitempty"`
 }
 
-// safety: ConcurrencySpec is shared at plan and job scope; only the host computes scoped keys.
-// Omitted concurrency and [] both mean no declarations. Explicit null is invalid.
+// ConcurrencySpec declares membership at plan or job scope; the host computes scoped keys.
 type ConcurrencySpec struct {
 	Group           string  `json:"group"`
 	Scope           *string `json:"scope,omitempty"`
@@ -87,13 +86,13 @@ type ConcurrencySpec struct {
 	CancelTimeoutMS *int64  `json:"cancel_timeout_ms,omitempty"`
 }
 
-// safety: ResourceSpec preserves unset values until the setting's seal point.
+// ResourceSpec preserves unset values until the setting's seal point.
 type ResourceSpec struct {
 	Cores       *float64 `json:"cores,omitempty"`
 	MemoryBytes *int64   `json:"memory_bytes,omitempty"`
 }
 
-// safety: SourceSpec expresses checkout policy without granting repository authority.
+// SourceSpec expresses checkout policy without granting repository authority.
 type SourceSpec struct {
 	FullHistory *bool `json:"full_history,omitempty"`
 	Depth       *int  `json:"depth,omitempty"`
@@ -102,18 +101,18 @@ type SourceSpec struct {
 	LFS         *bool `json:"lfs,omitempty"`
 }
 
-// safety: RetrySpec counts application retries only; disruptions do not consume this budget.
+// RetrySpec counts application retries only; disruptions do not consume this budget.
 type RetrySpec struct {
 	Attempts  int    `json:"attempts"`
 	BackoffMS *int64 `json:"backoff_ms,omitempty"`
 }
 
-// safety: MemoSpec enables result reuse independently of dependency-directory caches.
+// MemoSpec enables result reuse independently of dependency-directory caches.
 type MemoSpec struct {
 	TTLMS *int64 `json:"ttl_ms,omitempty"`
 }
 
-// safety: CacheSpec is wire-only so SDK binaries need not link engine storage implementations.
+// CacheSpec is wire-only so SDK binaries need not link engine storage implementations.
 type CacheSpec struct {
 	Name     string   `json:"name"`
 	Path     string   `json:"path,omitempty"`
@@ -122,29 +121,29 @@ type CacheSpec struct {
 	KeyFiles []string `json:"key_files"`
 }
 
-// safety: ApprovalSpec keeps zero timeout indefinite; the owner's deadline remains separate.
+// ApprovalSpec keeps zero timeout indefinite; the owner's deadline remains separate.
 type ApprovalSpec struct {
 	Message   string `json:"message,omitempty"`
 	TimeoutMS *int64 `json:"timeout_ms,omitempty"`
 	OnTimeout string `json:"on_timeout,omitempty"`
 }
 
-// safety: ArtifactInput declares the dependency edge used to authorize artifact reads.
+// ArtifactInput declares the dependency edge used to authorize artifact reads.
 type ArtifactInput struct {
 	Producer string `json:"producer"`
 	Into     string `json:"into,omitempty"`
 }
 
-// safety: PipelineReference declares a cross-run read without granting undeclared blob access.
+// PipelineReference declares a cross-run read without granting undeclared blob access.
 type PipelineReference struct {
 	Pipeline string `json:"pipeline"`
 	Job      string `json:"job"`
 }
 
-// safety: SecretMatcher avoids copying secret values into validation errors or persisted plans.
+// SecretMatcher avoids copying secret values into validation errors or persisted plans.
 type SecretMatcher interface{ ContainsSecret(identifier string) bool }
 
-// safety: ValidationContext supplies host facts without admitting those fields in SDK JSON.
+// ValidationContext supplies host facts without admitting those fields in SDK JSON.
 type ValidationContext struct {
 	Placement           Placement
 	Secrets             SecretMatcher
@@ -154,11 +153,7 @@ type ValidationContext struct {
 	SourceJob           string
 }
 
-// safety: ValidatePlan is the only strict decoder for initial plans and generated expansions.
-// It rejects unknown/duplicate keys, invalid graphs and secret-bearing IDs before persistence.
-// C1 must next call settings.ResolvePlan and secret preflight inside the same acceptance
-// transaction. Structural validity alone never authorizes persistence or execution.
-// Errors implement C2 apierr's error contract; the full invariant list is in c3-protocol-sdk.md.
+// ValidatePlan strictly decodes plans and expansions, rejecting invalid graphs and secret-bearing identifiers.
 func ValidatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, error) {
 	plan, err := validatePlan(raw, context)
 	return plan, sanitizePlanError(err, context.Secrets)

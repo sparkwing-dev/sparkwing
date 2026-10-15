@@ -156,7 +156,10 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	if mode == "result_refused" {
 		s.reject = store.CauseReport
 	}
-	input := nodehost.NodeInput{Accepted: nodehost.AcceptedRun{RunID: "run", Spec: raw, SpecHash: "spec", PlanHash: string(planHash), Plan: plan}, NodeID: "job", Generation: 2, Attempt: 0, SpecHash: string(jobHash), Execution: execution, Engine: resolved, Authority: nodehost.ClaimAuthority{Holder: "runner", CapabilityPrefix: "claim"}, RouteBinding: nodeproto.ProcessBinding{RunID: "run", JobID: "job"}}
+	input, err := nodehost.NewNodeInput(nodehost.AcceptedRun{RunID: "run", Spec: raw, SpecHash: "spec", PlanHash: string(planHash), Plan: plan}, row, resolved, nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	input.RouteBinding.Routes.Bearer = "parent-authority"
 	dependencies := nodehost.ExecutorDependencies{
 		Store: s, Mask: func(text string) string { return strings.ReplaceAll(text, "private", "***") },

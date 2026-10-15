@@ -81,17 +81,18 @@ func skipIfEval(ctx context.Context, sess *Session, log Sink, id string, i int, 
 		return false, nil
 	case err != nil:
 		return false, err
-	case er.Error != nil:
-		err := fmt.Errorf("SkipIf predicate %d failed: %w", i, er.Error)
-		closureNote(log, "error", err.Error()+" (the node does not run)")
-		return false, err
 	}
-	if err := er.ValidateValue("skip_if"); err != nil {
+	value, err := evalValue(er, "skip_if")
+	if err != nil {
+		if er.Error != nil {
+			err = fmt.Errorf("SkipIf predicate %d failed: %w", i, err)
+		}
+		closureNote(log, "error", err.Error())
 		return false, err
 	}
 	var skip bool
-	if err := json.Unmarshal(er.Value, &skip); err != nil {
-		return false, hostError(apierr.ProtocolError, "skip_if %s returned %s, not a boolean", id, er.Value)
+	if err := json.Unmarshal(value, &skip); err != nil {
+		return false, err
 	}
 	return skip, nil
 }
@@ -191,15 +192,16 @@ func afterRunArgOf(res Result) nodeproto.RunResult {
 }
 
 // safety: msg is the closure's own error and err a failed reply or broken session, which callers treat differently.
-func closureEval(ctx context.Context, sess *Session, kind, id string, input json.RawMessage) (msg error, err error) {
+func closureEval(ctx context.Context, sess *Session, kind, id string, input json.RawMessage) (msg, err error) {
 	var er nodeproto.EvalResult
 	if err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: id, Input: input}, &er); err != nil {
 		return nil, err
 	}
+	_, failure := evalValue(er, kind)
 	if er.Error != nil {
-		return er.Error, nil
+		return failure, nil
 	}
-	return nil, er.ValidateValue(kind)
+	return nil, failure
 }
 
 func closuresOf(n *NodeRun) nodeproto.ClosureSpec { return n.Plan.Closures }

@@ -134,6 +134,7 @@ func executorFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDependenc
 	spec := runspec.Spec{Hash: "seal", PlanHash: planHash, Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "ci"}}, Resolved: runspec.Resolved{Engine: identity, Settings: runspec.ExecutionSettings{Jobs: map[string]runspec.JobExecutionSettings{"build": execution}}}}
 	raw, _ := json.Marshal(spec)
 	input := NodeInput{Accepted: AcceptedRun{RunID: "run", Spec: raw, SpecHash: "seal", Plan: plan, PlanHash: string(planHash)}, Engine: resolved, Entry: &source.Entry{Engine: resolved}, NodeID: "build", Generation: 3, Attempt: 4, SpecHash: string(jobHash), Execution: execution, Authority: ClaimAuthority{Holder: "runner", CapabilityPrefix: "claim"}, RouteBinding: nodeproto.ProcessBinding{RunID: "run", JobID: "build"}}
+	input.GrantedRunner = nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
 	jobJSON, _ := json.Marshal(job)
 	s := &executorStore{row: store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "build"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 3, Attempt: 4, Spec: jobJSON, SpecHash: string(jobHash), Execution: execution}}
 	processes := []*executorProcess{}
@@ -731,8 +732,10 @@ func TestNodeExecutorFirstStartAllocatesOrdinal(t *testing.T) {
 	}
 }
 
-type executorStorageBytes struct{ blob.Store }
-type executorStorageRecords struct{ blob.RecordStore }
+type (
+	executorStorageBytes   struct{ blob.Store }
+	executorStorageRecords struct{ blob.RecordStore }
+)
 
 func TestNodeExecutorRefreshesStorageAndFinalizesLastAttempt(t *testing.T) {
 	input, st, deps, processes := executorFixture(t)

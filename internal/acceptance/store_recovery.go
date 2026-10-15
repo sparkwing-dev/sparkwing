@@ -54,7 +54,7 @@ func (recoveryEnrollment) ResolveClaimProfile(context.Context, capability.Princi
 	return match.Profile{Capacity: capacity}, capacity, nil
 }
 
-func newStoreRecoveryFixture(ctx context.Context, path string) (_ storeRecoveryFixture, err error) {
+func newStoreRecoveryFixture(ctx context.Context, path string, started bool) (_ storeRecoveryFixture, err error) {
 	s, err := store.Open(path)
 	if err != nil {
 		return storeRecoveryFixture{}, err
@@ -106,8 +106,10 @@ VALUES (?,'run','job','pending',?,?,'runner','holder',2,?,?)`, []any{store.Defau
 	if err != nil {
 		return f, err
 	}
-	if _, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart}); err != nil {
-		return f, err
+	if started {
+		if _, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart}); err != nil {
+			return f, err
+		}
 	}
 	return f, nil
 }
@@ -170,7 +172,7 @@ func (f storeRecoveryFixture) refuseLateReports(ctx context.Context) error {
 }
 
 func checkRecoveryCancellation(ctx context.Context, root string) (err error) {
-	f, err := newStoreRecoveryFixture(ctx, filepath.Join(root, "cancel.db"))
+	f, err := newStoreRecoveryFixture(ctx, filepath.Join(root, "cancel.db"), true)
 	if err != nil {
 		return err
 	}
@@ -232,7 +234,7 @@ func checkRecoveryCancellation(ctx context.Context, root string) (err error) {
 }
 
 func checkRecoveryReconciliation(ctx context.Context, root, order string) (err error) {
-	f, err := newStoreRecoveryFixture(ctx, filepath.Join(root, order+".db"))
+	f, err := newStoreRecoveryFixture(ctx, filepath.Join(root, order+".db"), true)
 	if err != nil {
 		return err
 	}

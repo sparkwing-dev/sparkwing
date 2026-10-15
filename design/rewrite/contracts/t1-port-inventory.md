@@ -439,6 +439,18 @@ The source reports describe residual failures that their committed tests do not 
 
 ## W3 recovery port after amendment integration
 
+The [execution continuation](w3-execution-continuation.md) adds
+`lifecycle-transition-replay-and-fencing/hermetic-store-executor-events`.
+Five cases run the common claimed host and executor against real SQLite
+transitions. Success and retry have one start and terminal event. Failed hooks
+and output writes fail the job. A SQLite trigger refuses a result transaction,
+leaving both terminal state and its event absent. Reconciliation adopts each
+committed terminal result twice without another award or event. SDK execution,
+engine verification, source acquisition and process delegation are fakes.
+This ports the final-store start/retry/end and adoption assertions. It does not
+complete the old dispatcher-event test's approval, expansion, artifact and
+concurrency diagnostics or a native placement cell.
+
 The [settlement continuation](w3-settlement-continuation.md) adds ten real Go SDK
 process cases through the common executor. These port the result-read, parallel,
 failure, Finally, optional and SkipIf parts of TestHostDrivesSteps. Step windows,

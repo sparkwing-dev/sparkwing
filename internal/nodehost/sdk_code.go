@@ -132,13 +132,7 @@ func (h *sdkCode) eval(ctx context.Context, session *executorSession, input Node
 	if err := session.call(ctx, request, &result); err != nil {
 		return nil, err
 	}
-	if result.Error != nil {
-		return nil, result.Error
-	}
-	if !json.Valid(result.Value) {
-		return nil, executorError(apierr.ProtocolError, "SDK closure returned invalid JSON")
-	}
-	return result.Value, nil
+	return evalValue(result, "")
 }
 
 func executorRunContext(spec runspec.Spec) nodeproto.RunContext {
