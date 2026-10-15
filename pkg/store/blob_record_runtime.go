@@ -16,10 +16,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// BlobManifestReader decodes members only after reading and verifying the manifest digest.
-// The SQL member table stores reachability; paths and modes remain in immutable manifest bytes.
+// BlobManifestReader separates bounded admission verification from admitted-member reads.
 type BlobManifestReader interface {
 	ReadBlobManifest(context.Context, Team, blob.Digest) ([]blob.Member, error)
+	VerifyBlobManifest(context.Context, Team, blob.Digest, []blob.Member) error
 }
 
 type blobRecords struct {
@@ -49,14 +49,10 @@ func (r *blobRecords) manifestMembers(ctx context.Context, request blob.CommitRe
 	if r.manifests == nil {
 		return nil, authorityError(apierr.Unavailable, "verified manifest reader is not configured")
 	}
-	members, err := r.manifests.ReadBlobManifest(ctx, r.tenant.team, manifest.Value)
-	if err != nil {
+	if err := r.manifests.VerifyBlobManifest(ctx, r.tenant.team, manifest.Value, request.Members); err != nil {
 		return nil, err
 	}
-	if !reflect.DeepEqual(members, request.Members) && !(len(members) == 0 && len(request.Members) == 0) {
-		return nil, blob.ErrIntegrity
-	}
-	return members, nil
+	return request.Members, nil
 }
 
 func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecordRequest) (blob.Record, error) {

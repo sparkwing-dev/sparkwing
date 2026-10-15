@@ -88,12 +88,20 @@ Record transactions, read-set construction, unique-byte accounting, GC and
 retention belong to `pkg/store`. Controller authorization and upload tickets belong
 to the controller and capability packages.
 
-`ObjectBackend.ReadManifest` reads only the selected tenant's CAS object and
-returns its file metadata after verifying length, digest and successful close.
-`storage.BlobManifests` supplies that reader to `Tenant.BlobRecords`. The record
-transaction authorizes the manifest first and checks every member afterward.
-This physical read opens no nested database transaction. `Server.WithDataObjects`
-installs it for result verification and authenticated record operations.
+`ObjectBackend.VerifyManifest` streams the selected tenant's CAS bytes against
+members already in the commit request. Decoder memory depends on that submitted
+metadata, including its worst-case JSON escaping, rather than object size.
+Whitespace runs outside strings consume constant memory, including when reading
+admitted records. Unknown fields and metadata disagreements fail integrity checks.
+Successful admission requires the original raw length, digest, verified EOF and
+successful close. There is no manifest byte-size cap.
+
+`storage.BlobManifests` supplies separate verification and admitted-member read
+methods to `Tenant.BlobRecords`. The record transaction authorizes the manifest
+first, verifies the submitted list, then checks each member's existence and
+current authority before mutation. `ReadManifest` streams admitted metadata for
+record lookups. These physical reads open no nested database transaction.
+`Server.WithDataObjects` installs the adapter for authenticated record operations.
 
 The filesystem and S3 manifest boundaries generate file metadata and reject
 tenant substitution, corrupt bytes, truncation and malformed members. The SQLite
@@ -126,7 +134,8 @@ the CLI's separate publication result still require their owning integrations.
 
 `MaterializeMemo` asks `RecordStore.CopyMemo` for an atomic, authorized copy,
 then verifies the output, manifest and every member within the lookup budget.
-Missing or corrupt bytes, a refused edge or a failed copy produces a miss.
+Missing or corrupt bytes and non-authority copy failures produce a miss.
+Authorization, authentication and claim-fence failures remain errors.
 An absent output digest also produces a miss. Empty output remains valid when
 its explicit blob and output record were copied.
 Caller cancellation remains an error. Hosts query records before coordinating
@@ -256,6 +265,9 @@ provenance policy before reading its committed digest. It installs the
 executable only after EOF verification and successful close. An upload obtains
 the exact owner/job receipt before committing its binary record. The record
 store assigns provenance. The binding keeps the host's authority in memory.
+The compiler key determines freshness, including build flags. Remote digest
+verification checks byte integrity. Local binary reuse relies on the machine's
+compiler-keyed cache and does not perform the remote download integrity check.
 
 Remote cache construction carries the authenticated team and full
 `DataBinding.Authority` in `RemoteCacheOptions`. Record lookups and signed byte

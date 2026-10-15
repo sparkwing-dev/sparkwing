@@ -34,9 +34,7 @@ type Data struct {
 	Budget    blob.Budget
 }
 
-// Capture uploads matched workspace files, commits their authorized manifest,
-// and returns the committed record. A wildcard match outside the workspace is
-// skipped with a warning; a literal outside match fails.
+// Capture commits matched workspace files; outside directories and wildcard matches warn and skip, while literal outside files fail.
 func Capture(ctx context.Context, data Data, workspace string, globs []string, warn func(msg string)) (blob.Record, error) {
 	if err := context.Cause(ctx); err != nil {
 		return blob.Record{}, err

@@ -37,13 +37,11 @@ type Uploader interface {
 	// PutSegment stores seg's compressed body under segment number
 	// seg.N. Writing the same number twice writes the same bytes.
 	PutSegment(ctx context.Context, seg Segment, body []byte) error
-	// PutManifest writes m only if the attempt has no manifest yet, and
-	// returns ErrSealed if it does.
+	// PutManifest seals the persisted stream; identical replay succeeds and conflicting seals return ErrSealed.
 	PutManifest(ctx context.Context, m Manifest) error
 }
 
-// ErrSealed refuses a manifest for an attempt that already has one,
-// which the controller writes when it judged the attempt abandoned.
+// ErrSealed rejects a final payload that conflicts with the persisted stream seal.
 var ErrSealed = errors.New("logseg: the attempt already has a manifest")
 
 // ErrClosed refuses an append to a sink that has written its manifest.

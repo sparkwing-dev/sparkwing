@@ -273,6 +273,11 @@ func (f *dataObjects) DeleteBlob(context.Context, blob.Blob) error {
 	return f.deleteErr
 }
 
+func (f *dataObjects) VerifyManifest(context.Context, string, blob.Digest, []blob.Member) error {
+	*f.events = append(*f.events, "verify-manifest")
+	return blob.ErrNotFound
+}
+
 func (f *dataObjects) ReadManifest(context.Context, string, blob.Digest) ([]blob.Member, error) {
 	*f.events = append(*f.events, "read-manifest")
 	return nil, blob.ErrNotFound

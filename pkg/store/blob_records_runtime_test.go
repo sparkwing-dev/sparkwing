@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,17 @@ func (f fakeBlobManifests) ReadBlobManifest(_ context.Context, _ Team, d blob.Di
 		return nil, blob.ErrNotFound
 	}
 	return members, nil
+}
+
+func (f fakeBlobManifests) VerifyBlobManifest(ctx context.Context, team Team, digest blob.Digest, expected []blob.Member) error {
+	members, err := f.ReadBlobManifest(ctx, team, digest)
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(members, expected) {
+		return blob.ErrIntegrity
+	}
+	return nil
 }
 
 func blobRecordFixture(t *testing.T) (*Store, *blobRecords, blob.UploadIntent) {
@@ -295,6 +307,17 @@ type blobManifestFunc func(context.Context, Team, blob.Digest) ([]blob.Member, e
 
 func (f blobManifestFunc) ReadBlobManifest(ctx context.Context, team Team, digest blob.Digest) ([]blob.Member, error) {
 	return f(ctx, team, digest)
+}
+
+func (f blobManifestFunc) VerifyBlobManifest(ctx context.Context, team Team, digest blob.Digest, expected []blob.Member) error {
+	members, err := f(ctx, team, digest)
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(members, expected) {
+		return blob.ErrIntegrity
+	}
+	return nil
 }
 
 func TestBlobRecordsAuthorizeManifestBeforeReadingBytes(t *testing.T) {
