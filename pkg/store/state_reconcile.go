@@ -51,6 +51,9 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (R
 				return err
 			}
 			result.Kind, result.Source = Materialize, request.Source
+		} else if request.MaterializeOnly {
+			result.Kind = Dispatch
+			return nil
 		} else {
 			if result.Node.Status != StatusPending {
 				return authorityError(apierr.IllegalTransition, "job is not executable")

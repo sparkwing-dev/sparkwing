@@ -18,10 +18,11 @@ import (
 var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).ReconcileControllerRuns": "the elected controller enumerates active controller-owned runs across teams, then settles each exact tenant/run under the same lease fence",
 	"readAuthorityTx":                     "a globally unique capability prefix or session hash identifies authority before its team and membership are resolved",
+	"authenticationAuthorityTx":           "a globally unique presentation digest identifies the session before its tenant and current membership are known",
 	"revokeAuthorityTx":                   "the authorized revocation path names its exact capability or session by global identity",
 	"advanceAuthGenerationsTx":            "membership and revocation changes invalidate exact ancestor session hashes, including ancestors outside the affected team",
 	"claimUnitTx":                         "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
-	"resolveMatchingInputsTx":             "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
+	"readMatchingInputsTx":                "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
 	"loadAwardRowTx":                      "awards derive team from the globally identified unit and check it against the authenticated claimant before issuing authority",
 	"(*Store).settlePaymentFacts":         "a verified provider event identifies a committed checkout by payment mode and session id; the stored checkout supplies the team",
 	"(*Operator).maintainRetention":       "the elected deployment maintenance pass expires sessions across teams while preserving live capability ancestry",

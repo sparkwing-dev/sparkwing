@@ -71,6 +71,7 @@ const (
 	WaitHolder   ReconcileKind = "wait_holder"
 	Execute      ReconcileKind = "execute"
 	Materialize  ReconcileKind = "materialize"
+	Dispatch     ReconcileKind = "dispatch"
 )
 
 // ReconcileRequest names a possible source; the store checks it rather than trusting the host's cache hit.
@@ -79,6 +80,8 @@ type ReconcileRequest struct {
 	Actor  Actor
 	Policy SourcePolicy
 	Source *MaterializeSource
+	// MaterializeOnly returns Dispatch on a source miss without awarding execution.
+	MaterializeOnly bool
 }
 
 // ReconciledNode is decided with any self-claim in the same transaction.

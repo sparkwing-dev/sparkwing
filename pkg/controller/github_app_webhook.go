@@ -685,11 +685,11 @@ func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInst
 	}
 	var entries []crons.Declared
 	if snapshot.Found {
-		cfg, err := projectconfig.ParseOld(snapshot.Content)
+		cfg, err := projectconfig.Parse(snapshot.Content)
 		if err != nil {
 			return http.StatusUnprocessableEntity, "", fmt.Errorf("read GitHub schedule config: %w", err)
 		}
-		for _, pipeline := range cfg.Pipelines {
+		for _, pipeline := range cfg.Registry().Pipelines {
 			for _, schedule := range pipeline.On.Schedule {
 				if schedule.Where == pipelines.ScheduleWhereController {
 					entries = append(entries, crons.Declared{Pipeline: pipeline.Name, Name: schedule.EffectiveName(), Trigger: schedule})

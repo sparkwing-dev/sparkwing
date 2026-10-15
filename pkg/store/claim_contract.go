@@ -47,6 +47,10 @@ type UnitClaim struct {
 // C2 Award in the same transaction. Named and queued trigger, plan, eval and job
 // claims use the same path; only launcher service scope can cross teams.
 // ReconcileNode self-claims use the same matching inputs and reservation checks.
+// Each requested kind requires its own live grant before one ordered scan. Empty,
+// duplicate, unknown and unauthorized kinds fail instead of being filtered silently.
+// A named trigger Target also accepts the matching here Award's trigger.host after
+// rechecking its first-claim/reclaim window, reservation and requester authority.
 func (s *Store) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error) {
 	return s.claimUnit(ctx, demand)
 }
@@ -80,13 +84,3 @@ var _ OperatorStore = (*Operator)(nil)
 func matchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, unit UnitRef) (match.Profile, match.Demand, error) {
 	return resolveMatchingInputsTx(ctx, tx, request, unit)
 }
-
-// ClaimProfileResolver supplies enrolled placement facts and current host capacity.
-// Implementations must bind every result to the supplied authenticated principal.
-// ResolveClaimProfile runs inside a store transaction and must not mutate store state.
-type ClaimProfileResolver interface {
-	ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error)
-}
-
-// SetClaimProfileResolver installs enrollment and self-claim observations before concurrent use.
-func (s *Store) SetClaimProfileResolver(resolver ClaimProfileResolver) { s.claimProfiles = resolver }

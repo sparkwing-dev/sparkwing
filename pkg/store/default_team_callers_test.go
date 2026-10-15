@@ -53,7 +53,6 @@ var defaultTeamCallers = map[string]string{
 	"internal/backend.(*StoreBackend).ListEventsAfter":                 defaultTeamBackend,
 	"internal/backend.(*StoreBackend).ListNodes":                       defaultTeamBackend,
 	"internal/localsecrets.(*storeSource).read":                        defaultTeamSecrets,
-	"internal/localsecrets.ImportLegacy":                               defaultTeamSecrets,
 	"internal/opsview.diagnosePoisonedProfiles":                        defaultTeamProfiles,
 	"internal/orchestrator.(*HeldRunStore).FinalizeCancelledRuns":      defaultTeamStores,
 	"internal/orchestrator.(*HeldRunStore).IsRunTerminal":              defaultTeamStores,

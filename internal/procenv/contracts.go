@@ -36,6 +36,7 @@ const (
 	Cleanup
 	Install
 	HostChild
+	Git
 )
 
 // Var is a registry row; Prefix matches a family, and engine ownership forbids inheritance.
@@ -73,6 +74,7 @@ func Policies() []Policy {
 		{Cleanup, "inherit attempt", "inherit attempt", "none", "none", "inherit attempt", "inherit attempt including body"},
 		{Install, "base only", "none", "none", "none", "none", "base; output masked"},
 		{HostChild, "captured snapshot", "none", "arguments", "none", "none", "captured snapshot; host binary via argument"},
+		{Git, "filtered base", "none", "explicit argv and private config files", "private file only", "none", "base without inherited git control variables"},
 	}
 }
 
@@ -114,18 +116,18 @@ type JobEnv struct{ Startup, Body []Assignment }
 // SplitJobEnv validates names and rejects engine-owned or credential transport names. NODE_OPTIONS,
 // GODEBUG and GOMAXPROCS always belong to Startup. Startup values must not affect declarations;
 // a differing attempt replan fails as plan_drift, rather than changing the accepted plan.
-func SplitJobEnv(env []Assignment) (JobEnv, error) { panic("unimplemented: c4-surface-config") }
-
-// Build excludes credential-class values from both local snapshots and remote inputs under Policies.
-// This includes tool-owned credentials in a local snapshot. Plan never receives job Startup;
-// Attempt and Eval receive it before process start. The SDK adds Body only after plan succeeds.
-// Cleanup and StepTool use AttemptEnv exactly. Remote allow-list values of at least twelve characters
-// are masked before any subprocess starts. Build drops envredact.CredentialName matches before
-// applying allow lists, even when Lookup classifies an unknown name as user-owned.
-func Build(k Kind, b Base, rt Runtime) ([]string, error) { panic("unimplemented: c4-surface-config") }
-
-// Lookup uses exact rows before prefixes, case-insensitively on Windows; unknown names remain user-owned.
-func Lookup(name string) (Var, bool) { panic("unimplemented: c4-surface-config") }
-
-// Validate refuses invalid names and engine-owned assignments without exposing secret values in its errors.
-func Validate(env []Assignment) error { panic("unimplemented: c4-surface-config") }
+func SplitJobEnv(env []Assignment) (JobEnv, error) {
+	if err := Validate(env); err != nil {
+		return JobEnv{}, err
+	}
+	var result JobEnv
+	for _, assignment := range env {
+		row, _ := Lookup(assignment.Name)
+		if assignment.Startup || row.Startup {
+			result.Startup = append(result.Startup, assignment)
+		} else {
+			result.Body = append(result.Body, assignment)
+		}
+	}
+	return result, nil
+}

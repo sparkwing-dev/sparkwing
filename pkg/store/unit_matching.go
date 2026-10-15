@@ -13,7 +13,11 @@ import (
 )
 
 func resolveMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, unit UnitRef) (match.Profile, match.Demand, error) {
-	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: request.CapabilityPrefix}, true)
+	return readMatchingInputsTx(ctx, tx, request, unit, true)
+}
+
+func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, unit UnitRef, lock bool) (match.Profile, match.Demand, error) {
+	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: request.CapabilityPrefix}, lock)
 	if err != nil {
 		return match.Profile{}, match.Demand{}, err
 	}
@@ -32,7 +36,10 @@ func resolveMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDeman
 		}
 	}
 	profile = authenticatedClaimProfile(p.Capability, profile, here)
-	profile.Labels, profile.OS, profile.Arch, profile.Capacity = slices.Clone(request.Labels), request.OS, request.Arch, request.Capacity
+	profile.Labels, profile.OS, profile.Arch = slices.Clone(request.Labels), request.OS, request.Arch
+	if tx.store.claimProfiles == nil {
+		profile.Capacity = request.Capacity
+	}
 	var team, repo, display string
 	var requestBody, specBody, pools []byte
 	err = tx.QueryRowContext(ctx, `SELECT team,repo_key,repo_display,request_json,spec_json,allowed_pools FROM runs WHERE id=?`, unit.RunID).Scan(&team, &repo, &display, &requestBody, &specBody, &pools)

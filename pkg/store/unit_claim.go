@@ -27,6 +27,9 @@ func (s *Store) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, er
 		if err != nil {
 			return err
 		}
+		if !validMatchingResources(demand.Capacity) || !validMatchingResources(demand.Available) {
+			return authorityError(apierr.BadRequest, "invalid claim resources")
+		}
 		if demand.Target != nil {
 			out, err = claimUnitTx(ctx, tx, demand, *demand.Target)
 			return err
@@ -58,34 +61,37 @@ func claimKinds(c capability.Capability, demand UnitDemand) ([]capability.UnitKi
 		return nil, authorityError(apierr.Forbidden, "claim requires controller authority")
 	}
 	kinds := slices.Clone(demand.Kinds)
-	if demand.Target != nil {
-		if len(kinds) > 0 && !slices.Contains(kinds, demand.Target.Kind) {
-			return nil, authorityError(apierr.BadRequest, "claim target is outside requested kinds")
-		}
+	if demand.Target != nil && len(kinds) == 0 {
 		kinds = []capability.UnitKind{demand.Target.Kind}
 	}
-	var allowed []capability.UnitKind
-	for _, policy := range capability.AwardPolicies {
-		if policy.Purpose == capability.PurposeHere {
-			continue
-		}
-		for _, g := range policy.ClaimGrants {
-			if slices.Contains(c.Grants, g) {
-				allowed = append(allowed, policy.Unit)
-				break
-			}
-		}
-	}
 	if len(kinds) == 0 {
-		kinds = allowed
+		return nil, authorityError(apierr.BadRequest, "claim requires unit kinds")
+	}
+	seen := map[capability.UnitKind]bool{}
+	for _, kind := range kinds {
+		if !slices.Contains([]capability.UnitKind{capability.UnitTrigger, capability.UnitNode, capability.UnitPlan, capability.UnitEval}, kind) || seen[kind] {
+			return nil, authorityError(apierr.BadRequest, "claim kinds must be known and unique")
+		}
+		seen[kind] = true
+	}
+	if demand.Target != nil && !seen[demand.Target.Kind] {
+		return nil, authorityError(apierr.BadRequest, "claim target is outside requested kinds")
 	}
 	for _, kind := range kinds {
-		if !slices.Contains(allowed, kind) {
+		grant := capability.NodesClaim
+		if kind == capability.UnitTrigger {
+			grant = capability.TriggersClaim
+		}
+		allowed := slices.Contains(c.Grants, grant) && (kind == capability.UnitNode || kind == capability.UnitTrigger)
+		if launcherClaimant(c) {
+			allowed = kind == capability.UnitPlan || kind == capability.UnitEval || kind == capability.UnitNode
+		}
+		if c.Purpose == capability.PurposeHere {
+			allowed = kind == capability.UnitTrigger && demand.Target != nil && demand.Target.RunID == c.Binding.RunID && slices.Contains(c.Grants, capability.TriggerHost)
+		}
+		if !allowed {
 			return nil, authorityError(apierr.Forbidden, "claimant lacks the unit claim grant")
 		}
-	}
-	if len(kinds) == 0 {
-		return nil, authorityError(apierr.Forbidden, "claimant lacks a claim grant")
 	}
 	return kinds, nil
 }

@@ -261,6 +261,11 @@ func trustedIntakeRequest(request IntakeRequest, p capability.Principal, team Te
 	if input.Git.Repository.Key == "" {
 		return input, authorityError(apierr.BadRequest, "repository identity is required")
 	}
+	if policy.SourceLocation != nil {
+		input.Source.Location = *policy.SourceLocation
+	} else if input.Source.Location != (runspec.SourceLocation{}) {
+		return input, authorityError(apierr.Unavailable, "verified source location is unavailable")
+	}
 	if input.Lineage.ParentRunID != "" {
 		input.Origin = runspec.OriginChild
 	}

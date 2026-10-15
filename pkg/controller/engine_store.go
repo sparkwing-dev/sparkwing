@@ -142,6 +142,10 @@ func engineJob(row store.NodeRow) controllerwire.JobDetail {
 	return controllerwire.JobDetail{ID: row.Ref.NodeID, Status: string(row.Status), Outcome: string(row.Outcome), StatusDetail: row.StatusDetail, Generation: row.Generation, Attempt: row.Attempt, StateSeq: row.StateSeq, Expansion: string(row.Expansion), StartedAt: row.StartedAt, FinishedAt: row.FinishedAt, CancelRequestedAt: row.CancelRequestedAt}
 }
 
+func engineExecutionJob(row store.NodeRow) controllerwire.ExecutionJob {
+	return controllerwire.ExecutionJob{JobDetail: engineJob(row), Spec: row.Spec, SpecHash: row.SpecHash, Execution: row.Execution, ClaimedBy: row.ClaimedBy, CapabilityPrefix: row.CapabilityPrefix, ReadyAt: row.ReadyAt, LeaseExpiresAt: row.LeaseExpiresAt, ApplicationRetries: row.ApplicationRetries, Disruptions: row.Disruptions, ExpansionDigest: row.ExpansionDigest}
+}
+
 func validateEngineFailure(failure *apierr.Error, decode func([]byte) (*apierr.Error, error)) error {
 	if failure == nil {
 		return nil
@@ -183,19 +187,20 @@ func engineExpansion(result store.AcceptedExpansion) (controllerwire.ExpansionAc
 		if err := json.Unmarshal(row.Spec, &job); err != nil {
 			return controllerwire.ExpansionAccepted{}, err
 		}
-		response.Jobs = append(response.Jobs, controllerwire.ExpandedJob{Job: job, SpecHash: row.SpecHash, Execution: row.Execution})
+		response.Jobs = append(response.Jobs, controllerwire.ExpandedJob{Job: job, SpecHash: row.SpecHash, Execution: row.Execution, Current: engineExecutionJob(row)})
 	}
 	return response, nil
 }
 
 func engineReconciledClaim(c capability.Capability, result store.ReconciledNode, run store.RunRow) *controllerwire.ClaimedUnit {
-	claim := &controllerwire.ClaimedUnit{Unit: c.Unit, UnitID: c.UnitID, RunID: result.Node.Ref.RunID, JobID: result.Node.Ref.NodeID, Binding: c.Binding, Capability: string(result.Bearer), Request: run.Request, Execution: &result.Node.Execution, LeaseExpiresAt: result.Claim.LeaseExpiresAt, Runner: nodeproto.RunnerIdentity{Name: result.Claim.Holder}}
+	claim := &controllerwire.ClaimedUnit{Unit: c.Unit, Purpose: c.Purpose, Delivery: c.Delivery, UnitID: c.UnitID, RunID: result.Node.Ref.RunID, JobID: result.Node.Ref.NodeID, Binding: c.Binding, Capability: string(result.Bearer), Request: run.Request, Execution: &result.Node.Execution, LeaseExpiresAt: result.Claim.LeaseExpiresAt, OwnerDeadline: c.Binding.Deadline, Runner: nodeproto.RunnerIdentity{Name: result.Claim.Holder}}
 	if c.Billing != nil {
 		claim.Runner.Type = c.Billing.ExecutorClass
 	}
 	if run.Spec != nil {
 		accepted := enginePlan(store.AcceptedPlan{Spec: *run.Spec, Plan: run.Plan, PlanHash: run.PlanHash})
 		claim.Accepted = &accepted
+		claim.Engine = &run.Spec.Resolved.Engine
 	}
 	return claim
 }

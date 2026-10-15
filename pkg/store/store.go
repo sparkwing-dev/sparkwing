@@ -102,6 +102,7 @@ type Store struct {
 	intakePolicy     IntakePolicy
 	plans            planContracts
 	planSecretOpener PlanSecretOpener
+	delegation       delegationContracts
 	clock            func() time.Time
 	db               *sql.DB
 	dialect          Dialect

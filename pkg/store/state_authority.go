@@ -101,7 +101,7 @@ func checkHolderTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, act
 
 func checkCancelActorTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runID string, now time.Time) error {
 	switch actor.Kind {
-	case ActorController:
+	case ActorController, ActorRunHost:
 		return checkOwnerTx(ctx, tx, team, actor, runID, now)
 	case ActorReaper:
 		return checkReaperTx(ctx, tx, actor, now)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
@@ -63,7 +64,7 @@ func TestStartup_PreservesRestoredLeasesAboveSmallerBudget(t *testing.T) {
 		},
 	}))
 	log := &logCapture{}
-	budget, err := wingd.ParseBudget("10")
+	budget, err := userconfig.ParseBudget("10")
 	if err != nil {
 		t.Fatalf("parse budget: %v", err)
 	}

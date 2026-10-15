@@ -56,14 +56,5 @@ func (s *Store) LookupCapability(ctx context.Context, digest [32]byte) (capabili
 
 // ExchangeCapability consumes a bootstrap and returns its replacement only after commit.
 func (s *Store) ExchangeCapability(ctx context.Context, spec capability.ExchangeSpec) (capability.Issued, error) {
-	var issued capability.Issued
-	err := s.inTx(ctx, func(tx *storeTx) error {
-		var err error
-		issued, err = s.Issue(ctx, tx, capability.IssueRequest{Kind: capability.Exchange, Exchange: &spec})
-		return err
-	})
-	if err != nil {
-		return capability.Issued{}, err
-	}
-	return issued, nil
+	return s.commitIssuance(ctx, capability.IssueRequest{Kind: capability.Exchange, Exchange: &spec})
 }

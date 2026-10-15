@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -149,7 +150,17 @@ func materializationResultTx(ctx context.Context, tx *storeTx, team Team, run Ru
 		}
 	}
 	result := NodeResult{Outcome: node.Outcome}
-	err = tx.QueryRowContext(ctx, `SELECT failure_reason,error,exit_code FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID).Scan(&result.Reason, &result.MaskedError, &result.ExitCode)
+	var failure []byte
+	err = tx.QueryRowContext(ctx, `SELECT failure_reason,error,exit_code,failure_json FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID).Scan(&result.Reason, &result.MaskedError, &result.ExitCode, &failure)
+	if err == nil && len(failure) > 0 && node.Outcome == NodeFailed {
+		err = json.Unmarshal(failure, &result.Failure)
+		if err == nil && result.Failure == nil {
+			err = authorityError(apierr.IntegrityFailure, "materialized failure is null")
+		}
+		if err == nil {
+			err = validateRecordedFailure(ref, result.Failure)
+		}
+	}
 	return result, err
 }
 

@@ -12,6 +12,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 
@@ -142,6 +143,9 @@ type NodeRow struct {
 }
 
 // NodeAttempt preserves the node-wide ordinal across claims; generation is an attribute of that ordinal.
+// A node starts at attempt zero. CauseStart allocates one on first execution and
+// the next ordinal after a started disruption. CauseRetry allocates the next ordinal
+// under the same claim. An unstarted release consumes no ordinal. Applied.Attempt is authoritative.
 type NodeAttempt struct {
 	Identity         runspec.AttemptIdentity
 	Holder           string
@@ -237,6 +241,8 @@ func NodeTransitions() []NodeEdge {
 		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeCancelled}, []ActorKind{ActorReaper}, CauseLeaseLapse, []EdgeGuard{GuardCancelLapse}, false},
 		{[]NodeState{NodePending, NodeReady, NodeApprovalPending}, []NodeState{NodeCancelled}, cancellers, CauseCancel, []EdgeGuard{GuardCancel, GuardUnclaimed}, false},
 		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeCancelled}, cancellers, CauseCancel, []EdgeGuard{GuardCancel}, true},
+		{[]NodeState{NodePending, NodeReady, NodeApprovalPending}, []NodeState{NodeCancelled}, []ActorKind{ActorRunHost}, CauseCancel, []EdgeGuard{GuardOwner, GuardCancel, GuardUnclaimed}, false},
+		{[]NodeState{NodeClaimed, NodeRunning}, []NodeState{NodeCancelled}, []ActorKind{ActorRunHost}, CauseCancel, []EdgeGuard{GuardOwner, GuardCancel}, true},
 	}
 }
 
@@ -248,6 +254,7 @@ type NodeResult struct {
 	ExitCode       *int
 	OutputRecord   *blob.RecordKey
 	ManifestRecord *blob.RecordKey
+	Failure        *nodeproto.JobFailure
 }
 
 // MaterializeSource preserves the read edge that permits copying another result.
@@ -417,6 +424,11 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 		}
 	}
 	if row.StateDigest == digest && reflect.DeepEqual(row.StateActor, change.Actor) {
+		if change.Actor.Kind == ActorRunHost {
+			if err := checkOwnerTx(ctx, tx, team, change.Actor, change.Ref.RunID, now); err != nil {
+				return Applied{}, err
+			}
+		}
 		return Applied{Replayed: true, CancelRequested: row.CancelRequestedAt != nil && row.Status != StatusDone, StateSeq: row.StateSeq, Generation: row.Generation, Attempt: row.Attempt}, nil
 	}
 	refusal := func(reason IllegalTransitionReason) (Applied, error) {
@@ -452,7 +464,21 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 		return Applied{}, err
 	}
 	if result := change.Extra.Result; result != nil {
-		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET error=?,failure_reason=?,exit_code=? WHERE team=? AND run_id=? AND node_id=?`, result.MaskedError, result.Reason, result.ExitCode, team, row.Ref.RunID, row.Ref.NodeID); err != nil {
+		var failure []byte
+		if result.Failure != nil {
+			if err := validateRecordedFailure(row.Ref, result.Failure); err != nil {
+				return Applied{}, err
+			}
+			failure, err = json.Marshal(result.Failure)
+			if err != nil {
+				return Applied{}, err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET error=?,failure_reason=?,exit_code=?,failure_json=? WHERE team=? AND run_id=? AND node_id=?`, result.MaskedError, result.Reason, result.ExitCode, failure, team, row.Ref.RunID, row.Ref.NodeID); err != nil {
+			return Applied{}, err
+		}
+	} else if row.Status == StatusDone || change.To == NodeRunning {
+		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET failure_json=NULL WHERE team=? AND run_id=? AND node_id=?`, team, row.Ref.RunID, row.Ref.NodeID); err != nil {
 			return Applied{}, err
 		}
 	}
@@ -470,6 +496,21 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 		return Applied{}, err
 	}
 	return Applied{CancelRequested: edge.RequestOnly, StateSeq: row.StateSeq, Generation: row.Generation, Attempt: row.Attempt}, nil
+}
+
+func validateRecordedFailure(ref NodeRef, failure *nodeproto.JobFailure) error {
+	if failure.Job != ref.NodeID || failure.Stage == "" || failure.Error == nil {
+		return authorityError(apierr.BadRequest, "failure requires its job, stage and structured error")
+	}
+	if int64(len(failure.Error.Message)) > limits.ErrorBytes {
+		return authorityError(apierr.BadRequest, "failure error exceeds limit")
+	}
+	raw, err := json.Marshal(failure.Error)
+	if err != nil {
+		return err
+	}
+	_, err = apierr.DecodeInner(raw)
+	return err
 }
 
 // safety: plan and expansion insertion share state_seq=0 and reject a conflicting spec hash.
@@ -496,6 +537,9 @@ func stateHash(value any) (string, error) {
 
 func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, change NodeTransition, edge NodeEdge, now time.Time) error {
 	if change.Extra.Result != nil {
+		if change.Extra.Result.Failure != nil && change.Extra.Result.Outcome != NodeFailed {
+			return authorityError(apierr.BadRequest, "recorded failure requires a failed outcome")
+		}
 		if !slices.Contains([]NodeState{NodeSuccess, NodeFailed, NodeCancelled, NodeSkipped, NodeSuperseded, NodeMemoized}, change.Extra.Result.Outcome) {
 			return errors.New("result requires terminal outcome")
 		}

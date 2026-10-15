@@ -45,8 +45,7 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 	case request.Kind == capability.Delegate && request.Provision != nil:
 		c, err = provisionCapabilityTx(ctx, tx, *request.Provision)
 	case request.Kind == capability.Delegate && request.Delegate != nil:
-		// safety: C2 owns narrowing; an unavailable validator must never turn into permissive issuance.
-		return capability.Issued{}, authorityError(apierr.Unavailable, "capability delegation validation is unavailable")
+		c, err = delegateCapabilityTx(ctx, tx, *request.Delegate)
 	default:
 		return capability.Issued{}, authorityError(apierr.BadRequest, "issuance kind does not match variant")
 	}
@@ -221,7 +220,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if parent.Capability.ExpiresAt != nil && (c.ExpiresAt == nil || parent.Capability.ExpiresAt.Before(*c.ExpiresAt)) {
 		c.ExpiresAt = parent.Capability.ExpiresAt
 	}
-	if c.ExpiresAt == nil && !here {
+	if c.ExpiresAt == nil && !here && parent.Capability.Subject.Kind != capability.SubjectLocal && parent.Capability.Purpose != capability.PurposeHere {
 		return capability.Capability{}, authorityError(apierr.Unavailable, "awarded unit deadline is unavailable")
 	}
 	if here {
@@ -262,7 +261,10 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 		start = capability.BillingAtStart
 		executor = "cloud"
 	}
-	if here {
+	if parent.Capability.Subject.Kind == capability.SubjectLocal {
+		executor = "local"
+	}
+	if here || parent.Capability.Purpose == capability.PurposeHere {
 		executor = "here"
 	}
 	c.Billing = &capability.BillingProvenance{PayerTeam: row.team, Metered: false, ExecutorClass: executor, ReservationID: reservation, Start: start, Unit: billingUnit}
@@ -340,14 +342,14 @@ func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Pro
 		return capability.Capability{}, authorityError(apierr.Forbidden, "member provisioning exceeds session authority")
 	}
 	for _, g := range spec.Grants {
-		if g == capability.TeamAdmin || !slices.Contains(p.Capability.Grants, g) {
+		if !slices.Contains(p.Capability.Grants, g) {
 			return capability.Capability{}, authorityError(apierr.Forbidden, "member provisioning exceeds session grants")
 		}
 	}
-	if spec.ExpiresAt == nil || !spec.ExpiresAt.After(tx.now()) || (p.Capability.ExpiresAt != nil && spec.ExpiresAt.After(*p.Capability.ExpiresAt)) {
-		return capability.Capability{}, authorityError(apierr.Forbidden, "member expiry exceeds session lifetime")
+	if spec.ExpiresAt != nil && !spec.ExpiresAt.After(tx.now()) {
+		return capability.Capability{}, authorityError(apierr.Forbidden, "member root expiry has passed")
 	}
-	return capability.Capability{Team: spec.Team, Subject: spec.Subject, Audience: capability.Controller, Grants: slices.Clone(spec.Grants), Binding: spec.Binding, Issuance: capability.Delegate, ExpiresAt: spec.ExpiresAt, Parent: spec.Authority, ReservedPools: []string{}, Repositories: []string{}}, nil
+	return capability.Capability{Team: spec.Team, Subject: spec.Subject, Audience: capability.Controller, Grants: slices.Clone(spec.Grants), Binding: spec.Binding, Issuance: capability.Delegate, ExpiresAt: spec.ExpiresAt, ReservedPools: []string{}, Repositories: []string{}}, nil
 }
 
 func bindExchangedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, bootstrap string) error {

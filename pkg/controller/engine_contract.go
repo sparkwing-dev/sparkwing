@@ -6,6 +6,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -13,7 +14,10 @@ import (
 // EngineController adapts the shared HTTP wire to C1's transactions. Middleware
 // supplies C2 Authorized values; bodies cannot supply actors, grants or fences.
 // Every mutation rechecks that authority transactionally through the store.
-type EngineController struct{ Store *store.Store }
+type EngineController struct {
+	Store        *store.Store
+	RunnerPolicy RunnerAdmissionPolicy
+}
 
 // ExpansionForStore is the only expansion adapter. It derives Source and Actor
 // from the authorized route/binding, compares the requested immutable source
@@ -109,7 +113,7 @@ func (s *EngineController) ReconcileJob(ctx context.Context, authorized capabili
 	if err != nil {
 		return controllerwire.ReconcileResponse{}, err
 	}
-	request := store.ReconcileRequest{Ref: store.NodeRef{RunID: authorized.Target.RunID, NodeID: authorized.Target.NodeID}, Actor: actor, Policy: store.SourcePolicy(body.Policy)}
+	request := store.ReconcileRequest{Ref: store.NodeRef{RunID: authorized.Target.RunID, NodeID: authorized.Target.NodeID}, Actor: actor, Policy: store.SourcePolicy(body.Policy), MaterializeOnly: body.MaterializeOnly}
 	if body.Source != nil {
 		request.Source = &store.MaterializeSource{Kind: store.SourcePolicy(body.Source.Policy), Source: body.Source.Attempt, Record: body.Source.Record}
 	}
@@ -117,7 +121,7 @@ func (s *EngineController) ReconcileJob(ctx context.Context, authorized capabili
 	if err != nil {
 		return controllerwire.ReconcileResponse{}, err
 	}
-	response := controllerwire.ReconcileResponse{Kind: string(result.Kind), Job: engineJob(result.Node)}
+	response := controllerwire.ReconcileResponse{Kind: string(result.Kind), Job: engineExecutionJob(result.Node)}
 	if result.Source != nil {
 		response.Source = &controllerwire.ReuseSource{Policy: string(result.Source.Kind), Attempt: result.Source.Source, Record: result.Source.Record}
 	}
@@ -139,7 +143,54 @@ func (s *EngineController) ReconcileJob(ctx context.Context, authorized capabili
 // Claim calls engine.EvaluateRunner against signed policy before a new award, derives total
 // capacity from registration and uses reported availability with the shared matcher.
 func (s *EngineController) Claim(ctx context.Context, authorized capability.Authorized, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+	return s.claim(ctx, authorized, body)
+}
+
+// SyncLauncher returns only this launcher's held awards, with bearer material omitted.
+func (s *EngineController) SyncLauncher(ctx context.Context, authorized capability.Authorized, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
 	panic("unimplemented: controller-wire")
+}
+
+// Exchange consumes the authenticated bootstrap once and returns its original unit policy.
+func (s *EngineController) Exchange(ctx context.Context, authorized capability.Authorized) (controllerwire.ExchangeResponse, error) {
+	return s.exchange(ctx, authorized)
+}
+
+// CancelJob requests the named job's cancellation without overwriting a live holder's result.
+func (s *EngineController) CancelJob(ctx context.Context, authorized capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error) {
+	actor, err := engineActor(authorized)
+	if err != nil {
+		return controllerwire.Applied{}, err
+	}
+	if authorized.Target.RunID == "" || authorized.Target.NodeID == "" {
+		return controllerwire.Applied{}, engineBadRequest("cancellation requires a job")
+	}
+	tenant, err := s.tenant(ctx, authorized)
+	if err != nil {
+		return controllerwire.Applied{}, err
+	}
+	result, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: authorized.Target.RunID, NodeID: authorized.Target.NodeID}, Actor: actor, To: store.NodeCancelled, Cause: store.CauseCancel, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: body.Reason}}})
+	if err != nil {
+		return controllerwire.Applied{}, err
+	}
+	return engineApplied(result), nil
+}
+
+// ReadFailure derives the source and generation from authorized.Target and checks its recovery edge.
+func (s *EngineController) ReadFailure(ctx context.Context, authorized capability.Authorized) (*nodeproto.JobFailure, error) {
+	tenant, err := s.tenant(ctx, authorized)
+	if err != nil {
+		return nil, err
+	}
+	source := store.NodeRef{RunID: authorized.Target.RunID, NodeID: authorized.Target.NodeID}
+	if authorized.Principal.Capability.Unit == capability.UnitNode {
+		authorized.Target.NodeID = authorized.Binding.NodeID
+	}
+	actor, err := engineActor(authorized)
+	if err != nil {
+		return nil, err
+	}
+	return tenant.ReadFailure(ctx, source, authorized.Target.SourceGeneration, actor)
 }
 
 func (s *EngineController) Renew(ctx context.Context, authorized capability.Authorized, body controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error) {
@@ -242,13 +293,29 @@ func (s *EngineController) Retry(ctx context.Context, authorized capability.Auth
 // RunDetail uses runspec.DisplayRequest/DisplaySpec and the same safe projection
 // for local and remote reads. Claim execution inputs are on their private wire.
 func (s *EngineController) RunDetail(ctx context.Context, authorized capability.Authorized) (controllerwire.RunDetail, error) {
-	panic("unimplemented: controller-wire")
+	tenant, err := s.tenant(ctx, authorized)
+	if err != nil {
+		return controllerwire.RunDetail{}, err
+	}
+	view, err := tenant.ReadRunView(ctx, authorized.Target.RunID)
+	if err != nil {
+		return controllerwire.RunDetail{}, err
+	}
+	return engineRunDetail(view), nil
 }
 
 // Snapshot takes one ReadSnapshot and its Scheduling projection, including empty
 // generator groups. Remote owners cannot assemble a schedule from separate reads.
 func (s *EngineController) Snapshot(ctx context.Context, authorized capability.Authorized) (controllerwire.ScheduleSnapshot, error) {
-	panic("unimplemented: controller-wire")
+	tenant, err := s.tenant(ctx, authorized)
+	if err != nil {
+		return controllerwire.ScheduleSnapshot{}, err
+	}
+	snapshot, err := tenant.ReadOwnerSnapshot(ctx, authorized.Principal.Authority, authorized.Target.RunID)
+	if err != nil {
+		return controllerwire.ScheduleSnapshot{}, err
+	}
+	return engineSchedule(snapshot)
 }
 
 // Compatibility serves /api/v1/capabilities?engine_version= from verified release

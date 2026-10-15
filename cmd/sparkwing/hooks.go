@@ -158,7 +158,7 @@ type installOptions struct {
 }
 
 func declaredHooks(sparkwingDir string) (map[string][]string, error) {
-	cfg, err := projectconfig.LoadOld(filepath.Join(sparkwingDir, projectconfig.Filename))
+	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +166,7 @@ func declaredHooks(sparkwingDir string) (map[string][]string, error) {
 		return map[string][]string{}, nil
 	}
 	out := map[string][]string{}
-	for _, p := range cfg.Pipelines {
+	for _, p := range cfg.Registry().Pipelines {
 		if p.On.PreHook != nil {
 			out["pre-commit"] = append(out["pre-commit"], p.Name)
 		}

@@ -20,6 +20,7 @@ type IntakePolicyFacts struct {
 	Options              *runspec.Options
 	Ceilings             runspec.Ceilings
 	RepositoryAuthorized bool
+	SourceLocation       *runspec.SourceLocation
 	Delivery             *VerifiedRunDelivery
 	LogRetentionClass    string
 	LogRetentionDays     int
