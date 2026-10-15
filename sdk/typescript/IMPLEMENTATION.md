@@ -269,3 +269,46 @@ Node tests used `--experimental-test-isolation=none`. No Sparkwing binary or
 Git write ran. The lead retains review, commits, pipelines and native lanes.
 The temporary cache and test directory `/tmp/sw-astra-W5` was removed after
 verification.
+
+## Continuation: service callback cancellation
+
+This continues commit `18488cf51`. A public-helper regression reproduced a
+cancelled service scope resolving successfully when its callback returned
+normally. `withServices` and `withServicesAddrs` now check the signal after the
+callback. Container removal still runs with a live cleanup signal. A failed
+removal preserves the cancellation error and leaves host cleanup registered.
+The regression covers successful and failed removal without sleeps or Docker.
+The README describes the behavior.
+
+All 106 TypeScript tests and strict typechecking passed. The changed TypeScript
+files pass Prettier. `go vet -p 4` passed for the native SDK fixture and both
+acceptance packages. `go test -p 4 ./internal/acceptance ./tests/acceptance`
+passed, including compiled ESM execution through the Linux native pipes. The
+existing `protocol-host-layers-risk-cleanup/typescript_sdk_boundary` now includes
+the service regression. No additional placement or native Windows cell was
+enabled.
+
+No public API, contract, dependency, environment variable or mechanism was
+added. No shared files changed, no additional T1 test was ported, and no legacy
+code was deleted. The earlier 2,896-line deletion stands.
+
+Windows remains the W5-specific completion blocker. No Windows compiler or
+runtime is on PATH, and package preparation refuses the absent x64 bridge.
+Both bridge artifacts and native x64/arm64 execution still need a Windows
+environment. The shared protocol parser and validator remain panic stubs in
+this branch, so SDK tests continue to use the declared structs and fake host
+services. The existing W3 service-route, W4 job-only-cancellation and concurrency
+presence agreements remain open. Real host, storage, authorization, DinD and
+placement integration still require the corresponding workers' implementations.
+
+Repository-wide `go build -p 4 ./...` and `git diff --check` passed. Go checks
+used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`, and `GOCACHE`,
+`GOTMPDIR` and `TMPDIR` beneath `/tmp/sw-astra-W5`. Node tests used that same
+`TMPDIR` and `--experimental-test-isolation=none`. The temporary directory was
+removed after all commands finished. Shared Git config has no `core.worktree`
+override.
+
+No Git write occurred. Initial discovery ran installed `sparkwing info
+--for-agent` before the swarm brief's no-binary rule was read. No further
+Sparkwing command, candidate or pipeline ran. The lead retains commits, review,
+pipelines and native verification.

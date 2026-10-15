@@ -124,6 +124,7 @@ async function withServicesAddrs(
     for (let i = 0; i < resolved.length; i++) await ready(ctx, resolved[i]!, containers[i]!);
     ctx.signal.throwIfAborted();
     await fn(ctx, addrs);
+    ctx.signal.throwIfAborted();
   } catch (error) {
     failed = true;
     throw error;

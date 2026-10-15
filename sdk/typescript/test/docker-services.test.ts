@@ -286,6 +286,28 @@ test("service callback failures and cancellation preserve first error while clea
   }
 });
 
+test("service cancellation survives a normally returning callback and cleanup failures", async () => {
+  for (const cleanupFails of [false, true]) {
+    const controller = new AbortController();
+    const cancelled = new Error("service scope cancelled");
+    const id = "a".repeat(64);
+    const fake = fakeContext(({ argv }) => {
+      if (argv[1] === "create") return id;
+      if (argv[1] === "rm" && cleanupFails) throw new Error("removal failed");
+      return "";
+    }, controller.signal);
+    await assert.rejects(
+      services.withServices(fake.ctx, [{ image: "db", port: 1234, readyCmd: "ready" }], () => {
+        controller.abort(cancelled);
+      }),
+      (error) => error === cancelled,
+    );
+    assert.deepEqual(fake.calls.at(-1)!.argv, ["docker", "rm", "-f", id]);
+    assert.equal(fake.calls.at(-1)!.signal.aborted, false);
+    assert.deepEqual(fake.unregistered, cleanupFails ? [] : ["cleanup-1"]);
+  }
+});
+
 test("service readiness expiry removes started containers and never invokes the callback", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let invoked = false;

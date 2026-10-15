@@ -45,6 +45,9 @@ output. The host validates the reconstructed declarations against accepted state
 Step output reads stay within the current attempt, including retry hooks.
 Cancellation reaches bodies and every closure kind. A callback that finishes
 after cancellation still reports a failed invocation.
+Service scopes also reject after cancellation when their callback returns normally.
+They remove their containers before rejecting. If removal fails, host cleanup
+stays registered and the cancellation error is preserved.
 
 The host starts `node <entry> --sw-node-protocol`. Protocol 2 begins with hello,
 which supplies granted runner identity and an optional in-memory service binding.
