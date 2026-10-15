@@ -15,10 +15,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// OutputUpload carries server-derived job authority and its output record key.
+// JobUpload carries server-derived job authority and its destination record key.
 // The backend rechecks live authority at upload and record commit; this value
 // cannot grant access merely by naming an attempt or digest.
-type OutputUpload struct {
+type JobUpload struct {
 	Identity  blob.UploadIdentity
 	Authority blob.Authority
 	Key       blob.RecordKey
@@ -31,7 +31,7 @@ type OutputUpload struct {
 type OutputRecords struct {
 	Blobs   blob.Store
 	Records blob.RecordStore
-	Bind    func(context.Context, NodeInput) (OutputUpload, error)
+	Bind    func(context.Context, NodeInput) (JobUpload, error)
 }
 
 // PublishOutput returns a record only after both immutable upload and record
@@ -59,53 +59,70 @@ func (o OutputRecords) PublishOutput(ctx context.Context, input NodeInput, value
 	if input.Storage.Authority.CapabilityRef != "" && input.Storage.Authority != upload.Authority {
 		return nil, errors.New("output authority differs from the current storage binding")
 	}
-	if err := upload.check(input); err != nil {
+	if err := upload.check(input, blob.KindOutput); err != nil {
 		return nil, err
 	}
 	sum := sha256.Sum256(value)
 	digest := blob.Digest(hex.EncodeToString(sum[:]))
-	receipt, err := o.Blobs.Put(ctx, blob.PutRequest{Identity: upload.Identity, Authority: upload.Authority, Digest: digest, Size: int64(len(value)), Body: bytes.NewReader(value)})
-	if err != nil {
+	if err := upload.put(ctx, o.Blobs, digest, int64(len(value)), bytes.NewReader(value)); err != nil {
 		return nil, err
 	}
-	if receipt.Identity != upload.Identity || receipt.Digest != digest {
-		return nil, errors.New("output receipt differs from its upload")
+	return upload.commit(ctx, o.Records, digest, nil)
+}
+
+func (u JobUpload) check(input NodeInput, kind blob.Kind) error {
+	var spec runspec.Spec
+	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil || input.Accepted.SpecHash == "" || input.Accepted.PlanHash == "" || string(spec.Hash) != input.Accepted.SpecHash || string(spec.PlanHash) != input.Accepted.PlanHash {
+		return executorError(apierr.SpecDrift, "job upload requires an accepted run spec")
 	}
+	attempt := runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: input.Generation, Attempt: input.Attempt}
+	if attempt.Team == "" || attempt.RunID == "" || attempt.NodeID == "" || attempt.Generation < 1 || attempt.Attempt < 1 || input.Authority.Holder == "" || input.Authority.CapabilityPrefix == "" {
+		return errors.New("job upload requires an awarded job attempt")
+	}
+	if u.Identity.Kind != blob.UploadJob || u.Identity.Unit.Set || !u.Identity.Attempt.Set || u.Identity.Attempt.Value != attempt || u.Identity.Team != attempt.Team || u.Identity.RunID != attempt.RunID {
+		return errors.New("job upload differs from its awarded attempt")
+	}
+	if !u.Authority.Attempt.Set || u.Authority.Attempt.Value != attempt || u.Authority.CapabilityRef == "" || u.Authority.CapabilityRef != u.Identity.CapabilityRef || u.Authority.Principal == "" || u.Authority.Principal != u.Identity.Principal {
+		return errors.New("job upload differs from its authenticated authority")
+	}
+	if u.Key.Kind != kind || u.Key.Team != attempt.Team || u.Key.Scope.Job != attempt.NodeID || u.Key.Scope.Pipeline != spec.Request.Request.Pipeline || u.Key.Scope.Repo == "" || u.Key.Scope.Repo != u.Authority.Repo || u.Key.Scope.Ref != u.Authority.Ref.Scope || u.Key.Name == "" {
+		return errors.New("job record differs from its authenticated scope")
+	}
+	if spec.Request.Request.Git.Repository.Key != "" && u.Key.Scope.Repo != spec.Request.Request.Git.Repository.Key {
+		return errors.New("job record differs from its sealed repository")
+	}
+	return nil
+}
+
+func (u JobUpload) put(ctx context.Context, backend blob.Store, digest blob.Digest, size int64, body io.Reader) error {
+	if err := context.Cause(ctx); err != nil {
+		return err
+	}
+	receipt, err := backend.Put(ctx, blob.PutRequest{Identity: u.Identity, Authority: u.Authority, Digest: digest, Size: size, Body: body})
+	if err != nil {
+		return err
+	}
+	if receipt.Identity != u.Identity || receipt.Digest != digest {
+		return errors.New("job upload receipt differs from its upload")
+	}
+	return context.Cause(ctx)
+}
+
+func (u JobUpload) commit(ctx context.Context, records blob.RecordStore, digest blob.Digest, members []blob.Member) (*blob.RecordKey, error) {
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
-	record, err := o.Records.CommitRecord(ctx, blob.CommitRecordRequest{Source: upload.Identity, Authority: upload.Authority, Key: upload.Key, Digest: digest})
+	record, err := records.CommitRecord(ctx, blob.CommitRecordRequest{Source: u.Identity, Authority: u.Authority, Key: u.Key, Digest: digest, Members: members})
 	if err != nil {
 		return nil, err
 	}
-	if record.Key != upload.Key || record.Digest != digest || record.Source != upload.Identity {
-		return nil, errors.New("committed output differs from its upload")
+	if record.Key != u.Key || record.Digest != digest || record.Source != u.Identity {
+		return nil, errors.New("committed job record differs from its upload")
 	}
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
 	return &record.Key, nil
-}
-
-func (u OutputUpload) check(input NodeInput) error {
-	var spec runspec.Spec
-	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil || input.Accepted.SpecHash == "" || input.Accepted.PlanHash == "" || string(spec.Hash) != input.Accepted.SpecHash || string(spec.PlanHash) != input.Accepted.PlanHash {
-		return executorError(apierr.SpecDrift, "output requires an accepted run spec")
-	}
-	attempt := runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: input.Generation, Attempt: input.Attempt}
-	if attempt.Team == "" || attempt.RunID == "" || attempt.NodeID == "" || attempt.Generation < 1 || attempt.Attempt < 1 || input.Authority.Holder == "" || input.Authority.CapabilityPrefix == "" {
-		return errors.New("output requires an awarded job attempt")
-	}
-	if u.Identity.Kind != blob.UploadJob || u.Identity.Unit.Set || !u.Identity.Attempt.Set || u.Identity.Attempt.Value != attempt || u.Identity.Team != attempt.Team || u.Identity.RunID != attempt.RunID {
-		return errors.New("output upload differs from its awarded attempt")
-	}
-	if !u.Authority.Attempt.Set || u.Authority.Attempt.Value != attempt || u.Authority.CapabilityRef == "" || u.Authority.CapabilityRef != u.Identity.CapabilityRef || u.Authority.Principal == "" || u.Authority.Principal != u.Identity.Principal {
-		return errors.New("output upload differs from its authenticated authority")
-	}
-	if u.Key.Kind != blob.KindOutput || u.Key.Team != attempt.Team || u.Key.Scope.Job != attempt.NodeID || u.Key.Scope.Pipeline != spec.Request.Request.Pipeline || u.Key.Scope.Repo == "" || u.Key.Scope.Repo != u.Authority.Repo || u.Key.Scope.Ref != u.Authority.Ref.Scope || u.Key.Name == "" {
-		return errors.New("output record differs from its authenticated scope")
-	}
-	return nil
 }
 
 // ReadOutput closes every reader and accepts bytes only after verified EOF.

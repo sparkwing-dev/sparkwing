@@ -16,12 +16,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
-// ArtifactRecords stages the members authorized by a transactional manifest lookup.
+// ArtifactRecords publishes files and stages authorized manifest members.
 // The caller resolves the producer's persisted record key under the consumer's
 // live authority. A key or digest alone never grants a read.
 type ArtifactRecords struct {
 	Blobs   blob.Store
 	Records blob.RecordStore
+	Bind    func(context.Context, NodeInput) (JobUpload, error)
+	// Producer resolves a declared producer's persisted terminal manifest reference.
+	Producer func(context.Context, NodeInput, string) (blob.RecordKey, error)
+	Warn     func(string)
 }
 
 // Stage restores required artifacts below workspace/into. It verifies the

@@ -27,7 +27,7 @@ type outputBackend struct {
 	blob.Store
 	blob.RecordStore
 	mode   string
-	upload nodehost.OutputUpload
+	upload nodehost.JobUpload
 	value  []byte
 	put    *blob.PutRequest
 	commit *blob.CommitRecordRequest
@@ -154,14 +154,14 @@ func outputFixture(t *testing.T, mode string) (nodehost.NodeInput, nodehost.Outp
 	input.Attempt++
 	attempt := runspec.AttemptIdentity{Team: "team", RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: input.Generation, Attempt: input.Attempt}
 	identity := blob.UploadIdentity{Kind: blob.UploadJob, Team: "team", RunID: input.Accepted.RunID, Principal: "principal", CapabilityRef: "live-claim", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: attempt}}
-	upload := nodehost.OutputUpload{Identity: identity, Authority: blob.Authority{CapabilityRef: identity.CapabilityRef, Principal: identity.Principal, Attempt: identity.Attempt, Repo: "example.com/acme/repo"}, Key: blob.RecordKey{Team: "team", Kind: blob.KindOutput, Scope: blob.Scope{Repo: "example.com/acme/repo", Pipeline: "build", Job: input.NodeID}, Name: "bound-output"}}
+	upload := nodehost.JobUpload{Identity: identity, Authority: blob.Authority{CapabilityRef: identity.CapabilityRef, Principal: identity.Principal, Attempt: identity.Attempt, Repo: "example.com/acme/repo"}, Key: blob.RecordKey{Team: "team", Kind: blob.KindOutput, Scope: blob.Scope{Repo: "example.com/acme/repo", Pipeline: "build", Job: input.NodeID}, Name: "bound-output"}}
 	b := &outputBackend{mode: mode, upload: upload, value: []byte(`{"value":7}`)}
-	adapter := nodehost.OutputRecords{Blobs: b, Records: b, Bind: func(_ context.Context, got nodehost.NodeInput) (nodehost.OutputUpload, error) {
+	adapter := nodehost.OutputRecords{Blobs: b, Records: b, Bind: func(_ context.Context, got nodehost.NodeInput) (nodehost.JobUpload, error) {
 		if got.Accepted.RunID != attempt.RunID || got.Authority != input.Authority || got.Generation != attempt.Generation || got.Attempt != attempt.Attempt {
-			return nodehost.OutputUpload{}, errors.New("binding lost the awarded claim")
+			return nodehost.JobUpload{}, errors.New("binding lost the awarded claim")
 		}
 		if mode == "bind" {
-			return nodehost.OutputUpload{}, outputRefused
+			return nodehost.JobUpload{}, outputRefused
 		}
 		return b.upload, nil
 	}}

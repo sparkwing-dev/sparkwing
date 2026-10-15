@@ -27,6 +27,8 @@ func pendingScenarios(t *testing.T, group string) {
 				t.Run("hermetic-required-output", acceptance.CheckOutputRecordRead)
 				t.Run("hermetic-required-artifacts", acceptance.CheckArtifactStaging)
 				t.Run("hermetic-executor-artifacts", acceptance.CheckExecutorArtifactStaging)
+				t.Run("hermetic-artifact-publication", acceptance.CheckArtifactPublication)
+				t.Run("hermetic-executor-publication", acceptance.CheckExecutorArtifactPublication)
 			case "lifecycle-generator-reconstruct-code":
 				t.Run("hermetic-replay", acceptance.CheckGeneratorReplay)
 			case "environment-startup-versus-body":

@@ -13,8 +13,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -278,18 +278,13 @@ func CheckExecutorArtifactStaging(t *testing.T) {
 					request.Authority.Repo = "example.com/acme/repo"
 					return nodehost.StorageBinding{Bytes: backend, Records: backend, Authority: request.Authority}, nil
 				}
-				deps.PrepareLayer = func(ctx context.Context, layer nodehost.LayerSpec, in nodehost.NodeInput, job nodeproto.JobSpec) (nodehost.ExecutorFinalizer, error) {
-					if layer.Name != "artifacts" {
-						return nil, nil
+				stager := nodehost.ArtifactRecords{Producer: func(_ context.Context, _ nodehost.NodeInput, producer string) (blob.RecordKey, error) {
+					if producer != request.Key.Scope.Job {
+						return blob.RecordKey{}, errors.New("staging lost its declared producer")
 					}
-					if len(job.Consumes) != 1 || job.Consumes[0].Producer != request.Key.Scope.Job {
-						return nil, errors.New("staging lost its declared producer")
-					}
-					stager := nodehost.ArtifactRecords{Blobs: in.Storage.Bytes, Records: in.Storage.Records}
-					lookup := blob.RecordLookup{Key: request.Key, Authority: in.Storage.Authority}
-					_, err := stager.Stage(ctx, lookup, workspace, "")
-					return nil, err
-				}
+					return request.Key, nil
+				}}
+				deps.PrepareLayer = stager.Prepare
 				start := deps.Start
 				deps.Start = func(ctx context.Context, in nodehost.NodeInput, activity nodehost.ExecutorActivity) (nodehost.ExecutorProcess, error) {
 					got, err := os.ReadFile(filepath.Join(workspace, "bin/program"))
@@ -299,6 +294,14 @@ func CheckExecutorArtifactStaging(t *testing.T) {
 					return start(ctx, in, activity)
 				}
 			})
+			acquire := host.Acquire
+			host.Acquire = func(ctx context.Context, spec source.Spec, options source.Options) (*source.Entry, error) {
+				entry, err := acquire(ctx, spec, options)
+				if entry != nil {
+					entry.Directory = workspace
+				}
+				return entry, err
+			}
 			err := host.Execute(t.Context(), input)
 			if (err == nil) != (mode == "verified") {
 				t.Fatalf("executor returned %v", err)

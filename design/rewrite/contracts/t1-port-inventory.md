@@ -126,8 +126,15 @@ fail. Verified downloads replace destinations after EOF and close. The real
 executor stages once around application retries, uses the committed attempt's
 storage binding, and reports failure before SDK startup when staging fails.
 These checks carry the consumed-artifact failure and workspace-safety behaviors
-of the old artifact tests. They do not close memo materialization, publication,
-native read-edge authorization or the legacy runtime cut.
+of the old artifact tests. CheckExecutorArtifactStaging now uses ArtifactRecords.Prepare.
+`hermetic-artifact-publication` and `hermetic-executor-publication` add capture,
+verified uploads, manifest commit and one publication after application retries.
+They preserve directory globs, internal symlinks, modes and empty captures.
+Upload changes, receipt/record mismatches, cancellation and publication failures
+produce no successful reference. Fuzz drivers cover workspace confinement and
+attempt/scope binding. Real byte/record authorization uses separate drivers.
+Memo materialization, native assembly and the legacy runtime cut remain open.
+No additional parked-test row is claimed complete by these publication checks.
 
 Amendment 1 adds `CheckHostServices` under the secret-identifier and SDK service
 scenarios. It drives registered endpoint handlers with policy/persistence fakes,

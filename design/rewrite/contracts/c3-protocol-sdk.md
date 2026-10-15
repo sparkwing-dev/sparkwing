@@ -3,7 +3,9 @@
 [W3 amendment implementation and remaining integration](w3-amendment-handoff.md)
 records the current host boundary. Native placement assembly remains incomplete.
 [Required artifact staging](w3-artifact-continuation.md) adds the verified read
-boundary and its executor acceptance checks. Publication and cache assembly remain open.
+boundary and its executor acceptance checks.
+[Artifact publication](w3-publication-continuation.md) adds capture and the shared
+artifact layer. Native placement and cache assembly remain open.
 
 ## Amendment 1: shared host inputs
 
@@ -118,8 +120,8 @@ are part of this contract.
 | `nodehost.NodeInput` | Binds an attempt to accepted spec, node, generation, runner and route bearer. |
 | `nodehost.NodeHost.Execute` | Replans, checks drift, runs executor layers and reports through store transitions. |
 | `nodehost.NewNodeExecutor`, `ExecutorDependencies`, `ExecutorProcess` | Connect the common executor to the fenced store, matched engine, SDK process and storage adapters. |
-| `nodehost.OutputRecords`, `OutputUpload` | Publish typed output through verified uploads and record commits; read authorized output only after verified EOF. |
-| `nodehost.ArtifactRecords`, `ArtifactRecords.Stage` | Stage authorized manifest members inside a workspace. Required manifest/file reads verify EOF and close before replacing a destination. |
+| `nodehost.OutputRecords`, `nodehost.JobUpload` | Publish typed output through verified uploads and record commits; read authorized output only after verified EOF. JobUpload supplies the common attempt/scope binding for output and artifact writes. |
+| `nodehost.ArtifactRecords`, `ArtifactRecords.Stage`, `ArtifactRecords.Publish`, `ArtifactRecords.Prepare` | Stage authorized manifest members and capture workspace files through verified uploads and a transactional manifest commit. The artifact layer stages once and publishes after retries with the last attempt's binding. |
 | `nodehost.ClaimedNodeHost`, `ClaimStore` | Own source acquisition and renewal around the common executor for an awarded remote job. |
 | `nodehost.ExecutorActivity` | Reports progress and brackets authorized child awaits without extending the execution deadline. |
 | `nodehost.ProtocolSessionConfig`, `ProtocolSession`, `StartProtocolSession` | Launch protocol-v2 SDK processes with private pipes, request correlation, cancellation, log attribution and joined cleanup. |
@@ -552,6 +554,34 @@ generation and distinguish an absent declared result from a missing required
 record. `NodeRow` exposes no result reference, so the host cannot construct that
 lookup from a node read. Owner evaluation and generated-code replay must use
 the persisted reference through live read authority.
+
+`ArtifactRecords.Publish` captures declared file globs beneath the acquired
+workspace. It uploads every selected file under the exact current attempt,
+checks each receipt, uploads a deterministic manifest and commits the authorized
+member rows. The manifest encodes a sorted `files` array whose entries contain
+`path`, `digest`, `size` and `mode`. Empty captures encode an empty array and
+still commit a manifest. A failure returns no successful record key.
+
+Rooted opens prevent symlink changes from reading outside the workspace. A
+wildcard match outside the workspace is skipped through the supplied warning
+sink. A literal outside file fails. Internal symlinks retain their declared
+paths. The byte backend verifies the expected size and hash on upload, so a file
+changed after hashing cannot produce a successful receipt for stale bytes.
+Neither file capture nor publication uses a team-wide existence probe.
+
+`ArtifactRecords.Prepare` supplies the artifact portion of the common executor
+layer. Producer resolves a declared producer's persisted manifest record key.
+Staging runs in consumes order before SDK startup. Publication runs once after
+successful execution and uses the last committed attempt's StorageBinding.
+Failed work publishes no manifest. Upload and record errors fail the job.
+Only a successful record commit supplies `NodeResult.ManifestRecord`, and the
+terminal transaction still rechecks attachment authority. The caller composes
+the separate cache layer and routes warnings through the shared masker.
+
+The artifact publication acceptance cells use real workspace files and fake
+byte/record transactions. Generated tests cover outside symlink chains and
+attempt/scope mismatches. Real upload binding, source record reads, edge checks
+and native placement assembly remain integration points.
 
 Owner reuse now probes MaterializeOnly before admission. A hit materializes;
 a miss returns Dispatch without awarding execution. DecisionCancelHolder uses
