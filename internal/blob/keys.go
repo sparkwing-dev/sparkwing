@@ -19,7 +19,8 @@ func validDigest(d Digest) bool {
 	return err == nil
 }
 
-func objectKey(team string, digest Digest) (string, error) {
+// ObjectKey validates the tenant and digest before constructing the immutable key.
+func ObjectKey(team string, digest Digest) (string, error) {
 	if team == "" || team == "." || team == ".." || strings.ContainsAny(team, "/\\%") || strings.ContainsFunc(team, unicode.IsControl) || !validDigest(digest) {
 		return "", fmt.Errorf("invalid blob team or digest")
 	}
@@ -82,11 +83,13 @@ func memoNamespace(key MemoKey) (string, error) {
 	return scopedNamespace(KindMemo, string(key.Repo), key.Ref, key.Pipeline, key.Job, string(key.Hash))
 }
 
-func depcacheNamespace(key DepcacheKey) (string, error) {
+// DepcacheNamespace encodes a dependency cache scope.
+func DepcacheNamespace(key DepcacheKey) (string, error) {
 	return scopedNamespace(KindDepcache, string(key.Repo), key.Ref, key.Name, key.Key)
 }
 
-func recordNamespace(key RecordKey) (string, error) {
+// RecordNamespace encodes a logical record scope without delimiter collisions.
+func RecordNamespace(key RecordKey) (string, error) {
 	if !slices.Contains(Kinds, key.Kind) {
 		return "", fmt.Errorf("invalid blob record kind")
 	}
@@ -114,7 +117,8 @@ func ResultRecordKey(attempt runspec.AttemptIdentity, repo runspec.RepoKey, ref 
 	return RecordKey{Team: attempt.Team, Kind: kind, Scope: Scope{Repo: repo, Ref: ref, Pipeline: pipeline, Job: attempt.NodeID, Key: fmt.Sprintf("%s/%d/%d", attempt.RunID, attempt.Attempt, attempt.Generation)}, Name: "result"}
 }
 
-func resolveWriteKey(a Authority, intent WriteScopeIntent) (RecordKey, error) {
+// ResolveWriteKey derives the record scope from live authority.
+func ResolveWriteKey(a Authority, intent WriteScopeIntent) (RecordKey, error) {
 	var i UploadIdentity
 	if a.Upload.Set {
 		i = a.Upload.Value

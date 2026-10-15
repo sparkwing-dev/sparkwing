@@ -147,10 +147,21 @@ func (l segmentLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadC
 	if _, known := logNodeSettled(view, nodeID); !known {
 		return nil, nil
 	}
+	ctx, cancel := context.WithCancel(ctx)
 	pr, pw := io.Pipe()
-	go func() { pw.CloseWithError(l.streamNode(ctx, runID, nodeID, cur, pw)) }()
-	return pr, nil
+	go func() {
+		defer cancel()
+		pw.CloseWithError(l.streamNode(ctx, runID, nodeID, cur, pw))
+	}()
+	return &logStream{ReadCloser: pr, cancel: cancel}, nil
 }
+
+type logStream struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (s *logStream) Close() error { s.cancel(); return s.ReadCloser.Close() }
 
 func (l segmentLogs) streamNode(ctx context.Context, runID, nodeID string, cur logCursor, out io.Writer) error {
 	if _, err := io.WriteString(out, ": open\n\n"); err != nil {

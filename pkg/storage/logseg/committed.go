@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -39,9 +40,7 @@ type ReadResult struct {
 	IncompleteReason string
 }
 
-// Read reauthorizes through the store on every call and verifies each entire
-// segment before emitting its requested suffix. Follow/polling belongs to the
-// controller, which can join these ranges to its live ring by byte offset.
+// Read reauthorizes and verifies each committed segment before emitting its requested suffix.
 func (r CommittedReader) Read(ctx context.Context, actor store.Actor, request blob.LogReadRequest, out io.Writer) (result ReadResult, err error) {
 	if err := request.Subject.Validate(); err != nil {
 		return result, err
@@ -66,6 +65,18 @@ func (r CommittedReader) Read(ctx context.Context, actor store.Actor, request bl
 		}
 		if seg.Offset+seg.Size <= request.Offset {
 			continue
+		}
+		if result.Bytes > 0 {
+			current, err := r.Records.ReadLogSegments(ctx, actor, request)
+			if err != nil {
+				return result, err
+			}
+			if err := validateRanges(request, current); err != nil {
+				return result, err
+			}
+			if !slices.Contains(current.Segments, seg) {
+				return result, blob.ErrIntegrity
+			}
 		}
 		stored, err := readObject(ctx, r.Objects, seg.ObjectKey, seg.StoredBytes)
 		if err != nil {

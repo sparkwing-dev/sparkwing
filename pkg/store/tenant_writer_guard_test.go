@@ -8,11 +8,10 @@ import (
 
 var tablesWithNoTeamWriter = []string{
 	"egress_usage",
-	"pool_access_rules",
 	"repos",
 }
 
-const tablesWithNoTeamWriterSize = 3
+const tablesWithNoTeamWriterSize = 2
 
 // A predicate is only as real as the data under it. The scope guard beside
 // this one reads statement text, so it can prove a team predicate exists

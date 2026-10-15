@@ -1,8 +1,6 @@
 package nodehost
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,39 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
 )
-
-func restoreDirectory(ctx context.Context, dir string, get func() (blob.VerifiedReader, error)) error {
-	return tarsafe.ExtractIntoDirStaged(dir, ".sparkwing-cache-*", func(stage string) (err error) {
-		reader, err := get()
-		if reader != nil {
-			defer func() { err = errors.Join(err, reader.Close()) }()
-		}
-		if err != nil {
-			return err
-		}
-		if reader == nil {
-			return errors.New("cache backend returned no reader")
-		}
-		gzipReader, err := gzip.NewReader(reader)
-		if err != nil {
-			return err
-		}
-		defer func() { err = errors.Join(err, gzipReader.Close()) }()
-		if err := tarsafe.ExtractInRoot(tar.NewReader(gzipReader), stage, tarsafe.Policy{AllowSymlinks: true}); err != nil {
-			return err
-		}
-		if _, err := io.Copy(io.Discard, gzipReader); err != nil {
-			return err
-		}
-		if _, err := io.Copy(io.Discard, struct{ io.Reader }{reader}); err != nil {
-			return err
-		}
-		if !reader.Verified() {
-			return blob.ErrIntegrity
-		}
-		return context.Cause(ctx)
-	})
-}
 
 func (d DepcacheRecords) save(ctx context.Context, input NodeInput, cache directoryCache) (err error) {
 	if err := context.Cause(ctx); err != nil {

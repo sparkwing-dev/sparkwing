@@ -26,7 +26,10 @@ the record transaction.
 bytes under the lookup budget. It returns bytes only after EOF verification and
 successful close. Missing records and missing objects both fail. Memo reads use
 the same bounded output reader. Hosts must attach the resulting record key in
-their result transition. Controller and host output bindings remain pending.
+their result transition. `DataController.BindData` supplies the authenticated
+signer and record store. Production host construction must supply that binding.
+The common host output publisher calls `OutputData.Put` after checking SDK JSON
+and its exact-attempt result key.
 
 `AuthorizeUpload` and `AuthorizeEdge` operate on server-resolved facts. They do
 not authenticate a bearer or query the store. Call them inside the transaction
@@ -63,11 +66,14 @@ refreshes it after successful execution before saving. A refused binding runs
 cold or skips the save. A download is verified before archive extraction publishes
 files. Without an injected backend, dependency caches use local files.
 The SDK and host share `internal/depcachekey` for workspace-contained lockfile
-reads and full SHA-256 keys. Candidate inputs outside the workspace, including
+reads and full SHA-256 keys. The common executor hashes captured lockfile bytes
+through that same key function. Candidate inputs outside the workspace, including
 escaping symlinks, disable caching. The protocol's Go resolver is `go-modules`.
 `ExtractArchiveStaged(ctx, reader, dir)` consumes the gzip trailer before
 publishing, so checksum errors and truncated trailers preserve the destination.
-Cancellation during extraction also preserves it. A failed restore runs cold
+Cancellation during extraction also preserves it. The common executor restores
+through `depcacheblob.RestoreArchive`, sharing verification and staged extraction
+with local and remote archive backends. A failed restore runs cold
 and can replace the failed archive after successful work.
 
 The archive acceptance checks join signed filesystem and S3 transfers to SQLite
@@ -86,8 +92,8 @@ to the controller and capability packages.
 returns its file metadata after verifying length, digest and successful close.
 `storage.BlobManifests` supplies that reader to `Tenant.BlobRecords`. The record
 transaction authorizes the manifest first and checks every member afterward.
-This physical read opens no nested database transaction. W2 still needs to install
-the adapter in its authenticated record binding.
+This physical read opens no nested database transaction. `Server.WithDataObjects`
+installs it for result verification and authenticated record operations.
 
 The filesystem and S3 manifest boundaries generate file metadata and reject
 tenant substitution, corrupt bytes, truncation and malformed members. The SQLite
@@ -95,7 +101,10 @@ record boundaries reject forged metadata and borrowed same-run upload receipts,
 then admit independently verified member uploads and read them after reopening.
 Record fixtures, writers and store checks share `ResultRecordKey`.
 
-Artifact capture and staging live in `internal/artifacts`. Its `Data` value binds
+Artifact capture and staging live in `internal/artifacts`.
+The common host artifact publisher calls `Capture` with its current storage
+binding and the final result key. It writes the shared `Manifest` format, which
+the real store verifies before publishing member edges. Its `Data` value binds
 the byte store, record store and authority to the same job. Capture uploads each
 file even if another principal stored identical bytes, because an existence
 answer does not establish an upload receipt. It commits the manifest only after
@@ -213,12 +222,11 @@ callback are removed. The controller supplies its configured backend to the
 shared leased maintenance pass. Standalone S3 construction installs this backend.
 Standalone controllers install either backend through `Server.WithDataObjects`.
 That constructor also installs physical manifest verification for terminal results.
-The authenticated data bindings and local-controller host construction remain open.
+Authenticated data bindings use the controller's configured replica identity for
+upload settlement. Local-controller host construction remains separate.
 
-The retained `internal/teamblob` helper constructs keys for the older output
-downloader. Its bucket measurement, client interface, listing budgets and S3 test
-fixture are removed with the bucket-reconciliation pass. Usage and reachability
-come from the store. The final output transport cut also removes this key helper.
+The obsolete `internal/teamblob` object-key builder is removed. Log team validation
+lives beside the tagged log keys. Tenant records own usage and reachability.
 
 The filesystem and S3 collection acceptance boundaries generate twelve pairs of
 tenant graphs, including identical digests, cycles, old referenced bytes and
@@ -249,8 +257,13 @@ executable only after EOF verification and successful close. An upload obtains
 the exact owner/job receipt before committing its binary record. The record
 store assigns provenance. The binding keeps the host's authority in memory.
 
-Remote runtime bindings remain pending. The old hosts compile into their
-machine's binary cache without a remote storage binding.
+Remote cache construction carries the authenticated team and full
+`DataBinding.Authority` in `RemoteCacheOptions`. Record lookups and signed byte
+reads retain that exact authority. The returned record must match the selected
+team. The local ref never selects the remote default branch.
+
+Remote host construction must supply the live data binding. Local builds keep
+their machine's binary cache.
 
 `bincache.SourceData` uploads source-bundle records with the exact uploader
 receipt and imports a working-tree snapshot by its sealed blob digest.
@@ -259,13 +272,16 @@ Import verifies the declared snapshot commit and refuses a symlinked pipeline
 directory. The checkout is published only after those checks pass. Failed
 transfers or imports remove staging and preserve an existing checkout.
 
-The CLI and old hosts have no source storage binding. Working-tree triggers
-fail before upload or submission. Intake must supply live upload authority
-before the CLI can commit and seal the source digest. Hosts must pass their
-live data authority and sealed digest. The cache-grant request client,
-legacy source byte transport and grant-based controller data handlers are
-deleted. The authenticated controller adapter and remaining output handlers
-still need binding to the store's upload transaction.
+Source checkout acquisition belongs to `internal/source`. The obsolete
+`bincache` direct-fetch clients, credential exchange, SSH-key sweeper and
+checkout implementations are removed. The signed bundle importer retains only
+local Git commands. Those commands discard inherited Git routing, tracing and
+configuration controls. The snapshot baseline type remains for CLI capture.
+Its environment transport and remote adoption path are removed.
+
+Working-tree intake must supply live upload authority before committing and
+sealing a source digest. Production host construction must pass its current
+data authority and sealed digest to the shared source boundary.
 
 The acceptance suite runs nine `storage-components` checks for receipt and
 namespace isolation, binary trust, verified streams, presence budgets, memo
@@ -279,6 +295,7 @@ Controller authorization and transactional records use fakes. These component
 checks run separately from the skipped native targets, whose transport,
 transaction, backend matrix and placement assertions need their real drivers.
 
+Storage persistence proofs live in `tests/acceptance` as test-only helpers.
 The upload-isolation boundary uses real SQLite records with both filesystem
 objects and the S3 signer and SDK against a fake object service. Thirty-two
 generated uploads cover separate same-run receipts, missing staging and unique
@@ -294,15 +311,17 @@ The tagged-log property runs against filesystem objects and the S3 signer and
 SDK. It varies subject identities, retention classes and lost PUT responses.
 Batch signing checks S3 lifecycle readiness. Offset reads verify persisted ranges
 before emitting bytes, and corrupt objects fail before output. Controller
-authorization and segment records are fakes in this property.
+signing remains a contract fixture. Segment commits and reads use real tenant
+transactions and survive reopening SQLite.
 
 The sink acceptance properties drive concurrent numbered writers through the
-real spool, compression, signed transfers, committed reader and stored manifest.
+real spool, compression, signed transfers and tenant segment transactions.
 Each backend receives 128 generated cases with job, trigger, plan and eval
 subjects. Duplicate appends appear once, each writer's records retain their
 order, live offsets match the final bytes, and closing removes the spool.
-Lost PUT replies require exact stored-byte verification. Altered generations
-cannot select the committed ranges. Record and authority callbacks are fakes.
+After reopening SQLite, the committed reader checks exact offsets and rejects
+altered generations and revoked readers. Lost PUT replies require exact stored-byte
+verification. Claim issuance and authenticated signing remain contract fixtures.
 The unused filesystem append-log backend and its example are removed.
 
 Local host construction does not open an artifact backend from
@@ -311,10 +330,12 @@ contract takes live byte and record clients through `nodehost.StorageBinding`.
 Runtime bindings still need integration.
 
 The raw `pkg/storage.ArtifactStore` contract and filesystem adapter are removed.
-`pkg/storage/s3.ArtifactStore` still serves legacy S3 log handlers and read-only
-bucket measurements. Its remaining log reader and create-only writer retire
-with the authenticated log transport. Signed-data clients use their separate
-authenticated presence API.
+`pkg/storage/s3.MeasurementStore` exposes physical bucket measurement only.
+Tagged log reads use the configured blob backend through `logseg.CommittedReader`.
+The separate raw S3 reader, listing reader and create-only writer are removed.
+Dashboard reads select subjects through `Tenant.ReadRunView`; each byte read and
+live-ring continuation rechecks the request actor through `ReadLogSegments`.
+Local dashboards use the same path. Run-directory log fallback is removed.
 
 `storeurl.OpenArtifactStore`, `storage.Usage` and the controller's unused
 `WithArtifactStore` fallback are removed. `OpenMeasurementStore` and
@@ -332,11 +353,16 @@ transactions and controller authorization are fakes. Separate generated capture
 and staging properties check symlink and path containment on Unix. Native
 Windows filesystem evidence remains required.
 
-The filesystem and S3 archive proofs also write outputs, capture artifacts and
-commit memo through real tenant record transactions. They reopen SQLite, verify
-required output bytes, materialize the memo and stage its artifacts. Their data
-signer is a contract fixture around real reservations, receipts and physical
-verification because authenticated controller binding remains separate.
+The filesystem and S3 archive proofs drive the common host output and artifact
+publishers through real tenant upload and record transactions. Empty output is
+also covered directly through `OutputData.Put`. They commit memo through those
+same records. `DataController.BindData` supplies the byte signer and record
+store through persisted authority resolution, live data-access checks and tenant
+transactions. The proofs reopen SQLite, verify required output bytes, materialize
+the memo and stage its artifacts. They reject a forged uploader and a commit
+without staging, replay settlement after staging cleanup and reopening, and
+refuse reads or receipt replay after revocation. Claim issuance is seeded.
+The S3 object service is injected. Native placement remains separate.
 
 The physical log proofs use real tenant segment commits and reads with both
 backends. Signed slots and stored references share `LogObjectKey`. Segment
@@ -357,3 +383,8 @@ through the controller Handler, including real tenant-record and log-record
 proofs. Authentication and award issuance remain seeded or contract fixtures.
 Signed paths bind the method and exact object. The old filesystem output MAC,
 output handlers, raw log adapter and log PUT handler are removed.
+
+The implemented byte and record types live in `types.go`, tagged log subjects
+in `logs.go`, and the physical backend interface in `objects.go`. Their former
+contract files and forwarding declarations are removed. `pkg/storage` has no
+legacy state-store interface. Native hosts use their existing tenant boundaries.

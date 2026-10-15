@@ -16,6 +16,10 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"RecordBusinessEvent":                        "the shared event writer accepts an explicit nullable team because deployment account events have no tenant",
+	"(*Console).ConsoleUnbindGitHubInstallation": "the console administrator resolves the installation's tenant by global installation ID, then removes only that tenant's binding",
+	"revokeSelectedCapabilitiesTx":               "account and team deletion supply a checked selector, then revoke each selected credential through its full authority ancestry",
+
 	"readPaymentCorrelationTx":      "verified provider mode and object resolve the payer from the persisted correlation before its tenant is known",
 	"hasDeploymentAdministratorTx":  "deployment readiness and the bootstrap gate select only credentials whose team is NULL, then validate their complete live ancestry",
 	"(*Store).LookupCapability":     "a presentation digest identifies the credential before its tenant is known",
@@ -57,14 +61,9 @@ var reviewedUnscopedSQL = map[string]string{
 	"globalRunnerRefusal":             "the global concurrent runner cap counts live claims from every team",
 	"globalRunsPerHourRefusal":        "the global hourly cap counts runs from every team",
 	"runOwnerTx":                      "asks which team owns an id, so an answer scoped to the asker is no answer",
-	"(*Store).NodeOutputKey":          "the run ID is global, and the key only names an attempt the upload's own check binds",
-	"(*Store).RecordLocalOutput": "a laptop store records an output its own process wrote for a node it holds; " +
-		"the run ID is global and the row takes that node's team",
 	"(*Store).listRuns": "the team predicate comes from runFilterWhere at run time; " +
 		"a scope with no team and no all-teams flag is refused there",
 	"(*Store).countRuns": "shares listRuns' predicate builder and its refusal",
-	"(*Store).listTriggers": "the team predicate comes from its scope at run time; " +
-		"a scope with no team and no all-teams flag is refused there",
 	"(*Store).getLatestRun": "the team predicate comes from its scope at run time; " +
 		"a scope with no team and no all-teams flag is refused there",
 	"(*Store).SampleSealedSecrets": "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
@@ -73,14 +72,14 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).DeleteSession":       "ends the one session whose globally unique digest the caller presented, before its team is known",
 	"(*Store).mintCSRFKey":         "a new signing key cannot sign any team's live sessions, so key and sessions rotate together",
 	"(*Store).resolveSignInOnce":   "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
-	"(*Store).approveOneOnce":      "counts one account's memberships in every team, because an admission decides whether that human needs a personal space",
+	"approveOneTx":                 "counts one account's memberships in every team, because an admission decides whether that human needs a personal space",
 	"settleTriggerCreditsTx": "asks which team owns a trigger id and whether its claim holds a credit " +
 		"reservation; the settlement that follows is scoped to that team",
 	"settleActiveTeamTx":               "picks the account's first team from all of its memberships when its sticky team is gone",
 	"(*Store).AccountMemberships":      "lists the teams one account belongs to, which is a question across teams by definition",
 	"(*Store).OpenInvitationsForEmail": "lists the invitations addressed to one verified email from every team that sent one",
 	"(*Store).AcceptInvitation":        "finds an invitation by its id before the team is known; the accepting write then names that team",
-	"(*Store).DeleteAccount": "removes one account from every team it belongs to and relabels the rows it " +
+	"(*Store).deleteAccountTx": "removes one account from every team it belongs to and relabels the rows it " +
 		"left in each, because an account is the deployment's and reaches teams only through memberships",
 	"lockOwnedTeamsTx": "lists the teams one account owns across every team, to lock each before the " +
 		"account deletion counts their owners",
@@ -103,8 +102,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"nodeChargeTx": "reads the team, pipeline and plan of the run a charge names by global id, so the charge lands in that " +
 		"run's team",
 
-	"lockRunRow": "the expired-claim reaper and the trigger lease beat lock a run row by the global id their own read " +
-		"selected, in the order the claim path names, and read nothing back",
 	"(*Operator).RunTeam": "asks which team owns a run id a sweep found across teams, so the sweep acts on it through that " +
 		"team's handle; an answer scoped to the asker is no answer",
 	"(*Operator).TriggerTeam": "asks which team owns a trigger id a sweep found across teams, so the sweep acts on it " +

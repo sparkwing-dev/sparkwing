@@ -15,11 +15,12 @@ func FuzzArtifactCaptureConfinement(f *testing.F) {
 }
 
 func FuzzArtifactUploadBinding(f *testing.F) {
-	for field := range uint8(16) {
+	for field := range uint8(18) {
 		f.Add(field, "foreign")
 		f.Add(field, "")
 	}
 	f.Add(uint8(3), "principal")
+	f.Add(uint8(16), "result")
 	f.Fuzz(func(t *testing.T, field uint8, value string) {
 		checkArtifactUploadBinding(t, field, value)
 	})

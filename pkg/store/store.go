@@ -23,6 +23,8 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // DefaultBusyTimeoutMS is the SQLite busy_timeout Open and OpenReadOnly
@@ -107,7 +109,6 @@ type Store struct {
 	csrfKeyMu        sync.Mutex
 	csrfKey          []byte
 	csrfCipher       SessionKeyCipher
-	outputDir        string
 	githubCheckMu    sync.Mutex
 }
 
@@ -169,7 +170,6 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	st.outputDir = filepath.Dir(path)
 	return st, nil
 }
 
@@ -287,7 +287,6 @@ func sqliteReadOnlyDSNWithMode(path string, immutable bool) string {
 func OpenReadOnly(path string) (*Store, error) {
 	st, err := openReadOnlyDSN(sqliteReadOnlyDSN(path))
 	if err == nil {
-		st.outputDir = filepath.Dir(path)
 	}
 	return st, err
 }
@@ -320,7 +319,6 @@ func OpenReadOnlySnapshot(path string) (*Store, error) {
 		return nil, err
 	}
 	st.cleanup = cleanup
-	st.outputDir = filepath.Dir(path)
 	return st, nil
 }
 
@@ -576,72 +574,39 @@ func IsProtocolErr(err error) bool {
 		strings.Contains(msg, "sqlite_protocol")
 }
 
-// Run is one row in the runs table.
+// Run is the redacted reporting view of a persisted run.
 type Run struct {
-	ID            string            `json:"id"`
-	Pipeline      string            `json:"pipeline"`
-	Status        string            `json:"status"`
-	TriggerSource string            `json:"trigger_source,omitempty"`
-	GitBranch     string            `json:"git_branch,omitempty"`
-	GitSHA        string            `json:"git_sha,omitempty"`
-	Args          map[string]string `json:"args,omitempty"`
-	PlanSnapshot  []byte            `json:"-"`
-	Error         string            `json:"error,omitempty"`
-	// CreatedAt is when the controller first persisted the run row
-	// (trigger-intake time for trigger-originated runs, or CreateRun
-	// time for direct CreateRun callers). Lets "pending" runs have a
-	// wall-clock anchor distinct from StartedAt.
-	CreatedAt  time.Time  `json:"created_at,omitempty"`
-	StartedAt  time.Time  `json:"started_at"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
-	// ParentRunID identifies the spawning RunAndAwait caller.
-	ParentRunID string `json:"parent_run_id,omitempty"`
-	// Admission is a controller-dispatched run's admission state, one of
-	// the current admission phase; it is empty for any other run.
-	Admission string `json:"admission,omitempty"`
-	// DeclaredRepo is the repository the submitter typed (e.g.
-	// "my-app"). It is metadata for display and filtering, and it
-	// grants nothing, because no step proves the submitter owns the
-	// repository it names.
-	// safety: the wire name stays `repo` because a CLI and a controller
-	// version independently, and a released client sending `repo` meets a
-	// DisallowUnknownFields decoder.
-	DeclaredRepo string `json:"repo,omitempty"`
-	// RepoURL is `git remote get-url origin` at trigger time.
-	RepoURL string `json:"repo_url,omitempty"`
-	// GithubOwner/Repo: parsed when origin is github.
-	GithubOwner string `json:"github_owner,omitempty"`
-	GithubRepo  string `json:"github_repo,omitempty"`
-	// RetryOf points at the source run; RetriedAs is the reverse.
-	RetryOf   string `json:"retry_of,omitempty"`
-	RetriedAs string `json:"retried_as,omitempty"`
-	// RetrySource is RetrySourceManual for a manually retried run.
-	RetrySource string `json:"retry_source,omitempty"`
-	// Replay lineage; independent of retry chain.
-	ReplayOfRunID  string `json:"replay_of_run_id,omitempty"`
-	ReplayOfNodeID string `json:"replay_of_node_id,omitempty"`
-	// Invocation snapshots how this run was started: flags, args,
-	// binary_source, cwd, reproducer, hashes, and anything else the
-	// orchestrator chooses to include in run_start.attrs. Stored as
-	// a free-form map so adding a new context field is a one-line
-	// emitter change with no schema migration. Empty/nil for runs
-	// created before the column landed.
-	Invocation map[string]any `json:"invocation,omitempty"`
-	// Annotation rollup surfaced to list views. Updated server-side on
-	// each sparkwing.AnnotateOld call; the dashboard renders these
-	// without needing a per-row aggregate query.
-	AnnotationCount int      `json:"annotation_count,omitempty"`
-	TopAnnotation   string   `json:"top_annotation,omitempty"`
-	Annotations     []string `json:"annotations,omitempty"`
-	// NeedsAttention says why a ready node of the run waits with no agent
-	// able to claim it; empty when none does.
-	NeedsAttention string `json:"needs_attention,omitempty"`
-	// TriggerUser and PullRequest are the actor of the run's trigger and
-	// the pull request it fired for. The runs row does not hold them: the
-	// controller's single-run read fills them from the trigger, so every
-	// host that plans the run sees the same values without the trigger.
-	TriggerUser string          `json:"trigger_user,omitempty"`
-	PullRequest *RunPullRequest `json:"pull_request,omitempty"`
+	ID              string            `json:"id"`
+	Number          int64             `json:"number"`
+	Pipeline        string            `json:"pipeline"`
+	Status          string            `json:"status"`
+	TriggerSource   string            `json:"trigger_source,omitempty"`
+	GitBranch       string            `json:"git_branch,omitempty"`
+	GitSHA          string            `json:"git_sha,omitempty"`
+	Args            map[string]string `json:"args,omitempty"`
+	PlanSnapshot    []byte            `json:"-"`
+	Error           string            `json:"error,omitempty"`
+	CreatedAt       time.Time         `json:"created_at,omitempty"`
+	StartedAt       time.Time         `json:"started_at"`
+	FinishedAt      *time.Time        `json:"finished_at,omitempty"`
+	ParentRunID     string            `json:"parent_run_id,omitempty"`
+	Admission       string            `json:"admission,omitempty"`
+	DeclaredRepo    string            `json:"repo,omitempty"`
+	RepoURL         string            `json:"repo_url,omitempty"`
+	GithubOwner     string            `json:"github_owner,omitempty"`
+	GithubRepo      string            `json:"github_repo,omitempty"`
+	RetryOf         string            `json:"retry_of,omitempty"`
+	RetriedAs       string            `json:"retried_as,omitempty"`
+	RetrySource     string            `json:"retry_source,omitempty"`
+	ReplayOfRunID   string            `json:"replay_of_run_id,omitempty"`
+	ReplayOfNodeID  string            `json:"replay_of_node_id,omitempty"`
+	Invocation      map[string]any    `json:"invocation,omitempty"`
+	AnnotationCount int               `json:"annotation_count,omitempty"`
+	TopAnnotation   string            `json:"top_annotation,omitempty"`
+	Annotations     []string          `json:"annotations,omitempty"`
+	NeedsAttention  string            `json:"needs_attention,omitempty"`
+	TriggerUser     string            `json:"trigger_user,omitempty"`
+	PullRequest     *RunPullRequest   `json:"pull_request,omitempty"`
 }
 
 // RunPullRequest is the pull request a run's trigger fired for.
@@ -768,9 +733,11 @@ func runOwnerTx(ctx context.Context, tx *storeTx, runID string) (Team, bool, err
 	return Team(owner), true, nil
 }
 
-// safety: every run read shares this list, because a column added to runs
-// has to reach each of them and scanRun together or the scan misaligns.
-const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, admission, ` + runAttentionColumn
+const runColumns = `runs.id,runs.number,runs.pipeline,runs.status,runs.trigger_source,runs.git_branch,runs.git_sha,
+ runs.request_json,runs.spec_json,runs.plan_json,runs.error,runs.created_at,runs.started_at,runs.finished_at,
+ runs.parent_run_id,runs.repo_display,runs.retry_of,
+ COALESCE((SELECT retry.id FROM runs retry WHERE retry.team=runs.team AND retry.retry_of=runs.id ORDER BY retry.created_at DESC,retry.id DESC LIMIT 1),''),
+ runs.lineage_json,runs.replay_of_run_id,runs.replay_of_node_id,runs.annotation_count,runs.top_annotation,runs.annotations_json,runs.admission,` + runAttentionColumn
 
 // GetRun fetches a single default-team run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
@@ -855,9 +822,9 @@ func (s *Store) listRuns(ctx context.Context, scope teamScope, f RunFilter) (_ [
 	limit = min(limit, maxRunListFetch)
 	args = append(args, limit)
 
-	order := "started_at DESC, id DESC"
+	order := "COALESCE(started_at,0) DESC, id DESC"
 	if f.HasBeforeCursor() {
-		order = "started_at ASC, id ASC"
+		order = "COALESCE(started_at,0) ASC, id ASC"
 	}
 	query := `
 SELECT ` + runColumns + `
@@ -895,11 +862,11 @@ SELECT ` + runColumns + `
 // group holding more would order by the raw value first and this would skip part of it.
 func runCursorClause(afterStartedAt int64) string {
 	if afterStartedAt <= 0 {
-		return "(started_at <= 0 AND id < ?)"
+		return "(COALESCE(started_at,0) <= 0 AND id < ?)"
 	}
 	// hack: the expanded form rather than a row-value comparison, so the predicate
 	// holds on every SQLite build this driver may sit on.
-	return "(started_at < ? OR (started_at = ? AND id < ?))"
+	return "(COALESCE(started_at,0) < ? OR (started_at = ? AND id < ?))"
 }
 
 func runCursorArgs(f RunFilter) []any {
@@ -937,7 +904,7 @@ func runFilterWhere(dialect Dialect, scope teamScope, f RunFilter) (string, []an
 	where := ""
 	args := []any{}
 	if !scope.all {
-		where = " WHERE team = ?"
+		where = " WHERE runs.team = ?"
 		args = append(args, string(scope.team))
 	}
 	addIn := func(col string, values []string) {
@@ -959,8 +926,8 @@ func runFilterWhere(dialect Dialect, scope teamScope, f RunFilter) (string, []an
 	addIn("pipeline", f.Pipelines)
 	addIn("status", f.Statuses)
 	addIn("git_branch", f.GitBranches)
-	addIn("declared_repo", f.DeclaredRepos)
-	addIn("repo_url", f.RepoURLs)
+	addIn("repo_display", f.DeclaredRepos)
+	addIn("repo_display", f.RepoURLs)
 	addClause := func(clause string, values ...any) {
 		if where == "" {
 			where = " WHERE " + clause
@@ -1065,53 +1032,62 @@ func nullableTimeNS(t *time.Time) any {
 	return t.UnixNano()
 }
 
-func scanRun(rs rowScanner) (*Run, error) {
+func scanRun(rs rowScanner, tail ...any) (*Run, error) {
 	var r Run
-	var argsJSON, planJSON, invocationJSON, annotationsJSON []byte
-	var createdNS, startedNS int64
-	var finishedNS sql.NullInt64
+	var request, spec, lineage, annotations []byte
+	var created int64
+	var started, finished sql.NullInt64
 	var parent sql.NullString
-	err := rs.Scan(&r.ID, &r.Pipeline, &r.Status, &r.TriggerSource,
-		&r.GitBranch, &r.GitSHA, &argsJSON, &planJSON, &r.Error,
-		&createdNS, &startedNS, &finishedNS, &parent,
-		&r.DeclaredRepo, &r.RepoURL, &r.GithubOwner, &r.GithubRepo,
-		&r.RetryOf, &r.RetriedAs, &r.RetrySource,
-		&r.ReplayOfRunID, &r.ReplayOfNodeID, &invocationJSON,
-		&r.AnnotationCount, &r.TopAnnotation, &annotationsJSON,
-		&r.Admission, &r.NeedsAttention)
-	if err != nil {
+	destinations := []any{&r.ID, &r.Number, &r.Pipeline, &r.Status, &r.TriggerSource, &r.GitBranch, &r.GitSHA,
+		&request, &spec, &r.PlanSnapshot, &r.Error, &created, &started, &finished, &parent, &r.DeclaredRepo, &r.RetryOf, &r.RetriedAs,
+		&lineage, &r.ReplayOfRunID, &r.ReplayOfNodeID, &r.AnnotationCount, &r.TopAnnotation, &annotations, &r.Admission, &r.NeedsAttention}
+	if err := rs.Scan(append(destinations, tail...)...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound("run", "")
 		}
 		return nil, err
 	}
-	if createdNS > 0 {
-		r.CreatedAt = time.Unix(0, createdNS)
+	var sealed runspec.SealedRequest
+	if err := json.Unmarshal(request, &sealed); err != nil {
+		return nil, fmt.Errorf("decode run request: %w", err)
 	}
-	if startedNS > 0 {
-		r.StartedAt = time.Unix(0, startedNS)
+	display := runspec.DisplayRequest(sealed)
+	r.RepoURL = sealed.Request.Source.Location.RemoteURL
+	if len(spec) > 0 {
+		var accepted runspec.Spec
+		if err := json.Unmarshal(spec, &accepted); err != nil {
+			return nil, fmt.Errorf("decode run spec: %w", err)
+		}
+		display = runspec.DisplaySpec(accepted)
+		r.Args = display.Args
+	} else {
+		r.Args = display.RequestedArgs
 	}
-	if finishedNS.Valid {
-		t := time.Unix(0, finishedNS.Int64)
-		r.FinishedAt = &t
+	if len(annotations) > 0 {
+		if err := json.Unmarshal(annotations, &r.Annotations); err != nil {
+			return nil, fmt.Errorf("decode run annotations: %w", err)
+		}
 	}
-	if parent.Valid {
-		r.ParentRunID = parent.String
+	r.CreatedAt, r.FinishedAt, r.ParentRunID = time.Unix(0, created).UTC(), stateTime(finished), parent.String
+	if started.Valid {
+		r.StartedAt = time.Unix(0, started.Int64).UTC()
 	}
-	if len(argsJSON) > 0 {
-		_ = json.Unmarshal(argsJSON, &r.Args)
+	r.Invocation = map[string]any{InvocationSecretArgsKey: display.SecretArgs}
+	r.TriggerUser = display.Actor.Display
+	if r.TriggerUser == "" {
+		r.TriggerUser = display.Actor.ID
 	}
-	if len(invocationJSON) > 0 {
-		_ = json.Unmarshal(invocationJSON, &r.Invocation)
+	if display.PullRequest.Set {
+		pr := display.PullRequest.Value
+		r.PullRequest = &RunPullRequest{Number: int(pr.Number), Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA}
 	}
-	if len(annotationsJSON) > 0 {
-		_ = json.Unmarshal(annotationsJSON, &r.Annotations)
+	if r.RetryOf != "" {
+		r.RetrySource = RetrySourceManual
 	}
-	r.PlanSnapshot = planJSON
 	return &r, nil
 }
 
-// Node is one row in the nodes table.
+// Node reports persisted job metadata and attempt history.
 type Node struct {
 	RunID      string     `json:"run_id,omitempty"`
 	NodeID     string     `json:"id"`
@@ -1123,123 +1099,57 @@ type Node struct {
 	StartedAt  *time.Time `json:"started_at,omitempty"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 
-	// Warm-pool dispatch; zero on laptop / K8sRunner paths.
-	ReadyAt             *time.Time         `json:"ready_at,omitempty"`
-	ClaimedBy           string             `json:"claimed_by,omitempty"`
-	Claimed             bool               `json:"claimed,omitempty"`
-	LeaseExpiresAt      *time.Time         `json:"lease_expires_at,omitempty"`
-	OfferStartedAt      *time.Time         `json:"offer_started_at,omitempty"`
-	OfferPriorityTarget int                `json:"offer_priority_target,omitempty"`
-	ClaimBasePriority   int                `json:"claim_base_priority,omitempty"`
-	ClaimPriority       int                `json:"claim_priority,omitempty"`
-	ClaimWorkerID       string             `json:"claim_worker_id,omitempty"`
-	ClaimExecutorKind   string             `json:"claim_executor_kind,omitempty"`
-	ClaimReservationID  string             `json:"claim_reservation_id,omitempty"`
-	CoordinatorID       string             `json:"coordinator_id,omitempty"`
-	ClaimGeneration     int64              `json:"claim_generation,omitempty"`
-	ClaimMembershipID   string             `json:"claim_membership_id,omitempty"`
-	ExecutorKind        string             `json:"executor_kind,omitempty"`
-	ExecutorName        string             `json:"executor_name,omitempty"`
-	ExecutorID          string             `json:"executor_id,omitempty"`
-	ExecutorLocation    string             `json:"executor_location,omitempty"`
-	ExecutionSite       string             `json:"execution_site,omitempty"`
-	ExecutionSiteName   string             `json:"execution_site_name,omitempty"`
-	ExecutionStartedAt  *time.Time         `json:"execution_started_at,omitempty"`
-	ReservationID       string             `json:"reservation_id,omitempty"`
-	AttemptsConsumed    int                `json:"attempts_consumed,omitempty"`
-	RetryRootRunID      string             `json:"retry_root_run_id,omitempty"`
-	ExecutionAttempts   []ExecutionAttempt `json:"execution_attempts,omitempty"`
+	ReadyAt            *time.Time         `json:"ready_at,omitempty"`
+	ClaimedBy          string             `json:"claimed_by,omitempty"`
+	Claimed            bool               `json:"claimed,omitempty"`
+	LeaseExpiresAt     *time.Time         `json:"lease_expires_at,omitempty"`
+	OfferStartedAt     *time.Time         `json:"offer_started_at,omitempty"`
+	ClaimWorkerID      string             `json:"claim_worker_id,omitempty"`
+	ClaimExecutorKind  string             `json:"claim_executor_kind,omitempty"`
+	ClaimReservationID string             `json:"claim_reservation_id,omitempty"`
+	CoordinatorID      string             `json:"coordinator_id,omitempty"`
+	ClaimGeneration    int64              `json:"claim_generation,omitempty"`
+	ClaimMembershipID  string             `json:"claim_membership_id,omitempty"`
+	ExecutorKind       string             `json:"executor_kind,omitempty"`
+	ExecutorName       string             `json:"executor_name,omitempty"`
+	ExecutorID         string             `json:"executor_id,omitempty"`
+	ExecutorLocation   string             `json:"executor_location,omitempty"`
+	ExecutionSite      string             `json:"execution_site,omitempty"`
+	ExecutionSiteName  string             `json:"execution_site_name,omitempty"`
+	ExecutionStartedAt *time.Time         `json:"execution_started_at,omitempty"`
+	ReservationID      string             `json:"reservation_id,omitempty"`
+	AttemptsConsumed   int                `json:"attempts_consumed,omitempty"`
+	RetryRootRunID     string             `json:"retry_root_run_id,omitempty"`
+	ExecutionAttempts  []ExecutionAttempt `json:"execution_attempts,omitempty"`
 
-	// PlacementReason names why the claiming runner got this node:
-	// "preference", "fallback" after the local-first hold window, or "none"
-	// when it carried no preference. Empty on a node no claim path decided.
-	PlacementReason string `json:"placement_reason,omitempty"`
-	// PlacementHoldFrom is when the node became claimable, which the
-	// local-first hold runs from.
+	PlacementReason   string     `json:"placement_reason,omitempty"`
 	PlacementHoldFrom *time.Time `json:"placement_hold_from,omitempty"`
 
-	// CreditCPUClassCores is the cpu class the claim billed this node at,
-	// which is the shape its executor owes it. Zero on a node no metered
-	// claim priced.
-	CreditCPUClassCores int64 `json:"credit_cpu_class_cores,omitempty"`
-	// CreditCPUClassMemoryBytes is the memory that class carries, which is
-	// what its executor gives the node alongside the cores.
+	CreditCPUClassCores       int64 `json:"credit_cpu_class_cores,omitempty"`
 	CreditCPUClassMemoryBytes int64 `json:"credit_cpu_class_memory_bytes,omitempty"`
 
-	// NeedsLabels: runner labels required (AND semantics). Empty = any.
-	NeedsLabels []string `json:"needs_labels,omitempty"`
-	// PrefersLabels orders soft executor preferences.
+	NeedsLabels   []string `json:"needs_labels,omitempty"`
 	PrefersLabels []string `json:"prefers_labels,omitempty"`
 
 	RequestedCores       float64 `json:"requested_cores,omitempty"`
 	RequestedMemoryBytes int64   `json:"requested_memory_bytes,omitempty"`
 	RequestedSlots       int     `json:"requested_slots,omitempty"`
 
-	// StatusDetail: phase string for the dashboard.
-	StatusDetail string `json:"status_detail,omitempty"`
-	// LastHeartbeat: liveness for UI; LeaseExpiresAt is for ownership.
+	StatusDetail  string     `json:"status_detail,omitempty"`
 	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
 
-	// FailureReason: Failure* constant; empty = no structured reason.
 	FailureReason string `json:"failure_reason,omitempty"`
-	// ExitCode: process exit; nil when not applicable.
-	ExitCode *int `json:"exit_code,omitempty"`
+	ExitCode      *int   `json:"exit_code,omitempty"`
 
-	// Annotations is the accumulated list of summary strings emitted
-	// by sparkwing.AnnotateOld during the node's execution. Each call
-	// appends one entry; order preserved. Surfaced to the dashboard
-	// alongside the node's status.
 	Annotations []string `json:"annotations,omitempty"`
 
-	// Summary is the latest markdown run summary emitted by
-	// sparkwing.Summary while the node was running outside any step
-	// body. Overwrite-on-write: only the last value is kept. Empty
-	// when no node-scoped summary was emitted; step-scoped summaries
-	// live on NodeStep.Summary instead.
 	Summary string `json:"summary,omitempty"`
 
-	// CPUNanos is the user plus system CPU time the kernel accounted to
-	// the process that executed this node, MaxRSSBytes the peak resident
-	// set size it reported for that process, and ProcessWallNanos the
-	// span that process existed for, spawn to reap. They are written by
-	// a runner that supervised a process of its own, and stay zero for a
-	// node executed anywhere else -- a Kubernetes pod, a node run inside
-	// the dispatcher; zero means absent, not measured-as-nothing. Exact
-	// where the per-interval sampler is not: a node shorter than one
-	// sampling interval has no metric samples at all and still reports
-	// what it cost here.
-	//
-	// ProcessWallNanos is the denominator CPUNanos belongs over. It is
-	// wider than FinishedAt.Sub(StartedAt), which the node stamps from
-	// inside itself once startup is done, and both figures are kept
-	// because they answer different questions: how long the box was
-	// occupied, and how long the node's own work took. A node retried in
-	// place accumulates every attempt here -- the machine paid for all of
-	// them -- while MaxRSSBytes keeps the high-water across attempts.
-	CPUNanos         int64 `json:"cpu_nanos,omitempty"`
-	MaxRSSBytes      int64 `json:"max_rss_bytes,omitempty"`
-	ProcessWallNanos int64 `json:"process_wall_nanos,omitempty"`
-
-	// ArtifactManifest is the content-addressed digest of the manifest
-	// describing the files this node published as artifacts (see
-	// JobNode.Outputs). Empty when the node declared no outputs or no
-	// artifact store was configured. A cache replay copies this digest
-	// onto the replayed node so the producer's file set reproduces
-	// without re-running it.
-	ArtifactManifest string `json:"artifact_manifest,omitempty"`
-
-	// ClaimToken is set only on the answer to a runner's claim: the claim
-	// token the node's process authenticates with in place of the runner's
-	// own credential. It stops working when the claim ends.
-	ClaimToken string `json:"claim_token,omitempty"`
-	// SpecHash is the node's spec_hash in the plan its run host accepted. A
-	// remote host of the node runs it only when its own plan of the node
-	// hashes the same.
-	SpecHash string `json:"spec_hash,omitempty"`
-	// Generated is set on a node a generator added to its run: where it came
-	// from and its whole spec, which every later host of the node reads
-	// instead of generating it again.
-	Generated *GeneratedNode `json:"generated,omitempty"`
+	CPUNanos         int64          `json:"cpu_nanos,omitempty"`
+	MaxRSSBytes      int64          `json:"max_rss_bytes,omitempty"`
+	ProcessWallNanos int64          `json:"process_wall_nanos,omitempty"`
+	SpecHash         string         `json:"spec_hash,omitempty"`
+	Generated        *GeneratedNode `json:"generated,omitempty"`
 }
 
 // GeneratedNode is how a generator added a node to its run.
@@ -1310,99 +1220,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 	return tx.Commit()
 }
 
-// FinishNode marks terminal with outcome + optional output/error.
-func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error {
-	return s.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, FailureUnknown, nil)
-}
-
-// FinishNodeWithReason additionally records a Failure* code + exit. Output
-// bytes are written to the store's own output directory, so only a store
-// with one ([Store.OutputDir]) accepts them.
-func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
-	// safety: the output is written into the node's own team and the finish
-	// below is the default team's, so a node of another team is refused before
-	// its bytes are stored and charged.
-	if _, err := s.defaultTenant().GetNode(ctx, runID, nodeID); err != nil {
-		return err
-	}
-	ref, err := s.writeLocalOutput(ctx, runID, nodeID, output)
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrOutputNotStored, err)
-	}
-	return s.defaultTenant().FinishNodeWithOutputRef(ctx, runID, nodeID, outcome, errMsg, ref, reason, exitCode)
-}
-
-// FinishNodeWithOutputRef finishes a tenant job with committed output.
-func (t *Tenant) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error {
-	return t.finishNode(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
-}
-
-func (t *Tenant) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef,
-	reason string, exitCode *int,
-) error {
-	var code any
-	if exitCode != nil {
-		code = *exitCode
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	var team string
-	var generation, consumed int64
-	err = tx.QueryRowContext(ctx, `SELECT team, claim_generation, attempts_consumed FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID).Scan(&team, &generation, &consumed)
-	if errors.Is(err, sql.ErrNoRows) {
-		return notFound("node", runID+"/"+nodeID)
-	}
-	if err != nil {
-		return err
-	}
-	if output != nil {
-		if err := checkOutputRefTx(ctx, tx, Team(team), runID, nodeID, consumed+1, generation, output); err != nil {
-			return err
-		}
-	}
-	res, err := tx.ExecContext(ctx, `
-UPDATE nodes
-	   SET status = ?, outcome = ?, error = ?, finished_at = ?,
-	       failure_reason = ?, exit_code = ?
-	 WHERE team = ? AND run_id = ? AND node_id = ? AND NOT (status = ? AND outcome != '')`,
-		nodeStatusDone, outcome, errMsg, time.Now().UnixNano(), reason, code,
-		string(t.team), runID, nodeID, nodeStatusDone)
-	if err != nil {
-		return err
-	}
-	if n, err := res.RowsAffected(); err != nil {
-		return err
-	} else if n == 1 {
-		if err := writeNodeOutputTx(ctx, tx, Team(team), runID, nodeID, generation, output); err != nil {
-			return err
-		}
-		if err := settleRunningStepsTx(ctx, tx, Team(team), runID, nodeID, outcome); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-// safety: a node killed mid-step never writes that step's end, so a step
-// still running when its node finishes ends with the node.
-func settleRunningStepsTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, outcome string) error {
-	status := StepFailed
-	switch outcome {
-	case outcomeSuccess:
-		status = StepPassed
-	case outcomeCancelled:
-		status = StepCancelled
-	}
-	_, err := tx.ExecContext(ctx, `
-UPDATE node_steps SET status = ?, finished_at = ?
- WHERE team = ? AND run_id = ? AND node_id = ? AND status = ?`,
-		status, time.Now().UnixNano(), team, runID, nodeID, StepRunning)
-	return err
-}
-
 // ListNodes returns the nodes for a run in insertion order, which the
 // nodes.seq column records because no physical row order survives an
 // update on Postgres. Rows a pre-v29 Postgres store wrote carry no
@@ -1467,109 +1284,47 @@ func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, erro
 	return record, nil
 }
 
-const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error,
-       (SELECT o.key FROM node_outputs o WHERE o.team = nodes.team AND o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
-       (SELECT o.size FROM node_outputs o WHERE o.team = nodes.team AND o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
-       (SELECT o.sha256 FROM node_outputs o WHERE o.team = nodes.team AND o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
-       started_at, finished_at,
-       ready_at, claimed_by, lease_expires_at, needs_labels, prefers_labels,
-       requested_cores, requested_memory_bytes, requested_slots,
-       offer_started_at, offer_priority_target, claim_base_priority, claim_priority,
-       claim_worker_id, claim_executor_kind, claim_reservation_id,
-	   status_detail, last_heartbeat, failure_reason, exit_code, annotations_json, summary,
-	   artifact_manifest, cpu_nanos, max_rss_bytes, process_wall_nanos,
-	   coordinator_id, claim_generation, claim_membership_id,
-	   executor_kind, executor_id, executor_location, execution_started_at, reservation_id,
-	   attempts_consumed, retry_root_run_id,
-	   placement_reason, placement_hold_from, credit_cpu_class, spec_hash, generated_json`
+const nodeSelectColumns = `run_id,node_id,status,outcome,deps_json,error,started_at,finished_at,
+ ready_at,claimed_by,lease_expires_at,needs_labels,prefers_labels,requested_cores,requested_memory_bytes,requested_slots,
+ offer_started_at,status_detail,last_heartbeat,failure_reason,exit_code,annotations_json,summary,cpu_nanos,max_rss_bytes,process_wall_nanos,
+ generation,executor_kind,executor_id,executor_location,execution_started_at,attempt,placement_reason,placement_hold_from,credit_cpu_class,spec_hash,generated_json`
 
 func scanNodeRow(rs rowScanner, n *Node) error {
-	var depsJSON, labelsJSON, prefersJSON, annotationsJSON []byte
-	var outputKey, outputSHA sql.NullString
-	var outputSize sql.NullInt64
-	var generatedJSON []byte
-	var startedNS, finishedNS, readyNS, leaseNS, offerStartedNS, heartbeatNS, executionStartedNS sql.NullInt64
-	var holdFromNS sql.NullInt64
-	var claimedBy sql.NullString
-	var exitCode sql.NullInt64
-	err := rs.Scan(&n.RunID, &n.NodeID, &n.Status, &n.Outcome,
-		&depsJSON, &n.Error, &outputKey, &outputSize, &outputSHA, &startedNS, &finishedNS,
-		&readyNS, &claimedBy, &leaseNS, &labelsJSON, &prefersJSON,
-		&n.RequestedCores, &n.RequestedMemoryBytes, &n.RequestedSlots,
-		&offerStartedNS, &n.OfferPriorityTarget, &n.ClaimBasePriority, &n.ClaimPriority,
-		&n.ClaimWorkerID, &n.ClaimExecutorKind, &n.ClaimReservationID,
-		&n.StatusDetail, &heartbeatNS,
-		&n.FailureReason, &exitCode, &annotationsJSON, &n.Summary, &n.ArtifactManifest,
-		&n.CPUNanos, &n.MaxRSSBytes, &n.ProcessWallNanos,
-		&n.CoordinatorID, &n.ClaimGeneration, &n.ClaimMembershipID,
-		&n.ExecutorKind, &n.ExecutorID, &n.ExecutorLocation, &executionStartedNS, &n.ReservationID,
-		&n.AttemptsConsumed, &n.RetryRootRunID,
-		&n.PlacementReason, &holdFromNS, &n.CreditCPUClassCores, &n.SpecHash, &generatedJSON)
+	var deps, labels, prefers, annotations, generated []byte
+	var started, finished, ready, lease, offered, heartbeat, executed, hold sql.NullInt64
+	var holder sql.NullString
+	var exit sql.NullInt64
+	err := rs.Scan(&n.RunID, &n.NodeID, &n.Status, &n.Outcome, &deps, &n.Error, &started, &finished,
+		&ready, &holder, &lease, &labels, &prefers, &n.RequestedCores, &n.RequestedMemoryBytes, &n.RequestedSlots,
+		&offered, &n.StatusDetail, &heartbeat, &n.FailureReason, &exit, &annotations, &n.Summary, &n.CPUNanos, &n.MaxRSSBytes, &n.ProcessWallNanos,
+		&n.ClaimGeneration, &n.ExecutorKind, &n.ExecutorID, &n.ExecutorLocation, &executed, &n.AttemptsConsumed,
+		&n.PlacementReason, &hold, &n.CreditCPUClassCores, &n.SpecHash, &generated)
 	if errors.Is(err, sql.ErrNoRows) {
-		return notFound("node", "")
+		return notFound("job", "")
 	}
 	if err != nil {
 		return err
 	}
-	_ = json.Unmarshal(depsJSON, &n.Deps)
-	if len(generatedJSON) > 0 {
-		n.Generated = &GeneratedNode{}
-		if err := json.Unmarshal(generatedJSON, n.Generated); err != nil {
-			return fmt.Errorf("node %s generated spec: %w", n.NodeID, err)
+	for _, part := range []struct {
+		raw []byte
+		dst any
+	}{
+		{deps, &n.Deps}, {labels, &n.NeedsLabels}, {prefers, &n.PrefersLabels}, {annotations, &n.Annotations}, {generated, &n.Generated},
+	} {
+		if len(part.raw) > 0 {
+			if err := json.Unmarshal(part.raw, part.dst); err != nil {
+				return fmt.Errorf("decode job %s: %w", n.NodeID, err)
+			}
 		}
 	}
-	if outputKey.Valid {
-		n.OutputRef = &OutputRef{Key: outputKey.String, Size: outputSize.Int64, SHA256: outputSHA.String}
-	}
-	if len(labelsJSON) > 0 {
-		_ = json.Unmarshal(labelsJSON, &n.NeedsLabels)
-	}
-	if len(prefersJSON) > 0 {
-		_ = json.Unmarshal(prefersJSON, &n.PrefersLabels)
-	}
+	n.StartedAt, n.FinishedAt, n.ReadyAt = stateTime(started), stateTime(finished), stateTime(ready)
+	n.LeaseExpiresAt, n.OfferStartedAt, n.LastHeartbeat = stateTime(lease), stateTime(offered), stateTime(heartbeat)
+	n.ExecutionStartedAt, n.PlacementHoldFrom = stateTime(executed), stateTime(hold)
+	n.ClaimedBy, n.Claimed = holder.String, holder.Valid
 	n.CreditCPUClassMemoryBytes = CPUClassMemoryBytes(n.CreditCPUClassCores)
-	if startedNS.Valid {
-		t := time.Unix(0, startedNS.Int64)
-		n.StartedAt = &t
-	}
-	if finishedNS.Valid {
-		t := time.Unix(0, finishedNS.Int64)
-		n.FinishedAt = &t
-	}
-	if readyNS.Valid {
-		t := time.Unix(0, readyNS.Int64)
-		n.ReadyAt = &t
-	}
-	if holdFromNS.Valid {
-		t := time.Unix(0, holdFromNS.Int64)
-		n.PlacementHoldFrom = &t
-	}
-	if offerStartedNS.Valid {
-		t := time.Unix(0, offerStartedNS.Int64)
-		n.OfferStartedAt = &t
-	}
-	if claimedBy.Valid {
-		n.ClaimedBy = claimedBy.String
-		n.Claimed = true
-	}
-	if leaseNS.Valid {
-		t := time.Unix(0, leaseNS.Int64)
-		n.LeaseExpiresAt = &t
-	}
-	if executionStartedNS.Valid {
-		t := time.Unix(0, executionStartedNS.Int64)
-		n.ExecutionStartedAt = &t
-	}
-	if heartbeatNS.Valid {
-		t := time.Unix(0, heartbeatNS.Int64)
-		n.LastHeartbeat = &t
-	}
-	if exitCode.Valid {
-		v := int(exitCode.Int64)
-		n.ExitCode = &v
-	}
-	if len(annotationsJSON) > 0 {
-		_ = json.Unmarshal(annotationsJSON, &n.Annotations)
+	if exit.Valid {
+		code := int(exit.Int64)
+		n.ExitCode = &code
 	}
 	return nil
 }
@@ -1910,93 +1665,38 @@ func scanDebugPause(rs rowScanner) (*DebugPause, error) {
 	return &p, nil
 }
 
-// Trigger is one row in the triggers table; ID becomes the run ID.
+// Trigger combines sealed run display with queue state.
 type Trigger struct {
-	ID             string            `json:"id"`
-	Pipeline       string            `json:"pipeline"`
-	Args           map[string]string `json:"args,omitempty"`
-	TriggerSource  string            `json:"trigger_source,omitempty"`
-	TriggerUser    string            `json:"trigger_user,omitempty"`
-	TriggerEnv     map[string]string `json:"trigger_env,omitempty"`
-	GitBranch      string            `json:"git_branch,omitempty"`
-	GitSHA         string            `json:"git_sha,omitempty"`
-	Status         string            `json:"status"`
-	Error          string            `json:"error,omitempty"`
-	CreatedAt      time.Time         `json:"created_at"`
-	ClaimedAt      *time.Time        `json:"claimed_at,omitempty"`
-	LeaseExpiresAt *time.Time        `json:"lease_expires_at,omitempty"`
-	// ParentRunID: spawning RunAndAwait; for cycle detection.
-	ParentRunID string `json:"parent_run_id,omitempty"`
-	// Mirror of Run repo fields; threaded into CreateRun.
-	Repo         string `json:"repo,omitempty"`
-	RepoURL      string `json:"repo_url,omitempty"`
-	GithubOwner  string `json:"github_owner,omitempty"`
-	GithubRepo   string `json:"github_repo,omitempty"`
-	GithubRepoID int64  `json:"-"`
-	// RepoInherited distinguishes an implicit same-repository await from an
-	// explicit cross-repository request after parent provenance is copied.
-	RepoInherited bool `json:"repo_inherited,omitempty"`
-	// RetryOf is threaded into the persisted Run row.
-	RetryOf string `json:"retry_of,omitempty"`
-	// RetrySource is "manual" for a retried run.
-	RetrySource string `json:"retry_source,omitempty"`
-	// ParentNodeID: which parent node spawned this; for retry-lineage
-	// chaining across nested spawns.
-	ParentNodeID string `json:"parent_node_id,omitempty"`
-	// Full: "rerun all" mode for manual retries. When true, the
-	// orchestrator ignores skip-passed rehydration and re-executes
-	// every node even though retry_of is set. The dashboard's
-	// "Rerun all" choice flips this; "Rerun from failed" leaves
-	// it false (the default).
-	Full bool `json:"full,omitempty"`
-	// IdempotencyKey is a caller-supplied deduplication token, scoped to
-	// the pipeline. At most one trigger may carry any given (pipeline,
-	// non-empty key) pair -- a partial unique index enforces it -- so a
-	// submitter that retries after an ambiguous failure re-reaches the
-	// original run instead of starting a second one. Empty is the norm
-	// and is exempt from the index.
-	//
-	// The scope is the pipeline and not the whole store because a key is
-	// a caller's name for one intent, and two pipelines naming their
-	// intents independently is the normal case: a global namespace would
-	// let `submit beta --idempotency-key nightly` answer with alpha's run
-	// and never execute beta at all.
-	//
-	// It is deliberately not the trigger's tracing identity: a caller
-	// correlating log lines wants a fresh id per attempt, while dedup
-	// wants the same token across attempts of one intent. Tracing ids
-	// ride in TriggerEnv; only this field decides whether a submission
-	// is a duplicate.
-	IdempotencyKey string `json:"idempotency_key,omitempty"`
-	// ClaimSeq counts how many times this trigger has been claimed. It
-	// is the fence that makes a re-claim invalidate the previous
-	// dispatch: a claim reads the value it was given, and a terminal
-	// write that presents a stale value is refused rather than applied.
-	//
-	// Without it, a dispatch whose claim lapsed and was taken by another
-	// consumer could still finish and stamp its own outcome over the run
-	// the new claim is producing -- two writers, one run row, and the
-	// last to finish wins regardless of which one the store considers
-	// current.
-	ClaimSeq int64 `json:"claim_seq,omitempty"`
-	// ClaimToken is set only on the answer to a runner's trigger claim: the
-	// claim token that reads the run's declared secrets while the claim
-	// lives.
-	ClaimToken string `json:"claim_token,omitempty"`
-	// WebhookDelivery records the provider's delivery header for audit.
-	// One delivery can start several pipelines. WebhookReplayKey owns deduplication.
-	WebhookDelivery string `json:"webhook_delivery,omitempty"`
-	// WebhookReplayKey identifies verified delivery material and its pipeline.
-	// It is unique within the team, regardless of the unsigned delivery header.
-	WebhookReplayKey string `json:"webhook_replay_key,omitempty"`
-	// Team owns the trigger and the run it becomes. A claim and a read
-	// return it so the runner that executes the run can place its work
-	// on nodes no other team's work shares.
-	Team Team `json:"team,omitempty"`
-	// RunnerPin is the prefix of the one-shot credential a
-	// `--runner here` trigger is pinned to, empty for every other trigger.
-	// A pinned trigger is claimable only by that credential, once.
-	RunnerPin string `json:"-"`
+	ID               string            `json:"id"`
+	Pipeline         string            `json:"pipeline"`
+	Args             map[string]string `json:"args,omitempty"`
+	TriggerSource    string            `json:"trigger_source,omitempty"`
+	TriggerUser      string            `json:"trigger_user,omitempty"`
+	TriggerEnv       map[string]string `json:"trigger_env,omitempty"`
+	GitBranch        string            `json:"git_branch,omitempty"`
+	GitSHA           string            `json:"git_sha,omitempty"`
+	Status           string            `json:"status"`
+	Error            string            `json:"error,omitempty"`
+	CreatedAt        time.Time         `json:"created_at"`
+	ClaimedAt        *time.Time        `json:"claimed_at,omitempty"`
+	LeaseExpiresAt   *time.Time        `json:"lease_expires_at,omitempty"`
+	ParentRunID      string            `json:"parent_run_id,omitempty"`
+	Repo             string            `json:"repo,omitempty"`
+	RepoURL          string            `json:"repo_url,omitempty"`
+	GithubOwner      string            `json:"github_owner,omitempty"`
+	GithubRepo       string            `json:"github_repo,omitempty"`
+	GithubRepoID     int64             `json:"-"`
+	RepoInherited    bool              `json:"repo_inherited,omitempty"`
+	RetryOf          string            `json:"retry_of,omitempty"`
+	RetrySource      string            `json:"retry_source,omitempty"`
+	ParentNodeID     string            `json:"parent_node_id,omitempty"`
+	Full             bool              `json:"full,omitempty"`
+	IdempotencyKey   string            `json:"idempotency_key,omitempty"`
+	ClaimSeq         int64             `json:"claim_seq,omitempty"`
+	WebhookDelivery  string            `json:"webhook_delivery,omitempty"`
+	WebhookReplayKey string            `json:"webhook_replay_key,omitempty"`
+	Team             Team              `json:"team,omitempty"`
+	RunnerPin        string            `json:"-"`
 }
 
 // DefaultLeaseDuration is the claim lease TTL. Wide enough to survive
@@ -2085,221 +1785,81 @@ type SpawnedChild struct {
 	ChildRunID   string `json:"child_run_id"`
 }
 
-// GetTrigger returns one tenant trigger.
+// GetTrigger returns one tenant trigger's sealed display and queue state.
 func (t *Tenant) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
-	var tr Trigger
-	var argsJSON, envJSON []byte
-	var createdNS int64
-	var claimedNS, leaseNS sql.NullInt64
-	var parent sql.NullString
-	var fullInt, repoInheritedInt int
-	err := t.s.queryRow(
-		ctx, `
-SELECT id, pipeline, args_json, trigger_source, trigger_user,
-       trigger_env, git_branch, git_sha, status, created_at, claimed_at, lease_expires_at,
-       repo, repo_url, github_owner, github_repo, github_repo_id, repo_inherited, retry_of, retry_source, parent_node_id, parent_run_id, "full",
-       idempotency_key, claim_seq, webhook_delivery, team,
-       COALESCE((SELECT error FROM runs WHERE runs.team = triggers.team AND runs.id = triggers.id), '')
-  FROM triggers WHERE team = ? AND id = ?`, string(t.team), id,
-	).Scan(&tr.ID, &tr.Pipeline, &argsJSON, &tr.TriggerSource, &tr.TriggerUser,
-		&envJSON, &tr.GitBranch, &tr.GitSHA, &tr.Status, &createdNS, &claimedNS, &leaseNS,
-		&tr.Repo, &tr.RepoURL, &tr.GithubOwner, &tr.GithubRepo, &tr.GithubRepoID, &repoInheritedInt, &tr.RetryOf, &tr.RetrySource, &tr.ParentNodeID, &parent, &fullInt,
-		&tr.IdempotencyKey, &tr.ClaimSeq, &tr.WebhookDelivery, &tr.Team, &tr.Error)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, notFound("trigger", id)
-		}
-		return nil, err
-	}
-	tr.CreatedAt = time.Unix(0, createdNS)
-	if claimedNS.Valid {
-		ct := time.Unix(0, claimedNS.Int64)
-		tr.ClaimedAt = &ct
-	}
-	if leaseNS.Valid {
-		lt := time.Unix(0, leaseNS.Int64)
-		tr.LeaseExpiresAt = &lt
-	}
-	if parent.Valid {
-		tr.ParentRunID = parent.String
-	}
-	tr.Full = fullInt != 0
-	tr.RepoInherited = repoInheritedInt != 0
-	if len(argsJSON) > 0 {
-		if err := json.Unmarshal(argsJSON, &tr.Args); err != nil {
-			tr.Args = nil
-		}
-	}
-	if len(envJSON) > 0 {
-		if err := json.Unmarshal(envJSON, &tr.TriggerEnv); err != nil {
-			tr.TriggerEnv = nil
-		}
-	}
-	return &tr, nil
+	return scanTrigger(t.s.queryRow(ctx, triggerSelect+` WHERE triggers.team=? AND triggers.id=?`, t.team, id))
 }
 
 // TriggerFilter narrows ListTriggers; zero value matches all.
 type TriggerFilter struct {
-	Statuses  []string // "pending"|"claimed"|"done"|"failed"
+	Statuses  []string
 	Pipelines []string
-	Repo      string // matches GITHUB_REPOSITORY in trigger_env
-	Limit     int    // <=0 = 20
+	Repo      string
+	Limit     int
 }
 
-const (
-	triggerRepoScanBatch = 200
-	triggerRepoScanCap   = 5000
-)
+const triggerSelect = `SELECT ` + runColumns + `,triggers.team,triggers.status,triggers.claimed_at,triggers.lease_expires_at,
+ triggers.generation,triggers.webhook_delivery,triggers.webhook_replay_key,runs.idempotency_key,runs.parent_node_id
+ FROM runs JOIN triggers ON triggers.team=runs.team AND triggers.id=runs.id`
 
-// ListTriggers returns t's triggers newest-first, filtered by f, with the
-// same paging and repo matching as [Tenant.ListTriggers].
+// ListTriggers returns this tenant's sealed trigger displays, newest first.
 func (t *Tenant) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error) {
 	return t.s.listTriggers(ctx, oneTeam(t.team), f)
 }
 
-func (s *Store) listTriggers(ctx context.Context, scope teamScope, f TriggerFilter) ([]*Trigger, error) {
+func (s *Store) listTriggers(ctx context.Context, scope teamScope, f TriggerFilter) (_ []*Trigger, err error) {
+	filter := RunFilter{Pipelines: f.Pipelines}
+	if f.Repo != "" {
+		filter.RepoNames = []string{f.Repo}
+	}
+	where, args, err := runFilterWhere(s.dialect, scope, filter)
+	if err != nil {
+		return nil, err
+	}
+	if len(f.Statuses) > 0 {
+		if where == "" {
+			where = " WHERE "
+		} else {
+			where += " AND "
+		}
+		where += "triggers.status IN (" + placeholders(len(f.Statuses)) + ")"
+		args = append(args, stringsToAny(f.Statuses)...)
+	}
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 20
 	}
-	limit = min(limit, MaxRunListLimit)
-
-	where := ""
-	args := []any{}
-	addClause := func(clause string) {
-		if where == "" {
-			where = " WHERE " + clause
-		} else {
-			where += " AND " + clause
-		}
-	}
-	if !scope.all {
-		if scope.team == "" {
-			return nil, ErrNoTeam
-		}
-		addClause("team = ?")
-		args = append(args, string(scope.team))
-	}
-	addIn := func(col string, values []string) {
-		if len(values) == 0 {
-			return
-		}
-		placeholders := make([]string, len(values))
-		for i, v := range values {
-			placeholders[i] = "?"
-			args = append(args, v)
-		}
-		addClause(col + " IN (" + strings.Join(placeholders, ",") + ")")
-	}
-	addIn("status", f.Statuses)
-	addIn("pipeline", f.Pipelines)
-
-	selectTriggers := `
-SELECT id, pipeline, args_json, trigger_source, trigger_user,
-       trigger_env, git_branch, git_sha, status, created_at,
-       claimed_at, lease_expires_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-       idempotency_key, claim_seq, webhook_delivery,
-       COALESCE((SELECT error FROM runs WHERE runs.id = triggers.id), '')
-  FROM triggers`
-	const orderAndLimit = `
- ORDER BY created_at DESC, id DESC
- LIMIT ?`
-
-	batch := limit
-	if f.Repo != "" {
-		batch = max(limit, triggerRepoScanBatch)
-	}
-	var out []*Trigger
-	var cursor *Trigger
-	scanned := 0
-	for {
-		pageWhere, pageArgs := where, append([]any{}, args...)
-		if cursor != nil {
-			cursorNS := cursor.CreatedAt.UnixNano()
-			clause := "(created_at < ? OR (created_at = ? AND id < ?))"
-			if pageWhere == "" {
-				pageWhere = " WHERE " + clause
-			} else {
-				pageWhere += " AND " + clause
-			}
-			pageArgs = append(pageArgs, cursorNS, cursorNS, cursor.ID)
-		}
-		pageArgs = append(pageArgs, batch)
-		page, err := s.listTriggerPage(ctx, selectTriggers+pageWhere+orderAndLimit, pageArgs)
-		if err != nil {
-			return nil, err
-		}
-		for _, t := range page {
-			if f.Repo != "" && t.TriggerEnv["GITHUB_REPOSITORY"] != f.Repo {
-				continue
-			}
-			out = append(out, t)
-			if len(out) == limit {
-				return out, nil
-			}
-		}
-		scanned += len(page)
-		if f.Repo == "" || len(page) < batch {
-			return out, nil
-		}
-		if scanned >= triggerRepoScanCap {
-			slog.Warn("trigger repo filter stopped at its search horizon",
-				"repo", f.Repo, "scanned", scanned, "matched", len(out), "limit", limit)
-			return out, nil
-		}
-		cursor = page[len(page)-1]
-	}
-}
-
-func (s *Store) listTriggerPage(ctx context.Context, query string, args []any) ([]*Trigger, error) {
-	rows, err := s.query(ctx, query, args...)
+	args = append(args, min(limit, MaxRunListLimit))
+	rows, err := s.query(ctx, triggerSelect+where+` ORDER BY triggers.created_at DESC,triggers.id DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-
+	defer closeRowsInto(rows, &err)
 	var out []*Trigger
 	for rows.Next() {
-		var t Trigger
-		var argsJSON, envJSON []byte
-		var createdNS int64
-		var claimedNS, leaseNS sql.NullInt64
-		var parent sql.NullString
-		var fullInt, repoInheritedInt int
-		if err := rows.Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
-			&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS,
-			&claimedNS, &leaseNS, &parent,
-			&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
-			&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery, &t.Error); err != nil {
+		trigger, err := scanTrigger(rows)
+		if err != nil {
 			return nil, err
 		}
-		t.Full = fullInt != 0
-		t.RepoInherited = repoInheritedInt != 0
-		t.CreatedAt = time.Unix(0, createdNS)
-		if claimedNS.Valid {
-			ct := time.Unix(0, claimedNS.Int64)
-			t.ClaimedAt = &ct
-		}
-		if leaseNS.Valid {
-			lt := time.Unix(0, leaseNS.Int64)
-			t.LeaseExpiresAt = &lt
-		}
-		if parent.Valid {
-			t.ParentRunID = parent.String
-		}
-		if len(argsJSON) > 0 {
-			_ = json.Unmarshal(argsJSON, &t.Args)
-		}
-		if len(envJSON) > 0 {
-			_ = json.Unmarshal(envJSON, &t.TriggerEnv)
-		}
-		out = append(out, &t)
+		out = append(out, trigger)
 	}
-	if err := rows.Err(); err != nil {
+	return out, rows.Err()
+}
+
+func scanTrigger(rs rowScanner) (*Trigger, error) {
+	var tr Trigger
+	var claimed, lease sql.NullInt64
+	run, err := scanRun(rs, &tr.Team, &tr.Status, &claimed, &lease, &tr.ClaimSeq, &tr.WebhookDelivery, &tr.WebhookReplayKey, &tr.IdempotencyKey, &tr.ParentNodeID)
+	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	tr.ID, tr.Pipeline, tr.Args = run.ID, run.Pipeline, run.Args
+	tr.TriggerSource, tr.TriggerUser, tr.Error = run.TriggerSource, run.TriggerUser, run.Error
+	tr.GitBranch, tr.GitSHA, tr.CreatedAt = run.GitBranch, run.GitSHA, run.CreatedAt
+	tr.ClaimedAt, tr.LeaseExpiresAt = stateTime(claimed), stateTime(lease)
+	tr.ParentRunID, tr.RetryOf, tr.RetrySource = run.ParentRunID, run.RetryOf, run.RetrySource
+	tr.Repo, tr.RepoURL = run.DeclaredRepo, run.RepoURL
+	return &tr, nil
 }
 
 // ErrLockHeld signals the caller is not the current slot holder. HTTP -> 409.

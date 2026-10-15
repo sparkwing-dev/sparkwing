@@ -69,7 +69,7 @@ func (f *scriptedSegmentLogs) Get(_ context.Context, key string) (io.ReadCloser,
 	f.gets++
 	data, ok := f.objects[key]
 	if !ok {
-		return nil, storage.ErrNotFound
+		return nil, blob.ErrNotFound
 	}
 	return io.NopCloser(bytes.NewReader(data)), nil
 }

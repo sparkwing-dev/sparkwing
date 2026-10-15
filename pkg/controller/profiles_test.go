@@ -60,7 +60,7 @@ func TestFinishRunFoldsPartialSamplesRaiseOnly(t *testing.T) {
 					t.Fatalf("sample %d: %v", i, err)
 				}
 			}
-			if err := st.FinishNode(ctx, "partial", "build", "success", "", nil); err != nil {
+			if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, store.NodeRef{RunID: "partial", NodeID: "build"}, store.NodeResult{Outcome: store.NodeState("success"), MaskedError: ""}); err != nil {
 				t.Fatal(err)
 			}
 			request := httptest.NewRequest(http.MethodPost, "/api/v1/runs/partial/finish", strings.NewReader(`{"status":"success","error":""}`))

@@ -16,7 +16,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func checkStorageFilesystemLogSink(t *testing.T) {
@@ -35,14 +34,14 @@ func checkStorageS3LogSink(t *testing.T) {
 
 func checkStorageLogSink(t *testing.T, objects storageLogObjects, transport http.RoundTripper, seed [16]byte, ordinal uint8, lost bool) bool {
 	t.Helper()
-	subject := storageLogSubject(seed, ordinal)
 	signing := &storageLogTransport{objects: objects, class: logseg.ClassStandard}
-	records := &storageLogRecords{}
+	records, commit, actor, reopen := storageLogPersistence(t, ordinal, signing.class)
+	subject := commit.Subject
 	if lost {
 		transport = storageLostResponse{transport}
 	}
 	uploader, err := logseg.NewSubjectUploader(logseg.Data{
-		Subject: subject, Transport: signing, Records: records,
+		Subject: subject, Transport: signing, Records: records, Actor: commit.Actor,
 		HTTPClient: blob.TransferClient{Transport: transport},
 	})
 	if err != nil {
@@ -113,9 +112,15 @@ func checkStorageLogSink(t *testing.T, objects storageLogObjects, transport http
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("spool cleanup: %v: %v", entries, err)
 	}
+	persisted, records := reopen()
+	defer func() {
+		if err := persisted.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	reader := logseg.CommittedReader{Records: records, Objects: objects}
 	var output bytes.Buffer
-	result, err := reader.Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: subject}, &output)
+	result, err := reader.Read(t.Context(), actor, blob.LogReadRequest{Subject: subject}, &output)
 	if err != nil || !result.Complete || result.Bytes != int64(len(live)) || !bytes.Equal(live, output.Bytes()) {
 		t.Fatalf("sink read: %+v: %v", result, err)
 	}
@@ -135,19 +140,31 @@ func checkStorageLogSink(t *testing.T, objects storageLogObjects, transport http
 	}
 	for _, offset := range []int64{1, int64(seed[2]) % result.Bytes, result.Bytes, result.Bytes + 1} {
 		output.Reset()
-		tail, err := reader.Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: subject, Offset: offset}, &output)
+		tail, err := reader.Read(t.Context(), actor, blob.LogReadRequest{Subject: subject, Offset: offset}, &output)
 		if err != nil || !tail.Complete || !bytes.Equal(output.Bytes(), live[min(offset, int64(len(live))):]) {
 			return false
 		}
 	}
-	foreign := storageLogSubject(seed, ordinal)
+	foreign := subject
 	if foreign.Attempt != nil {
+		attempt := *foreign.Attempt
+		foreign.Attempt = &attempt
 		foreign.Attempt.Generation++
 	} else {
+		unit := *foreign.Unit
+		foreign.Unit = &unit
 		foreign.Unit.Generation++
 	}
-	result, err = reader.Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: foreign}, io.Discard)
-	if !errors.Is(err, blob.ErrIntegrity) || result.Bytes != 0 {
+	result, err = reader.Read(t.Context(), actor, blob.LogReadRequest{Subject: foreign}, io.Discard)
+	if err == nil || result.Bytes != 0 {
+		return false
+	}
+	if err := records.RevokeAuthority(t.Context(), actor, actor.Authority); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	result, err = reader.Read(t.Context(), actor, blob.LogReadRequest{Subject: subject}, &output)
+	if err == nil || result.Bytes != 0 || result.Complete || output.Len() != 0 {
 		return false
 	}
 	prefix, err := blob.LogSubjectPrefix(signing.class, subject)

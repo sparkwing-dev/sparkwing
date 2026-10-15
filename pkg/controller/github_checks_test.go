@@ -120,11 +120,7 @@ func (f *appFixture) addNode(runID, nodeID, outcome, errMsg string) {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	tn, err := f.store.ForTeam(ctx, team)
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	if err := tn.FinishNodeWithOutputRef(ctx, runID, nodeID, outcome, errMsg, nil, store.FailureUnknown, nil); err != nil {
+	if err := teststore.SeedNodeFinish(f.store, ctx, team, store.NodeRef{RunID: runID, NodeID: nodeID}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: errMsg}); err != nil {
 		f.t.Fatal(err)
 	}
 }

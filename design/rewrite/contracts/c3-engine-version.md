@@ -221,8 +221,12 @@ It continues renewing held claims while draining, then replaces the binary,
 refreshes its managed units and restarts. The controller enforces the same
 minimum before issuing new awards.
 
-`RunnerInstallation` preserves credentials, configuration, executable paths,
-service registration and schedules. Its refresh uses the existing managed-unit
+`RunnerInstallation.Apply` performs one serialized update: drain, replace,
+refresh managed units, then restart. A failed step stops the operation. Individual
+stages are private, so callers cannot reorder them. `ApplySoftwareUpdate` checks
+the verified release before invoking that operation. Updates preserve credentials,
+configuration, executable paths, service registration and schedules.
+Its refresh uses the existing managed-unit
 refresh boundary for controller services and timers, plus the runner's existing
 service registration. Linux, macOS and Windows use their native replacement
 paths. A failed update reports an actionable error and retains recoverable prior

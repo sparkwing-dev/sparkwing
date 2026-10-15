@@ -31,7 +31,7 @@ func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 			if err := st.CreateNode(ctx, store.Node{RunID: run.id, NodeID: nodeID, Status: "pending"}); err != nil {
 				t.Fatal(err)
 			}
-			if err := st.FinishNode(ctx, run.id, nodeID, outcome, "", nil); err != nil {
+			if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, store.NodeRef{RunID: run.id, NodeID: nodeID}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {
 				t.Fatal(err)
 			}
 		}

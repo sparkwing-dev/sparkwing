@@ -2,13 +2,14 @@ package backend_test
 
 import (
 	"context"
-	"os"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -26,8 +27,8 @@ func newTestStore(t *testing.T) (*store.Store, paths.Paths) {
 
 func TestStoreBackend_Capabilities(t *testing.T) {
 	t.Parallel()
-	st, paths := newTestStore(t)
-	b := backend.NewStoreBackend(st, paths, nil)
+	st, _ := newTestStore(t)
+	b := backend.NewStoreBackend(st, nil)
 	got, err := b.Capabilities(context.Background())
 	if err != nil {
 		t.Fatalf("Capabilities: %v", err)
@@ -48,8 +49,8 @@ func TestStoreBackend_Capabilities(t *testing.T) {
 
 func TestStoreBackend_RunsRoundTrip(t *testing.T) {
 	t.Parallel()
-	st, paths := newTestStore(t)
-	b := backend.NewStoreBackend(st, paths, nil)
+	st, _ := newTestStore(t)
+	b := backend.NewStoreBackend(st, nil)
 	ctx := context.Background()
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -85,31 +86,10 @@ func TestStoreBackend_RunsRoundTrip(t *testing.T) {
 	}
 }
 
-func TestStoreBackend_ReadNodeLog_DiskFallback(t *testing.T) {
-	t.Parallel()
-	st, paths := newTestStore(t)
-	b := backend.NewStoreBackend(st, paths, nil)
-	ctx := context.Background()
-
-	got, err := b.ReadNodeLog(ctx, "r1", "n1", backend.ReadOpts{})
-	if err != nil {
-		t.Fatalf("ReadNodeLog miss: %v", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("ReadNodeLog miss = %q, want empty", got)
-	}
-
-	if err := paths.EnsureRunDir("r1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(paths.NodeLog("r1", "n1"), []byte("hello\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got, err = b.ReadNodeLog(ctx, "r1", "n1", backend.ReadOpts{})
-	if err != nil {
-		t.Fatalf("ReadNodeLog hit: %v", err)
-	}
-	if string(got) != "hello\n" {
-		t.Errorf("ReadNodeLog = %q, want %q", got, "hello\n")
+func TestStoreBackendReadRequiresBoundLogs(t *testing.T) {
+	st, _ := newTestStore(t)
+	_, err := backend.NewStoreBackend(st, nil).ReadNodeLog(t.Context(), "r1", "n1", backend.ReadOpts{})
+	if !errors.Is(err, storage.ErrNotSupported) {
+		t.Fatalf("unbound log read = %v", err)
 	}
 }

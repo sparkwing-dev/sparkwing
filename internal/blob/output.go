@@ -26,7 +26,7 @@ type OutputData struct {
 // Put commits an output record after obtaining the exact uploader's receipt.
 // Empty output is stored explicitly, so missing bytes cannot stand for success.
 func (d OutputData) Put(ctx context.Context, body []byte) (Record, error) {
-	if err := ctx.Err(); err != nil {
+	if err := context.Cause(ctx); err != nil {
 		return Record{}, err
 	}
 	if d.Bytes == nil || d.Records == nil {
@@ -47,17 +47,17 @@ func (d OutputData) Put(ctx context.Context, body []byte) (Record, error) {
 	sum := sha256.Sum256(body)
 	digest := Digest(hex.EncodeToString(sum[:]))
 	receipt, err := d.Bytes.Put(ctx, PutRequest{Authority: d.Authority, Identity: d.Identity, Digest: digest, Size: int64(len(body)), Body: bytes.NewReader(body)})
-	if err != nil {
+	if err = errors.Join(err, context.Cause(ctx)); err != nil {
 		return Record{}, err
 	}
 	if receipt.Digest != digest || receipt.Identity != d.Identity {
 		return Record{}, ErrIntegrity
 	}
-	if err := ctx.Err(); err != nil {
+	if err := context.Cause(ctx); err != nil {
 		return Record{}, err
 	}
 	record, err := d.Records.CommitRecord(ctx, CommitRecordRequest{Authority: d.Authority, Source: d.Identity, Key: key, Digest: digest})
-	if err != nil {
+	if err = errors.Join(err, context.Cause(ctx)); err != nil {
 		return Record{}, err
 	}
 	if record.Key != key || record.Digest != digest || record.Source != d.Identity {

@@ -46,7 +46,8 @@ func validUpload(i UploadIdentity) bool {
 	return false
 }
 
-func authorizeUpload(a Authority, i UploadIdentity, kind Kind) error {
+// AuthorizeUpload checks the upload kind against its bound identity.
+func AuthorizeUpload(a Authority, i UploadIdentity, kind Kind) error {
 	if !validUpload(i) || a.Principal != i.Principal || a.CapabilityRef != i.CapabilityRef {
 		return ErrDigestNotReadable
 	}
@@ -65,7 +66,8 @@ func authorizeUpload(a Authority, i UploadIdentity, kind Kind) error {
 	return ErrDigestNotReadable
 }
 
-func authorizeEdge(r EdgeRequest) error {
+// AuthorizeEdge checks receipt identity or a declared readable edge.
+func AuthorizeEdge(r EdgeRequest) error {
 	if !validDigest(r.Digest) || !slices.Contains(Kinds, r.TargetKind) {
 		return ErrDigestNotReadable
 	}
@@ -105,7 +107,8 @@ func cacheReadKind(kind Kind) bool {
 	return kind == KindOutput || kind == KindManifest || kind == KindMemo || kind == KindDepcache
 }
 
-func checkBinaryExecution(e BinaryExecution) error {
+// CheckBinaryExecution requires trusted provenance for executable bytes.
+func CheckBinaryExecution(e BinaryExecution) error {
 	if !validDigest(e.Digest) || e.Digest != e.Record.Digest {
 		return ErrIntegrity
 	}

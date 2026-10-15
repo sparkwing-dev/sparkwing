@@ -20,6 +20,7 @@ import (
 type logSubmissionObjects interface {
 	logseg.LogPutSigner
 	logseg.SegmentObjects
+	LogClassReady(context.Context, string) error
 }
 
 func (s *Server) logSubmissionEndpoints(e *EngineController) []Endpoint {
@@ -105,11 +106,7 @@ func (s *Server) handleLogSigning(w http.ResponseWriter, r *http.Request, a capa
 	if err != nil {
 		return err
 	}
-	ready := s.logClassReady
-	if backend, ok := objects.(*blob.S3); ok {
-		ready = backend.LogClassReady
-	}
-	batch, err := (logseg.BatchSigner{Objects: objects, ClassReady: ready}).Sign(r.Context(), body, class)
+	batch, err := (logseg.BatchSigner{Objects: objects, ClassReady: objects.LogClassReady}).Sign(r.Context(), body, class)
 	if err != nil {
 		return err
 	}

@@ -72,10 +72,14 @@ func (b *dataBackend) Fetch(ctx context.Context, key, dir string) (int64, error)
 	if err != nil {
 		return 0, err
 	}
-	return restoreArchive(ctx, r, dir)
+	return RestoreArchive(ctx, r, dir)
 }
 
-func restoreArchive(ctx context.Context, r blob.VerifiedReader, dir string) (n int64, err error) {
+// RestoreArchive publishes a dependency directory only after verified EOF and staged extraction.
+func RestoreArchive(ctx context.Context, r blob.VerifiedReader, dir string) (n int64, err error) {
+	if r == nil {
+		return 0, fmt.Errorf("dependency cache returned no reader")
+	}
 	if err := ctx.Err(); err != nil {
 		return 0, errors.Join(err, r.Close())
 	}

@@ -1,5 +1,24 @@
 # C1 data contract
 
+## Sealed reporting and raw job-finish retirement
+
+Reporting run and trigger readers use C4's display projections, including
+fail-closed argument classification before plan acceptance. Trigger metadata
+comes from the sealed run and queue state from `triggers`. Repository filtering
+runs in SQL over `repo_display`. Pending run cursors coalesce absent starts to
+zero. `Run.Number` reports the allocated tenant number.
+
+Job reporting reads the final `generation` and `attempt` columns. Typed state
+readers retain output/manifest record selectors. The raw `FinishNode`,
+`FinishNodeWithReason`, `FinishNodeWithOutputRef` APIs and their duplicate terminal
+writer are removed. Tests use real claims and `TransitionNode` for metadata,
+replay, refusal and tenant boundaries. Unrelated presentation fixtures use
+`teststore.SeedNodeFinish` without granting production authority.
+
+Unused Node offer-priority, artifact-digest and raw bearer fields are removed.
+Unused `ClaimToken`, `ClaimTokenKind` and its kind constants are removed.
+
+
 ## Owner completion and retired store helpers
 
 `Tenant.FinishRun` and its unfenced terminal writer are removed. Use

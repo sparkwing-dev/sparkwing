@@ -13,9 +13,9 @@ type sqlClause struct {
 	args []any
 }
 
-const runRepoNameSQL = `(CASE WHEN declared_repo <> '' THEN declared_repo WHEN github_repo <> '' THEN github_repo ELSE 'unknown' END)`
+const runRepoNameSQL = `COALESCE(NULLIF(repo_display,''),'unknown')`
 
-var runTextColumns = []string{"id", "pipeline", "declared_repo", "github_repo", "git_branch", "git_sha", "error", "trigger_source", "status"}
+var runTextColumns = []string{"id", "pipeline", "repo_display", "repo_key", "git_branch", "git_sha", "error", "trigger_source", "status"}
 
 func normalizeSHAPrefixes(prefixes []string) ([]string, error) {
 	if len(prefixes) == 0 {
@@ -142,7 +142,7 @@ var errBothCursors = errors.New("a run listing pages after one run or before one
 
 func runBeforeCursorClause(beforeStartedAt int64) string {
 	if beforeStartedAt <= 0 {
-		return "(started_at > 0 OR (started_at <= 0 AND id > ?))"
+		return "(started_at > 0 OR (COALESCE(started_at,0) <= 0 AND id > ?))"
 	}
 	return "(started_at > ? OR (started_at = ? AND id > ?))"
 }

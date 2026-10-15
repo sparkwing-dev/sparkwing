@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 // A runner resolving a coalesce follower names its leader in the query. A
@@ -20,7 +21,7 @@ import (
 func TestTeamBoundary_ResolveWaiterDoesNotReadAnotherTeamsLeader(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		ctx := context.Background()
-		if err := f.teamA.FinishNodeWithOutputRef(ctx, f.runA, "n1", "success", "", nil, store.FailureUnknown, nil); err != nil {
+		if err := teststore.SeedNodeFinish(f.st, ctx, f.teamA.Team(), store.NodeRef{RunID: f.runA, NodeID: "n1"}, store.NodeResult{Outcome: store.NodeState("success"), MaskedError: ""}); err != nil {
 			t.Fatal(err)
 		}
 		claimSeq := f.claimRun(f.runnerB, "run-by-b", "")
@@ -30,7 +31,7 @@ func TestTeamBoundary_ResolveWaiterDoesNotReadAnotherTeamsLeader(t *testing.T) {
 		if err := f.st.CreateNode(ctx, store.Node{RunID: leaderB, NodeID: "lead", Status: "running"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := f.teamB.FinishNodeWithOutputRef(ctx, leaderB, "lead", "success", "", nil, store.FailureUnknown, nil); err != nil {
+		if err := teststore.SeedNodeFinish(f.st, ctx, f.teamB.Team(), store.NodeRef{RunID: leaderB, NodeID: "lead"}, store.NodeResult{Outcome: store.NodeState("success"), MaskedError: ""}); err != nil {
 			t.Fatal(err)
 		}
 

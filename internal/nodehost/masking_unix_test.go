@@ -100,8 +100,8 @@ func TestOuterLayerNodeFailuresAreMaskedThenBounded(t *testing.T) {
 func TestARefusedOutputsErrorIsMaskedThenBounded(t *testing.T) {
 	f, input, deps := maskingExecutorFixture(t)
 	deps.PublishOutput = func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error) {
-		lead := strings.Repeat("h", int(limits.ErrorBytes)/2-20-len(store.ErrOutputNotStored.Error()+": "))
-		return nil, fmt.Errorf("%w: %s", store.ErrOutputNotStored, lead+splitSecret+"\n"+strings.Repeat("y", 2*int(limits.ErrorBytes)))
+		lead := strings.Repeat("h", int(limits.ErrorBytes)/2-20-len(blob.ErrNotFound.Error()+": "))
+		return nil, fmt.Errorf("%w: %s", blob.ErrNotFound, lead+splitSecret+"\n"+strings.Repeat("y", 2*int(limits.ErrorBytes)))
 	}
 	host, err := NewNodeExecutor(deps)
 	if err != nil {

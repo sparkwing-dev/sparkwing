@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Remove raw job finish APIs. Job results commit through fenced tenant transitions. Run and trigger reports read sealed inputs, mask secret arguments, and query the final schema. Pending runs page correctly before execution starts. See [migration guide](docs/migrations/_unreleased.md#sealed-reporting-and-job-completion).
+
 - **store (Breaking):** Remove the unfenced tenant run finisher and unused heartbeat timing and profile-key helpers. Fenced completion records the team’s first success atomically. See [migration guide](docs/migrations/_unreleased.md#owner-completion-and-retired-store-helpers).
 
 - **store (Breaking):** Replace raw metric and usage writers with tenant transactions that recheck current reporting authority. Metric retries succeed at the sample limit. Cron ticks move to Operator and use the fenced schedule lease. See [migration guide](docs/migrations/_unreleased.md#reporting-transactions-and-schedule-lease).
@@ -77,6 +79,9 @@ unlock.
   The default tenant registry stores canonical repository identity and atomically revokes Actions ancestry on removal. Issuance checks live enrollment and existing caps. Raw add/remove binding writers are removed. See [migration guide](docs/migrations/_unreleased.md#github-runner-enrollment-uses-current-administration-authority).
 - **store (Breaking):** Credential mutations and secret reads recheck current authority in their committing transactions
   The default tenant adapters enforce administration, declaration and pool checks. Secret release commits its audit before returning a row. `ReleaseClaimSecret` is removed. See [migration guide](docs/migrations/_unreleased.md#secret-release-uses-current-authority).
+- **storage (Breaking):** Remove store-local output bytes and obsolete host storage paths
+  Outputs use committed result selectors and verified blobs. The old scheduler, output grants and state-store interface are removed. Dashboard streams use the bound segment reader. See [migration guide](docs/migrations/_unreleased.md#committed-result-storage).
+
 - **controller (Breaking):** Use shared object backends for signing and capability subjects for authentication metrics
   CloudFront download signing wraps the S3 backend. Duplicate signer types and legacy upload helpers are removed. Authenticated requests use subject-kind labels, and the token-cache metric is removed. See [migration guide](docs/migrations/_unreleased.md#data-signing-and-authentication-metrics).
 
@@ -361,6 +366,11 @@ unlock.
   for that object.
 
 ### Removed
+- **store (Breaking):** Deployment card collection, settlement, fraud warnings and queued refunds move from Store to Operator. See [migration guide](docs/migrations/_unreleased.md#card-workers-use-operator).
+
+- **storage (Breaking):** Remove the separate raw S3 log store and local log-file fallback
+  Dashboard reads use committed tenant log ranges and the shared blob backend. `WithS3Logs`, `s3.ArtifactStore` and the obsolete teamblob key builder are removed. Bucket measurements use `s3.MeasurementStore`. See [migration guide](docs/migrations/_unreleased.md#data-signing-and-authentication-metrics).
+
 - **store (Breaking):** Deployment card collection, settlement, fraud warnings and queued refunds move from Store to Operator. See [migration guide](docs/migrations/_unreleased.md#card-workers-use-operator).
 
 - **controller client (Breaking):** Remove duplicate legacy credential-management methods, the raw secret list and the environment-free trigger shortcut

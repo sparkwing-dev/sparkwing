@@ -53,11 +53,11 @@ key, reads bounded bytes and requires successful close, exact size and SHA-256.
 It returns no bytes or read URL and creates no reference edge. `RecordSegments`
 rechecks the writer before committing that edge. The verifier works with both
 object backends. Its controller route remains an integration point.
-`blob.S3.LogClassReady` supplies the lifecycle callback for the S3 bucket.
-The filesystem backend exposes an expiry pass for the controller's maintenance
-lease. Its scheduling must be connected before enabling filesystem log signing.
+`LogClassReady` is part of the controller's physical log binding. S3 validates
+the bucket lifecycle. Filesystem validates the class handled by its expiry pass.
+The controller runs filesystem expiry after renewing its maintenance lease.
 
-`CommittedReader` calls `ReadLogSegments` on each read. It checks the returned
+`CommittedReader` calls `ReadLogSegments` before each segment. It checks the returned
 subject, keys and contiguous ranges before reading any object. Each segment must
 close successfully and pass digest and raw-size verification before its bytes
 reach the response. `ReadResult.Bytes` counts bytes emitted, including partial
@@ -80,13 +80,16 @@ These proofs do not count as native acceptance receipts.
 `TestStorage/storage-log-segments-and-fallback/storage-components` generates
 job and trigger/plan/eval subjects over real filesystem signed uploads and reads.
 It covers lost PUT responses, offset resume, subject mismatch and corrupt bytes.
-Its authorization, lifecycle readiness and record persistence are fakes.
+Segment commits and reads use real SQLite tenant transactions and survive
+reopening. Authenticated signing and claim issuance remain contract fixtures.
 
 The `filesystem-sink` and `s3-sink` acceptance cells also exercise concurrent
 numbered writers, duplicate delivery, live offsets, compression, batch renewal,
 offset reads and spool removal through the real sink. Each backend runs 128
-generated cases. Record persistence and authorization remain fakes. The removed
-`fs.LogStore` has no production caller.
+generated cases with job, trigger, plan and eval subjects. Tenant transactions
+persist the segments and final seal. Reads reopen SQLite, select exact persisted
+ranges and reject foreign generations and revoked readers. Signing and claim
+issuance remain fixtures. The removed `fs.LogStore` has no production caller.
 
 The append/delete `LogStore` conformance facade and its unused portable suite
 are removed. Log tests call the tagged sink, reader and physical expiry APIs.
@@ -97,11 +100,9 @@ retention has separate expiry tests.
 Filesystem and S3 acceptance proofs join the physical components to the store's
 transactional log records. Authenticated controller routes, egress settlement
 and host bindings remain integration work.
-S3 log signing still needs admission for future slots whose payload size and
-digest are unknown. The existing job-only controller and host transport uses
-tagged manifest identities and prefixes. It still signs individual segments.
-Owner-unit transport, batch-signing routes and transactional record bindings
-remain separate integration work.
+Hosts consume `blob.LogTransport` and `SegmentRecorder`. The authenticated
+signing and commit routes use the configured physical backend and real tenant
+transactions. Upload verification and host transport adapters remain W2 work.
 
 `internal/blob` owns physical log keys. `LogObjectKey` reserves index zero for
 the final manifest and positive indexes for segments. Signing, verification and
@@ -119,3 +120,24 @@ job and owner-unit subjects, retention classes and lost PUT responses. It checks
 the bucket lifecycle before signing, reads exact offsets and refuses corrupt
 segments before emitting bytes. Segment records and controller authorization
 remain fakes.
+
+The dashboard reader uses `Tenant.ReadRunView` to select committed subjects and
+passes the request actor to `CommittedReader`. Both physical backends are selected
+through `Server.WithDataObjects`. There is no separate S3 log store or run-directory
+fallback. Closing a dashboard stream cancels its pending reads.
+`TestCommittedDashboardLogsReadRealRecords` drives a real claim, start, signed
+filesystem upload, segment commit, exact-offset read and SSE resume.
+`TestCommittedDashboardLogsNeverEmitForForeignOrRevokedActors` generates payloads
+against the real tenant and verifies that ended authority emits no bytes.
+`TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject` drives an
+authenticated claim through signing, filesystem PUTs, segment commits and a
+controller GET. It checks exact bytes and generated foreign-subject refusals.
+
+`TestCommittedDashboardLogsRecheckAuthorityBetweenSegments` revokes a real
+SQLite capability after the first segment is written. The next segment is
+refused before physical I/O. The partial byte count remains exact, and the
+reader cannot report completeness.
+
+The backend's separate live-ring interface and the web fallback are removed.
+Dashboard streams use the same bound reader for persisted segments and ring
+continuation. An unavailable stream has no alternate byte path.

@@ -18,10 +18,11 @@ import (
 
 type outputRecords struct {
 	blob.RecordStore
-	request blob.CommitRecordRequest
-	lookup  blob.RecordLookup
-	result  blob.RecordLookupResult
-	err     error
+	request     blob.CommitRecordRequest
+	lookup      blob.RecordLookup
+	result      blob.RecordLookupResult
+	err         error
+	afterCommit func()
 }
 
 func (r *outputRecords) CommitRecord(_ context.Context, q blob.CommitRecordRequest) (blob.Record, error) {
@@ -30,7 +31,22 @@ func (r *outputRecords) CommitRecord(_ context.Context, q blob.CommitRecordReque
 		return blob.Record{}, r.err
 	}
 	r.result = blob.RecordLookupResult{Found: true, Record: blob.Record{Key: q.Key, Digest: q.Digest, Source: q.Source}}
+	if r.afterCommit != nil {
+		r.afterCommit()
+	}
 	return r.result.Record, nil
+}
+
+func TestOutputCommitPreservesCancellationCause(t *testing.T) {
+	data, records, _ := newOutputData(t)
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+	cause := errors.New("output writer stopped")
+	records.afterCommit = func() { cancel(cause) }
+	record, err := data.Put(ctx, []byte("result"))
+	if !errors.Is(err, cause) || record != (blob.Record{}) {
+		t.Fatalf("cancelled commit returned %+v: %v", record, err)
+	}
 }
 
 func (r *outputRecords) LookupRecord(_ context.Context, q blob.RecordLookup) (blob.RecordLookupResult, error) {

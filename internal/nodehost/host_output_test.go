@@ -73,7 +73,7 @@ func outputFixture(t *testing.T, mode string) (NodeInput, OutputRecords, *output
 	input.Attempt++
 	attempt := runspec.AttemptIdentity{Team: "team", RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: input.Generation, Attempt: input.Attempt}
 	identity := blob.UploadIdentity{Kind: blob.UploadJob, Team: "team", RunID: input.Accepted.RunID, Principal: "principal", CapabilityRef: "live-claim", Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: attempt}}
-	upload := JobUpload{Identity: identity, Authority: blob.Authority{CapabilityRef: identity.CapabilityRef, Principal: identity.Principal, Attempt: identity.Attempt, Repo: "example.com/acme/repo"}, Key: blob.RecordKey{Team: "team", Kind: blob.KindOutput, Scope: blob.Scope{Repo: "example.com/acme/repo", Pipeline: "build", Job: input.NodeID}, Name: "bound-output"}}
+	upload := JobUpload{Identity: identity, Authority: blob.Authority{CapabilityRef: identity.CapabilityRef, Principal: identity.Principal, Attempt: identity.Attempt, Repo: "example.com/acme/repo"}, Key: blob.ResultRecordKey(attempt, "example.com/acme/repo", blob.RefScope{}, "build", blob.KindOutput)}
 	b := newOutputBackend(mode, upload, []byte(`{"value":7}`))
 	adapter := OutputRecords{Blobs: b, Records: b, Bind: func(_ context.Context, got NodeInput) (JobUpload, error) {
 		if got.Accepted.RunID != attempt.RunID || got.Authority != input.Authority || got.Generation != attempt.Generation || got.Attempt != attempt.Attempt {
@@ -89,7 +89,7 @@ func outputFixture(t *testing.T, mode string) (NodeInput, OutputRecords, *output
 
 func TestOutputRecordCommit(t *testing.T) {
 	t.Helper()
-	for _, mode := range []string{"success", "bound_storage", "null", "at_limit", "invalid", "invalid_seal", "oversized", "bind", "foreign_attempt", "foreign_generation", "foreign_run", "owner_receipt", "foreign_key", "foreign_ref", "foreign_authority", "foreign_principal", "cancelled", "put", "receipt_digest", "receipt_attempt", "commit", "record_key", "record_digest", "record_attempt"} {
+	for _, mode := range []string{"success", "bound_storage", "null", "at_limit", "invalid", "invalid_seal", "oversized", "bind", "foreign_attempt", "foreign_generation", "foreign_run", "owner_receipt", "foreign_key", "foreign_layout", "foreign_name", "foreign_ref", "foreign_authority", "foreign_principal", "cancelled", "put", "receipt_digest", "receipt_attempt", "commit", "record_key", "record_digest", "record_attempt"} {
 		t.Run(mode, func(t *testing.T) {
 			input, adapter, b, _ := outputFixture(t, mode)
 			ctx, cancel := context.WithCancel(t.Context())
@@ -118,6 +118,10 @@ func TestOutputRecordCommit(t *testing.T) {
 				b.upload.Identity.Kind = blob.UploadOwnerUnit
 			case "foreign_key":
 				b.upload.Key.Scope.Job = "foreign"
+			case "foreign_layout":
+				b.upload.Key.Scope.Key = "foreign"
+			case "foreign_name":
+				b.upload.Key.Name = "foreign"
 			case "foreign_ref":
 				b.upload.Key.Scope.Ref.Verified = true
 			case "foreign_authority":

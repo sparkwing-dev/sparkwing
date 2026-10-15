@@ -1,119 +1,41 @@
 package store_test
 
 import (
-	"context"
-	"database/sql"
+	"reflect"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func TestFinishNodeWithReason_PersistsStructuredMetadata(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	seedRunAndNode(t, s, "run-1", "node-a")
-
-	code := 137
-	if err := s.FinishNodeWithReason(ctx, "run-1", "node-a",
-		"failed", "pod OOMKilled", nil, store.FailureOOMKilled, &code); err != nil {
-		t.Fatalf("FinishNodeWithReason: %v", err)
-	}
-
-	n, err := s.GetNode(ctx, "run-1", "node-a")
-	if err != nil {
-		t.Fatalf("GetNode: %v", err)
-	}
-	if n.FailureReason != store.FailureOOMKilled {
-		t.Fatalf("failure_reason: %q", n.FailureReason)
-	}
-	if n.ExitCode == nil || *n.ExitCode != 137 {
-		t.Fatalf("exit_code: %v", n.ExitCode)
-	}
-	if n.Outcome != "failed" || n.Status != "done" {
-		t.Fatalf("outcome/status: %q %q", n.Outcome, n.Status)
-	}
-}
-
-func TestFinishNodeWithReason_DoesNotOverwriteTerminalNode(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	seedRunAndNode(t, s, "run-1", "node-a")
-
-	if err := s.FinishNode(ctx, "run-1", "node-a", "success", "", []byte(`"ok"`)); err != nil {
-		t.Fatalf("FinishNode: %v", err)
-	}
-	code := 137
-	if err := s.FinishNodeWithReason(ctx, "run-1", "node-a",
-		"failed", "late infrastructure failure", nil, store.FailureOOMKilled, &code); err != nil {
-		t.Fatalf("FinishNodeWithReason: %v", err)
-	}
-
-	n, err := s.GetNode(ctx, "run-1", "node-a")
-	if err != nil {
-		t.Fatalf("GetNode: %v", err)
-	}
-	if n.Status != "done" || n.Outcome != "success" {
-		t.Fatalf("status/outcome: %q %q, want done/success", n.Status, n.Outcome)
-	}
-	if n.Error != "" {
-		t.Fatalf("error = %q, want empty", n.Error)
-	}
-	if out, err := s.GetNodeOutput(ctx, "run-1", "node-a"); err != nil || string(out) != `"ok"` {
-		t.Fatalf("output = %s, %v, want original output", out, err)
-	}
-	if n.FailureReason != store.FailureUnknown {
-		t.Fatalf("failure_reason = %q, want original empty reason", n.FailureReason)
-	}
-	if n.ExitCode != nil {
-		t.Fatalf("exit_code = %v, want nil", *n.ExitCode)
+func TestJobFinishPersistsMetadataAndRefusesOverwrite(t *testing.T) {
+	for _, outcome := range []store.NodeState{store.NodeFailed, store.NodeSuccess} {
+		t.Run(string(outcome), func(t *testing.T) {
+			f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
+			result := &store.NodeResult{Outcome: outcome}
+			if outcome == store.NodeFailed {
+				code := 137
+				result.Reason, result.MaskedError, result.ExitCode = store.FailureOOMKilled, "container killed", &code
+			}
+			finish := store.NodeTransition{Ref: f.ref, Actor: f.holder, To: outcome, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(1), Extra: store.TransitionExtra{Result: result}}
+			for i := range 2 {
+				applied, err := f.tenant.TransitionNode(t.Context(), finish)
+				if err != nil || applied.Replayed != (i == 1) {
+					t.Fatalf("finish=%+v, %v", applied, err)
+				}
+			}
+			node, err := f.tenant.GetNode(t.Context(), f.ref.RunID, f.ref.NodeID)
+			if err != nil || node.Outcome != string(outcome) || node.FailureReason != result.Reason || !reflect.DeepEqual(node.ExitCode, result.ExitCode) || node.Error != result.MaskedError || node.FinishedAt == nil {
+				t.Fatalf("metadata=%+v, %v", node, err)
+			}
+			finish.Extra.Result = &store.NodeResult{Outcome: outcome, MaskedError: "changed"}
+			if _, err := f.tenant.TransitionNode(t.Context(), finish); err == nil {
+				t.Fatal("different terminal metadata overwrote result")
+			}
+			after, err := f.tenant.GetNode(t.Context(), f.ref.RunID, f.ref.NodeID)
+			if err != nil || !reflect.DeepEqual(node, after) {
+				t.Fatalf("overwrite changed node: %+v -> %+v, %v", node, after, err)
+			}
+		})
 	}
 }
-
-func TestFinishNodeWithReason_FinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
-		ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-	if err := s.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "node-a", Status: "done"}); err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-
-	if err := s.FinishNode(ctx, "run-1", "node-a", "success", "", []byte(`"ok"`)); err != nil {
-		t.Fatalf("FinishNode: %v", err)
-	}
-	n, err := s.GetNode(ctx, "run-1", "node-a")
-	if err != nil {
-		t.Fatalf("GetNode: %v", err)
-	}
-	if n.Status != "done" || n.Outcome != "success" {
-		t.Fatalf("status/outcome: %q %q, want done/success", n.Status, n.Outcome)
-	}
-	if out, err := s.GetNodeOutput(ctx, "run-1", "node-a"); err != nil || string(out) != `"ok"` {
-		t.Fatalf("output = %s, %v, want finalized output", out, err)
-	}
-}
-
-func TestFinishNode_LeavesReasonEmpty(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	seedRunAndNode(t, s, "run-1", "node-a")
-
-	if err := s.FinishNode(ctx, "run-1", "node-a", "success", "", []byte(`"ok"`)); err != nil {
-		t.Fatalf("FinishNode: %v", err)
-	}
-	n, _ := s.GetNode(ctx, "run-1", "node-a")
-	if n.FailureReason != store.FailureUnknown {
-		t.Fatalf("expected empty failure_reason, got %q", n.FailureReason)
-	}
-	if n.ExitCode != nil {
-		t.Fatalf("expected nil exit_code, got %v", *n.ExitCode)
-	}
-}
-
-var _ sql.NullInt64 = sql.NullInt64{}

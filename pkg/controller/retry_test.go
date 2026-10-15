@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -171,7 +170,7 @@ func TestRetry_WorkingTreeRunIgnoresAnotherTeamsTriggerWithSameID(t *testing.T) 
 	}
 	if err := bobTeam.CreateTrigger(t.Context(), store.Trigger{
 		ID: runID, Pipeline: "build", TriggerSource: "pipeline-working-tree@cloud",
-		TriggerEnv: map[string]string{bincache.SourceBundleObjectEnvKey: "sources/other-team"},
+		TriggerEnv: map[string]string{"SPARKWING_SOURCE_BUNDLE_OBJECT": "sources/other-team"},
 		CreatedAt:  time.Now(),
 	}); err != nil {
 		t.Fatal(err)

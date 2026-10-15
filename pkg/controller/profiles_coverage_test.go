@@ -30,7 +30,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 				if id == "c" && mode == "cached" {
 					outcome = "cached"
 				}
-				if err := st.FinishNode(t.Context(), "r", id, outcome, "", nil); err != nil {
+				if err := teststore.SeedNodeFinish(st, t.Context(), store.DefaultTeam, store.NodeRef{RunID: "r", NodeID: id}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {
 					t.Fatal(err)
 				}
 				cpu := int64(100)

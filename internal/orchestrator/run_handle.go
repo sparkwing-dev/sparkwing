@@ -14,16 +14,14 @@ type RunHandle struct {
 	SchemaVersion int    `json:"schema_version"`
 	RunID         string `json:"run_id"`
 	Pipeline      string `json:"pipeline"`
-	LogPath       string `json:"log_path,omitempty"`
 	Status        string `json:"status,omitempty"`
 }
 
-func NewRunHandle(runID, pipeline, logPath, status string) RunHandle {
+func NewRunHandle(runID, pipeline, status string) RunHandle {
 	return RunHandle{
 		SchemaVersion: RunHandleSchemaVersion,
 		RunID:         runID,
 		Pipeline:      pipeline,
-		LogPath:       logPath,
 		Status:        status,
 	}
 }

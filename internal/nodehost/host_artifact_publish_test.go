@@ -36,6 +36,7 @@ func TestExecutorArtifactPublication(t *testing.T) {
 				deps.BindStorage = func(_ context.Context, in NodeInput) (StorageBinding, error) {
 					backend.upload.Identity.Attempt.Value = runspec.AttemptIdentity{Team: "team", RunID: in.Accepted.RunID, NodeID: in.NodeID, Generation: in.Generation, Attempt: in.Attempt}
 					backend.upload.Authority.Attempt = backend.upload.Identity.Attempt
+					backend.upload.Key = blob.ResultRecordKey(backend.upload.Identity.Attempt.Value, backend.upload.Authority.Repo, backend.upload.Authority.Ref.Scope, "build", blob.KindManifest)
 					return StorageBinding{Bytes: backend, Records: backend, Authority: backend.upload.Authority}, nil
 				}
 				deps.PrepareLayer = adapter.Prepare
@@ -101,8 +102,7 @@ func TestExecutorArtifactPublication(t *testing.T) {
 func artifactPublicationFixture(t *testing.T) (NodeInput, ArtifactRecords, *artifactPublisherFixture) {
 	t.Helper()
 	input, _, backend, _ := outputFixture(t, "success")
-	backend.upload.Key.Kind = blob.KindManifest
-	backend.upload.Key.Name = "artifacts"
+	backend.upload.Key = blob.ResultRecordKey(backend.upload.Identity.Attempt.Value, backend.upload.Authority.Repo, backend.upload.Authority.Ref.Scope, "build", blob.KindManifest)
 	p := newArtifactPublisher(backend.upload)
 	a := ArtifactRecords{Blobs: p, Records: p, Bind: func(context.Context, NodeInput) (JobUpload, error) { return p.upload, nil }}
 	return input, a, p

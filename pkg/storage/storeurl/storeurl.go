@@ -37,7 +37,7 @@ func OpenMeasurementStore(ctx context.Context, raw string, maxPages int) (storag
 		if err != nil {
 			return nil, err
 		}
-		store := s3store.NewArtifactStore(bucket, prefix, client)
+		store := s3store.NewMeasurementStore(bucket, prefix, client)
 		store.MaxUsagePages = maxPages
 		return store, nil
 	default:

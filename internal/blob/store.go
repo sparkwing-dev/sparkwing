@@ -15,7 +15,8 @@ type signedStore struct {
 	client HTTPClient
 }
 
-func newSignedStore(options SignedStoreOptions) Store {
+// NewSignedStore verifies signed uploads and downloads.
+func NewSignedStore(options SignedStoreOptions) Store {
 	client := options.HTTPClient
 	if client == nil {
 		client = TransferClient{}

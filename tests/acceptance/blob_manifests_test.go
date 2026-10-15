@@ -1,4 +1,4 @@
-package acceptance
+package acceptance_test
 
 import (
 	"context"
@@ -18,8 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// CheckBlobManifestRecords checks physical manifest admission with SQLite and independent job receipts.
-func CheckBlobManifestRecords(ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient) (err error) {
+func checkBlobManifestRecords(ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient) (err error) {
 	path := filepath.Join(root, "manifest-records.db")
 	s, err := store.Open(path)
 	if err != nil {

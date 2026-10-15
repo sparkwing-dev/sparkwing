@@ -118,7 +118,6 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		return nil, err
 	}
 	claims, cancelClaims := context.WithCancel(ctx)
-	defer cancelClaims()
 	watchDone := make(chan struct{})
 	go func() {
 		defer close(watchDone)
@@ -129,11 +128,13 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		}
 	}()
 	defer func() { cancelClaims(); <-watchDone }()
-	policyRefresh := time.NewTicker(limits.VersionIndexRefresh)
-	defer policyRefresh.Stop()
+	refresh := time.NewTicker(limits.VersionIndexRefresh)
+	defer refresh.Stop()
+	timer := time.NewTimer(0)
+	defer timer.Stop()
 	results := make(chan unitResult, l.Config.MaxConcurrent)
 	active := make(map[capability.LeaseRef]struct{})
-	idleSince := time.Now()
+	idleSince, pollAt := time.Now(), time.Time{}
 	claimed := 0
 	var hostErr error
 	finish := func(result unitResult) {
@@ -150,17 +151,6 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}
 		}
 	}
-	defer func() {
-		for len(active) > 0 {
-			finish(<-results)
-		}
-		if hostErr != nil {
-			runErr = errors.Join(runErr, hostErr)
-		}
-		if cause := context.Cause(ctx); cause != nil && !errors.Is(runErr, cause) {
-			runErr = errors.Join(runErr, cause)
-		}
-	}()
 	drainResults := func() {
 		for {
 			select {
@@ -171,109 +161,97 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}
 		}
 	}
+	accept := func(outcome claimOutcome) error {
+		if outcome.response.Claim == nil {
+			return nil
+		}
+		drainResults()
+		unit := *outcome.response.Claim
+		if err := validateUnit(unit); err != nil {
+			return err
+		}
+		if !slices.Contains(l.Config.Kinds, unit.Unit) || (l.Config.RunID != "" && unit.RunID != l.Config.RunID) {
+			return errors.New("controller awarded work outside the runner's requested selection")
+		}
+		key := capability.LeaseRef{Kind: unit.Unit, ID: unit.UnitID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation}
+		if _, exists := active[key]; exists {
+			return errors.New("controller awarded a unit already held by this runner")
+		}
+		active[key] = struct{}{}
+		claimed++
+		go func() { results <- unitResult{key: key, err: l.Host.Host(ctx, unit)} }()
+		return nil
+	}
+	var pending <-chan claimOutcome
+	defer func() {
+		cancelClaims()
+		if pending != nil {
+			runErr = errors.Join(runErr, accept(<-pending))
+		}
+		for len(active) > 0 {
+			finish(<-results)
+		}
+		runErr = errors.Join(runErr, hostErr, context.Cause(ctx))
+	}()
 	for {
 		drainResults()
-		if ctx.Err() != nil {
-			return nil, context.Cause(ctx)
-		}
 		select {
 		case <-drain:
 			return nil, nil
 		default:
 		}
-		if l.Config.MaxClaims > 0 && claimed >= l.Config.MaxClaims {
+		if claims.Err() != nil || (l.Config.MaxClaims > 0 && claimed >= l.Config.MaxClaims) || l.lifecycleWait(limits.VersionIndexRefresh, idleSince, len(active) == 0) == 0 {
 			return nil, nil
 		}
-		if len(active) >= l.Config.MaxConcurrent {
-			select {
-			case result := <-results:
-				finish(result)
-				idleSince = time.Now()
-			case <-policyRefresh.C:
-				if stop, err := l.checkPolicy(claims); stop {
-					return err, nil
-				}
-			case <-drain:
-				return nil, nil
-			case <-ctx.Done():
-				return nil, context.Cause(ctx)
+		if pending == nil && len(active) < l.Config.MaxConcurrent && !pollAt.After(time.Now()) {
+			if stop, err := l.checkPolicy(claims); stop {
+				return err, nil
 			}
-			continue
+			done := make(chan claimOutcome, 1)
+			pending = done
+			request := l.request()
+			go func() {
+				response, err := l.Controller.Claim(claims, request)
+				done <- claimOutcome{response: response, err: err}
+			}()
 		}
+		wait := limits.VersionIndexRefresh
+		if pending == nil && pollAt.After(time.Now()) {
+			wait = min(wait, time.Until(pollAt))
+		}
+		timer.Reset(l.lifecycleWait(wait, idleSince, len(active) == 0))
 		select {
-		case <-drain:
-			return nil, nil
-		default:
-		}
-		if !l.Config.ClaimUntil.IsZero() && !time.Now().Before(l.Config.ClaimUntil) {
-			return nil, nil
-		}
-		if len(active) == 0 && l.Config.IdleExit > 0 && time.Since(idleSince) >= l.Config.IdleExit {
-			return nil, nil
-		}
-		if stop, err := l.checkPolicy(claims); stop {
-			return err, nil
-		}
-		outcome := l.claimWhileHosting(claims, policyRefresh.C, results, finish, func() time.Duration {
-			return l.lifecycleWait(limits.VersionIndexRefresh, idleSince, len(active) == 0)
-		})
-		if outcome.response.Claim != nil {
-			drainResults()
-			unit := *outcome.response.Claim
-			if err := validateUnit(unit); err != nil {
-				return outcome.stopErr, err
+		case outcome := <-pending:
+			pending = nil
+			if err := accept(outcome); err != nil {
+				return nil, err
 			}
-			if !slices.Contains(l.Config.Kinds, unit.Unit) || (l.Config.RunID != "" && unit.RunID != l.Config.RunID) {
-				return outcome.stopErr, errors.New("controller awarded work outside the runner's requested selection")
-			}
-			key := capability.LeaseRef{Kind: unit.Unit, ID: unit.UnitID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation}
-			if _, exists := active[key]; exists {
-				return outcome.stopErr, errors.New("controller awarded a unit already held by this runner")
-			}
-			active[key] = struct{}{}
-			claimed++
-			go func() { results <- unitResult{key: key, err: l.Host.Host(ctx, unit)} }()
-		}
-		if ctx.Err() != nil {
-			return outcome.stopErr, context.Cause(ctx)
-		}
-		if outcome.stopped {
-			return outcome.stopErr, nil
-		}
-		if outcome.err != nil {
-			return nil, fmt.Errorf("claim runner work: %w", outcome.err)
-		}
-		if outcome.response.Claim != nil {
-			continue
-		}
-		timer := time.NewTimer(l.pollWait(idleSince, len(active) == 0))
-	pollWait:
-		for {
-			select {
-			case result := <-results:
-				finish(result)
-				break pollWait
-			case <-timer.C:
-				break pollWait
-			case <-policyRefresh.C:
-				if stop, err := l.checkPolicy(claims); stop {
-					timer.Stop()
-					return err, nil
-				}
-			case <-drain:
-				timer.Stop()
+			if claims.Err() != nil {
 				return nil, nil
-			case <-ctx.Done():
-				timer.Stop()
-				return nil, context.Cause(ctx)
 			}
+			select {
+			case <-drain:
+				return nil, nil
+			default:
+			}
+			if outcome.err != nil {
+				return nil, fmt.Errorf("claim runner work: %w", outcome.err)
+			}
+			if outcome.response.Claim == nil {
+				pollAt = time.Now().Add(l.Config.PollInterval)
+			}
+		case result := <-results:
+			finish(result)
+			pollAt = time.Time{}
+		case <-refresh.C:
+			if stop, err := l.checkPolicy(claims); stop {
+				return err, nil
+			}
+		case <-timer.C:
+		case <-claims.Done():
+			return nil, nil
 		}
-		timer.Stop()
 	}
-}
-
-func (l *Loop) pollWait(idleSince time.Time, idle bool) time.Duration {
-	return l.lifecycleWait(l.Config.PollInterval, idleSince, idle)
 }
 
 func (l *Loop) lifecycleWait(wait time.Duration, idleSince time.Time, idle bool) time.Duration {
@@ -289,49 +267,6 @@ func (l *Loop) lifecycleWait(wait time.Duration, idleSince time.Time, idle bool)
 type claimOutcome struct {
 	response controllerwire.ClaimResponse
 	err      error
-	stopped  bool
-	stopErr  error
-}
-
-func (l *Loop) claimWhileHosting(ctx context.Context, refresh <-chan time.Time, results <-chan unitResult, finish func(unitResult), wait func() time.Duration) claimOutcome {
-	claimCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	done := make(chan claimOutcome, 1)
-	request := l.request()
-	go func() {
-		response, err := l.Controller.Claim(claimCtx, request)
-		done <- claimOutcome{response: response, err: err}
-	}()
-	timer := time.NewTimer(wait())
-	defer timer.Stop()
-	for {
-		var stopErr error
-		select {
-		case outcome := <-done:
-			outcome.stopped = ctx.Err() != nil
-			return outcome
-		case result := <-results:
-			finish(result)
-			timer.Reset(wait())
-			continue
-		case <-refresh:
-			stop, err := l.checkPolicy(ctx)
-			if !stop {
-				continue
-			}
-			stopErr = err
-		case <-timer.C:
-			if remaining := wait(); remaining > 0 {
-				timer.Reset(remaining)
-				continue
-			}
-		case <-ctx.Done():
-		}
-		cancel()
-		outcome := <-done
-		outcome.stopped, outcome.stopErr = true, stopErr
-		return outcome
-	}
 }
 
 func (l *Loop) checkPolicy(ctx context.Context) (bool, error) {

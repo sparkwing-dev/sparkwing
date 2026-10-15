@@ -2,14 +2,37 @@ package nodehost
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
+
+func TestDirectoryCacheKeyMatchesSDK(t *testing.T) {
+	property := func(body []byte, suffix uint32) bool {
+		workspace := t.TempDir()
+		if err := os.WriteFile(filepath.Join(workspace, "lock"), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		name := fmt.Sprintf("deps-%x", suffix)
+		want, err := sparkwing.Dir(name, sparkwing.KeyFromFile("lock")).Key(workspace)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := directoryCacheKey(t.Context(), workspace, nodeproto.CacheSpec{Name: name, Path: name, KeyScope: name, KeyFiles: []string{"missing", "lock"}})
+		return err == nil && got == want
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestCacheDirectoryUsesPersistedBodyEnvironment(t *testing.T) {
 	for _, resolver := range []string{"go-modules", "npm"} {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestConcurrency_ReacquireExpiredHolderDoesNotRevive(t *testing.T) {
@@ -201,8 +202,7 @@ func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 func TestConcurrency_ResolveWaiterRejectsFailedLeaderOutcome(t *testing.T) {
 	s := storetest.Open(t)
 	seedRunAndNode(t, s, "rLeader", "n")
-	if err := s.FinishNodeWithReason(ctxT(t), "rLeader", "n",
-		"failed", "boom", nil, store.FailureOOMKilled, nil); err != nil {
+	if err := teststore.SeedNodeFinish(s, ctxT(t), store.DefaultTeam, store.NodeRef{RunID: "rLeader", NodeID: "n"}, store.NodeResult{Outcome: store.NodeState("failed"), MaskedError: "boom", Reason: store.FailureOOMKilled, ExitCode: nil}); err != nil {
 		t.Fatalf("FinishNodeWithReason: %v", err)
 	}
 	res, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctxT(t), "k", "rF", "n", "", "rLeader", "n", false)

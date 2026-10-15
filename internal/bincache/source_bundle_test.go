@@ -17,16 +17,39 @@ import (
 )
 
 func TestSourceBundleImportsExactSnapshotWithoutOrigin(t *testing.T) {
-	checkSourceBundleImport(t, "")
+	checkSourceBundleImport(t, "", nil)
 }
 
 func TestSourceBundleRefusesSymlinkedSparkwing(t *testing.T) {
 	for _, target := range []string{"external", "relative-external", "internal"} {
-		t.Run(target, func(t *testing.T) { checkSourceBundleImport(t, target) })
+		t.Run(target, func(t *testing.T) { checkSourceBundleImport(t, target, nil) })
 	}
 }
 
-func checkSourceBundleImport(t *testing.T, linkTarget string) {
+func FuzzSourceBundleImportIgnoresAmbientGitControls(f *testing.F) {
+	f.Add([]byte("trace-and-routing"))
+	f.Add([]byte("config-and-filter"))
+	f.Fuzz(func(t *testing.T, seed []byte) {
+		sum := sha256.Sum256(seed)
+		outside := t.TempDir()
+		path := filepath.Join(outside, hex.EncodeToString(sum[:]))
+		environment := map[string]string{
+			"GIT_DIR": path, "GIT_WORK_TREE": path, "GIT_INDEX_FILE": path,
+			"GIT_OBJECT_DIRECTORY": path, "GIT_ALTERNATE_OBJECT_DIRECTORIES": path,
+			"GIT_COMMON_DIR": path, "GIT_ALLOW_PROTOCOL": "ext",
+			"GIT_TRACE": path, "GIT_TRACE_CURL": path, "GIT_TRACE_PACKET": path,
+			"GIT_TRACE2_EVENT": path, "GIT_CURL_VERBOSE": "1",
+			"GIT_CONFIG_GLOBAL": path, "GIT_CONFIG_SYSTEM": path,
+			"GIT_CONFIG": path, "GIT_CONFIG_PARAMETERS": "invalid config",
+			"GIT_CONFIG_COUNT": "invalid count", "GIT_CONFIG_KEY_0": "core.hooksPath",
+			"GIT_CONFIG_VALUE_0": path,
+		}
+		checkSourceBundleImport(t, "", environment)
+		assertEmptyDirectory(t, outside)
+	})
+}
+
+func checkSourceBundleImport(t *testing.T, linkTarget string, environment map[string]string) {
 	t.Helper()
 	repo := filepath.Join(t.TempDir(), "repo")
 	git := func(args ...string) string {
@@ -84,6 +107,9 @@ func checkSourceBundleImport(t *testing.T, linkTarget string) {
 	}
 	data, transport := sourceBundleFixture(contents)
 	workDir := t.TempDir()
+	for name, value := range environment {
+		t.Setenv(name, value)
+	}
 	got, err := FetchSourceBundle(t.Context(), data, transport.want, sha, "", workDir)
 	if linkTarget != "" {
 		if err == nil {

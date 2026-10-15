@@ -2456,3 +2456,32 @@ and tick-window cases. `TestSingletonReleaseCannotClearAnotherFenceProperty`
 generates 64 invalid releases and checks stale takeover refusal.
 
 These checks do not promote native PostgreSQL or end-to-end HTTP acceptance.
+
+
+## W1 sealed reporting and terminal metadata ports
+
+`TestFinishNodeWithReason_PersistsStructuredMetadata`,
+`TestFinishNodeWithReason_DoesNotOverwriteTerminalNode` and
+`TestFinishNode_LeavesReasonEmpty` are replaced by
+`TestJobFinishPersistsMetadataAndRefusesOverwrite`. It uses real intake,
+acceptance, claims and starts. Success and failure preserve reason, masked
+error, exit code and finish time. Exact replay succeeds and changed terminal
+metadata fails without changing the reported job or attempt history.
+`TestFinishNodeWithReason_FinalizesDoneNodeWithEmptyOutcome` retires because
+the final schema refuses that state. Existing schema shape tests retain that
+constraint.
+
+`TestStoreFinishRefusesAnotherTeamsNode` is replaced by
+`TestTenantFinishRejectsForeignAndMissingJobs`. Both refusals retain the
+holder, generation, attempt, state sequence and digest.
+
+`TestReportingReadsSealedFactsWithoutSecretValuesProperty` generates private
+and public arguments, reads before/after acceptance, compares run and trigger
+lists to individual reads, and refuses foreign tenant reads.
+`TestReportingReadsCurrentJobLifecycle` checks the final reporting projection
+against typed job state and attempt history. Pending paging, queue-status and
+literal repository filters are covered by
+`TestReportingPagesUnstartedRunsAndFiltersQueueState`.
+`TestReportingRefusesMalformedSeals` requires errors for corrupt requests.
+The unused dispatch-route fixture had no tests or consumers and is removed.
+No native topology matrix cell is claimed by these component tests.

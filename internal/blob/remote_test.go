@@ -54,7 +54,7 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 		}
 		return result, nil
 	}}
-	options := blob.RemoteCacheOptions{Profile: "ci", AuthorityRef: "user-repo-read", Repo: key.Repo, Records: r}
+	options := blob.RemoteCacheOptions{Profile: "ci", Team: "team", Authority: blob.Authority{CapabilityRef: "user-repo-read", Principal: "reader", Repo: key.Repo}, Repo: key.Repo, Records: r}
 	cache, err := blob.OpenRemoteCache(options, bytes)
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +95,7 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 	if _, err = cache.Artifact(t.Context(), digest("foreign")); !errors.Is(err, blob.ErrDigestNotReadable) {
 		t.Fatal("unrelated artifact was readable")
 	}
-	for _, mutation := range []string{"manual", "false_default", "foreign_repo", "foreign_pipeline", "foreign_job", "foreign_hash", "foreign_name", "missing_delivery", "different_default", "foreign_member", "member_size", "member_path", "member_mode", "manifest_members", "corrupt"} {
+	for _, mutation := range []string{"manual", "false_default", "foreign_team", "foreign_repo", "foreign_pipeline", "foreign_job", "foreign_hash", "foreign_name", "missing_delivery", "different_default", "foreign_member", "member_size", "member_path", "member_mode", "manifest_members", "corrupt"} {
 		t.Run(mutation, func(t *testing.T) {
 			bad := result
 			bad.Members = append([]blob.Member(nil), result.Members...)
@@ -104,6 +104,8 @@ func TestRemoteCacheVerifiedDefaultAndArtifactEdges(t *testing.T) {
 				bad.Record.RefFacts.Scope.Verified = false
 			case "false_default":
 				bad.Record.RefFacts.DefaultBranchVerified = false
+			case "foreign_team":
+				bad.Record.Key.Team = "other"
 			case "foreign_repo":
 				bad.Record.Key.Scope.Repo = "gh:456"
 			case "foreign_pipeline":
@@ -195,7 +197,7 @@ func TestRemoteMemoVerifiesBeforeGrantingArtifacts(t *testing.T) {
 					Scope: key.Scope.Ref, DefaultBranch: "main", DefaultBranchVerified: true, AppDeliveryKey: "delivery", SHA: "sha",
 				}}}, nil
 			}}
-			cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", AuthorityRef: "user", Repo: "gh:123", Records: records}, bytes)
+			cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", Team: "team", Authority: blob.Authority{CapabilityRef: "user", Principal: "reader", Repo: "gh:123"}, Repo: "gh:123", Records: records}, bytes)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -228,7 +230,7 @@ func TestRemoteDepcacheArchiveIsReadableAfterTrustedLookup(t *testing.T) {
 		key.Scope.Ref = blob.RefScope{Ref: "main", Verified: true}
 		return blob.RecordLookupResult{Found: true, Record: blob.Record{Key: key, Digest: d, RefFacts: blob.RefFacts{Scope: key.Scope.Ref, DefaultBranch: "main", DefaultBranchVerified: true, AppDeliveryKey: "delivery", SHA: "sha"}}}, nil
 	}}
-	cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", AuthorityRef: "user", Repo: "gh:123", Records: r}, bytes)
+	cache, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{Profile: "ci", Team: "team", Authority: blob.Authority{CapabilityRef: "user", Principal: "reader", Repo: "gh:123"}, Repo: "gh:123", Records: r}, bytes)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,7 +17,7 @@ import (
 
 // safety: a claim hides the reason without writing the run row.
 const runAttentionColumn = `COALESCE((SELECT n.attention_reason FROM nodes n
- WHERE n.run_id = runs.id AND n.ready_at IS NOT NULL AND n.claimed_by IS NULL
+ WHERE n.team = runs.team AND n.run_id = runs.id AND n.ready_at IS NOT NULL AND n.claimed_by IS NULL
    AND n.` + nodeNotDone + ` AND n.attention_reason != ''
  ORDER BY n.node_id LIMIT 1), '')`
 

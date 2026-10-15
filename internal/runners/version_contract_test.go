@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -20,61 +19,14 @@ import (
 )
 
 type installationFixture struct {
-	calls                   []string
-	fail                    string
-	held, renewed           int
-	configuration, schedule string
+	calls []string
 }
 
-func (f *installationFixture) step(name string) error {
-	f.calls = append(f.calls, name)
-	if f.fail == name {
-		return fmt.Errorf("fixture %s failure", name)
-	}
+func (f *installationFixture) Apply(context.Context, engine.VerifiedRelease) error {
+	f.calls = append(f.calls, "apply")
 	return nil
 }
-func (f *installationFixture) Drain(context.Context) error {
-	if err := f.step("drain"); err != nil {
-		return err
-	}
-	f.renewed += f.held
-	f.held = 0
-	return nil
-}
-func (f *installationFixture) Replace(context.Context, engine.VerifiedRelease) error {
-	if f.held != 0 {
-		return fmt.Errorf("replaced before draining")
-	}
-	return f.step("replace")
-}
-func (f *installationFixture) RefreshManagedUnits(context.Context) error { return f.step("refresh") }
-func (f *installationFixture) Restart(context.Context) error             { return f.step("restart") }
-func TestSoftwareUpdateDrainsBeforeReplacingAndPreservesRegistration(t *testing.T) {
-	release := runnerReleaseFixture(t)
-	update := engine.SoftwareUpdate{CurrentVersion: "v0.10.0", Version: "v0.20.0", Release: release, Required: true}
-	for i, fail := range []string{"drain", "replace", "refresh", "restart", ""} {
-		t.Run("failure_"+fail, func(t *testing.T) {
-			f := &installationFixture{fail: fail, held: 2, configuration: "existing credential", schedule: "existing timer"}
-			err := ApplySoftwareUpdate(context.Background(), update, f)
-			if (err != nil) != (fail != "") {
-				t.Fatalf("error=%v", err)
-			}
-			want := []string{"drain", "replace", "refresh", "restart"}
-			if i < 4 {
-				want = want[:i+1]
-			}
-			if !reflect.DeepEqual(f.calls, want) {
-				t.Fatalf("calls=%v want=%v", f.calls, want)
-			}
-			if fail != "drain" && (f.held != 0 || f.renewed != 2) {
-				t.Fatal("held claims were not renewed while draining")
-			}
-			if f.configuration != "existing credential" || f.schedule != "existing timer" {
-				t.Fatal("configuration or schedules changed")
-			}
-		})
-	}
-}
+
 func TestSoftwareUpdateRejectsMissingVerificationBeforeDrain(t *testing.T) {
 	f := &installationFixture{}
 	if err := ApplySoftwareUpdate(context.Background(), engine.SoftwareUpdate{CurrentVersion: "v0.10.0", Version: "v0.20.0", Required: true}, f); err == nil {
@@ -87,6 +39,7 @@ func TestSoftwareUpdateRejectsMissingVerificationBeforeDrain(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 func runnerReleaseFixture(t *testing.T) engine.VerifiedRelease {
 	t.Helper()
 	public, key, err := ed25519.GenerateKey(nil)
@@ -98,7 +51,7 @@ func runnerReleaseFixture(t *testing.T) engine.VerifiedRelease {
 	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
 	dir := t.TempDir()
 	for path, body := range map[string]string{"go.mod": "module github.com/sparkwing-dev/sparkwing/cmd/sparkwing-runner\ngo 1.26\n", "main.go": "package main\nvar Version=\"dev\"\nfunc main(){println(Version)}\n"} {
-		if err := os.WriteFile(filepath.Join(dir, path), []byte(body), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, path), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}

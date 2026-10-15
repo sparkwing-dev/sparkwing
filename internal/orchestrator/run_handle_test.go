@@ -11,7 +11,7 @@ import (
 func TestPublishRunHandleKeepsFirstReceipt(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "run.json")
-	want := NewRunHandle("run-123", "windows-verify", "logs", "running")
+	want := NewRunHandle("run-123", "windows-verify", "running")
 	if err := PublishRunHandle(path, want); err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func TestPublishRunHandleKeepsFirstReceipt(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil || got != want {
 		t.Fatalf("published handle = %+v, %v; want %+v", got, err, want)
 	}
-	if err := PublishRunHandle(path, NewRunHandle("run-456", "other", "", "running")); !errors.Is(err, os.ErrExist) {
+	if err := PublishRunHandle(path, NewRunHandle("run-456", "other", "running")); !errors.Is(err, os.ErrExist) {
 		t.Fatalf("second publication error = %v, want existing destination", err)
 	}
 	data, err = os.ReadFile(path)

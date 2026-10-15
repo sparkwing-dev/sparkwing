@@ -9,7 +9,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -29,7 +28,7 @@ func (m *memObjects) Get(_ context.Context, key string) (io.ReadCloser, error) {
 	m.gets = append(m.gets, key)
 	b, ok := m.objs[key]
 	if !ok {
-		return nil, storage.ErrNotFound
+		return nil, blob.ErrNotFound
 	}
 	return io.NopCloser(bytes.NewReader(b)), nil
 }

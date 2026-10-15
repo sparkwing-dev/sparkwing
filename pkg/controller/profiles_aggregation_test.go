@@ -50,7 +50,7 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 				if err := st.CreateNode(ctx, store.Node{RunID: "r", NodeID: id, Status: "running"}); err != nil {
 					t.Fatal(err)
 				}
-				if err := st.FinishNode(ctx, "r", id, outcome, "", nil); err != nil {
+				if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, store.NodeRef{RunID: "r", NodeID: id}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := st.DB().Exec(`UPDATE nodes SET started_at=?, finished_at=? WHERE run_id=? AND node_id=?`, begin.UnixNano(), end.UnixNano(), "r", id); err != nil {

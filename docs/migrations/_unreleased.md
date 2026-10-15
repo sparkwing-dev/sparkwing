@@ -318,8 +318,11 @@ backend and pass it through `WithDataController` or `WithDataObjects`. The dupli
 controller filesystem and S3 signer types and `WithSignedDownloads` are removed.
 Wrap an S3 backend with `controller.NewCloudFrontDataBackend` to sign public-ingress
 downloads through CloudFront. Direct requests retain regional S3 URLs. Uploads keep
-the backend's size and checksum constraints. `WithS3Logs` replaces
-`WithDirectUploads` for retained S3 log readers.
+the backend's size and checksum constraints. Retained log readers use that same
+backend. `WithS3Logs` and the raw S3 log object adapter are removed. Replace
+`s3.NewArtifactStore` with `s3.NewMeasurementStore` for bucket measurements.
+Measurement handles expose `Usage` only. Local dashboard logs require committed
+tagged segments because run-directory log fallback is removed.
 
 Replace the `user` and `runner` credential labels on
 `sparkwing_requests_by_principal_total` with `account` and `machine`. The other
@@ -2173,7 +2176,8 @@ Runner budgets use the verified team and holder after shared policy authorizatio
 Empty claims spend the polling budget. Awarded work does not. Empty polls are not
 audited. Job path identifiers appear as `run_id` and `job_id` in audit records.
 The unused live-log HTTP handlers and their `LiveLogRead` type are removed.
-Dashboard log reads retain the shared policy routes and in-memory live reader.
+Dashboard log reads retain the shared policy routes and committed segment reader.
+That reader joins its authorized segments to the in-memory ring.
 
 Egress concurrency refusals use `error.code=rate_limited`, with
 `egress_download_limit` or `egress_stream_limit` in `error.details.reason`.
@@ -2342,3 +2346,25 @@ award to record process accounting after the job has finished.
 `RunCronTickLeased` moves from `Store` to `Operator`. It uses `schedules.tick`
 and the store clock. `Operator.ReleaseSingletonLease` releases an exact lease
 fence. No legacy metadata table is needed for cron ticks.
+
+
+## Sealed reporting and job completion
+
+`Store.FinishNode`, `Store.FinishNodeWithReason` and
+`Tenant.FinishNodeWithOutputRef` are removed. Submit a `NodeTransition` with the
+current holder, generation and source attempt through `Tenant.TransitionNode`.
+Exact reports replay. Changed terminal metadata is refused.
+
+`GetRun`, `ListRuns`, `GetTrigger` and `ListTriggers` project their arguments
+through `runspec.DisplayRequest` or `DisplaySpec`. Before describe supplies a
+valid classification, every argument value is hidden. Execution and retry
+read the private snapshot APIs. `Run.Number` exposes the allocated team number.
+Repository filters read `repo_display`; text search also reads `repo_key`.
+The trigger repo filter runs in SQL without a scan horizon. Unstarted runs
+retain a zero `StartedAt` and participate in cursor paging.
+
+`GetNode` and `ListNodes` read the current generation and node-wide attempt
+ordinal, with attempt history from `node_attempts`. Output and manifest
+selectors remain on the typed `ReadNode` and `ReadSnapshot` records.
+Unused offer-priority fields, raw claim-token fields and `Node.ArtifactManifest`
+are removed. The unused legacy claim-token type and kind constants are removed.

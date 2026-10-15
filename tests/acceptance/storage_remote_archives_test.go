@@ -65,7 +65,7 @@ func checkStorageRemoteArchives(t *testing.T, objects blob.ObjectBackend, transf
 		}}
 		budget := blob.Budget{Deadline: time.Now().Add(time.Minute)}
 		readStore := blob.NewSignedStore(blob.SignedStoreOptions{Signer: signer.storageCacheSigner, HTTPClient: transfers})
-		cache := storageOpenCache(t, readStore, authority.Repo, result)
+		cache := storageOpenCache(t, readStore, authority.Repo, identity.Team, result)
 		reader, err := depcacheblob.NewRemoteReader(cache, authority.Repo, budget)
 		if err != nil {
 			t.Fatal(err)
@@ -99,7 +99,7 @@ func checkStorageRemoteArchives(t *testing.T, objects blob.ObjectBackend, transf
 		}
 		overwrite(objectKey, archive.Bytes())
 		for _, fault := range []string{"repo", "manual", "default", "ref", "key"} {
-			bad := storageOpenCache(t, readStore, authority.Repo, storageCacheMutation(result, fault))
+			bad := storageOpenCache(t, readStore, authority.Repo, identity.Team, storageCacheMutation(result, fault))
 			badReader, err := depcacheblob.NewRemoteReader(bad, authority.Repo, budget)
 			if err != nil {
 				t.Fatal(err)

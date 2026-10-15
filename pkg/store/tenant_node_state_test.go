@@ -117,27 +117,23 @@ func TestTenantMetricsStayInTheRunsTeam(t *testing.T) {
 }
 
 // The store-level finish acts on the default team, so a node of another
-// team is refused before its output is stored, and stays as it was.
-func TestStoreFinishRefusesAnotherTeamsNode(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	acme := tenantFor(t, st, "acme")
-	seedTenantRun(t, acme, "run-a", "deploy")
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-a", NodeID: "build", Status: "running"}); err != nil {
-		t.Fatal(err)
-	}
-	err := st.FinishNodeWithReason(ctx, "run-a", "build", "success", "", []byte(`{"ok":true}`), store.FailureUnknown, nil)
-	if !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("FinishNodeWithReason on acme's node = %v, want ErrNotFound", err)
-	}
-	n, err := acme.GetNode(ctx, "run-a", "build")
+func TestTenantFinishRejectsForeignAndMissingJobs(t *testing.T) {
+	f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
+	foreign := tenantFor(t, f.s, "foreign")
+	change := store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(1)}
+	before, err := f.tenant.ReadNode(t.Context(), f.ref)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n.Status != "running" || n.OutputRef != nil {
-		t.Fatalf("acme's node = status %q output %+v; want it running with no output", n.Status, n.OutputRef)
+	if _, err := foreign.TransitionNode(t.Context(), change); err == nil {
+		t.Fatal("foreign tenant finished job")
 	}
-	if err := acme.FinishNodeWithOutputRef(ctx, "run-a", "missing", "success", "", nil, store.FailureUnknown, nil); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("finishing a missing node = %v, want ErrNotFound", err)
+	change.Ref.NodeID = "missing"
+	if _, err := f.tenant.TransitionNode(t.Context(), change); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing job = %v", err)
+	}
+	after, err := f.tenant.ReadNode(t.Context(), f.ref)
+	if err != nil || before.StateSeq != after.StateSeq || before.StateDigest != after.StateDigest || before.Generation != after.Generation || before.Attempt != after.Attempt || before.ClaimedBy != after.ClaimedBy || before.Status != after.Status {
+		t.Fatalf("refusal changed job: %+v -> %+v, %v", before, after, err)
 	}
 }
