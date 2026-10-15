@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -8,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -57,4 +60,41 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 		return writeErr
 	}
 	return nil
+}
+
+type maskedCLIError struct {
+	err    error
+	masker *secrets.Masker
+}
+
+func (e *maskedCLIError) Error() string { return e.masker.Mask(e.err.Error()) }
+func (e *maskedCLIError) Unwrap() error { return e.err }
+
+func (e *maskedCLIError) As(target any) bool {
+	result, ok := target.(**apierr.Error)
+	if !ok {
+		return false
+	}
+	var original *apierr.Error
+	if !errors.As(e.err, &original) {
+		return false
+	}
+	masked := *original
+	if e.masker.Mask(string(original.Code)) != string(original.Code) {
+		masked.Code = apierr.Internal
+	}
+	masked.Message, masked.Hint = e.masker.Mask(original.Message), e.masker.Mask(original.Hint)
+	if original.Details != nil {
+		masked.Details = map[string]any{"masked_attrs": "error details unavailable"}
+		if body, err := json.Marshal(original.Details); err == nil {
+			decoder := json.NewDecoder(bytes.NewReader(e.masker.MaskJSON(body)))
+			decoder.UseNumber()
+			var details map[string]any
+			if err := decoder.Decode(&details); err == nil {
+				masked.Details = details
+			}
+		}
+	}
+	*result = &masked
+	return true
 }

@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **cli rewrite:** here retries retain their one-time bearer in a private controller/run-bound file. `pipeline trigger --resume` resolves the existing run and passes its awarded seals to the shared host. Incomplete handoffs exit 3 without claiming native execution. Native host construction and initial trigger intake remain integration requirements.
+
 ### Added
 - **cli rewrite (Breaking):** `runs retry` uses the shared controller API with explicit `failed` or `all` selection and independent idempotency keys. Receipts exclude sealed execution inputs and here credentials. Post-trigger outcome reads use one public run detail. Removed the legacy retry/list-trigger clients and undispatched trigger-management CLI. Native retry intake, reuse and here handoff remain integration requirements. See [migration](docs/migrations/_unreleased.md#retry-requests-and-receipts).
 - **protocol documentation:** publish generated v2 schemas for hello, job requests, flat plans and shared errors. Documentation checks reject wire-shape drift. The protocol guide describes handle transport and node-host services; native placement conformance remains part of the rewrite.

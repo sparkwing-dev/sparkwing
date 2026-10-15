@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -83,7 +82,7 @@ func (s sdkInstaller) run(ctx context.Context, args []string, input io.Reader, o
 	masked := &installDiagnostics{out: diagnostics, stream: masker.Stream()}
 	result, prepareErr := s.prepare(ctx, dir, request.SDK, env, masked)
 	if err := errors.Join(prepareErr, masked.close(), ctx.Err()); err != nil {
-		return &sdkInstallError{err: err, masker: masker}
+		return &maskedCLIError{err: err, masker: masker}
 	}
 	current, err := s.readPin(request.Directory, request.SDK)
 	if err != nil {
@@ -96,40 +95,6 @@ func (s sdkInstaller) run(ctx context.Context, args []string, input io.Reader, o
 		return errors.New("SDK installation returned an invalid command")
 	}
 	return json.NewEncoder(out).Encode(result)
-}
-
-type sdkInstallError struct {
-	err    error
-	masker *secrets.Masker
-}
-
-func (e *sdkInstallError) Error() string { return e.masker.Mask(e.err.Error()) }
-func (e *sdkInstallError) Unwrap() error { return e.err }
-
-func (e *sdkInstallError) As(target any) bool {
-	result, ok := target.(**apierr.Error)
-	if !ok {
-		return false
-	}
-	var original *apierr.Error
-	if !errors.As(e.err, &original) {
-		return false
-	}
-	masked := *original
-	masked.Message, masked.Hint = e.masker.Mask(original.Message), e.masker.Mask(original.Hint)
-	if original.Details != nil {
-		masked.Details = map[string]any{"masked_attrs": "error details unavailable"}
-		if body, err := json.Marshal(original.Details); err == nil {
-			decoder := json.NewDecoder(bytes.NewReader(e.masker.MaskJSON(body)))
-			decoder.UseNumber()
-			var details map[string]any
-			if err := decoder.Decode(&details); err == nil {
-				masked.Details = details
-			}
-		}
-	}
-	*result = &masked
-	return true
 }
 
 func sdkInstallDirectory(request engine.SDKInstallRequest) (string, error) {

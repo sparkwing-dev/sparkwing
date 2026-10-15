@@ -14,13 +14,35 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
-func runRunsRetry(ctx context.Context, args []string) error {
-	return runRunsRetryCommand(ctx, args, os.Stdin, os.Stdout, resolveEngineController)
+type retryConnection struct {
+	controllerwire.Controller
+	here  func(context.Context, controllerwire.CreateRunResponse) error
+	close func()
 }
 
-func runRunsRetryCommand(ctx context.Context, args []string, input io.Reader, out io.Writer, resolve func(context.Context, string) (controllerwire.Controller, func(), error)) error {
+func runRunsRetry(ctx context.Context, args []string) error {
+	return runRunsRetryCommand(ctx, args, os.Stdin, os.Stdout, resolveRetryConnection)
+}
+
+func resolveRetryConnection(ctx context.Context, profile string) (retryConnection, error) {
+	options, closeTransport, err := controllerOptions(ctx, profile)
+	if err != nil {
+		return retryConnection{}, err
+	}
+	controller, err := client.NewEngineClient(options)
+	if err != nil {
+		closeTransport()
+		return retryConnection{}, err
+	}
+	return retryConnection{Controller: controller, close: closeTransport, here: func(ctx context.Context, response controllerwire.CreateRunResponse) error {
+		return handoffHereRun(ctx, options, response, defaultHereDependencies())
+	}}, nil
+}
+
+func runRunsRetryCommand(ctx context.Context, args []string, input io.Reader, out io.Writer, resolve func(context.Context, string) (retryConnection, error)) error {
 	inv, err := clisurface.Parse("sparkwing", append([]string{"runs", "retry"}, args...))
 	if err != nil {
 		return err
@@ -45,16 +67,16 @@ func runRunsRetryCommand(ctx context.Context, args []string, input io.Reader, ou
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	controller, closeTransport, err := resolve(ctx, inv.Value("profile"))
+	connection, err := resolve(ctx, inv.Value("profile"))
 	if err != nil {
 		return err
 	}
-	defer closeTransport()
+	defer connection.close()
 	mode := controllerwire.RetryFailed
 	if inv.Bool("all-jobs") {
 		mode = controllerwire.RetryAll
 	}
-	return retryRunIDs(ctx, controller, ids, mode, out, format)
+	return retryRunIDs(ctx, connection, ids, mode, out, format)
 }
 
 type retryResult struct {
@@ -65,16 +87,23 @@ type retryResult struct {
 	Error       *apierr.Error `json:"error,omitempty"`
 }
 
-func retryRunIDs(ctx context.Context, controller controllerwire.Controller, ids []string, mode controllerwire.RetryMode, out io.Writer, format string) error {
+func retryRunIDs(ctx context.Context, connection retryConnection, ids []string, mode controllerwire.RetryMode, out io.Writer, format string) error {
 	var failures []error
 	for _, id := range ids {
 		if err := ctx.Err(); err != nil {
 			return errors.Join(append(failures, err)...)
 		}
-		response, err := controller.Retry(ctx, id, controllerwire.RetryRequest{Mode: mode, IdempotencyKey: rand.Text()})
+		response, err := connection.Retry(ctx, id, controllerwire.RetryRequest{Mode: mode, IdempotencyKey: rand.Text()})
 		result := retryResult{SourceRunID: id}
 		if err == nil {
 			result, err = retryReceipt(id, response)
+		}
+		if err == nil && response.Request.Request.Options.Runner.Value.Kind == runspec.RunnerHere {
+			if connection.here == nil {
+				err = incompleteHereHandoff(response.RunID, &apierr.Error{Code: apierr.Unavailable, Message: "here hosting is unavailable in this build"})
+			} else {
+				err = connection.here(ctx, response)
+			}
 		}
 		if err != nil {
 			failures = append(failures, fmt.Errorf("retry run %s: %w", id, err))
@@ -95,11 +124,7 @@ func retryReceipt(source string, response controllerwire.CreateRunResponse) (ret
 		return result, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an invalid retry receipt"}
 	}
 	result.RunID, result.Number, result.Replayed = response.RunID, response.Number, response.Replayed
-	// safety: private intake state and one-time authority never enter the public receipt.
-	if response.Request.Request.Options.Runner.Value.Kind == runspec.RunnerHere {
-		return result, exitError(3, &apierr.Error{Code: apierr.Unavailable, Message: "retry created run " + response.RunID + " but here hosting is unavailable in this build", Hint: "the here handoff is incomplete; the reservation retains its original expiry"})
-	}
-	if response.HereBearer != "" {
+	if response.HereBearer != "" && response.Request.Request.Options.Runner.Value.Kind != runspec.RunnerHere {
 		return result, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned unexpected here authority"}
 	}
 	return result, nil

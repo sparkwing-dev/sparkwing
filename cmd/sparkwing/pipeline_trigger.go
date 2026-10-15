@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
@@ -56,8 +59,16 @@ func runPipelineTrigger(args []string) error {
 		PrintHelp(cmdPipelineTrigger, os.Stderr)
 		return fmt.Errorf("pipeline trigger: %w", err)
 	}
-	if flags.resume != "" || flags.pipelineRef != "" {
-		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "pipeline trigger: resume and pipeline revision selection are unavailable in this build"}
+	if flags.resume != "" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return runHereResumeCommand(ctx, flags, os.Stdout, controllerOptions, client.NewEngineClient,
+			func(ctx context.Context, options client.EngineOptions, run string) (nodehost.RunCompletion, error) {
+				return resumeHereRun(ctx, options, run, defaultHereDependencies())
+			})
+	}
+	if flags.pipelineRef != "" {
+		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "pipeline trigger: pipeline revision selection is unavailable in this build"}
 	}
 	if flags.profile == "" {
 		return exitErrorf(2, "pipeline trigger: --profile NAME is required (the controller this trigger submits to)")

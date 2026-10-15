@@ -93,7 +93,7 @@ func runCacheWarmCommand(ctx context.Context, args []string, out io.Writer, deps
 	masked := &installDiagnostics{out: diagnostics, stream: masker.Stream()}
 	result, prepareErr := deps.prepare(ctx, dir, env, masked)
 	if err := errors.Join(prepareErr, masked.close(), ctx.Err()); err != nil {
-		return &sdkInstallError{err: err, masker: masker}
+		return &maskedCLIError{err: err, masker: masker}
 	}
 	result.Cleared = cleared
 	switch format {

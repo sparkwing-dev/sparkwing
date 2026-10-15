@@ -1,3 +1,158 @@
+# W9 private here handoff and resume continuation
+
+W9 remains incomplete. This continuation started clean at 2c8def4ac. All writes
+stay in this worktree and /tmp/sw-astra-W9, which is deleted before reporting.
+No Git metadata, candidate runtime, service, release or Sparkwing pipeline was
+changed. Installed discovery info was read during bootstrap before loading the
+swarm brief. No Sparkwing binary was run afterwards.
+
+## Implemented
+
+- `pipeline trigger --resume` now resolves a stable ID or team number through
+  the public controller reader, loads the retained here bearer for that exact
+  controller/run, and makes one named trigger claim. It creates no run and
+  consults no checkout, pipeline arguments or machine settings to replace seals.
+- Here retries retain their one-time bearer before hosting. The retry connection
+  captures its controller options once. A changed profile cannot redirect that
+  handoff through another resolution. Missing native hosting leaves the private
+  record intact and returns exit 3 with the allocated run in JSON.
+- Private records contain only controller URL, stable run ID and bearer. Their
+  filenames hash the complete normalized binding. The fssecure directory/file
+  APIs enforce owner-only access and refuse symlinks. Reads reject malformed,
+  foreign and empty records without echoing their contents. A saved bearer is
+  never overwritten with different authority. A replay carrying another raw
+  bearer is refused before private storage. Failed writes remove only the
+  file this call created. No durability lock, fsync or cleanup sweep was added.
+- The claim adapter checks the requested run against the award and fence, keeps
+  retry destination identity separate from the original sealed request, verifies
+  request/spec/plan hashes, and passes the immutable inputs to nodehost.RunHost.
+  Accepted plan decoding refuses unknown fields. Full plan capability and
+  semantic validation remains the host's responsibility.
+- The runtime binder receives the complete server award, including granted
+  runner identity, deadlines and generation. It supplies owner/storage/engine/
+  plan-cache bindings. W9 supplies the awarded request and accepted seals rather
+  than trusting replacement inputs from the binder. The native resolver returns
+  unavailable before Claim until those shared constructors exist.
+- Cancellation is checked before credential reads, claiming, construction and
+  execution. A constructed session closes once even if cancellation prevents its
+  start. Cleanup failure and missing terminal outcomes remain incomplete. The
+  CLI emits only run ID and terminal outcome after successful hosting.
+- Moved the existing installer error masker into the shared CLI error owner.
+  SDK installation and warming use the same implementation. Here diagnostics
+  register retained and awarded bearers plus request/resolved argument values.
+  If a private value appears in an error code, output uses internal instead of
+  echoing it. Message, hint and details remain masked, and errors.Is preserves
+  the original cause. The diagnostic fuzz seed failed before the code-field fix.
+- Replaced the here guide's old one-claim-only rule with the final reclaim,
+  retained-bearer and sealed-resume contract. The guide states the native gaps.
+  An embedded-doc test parses its resume example against clisurface. Source
+  documentation, changelog and embedded mirrors agree.
+
+Security invariants: a retained bearer is used only for its recorded controller
+and run; no retained/awarded bearer or private argument reaches diagnostics; an
+award cannot change the named run fence. Each has a fuzz target. No new flag,
+environment variable, timeout, cap, grant or authority rule was introduced.
+
+## Tests, deletions and evidence
+
+The new acceptance contract tests pass:
+
+- TestHereResumeClaimContract, over HTTP and api.sock-shaped fake transports.
+- TestHereClaimResponseLossIsNotRetried.
+
+These are contract proofs. Native T1 lifecycle cells remain skipped because the
+real drivers are stubs. No native socket, store transaction, secret release,
+lease keeper, platform process or deployment behavior is claimed.
+
+Added focused tests for immutable retry/resume inputs, private record binding,
+malformed/tampered records, Unix public-file/symlink refusal, lost handoff,
+numeric selectors, cancellation checkpoints, cleanup failure, receipt privacy
+and the guide example. Three new fuzz targets exercised 1,628 inputs in their
+bounded runs (1,607 credential-binding, 7 diagnostic and 14 award-fence executions).
+The parked inventory assigns no source function directly to W9. No additional
+inventory function was ported in this continuation.
+
+Removed 51 gross lines across cache_warm.go, pipeline_trigger.go, runs_retry.go
+and sdk_install.go, plus 21 source-guide lines. Thirty-four production lines
+were relocated masking logic, rather than retired behavior. No complete legacy
+host file was deleted. The initial legacy trigger and here-host paths still
+need their hard cut.
+
+Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4 and
+GOCACHE/GOTMPDIR/TMPDIR beneath /tmp/sw-astra-W9. Passing evidence:
+
+- Whole-repository go build -p 4 ./... .
+- Focused go vet for cmd/sparkwing, clisurface, controllerwire,
+  controller/client, doccheck and tests/acceptance.
+- Full clisurface, controllerwire, doccheck and tests/acceptance suites.
+- CLI selection ^(TestHere|FuzzHere|TestRetry|FuzzRetry|TestParseTrigger|
+  TestSDKInstall|TestCacheWarm|TestInvocation|TestTriggeredOutcome|TestSurface|
+  TestAllCommands|TestDiscovery|TestEveryDiscovered|TestCommandsMarkdown|
+  TestEmbeddedReference|TestEveryPageExemption|TestRepoDocsNameOnlyDispatched|
+  TestShippedProse|TestHonestyCheck).
+- Controller/client -run ^TestEngine. Pkg/docs mirror/changelog, privacy,
+  read/list/search, guide, migration, section, catalog and command-name checks
+  using the preceding continuation's Test(PkgDocsContent|EmbeddedChangelog|
+  EmbeddedDocsCarry|EveryRecordedScrub|ScrubPatterns|Read_|ReadGuide|Migrations|
+  List|Search|Sections|SectionBody|Guide|Catalog|DocsName) selection.
+- Each new fuzz target with -run ^$, -fuzztime=3s and -parallel=2.
+- Required commentcheck -base main . (592 Go files), sleepcheck -base HEAD .,
+  sync-docs --check, gofmt and git diff --check.
+
+The first test compilation failed on the missing new adapter. The new checkpoint
+cases then reproduced acceptance of changed/missing request seals and startup
+following cancellation after construction. Both now pass. A fixture initially
+used an invalid repository key and later an obsolete generators plan field.
+Those fixture errors were corrected to the final contracts. Earlier API snapshot
+drift in seven unrelated packages remains as recorded below. This continuation
+changes no exported Go API and does not regenerate those baselines.
+
+## Remaining integration and contract questions
+
+No foreign contract was changed or newly requested. The W9 wire prose now
+records retained-bearer resume. Its Go types and C2 route/authority policy are
+unchanged. Existing W1/W2 selected-retry transaction and W6 sealed here-reason
+questions remain open.
+
+W3/W8 must supply the concrete shared RunHost and native composition through
+resolveHereRuntime: owner actor, claim-scoped controller/data clients, source
+acquisition, captured environment, exact engine, plan cache and lease keeper.
+W9 still needs public log following and the final signal/cancellation behavior
+around that host. Constructor fakes prove handoff behavior only.
+
+Before native api.sock here hosting is bound, W9 must represent the selected
+local socket/home in the retained-credential binding. The shared display URL
+alone cannot distinguish separate local controllers. The current native resolver
+refuses before any claim, so no native claim sends a retained bearer through that
+ambiguous identity. The new private-file and resume fakes use real HTTP controller
+URLs. The api.sock-shaped acceptance fake proves wire behavior only.
+
+Initial pipeline trigger intake and its legacy here host are still unchanged.
+They cannot feed legacy TriggerResponse into the final adapter. Cut them over
+with the final sealed request/source proposal and recorded here reason, then
+delete pipeline_trigger_here.go's old host helpers and worker.go's legacy host
+path. No conversion or compatibility adapter was added.
+
+Local/detached hosting, publication and read-only cache composition, controller
+schedule/tick and managed-unit construction, and Go preparation remain open as
+recorded in earlier handoffs. W1/W2 still need selected-retry materialization,
+and native T1/QA remains lead work. These are unfinished integrations, not
+approved feature cuts.
+
+## Shared files and friction
+
+Shared changes: tests/acceptance/here_contract_test.go, CHANGELOG.md,
+pkg/docs/changelog.md, pkg/docs/mirror/hotfix-runner.md, the W9 wire contract
+prose and this handoff. All other changes are W9-owned. No production caller in
+another area's package needed migration, and no exported API was removed.
+
+Friction: shared runtime constructors and real acceptance drivers remain absent.
+The first fuzz build required a cold instrumented cache. Final checks use fakes
+and private files within the allowed scratch root. Git identity remains Korey
+Gambill and core.worktree is unset. The lead owns review, commits and landing.
+
+---
+
 # W9 retry and triggered-outcome continuation
 
 W9 remains incomplete. This session started clean at 83fe557b8 with no merge

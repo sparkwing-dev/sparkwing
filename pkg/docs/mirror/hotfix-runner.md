@@ -1,33 +1,39 @@
-# Hotfix runner
+# Host a controller run on this machine
 
-When the team's runners cannot take a run, `sparkwing pipeline trigger --runner here` runs it on the caller's machine without handing that machine the team's secrets. The controller still decides what the run receives, records who started it and why, and confines the machine to that one run.
+`pipeline trigger --runner here` reserves one controller run for the caller's machine. The controller keeps the run history, authorization and results. The shared run host executes the sealed source and plan on that machine.
+
+Initial trigger intake and native shared hosting remain incomplete in this build. The retry and resume adapters use the final contracts below. A missing native host reports `unavailable` before it claims work.
 
 ```sh
-git commit -am "fix: roll back the bad migration"
-sparkwing pipeline trigger release --profile prod --runner here --reason "INC-42: runners down"
+sparkwing pipeline trigger release --profile prod --runner here --reason "runners unavailable"
 ```
 
-The command submits the trigger, builds the checkout's pipeline, hosts the run in this process, follows its logs, and exits on its outcome: 0 for success, 1 for failed or cancelled, 3 when the outcome could not be read.
+## Authority and recovery
 
-## How the run is confined
+Intake requires the caller's live `runs.write` authority. It returns a private bearer once, bound to the requesting authority and the reserved run. The CLI retains that bearer in an owner-only file under the Sparkwing configuration directory's `here/` directory. The file is bound to the controller URL and stable run ID. It contains no execution environment or run spec.
 
-- **One credential, one run, one claim.** With `runner: here` the controller mints a runner credential in the same transaction that writes the trigger, pins the trigger to that credential, and returns the credential once. The pinned trigger is invisible to every other runner's queue claim and refused to their claim by id. The credential claims it by id, only within 10 minutes of the trigger and only while it has never been claimed: a run whose claim lapsed, or that was not claimed in time, is not taken by anyone.
-- **Fenced routes.** The credential's principal names its run. Every request it makes passes an allowlist: the run's own run and trigger routes, run creation bound to its own trigger claim, and the claim-bound concurrency, pipeline profile and secret routes. A pipeline profile is readable only for the run's own pipeline while the credential holds the run's claim. The queue claims, other runs, listings and new triggers answer 403.
-- **Expiry.** The credential carries the runner scopes only (`nodes.claim`, `triggers.claim`, `runs.state`) and expires six hours after the trigger, the time a runner gives any hosted run. The run's trigger and node claims end with it.
-- **Secrets as on any runner.** A secret reaches the run only when its plan declares it, through the trigger's or a node's claim, recorded as a `secret_released` event, and masked in the logs the run uploads. Nothing is written to the local store. A plain `sparkwing run` still reads no controller secret, and the credential cannot read one outside its run's claims.
-- **Audit.** The trigger request's audit line names the caller, `runner=here`, the credential's prefix and the reason. The run's event stream carries a `runner_here` event with the same reason, the caller and the credential prefix, written in the transaction that creates the run.
+The first claim must meet the controller's ten-minute `claim_by` window. After a claim lapses, the same bearer can reclaim the same live run beyond that initial window. The reservation and its original expiry stay unchanged. The controller rechecks the run, requester, ancestry and current `runs.write` authority. Other runners cannot take the reservation.
 
-Who may use it: any caller who may start a run (`runs.write`). Such a caller can already mint a machine token or send the working tree to a runner, so `--runner here` grants no secret that was out of reach; it adds a recorded reason. Environment protection rules that require approval before a protected environment's secrets reach a run are not enforced yet.
+If intake succeeds but its first response is lost, an idempotent replay returns the existing run without another bearer. A retained bearer permits resume. Without it, make a fresh trigger request. The abandoned reservation expires under its original policy. The client never retries an award-capable claim automatically.
 
-## Runbook
+## Resume a run
 
-1. Commit the fix. `--runner here` refuses a checkout with uncommitted tracked changes, because the run records `HEAD`.
-2. Run `sparkwing pipeline trigger <pipeline> --profile <profile> --runner here --reason "<incident and why>"`. The reason is one line of at most 200 bytes.
-3. Keep the terminal open until the command exits; the run lives in this process. The command claims the run as soon as the trigger is written; if it cannot claim within 10 minutes, the run is cancelled and must be triggered again.
-4. To stop, press Ctrl-C once: the run is cancelled and the command exits when the run records it. A second Ctrl-C stops hosting at once.
-5. If the machine dies mid-run, the run cannot be claimed again. Cancel it with `sparkwing runs cancel --run <id> --profile <profile>` and trigger again.
-6. Review the run's `runner_here` and `secret_released` events afterwards.
+```sh
+sparkwing pipeline trigger --resume RUN_ID --profile prod
+```
 
-## Out of scope
+A stable run ID or team run number selects the existing run. Resume resolves its canonical ID, loads only that controller/run's retained bearer and makes one named owner claim. It creates no run. The award supplies the original sealed request, current fence, granted runner identity and any accepted plan. A retry's new run ID remains separate from the original request's sealed identity.
 
-A controller outage is out of scope: `--runner here` needs the controller to mint the credential, release secrets and record the run. Keep production credentials needed to recover the controller itself in the team's secret manager, not in Sparkwing.
+Resume accepts no new pipeline, arguments, reason, ref, working tree or detach option. It does not reread checkout or machine settings to replace sealed values. Source acquisition and execution use the awarded source and accepted plan.
+
+JSON success output contains `run_id` and `outcome`. Plain output contains the run ID. Private bearers, input values and seal hashes stay out of output and diagnostics. Incomplete hosting exits 3. A recorded failed or cancelled run exits 1. A recorded successful run exits 0.
+
+`runs retry` also retains a here retry's one-time bearer before attempting hosting. An unavailable host leaves that private record intact and reports the allocated run in its JSON failure receipt.
+
+## Secrets and lifetime
+
+Here authority grants access only to its bound run and declared data. The controller applies the same secret preflight and release checks as other placements. Pool-restricted secrets remain unavailable to a here runner. Descendant authority stays under the requester's ancestry.
+
+The controller owns execution deadlines and credential expiry. A remote owner's default execution budget is six hours, subject to its sealed operator policy and parent lifetime. Resume never extends those bounds.
+
+A controller outage prevents claims, secret release and result recording. Credentials used to recover the controller belong in the team's separate secret manager.

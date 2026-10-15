@@ -143,10 +143,15 @@ The CLI submits both local and profile retries through `Controller.Retry`.
 It resolves and deduplicates all flag/stdin selectors before submitting any run.
 Each selected source gets a separate idempotency key. JSON receipts expose only
 source/new IDs, allocated number, replay and structured failure. Sealed requests
-and one-time here bearers never enter output. A here retry with no host binding
-returns incomplete exit 3 after intake, retains the returned run ID in its JSON
-failure receipt, and makes no claim that hosting started. Native here handoff
-and retained-bearer resume remain W3/W8/W9 integration requirements. W1/W2 must
+and one-time here bearers never enter output. A here retry retains its one-time bearer in an owner-only controller/run-bound
+file before hosting. A missing native host returns incomplete exit 3 after
+intake, retains the returned run ID in its JSON failure receipt and makes no
+claim that hosting started. `pipeline trigger --resume` resolves a stable ID
+or team number through the public reader, loads that binding and makes one
+named trigger claim. The award supplies the request and accepted seals unchanged.
+The runtime binder receives the complete award, including runner identity,
+fences and deadlines, and owns source, storage and lease composition.
+Native host construction remains W3/W8/W9 integration work. W1/W2 must
 implement selected retry intake/materialization and consume the shared validator.
 No other area's contract or authority rule changed with this W9 wire amendment.
 

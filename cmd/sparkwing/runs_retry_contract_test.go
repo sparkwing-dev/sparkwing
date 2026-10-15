@@ -47,11 +47,11 @@ func TestRetryCommandSelectsModeAndControllerBeforeIntake(t *testing.T) {
 					keys = append(keys, input.IdempotencyKey)
 					return retryResponse("new-" + id), nil
 				}}
-				resolve := func(_ context.Context, selected string) (controllerwire.Controller, func(), error) {
+				resolve := func(_ context.Context, selected string) (retryConnection, error) {
 					if selected != profile {
 						t.Fatalf("profile = %q", selected)
 					}
-					return c, func() { closed = true }, nil
+					return retryConnection{Controller: c, close: func() { closed = true }}, nil
 				}
 				args := []string{"--run", "run-a", "--run", "-", "--" + mode, "-o", "plain"}
 				if profile != "" {
@@ -71,14 +71,18 @@ func TestRetryCommandSelectsModeAndControllerBeforeIntake(t *testing.T) {
 
 func TestRetryCommandRefusesInvalidSelectionBeforeConnection(t *testing.T) {
 	for _, args := range [][]string{
-		{"--run", "a"}, {"--run", "a", "--failed", "--all-jobs"},
-		{"--failed"}, {"a", "--failed"}, {"--run", "a", "--failed", "-o", "csv"},
-		{"--run", "a", "--failed=false"}, {"--run", "-", "--failed"},
+		{"--run", "a"},
+		{"--run", "a", "--failed", "--all-jobs"},
+		{"--failed"},
+		{"a", "--failed"},
+		{"--run", "a", "--failed", "-o", "csv"},
+		{"--run", "a", "--failed=false"},
+		{"--run", "-", "--failed"},
 	} {
 		var out bytes.Buffer
-		resolve := func(context.Context, string) (controllerwire.Controller, func(), error) {
+		resolve := func(context.Context, string) (retryConnection, error) {
 			t.Fatal("invalid invocation connected")
-			return nil, nil, nil
+			return retryConnection{}, nil
 		}
 		err := runRunsRetryCommand(t.Context(), args, strings.NewReader("\n"), &out, resolve)
 		if exitCodeFor(err) != 2 || out.Len() != 0 {
@@ -88,9 +92,9 @@ func TestRetryCommandRefusesInvalidSelectionBeforeConnection(t *testing.T) {
 }
 
 func TestRetryCommandHelpAndCancellationHaveNoSideEffects(t *testing.T) {
-	resolve := func(context.Context, string) (controllerwire.Controller, func(), error) {
+	resolve := func(context.Context, string) (retryConnection, error) {
 		t.Fatal("connected")
-		return nil, nil, nil
+		return retryConnection{}, nil
 	}
 	var out bytes.Buffer
 	if err := runRunsRetryCommand(t.Context(), []string{"--help"}, nil, &out, resolve); err != nil || out.Len() == 0 {
@@ -105,8 +109,8 @@ func TestRetryCommandHelpAndCancellationHaveNoSideEffects(t *testing.T) {
 
 func TestRetryConnectionFailureDoesNotSubmit(t *testing.T) {
 	refusal := &apierr.Error{Code: apierr.Unavailable, Message: "local controller unavailable"}
-	resolve := func(context.Context, string) (controllerwire.Controller, func(), error) {
-		return nil, nil, refusal
+	resolve := func(context.Context, string) (retryConnection, error) {
+		return retryConnection{}, refusal
 	}
 	var out bytes.Buffer
 	err := runRunsRetryCommand(t.Context(), []string{"--run", "source", "--failed"}, nil, &out, resolve)
@@ -125,7 +129,7 @@ func TestRetryReportsPartialFailureAndKeepsReplay(t *testing.T) {
 		return result, nil
 	}}
 	var out bytes.Buffer
-	err := retryRunIDs(t.Context(), c, []string{"a", "b"}, controllerwire.RetryFailed, &out, "json")
+	err := retryRunIDs(t.Context(), retryConnection{Controller: c}, []string{"a", "b"}, controllerwire.RetryFailed, &out, "json")
 	if err == nil || !strings.Contains(err.Error(), "retry refused") {
 		t.Fatalf("failure lost: %v", err)
 	}
@@ -152,7 +156,7 @@ func TestRetryStopsAfterCancellationOrOutputFailure(t *testing.T) {
 		if cancelled {
 			out = io.Discard
 		}
-		err := retryRunIDs(ctx, c, []string{"a", "b"}, controllerwire.RetryAll, out, "plain")
+		err := retryRunIDs(ctx, retryConnection{Controller: c}, []string{"a", "b"}, controllerwire.RetryAll, out, "plain")
 		if err == nil || calls != 1 {
 			t.Fatalf("cancelled=%v calls=%d err=%v", cancelled, calls, err)
 		}
@@ -171,7 +175,7 @@ func TestRetryRejectsMalformedReceipt(t *testing.T) {
 			return result, nil
 		}}
 		var out bytes.Buffer
-		err := retryRunIDs(t.Context(), c, []string{"a"}, controllerwire.RetryAll, &out, "plain")
+		err := retryRunIDs(t.Context(), retryConnection{Controller: c}, []string{"a"}, controllerwire.RetryAll, &out, "plain")
 		if err == nil || out.Len() != 0 {
 			t.Fatalf("malformed receipt succeeded: %+v output=%q err=%v", result, out.String(), err)
 		}
@@ -190,6 +194,32 @@ func TestRetryReceiptKeepsOriginalSealedIdentity(t *testing.T) {
 	}
 }
 
+func TestRetryHereHandoffReceivesPrivateReceiptOnce(t *testing.T) {
+	response := retryResponse("here-retry")
+	response.HereBearer = "one-time-private-bearer"
+	response.Request.Request.Options.Runner.Value.Kind = runspec.RunnerHere
+	claimed := 0
+	c := retryConnection{
+		Controller: retryController{retry: func(context.Context, string, controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error) {
+			return response, nil
+		}},
+		here: func(_ context.Context, got controllerwire.CreateRunResponse) error {
+			claimed++
+			if !reflect.DeepEqual(got, response) {
+				t.Fatal("here handoff lost private execution inputs")
+			}
+			return nil
+		},
+	}
+	var out bytes.Buffer
+	if err := retryRunIDs(t.Context(), c, []string{"source"}, controllerwire.RetryFailed, &out, "json"); err != nil {
+		t.Fatal(err)
+	}
+	if claimed != 1 || strings.Contains(out.String(), response.HereBearer) || strings.Contains(out.String(), "request") || !strings.Contains(out.String(), `"run_id":"here-retry"`) {
+		t.Fatalf("handoffs=%d receipt=%s", claimed, &out)
+	}
+}
+
 func FuzzRetryReceiptsExcludeExecutionInputs(f *testing.F) {
 	f.Add("private-retry-credential", "private-argument-value", false)
 	f.Add("private-retry-credential", "private-argument-value", true)
@@ -205,7 +235,7 @@ func FuzzRetryReceiptsExcludeExecutionInputs(f *testing.F) {
 				return response, nil
 			}}
 			var out bytes.Buffer
-			err := retryRunIDs(t.Context(), c, []string{"source-run"}, controllerwire.RetryFailed, &out, "json")
+			err := retryRunIDs(t.Context(), retryConnection{Controller: c}, []string{"source-run"}, controllerwire.RetryFailed, &out, "json")
 			if here && exitCodeFor(err) != 3 || !here && err != nil {
 				t.Fatalf("here=%v error=%v", here, err)
 			}
