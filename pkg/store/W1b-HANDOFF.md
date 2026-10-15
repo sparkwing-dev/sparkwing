@@ -1,10 +1,104 @@
 # W1b handoff
 
-Continues `3e1232e53` after merge `8941b0068`. W1b remains incomplete.
-This continuation is uncommitted. The lead owns review, commits, pipelines and
-native integration.
+Continues `189094152`. W1b remains incomplete. This continuation is uncommitted.
+The lead owns review, commits, pipelines and native integration.
 
 ## Current continuation
+
+Moved local binary trust policy to owned build_trust.go. The only public methods
+are now Tenant.TrustLocalBuilds and Tenant.SetTrustLocalBuilds. Removed both raw
+Store APIs, including their 26-line definitions and separating blank lines.
+Their behavior lives on Tenant, with no forwarding API. The controller uses
+its existing membership-selected tenant. Legacy direct-object readers obtain
+their tenant before reading policy. An absent policy remains false. Invalid
+stored flags and database errors return false with an error.
+
+The invariant is that a build-trust read or write affects only the selected
+Tenant, and policy changes cannot relabel persisted upload provenance.
+The first public-API test failed to compile because Tenant had neither method.
+It now covers defaults, repeated opt-in/out and the neighboring tenant.
+A 64-case property covers 128 generated tenant keys with Unicode and SQL
+metacharacters, independent policies, updates and reopening. A failed-write
+case preserves default refusal. Invalid numeric and text flags fail loudly.
+The text-flag case first reproduced boolean conversion accepting a corrupt
+"true" value. The reader now accepts only the stored integer flags 0 and 1.
+The generated fixture normalizes team keys before insertion, matching ForTeam.
+
+Extended storage-owner-receipts-and-stream-verification/store-data-sqlite.
+For both trigger and plan owners, its non-cloud upload starts local, the team
+opts into local binary trust, and reopening preserves both that policy and the
+unchanged local upload provenance. The proof still uses preseeded awards and
+physical verification evidence. It does not run a binary or claim that W7's
+binary execution check has landed. No additional native cell or archived T1
+inventory port is claimed complete. No legacy test was deleted.
+
+Verification commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+-p 4 and GOCACHE/GOTMPDIR/TMPDIR beneath /tmp/sw-astra-W1b/. Go commands use
+`go -C /home/bombuntu/.xwing/envs/1088/sparkwing`.
+
+- Final whole-repository `go build -p 4 ./...` passed.
+- `go vet -p 4 ./pkg/store/... ./pkg/controller/...
+  ./internal/acceptance/... ./tests/acceptance/...` passed.
+- The expanded store selection under Manual below passed **193 top-level tests /
+  478 cases**, with no skips. It also selects TestGrantCredits, TestCreditGrant,
+  TestCreditReversal, TestCreditHistory, TestCreditsBalanceIs,
+  TestCreditsDefaultTenant, TestTenantSQLScope, TestTenantWriters and
+  TestTenantTwins. TestStoreData selects the three new tests.
+- Both acceptance trees passed **20 top-level tests / 486 cases**. All **12
+  SQLite data/billing proofs** passed. There are **2,992 skipped cases** in the
+  platform/native skeleton. No native cell is newly activated.
+- Required `commentcheck -base main` passed across 900 files. Session sleepcheck,
+  focused documentation/changelog tests, sync-docs --check and whitespace checks
+  passed.
+
+The complete legacy store suite, native controller runtime suite, PostgreSQL,
+providers, physical backends and binary execution were not exercised. Existing
+legacy fixtures are caller-migrated and compile. They are not final-schema
+execution evidence. No additional archived T1 test is claimed complete.
+
+Amendment audit:
+
+- A1-24 retains the merged transaction data checker and binding integration.
+- A1-27 has immutable award/interval/settlement helpers. W1 must connect its
+  lifecycle transactions. The unstarted at_award refund operation and explicit
+  customer-runner wait operation still need agreement. C2 SettleBilling remains
+  a panic stub. This continuation does not change those foreign contracts.
+- A1-28 has committed-checkout settlement. W2 still owns provider verification,
+  route cutover and retirement of caller-selected paid grant authority.
+- A1-29 through A1-35 have upload/receipt/member/record/reference/tombstone/log
+  persistence. Build trust is now Tenant-owned. W2/W7 transport, policy,
+  physical verification/deletion and proxy egress remain real integrations.
+  Result attachment still needs its manifest reader. Materialization needs a
+  destination identity for a terminal job that never executed. Published owner
+  log identities still need agreement. W7 CheckBinaryExecution and W3's binary
+  execution adapter must consume persisted provenance, digest and tenant trust.
+- A1-53 retains the SQLite proofs. Native acceptance remains open.
+- handoffs.md has no new W1b assignment. W1's caller-migration clarification is
+  respected. No W1 lifecycle file was edited and no removed API was restored.
+
+C1 records the local API ownership correction. No foreign contract shape,
+schema, rate, setting, limit, environment variable or runtime service changed.
+No human decision is requested. The existing refund/wait/publication identity
+questions and real-integration boundaries remain open.
+
+Shared production caller: pkg/controller/build_trust.go. Shared test callers:
+pkg/controller/direct_upload_test.go and
+data_download_claim_provenance_test.go. The only changes in those files select
+the tenant API. Other shared edits are
+internal/acceptance/store_owner_receipts.go, design/rewrite/contracts/c1-data.md,
+.apidiff/pkg_store.txt, CHANGELOG.md, docs/migrations/_unreleased.md and generated
+mirrors. Owned changes are build_trust.go and its tests, direct_upload.go and
+its single test caller, STORE-DATA.md and this handoff.
+
+Friction was cold compilation and the generated team's normalization mismatch.
+No Sparkwing binary, service, provider, Git write, deployment or release ran.
+Git identity is unchanged. Scratch is deleted after final inspection.
+The lead must run native HTTP/provider/backend/PostgreSQL evidence and retire
+legacy consumers with their owners. Aggregate API snapshot drift remains the
+lead's integration task. Only the two removed and two added policy signatures
+were changed in this continuation's snapshot.
+
+## Previous continuation (committed in 189094152)
 
 Moved `Store.CreditLedgerTotals` into owned credit_totals.go and replaced its
 legacy node/trigger refund queries with immutable billing awards and intervals.

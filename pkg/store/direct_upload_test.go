@@ -165,7 +165,7 @@ func TestCloudBinaryLookupRefusesLocalProvenanceUntilTeamTrustsIt(t *testing.T) 
 	if got, err := st.BinaryObject(t.Context(), "team-a", input, false, "", []string{""}); err != nil || got.Provenance != "local" {
 		t.Fatalf("local lookup = %+v, %v", got, err)
 	}
-	if err := st.SetTrustLocalBuilds(t.Context(), "team-a", true); err != nil {
+	if err := teamHandle(t, st, "team-a").SetTrustLocalBuilds(t.Context(), true); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := st.BinaryObject(t.Context(), "team-a", input, true, "", []string{""}); err != nil || got.Key != u.Key {

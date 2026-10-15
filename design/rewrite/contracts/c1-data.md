@@ -180,6 +180,14 @@ enrollment and GitHub App issuance path remain separate integrations.
 
 ### Upload and record persistence
 
+`Tenant.TrustLocalBuilds` and `Tenant.SetTrustLocalBuilds` own the team's
+local binary execution opt-in. Their raw Store methods are removed. An absent
+row means false. Read errors or invalid stored flags cannot enable trust.
+Enabling trust does not change upload or record provenance. The controller's
+membership checks own who may read or change this policy. W7's
+`blob.CheckBinaryExecution` and W3's execution adapter must enforce the policy
+against the committed binary and digest.
+
 `blob.Authority.Upload` contains C2's resolved tagged uploader. W1 rechecks it
 against the exact job/attempt/generation, owner lease or imported terminal
 published attempt. Attempt-scoped publication requires a persisted finish time

@@ -46,6 +46,15 @@ func checkStoreOwnerReceipt(ctx context.Context, path string, kind capability.Un
 	if err != nil {
 		return err
 	}
+	if ticket.Provenance != blob.ProvenanceLocal {
+		return fmt.Errorf("non-cloud award assigned upload provenance %s", ticket.Provenance)
+	}
+	if trust, err := tenant.TrustLocalBuilds(ctx); err != nil || trust {
+		return fmt.Errorf("local binaries trusted without opt-in: %v: %v", trust, err)
+	}
+	if err := tenant.SetTrustLocalBuilds(ctx, true); err != nil {
+		return err
+	}
 	query := blob.HasManyRequest{Authority: request.Intent.Authority, Digests: []blob.Digest{ticket.Blob.Digest}}
 	if presence, err := tenant.ReadableBlobs(ctx, query); err != nil || len(presence.Present) != 0 {
 		return fmt.Errorf("reservation exposed bytes: %+v: %v", presence, err)
@@ -77,11 +86,14 @@ func checkStoreOwnerReceipt(ctx context.Context, path string, kind capability.Un
 	if err != nil {
 		return err
 	}
+	if trust, err := tenant.TrustLocalBuilds(ctx); err != nil || !trust {
+		return fmt.Errorf("reopened build trust lost opt-in: %v: %v", trust, err)
+	}
 	if presence, err := tenant.ReadableBlobs(ctx, query); err != nil || !slices.Equal(presence.Present, query.Digests) {
 		return fmt.Errorf("reopened receipt lost authority: %+v: %v", presence, err)
 	}
 	persisted, err := tenant.LookupBlobUpload(ctx, request.Intent.Authority, ticket.ID)
-	if err != nil || persisted.Identity != request.Intent.Identity || persisted.Identity.Attempt.Set || persisted.CommittedAt == nil {
+	if err != nil || persisted.Identity != request.Intent.Identity || persisted.Identity.Attempt.Set || persisted.CommittedAt == nil || persisted.Provenance != blob.ProvenanceLocal {
 		return fmt.Errorf("reopened owner ticket=%+v: %v", persisted, err)
 	}
 	var jobs int

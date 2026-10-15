@@ -1,5 +1,11 @@
 # Store data persistence
 
+Build trust uses `Tenant.TrustLocalBuilds` and `Tenant.SetTrustLocalBuilds`.
+Their raw Store methods are removed. Missing policy defaults to false, invalid
+flags return an error, and writes cannot change another tenant's opt-in.
+Policy survives reopening and cannot change persisted upload provenance.
+Execution still needs W7's binary check and W3's adapter.
+
 Financial writes use the same transaction as the state change that caused them.
 Balances use `Tenant.CreditBalanceMicro`. Billing state and grant history use
 `Tenant.CreditState` and `Tenant.ListCreditGrants`. Their raw Store twins are removed. Burn windows use

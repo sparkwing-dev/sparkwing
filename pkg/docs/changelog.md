@@ -76,6 +76,7 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
+- **store (Breaking):** Move `TrustLocalBuilds` and `SetTrustLocalBuilds` from Store to Tenant. Build-trust policy stays scoped to the selected team. See [migration guide](docs/migrations/_unreleased.md#build-trust-uses-tenant-handles).
 - **store:** Deployment billing totals use immutable awards and intervals to exclude refundable reservations without advancing billing checkpoints. Operational run retention cannot change the totals, and storage time stays outside compute seconds.
 - **store (Breaking):** Remove the unused `Store.RunFinished` pruning query. Leased retention and tagged log streams own log lifetime. See [migration guide](docs/migrations/_unreleased.md#financial-totals-use-persisted-awards).
 - **store (Breaking):** Remove `Store.RecordCreditGrant`. Submit grant requests through a tenant handle. See [migration guide](docs/migrations/_unreleased.md#grant-requests-use-tenant-handles).

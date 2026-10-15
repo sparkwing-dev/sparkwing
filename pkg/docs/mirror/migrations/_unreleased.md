@@ -1,5 +1,13 @@
 # Migrating to the next release
 
+## Build trust uses tenant handles
+
+`Store.TrustLocalBuilds` and `Store.SetTrustLocalBuilds` are removed. Obtain a
+tenant with `Store.ForTeam`, then call `Tenant.TrustLocalBuilds` or
+`Tenant.SetTrustLocalBuilds` without a team argument. Local stores use
+`store.DefaultTeam`. The default is false. The HTTP build-trust routes and
+their membership requirements keep their existing behavior.
+
 ## Financial totals use persisted awards
 
 `Store.CreditLedgerTotals` subtracts refundable reservations using the immutable
