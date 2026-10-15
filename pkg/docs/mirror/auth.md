@@ -6,6 +6,23 @@ resource's team before authorization and derives actors and fences from the
 credential. Unknown or ended credentials get `unauthenticated`. A live
 credential without the grant or binding gets `forbidden`.
 
+Token revocation and member updates use the same policy router. A team token is
+revoked at `DELETE /api/v1/tokens/{token}`. Deployment service/operator roots use
+`DELETE /api/v1/operator/tokens/{token}` with `operator.tokens` or an operator
+console session. Team routes derive their active team from the committed
+credential. Header and query hints cannot select another team.
+
+`GET /api/v1/team/members` returns the active team's member directory and
+requires `runs.read`. An empty team returns `[]`.
+
+`PATCH /api/v1/team/members/{account}` accepts a role of `owner`, `editor` or
+`reader`. `DELETE` on that path removes the membership. The store rechecks the
+authenticated authority and updates the membership generation in the same
+transaction. A missing member returns `not_found`. A last-owner change returns
+`conflict`. Browser mutations require CSRF proof. Revocation stops descendants'
+new controller operations, including those parented to a session. Previously
+issued external credentials and signed URLs keep their documented lifetimes.
+
 `POST /api/v1/runs` accepts a `request` and `idempotency_key`. The request names
 its team. A bound job creating a child must name its own run and job as the
 parent. Intake returns the committed run number and first seal. A here bearer
@@ -1111,17 +1128,16 @@ carries `admin`.
 either family, and adds every machine token of the team for an editor or
 owner. Each row names `prefix`, `name`, `family`, `scopes`, `created_by`,
 `created_at`, `expires_at`, `last_used_at` and `git_credentials`.
-`DELETE /api/v1/team/tokens/{prefix}` revokes a token at once: the member who
+`DELETE /api/v1/tokens/{token}` revokes a token at once: the member who
 minted it revokes their own, and an owner revokes any machine token. A token
 the caller cannot see answers `404`, and one they see but may not revoke
 answers `403`. An owner releases stored git credentials to a machine with
 `PUT /api/v1/team/tokens/{prefix}/git-credentials` (see
 [Git credentials](git-credentials.md#who-receives-it)).
 
-Removing a member revokes every token they minted in that team, and demoting a
-member to `reader` revokes them too, both in the same step as the role change.
-An owner demoted to `editor` keeps theirs, since a member token already
-carried only the editor's scopes.
+Membership changes advance the team auth generation in the same transaction.
+Authentication rechecks the current membership and effective grants. Here
+authority also ends when its requesting parent loses `runs.write`.
 
 CLI tokens (`swu_`) and runner tokens (`swr_`) minted from team settings
 before team tokens existed keep authenticating as they did until they expire

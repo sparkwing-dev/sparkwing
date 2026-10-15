@@ -162,29 +162,13 @@ func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLookupTokenByPrefix(w http.ResponseWriter, r *http.Request) {
-	prefix := r.PathValue("prefix")
+	prefix := r.PathValue("token")
 	tok, err := s.store.LookupTokenByPrefix(prefix)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, tokenToJSON(tok))
-}
-
-func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
-	prefix := r.PathValue("prefix")
-	if err := s.store.RevokeToken(prefix, time.Now().UTC()); err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	s.auth.Invalidate(prefix)
-	p, _ := PrincipalFromContext(r.Context())
-	who := authwire.AnonymousPrincipal
-	if p != nil {
-		who = p.Name
-	}
-	s.logger.Info("token revoked", "prefix", prefix, "by", who)
-	w.WriteHeader(http.StatusNoContent)
 }
 
 type whoamiResp struct {

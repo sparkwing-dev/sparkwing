@@ -152,6 +152,10 @@ func (router *PolicyRouter) checkEndpoint(route capability.RoutePolicy, endpoint
 }
 
 func (router *PolicyRouter) serveEndpoint(w http.ResponseWriter, r *http.Request, endpoint Endpoint) error {
+	// safety: this is the registered pattern, so caller text cannot enter audit route labels.
+	if record, ok := r.Context().Value(auditCtxKey{}).(*auditRecord); ok {
+		record.route = endpoint.Pattern
+	}
 	route, found := capability.LookupRoute(endpoint.Method, endpoint.Pattern)
 	if !found {
 		return missingEndpointPolicy()
@@ -181,6 +185,10 @@ func (router *PolicyRouter) serveEndpoint(w http.ResponseWriter, r *http.Request
 	// safety: unknown or dead credentials cannot use decoder failures as an existence oracle.
 	if decodeErr != nil {
 		return decodeErr
+	}
+	// safety: team-local routes without a selector use only the committed credential's active team.
+	if route.Owner == capability.OwnerTeam && presentation.Evidence.Target.Team == "" {
+		presentation.Evidence.Target.Team = authenticated.Principal.Capability.Team
 	}
 	if requiresCSRF(r.Method, authenticated.Principal.Class) {
 		if router.authorization.CheckCSRF == nil {

@@ -8,7 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// EngineController adapts the shared HTTP wire to C1's transactions. Middleware
+// EngineController adapts authorized controller operations to C1's transactions. Middleware
 // supplies C2 Authorized values; bodies cannot supply actors, grants or fences.
 // Every mutation rechecks that authority transactionally through the store.
 type EngineController struct {
@@ -19,6 +19,9 @@ type EngineController struct {
 	// ResolveRunTeam supplies resource ownership before authorization. A nil
 	// resolver uses Store.AsOperator().RunTeam.
 	ResolveRunTeam func(context.Context, string) (store.Team, error)
+	// ResolveOperator supplies deployment revocation without exposing a tenant.
+	// A nil resolver uses Store.AsOperator.
+	ResolveOperator func(context.Context) (AuthorityRevoker, error)
 }
 
 // ReconcileJob uses C1 ReconcileRequest and returns its persisted node and claim.

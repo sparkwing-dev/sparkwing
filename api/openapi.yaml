@@ -2112,12 +2112,12 @@ paths:
                     type: array
                     items: {$ref: "#/components/schemas/Token"}
 
-  /api/v1/tokens/{prefix}:
+  /api/v1/tokens/{token}:
     parameters:
       - in: path
-        name: prefix
+        name: token
         required: true
-        schema: {type: string, description: The 12-char prefix returned at mint.}
+        schema: {type: string, description: The capability prefix returned at mint.}
     get:
       x-sparkwing-scope: admin
       tags: [tokens]
@@ -2130,9 +2130,10 @@ paths:
               schema: {$ref: "#/components/schemas/Token"}
         "404": {$ref: "#/components/responses/NotFound"}
     delete:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.read
       tags: [tokens]
-      summary: Revoke a token by prefix.
+      summary: Revoke a team capability by prefix.
+      description: The binding policy checks ownership in the active team. The transaction rechecks authority and advances the revocation generation before returning.
       responses:
         "204": {description: Revoked.}
 
@@ -4717,7 +4718,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
-  /api/v1/team/members/{user_id}:
+  /api/v1/team/members/{account}:
     patch:
       x-sparkwing-scope: team.admin
       tags: [teams]
@@ -4725,13 +4726,13 @@ paths:
       description: >-
         Nobody grants a role above their own or re-roles someone who outranks them, and the last owner cannot be demoted. A user who is not a member of the active team answers 404.
       parameters:
-        - {name: user_id, in: path, required: true, schema: {type: string}}
+        - {name: account, in: path, required: true, schema: {type: string}}
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.setRoleReq
+              x-sparkwing-go-type: pkg/controller.membershipRequest
               type: object
               required: [role]
               properties:
@@ -4742,19 +4743,21 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The team must retain at least one owner.}
     delete:
       x-sparkwing-scope: runs.read
       tags: [teams]
-      summary: Remove a member, or leave the team when `user_id` is the caller.
+      summary: Remove a member, or leave the team when `account` is the caller.
       description: >-
         Removing another member needs the owner role. The last owner cannot leave. The removed user's sessions lose every scope in the team on their next request.
       parameters:
-        - {name: user_id, in: path, required: true, schema: {type: string}}
+        - {name: account, in: path, required: true, schema: {type: string}}
       responses:
         "204": {description: Removed.}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The team must retain at least one owner.}
 
   /api/v1/team/invitations:
     get:
@@ -4904,21 +4907,6 @@ paths:
         "409": {description: "The member or team holds as many tokens of this family as it may, or another live machine token carries the name."}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-
-  /api/v1/team/tokens/{prefix}:
-    delete:
-      x-sparkwing-scope: runs.read
-      tags: [teams]
-      summary: Revoke one team token.
-      description: >-
-        The minter revokes their own token of either family, and an owner revokes any machine token of the team. A token the caller cannot list answers 404; a machine token an editor lists but did not mint answers 403.
-      parameters:
-        - {name: prefix, in: path, required: true, schema: {type: string}}
-      responses:
-        "204": {description: Revoked.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/team/tokens/{prefix}/git-credentials:
     put:
@@ -7433,6 +7421,24 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
         "409": {description: The state or authority changed before the transaction committed.}
+
+  /api/v1/operator/tokens/{token}:
+    parameters:
+      - in: path
+        name: token
+        required: true
+        schema: {type: string}
+    delete:
+      x-sparkwing-scope: operator.tokens or operator
+      tags: [tokens]
+      summary: Revoke a deployment service or operator capability.
+      description: The transaction rechecks the authenticated actor and target and advances the root revocation generation. Descendant operations observe the revoked ancestry. Browser requests require CSRF proof.
+      responses:
+        "204": {description: Revoked.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
 
 components:
   securitySchemes:

@@ -270,7 +270,7 @@ describe("team administration calls", () => {
     assert.deepEqual(
       calls.map((c) => `${c.method} ${c.url}`),
       [
-        "DELETE /api/v1/team/tokens/swr_a%2F..%2F..%2Ftokens",
+        "DELETE /api/v1/tokens/swr_a%2F..%2F..%2Ftokens",
         "DELETE /api/v1/team/members/u%201",
         "POST /api/v1/invitations/inv%3Fx%3D1/accept",
       ],
@@ -492,7 +492,7 @@ describe("member tokens", () => {
   it("revokes by escaped prefix", async () => {
     await teams.revokeTeamToken("swu_a/../tokens");
     assert.equal(calls[0].method, "DELETE");
-    assert.equal(calls[0].url, "/api/v1/team/tokens/swu_a%2F..%2Ftokens");
+    assert.equal(calls[0].url, "/api/v1/tokens/swu_a%2F..%2Ftokens");
   });
 
   it("tells a read-only token from one that starts runs", () => {

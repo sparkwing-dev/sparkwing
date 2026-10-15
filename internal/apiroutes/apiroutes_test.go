@@ -54,6 +54,28 @@ func TestParseEngineEndpointsUsesActualRegistrations(t *testing.T) {
 	}
 }
 
+func TestParseAuthorityEndpointsUsesActualRegistrations(t *testing.T) {
+	src := writeFile(t, "server.go", "s.registerAuthorityRoutes(router)")
+	endpoints := `{Method: "DELETE", Pattern: "/api/v1/tokens/{token}", Authentication: capability.AuthCapability},
+{Method: "DELETE", Pattern: "/api/v1/operator/tokens/{token}", Authentication: capability.AuthCapability},
+{Method: "PATCH", Pattern: "/api/v1/team/members/{account}", Authentication: capability.AuthCapability},`
+	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "authority_routes.go"), []byte(endpoints), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Route{
+		{Method: "DELETE", Path: "/api/v1/operator/tokens/{token}", Scope: "operator.tokens` or `operator"},
+		{Method: "PATCH", Path: "/api/v1/team/members/{account}", Scope: "team.admin"},
+		{Method: "DELETE", Path: "/api/v1/tokens/{token}", Scope: "runs.read"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("authority registrations = %+v, want %+v", got, want)
+	}
+}
+
 func writeFile(t *testing.T, name, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)

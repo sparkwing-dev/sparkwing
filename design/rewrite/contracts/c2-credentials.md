@@ -9,7 +9,7 @@ delegation validator, data/source checks, billing calculation, payment verifier
 and error codec are implemented. Filesystem and S3 object signers implement the
 signing boundary. Persistent issuance and authentication reads still need the
 store implementation. The Stripe callback, sixteen engine endpoints and twenty-three operator endpoints use this table in the existing
-controller. The remaining routes have not switched to it.
+controller. Four credential/membership mutations and the member directory also use this table. The remaining routes have not switched to it.
 
 ## Ownership
 
@@ -122,6 +122,7 @@ All capability names below are in `internal/capability`.
 | `controller.Server.WithAuthorization` | Configure the shared verifier, bindings, transport identity and CSRF adapters before constructing the server handler. Missing adapters fail closed. |
 | `controller.RouteAuthorization`, `controller.Endpoint`, `controller.PolicyRouter` | Wire identity, decoding, CSRF, external proof and authorized handlers into the matched route. |
 | `controller.NewPolicyRouter`, `PolicyRouter.Register`, `PolicyRouter.Validate`, `PolicyRouter.Registrations` | Register handlers independently of the policy table and check their proof wiring. Combine controller and node-host registrations for the complete inventory check. |
+| `controller.AuthorityRevoker`, `EngineController.ResolveOperator` | Reuse C1's existing RevokeAuthority transaction through the tenant or deployment scope. The optional resolver supports embedded controllers and fakes without another issuer or persistence owner. |
 | `controller.RunTransactions`, `EngineController.ResolveTenant`, `EngineController.ResolveRunTeam`, `Server.WithEngineController` | Supply final intake/sealing transactions and resource ownership. Production uses the existing store methods. Embedded controllers and tests may supply the same contracts without SQL or alternate authorization. |
 
 The exported data tables are `Grants`, `AwardPolicies`, `LivenessPolicies`,
@@ -814,6 +815,114 @@ documentation symbols and embedded mirrors. The new reporting file has 161
 passing HTTP cases and a seven-request client round-trip proof. The full
 legacy controller suite, native transports and Sparkwing pipelines were not
 run. The lead owns independent review and integration checks.
+
+### Authority mutation cutover
+
+Five endpoints use `PolicyRouter` and C1's existing member read and authority
+mutations: the member directory, team and deployment token revocation, and
+member role changes/removal.
+`RunTransactions` includes `RevokeAuthority` and `UpdateMembership` with their
+unchanged C1 signatures. It also exposes the existing `Tenant.Members` read.
+The old member-directory handler is deleted, and the new read returns an
+explicit empty array for an empty team. `AuthorityRevoker` exposes only the same revocation
+method to the deployment adapter. `EngineController.ResolveOperator` defaults
+to `Store.AsOperator`. It exists because embedded controllers and tests cannot
+construct the concrete SQL operator. No second issuer, auth cache or database
+adapter was added.
+
+Team revocation uses `/api/v1/tokens/{token}`. Deployment service/operator
+roots use `/api/v1/operator/tokens/{token}`. The registered path chooses the
+tenant or operator transaction. The old team-token revoke registration and
+both old revoke handlers are deleted. Membership PATCH/DELETE use
+`/api/v1/team/members/{account}` and pass tagged authority to `UpdateMembership`.
+The old role/removal handlers are deleted. The old standalone role request
+struct is replaced by the new adapter's `membershipRequest`.
+
+The common router fills an absent team selector on `OwnerTeam` routes from
+the committed principal after authentication. An explicit selector is retained
+and checked against that principal. Body selectors required by intake still
+fail decoding when absent. Headers and query parameters do not select a team.
+The router also records its registered pattern in the audit record, because
+path-only outer registrations otherwise produce `other` audit labels.
+
+Local C2 error choice: `ErrLastOwner` maps to `409 conflict`, since retaining an
+owner is a transaction invariant. `ErrNotMember` maps to `404 not_found` and
+`ErrRoleAboveOwn` to `403 forbidden`. Typed C1 errors pass through unchanged.
+Private errors remain internal. Browser mutations retain the common CSRF check.
+
+The acceptance proofs exercise actor/session preservation, team scoping,
+correct relational binding selectors, malformed updates, transaction refusals,
+body-consumption races, missing dependencies, method refusals, safe audit
+labels and the removed path. A fake committed authority directory warms two
+independent verifiers, then records machine-root, launcher-root, token-parented
+session, membership and here-parent revocation. Both routers refuse subsequent
+requests. Rotation grace is cut short by a committed root revocation. These are
+HTTP/contract proofs with fake persistence, not SQL generation or race proofs.
+The old same-replica, rotation-grace, token-parented-session and dead-token
+refusal tests are replaced. Dead credentials now assert the shared envelope,
+without the legacy token-state fields or one-hour retry hint.
+
+Shared caller edits change the Go admin client's revoke path to the deployment
+route and the web team's revoke call to the team route. Their round-trip/path
+tests pass. The legacy token lookup wildcard is renamed to `{token}` so its
+OpenAPI path can share the new DELETE operation. Its URI and old read handler
+remain. Token list/create/lookup/rotation still need their full policy/issuance
+cutover. The daemon classification and legacy tenant table match the changed
+registrations.
+
+Shared source/caller paths are `pkg/controller/client/admin.go`,
+`web/src/lib/teams.ts`, `web/src/lib/teams.test.ts`,
+`internal/orchestrator/wingd_api_routes_test.go`,
+`internal/apiroutes/apiroutes.go`, `internal/apiroutes/apiroutes_test.go`,
+`internal/apispec/rewrite.go` and `internal/apispec/rewrite_test.go`.
+The remaining shared artifacts are `.apidiff/pkg_controller.txt`,
+`api/openapi.yaml`, `docs/api-reference.md`, `docs/auth.md`,
+`docs/migrations/_unreleased.md`, `CHANGELOG.md` and their embedded mirrors.
+
+The API reference parser follows `registerAuthorityRoutes` and its actual
+endpoint declarations before applying policy metadata. Its regression test
+checks those declarations. The OpenAPI generator's existing idempotency test
+now includes alternative grants. It reproduced different first/second output
+when a missing route was seeded. Seeding now removes Markdown ticks just as
+restamping already did. This is one formatting-line change, not another route
+inventory. OpenAPI, auth/migration docs, changelog, controller API snapshot and
+embedded copies move with these changes.
+
+The removed controller handlers and request type contain 114 legacy source
+lines, plus five registrations. Their obsolete revocation tests/helper remove
+145 lines. Native topology acceptance cells remain skipped. Persistence,
+transactional authority resolution, relational bindings, production session
+identity and CSRF wiring still require real integration.
+
+Contract work identified while tracing the next engine routes:
+
+- C1 `ReconciledNode.Claim` is a `ClaimAward` containing prefix, holder,
+  generation and lease expiry. It carries no one-time bearer or complete
+  server-derived binding/unit delivery for `ReconcileResponse.Claim`. C1/C3/W9
+  must define how an Execute result transports its committed private award.
+  C2 must not mint or reconstruct it outside that transaction.
+- Queued claim adaptation needs the registered runner profile (OS/arch,
+  capacity and identity), signed runner software policy, and committed private
+  execution delivery. `ClaimRequest` supplies only version/labels/available
+  capacity and selectors, while `UnitDemand` needs trusted registration fields.
+  These source/projection contracts must be wired with W1/W8/W9. No legacy
+  token adapter or new claim transaction was added.
+- Earlier result-digest persistence, annotation/summary attempt attribution,
+  plan/eval renewal and non-checkout payment event questions remain open.
+
+Verification uses `GOWORK=off`, `GOFLAGS=-buildvcs=false` and caches/temp files
+under `/tmp/sw-astra-W2`. The whole repository build, scoped vet, capability/API-error tests, executable
+acceptance proofs, focused controller tests, daemon route classification,
+OpenAPI generation, web caller test, embedded-doc mirrors and SDK symbol
+checks pass. The changed-line comment check and separate checks of the new
+files pass. Full commentcheck reports 105 pre-existing violations outside the
+changed lines. Full doccheck finds the existing runs_on mention in
+node-protocol.md, frozen counts in gitcache.md/security.md, and the missing
+cli-fleet sidebar page. These failures are verified in HEAD and left to their
+owners. Full native topology cells remain skipped.
+
+The lead owns native/database integration, independent review and Sparkwing
+pipelines. No Sparkwing binary or git write is used.
 
 ## Open questions for the lead
 

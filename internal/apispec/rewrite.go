@@ -212,7 +212,7 @@ func seedMissing(paths *yaml.Node, routes []apiroutes.Route, documented map[stri
 
 func stub(scope string) *yaml.Node {
 	op := &yaml.Node{Kind: yaml.MappingNode}
-	appendPair(op, scopeKey, scalar(scope))
+	appendPair(op, scopeKey, scalar(strings.ReplaceAll(scope, "`", "")))
 	appendPair(op, "summary", scalar(stubSummary))
 	appendPair(op, "description", scalar(stubDescription))
 	fallback := &yaml.Node{Kind: yaml.MappingNode, Style: yaml.FlowStyle}

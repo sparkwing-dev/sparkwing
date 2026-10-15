@@ -87,9 +87,9 @@ func (c *Client) LookupToken(ctx context.Context, prefix string) (json.RawMessag
 	return out, nil
 }
 
-// RevokeToken revokes the token with prefix at once.
+// RevokeToken revokes a deployment service or operator capability by prefix.
 func (c *Client) RevokeToken(ctx context.Context, prefix string) error {
-	return c.deleteJSON(ctx, "/api/v1/tokens/"+url.PathEscape(prefix), http.StatusNoContent, nil)
+	return c.deleteJSON(ctx, "/api/v1/operator/tokens/"+url.PathEscape(prefix), http.StatusNoContent, nil)
 }
 
 // RotateToken mints a replacement for the token with prefix. The old token

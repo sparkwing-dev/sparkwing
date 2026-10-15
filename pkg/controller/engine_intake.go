@@ -16,9 +16,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// RunTransactions is the engine transaction boundary. Persistence owns validation,
+// RunTransactions is the controller's tenant transaction and read boundary. Persistence owns validation,
 // clocks, replay, and transactional authority rechecks on each mutation.
 type RunTransactions interface {
+	AuthorityRevoker
+	UpdateMembership(context.Context, store.Actor, store.MembershipUpdate) error
+	Members(context.Context) ([]store.Membership, error)
 	AdmitRun(context.Context, store.IntakeRequest) (store.AdmissionResult, error)
 	ReadRun(context.Context, string) (store.RunRow, error)
 	ReadNode(context.Context, store.NodeRef) (store.NodeRow, error)

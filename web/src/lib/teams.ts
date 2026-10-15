@@ -409,7 +409,7 @@ export async function mintMemberToken(
 }
 
 export async function revokeTeamToken(prefix: string): Promise<void> {
-  await send("DELETE", `/api/v1/team/tokens/${seg(prefix)}`, "Revoke token");
+  await send("DELETE", `/api/v1/tokens/${seg(prefix)}`, "Revoke token");
 }
 
 // The page collects one free-form field; the controller validates each pattern.

@@ -23,27 +23,56 @@ import (
 )
 
 type engineTransactions struct {
-	intake     store.IntakeRequest
-	plan       store.PlanAcceptance
-	expansion  store.ExpansionSubmission
-	run        store.RunRow
-	node       store.NodeRow
-	admitted   store.AdmissionResult
-	accepted   store.AcceptedPlan
-	expanded   store.AcceptedExpansion
-	nodeChange store.NodeTransition
-	runChange  store.RunTransition
-	finish     store.FinishRunRequest
-	renewActor store.Actor
-	renewRef   store.NodeRef
-	beat       store.LeaseBeat
-	applied    store.Applied
-	annotation store.AnnotationWrite
-	summary    store.SummaryWrite
-	step       store.StepReport
-	writes     int
-	err        error
-	readErr    error
+	intake           store.IntakeRequest
+	plan             store.PlanAcceptance
+	expansion        store.ExpansionSubmission
+	run              store.RunRow
+	node             store.NodeRow
+	admitted         store.AdmissionResult
+	accepted         store.AcceptedPlan
+	expanded         store.AcceptedExpansion
+	nodeChange       store.NodeTransition
+	runChange        store.RunTransition
+	finish           store.FinishRunRequest
+	renewActor       store.Actor
+	renewRef         store.NodeRef
+	beat             store.LeaseBeat
+	applied          store.Applied
+	annotation       store.AnnotationWrite
+	summary          store.SummaryWrite
+	step             store.StepReport
+	authorityActor   store.Actor
+	revokedAuthority capability.AuthorityRef
+	membership       store.MembershipUpdate
+	members          []store.Membership
+	memberReads      int
+	commitAuthority  func()
+	writes           int
+	err              error
+	readErr          error
+}
+
+func (f *engineTransactions) Members(context.Context) ([]store.Membership, error) {
+	f.memberReads++
+	return f.members, f.readErr
+}
+
+func (f *engineTransactions) RevokeAuthority(_ context.Context, actor store.Actor, target capability.AuthorityRef) error {
+	f.authorityActor, f.revokedAuthority = actor, target
+	f.writes++
+	if f.err == nil && f.commitAuthority != nil {
+		f.commitAuthority()
+	}
+	return f.err
+}
+
+func (f *engineTransactions) UpdateMembership(_ context.Context, actor store.Actor, change store.MembershipUpdate) error {
+	f.authorityActor, f.membership = actor, change
+	f.writes++
+	if f.err == nil && f.commitAuthority != nil {
+		f.commitAuthority()
+	}
+	return f.err
 }
 
 func (f *engineTransactions) WriteSummary(_ context.Context, summary store.SummaryWrite) error {

@@ -15,7 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// WithEngineController supplies the intake/sealing transaction adapter before
+// WithEngineController supplies the engine and authority transaction adapter before
 // Handler is constructed. The default adapter uses the server's store.
 func (s *Server) WithEngineController(engine *EngineController) *Server {
 	s.engineController = engine

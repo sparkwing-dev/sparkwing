@@ -23,11 +23,14 @@ import (
 // safety: these cells exercise the HTTP authorization boundary with committed-fact fakes.
 // They do not claim SQLite/Postgres mutation, native transport or deployment coverage.
 type credentialBoundary struct {
-	snapshot capability.AuthenticationSnapshot
-	raw      string
-	handled  int
-	race     bool
-	readErr  error
+	snapshot      capability.AuthenticationSnapshot
+	raw           string
+	handled       int
+	race          bool
+	readErr       error
+	bindingErr    error
+	bindingRule   capability.BindingRule
+	bindingTarget capability.Target
 }
 
 func newCredentialBoundary() *credentialBoundary {
@@ -61,8 +64,9 @@ func (b *credentialBoundary) ReadAuthentication(_ context.Context, lookup capabi
 	return b.snapshot, nil
 }
 
-func (b *credentialBoundary) CheckBinding(context.Context, capability.Principal, capability.BindingRule, capability.Target) error {
-	return nil
+func (b *credentialBoundary) CheckBinding(_ context.Context, _ capability.Principal, rule capability.BindingRule, target capability.Target) error {
+	b.bindingRule, b.bindingTarget = rule, target
+	return b.bindingErr
 }
 
 func (b *credentialBoundary) router(t *testing.T) http.Handler {

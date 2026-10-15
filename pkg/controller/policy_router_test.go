@@ -100,6 +100,50 @@ func TestPolicyRouterOrderingAndErrorBoundary(t *testing.T) {
 	}
 }
 
+func TestPolicyRouterResolvesTeamLocalTargets(t *testing.T) {
+	for _, tc := range []struct {
+		name, team, targetTeam string
+		status                 int
+	}{
+		{"active team", "team", "", 204},
+		{"explicit team", "team", "team", 204},
+		{"foreign team", "team", "foreign", 403},
+		{"no active team", "", "", 403},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var order []string
+			p := capability.Principal{Class: capability.CredentialBearer, Capability: capability.Capability{
+				Team: tc.team, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"}, Audience: capability.Controller,
+				Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead},
+			}}
+			router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: policyAuth{p, nil, &order}, Bindings: policyBindings{order: &order}})
+			if err := router.Register(controller.Endpoint{
+				Method: "GET", Pattern: "/api/v1/tokens/{token}", Authentication: capability.AuthCapability,
+				Decode: func(r *http.Request) (capability.RequestEvidence, error) {
+					return capability.RequestEvidence{Target: capability.Target{Team: tc.targetTeam, TokenPrefix: r.PathValue("token")}}, nil
+				},
+				Handle: func(w http.ResponseWriter, _ *http.Request, a capability.Authorized) error {
+					if a.Target.Team != "team" || a.Target.TokenPrefix != "target" {
+						t.Fatalf("target = %+v", a.Target)
+					}
+					w.WriteHeader(204)
+					return nil
+				},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			r := httptest.NewRequest("GET", "/api/v1/tokens/target?team=forged", nil)
+			r.Header.Set("Authorization", "Bearer synthetic")
+			r.Header.Set("X-Sparkwing-Team", "forged")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, r)
+			if w.Code != tc.status {
+				t.Fatalf("HTTP %d %s, want %d", w.Code, w.Body.String(), tc.status)
+			}
+		})
+	}
+}
+
 func TestPolicyRouterMissingRoutesAndPolicies(t *testing.T) {
 	mux := controller.NewPolicyRouter(controller.RouteAuthorization{})
 	called := false

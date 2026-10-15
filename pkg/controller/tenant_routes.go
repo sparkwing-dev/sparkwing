@@ -47,7 +47,6 @@ var (
 // server.go registers one this table lacks, so a new route is classified
 // before it serves anything.
 var tenantRoutes = map[string]tenantResource{
-
 	"GET /api/v1/agents": resNone,
 
 	"GET /api/v1/approvals/pending": resNone,
@@ -248,21 +247,15 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/team/invitations":        resNone,
 	"DELETE /api/v1/team/invitations/{id}": resInvitation,
 
-	"GET /api/v1/team/members":              resNone,
-	"DELETE /api/v1/team/members/{user_id}": resMember,
-	"PATCH /api/v1/team/members/{user_id}":  resMember,
-
 	"POST /api/v1/teams": resNone,
 
 	"GET /api/v1/team/tokens":                          resNone,
 	"POST /api/v1/team/tokens":                         resNone,
-	"DELETE /api/v1/team/tokens/{prefix}":              resTeamToken,
 	"PUT /api/v1/team/tokens/{prefix}/git-credentials": resTeamToken,
 
 	"GET /api/v1/tokens":                   resNone,
 	"POST /api/v1/tokens":                  resNone,
-	"DELETE /api/v1/tokens/{prefix}":       resToken,
-	"GET /api/v1/tokens/{prefix}":          resToken,
+	"GET /api/v1/tokens/{token}":           resToken,
 	"POST /api/v1/tokens/{prefix}/metered": resToken,
 	"POST /api/v1/tokens/{prefix}/rotate":  resToken,
 

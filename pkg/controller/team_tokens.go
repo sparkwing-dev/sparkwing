@@ -169,37 +169,3 @@ func (s *Server) handleListTeamTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, out)
 }
-
-func (s *Server) handleRevokeTeamToken(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleReader)
-	if !ok {
-		return
-	}
-	prefix := r.PathValue("prefix")
-	now := time.Now()
-	tok, err := t.TeamToken(r.Context(), prefix)
-	if err != nil {
-		writeIdentityError(w, s, r, "revoke team token", err)
-		return
-	}
-	own := tok.CreatedBy == p.AccountID
-	machine := tok.Family() == store.TokenFamilyMachine
-	// safety: a token the caller could not list answers as no token, so a prefix probe learns nothing.
-	if !tok.IsValid(now) || (!own && !(machine && store.Role(p.Role).AtLeast(store.RoleEditor))) {
-		writeError(w, http.StatusNotFound, store.ErrNotFound)
-		return
-	}
-	if !own && !p.HasScope(ScopeTeamAdmin) {
-		writeAuthError(w, http.StatusForbidden, authErrorBody{
-			Code: "forbidden", Principal: p.label(),
-			Message: "an editor revokes only the machine tokens they minted",
-		})
-		return
-	}
-	if err := t.RevokeTeamToken(r.Context(), prefix, now); err != nil {
-		writeIdentityError(w, s, r, "revoke team token", err)
-		return
-	}
-	s.auth.Invalidate(prefix)
-	w.WriteHeader(http.StatusNoContent)
-}

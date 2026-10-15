@@ -58,62 +58,6 @@ func (f *revocationFixture) do(t *testing.T, method, path, token, body string) *
 	return resp
 }
 
-func (f *revocationFixture) whoamiStatus(t *testing.T, token string) int {
-	t.Helper()
-	resp := f.do(t, http.MethodGet, "/api/v1/auth/whoami", token, "")
-	defer func() { _ = resp.Body.Close() }()
-	return resp.StatusCode
-}
-
-func TestRevokeToken_TakesEffectOnTheSameReplica(t *testing.T) {
-	f := newRevocationFixture(t)
-	raw, tok, err := f.store.CreateToken("victim", store.TokenKindUser, []string{ScopeRunsRead}, 0, time.Now().UTC())
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-	if got := f.whoamiStatus(t, raw); got != http.StatusOK {
-		t.Fatalf("whoami before revoke = %d, want 200", got)
-	}
-
-	resp := f.do(t, http.MethodDelete, "/api/v1/tokens/"+tok.Prefix, f.admin, "")
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("revoke = %d, want 204", resp.StatusCode)
-	}
-	if got := f.whoamiStatus(t, raw); got != http.StatusUnauthorized {
-		t.Fatalf("whoami after revoke = %d, want 401", got)
-	}
-}
-
-func TestRotateThenRevoke_CutsTheGraceWindowShort(t *testing.T) {
-	f := newRevocationFixture(t)
-	raw, tok, err := f.store.CreateToken("pool", store.TokenKindRunner, []string{ScopeNodesClaim}, 0, time.Now().UTC())
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-	if got := f.whoamiStatus(t, raw); got != http.StatusOK {
-		t.Fatalf("whoami before rotate = %d, want 200", got)
-	}
-
-	resp := f.do(t, http.MethodPost, "/api/v1/tokens/"+tok.Prefix+"/rotate", f.admin, `{"grace_secs":86400}`)
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("rotate = %d, want 200", resp.StatusCode)
-	}
-	if got := f.whoamiStatus(t, raw); got != http.StatusOK {
-		t.Fatalf("whoami during grace = %d, want 200", got)
-	}
-
-	resp = f.do(t, http.MethodDelete, "/api/v1/tokens/"+tok.Prefix, f.admin, "")
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("revoke during grace = %d, want 204", resp.StatusCode)
-	}
-	if got := f.whoamiStatus(t, raw); got != http.StatusUnauthorized {
-		t.Fatalf("whoami after early revoke = %d, want 401", got)
-	}
-}
-
 func TestRotateToken_GraceCapRejected(t *testing.T) {
 	f := newRevocationFixture(t)
 	_, tok, err := f.store.CreateToken("pool", store.TokenKindRunner, []string{ScopeNodesClaim}, 0, time.Now().UTC())
@@ -162,44 +106,6 @@ func TestRotateToken_GraceAtCapAccepted(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("rotate at the cap = %d, want 200", resp.StatusCode)
-	}
-}
-
-func TestRevokeToken_EndsTheDashboardSessionsItOpened(t *testing.T) {
-	f := newRevocationFixture(t)
-	now := time.Now().UTC()
-	_, tok, err := f.store.CreateToken("operator", store.TokenKindUser, []string{ScopeAdmin}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-	rawSession, _, err := f.store.CreateTokenSession(t.Context(), tok.Prefix, tok.Principal, tok.Team, time.Hour, now)
-	if err != nil {
-		t.Fatalf("CreateTokenSession: %v", err)
-	}
-	sessionStatus := func() int {
-		t.Helper()
-		req, err := http.NewRequest(http.MethodGet, f.base+"/api/v1/auth/session", nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.Header.Set("Authorization", "Session "+rawSession)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = resp.Body.Close()
-		return resp.StatusCode
-	}
-	if got := sessionStatus(); got != http.StatusOK {
-		t.Fatalf("session before revoke = %d, want 200", got)
-	}
-	resp := f.do(t, http.MethodDelete, "/api/v1/tokens/"+tok.Prefix, f.admin, "")
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("revoke = %d, want 204", resp.StatusCode)
-	}
-	if got := sessionStatus(); got != http.StatusUnauthorized {
-		t.Fatalf("session after its token was revoked = %d, want 401", got)
 	}
 }
 
@@ -295,56 +201,5 @@ func TestAuthenticate_InvalidateDuringLookupIsNotOverwritten(t *testing.T) {
 	}
 	if _, err := a.Authenticate(raw); err == nil {
 		t.Fatalf("a token revoked mid-lookup still authenticates from the cache")
-	}
-}
-
-func TestDeadTokenRefusalNamesItsStateAndAnHour(t *testing.T) {
-	f := newRevocationFixture(t)
-	now := time.Now().UTC()
-	revoked, tok, err := f.store.CreateToken("gone", store.TokenKindRunner, []string{ScopeNodesClaim}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-	resp := f.do(t, http.MethodDelete, "/api/v1/tokens/"+tok.Prefix, f.admin, "")
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("revoke = %d, want 204", resp.StatusCode)
-	}
-	expired, _, err := f.store.CreateToken("lapsed", store.TokenKindRunner, []string{ScopeNodesClaim}, time.Minute, now.Add(-time.Hour))
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-
-	cases := []struct {
-		name       string
-		token      string
-		state      string
-		retryAfter string
-	}{
-		{"revoked", revoked, "revoked", "3600"},
-		{"expired", expired, "expired", "3600"},
-		{"unknown", "swr_nosuchtk_" + strings.Repeat("x", 32), "", ""},
-		{"malformed", "garbage", "", ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			resp := f.do(t, http.MethodGet, "/api/v1/auth/whoami", tc.token, "")
-			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode != http.StatusUnauthorized {
-				t.Fatalf("status = %d, want 401", resp.StatusCode)
-			}
-			var body struct {
-				TokenState string `json:"token_state"`
-			}
-			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-				t.Fatalf("decode: %v", err)
-			}
-			if body.TokenState != tc.state {
-				t.Fatalf("token_state = %q, want %q", body.TokenState, tc.state)
-			}
-			if got := resp.Header.Get("Retry-After"); got != tc.retryAfter {
-				t.Fatalf("Retry-After = %q, want %q", got, tc.retryAfter)
-			}
-		})
 	}
 }

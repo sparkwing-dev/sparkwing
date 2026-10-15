@@ -711,3 +711,18 @@ its mutations require CSRF proof. Quota selectors name the team.
 `GET /api/v1/operator/object-store`. The former compute-limits, signups,
 object-store and storage-settings paths are removed, along with
 `GET /api/v1/admin/usage-metrics` and the repo-dispatch mutation route.
+
+## Credential revocation
+
+Use `DELETE /api/v1/tokens/{token}` for a team capability. The old
+`DELETE /api/v1/team/tokens/{prefix}` path is removed. Deployment token
+revocation moves to `DELETE /api/v1/operator/tokens/{token}` and requires
+`operator.tokens` or an operator console session. The Go admin client's
+`RevokeToken` uses the deployment path.
+
+Member updates use `/api/v1/team/members/{account}`. PATCH accepts a JSON object
+with `role` set to `reader`, `editor` or `owner`. DELETE removes the membership.
+Browser mutations require CSRF proof. Last-owner refusals use the shared
+`conflict` error with HTTP 409. Dead credentials use `unauthenticated` with
+HTTP 401. The old token-state response fields and one-hour retry hint do not
+apply to these routes.

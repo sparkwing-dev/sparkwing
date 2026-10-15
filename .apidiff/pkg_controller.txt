@@ -27,6 +27,9 @@ func (a *Authenticator) Authenticate(raw string) (*Principal, error)
 func (a *Authenticator) Invalidate(prefix string)
 func (a *Authenticator) Middleware(next http.Handler) http.Handler
 func (a *Authenticator) WithLogger(l *slog.Logger) *Authenticator
+type AuthorityRevoker interface {
+	RevokeAuthority(context.Context, store.Actor, capability.AuthorityRef) error
+}
 const BalanceCapCode = "balance_cap"
 const BootstrapAdminPrincipal = "bootstrap:admin"
 type BoundCipher interface {
@@ -117,6 +120,8 @@ type EngineController struct {
 	ResolveTenant func(context.Context, store.Team) (RunTransactions, error)
 
 	ResolveRunTeam func(context.Context, string) (store.Team, error)
+
+	ResolveOperator func(context.Context) (AuthorityRevoker, error)
 }
 func (s *EngineController) AcceptExpansion(ctx context.Context, authorized capability.Authorized, body controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error)
 func (s *EngineController) AcceptPlan(ctx context.Context, a capability.Authorized, body controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error)
@@ -294,6 +299,9 @@ type RouteAuthorization struct {
 	CheckCSRF     func(*http.Request, capability.Principal) error
 }
 type RunTransactions interface {
+	AuthorityRevoker
+	UpdateMembership(context.Context, store.Actor, store.MembershipUpdate) error
+	Members(context.Context) ([]store.Membership, error)
 	AdmitRun(context.Context, store.IntakeRequest) (store.AdmissionResult, error)
 	ReadRun(context.Context, string) (store.RunRow, error)
 	ReadNode(context.Context, store.NodeRef) (store.NodeRow, error)

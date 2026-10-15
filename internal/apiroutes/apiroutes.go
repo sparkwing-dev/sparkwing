@@ -84,6 +84,7 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 	for _, group := range []struct{ registration, file string }{
 		{"s.registerOperatorRoutes(router)", "operator_routes.go"},
 		{"s.registerEngineRoutes(router)", "engine_routes.go"},
+		{"s.registerAuthorityRoutes(router)", "authority_routes.go"},
 	} {
 		if !strings.Contains(string(data), group.registration) {
 			continue
