@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -286,11 +287,15 @@ func runPipelineDescribe(args []string) error {
 func describePipelineSecrets(name, format string) error {
 	var secrets pipelines.SecretsField
 	err := withPipelineEntry(name, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
+		identity, err := pipelineIdentityAt(filepath.Join(dir, ".sparkwing"), name)
+		if err != nil {
+			return err
+		}
 		doc, err := repos.Describe(ctx, entry, dir)
 		if err != nil {
 			return err
 		}
-		schema, err := findPipelineSchema(doc.Pipelines, name)
+		schema, err := boundPipelineSchema(doc.Pipelines, identity)
 		secrets = schema.Secrets
 		return err
 	})
@@ -341,7 +346,6 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 		}
 	}
 	var out []Pipeline
-	seen := map[string]struct{}{}
 	if cfg != nil {
 		for _, p := range cfg.Registry().Pipelines {
 			if p.Hidden && !includeHidden {
@@ -353,7 +357,7 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				PinnedProfile: p.Profile,
 				Triggers:      summarizeTriggerList(p.On),
 			}
-			if dp, ok := describeByName[p.Name]; ok {
+			if dp, ok := describeByName[p.Entrypoint]; ok {
 				a.Short = dp.Short
 				a.Help = dp.Help
 				a.Args = dp.Args
@@ -363,7 +367,6 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				a.RisksBySteps = dp.RisksBySteps
 				a.Secrets = dp.Secrets
 			}
-			seen[p.Name] = struct{}{}
 			out = append(out, a)
 		}
 	}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"sort"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -13,38 +12,18 @@ type stepRiskFinding struct {
 	Labels []string
 }
 
-// safety: a step declares its risk labels in Go, so they are legible only from
-// a build of the pipeline; the caller builds one before asking.
-func declaredRisks(ctx context.Context, sparkwingDir, pipelineName string) []stepRiskFinding {
-	schemas, err := readDescribeCache(ctx, sparkwingDir)
-	if err != nil || schemas == nil {
-		return nil
-	}
-	return risksIn(schemas, pipelineName)
-}
-
-func risksIn(schemas []sparkwing.DescribePipeline, pipelineName string) []stepRiskFinding {
-	for _, s := range schemas {
-		if s.Name != pipelineName {
+func risksIn(schema sparkwing.DescribePipeline) []stepRiskFinding {
+	var out []stepRiskFinding
+	for _, row := range schema.RisksBySteps {
+		if len(row.Labels) == 0 {
 			continue
 		}
-		var out []stepRiskFinding
-		for _, row := range s.RisksBySteps {
-			if len(row.Labels) == 0 {
-				continue
-			}
-			out = append(out, stepRiskFinding{
-				NodeID: row.NodeID,
-				StepID: row.StepID,
-				Labels: row.Labels,
-			})
-		}
-		if len(out) == 0 && len(s.Risks) > 0 {
-			out = append(out, stepRiskFinding{Labels: s.Risks})
-		}
-		return out
+		out = append(out, stepRiskFinding{NodeID: row.NodeID, StepID: row.StepID, Labels: row.Labels})
 	}
-	return nil
+	if len(out) == 0 && len(schema.Risks) > 0 {
+		out = append(out, stepRiskFinding{Labels: schema.Risks})
+	}
+	return out
 }
 
 func enforceRiskGate(

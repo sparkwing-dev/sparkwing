@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **pipeline aliases:** local argument parsing, help, completion and catalog metadata use the configured SDK entrypoint while keeping the invoked pipeline name. Aliases retain the entrypoint's secret classifications and risk declarations.
+
 - **cli rewrite:** here retries retain their one-time bearer in a private controller/run-bound file. `pipeline trigger --resume` resolves the existing run and passes its awarded seals to the shared host. Incomplete handoffs exit 3 without claiming native execution. Native host construction and initial trigger intake remain integration requirements.
 
 ### Added

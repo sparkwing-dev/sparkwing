@@ -288,6 +288,15 @@ are NDJSON and diagnostics use the C2 error object on stderr.
 `__complete --word` accepts an empty value to select root completions. Shell
 completion requests use `--kind` and `--word`, with explicit plain output.
 
+`clisurface.ResolvePipeline` captures the invoked name and registered SDK
+entrypoint from validated project configuration. An unconfigured pipeline uses
+the same name for both. A configured entrypoint that is missing from describe
+cannot fall back to an SDK registration named after the alias. Help, completion,
+arguments, secrets and risks all use the selected entrypoint's schema while
+displaying the invoked name. Hosts carry the pair into the sealed source and
+resolved entrypoint. Protocol v2 plan requests select the entrypoint in
+`Request.Pipeline` and retain the invoked name in `RunContext.Pipeline`.
+
 - `run` is local. `--publish P` uploads the record/results/logs with local
   provenance under trust_local_builds; publication failure cannot fail the run.
   `--sw-cache-from P` or run.cache_from reads only authorized verified-default-
@@ -604,6 +613,8 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`CommonRules`](../../../internal/clisurface/contract.go#L96) | CommonRules fixes shared meanings so a new command cannot reinterpret a flag. |
 | [`Validate`](../../../internal/clisurface/contract.go#L117) | Validate catches grammar drift before a parser or help generator consumes it. |
 | [`Registry`](../../../internal/clisurface/registry.go#L4) | the final tree is independent of runtime dispatch so help and parsers share one contract. |
+| [`PipelineIdentity`](../../../internal/clisurface/pipeline.go) | Captures the invoked name separately from the registered SDK entrypoint. |
+| [`ResolvePipeline`](../../../internal/clisurface/pipeline.go) | Resolves the configured pair without process globals or later configuration reads. |
 
 ### pkg/projectconfig
 

@@ -1,3 +1,129 @@
+# W9 pipeline identity continuation
+
+W9 remains incomplete. This continuation started clean at f91bb20ac. No Git
+write, Sparkwing executable, service, pipeline or installed candidate ran. Writes
+stay in this worktree and /tmp/sw-astra-W9, which is removed before reporting.
+
+## Implemented
+
+- Added clisurface.PipelineIdentity and ResolvePipeline as W9's shared mapping
+  from an invoked project name to its registered SDK entrypoint. The resolver
+  takes validated project configuration and captures string values without
+  process globals. Unconfigured pipelines keep the same name for both fields.
+- Local argument parsing, help, pipeline catalog metadata, flag completion,
+  pipeline completion, describe-secrets selection and inspection parsing select
+  the entrypoint schema. Their public names and argument diagnostics retain the
+  invoked alias. Multiple aliases can share an entrypoint. Missing entrypoints
+  cannot fall back to an unrelated registration named after the alias.
+- Removed the foreground risk gate's second describe/cache lookup. It consumes
+  the schema already selected for argument parsing. Detached risk checking uses
+  the same binding rule and rejects a missing entrypoint. The regression first
+  reproduced an alias bypassing the entrypoint's prod risk declaration.
+- Source-revision inspection binds acquired SDK code to the invoking checkout's
+  project declarations. Invalid binding configuration fails before describing
+  pipeline code. Config errors do not echo the invalid value.
+- Corrected the pipeline registry guide's name/entrypoint explanation, stale
+  project-profile and guard prose, removed its webhook declaration example and
+  synchronized its embedded mirror and the changelog.
+
+The security invariant is that flags, secret classifications and risks for a
+configured pipeline come from its selected entrypoint even when another SDK
+registration has the alias's name. FuzzPipelineAliasMetadataIsolation generates
+alias/entrypoint collisions in both schema orders and checks secret classification
+and risk refusal. It passed 1,352 executions with two workers over three seconds.
+
+Mechanism added: one pure shared identity resolver because replacing only the
+help name would leave argument, completion and risk readers selecting different
+registrations. Undo is to revert the resolver and its consumers together. No
+public flag, environment variable, service, grant, timeout or restriction was added.
+
+## Tests and deletion
+
+Added eight test functions and one fuzz target. TestSurfacePipelineIdentityContract
+passes in tests/acceptance for local/trigger grammar, shared entrypoints, captured
+identity, unconfigured pipelines and invalid configuration. CLI tests cover
+required pipeline/job flags, alias help/errors, catalog metadata, completion,
+risk refusal, missing entrypoints, invalid config and source-revision binding.
+SDK-shaped subprocess fakes establish inspection behavior only. They still use
+the retained legacy session and do not establish v2 or matched-engine execution.
+No native T1 cell was unskipped. No inventory function was assigned directly to
+W9, and no additional T1 inventory port is claimed.
+
+Deleted 49 gross production Go lines and eight test lines. This removes
+declaredRisks, alias-name schema selection at the migrated call sites, the
+foreground fail-open cache lookup and its DegradesGracefully test. No whole
+legacy hosting file was retired. The native hosting hard cut remains unfinished.
+
+All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W9. Tests used -p 4 or lower.
+Passing evidence on final Go source:
+
+- Whole-repository `go build -p 4 ./...`.
+- Focused go vet over cmd/sparkwing, clisurface, controllerwire,
+  controller/client, pkg/docs and tests/acceptance.
+- Full clisurface, controllerwire, doccheck and tests/acceptance packages.
+- CLI alias, risk, describe-cache, source-binding, argument, help, plan-inspection,
+  registry, discovery, command-reference and shipped-prose selections.
+- All 61 pkg/docs tests outside the TestWebClient family.
+- FuzzPipelineAliasMetadataIsolation, commentcheck -base HEAD, sleepcheck
+  -base HEAD, sync-docs --check and git diff --check.
+
+The retained TestPersistSubmissionRefusesDeclaredRiskBeforeQueuing fails with
+no such column: pipeline. The same test fails with the same error using an
+overlay restoring HEAD's CLI source and excluding this continuation's tests.
+It reaches legacy store reads after the risk refusal. This is not claimed as
+a passing detached-submission integration test.
+
+The first full pkg/docs run reaches a native httptest listener and is refused
+by the sandbox. The 61-test selection excludes the TestWebClient family and
+passes. The required whole-tree commentcheck -base main still reports the two
+incoming W1 comments in pkg/store/state_materialize.go:15 and
+pkg/store/state_result_records.go:9. This continuation's diff is comment-clean.
+
+## Remaining handoffs and amendments
+
+Handoff finding 7's W9 metadata/argument half is implemented. Its final execution
+half remains open: Request.Pipeline must select the entrypoint and
+RunContext.Pipeline must carry the alias through real SDK planning and author
+code. W9's retained inspection session is repos.Session, whose Call accepts
+RequestOld; nodehost.Session also accepts RequestOld. W3/W4 must provide the
+shared v2 describe/plan session boundary with verified engine/runner hello.
+Do not add a second CLI protocol implementation or an old/new request adapter.
+ResolvePipeline is available for the shared host's constructor.
+
+Handoff finding 3 and A1-19 still need W3/W8's execution-input constructor and
+native hello tests. W9's already implemented wire preserves the granted runner
+and selected engine, but that is not constructor evidence.
+
+The earlier amendment action ledger remains in force. No completed transport,
+installer, profile, queue, enrollment or schema work was redone. Remaining W9
+composition covers A1-10/11, A1-29/30/34, A1-39/40/41, A1-43,
+A1-45/47/49/50/51/52/53 and A1-55: local/here/detached hosting, source intake,
+read-only cache/publication, native lifecycle and managed schedules, runner
+startup, selected-engine execution, Windows packaging and native acceptance.
+The other rows retain their existing W9 component evidence and owner integration
+requirements. Initial here intake still needs the W6/W1/W2 sealed reason/audit
+proposal. Working-tree intake still needs W1/W2/W7's authorized source-bundle
+handoff. No foreign frozen interface changed.
+
+Local W9 contract addition: PipelineIdentity/ResolvePipeline and the pair's
+semantics are recorded in c4-surface-config.md. No new human decision is requested.
+
+## Shared files and friction
+
+No production file outside W9 ownership changed, so no cross-package production
+caller migration was needed. Shared files touched are CHANGELOG.md,
+pkg/docs/changelog.md, pkg/docs/mirror/pipelines.md,
+tests/acceptance/pipeline_identity_contract_test.go,
+design/rewrite/contracts/c4-surface-config.md and this handoff.
+
+Friction: native sockets are unavailable, the legacy detached-store test is
+incompatible with the merged schema, the v2 inspection session is absent, and
+the two incoming W1 comments fail whole-tree commentcheck. Standards discovery
+works despite its stale installed-version notice. Git identity remains Korey's
+default and local core.worktree is unset. The lead owns review, commits,
+pipelines, landing and native launch QA.
+
 # W9 Go preparation continuation
 
 W9 remains incomplete. This continuation started clean at 7d6e534c2. The

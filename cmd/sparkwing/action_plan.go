@@ -145,12 +145,16 @@ type planned struct {
 // protocol cannot seal, so plan reports it as decided at run time instead.
 func planOverProtocol(ctx context.Context, entry pipelineentry.Command, dir, pipeline string, args []string, runID string) (planned, error) {
 	out := planned{pipeline: pipeline}
-	err := repos.Converse(ctx, entry, dir, func(s *repos.Session) error {
+	identity, err := pipelineIdentityAt(filepath.Join(dir, ".sparkwing"), pipeline)
+	if err != nil {
+		return out, err
+	}
+	err = repos.Converse(ctx, entry, dir, func(s *repos.Session) error {
 		described, err := s.Describe()
 		if err != nil {
 			return err
 		}
-		schema, err := findPipelineSchema(described.Pipelines, pipeline)
+		schema, err := boundPipelineSchema(described.Pipelines, identity)
 		if err != nil {
 			return err
 		}

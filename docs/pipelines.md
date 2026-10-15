@@ -40,18 +40,24 @@ pipelines:
 Each entry has (these are the only valid keys; an unknown field is a
 hard parse error):
 
-- **name** - the pipeline name (`sparkwing run build-deploy`); must equal the `Register("name", ...)` string and match `^[A-Za-z0-9][A-Za-z0-9._-]*$`
-- **entrypoint** - the Go pipeline struct type implementing it (required); equals the struct name
+- **name** - the invoked pipeline name (`sparkwing run build-deploy`), matching `^[A-Za-z0-9][A-Za-z0-9._-]*$`
+- **entrypoint** - the registered SDK entrypoint implementing it (required). Several pipeline names can select the same entrypoint.
 - **description** - one-line summary surfaced by `sparkwing pipeline list`
-- **on** - declarative trigger block: `push` (branches/paths), `pull_request` (actions/branches), `schedule` (one entry, or a list of them, each with `name`, `cron`, a required `where`, `tz`, `overlap`, `catch_up`, `args`), `webhook`, `pre_commit`, `pre_push`, `post_commit`. Absent means "manual only" (a command).
-- **guards** - gate dispatch on profile, args, and git branch (`reject` / `require` token lists)
+- **on** - declarative trigger block: `push` (branches/paths), `pull_request` (actions/branches), `schedule` (one entry, or a list of them, each with `name`, `cron`, a required `where`, `tz`, `overlap`, `catch_up`, `args`), `pre_commit`, `pre_push`, `post_commit`. Absent means "manual only" (a command).
+- **guards** - gate dispatch on placement, args and git branch (`when` / `unless` token lists)
 - **args** - per-arg default values, keyed by CLI flag name
-- **profile** - the project profile this pipeline uses (from the `profiles:` map)
-- **requires** - runner-label requirements for every job (e.g. `[local]` pins execution to this machine)
+- **profile** - the named controller connection in the machine config. A pinned pipeline runs through `pipeline trigger --profile`.
+- **requires** - runner-label requirements inherited by every job
+- **prefers** - soft runner-label preferences
+- **source** - the revision supplying pipeline code
 - **hidden** - omit from `pipeline list` (still invocable by exact name)
 
 For the complete schema -- every top-level key, pipeline field, and
 trigger field with types -- see the generated [config-reference.md](config-reference.md).
+
+For `name: deploy-prod` with `entrypoint: Deploy`, use `deploy-prod` in commands.
+Help, flag completion, secrets and risk declarations come from `Deploy`.
+Help and argument errors keep the invoked name.
 
 ## Triggers
 
@@ -75,13 +81,6 @@ pipelines:
       pull_request:
         branches: [main]                 # declarative: records intent, not gated on
 
-  # Declarative path: recorded, not routed
-  - name: review
-    entrypoint: Review
-    on:
-      webhook:
-        path: /review
-
   # Cron in UTC. `where` is required: `local` fires from a host once
   # armed there; until then invoke it with `sparkwing run nightly`
   - name: nightly
@@ -95,7 +94,7 @@ pipelines:
 `branches` / `paths` / `actions` record intent: the controller does not
 read your `sparkwing.yaml`, so it dispatches the pipelines a team
 subscribed to the repository through the [GitHub App](github-app.md). To require a checked-out branch before any step runs,
-add `guards: {require: [git:branch=main]}` with its literal name. For pull
+add `guards: {when: [git:branch=main]}` with its literal name. For pull
 requests this compares the head branch, not the base branch.
 `git:branch=default` matches the repository's default branch, which a
 GitHub App trigger records and any other run reads from its checkout; a run

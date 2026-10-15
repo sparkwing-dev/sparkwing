@@ -3,10 +3,13 @@ package main
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -23,6 +26,10 @@ func (r *pipelineRun) describedPipeline(pipelineName string) (sparkwing.Describe
 			schemas = readDescribeFile(describeCachePath(key))
 		}
 	}
+	identity, err := pipelineIdentityAt(bindDir, pipelineName)
+	if err != nil {
+		return sparkwing.DescribePipeline{}, err
+	}
 	if schemas == nil {
 		doc, err := describeEntry(r.ctx, bindDir, r.entry)
 		if err != nil {
@@ -30,7 +37,24 @@ func (r *pipelineRun) describedPipeline(pipelineName string) (sparkwing.Describe
 		}
 		schemas = doc.Pipelines
 	}
-	return findPipelineSchema(schemas, pipelineName)
+	return boundPipelineSchema(schemas, identity)
+}
+
+func pipelineIdentityAt(dir, name string) (clisurface.PipelineIdentity, error) {
+	cfg, err := projectconfig.Load(filepath.Join(dir, projectconfig.Filename))
+	if err != nil {
+		return clisurface.PipelineIdentity{}, err
+	}
+	return clisurface.ResolvePipeline(cfg, name)
+}
+
+func boundPipelineSchema(schemas []sparkwing.DescribePipeline, identity clisurface.PipelineIdentity) (sparkwing.DescribePipeline, error) {
+	schema, err := findPipelineSchema(schemas, identity.Entrypoint)
+	if err != nil {
+		return schema, fmt.Errorf("pipeline %q: %w", identity.Name, err)
+	}
+	schema.Name = identity.Name
+	return schema, nil
 }
 
 func findPipelineSchema(schemas []sparkwing.DescribePipeline, pipelineName string) (sparkwing.DescribePipeline, error) {

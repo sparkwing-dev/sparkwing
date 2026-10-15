@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -655,6 +654,10 @@ type riskGate struct {
 
 func (g riskGate) check(execDir, pinnedBinary string) error {
 	sparkwingDir := filepath.Join(execDir, ".sparkwing")
+	identity, err := pipelineIdentityAt(sparkwingDir, g.Pipeline)
+	if err != nil {
+		return err
+	}
 	declared := g.Declared
 	switch {
 	case pinnedBinary != "":
@@ -670,10 +673,11 @@ func (g riskGate) check(execDir, pinnedBinary string) error {
 			return fmt.Errorf("%s: read what %s declares: %w", g.Surface, g.Pipeline, err)
 		}
 	}
-	if !slices.ContainsFunc(declared, func(p sparkwing.DescribePipeline) bool { return p.Name == g.Pipeline }) {
-		return fmt.Errorf("%s: no selected source declares a pipeline named %q", g.Surface, g.Pipeline)
+	schema, err := boundPipelineSchema(declared, identity)
+	if err != nil {
+		return fmt.Errorf("%s: %w", g.Surface, err)
 	}
-	if err := enforceRiskGate(g.Pipeline, risksIn(declared, g.Pipeline), g.Flags); err != nil {
+	if err := enforceRiskGate(g.Pipeline, risksIn(schema), g.Flags); err != nil {
 		return fmt.Errorf("%s: %w\n"+
 			"A queued run carries neither an allow nor a dry run, so a pipeline that declares a risk "+
 			"runs in the foreground",
