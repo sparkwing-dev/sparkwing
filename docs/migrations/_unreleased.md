@@ -51,6 +51,11 @@ its independent repair path.
 and a batch limit to `Store.ReapUnits`. Results identify the team, run and unit.
 Lease loss requeues unfinished remote work within the same run. Started local
 owners fail in place. Unstarted owners consume no execution attempt or disruption.
+`Store.RequeueUnstartedClaim` and `Tenant.RequeueUnstartedClaim` are removed.
+Expired owner awards use the same leased pass. An unstarted owner requeues
+without a disruption, and a replacement award advances its generation.
+The former holder cannot renew, finish or accept a plan for the replacement.
+
 ## Build trust uses tenant handles
 
 `Store.TrustLocalBuilds` and `Store.SetTrustLocalBuilds` are removed. Obtain a

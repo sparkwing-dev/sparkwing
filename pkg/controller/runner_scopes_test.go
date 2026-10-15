@@ -1273,68 +1273,6 @@ func TestRunnerScopes_PinRefusesAnUnboundedFigure(t *testing.T) {
 	}
 }
 
-// A trigger returned to the queue carries no claimant, so the principal
-// that held it before cannot ride a later in-process claim.
-func TestRunnerScopes_AReleasedTriggerDropsItsClaimant(t *testing.T) {
-	f, raw := newScopedFixture(t, runnerScopes)
-	ctx := context.Background()
-	c := client.NewWithToken(f.url, nil, raw)
-
-	seedRepoTrigger(t, f.store, "run-1", "acme/web")
-	if _, err := c.ClaimSpecificTrigger(ctx, "run-1", time.Minute); err != nil {
-		t.Fatalf("ClaimSpecificTrigger: %v", err)
-	}
-	if _, err := f.store.RequeueUnstartedClaim(ctx, "run-1"); err != nil {
-		t.Fatalf("RequeueUnstartedClaim: %v", err)
-	}
-
-	var principal, prefix string
-	if err := f.store.DB().QueryRowContext(ctx,
-		`SELECT claim_principal, claim_token_prefix FROM triggers WHERE id = ?`, "run-1",
-	).Scan(&principal, &prefix); err != nil {
-		t.Fatalf("read the released row: %v", err)
-	}
-	if principal != "" || prefix != "" {
-		t.Errorf("released trigger still names %q/%q as its claimant", principal, prefix)
-	}
-
-	if _, err := f.store.ClaimSpecificTrigger(ctx, "run-1", time.Minute); err != nil {
-		t.Fatalf("in-process re-claim: %v", err)
-	}
-	if err := f.store.CreateRun(ctx, store.Run{
-		ID: "run-1", Pipeline: "deploy", Status: "running", StartedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-	if err := f.store.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-
-	for _, tc := range []struct {
-		name string
-		call func() error
-	}{
-		{"read the trigger", func() error { _, err := c.GetTrigger(ctx, "run-1"); return err }},
-		{"create a node on the live run", func() error {
-			return c.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "intruder", Status: "pending"})
-		}},
-		{"finish the live run", func() error { return c.FinishRun(ctx, "run-1", "failed", "") }},
-		{"record contention against its pipeline", func() error { return c.RecordContention(ctx, "deploy") }},
-	} {
-		if err := tc.call(); err == nil {
-			t.Errorf("the released principal could still %s", tc.name)
-		}
-	}
-
-	run, err := f.store.GetRun(ctx, "run-1")
-	if err != nil {
-		t.Fatalf("GetRun: %v", err)
-	}
-	if run.Status != "running" {
-		t.Errorf("run status = %q, want running: a principal holding nothing finished it", run.Status)
-	}
-}
-
 // An admin token skips the claim check, and the execution-start handler finds
 // a trigger-owned attempt only through the fence that check would attach, so
 // an admin runner's every node answered 400 until the fence survived.

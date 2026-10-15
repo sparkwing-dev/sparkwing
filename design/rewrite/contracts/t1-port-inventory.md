@@ -19,6 +19,26 @@ pending. This adds no archived source-function port identity.
 
 # Acceptance test port inventory
 
+The raw `RequeueUnstartedClaim` suite and its controller/orchestrator callers are
+retired. `TestOwnerUnstartedRecoveryFencesPriorAwardsProperty` varies initial
+generations, pending/running runs, runner/launcher owners and repeated recovery.
+It retains claimant clearing, no execution/disruption consumption, no repeated
+refund, stale renewal/release/finish refusal and terminal absorption. Existing
+owner-reaper and cancellation tests retain started-local failure, remote recovery,
+cancellation precedence, team scope and the elected fence. The impossible
+trigger-without-run fixture is removed because final owner rows require a run.
+C2's at-award compute keeps its charge. Unstarted pod reservations refund.
+The old metered tests that refunded already-started host compute are removed
+with their raw API. The final unit-billing suite retains immutable prices,
+settlement and generation-specific reservations.
+
+`recovery-unstarted-lapse/store-sqlite` now also uses real intake and claiming
+for a trigger owner. It proves three unstarted requeues and reclaims through
+SQLite reopening, stable intake identity, stale plan/renewal refusal and final
+plan acceptance by the replacement. Intake and enrollment remain contract fakes.
+The removed legacy HTTP tests do not count as final HTTP integration evidence.
+No additional archived source-function identity is claimed closed by this port.
+
 `TestPlacement/placement-ordered-matching/store-sqlite` adds final-store evidence
 for scoped trigger order, job requirements and soft preferences. The claim queue
 property generates 32 selectors and checks that failed polls change no row or

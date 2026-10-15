@@ -2,7 +2,6 @@ package controller_test
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -158,27 +157,5 @@ func TestTriggerClaim_UnclaimedTriggerAnswersNotFound(t *testing.T) {
 	}
 	if trig.Status != "pending" {
 		t.Errorf("unclaimed trigger status=%q, want pending", trig.Status)
-	}
-}
-
-// The reaped-claim contract the in-tree heartbeat loops key on: once the
-// claim is requeued, the former holder's own heartbeat is not-found, and
-// the client surfaces that as store.ErrNotFound so the loop stops the
-// child instead of retrying until its silence window terminates it.
-func TestTriggerClaim_RequeuedClaimAnswersNotFoundToItsFormerHolder(t *testing.T) {
-	f := newTriggerOwnershipFixture(t)
-	ctx := context.Background()
-
-	requeued, err := f.store.RequeueUnstartedClaim(ctx, "run-owned")
-	if err != nil || !requeued {
-		t.Fatalf("RequeueUnstartedClaim = (%v, %v), want (true, nil)", requeued, err)
-	}
-
-	if got := f.post(t, f.holder, "/api/v1/triggers/run-owned/heartbeat"); got != http.StatusNotFound {
-		t.Errorf("former holder heartbeat status=%d want 404", got)
-	}
-	if _, err := client.NewWithToken(f.url, nil, f.holder).
-		HeartbeatTrigger(ctx, "run-owned"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("client HeartbeatTrigger err=%v, want store.ErrNotFound", err)
 	}
 }

@@ -3851,37 +3851,6 @@ func (t *Tenant) FinishRunAtGeneration(ctx context.Context, runID string, seq in
 	return true, nil
 }
 
-// RequeueUnstartedClaim returns a lapsed claim to the pending queue only
-// while its run has not started -- no run row, or one still pending.
-//
-// The run-status guard is what keeps recovery from becoming duplication.
-// A run that reached `running` has a process behind it that the lease
-// alone cannot see, so requeueing it would put a second copy of live
-// work on the queue; that case belongs to the orphan reaper, which
-// judges by heartbeat. The run's status is a correlated subquery inside
-// the requeue's own WHERE rather than a read before it, which narrows
-// the window a run can start in from a round trip to a single
-// statement. It does not close it: the subquery reads that statement's
-// snapshot, so a run that commits its start afterwards is invisible
-// here, and nothing this function locks would make it visible -- the
-// consumer that starts a run does not touch the trigger row. A run with
-// no row at all reads as not started, which is also what an unclaimed
-// trigger looks like before its consumer gets that far.
-func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error) {
-	return s.defaultTenant().RequeueUnstartedClaim(ctx, id)
-}
-
-// RequeueUnstartedClaim is [Store.RequeueUnstartedClaim] confined to t's team.
-func (t *Tenant) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error) {
-	return t.endTriggerClaim(ctx, id, true,
-		`UPDATE triggers
-		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL,
-		        claim_principal = '', claim_token_prefix = ''
-		  WHERE team = ? AND id = ? AND status = ?
-		    AND COALESCE((SELECT status FROM runs WHERE runs.team = triggers.team AND runs.id = triggers.id), ?) = ?`,
-		triggerStatusPending, string(t.team), id, triggerStatusClaimed, runStatusPending, runStatusPending)
-}
-
 // ReleaseClaimAtGeneration returns a claimed trigger to the pending
 // queue, but only while seq is still its current claim generation.
 //

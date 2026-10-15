@@ -242,7 +242,6 @@ func TestTenantTriggersStayInTheirTeam(t *testing.T) {
 	for name, end := range map[string]func() (bool, error){
 		"FinishTriggerAtGeneration": func() (bool, error) { return globex.FinishTriggerAtGeneration(ctx, "trig-a", 0) },
 		"ReleaseClaimAtGeneration":  func() (bool, error) { return globex.ReleaseClaimAtGeneration(ctx, "trig-a", 0) },
-		"RequeueUnstartedClaim":     func() (bool, error) { return globex.RequeueUnstartedClaim(ctx, "trig-a") },
 	} {
 		if ended, err := end(); err != nil || ended {
 			t.Errorf("globex.%s = %v, %v, want nothing ended", name, ended, err)

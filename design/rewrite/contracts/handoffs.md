@@ -147,3 +147,15 @@ claim/trigger writers and old controller fixtures still need retirement. W2's
 calculator and cancellation-reason shape, W9/W3 source-attempt transport and
 W8/W9 launcher correlation remain foreign integration points. See
 `../w1-session19-progress.md` for the cut, ports and verification.
+**Lead decision for W3: "the W4 expansion-concurrency mismatch question" is settled by c3-protocol-notes.md line 66.** A generated job's concurrency membership must match the existing plan or job definition of that group on capacity, scope and on_limit; cost may differ; a mismatch refuses the expansion with `plan_invalid` naming the field path. The host supplies existing definitions through `ExistingConcurrency`. W3 implements this in the strict raw-bytes expansion validation (handoff "W3 expansion acceptance"). If a W4 membership test accepts a mismatch on capacity, scope or on_limit, W3 corrects that test as a minimal shared-file edit and lists it. No further lead input is needed.
+
+W1's raw unstarted-requeue cut is complete. `Store.RequeueUnstartedClaim` and
+its Tenant twin are removed with every Go caller. Expired owners use the leased
+`ReapUnits` pass. Generated tests cover repeated award generations, stale
+release/renewal/finish, terminal absorption and settlement with future-dated
+ledger rows. The SQLite unstarted-lapse cell now also covers real owner intake,
+repeated requeue/reclaim, stale plan refusal and reopening. The lead's caller
+exception is used only for legacy credit-test retirement. W1b implementation
+files are unchanged. StateStoreOld, raw lifecycle/readiness and the remaining
+legacy claim/trigger writers still need retirement. See
+`../w1-session20-progress.md` for ports, shared files and evidence.

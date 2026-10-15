@@ -131,7 +131,13 @@ returns tagged `ReapedUnit` results and never creates a retry run. A local owner
 that has started fails in place after lease loss. An unstarted local owner
 requeues without consuming a disruption. Terminal owner timestamps stay recorded.
 The old dispatcher-expiry path and its application-retry accounting are removed.
-Metered recovery still needs W1b's final transactional settlement integration.
+Metered recovery uses the lifecycle settlement join. C2's production billing
+calculator remains an integration point.
+`Store.RequeueUnstartedClaim` and its Tenant twin are removed. Only the leased
+pass recovers expired owners. Unstarted owner recovery preserves intake identity,
+clears holder authority, consumes no disruption and fences every previous award.
+C2's billing start rule still determines whether compute began at award or awaits
+a qualifying pod renewal/start.
 
 `Operator.MaintainConcurrency(ctx, lease, options)` runs under that same
 `controller.reaper` fence. It locks affected capacity entries in tenant/key order,
