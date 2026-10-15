@@ -155,6 +155,13 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 				},
 			},
 			Owner: nodehost.OwnerHost{
+				Renew: func(ctx context.Context, actor store.Actor, computing bool) (store.LeaseBeat, error) {
+					beat, err := s.RenewUnit(ctx, actor.CapabilityPrefix, computing)
+					if mode == "remote_renewal" && err == nil && renewals.Add(1) == 2 {
+						close(renewed)
+					}
+					return beat, err
+				},
 				Wait: func(context.Context, store.RunSnapshot) error { return errors.New("unexpected state wait") },
 				Acquire: func(ctx context.Context, input nodehost.RunInput) (*source.Entry, error) {
 					acquired = true
@@ -200,13 +207,6 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 		}
 		services, err := bind(ctx, runners.StoreBinding{Tenant: tenant, Principal: principal})
 		services.Config.Store = tenant
-		if mode == "remote_renewal" {
-			services.Config.Store = nativeRenewalStoreW8{NativeHostStore: tenant, renew: func() {
-				if renewals.Add(1) == 2 {
-					close(renewed)
-				}
-			}}
-		}
 		return services, principal, err
 	}}
 	if mode == "remote_award" || mode == "remote_renewal" || mode == "remote_cancel" {
@@ -300,19 +300,6 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	if err != nil || run.State != store.RunSuccess || !bound || !acquired || !closed {
 		t.Fatalf("state=%s bound=%v acquired=%v closed=%v error=%v", run.State, bound, acquired, closed, err)
 	}
-}
-
-type nativeRenewalStoreW8 struct {
-	nodehost.NativeHostStore
-	renew func()
-}
-
-func (s nativeRenewalStoreW8) RenewOwner(ctx context.Context, actor store.Actor) (store.LeaseBeat, error) {
-	beat, err := s.NativeHostStore.RenewOwner(ctx, actor)
-	if err == nil {
-		s.renew()
-	}
-	return beat, err
 }
 
 func requireLocalCancellationW8(t *testing.T, err error) {

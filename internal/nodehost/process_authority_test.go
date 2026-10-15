@@ -393,8 +393,8 @@ func TestProcessAuthorityBindingChecksKeepLocalAndPersistedOwnership(t *testing.
 	sentinel := errors.New("persisted relation refused")
 	registry.deps.Bindings = processBindingFunc(func(_ context.Context, process capability.Principal, _ capability.BindingRule, target capability.Target) error {
 		calls++
-		if process.Capability.Parent == nil || *process.Capability.Parent != spec.Parent || process.Capability.Audience != capability.NodeHost || target.RunID != "run" || target.Team != "team" {
-			t.Fatal("relation checker lost the narrowed process authority")
+		if process.Authority != spec.Parent || process.Capability.Audience != capability.Controller || !reflect.DeepEqual(process.Capability.Binding, spec.Binding) || target.RunID != "run" || target.Team != "team" {
+			t.Fatal("relation checker lost the persisted parent or process target")
 		}
 		return sentinel
 	})

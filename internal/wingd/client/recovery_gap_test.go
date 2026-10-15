@@ -99,7 +99,7 @@ func TestLeaseWatchRecoversAfterLongReplacementGap(t *testing.T) {
 		reattached := make(chan struct{})
 		watchDone := make(chan error, 1)
 		go func() {
-			watchDone <- lease.watchLease(nil, func(wingwire.Cancel) { close(reattached) })
+			watchDone <- lease.WatchControl(nil, func(wingwire.Cancel) { close(reattached) })
 		}()
 		disconnectedAt := time.Now()
 		_ = oldServer.Close()
@@ -140,7 +140,7 @@ func TestReleaseCancelsLeaseRecovery(t *testing.T) {
 		cl.setConn(clientEnd)
 		lease := &Lease{cl: cl, RunID: "parent", Token: "token"}
 		watchDone := make(chan error, 1)
-		go func() { watchDone <- lease.watchLease(nil, nil) }()
+		go func() { watchDone <- lease.WatchControl(nil, nil) }()
 		_ = oldServer.Close()
 		time.Sleep(time.Second)
 		releasedAt := time.Now()

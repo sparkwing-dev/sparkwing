@@ -22,6 +22,8 @@ type ScheduleNode struct {
 	Generation      int64
 	Ready           bool
 	Claimed         bool
+	CancelRequested bool
+	CancelReason    string
 	Deps            []string
 	DepsIfPresent   []string
 	NeedsGenerated  []string
@@ -98,6 +100,14 @@ func Decide(snapshot ScheduleSnapshot) ScheduleDecision {
 		return decideGuardRefusal(nodes, snapshot.GuardRefusal)
 	}
 	var result ScheduleDecision
+	for _, node := range nodes {
+		if node.CancelRequested && node.Status != "done" {
+			result.Nodes = append(result.Nodes, NodeDecision{NodeID: node.ID, Generation: node.Generation, Kind: DecisionCancelHolder, Outcome: "cancelled", Reason: node.CancelReason})
+		}
+	}
+	if len(result.Nodes) != 0 {
+		return result
+	}
 	waiters := make(map[string][]int)
 	remaining := make([]int, len(nodes))
 	var queue []int
@@ -234,6 +244,40 @@ func scheduleDependencies(node ScheduleNode, byID map[string]int, groups map[str
 	return unique, true
 }
 
+// PlanDependencyClosure returns the selected jobs and every prerequisite used by scheduling.
+func PlanDependencyClosure(plan nodeproto.PlanDoc, selected []string) (map[string]bool, error) {
+	nodes := make([]ScheduleNode, len(plan.Jobs))
+	byID := make(map[string]int, len(nodes))
+	groups := make(map[string]ScheduleExpansion)
+	for index, job := range plan.Jobs {
+		nodes[index] = scheduleDeclaration(job)
+		byID[job.ID] = index
+		for _, generator := range job.Closures.Generate {
+			groups[generator] = ScheduleExpansion{GeneratorID: generator, SourceNodeID: job.ID}
+		}
+	}
+	keep := make(map[string]bool)
+	remaining := slices.Clone(selected)
+	for len(remaining) > 0 {
+		id := remaining[len(remaining)-1]
+		remaining = remaining[:len(remaining)-1]
+		if keep[id] {
+			continue
+		}
+		index, exists := byID[id]
+		if !exists {
+			return nil, fmt.Errorf("selected job %q is undeclared", id)
+		}
+		deps, valid := scheduleDependencies(nodes[index], byID, groups)
+		if !valid {
+			return nil, fmt.Errorf("selected job %q has undeclared dependencies", id)
+		}
+		keep[id] = true
+		remaining = append(remaining, deps...)
+	}
+	return keep, nil
+}
+
 func decideNode(node ScheduleNode, nodes []ScheduleNode, byID map[string]int, groups map[string]ScheduleExpansion) NodeDecision {
 	decision := NodeDecision{NodeID: node.ID, Generation: node.Generation}
 	for _, id := range node.NeedsGenerated {
@@ -320,6 +364,7 @@ func (snapshot RunSnapshot) Scheduling() (ScheduleSnapshot, error) {
 	}
 	projection := scheduleProjection{
 		runID:    snapshot.Run.ID,
+		finished: snapshot.Run.FinishedAt != nil,
 		result:   ScheduleSnapshot{CancelRequested: snapshot.Run.CancelRequestedAt != nil, GuardRefusal: runGuardRefusal(snapshot.Run)},
 		rows:     make(map[string]NodeRow, len(snapshot.Nodes)),
 		jobs:     make(map[string]nodeproto.JobSpec, len(snapshot.Nodes)),
@@ -356,6 +401,7 @@ func (snapshot RunSnapshot) Scheduling() (ScheduleSnapshot, error) {
 
 type scheduleProjection struct {
 	runID    string
+	finished bool
 	result   ScheduleSnapshot
 	rows     map[string]NodeRow
 	jobs     map[string]nodeproto.JobSpec
@@ -399,17 +445,15 @@ func (projection *scheduleProjection) add(job nodeproto.JobSpec) error {
 		return fmt.Errorf("job %q: %w", job.ID, err)
 	}
 	projection.jobs[job.ID] = job
-	kind := "work"
-	if job.Approval != nil {
-		kind = "approval"
-	} else if row.Status == StatusApprovalPending {
+	if job.Approval == nil && row.Status == StatusApprovalPending {
 		return fmt.Errorf("job %q waits for an undeclared approval", job.ID)
 	}
-	projection.result.Nodes = append(projection.result.Nodes, ScheduleNode{
-		ID: job.ID, Kind: kind, Status: string(row.Status), Outcome: string(row.Outcome), Generation: row.Generation,
-		Ready: row.Status == StatusPending && row.ClaimedBy == "" && row.ReadyAt != nil, Claimed: row.ClaimedBy != "", Deps: slices.Clone(job.Needs), DepsIfPresent: slices.Clone(job.NeedsIfPresent),
-		NeedsGenerated: slices.Clone(job.NeedsGenerated), OnFailureOf: job.OnFailureOf, ContinueOnError: job.ContinueOnError, Optional: job.Optional, Expansion: string(row.Expansion),
-	})
+	node := scheduleDeclaration(job)
+	node.Status, node.Outcome, node.Generation = string(row.Status), string(row.Outcome), row.Generation
+	node.Ready, node.Claimed = row.Status == StatusPending && row.ClaimedBy == "" && row.ReadyAt != nil, row.ClaimedBy != ""
+	node.CancelRequested, node.CancelReason = row.CancelRequestedAt != nil, row.CancelReason
+	node.Expansion = string(row.Expansion)
+	projection.result.Nodes = append(projection.result.Nodes, node)
 	for _, generator := range job.Closures.Generate {
 		if _, exists := projection.groups[generator]; generator == "" || exists {
 			return fmt.Errorf("empty or duplicate generator %q", generator)
@@ -418,6 +462,17 @@ func (projection *scheduleProjection) add(job nodeproto.JobSpec) error {
 		projection.result.Expansions = append(projection.result.Expansions, ScheduleExpansion{GeneratorID: generator, SourceNodeID: job.ID, State: string(row.Expansion)})
 	}
 	return nil
+}
+
+func scheduleDeclaration(job nodeproto.JobSpec) ScheduleNode {
+	kind := "work"
+	if job.Approval != nil {
+		kind = "approval"
+	}
+	return ScheduleNode{
+		ID: job.ID, Kind: kind, Deps: slices.Clone(job.Needs), DepsIfPresent: slices.Clone(job.NeedsIfPresent),
+		NeedsGenerated: slices.Clone(job.NeedsGenerated), OnFailureOf: job.OnFailureOf, ContinueOnError: job.ContinueOnError, Optional: job.Optional,
+	}
 }
 
 func (projection *scheduleProjection) expand(expansion AcceptedExpansionRow) error {
@@ -501,7 +556,7 @@ func (projection *scheduleProjection) validate() error {
 		case ExpansionFailed:
 			valid = len(job.Closures.Generate) != 0 && row.Status == StatusDone && scheduleSucceeded(string(row.Outcome))
 		case ExpansionNone:
-			valid = len(job.Closures.Generate) != 0 && (projection.result.CancelRequested || row.Status == StatusDone && !scheduleSucceeded(string(row.Outcome)))
+			valid = len(job.Closures.Generate) != 0 && (projection.result.CancelRequested || row.Status == StatusDone && (projection.finished || !scheduleSucceeded(string(row.Outcome))))
 		}
 		if !valid {
 			return fmt.Errorf("job %q has inconsistent expansion state %q", id, row.Expansion)

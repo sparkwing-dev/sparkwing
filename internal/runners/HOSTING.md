@@ -70,7 +70,7 @@ owner and claimed host own acquisition, lease renewal and joining. Services clos
 after those hosts return, including partial construction failures. Configured
 storage still needs fresh per-attempt bindings in the shared executor.
 
-`RunInputForAward` captures the request, accepted plan and granted runner for
+`nodehost.NewRunInput` captures the request, accepted plan and granted runner for
 remote and embedded hosting. The execution run ID can differ from the
 original request seal on retry. `ValidateAwardIdentity` checks that relationship
 for hosting, launcher claim and bootstrap exchange. The accepted request must

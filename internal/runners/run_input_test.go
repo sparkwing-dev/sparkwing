@@ -27,7 +27,7 @@ func (e sourceRefusalExecutor) Execute(context.Context, nodehost.NodeInput) erro
 
 func TestClaimedRunnerRefusesAwardWithoutSourceBeforeAcquisition(t *testing.T) {
 	unit, principal, state := hostingStateFor(t, capability.UnitNode)
-	input, err := RunInputForAward(unit)
+	input, err := nodehost.NewRunInput(unit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestNativeInputsUsePersistedAuthority(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
 			unit, p, state := hostingStateFor(t, kind)
-			input, err := RunInputForAward(unit)
+			input, err := nodehost.NewRunInput(unit)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -120,19 +120,19 @@ func TestNativeInputsUsePersistedAuthority(t *testing.T) {
 	}
 }
 
-func TestRunInputForAwardRejectsMalformedPlan(t *testing.T) {
+func TestAwardInputRejectsMalformedPlan(t *testing.T) {
 	for _, body := range []string{`{"jobs":[],"unknown":true}`, `{"jobs":[]} {}`, `{"jobs":`, `{"jobs":"invalid"}`} {
 		t.Run(body, func(t *testing.T) {
 			unit, _, _ := hostingStateFor(t, capability.UnitNode)
 			unit.Accepted.Plan = json.RawMessage(body)
-			if _, err := RunInputForAward(unit); err == nil {
+			if _, err := nodehost.NewRunInput(unit); err == nil {
 				t.Fatal("malformed acceptance reached host construction")
 			}
 		})
 	}
 }
 
-func FuzzRunInputForAwardCapturesRetrySeals(f *testing.F) {
+func FuzzAwardInputCapturesRetrySeals(f *testing.F) {
 	f.Add([]byte("original"), false)
 	f.Add([]byte("retry"), true)
 	f.Fuzz(func(t *testing.T, data []byte, node bool) {
@@ -152,7 +152,7 @@ func FuzzRunInputForAwardCapturesRetrySeals(f *testing.F) {
 		if err := validateHostedAward(unit); err != nil {
 			t.Fatal(err)
 		}
-		input, err := RunInputForAward(unit)
+		input, err := nodehost.NewRunInput(unit)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -177,7 +177,7 @@ func FuzzRunInputForAwardCapturesRetrySeals(f *testing.F) {
 			unit.Accepted.Plan[0] = '['
 		}
 		after, err := json.Marshal(input)
-		if err != nil || string(before) != string(after) || input.Owner != (store.Actor{}) {
+		if err != nil || string(before) != string(after) || input.Owner.Authority != (capability.AuthorityRef{}) || input.Owner.CapabilityPrefix != "" {
 			t.Fatalf("captured inputs changed or acquired authority: %v", err)
 		}
 	})
@@ -214,7 +214,7 @@ func FuzzNativeInputsRejectChangedAwards(f *testing.F) {
 		case 9:
 			unit.JobID += value
 		}
-		input, err := RunInputForAward(unit)
+		input, err := nodehost.NewRunInput(unit)
 		if err == nil {
 			_, err = nativeInputs(t.Context(), state, unit, p, input)
 		}

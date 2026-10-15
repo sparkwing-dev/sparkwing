@@ -20,10 +20,15 @@ func snapshotProcesses(selected func(map[int]processSample) map[int]processSampl
 		processes[pid] = processSample{parent: int(entry.Eproc.Ppid)}
 		zombies[pid] = entry.Proc.P_stat == 5
 	}
-	for pid, p := range selected(processes) {
+	processes = selected(processes)
+	for pid, p := range processes {
 		var usage [18]uint64
 		// #nosec G103 -- rusage_info_v1 contains eighteen 64-bit words, including its UUID.
 		_, _, errno := unix.Syscall6(336, 9, uintptr(pid), 1, 0, uintptr(unsafe.Pointer(&usage)), 0)
+		if errno == unix.ESRCH {
+			delete(processes, pid)
+			continue
+		}
 		if errno != 0 || usage[2] > math.MaxUint64-usage[3] || usage[12] > math.MaxUint64-usage[13] || usage[8] > math.MaxInt64 {
 			return nil, false
 		}

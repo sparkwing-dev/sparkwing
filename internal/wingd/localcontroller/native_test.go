@@ -38,7 +38,7 @@ func TestNativeServicesRefusesUnknownAuthorityBeforeOpeningResources(t *testing.
 		Capability: capability.Capability{Team: string(binding.Tenant.Team()), Binding: capability.Binding{RunID: "unavailable"}},
 	}
 	refreshed := false
-	services, err := NativeServices(t.Context(), home, c.store, runners.StoreBinding{Tenant: binding.Tenant, Principal: principal, Refresh: func(ctx context.Context) (capability.Principal, error) {
+	services, err := NativeServices(t.Context(), home, "v0.71.0", c.store, runners.StoreBinding{Tenant: binding.Tenant, Principal: principal, Refresh: func(ctx context.Context) (capability.Principal, error) {
 		refreshed = true
 		route, _ := capability.LookupRoute("POST", "/api/v1/runs/{run}/heartbeat")
 		_, err := capability.NewAuthenticator(c.store).Authenticate(ctx, capability.Presentation{Class: capability.CredentialBearer, Raw: capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))}, route)

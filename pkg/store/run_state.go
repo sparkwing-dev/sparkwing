@@ -30,12 +30,13 @@ type RunCause string
 
 // Run causes let the store select a lifecycle event and completion desired state.
 const (
-	RunStart        RunCause = "start"
-	RunFinish       RunCause = "finish"
-	RunCancel       RunCause = "cancel"
-	RunQueueTimeout RunCause = "queue_timeout"
-	RunOwnerLost    RunCause = "owner_lost"
-	RunPublish      RunCause = "publish"
+	RunStart         RunCause = "start"
+	RunFinish        RunCause = "finish"
+	RunCancel        RunCause = "cancel"
+	RunQueueTimeout  RunCause = "queue_timeout"
+	RunOwnerLost     RunCause = "owner_lost"
+	RunPublish       RunCause = "publish"
+	RunPolicyRefused RunCause = "policy_refused"
 )
 
 // RunEdge records all legal run-state families; a cancel of live work is initially request-only.
@@ -56,6 +57,7 @@ func RunTransitions() []RunEdge {
 	return []RunEdge{
 		{[]RunState{RunPending}, []RunState{RunRunning}, owners, RunStart, "live owner; accepted plan", false},
 		{active, terminal, owners, RunFinish, "live owner; no live work or expected expansions", false},
+		{active, []RunState{RunSuccess, RunFailed}, owners, RunPolicyRefused, "live owner; typed admission refusal; unfinished jobs unreleased", false},
 		{active, []RunState{RunCancelled}, []ActorKind{ActorOperator, ActorController, ActorReaper}, RunCancel, "cancel authority; resolves expected expansions; live work drains", true},
 		{active, []RunState{RunCancelled}, []ActorKind{ActorController, ActorReaper, ActorRunHost}, RunFinish, "cancel requested; no live work or expected expansions", false},
 		{[]RunState{RunPending}, []RunState{RunFailed}, []ActorKind{ActorReaper}, RunQueueTimeout, "queue deadline elapsed; no live claim", false},
@@ -66,6 +68,7 @@ func RunTransitions() []RunEdge {
 
 // RunTransition never accepts a client clock or effect payload; those derive from committed state.
 type RunTransition struct {
+	OwnerPolicy *OwnerPolicyResult
 	RunID       string
 	To          RunState
 	Actor       Actor
@@ -189,6 +192,11 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change RunTran
 		}
 		kind = "run_cancel_requested"
 	} else {
+		if change.Cause == RunPolicyRefused {
+			if _, err := tx.ExecContext(ctx, `UPDATE nodes SET expansion='none' WHERE team=? AND run_id=? AND expansion='expected'`, team, row.ID); err != nil {
+				return Applied{}, err
+			}
+		}
 		if change.Cause == RunOwnerLost || change.Cause == RunQueueTimeout {
 			if err := cancelRunNodesTx(ctx, tx, team, row.ID, change.Actor, row.CancelReason, now); err != nil {
 				return Applied{}, err
@@ -241,7 +249,12 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change RunTran
 }
 
 func guardRunEdgeTx(ctx context.Context, tx *storeTx, team Team, row RunRow, change RunTransition, now time.Time) error {
+	if change.OwnerPolicy != nil && change.Cause != RunPolicyRefused {
+		return errors.New("unexpected run owner policy result")
+	}
 	switch change.Cause {
+	case RunPolicyRefused:
+		return applyRunOwnerPolicyTx(ctx, tx, team, row, change, now)
 	case RunCancel:
 		return checkCancelActorTx(ctx, tx, team, change.Actor, row.ID, now)
 	case RunStart:

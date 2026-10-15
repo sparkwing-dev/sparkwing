@@ -92,7 +92,6 @@ func TestUsageHelperProcess(t *testing.T) {
 }
 
 func TestUsageMeasuresWholeSession(t *testing.T) {
-	defer nodemetrics.SetIntervalForTest(20 * time.Millisecond)()
 	tree, treeOut, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +107,7 @@ func TestUsageMeasuresWholeSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sampler := StartUsage(cmd.Process.Pid)
+	sampler := startUsage(cmd.Process.Pid, nodemetrics.SessionProcesses, 20*time.Millisecond)
 	if _, err := io.Copy(io.Discard, tree); err != nil {
 		t.Fatal(err)
 	}

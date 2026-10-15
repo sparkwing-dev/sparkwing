@@ -2,7 +2,6 @@ package nodehost
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -11,7 +10,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
@@ -43,12 +41,6 @@ type cleanupList struct {
 	items []cleanup
 }
 
-// safety: keyed by the bearer's hash, so a node reaches only its own list.
-type cleanupLedger struct {
-	mu    sync.Mutex
-	nodes map[[bearerHashSize]byte]*ProcessCleanups
-}
-
 // CleanupScope is where a node's cleanups run. Env is the node process's own
 // environment, Dir its repository root, and Log the node's log.
 type CleanupScope struct {
@@ -69,30 +61,6 @@ func checkCleanup(argv []string, description string) string {
 		return "argv may not contain NUL bytes"
 	}
 	return ""
-}
-
-// RunCleanups runs every cleanup the node process holding bearer registered
-// and did not release, newest first, each bounded by [CleanupTimeout]. Call it
-// once the process has exited and its bearer is revoked. Each cleanup runs
-// with no shell, in scope.Dir and with scope.Env, and writes its output to
-// scope.Log; a failure is logged and the next cleanup still runs.
-func (s *Server) RunCleanups(ctx context.Context, bearer string, scope CleanupScope) error {
-	key := sha256.Sum256([]byte(bearer))
-	s.mu.RLock()
-	_, live := s.grants[key]
-	s.mu.RUnlock()
-	if live {
-		return errors.New("node cleanups: revoke the node's bearer before running its cleanups")
-	}
-	l := &s.cleanups
-	l.mu.Lock()
-	list := l.nodes[key]
-	delete(l.nodes, key)
-	l.mu.Unlock()
-	if list == nil {
-		return nil
-	}
-	return list.Run(ctx, scope)
 }
 
 // safety: failures name argv[0] only, since later arguments may carry secrets.

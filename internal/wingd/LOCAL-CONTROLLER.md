@@ -53,7 +53,10 @@ cannot yet sustain a running controller. The constructor test does not claim
 that evidence.
 
 `NativeServices` binds the owned tenant to W3's host configuration, source,
-captured environments, lease keeper, state following and process router. It
+captured environments, lease keeper, state following and process router. Owner
+renewals reauthenticate the award, check its owner fence, and call the shared
+unit-renewal transaction with current compute activity. The shared host owns
+the keeper and joins it before service cleanup. It
 checks current authority before allocating resources. Process HTTP uses the
 same joined serving lifecycle as the API and dashboard. Closing the host
 cancels requests, closes HTTP and hijacked connections, and joins handlers
@@ -61,10 +64,20 @@ before closing process authority. Repeated close calls return the same cleanup
 error. Logs are masked before private
 JSONL writes. `StoreBinding.Refresh` reauthenticates the captured award through
 the shared C2 policy, including unit liveness, before each authority refresh.
-Owner policies, node-award adoption, authorized byte/record
+Owner policies, claim-spanning authentication, authorized byte/record
 clients, controller log projection and ephemeral-process binding validation
 remain integration points. Foreground CLI hosting also needs the shared host's
 remote state adapter. These gaps prevent a completed native local run.
+
+The native local host binds W3's machine-admission port to the elected home
+with takeover and spawning disabled. W6 resolves the configured box identity
+and its hostname default. The same identity reaches local and store capacity
+admission. Every locally scheduled job uses machine admission before execution.
+Each held lease owns its admission connection, returns watch failures to the
+host, and closes that connection on release. The production CLI supplies its
+version to this binding. The adapter tests preserve the captured home and
+refuse malformed machine settings. In-memory client tests cover recovery and
+joined release. Native admission sockets still require the lead's platform run.
 
 The local schedule factory constructs the same home-bound lifecycle and native
 timer operations without opening the store. Registration, pinning and ticks

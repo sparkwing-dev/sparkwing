@@ -38,7 +38,7 @@ func hostAward(ctx context.Context, unit controllerwire.ClaimedUnit, bind func(c
 	if err != nil {
 		return err
 	}
-	input, err := RunInputForAward(captured)
+	input, err := nodehost.NewRunInput(captured)
 	if err != nil {
 		return err
 	}
@@ -132,6 +132,9 @@ func (h Hosting) controller(bearer string) (controllerwire.Controller, error) {
 }
 
 func validateHostedAward(unit controllerwire.ClaimedUnit) error {
+	if err := ValidateAwardIdentity(unit); err != nil {
+		return err
+	}
 	if err := validateUnit(unit); err != nil {
 		return err
 	}

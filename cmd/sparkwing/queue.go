@@ -14,8 +14,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -177,7 +177,7 @@ func renderQueueGroup(out io.Writer, group controllerwire.QueueGroup, format str
 	}
 	fmt.Fprintf(rows, "group\t%s\tcapacity\t%d\teffective\t%d\tused\t%d\n", group.Group, group.Capacity, group.EffectiveCapacity, group.UsedCost)
 	if format == "pretty" {
-		fmt.Fprintf(rows, "scope\t%s\n", orchestrator.ScopeLabelFromKey(group.Group))
+		fmt.Fprintf(rows, "scope\t%s\n", nodehost.ScopeLabelFromKey(group.Group))
 		fmt.Fprintln(rows, "STATE\tRUN\tJOB\tPOSITION\tCOST\tSUPERSEDED\tHOLDER / POLICY\tCLAIMED / ARRIVED\tLEASE EXPIRES")
 	}
 	for _, h := range group.Holders {

@@ -75,16 +75,16 @@ func (s *cliHostState) FinishRunAndUnit(ctx context.Context, request store.Finis
 	}, nil
 }
 
-func (s *cliHostState) RenewOwner(ctx context.Context, _ store.Actor) (store.LeaseBeat, error) {
-	return s.renew(ctx)
+func (s *cliHostState) RenewOwner(ctx context.Context, _ store.Actor, executing bool) (store.LeaseBeat, error) {
+	return s.renew(ctx, executing)
 }
 
 func (s *cliHostState) RenewNodeClaim(ctx context.Context, _ store.NodeRef, _ store.Actor) (store.LeaseBeat, error) {
-	return s.renew(ctx)
+	return s.renew(ctx, s.executing())
 }
 
-func (s *cliHostState) renew(ctx context.Context) (store.LeaseBeat, error) {
-	response, err := s.controller.Renew(ctx, s.unit, controllerwire.RenewalRequest{Executing: s.executing()})
+func (s *cliHostState) renew(ctx context.Context, executing bool) (store.LeaseBeat, error) {
+	response, err := s.controller.Renew(ctx, s.unit, controllerwire.RenewalRequest{Executing: executing})
 	if err != nil {
 		return store.LeaseBeat{}, err
 	}

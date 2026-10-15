@@ -61,11 +61,9 @@ Higher-weight classes are considered more frequently, while aging raises older
 work until it overtakes newer arrivals. `Plan.Priority` and `--sw-priority`
 remain explicit strict ordering overrides and are separate from workload class.
 
-The orchestrator uses `SPARKWING_ADMISSION_CLASS` to carry its trigger-derived
-class across the CLI-to-pipeline process boundary. Valid values are `critical`,
-`interactive`, `normal`, and `batch`; an invalid or empty value is ignored.
-Pipeline code normally uses `Plan.AdmissionClass` instead, and that explicit
-choice overrides the inherited environment value.
+Admission class is resolved into the sealed execution options. Local run and
+job admission consume that winner. Explicit request settings outrank pipeline
+declarations, which outrank the inferred class.
 
 Auto backfill uses measured p99 duration. Unknown-duration jobs receive the
 single opportunistic backfill retained for first-run liveness, but cannot keep

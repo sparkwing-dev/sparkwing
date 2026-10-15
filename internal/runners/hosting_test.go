@@ -23,10 +23,10 @@ func hostingAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 		purpose = capability.PurposeWork
 	}
 	unit := controllerwire.ClaimedUnit{Unit: kind, Purpose: purpose, Delivery: capability.DeliveryDirect, UnitID: "unit", RunID: "run", JobID: binding.NodeID, Binding: binding, Capability: "award-secret", LeaseExpiresAt: time.Now().Add(time.Minute)}
+	unit.Runner = nodeproto.RunnerIdentity{Name: "granted-runner", Type: "runner", Labels: []string{"granted"}}
 	unit.Request = runspec.SealedRequest{RunID: unit.RunID, Hash: "request-hash", Request: runspec.Request{Team: "team"}}
 	if kind == capability.UnitNode {
 		unit.Engine = &engine.Identity{Version: "v0.20.0"}
-		unit.Runner = nodeproto.RunnerIdentity{Name: "granted-runner", Type: "runner"}
 		unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash", Resolved: runspec.Resolved{Engine: *unit.Engine}}, Plan: []byte(`{"jobs":[{"id":"job"}]}`), PlanHash: "plan-hash"}
 		unit.Execution = &runspec.JobExecutionSettings{}
 	}

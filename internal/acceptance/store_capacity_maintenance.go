@@ -22,11 +22,11 @@ func checkRecoveryCapacityMaintenance(ctx context.Context, root string) (err err
 		return err
 	}
 	request := store.AcquireSlotRequest{Key: "deploy", HolderID: "original", RunID: "run", NodeID: "job", Capacity: 1, Cost: 1, Lease: time.Hour, Policy: store.OnLimitQueue}
-	if got, err := f.tenant.AcquireConcurrencySlot(ctx, request); err != nil || got.Kind != store.AcquireGranted {
+	if got, err := acquireRecoveryCapacity(ctx, f, request); err != nil || got.Kind != store.AcquireGranted {
 		return fmt.Errorf("original capacity: %+v, %v", got, err)
 	}
 	request.HolderID, request.RunID = "waiting", "competitor"
-	if got, err := f.tenant.AcquireConcurrencySlot(ctx, request); err != nil || got.Kind != store.AcquireQueued {
+	if got, err := acquireRecoveryCapacity(ctx, f, request); err != nil || got.Kind != store.AcquireQueued {
 		return fmt.Errorf("competing capacity: %+v, %v", got, err)
 	}
 	if _, err := f.s.DB().ExecContext(ctx, `UPDATE concurrency_holders SET lease_expires_at=1 WHERE team=? AND key='deploy' AND holder_id='original'`, store.DefaultTeam); err != nil {
@@ -49,7 +49,7 @@ func checkRecoveryCapacityMaintenance(ctx context.Context, root string) (err err
 		return fmt.Errorf("expired adoption: %+v, %v", adopted, err)
 	}
 	request.HolderID, request.RunID = "original", "run"
-	if got, err := f.tenant.AcquireConcurrencySlot(ctx, request); err != nil || got.Kind != store.AcquireQueued {
+	if got, err := acquireRecoveryCapacity(ctx, f, request); err != nil || got.Kind != store.AcquireQueued {
 		return fmt.Errorf("returning arrival: %+v, %v", got, err)
 	}
 	if repeated, err := f.s.AsOperator().MaintainConcurrency(ctx, f.lease, store.ConcurrencyMaintenanceOptions{}); err != nil || !reflect.DeepEqual(repeated, store.ConcurrencyMaintenanceResult{}) {

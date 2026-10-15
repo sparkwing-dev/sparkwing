@@ -29,7 +29,7 @@ import (
 )
 
 // NativeServices binds the elected local store to shared source, process and host services.
-func NativeServices(ctx context.Context, home string, owned *store.Store, binding runners.StoreBinding, sourceOptions source.Options) (_ runners.NativeServices, err error) {
+func NativeServices(ctx context.Context, home, version string, owned *store.Store, binding runners.StoreBinding, sourceOptions source.Options) (_ runners.NativeServices, err error) {
 	if owned == nil || binding.Tenant == nil || binding.Refresh == nil || binding.Principal.Capability.Team != string(binding.Tenant.Team()) || binding.Principal.Capability.Binding.RunID == "" {
 		return runners.NativeServices{}, errors.New("local native host requires its authenticated tenant and run")
 	}
@@ -41,6 +41,10 @@ func NativeServices(ctx context.Context, home string, owned *store.Store, bindin
 		return principal, err
 	}
 	if _, err := current(ctx); err != nil {
+		return runners.NativeServices{}, err
+	}
+	admission, err := localMachineAdmission(home, version)
+	if err != nil {
 		return runners.NativeServices{}, err
 	}
 	snapshots, err := nodehost.NewFileEnvironmentSnapshots(filepath.Join(home, "environments"))
@@ -97,7 +101,8 @@ func NativeServices(ctx context.Context, home string, owned *store.Store, bindin
 	config := nodehost.NativeHostConfig{
 		Store: binding.Tenant, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
 		Source: sourceOptions, Snapshots: snapshots, Masks: masks, Processes: processes, Router: router,
-		Owner: nodehost.OwnerHost{Wait: follower.Wait, WaitNode: follower.WaitNode, AdoptClaim: claims.adopt},
+		Admission: admission, Capacity: &nodehost.StoreAdmission{Store: binding.Tenant, BoxID: admission.BoxID},
+		Owner: nodehost.OwnerHost{Renew: localOwnerRenew(current, owned.RenewUnit), Local: func(store.NodeRow) bool { return true }, Wait: follower.Wait, WaitNode: follower.WaitNode, AdoptClaim: claims.adopt},
 		Planner: nodehost.SDKPlanner{Log: func(ctx context.Context, frame nodeproto.FrameLog) error {
 			return processes.Log(ctx, run.Run.ID, "", frame)
 		}},

@@ -87,11 +87,13 @@ func nativeInputs(ctx context.Context, state nodehost.NativeHostStore, unit cont
 		return storeInputs{}, awardMismatch()
 	}
 	if snapshot.Run.Spec != nil {
-		accepted, err := acceptedInput(unit.RunID, controllerwire.PlanAccepted{Spec: *snapshot.Run.Spec, Plan: snapshot.Run.Plan, PlanHash: runspec.Hash(snapshot.Run.PlanHash)})
+		persisted := unit
+		persisted.Accepted = &controllerwire.PlanAccepted{Spec: *snapshot.Run.Spec, Plan: snapshot.Run.Plan, PlanHash: runspec.Hash(snapshot.Run.PlanHash)}
+		accepted, err := nodehost.NewRunInput(persisted)
 		if err != nil {
 			return storeInputs{}, err
 		}
-		if !reflect.DeepEqual(accepted, *input.Accepted) {
+		if !reflect.DeepEqual(accepted.Accepted, input.Accepted) {
 			return storeInputs{}, awardMismatch()
 		}
 	}
