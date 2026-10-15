@@ -10,7 +10,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -123,28 +122,6 @@ func TestOwnerExpansionFanOutBoundary(t *testing.T) {
 			}
 		})
 	}
-}
-
-type expansionWrites struct {
-	storage.StateStoreOld
-	nodes []store.Node
-}
-
-func (s *expansionWrites) CreateNode(_ context.Context, node store.Node) error {
-	s.nodes = append(s.nodes, node)
-	return nil
-}
-func (*expansionWrites) UpdateNodeDeps(context.Context, string, string, []string) error { return nil }
-func (*expansionWrites) AppendEvent(context.Context, string, string, string, []byte) error {
-	return nil
-}
-
-func (s *expansionWrites) ListNodes(context.Context, string) ([]*store.Node, error) {
-	nodes := make([]*store.Node, 0, len(s.nodes))
-	for i := range s.nodes {
-		nodes = append(nodes, &s.nodes[i])
-	}
-	return nodes, nil
 }
 
 func FuzzGeneratorReplayPreservesEveryAcceptedDeclaration(f *testing.F) {

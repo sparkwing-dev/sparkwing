@@ -66,12 +66,6 @@ func failureMessage(got reply) string {
 	return message
 }
 
-func failureReason(got reply) any {
-	failure, _ := got.body["error"].(map[string]any)
-	details, _ := failure["details"].(map[string]any)
-	return details["reason"]
-}
-
 type reply struct {
 	status int
 	body   map[string]any

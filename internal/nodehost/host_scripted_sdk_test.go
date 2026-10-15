@@ -33,6 +33,7 @@ func (p *scriptedSDK) Request(ctx context.Context, request nodeproto.Request) (n
 	}
 	return p.request(ctx, request)
 }
+
 func (p *scriptedSDK) Close() error {
 	p.closed = true
 	if p.onClose != nil {
@@ -40,6 +41,7 @@ func (p *scriptedSDK) Close() error {
 	}
 	return nil
 }
+
 func (p *scriptedSDK) Cleanup(ctx context.Context) error {
 	if !p.closed {
 		return errors.New("cleanup preceded process close")
@@ -50,6 +52,7 @@ func (p *scriptedSDK) Cleanup(ctx context.Context) error {
 	}
 	return nil
 }
+
 func newExpansionSDK(plan nodeproto.PlanDoc, mode string) *scriptedSDK {
 	p := &scriptedSDK{plan: plan}
 	p.request = func(_ context.Context, in nodeproto.Request) (nodeproto.Reply, error) {
@@ -86,6 +89,7 @@ func newExpansionSDK(plan nodeproto.PlanDoc, mode string) *scriptedSDK {
 	}
 	return p
 }
+
 func newExecutionSDK(plan nodeproto.PlanDoc, input NodeInput, mode string, trace *[]string) *scriptedSDK {
 	p := newExpansionSDK(plan, mode)
 	p.input = input
@@ -138,6 +142,7 @@ func newExecutionSDK(plan nodeproto.PlanDoc, input NodeInput, mode string, trace
 	}
 	return p
 }
+
 func newPlanningSDK(plan nodeproto.PlanDoc, secret string) *scriptedSDK {
 	p := newExpansionSDK(plan, "")
 	base := p.request
@@ -156,6 +161,7 @@ func newPlanningSDK(plan nodeproto.PlanDoc, secret string) *scriptedSDK {
 	}
 	return p
 }
+
 func newCheckoutSDK(plan nodeproto.PlanDoc, description nodeproto.PipelineDescription) *scriptedSDK {
 	p := newExpansionSDK(plan, "")
 	base := p.request
@@ -168,6 +174,7 @@ func newCheckoutSDK(plan nodeproto.PlanDoc, description nodeproto.PipelineDescri
 	}
 	return p
 }
+
 func newPolicySDK(plan nodeproto.PlanDoc, value json.RawMessage, fail bool) *scriptedSDK {
 	p := newExpansionSDK(plan, "")
 	base := p.request
@@ -188,6 +195,7 @@ func newPolicySDK(plan nodeproto.PlanDoc, value json.RawMessage, fail bool) *scr
 	}
 	return p
 }
+
 func replaySDK(sdk *scriptedSDK, failure *nodeproto.JobFailure, evaluate func(nodeproto.Request) (json.RawMessage, error)) *scriptedSDK {
 	p := sdk
 	base := p.request
@@ -211,10 +219,3 @@ func replaySDK(sdk *scriptedSDK, failure *nodeproto.JobFailure, evaluate func(no
 type noV2Secrets struct{}
 
 func (noV2Secrets) ContainsSecret(string) bool { return false }
-
-func errText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
-}

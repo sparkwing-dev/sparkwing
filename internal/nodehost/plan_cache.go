@@ -13,9 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// PlanCacheEnabledByDefault applies to planning only; NoMemo controls job-result reuse.
-const PlanCacheEnabledByDefault = true
-
 // PlanCacheInputs identifies every input visible to planning. Digests include
 // explicit presence and are private because low-entropy secret values are guessable.
 // SourceDigest includes the exact tree (including dirty local files), dependencies

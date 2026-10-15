@@ -25,8 +25,6 @@ func planGrouped(scope, onLimit string, nodes ...string) nodeproto.PlanDoc {
 	return doc
 }
 
-var boxKey = scopedConcurrencyKey("deploys", "box", "", testBox)
-
 func TestPlanGroupFixtureDeclaresScopeWithoutHostKey(t *testing.T) {
 	raw, err := json.Marshal(planGrouped("box", "queue", "a"))
 	if err != nil {

@@ -2,7 +2,6 @@ package nodehost
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -131,26 +130,6 @@ func TestApprovalGateTimeoutYieldsToALateHumanAnswer(t *testing.T) {
 	if err != nil || row.Outcome != store.NodeSuccess {
 		t.Fatalf("gate = %+v, error %v", row, err)
 	}
-}
-
-func resolveAs(resolution, approver, comment string) func(*store.Store) error {
-	return func(st *store.Store) error {
-		_, err := st.ResolveApproval(context.Background(), testRunID, "gate", resolution, approver, comment)
-		return err
-	}
-}
-
-func jsonEqual(got []byte, want string) bool {
-	if want == "" {
-		return len(got) == 0
-	}
-	var g, w any
-	return json.Unmarshal(got, &g) == nil && json.Unmarshal([]byte(want), &w) == nil && jsonText(g) == jsonText(w)
-}
-
-func jsonText(v any) string {
-	b, _ := json.Marshal(v)
-	return string(b)
 }
 
 func TestApprovalGateFailsOnAStoreThatCannotRecover(t *testing.T) {
