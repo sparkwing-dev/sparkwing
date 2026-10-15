@@ -29,6 +29,7 @@ func registerJobArgs(p *Plan, id string, jobValue any) {
 	if holder == nil || argsType == nil {
 		return
 	}
+	p.diagnostics.collectJob(jobValue)
 	schema, err := parseInputsSchema(argsType)
 	if err != nil {
 		panic(fmt.Sprintf("sparkwing: Job(%q): invalid WithArgs[%s]: %v", id, argsType, err))
@@ -36,11 +37,6 @@ func registerJobArgs(p *Plan, id string, jobValue any) {
 	for _, f := range schema.Fields {
 		if f.isExtraBag {
 			panic(fmt.Sprintf("sparkwing: Job(%q): WithArgs[%s] field %s: flag:\",extra\" is only supported on pipeline Inputs", id, argsType, f.GoName))
-		}
-		// safety: secret masking reads the pipeline Inputs schema before the
-		// plan exists, so a job-level secret would reach the logs unmasked.
-		if f.Secret {
-			panic(fmt.Sprintf("sparkwing: Job(%q): WithArgs[%s] field %s: secret:\"true\" is only supported on pipeline Inputs", id, argsType, f.GoName))
 		}
 		for _, prior := range p.jobArgs {
 			for _, pf := range prior.schema.Fields {
@@ -79,6 +75,7 @@ func (p *Plan) declaredArguments() []describeArg {
 				Desc:     f.Description,
 				Default:  f.Default,
 				Enum:     f.Enum,
+				Secret:   f.Secret,
 				JobID:    d.jobID,
 			})
 		}

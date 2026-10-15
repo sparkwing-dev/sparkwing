@@ -144,10 +144,24 @@ func TestJobArgs_FlagCollisionPanics(t *testing.T) {
 	})
 }
 
-func TestJobArgs_PipelineOnlyTagsPanic(t *testing.T) {
-	mustPanic(t, []string{"secret", "pipeline Inputs"}, func() {
-		Job(NewPlan(), "s", &jobargsJobSecret{})
+func TestJobArgs_SecretsRetainClassification(t *testing.T) {
+	isolateProtocolDiscoveryRegistry(t)
+	Register[NoInputs]("job-secrets", func() Pipeline[NoInputs] {
+		return protocolDiscoveryPipeline[NoInputs]{declare: func(p *Plan, _ NoInputs) error {
+			Job(p, "s", &jobargsJobSecret{})
+			return nil
+		}}
 	})
+	doc, err := (sdkOperations{}).Describe(t.Context())
+	if err != nil || len(doc.Pipelines) != 1 {
+		t.Fatalf("describe secret job arguments: %+v, %v", doc, err)
+	}
+	if args := doc.Pipelines[0].Args; len(args) != 1 || !args[0].Secret || args[0].JobID != "s" {
+		t.Fatalf("secret job argument classification lost: %+v", args)
+	}
+}
+
+func TestJobArgs_ExtraBagIsPipelineOnly(t *testing.T) {
 	mustPanic(t, []string{"extra", "pipeline Inputs"}, func() {
 		Job(NewPlan(), "e", &jobargsJobExtra{})
 	})
