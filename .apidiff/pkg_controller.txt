@@ -144,10 +144,11 @@ type Endpoint struct {
 	Handle        func(http.ResponseWriter, *http.Request, capability.Authorized) error
 }
 type EngineController struct {
-	Store        *store.Store
-	RunnerPolicy RunnerAdmissionPolicy
-	Units        UnitRenewer
-	Launcher     LauncherSyncReader
+	Store         *store.Store
+	RunnerPolicy  RunnerAdmissionPolicy
+	VersionPolicy *SignedEngineVersionPolicy
+	Units         UnitRenewer
+	Launcher      LauncherSyncReader
 
 	ResolveTenant func(context.Context, store.Team) (RunTransactions, error)
 
@@ -458,6 +459,7 @@ func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Accou
 func (s *Server) WithSignUpWaitlist(on bool) *Server
 func (s *Server) WithSignedDownloads(cache *teamblob.Store, client *s3.Client, domain, keyPairID, privateKey string) error
 func (s *Server) WithSizingStore(resolve func(context.Context, store.Team) (SizingStore, error)) *Server
+func (s *Server) WithSourceController(source *SourceController) *Server
 func (s *Server) WithStoragePass(cache *teamblob.Store) *Server
 func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
 func (s *Server) WithTeamStorage(ts TeamStorage) *Server
@@ -474,6 +476,11 @@ type ServicesResponse struct {
 
 	DirectData bool
 }
+type SignedEngineVersionPolicy struct {
+	Resolver *engine.Resolver
+}
+func (p SignedEngineVersionPolicy) Compatibility(ctx context.Context, version string) (controllerwire.Compatibility, error)
+func (p SignedEngineVersionPolicy) Notices(ctx context.Context, version string) ([]engine.Notice, error)
 type SignedRunnerAdmission struct{ Resolver *engine.Resolver }
 func (p SignedRunnerAdmission) CheckRunner(ctx context.Context, version string) error
 type SizingReader interface {
@@ -485,6 +492,23 @@ type SizingStore interface {
 	RecordProfileObservation(context.Context, capability.Authorized, store.ProfileObservation) error
 	RecordContention(context.Context, capability.Authorized) error
 	RecordWaitObservation(context.Context, capability.Authorized, time.Duration) error
+}
+type SourceController struct {
+	Store         *store.Store
+	Cipher        BoundCipher
+	ResolveTenant func(context.Context, store.Team) (SourceTransactions, error)
+}
+func (s *SourceController) Release(ctx context.Context, a capability.Authorized) (SourceCredentialResponse, error)
+type SourceCredentialResponse struct {
+	Kind       string
+	Host       string
+	Username   string
+	Secret     string
+	KnownHosts string
+}
+type SourceTransactions interface {
+	ReleaseSourceCredential(context.Context, capability.Authorized) (store.GitCredential, capability.SourceReleaseAudit, error)
+	SetSourceMachineConsent(context.Context, capability.AuthorityRef, string, bool) error
 }
 const SpendLimitCode = "spend_limit"
 const StaleCardSetupCode = "stale_card_setup"
@@ -561,6 +585,7 @@ func (objectStoreCollector) Describe(ch chan<- *prometheus.Desc)
 func (v *optionalCreditInt64) UnmarshalJSON(raw []byte) error
 func (t *optionalCreditRateTable) UnmarshalJSON(raw []byte) error
 func (pipeSink) Flush() error
+func (c planSecretCipher) OpenPlanSecret(ctx context.Context, team store.Team, secret store.Secret) (string, error)
 func (o s3LogObjects) Get(ctx context.Context, key string) (io.ReadCloser, error)
 func (o s3LogObjects) List(ctx context.Context, prefix string) ([]string, error)
 func (l segmentLogs) Append(context.Context, string, string, []byte) error
@@ -571,6 +596,10 @@ func (l segmentLogs) ReadRun(ctx context.Context, runID string) ([]byte, error)
 func (l segmentLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)
 func (r *setComputeLimitsReq) UnmarshalJSON(raw []byte) error
 func (r *setCreditSettingsReq) UnmarshalJSON(raw []byte) error
+func (sharedEngineVersionContracts) CompatibilityFor(release engine.VersionInfo) controllerwire.Compatibility
+func (sharedEngineVersionContracts) Evaluate(index engine.VerifiedIndex, version string, now time.Time) ([]engine.Notice, error)
+func (sharedEngineVersionContracts) Index(ctx context.Context, resolver *engine.Resolver, now time.Time) (engine.IndexResult, error)
+func (sharedEngineVersionContracts) Policy(index engine.VerifiedIndex) engine.VersionIndex
 func (r *statusRecorder) Unwrap() http.ResponseWriter
 func (r *statusRecorder) WriteHeader(code int)
 func (s storeOperatorSettings) StorageTenant(ctx context.Context, team store.Team) (storageQuotaStore, error)

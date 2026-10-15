@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **controller (Breaking):** Source release uses the shared capability policy and commits a store audit before decryption. Machine consent requires its owner's account session at `/api/v1/tokens/{token}/git-credentials`. Plan acceptance uses the configured secrets cipher for stored-secret validation. See [migration guide](docs/migrations/_unreleased.md#source-credentials).
 - **controller (Breaking):** Data upload, commit and record routes use live capability policy and server-derived uploader scope. Upload accepts a digest and size. Commit returns a receipt after physical verification. Cache-grant uploads and caller-selected object keys are removed. See [migration guide](docs/migrations/_unreleased.md#data-writes-and-records).
 - **controller (Breaking):** Runner queues use `/api/v1/runners/claim` for mixed trigger and job selection. Named triggers use `/api/v1/runs/{run}/claim`. Claim, exchange, renewal and launcher sync use the shared capability policy. Split queue endpoints are removed. See [migration guide](docs/migrations/_unreleased.md#work-claims).
 - **controller:** Shared policy routes verify persisted capabilities through the store by default. Owner snapshots recheck the live owner in their read transaction. Run detail reads complete history and logs from one snapshot. Unit renewal carries execution activity to the store. Browser writes require a configured CSRF verifier.

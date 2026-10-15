@@ -149,5 +149,15 @@ func (s *EngineController) readStoredRunStatus(ctx context.Context, team store.T
 	if err != nil {
 		return RunStatusFacts{}, err
 	}
-	return RunStatusFacts{Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs}, nil
+	facts := RunStatusFacts{Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs}
+	if view.Snapshot.Run.Spec != nil {
+		if s.VersionPolicy == nil {
+			return RunStatusFacts{}, versionPolicyUnavailable()
+		}
+		facts.Notices, err = s.VersionPolicy.Notices(ctx, view.Snapshot.Run.Spec.Resolved.Engine.Version)
+		if err != nil {
+			return RunStatusFacts{}, err
+		}
+	}
+	return facts, nil
 }

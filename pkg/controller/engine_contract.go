@@ -12,10 +12,11 @@ import (
 // supplies C2 Authorized values; bodies cannot supply actors, grants or fences.
 // Every mutation rechecks that authority transactionally through the store.
 type EngineController struct {
-	Store        *store.Store
-	RunnerPolicy RunnerAdmissionPolicy
-	Units        UnitRenewer
-	Launcher     LauncherSyncReader
+	Store         *store.Store
+	RunnerPolicy  RunnerAdmissionPolicy
+	VersionPolicy *SignedEngineVersionPolicy
+	Units         UnitRenewer
+	Launcher      LauncherSyncReader
 	// ResolveTenant supplies the same transaction contract to embedded controllers and tests.
 	// A nil resolver uses Store.ForTeam.
 	ResolveTenant func(context.Context, store.Team) (RunTransactions, error)
@@ -86,5 +87,11 @@ func (s *EngineController) Exchange(ctx context.Context, authorized capability.A
 // Compatibility serves /api/v1/capabilities?engine_version= from verified release
 // metadata. API compatibility and security eligibility remain separate decisions.
 func (s *EngineController) Compatibility(ctx context.Context, engineVersion string) (controllerwire.Compatibility, error) {
-	panic("unimplemented: controller-wire")
+	if engineVersion == "" {
+		return controllerwire.Compatibility{}, invalidEngineBody("engine_version is required")
+	}
+	if s.VersionPolicy == nil {
+		return controllerwire.Compatibility{}, versionPolicyUnavailable()
+	}
+	return s.VersionPolicy.Compatibility(ctx, engineVersion)
 }

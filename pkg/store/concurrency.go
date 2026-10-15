@@ -274,15 +274,7 @@ type ConcurrencyState struct {
 	Waiters           []ConcurrencyWaiter
 }
 
-// ActiveConcurrencyHolder returns one non-superseded holder with an
-// unexpired lease. ErrNotFound means the key/holder pair is not
-// currently admitted.
-func (s *Store) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error) {
-	return s.defaultTenant().ActiveConcurrencyHolder(ctx, key, holderID, now)
-}
-
-// ActiveConcurrencyHolder returns one of t's non-superseded holders with
-// an unexpired lease. See [Store.ActiveConcurrencyHolder].
+// ActiveConcurrencyHolder returns a tenant's live holder that has not been superseded.
 func (t *Tenant) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error) {
 	return t.concurrencyHolder(ctx, key, holderID, now, holderLiveSQL(""))
 }
@@ -2670,9 +2662,9 @@ func (s *Store) sweepLRUConcurrencyCache(ctx context.Context, keepCount int) (in
 }
 
 // CountConcurrencyCache is exposed for ops dashboards.
-func (s *Store) CountConcurrencyCache(ctx context.Context) (int, error) {
+func (o *Operator) CountConcurrencyCache(ctx context.Context) (int, error) {
 	var n int
-	err := s.queryRow(ctx, `SELECT COUNT(*) FROM concurrency_cache`).Scan(&n)
+	err := o.s.queryRow(ctx, `SELECT COUNT(*) FROM concurrency_cache`).Scan(&n)
 	return n, err
 }
 

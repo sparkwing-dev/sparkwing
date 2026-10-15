@@ -69,6 +69,23 @@ func TestParseQueueEndpointUsesActualRegistration(t *testing.T) {
 	}
 }
 
+func TestParseSourceEndpointsUsesActualRegistrations(t *testing.T) {
+	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.sourceEndpoints())")
+	endpoints := `{Method: "POST", Pattern: "/api/v1/runs/{run}/source-credential", Authentication: capability.AuthCapability},
+{Method: "PUT", Pattern: "/api/v1/tokens/{token}/git-credentials", Authentication: capability.AuthCapability},`
+	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "source_controller.go"), []byte(endpoints), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Route{{Method: "POST", Path: "/api/v1/runs/{run}/source-credential", Scope: "source.read"}, {Method: "PUT", Path: "/api/v1/tokens/{token}/git-credentials", Scope: Authenticated}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("source registrations=%+v want=%+v", got, want)
+	}
+}
+
 func TestParseAuthorityEndpointsUsesActualRegistrations(t *testing.T) {
 	src := writeFile(t, "server.go", "s.registerAuthorityRoutes(router)")
 	endpoints := `{Method: "DELETE", Pattern: "/api/v1/tokens/{token}", Authentication: capability.AuthCapability},

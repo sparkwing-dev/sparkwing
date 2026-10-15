@@ -6,8 +6,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
-// nodeResultRecords attaches already verified records using the exact live
-// attempt or publication authority in the surrounding result transaction.
 type nodeResultRecords interface {
 	AttachResultRecords(context.Context, *storeTx, Team, Actor, NodeRow, NodeResult) error
 }

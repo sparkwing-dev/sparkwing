@@ -156,7 +156,7 @@ reads the repository the App's webhook recorded, or a repository the run names
 by hand only when one of the team's App trigger subscriptions names it, so
 typing a private repository of the installation into a run yields no token for
 it. Only a claim token of the run receives a source credential, through
-`POST /api/v1/runs/{id}/source-credential`, and each issue is recorded with
+`POST /api/v1/runs/{run}/source-credential`, and each issue is recorded with
 the team's git credential releases. The operator's launcher token
 receives claim tokens for every team's ready nodes, so whoever holds it reaches
 every team's run secrets, source credentials and cache grants; keep it

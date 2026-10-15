@@ -1,5 +1,21 @@
 # Migrating to the next release
 
+## Source credentials
+
+`POST /api/v1/runs/{run}/source-credential` takes no body and requires a live
+`source.read` capability bound to the run. The response carries `kind`, `host`,
+`secret`, optional `username` and optional `known_hosts`. Checkout identity and
+policy come from the sealed execution input. The store commits authorization
+and its audit before the controller decrypts the credential.
+
+Move machine consent to `PUT /api/v1/tokens/{token}/git-credentials` with
+`{"enabled":true}` or `{"enabled":false}`. The machine owner's account session
+and CSRF proof are required. Team administration cannot substitute for ownership.
+
+Embedded controllers may supply `WithSourceController` with the declared
+transaction and bound-cipher interfaces. `WithSecretsCipher` also configures
+C1's plan-secret opener. Missing keys refuse decryption and plan validation.
+
 ## Work claims
 
 Use `POST /api/v1/runners/claim` with the shared claim request instead of the

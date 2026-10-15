@@ -99,7 +99,7 @@ signing boundary. Authentication reads use the store snapshot implementation. Ro
 provisioning still needs its remaining trusted adapters. The Stripe callback, migrated engine and operator endpoints use this table in the existing
 controller. Four credential/membership mutations, the member directory, three
 credential discovery routes and both public OIDC metadata routes also use this
-table. Five pipeline sizing routes also use this policy. The remaining routes have not switched to it.
+table. Five pipeline sizing routes also use this policy. Stored source release and machine-owner consent also use this table. The remaining routes have not switched to it.
 
 Job list/detail status reads also use this policy and the declared JobDetail
 projection. They read C1's snapshot/node interfaces and exclude execution
@@ -141,6 +141,43 @@ Storage settings and reports use Operator. Quota and allowance writes resolve a
 Tenant for the policy-authorized team. They retain the operator.object_store
 grant and final operator routes. These calls still need C1's authority-bearing
 mutation signatures to repeat the operator recheck under the write lock.
+
+### Stored source release and plan-secret integration
+
+`SourceController` is the local C2 adapter for C1's existing
+`Tenant.ReleaseSourceCredential` and `Tenant.SetSourceMachineConsent` signatures.
+Its `SourceTransactions` interface preserves those signatures. `Store.ForTeam`
+is the default resolver. Embedded controllers and tests may supply
+`ResolveTenant` through `WithSourceController`. The configured BoundCipher opens
+only the returned team-and-host-bound envelope after the release audit commits.
+The controller compares the audit's team, credential, host, repository, run, job,
+generation and capability prefix with the authorized projection before opening.
+
+`POST /api/v1/runs/{run}/source-credential` uses PolicyRouter and the existing
+SourceRead/BindSource/LiveSensitive rule. It takes no body. Its local C2
+`SourceCredentialResponse` carries kind, host, secret, optional username and
+optional known_hosts. Checkout identity and policy remain in the sealed request.
+This cuts the legacy claim-token handler, its separate eligibility checks and
+its per-process limiter. Source release has RetryNever.
+
+`PUT /api/v1/tokens/{token}/git-credentials` takes an explicit enabled boolean.
+The policy requires an account session and BindMachineOwner. It passes the
+authenticated AuthorityRef and token selector unchanged to C1's consent
+transaction. Team administration does not supply owner consent. The former
+team-token consent route and handler are removed.
+
+`WithSecretsCipher` installs a PlanSecretOpener on its store. The adapter uses
+the stored tenant, name, pipeline, shared and masked fields through the same
+secret-envelope opener as controller reads. Clearing the cipher removes the
+opener. Missing or failed decryption refuses acceptance. W4's ValidatePlan is
+still a stub in this checkout, so complete encrypted-secret identifier
+acceptance remains an integration obligation.
+
+C1's audited release method returns confirmed stored SSH/HTTPS credentials.
+GitHub App minting and extra-repository release still need an audited C1
+contract before their runtime can be restored. W2 retains no unaudited App
+mint path. The source Access consumer in W3 and client projection in W9 must
+consume the new credential response with their existing sealed source facts.
 
 ## Ownership
 

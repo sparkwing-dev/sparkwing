@@ -4404,20 +4404,20 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
-  /api/v1/team/tokens/{prefix}/git-credentials:
+  /api/v1/tokens/{token}/git-credentials:
     put:
-      x-sparkwing-scope: team.admin
+      x-sparkwing-scope: authenticated
       tags: [teams]
-      summary: Opt one of the team's machines in to, or out of, receiving the team's git credentials.
-      description: An owner. A cloud runner receives the team's git credentials without this; any other machine or runner token of the team receives them only once opted in. Answers 404 for a prefix that is no unrevoked machine or runner token of the team.
+      summary: Set the machine owner's consent to release stored git credentials.
+      description: Requires the current account session of the machine's owner. The store rechecks account membership and machine ownership in the consent transaction.
       parameters:
-        - {name: prefix, in: path, required: true, schema: {type: string}}
+        - {name: token, in: path, required: true, schema: {type: string}}
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.runnerGitCredentialsReq
+              x-sparkwing-go-type: pkg/controller.Server.handleSourceConsent.request
               type: object
               required: [enabled]
               properties:
@@ -4428,7 +4428,7 @@ paths:
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: pkg/controller.runnerGitCredentialsReq
+                x-sparkwing-go-type: none
                 type: object
                 required: [enabled]
                 properties:
@@ -6233,56 +6233,37 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/PolicyError"}
 
-  /api/v1/runs/{id}/source-credential:
+  /api/v1/runs/{run}/source-credential:
     parameters:
       - in: path
-        name: id
+        name: run
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: claim
+      x-sparkwing-scope: source.read
       tags: [runs]
-      summary: Issue the one credential a claim fetches its run's source with.
+      summary: Release the stored source credential authorized for a live claim.
       description: >-
-        The only route that releases a source credential. It answers only a live, uncancelled claim token of the run: a launcher's plan or work claim, or a runner's node or trigger claim; any other bearer gets 403 claim_token_required. When the run's repository is on github.com and an installation bound to the team covers it, the answer is a read-only GitHub App installation token (`contents: read`, about an hour) for the run's repository and the repositories a team owner listed for it (Team > GitHub), named by their GitHub IDs so a rename or a reused name changes nothing it reaches. The run's repository qualifies by the ID the App's webhook recorded on its trigger; a repository the run names by hand qualifies only when one of the team's App trigger subscriptions names it, under the ID that subscription recorded. Otherwise a runner's claim gets the git credential the team stored for the host of the run's repository, when the claim's machine is a cloud runner or a machine a team owner opted in; a launcher's claim never does, since Sparkwing Cloud fetches source only through the App. With neither the answer is 404 no_source_credential with a message naming the remedies. The answer carries the run's commit and branch, and for a launcher's claim the clone URL and the checkout the run's plan asks for (depth, tags, submodules, LFS). A claim with a node of its own gets at most three credentials, so a failed or lost mint can be asked for again, and none once its attempt has started, since the node's own process holds the same claim token. Every claim asks at most ten times a minute. Each issue and release is recorded as a git credential release. The route reads no request body.
+        Takes no body. The store derives the repository, host, executor enrollment and machine-owner consent from persisted authority and the sealed request. It commits the release audit before the controller opens the team-and-host-bound envelope. Node authority loses source access when execution starts. The response contains ephemeral credential material. Checkout location, SHA and policy come from the sealed execution input.
       responses:
         "200":
-          description: The credential and what to check out.
+          description: The audited source credential.
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: pkg/store.SourceCredential
+                x-sparkwing-go-type: pkg/controller.SourceCredentialResponse
                 type: object
-                required: [kind, host, repositories, source]
+                required: [kind, host, secret]
                 properties:
-                  kind: {type: string, enum: [github_app, ssh, https]}
-                  host: {type: string, description: "The host the credential is bound to; the runner refuses to present it to any other."}
-                  token: {type: string, description: "The App token, for kind github_app."}
-                  expires_at: {type: integer, format: int64, description: Unix seconds the App token expires at.}
-                  repo_url: {type: string, description: "The run's https clone URL, for kind github_app."}
-                  sha: {type: string}
-                  branch: {type: string}
-                  repositories:
-                    type: array
-                    items: {type: string}
-                    description: "owner/name, the run's own first, then the ones a team owner listed for it; an App token reads them all. Empty for a run on a host other than github.com."
-                  source:
-                    x-sparkwing-go-type: pkg/store.SourceSpec
-                    type: object
-                    properties:
-                      depth: {type: integer}
-                      tags: {type: boolean}
-                      submodules: {type: boolean}
-                      lfs: {type: boolean}
-                  username: {type: string, description: "The https username, for kind https."}
-                  secret: {type: string, description: "The https token, or the ssh private key, for kind https or ssh."}
-                  known_hosts: {type: string, description: "The known_hosts entry of the host key the owner confirmed, for kind ssh."}
+                  kind: {type: string, enum: [ssh, https]}
+                  host: {type: string}
+                  username: {type: string}
+                  secret: {type: string}
+                  known_hosts: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: "The run records no commit for a launcher's claim, an extra repository is no longer covered, or the team's ssh credential awaits its host key's confirmation."}
-        "429": {description: This claim asked more than ten times in a minute; Retry-After says when to ask again.}
-        "502": {description: GitHub could not be reached to find the repository's installation or mint its token.}
 
   /api/v1/outputs/objects/{key}:
     parameters:

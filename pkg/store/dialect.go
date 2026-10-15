@@ -122,9 +122,10 @@ func (s *Store) queryRowNoCtx(q string, args ...any) *sql.Row {
 }
 
 type storeTx struct {
-	tx      *sql.Tx
-	dialect Dialect
-	store   *Store
+	tx           *sql.Tx
+	dialect      Dialect
+	store        *Store
+	snapshotRead bool
 }
 
 func (s *Store) now() time.Time {
@@ -147,7 +148,11 @@ func (t *storeTx) now() time.Time {
 // refuses the level, so it keeps the default.
 func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
 	if s.dialect != DialectPostgres {
-		return s.beginTx(ctx)
+		tx, err := s.beginTx(ctx)
+		if err == nil {
+			tx.snapshotRead = true
+		}
+		return tx, err
 	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
@@ -156,7 +161,7 @@ func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &storeTx{tx: tx, dialect: s.dialect, store: s}, nil
+	return &storeTx{tx: tx, dialect: s.dialect, store: s, snapshotRead: true}, nil
 }
 
 func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
@@ -168,14 +173,14 @@ func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
 }
 
 func (t *storeTx) forUpdate() string {
-	if t.dialect == DialectPostgres {
+	if t.dialect == DialectPostgres && !t.snapshotRead {
 		return " FOR UPDATE"
 	}
 	return ""
 }
 
 func (t *storeTx) forShare() string {
-	if t.dialect == DialectPostgres {
+	if t.dialect == DialectPostgres && !t.snapshotRead {
 		return " FOR SHARE"
 	}
 	return ""
@@ -185,7 +190,7 @@ func (t *storeTx) forShare() string {
 // key takes on its run while holding the run's sequence lock, so a transaction
 // that locks its run and then appends an event deadlocks with that insert.
 func (t *storeTx) forNoKeyUpdate() string {
-	if t.dialect == DialectPostgres {
+	if t.dialect == DialectPostgres && !t.snapshotRead {
 		return " FOR NO KEY UPDATE"
 	}
 	return ""

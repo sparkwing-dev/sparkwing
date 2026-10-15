@@ -889,15 +889,13 @@ claim:
   request after that answers `403 claim_ended`, or `401` for a dead runner
   token.
 
-A trigger claim token answers `GET /api/v1/secrets/{name}` and
-`POST /api/v1/runs/{id}/source-credential` alone, for the trigger's own run,
-and stops with the trigger claim. The source credential route answers a node
-or trigger claim token and no bearer, so the runner's token fetches no
-source credential (see [Git credentials](git-credentials.md)). The closures the
-run host evaluates after the first plan read the run's declared secrets under
-the trigger claim, which is why the trigger claim reads secrets; the first plan
-gets no node routes. The runner hosts the trigger's run with its own token,
-which never reaches the pipeline's processes.
+A live trigger, plan or job capability uses `source.read` and its run binding
+at `POST /api/v1/runs/{run}/source-credential`. A bare runner root cannot use
+this route. The store checks current enrollment and the machine owner's consent,
+then commits the release audit before decryption. A job loses source access
+when execution starts. Missing or ended credentials receive 401. Live authority
+without the required grant or binding receives 403. See
+[Git credentials](git-credentials.md).
 
 
 The two reads a node process opens with, `GET /api/v1/runs/{id}` and
@@ -1185,8 +1183,8 @@ owner. Each row names `prefix`, `name`, `family`, `scopes`, `created_by`,
 `DELETE /api/v1/tokens/{token}` revokes a token at once: the member who
 minted it revokes their own, and an owner revokes any machine token. A token
 the caller cannot see answers `404`, and one they see but may not revoke
-answers `403`. An owner releases stored git credentials to a machine with
-`PUT /api/v1/team/tokens/{prefix}/git-credentials` (see
+answers `403`. The machine owner consents to stored git credential release with
+`PUT /api/v1/tokens/{token}/git-credentials` (see
 [Git credentials](git-credentials.md#who-receives-it)).
 
 Membership changes advance the team auth generation in the same transaction.

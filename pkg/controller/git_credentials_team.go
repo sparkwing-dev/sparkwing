@@ -269,36 +269,6 @@ func (s *Server) handleListGitCredentialReleases(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, map[string]any{"releases": out})
 }
 
-type runnerGitCredentialsReq struct {
-	Enabled bool `json:"enabled"`
-}
-
-// safety: Owner opt-in controls machine access to team credentials; metered cloud runners do not need it.
-func (s *Server) handleSetTeamTokenGitCredentials(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
-	}
-	var req runnerGitCredentialsReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	prefix := r.PathValue("prefix")
-	err := t.SetGitCredentialMachine(r.Context(), prefix, req.Enabled, p.AccountID, time.Now())
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	if err != nil {
-		s.writeInternalError(w, r, "set machine git credentials", err)
-		return
-	}
-	s.logger.Info("machine git credentials set", "team", string(p.Team), "prefix", prefix,
-		"enabled", req.Enabled, "by", p.AccountID)
-	writeJSON(w, http.StatusOK, req)
-}
-
 func validGitCredentialHost(host string) bool {
 	if host == "" || len(host) > 253 || strings.HasPrefix(host, "-") || strings.HasPrefix(host, ".") ||
 		strings.HasSuffix(host, ".") || !strings.Contains(host, ".") {

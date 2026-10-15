@@ -165,7 +165,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/runs/{id}/paused` | `runs.read` |
 | `GET` | `/api/v1/runs/{id}/pending-triggers` | `triggers.read` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/receipt` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/source-credential` | `claim` |
 | `GET` | `/api/v1/runs/{id}/steps` | `runs.read` |
 | `GET` | `/api/v1/runs/{run}` | `runs.read` or `source.read` or `trigger.host` |
 | `POST` | `/api/v1/runs/{run}/cancel` | `runs.control` |
@@ -190,6 +189,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{run}/plan` | `node.result` or `data.write` |
 | `POST` | `/api/v1/runs/{run}/retry` | `runs.control` |
 | `GET` | `/api/v1/runs/{run}/snapshot` | `trigger.host` |
+| `POST` | `/api/v1/runs/{run}/source-credential` | `source.read` |
 | `GET` | `/api/v1/secrets` | `runs.read` or `team.admin` |
 | `POST` | `/api/v1/secrets` | `admin` or `team.admin` |
 | `POST` | `/api/v1/secrets/rotate` | `admin` |
@@ -233,7 +233,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `PATCH` | `/api/v1/team/members/{account}` | `team.admin` |
 | `GET` | `/api/v1/team/tokens` | `runs.read` |
 | `POST` | `/api/v1/team/tokens` | `runs.read` |
-| `PUT` | `/api/v1/team/tokens/{prefix}/git-credentials` | `team.admin` |
 | `POST` | `/api/v1/teams` | `authenticated` |
 | `GET` | `/api/v1/tokens` | `admin` |
 | `POST` | `/api/v1/tokens` | `admin` |
@@ -241,6 +240,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/tokens/{prefix}/rotate` | `admin` |
 | `DELETE` | `/api/v1/tokens/{token}` | `runs.read` |
 | `GET` | `/api/v1/tokens/{token}` | `admin` |
+| `PUT` | `/api/v1/tokens/{token}/git-credentials` | `authenticated` |
 | `GET` | `/api/v1/trends` | `runs.read` |
 | `GET` | `/api/v1/triggers` | `triggers.read` |
 | `POST` | `/api/v1/triggers` | `runs.write` |

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -37,13 +38,13 @@ type Server struct {
 	store  *store.Store
 	logger *slog.Logger
 
-	hostKeyScan           func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
-	sourceCredentialLimit perMinuteLimiter
-	identityLinkLimit     perMinuteLimiter
+	hostKeyScan       func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
+	identityLinkLimit perMinuteLimiter
 
 	auth                *Authenticator
 	authorization       RouteAuthorization
 	dataController      *DataController
+	sourceController    *SourceController
 	operatorSettings    operatorSettingsStore
 	engineController    *EngineController
 	resolveSizingStore  func(context.Context, store.Team) (SizingStore, error)
@@ -124,7 +125,8 @@ type Server struct {
 
 	// safety: names this process in the cron tick lease and on each recorded
 	// tick, so an operator can tell which controller evaluated.
-	cronHolder string
+	cronHolder  string
+	leaseHolder string
 
 	// safety: the cron evaluator's clock, so a test can resolve a due
 	// instant without waiting a minute for one. Nil reads time.Now.
@@ -192,6 +194,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		runnerPresence:      newRunnerPresenceRegistry(),
 		runnerHeartbeats:    newRunnerHeartbeatRegistry(),
 		cronHolder:          defaultCronHolder(),
+		leaseHolder:         rand.Text(),
 		requestBudget:       newPrincipalBudget(RequestBudget{}),
 		idleClaimPoll:       DefaultMaxIdleClaimPoll,
 		downloadFree:        DefaultTeamDailyDownloadFreeBytes,
@@ -355,6 +358,13 @@ func (s *Server) WithMetricsListener(ln net.Listener) *Server {
 // set works -- the default implementation lives in internal/secrets.
 func (s *Server) WithSecretsCipher(c Cipher) *Server {
 	s.secretsCipher = c
+	if s.store != nil {
+		var opener store.PlanSecretOpener
+		if c != nil {
+			opener = planSecretCipher{cipher: c}
+		}
+		s.store.SetPlanSecretOpener(opener)
+	}
 	return s
 }
 
@@ -791,7 +801,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
 	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleGetTrigger)), ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/runs/{id}/cache-grant", newClaimSensitiveRoute(claimSourceKinds, nil, s.handleRunCacheGrant(s.runTeam)).orElse(requireScope(ScopeNodesClaim, s.handleRunCacheGrant(s.runTeam), ScopeTriggersClaim)))
-	mux.Handle("POST /api/v1/runs/{id}/source-credential", newClaimSensitiveRoute(claimSourceCredentialKinds, nil, http.HandlerFunc(s.handleRunSourceCredential)))
 	mux.Handle("POST /api/v1/runs/{id}/oidc-token", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(handleClaimOIDCToken)).orElse(requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleOIDCToken), ScopeTriggersClaim)))
 	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))
 	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, s.meteredBytes(egress.ClassGit, http.HandlerFunc(s.handleGitcacheGit))))
@@ -907,7 +916,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/team/git-credentials/releases", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleListGitCredentialReleases)))
 	mux.Handle("POST /api/v1/team/tokens", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreateTeamToken)))
 	mux.Handle("GET /api/v1/team/tokens", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListTeamTokens)))
-	mux.Handle("PUT /api/v1/team/tokens/{prefix}/git-credentials", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleSetTeamTokenGitCredentials)))
 	mux.Handle("GET /api/v1/team/github-runners", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubRunnerBindings)))
 	mux.Handle("POST /api/v1/team/github-runners", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleAddGitHubRunnerBinding)))
 	mux.Handle("DELETE /api/v1/team/github-runners/{repository_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleRemoveGitHubRunnerBinding)))
@@ -958,6 +966,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	s.registerPolicyEndpoints(router, s.creditEndpoints())
 	s.registerPolicyEndpoints(router, s.queueEndpoints())
 	s.registerPolicyEndpoints(router, s.dataEndpoints())
+	s.registerPolicyEndpoints(router, s.sourceEndpoints())
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	// safety: the cache proves itself with its storage.count service token,
 	// which these handlers check.
@@ -1126,6 +1135,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	}
 
 	s.loadEgressUsage(ctx)
+	s.reconcileOwnedRuns(ctx)
 
 	go s.runReaper(ctx, 10*time.Second)
 	go s.runCreditSampler(ctx, creditSampleInterval)
@@ -1253,6 +1263,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			s.sweepEgressUsage(ctx)
 			s.pruneOutputsWithoutStoragePass(ctx, time.Now())
 			s.reapLeased(ctx)
+			s.reconcileOwnedRuns(ctx)
 			s.sampleOperationalSeries(ctx)
 		}
 	}

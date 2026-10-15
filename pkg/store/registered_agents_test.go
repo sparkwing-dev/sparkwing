@@ -24,7 +24,7 @@ func TestRegisteredAgentsUseLiveCapabilityIdentityAndSavedLabels(t *testing.T) {
 	if err := s.RecordAgentLabels(t.Context(), root.Prefix, []string{"gpu", "name=forged", "class=cloud", "pool=forged", "os=linux", "arch=arm64"}); err != nil {
 		t.Fatal(err)
 	}
-	agents, err := s.ListRegisteredAgents(t.Context(), "a")
+	agents, err := (&Tenant{s: s, team: "a"}).ListRegisteredAgents(t.Context())
 	if err != nil || len(agents) != 1 {
 		t.Fatalf("registered agents: %+v, %v", agents, err)
 	}
@@ -44,7 +44,7 @@ func TestRegisteredAgentsRetainEnrollmentWithoutReplacingGrantedIdentity(t *test
 		t.Fatal(err)
 	}
 	s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Name: "impostor", Class: match.ClassCloud, ReservedPools: []string{"forged"}, Location: "local", Accept: accept, Capacity: match.Resources{Cores: 4}}})
-	agents, err := s.ListRegisteredAgents(t.Context(), "a")
+	agents, err := (&Tenant{s: s, team: "a"}).ListRegisteredAgents(t.Context())
 	if err != nil || len(agents) != 1 {
 		t.Fatalf("enrolled agents: %+v, %v", agents, err)
 	}
@@ -87,7 +87,7 @@ func TestRegisteredAgentsExcludeExpiredRevokedAndNonClaimants(t *testing.T) {
 			if err := s.RecordAgentLabels(t.Context(), root.Prefix, []string{"gpu"}); err == nil {
 				t.Fatal("unavailable agent recorded labels")
 			}
-			agents, err := s.ListRegisteredAgents(t.Context(), "a")
+			agents, err := (&Tenant{s: s, team: "a"}).ListRegisteredAgents(t.Context())
 			if err != nil || len(agents) != 0 {
 				t.Fatalf("unavailable agents: %+v, %v", agents, err)
 			}
@@ -101,7 +101,7 @@ func TestRegisteredAgentsRejectCorruptCapabilityAndLabels(t *testing.T) {
 			s := authorityStore(t)
 			authorityPersist(t, s, authorityRoot("runner", "a"))
 			rewriteSchemaExec(t, s.db, `UPDATE capabilities SET `+column+`=? WHERE prefix='runner'`, []byte(`{`))
-			if agents, err := s.ListRegisteredAgents(t.Context(), "a"); err == nil || len(agents) != 0 {
+			if agents, err := (&Tenant{s: s, team: "a"}).ListRegisteredAgents(t.Context()); err == nil || len(agents) != 0 {
 				t.Fatalf("corrupt registration: %+v, %v", agents, err)
 			}
 		})
