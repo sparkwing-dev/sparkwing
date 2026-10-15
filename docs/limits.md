@@ -170,8 +170,8 @@ second run over the same data removes nothing more.
 
 | What | Rule | Where | Setting |
 |---|---|---|---|
-| Run events, node metrics | finished runs past the retention window | controller, hourly storage pass | `event_retention_days`, `node_metric_retention_days`; a multi-team controller writes 30 days where the operator set none |
-| A run's event bytes | released from the team's event share once the run finished more than the retention window ago | controller, hourly storage pass | `event_retention_days` |
+| Runs and operational children | finished runs past the run window, preserving each pipeline's newest success | controller, leased hourly maintenance | `run_retention_days`; Cloud defaults to 90 days, self-hosted defaults to disabled |
+| Node metrics | samples past their independent window | controller, leased hourly maintenance | `node_metric_retention_days` |
 | Node log segments | by retention class: `logs/r90/` 90 days for a funded or single-team controller, `logs/r30/` 30 days for a team the controller answered free when the attempt's log opened, `logs/r<days>/` for a team `--log-retention` names | the bucket's lifecycle rules, which the controller verifies before it issues URLs into a class; deleting a run or a team deletes its segments | `--log-retention team=days`; see [self-hosting.md](self-hosting.md#node-log-retention) |
 | Cache binaries, dependency archives and artifacts | written more than 30 days ago, including the default team and the operator grant's cache root | controller, hourly storage pass | `--cache-blob-store` |
 | Job outputs | 30 days after the run finished, except each pipeline's newest successful run | controller, hourly storage pass, or hourly on a controller without one | none |
@@ -182,7 +182,6 @@ second run over the same data removes nothing more.
 | Cron fire history | beyond 200 per schedule | controller, on each fire | none |
 | Egress usage rows | older than 13 months | controller, monthly | none |
 | Team download days | older than 7 days | controller, hourly storage pass | none |
-| The cache's egress totals | days and months before last month | controller, hourly storage pass | none |
 | Storage reservations | an hour after a writer took one it never committed or released | controller, on the team's next write and in the hourly storage pass | none |
 
 Every rule keys on when a run finished or when a file or object was last
@@ -235,8 +234,7 @@ egress budget, so a multi-team deployment runs with one.
 These are rows, not stored bytes, and each grows only as fast as the limits
 above let a team act.
 
-- **Run rows.** Retention removes a run's events and releases its bytes, but
-  the run and its nodes stay, so run history grows with every run a team
-  starts; the per-principal hourly run budget on a limits profile bounds it.
-- **Monthly storage totals and the credit ledger.** One row per team per month
-  and one row per charge, kept for billing.
+- **Pinned runs.** Each pipeline keeps its newest successful run and outputs.
+  Other run rows expire under the configured run-retention window.
+- **Storage usage and the credit ledger.** Usage rows are additive per team,
+  period and replica. Financial evidence survives run retention.

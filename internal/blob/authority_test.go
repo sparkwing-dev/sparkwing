@@ -2,7 +2,9 @@ package blob_test
 
 import (
 	"errors"
+	"fmt"
 	"testing"
+	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -52,6 +54,51 @@ func TestReferenceEdges(t *testing.T) {
 	request.ReadSet.Reader.NodeID = "unrelated"
 	if err := blob.AuthorizeEdge(request); !errors.Is(err, blob.ErrDigestNotReadable) {
 		t.Fatal("foreign read set accepted")
+	}
+}
+
+func TestRemoteCacheReferenceEdges(t *testing.T) {
+	property := func(seed [16]byte, choice uint8) bool {
+		nonce := fmt.Sprintf("%x", seed)
+		kinds := []blob.Kind{blob.KindOutput, blob.KindManifest, blob.KindMemo, blob.KindDepcache}
+		kind := kinds[int(choice)%len(kinds)]
+		request := blob.EdgeRequest{
+			TargetKind: kind, Digest: digest(nonce),
+			Authority: blob.Authority{CapabilityRef: "reader-" + nonce, Principal: "user-" + blob.Principal(nonce), Repo: "gh:1"},
+			ReadSet: blob.ReadSet{Edges: []blob.ReadEdge{{
+				Kind: blob.EdgeMemoScope, Digest: digest(nonce),
+				Record: blob.RecordKey{Team: "team-" + nonce, Kind: kind, Scope: blob.Scope{Repo: "gh:1", Ref: blob.RefScope{Ref: "main", Verified: true}}},
+			}}},
+		}
+		if blob.AuthorizeEdge(request) != nil {
+			return false
+		}
+		for _, mutate := range []func(*blob.EdgeRequest){
+			func(q *blob.EdgeRequest) { q.Authority.Principal = "" },
+			func(q *blob.EdgeRequest) { q.Authority.CapabilityRef = "" },
+			func(q *blob.EdgeRequest) { q.Authority.Repo = "gh:2" },
+			func(q *blob.EdgeRequest) { q.Authority.Upload.Set = true },
+			func(q *blob.EdgeRequest) { q.ReadSet.Edges[0].Record.Team = "" },
+			func(q *blob.EdgeRequest) { q.ReadSet.Edges[0].Record.Scope.Ref.Verified = false },
+			func(q *blob.EdgeRequest) { q.ReadSet.Edges[0].Record.Kind = blob.KindBinary },
+			func(q *blob.EdgeRequest) { q.ReadSet.Edges[0].Kind = blob.EdgeDependency },
+			func(q *blob.EdgeRequest) { q.ReadSet.Edges[0].Digest = digest("other-" + nonce) },
+			func(q *blob.EdgeRequest) { q.ReadSet.Reader = identity().Attempt.Value },
+			func(q *blob.EdgeRequest) { q.ReadSet.Edges[0].Reader = identity().Attempt.Value },
+			func(q *blob.EdgeRequest) { q.TargetKind = blob.KindBinary },
+			func(q *blob.EdgeRequest) { q.TargetKind = blob.KindSourceBundle },
+		} {
+			changed := request
+			changed.ReadSet.Edges = append([]blob.ReadEdge(nil), request.ReadSet.Edges...)
+			mutate(&changed)
+			if !errors.Is(blob.AuthorizeEdge(changed), blob.ErrDigestNotReadable) {
+				return false
+			}
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+		t.Fatal(err)
 	}
 }
 

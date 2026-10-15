@@ -15,7 +15,6 @@ import (
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -59,17 +58,14 @@ func newPassBuckets(t *testing.T) *passBuckets {
 		t.Fatal(err)
 	}
 	b := &passBuckets{raw: raw, hook: &listHook{Client: raw}, now: time.Now()}
-	open := func(prefix string, maxAge func(string) time.Duration) *teamblob.Store {
-		s, err := teamblob.New(teamblob.Options{
-			Bucket: passBucket, Prefix: prefix, Client: b.hook, TeamObjectMaxAge: maxAge,
-			Now: func() time.Time { return b.now },
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return s
+	cache, err := teamblob.New(teamblob.Options{
+		Bucket: passBucket, Prefix: "cache", Client: b.hook,
+		Now: func() time.Time { return b.now },
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	b.cache = open("cache", controller.CacheObjectMaxAge)
+	b.cache = cache
 	return b
 }
 
@@ -106,67 +102,6 @@ func commitStorage(t *testing.T, st *store.Store, team store.Team, kind store.St
 	}
 	if err := st.CommitStorage(ctx, store.StorageCommit{ID: res.ID, Team: team, Kind: kind, Bytes: n}); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestSourceStoragePassPrunesOrphanButKeepsQueuedRun(t *testing.T) {
-	for _, bound := range []bool{false, true} {
-		name := "orphan"
-		if bound {
-			name = "queued"
-		}
-		t.Run(name, func(t *testing.T) {
-			f := freeTierFixture(t, 5)
-			b := newPassBuckets(t)
-			f.srv.WithStoragePass(b.cache)
-			_ = freeTeamToken(t, f.store, "source-team")
-			allowance := int64(1 << 30)
-			if _, err := f.store.SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageFreeAllowanceBytes: &allowance}); err != nil {
-				t.Fatal(err)
-			}
-			old := time.Now().Add(-25 * time.Hour)
-			if bound {
-				old = time.Now().Add(-time.Hour)
-			}
-			key := "sources/" + strings.Repeat("a", 64) + "/" + strings.Repeat("1", 32)
-			u, err := f.store.ReserveUpload(t.Context(), store.UploadRequest{
-				Team: "source-team", Kind: store.StorageCache,
-				Key: key, Size: 10, SHA256: strings.Repeat("a", 64), Principal: "owner", ClaimPrefix: "swu_owner", Provenance: "local", Now: old,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := f.store.CommitUpload(t.Context(), u.Team, u.ID, u.Principal, old.Add(time.Minute)); err != nil {
-				t.Fatal(err)
-			}
-			if bound {
-				tn, err := f.store.ForTeam(t.Context(), u.Team)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := tn.CreateSourceTriggerWithRun(t.Context(), store.Trigger{ID: "run-source", Pipeline: "build", CreatedAt: old.Add(2 * time.Minute)},
-					store.Run{ID: "run-source", Pipeline: "build", Status: "pending", CreatedAt: old.Add(2 * time.Minute), StartedAt: old.Add(2 * time.Minute)},
-					key, "owner", "swu_owner"); err != nil {
-					t.Fatal(err)
-				}
-				b.now = time.Now().Add(31 * 24 * time.Hour)
-			}
-			s3key := "cache/teams/source-team/local/" + key
-			b.put(t, s3key, 10)
-			if ran, err := f.srv.RunStoragePass(t.Context()); err != nil || !ran {
-				t.Fatalf("pass = %v, %v", ran, err)
-			}
-			if got := b.has(t, s3key); got != bound {
-				t.Fatalf("source in S3 = %t, want %t", got, bound)
-			}
-			wantBytes := int64(0)
-			if bound {
-				wantBytes = 10
-			}
-			if got := held(t, f.store, u.Team, store.StorageCache); got != wantBytes {
-				t.Fatalf("source quota bytes = %d, want %d", got, wantBytes)
-			}
-		})
 	}
 }
 
@@ -208,37 +143,6 @@ func TestTheStoragePassReconcilesAndKeepsWritesInFlight(t *testing.T) {
 	b.hook.after = nil
 	if ran, err := f.srv.RunStoragePass(context.Background()); err != nil || ran {
 		t.Fatalf("a second pass inside the window = %t, %v; want it skipped", ran, err)
-	}
-}
-
-// The pass expires cache objects past their age in the listing it already
-// makes, including the operator's team and token namespaces.
-func TestTheStoragePassExpiresOldCacheObjects(t *testing.T) {
-	f := freeTierFixture(t, 5)
-	b := newPassBuckets(t)
-	f.srv.WithStoragePass(b.cache)
-	if code := f.trigger(freeTeamToken(t, f.store, "alpha")); code != 202 {
-		t.Fatal(code)
-	}
-	if err := f.store.GrantFreeSlot(t.Context(), "alpha", time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	b.put(t, "cache/teams/alpha/bins/old", 300)
-	b.put(t, "cache/teams/default/bins/operator", 10)
-	b.put(t, "cache/bins/operator-root", 10)
-	b.now = b.now.Add(controller.CacheObjectMaxAge("alpha") + time.Hour)
-
-	if _, err := f.srv.RunStoragePass(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if b.has(t, "cache/teams/alpha/bins/old") {
-		t.Error("a cache object past its age survived the pass")
-	}
-	if b.has(t, "cache/teams/default/bins/operator") || b.has(t, "cache/bins/operator-root") {
-		t.Error("old operator cache survived the pass")
-	}
-	if got := held(t, f.store, "alpha", store.StorageCache); got != 0 {
-		t.Errorf("alpha's cache after expiry = %d, want 0", got)
 	}
 }
 

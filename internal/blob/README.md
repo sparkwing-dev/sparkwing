@@ -32,6 +32,9 @@ not authenticate a bearer or query the store. Call them inside the transaction
 that checks liveness, blob existence and receipt ownership. Owner and publication
 writes need `Authority.Upload`, because an attempt cannot represent those fences.
 Job receipts require the exact job, attempt, generation, principal and capability.
+User remote-cache reads have no job attempt. Their server-derived `memo_scope`
+edges require the same repository and verified record ref. They authorize only
+outputs, manifests, memo and depcache. Owner upload bindings cannot use this path.
 
 Memo and depcache namespaces encode each component separately. Manual refs carry
 an explicit trust tag, distinct from a verified ref whose literal name starts
@@ -111,7 +114,11 @@ key. It verifies the complete upload before publishing the staging file. S3 PUTs
 sign the content length and checksum. Commit reads and verifies staging bytes
 through EOF and successful close, then copies with the verified source ETag
 and a destination create-only condition. It verifies the final bytes too.
-Both backends verify an existing final object before adopting it on a retry.
+Both backends require this ticket's staged bytes even if the final object already
+exists, and verify the final object before adopting it. Missing staging is an
+error. Before settlement, retries retain and reverify staging. After settlement,
+the controller reauthorizes and replays the persisted receipt without calling
+physical publication again. Staging cleanup follows settlement.
 Filesystem reads remain subject to the client's EOF verification.
 
 Both backends expose `SignLogPut` for the separate tagged-log upload path.
@@ -206,6 +213,14 @@ The memo budget check drives deadline expiry with a simulated clock.
 Controller authorization and transactional records use fakes. These component
 checks run separately from the skipped native targets, whose transport,
 transaction, backend matrix and placement assertions need their real drivers.
+
+Two additional acceptance boundaries use real SQLite records. The filesystem
+upload property covers separate same-run upload receipts, missing staging,
+deduplication and receipt replay after cleanup. The repository-reader boundary
+uses the shared edge rules with a repo-bound reader that has no job attempt and
+rejects records without verified default-branch evidence. Authority and graph
+intake are seeded fixtures. Neither proof covers authenticated controller routes
+or native placements.
 
 Local host construction does not open an artifact backend from
 `SPARKWING_CACHE_URL` or create an unused raw artifact cache. The final host

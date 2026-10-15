@@ -64,15 +64,34 @@ func authorizeEdge(r EdgeRequest) error {
 	if r.OwnReceipt.Set && r.OwnReceipt.Value.Digest == r.Digest && AuthorizeUpload(r.Authority, r.OwnReceipt.Value.Identity, r.TargetKind) == nil {
 		return nil
 	}
-	if !r.Authority.Attempt.Set || !validAttempt(r.Authority.Attempt.Value) || r.Authority.Principal == "" || r.Authority.CapabilityRef == "" || r.ReadSet.Reader != r.Authority.Attempt.Value {
+	a := r.Authority
+	if a.Principal == "" || a.CapabilityRef == "" {
+		return ErrDigestNotReadable
+	}
+	if a.Attempt.Set {
+		if !validAttempt(a.Attempt.Value) || r.ReadSet.Reader != a.Attempt.Value {
+			return ErrDigestNotReadable
+		}
+	} else if a.Upload.Set || a.Repo == "" || r.ReadSet.Reader != (runspec.AttemptIdentity{}) {
 		return ErrDigestNotReadable
 	}
 	for _, edge := range r.ReadSet.Edges {
-		if edge.Reader == r.ReadSet.Reader && edge.Digest == r.Digest && slices.Contains(EdgeKinds, edge.Kind) {
+		if edge.Reader != r.ReadSet.Reader || edge.Digest != r.Digest || !slices.Contains(EdgeKinds, edge.Kind) {
+			continue
+		}
+		if a.Attempt.Set {
+			return nil
+		}
+		key := edge.Record
+		if edge.Kind == EdgeMemoScope && cacheReadKind(r.TargetKind) && cacheReadKind(key.Kind) && key.Team != "" && key.Scope.Repo == a.Repo && key.Scope.Ref.Verified {
 			return nil
 		}
 	}
 	return ErrDigestNotReadable
+}
+
+func cacheReadKind(kind Kind) bool {
+	return kind == KindOutput || kind == KindManifest || kind == KindMemo || kind == KindDepcache
 }
 
 func checkBinaryExecution(e BinaryExecution) error {

@@ -107,40 +107,49 @@ func TestResultAnnotationsSummariesAndStaleWrites(t *testing.T) {
 }
 
 func logCommit(actor Actor, attempt runspec.AttemptIdentity) SegmentCommit {
-	return SegmentCommit{Subject: blob.LogSubject{Kind: blob.LogJobAttempt, Team: attempt.Team, RunID: attempt.RunID, Attempt: &attempt}, Actor: actor, RetentionClass: "r30", Segments: []Segment{{Index: 0, Offset: 0, Size: 3, Digest: strings.Repeat("a", 64), ObjectKey: "logs/run/job/2/0"}}}
+	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: attempt.Team, RunID: attempt.RunID, Attempt: &attempt}
+	key, err := LogSegmentObjectKey(subject, "r30", 0)
+	if err != nil {
+		panic(err)
+	}
+	return SegmentCommit{Subject: subject, Actor: actor, RetentionClass: "r30", Segments: []Segment{{Index: 0, Offset: 0, Size: 3, Digest: strings.Repeat("a", 64), ObjectKey: key}}}
 }
 
 func TestResultSegmentsRoundTripContiguityAndSeal(t *testing.T) {
 	s, tenant, actor, attempt := resultFixture(t)
 	commit := logCommit(actor, attempt)
-	if err := tenant.recordSegments(t.Context(), commit); err != nil {
+	if err := tenant.RecordSegments(t.Context(), commit); err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.recordSegments(t.Context(), commit); err != nil {
+	if err := tenant.RecordSegments(t.Context(), commit); err != nil {
 		t.Fatal(err)
 	}
-	commit.Segments = []Segment{{Index: 1, Offset: 4, Size: 2, Digest: strings.Repeat("b", 64), ObjectKey: "logs/run/job/2/1"}}
-	if err := tenant.recordSegments(t.Context(), commit); err == nil {
+	key, err := LogSegmentObjectKey(commit.Subject, "r30", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit.Segments = []Segment{{Index: 1, Offset: 4, Size: 2, Digest: strings.Repeat("b", 64), ObjectKey: key}}
+	if err := tenant.RecordSegments(t.Context(), commit); err == nil {
 		t.Fatal("non-contiguous offset accepted")
 	}
 	commit.Segments[0].Offset = 3
 	commit.Final = true
-	if err := tenant.recordSegments(t.Context(), commit); err != nil {
+	if err := tenant.RecordSegments(t.Context(), commit); err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.recordSegments(t.Context(), commit); err != nil {
+	if err := tenant.RecordSegments(t.Context(), commit); err != nil {
 		t.Fatal(err)
 	}
 	commit.Segments[0].ObjectKey = "other"
-	if err := tenant.recordSegments(t.Context(), commit); err == nil {
+	if err := tenant.RecordSegments(t.Context(), commit); err == nil {
 		t.Fatal("different final commit replayed")
 	}
 	reader := authorityMember(t, s, "reader", RoleReader)
-	got, err := tenant.readLogSegments(t.Context(), reader, blob.LogReadRequest{Subject: commit.Subject, Offset: 3})
+	got, err := tenant.ReadLogSegments(t.Context(), reader, blob.LogReadRequest{Subject: commit.Subject, Offset: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.Complete || len(got.Segments) != 1 || got.Segments[0].Offset != 3 || got.Segments[0].ObjectKey != "logs/run/job/2/1" {
+	if !got.Complete || len(got.Segments) != 1 || got.Segments[0].Offset != 3 || got.Segments[0].ObjectKey != key {
 		t.Fatalf("log read = %#v", got)
 	}
 	foreign := *commit.Subject.Attempt
@@ -148,7 +157,7 @@ func TestResultSegmentsRoundTripContiguityAndSeal(t *testing.T) {
 	subject := commit.Subject
 	subject.Team = "b"
 	subject.Attempt = &foreign
-	if _, err := tenant.readLogSegments(t.Context(), reader, blob.LogReadRequest{Subject: subject}); err == nil {
+	if _, err := tenant.ReadLogSegments(t.Context(), reader, blob.LogReadRequest{Subject: subject}); err == nil {
 		t.Fatal("foreign log read accepted")
 	}
 }
@@ -174,7 +183,7 @@ func TestResultFinalLogsUseExactWriterAndBoundedGrace(t *testing.T) {
 			}
 			commit := logCommit(actor, attempt)
 			commit.Final = true
-			err := tenant.recordSegments(t.Context(), commit)
+			err := tenant.RecordSegments(t.Context(), commit)
 			if kind == "allowed" && err != nil {
 				t.Fatal(err)
 			}

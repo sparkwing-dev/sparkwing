@@ -170,53 +170,6 @@ func TestLogSegmentsRefuseASupersededAttemptAndASecondManifest(t *testing.T) {
 	}
 }
 
-// A runner that dies mid-node never seals its attempt. Once the node is
-// finished and the grace has passed, the controller seals what landed
-// and the log reads incomplete.
-func TestControllerSealsAnAttemptItsRunnerAbandoned(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	tok := f.claim(t, "b", store.ClaimTokenWork)
-	s, up := f.sink(t, tok, "b")
-	for i := 1; i <= 5; i++ {
-		if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for n := range up.stored {
-		if n >= 2 {
-			break
-		}
-	}
-	wantPost(t, f.dispatchRouteFixture, "/api/v1/runs/run-d/nodes/b/attempt", tok, `{"outcome":"failed","error":"runner lost"}`, http.StatusOK, "")
-
-	f.srv.sealAbandonedLogs(ctx, time.Now().Add(2*logseg.SealGrace))
-	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "b")
-	if err != nil || rec.SealedAt.IsZero() {
-		t.Fatalf("the abandoned attempt was not sealed: %+v, %v", rec, err)
-	}
-	logs := f.srv.dashboardLogs(store.DefaultTeam).(segmentLogs)
-	got, err := logs.Read(ctx, "run-d", "b", storage.ReadOpts{})
-	if err != nil || !strings.HasPrefix("line 01\nline 02\nline 03\nline 04\nline 05\n", string(got)) || len(got) == 0 {
-		t.Fatalf("read %q, %v", got, err)
-	}
-	c, _, err := logs.NodeLogCompleteness(ctx, "run-d", "b", logseg.NodeProgress{Started: true, Terminal: true}, time.Now())
-	if err != nil || c.State != logseg.StateIncomplete || !strings.Contains(c.Message, logseg.ReasonRunnerLost) {
-		t.Fatalf("completeness = %+v, %v", c, err)
-	}
-	if _, err := s.Close(context.Background(), logseg.End{}); err == nil {
-		t.Fatal("the lost runner sealed after the controller did")
-	}
-
-	admin := f.admin(t)
-	if code, raw := f.do(t, http.MethodDelete, "/api/v1/runs/run-d", admin, nil); code != http.StatusNoContent {
-		t.Fatalf("delete run: %d %s", code, raw)
-	}
-	if left, _ := f.srv.logObjects().List(ctx, rec.Prefix); len(left) != 0 {
-		t.Fatalf("deleting the run left its log objects: %v", left)
-	}
-}
-
 // A viewer of a running segment node sees the segments uploaded so far
 // and then the live ring from the byte where they end, each line once,
 // until the manifest ends the stream.

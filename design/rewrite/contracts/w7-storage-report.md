@@ -2,67 +2,99 @@
 
 <!-- design:begin -->
 
-W7 remains incomplete. Earlier sessions implemented the signed byte backends,
-artifacts, memo, depcache, binary/source transfers and tagged-log components.
-This continuation removes another raw storage API and resolves the integration
-merge's file contents. Legacy output/log retirement and native integration remain.
+W7 remains incomplete. The merge contents are resolved, two byte/authority defects
+are fixed, and two additional SQLite acceptance boundaries pass. Cross-area
+record contracts and authenticated host wiring still block the remaining hard cut.
 
-## This continuation
+## Implemented
 
-Resolved both conflicted files. `api/openapi.yaml` drops the retired orphan
-reconciliation and run gitcache routes. `pkg/controller/doc.go` drops the retired
-reconcile-hook reference without adding another laptop wiring claim. The amended
-contracts remain intact. No Git write ran, so the index still lists these files
-as unmerged. The lead must stage their resolved contents.
+The first invariant is: an uncommitted upload ticket cannot mint a receipt without
+its own verified staged bytes. Filesystem and S3 `CommitObject` now return
+`ErrNotFound` for missing staging even when the final digest already exists.
+Both still verify existing final content. Before settlement, retries retain and
+reverify staging. After settlement, the controller must reauthorize and replay the
+persisted receipt without calling physical publication. Cleanup follows settlement.
+`ObjectBackend` and C1 document this local precondition. No signature changed.
 
-Removed `ArtifactStore.Put` and `Has`, their filesystem/S3 implementations, and
-the unused `HeadObject`/`DeleteObjects` requirements from the raw S3 API. Raw
-writers now use the existing error-only `PutIfAbsent`. No aliases remain.
-The `pkg/storage` diff removes **194 lines** and adds 88, including fixture and
-conformance changes. These are gross counts against the integration index.
-The raw log/measurement backend still exists for its surviving consumers.
+The second invariant is: a reader without a job attempt can reference only its
+server-derived, repository-matching verified cache edges. `AuthorizeEdge` accepts
+these `memo_scope` edges for output, manifest, memo and depcache. It requires an
+opaque principal/capability, an empty reader attempt and no upload identity.
+Binary/source records, owner uploads, other repos, manual refs and job read sets
+are refused. The store still resolves live authority and verified-default evidence.
 
-The invariant is: once a signed log key contains bytes, later requests cannot
-replace them. The remaining filesystem log route creates the key once, verifies
-an existing object's exact bytes and successful close for a retry, and returns
-409 for a replacement. A generated controller property checks 32 payload pairs
-with separately valid signed requests. An overlay that deletes before writing
-fails on the first generated pair. The overlay never changed repository source.
+The filesystem/SQLite proof generates 32 payloads, including empty bytes. It
+checks physical publication before settlement, independent same-run job receipts,
+missing staging, successful independent uploads, unique-byte/object accounting,
+and receipt replay after staging cleanup. The S3 proof generates the same payload
+sizes against its AWS HTTP boundary. The reader property generates 64 identities
+and mutates thirteen authority/edge fields. Its SQLite proof uses the real shared
+record rules and refuses records without verified-default evidence.
 
-The raw conformance suite now checks refusal of replacement rather than mutable
-last-writer behavior. Fixtures use create-only writes and reads instead of the
-removed APIs. The corruption fixture damages its real file directly. The S3
-fake uses an in-process HTTP client, so the complete S3 package suite runs without
-opening a socket. Its endpoint tests still exercise the AWS endpoint resolver.
+Removed **7 executable fallback lines**. Preserved deletion of **7 resurrected
+legacy files, 2,524 lines on the incoming side**: `internal/cache/cache.go`,
+`internal/cache/egress_budget_test.go`, `internal/storagequota/client.go`,
+`internal/storagequota/storagequotatest/controller.go`,
+`pkg/controller/direct_upload_test.go`, `pkg/controller/storage_counters.go`, and
+`pkg/controller/storage_counters_test.go`. The remaining legacy output/log code
+has not been retired.
 
-## Amendment audit
+## Merge and amendment actions
 
-| Row | W7 implementation and remaining integration |
+All 23 conflicted paths have resolved file contents or the intended deletion.
+Contract prose keeps both the W7 byte guarantees and W1 amendments. Retired cache
+routes, credentials and accounting code stay removed. The controller API snapshot
+was regenerated and embedded docs were synced from their sources.
+
+No Git write ran. The index still reports 23 unmerged paths. The lead must stage
+the resolved files and deletions and finish the merge.
+
+| Row | W7 result and remaining integration |
 | --- | --- |
-| A1-29 | Remote memo/depcache clients request `VerifiedDefaultOnly`, validate returned scope/evidence and retain authorized member metadata. W1 must supply live lookup/read edges. |
-| A1-30 | `RemoteCacheOptions.Records` supplies logical record lookups. Remote access remains opt-in, verified-default-only and read-only, with no binary fetch. Component properties pass. |
-| A1-31 | W7 upload/edge helpers compare exact tagged uploader identity and owner/publication fences. W2 derives `Authority.Upload`; W1 rechecks it transactionally. Both remain integration points. |
-| A1-33 | Filesystem/S3 implement `ObjectBackend` signing, verified immutable publication and deletion. Existing final bytes verify too. Physical commits grant no receipt or record. Backend suites pass with fakes at the service boundary. |
+| A1-24 | The new boundaries use W1's real upload, receipt, lookup and read-set transactions. C2 binding remains separate. |
+| A1-29 | W7 requests restricted lookup, checks returned verified evidence and preserves member metadata. W1/W2 must resolve remote lookup team/default ref. |
+| A1-30 | `RemoteCacheOptions.Records` and the read-only memo/depcache adapters remain implemented. The repo-reader edge check now works without a job attempt. |
+| A1-31 | Exact tagged upload/receipt checks remain. The new physical precondition closes a receipt-minting path across unrelated jobs. |
+| A1-32 | W1 upload admission, commit and receipt replay are exercised with real filesystem publication and SQLite settlement. |
+| A1-33 | Filesystem/S3 implement the declared backend. Missing staging cannot be replaced by another ticket's final object. |
+| A1-34 | W7 transfers remain behind the declared binding. `DataController.DataAuthority`, `BindData` and `client.NewDataClient` remain panic stubs. W2 must implement settled-ticket replay as described above. |
+| A1-35 | W1 persistence is implemented. The record-layout/name conflicts below prevent W7 output/memo writers from using it. |
+| A1-36 | `StorageBinding` still appears only in the host declarations. W3/W8 must construct and refresh it per attempt/generation. |
+| A1-37 | W7's removed cache transport stays deleted. SDK Cache/lint consumer completion remains W4/W9 work. |
+| A1-43 | This continuation changes no engine assets, trust roots, version resolution or release support. |
+| A1-50 | W7's remote cache is opt-in and read-only. W9 still owns CLI cache/publication binding. |
+| A1-53 | Native placement/backend/OS cells remain skipped pending their drivers. These boundary proofs do not satisfy them. |
 
-Consumer rows A1-24/32/34/35/36/37/43/50/53 retain the declared interfaces. Their
-store, authorization, host, SDK, CLI and native-driver work remains with those
-owners. W7 tests use contract fakes for those boundaries. This continuation
-changes no final contract in another area and requests no product decision.
+## Contract changes needed in other areas
 
-## Acceptance and ports
+No new cross-area signature is proposed. Three W1 implementation conflicts with
+C1 were reproduced through a temporary Go overlay, using W1's fixtures and real
+methods. The overlay was not written into the repository.
 
-`TestStorage` reports **9 passing W7 storage component checks, 424 skipped native
-cells and 0 failures**. No native cell was unskipped. The passing components cover
-CAS integrity, reference-edge laundering, memo/depcache scope, binary provenance,
-log segments, remote-cache opt-in, memo failures, owner receipts/stream checks and
-bounded large presence queries.
+| Input required by C1/W7 | W1 result |
+| --- | --- |
+| Output/manifest key with run ID as `Name` and empty `Scope.Key` | `CommitRecord` returns `result key differs from attempt fence`. `ResultBlobKey` instead uses `Name=result` and `Scope.Key=<run>/<attempt>/<generation>`. |
+| Memo key with `Name=blob.MemoRecordName` (`result`) | `CommitRecord` returns `memo record must name output or manifest`. W1 memo lookup also searches those other names. |
+| Repo-bound restricted lookup with team/default ref left for server resolution | `LookupRecord` returns `digest_not_readable`. The same reader succeeds with a fully specified authorized key after the W7 edge fix. |
 
-New complete T1 inventory ports: **0**. Earlier ports remain in the existing
-component tests. The new property closes the raw signed-log replacement path,
-but does not establish controller authorization, store transactions or native
-placement coverage.
+The owning files are `pkg/store/blob_record_runtime.go` and
+`pkg/store/blob_lookup.go`. W1/W2 must implement C1, or the lead must amend the
+shared layouts and migrate W3/W7 writers and readers together. W7 has not silently
+changed its keys to match the conflicting implementation.
 
-## Verification
+## Acceptance, ports and checks
+
+`TestStorage` has **19 passing boundary/component checks and 424 skipped native
+cells**. This includes nine existing W7 component checks, eight merged W1 SQLite
+proofs and these two additions:
+
+- `storage-reference-edge-laundering/filesystem-store`
+- `storage-local-remote-cache-opt-in/store-data-sqlite`
+
+New complete T1 native inventory ports: **0**. Existing CAS interrupted-upload,
+checksum and reference-edge ports remain, with their physical retry assertions
+updated to retain ticket-specific staging. The whole native transport/placement
+matrix is still required.
 
 Go commands use `GOWORK=off GOFLAGS=-buildvcs=false GOMAXPROCS=4`, `-p 4`,
 `GOCACHE=/tmp/sw-astra-W7/cache`, `GOTMPDIR=/tmp/sw-astra-W7/tmp` and
@@ -71,64 +103,48 @@ Go commands use `GOWORK=off GOFLAGS=-buildvcs=false GOMAXPROCS=4`, `-p 4`,
 Passed:
 
 - Whole-repository `go build -p 4 ./...` and compile-only `go test -p 4 ./... -run '^$'`.
-- `go vet -p 4 ./pkg/storage/... ./internal/blob/... ./internal/artifacts
-  ./internal/depcache ./pkg/controller/... ./tests/acceptance ./internal/acceptance`.
-- Full tests for `pkg/storage`, `pkg/storage/fs`, `pkg/storage/s3`,
-  `pkg/storage/logseg`, `internal/blob/...`, `internal/artifacts`,
-  `internal/depcache`, `tests/acceptance` and `internal/acceptance`.
-- The generated controller property, focused bucket-usage tests, non-socket
-  storeurl tests and API route/spec tests.
-- The replacement-write negative control fails at its intended assertion.
-- Formatting, scoped sleepcheck, `git diff --check`, storage API snapshots and
-  embedded-doc sync.
+- Focused vet over `internal/blob/...`, artifacts, depcache, `pkg/storage/...`, and both acceptance packages.
+- Full tests for blob/depcache, artifacts, depcache, raw storage, filesystem, S3, logseg and both acceptance packages.
+- Controller route guards, API route/spec checks, formatting and `git diff --check`.
+- Negative controls: the old filesystem behavior fails the new receipt proof, the old S3 implementation fails the generated property, and the old edge helper fails the verified remote-reader SQLite proof.
 
-`go run ./internal/commentcheck -base main .` reports only three comments outside
-this W7 diff: `internal/controllerwire/contracts.go:47`,
-`pkg/store/state_materialize.go:15` and `pkg/store/state_result_records.go:9`.
-The HEAD-scoped run reports the two merged W1 comments. No W7 comment is flagged.
+`go run ./internal/commentcheck -base main .` still fails only at
+`internal/controllerwire/contracts.go:47`, `pkg/store/state_materialize.go:15`,
+and `pkg/store/state_result_records.go:9`. None is in W7's edits.
 
-The full legacy controller and storeurl socket suites, real S3/Postgres, native
-placements and pipelines remain for the lead. No Sparkwing executable, service,
-pipeline, Git write or release ran. Scratch is deleted at the end.
+Five merged API snapshots remain stale outside this continuation:
+`pkg_controller_client.txt`, `pkg_projectconfig.txt`, `pkg_match.txt`,
+`pkg_store.txt`, and `sparkwing.txt`. W7's resolved controller snapshot matches
+the generator. No Sparkwing executable, socket service, pipeline or release ran.
+Independent review and native S3/Postgres/placement checks remain with the lead.
+Scratch is removed at the end.
 
-## Remaining implementation and real integration
+## Shared files and remaining work
 
-1. W1: `Tenant` record and upload lifecycle methods remain panic stubs in
-   `blob_records.go` and `upload_contract.go`. Implement exact receipts/read sets,
-   atomic memo copies, unique-byte quotas, newest-success pins and reachability GC.
-2. W2: `DataController.DataAuthority`, `BindData` and `client.NewDataClient`
-   remain panic stubs. Bind authenticated data/records, tagged-log signing,
-   uncertain-upload verification, writer fencing, commits, proxy reads and metering.
-3. W3/W8: refresh `StorageBinding` and log bindings per attempt/generation, attach
-   output records and artifact/cache/source clients, and carry trigger/plan/eval
-   log subjects through execution. The declared storage binding remains unused by
-   the old runtime.
-4. W4/W9: finish SDK Cache/lint and CLI cache/publication consumers. Preserve the
-   engine release contracts and regenerate their final surface references.
-5. W7: retire `pkg/controller/node_output.go`, `output_objects_s3.go`,
-   `output_download_s3.go`, `log_segments.go`, `client/output.go`,
-   `client/logsegments.go`, `internal/orchestrator/segment_logs.go`, their legacy
-   tests and the remaining raw artifact/log backends as those consumers bind to
-   the final contracts. Removing these now also requires the listed host and
-   authorization integrations, rather than a replacement compatibility path.
-6. T1/lead: implement `internal/acceptance.New`/`Run` and supply native
-   HTTP/api.sock, SQLite/Postgres, filesystem/S3, OS/placement and real-repository QA.
+Merge resolution touched `.apidiff/pkg_controller.txt`, `api/openapi.yaml`,
+`design/rewrite/contracts/c1-data.md`, `internal/orchestrator/wingd_api_routes_test.go`,
+`pkg/controller/server.go`, `pkg/controller/route_scope_guard_test.go`, the seven
+deletions listed above, and the source/mirror pairs for `api-reference.md`,
+`auth.md`, `migrations/_unreleased.md`, `observability.md`, and `security.md`.
 
-## Shared files touched
+New shared acceptance files are `internal/acceptance/blob_upload_isolation.go`,
+`internal/acceptance/blob_remote_edges.go`, `tests/acceptance/storage_test.go`, and
+`tests/acceptance/storage_filesystem_test.go`. Source docs are `docs/storage.md`
+and `CHANGELOG.md`, with their generated embedded copies. Other edits are in
+`internal/blob` and this handoff. No out-of-area runtime caller was migrated.
 
-- `api/openapi.yaml` and `pkg/controller/doc.go`: merge content resolution.
-- `pkg/controller/log_segments.go` and its existing/internal property tests:
-  create-only caller and corruption-fixture migration.
-- `pkg/controller/bucket_ceiling_internal_test.go` and `deletion_review_test.go`:
-  minimal removed-API caller migrations.
-- Five `.apidiff/pkg_storage*.txt` snapshots, `VERSIONING.md`, `CHANGELOG.md`,
-  the migration page and generated embedded copies: describe the removed APIs.
-- `internal/blob/README.md` and this handoff: measured component and integration boundaries.
+Remaining real integration includes W2's authenticated byte/record/log adapters,
+W1's conflicting record keys and names, W3/W8 storage/log binding construction,
+W4/W9 SDK/CLI consumers, and T1's native harness. Once these bind to the final
+contracts, retire `pkg/controller/node_output.go`, `output_objects_s3.go`,
+`output_download_s3.go`, `log_segments.go`, `client/output.go`,
+`client/logsegments.go`, `internal/orchestrator/segment_logs.go`, their legacy
+tests, and the remaining raw artifact/log backends.
 
-Other edits are in `pkg/storage`. No other package's contract changed. Friction
-is the unimplemented native/authenticated wiring, the three out-of-area comment
-violations and the merge index awaiting the lead. No new setting, limit,
-environment variable, production interface or compatibility wrapper was added.
+Open product questions: none. Friction is the cross-area contract drift, the
+unimplemented authenticated bindings, the three existing comment violations,
+five stale merged API snapshots and the merge index awaiting the lead. No new
+limit, setting, credential, environment variable or compatibility path was added.
 
 <!-- design:end -->
 

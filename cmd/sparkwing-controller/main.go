@@ -529,7 +529,7 @@ func run(args []string) error {
 		srv = srv.WithBucketUsage(bucketStore)
 	}
 	if *cacheBlobStore != "" {
-		cache, err := openTeamStore(ctx, *cacheBlobStore, controller.CacheObjectMaxAge)
+		cache, err := openTeamStore(ctx, *cacheBlobStore)
 		if err != nil {
 			return fmt.Errorf("--cache-blob-store: %w", err)
 		}
@@ -789,7 +789,7 @@ func configureMailer(ctx context.Context, srv *controller.Server, sender, config
 	return nil
 }
 
-func openTeamStore(ctx context.Context, raw string, maxAge func(string) time.Duration) (*teamblob.Store, error) {
+func openTeamStore(ctx context.Context, raw string) (*teamblob.Store, error) {
 	if raw == "" {
 		return nil, nil
 	}
@@ -797,7 +797,7 @@ func openTeamStore(ctx context.Context, raw string, maxAge func(string) time.Dur
 	if err != nil {
 		return nil, err
 	}
-	return teamblob.New(teamblob.Options{Bucket: bucket, Prefix: prefix, Client: client, TeamObjectMaxAge: maxAge})
+	return teamblob.New(teamblob.Options{Bucket: bucket, Prefix: prefix, Client: client})
 }
 
 // safety: a negative bound would silently remove the ceiling it names, so it stops the controller instead.

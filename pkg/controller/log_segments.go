@@ -628,25 +628,6 @@ func (s *Server) handleLogSegmentPut(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// safety: without this an attempt whose runner is gone would read as streaming forever rather than incomplete.
-func (s *Server) sealAbandonedLogs(ctx context.Context, now time.Time) {
-	objs := s.logObjects()
-	if objs == nil {
-		return
-	}
-	abandoned, err := s.store.AbandonedNodeLogs(ctx, now.Add(-logseg.SealGrace), 100)
-	if err != nil {
-		s.logger.Error("list abandoned node logs", "err", err)
-		return
-	}
-	for _, rec := range abandoned {
-		if _, err := s.sealNodeLog(ctx, objs, rec, now); err != nil {
-			s.logger.Warn("seal an abandoned node log", "run_id", rec.RunID, "node_id", rec.NodeID,
-				"attempt", rec.Attempt, "err", err)
-		}
-	}
-}
-
 func (s *Server) sealNodeLog(ctx context.Context, objs logObjectStore, rec store.NodeLog, now time.Time) (*logseg.Manifest, error) {
 	m, err := logseg.SealAbandoned(ctx, objs, rec.Prefix, logseg.Manifest{
 		Subject: new(nodeLogSubject(rec)),

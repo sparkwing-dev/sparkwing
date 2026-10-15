@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"strings"
@@ -34,8 +35,8 @@ func TestS3CommitVerifiesStoredBytes(t *testing.T) {
 		{name: "extra body", staged: "hello!", fixedLength: true, want: blob.ErrIntegrity},
 		{name: "deduplicated", staged: "hello", final: "hello", copies: 1},
 		{name: "corrupt final", staged: "hello", final: "jello", want: blob.ErrIntegrity, copies: 1},
-		{name: "interrupted commit", final: "hello"},
-		{name: "interrupted corrupt commit", final: "jello", want: blob.ErrIntegrity},
+		{name: "missing staging with existing final", final: "hello", want: blob.ErrNotFound},
+		{name: "missing staging with corrupt final", final: "jello", want: blob.ErrNotFound},
 		{name: "absent", want: blob.ErrNotFound},
 		{name: "staging close", staged: "hello", closeKey: "pending", want: closeErr},
 		{name: "final close", staged: "hello", closeKey: "cas", want: closeErr, copies: 1},
@@ -127,3 +128,47 @@ type closeCounter struct {
 }
 
 func (b closeCounter) Close() error { *b.count++; return b.closeErr }
+
+func TestS3CommitRequiresItsOwnStagedBytes(t *testing.T) {
+	random := rand.New(rand.NewPCG(29, 66))
+	for i := range 32 {
+		body := make([]byte, i*17)
+		for j := range body {
+			body[j] = byte(random.Uint32())
+		}
+		object := blob.Blob{Team: "team", Digest: digest(string(body)), Size: int64(len(body))}
+		pending := "teams/team/pending/unuploaded"
+		final, err := blob.ObjectKey(object.Team, object.Digest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		client := s3.New(s3.Options{
+			Region: "us-east-1", BaseEndpoint: aws.String("https://objects.invalid"), UsePathStyle: true, RetryMaxAttempts: 1,
+			Credentials: aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+				return aws.Credentials{AccessKeyID: "test", SecretAccessKey: "secret"}, nil
+			}),
+			HTTPClient: s3HTTP(func(r *http.Request) (*http.Response, error) {
+				key := strings.TrimPrefix(r.URL.Path, "/bucket/")
+				response := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Request: r, Body: io.NopCloser(strings.NewReader(""))}
+				switch {
+				case r.Method == http.MethodGet && key == final:
+					response.ContentLength = int64(len(body))
+					response.Header.Set("Content-Length", strconv.Itoa(len(body)))
+					response.Body = io.NopCloser(strings.NewReader(string(body)))
+				case r.Method == http.MethodGet && key == pending:
+					response.StatusCode = http.StatusNotFound
+				default:
+					t.Fatalf("unexpected object access: %s %s", r.Method, key)
+				}
+				return response, nil
+			}),
+		})
+		backend, err := blob.NewS3(client, "bucket")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := backend.CommitObject(t.Context(), pending, object); !errors.Is(err, blob.ErrNotFound) {
+			t.Fatalf("case %d accepted final bytes without this ticket's staged upload: %v", i, err)
+		}
+	}
+}

@@ -99,8 +99,7 @@ func (s *S3) verify(ctx context.Context, key string, expected Blob) (string, err
 	return aws.ToString(object.ETag), nil
 }
 
-// CommitObject seals verified bytes under a key that cannot overwrite another object.
-// An absent staging object permits retry only if the final object verifies in full.
+// CommitObject verifies this ticket's staged bytes before publishing its immutable CAS key.
 func (s *S3) CommitObject(ctx context.Context, pending string, expected Blob) error {
 	final, err := ObjectKey(expected.Team, expected.Digest)
 	if err != nil {
@@ -113,10 +112,6 @@ func (s *S3) CommitObject(ctx context.Context, pending string, expected Blob) er
 		return err
 	}
 	etag, err := s.verify(ctx, pending, expected)
-	if errors.Is(err, ErrNotFound) {
-		_, err = s.verify(ctx, final, expected)
-		return err
-	}
 	if err != nil {
 		return err
 	}

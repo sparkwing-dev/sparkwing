@@ -43,6 +43,9 @@ func TestFilesystemSignedCommit(t *testing.T) {
 	if err := backend.CommitObject(t.Context(), key, object); err != nil {
 		t.Fatal(err)
 	}
+	if err := backend.CommitObject(t.Context(), key, object); err != nil {
+		t.Fatalf("retry before settlement: %v", err)
+	}
 	final, err := blob.ObjectKey(object.Team, object.Digest)
 	if err != nil {
 		t.Fatal(err)
@@ -61,8 +64,13 @@ func TestFilesystemSignedCommit(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, filepath.FromSlash(key))); err != nil {
 		t.Fatal(err)
 	}
-	if err := backend.CommitObject(t.Context(), key, object); err != nil {
-		t.Fatalf("retry after interrupted transaction: %v", err)
+	if err := backend.CommitObject(t.Context(), key, object); !errors.Is(err, blob.ErrNotFound) {
+		t.Fatalf("commit without this ticket's staging: %v", err)
+	}
+	response = httptest.NewRecorder()
+	backend.ServeHTTP(response, httptest.NewRequest(http.MethodPut, signed.URL, strings.NewReader("hello")))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("new staging PUT = %d: %s", response.Code, response.Body)
 	}
 	if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(final)), []byte("jello"), 0o600); err != nil {
 		t.Fatal(err)

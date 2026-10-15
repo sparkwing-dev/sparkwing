@@ -27,6 +27,11 @@ pipeline binary or source bundle. Each reference requires either the exact
 uploader's receipt or an authorized read edge. Knowing a digest does not grant
 access. Presence queries reveal only objects the caller may read.
 
+Each upload ticket must stage and verify its own bytes, including when identical
+content already exists. Missing staging fails the commit. Before settlement, a
+retry keeps the staged object; after settlement, it replays the stored receipt
+under current authority. Staging cleanup follows settlement.
+
 Memo and dependency-cache records carry repository and ref scope. Manual
 writes cannot overwrite verified branch entries. Memo reads its own scope
 before a verified default-branch fallback. Dependency caches try their own

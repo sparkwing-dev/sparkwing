@@ -7,7 +7,7 @@
 [Amendments 1](amendments-1.md) records the worker requests and assignments.
 These declarations leave transaction implementation with W1.
 
-- `plan_secret_contract.go` declares `PlanSecretOpener`. The controller installs
+- `plan_contracts.go` declares `PlanSecretOpener`. The controller installs
   the trusted decryptor before serving. Acceptance selects tenant/pipeline secrets
   in its transaction and passes plaintext only to validation. Neither intake facts
   nor secret values arrive as trusted planner JSON. `Resolved.SecretArgs` retains
@@ -139,7 +139,10 @@ enrollment and GitHub App issuance path remain separate integrations.
 `blob.Authority.Upload` contains C2's resolved tagged uploader. W1 rechecks it
 against the exact job/attempt/generation, owner lease or published attempt.
 `RecordLookup.VerifiedDefaultOnly` selects only the authorized repository's
-verified default-branch entries. The default ref comes from persisted verified
+verified default-branch entries before required bytes or member metadata are read.
+An excluded record is a miss. The evidence retains the App event key, SHA and
+matching verified ref/default branch. A bound reader's sealed default branch
+must match when present. The default ref comes from persisted verified
 facts. Setting the flag false cannot weaken DataRemoteCache authority. Returned
 `RecordLookupResult.Members` includes committed path/size/mode metadata after
 read-edge checks. Internal member reads confer no client read authority.
@@ -149,6 +152,8 @@ and AbortBlobUpload using the existing uploads table. Reservation binds tenant,
 uploader, digest, size, expiry, provenance and ref facts before signing. The
 physical backend verifies size/digest before W1 commits existence and the exact
 receipt with quota settlement. Commit repeats live authority and fence checks.
+`VerifiedUploadCommit.ReplicaID` is trusted controller configuration, never a
+client-selected field. The ticket ID also binds the persisted quota reservation.
 Existing CAS bytes grant no receipt. Failed settlement grants no edge. Abort or
 leased retention releases uncommitted reservations without deleting a live blob.
 
@@ -158,6 +163,37 @@ verified EOF and successful close. S3 fences its copy to the verified source ETa
 creates the final key only if absent, and verifies final bytes before returning.
 A physical commit grants no record, existence row or receipt. Those remain W1's
 transactional responsibility after the controller repeats authorization.
+
+`CommitObject` requires verified bytes at the exact ticket's staging key even
+when the final CAS object already exists. An absent staging key returns
+`ErrNotFound`; a digest and another uploader's final object cannot establish an
+own-upload receipt. Retries before settlement retain staging. After settlement,
+the authenticated adapter replays the persisted receipt under current authority
+without repeating physical publication. Staging cleanup follows settlement.
+
+Upload tickets reserve monthly bytes, lifetime run bytes and lifetime run objects
+in the existing quota tables. Each dimension has its own durable reservation.
+The aggregate keys are `storage`, `storage.run.bytes:<run>` and
+`storage.run.objects:<run>`. All paths acquire them in that order. Run dimensions
+have no calendar reset. Commit charges only newly inserted tenant blobs, with
+one object even when its size is zero. Authorized existing bytes reserve zero
+in every dimension. Abort and leased expiry release all three holds, including
+holds whose upload row was removed by a run cascade. Effective default-tier
+policy is read for every new upload without creating an override row.
+
+Logical record pointers add no storage usage. Output and memo records may point
+to the same authorized blob at the run's object ceiling. A new blob still needs
+an object reservation. The legacy `SetNodeArtifactManifestCharged` methods are
+removed with the legacy manifest-pointer endpoint. W7/W9 wire final publication
+and member validation through the record and result contracts. No manifest
+column or mutable pointer route is restored to the final schema.
+
+The `storage-quota-settlement-crash-replay/store-data-sqlite` proof exercises
+upload admission, commit, abort and deduplication. Child processes exit without
+closing their store at before/after commit and abort checkpoints. The parent
+reopens and verifies the persisted state before replay. Publication authority
+is preseeded and verification evidence is a contract fake. Native controller
+checkpoints, signing and transfer integrity remain integration obligations.
 
 LookupRecord, LookupMemo, LookupDepcache, CommitRecord and CopyMemo remain the
 only record owners. W1 integrates receipt/read-set checks, members, unique-byte
@@ -414,6 +450,11 @@ persisted finish time plus `limits.LogSealGrace`. C1 rechecks the recorded write
 attempt, generation, current credential ancestry/expiry/membership and absence
 of a newer claim. After sealing, only an identical final commit may replay.
 Owner-unit liveness stays separate; eval gains no job-attempt grace exception.
+Published job logs use live run-bound `data.write` publisher authority and the
+exact imported terminal attempt in a publish-mode run. Publication has no
+execution lease, so execution tail grace does not govern its uploads. Normal
+segment integrity, retention and seal rules still apply. Owner-unit publication
+needs an imported unit identity contract before it can bypass a live unit lease.
 `LogTransport.SignSegments` derives object keys and retention from the authorized
 subject and run. Each segment URL includes its required `Headers`; the final
 manifest uses `ManifestURL` and `ManifestHeaders`. Storage transports must send
@@ -432,6 +473,55 @@ an error. A changed payload, missing object or failed close cannot recover.
 subject, proxy bytes through the controller, meter egress and apply the log
 exception to download caps. Persisted segments fill gaps or stalls in the ring.
 
+The `storage-hasmany-read-set/store-data-sqlite` proof uses exact imported job
+attempts under a preseeded publication capability. It checks hidden unrelated and
+foreign existence, budget expiry, reservation and failed-commit refusal, independent
+verified receipts, deduplicated replica charging and persistence after reopening.
+Presence metadata consumes neither download nor egress bytes. Physical verification,
+job-holder transports and native placements remain integration obligations.
+
+The `storage-log-segments-and-fallback/store-data-sqlite` proof exercises
+immutable job segments, transactional rollback of a gapped batch, reopening,
+offset reads, final incomplete seals, exact replay, retained-byte accounting,
+subject isolation, revocation and leased abandoned-stream sealing across reopening.
+Claim authority and segment digests are
+preseeded contract facts. Physical bytes, owner-unit transport, ring fallback,
+signing, lifecycle expiry and proxy egress remain cross-area integrations.
+
+`Operator.SealAbandonedLogStreams(ctx, maintenanceLease, limit)` closes existing
+unsealed execution streams with `writer_lost`. Job attempts wait until strictly
+after their persisted finish plus `limits.LogSealGrace`. Trigger and plan streams
+need no matching live unit generation. Eval checks its own generation and its
+immutable source generation separately. The operation locks each run, rechecks
+eligibility and the maintenance fence, and commits a bounded batch atomically.
+It preserves segments, stored-byte accounting, final seals and execution results.
+Publish-mode streams retain their publisher's final-commit contract because
+publication has no executable lease. The controller invokes this operation from
+its leased retention pass. The old `Store.AbandonedNodeLogs` query and unfenced
+controller sweep are removed. Physical manifests and ring fallback remain with
+the log transport.
+
+Persisted reads recheck a trigger's current owner lease even when its award has
+`runs.read`. Job-scoped readers retain their exact writer, attempt and generation
+fence and cannot reuse sealed-write replay to read past `limits.LogSealGrace`.
+Unbound run/log readers can still read historical subjects. Identical final
+write replay keeps its existing ancestry checks and separate replay exception.
+
+The `storage-reference-edge-laundering/store-data-sqlite` proof reopens a seeded
+output/manifest/member graph and checks presence plus download/reference
+authorization. Direct, optional, transitive, artifact-input, generated-group and
+failure-handler dependencies grant edges. Unrelated, foreign-team and missing
+digests stay hidden. These metadata checks consume no egress or download budget.
+Accepted-plan intake, manifest byte verification, record commits and native
+routes remain separate integration obligations.
+
+The `storage-publish-one-way/store-data-sqlite` proof commits published job logs
+after local completion, reopens their segments and incomplete seal, and checks
+retained bytes, immutable replay, credential revocation and unchanged job results.
+It creates no executable unit or billable interval. Publisher authority and
+terminal imported attempts are preseeded. Run/result import, owner-unit logs,
+local publication transport and physical bytes remain integration obligations.
+
 | Export | Purpose |
 |---|---|
 | `AcceptedExpansionRow` | Keeps accepted expansion bytes, source fence and body hash in a consistent snapshot. |
@@ -447,6 +537,7 @@ exception to download caps. Persisted segments fill gaps or stalls in the ring.
 | `logseg.UploadVerifier` | Derive one authorized object's key and check its stored size and digest after successful close. |
 | `blob.LogReadRequest`, `blob.LogTransport` | Sign uploads, verify uncertain writes and proxy authenticated reads through the controller. |
 | `SegmentCommit`, `LogSegments`, `Tenant.ReadLogSegments` | Commit and read persisted segments under the same subject fence. |
+| `Operator.SealAbandonedLogStreams` | Seal abandoned execution streams under the maintenance lease without changing execution results. |
 
 ## Capability persistence, authority and payment settlement
 
@@ -496,6 +587,26 @@ checkout records at most one credit grant, even when multiple paid event IDs arr
 Failures and expiry cannot undo paid credit. Financial rows have no run cascade.
 Human grants, refunds and freezes remain console-only operations.
 
+Payment lookups and console refunds follow the checkout's persisted `grant_id`.
+The grant's ledger reference is not a provider payment ID. Refunds retain that
+ledger reference in `reverses`, count prior reversals and cap the total at the
+paid grant. Checkout lookups select the configured test/live mode. Distinct card
+charge grants retain their provider payment reference. Ambiguous payment/grant
+associations fail instead of choosing a team. Caller-directed checkout closure
+is removed. Verified failure and expiry events own those outcomes.
+`CreditGrantRequest` carries no checkout session. Only verified payment
+settlement writes the checkout's paid timestamp and grant association.
+
+Credit pricing and storage-rate settings use unsealed JSON values in `settings`.
+Only missing keys select defaults. Malformed values, invalid prices and sealed
+rows return errors. A settings batch and its returned snapshot commit together.
+Rate-table reads use one snapshot so a concurrent update cannot mix its scalar
+price with another table. Operator table authority is checked under the shared
+advisory lock before any settings write.
+
+`CreditSettings` supplies max-charge seconds, the storage price, the free storage
+allowance and rate-table presence. Their unused Store getters are removed.
+
 | Export | Purpose |
 |---|---|
 | `CapabilityRecord`, `CapabilityRecord.Validate` | Preserve and validate complete versioned authority alongside indexed projections. |
@@ -536,10 +647,67 @@ capability pruning. Plan/eval compute has no minimum; job compute retains its
 60-second minimum; customer-runner waits produce no billable interval. Billing
 keys are configuration, so test-key and live-key deployments use the same schema.
 
+The cache service's egress-total endpoint, its high-water-mark store methods,
+client bridge and fake route are removed. Tenant usage has no service-selected
+counter owner.
+
+The legacy `PruneExpiredCacheObjects` row sweep is removed with its controller
+call. Record expiry and reachability GC govern final blob lifetime. Old creation
+time alone cannot delete a live record's bytes, including the default tenant's.
+`ClaimExpiredSourceBundles`, `DeleteSourceBundleRows`, `PruneExpiredUploads`,
+`DirectCacheMaxAge` and the controller's `CacheObjectMaxAge` are removed.
+The controller's cache listing has no age-expiry callback. Source records retain
+bytes independently of their originating run. Upload-ticket expiry releases
+quota through the leased final retention pass. Physical GC wiring remains with
+the storage adapter.
+
 Usage rows are additive per team, period and replica. Reporting sums rows.
 Admission takes a shared team/quota lock and records each reservation durably;
 settlement is idempotent by reservation ID. Log reads meter egress exactly and
 are exempt from download quota. Deferred plan counters add no enforcement here.
+
+`Operator.ChargeRetainedStorage(ctx, maintenanceLease)` bills unique `blobs`
+and committed `log_streams.stored_bytes`. Historical replica usage and reference
+counts cannot multiply the charge. The team's cache and log rows share their
+existing `storage_charged_through` watermark because the free allowance applies
+once to the combined bytes. The tenant's retained allowance caps that total
+before the free allowance comes off. An absent quota row adds no ceiling.
+Each watermark and ledger debit commit under the current maintenance fence and
+credit lock. Initial samples establish billing time. Idle gaps are clamped to
+the stored bytes' creation time. A zero price resets existing watermarks so
+resuming billing starts a new interval. Storage charges remain runless.
+
+The `billing-ledger-survives-retention/store-data-sqlite` acceptance proof
+checks a real storage debit and preserves every financial row across leased
+retention and reopening. It does not exercise provider verification or native
+placements. The controller's billing caller uses this operator method. W1's
+maintenance coordinator owns the shared retention, quota and GC ordering.
+
+### Storage policy and reports
+
+`Tenant.SetStorageQuota`, `StorageQuota`, `SetStorageAllowance`,
+`StorageUsageFor` and `StorageRetainedBytes` replace raw principal-selected
+storage methods. Quota, usage and ranking rows carry `Team`. Write limits and
+retained allowances have independent writers. Allowance creation preserves the
+effective default tier. Usage reports sum replica rows and reject corrupt or
+overflowing totals. Retained-byte reports share the billing inventory.
+
+`Operator.StorageSettings`, `SetStorageSettings`, `SeedRunRetention`,
+`DatabaseSize`, `ListStorageQuotas` and `TopStorageTeams` own deployment policy
+and reports. Run and metric windows use `operator.run_retention_days` and
+`operator.node_metric_retention_days`. Alarm and default-tier keys retain their
+existing names in the final settings table. Policy writes commit as one batch.
+Malformed, sealed, negative and overflowing values fail loudly.
+
+The controller's storage pass calls leased retention and billing with the same
+maintenance fence. Cloud seeds 90-day run retention only when absent. Metric
+retention stays independent. The old event-only and principal allowance sweeps
+are removed. Allowance-driven eviction, physical GC and full elected-worker
+coordination remain integration obligations.
+
+The local C1 correction removes the raw methods and principal quota types.
+Controller callers use team quota paths and `run_retention_days`. No C2, C3 or
+C4 contract declaration changes here.
 
 ## Input and blob invariants
 
@@ -566,6 +734,12 @@ are separate checks. Every record/member/copy edge checks the current read set
 or an exact permitted uploader receipt in the transaction. HasMany answers only
 inside the read set; absent and unauthorized are indistinguishable. A download
 must reach a verified EOF; early Close does not establish success.
+
+Repo-bound user cache readers have no job attempt or upload identity. Their
+server-derived `memo_scope` read edges use an empty reader attempt and carry the
+authorized repository and verified record ref. `AuthorizeEdge` accepts these
+only for output, manifest, memo and depcache. The transaction checks the user's
+live repo grant and verified-default evidence before constructing those edges.
 
 `blob.OutputData` applies the shared output cap to writes and reads using
 `Store` and `RecordStore`. Output records use kind `output`, the run ID as
@@ -603,6 +777,46 @@ keeps local archives first and saves locally. The remote interface has no write
 method. Both dependency-archive backends use the same verified-download and staged
 extraction path. A copied memo without an explicit output digest is a miss,
 including for followers. Explicit empty output remains a valid hit.
+
+Memo and depcache default-branch fallback apply `VerifiedDefaultOnly` before
+reading bytes or member metadata. A verified ref without default-branch evidence
+does not qualify. Memo uses own scope before default fallback and has no PR-base
+fallback. Depcache preserves its own-ref, PR-base, default order.
+
+The same fallback restrictions govern persisted read edges, including HasMany,
+download authorization and new references. A PR-base grant permits depcache
+reads, not memo reads. A default fallback needs recorded default-branch evidence
+matching the reader's sealed default branch. The
+`storage-memo-and-depcache-scope/store-data-sqlite` proof checks those read-set
+decisions after reopening. It seeds records and publication authority; native
+App intake, namespace rules and byte verification remain integration work.
+
+`CheckDataAccess` carries a complete target run/job/attempt/generation tuple into
+the authority recheck. Published job receipts require that exact imported
+attempt; omitting the selectors cannot borrow a receipt from another job.
+
+Both `Tenant` and the owning store transaction implement C2's `DataAccessChecker`.
+They share the persisted authority, receipt and read-edge checks. The transaction
+implementation opens no second transaction and leaves commit or rollback to its
+caller. Uncommitted receipt removal, reference changes, revocation and holder
+fences therefore govern authorization in that write. Caller-supplied principal
+fields cannot widen the persisted capability. Final upload and record writes
+still repeat their locking checks before persisting a receipt or reference.
+
+The `storage-reachability-and-retention-tails/store-data-sqlite` proof exercises
+leased record expiry, newest-success output pins, receipt roots, transitive
+members, persisted tombstones, grace and failed physical deletion. Collection
+rechecks references added after marking, then removes tails after their last
+root disappears. An old source bundle survives its originating run and becomes
+collectible only after its record expires and the tombstone grace passes.
+Graphs and the deletion backend are contract fixtures. Native
+placement, manifest verification and physical object deletion remain integration
+obligations.
+
+The 16 MiB output cap applies to memo records named `output` at commit and lookup.
+An oversized persisted memo is corrupt cache data: memo lookup and copying miss,
+while a required record lookup fails. Manifest-only memo records retain their
+separate artifact contract.
 
 ## Publication and retry interpretation
 

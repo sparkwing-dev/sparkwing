@@ -36,7 +36,6 @@ type BoundCipher interface {
 
 	OpenBound(team, name, scope string, shared, masked bool, envelope string) (string, error)
 }
-func CacheObjectMaxAge(team string) time.Duration
 const CardBillingCapability = "card-billing-v1"
 const CardBillingInterval = 30 * time.Second
 const CardNotTrustedCode = "card_not_trusted"
@@ -51,7 +50,7 @@ type Cipher interface {
 	Open(envelope string) (string, error)
 }
 const ClaimPollInterval = 500 * time.Millisecond
-const CloudRetentionDays = 30
+const CloudRetentionDays = 90
 func CompliantClaimPollsPerMinute() int
 const ComputeLimitRefusedCode = "compute_limit"
 const ComputeLimitRetryAfterSeconds = 5
@@ -104,7 +103,10 @@ type Endpoint struct {
 	Verify         func(*http.Request) error
 	Handle         func(http.ResponseWriter, *http.Request, capability.Authorized) error
 }
-type EngineController struct{ Store *store.Store }
+type EngineController struct {
+	Store        *store.Store
+	RunnerPolicy RunnerAdmissionPolicy
+}
 func (s *EngineController) AcceptExpansion(ctx context.Context, authorized capability.Authorized, body controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error)
 func (s *EngineController) AcceptPlan(ctx context.Context, authorized capability.Authorized, body controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error)
 func (s *EngineController) Cancel(ctx context.Context, authorized capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error)
@@ -274,6 +276,9 @@ type RouteAuthorization struct {
 	Identify      func(*http.Request) (capability.Presentation, error)
 	CheckCSRF     func(*http.Request, capability.Principal) error
 }
+type RunnerAdmissionPolicy interface {
+	CheckRunner(context.Context, string) error
+}
 const ScopeAdmin = "admin"
 const ScopeApprovalsWrite = store.ScopeApprovalsWrite
 const ScopeClaimsLaunch = store.LaunchScope
@@ -354,6 +359,8 @@ type ServicesResponse struct {
 
 	MultiTeam bool
 }
+type SignedRunnerAdmission struct{ Resolver *engine.Resolver }
+func (p SignedRunnerAdmission) CheckRunner(ctx context.Context, version string) error
 const SpendLimitCode = "spend_limit"
 const StaleCardSetupCode = "stale_card_setup"
 const StorageMaintenanceInterval = time.Hour
@@ -374,7 +381,6 @@ type TrendPoint struct {
 	P95DurMs  int64
 	AvgWaitMs int64
 }
-const UnknownCheckoutCode = "unknown_checkout"
 const UnknownPaymentCode = "unknown_payment"
 const UnpricedCPUClassCode = "unpriced_cpu_class"
 const UnsupportedRouteError = "unsupported"

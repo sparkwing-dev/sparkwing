@@ -106,3 +106,46 @@ func TestPaymentSettlementRollbackAndLatePayment(t *testing.T) {
 	}
 	rewriteSchemaCount(t, s.db, "credit_grants", 1)
 }
+
+func TestPaymentSettlementAuditsTransitionsAndResumesFundedTeam(t *testing.T) {
+	s, event := paymentFixture(t, capability.PaymentTest)
+	rewriteSchemaExec(t, s.db, "UPDATE teams SET credit_exhausted_at=1 WHERE name='a'")
+	event.Kind = capability.PaymentCheckoutExpired
+	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
+		t.Fatal(err)
+	}
+	event.EventID, event.Kind = "failed", capability.PaymentCheckoutFailed
+	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
+		t.Fatal(err)
+	}
+	event.EventID, event.Kind = "paid", capability.PaymentCheckoutPaid
+	for range 2 {
+		if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var exhausted int64
+	if err := s.db.QueryRow("SELECT credit_exhausted_at FROM teams WHERE name='a'").Scan(&exhausted); err != nil || exhausted != 0 {
+		t.Fatalf("paid team remains exhausted: %d, %v", exhausted, err)
+	}
+	for kind, want := range map[string]int{BusinessEventCheckoutExpired: 1, BusinessEventCheckoutFailed: 0, BusinessEventCheckoutPaid: 1} {
+		var count int
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM business_events WHERE team='a' AND kind=?", kind).Scan(&count); err != nil || count != want {
+			t.Fatalf("%s events=%d, want %d: %v", kind, count, want, err)
+		}
+	}
+}
+
+func TestPaymentSettlementAuditFailureRollsBackFinancialResult(t *testing.T) {
+	s, event := paymentFixture(t, capability.PaymentTest)
+	rewriteSchemaExec(t, s.db, "CREATE TRIGGER refuse_payment_audit BEFORE INSERT ON business_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END")
+	if _, err := s.settlePaymentFacts(t.Context(), event); err == nil {
+		t.Fatal("financial write ignored audit failure")
+	}
+	rewriteSchemaCount(t, s.db, "credit_grants", 0)
+	rewriteSchemaCount(t, s.db, "payment_events", 0)
+	var paid int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM credit_checkouts WHERE paid_at IS NOT NULL").Scan(&paid); err != nil || paid != 0 {
+		t.Fatalf("checkout advanced without audit: %d, %v", paid, err)
+	}
+}

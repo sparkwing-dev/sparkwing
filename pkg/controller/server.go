@@ -892,7 +892,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/touch", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleTouchNodeHeartbeat)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleTouchNodeHeartbeat)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/annotations", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleAppendNodeAnnotation)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAppendNodeAnnotation)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/summary", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleSetNodeSummary)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleSetNodeSummary)))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleSetNodeArtifactManifest)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleSetNodeArtifactManifest)))))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/start", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleStartNodeStep)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleStartNodeStep)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/finish", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleFinishNodeStep)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeStep)))))
@@ -974,8 +973,8 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 
 	mux.Handle("GET /api/v1/storage", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleStorageShow)))
 	mux.Handle("PUT /api/v1/storage/settings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageSettings)))
-	mux.Handle("PUT /api/v1/storage/quotas/{principal}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageQuota)))
-	mux.Handle("PUT /api/v1/storage/quotas/{principal}/allowance", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageAllowance)))
+	mux.Handle("PUT /api/v1/storage/quotas/{team}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageQuota)))
+	mux.Handle("PUT /api/v1/storage/quotas/{team}/allowance", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageAllowance)))
 
 	mux.Handle("GET /api/v1/team/billing", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTeamBilling)))
 	mux.Handle("POST /api/v1/team/billing/checkout", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingCheckout)))
@@ -987,7 +986,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/credits/grants", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditsGrant)))
 	mux.Handle("POST /api/v1/credits/reversals", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleReversePayment)))
 	mux.Handle("POST /api/v1/credits/freezes", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditFreeze)))
-	mux.Handle("POST /api/v1/credits/checkouts/closed", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCheckoutClosed)))
 	mux.Handle("POST /api/v1/credits/cards", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleSavedCard)))
 	mux.Handle("POST /api/v1/credits/card-payments", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCardPayment)))
 	mux.Handle("POST /api/v1/credits/warnings", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handlePaymentWarning)))
@@ -1368,7 +1366,6 @@ func (s *Server) reap(ctx context.Context, lease store.SingletonLease) {
 		}
 	}
 	s.sweepClaimAttention(ctx, time.Now(), claimAttentionBatch)
-	s.sealAbandonedLogs(ctx, time.Now())
 }
 
 func (s *Server) sampleOperationalSeries(ctx context.Context) {

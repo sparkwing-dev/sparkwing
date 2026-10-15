@@ -108,9 +108,10 @@ func TestS3SigningAndCommit(t *testing.T) {
 	if err := backend.DeleteObject(t.Context(), pending); err != nil {
 		t.Fatal(err)
 	}
-	if err := backend.CommitObject(t.Context(), pending, object); err != nil {
-		t.Fatalf("interrupted commit: %v", err)
+	if err := backend.CommitObject(t.Context(), pending, object); !errors.Is(err, blob.ErrNotFound) {
+		t.Fatalf("commit without this ticket's staging: %v", err)
 	}
+	objects[pending] = checksum
 	objects[final] = "different checksum"
 	if err := backend.CommitObject(t.Context(), pending, object); !errors.Is(err, blob.ErrIntegrity) {
 		t.Fatalf("corrupt final: %v", err)

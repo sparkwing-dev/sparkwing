@@ -94,11 +94,11 @@ func checkStorageFilesystemCAS(t *testing.T) {
 		if f.CommitObject(t.Context(), pending, foreign) == nil {
 			return false
 		}
-		if err := f.DeleteObject(t.Context(), pending); err != nil {
-			t.Fatal(err)
-		}
 		if err := f.CommitObject(t.Context(), pending, object); err != nil {
-			t.Fatalf("interrupted settlement could not adopt verified bytes: %v", err)
+			t.Fatalf("retry with this ticket's staging: %v", err)
+		}
+		if err := f.CommitObject(t.Context(), pending+"-missing", object); !errors.Is(err, blob.ErrNotFound) {
+			t.Fatalf("commit without this ticket's staging: %v", err)
 		}
 		key, err := blob.ObjectKey(object.Team, digest)
 		if err != nil {
@@ -133,6 +133,9 @@ func checkStorageFilesystemCAS(t *testing.T) {
 		}
 		if !errors.Is(f.CommitObject(t.Context(), pending, object), blob.ErrIntegrity) {
 			return false
+		}
+		if err := f.DeleteObject(t.Context(), pending); err != nil {
+			t.Fatal(err)
 		}
 		r, err = store.Get(t.Context(), blob.GetRequest{Digest: digest})
 		if err == nil {

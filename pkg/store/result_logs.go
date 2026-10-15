@@ -7,7 +7,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/url"
 	"slices"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -23,17 +27,34 @@ type logStreamIdentity struct {
 
 func logIdentity(subject blob.LogSubject) (logStreamIdentity, error) {
 	identity := logStreamIdentity{}
+	if subject.Team == "" || subject.RunID == "" {
+		return identity, authorityError(apierr.BadRequest, "log team and run are required")
+	}
 	switch subject.Kind {
 	case blob.LogJobAttempt:
-		if subject.Attempt == nil {
-			return identity, authorityError(apierr.BadRequest, "job log identity is missing")
+		a := subject.Attempt
+		if a == nil || subject.Unit != nil || a.Team != subject.Team || a.RunID != subject.RunID || a.NodeID == "" || a.Attempt <= 0 || a.Generation <= 0 {
+			return identity, authorityError(apierr.BadRequest, "invalid job log identity")
 		}
 		identity.node = subject.Attempt.NodeID
 		identity.attempt = subject.Attempt.Attempt
 		identity.generation = subject.Attempt.Generation
 	case blob.LogOwnerUnit:
-		if subject.Unit == nil {
-			return identity, authorityError(apierr.BadRequest, "owner log identity is missing")
+		u := subject.Unit
+		if subject.Attempt != nil || u == nil || u.Generation <= 0 {
+			return identity, authorityError(apierr.BadRequest, "invalid owner log identity")
+		}
+		switch u.Kind {
+		case blob.LogTrigger, blob.LogPlan:
+			if u.Source != nil {
+				return identity, authorityError(apierr.BadRequest, "trigger and plan logs have no source")
+			}
+		case blob.LogEval:
+			if u.Source == nil || u.Source.NodeID == "" || u.Source.Generation <= 0 {
+				return identity, authorityError(apierr.BadRequest, "eval logs require a fenced source")
+			}
+		default:
+			return identity, authorityError(apierr.BadRequest, "unknown owner log unit")
 		}
 		identity.unit = string(subject.Unit.Kind)
 		identity.generation = subject.Unit.Generation
@@ -53,6 +74,24 @@ func logIdentity(subject blob.LogSubject) (logStreamIdentity, error) {
 	return identity, nil
 }
 
+// LogSegmentObjectKey binds a signing slot to the same subject used by persistence.
+// Signers use the run's persisted retention class, never a caller-selected class.
+func LogSegmentObjectKey(subject blob.LogSubject, retention string, index int64) (string, error) {
+	identity, err := logIdentity(subject)
+	if err != nil {
+		return "", err
+	}
+	for _, part := range []string{subject.Team, subject.RunID, retention} {
+		if part == "." || part == ".." || strings.ContainsAny(part, "/\\\x00") {
+			return "", authorityError(apierr.BadRequest, "invalid log object namespace")
+		}
+	}
+	if retention == "" || index < 0 || index > int64(limits.MaxLogSegmentNumber) {
+		return "", authorityError(apierr.BadRequest, "invalid log signing slot")
+	}
+	return fmt.Sprintf("teams/%s/logs/%s/%s/%s/%d", url.PathEscape(subject.Team), url.PathEscape(retention), url.PathEscape(subject.RunID), identity.id, index), nil
+}
+
 func (t *Tenant) recordSegments(ctx context.Context, commit SegmentCommit) error {
 	if commit.Subject.Team != string(t.team) {
 		return authorityError(apierr.Forbidden, "log subject belongs to another team")
@@ -60,6 +99,18 @@ func (t *Tenant) recordSegments(ctx context.Context, commit SegmentCommit) error
 	identity, err := logIdentity(commit.Subject)
 	if err != nil {
 		return err
+	}
+	if (!commit.Final && commit.IncompleteReason != "") || !utf8.ValidString(commit.IncompleteReason) {
+		return authorityError(apierr.BadRequest, "incomplete reason requires a final log commit")
+	}
+	for _, segment := range commit.Segments {
+		key, err := LogSegmentObjectKey(commit.Subject, commit.RetentionClass, segment.Index)
+		if err != nil {
+			return err
+		}
+		if segment.ObjectKey != key {
+			return authorityError(apierr.Forbidden, "log segment object belongs to another signing slot")
+		}
 	}
 	body, err := json.Marshal(commit)
 	if err != nil {
@@ -72,6 +123,9 @@ func (t *Tenant) recordSegments(ctx context.Context, commit SegmentCommit) error
 		return err
 	}
 	defer rollbackOrLog(tx)
+	if _, err := resolveActorTx(ctx, tx, commit.Actor); err != nil {
+		return err
+	}
 	if err := lockStateRunTx(ctx, tx, t.team, commit.Subject.RunID); err != nil {
 		return err
 	}
@@ -170,6 +224,9 @@ func checkLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject blob.
 		return err
 	}
 	c := p.Capability
+	if c.Data != nil && c.Data.Use == capability.DataPublish {
+		return checkPublishedLogWriterTx(ctx, tx, team, subject, c)
+	}
 	if c.Team != string(team) || c.Prefix != actor.CapabilityPrefix || c.Binding.RunID != subject.RunID || c.Binding.Holder != actor.Holder {
 		return holderRefusal()
 	}
@@ -263,30 +320,32 @@ func (t *Tenant) readLogSegments(ctx context.Context, actor Actor, request blob.
 	if err != nil {
 		return result, err
 	}
-	tx, err := t.s.beginSnapshotReadTx(ctx)
+	// safety: authority rechecks take shared locks, which PostgreSQL forbids in read-only transactions.
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return result, err
 	}
 	defer rollbackOrLog(tx)
-	chain, err := authorityChainTx(ctx, tx, actor.Authority, false)
+	principal, err := resolveActorTx(ctx, tx, actor)
 	if err != nil {
 		return result, err
 	}
-	c := chain[0].principal.Capability
+	c := principal.Capability
 	if c.Team != string(t.team) || (!slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead) && !slices.Contains(c.Grants, capability.LogTail) && !slices.Contains(c.Grants, capability.ExpansionSubmit)) {
 		return result, authorityError(apierr.Forbidden, "log read grant is required")
 	}
 	if c.Binding.Kind != capability.BindingNone && c.Binding.RunID != request.Subject.RunID {
 		return result, holderRefusal()
 	}
-	if c.Binding.Kind == capability.BindingNode {
-		if request.Subject.Kind == blob.LogJobAttempt {
-			a := request.Subject.Attempt
-			if a.NodeID != c.Binding.NodeID || a.Generation != c.Binding.Generation || (c.Binding.Attempt > 0 && c.Binding.Attempt != a.Attempt) {
-				return result, holderRefusal()
-			}
-		} else if request.Subject.Unit == nil || request.Subject.Unit.Kind != blob.LogEval || request.Subject.Unit.Source == nil || c.Unit != capability.UnitEval || request.Subject.Unit.Source.NodeID != c.Binding.NodeID || request.Subject.Unit.Source.Generation != c.Binding.Generation || c.Binding.Expansion == nil || request.Subject.Unit.Generation != c.Binding.Expansion.Generation {
-			return result, holderRefusal()
+	if c.Unit == capability.UnitTrigger {
+		owner := actor
+		owner.Owner = OwnerLeaseRef{Kind: OwnerTrigger, RunID: c.Binding.RunID, Holder: actor.Holder, Generation: actor.Generation}
+		if err := checkOwnerTx(ctx, tx, t.team, owner, request.Subject.RunID, tx.now()); err != nil {
+			return result, err
+		}
+	} else if c.Binding.Kind == capability.BindingNode || c.Unit != "" || (!slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead)) {
+		if err := checkLogWriterTx(ctx, tx, t.team, request.Subject, actor, false); err != nil {
+			return result, err
 		}
 	}
 	var completeness string

@@ -205,8 +205,7 @@ func (f *Filesystem) verify(ctx context.Context, key string, expected Blob) erro
 	return verifyObject(ctx, body, expected)
 }
 
-// CommitObject verifies staged bytes before linking their immutable CAS key.
-// A retried transaction may adopt a verified final object after staging cleanup.
+// CommitObject verifies this ticket's staged bytes before publishing its immutable CAS key.
 func (f *Filesystem) CommitObject(ctx context.Context, pending string, expected Blob) error {
 	final, err := ObjectKey(expected.Team, expected.Digest)
 	if err != nil {
@@ -219,9 +218,6 @@ func (f *Filesystem) CommitObject(ctx context.Context, pending string, expected 
 		return err
 	}
 	if err := f.verify(ctx, pending, expected); err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return f.verify(ctx, final, expected)
-		}
 		return err
 	}
 	if err := f.root.MkdirAll(path.Dir(final), 0o700); err != nil {

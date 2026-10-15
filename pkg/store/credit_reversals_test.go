@@ -54,21 +54,6 @@ func TestReversePaymentTakesBackWhatThePaymentStillHas(t *testing.T) {
 	}
 }
 
-// A payment already spent is still reversed whole, so the balance goes below
-// zero and the claim path stops the team's new metered work.
-func TestReversePaymentMayTakeTheBalanceBelowZero(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	claimant, granted := fundedMeteredNode(t, s, "run-spent")
-	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-	res, err := s.ReversePayment(ctx, "pay_run-spent", "refund:pay_run-spent", "ops", 0)
-	if err != nil || res.Grant.AmountMicro != -granted || res.BalanceMicro >= 0 {
-		t.Fatalf("reversal = %+v, %v; want the whole payment back and a negative balance", res, err)
-	}
-}
-
 // A frozen team's metered claims are refused however much it holds, until
 // every freeze on it is released; an unmetered claim is not affected.
 func TestFrozenTeamsMeteredClaimsAreRefused(t *testing.T) {
