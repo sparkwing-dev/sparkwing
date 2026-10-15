@@ -33,12 +33,12 @@ func dispatchChain(cfg *Config) Executor {
 // recorded, as it does a copied source's.
 func dispatchedGenerators(ctx context.Context, cfg *Config, n *NodeRun, res Result) Result {
 	c := n.Plan.Closures
-	if res.Outcome != sparkwing.Success || c == nil || len(c.Generator) == 0 || cfg.Attempts == nil {
+	if res.Outcome != sparkwing.Success || len(c.Generate) == 0 || cfg.Attempts == nil {
 		return res
 	}
 	output, err := recordedOutput(context.WithoutCancel(ctx), n.Run.State, n.Run.ID, n.Plan.ID)
 	if err != nil {
-		for _, id := range c.Generator {
+		for _, id := range c.Generate {
 			res.expansions = append(res.expansions, expansion{closure: id, err: err})
 		}
 		return res

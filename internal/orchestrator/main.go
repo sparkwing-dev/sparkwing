@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
@@ -9,39 +8,8 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/sparkwing-dev/sparkwing/internal/protofd"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
-	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
-
-func Main() {
-	if len(os.Args) == 2 && os.Args[1] == protofd.Arg {
-		if _, err := bindProjectPipelines(); err != nil {
-			fmt.Fprintln(os.Stderr, "sw-node-protocol:", err)
-			os.Exit(1)
-		}
-		os.Exit(sdkserve.Main(sdkserve.Config{SDKVersion: sparkwingModuleVersion(), PlanDoc: planDocument}))
-	}
-	fmt.Fprintf(os.Stderr, "this pipeline binary answers only %s; run it with `sparkwing run <pipeline>`\n", protofd.Arg)
-	os.Exit(2)
-}
-
-func bindProjectPipelines() (*projectconfig.Config, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, fmt.Errorf("find the project config: %w", err)
-	}
-	_, cfg, err := projectconfig.Discover(cwd)
-	if err != nil {
-		return nil, err
-	}
-	if cfg == nil {
-		return nil, nil
-	}
-	sparkwing.BindPipelinesFromYAML(cfg.Registry())
-	return cfg, nil
-}
 
 func localRenderer(format string) sparkwing.Logger {
 	switch strings.ToLower(format) {
@@ -113,9 +81,6 @@ func splitCommaClean(s string) []string {
 // and its GitHub repository.
 func DetectGit(dir string) *sparkwing.Git {
 	g := &sparkwing.Git{}
-	if dir != "" {
-		g = sparkwing.NewGit(dir, "", "", "", "", "")
-	}
 	git := func(args ...string) ([]byte, error) {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir

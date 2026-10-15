@@ -33,10 +33,10 @@ func TestRecoveryWaitsOnItsParentAlone(t *testing.T) {
 			return Result{Outcome: sparkwing.Success}
 		},
 	}}
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
-		{ID: "slow"},
-		{ID: "deploy"},
-		{ID: "rollback", OnFailureOf: "deploy", Deps: deps("slow")},
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "slow", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "deploy", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "rollback", OnFailureOf: "deploy", Needs: deps("slow"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}
 
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
@@ -45,7 +45,7 @@ func TestRecoveryWaitsOnItsParentAlone(t *testing.T) {
 
 	<-parentIn
 	wantRow(t, st, "rollback", sparkwing.Success, "")
-	if f := fx.seen["rollback"].Failure; f == nil || *f != (nodeproto.Failure{Node: "deploy", Stage: "action", Message: "deploy broke"}) {
+	if f := fx.seen["rollback"].Failure; f == nil || f.Job != "deploy" || f.Stage != "action" || f.Error == nil || f.Error.Message != "deploy broke" {
 		t.Errorf("rollback failure = %+v, want deploy's action failure", f)
 	}
 }
@@ -55,10 +55,10 @@ func TestRecoverySkipsAParentCancelledUpstream(t *testing.T) {
 	fx := &fakeExec{bodies: map[string]Executor{"build": func(context.Context, *NodeRun) Result {
 		return Result{Outcome: sparkwing.Failed, Err: errors.New("broke")}
 	}}}
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
-		{ID: "build"},
-		{ID: "deploy", Deps: deps("build")},
-		{ID: "rollback", OnFailureOf: "deploy"},
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "deploy", Needs: deps("build"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "rollback", OnFailureOf: "deploy", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}
 
 	hostDoc(t, t.Context(), st, doc, fx.run)
@@ -75,9 +75,9 @@ func TestAFailedRecoveryLeavesTheRunToItsParent(t *testing.T) {
 		return Result{Outcome: sparkwing.Failed, Err: errors.New("broke")}
 	}
 	fx := &fakeExec{bodies: map[string]Executor{"notify": broke, "notify-recover": broke}}
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
-		{ID: "notify", Modifiers: &nodeproto.PlanModifiers{Optional: true, OnFailure: "notify-recover"}},
-		{ID: "notify-recover", OnFailureOf: "notify"},
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "notify", Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "notify-recover", OnFailureOf: "notify", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}
 
 	res := hostDoc(t, t.Context(), st, doc, fx.run)

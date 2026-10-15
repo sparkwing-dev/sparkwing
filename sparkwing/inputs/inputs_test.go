@@ -13,8 +13,8 @@ func TestEnvDeterministicOrder(t *testing.T) {
 	t.Setenv("SAMPLE_FIRST_VALUE", "1")
 	t.Setenv("SAMPLE_SECOND_VALUE", "2")
 
-	first := resolvedKey(t, EnvOld("SAMPLE_FIRST_VALUE", "SAMPLE_SECOND_VALUE"))
-	second := resolvedKey(t, EnvOld("SAMPLE_SECOND_VALUE", "SAMPLE_FIRST_VALUE"))
+	first := resolvedKey(t, Env("SAMPLE_FIRST_VALUE", "SAMPLE_SECOND_VALUE"))
+	second := resolvedKey(t, Env("SAMPLE_SECOND_VALUE", "SAMPLE_FIRST_VALUE"))
 	if first != second || first == "" {
 		t.Fatalf("Env order should not affect hash: a=%q b=%q", first, second)
 	}
@@ -27,8 +27,8 @@ func TestEnvUnsetVsEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	present := resolvedKey(t, EnvOld("SAMPLE_PRESENT_VALUE"))
-	absent := resolvedKey(t, EnvOld("SAMPLE_ABSENT_VALUE"))
+	present := resolvedKey(t, Env("SAMPLE_PRESENT_VALUE"))
+	absent := resolvedKey(t, Env("SAMPLE_ABSENT_VALUE"))
 	if present == absent {
 		t.Fatalf("set-but-empty and unset must hash differently: both=%q", present)
 	}
@@ -36,29 +36,54 @@ func TestEnvUnsetVsEmpty(t *testing.T) {
 
 func TestEnvValueChangesHash(t *testing.T) {
 	t.Setenv("SAMPLE_INPUT_VALUE", "one")
-	first := resolvedKey(t, EnvOld("SAMPLE_INPUT_VALUE"))
+	first := resolvedKey(t, Env("SAMPLE_INPUT_VALUE"))
 	t.Setenv("SAMPLE_INPUT_VALUE", "two")
-	second := resolvedKey(t, EnvOld("SAMPLE_INPUT_VALUE"))
+	second := resolvedKey(t, Env("SAMPLE_INPUT_VALUE"))
 	if first == second {
 		t.Fatalf("changing var value should change hash: a=%q b=%q", first, second)
 	}
 }
 
+func TestEnvFramesNamesAndValues(t *testing.T) {
+	t.Setenv("MEMO_FRAME_A", "x\x1eMEMO_FRAME_B=y")
+	t.Setenv("MEMO_FRAME_B", "z")
+	first := resolvedKey(t, Env("MEMO_FRAME_A", "MEMO_FRAME_B"))
+	t.Setenv("MEMO_FRAME_A", "x")
+	t.Setenv("MEMO_FRAME_B", "y\x1eMEMO_FRAME_B=z")
+	if second := resolvedKey(t, Env("MEMO_FRAME_A", "MEMO_FRAME_B")); first == second {
+		t.Fatalf("different environment values share a key: %q", first)
+	}
+}
+
 func TestConst(t *testing.T) {
-	if resolvedKey(t, ConstOld("v1")) != "v1" {
+	if resolvedKey(t, Const("v1")) != "v1" {
 		t.Fatal("Const should return its supplied key")
 	}
-	if resolvedKey(t, ConstOld("v1")) == resolvedKey(t, ConstOld("v2")) {
+	if resolvedKey(t, Const("v1")) == resolvedKey(t, Const("v2")) {
 		t.Fatal("different Const values should differ")
 	}
 }
 
+func TestConstRejectsEmptyMemoKey(t *testing.T) {
+	key, err := Const("")(t.Context())
+	if key != "" || err == nil {
+		t.Fatalf("empty constant = (%q, %v)", key, err)
+	}
+}
+
 func TestComposeShortCircuitsOnEmpty(t *testing.T) {
-	empty := sparkwing.CacheKeyFn(func(context.Context) (sparkwing.CacheKey, error) { return "", nil })
-	value := sparkwing.CacheKeyFn(func(context.Context) (sparkwing.CacheKey, error) { return "x", nil })
-	key, err := ComposeOld(value, empty)(t.Context())
+	empty := sparkwing.MemoKeyFn(func(context.Context) (sparkwing.MemoValue, error) { return "", nil })
+	value := sparkwing.MemoKeyFn(func(context.Context) (sparkwing.MemoValue, error) { return "x", nil })
+	key, err := Compose(value, empty)(t.Context())
 	if key != "" || err == nil || !strings.Contains(err.Error(), "empty key") {
 		t.Fatalf("empty input = (%q, %v)", key, err)
+	}
+}
+
+func TestComposeRejectsNilResolver(t *testing.T) {
+	key, err := Compose(Const("valid"), nil)(t.Context())
+	if key != "" || err == nil {
+		t.Fatalf("nil resolver = (%q, %v)", key, err)
 	}
 }
 
@@ -184,27 +209,27 @@ func TestDirPrefixIsBoundaryAware(t *testing.T) {
 	}
 }
 
-func TestSignatureIsCacheKeyFn(t *testing.T) {
-	_ = RepoFilesOld()
-	_ = RepoFilesOld(Ignore("*.md"))
-	_ = FilesOld("src/**")
-	_ = EnvOld("HOME")
-	_ = ConstOld("v1")
-	_ = ComposeOld(ConstOld("a"), ConstOld("b"))
+func TestSignatureIsMemoKeyFn(t *testing.T) {
+	_ = RepoFiles()
+	_ = RepoFiles(Ignore("*.md"))
+	_ = Files("src/**")
+	_ = Env("HOME")
+	_ = Const("v1")
+	_ = Compose(Const("a"), Const("b"))
 }
 
 func TestComposeIncorporatesAllParts(t *testing.T) {
-	first := resolvedKey(t, ComposeOld(ConstOld("x"), ConstOld("y")))
-	second := resolvedKey(t, ComposeOld(ConstOld("x"), ConstOld("z")))
+	first := resolvedKey(t, Compose(Const("x"), Const("y")))
+	second := resolvedKey(t, Compose(Const("x"), Const("z")))
 	if first == second {
 		t.Fatal("changing one Const should change Compose output")
 	}
-	if !strings.HasPrefix(string(first), "ck:") {
-		t.Errorf("Compose output should be sparkwing.Key prefix: %q", first)
+	if first == "" || first == sparkwing.NoMemo {
+		t.Errorf("Compose output must be a memo key: %q", first)
 	}
 }
 
-func resolvedKey(t *testing.T, resolve sparkwing.CacheKeyFn) sparkwing.CacheKey {
+func resolvedKey(t *testing.T, resolve sparkwing.MemoKeyFn) sparkwing.MemoValue {
 	t.Helper()
 	key, err := resolve(t.Context())
 	if err != nil {

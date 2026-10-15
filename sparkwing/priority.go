@@ -6,12 +6,6 @@ func (p *Plan) Priority(n int) *Plan {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.priority = n
+	p.prioritySet = true
 	return p
-}
-
-// PriorityValue returns the run's local admission priority.
-func (p *Plan) PriorityValue() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.priority
 }

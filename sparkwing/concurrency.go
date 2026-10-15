@@ -25,7 +25,7 @@ const (
 // OnLimit is the closed set of behaviors for a node that finds its
 // [ConcurrencyGroup] at capacity. Sharing another member's result is
 // not among them: a group is different work taking turns, never the
-// same work -- result reuse is [JobNode.Cache]'s job.
+// same work. Result reuse belongs to [JobNode.Memo].
 type OnLimit string
 
 const (
@@ -55,7 +55,7 @@ const (
 type ConcurrencyLimit struct {
 	// Capacity is the total budget in author-defined units. With the
 	// default member cost of 1 it reads as "max members running at
-	// once". Values <= 0 are treated as 1 by the coordination backend.
+	// once". Capacity must be positive when the host validates the plan.
 	//
 	// When two live participants declare different capacities for the
 	// same group (a version skew across runs), the effective capacity
@@ -135,10 +135,22 @@ func (g *ConcurrencyGroup) Name() string { return g.name }
 // Limit returns the group's declared budget.
 func (g *ConcurrencyGroup) Limit() ConcurrencyLimit { return g.limit }
 
+// String includes the group's capacity and effective scope and saturation policy.
+func (g *ConcurrencyGroup) String() string {
+	scope, onLimit := g.limit.Scope, g.limit.OnLimit
+	if scope == "" {
+		scope = ScopeGlobal
+	}
+	if onLimit == "" {
+		onLimit = Queue
+	}
+	return fmt.Sprintf("%s(capacity %d, scope %s, on-limit %s)", g.name, g.limit.Capacity, scope, onLimit)
+}
+
 // Concurrency enrolls the node in concurrency group g with the given
 // admission cost (default 1). The node competes with the group's other
 // members for g's budget; how it behaves at the limit follows g's
-// [OnLimit]. Independent of [JobNode.Cache] -- a node may declare both,
+// [OnLimit]. Independent of [JobNode.Memo] -- a node may declare both,
 // neither, or either.
 //
 //	shard := sparkwing.Job(plan, "shard-1", run)
@@ -157,27 +169,7 @@ func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode {
 
 type concurrencyMembership struct {
 	group *ConcurrencyGroup
-	cost  int
-}
-
-// ConcurrencyGroupRef returns the group the node joined via
-// [JobNode.Concurrency], or nil when the node declared no membership.
-func (n *JobNode) ConcurrencyGroupRef() *ConcurrencyGroup {
-	if n.concurrency == nil {
-		return nil
-	}
-	return n.concurrency.group
-}
-
-// ConcurrencyCost returns the admission cost declared via
-// [JobNode.Concurrency], or 0 when the node has no membership. The
-// coordination backend admits a member only when the summed cost of
-// live members in the same scope plus this cost fits the capacity.
-func (n *JobNode) ConcurrencyCost() int {
-	if n.concurrency == nil {
-		return 0
-	}
-	return n.concurrency.cost
+	cost  *int
 }
 
 // Concurrency enrolls every member of the group in concurrency group g
@@ -190,9 +182,9 @@ func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup {
 }
 
 // PlanConcurrency records one whole-run concurrency gate.
-type PlanConcurrency struct {
+type planConcurrency struct {
 	Group *ConcurrencyGroup
-	Cost  int
+	Cost  *int
 }
 
 // Concurrency gates the whole run on concurrency group g: the run acquires
@@ -211,7 +203,7 @@ func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan {
 		return p
 	}
 	c := concurrencyCost(g, "plan", cost...)
-	membership := PlanConcurrency{Group: g, Cost: c}
+	membership := planConcurrency{Group: g, Cost: c}
 	for i, existing := range p.planConcurrency {
 		if sameConcurrencyGroup(existing.Group, g) {
 			p.planConcurrency[i] = membership
@@ -222,39 +214,6 @@ func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan {
 	return p
 }
 
-// PlanConcurrency returns every whole-run gate declared via [Plan.Concurrency].
-func (p *Plan) PlanConcurrency() []PlanConcurrency {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	out := make([]PlanConcurrency, len(p.planConcurrency))
-	copy(out, p.planConcurrency)
-	return out
-}
-
-// ConcurrencyGroupRef returns the first group set via [Plan.Concurrency], or
-// nil when the plan declared no whole-run coordination. Prefer
-// [Plan.PlanConcurrency] when a caller must observe every whole-run gate.
-func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if len(p.planConcurrency) == 0 {
-		return nil
-	}
-	return p.planConcurrency[0].Group
-}
-
-// ConcurrencyCost returns the first plan-level admission cost declared via
-// [Plan.Concurrency], or 0 when the plan declared no whole-run coordination.
-// Prefer [Plan.PlanConcurrency] when a caller must observe every gate.
-func (p *Plan) ConcurrencyCost() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if len(p.planConcurrency) == 0 {
-		return 0
-	}
-	return p.planConcurrency[0].Cost
-}
-
 func sameConcurrencyGroup(a, b *ConcurrencyGroup) bool {
 	if a == nil || b == nil {
 		return a == b
@@ -262,28 +221,19 @@ func sameConcurrencyGroup(a, b *ConcurrencyGroup) bool {
 	return a.name == b.name && a.limit.Scope == b.limit.Scope
 }
 
-func concurrencyCost(g *ConcurrencyGroup, subject string, cost ...int) int {
+func concurrencyCost(g *ConcurrencyGroup, subject string, cost ...int) *int {
+	if len(cost) > 1 {
+		panic("sparkwing: Concurrency accepts at most one cost")
+	}
 	c := 1
-	switch len(cost) {
-	case 0:
-	case 1:
+	if len(cost) == 1 {
 		c = cost[0]
-	default:
-		panic("sparkwing: Concurrency: at most one cost may be given")
 	}
-	if c < 1 {
-		c = 1
+	if c <= 0 || (g.limit.Capacity > 0 && c > g.limit.Capacity) {
+		panic(fmt.Sprintf("sparkwing: invalid concurrency cost for %s", subject))
 	}
-	if eff := g.limit.Capacity; eff > 0 && c > eff {
-		panic(fmt.Sprintf(
-			"sparkwing: Concurrency: %s cost %d exceeds group %q capacity %d -- it could never be admitted",
-			subject, c, g.name, eff,
-		))
-	} else if eff <= 0 && c > 1 {
-		panic(fmt.Sprintf(
-			"sparkwing: Concurrency: %s cost %d exceeds group %q capacity 1 (capacity unset defaults to 1) -- it could never be admitted",
-			subject, c, g.name,
-		))
+	if len(cost) == 0 {
+		return nil
 	}
-	return c
+	return &c
 }

@@ -12,16 +12,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// safety: retry_auto shares the budget and backoff, because every attempt
-// already runs in a fresh SDK process, which is the whole-node re-dispatch
-// retry_auto asks for. The node row stays running until the last attempt
-// ends, since only the scheduler finishes it.
+// safety: the node row stays running until the last application attempt ends.
 func retryLayer(cfg *Config, next Executor) Executor {
 	return func(ctx context.Context, n *NodeRun) Result {
-		m := n.Plan.Modifiers
+		m := n.Plan.Retry
 		first, budget := max(n.Attempt, 1), 1
 		if m != nil {
-			budget += max(m.Retry, 0)
+			budget += max(m.Attempts, 0)
 		}
 		// safety: attempts an earlier run of the node's lineage spent, as an agent-loss retry's row carries, come
 		// out of its budget, so a node that keeps losing its executor stops being retried.
@@ -41,7 +38,7 @@ func retryLayer(cfg *Config, next Executor) Executor {
 			attempt.Attempt = first
 			return next(ctx, &attempt)
 		}
-		backoff := millis(m.RetryBackoffMS)
+		backoff := millis(value(m.BackoffMS))
 		// safety: one rule for both the loop and the attempt's Retried, so after_run
 		// runs in exactly the attempt the loop ends on.
 		retries := func(r Result) bool { return r.Outcome == sparkwing.Failed && !r.Final && ctx.Err() == nil }
@@ -64,18 +61,10 @@ func retryLayer(cfg *Config, next Executor) Executor {
 	}
 }
 
-// safety: the lines and events are the dispatcher's: a plain retry notes its
-// attempt in the node log and records attempt_retry once the backoff ends, and
-// retry_auto records node_auto_retry before it, as a re-dispatch does.
 func retryAnnounce(ctx context.Context, cfg *Config, n *NodeRun, ordinal, budget int, wait time.Duration) bool {
 	after := ""
 	if wait > 0 {
 		after = " after " + wait.String()
-	}
-	if n.Plan.Modifiers.RetryAuto {
-		hostNodeLog(ctx, cfg, n, sparkwing.LogRecord{Level: "info", Msg: fmt.Sprintf("auto-retry dispatch %d/%d%s", ordinal, budget, after)})
-		hostEvent(ctx, n.Run, n.Plan.ID, "node_auto_retry", fmt.Appendf(nil, "dispatch %d/%d", ordinal, budget))
-		return waitFor(ctx, wait)
 	}
 	hostNodeLog(ctx, cfg, n, sparkwing.LogRecord{
 		Level: "info", Event: "retry", Msg: fmt.Sprintf("retry attempt %d/%d%s", ordinal, budget, after),
@@ -91,15 +80,19 @@ func retryAnnounce(ctx context.Context, cfg *Config, n *NodeRun, ordinal, budget
 // AttemptsBudget is the longest node n runs on one host: every attempt its
 // retries allow at its timeout_ms, and the backoff between them. Zero means
 // the node declares no timeout.
-func AttemptsBudget(n nodeproto.PlanNode) time.Duration {
-	m := n.Modifiers
-	if m == nil || m.TimeoutMS <= 0 {
+func AttemptsBudget(n nodeproto.JobSpec) time.Duration {
+	if value(n.TimeoutMS) <= 0 {
 		return 0
 	}
-	retries := max(m.Retry, 0)
-	total := time.Duration(retries+1) * millis(m.TimeoutMS)
+	retries := 0
+	var backoff time.Duration
+	if n.Retry != nil {
+		retries = max(n.Retry.Attempts, 0)
+		backoff = millis(value(n.Retry.BackoffMS))
+	}
+	total := time.Duration(retries+1) * millis(value(n.TimeoutMS))
 	for i := 1; i <= retries; i++ {
-		total += scaledBackoff(millis(m.RetryBackoffMS), i)
+		total += scaledBackoff(backoff, i)
 	}
 	if total < 0 {
 		return math.MaxInt64

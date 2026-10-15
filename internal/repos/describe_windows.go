@@ -19,7 +19,7 @@ var describeJobs atomic.Uint64
 type processTree struct{ job *procgroup.Job }
 
 // hack: Windows has no descriptor numbering or process groups, so the pipes
-// travel as inherited handles that protofd.HandlesEnv names and a
+// travel as inherited handles named in argv and a
 // kill-on-close job holds the tree.
 func startTree(cmd *exec.Cmd, requests, frames *os.File) (*processTree, error) {
 	handles := []syscall.Handle{syscall.Handle(requests.Fd()), syscall.Handle(frames.Fd())}
@@ -29,7 +29,7 @@ func startTree(cmd *exec.Cmd, requests, frames *os.File) (*processTree, error) {
 		}
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{AdditionalInheritedHandles: handles}
-	cmd.Env = append(cmd.Environ(), fmt.Sprintf("%s=%d,%d", protofd.HandlesEnv, handles[0], handles[1]))
+	cmd.Args = append(cmd.Args, protofd.HandlesArg, fmt.Sprintf("%d,%d", handles[0], handles[1]))
 	job, err := procgroup.NewJob(fmt.Sprintf(`Local\sparkwing-describe-%d-%d`, os.Getpid(), describeJobs.Add(1)))
 	if err != nil {
 		return nil, err

@@ -153,13 +153,13 @@ func githubAppRerunAnchor(anchors []*store.Trigger, sub store.GitHubAppTrigger) 
 }
 
 func githubAppRunEventSubscribed(run *store.Trigger, sub store.GitHubAppTrigger) bool {
-	event := run.TriggerEnv[sparkwing.EnvGitHubEventName]
+	event := run.TriggerEnv["GITHUB_EVENT_NAME"]
 	if event == "" {
 		event = "push"
 	}
 	action := run.TriggerEnv["GITHUB_ACTION"]
-	if action == "" && event == sparkwing.EventPullRequest {
-		action = run.TriggerEnv[sparkwing.EnvPRAction]
+	if action == "" && event == "pull_request" {
+		action = run.TriggerEnv["GITHUB_PR_ACTION"]
 	}
 	return githubAppSubscribes(sub, event, action, run.TriggerEnv, run.GitBranch)
 }
@@ -172,8 +172,8 @@ func githubAppRerunIntake(anchor *store.Trigger, user string) githubAppIntake {
 		}
 	}
 	var pr *sparkwing.PullRequest
-	if env[sparkwing.EnvGitHubEventName] == sparkwing.EventPullRequest {
-		pr = sparkwing.PullRequestFromEnv(env)
+	if env["GITHUB_EVENT_NAME"] == "pull_request" {
+		pr = PullRequestForTrigger(env)
 	}
 	return githubAppIntake{user: user, branch: anchor.GitBranch, sha: anchor.GitSHA, env: env, at: time.Now(), prInfo: pr}
 }

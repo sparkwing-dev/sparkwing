@@ -1,26 +1,24 @@
-package sparkwing_test
+package sparkwing
 
 import (
 	"context"
 	"reflect"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestWork_GroupsAccessorReturnsDeclaredGroupsInOrder(t *testing.T) {
-	w := sparkwing.NewWork()
-	fetch := sparkwing.Step(w, "fetch", func(context.Context) error { return nil })
-	lint := sparkwing.Step(w, "lint", func(context.Context) error { return nil }).Needs(fetch)
-	vet := sparkwing.Step(w, "vet", func(context.Context) error { return nil }).Needs(fetch)
-	test := sparkwing.Step(w, "test", func(context.Context) error { return nil }).Needs(fetch)
-	smoke := sparkwing.Step(w, "smoke", func(context.Context) error { return nil })
-	bench := sparkwing.Step(w, "bench", func(context.Context) error { return nil })
+	w := NewWork()
+	fetch := Step(w, "fetch", func(context.Context) error { return nil })
+	lint := Step(w, "lint", func(context.Context) error { return nil }).Needs(fetch)
+	vet := Step(w, "vet", func(context.Context) error { return nil }).Needs(fetch)
+	test := Step(w, "test", func(context.Context) error { return nil }).Needs(fetch)
+	smoke := Step(w, "smoke", func(context.Context) error { return nil })
+	bench := Step(w, "bench", func(context.Context) error { return nil })
 
-	checks := sparkwing.GroupSteps(w, "checks", lint, vet, test)
-	verify := sparkwing.GroupSteps(w, "verify", smoke, bench)
+	checks := GroupSteps(w, "checks", lint, vet, test)
+	verify := GroupSteps(w, "verify", smoke, bench)
 
-	got := w.Groups()
+	got := w.groups
 	if len(got) != 2 {
 		t.Fatalf("Groups() len = %d, want 2", len(got))
 	}
@@ -44,9 +42,9 @@ func TestWork_GroupsAccessorReturnsDeclaredGroupsInOrder(t *testing.T) {
 }
 
 func TestWork_GroupsEmptyWhenNoGroupSteps(t *testing.T) {
-	w := sparkwing.NewWork()
-	sparkwing.Step(w, "only", func(context.Context) error { return nil })
-	if got := w.Groups(); len(got) != 0 {
+	w := NewWork()
+	Step(w, "only", func(context.Context) error { return nil })
+	if got := w.groups; len(got) != 0 {
 		t.Errorf("Groups() = %v, want empty", got)
 	}
 }

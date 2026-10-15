@@ -43,7 +43,7 @@ type RunnerInfo struct {
 
 // HasLabel reports whether the runner advertises the given label
 // term. Honors the comma-OR within-a-term syntax used by
-// Job.Requires / Prefers / WhenRunner:
+// Job.Requires / Prefers:
 //
 //	r.HasLabel("os=linux")          // single label
 //	r.HasLabel("os=linux,os=macos") // OR within term
@@ -83,8 +83,8 @@ type runnerCtxKey struct{}
 
 // Runner returns the RunnerInfo the orchestrator installed for the
 // current job. Returns nil when no orchestrator has installed one
-// (inside Plan(), in unit tests that haven't called WithRunner,
-// in code paths that don't carry the dispatch context).
+// in code paths that don't carry the dispatch context. Tests can
+// supply a granted runner through sparkwingtest.Options.
 //
 // Adapters branching on the result should treat nil and an
 // unconfigured runner the same way the local default does -- the

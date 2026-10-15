@@ -32,7 +32,7 @@ type sourceOutputs interface {
 // safety: the dispatcher's rule: a manual retry runs again every node that did not succeed, and an automatic
 // retry runs exactly its causes and what they reach, so a result copied from the source is never one a rerun
 // node changes. It is decided once the node is ready, when the nodes a generator added are known.
-func (s *scheduler) rehydrated(ctx context.Context, n nodeproto.PlanNode, byID map[string]nodeproto.PlanNode) (Result, bool) {
+func (s *scheduler) rehydrated(ctx context.Context, n nodeproto.JobSpec, byID map[string]nodeproto.JobSpec) (Result, bool) {
 	r := s.rehydrate
 	strict := r != nil && len(r.Causes) > 0
 	if r == nil || s.rerun[n.ID] || (strict && s.reruns(n.ID, byID, map[string]bool{})) {
@@ -59,7 +59,7 @@ func (s *scheduler) rehydrated(ctx context.Context, n nodeproto.PlanNode, byID m
 	}
 	// safety: a node planned differently in the source, as a generator may regenerate it, ran other work, so
 	// its result is not this node's to copy.
-	if prior.SpecHash != n.SpecHash {
+	if prior.SpecHash != jobHash(n) {
 		return s.runsAgain(n.ID)
 	}
 	generator := generatesNodes(n, sparkwing.Outcome(prior.Outcome))
@@ -100,7 +100,7 @@ func (s *scheduler) runsAgain(id string) (Result, bool) {
 	return Result{}, false
 }
 
-func (s *scheduler) reruns(id string, byID map[string]nodeproto.PlanNode, seen map[string]bool) bool {
+func (s *scheduler) reruns(id string, byID map[string]nodeproto.JobSpec, seen map[string]bool) bool {
 	if rerun, ok := s.rerun[id]; ok {
 		return rerun
 	}
@@ -116,7 +116,7 @@ func (s *scheduler) reruns(id string, byID map[string]nodeproto.PlanNode, seen m
 	}
 	for _, closure := range n.NeedsGenerated {
 		for _, source := range s.nodes {
-			if source.Closures != nil && slices.Contains(source.Closures.Generator, closure) {
+			if slices.Contains(source.Closures.Generate, closure) {
 				waits = append(waits, source.ID)
 			}
 		}

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func repoShortName(dir string) string {
@@ -126,9 +125,6 @@ func gitDirPointer(gitFile, dir string) string {
 }
 
 func currentRepoShortName() string {
-	if workDir := sparkwing.CurrentRuntime().WorkDir; workDir != "" {
-		return repoShortName(workDir)
-	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return ""

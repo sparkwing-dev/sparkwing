@@ -44,12 +44,12 @@ func newArtifactHarness(t *testing.T, nodes ...string) *artifactHarness {
 			t.Fatal(err)
 		}
 	}
-	run := &Run{ID: testRunID, State: st, Logger: slog.New(slog.DiscardHandler)}
+	run := &Run{ID: testRunID, State: st, Logger: slog.New(slog.DiscardHandler), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	return &artifactHarness{t: t, st: st, art: art, run: run}
 }
 
-func (h *artifactHarness) exec(workspace string, plan nodeproto.PlanNode, body func(dir string) Result) (res Result, ran bool) {
-	cfg := &Config{Artifacts: h.art, Session: SessionConfig{Dir: workspace}}
+func (h *artifactHarness) exec(workspace string, plan nodeproto.JobSpec, body func(dir string) Result) (res Result, ran bool) {
+	cfg := &Config{Artifacts: h.art, Session: SessionConfig{Dir: workspace, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}}
 	inner := func(context.Context, *NodeRun) Result {
 		ran = true
 		return body(workspace)
@@ -99,15 +99,15 @@ func sha(b []byte) string {
 
 func TestArtifactsStageThenPublish(t *testing.T) {
 	h := newArtifactHarness(t, "build", "package")
-	build := nodeproto.PlanNode{ID: "build", Outputs: []string{"dist/**"}}
+	build := nodeproto.JobSpec{ID: "build", Artifacts: []string{"dist/**"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	res, _ := h.exec(t.TempDir(), build, func(dir string) Result { return writeFile(dir, "dist/app.bin", "binary") })
 	if res.Outcome != sparkwing.Success {
 		t.Fatalf("build: %s %v", res.Outcome, res.Err)
 	}
 
-	pkg := nodeproto.PlanNode{
-		ID: "package", Deps: []string{"build"}, Outputs: []string{"out.tgz"},
-		Consumes: []nodeproto.PlanConsume{{Producer: "build", Into: "in"}},
+	pkg := nodeproto.JobSpec{
+		ID: "package", Needs: []string{"build"}, Artifacts: []string{"out.tgz"},
+		Consumes: []nodeproto.ArtifactInput{{Producer: "build", Into: "in"}}, Steps: []nodeproto.StepSpec{{ID: "body"}},
 	}
 	res, _ = h.exec(t.TempDir(), pkg, func(dir string) Result {
 		b, err := os.ReadFile(filepath.Join(dir, "in", "dist", "app.bin"))
@@ -141,7 +141,7 @@ func TestArtifactsStageThenPublish(t *testing.T) {
 
 func TestArtifactsFailedNodePublishesNothing(t *testing.T) {
 	h := newArtifactHarness(t, "build")
-	build := nodeproto.PlanNode{ID: "build", Outputs: []string{"*"}}
+	build := nodeproto.JobSpec{ID: "build", Artifacts: []string{"*"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	res, _ := h.exec(t.TempDir(), build, func(dir string) Result {
 		writeFile(dir, "half.bin", "partial")
 		return Result{Outcome: sparkwing.Failed, Err: errors.New("boom")}
@@ -156,7 +156,7 @@ func TestArtifactsFailedNodePublishesNothing(t *testing.T) {
 
 func TestArtifactsMissingConsumedArtifactFailsNode(t *testing.T) {
 	h := newArtifactHarness(t, "build", "deploy")
-	build := nodeproto.PlanNode{ID: "build", Outputs: []string{"app.bin"}}
+	build := nodeproto.JobSpec{ID: "build", Artifacts: []string{"app.bin"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	if res, _ := h.exec(t.TempDir(), build, func(dir string) Result { return writeFile(dir, "app.bin", "binary") }); res.Outcome != sparkwing.Success {
 		t.Fatalf("build: %v", res.Err)
 	}
@@ -164,7 +164,7 @@ func TestArtifactsMissingConsumedArtifactFailsNode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deploy := nodeproto.PlanNode{ID: "deploy", Consumes: []nodeproto.PlanConsume{{Producer: "build"}}}
+	deploy := nodeproto.JobSpec{ID: "deploy", Consumes: []nodeproto.ArtifactInput{{Producer: "build"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	res, ran := h.exec(t.TempDir(), deploy, func(string) Result { return Result{Outcome: sparkwing.Success} })
 	if ran {
 		t.Fatal("node ran without its consumed artifact")
@@ -181,12 +181,12 @@ func TestArtifactsMissingConsumedArtifactFailsNode(t *testing.T) {
 }
 
 func TestArtifactsRefuseEscapingDeclaredPaths(t *testing.T) {
-	cases := map[string]nodeproto.PlanNode{
-		"output climbs":   {ID: "n", Outputs: []string{"../secret.txt"}},
-		"output buried":   {ID: "n", Outputs: []string{"dist/../../secret.txt"}},
-		"output absolute": {ID: "n", Outputs: []string{"/etc/passwd"}},
-		"into climbs":     {ID: "n", Consumes: []nodeproto.PlanConsume{{Producer: "build", Into: "../up"}}},
-		"into absolute":   {ID: "n", Consumes: []nodeproto.PlanConsume{{Producer: "build", Into: "/tmp/x"}}},
+	cases := map[string]nodeproto.JobSpec{
+		"output climbs":   {ID: "n", Artifacts: []string{"../secret.txt"}},
+		"output buried":   {ID: "n", Artifacts: []string{"dist/../../secret.txt"}},
+		"output absolute": {ID: "n", Artifacts: []string{"/etc/passwd"}},
+		"into climbs":     {ID: "n", Consumes: []nodeproto.ArtifactInput{{Producer: "build", Into: "../up"}}},
+		"into absolute":   {ID: "n", Consumes: []nodeproto.ArtifactInput{{Producer: "build", Into: "/tmp/x"}}},
 	}
 	for name, plan := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -205,7 +205,7 @@ func TestArtifactsRefuseEscapingDeclaredPaths(t *testing.T) {
 func TestArtifactsLayerOffWithoutStore(t *testing.T) {
 	next := func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} }
 	cfg := &Config{}
-	res := artifactsLayer(cfg, next)(t.Context(), &NodeRun{Plan: nodeproto.PlanNode{ID: "n", Outputs: []string{"../x"}}})
+	res := artifactsLayer(cfg, next)(t.Context(), &NodeRun{Plan: nodeproto.JobSpec{ID: "n", Artifacts: []string{"../x"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}})
 	if res.Outcome != sparkwing.Success {
 		t.Fatalf("layer acted with no store: %s %v", res.Outcome, res.Err)
 	}

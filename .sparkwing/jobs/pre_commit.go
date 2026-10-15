@@ -63,7 +63,7 @@ func (p *PreCommit) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.No
 // measured 0.9 s, so the tier costs what its slowest member costs and ordering
 // would only make the verdict later. FailFast still stops the first failure.
 func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.ParallelFailures(sparkwing.FailFast)
+	w.FailurePolicy(sparkwing.FailFast)
 	budget := newTierBudget("pre-commit", preCommitBudget).over(changeScope)
 	budget.step(w, "gofmt", runGofmtOnTheChange)
 	budget.step(w, "formatters", runFormatters)

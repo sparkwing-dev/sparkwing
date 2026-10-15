@@ -23,7 +23,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func (s *Server) handleDirectCapabilities(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +125,7 @@ func (s *Server) triggerCacheScope(ctx context.Context, trigger *store.Trigger) 
 	env := trigger.TriggerEnv
 	own := triggerOwnRef(trigger)
 	refs := []string{}
-	for _, ref := range []string{own, branchRef(env[sparkwing.EnvPRBaseRef]), branchRef(env[EnvDefaultBranch])} {
+	for _, ref := range []string{own, branchRef(env["GITHUB_BASE_REF"]), branchRef(env[EnvDefaultBranch])} {
 		if ref != "" && !slices.Contains(refs, ref) {
 			refs = append(refs, ref)
 		}

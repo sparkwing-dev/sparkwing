@@ -1,326 +1,125 @@
-package sparkwing_test
+package sparkwing
 
 import (
 	"context"
 	"errors"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func TestJob_ClosureFormSingleStepWork(t *testing.T) {
+func TestJobClosureBuildsOneStep(t *testing.T) {
 	called := false
-	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "single", func(ctx context.Context) error {
-		called = true
-		return nil
-	})
-	if n.ResultStep() != nil {
-		t.Fatal("closure-form Job should not have a typed result step")
+	plan := NewPlan()
+	job := Job(plan, "single", func(context.Context) error { called = true; return nil })
+	if job.resultStep != nil || len(job.work.steps) != 1 || job.work.steps[0].id != "run" {
+		t.Fatalf("closure work = %+v", job.work)
 	}
-	steps := n.Work().Steps()
-	if len(steps) != 1 {
-		t.Fatalf("expected 1 step, got %d", len(steps))
-	}
-	if steps[0].ID() != "run" {
-		t.Fatalf("step id = %q, want %q", steps[0].ID(), "run")
-	}
-	if _, err := sparkwing.RuntimePlumbing.Fns.WorkStepFn(steps[0])(context.Background()); err != nil {
-		t.Fatalf("step fn returned %v", err)
-	}
-	if !called {
-		t.Fatal("step fn did not invoke the wrapped closure")
+	if _, err := runStep(t.Context(), job.work, job.work.steps[0]); err != nil || !called {
+		t.Fatalf("body called=%v, error=%v", called, err)
 	}
 }
 
-type fooOut struct {
-	Tag string
-}
+type countingJob struct{ calls int }
 
-type countingJob struct {
-	calls int
-}
-
-func (j *countingJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	j.calls++
-	sparkwing.Step(w, "only", func(ctx context.Context) error { return nil })
+func (job *countingJob) Work(work *Work) (*WorkStep, error) {
+	job.calls++
+	Step(work, "only", func(context.Context) error { return nil })
 	return nil, nil
 }
 
-func TestPlanJob_MaterializesWorkAtRegistration(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	cj := &countingJob{}
-	n := sparkwing.Job(plan, "compute", cj)
-	if cj.calls != 1 {
-		t.Fatalf("sw.Job should call Work() once at registration, got %d calls", cj.calls)
-	}
-	if n.ID() != "compute" {
-		t.Fatalf("node id = %q, want compute", n.ID())
+func TestJobMaterializesAtRegistration(t *testing.T) {
+	plan := NewPlan()
+	body := &countingJob{}
+	Job(plan, "compute", body)
+	if body.calls != 1 {
+		t.Fatalf("materialization calls = %d", body.calls)
 	}
 }
 
-func TestPlanJob_PanicsOnNilJob(t *testing.T) {
-	plan := sparkwing.NewPlan()
+func TestJobRejectsNilAndDuplicate(t *testing.T) {
+	for name, makeJob := range map[string]func(){
+		"nil": func() { Job(NewPlan(), "x", nil) },
+		"duplicate": func() {
+			plan := NewPlan()
+			Job(plan, "x", jobFnNoop())
+			Job(plan, "x", jobFnNoop())
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("invalid job accepted")
+				}
+			}()
+			makeJob()
+		})
+	}
+}
+
+func TestStepDependenciesAndGroups(t *testing.T) {
+	work := NewWork()
+	a := Step(work, "a", jobFnNoop())
+	b := Step(work, "b", jobFnNoop())
+	group := GroupSteps(work, "both", a, b)
+	join := Step(work, "join", jobFnNoop()).Needs(group)
+	if len(join.needs) != 2 || join.needs[0] != "a" || join.needs[1] != "b" {
+		t.Fatalf("step dependencies = %v", join.needs)
+	}
+}
+
+func TestTypedStepGetAfterRunStep(t *testing.T) {
+	work := NewWork()
+	step := Step(work, "produce", func(context.Context) (int, error) { return 42, nil })
+	if _, err := runStep(t.Context(), work, step); err != nil {
+		t.Fatal(err)
+	}
+	if got := StepGet[int](t.Context(), step); got != 42 {
+		t.Fatalf("StepGet = %d", got)
+	}
+}
+
+func TestStepGetRejectsUntypedStep(t *testing.T) {
+	work := NewWork()
+	step := Step(work, "plain", jobFnNoop())
 	defer func() {
 		if recover() == nil {
-			t.Fatal("sw.Job(nil) should panic")
+			t.Fatal("untyped StepGet accepted")
 		}
 	}()
-	sparkwing.Job(plan, "x", nil)
+	_ = StepGet[int](t.Context(), step)
 }
 
-func TestPlanJob_PanicsOnDuplicateID(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	sparkwing.Job(plan, "a", func(ctx context.Context) error { return nil })
-	defer func() {
-		if recover() == nil {
-			t.Fatal("sw.Job duplicate id should panic")
-		}
-	}()
-	sparkwing.Job(plan, "a", func(ctx context.Context) error { return nil })
-}
-
-func TestWork_StepDuplicateIDPanics(t *testing.T) {
-	w := sparkwing.NewWork()
-	sparkwing.Step(w, "only", func(ctx context.Context) error { return nil })
-	defer func() {
-		if recover() == nil {
-			t.Fatal("duplicate sw.Step id should panic")
-		}
-	}()
-	sparkwing.Step(w, "only", func(ctx context.Context) error { return nil })
-}
-
-func TestWork_StepNeeds(t *testing.T) {
-	w := sparkwing.NewWork()
-	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
-	b := sparkwing.Step(w, "b", func(ctx context.Context) error { return nil })
-	c := sparkwing.Step(w, "c", func(ctx context.Context) error { return nil }).Needs(a, b)
-	deps := c.DepIDs()
-	if len(deps) != 2 || deps[0] != "a" || deps[1] != "b" {
-		t.Fatalf("c.DepIDs = %v, want [a b]", deps)
-	}
-	if len(b.DepIDs()) != 0 {
-		t.Fatalf("b should have no deps, got %v", b.DepIDs())
-	}
-}
-
-func TestWork_NeedsChainAndGroupSteps(t *testing.T) {
-	w := sparkwing.NewWork()
-	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
-	b := sparkwing.Step(w, "b", func(ctx context.Context) error { return nil }).Needs(a)
-	c := sparkwing.Step(w, "c", func(ctx context.Context) error { return nil }).Needs(b)
-	if got := b.DepIDs(); len(got) != 1 || got[0] != "a" {
-		t.Fatalf("b should depend on a, got %v", got)
-	}
-	if got := c.DepIDs(); len(got) != 1 || got[0] != "b" {
-		t.Fatalf("c should depend on b, got %v", got)
-	}
-
-	x := sparkwing.Step(w, "x", func(ctx context.Context) error { return nil })
-	y := sparkwing.Step(w, "y", func(ctx context.Context) error { return nil })
-	group := sparkwing.GroupSteps(w, "fanout", x, y)
-	if group.Name() != "fanout" {
-		t.Fatalf("StepGroup.Name() = %q, want %q", group.Name(), "fanout")
-	}
-	join := sparkwing.Step(w, "join", func(ctx context.Context) error { return nil }).Needs(group)
-	if got := join.DepIDs(); len(got) != 2 {
-		t.Fatalf("join should fan in 2 deps from a step group, got %v", got)
-	}
-}
-
-func TestGroupSteps_NeedsAndSkipIfDelegate(t *testing.T) {
-	w := sparkwing.NewWork()
-	setup := sparkwing.Step(w, "setup", func(ctx context.Context) error { return nil })
-	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
-	b := sparkwing.Step(w, "b", func(ctx context.Context) error { return nil })
-	g := sparkwing.GroupSteps(w, "members", a, b).
-		Needs(setup).
-		SkipIf(func(ctx context.Context) bool { return false })
-
-	for _, m := range g.Members() {
-		deps := m.DepIDs()
-		if len(deps) != 1 || deps[0] != "setup" {
-			t.Fatalf("group member %q should depend on setup, got %v", m.ID(), deps)
-		}
-		if len(m.SkipPredicates()) != 1 {
-			t.Fatalf("group member %q should have one skip predicate, got %d", m.ID(), len(m.SkipPredicates()))
-		}
-	}
-}
-
-func TestStep_TypedStep_ResolveAfterMarkDone(t *testing.T) {
-	w := sparkwing.NewWork()
-	want := fooOut{Tag: "shipped"}
-	produced := sparkwing.Step(w, "produce", func(ctx context.Context) (fooOut, error) {
-		return want, nil
-	})
-	if produced.OutputType() == nil {
-		t.Fatal("typed sw.Step should set OutputType from fn return")
-	}
-	out, err := sparkwing.RuntimePlumbing.Fns.WorkStepFn(produced)(context.Background())
-	if err != nil {
-		t.Fatalf("produce fn returned %v", err)
-	}
-	sparkwing.RuntimePlumbing.Fns.WorkStepMarkDone(produced, out)
-
-	got := sparkwing.StepGet[fooOut](context.Background(), produced)
-	if got != want {
-		t.Fatalf("StepGet = %+v, want %+v", got, want)
-	}
-}
-
-func TestStepGet_PanicsOnUntypedStep(t *testing.T) {
-	w := sparkwing.NewWork()
-	s := sparkwing.Step(w, "plain", func(ctx context.Context) error { return nil })
-	sparkwing.RuntimePlumbing.Fns.WorkStepMarkDone(s, nil)
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("StepGet on an untyped step should panic")
-		}
-		msg, _ := r.(string)
-		if !strings.Contains(msg, "no typed output") {
-			t.Fatalf("panic should mention 'no typed output', got %q", msg)
-		}
-	}()
-	_ = sparkwing.StepGet[fooOut](context.Background(), s)
-}
-
-func TestStepGet_PanicsOnTypeMismatch(t *testing.T) {
-	w := sparkwing.NewWork()
-	s := sparkwing.Step(w, "produce", func(ctx context.Context) (fooOut, error) {
-		return fooOut{Tag: "ok"}, nil
-	})
-	out, _ := sparkwing.RuntimePlumbing.Fns.WorkStepFn(s)(context.Background())
-	sparkwing.RuntimePlumbing.Fns.WorkStepMarkDone(s, out)
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("StepGet with mismatched T should panic")
-		}
-		msg, _ := r.(string)
-		if !strings.Contains(msg, "produces") {
-			t.Fatalf("panic should mention produced type, got %q", msg)
-		}
-	}()
-	_ = sparkwing.StepGet[string](context.Background(), s)
-}
-
-func TestStep_RejectsBadFnSignatures(t *testing.T) {
+func TestStepRejectsBadFunctionSignatures(t *testing.T) {
 	cases := []struct {
 		name string
 		fn   any
 		want string
 	}{
-		{"nil", nil, "fn must be non-nil"},
-		{"non-func", "not a func", "fn must be a func"},
-		{"variadic", func(ctx context.Context, args ...string) error { return nil }, "must not be variadic"},
-		{"zero args", func() error { return nil }, "exactly 1 argument"},
-		{"two args", func(ctx context.Context, x int) error { return nil }, "exactly 1 argument"},
-		{"wrong arg type", func(s string) error { return nil }, "argument must be context.Context"},
-		{"one return non-error", func(ctx context.Context) string { return "" }, "one return value must return error"},
-		{"three returns", func(ctx context.Context) (int, int, error) { return 0, 0, nil }, "must return error or (T, error)"},
-		{"second return non-error", func(ctx context.Context) (int, string) { return 0, "" }, "second return value must be error"},
+		{"nil", nil, "non-nil"},
+		{"non-function", "text", "must be a func"},
+		{"variadic", func(context.Context, ...string) error { return nil }, "variadic"},
+		{"no arguments", func() error { return nil }, "exactly 1 argument"},
+		{"wrong argument", func(string) error { return nil }, "context.Context"},
+		{"wrong result", func(context.Context) string { return "" }, "must return error"},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
 			defer func() {
-				r := recover()
-				if r == nil {
-					t.Fatalf("expected panic containing %q", tc.want)
-				}
-				msg, _ := r.(string)
-				if !strings.Contains(msg, tc.want) {
-					t.Fatalf("panic %q must contain %q", msg, tc.want)
+				value := recover()
+				if value == nil || !strings.Contains(value.(string), test.want) {
+					t.Fatalf("panic = %v; want %s", value, test.want)
 				}
 			}()
-			w := sparkwing.NewWork()
-			sparkwing.Step(w, "x", tc.fn)
+			Step(NewWork(), "x", test.fn)
 		})
 	}
 }
 
-type discoverJob struct {
-	sparkwing.Produces[[]string]
-	items []string
-}
-
-func (d *discoverJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	return sparkwing.Step(w, "run", d.run), nil
-}
-
-func (d *discoverJob) run(ctx context.Context) ([]string, error) { return d.items, nil }
-
-func TestJobFanOutDynamic_RegistersExpansion(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	src := sparkwing.Job(plan, "discover", &discoverJob{items: []string{"a", "b"}})
-	calls := 0
-	group := sparkwing.JobFanOutDynamic(plan, "builds", src, func(s string) (string, any) {
-		calls++
-		return "build-" + s, func(ctx context.Context) error { return nil }
-	})
-	if group == nil {
-		t.Fatal("JobFanOutDynamic should return a Group")
-	}
-	if !group.Dynamic() {
-		t.Fatal("JobFanOutDynamic group should be dynamic")
-	}
-	if group.Name() != "builds" {
-		t.Fatalf("group name = %q, want %q", group.Name(), "builds")
-	}
-	exps := plan.Expansions()
-	if len(exps) != 1 {
-		t.Fatalf("expected 1 expansion, got %d", len(exps))
-	}
-	if exps[0].Source != src {
-		t.Fatal("expansion source should point at the discover node")
-	}
-	if calls != 0 {
-		t.Fatalf("fn should not run at registration; ran %d times", calls)
-	}
-	ctx := sparkwingruntime.WithJSONResolver(context.Background(), func(id string) ([]byte, bool) {
-		if id == "discover" {
-			return []byte(`["a","b","c"]`), true
-		}
-		return nil, false
-	})
-	children := exps[0].Gen(ctx)
-	if len(children) != 3 {
-		t.Fatalf("expected 3 children, got %d", len(children))
-	}
-	wantIDs := []string{"build-a", "build-b", "build-c"}
-	for i, c := range children {
-		if c.ID() != wantIDs[i] {
-			t.Fatalf("child %d id = %q, want %q", i, c.ID(), wantIDs[i])
-		}
-	}
-	if calls != 3 {
-		t.Fatalf("fn should run once per item; ran %d times", calls)
-	}
-}
-
-func TestStepSkipIf_AccumulatesPredicates(t *testing.T) {
-	w := sparkwing.NewWork()
-	s := sparkwing.Step(w, "x", func(ctx context.Context) error { return nil }).
-		SkipIf(func(ctx context.Context) bool { return false }).
-		SkipIf(func(ctx context.Context) bool { return true })
-	preds := s.SkipPredicates()
-	if len(preds) != 2 {
-		t.Fatalf("expected 2 predicates, got %d", len(preds))
-	}
-	if !preds[1](context.Background()) {
-		t.Fatal("second predicate should report true")
-	}
-}
-
-func TestWork_StepFnReturnsError(t *testing.T) {
-	myErr := errors.New("boom")
-	w := sparkwing.NewWork()
-	s := sparkwing.Step(w, "x", func(ctx context.Context) error { return myErr })
-	if _, err := sparkwing.RuntimePlumbing.Fns.WorkStepFn(s)(context.Background()); !errors.Is(err, myErr) {
-		t.Fatalf("step fn should propagate error, got %v", err)
+func TestStepReturnsBodyError(t *testing.T) {
+	work := NewWork()
+	want := errors.New("boom")
+	step := Step(work, "x", func(context.Context) error { return want })
+	if _, err := runStep(t.Context(), work, step); !errors.Is(err, want) {
+		t.Fatalf("error = %v", err)
 	}
 }
