@@ -117,9 +117,6 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 	if request.Failure != nil && (request.Failure.MaskedError == "" || len(request.Failure.MaskedError) > int(limits.ErrorBytes) || !slices.ContainsFunc(apierr.Codes, func(code apierr.Definition) bool { return code.Code == request.Failure.Code })) {
 		return result, authorityError(apierr.BadRequest, "invalid expansion failure")
 	}
-	if request.Failure == nil {
-		panic("unimplemented: c1-data")
-	}
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		now := tx.now()
 		if err := expansionAuthorityTx(ctx, tx, t.team, request, now); err != nil {
@@ -146,23 +143,35 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 			return holderRefusal()
 		}
 		result = AcceptedExpansion{Source: request.Source, SourceGeneration: request.SourceGeneration}
-		result.State = ExpansionFailed
-		failure, err := json.Marshal(request.Failure)
+		accepted, err := prepareExpansionTx(ctx, tx, t.team, request, snapshot)
 		if err != nil {
 			return err
 		}
-		result.BodyHash, err = stateHash(request.Failure)
-		if err != nil {
-			return err
-		}
+		result.State, result.BodyHash = accepted.state, accepted.hash
 		if source.Expansion == result.State && source.ExpansionDigest == result.BodyHash {
+			result.Nodes, err = acceptedExpansionNodes(snapshot, accepted.plan)
+			if err != nil {
+				return err
+			}
+			if err := expansionAuthorityTx(ctx, tx, t.team, request, tx.now()); err != nil {
+				return err
+			}
 			result.Replayed = true
 			return nil
 		}
 		if source.Expansion != ExpansionExpected {
 			return authorityError(apierr.IllegalTransition, "expansion differs from its accepted submission")
 		}
-		write, err := tx.ExecContext(ctx, `UPDATE nodes SET expansion=?,expansion_digest=?,expansion_body=?,expansion_failure=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND expansion='expected'`, result.State, result.BodyHash, nil, failure, t.team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration)
+		if request.Failure == nil {
+			result.Nodes, err = insertExpansionTx(ctx, tx, t.team, request, snapshot, accepted)
+			if err != nil {
+				return err
+			}
+		}
+		if err := expansionAuthorityTx(ctx, tx, t.team, request, tx.now()); err != nil {
+			return err
+		}
+		write, err := tx.ExecContext(ctx, `UPDATE nodes SET expansion=?,expansion_digest=?,expansion_body=?,expansion_failure=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND expansion='expected'`, result.State, result.BodyHash, accepted.body, accepted.failure, t.team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration)
 		if err != nil {
 			return err
 		}
@@ -238,6 +247,37 @@ func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request E
 		return holderRefusal()
 	}
 	return nil
+}
+
+func resolveReapedExpansionTx(ctx context.Context, tx *storeTx, target expiredUnit, status string, actor Actor, now time.Time) error {
+	if err := checkReaperTx(ctx, tx, actor, now); err != nil {
+		return err
+	}
+	state := ExpansionFailed
+	failure := &ExpansionFailure{Code: apierr.Unavailable, MaskedError: "generator evaluator lost"}
+	if status == "cancelled" {
+		state, failure = ExpansionNone, nil
+	}
+	body, err := json.Marshal(failure)
+	if err != nil {
+		return err
+	}
+	digest, err := stateHash(failure)
+	if err != nil {
+		return err
+	}
+	write, err := tx.ExecContext(ctx, `UPDATE nodes SET expansion=?,expansion_failure=?,expansion_digest=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND expansion='expected'`, state, body, digest, target.team, target.ref.RunID, target.ref.NodeID, target.sourceGeneration)
+	if err != nil {
+		return err
+	}
+	count, err := write.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return holderRefusal()
+	}
+	return settleControllerTx(ctx, tx, target.team, target.ref.RunID, now)
 }
 
 // safety: intake and both seals own every write-once request/spec projection so retry cannot replace trusted facts.

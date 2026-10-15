@@ -98,16 +98,18 @@ const (
 // underlying database is SQLite or Postgres depending on which
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
-	clock          func() time.Time
-	db             *sql.DB
-	dialect        Dialect
-	cleanup        func() error
-	csrfKeyMu      sync.Mutex
-	csrfKey        []byte
-	launchResumeMu sync.Mutex
-	launchResume   *launchCursor
-	outputDir      string
-	githubCheckMu  sync.Mutex
+	plans            planContracts
+	planSecretOpener PlanSecretOpener
+	clock            func() time.Time
+	db               *sql.DB
+	dialect          Dialect
+	cleanup          func() error
+	csrfKeyMu        sync.Mutex
+	csrfKey          []byte
+	launchResumeMu   sync.Mutex
+	launchResume     *launchCursor
+	outputDir        string
+	githubCheckMu    sync.Mutex
 }
 
 // Dialect reports the SQL dialect this Store was opened against.

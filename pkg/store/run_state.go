@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -300,21 +301,26 @@ func guardRunEdgeTx(ctx context.Context, tx *storeTx, team Team, row RunRow, cha
 				return errors.New("run queue deadline not reached")
 			}
 		} else {
-			if row.Dispatch == "controller" {
+			if row.Dispatch == "controller" && row.Spec != nil {
 				return errors.New("controller ownership expiry does not fail a run")
 			}
 			if row.Owner == nil {
 				return holderRefusal()
 			}
-			var until int64
+			var until sql.NullInt64
+			var started sql.NullInt64
+			var status string
 			var disruptions int
-			if err := tx.QueryRowContext(ctx, `SELECT lease_expires_at,disruptions FROM triggers WHERE team=? AND id=?`, team, row.ID).Scan(&until, &disruptions); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT lease_expires_at,disruptions,status,started_at FROM triggers WHERE team=? AND id=?`, team, row.ID).Scan(&until, &disruptions, &status, &started); err != nil {
 				return err
 			}
-			if row.Request.Request.Origin != "local" && disruptions < limits.MaxDisruptions && row.CancelRequestedAt == nil {
+			if status != "failed" && row.Request.Request.Origin != "local" && disruptions < limits.MaxDisruptions && row.CancelRequestedAt == nil {
 				return errors.New("remote owner loss must requeue within the same run")
 			}
-			if until > now.UnixNano() {
+			if until.Valid && until.Int64 > now.UnixNano() {
+				return holderRefusal()
+			}
+			if status != "failed" && !(status == "done" && row.CancelRequestedAt != nil) && (!until.Valid || !started.Valid && row.CancelRequestedAt == nil) {
 				return holderRefusal()
 			}
 		}
@@ -324,6 +330,50 @@ func guardRunEdgeTx(ctx context.Context, tx *storeTx, team Team, row RunRow, cha
 	default:
 		return errors.New("unknown run transition cause")
 	}
+}
+
+func writeOwnerRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, owner ownerRecovery, status string, now time.Time) error {
+	var started, finished any
+	if status != "pending" {
+		finished = now.UnixNano()
+		if owner.started.Valid {
+			started = owner.started.Int64
+		}
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE triggers SET status=?,disruptions=?,claimed_by=NULL,capability_prefix='',claim_principal='',claimed_at=NULL,lease_expires_at=NULL,started_at=?,finished_at=? WHERE team=? AND id=? AND generation=?`, status, owner.disruptions, started, finished, target.team, target.ref.RunID, owner.generation)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return holderRefusal()
+	}
+	return nil
+}
+
+func writeEvalRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, unit ownerRecovery, status string, now time.Time) error {
+	var started, finished any
+	if status != "pending" {
+		finished = now.UnixNano()
+		if unit.started.Valid {
+			started = unit.started.Int64
+		}
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE eval_units SET status=?,disruptions=?,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,claimed_at=NULL,started_at=?,finished_at=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND generation=?`, status, unit.disruptions, started, finished, target.team, target.ref.RunID, target.ref.NodeID, target.sourceGeneration, unit.generation)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return holderRefusal()
+	}
+	return nil
 }
 
 func cancelRunNodesTx(ctx context.Context, tx *storeTx, team Team, runID string, actor Actor, now time.Time) error {

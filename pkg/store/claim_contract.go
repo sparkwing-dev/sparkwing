@@ -53,7 +53,7 @@ func (s *Store) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, er
 
 // ReleaseUnit returns an unstarted unit without consuming an attempt; cancellation and started leases use transitions.
 func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPrefix string) error {
-	panic("unimplemented: c1-data")
+	return s.releaseUnit(ctx, claim, capabilityPrefix)
 }
 
 // OperatorStore restricts deployment work to explicit methods without embedding a tenant or raw Store.
