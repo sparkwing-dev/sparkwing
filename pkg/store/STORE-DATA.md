@@ -96,6 +96,10 @@ Policy survives reopening and cannot change persisted upload provenance.
 Execution still needs W7's binary check and W3's adapter.
 
 Financial writes use the same transaction as the state change that caused them.
+Unpriced work is refused by the claim transaction without changing the job,
+attempts, events or ledger. The unused `Tenant.FailNodeForUnpricedClass` writer,
+its unfenced cancellation helper and its separate event kind are removed.
+Terminal reports use `Tenant.TransitionNode` and its current claim fence.
 Balances use `Tenant.CreditBalanceMicro`. Billing state and grant history use
 `Tenant.CreditState` and `Tenant.ListCreditGrants`. Their raw Store twins are removed. Burn windows use
 the store clock and include charges at the window's lower boundary.

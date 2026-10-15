@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -72,8 +71,6 @@ const (
 	EventKindCreditsBlocked = "credits_blocked"
 	// EventKindCreditsExhausted records a node cancelled after the balance reached zero and the grace period elapsed.
 	EventKindCreditsExhausted = "credits_exhausted"
-	// EventKindCreditsUnpriced records a node failed because its cpu request is above the largest class the rate table prices.
-	EventKindCreditsUnpriced = "credits_unpriced_class"
 )
 
 // ErrInsufficientCredits is returned when a metered runner's controller has no balance left to pay for the work it asked for.
@@ -1599,62 +1596,6 @@ func (t *Tenant) eventKindPresent(ctx context.Context, runID, nodeID, kind strin
 		return false, nil
 	}
 	return err == nil, err
-}
-
-// FailNodeForUnpricedClass fails a node whose cpu request is above the largest class the credit rate table prices, and records an event naming both sizes.
-func (t *Tenant) FailNodeForUnpricedClass(
-	ctx context.Context, refusal *UnpricedCPUClassError, now time.Time,
-) error {
-	payload, err := json.Marshal(map[string]int64{
-		"cores": refusal.Cores, "max_cores": refusal.MaxCores,
-	})
-	if err != nil {
-		return err
-	}
-	if _, err := t.AppendEventOnce(ctx, refusal.RunID, refusal.NodeID,
-		EventKindCreditsUnpriced, payload); err != nil {
-		return err
-	}
-	return t.s.cancelMeteredNode(ctx, refusal.RunID, refusal.NodeID, "",
-		FailureUnpricedCPUClass, refusal.Error(), now)
-}
-
-func (s *Store) cancelMeteredNode(
-	ctx context.Context, runID, nodeID, tokenPrefix, reason, message string, now time.Time,
-) (err error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	settlement, err := s.chargeNodeTx(ctx, tx, runID, nodeID, tokenPrefix, now, true)
-	if err != nil {
-		return err
-	}
-	team, err := creditTeamForRunTx(ctx, tx, runID)
-	if err != nil {
-		return err
-	}
-	stoppedAt := settlement.settledAt.UnixNano()
-	if _, err := tx.ExecContext(ctx, `UPDATE nodes
-   SET `+nodeFailSet+`, error = ?, failure_reason = ?, finished_at = ?,
-       claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
-       claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
-       claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
-       ready_at = NULL, offer_started_at = NULL, reservation_id = '',
-       credit_charged_through = 0
- WHERE team = ? AND run_id = ? AND node_id = ? AND `+nodeNotDone,
-		message, reason, stoppedAt, string(team), runID, nodeID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE node_execution_attempts
-   SET finished_at = COALESCE(finished_at, ?), outcome = CASE WHEN finished_at IS NULL THEN 'failed' ELSE outcome END,
-       failure_reason = CASE WHEN finished_at IS NULL THEN ? ELSE failure_reason END
- WHERE team = ? AND run_id = ? AND node_id = ? AND finished_at IS NULL`,
-		stoppedAt, reason, string(team), runID, nodeID); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 func newCreditID(prefix string) (string, error) {

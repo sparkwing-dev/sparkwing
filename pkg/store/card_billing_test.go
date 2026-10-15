@@ -397,45 +397,6 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 	}
 }
 
-// A decline holds the team, drops an operator's grant back to New and stops
-// every claim, prepaid balance or not; the retries still run under the hold,
-// and paying the charge lifts it.
-func TestADeclineHoldsATeamWithPrepaidBalanceAtNew(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	acme := teamHandle(t, s, "acme")
-	trustWithCard(t, acme, now)
-	spend(t, s, "acme", "ch_1", 15_000)
-	w := dueCharge(t, s, now)
-	if _, _, err := s.AsOperator().FailCardAttempt(ctx, w.AttemptID, "pi_declined", "card_declined", now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 400 * store.MicroCreditsPerCredit * 1000, Reference: "promo", CreatedBy: "admin"}); err != nil {
-		t.Fatal(err)
-	}
-	if b, err := acme.BillingStanding(ctx, now); err != nil || b.Trusted {
-		t.Fatalf("standing = %+v, %v; want the granted team back at New while held", b, err)
-	}
-	claimant := meteredTeamClaimant(t, acme, "agent:cloud")
-	readyTeamNode(t, s, acme, "run-held", "build")
-	if limit := claimLimit(t, s, claimant); limit != store.SpendLimitChargeFailed {
-		t.Fatalf("claim while held = %q, want refused as a failed charge", limit)
-	}
-	retry := dueCharge(t, s, now.Add(25*time.Hour))
-	if _, _, err := s.AsOperator().SettleCardPayment(ctx, store.CardPayment{
-		ChargeID: retry.ChargeID, AttemptID: retry.AttemptID, PaymentIntent: "pi_retry", AmountCents: 15_000,
-	}, now); err != nil {
-		t.Fatal(err)
-	}
-	if freeze, err := acme.CreditFreeze(ctx); err != nil || freeze.Frozen {
-		t.Fatalf("freeze after paying = %+v, %v; want released", freeze, err)
-	}
-	if b, err := acme.BillingStanding(ctx, now); err != nil || !b.Trusted {
-		t.Fatalf("standing after paying = %+v, %v; want trusted again", b, err)
-	}
-}
-
 // One card's spend counts against its limits across every team it pays for:
 // a claim by one team writes the card's bucket, and the card's cap binds the
 // other team.

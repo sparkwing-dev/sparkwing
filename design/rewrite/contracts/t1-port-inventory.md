@@ -21,6 +21,21 @@ pending. This adds no archived source-function port identity.
 
 ## W1b raw cancellation writer retirement
 
+`TestMeteredUnpricedClaimLeavesWorkUnchanged` replaces
+`TestFailNodeForUnpricedClassEndsTheNodeWithAnEvent`. Named and queued claims on
+runner and Cloud paths refuse an unpriced resource request without changing the
+job, balance, attempts, events or billing rows. The uncalled cancellation writer
+and its separate event kind are removed. Final terminal changes require the
+state machine's current actor and attempt fence.
+
+`TestPaymentDeclineHoldsPrepaidClaimsUntilCollectionSucceeds` replaces
+`TestADeclineHoldsATeamWithPrepaidBalanceAtNew`. It submits trusted failure and
+success facts through the provider settlement owner, binds the retry through
+RecordAttemptIntent, and exercises the real ClaimUnit refusal while the team has
+prepaid credit. The hold lowers billing trust until collection succeeds. Event
+receipts commit with the outcomes. Provider verification and final payment schema
+remain contract fixtures.
+
 `TestMeteredFailureReportSettlesAndReleasesClaimProperty` replaces
 `TestCancelNodeForExhaustedCreditsFailsAndReleasesTheNode`,
 `TestCancelNodeForComputeLimitFailsTheNodeAndReleasesTheClaim` and

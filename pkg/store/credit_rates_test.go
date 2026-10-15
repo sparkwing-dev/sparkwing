@@ -566,57 +566,6 @@ func TestAnEmptyBalanceIsReportedBeforeTheUnpricedClass(t *testing.T) {
 	}
 }
 
-// A node nobody can price fails with the reason, because every poller would
-// otherwise retry it forever.
-func TestFailNodeForUnpricedClassEndsTheNodeWithAnEvent(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	claimant := meteredClaimant(t, s, "agent:cloud")
-	fundLedger(t, s, 10_000)
-	rates := githubRateTable()
-	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
-		t.Fatalf("set the rate table: %v", err)
-	}
-	readyNodeWithCores(t, s, "run-unpriced", "build", 96)
-
-	_, err := s.ClaimNamedNode(ctx, claimant, "run-unpriced", "build", "pod-1", time.Minute, store.NamedClaimOptions{SizesToClass: true})
-	var unpriced *store.UnpricedCPUClassError
-	if !errors.As(err, &unpriced) {
-		t.Fatalf("claim = %v, want an unpriced-class refusal", err)
-	}
-	if unpriced.RunID != "run-unpriced" || unpriced.NodeID != "build" {
-		t.Fatalf("the refusal names %s/%s", unpriced.RunID, unpriced.NodeID)
-	}
-
-	team, err := s.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := team.FailNodeForUnpricedClass(ctx, unpriced, time.Now()); err != nil {
-		t.Fatalf("fail the node: %v", err)
-	}
-	node, err := s.GetNode(ctx, "run-unpriced", "build")
-	if err != nil {
-		t.Fatalf("get node: %v", err)
-	}
-	if node.Outcome != "failed" || node.FailureReason != store.FailureUnpricedCPUClass {
-		t.Fatalf("node = %s/%s, want a failure naming the unpriced class", node.Outcome, node.FailureReason)
-	}
-	if !strings.Contains(node.Error, "96") || !strings.Contains(node.Error, "64") {
-		t.Fatalf("the node's error %q names neither size", node.Error)
-	}
-	events, err := s.ListEventsAfter(ctx, "run-unpriced", 0, 50)
-	if err != nil {
-		t.Fatalf("events: %v", err)
-	}
-	for _, e := range events {
-		if e.Kind == store.EventKindCreditsUnpriced {
-			return
-		}
-	}
-	t.Fatalf("no %s event on the run: %+v", store.EventKindCreditsUnpriced, events)
-}
-
 func TestAStoredRateTableNothingCanReadIsAnError(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()

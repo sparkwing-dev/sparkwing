@@ -1042,7 +1042,6 @@ type Event struct {
 const EventKindComputeLimitBlocked = "compute_limit_blocked"
 const EventKindCreditsBlocked = "credits_blocked"
 const EventKindCreditsExhausted = "credits_exhausted"
-const EventKindCreditsUnpriced = "credits_unpriced_class"
 const EventKindMetricsStopped = "metrics_stopped"
 const EventKindSecretPreflightRefused = "secret_preflight_refused"
 type EventLimits struct {
@@ -3060,9 +3059,6 @@ func (t *Tenant) DeleteRun(ctx context.Context, runID string) error
 func (t *Tenant) DeleteSecret(name, pipeline string) error
 func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) (err error)
 func (t *Tenant) EgressUsage(ctx context.Context, period string) (EgressUsage, error)
-func (t *Tenant) FailNodeForUnpricedClass(
-	ctx context.Context, refusal *UnpricedCPUClassError, now time.Time,
-) error
 func (t *Tenant) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (t *Tenant) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
 func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey string) (*Trigger, error)
