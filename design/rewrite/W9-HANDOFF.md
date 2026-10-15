@@ -1,3 +1,90 @@
+## Continuation from f3f6b5508 - retained command tests
+
+This section supersedes the verification counts below. W9 remains CONTINUE.
+The worktree started clean. No Git writes or candidate installation ran.
+
+### Implemented and deleted
+
+- Ported the subprocess output tests to `profiles show --profile`, `docs read
+  --full` and `docs search --search=TEXT`. The profile test uses a private real
+  config file. Invalid output flags must retain exit 2 and empty stdout. The
+  subprocess helper now uses the production error renderer. Removed three
+  terminal cases for deleted `repos update --check` behavior.
+- Replaced the production-source grep for the old jobs command with dispatch
+  checks for every runs subcommand. Current help resolves the correct path.
+  Retired jobs invocations return exit 2 with empty stdout. Protocol text no
+  longer causes a false command-rename failure.
+- Ported secret-description source drift to the existing source-entry boundary.
+  It builds a real SDK pipeline, invokes the command over protocol v2 twice,
+  checks renamed declarations and refuses unbuildable source without output.
+  Source acquisition is a test adapter. This does not establish selected-engine
+  production acquisition. Deleted its unused 113-line submit fixture scaffold.
+- Reverified the previously fixed daemon missing/cancelled fixture. The orphan
+  liveness source-scan test and legacy opsview doctor facade were already
+  deleted in f3f6b5508 and were not recreated.
+
+This pass changes tests only: 73 added, 179 deleted, net -106 lines. Production
+Go delta is 0 this pass and **-8,111 versus main**, within the -2,900 W9 budget.
+No production API was removed and no caller outside cmd/sparkwing changed.
+
+### Verification and acceptance
+
+All Go checks use GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache,
+GOMAXPROCS=4 and TMPDIR/GOTMPDIR under /tmp/sw-astra-W9. Tests use -p 4.
+
+- Whole-repository `go build -p 4 ./...`, scoped cmd/sparkwing and opsview vet,
+  full opsview tests and commentcheck against main pass.
+- The final socket-free short CLI selection has 917 passing, 15 skipped and
+  two failing top-level tests. Nineteen socket-based tests were excluded from
+  that diagnostic selection. No skips were added to repository tests.
+- The two failures remain `TestSDKCheckRejectsFIFO` and
+  `TestSDKCheckRefusesOversizedModuleWithoutWriting`, through W8's real pin
+  reader. FIFO blocks until the test's existing subprocess bound. The oversized
+  refusal includes 1,048,606 bytes instead of applying the retained file bound.
+- The non-short migrated secret-description and command-dispatch tests pass:
+  `go test -p 4 ./cmd/sparkwing -run '^Test(PipelineDescribeSecretsFollowsTheSourceAndFailsLoudly|RunCommandsDispatchThroughFinalNames)$' -count=1`.
+- Output formatting and error tests pass with
+  `go test -p 4 ./cmd/sparkwing -run '^TestOutputContract' -skip '^TestOutputContractPipeRoutes$' -count=1`.
+  The pipe-routes test's sole failure is daemon status: the sandbox denies the
+  local socket connection. That retained case stays in the test.
+- Existing `go test -p 4 ./tests/acceptance -run '^(TestSurface|TestHere)' -count=1`
+  components pass. No native acceptance cell is newly complete or unskipped.
+
+### Production composition and contracts still open
+
+The tagged production probes were rerun without replacing their production
+factories. Local run, local controller and local schedules still return their
+explicit integration refusals. Doctor leaves the pruned run's ledger record and
+reports no unrecorded_step_outcome warning. Neither lead finding 1 nor 7 is fixed.
+
+At f3f6b5508, NewNativeHost and NewLocalRuntime exist. The latter still requires
+an Open callback. No concrete wingd.LocalController exists outside test fixtures,
+and LocalLifecycle.Doctor(ctx, version) still has no dry-run/sweep input or
+controller maintenance operation. The default controller authentication reader
+supports persisted bearer/session authority only. It does not supply the local
+peer authentication adapter. The requested constructor names/commit were asked
+for while the retained tests were ported. No answer arrived in this session.
+
+The prior foreign-owner requests still apply: W2/W8's elected store, queue,
+reconciliation, maintenance and authorized API/UI composition; W2/W3's private
+host state, captured environments, delegated processes, source and data/log
+bindings; local schedule checkout/environment/proof/pin/tick ownership; and a
+controller-owned doctor sweep carrying dry-run and independent recording
+warnings. Contract fakes and W3's real native-host constructor are already
+covered by the existing CLI composition tests. A substitute production factory
+would not close these gaps. No foreign contract was changed.
+
+The earlier A1-50 source-bundle, here, remote-cache, publication and debug-release
+requests, plus W8's inspection compiler and upgrade pin-directory requests,
+remain open as listed below. Other completed amendment/handoff work is retained.
+Native platform/backend/placement evidence remains with T1/lead.
+
+Shared files touched: none. Code/test edits are five files under cmd/sparkwing.
+This report is the only documentation edit. Lead-owned handoffs and amendments
+are unchanged. Friction remains the absent production adapters, W8 pin-reader
+failures and sandbox socket denial. W9 scratch is removed after final checks;
+/tmp/sw-gocache is kept. No new production mechanism was added.
+
 ## Continuation from db866b76a - production composition remains open
 
 This section supersedes the status below. W9 is CONTINUE. The worktree started
