@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
@@ -175,45 +175,48 @@ func TestFakeHostPlansRegisteredPipeline(t *testing.T) {
 }
 
 func TestFakeHostEvaluatesGeneratorAndClosesContexts(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	source := sparkwing.Job(plan, "source", fakeProducer{})
-	reference := sparkwing.RefTo[fakeOutput](source)
-	generated := source.Generate(func(ctx context.Context, expanded *sparkwing.Plan) error {
-		value := reference.Get(ctx)
-		sparkwing.Job(expanded, "child-"+value.Value, func(context.Context) error { return nil })
-		return nil
-	})
-	host := sparkwingtest.New(sparkwingtest.Options{})
-	defer host.Close()
-	output, err := host.Eval(t.Context(), plan, "source", generated.ID(), json.RawMessage(`{"Value":"ready"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var jobs []struct {
-		ID     string   `json:"id"`
-		Needs  []string `json:"deps"`
-		Groups []string `json:"groups"`
-	}
-	if err := json.Unmarshal(output, &jobs); err != nil {
-		t.Fatal(err)
-	}
-	if len(jobs) != 1 || jobs[0].ID != "child-ready" || len(jobs[0].Needs) != 1 || jobs[0].Needs[0] != "source" ||
-		len(jobs[0].Groups) != 1 || jobs[0].Groups[0] != generated.ID() {
-		t.Fatalf("generated jobs = %+v", jobs)
-	}
-	if _, err := host.Eval(t.Context(), plan, "source", "absent-closure", nil); err == nil {
-		t.Fatal("unknown closure evaluated successfully")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		plan := sparkwing.NewPlan()
+		source := sparkwing.Job(plan, "source", fakeProducer{})
+		reference := sparkwing.RefTo[fakeOutput](source)
+		generated := source.Generate(func(ctx context.Context, expanded *sparkwing.Plan) error {
+			value := reference.Get(ctx)
+			sparkwing.Job(expanded, "child-"+value.Value, func(context.Context) error { return nil })
+			return nil
+		})
+		host := sparkwingtest.New(sparkwingtest.Options{})
+		defer host.Close()
+		output, err := host.Eval(t.Context(), plan, "source", generated.ID(), json.RawMessage(`{"Value":"ready"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var jobs []struct {
+			ID     string   `json:"id"`
+			Needs  []string `json:"deps"`
+			Groups []string `json:"groups"`
+		}
+		if err := json.Unmarshal(output, &jobs); err != nil {
+			t.Fatal(err)
+		}
+		if len(jobs) != 1 || jobs[0].ID != "child-ready" || len(jobs[0].Needs) != 1 || jobs[0].Needs[0] != "source" ||
+			len(jobs[0].Groups) != 1 || jobs[0].Groups[0] != generated.ID() {
+			t.Fatalf("generated jobs = %+v", jobs)
+		}
+		if _, err := host.Eval(t.Context(), plan, "source", "absent-closure", nil); err == nil {
+			t.Fatal("unknown closure evaluated successfully")
+		}
 
-	ctx := host.Context(t.Context())
-	if err := host.Close(); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-ctx.Done():
-	case <-time.After(2 * time.Second):
-		t.Fatal("closing fake host did not cancel its contexts")
-	}
+		ctx := host.Context(t.Context())
+		if err := host.Close(); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		select {
+		case <-ctx.Done():
+		default:
+			t.Fatal("closing fake host did not cancel its contexts")
+		}
+	})
 }
 
 func TestFakeHostReportsGeneratorFailure(t *testing.T) {
