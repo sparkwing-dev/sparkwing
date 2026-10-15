@@ -1,7 +1,7 @@
 <!-- GENERATED from the route registrations in pkg/controller/server.go by internal/apiref. Do not edit by hand; regenerate with `bash bin/gen-api-docs.sh`. -->
 # HTTP API reference
 
-Every route the controller registers, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` satisfies any scope check except `credits.grant`, which only the checkout service's own token passes. `public` routes run with no bearer check (the GitHub and Stripe webhooks require their HMAC signatures); `authenticated` routes take any valid bearer and check no further scope. `claim` routes answer the claim token of one node claim, and only for that claim's own run and node. `operator` routes require an operator-console session through the shared route policy and CSRF proof for writes; no bearer reaches them.
+Every route the controller registers, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` satisfies any scope check except `credits.grant`, which only the checkout service's own token passes. `public` routes run with no bearer check (the GitHub and Stripe webhooks require their HMAC signatures); `authenticated` routes require live identity under their credential policy and no named grant. `claim` routes answer the claim token of one node claim, and only for that claim's own run and node. `operator` routes require an operator-console session through the shared route policy and CSRF proof for writes; no bearer reaches them.
 
 ## Controller
 
@@ -49,7 +49,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/crons/{id}/pause` | `runs.control` |
 | `POST` | `/api/v1/crons/{id}/resume` | `runs.control` |
 | `POST` | `/api/v1/crons/{id}/run` | `runs.control` |
-| `GET` | `/api/v1/data/capabilities` | `public` |
+| `GET` | `/api/v1/data/capabilities` | `authenticated` |
 | `POST` | `/api/v1/data/commit` | `public` |
 | `POST` | `/api/v1/data/download` | `public` |
 | `POST` | `/api/v1/data/upload` | `public` |

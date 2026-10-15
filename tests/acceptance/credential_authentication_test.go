@@ -58,6 +58,9 @@ func (b *credentialBoundary) ReadAuthentication(_ context.Context, lookup capabi
 	if b.readErr != nil {
 		return capability.AuthenticationSnapshot{}, b.readErr
 	}
+	if p := b.snapshot.Authorities[0].Principal; lookup.Class == capability.CredentialPeer && p.Class == lookup.Class && lookup.Peer == p.Capability.Subject {
+		return b.snapshot, nil
+	}
 	if lookup.Digest != b.snapshot.Authorities[0].Principal.Capability.Digest {
 		return capability.AuthenticationSnapshot{}, &apierr.Error{Code: apierr.Unauthenticated, Message: "unknown credential"}
 	}

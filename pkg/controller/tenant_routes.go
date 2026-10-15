@@ -51,8 +51,6 @@ var tenantRoutes = map[string]tenantResource{
 
 	"GET /api/v1/approvals/pending": resNone,
 
-	"GET /api/v1/auth/whoami": resNone,
-
 	"POST /api/v1/cache/store-ceiling/measure": resNone,
 	"POST /api/v1/cache/store-ceiling/thaw":    resNone,
 
@@ -150,7 +148,6 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/runs/{id}/nodes":                                   resRun,
 	"GET /api/v1/runs/{id}/nodes/{nodeID}":                           resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/activity":                 resRun,
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/annotations":              resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest":        resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/attempt":                  resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset":         resRun,
@@ -184,12 +181,6 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready":             resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/start":                    resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/status":                   resRun,
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/steps/annotations":        resRun,
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/steps/finish":             resRun,
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/steps/skip":               resRun,
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/steps/start":              resRun,
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/steps/summary":            resRun,
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/summary":                  resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/touch":                    resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/usage":                    resRun,
 	"POST /api/v1/runs/{id}/oidc-token":                              resRun,
@@ -204,8 +195,6 @@ var tenantRoutes = map[string]tenantResource{
 	"DELETE /api/v1/secrets/{name}": resSecret,
 	"GET /api/v1/secrets/{name}":    resSecret,
 	"POST /api/v1/secrets/rotate":   resNone,
-
-	"GET /api/v1/services": resNone,
 
 	"GET /api/v1/storage": resNone,
 

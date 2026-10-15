@@ -32,8 +32,8 @@ func main() {
 		"the token model are in [auth.md](auth.md); `admin` satisfies any scope " +
 		"check except `credits.grant`, which only the checkout service's own token " +
 		"passes. `public` routes run with no bearer check (the " +
-		"GitHub and Stripe webhooks require their HMAC signatures); `authenticated` routes take any " +
-		"valid bearer and check no further scope. `claim` routes answer the claim " +
+		"GitHub and Stripe webhooks require their HMAC signatures); `authenticated` routes require live " +
+		"identity under their credential policy and no named grant. `claim` routes answer the claim " +
 		"token of one node claim, and only for that claim's own run and node. " +
 		"`operator` routes require an operator-console session through the shared " +
 		"route policy and CSRF proof for writes; no bearer reaches them.\n\n")

@@ -75,7 +75,11 @@ func (s *Server) registerPolicyEndpoints(mux *http.ServeMux, endpoints []Endpoin
 	for _, endpoint := range endpoints {
 		if !paths[endpoint.Pattern] {
 			// safety: unsupported methods must reach the policy router's JSON 405, not legacy fallback.
-			mux.Handle(endpoint.Pattern, noStore(handler))
+			pathHandler := handler
+			if endpoint.Authentication != capability.AuthPublic {
+				pathHandler = noStore(handler)
+			}
+			mux.Handle(endpoint.Pattern, pathHandler)
 			paths[endpoint.Pattern] = true
 		}
 	}

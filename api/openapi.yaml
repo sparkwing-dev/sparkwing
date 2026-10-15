@@ -2381,32 +2381,29 @@ paths:
     get:
       x-sparkwing-scope: authenticated
       tags: [auth]
-      summary: Resolve the bearer token to the principal.
+      summary: Read the committed credential subject and grants.
       responses:
         "200":
           description: Principal info.
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: pkg/controller.whoamiResp
+                x-sparkwing-go-type: pkg/controller.whoamiJSON
                 type: object
                 properties:
                   principal: {type: string}
                   scopes:
                     type: array
                     items: {type: string}
-                  kind: {type: string}
+                  kind: {type: string, enum: [account, machine, service, operator, local, anonymous]}
                   token_prefix:
                     type: string
-                    description: Prefix of the bearer token that answered, absent for a session or anonymous principal.
+                    description: Capability prefix. Absent for a session or verified local peer.
                   team:
                     type: string
-                    description: Team the request acts for, from the token or the session. Absent for an anonymous principal.
-                  role:
-                    type: string
-                    enum: [owner, editor, reader]
-                    description: The signed-in user's role in `team`. Absent for a token or a password session.
+                    description: Active team from the committed credential. Absent for deployment authority without a team.
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/secrets:
     post:
@@ -2732,8 +2729,8 @@ paths:
       tags: [health]
       summary: Announce the data download, cache, and dashboard URLs a client should use.
       description: |
-        Any valid bearer satisfies this route, and every client that reads
-        it already holds one. A field is absent when the controller was
+        Discovery requires live identity in an active team. Bootstrap and eval
+        credentials are refused. A field is absent when the controller was
         started without the matching configuration; `data_download_url` is
         absent when the controller cannot sign downloads on the request's path;
         a public-ingress request needs CloudFront signing configured. A co-located laptop
@@ -2756,6 +2753,7 @@ paths:
                   multi_team: {type: boolean}
                   direct_data: {type: boolean, description: Direct S3 uploads and committed-object reads are available.}
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {description: This controller announces no services.}
 
   /api/v1/health:
@@ -6006,9 +6004,10 @@ paths:
 
   /api/v1/data/capabilities:
     get:
-      x-sparkwing-scope: public
+      x-sparkwing-scope: authenticated
       tags: [artifacts]
       summary: Report whether direct uploads and committed-object downloads are available.
+      description: Discovery requires live identity in an active team. Bootstrap and eval credentials are refused.
       responses:
         "200":
           description: Direct data capabilities.
@@ -6021,6 +6020,8 @@ paths:
                   upload: {type: boolean}
                   download: {type: boolean}
                   source: {type: boolean}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {description: Direct uploads are unavailable.}
 
   /api/v1/data/upload:

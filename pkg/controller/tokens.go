@@ -170,32 +170,3 @@ func (s *Server) handleLookupTokenByPrefix(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, http.StatusOK, tokenToJSON(tok))
 }
-
-type whoamiResp struct {
-	Principal   string   `json:"principal"`
-	Kind        string   `json:"kind"`
-	Scopes      []string `json:"scopes"`
-	TokenPrefix string   `json:"token_prefix,omitempty"`
-	Team        string   `json:"team,omitempty"`
-	Role        string   `json:"role,omitempty"`
-}
-
-func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
-	p, ok := PrincipalFromContext(r.Context())
-	if !ok {
-		writeJSON(w, http.StatusOK, whoamiResp{
-			Principal: authwire.AnonymousPrincipal,
-			Kind:      authwire.AnonymousKind,
-			Scopes:    nil,
-		})
-		return
-	}
-	writeJSON(w, http.StatusOK, whoamiResp{
-		Principal:   p.Name,
-		Kind:        p.Kind,
-		Scopes:      p.Scopes,
-		TokenPrefix: p.TokenPrefix,
-		Team:        string(p.Team),
-		Role:        p.Role,
-	})
-}

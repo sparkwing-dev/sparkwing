@@ -46,6 +46,20 @@ func (s *Server) authorityEndpoints() []Endpoint {
 			Method: "GET", Pattern: "/api/v1/team/members", Authentication: capability.AuthCapability,
 			Decode: authorityTarget, Handle: e.handleMemberDirectory,
 		},
+		{
+			Method: "GET", Pattern: "/api/v1/auth/whoami", Authentication: capability.AuthCapability,
+			Decode: authorityTarget, Handle: s.handleIdentity,
+		},
+		{
+			Method: "GET", Pattern: "/api/v1/services", Authentication: capability.AuthCapability,
+			Decode: authorityTarget, Handle: s.handleServices,
+		},
+		{
+			Method: "GET", Pattern: "/api/v1/data/capabilities", Authentication: capability.AuthCapability,
+			Decode: authorityTarget, Handle: s.handleDirectCapabilities,
+		},
+		{Method: "GET", Pattern: "/.well-known/openid-configuration", Authentication: capability.AuthPublic, Handle: s.handleOIDCDiscovery},
+		{Method: "GET", Pattern: "/.well-known/jwks.json", Authentication: capability.AuthPublic, Handle: s.handleOIDCKeys},
 	}
 }
 

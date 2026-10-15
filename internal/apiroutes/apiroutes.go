@@ -105,13 +105,21 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 					alternatives = append(alternatives, Operator)
 					continue
 				}
+				if len(access.Grants) == 0 {
+					alternatives = append(alternatives, Authenticated)
+					continue
+				}
 				var grants []string
 				for _, grant := range access.Grants {
 					grants = append(grants, string(grant))
 				}
 				alternatives = append(alternatives, strings.Join(grants, " + "))
 			}
-			routes = append(routes, Route{Method: match[1], Path: match[2], Scope: strings.Join(alternatives, "` or `")})
+			scope := strings.Join(alternatives, "` or `")
+			if policy.Authentication == capability.AuthPublic {
+				scope = Public
+			}
+			routes = append(routes, Route{Method: match[1], Path: match[2], Scope: scope})
 		}
 	}
 	for line := range strings.SplitSeq(string(data), "\n") {

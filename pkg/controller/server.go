@@ -960,8 +960,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/tokens", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListTokens)))
 	mux.Handle("GET /api/v1/tokens/{token}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleLookupTokenByPrefix)))
 
-	mux.Handle("GET /api/v1/auth/whoami", http.HandlerFunc(s.handleWhoami))
-
 	mux.Handle("GET /api/v1/me", http.HandlerFunc(s.handleMe))
 	mux.Handle("DELETE /api/v1/me", http.HandlerFunc(s.handleDeleteMe))
 	mux.Handle("GET /api/v1/me/team-deletions", http.HandlerFunc(s.handleMyTeamDeletions))
@@ -999,9 +997,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("DELETE /api/v1/team/github-app/automation", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppAutomation)))
 	mux.Handle("GET /api/v1/team/github-app/extra-repos", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubAppExtraRepos)))
 	mux.Handle("PUT /api/v1/team/github-app/extra-repos", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitHubAppExtraRepos)))
-
-	// safety: service discovery names the internal cache URL, so any bearer will do but anonymity will not.
-	mux.Handle("GET /api/v1/services", refuseRoleless(http.HandlerFunc(s.handleServices)))
 
 	mux.Handle("POST /api/v1/tokens/{prefix}/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateToken)))
 	mux.Handle("POST /api/v1/tokens/{prefix}/metered", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetTokenMetered)))
@@ -1045,7 +1040,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	router.HandleFunc("POST /internal/storage/reserve", s.handleStorageReserve)
 	router.HandleFunc("POST /api/v1/data/upload", s.handleDirectUpload)
 	router.HandleFunc("POST /api/v1/data/commit", s.handleDirectCommit)
-	router.HandleFunc("GET /api/v1/data/capabilities", s.handleDirectCapabilities)
 	// safety: these carry a URL signature this process minted, not a bearer.
 	router.HandleFunc("PUT /api/v1/outputs/uploads/{id}", s.handleOutputBlobPut)
 	router.HandleFunc("GET /api/v1/outputs/objects/{key...}", s.handleOutputBlobGet)
@@ -1062,8 +1056,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	router.Handle("POST /webhooks/stripe", s.paymentHandler())
 	// safety: the caller proves itself with a GitHub Actions ID token, not a bearer, so this route is public.
 	router.Handle("POST /api/v1/runners/github/exchange", noStore(http.HandlerFunc(s.handleGitHubRunnerExchange)))
-	router.HandleFunc("GET /.well-known/openid-configuration", s.handleOIDCDiscovery)
-	router.HandleFunc("GET /.well-known/jwks.json", s.handleOIDCKeys)
 
 	return mux, router
 }

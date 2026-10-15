@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **controller (Breaking):** Identity, service discovery and data capability discovery use the shared capability verifier. Missing and dead credentials receive the common error envelope before availability checks. Identity responses use capability subjects and omit session IDs and roles. Public OIDC metadata uses the policy router and common errors. See [migration guide](docs/migrations/_unreleased.md#credential-discovery).
 - **controller (Breaking):** Team and deployment token revocation use separate capability routes. Member updates preserve session authority and commit membership generations with the change. Browser mutations require CSRF proof. See [migration guide](docs/migrations/_unreleased.md#credential-revocation).
 - **controller (Breaking):** Job and step annotations, summaries and step reports move to `/api/v1/runs/{run}/jobs/{job}` under the shared capability policy. Reports carry server-derived authority and attempt fences. Annotations and summaries use the 128 KiB shared text limit. See [migration guide](docs/migrations/_unreleased.md#job-reporting).
 - **controller (Breaking):** Run intake, plan acceptance and lifecycle writes use the shared capability policy and controller wire. Raw run upserts and plan snapshots are removed. Child intake binds to its parent job, retries retain the source seal, and run finish commits its owner unit in the same transaction

@@ -253,20 +253,6 @@ func (s *Server) teamMember(w http.ResponseWriter, r *http.Request, min store.Ro
 
 var errAccountSessionsDisabled = errors.New("sign-in is not enabled on this controller")
 
-// safety: an account that lost its membership keeps a session so it can switch teams, and that session
-// must not pass a route that admits any authenticated caller.
-func refuseRoleless(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if p, ok := PrincipalFromContext(r.Context()); ok && p.AccountID != "" && p.Role == "" {
-			writeAuthError(w, http.StatusForbidden, authErrorBody{
-				Code: "forbidden", Principal: p.label(), Message: "you are not a member of the active team",
-			})
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func randomURLToken() (string, error) {
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
@@ -56,20 +58,20 @@ func (s *Server) WithOIDCIssuer(iss *oidcissuer.Issuer) *Server {
 	return s
 }
 
-func (s *Server) handleOIDCDiscovery(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleOIDCDiscovery(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	if s.oidc.issuer == nil {
-		writeError(w, http.StatusNotFound, errOIDCOff)
-		return
+		return &apierr.Error{Code: apierr.NotFound, Message: errOIDCOff.Error()}
 	}
 	s.oidc.issuer.ServeDiscovery(w, r)
+	return nil
 }
 
-func (s *Server) handleOIDCKeys(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleOIDCKeys(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	if s.oidc.issuer == nil {
-		writeError(w, http.StatusNotFound, errOIDCOff)
-		return
+		return &apierr.Error{Code: apierr.NotFound, Message: errOIDCOff.Error()}
 	}
 	s.oidc.issuer.ServeJWKS(w, r)
+	return nil
 }
 
 var errOIDCOff = errors.New("this controller holds no OIDC signing key, so it issues no ID tokens")

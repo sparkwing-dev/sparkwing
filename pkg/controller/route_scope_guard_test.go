@@ -27,9 +27,6 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 		"POST /webhooks/github-app": true,
 		// safety: the payment verifier checks Stripe's exact body before settlement.
 		"POST /webhooks/stripe": true,
-		// safety: cloud providers fetch OIDC metadata and keys unauthenticated; both answer 404 without a key.
-		"GET /.well-known/openid-configuration": true,
-		"GET /.well-known/jwks.json":            true,
 		// safety: the cache proves itself with its storage.count service token, which
 		// the handlers check themselves.
 		"POST /internal/storage/reserve":  true,
@@ -39,10 +36,9 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 		"POST /api/v1/data/download":      true,
 		"POST /internal/egress/totals":    true,
 		// safety: upload and commit authenticate a bound grant or runner token and
-		// check its live claim inside the handler; capability reports only availability.
-		"POST /api/v1/data/upload":      true,
-		"POST /api/v1/data/commit":      true,
-		"GET /api/v1/data/capabilities": true,
+		// check its live claim inside the handler.
+		"POST /api/v1/data/upload": true,
+		"POST /api/v1/data/commit": true,
 		// safety: output bytes move through URLs this controller signed for one
 		// upload or one object; the handlers check the signature and its expiry.
 		"PUT /api/v1/outputs/uploads/{id}":     true,

@@ -1,5 +1,24 @@
 # Migrating to the next release
 
+## Credential discovery
+
+`GET /api/v1/auth/whoami`, `GET /api/v1/services` and
+`GET /api/v1/data/capabilities` require live capability authority, a session or
+a verified local peer. Service and data discovery also require an active team.
+Configure the controller's shared authentication reader and transport adapters
+before serving these routes. An incomplete policy returns `policy_missing`.
+
+`whoami` returns the committed subject ID in `principal`, its subject kind in
+`kind`, and effective grants in `scopes`. The kind is `account`, `machine`,
+`service`, `operator`, `local` or `anonymous`. `token_prefix` is present only
+for a capability. The response omits `role` and session identifiers.
+Callers should handle the common `unauthenticated`, `forbidden` and `not_found`
+error envelope. Bootstrap and eval credentials cannot discover services.
+
+The OIDC discovery document and public keys stay public. Their disabled-issuer
+response uses the same error envelope. All five discovery routes accept only
+`GET` and return `method_not_allowed` with `Allow: GET` for other methods.
+
 ## Job reporting
 
 Annotations, summaries and step start, finish and skip requests use

@@ -25,6 +25,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -694,7 +695,9 @@ func TestS3OnlySignerAnnouncesOnlyInCluster(t *testing.T) {
 			req.Header.Set("X-Forwarded-For", "192.0.2.1")
 		}
 		rec := httptest.NewRecorder()
-		s.handleServices(rec, req)
+		if err := s.handleServices(rec, req, capability.Authorized{}); err != nil {
+			writePolicyError(rec, err)
+		}
 		if tc.want == "" && rec.Code == http.StatusNotFound {
 			continue
 		}

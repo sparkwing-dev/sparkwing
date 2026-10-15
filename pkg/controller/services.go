@@ -1,8 +1,10 @@
 package controller
 
 import (
-	"encoding/json"
 	"net/http"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // ServicesResponse is the wire shape of GET /api/v1/services. Names
@@ -35,22 +37,30 @@ type ServicesResponse struct {
 	DirectData bool `json:"direct_data,omitempty"`
 }
 
-func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleServices(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	multiTeam := s.MultiTeam()
 	downloadURL := s.dataDownloadURL()
 	if downloadViaIngress(r) && s.downloadCDN == nil {
 		downloadURL = ""
 	}
 	if s.cachePodURL == "" && s.dashboardURL == "" && !multiTeam && downloadURL == "" && s.directUploads == nil {
-		http.Error(w, "no services announced", http.StatusNotFound)
-		return
+		return &apierr.Error{Code: apierr.NotFound, Message: "no services announced"}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(ServicesResponse{
+	writeJSON(w, http.StatusOK, ServicesResponse{
 		DataDownloadURL: downloadURL,
 		DirectData:      s.directUploads != nil,
 		CachePod:        s.cachePodURL,
 		Dashboard:       s.dashboardURL,
 		MultiTeam:       multiTeam,
 	})
+	return nil
+}
+
+func (s *Server) handleDirectCapabilities(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
+	if s.directUploads == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: "data uploads are unavailable"}
+	}
+	download := s.dataDownloadURL() != "" && (!downloadViaIngress(r) || s.downloadCDN != nil)
+	writeJSON(w, http.StatusOK, map[string]bool{"upload": true, "source": download, "download": download})
+	return nil
 }

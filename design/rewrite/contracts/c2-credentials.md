@@ -9,7 +9,9 @@ delegation validator, data/source checks, billing calculation, payment verifier
 and error codec are implemented. Filesystem and S3 object signers implement the
 signing boundary. Persistent issuance and authentication reads still need the
 store implementation. The Stripe callback, sixteen engine endpoints and twenty-three operator endpoints use this table in the existing
-controller. Four credential/membership mutations and the member directory also use this table. The remaining routes have not switched to it.
+controller. Four credential/membership mutations, the member directory, three
+credential discovery routes and both public OIDC metadata routes also use this
+table. The remaining routes have not switched to it.
 
 ## Ownership
 
@@ -923,6 +925,99 @@ owners. Full native topology cells remain skipped.
 
 The lead owns native/database integration, independent review and Sparkwing
 pipelines. No Sparkwing binary or git write is used.
+
+### Credential discovery cutover
+
+Five more registered endpoints use `PolicyRouter`: identity lookup, service
+discovery, data capability discovery, and the public OIDC discovery/key
+documents. The first three use committed capability authentication. Services
+and data discovery derive their active team from the principal. Bootstrap and
+eval credentials cannot use them. Availability follows authorization, so a
+missing backend cannot turn a dead credential into a configuration oracle.
+
+Identity lookup projects the committed subject into `principal` and `kind`,
+grants into `scopes`, and the active team into `team`. Capability authority
+alone supplies `token_prefix`. The projection excludes session identifiers,
+ancestry, claim fences, billing and digests. Empty grants are an explicit
+array. Local peers require the configured verified transport adapter. Request
+headers and loopback addresses cannot establish that identity.
+
+Local C2 wire choice: the identity response omits `role`, because the declared
+authentication snapshot carries effective grants and a membership verdict,
+without a role projection. No caller reads that field. The CLI profile probe
+recognizes the `anonymous` subject kind and its fixtures use the new subject
+vocabulary. It no longer infers an open controller from legacy sentinel
+values. No caller shim or old-token conversion was added.
+
+Public OIDC metadata needs no capability reader. The configured issuer serves
+its own document and public key set with its existing one-hour cache header.
+The endpoint registrar retains that public caching instead of adding private
+response headers. Disabled issuers return the common `not_found` envelope.
+All five routes reject unsupported methods with the common 405 and `Allow`.
+
+The old identity handler/type, direct capability handler and unused roleless
+wrapper remove 51 source lines. Five legacy registrations and nine obsolete
+tenant-table entries are removed. Seven entries were leftovers from the
+earlier reporting cutover and the tenant-inventory test exposed them. The
+replaced service-auth tests remove 153 lines. Their authenticated discovery,
+dashboard-only and multi-team-without-URLs cases now use the real server and
+contract authentication fakes without SQL or sockets.
+
+New HTTP proofs cover identity projection, empty grants, private field
+exclusion, verified peers, malformed/dead/unknown credentials, revoked
+ancestry, membership loss, claim generation/end state, bootstrap/eval refusal,
+team scope, backend errors, availability ordering and method refusal. Public
+OIDC tests use a real synthetic signing key and check the configured origin,
+public-only JWKS, absent issuer and cache headers. They do not establish
+native peer transport, real sessions, database revocation or deployment
+integration. Full native T1 scenarios remain skipped.
+
+The route-reference parser follows the actual authority endpoint declarations.
+Grantless capability policies render as `authenticated`; public policies
+render as `public`. The regression test includes both forms, so the generated
+reference and OpenAPI do not silently lose their authorization labels.
+
+Contract changes needed in C1:
+
+- `Store.Issue` takes the private `*storeTx` and can only participate inside
+  persistence. No exported tenant/operator provisioning, delegation or
+  bootstrap-exchange transaction is declared. HTTP handlers cannot create,
+  commit or recheck that transaction, and may not return Raw before commit.
+  C1 must expose its final actor-bearing transaction boundary for these
+  operations. No alternate issuer or legacy token bridge was introduced.
+- Token metadata lookup/list and rotation also lack a capability-based
+  contract. The remaining methods return legacy `store.Token` rows. C1 must
+  define capability metadata and atomic rotation before those handlers can
+  replace the old routes.
+
+Earlier open contracts still apply: committed reconciliation award delivery,
+trusted runner-profile inputs, result digest persistence, annotation/summary
+attempt attribution, plan/eval renewal and non-checkout payment events.
+Production still needs C1 authentication/binding readers, verified peer and
+session identity adapters, CSRF wiring, and W7's final blob backend connected
+to discovery. Discovery here preserves the configured backend advertisement.
+Other controller routes and the old credential stack remain for their next
+cutovers. W2 is incomplete.
+
+Shared edits are `internal/apiroutes/apiroutes.go`, its test,
+`internal/apiref/main.go`, the discovery handler removal from
+`pkg/controller/direct_upload.go`, its direct services caller in
+`pkg/controller/data_download_test.go`, `cmd/sparkwing/profiles_test_cmd.go`
+and its test, OpenAPI, API/auth/migration docs,
+changelog and embedded mirrors. No exported controller API changed. The
+controller API snapshot matches regeneration. No new configuration, limit,
+issuer, cache or store implementation was added.
+
+The whole-repository build, scoped vet, capability/API-error tests,
+executable acceptance proofs, controller policy/signer/route-inventory tests,
+daemon classification, API schema/generation checks, documentation symbols,
+embedded mirrors and changed-line comment policy pass. Commands use
+`GOWORK=off`, `GOFLAGS=-buildvcs=false`, and at most four package workers.
+The lead retains independent review, native integration and Sparkwing
+pipelines. No Sparkwing binary or git write is used. The scratch directory
+`/tmp/sw-astra-W2/` is removed after verification.
+The CLI probe test fixture is updated and compile-checked. Its socket-based
+runtime test is left for the lead's native test lane.
 
 ## Open questions for the lead
 

@@ -56,6 +56,33 @@ derives the attempt from the claim or the persisted job, and the store owns
 timestamps and stale-attempt refusal. Annotations and summaries accept at most
 128 KiB of masked text. The old `/nodes/` reporting paths are removed.
 
+## Credential discovery
+
+`GET /api/v1/auth/whoami` uses the shared policy verifier. It returns the
+committed subject ID as `principal`, the subject kind as `kind`, and grants
+as `scopes`. `team` is present when the credential has an active team.
+`token_prefix` names a capability. Sessions and verified local peers omit it.
+The response excludes session IDs, ancestry, claim fences and billing facts.
+An empty grant set returns `"scopes":[]`.
+
+`GET /api/v1/services` and `GET /api/v1/data/capabilities` use the same verifier
+and require an active team. They announce configured services and data transfer
+support. Availability is checked after authorization. An authorized caller gets
+`not_found` when nothing is configured. Missing or dead credentials receive
+`unauthenticated` regardless of service configuration. Bootstrap and eval
+credentials cannot use these discovery routes or `whoami`.
+
+All three routes return `Cache-Control: no-store`. Unsupported methods return
+`method_not_allowed` with `Allow: GET`. Identity lookup requires an explicit
+credential or a verified local peer. An address, query parameter or identity
+header cannot supply authority.
+
+The OIDC discovery document at `/.well-known/openid-configuration` and public
+key set at `/.well-known/jwks.json` also use the policy router. Providers can
+read them without a Sparkwing credential. Both retain their one-hour public
+cache header. A controller without an issuer returns `not_found`, and
+unsupported methods return `method_not_allowed` with `Allow: GET`.
+
 ## Generator expansion authority
 
 `POST /api/v1/runs/{run}/jobs/{job}/expansion` uses the shared capability
@@ -939,12 +966,8 @@ A token with no scopes is still legal; it just unlocks nothing.
 Per-endpoint scope annotations live in `pkg/controller/server.go`. If
 you add a new route, annotate it with `requireScope`.
 
-`GET /api/v1/auth/whoami` is authenticated by the middleware like any
-other route but carries no scope check, so any valid token can read
-back its own principal, kind, scopes, and prefix. It shows as `public` in
-[api-reference.md](api-reference.md) because that table is generated
-from `requireScope` wrappers -- there, `public` means no scope check,
-not no authentication.
+Identity and service discovery use the shared policy described in
+[Credential discovery](#credential-discovery).
 
 ## Teams and sign-in
 

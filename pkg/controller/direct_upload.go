@@ -26,14 +26,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func (s *Server) handleDirectCapabilities(w http.ResponseWriter, r *http.Request) {
-	if s.directUploads == nil {
-		http.NotFound(w, r)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]bool{"upload": true, "source": s.dataDownloadURL() != "" && (!downloadViaIngress(r) || s.downloadCDN != nil), "download": s.dataDownloadURL() != "" && (!downloadViaIngress(r) || s.downloadCDN != nil)})
-}
-
 type directUploadS3 struct {
 	client  *s3.Client
 	presign *s3.PresignClient
