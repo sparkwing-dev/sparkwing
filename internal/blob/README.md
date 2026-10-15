@@ -311,15 +311,17 @@ The tagged-log property runs against filesystem objects and the S3 signer and
 SDK. It varies subject identities, retention classes and lost PUT responses.
 Batch signing checks S3 lifecycle readiness. Offset reads verify persisted ranges
 before emitting bytes, and corrupt objects fail before output. Controller
-authorization and segment records are fakes in this property.
+signing remains a contract fixture. Segment commits and reads use real tenant
+transactions and survive reopening SQLite.
 
 The sink acceptance properties drive concurrent numbered writers through the
-real spool, compression, signed transfers, committed reader and stored manifest.
+real spool, compression, signed transfers and tenant segment transactions.
 Each backend receives 128 generated cases with job, trigger, plan and eval
 subjects. Duplicate appends appear once, each writer's records retain their
 order, live offsets match the final bytes, and closing removes the spool.
-Lost PUT replies require exact stored-byte verification. Altered generations
-cannot select the committed ranges. Record and authority callbacks are fakes.
+After reopening SQLite, the committed reader checks exact offsets and rejects
+altered generations and revoked readers. Lost PUT replies require exact stored-byte
+verification. Claim issuance and authenticated signing remain contract fixtures.
 The unused filesystem append-log backend and its example are removed.
 
 Local host construction does not open an artifact backend from

@@ -10,27 +10,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-type storageLogRecords struct{ view store.LogSegments }
-
-func (r *storageLogRecords) RecordSegments(_ context.Context, q store.SegmentCommit) error {
-	r.view.Subject = q.Subject
-	if q.Final {
-		r.view.Segments = slices.Clone(q.Segments)
-		r.view.Complete = q.IncompleteReason == ""
-		r.view.IncompleteReason = q.IncompleteReason
-	} else {
-		r.view.Segments = append(r.view.Segments, q.Segments...)
-	}
-	return nil
-}
 
 func checkStorageFilesystemLogRecords(t *testing.T) {
 	storageProperty(t, func(seed [16]byte, ordinal uint8, lost bool) bool {
@@ -45,10 +29,6 @@ func checkStorageFilesystemLogRecords(t *testing.T) {
 		}
 		return true
 	})
-}
-
-func (r *storageLogRecords) ReadLogSegments(context.Context, store.Actor, blob.LogReadRequest) (store.LogSegments, error) {
-	return r.view, nil
 }
 
 type storageLogObjects interface {
@@ -120,19 +100,19 @@ func checkStorageLogs(t *testing.T) {
 
 func checkStorageLogRoundTrip(t *testing.T, objects storageLogObjects, transport http.RoundTripper, corrupt func(string, []byte), seed [16]byte, ordinal uint8, lost bool) bool {
 	t.Helper()
-	subject := storageLogSubject(seed, ordinal)
 	class := logseg.ClassStandard
 	if ordinal%2 == 0 {
 		class = logseg.ClassFree
 	}
 	signing := &storageLogTransport{objects: objects, class: class}
-	records := &storageLogRecords{}
+	records, commit, actor, reopen := storageLogPersistence(t, ordinal, class)
+	subject := commit.Subject
 	if lost {
 		transport = storageLostResponse{transport}
 	}
 	uploader, err := logseg.NewSubjectUploader(logseg.Data{
 		Subject: subject, Transport: signing,
-		HTTPClient: blob.TransferClient{Transport: transport}, Records: records,
+		HTTPClient: blob.TransferClient{Transport: transport}, Records: records, Actor: commit.Actor,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -154,10 +134,16 @@ func checkStorageLogRoundTrip(t *testing.T, objects storageLogObjects, transport
 	if signing.signs != 1 || (lost && signing.checks != 3) || (!lost && signing.checks != 0) {
 		return false
 	}
+	persisted, records := reopen()
+	defer func() {
+		if err := persisted.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	reader := logseg.CommittedReader{Records: records, Objects: objects}
 	for _, offset := range []int64{0, int64(len(content) / 2), int64(len(content) - 1), int64(len(content))} {
 		var output bytes.Buffer
-		result, err := reader.Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: subject, Offset: offset}, &output)
+		result, err := reader.Read(t.Context(), actor, blob.LogReadRequest{Subject: subject, Offset: offset}, &output)
 		if err != nil || !result.Complete || result.Bytes != int64(len(content))-offset || !bytes.Equal(output.Bytes(), content[offset:]) {
 			return false
 		}
@@ -169,27 +155,15 @@ func checkStorageLogRoundTrip(t *testing.T, objects storageLogObjects, transport
 		attempt.RunID = foreign.RunID
 		foreign.Attempt = &attempt
 	}
-	if _, err := reader.Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: foreign}, io.Discard); !errors.Is(err, blob.ErrIntegrity) {
+	if result, err := reader.Read(t.Context(), actor, blob.LogReadRequest{Subject: foreign}, io.Discard); err == nil || result.Bytes != 0 {
 		return false
 	}
-	corrupt(records.view.Segments[0].ObjectKey, []byte("corrupt"))
-	var output bytes.Buffer
-	result, err := reader.Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: subject}, &output)
-	return err != nil && result.Bytes == 0 && output.Len() == 0 && !result.Complete
-}
-
-func storageLogSubject(seed [16]byte, ordinal uint8) blob.LogSubject {
-	i, _ := storageIdentity(seed, uint32(ordinal))
-	subject := blob.LogSubject{Team: i.Team, RunID: i.RunID}
-	switch ordinal % 4 {
-	case 0:
-		subject.Kind, subject.Attempt = blob.LogJobAttempt, &i.Attempt.Value
-	default:
-		subject.Kind = blob.LogOwnerUnit
-		subject.Unit = &blob.LogUnit{Kind: []blob.LogUnitKind{blob.LogTrigger, blob.LogPlan, blob.LogEval}[ordinal%4-1], Generation: int64(ordinal) + 1}
-		if subject.Unit.Kind == blob.LogEval {
-			subject.Unit.Source = &blob.LogSource{NodeID: "generator", Generation: int64(ordinal) + 2}
-		}
+	view, err := records.ReadLogSegments(t.Context(), actor, blob.LogReadRequest{Subject: subject})
+	if err != nil || len(view.Segments) != 2 {
+		t.Fatalf("persisted log segments: %+v: %v", view, err)
 	}
-	return subject
+	corrupt(view.Segments[0].ObjectKey, []byte("corrupt"))
+	var output bytes.Buffer
+	result, err := reader.Read(t.Context(), actor, blob.LogReadRequest{Subject: subject}, &output)
+	return err != nil && result.Bytes == 0 && output.Len() == 0 && !result.Complete
 }

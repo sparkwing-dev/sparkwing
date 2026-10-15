@@ -4,132 +4,130 @@
 
 ## Implemented
 
-Starting HEAD is `5bb42357e`. The checkout was clean. No merge conflicts remain.
-W3's hosted_run, trigger_host and pod_node_host deletions remain intact.
-No Git write was made.
+Starting HEAD is `062f60e4c`. The checkout was clean. The three merge conflicts
+were already resolved. W3's hosted_run, trigger_host and pod_node_host deletions
+remain intact. No Git write was made.
 
-Remote cache construction now takes the authenticated team and the complete
-`DataBinding.Authority`. Every record lookup, verification download and artifact
-read carries that exact authority. Returned records must match the selected team.
-The old four-line partial-authority constructor is deleted.
+The existing filesystem-sink, s3-sink and filesystem round-trip properties now
+use `Tenant.RecordSegments` and `Tenant.ReadLogSegments` instead of the in-memory
+segment ledger. The sink, compression, batch signer, signed transfers and
+committed reader remain real. Each property runs 128 generated cases covering
+job, trigger, plan and eval subjects. Eval's lease generation remains separate
+from its source generation. Databases close between generated cases.
 
-This is a W7-local contract correction: `RemoteCacheOptions.AuthorityRef` becomes
-`Authority`, and `Team` is required. The explicit repository still must match the
-bound authority. No foreign interface changed. No production caller constructs
-these options yet. The existing unit and acceptance callers were migrated.
+The invariant is that persisted log bytes can be read only under current
+authority for the exact tagged subject and generation. The properties reopen
+SQLite before offset reads, refuse foreign subjects and generations, and refuse
+a revoked reader without emitting bytes. Concurrent duplicate deliveries retain
+one copy and per-writer ordering. Live offsets match reopened bytes. Lost PUT
+responses require physical verification before the real segment transaction.
+Corrupt committed objects fail before output. Both backends retain spool cleanup
+and exact final-manifest checks.
 
-The invariant is that remote-cache reads retain the exact bound repository
-identity and cannot admit a foreign tenant's record. The existing selector fuzz
-property now checks complete authority on both record and byte operations,
-including artifact reads. Existing generated remote-cache checks now mutate the
-returned team as well as repo, ref, provenance and member metadata. With the
-former partial-authority behavior restored temporarily, all twelve seed cases
-fail. The corrected implementation passes them and 1,000 generated executions.
+Claim issuance and authenticated signing remain contract fixtures. Filesystem
+objects and signed transfers are real. S3 uses the real signer and SDK against
+the existing fake object service. No new acceptance cell, registry, scenario
+catalog, production wrapper or contract was added. The shared job-claim fixture
+was extracted because both depcache and owner-log fixtures need its persisted
+authority envelope. The original depcache entrypoint retains its behavior.
 
-## Real integration gaps reproduced
+## Deleted and production lines
 
-A temporary extension of the existing SQLite remote-cache cell tried W2's real
-`DataController.BindData`. It exposed three mismatches. The W7 binding mismatch
-above is fixed. Two W1/W2 obligations remain:
+Removed the two residual raw-storage errors `storage.ErrNotFound` and
+`storage.ErrPreconditionFailed`: **7 production lines deleted**, zero added.
+Object-read test callers now use the real backend's `blob.ErrNotFound`.
+The unused in-memory acceptance segment ledger and its synthetic subject
+constructor are deleted.
 
-- **W1/W2 account-scoped data grants.** W2's remote reader requires an account
-  credential with `data.read`. W1's `readAuthorityTx` intersects an unbound account
-  capability with `ScopesForRole`. No role includes `data.read`, so even an
-  explicitly scoped reader loses it. A persisted account, membership and
-  repo-bound reader therefore fail `ResolveBlobAuthority` with
-  `blob grant and data scope are required`. A machine fixture passes W1 but W2
-  correctly refuses it as a repo-reader credential. W1/W2 must agree how current
-  membership preserves the explicitly granted repository-scoped read authority.
-  W7 has not widened membership grants or substituted a machine for a user.
-- **W1 server-default record selection (A1-29).** The remote-cache contract asks
-  `LookupRecord` to select a verified default ref without accepting the local
-  ref. After an explicit verified key succeeds, omitting that ref with
-  `VerifiedDefaultOnly=true` fails with
-  `empty or invalid record namespace component`. `lookupRecordTx` constructs
-  `RecordNamespace` before selecting a ref. W1 must implement the contracted
-  server-side selection, or propose a contract amendment. W7 has not guessed a
-  default branch or copied W1's fallback logic.
-
-The temporary integration probes were removed after recording their failures.
-The existing SQLite cell retains its valid direct-tenant evidence. Authenticated
-remote-cache proofs still use contract fakes. No acceptance cell, registry or
-scenario catalog was added. These two seams prevent replacing those fakes with
-real authenticated reader bindings.
-
-## Legacy deletion and production lines
-
-W7's net production Go delta against main is **-6,868 lines**, measured with the
-lead's area prefixes and exclusions for tests, testdata, acceptance and contract
-files. The budget is -6,630, leaving **238 lines within budget**.
-This session adds 14 and removes 16 production lines, net **-2**.
+W7's net production Go delta against main is **-6,875 lines** under the lead's
+area prefixes and exclusions for tests, testdata, acceptance and contract files.
+That is **245 lines within** the -6,630 budget. The diff contains 4,914 added and
+11,789 deleted production lines. This session's production delta is **-7**.
 
 The cache command/service, gitcache, package proxy, cache chart, raw S3 output
 and log backends, run-directory log fallback, direct source-fetch clients and
 credential transport remain deleted. Historical signed release assets remain.
-No legacy file was restored. The existing deletion manifest records prior cuts.
-W1 still owns the remaining OutputRef and node_outputs/data_objects metadata cut.
+No legacy file was restored. The deletion manifests retain the prior cuts.
 
 ## Verification
 
-All Go commands use `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
+Go commands use `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
 `GOCACHE=/tmp/sw-gocache`, and scratch beneath `/tmp/sw-astra-W7`.
-Tests use `-p 4` or less. Pipelines and independent review remain with the lead.
+Tests use `-p 4`. Pipelines, independent review and landing remain with the lead.
 
-- Whole-repository `go build ./...`: pass.
+- Whole-repository `go build ./...`: pass after the production deletion.
 - Tests for blob/..., artifacts, depcache and pkg/storage/...: pass.
-- Selector fuzzing: pass, 1,000 executions with four workers.
-- Vet on blob/... and tests/acceptance: pass.
-- Existing `TestStorage`: pass, 102.05 seconds, 70 pass events, 424 skips,
-  zero failures. The existing remote-cache component cell includes the new tenant
-  mutation. Native skipped cells remain unclaimed.
+- Existing `TestStorage`: pass in 135.458 seconds, 70 pass events, 424 skips,
+  zero failures. Native skipped cells remain unclaimed.
+- Final changed log-cell check after prompt database cleanup: pass. The three
+  existing cells cover 384 generated cases in total.
+- Controller `TestCommittedDashboard*` and `TestLogSubmissionRoutes*`: pass.
+- Vet on storage, controller and tests/acceptance: pass.
 - `internal/doccheck`: pass.
-- `commentcheck -base main .`: clean across 2,184 files.
-- `git diff --check`: pass. Git identity and core.worktree configuration unchanged.
+- `commentcheck -base main .`: clean across 2,185 files.
+- `git diff --check`: pass.
 
-No archived test port was added. The existing properties were strengthened.
-Native HTTP/api.sock, Windows/Darwin, PostgreSQL, placement, deployment, release
-and real-repository proofs remain unclaimed.
+A broader controller selection also ran `TestAnUnwiredFreeTierLogsOnceAtStartup`
+and `TestTeamLogReadsAreNotRefusedPastTheDownloadCap`. Both fail in unchanged
+fixtures with `tokens: insert: SQL logic error: no such table: tokens (1)`.
+These fixtures belong to W2's credential migration. They were left unchanged.
+The narrower tests covering the migrated caller pass. No archived test port was
+added. HTTP/api.sock, PostgreSQL, native Windows/Darwin, placement, deployment,
+release and real-repository proofs remain unclaimed.
 
-## Remaining handoffs
+## Remaining handoffs and contract changes needed
 
-A1-29/30/31/33 retain their implementations, with A1-29's server-default selection
-and A1-30's authenticated reader integration gaps identified above. A1-24/32/34/35
-writer consumers retain the real tenant store and controller binding from the
-previous session. A1-36/37 storage consumers retain the host and SDK contracts.
-A1-43's historical release assets remain intact. A1-50 production composition
-and A1-53 native evidence remain with their assigned owners. Lead-owned handoffs
-and amendments were read and left unchanged.
+A1-24/29/30/31/32/33/34/35 retain W7's real tenant upload/record integrations and
+physical backends. A1-36/37 retain the host and SDK contract consumers. A1-43's
+historical assets remain. Materialization remains closed by W1b's real
+controller/host byte-copy proof. A1-50 composition and A1-53 native evidence
+remain assigned to their owners. Lead-owned amendments and handoffs were read
+and left unchanged.
 
-The previous foreign seams remain open:
+The prior session's reproduced foreign seams remain present in this checkout:
 
-- W1/W2 need a tenant-authorized selected-output digest projection in the run
-  snapshot before W1 can remove OutputRef and its legacy metadata readers.
-- W2 needs authenticated `blob.LogTransport` and `SegmentRecorder` client
-  bindings, including the uncertain-upload route using `logseg.UploadVerifier`.
+- W1/W2 account-scoped remote-cache authority loses `data.read` when
+  `readAuthorityTx` intersects an unbound account grant with `ScopesForRole`.
+  W2 requires that repository-bound account reader. W7 does not substitute a
+  machine or widen membership policy.
+- W1 A1-29's default-ref selection still constructs a record namespace before
+  selecting the verified server default. RemoteCache leaves the local ref out
+  as contracted. W7 does not guess the server's default branch.
+- W1/W2 still need a tenant-authorized selected-output digest projection in the
+  run snapshot before W1 can remove OutputRef, node_outputs and data_objects.
+  The remaining output metadata and receipt caller are outside W7's byte paths.
+- W2 must supply authenticated `blob.LogTransport` and `SegmentRecorder` host
+  clients, including uncertain-upload verification through `UploadVerifier`.
+  W7 uses those interfaces. It does not copy authentication or authorization.
 - W3/W8/W9 must supply fresh data/log bindings per attempt and owner generation,
   remote-cache opt-in, and source-bundle intake in production host construction.
-- W1 needs an elected, fenced expired-ticket selector before physical staging
-  cleanup can consume it. W7's deletion backends are ready.
+- W1 must expose an elected, fenced expired-ticket selector before physical
+  staging cleanup can consume it. W7's deletion backends are ready.
 
-Materialization remains closed by W1b's prior real controller/host byte-copy
-proof. This session did not change that path.
+No foreign contract was changed. W7's byte implementation and legacy cuts are
+in place, but authenticated remote-reader and production host bindings remain
+open. The area is therefore still CONTINUE.
 
-## Shared files and assumptions
+## Shared files, assumptions and friction
 
-There are no shared production edits. Owned source changes are limited to
-`internal/blob/remote.go`, `types.go` and `README.md`. The migrated test callers
-are `internal/blob/remote_test.go`, `remote_selector_test.go`, and
-`tests/acceptance/storage_remote_test.go` and `storage_remote_archives_test.go`.
+Production edits are confined to owned `pkg/storage/storage.go`.
+The one-line foreign caller migration is `pkg/controller/log_reads_test.go`.
+Owned test migration is `pkg/storage/logseg/memory_test.go`.
+Acceptance helpers changed in `tests/acceptance/blob_depcache_test.go`,
+`storage_logs_test.go`, `storage_log_sink_test.go` and the new test-only
+`storage_log_persistence_test.go`. The existing registries are unchanged.
+Source documentation changed in `internal/blob/README.md` and
+`pkg/storage/logseg/README.md`.
 
-No new interface, wrapper, environment variable, credential policy or retry
-mechanism was added. The full authority and team replace reconstructed identity
-because W2 compares every operation with its persisted binding. No compatibility
-field remains. Reverting these local option changes would restore the partial
-identity bug.
+No new interface, retry mechanism, environment variable, credential policy or
+production setting was added. Fixture graph intake remains seeded because
+this check joins W7's sink to W1b's real persistence and W2's signing contract.
+Replacing that fixture with real claim issuance is a separate native proof.
 
-Friction: earlier fake-boundary proofs concealed the account-grant and default-ref
-selection gaps. Their implementation belongs to W1/W2. W7 continues against the
-contract rather than introducing a second authorization or fallback owner.
+Friction: the legacy controller tests still refer to a removed tokens table.
+The prior fake log ledger also hid the distinction between persisted subject
+selection and synthetic read results. The existing cells now exercise the real
+selection and authority checks.
 
 Scratch `/tmp/sw-astra-W7` is removed at exit. Shared `/tmp/sw-gocache` is retained.
 

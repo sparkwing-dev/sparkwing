@@ -80,13 +80,16 @@ These proofs do not count as native acceptance receipts.
 `TestStorage/storage-log-segments-and-fallback/storage-components` generates
 job and trigger/plan/eval subjects over real filesystem signed uploads and reads.
 It covers lost PUT responses, offset resume, subject mismatch and corrupt bytes.
-Its authorization, lifecycle readiness and record persistence are fakes.
+Segment commits and reads use real SQLite tenant transactions and survive
+reopening. Authenticated signing and claim issuance remain contract fixtures.
 
 The `filesystem-sink` and `s3-sink` acceptance cells also exercise concurrent
 numbered writers, duplicate delivery, live offsets, compression, batch renewal,
 offset reads and spool removal through the real sink. Each backend runs 128
-generated cases. Record persistence and authorization remain fakes. The removed
-`fs.LogStore` has no production caller.
+generated cases with job, trigger, plan and eval subjects. Tenant transactions
+persist the segments and final seal. Reads reopen SQLite, select exact persisted
+ranges and reject foreign generations and revoked readers. Signing and claim
+issuance remain fixtures. The removed `fs.LogStore` has no production caller.
 
 The append/delete `LogStore` conformance facade and its unused portable suite
 are removed. Log tests call the tagged sink, reader and physical expiry APIs.

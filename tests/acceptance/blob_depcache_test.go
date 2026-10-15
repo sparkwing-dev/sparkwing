@@ -275,6 +275,10 @@ func seedDepcacheBoundary(ctx context.Context, s *store.Store) (blob.Authority, 
 	if err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err
 	}
+	return seedStorageJobClaim(ctx, s, commit)
+}
+
+func seedStorageJobClaim(ctx context.Context, s *store.Store, commit store.SegmentCommit) (blob.Authority, blob.UploadIdentity, error) {
 	var raw []byte
 	if err := s.DB().QueryRowContext(ctx, "SELECT authority_json FROM capabilities WHERE prefix=?", commit.Actor.CapabilityPrefix).Scan(&raw); err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err

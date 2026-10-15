@@ -7,10 +7,6 @@ import (
 	"time"
 )
 
-// ErrNotFound is returned by Get / Has-style reads when the requested
-// key (or run/node pair) does not exist.
-var ErrNotFound = errors.New("storage: not found")
-
 // ErrNotSupported reports an operation unavailable on the selected backend.
 var ErrNotSupported = errors.New("storage: operation not supported")
 
@@ -32,9 +28,6 @@ func LogCursor(ctx context.Context) string {
 	c, _ := ctx.Value(logCursorKey{}).(string)
 	return c
 }
-
-// ErrPreconditionFailed reports an object that already exists.
-var ErrPreconditionFailed = errors.New("storage: conditional write precondition failed")
 
 // StoreUsage is how much a store holds: its total stored bytes and the
 // number of objects those bytes sit in, measured at ObservedAt.
