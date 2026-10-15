@@ -17,6 +17,8 @@ func pendingScenarios(t *testing.T, group string) {
 		count++
 		t.Run(scenario.ID, func(t *testing.T) {
 			switch scenario.ID {
+			case "lifecycle-request-and-plan-seals":
+				t.Run("hermetic-library", acceptance.CheckOwnerSeals)
 			case "recovery-keeper-causes-and-backoff":
 				t.Run("hermetic-library", acceptance.CheckKeeperCauses)
 			case "recovery-keeper-conflict-and-stop-join":

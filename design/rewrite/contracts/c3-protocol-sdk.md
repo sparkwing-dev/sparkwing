@@ -60,6 +60,8 @@ are part of this contract.
 | `nodehost.NodeInput` | Binds an attempt to accepted spec, node, generation, runner and route bearer. |
 | `nodehost.NodeHost.Execute` | Replans, checks drift, runs executor layers and reports through store transitions. |
 | `nodehost.NewNodeExecutor`, `ExecutorDependencies`, `ExecutorProcess` | Connect the common executor to the fenced store, matched engine, SDK process and storage adapters. |
+| `nodehost.ExecutorActivity` | Reports progress and brackets authorized child awaits without extending the execution deadline. |
+| `nodehost.ProtocolSessionConfig`, `ProtocolSession`, `StartProtocolSession` | Launch protocol-v2 SDK processes with private pipes, request correlation, cancellation, log attribution and joined cleanup. |
 | `nodehost.LayerSide` | Distinguishes owner decisions from executor work. |
 | `nodehost.OwnerSide`, `nodehost.ExecutorSide` | Name the two layer owners. |
 | `nodehost.LayerSpec`, `nodehost.LayerTable` | Declare the complete outer-to-inner envelope and retry scope. |
@@ -214,11 +216,35 @@ omitted it. Checkout resolution cannot replace the stored intake request.
 Owner policy tasks run independently so a waiting approval or admission does
 not stop ready siblings. Completed executor errors are checked against persisted
 terminal state because a committed failure must still release recovery jobs.
+Policy and persistence errors remain errors even when a competing write makes
+the job terminal. Acquisition and planning failures before acceptance finish the
+run and owner unit atomically. Setup failures on resumed runs leave accepted work
+to recovery. Loss of authority never writes a terminal verdict.
+
+`ExecutorActivity.Await` brackets an authenticated child wait and returns an
+idempotent resume function. Nested waits suspend only the no-progress deadline.
+The native child-await route adapter must bracket the whole wait. The execution
+deadline and owner cancellation remain active. Timed-out attempts run finally
+steps and last-attempt after_run under the existing cleanup budget while the
+owner remains live. Lost authority suppresses further SDK calls. Process cleanup
+joins after route revocation and cannot turn a failed attempt into success.
+
+`ProtocolSessionConfig.Start` supplies the native executor process adapter.
+It takes an explicit process environment, a masking log sink, route revocation
+and registered cleanups. It uses the shared request validator and frame decoder.
+Tests inject those functions while their owning area is unimplemented. Wire
+request IDs are private and opaque. A cancelled request joins its SDK work before
+returning so finally steps cannot overlap a timed-out body. Windows protocol
+handles travel in argv. The session does not own controller credentials.
+The protocol defines cancellation by job and step, but eval carries only a
+closure ID. Until C3's protocol owner defines eval cancellation, the native
+session terminates and joins on an eval timeout. Host-registered cleanup still
+runs. Finally or after_run requiring that SDK process cannot run after this cut.
 
 The host implementation accepts the declared store, validator, hash and engine
 interfaces so their independent implementations can be tested with fakes.
 This does not complete the native placement adapters. Those adapters must supply
-SDK process launch, source installation, environment construction, owner policy
+source installation, environment construction, owner policy
 evaluation, blob storage, route delegation and a state follower that catches up
 from persistence before waiting. The store owns the scheduling projection and
 decider. No host adapter may substitute its own readiness policy.

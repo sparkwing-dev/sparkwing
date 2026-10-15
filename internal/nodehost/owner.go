@@ -8,7 +8,9 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -106,10 +108,10 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 	}
 	entry, err := h.Acquire(ctx, input)
 	if err != nil {
-		return completion, err
+		return completion, h.preparationFailure(ctx, input, snapshot.Run, err)
 	}
 	if entry == nil {
-		return completion, errors.New("source acquisition returned no entry")
+		return completion, h.preparationFailure(ctx, input, snapshot.Run, errors.New("source acquisition returned no entry"))
 	}
 	defer func() { err = errors.Join(err, entry.Close()) }()
 	accepted, err := h.accept(ctx, input, snapshot.Run, entry)
@@ -186,14 +188,14 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	}
 	prepared, err := h.Prepare(ctx, input, entry)
 	if err != nil {
-		return AcceptedRun{}, err
+		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
 	if input.PlanCache != nil {
 		prepared.Planning.Cache = input.PlanCache
 	}
 	plan, err := PlanInitial(ctx, prepared.Planning, prepared.Functions)
 	if err != nil {
-		return AcceptedRun{}, err
+		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
 	accepted, err := h.Store.AcceptPlan(ctx, store.PlanAcceptance{RunID: input.RunID, Actor: input.Owner, Seal: runspec.SealInput{
 		Request: row.Request, Declarations: prepared.Declarations, Resolved: prepared.Resolved, Plan: plan.CanonicalPlan,
@@ -206,6 +208,34 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	}
 	row.Spec, row.Plan, row.PlanHash = &accepted.Spec, accepted.Plan, accepted.PlanHash
 	return ownerAccepted(row)
+}
+
+func (h *OwnerHost) preparationFailure(ctx context.Context, input RunInput, row store.RunRow, failure error) error {
+	// safety: accepted topology may have live remote work; only unaccepted setup can finish here.
+	if row.Spec != nil {
+		return failure
+	}
+	state, reason := store.RunFailed, string(apierr.PlanFailed)
+	message := "run preparation failed"
+	if cause := context.Cause(ctx); cause != nil {
+		var cancelled *lease.CancelError
+		if !errors.As(cause, &cancelled) {
+			return errors.Join(failure, cause)
+		}
+		state, reason = store.RunCancelled, string(apierr.ReasonCancelled)
+		message = "cancellation requested"
+	}
+	// safety: setup errors can contain credentials before describe establishes masking; persist only the stage.
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
+	defer cancel()
+	_, err := h.Store.FinishRunAndUnit(finishCtx, store.FinishRunRequest{
+		Unit: input.Owner.Owner,
+		Transition: store.RunTransition{
+			RunID: input.RunID, Actor: input.Owner,
+			To: state, Cause: store.RunFinish, Reason: reason, MaskedError: message,
+		},
+	})
+	return errors.Join(failure, err)
 }
 
 func ownerAccepted(row store.RunRow) (AcceptedRun, error) {

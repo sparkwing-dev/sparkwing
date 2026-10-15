@@ -18,7 +18,7 @@ type executorStepResult struct {
 	err    error
 }
 
-func (h *nodeExecutor) steps(ctx context.Context, session *executorSession, input NodeInput, spec runspec.Spec, job nodeproto.JobSpec) (json.RawMessage, error) {
+func (h *nodeExecutor) steps(ctx, parent context.Context, session *executorSession, input NodeInput, spec runspec.Spec, job nodeproto.JobSpec) (json.RawMessage, error) {
 	if len(job.Steps) == 0 {
 		return nil, executorError(apierr.PlanInvalid, "executable job has no steps")
 	}
@@ -44,6 +44,7 @@ func (h *nodeExecutor) steps(ctx context.Context, session *executorSession, inpu
 	}
 	done := make(chan executorStepResult, len(job.Steps))
 	var firstErr error
+	var cleanupErr error
 	var output json.RawMessage
 	fatal := false
 	var cancels sync.WaitGroup
@@ -59,7 +60,7 @@ func (h *nodeExecutor) steps(ctx context.Context, session *executorSession, inpu
 				ready = ready && finished[need]
 				blocked = blocked || failed[need] && !steps[need].ContinueOnError
 			}
-			if (fatal || ctx.Err() != nil) && !step.Finally || ready && blocked && !step.Finally {
+			if parent.Err() != nil || (fatal || ctx.Err() != nil) && !step.Finally || ready && blocked && !step.Finally {
 				delete(pending, step.ID)
 				finished[step.ID] = true
 				failed[step.ID] = true
@@ -73,7 +74,13 @@ func (h *nodeExecutor) steps(ctx context.Context, session *executorSession, inpu
 			running[step.ID] = true
 			changed = true
 			go func() {
-				raw, err := h.step(ctx, session, input, spec, step)
+				stepCtx := ctx
+				if step.Finally && ctx.Err() != nil {
+					var cancel context.CancelFunc
+					stepCtx, cancel = context.WithTimeout(parent, limits.CleanupTimeout)
+					defer cancel()
+				}
+				raw, err := h.step(stepCtx, session, input, spec, step)
 				done <- executorStepResult{id: step.ID, output: raw, err: err}
 			}()
 		}
@@ -94,6 +101,9 @@ func (h *nodeExecutor) steps(ctx context.Context, session *executorSession, inpu
 			continue
 		}
 		failed[result.id] = true
+		if step.Finally && ctx.Err() != nil && !step.Optional {
+			cleanupErr = errors.Join(cleanupErr, result.err)
+		}
 		if !step.Optional && !cancelled[result.id] && firstErr == nil {
 			firstErr = result.err
 		}
@@ -117,8 +127,16 @@ func (h *nodeExecutor) steps(ctx context.Context, session *executorSession, inpu
 			}()
 		}
 	}
-	return output, firstErr
+	if cleanupErr != nil {
+		cleanupErr = &executorCleanupError{err: cleanupErr}
+	}
+	return output, errors.Join(firstErr, cleanupErr, context.Cause(ctx))
 }
+
+type executorCleanupError struct{ err error }
+
+func (e *executorCleanupError) Error() string { return e.err.Error() }
+func (e *executorCleanupError) Unwrap() error { return e.err }
 
 func (h *nodeExecutor) step(ctx context.Context, session *executorSession, input NodeInput, spec runspec.Spec, step nodeproto.StepSpec) (json.RawMessage, error) {
 	for _, closure := range step.Closures.SkipIf {

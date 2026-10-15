@@ -9,9 +9,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
@@ -51,20 +49,46 @@ func (s *executorSession) call(ctx context.Context, request nodeproto.Request, r
 }
 
 func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspec.Spec, job nodeproto.JobSpec, first, retryAllowed bool) (result store.NodeResult, err error) {
+	parent := ctx
 	started := !first
-	var cleanupFailure error
 	ctx, cancel, err := h.deps.ChildContext(ctx, input.Execution.Timeout.Value, 0)
 	if err != nil {
 		return h.failure(err), err
 	}
-	defer cancel()
-	ctx, progress, stopIdle := executorProgressContext(ctx, input.Execution.NoProgressTimeout.Value)
-	defer stopIdle()
+	ctx, activity, stopIdle := executorProgressContext(ctx, input.Execution.NoProgressTimeout.Value)
+	var process ExecutorProcess
+	var session *executorSession
+	afterRun := false
 	defer func() {
-		if context.Cause(ctx) != nil && (errors.Is(context.Cause(ctx), context.DeadlineExceeded) || errors.Is(context.Cause(ctx), errExecutorNoProgress)) {
-			result = h.failure(executorError(apierr.DeadlineExceeded, "job attempt exceeded its execution deadline"))
-			if started && cleanupFailure == nil {
+		timeout := executorAttemptTimeout(ctx)
+		stopIdle()
+		cancel()
+		if timeout != nil {
+			result = h.failure(timeout)
+			var cleanupErr *executorCleanupError
+			if errors.As(err, &cleanupErr) {
+				result = h.failure(errors.Join(timeout, cleanupErr))
+			} else if started {
 				err = nil
+			}
+			if started && !retryAllowed && !afterRun && session != nil && parent.Err() == nil {
+				afterCtx, afterCancel := context.WithTimeout(parent, limits.CleanupTimeout)
+				afterErr := h.afterRun(afterCtx, session, input, job, result)
+				afterCancel()
+				if afterErr != nil {
+					err = errors.Join(err, afterErr)
+					result = h.failure(errors.Join(timeout, err))
+				}
+			}
+		}
+		if process != nil {
+			closeErr := process.Close()
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(parent), limits.CleanupTimeout)
+			cleanupErr := process.Cleanup(cleanupCtx)
+			cleanupCancel()
+			if cleanupFailure := errors.Join(closeErr, cleanupErr); cleanupFailure != nil {
+				err = errors.Join(err, cleanupFailure)
+				result = h.failure(err)
 			}
 		}
 	}()
@@ -77,20 +101,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 		return h.failure(err), err
 	}
 	input.Engine = resolved
-	process, err := h.deps.Start(ctx, input, progress)
-	if process != nil {
-		defer func() {
-			closeErr := process.Close()
-			cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), limits.CleanupTimeout)
-			cleanupErr := process.Cleanup(cleanupCtx)
-			cleanupCancel()
-			cleanupFailure = errors.Join(closeErr, cleanupErr)
-			if cleanupFailure != nil {
-				err = errors.Join(err, cleanupFailure)
-				result = h.failure(err)
-			}
-		}()
-	}
+	process, err = h.deps.Start(ctx, input, activity)
 	if err != nil {
 		return h.failure(err), err
 	}
@@ -98,7 +109,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 		err = errors.New("SDK process adapter returned no process")
 		return h.failure(err), err
 	}
-	session := &executorSession{process: process}
+	session = &executorSession{process: process}
 	if err = h.hello(ctx, session, input); err != nil {
 		return h.failure(err), err
 	}
@@ -147,33 +158,32 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			}
 		}
 	}
-	output, bodyErr := h.steps(ctx, session, input, spec, job)
+	output, bodyErr := h.steps(ctx, parent, session, input, spec, job)
+	var cleanupErr *executorCleanupError
+	if errors.As(bodyErr, &cleanupErr) {
+		err = cleanupErr
+	}
+	timeout := executorAttemptTimeout(ctx)
 	result = store.NodeResult{Outcome: store.NodeSuccess}
 	if bodyErr != nil {
 		result = h.failure(bodyErr)
 		var application *executorApplicationError
-		if !errors.As(bodyErr, &application) {
+		if !errors.As(bodyErr, &application) && timeout == nil {
 			return result, bodyErr
 		}
 	}
-	if bodyErr == nil && job.Closures.Verify != "" {
+	if timeout != nil {
+		result = h.failure(timeout)
+	}
+	if bodyErr == nil && timeout == nil && job.Closures.Verify != "" {
 		if _, verifyErr := h.eval(ctx, session, input, job.Closures.Verify, nil); verifyErr != nil {
 			result = h.failure(verifyErr)
 		}
 	}
-	if result.Outcome != store.NodeFailed || !retryAllowed {
-		after := nodeproto.RunResult{Outcome: string(result.Outcome)}
-		if result.Outcome == store.NodeFailed {
-			after.Error = &apierr.Error{Code: apierr.SDKError, Message: result.MaskedError}
-		}
-		payload, marshalErr := json.Marshal(after)
-		if marshalErr != nil {
-			return h.failure(marshalErr), marshalErr
-		}
-		for _, closure := range job.Closures.AfterRun {
-			if _, afterErr := h.eval(ctx, session, input, closure, payload); afterErr != nil {
-				return h.failure(afterErr), afterErr
-			}
+	if executorAttemptTimeout(ctx) == nil && (result.Outcome != store.NodeFailed || !retryAllowed) {
+		afterRun = true
+		if afterErr := h.afterRun(ctx, session, input, job, result); afterErr != nil {
+			return h.failure(afterErr), afterErr
 		}
 	}
 	if result.Outcome == store.NodeSuccess && len(output) > 0 {
@@ -190,7 +200,28 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			return h.failure(err), err
 		}
 	}
-	return result, nil
+	return result, err
+}
+
+func (h *nodeExecutor) afterRun(ctx context.Context, session *executorSession, input NodeInput, job nodeproto.JobSpec, result store.NodeResult) error {
+	after := nodeproto.RunResult{Outcome: string(result.Outcome)}
+	if result.Outcome == store.NodeFailed {
+		code := apierr.SDKError
+		if result.Reason == string(apierr.DeadlineExceeded) {
+			code = apierr.DeadlineExceeded
+		}
+		after.Error = &apierr.Error{Code: code, Message: result.MaskedError}
+	}
+	payload, err := json.Marshal(after)
+	if err != nil {
+		return err
+	}
+	for _, closure := range job.Closures.AfterRun {
+		if _, err := h.eval(ctx, session, input, closure, payload); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (h *nodeExecutor) hello(ctx context.Context, session *executorSession, input NodeInput) error {
@@ -382,35 +413,6 @@ func executorContains(values []string, value string) bool {
 		}
 	}
 	return false
-}
-
-var errExecutorNoProgress = errors.New("job made no progress")
-
-func executorProgressContext(parent context.Context, idle time.Duration) (context.Context, func(), func()) {
-	ctx, cancel := context.WithCancelCause(parent)
-	var mu sync.Mutex
-	var timer *time.Timer
-	stopped := false
-	if idle > 0 {
-		timer = time.AfterFunc(idle, func() { cancel(errExecutorNoProgress) })
-	}
-	progress := func() {
-		mu.Lock()
-		defer mu.Unlock()
-		if timer != nil && !stopped {
-			timer.Reset(idle)
-		}
-	}
-	stop := func() {
-		mu.Lock()
-		defer mu.Unlock()
-		stopped = true
-		if timer != nil {
-			timer.Stop()
-		}
-		cancel(nil)
-	}
-	return ctx, progress, stop
 }
 
 func executorResultFailure(result nodeproto.RunResult) error {

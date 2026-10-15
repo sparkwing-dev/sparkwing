@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
+
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -55,7 +57,7 @@ var errTriggerClaimEnded = errors.New("the trigger claim ended, so the run stopp
 // runs the scheduler, dispatches each node, and finishes the trigger once
 // the run row is terminal. An error means no run row was recorded. The caller
 // renews the trigger claim, as [HeartbeatTrigger] does, and cancels ctx with a
-// [nodehost.CancelError] for an operator's cancel; a ctx cancelled with no
+// [lease.CancelError] for an operator's cancel; a ctx cancelled with no
 // cause, as a runner shutting down is, leaves the run and trigger to the
 // claim's lease.
 //
@@ -296,7 +298,7 @@ const (
 
 // HeartbeatTrigger renews triggerID's claim every interval until stop is
 // called, and cancels the returned context when the claim ends: with a
-// [nodehost.CancelError] for an operator's cancel, which the run records as
+// [lease.CancelError] for an operator's cancel, which the run records as
 // cancelled, and with an error that fails the run when the claim ended any
 // other way.
 func HeartbeatTrigger(ctx context.Context, c *client.Client, triggerID string, interval time.Duration, logger *slog.Logger) (context.Context, func()) {
@@ -308,7 +310,7 @@ func HeartbeatTrigger(ctx context.Context, c *client.Client, triggerID string, i
 		defer close(done)
 		runHeartbeat(beatCtx, c, triggerID, interval, func() {
 			if cancelled.Load() {
-				cancel(&nodehost.CancelError{Reason: "cancelled by operator"})
+				cancel(&lease.CancelError{Reason: "cancelled by operator"})
 				return
 			}
 			cancel(errTriggerClaimEnded)

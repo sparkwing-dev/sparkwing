@@ -27,7 +27,8 @@ type NodeTransitionStore interface {
 	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
 }
 
-// ExecutorProcess must cancel pending requests when their context ends. Close
+// ExecutorProcess must cancel pending requests when their context ends while
+// remaining available for bounded timeout cleanup. Close
 // revokes the process binding and joins the process; Cleanup then runs registered
 // cleanups under its own bounded context. Both are called after failed setup too.
 type ExecutorProcess interface {
@@ -40,13 +41,22 @@ type ExecutorProcess interface {
 // Artifact publication returns verified references; the store authorizes attachment.
 type ExecutorFinalizer func(context.Context, *store.NodeResult) error
 
+// ExecutorActivity connects logs and authorized child waits to the idle budget.
+// Await pauses that budget until its returned function is called. Concurrent
+// waits nest, and each returned function may safely be called more than once.
+type ExecutorActivity struct {
+	Progress func()
+	Await    func() (resume func())
+}
+
 // ExecutorDependencies supplies process and storage adapters without changing
 // the accepted execution settings. Start receives the granted hello identity and
-// a progress callback for the no-progress budget. Execute's context must belong
+// activity callbacks for the no-progress budget. Its context bounds startup;
+// Close owns the process lifetime. Execute's context must belong
 // to the claim's lease keeper, whose lost-authority cause suppresses reporting.
 type ExecutorDependencies struct {
 	Store         NodeTransitionStore
-	Start         func(context.Context, NodeInput, func()) (ExecutorProcess, error)
+	Start         func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error)
 	EnsureEngine  func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
 	ValidatePlan  func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
 	CanonicalHash func(any) (runspec.Hash, error)

@@ -11,10 +11,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
+
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
@@ -138,7 +139,7 @@ func hostTriggerWith(ctx context.Context, cli *client.Client, trigger *store.Tri
 		return err
 	}
 	status := "failed"
-	if cancel := (*nodehost.CancelError)(nil); errors.As(cause, &cancel) {
+	if cancel := (*lease.CancelError)(nil); errors.As(cause, &cancel) {
 		status = "cancelled"
 	}
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(runCtx), 5*time.Second)

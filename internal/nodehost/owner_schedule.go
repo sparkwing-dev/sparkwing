@@ -109,8 +109,8 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		select {
 		case result := <-completed:
 			delete(active, result.nodeID)
-			if err := h.executionError(ctx, input.RunID, result); err != nil {
-				return RunCompletion{}, err
+			if result.err != nil {
+				return RunCompletion{}, result.err
 			}
 			continue
 		default:
@@ -124,8 +124,8 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		}
 		if result != nil {
 			delete(active, result.nodeID)
-			if err := h.executionError(ctx, input.RunID, *result); err != nil {
-				return RunCompletion{}, err
+			if result.err != nil {
+				return RunCompletion{}, result.err
 			}
 		}
 	}
@@ -234,7 +234,7 @@ func (h *OwnerHost) execute(ctx context.Context, accepted AcceptedRun, entry *so
 	if input.Accepted.RunID != accepted.RunID || input.Accepted.SpecHash != accepted.SpecHash || input.Accepted.PlanHash != accepted.PlanHash || input.NodeID != request.Ref.NodeID || input.Generation != result.Claim.Generation || input.Authority.Holder != result.Claim.Holder || input.Authority.CapabilityPrefix != result.Claim.CapabilityPrefix {
 		return errors.New("node binding does not match the committed self claim")
 	}
-	return h.Executor.Execute(ctx, input)
+	return h.executionError(ctx, accepted.RunID, ownerExecution{nodeID: input.NodeID, err: h.Executor.Execute(ctx, input)})
 }
 
 func (h *OwnerHost) expand(ctx context.Context, input RunInput, accepted AcceptedRun, row store.NodeRow) error {

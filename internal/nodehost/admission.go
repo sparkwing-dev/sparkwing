@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -459,7 +461,7 @@ func (a *Admission) waitSlot(ctx context.Context, h slotHolder, g group, initial
 func (a *Admission) holdSlot(ctx context.Context, h slotHolder, g group, holder string, run func(context.Context) Result) Result {
 	execCtx, cancelExec := context.WithCancelCause(ctx)
 	defer cancelExec(nil)
-	lostErr := &CancelError{Reason: fmt.Sprintf("concurrency key %q: holder superseded by newer arrival", g.key)}
+	lostErr := &lease.CancelError{Reason: fmt.Sprintf("concurrency key %q: holder superseded by newer arrival", g.key)}
 	var lost atomic.Bool
 	done := make(chan struct{})
 	watching := make(chan struct{})

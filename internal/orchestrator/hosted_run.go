@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -22,7 +24,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -170,11 +171,11 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	cfg := nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: entry.Command, Dir: entry.Dir, Env: engineenv.Strip(entry.Env), Sink: planSink},
 		Pipeline: opts.Pipeline, Args: invokeArgs, CheckArgs: checkArgs, Run: hostedRunContext(opts, runID),
-		StartAt: opts.StartAt, StopAt: opts.StopAt, Only: opts.Only, Workers: opts.MaxParallel,
+		StartAt: opts.StartAt, StopAt: opts.StopAt, Only: opts.Only,
 		State: state, Artifacts: backends.Artifact, Attempts: attempts, Admission: admission,
 		Debug: nodehost.Debug{
 			PauseBefore: opts.Debug.PauseBefore, PauseAfter: opts.Debug.PauseAfter,
-			PauseOnFailure: opts.Debug.PauseOnFailure, PauseTimeout: pauseTimeout(), Bounces: hostedBounces(backends.State),
+			PauseOnFailure: opts.Debug.PauseOnFailure, PauseTimeout: pauseTimeout(),
 		},
 		Invocation: invocation, Requires: requires,
 		Memo: &nodehost.Memo{
@@ -221,7 +222,7 @@ func hostedInterruptCancel(parent context.Context) (context.Context, func()) {
 	ctx, cancel := context.WithCancelCause(parent)
 	stopAfter := context.AfterFunc(interrupted, func() {
 		if cause := context.Cause(interrupted); cause != nil && parent.Err() == nil {
-			cancel(&nodehost.CancelError{Reason: cause.Error()})
+			cancel(&lease.CancelError{Reason: cause.Error()})
 		}
 	})
 	return ctx, func() { stopAfter(); stop(); cancel(nil) }
@@ -257,16 +258,6 @@ func hostedRunContext(opts Options, runID string) nodeproto.RunContextOld {
 		rc.Git = &nodeproto.Git{SHA: g.SHA, Branch: g.Branch, DefaultBranch: g.DefaultBranch, Repo: g.Repo, RepoURL: g.RepoURL}
 	}
 	return rc
-}
-
-func hostedBounces(state StateBackend) nodehost.Bounces {
-	switch s := state.(type) {
-	case localState:
-		return s.st
-	case *client.Client:
-		return s
-	}
-	return nil
 }
 
 // safety: plan code's logs have no node log to land in, so they go to the

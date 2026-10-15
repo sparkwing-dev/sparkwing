@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -180,9 +182,9 @@ func TestPlanGroupLimitPoliciesAndEviction(t *testing.T) {
 			if res.Status != c.status || (c.err == "") != (res.Err == nil) || !strings.Contains(errText(res.Err), c.err) {
 				t.Fatalf("run %s %v, want %s with %q", res.Status, res.Err, c.status, c.err)
 			}
-			var ce *CancelError
+			var ce *lease.CancelError
 			if c.status == "cancelled" && !errors.As(res.Err, &ce) {
-				t.Fatalf("err %T %v, want a CancelError", res.Err, res.Err)
+				t.Fatalf("err %T %v, want a lease.CancelError", res.Err, res.Err)
 			}
 			if c.evict == nil && g.peak != 0 {
 				t.Fatal("a node ran though the run was not admitted")
@@ -233,7 +235,7 @@ func TestPlanGroupReleasedOnEveryExit(t *testing.T) {
 			if c.cancel {
 				g := newGauge()
 				exec = g.exec
-				go func() { recv(t, ctx, g.entered); cancelRun(&CancelError{Reason: "interrupted by SIGINT"}) }()
+				go func() { recv(t, ctx, g.entered); cancelRun(&lease.CancelError{Reason: "interrupted by SIGINT"}) }()
 			}
 			res, release := hostPlanned(t, runCtx, st, testRunID, doc, adm, exec)
 			if res.Status != c.status {

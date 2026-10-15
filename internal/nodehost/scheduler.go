@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -47,7 +49,7 @@ type Config struct {
 	Heartbeat time.Duration
 	// Admission admits each node before it runs; nil admits every node at once.
 	Admission *Admission
-	// Debug holds the run's debug pauses and bounce requests.
+	// Debug holds the run's debug pauses.
 	Debug Debug
 	// Invocation is the run row's invocation record, which the read paths
 	// redact secret arguments by.
@@ -78,9 +80,6 @@ type Config struct {
 	// Only, as --sw-only, runs only the plan's nodes whose ID matches the
 	// glob and the nodes they depend on, skipping the rest.
 	Only string
-	// Workers caps how many non-inline nodes run an attempt at once; zero
-	// leaves them uncapped.
-	Workers int
 	// Rehydrate, when set, copies the results of a retried run's nodes
 	// instead of running them; nil runs every node.
 	Rehydrate *Rehydration
@@ -204,19 +203,17 @@ type Layer func(cfg *Config, next Executor) Executor
 
 // safety: the order is the envelope's nesting, outermost first: debug pauses, then skip_if, which the
 // dispatcher checks after a pause-before but before a gate waits, then approvals and recovery, memo, which
-// copies a hit before any admission lease or group slot is taken, admission, bounce, artifacts, caches,
-// retries, the worker cap and timeouts, expansion. The attempt closures and steps run inside the attempt executor.
+// copies a hit before any admission lease or group slot is taken, admission, artifacts, caches,
+// retries and timeouts, expansion. The attempt closures and steps run inside the attempt executor.
 var layers = []Layer{
 	debugLayer,
 	skipIfLayer,
 	approvalsLayer,
 	memoLayer,
 	admissionLayer,
-	bounceLayer,
 	artifactsLayer,
 	cachesLayer,
 	retryLayer,
-	workersLayer,
 	timeoutLayer,
 }
 
@@ -757,15 +754,8 @@ func appendNew(to, from []string) []string {
 	return to
 }
 
-// CancelError is the cause to cancel a run's context with when the run is
-// cancelled rather than failed: an interrupt, an eviction, a supersession or
-// a daemon's cancel. Any other cause, a deadline included, fails the run.
-type CancelError struct{ Reason string }
-
-func (e *CancelError) Error() string { return e.Reason }
-
 func runStatus(err error) string {
-	var cancel *CancelError
+	var cancel *lease.CancelError
 	switch {
 	case err == nil:
 		return "success"

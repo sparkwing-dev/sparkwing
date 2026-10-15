@@ -131,7 +131,7 @@ func executorFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDependenc
 	jobJSON, _ := json.Marshal(job)
 	s := &executorStore{row: store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "build"}, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 3, Attempt: 5, Spec: jobJSON, SpecHash: string(jobHash), Execution: execution}}
 	processes := []*executorProcess{}
-	deps := ExecutorDependencies{Store: s, Start: func(_ context.Context, _ NodeInput, _ func()) (ExecutorProcess, error) {
+	deps := ExecutorDependencies{Store: s, Start: func(_ context.Context, _ NodeInput, _ ExecutorActivity) (ExecutorProcess, error) {
 		p := &executorProcess{plan: plan, result: nodeproto.RunResult{Outcome: "success"}}
 		processes = append(processes, p)
 		return p, nil
@@ -162,7 +162,7 @@ func TestNodeExecutorRetriesRetainGenerationAndAdvanceOrdinal(t *testing.T) {
 	spec.Resolved.Settings.Jobs[input.NodeID] = input.Execution
 	input.Accepted.Spec, _ = json.Marshal(spec)
 	start := deps.Start
-	deps.Start = func(ctx context.Context, in NodeInput, progress func()) (ExecutorProcess, error) {
+	deps.Start = func(ctx context.Context, in NodeInput, progress ExecutorActivity) (ExecutorProcess, error) {
 		p, err := start(ctx, in, progress)
 		if len(*processes) < 3 {
 			p.(*executorProcess).result.Outcome = "failed"
@@ -202,7 +202,7 @@ func TestNodeExecutorRetriesRetainGenerationAndAdvanceOrdinal(t *testing.T) {
 func TestNodeExecutorDriftPreventsBody(t *testing.T) {
 	input, s, deps, processes := executorFixture(t)
 	start := deps.Start
-	deps.Start = func(ctx context.Context, in NodeInput, progress func()) (ExecutorProcess, error) {
+	deps.Start = func(ctx context.Context, in NodeInput, progress ExecutorActivity) (ExecutorProcess, error) {
 		p, err := start(ctx, in, progress)
 		p.(*executorProcess).plan.Jobs = []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "changed"}}}}
 		return p, err
@@ -230,7 +230,7 @@ func TestNodeExecutorLostLeaseNeverReports(t *testing.T) {
 	input, s, deps, processes := executorFixture(t)
 	ctx, cancel := context.WithCancelCause(context.Background())
 	start := deps.Start
-	deps.Start = func(ctx context.Context, in NodeInput, progress func()) (ExecutorProcess, error) {
+	deps.Start = func(ctx context.Context, in NodeInput, progress ExecutorActivity) (ExecutorProcess, error) {
 		p, err := start(ctx, in, progress)
 		p.(*executorProcess).onRun = func(context.Context) { cancel(lease.ErrLeaseLost) }
 		return p, err
@@ -295,7 +295,7 @@ func TestNodeExecutorTransitionRefusalStopsExecution(t *testing.T) {
 				executorRetryBudget(t, &input, s, 2)
 			}
 			start := deps.Start
-			deps.Start = func(ctx context.Context, in NodeInput, p func()) (ExecutorProcess, error) {
+			deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
 				process, err := start(ctx, in, p)
 				if cause == store.CauseRetry {
 					process.(*executorProcess).result.Outcome = "failed"
@@ -328,7 +328,7 @@ func TestNodeExecutorRetriesRespectPreviouslyConsumedBudget(t *testing.T) {
 	executorRetryBudget(t, &input, s, 2)
 	s.row.ApplicationRetries = 2
 	start := deps.Start
-	deps.Start = func(ctx context.Context, in NodeInput, p func()) (ExecutorProcess, error) {
+	deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
 		process, err := start(ctx, in, p)
 		process.(*executorProcess).result.Outcome = "failed"
 		return process, err
@@ -349,7 +349,7 @@ func TestNodeExecutorCancellationWinsSuccessfulBody(t *testing.T) {
 	input, s, deps, processes := executorFixture(t)
 	ctx, cancel := context.WithCancelCause(context.Background())
 	start := deps.Start
-	deps.Start = func(ctx context.Context, in NodeInput, p func()) (ExecutorProcess, error) {
+	deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
 		process, err := start(ctx, in, p)
 		process.(*executorProcess).onRun = func(context.Context) { cancel(&lease.CancelError{Reason: "cancel_requested"}) }
 		return process, err
@@ -376,7 +376,7 @@ func TestNodeExecutorStorageLayersWrapRetriesOnce(t *testing.T) {
 	}
 	start := deps.Start
 	attempts := 0
-	deps.Start = func(ctx context.Context, in NodeInput, p func()) (ExecutorProcess, error) {
+	deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
 		attempts++
 		events = append(events, "attempt")
 		process, err := start(ctx, in, p)
@@ -402,7 +402,7 @@ func TestNodeExecutorCleanupFailureCannotReportSuccess(t *testing.T) {
 	input, s, deps, processes := executorFixture(t)
 	cleanupErr := errors.New("cleanup failed")
 	start := deps.Start
-	deps.Start = func(ctx context.Context, in NodeInput, p func()) (ExecutorProcess, error) {
+	deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
 		process, err := start(ctx, in, p)
 		process.(*executorProcess).cleanupErr = cleanupErr
 		return process, err
@@ -431,7 +431,7 @@ func TestNodeExecutorTimeoutRetriesWithFreshBudget(t *testing.T) {
 		return ctx, func() { cancel(nil) }, nil
 	}
 	start := deps.Start
-	deps.Start = func(ctx context.Context, in NodeInput, p func()) (ExecutorProcess, error) {
+	deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
 		process, err := start(ctx, in, p)
 		if len(*processes) == 1 {
 			process.(*executorProcess).onRun = func(context.Context) { deadlineCancel(context.DeadlineExceeded) }
@@ -453,7 +453,7 @@ func TestNodeExecutorTimeoutRetriesWithFreshBudget(t *testing.T) {
 func TestNodeExecutorRejectsSDKMismatchBeforeBody(t *testing.T) {
 	input, s, deps, processes := executorFixture(t)
 	start := deps.Start
-	deps.Start = func(ctx context.Context, in NodeInput, p func()) (ExecutorProcess, error) {
+	deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
 		process, err := start(ctx, in, p)
 		process.(*executorProcess).answer = func(_ context.Context, r nodeproto.Request) (any, error) {
 			if r.Op == nodeproto.OpHello {
@@ -480,7 +480,7 @@ func TestNodeExecutorMissingOutputPublisherFailsLoudly(t *testing.T) {
 	job := input.Accepted.Plan.Jobs[0]
 	job.ResultStep = "body"
 	executorChangeJob(t, &input, s, job)
-	deps.Start = func(context.Context, NodeInput, func()) (ExecutorProcess, error) {
+	deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {
 		return &executorProcess{plan: input.Accepted.Plan, result: nodeproto.RunResult{Outcome: "success", Output: json.RawMessage(`{"value":3}`)}}, nil
 	}
 	host, err := NewNodeExecutor(deps)
@@ -510,7 +510,7 @@ func TestNodeExecutorRiskGateUsesSealedAllowList(t *testing.T) {
 				input.Accepted.Spec, _ = json.Marshal(spec)
 			}
 			start := deps.Start
-			deps.Start = func(ctx context.Context, in NodeInput, p func()) (ExecutorProcess, error) {
+			deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
 				process, err := start(ctx, in, p)
 				process.(*executorProcess).plan = input.Accepted.Plan
 				return process, err
@@ -566,7 +566,7 @@ func TestNodeExecutorGeneratorReplayChecksCompleteAcceptedMembership(t *testing.
 			s.expansions = []store.AcceptedExpansionRow{{Source: store.NodeRef{RunID: "run", NodeID: "source"}, SourceGeneration: 2, Body: body, BodyHash: string(bodyHash)}}
 			input.Replay = []GeneratorReplay{{SourceJob: "source", SourceGeneration: 2, GeneratorID: "generator", Output: json.RawMessage(`{"seed":1}`)}}
 			start := deps.Start
-			deps.Start = func(ctx context.Context, in NodeInput, p func()) (ExecutorProcess, error) {
+			deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
 				process, err := start(ctx, in, p)
 				fake := process.(*executorProcess)
 				fake.plan = input.Accepted.Plan
@@ -613,7 +613,7 @@ func TestNodeExecutorRecoveryReceivesPersistedFailure(t *testing.T) {
 	failure := nodeproto.JobFailure{Job: "source", Stage: "action", Error: &apierr.Error{Code: apierr.SDKError, Message: "recorded failure"}}
 	deps.ReadFailure = func(context.Context, store.NodeRef) (nodeproto.JobFailure, error) { return failure, nil }
 	start := deps.Start
-	deps.Start = func(ctx context.Context, in NodeInput, p func()) (ExecutorProcess, error) {
+	deps.Start = func(ctx context.Context, in NodeInput, p ExecutorActivity) (ExecutorProcess, error) {
 		process, err := start(ctx, in, p)
 		process.(*executorProcess).plan = input.Accepted.Plan
 		return process, err

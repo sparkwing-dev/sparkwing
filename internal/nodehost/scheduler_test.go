@@ -13,6 +13,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -211,7 +213,7 @@ func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
 	fx := &fakeExec{bodies: map[string]Executor{"slow": func(ctx context.Context, _ *NodeRun) Result {
-		cancel(&CancelError{Reason: "interrupted by SIGINT"})
+		cancel(&lease.CancelError{Reason: "interrupted by SIGINT"})
 		<-ctx.Done()
 		return Result{Outcome: sparkwing.Failed, Err: ctx.Err()}
 	}}}

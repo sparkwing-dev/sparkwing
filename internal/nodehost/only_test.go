@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -68,58 +67,6 @@ func TestOnlyRefusesWhatTheDispatcherRefused(t *testing.T) {
 		if _, err := onlySkips(doc, tc.only, tc.start, ""); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("only=%q start=%q: err=%v, want %q", tc.only, tc.start, err, tc.want)
 		}
-	}
-}
-
-func TestWorkersCapsTheNodesRunningAtOnce(t *testing.T) {
-	st := openStore(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	var mu sync.Mutex
-	running, peak := 0, 0
-	two, inlineRan, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	var reachedTwo sync.Once
-	go func() {
-		<-two
-		<-inlineRan
-		close(release)
-	}()
-	body := func(ctx context.Context, n *NodeRun) Result {
-		if m := n.Plan.Modifiers; m != nil && m.Inline {
-			close(inlineRan)
-			return Result{Outcome: sparkwing.Success}
-		}
-		mu.Lock()
-		running++
-		peak = max(peak, running)
-		if running == 2 {
-			reachedTwo.Do(func() { close(two) })
-		}
-		mu.Unlock()
-		select {
-		case <-release:
-		case <-ctx.Done():
-		}
-		mu.Lock()
-		running--
-		mu.Unlock()
-		return Result{Outcome: sparkwing.Success}
-	}
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
-		{ID: "a"},
-		{ID: "b"},
-		{ID: "c"},
-		{ID: "d"},
-		{ID: "e"},
-		{ID: "inline", Modifiers: &nodeproto.PlanModifiers{Inline: true}},
-	}}
-
-	res := hostWith(t, ctx, st, Config{Execute: body, Workers: 2}, doc)
-	if res.Status != "success" {
-		t.Fatalf("status=%s err=%v, want success: an inline node waited behind full workers", res.Status, res.Err)
-	}
-	if peak != 2 {
-		t.Errorf("peak running = %d, want the cap of 2", peak)
 	}
 }
 

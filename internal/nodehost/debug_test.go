@@ -58,9 +58,9 @@ func (d *debugStore) eventList() []string {
 }
 
 func fastDebugPolls(t *testing.T) {
-	prevPause, prevBounce := debugPausePoll, bouncePoll
-	debugPausePoll, bouncePoll = time.Millisecond, time.Millisecond
-	t.Cleanup(func() { debugPausePoll, bouncePoll = prevPause, prevBounce })
+	prevPause := debugPausePoll
+	debugPausePoll = time.Millisecond
+	t.Cleanup(func() { debugPausePoll = prevPause })
 }
 
 func hostDebug(t *testing.T, ctx context.Context, ds *debugStore, doc nodeproto.PlanDocOld, dbg Debug, exec Executor) RunResult {
@@ -235,77 +235,5 @@ func TestDebugRecoveryNodesAndGatesSkipTheirPauses(t *testing.T) {
 	pauses, err := ds.ListDebugPauses(ctx, testRunID)
 	if err != nil || len(pauses) != 1 {
 		t.Errorf("pauses %+v err %v, want only the gate's pause-before", pauses, err)
-	}
-}
-
-func TestDebugBounceRestartsTheNode(t *testing.T) {
-	fastDebugPolls(t)
-	ds := newDebugStore(t)
-	started := make(chan struct{}, 2)
-	var attempts []int
-	var mu sync.Mutex
-	fx := &fakeExec{bodies: map[string]Executor{"build": func(ctx context.Context, n *NodeRun) Result {
-		mu.Lock()
-		attempts = append(attempts, max(n.Attempt, 1))
-		first := len(attempts) == 1
-		mu.Unlock()
-		started <- struct{}{}
-		if !first {
-			return Result{Outcome: sparkwing.Success, Output: []byte(`{"ok":true}`)}
-		}
-		<-ctx.Done()
-		return Result{Outcome: sparkwing.Failed, Err: context.Cause(ctx)}
-	}}}
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "build"}}}
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	done := make(chan RunResult, 1)
-	go func() { done <- hostDebug(t, ctx, ds, doc, Debug{Bounces: ds.Store}, fx.run) }()
-
-	<-started
-	if _, err := ds.RequestNodeBounce(ctx, testRunID, "build", "alice"); err != nil {
-		t.Fatal(err)
-	}
-	res := <-done
-
-	if res.Status != "success" {
-		t.Fatalf("run %q: %v, want success after the bounce", res.Status, res.Err)
-	}
-	wantRow(t, ds.Store, "build", sparkwing.Success, "")
-	if !slices.Equal(attempts, []int{1, 1}) {
-		t.Errorf("attempts %v, want the node restarted as attempt 1", attempts)
-	}
-	bounces, err := ds.ListNodeBounces(ctx, testRunID)
-	if err != nil || len(bounces) != 1 || bounces[0].Outcome != store.BounceBounced || bounces[0].ConsumedAt == nil {
-		t.Errorf("bounces %+v err %v, want one consumed as bounced", bounces, err)
-	}
-	if got := ds.eventList(); !slices.Equal(got, []string{"build:node_bounced"}) {
-		t.Errorf("events %v, want build:node_bounced", got)
-	}
-}
-
-func TestDebugBounceAsTheNodeEndsIsMissed(t *testing.T) {
-	fastDebugPolls(t)
-	ds := newDebugStore(t)
-	fx := &fakeExec{bodies: map[string]Executor{"build": func(ctx context.Context, _ *NodeRun) Result {
-		if _, err := ds.RequestNodeBounce(ctx, testRunID, "build", "alice"); err != nil {
-			return Result{Outcome: sparkwing.Failed, Err: err}
-		}
-		return Result{Outcome: sparkwing.Success}
-	}}}
-	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "build"}}}
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	res := hostDebug(t, ctx, ds, doc, Debug{Bounces: ds.Store}, fx.run)
-
-	if res.Status != "success" {
-		t.Fatalf("run %q: %v", res.Status, res.Err)
-	}
-	bounces, err := ds.ListNodeBounces(ctx, testRunID)
-	if err != nil || len(bounces) != 1 || bounces[0].Outcome != store.BounceMissed {
-		t.Errorf("bounces %+v err %v, want one consumed as missed", bounces, err)
-	}
-	if got := ds.eventList(); !slices.Equal(got, []string{"build:node_bounce_missed"}) {
-		t.Errorf("events %v, want build:node_bounce_missed", got)
 	}
 }

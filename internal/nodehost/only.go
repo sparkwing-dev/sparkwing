@@ -1,13 +1,11 @@
 package nodehost
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"path"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // safety: --sw-only keeps the matched nodes and what they depend on; OnFailure recovery nodes and nodes a
@@ -54,27 +52,6 @@ func onlySkips(doc nodeproto.PlanDocOld, pattern, start, stop string) (map[strin
 		}
 	}
 	return skip, nil
-}
-
-// safety: the cap sits inside admission and group waits, so a node waiting there holds no worker, as the
-// dispatcher released its slot; inline nodes run uncapped as before.
-func workersLayer(cfg *Config, next Executor) Executor {
-	if cfg.Workers <= 0 {
-		return next
-	}
-	sem := make(chan struct{}, cfg.Workers)
-	return func(ctx context.Context, n *NodeRun) Result {
-		if m := n.Plan.Modifiers; m != nil && m.Inline {
-			return next(ctx, n)
-		}
-		select {
-		case sem <- struct{}{}:
-		case <-ctx.Done():
-			return Result{Outcome: sparkwing.Cancelled, Err: context.Cause(ctx)}
-		}
-		defer func() { <-sem }()
-		return next(ctx, n)
-	}
 }
 
 // safety: a controller-dispatched run has no host to record skips, so --sw-only cuts the nodes from the plan the
