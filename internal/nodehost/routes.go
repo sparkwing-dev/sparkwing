@@ -121,17 +121,6 @@ func (router serverRegistrar) Register(endpoint controller.Endpoint) error {
 			router.server.writeFailure(w, executorError(apierr.Unauthenticated, "a process bearer is required"))
 			return
 		}
-		if g.Claim != nil {
-			switch endpoint.Pattern {
-			case "/node/v1/jobs/{job}/output", "/node/v1/pipelines/{name}/latest", "/node/v1/oidc-token", "/node/v1/children":
-				done, err := claimSlot(request.Context(), g.Claim.slots)
-				if err != nil {
-					router.server.writeFailure(w, err)
-					return
-				}
-				defer done()
-			}
-		}
 		evidence, err := endpoint.Decode(request)
 		if err == nil {
 			auth := capability.Authorized{Binding: capability.Binding{Kind: capability.BindingNode, RunID: g.RunID, NodeID: g.NodeID}, Target: evidence.Target}

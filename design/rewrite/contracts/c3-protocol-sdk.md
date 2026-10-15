@@ -1,5 +1,11 @@
 # C3 protocol and SDK contract
 
+[The remote hosting cut](../w3-remote-hosting-cut-progress.md) routes initial here
+hosting through the same sealed owner handoff as resume. It deletes the legacy
+trigger dispatcher, pod host, remote service proxy and scheduler resume path.
+Native placement composition and the local scheduler/server cut remain open.
+
+
 [The runtime helper cut](../w3-runtime-helper-cut-progress.md) deletes the legacy
 runner adapter and duplicate remote-environment and Windows Job Object code.
 Production placement migration and the legacy scheduler cut remain open.

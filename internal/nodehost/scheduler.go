@@ -56,24 +56,8 @@ type Config struct {
 	CheckSecrets func(context.Context, []string) error
 	// Memo reuses memoized nodes' earlier results; nil runs every node.
 	Memo *Memo
-	// Dispatch, when set, runs each admitted node elsewhere, whole: the
-	// remote host runs its artifacts, caches, retries, timeouts and attempts
-	// and records its start and result. Debug pauses, skip_if, approvals,
-	// memo and admission stay in this host, with Attempts for their eval
-	// processes and logs. Nil runs every node in this process.
-	Dispatch Executor
 	// ParentRunID, RetryOf and RetrySource are the run row's lineage.
 	ParentRunID, RetryOf, RetrySource string
-	// Resume reuses the node rows an earlier host of this run left, as a
-	// trigger reclaimed after its runner stopped has: a finished node keeps
-	// its result, and an unfinished one, or one whose holder was lost, runs
-	// again. A row planned under another spec_hash fails the run with
-	// plan_drift. It needs Dispatch, whose claims keep a node from running
-	// twice.
-	Resume bool
-	// ClaimedRowPoll is how often a dispatched node's row is read while
-	// another holder claims it; zero means 5 seconds.
-	ClaimedRowPoll time.Duration
 	// Only, as --sw-only, runs only the plan's nodes whose ID matches the
 	// glob and the nodes they depend on, skipping the rest.
 	Only string
@@ -93,8 +77,7 @@ type Result struct {
 	// failed before_run does: a later attempt would run the body without it.
 	Final      bool
 	expansions []expansion
-	// safety: the memo layer writes the row before its release records the entry, and a dispatched node's
-	// remote host writes its own, so finish must not write it again.
+	// safety: memo and retry reuse already committed the result.
 	recorded bool
 }
 
@@ -188,9 +171,6 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	if cfg.Run.RunID == "" {
 		return RunResult{}, errors.New("nodehost: the run has no id")
 	}
-	if cfg.Resume && cfg.Dispatch == nil {
-		return RunResult{}, errors.New("nodehost: Resume needs Dispatch, whose claims keep a resumed node from running twice")
-	}
 	if cfg.Run.StartedAt.IsZero() {
 		cfg.Run.StartedAt = time.Now().UTC()
 	}
@@ -256,7 +236,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 // run row is terminal.
 func runPlanned(ctx context.Context, cfg *Config, run *Run, res *RunResult) (release func()) {
 	release = func() {}
-	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(cfg), resume: cfg.Resume}
+	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: localChain(cfg)}
 	s.rehydrate, s.rerun = cfg.Rehydrate, map[string]bool{}
 	if cfg.Attempts != nil {
 		s.regenerate = func(ctx context.Context, n *NodeRun, output json.RawMessage) []expansion {
@@ -321,14 +301,7 @@ func runRow(cfg Config, args map[string]string) store.Run {
 	return row
 }
 
-func chain(cfg *Config) Executor {
-	if cfg.Dispatch != nil {
-		return dispatchChain(cfg)
-	}
-	return podChain(cfg, "")
-}
-
-func wrapLayers(cfg *Config, next Executor, side LayerSide) Executor {
+func wrapLayers(cfg *Config, next Executor) Executor {
 	implementations := map[string]Layer{
 		"debug": debugLayer, "skip_if": skipIfLayer, "approval": approvalsLayer,
 		"memo": memoLayer, "admission": admissionLayer, "artifacts": artifactsLayer,
@@ -336,9 +309,6 @@ func wrapLayers(cfg *Config, next Executor, side LayerSide) Executor {
 	}
 	table := LayerTable()
 	for i := len(table) - 1; i >= 0; i-- {
-		if side != "" && table[i].Side != side {
-			continue
-		}
 		wrap := implementations[table[i].Name]
 		if wrap == nil {
 			return func(context.Context, *NodeRun) Result { return failed(errors.New("nodehost: unsupported host layer")) }
@@ -360,12 +330,10 @@ type scheduler struct {
 	addedBy map[string]string
 	// safety: the node whose generator added each generated node, so a node's generator chain reaches the plan.
 	sourceOf map[string]string
-	resume   bool
 	// safety: rerun records the nodes a retry runs again, so a node waiting on its deps is looked up in the
 	// source run once; only the scheduler goroutine reads it.
 	rehydrate  *Rehydration
 	rerun      map[string]bool
-	adopted    []finished
 	regenerate func(ctx context.Context, n *NodeRun, output json.RawMessage) []expansion
 	drifts     []error
 }
@@ -452,8 +420,6 @@ func (s *scheduler) startReady(ctx context.Context, done chan<- finished, runnin
 	return progressed
 }
 
-// safety: one rule for the run host and a dispatched recovery node's host,
-// which reads its parent's reason and error from the row this host recorded.
 func parentFailure(parent, reason, message string) *nodeproto.JobFailure {
 	stage := "action"
 	if reason == store.FailureVerify {
@@ -462,8 +428,6 @@ func parentFailure(parent, reason, message string) *nodeproto.JobFailure {
 	return &nodeproto.JobFailure{Job: parent, Stage: stage, Error: &apierr.Error{Code: apierr.SDKError, Message: message}}
 }
 
-// safety: a continue_on_error upstream's failure does not hold back its
-// dependents, as in the in-process dispatcher.
 func (s *scheduler) upstreamFailed(waits []string, byID map[string]nodeproto.JobSpec) bool {
 	for _, d := range waits {
 		if s.results[d].Outcome.OK() {
@@ -518,15 +482,7 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.JobSpec
 }
 
 func (s *scheduler) recordNodes(ctx, writeCtx context.Context, nodes []nodeproto.JobSpec, from *expansionFrom) error {
-	existing, err := s.resumedRows(writeCtx, nodes)
-	if err != nil {
-		return err
-	}
 	for i, n := range nodes {
-		if row, ok := existing[n.ID]; ok {
-			s.reuseRow(writeCtx, n, row)
-			continue
-		}
 		row := pendingRow(s.run, n)
 		err := from.record(&row, n, len(nodes))
 		if err == nil {
@@ -535,89 +491,14 @@ func (s *scheduler) recordNodes(ctx, writeCtx context.Context, nodes []nodeproto
 		if err != nil {
 			err = fmt.Errorf("create node %s: %w", n.ID, err)
 			s.nodes = append(s.nodes, nodes[:i]...)
-			// safety: only rows this host created are failed; a reused row is its holder's or its run's record.
 			for _, prior := range nodes[:i] {
-				if _, reused := existing[prior.ID]; !reused {
-					s.terminal(ctx, prior.ID, sparkwing.Failed, err.Error())
-				} else {
-					s.started[prior.ID] = true
-				}
+				s.terminal(ctx, prior.ID, sparkwing.Failed, err.Error())
 			}
 			return err
 		}
 	}
 	s.nodes = append(s.nodes, nodes...)
-	// safety: an adopted generator's nodes are added only once it is among the run's nodes, which they need.
-	for len(s.adopted) > 0 {
-		next := s.adopted[0]
-		s.adopted = s.adopted[1:]
-		s.expand(ctx, next.id, next.res)
-	}
 	return nil
-}
-
-// safety: a resumed run reads every row an earlier host left before it
-// writes any, so a node planned under another spec_hash refuses the whole
-// resume with plan_drift and no row, a live holder's included, is touched.
-func (s *scheduler) resumedRows(ctx context.Context, nodes []nodeproto.JobSpec) (map[string]*store.Node, error) {
-	if !s.resume {
-		return nil, nil
-	}
-	rows := map[string]*store.Node{}
-	for _, n := range nodes {
-		row, err := s.run.State.GetNode(ctx, s.run.ID, n.ID)
-		switch {
-		case errors.Is(err, store.ErrNotFound):
-			continue
-		case err != nil:
-			return nil, fmt.Errorf("read node %s: %w", n.ID, err)
-		case row.SpecHash != jobHash(n):
-			return nil, &apierr.Error{Code: apierr.PlanDrift, Message: fmt.Sprintf(
-				"node %s was planned as %s by an earlier host of this run and as %s now; plan code must be deterministic for a run",
-				n.ID, row.SpecHash, jobHash(n))}
-		}
-		rows[n.ID] = row
-	}
-	return rows, nil
-}
-
-// safety: terminal results survive resume; the reaper returns recoverable work to pending.
-func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.JobSpec, row *store.Node) {
-	id := n.ID
-	if row.Status != "done" || row.Outcome == "" {
-		return
-	}
-	res := Result{Outcome: sparkwing.Outcome(row.Outcome), Reason: row.FailureReason, recorded: true}
-	if row.Error != "" {
-		res.Err = errors.New(row.Error)
-	}
-	s.started[id], s.results[id] = true, res
-	if generatesNodes(n, res.Outcome) {
-		batches, err := storedExpansions(ctx, s.run.State, s.run.ID, n)
-		if err != nil {
-			for _, g := range n.Closures.Generate {
-				res.expansions = append(res.expansions, expansion{closure: g, err: err})
-			}
-		} else {
-			res.expansions = s.recordedExpansions(ctx, n, batches, func() (json.RawMessage, error) {
-				return recordedOutput(ctx, s.run.State, s.run.ID, id)
-			})
-		}
-		s.results[id] = res
-		s.adopted = append(s.adopted, finished{id: id, res: res})
-	}
-}
-
-func recordedOutput(ctx context.Context, st storage.StateStoreOld, runID, id string) (json.RawMessage, error) {
-	outputs, ok := baseState(st).(sourceOutputs)
-	if !ok {
-		return nil, fmt.Errorf("read node %s output: the runs store cannot read it", id)
-	}
-	out, err := outputs.GetNodeOutput(ctx, runID, id)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, nil
-	}
-	return out, err
 }
 
 func pendingRow(run *Run, n nodeproto.JobSpec) store.Node {
@@ -653,8 +534,6 @@ func runStatus(err error) string {
 	return "failed"
 }
 
-// safety: recovery and optional nodes never decide the run's status, and a
-// cause other than a plain cancel or deadline decides it, as in the dispatcher.
 func (s *scheduler) verdict(ctx context.Context) (string, error) {
 	cause := context.Cause(ctx)
 	if cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) {
@@ -699,10 +578,7 @@ func (s *scheduler) nodeVerdict() (string, error) {
 	return "success", nil
 }
 
-// safety: the one writer of a node's result, for the scheduler and a pod host. A refused output fails the node in
-// its row too, so the row never stays running, and a result the store never took never reads as a success. Layers
-// outside the attempt, and the store itself, fail with text no attempt masked, so the result is masked after its
-// last change and every text it records is masked before it is bounded.
+// safety: mask errors before bounding them so truncation cannot expose part of a secret.
 func recordResult(ctx context.Context, run *Run, id string, res Result) Result {
 	writeCtx := context.WithoutCancel(ctx)
 	var err error
@@ -735,3 +611,20 @@ type discardSink struct{}
 
 func (discardSink) Text(string, string)       {}
 func (discardSink) Record(nodeproto.FrameLog) {}
+
+func localChain(cfg *Config) Executor {
+	inner := func(context.Context, *NodeRun) Result { return failed(errors.New("nodehost: no attempt executor")) }
+	if cfg.Attempts != nil {
+		inner = cfg.Attempts.executor(cfg)
+	}
+	exec := func(ctx context.Context, n *NodeRun) Result {
+		if err := n.Run.State.StartNode(ctx, n.Run.ID, n.Plan.ID); err != nil {
+			return failed(fmt.Errorf("start node %s: %w", n.Plan.ID, err))
+		}
+		if n.Attempt <= 1 {
+			hostEvent(ctx, n.Run, n.Plan.ID, "node_started", nil)
+		}
+		return inner(ctx, n)
+	}
+	return wrapLayers(cfg, exec)
+}

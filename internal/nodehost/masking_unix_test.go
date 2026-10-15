@@ -384,8 +384,7 @@ func TestTheRunsStoreMasksEveryTextItIsGiven(t *testing.T) {
 	masker := secrets.NewMasker()
 	masker.Register(splitSecret)
 	inner := &textStore{}
-	cfg := Config{State: inner, Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}}
-	st := podRun(&cfg).State
+	st := maskState(inner, masker)
 	ctx, s := t.Context(), "x "+splitSecret
 	_ = st.FinishRun(ctx, "r", "failed", s)
 	_ = st.FinishNode(ctx, "r", "n", "failed", s, nil)
@@ -427,9 +426,7 @@ func TestARunsLoggerMasksItsDiagnostics(t *testing.T) {
 	masker := secrets.NewMasker()
 	masker.Register(splitSecret)
 	var out strings.Builder
-	cfg := Config{State: openStore(t), Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}}
-	cfg.Logger = slog.New(slog.NewTextHandler(&out, nil))
-	logger := podRun(&cfg).Logger.With("key", "k-"+splitSecret)
+	logger := maskLogger(slog.New(slog.NewTextHandler(&out, nil)), masker).With("key", "k-"+splitSecret)
 	logger.Error("generator "+splitSecret, "err", errors.New("boom "+splitSecret), slog.Group("g", "keys", []string{splitSecret}))
 	if got := out.String(); strings.Contains(got, splitSecret) || strings.Count(got, "***") < 4 {
 		t.Fatalf("logged %s", got)

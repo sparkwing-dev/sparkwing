@@ -34,10 +34,7 @@ type Node struct {
 	Secrets  []string
 	Resolver secretsource.Resolver
 	Masker   *secrets.Masker
-	// Claim forwards the routes that reach the controller; nil answers them 502,
-	// except the output routes Local answers.
-	Claim *Claim
-	Local LocalOutputs
+	Local    LocalOutputs
 	// Refs are the other pipelines' outputs the node's plan declares it
 	// reads; Local answers a latest-output read for these alone.
 	Refs []nodeproto.PipelineReference
@@ -103,9 +100,6 @@ func (s *Server) Admit(n Node) (bearer string, revoke func(), err error) {
 	}
 	g.services.Latest = func(ctx context.Context, _ capability.Authorized, pipeline, job string, age time.Duration) (ProcessOutput, error) {
 		return g.latest(ctx, pipeline, job, age)
-	}
-	g.services.OIDC = func(ctx context.Context, _ capability.Authorized, audience string) (ProcessOIDCToken, error) {
-		return g.oidc(ctx, audience)
 	}
 	g.services.StartChild = func(ctx context.Context, _ capability.Authorized, request ChildRequest) (string, error) {
 		return g.startChild(ctx, request)

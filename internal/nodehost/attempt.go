@@ -38,10 +38,7 @@ type Attempts struct {
 	Routes   *Server
 	Resolver secretsource.Resolver
 	Masker   *secrets.Masker
-	// Claim forwards the controller-backed routes; nil answers them 502,
-	// except the output routes Local answers.
-	Claim *Claim
-	Local LocalOutputs
+	Local    LocalOutputs
 	// Children starts the child runs of a run no controller holds; nil
 	// answers the child routes 502 there.
 	Children LocalChildren
@@ -99,7 +96,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	}
 	names := run.Secrets
 	bearer, revoke, err := a.Routes.Admit(Node{
-		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim, Local: a.Local, Refs: n.Plan.References,
+		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Local: a.Local, Refs: n.Plan.References,
 		Children: a.Children, Pause: n.Pause, Hold: n.Hold, Output: n.memoOutput,
 		Job: n.Plan, Sink: sink,
 	})

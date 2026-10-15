@@ -677,3 +677,13 @@ func pointerValue[T any](p *T) (v T) {
 	}
 	return v
 }
+
+func protocolTriggerSource(recorded string) string {
+	switch recorded {
+	case "schedule", "push", "webhook":
+		return recorded
+	case "github":
+		return "webhook"
+	}
+	return "manual"
+}

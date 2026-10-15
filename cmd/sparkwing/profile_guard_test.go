@@ -74,11 +74,8 @@ var profileGuardDirs = map[string]profileGuardRules{
 	".": {handoff: map[string]bool{"dropProfileEnv": true, "renderHookScript": true}},
 	"../../internal/orchestrator": {
 		handoff: map[string]bool{"submissionExecutionEnvironment": true, "refuseProfileHandoff": true},
-		// safety: podSecrets releases secrets through the controller's claim, so only pod execution, and a runner
-		// hosting a trigger it claimed from the controller (HostTriggerRun), may build one.
 		controllerSecrets: map[string]bool{
 			"controllerSecretSource": true, "ExecuteClaimedTrigger": true,
-			"podSecrets": true, "podSecrets.Resolve": true, "hostPodNode": true, "HostTriggerRun": true,
 		},
 	},
 }
