@@ -91,7 +91,9 @@ rejects duplicate, unknown, incorrectly cased or malformed metadata and returns
 no partial award on failure. Source metadata must be present and non-null.
 The shared source package validates and acquires its contents.
 `cluster.BootstrapRuntime` restores this award and passes it to
-`BootstrapHost.Run` for one-time exchange. Fetch-source can read the award without
+`BootstrapHost.Run` for one-time exchange. Its `Run` method parses the built
+container arguments and compares their fence with the private award before
+constructing either source or host services. Fetch-source can read the award without
 exchanging it. The existing Kubernetes JSON decoder supplies strict decoding
 because it checks nested duplicates without another parser implementation.
 Unit kind, attempt, eval-source fence and engine now travel in that file. The

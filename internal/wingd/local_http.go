@@ -35,11 +35,6 @@ func (s LocalHTTP) ServeAPI(ctx context.Context, listener net.Listener) error {
 	}, nil)
 }
 
-// ServeDashboard retains the dashboard handler's browser authentication.
-func (s LocalHTTP) ServeDashboard(ctx context.Context, listener net.Listener) error {
-	return serveLocalHTTP(ctx, listener, s.Dashboard, nil, nil)
-}
-
 type localAPIListener struct{ net.Listener }
 
 func (l localAPIListener) Accept() (net.Conn, error) {

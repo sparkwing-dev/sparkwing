@@ -2,6 +2,7 @@ package acceptance_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -118,16 +119,34 @@ func TestCloudBootstrapGrammarW8Components(t *testing.T) {
 				t.Fatal(err)
 			}
 			pod := resources.Job.Spec.Template.Spec
-			for _, args := range [][]string{pod.InitContainers[1].Args, pod.Containers[0].Args} {
+			bootstrapFile := writeBootstrapW8(t, resources.BootstrapSecret.Data)
+			for _, built := range [][]string{pod.InitContainers[1].Args, pod.Containers[0].Args} {
+				args := append([]string(nil), built...)
+				for i := range args {
+					if args[i] == "--bootstrap-file" {
+						args[i+1] = bootstrapFile
+					}
+				}
 				called := false
-				err := cluster.RunBootstrapCLI(t.Context(), args[0], args[1:], func(_ context.Context, options cluster.BootstrapOptions) error {
+				boundary := errors.New("service boundary")
+				check := func(options cluster.BootstrapOptions) {
 					called = true
-					if options.RunID != award.Binding.RunID || options.JobID != award.Binding.NodeID || options.Generation != award.Binding.Generation || options.ControllerURL != cfg.ControllerURL || options.SourceDir != "/tmp/source" || options.ModuleCache != "/tmp/modules" || options.BootstrapFile != "/etc/sparkwing/bootstrap/bootstrap" {
+					if options.RunID != award.Binding.RunID || options.JobID != award.Binding.NodeID || options.Generation != award.Binding.Generation || options.ControllerURL != cfg.ControllerURL || options.SourceDir != "/tmp/source" || options.ModuleCache != "/tmp/modules" || options.BootstrapFile != bootstrapFile {
 						t.Fatal("bootstrap entrypoint changed the awarded selectors or private paths")
 					}
-					return nil
-				})
-				if err != nil || !called {
+				}
+				runtime := cluster.BootstrapRuntime{
+					Source: func(_ context.Context, options cluster.BootstrapOptions) (launcher.SourceInit, error) {
+						check(options)
+						return launcher.SourceInit{}, boundary
+					},
+					Host: func(_ context.Context, options cluster.BootstrapOptions) (launcher.BootstrapHost, func() error, error) {
+						check(options)
+						return launcher.BootstrapHost{}, nil, boundary
+					},
+				}
+				err := runtime.Run(t.Context(), args[0], args[1:])
+				if !errors.Is(err, boundary) || !called {
 					t.Fatalf("built %s command did not reach its declared entrypoint: %v", args[0], err)
 				}
 			}

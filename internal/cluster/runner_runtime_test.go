@@ -8,6 +8,7 @@ import (
 	"errors"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,6 +111,23 @@ func TestRunnerRequiresSignedPolicyBeforeClaiming(t *testing.T) {
 	}}
 	if err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", "--credentials-dir=" + runnerCredentials(t)}, "v1.2.3"); !errors.Is(err, failure) {
 		t.Fatalf("Run = %v", err)
+	}
+}
+
+func TestRunnerBindsMetricsBeforeClaiming(t *testing.T) {
+	cli := RunnerCLI{Factory: func(context.Context, RunnerOptions) (*runners.ManagedRunner, error) {
+		loop := &runners.Loop{
+			Controller: cliClaim(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				t.Error("claimed before metrics bound")
+				return controllerwire.ClaimResponse{}, errors.New("unexpected claim")
+			}),
+			Host: cliHost(func(context.Context, controllerwire.ClaimedUnit) error { return nil }),
+		}
+		return &runners.ManagedRunner{Loop: loop, Versions: cliVersions{index: cliVersionIndex(t)}, Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner}}, nil
+	}}
+	err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", "--credentials-dir=" + runnerCredentials(t), "--metrics-addr=invalid:address:port"}, "v1.2.3")
+	if err == nil || !strings.Contains(err.Error(), "metrics") {
+		t.Fatalf("metrics bind error: %v", err)
 	}
 }
 

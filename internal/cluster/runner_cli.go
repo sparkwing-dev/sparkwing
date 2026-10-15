@@ -100,7 +100,7 @@ func (cli RunnerCLI) Run(ctx context.Context, command string, args []string, ver
 		return errors.New("runner runtime returned no unified loop")
 	}
 	runner.Loop.Config = options.Loop
-	return runner.Run(ctx)
+	return runRunner(ctx, runner, options.MetricsAddress)
 }
 
 func (cli RunnerCLI) config(command string, fs *flag.FlagSet) (userconfig.RunnerConfig, error) {

@@ -351,3 +351,9 @@ func TestLocalLifecycleJoinsFailedStartup(t *testing.T) {
 		}
 	})
 }
+
+func (d *Daemon) idleElapsed() time.Duration {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.idleElapsedLocked()
+}

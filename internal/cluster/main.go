@@ -17,10 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-func Main() {
-	MainWithVersion("")
-}
-
 // Runtime supplies the shared service bindings used by every runner command.
 type Runtime struct {
 	Runner    RunnerCLI

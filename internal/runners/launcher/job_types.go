@@ -76,5 +76,4 @@ type CloudJobResources struct {
 	Reservation     CloudNodeReservation
 	Network         CloudNetworkEvidence
 	JobDeadline     time.Time
-	ClaimDeadline   time.Time
 }

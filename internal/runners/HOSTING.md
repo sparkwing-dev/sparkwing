@@ -8,6 +8,12 @@ binder's `StoreRunnerConfig`.
 An HTTP placement supplies `Hosting` with its award-specific controller factory,
 source preparation and shared host adapters.
 
+`RunnerCLI` serves the existing metrics address alongside its bound factory's
+managed loop. Binding fails before any claim. Every claim records claimed,
+empty or error without changing its returned award or error. Metrics failure
+cancels and joins the loop. Runner exit stops and joins the listener, including
+the HTTP shutdown worker. An empty address starts no listener.
+
 `StoreRunnerConfig` supplies the claimant bearer provider, loop settings and
 native service binder. The queue authenticates each claim through C2 and checks
 every requested kind before calling the shared controller. Named trigger claims
@@ -52,3 +58,11 @@ The direct-award case retains the runner-label mutation regression.
 both owner and job construction. `FuzzNativeStoreAwardW8` rejects changed fences,
 seals, settings and bearers before service construction. These checks do not
 establish native placement, SDK-process or deployed Cloud behavior.
+
+<!-- design:begin -->
+
+The node-duration histogram still needs a committed-outcome observation from
+the host integration. A host method's returned error does not identify the
+terminal job verdict, so claim metrics do not manufacture that observation.
+
+<!-- design:end -->
