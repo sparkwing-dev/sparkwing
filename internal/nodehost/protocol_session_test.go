@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
@@ -434,6 +435,10 @@ func TestProtocolSessionChild(t *testing.T) {
 			continue
 		}
 		switch mode {
+		case "log_policy":
+			send(nodeproto.FrameLog{Level: "debug", Message: "debug detail"})
+			send(nodeproto.FrameLog{Level: "info", Message: "normal detail"})
+			reply(request, map[string]bool{})
 		case "startup_stable", "startup_change":
 			switch request.Op {
 			case nodeproto.OpPlan:
@@ -786,5 +791,75 @@ func TestOwnerEvaluationNativeProcess(t *testing.T) {
 	}
 	if len(plan.Jobs) != 3 || !revoked || !cleaned {
 		t.Fatalf("plan = %+v, revoked = %v, cleaned = %v", plan, revoked, cleaned)
+	}
+}
+
+func TestProtocolProcessAdaptersHonorLogPolicy(t *testing.T) {
+	for _, adapter := range []string{"direct", "attempt", "evaluation", "planning"} {
+		for _, debug := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/debug=%t", adapter, debug), func(t *testing.T) {
+				input, state, _, _ := executorFixture(t)
+				var spec runspec.Spec
+				if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
+					t.Fatal(err)
+				}
+				spec.Resolved.Settings.Options.Debug.Value = debug
+				var err error
+				input.Accepted.Spec, err = json.Marshal(spec)
+				if err != nil {
+					t.Fatal(err)
+				}
+				exe, err := os.Executable()
+				if err != nil {
+					t.Fatal(err)
+				}
+				command := []string{exe, "-test.run=^TestProtocolSessionChild$", "--", "log_policy"}
+				input.Entry.Command = command
+				var mu sync.Mutex
+				var levels []string
+				log := func(_ context.Context, record nodeproto.FrameLog) error {
+					mu.Lock()
+					defer mu.Unlock()
+					if strings.HasSuffix(record.Message, " detail") {
+						levels = append(levels, record.Level)
+					}
+					return nil
+				}
+				cfg := ProtocolSessionConfig{Command: command, Environment: []string{"GORACE=atexit_sleep_ms=0"}, Environments: sdkTestEnvironment(state), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Log: log, Debug: !debug, Revoke: func() error { return nil }}
+				var process ExecutorProcess
+				switch adapter {
+				case "direct":
+					cfg.Debug = debug
+					process, err = StartProtocolSession(t.Context(), cfg)
+				case "attempt":
+					process, err = cfg.Start(t.Context(), input, ExecutorActivity{})
+				case "evaluation":
+					process, err = cfg.StartEvaluation(t.Context(), EvaluationInput{Entry: input.Entry, Accepted: input.Accepted, NodeID: input.NodeID, Generation: input.Generation, SpecHash: input.SpecHash, GrantedRunner: input.GrantedRunner})
+				case "planning":
+					process, err = cfg.StartPlanning(t.Context(), PlanningProcessInput{Entry: input.Entry, Run: nodeproto.RunContext{RunID: "run", Pipeline: "ci"}, Debug: debug}, log)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = process.Close() })
+				session := process.(*ProtocolSession)
+				protocolTestHello(t, session)
+				if _, err := session.Request(t.Context(), nodeproto.Request{Op: nodeproto.OpDescribe}); err != nil {
+					t.Fatal(err)
+				}
+				if err := session.Close(); err != nil {
+					t.Fatal(err)
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				want := []string{"info"}
+				if debug {
+					want = []string{"debug", "info"}
+				}
+				if !slices.Equal(levels, want) {
+					t.Fatalf("levels=%v want=%v", levels, want)
+				}
+			})
+		}
 	}
 }

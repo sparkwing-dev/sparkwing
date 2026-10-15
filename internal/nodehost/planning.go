@@ -43,6 +43,9 @@ func PlanInitial(ctx context.Context, input PlanningInput, functions PlanningFun
 	if err := initialPlanningContext(input.Validation); err != nil {
 		return PlannedInitial{}, err
 	}
+	if input.Cache == nil && !input.Disabled {
+		return PlannedInitial{}, errors.New("initial planning requires plan cache assembly or explicit disablement")
+	}
 	functions = functions.defaults()
 	key, eligible, err := PlanCacheIdentity(input.Inputs)
 	if err != nil {
@@ -51,7 +54,7 @@ func PlanInitial(ctx context.Context, input PlanningInput, functions PlanningFun
 	}
 	result := PlannedInitial{MissReason: eligible.Reason}
 	switch {
-	case input.Cache == nil:
+	case input.Disabled:
 		result.MissReason = "plan cache disabled by host policy"
 	case eligible.Eligible:
 		result = lookupInitialPlan(ctx, input, key, functions)
@@ -120,7 +123,7 @@ func planFresh(ctx context.Context, input PlanningInput, key PlanCacheKey, eligi
 	if err != nil {
 		return PlannedInitial{}, err
 	}
-	if input.Cache != nil && eligible {
+	if input.Cache != nil && !input.Disabled && eligible {
 		entry := PlanCacheEntry{Key: key, Inputs: input.Inputs, Plan: canonical, PlanHash: hash}
 		if err := input.Cache.Put(ctx, entry); err != nil && context.Cause(ctx) == nil {
 			functions.Warn("plan cache write failed; using the validated plan")

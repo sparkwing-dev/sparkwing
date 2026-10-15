@@ -1,6 +1,7 @@
 package nodehost
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -293,13 +295,32 @@ func TestOwnerEvaluationReconstructsNestedGeneratorSource(t *testing.T) {
 	rootHash, _ := executorHash(root)
 	st.nodes = map[string]store.NodeRow{"root": {Ref: store.NodeRef{RunID: "run", NodeID: "root"}, Status: store.StatusDone, Outcome: store.NodeSuccess, Spec: rootBody, SpecHash: string(rootHash)}}
 	deps.Store = recordedReplayStore{st}
-	readOutput := deps.ReadOutput
-	deps.ReadOutput = func(ctx context.Context, ref store.NodeRef, generation int64) (json.RawMessage, error) {
-		if ref == st.nodes["root"].Ref && generation == 0 {
-			return json.RawMessage(`{"root":true}`), nil
+	rootKey := blob.MaterializedRecordKey("a", "run", "root", 0, "gh:1", blob.RefScope{}, "ci", blob.KindOutput)
+	sourceKey := blob.MaterializedRecordKey("a", "run", in.NodeID, 0, "gh:1", blob.RefScope{}, "ci", blob.KindOutput)
+	row := st.nodes["root"]
+	row.OutputRecord = &rootKey
+	st.nodes["root"] = row
+	st.row.OutputRecord = &sourceKey
+	authority := blob.Authority{CapabilityRef: "owner"}
+	backend := &scriptedStorage{}
+	backend.onLookupRecord = func(_ context.Context, request blob.RecordLookup) (blob.RecordLookupResult, error) {
+		if request.Authority != authority {
+			t.Fatal("storage authority changed")
 		}
-		return readOutput(ctx, ref, generation)
+		if request.Key != rootKey && request.Key != sourceKey {
+			t.Fatalf("unexpected selector: %+v", request.Key)
+		}
+		return blob.RecordLookupResult{Found: true, Record: blob.Record{Key: request.Key, Digest: blob.Digest(request.Key.Scope.Job)}}, nil
 	}
+	backend.onGet = func(_ context.Context, request blob.GetRequest) (blob.VerifiedReader, error) {
+		value := `{"count":2}`
+		if request.Digest == blob.Digest("root") {
+			value = `{"root":true}`
+		}
+		return &outputReader{Reader: bytes.NewReader([]byte(value))}, nil
+	}
+	in.Storage = StorageBinding{Bytes: backend, Records: backend, Authority: authority}
+	deps.ReadOutput = nil
 	replayed := 0
 	p.answer = func(_ context.Context, r nodeproto.Request) (any, error) {
 		if r.Op != nodeproto.OpEval {

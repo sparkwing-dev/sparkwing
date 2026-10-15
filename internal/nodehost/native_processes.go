@@ -42,7 +42,7 @@ func (p *NativeProcesses) Delegate(ctx context.Context, parent capability.Creden
 
 // Start launches an attempt with its live delegated services.
 func (p *NativeProcesses) Start(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
-	config, err := p.configuration(ctx, input.RouteBinding, input.processRevoke, activity)
+	config, err := p.configuration(ctx, input.RouteBinding, input.processRevoke, activity, input.Accepted)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +51,7 @@ func (p *NativeProcesses) Start(ctx context.Context, input NodeInput, activity E
 
 // StartEvaluation launches an owner closure with its live delegated services.
 func (p *NativeProcesses) StartEvaluation(ctx context.Context, input EvaluationInput) (ExecutorProcess, error) {
-	config, err := p.configuration(ctx, input.RouteBinding, input.processRevoke, ExecutorActivity{})
+	config, err := p.configuration(ctx, input.RouteBinding, input.processRevoke, ExecutorActivity{}, input.Accepted)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (p *NativeProcesses) StartPlanning(ctx context.Context, input PlanningProce
 
 func (p *NativeProcesses) computing(runID string) bool { return p.compute.active(runID) }
 
-func (p *NativeProcesses) configuration(ctx context.Context, binding nodeproto.ProcessBinding, revoke func() error, activity ExecutorActivity) (ProtocolSessionConfig, error) {
+func (p *NativeProcesses) configuration(ctx context.Context, binding nodeproto.ProcessBinding, revoke func() error, activity ExecutorActivity, accepted AcceptedRun) (ProtocolSessionConfig, error) {
 	config := p.Session
 	config.Revoke, config.RunCleanups = revoke, nil
 	if p.Authorities == nil || p.Log == nil || revoke == nil || binding.Routes.URL != strings.TrimRight(p.URL, "/") {
@@ -81,7 +81,11 @@ func (p *NativeProcesses) configuration(ctx context.Context, binding nodeproto.P
 		return config, config.failedStartup(errors.New("native services differ from the shared host binding"))
 	}
 	service.activity.set(activity)
-	logs := &planningLogs{known: true, masker: service.Masks.masker, sink: func(ctx context.Context, record nodeproto.FrameLog) error {
+	debug, err := acceptedDebug(accepted)
+	if err != nil {
+		return config, config.failedStartup(err)
+	}
+	logs := &planningLogs{debug: debug, known: true, masker: service.Masks.masker, sink: func(ctx context.Context, record nodeproto.FrameLog) error {
 		return p.Log(ctx, service.RunID, service.Job.ID, record)
 	}}
 	config.Log = logs.write

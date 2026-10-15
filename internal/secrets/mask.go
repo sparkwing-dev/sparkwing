@@ -45,6 +45,19 @@ func (m *Masker) Register(value string) {
 	slices.SortStableFunc(m.values, func(a, b string) int { return len(b) - len(a) })
 }
 
+// Merge copies already expanded patterns without deriving additional encodings.
+func (m *Masker) Merge(other *Masker) {
+	values := other.Values()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, value := range values {
+		if !slices.Contains(m.values, value) {
+			m.values = append(m.values, value)
+		}
+	}
+	slices.SortStableFunc(m.values, func(a, b string) int { return len(b) - len(a) })
+}
+
 // safety: shorter encodings of short secrets would mask ordinary log text.
 const minEncodedFormLen = 4
 

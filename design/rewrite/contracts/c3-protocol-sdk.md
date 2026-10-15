@@ -501,7 +501,7 @@ reruns validation, settings resolution, operator ceilings, authority and secret
 preflight and commits seal point two. A hit bypasses SDK planning compute, so
 it has no planning charge. Cache writes happen only for validated initial
 plans; generator expansions remain under their own transactional barrier.
-`PlanningInput` supplies this dependency to every placement's planning path.
+`PlanningInput` supplies this dependency to every placement's planning path. Native host assembly uses a private scoped file cache under its source workspace, or the user cache directory when no workspace is configured. Checkout planning constructs the cache before describe; the native environment projection and acquired checkout/entry bytes supply fingerprints before lookup. Source fingerprints include Git metadata. Nonregular source dependencies, external Git metadata/alternates, and unresolved executables bypass reuse. Inputs that mutate externally after capture are unsupported varying inputs; capture does not lock the filesystem. `PlanningInput.Disabled` is the explicit opt-out; absent cache wiring is an error, while cache storage failures warn and plan normally.
 
 `PlanInitial` connects cache lookup, validation, invalidation and fresh planning.
 Its `PlanningFunctions` use the shared validator and canonical hasher by default.

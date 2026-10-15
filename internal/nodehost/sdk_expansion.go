@@ -12,7 +12,7 @@ import (
 func (h *sdkCode) generate(ctx context.Context, session *executorSession, code NodeInput, job nodeproto.JobSpec, output json.RawMessage) (json.RawMessage, error) {
 	jobs := []json.RawMessage{}
 	for _, id := range job.Closures.Generate {
-		value, err := h.eval(ctx, session, code, id, output, nil)
+		value, err := h.eval(ctx, session, code, id, "generate", output, nil)
 		if err != nil {
 			return nil, err
 		}

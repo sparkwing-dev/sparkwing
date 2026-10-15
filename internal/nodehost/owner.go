@@ -116,6 +116,17 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 	if h.Lease.Interval <= 0 || h.Lease.Lease <= h.Lease.Interval {
 		return completion, errors.New("run host requires a positive renewal interval below its lease")
 	}
+	if input.Accepted != nil {
+		if err := h.Masks.initializeSeal(*input.Accepted); err != nil {
+			return completion, err
+		}
+	}
+	var request runspec.Request
+	if h.Masks != nil && json.Unmarshal(input.SealedRequest, &request) == nil {
+		if err := h.Masks.initialize(runspec.SealedRequest{Request: request}, nil, nil, nil); err != nil {
+			return completion, err
+		}
+	}
 	var preparing atomic.Bool
 	preparing.Store(true)
 	ctx, stop := h.keepOwner(parent, input.Owner, func() bool {
@@ -132,12 +143,8 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 	if err := ownerRequestMatches(input, snapshot.Run); err != nil {
 		return completion, err
 	}
-	if h.Masks != nil && snapshot.Run.Request.Request.SecretArgs.Set {
-		for _, name := range snapshot.Run.Request.Request.SecretArgs.Value {
-			if err := h.Masks.Register(snapshot.Run.Request.Request.RequestedArgs[name]); err != nil {
-				return completion, err
-			}
-		}
+	if err := h.Masks.initialize(snapshot.Run.Request, nil, nil, nil); err != nil {
+		return completion, err
 	}
 	if snapshot.Run.Spec != nil {
 		persisted, err := ownerAccepted(snapshot.Run)
@@ -151,18 +158,8 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		if _, err := selectionSkips(persisted.Plan, snapshot.Run.Spec.Resolved.Settings.Options); err != nil {
 			return completion, err
 		}
-		if h.Masks != nil {
-			namespace := persisted.Plan
-			for _, row := range snapshot.Nodes {
-				var job nodeproto.JobSpec
-				if len(row.Spec) == 0 || json.Unmarshal(row.Spec, &job) != nil || job.ID != row.Ref.NodeID {
-					return completion, errors.New("persisted mask namespace has an invalid job")
-				}
-				namespace.Jobs = append(namespace.Jobs, job)
-			}
-			if err := h.Masks.Accept(namespace, func() error { return nil }); err != nil {
-				return completion, err
-			}
+		if err := h.Masks.initialize(snapshot.Run.Spec.Request, &snapshot.Run.Spec.Resolved, &persisted.Plan, snapshot.Nodes); err != nil {
+			return completion, err
 		}
 	} else if input.Accepted != nil {
 		return completion, errors.New("resume has no persisted acceptance")
@@ -297,7 +294,11 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	guards := prepared.Resolved.Guards
 	if !guards.Passed && (len(guards.When)+len(guards.Unless) != 0 || guards.Reason != "") {
 		prepared.Planning.Cache = nil
+		prepared.Planning.Disabled = true
 		prepared.Functions.Plan = func(context.Context) (json.RawMessage, error) { return json.RawMessage(`{"jobs":[]}`), nil }
+	}
+	if err := h.Masks.initialize(row.Request, &prepared.Resolved, nil, nil); err != nil {
+		return AcceptedRun{}, err
 	}
 	if h.Masks != nil {
 		prepared.Planning.Validation.Secrets = planningSecrets{prior: prepared.Planning.Validation.Secrets, masker: h.Masks.masker}

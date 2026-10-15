@@ -36,6 +36,7 @@ type ClaimedNodeHost struct {
 	Acquire   func(context.Context, source.Spec, source.Options) (*source.Entry, error)
 	Executor  NodeHost
 	Mask      func(string) string
+	Masks     *MaskRegistry
 }
 
 // Execute accepts only store-derived inputs, without a pre-acquired entry.
@@ -51,11 +52,17 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 	if h.Lease.Interval <= 0 || h.Lease.Lease <= h.Lease.Interval {
 		return errors.New("claimed node host requires a positive renewal interval below its lease")
 	}
+	if err := h.Masks.initializeSeal(input.Accepted); err != nil {
+		return err
+	}
 	if err := context.Cause(parent); err != nil {
 		return err
 	}
 	spec, err := h.sourceSpec(parent, input)
 	if err != nil {
+		return err
+	}
+	if err := h.Masks.initializeAccepted(parent, h.Store, input.Accepted); err != nil {
 		return err
 	}
 	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, Holder: input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, Generation: input.Generation}
