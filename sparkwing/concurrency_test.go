@@ -2,7 +2,12 @@ package sparkwing
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func TestJobConcurrencyReachesPlanDocument(t *testing.T) {
@@ -12,6 +17,26 @@ func TestJobConcurrencyReachesPlanDocument(t *testing.T) {
 	memberships := planDocument(plan).Jobs[0].Concurrency
 	if len(memberships) != 1 || memberships[0].Group != "db" || *memberships[0].Cost != 4 || *memberships[0].Capacity != 8 {
 		t.Fatalf("job concurrency = %+v", memberships)
+	}
+}
+
+func TestGoConcurrencyCapacityMustBeExplicit(t *testing.T) {
+	for _, capacity := range []int{0, 1} {
+		plan := NewPlan()
+		Job(plan, "deploy", func(context.Context) error { return nil }).Concurrency(NewConcurrencyGroup("deploys", ConcurrencyLimit{Capacity: capacity}))
+		raw, err := json.Marshal(planDocument(plan))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: secretSet(nil)})
+		if capacity == 0 {
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || failure.Code != apierr.PlanInvalid {
+				t.Fatalf("zero capacity = %v, want plan_invalid", err)
+			}
+		} else if err != nil {
+			t.Fatalf("capacity %d: %v", capacity, err)
+		}
 	}
 }
 
