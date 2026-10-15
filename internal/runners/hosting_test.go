@@ -125,3 +125,39 @@ func TestHostingInterruptedConfirmationCannotBind(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func FuzzHostingRejectsIncompleteNodeAwards(f *testing.F) {
+	for missing := uint8(0); missing < 8; missing++ {
+		f.Add(missing)
+	}
+	f.Fuzz(func(t *testing.T, missing uint8) {
+		unit := hostingAward(capability.UnitNode)
+		missing &= 7
+		if missing&1 != 0 {
+			unit.Accepted = nil
+		}
+		if missing&2 != 0 {
+			unit.Engine = nil
+		}
+		if missing&4 != 0 {
+			unit.Execution = nil
+		}
+		confirmed := false
+		confirmation := errors.New("confirmed complete award")
+		host := Hosting{
+			ControllerURL: "https://controller.example",
+			NewController: hostingClient(func(context.Context) (lease.Beat, error) {
+				confirmed = true
+				return lease.Beat{}, confirmation
+			}),
+			Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (NativeServices, capability.Principal, error) {
+				t.Fatal("award reached native binding")
+				return NativeServices{}, capability.Principal{}, nil
+			},
+		}
+		err := host.Host(t.Context(), unit)
+		if err == nil || confirmed != (missing == 0) || errors.Is(err, confirmation) != (missing == 0) {
+			t.Fatalf("missing=%d confirmed=%v error=%v", missing, confirmed, err)
+		}
+	})
+}

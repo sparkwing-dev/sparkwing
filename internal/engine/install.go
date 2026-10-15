@@ -142,23 +142,11 @@ func (r Resolved) verifyInstalledEngine() error {
 	if version != r.Identity.Version || !validDigest(r.Identity.ManifestDigest) || !validDigest(r.AssetDigest) || !filepath.IsAbs(r.Executable) || r.Target != (releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}) {
 		return integrity(errors.New("SDK installation requires this machine's exact verified Sparkwing engine"))
 	}
-	metadata, err := os.ReadFile(filepath.Join(filepath.Dir(r.Executable), "verification.json"))
+	release, err := readCachedRelease(version, r.Target, r.Executable)
 	if err != nil {
 		return integrity(err)
 	}
-	var bundle ReleaseBundle
-	if err := decodeUniqueJSON(metadata, &bundle); err != nil {
-		return integrity(errors.New("invalid selected engine verification record"))
-	}
-	bundle.Asset, err = os.ReadFile(r.Executable)
-	if err != nil {
-		return integrity(err)
-	}
-	release, err := VerifyRelease(version, r.Target, bundle)
-	if err != nil {
-		return err
-	}
-	if digest(bundle.Manifest) != r.Identity.ManifestDigest || release.Asset().Digest() != r.AssetDigest {
+	if digest(release.bundle.Manifest) != r.Identity.ManifestDigest || release.Asset().Digest() != r.AssetDigest {
 		return integrity(errors.New("installed engine differs from the selected release"))
 	}
 	return nil

@@ -83,7 +83,7 @@ func cloudSource(unit controllerwire.ClaimedUnit) (source.Spec, error) {
 	if unit.Unit == capability.UnitPlan {
 		return source.ForRequest(unit.Request)
 	}
-	if unit.Accepted == nil || unit.Engine == nil || unit.Accepted.Spec.Request.RunID != unit.RunID || unit.Accepted.Spec.Request.Request.Team != unit.Request.Request.Team || *unit.Engine != unit.Accepted.Spec.Resolved.Engine {
+	if unit.Accepted == nil || unit.Engine == nil || unit.Accepted.Spec.Request.RunID != unit.Request.RunID || unit.Accepted.Spec.Request.Hash != unit.Request.Hash || unit.Accepted.Spec.Request.Request.Team != unit.Request.Request.Team || *unit.Engine != unit.Accepted.Spec.Resolved.Engine {
 		return source.Spec{}, errors.New("Cloud execution award does not match its accepted engine and run")
 	}
 	return source.ForExecution(unit.Accepted.Spec)
@@ -91,7 +91,7 @@ func cloudSource(unit controllerwire.ClaimedUnit) (source.Spec, error) {
 
 func cloudBinding(unit controllerwire.ClaimedUnit, delivery capability.DeliveryPurpose) (CloudJobBinding, error) {
 	fence := unit.Binding
-	if unit.Delivery != delivery || unit.UnitID == "" || unit.RunID == "" || unit.Request.RunID != unit.RunID || fence.RunID != unit.RunID || unit.Request.Request.Team == "" || fence.Generation <= 0 || fence.Attempt < 0 || unit.ParentCapabilityExpiry == nil || unit.ParentCapabilityExpiry.IsZero() {
+	if unit.Delivery != delivery || unit.UnitID == "" || unit.RunID == "" || unit.Request.RunID == "" || fence.RunID != unit.RunID || unit.Request.Request.Team == "" || fence.Generation <= 0 || fence.Attempt < 0 || unit.ParentCapabilityExpiry == nil || unit.ParentCapabilityExpiry.IsZero() {
 		return CloudJobBinding{}, errors.New("controller returned an invalid Cloud award binding")
 	}
 	binding := CloudJobBinding{UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID, Holder: fence.Holder, Generation: fence.Generation, Attempt: fence.Attempt, OwnerDeadline: deadlineValue(unit.OwnerDeadline), AttemptDeadline: deadlineValue(unit.AttemptDeadline), ParentCapabilityExpiry: *unit.ParentCapabilityExpiry}

@@ -81,6 +81,10 @@ func FuzzControllerSyncSeparatesClaimGenerations(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, kind uint8, generation, step uint16, reverse bool) {
 		unit := wireAward([]capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}[kind%3])
+		unit.Request.RunID = "original-run"
+		if unit.Accepted != nil {
+			unit.Accepted.Spec.Request = unit.Request
+		}
 		unit.Capability = ""
 		if unit.Unit == capability.UnitEval {
 			unit.Binding.Expansion.Generation = int64(generation) + int64(step) + 2

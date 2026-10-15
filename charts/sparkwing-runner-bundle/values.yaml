@@ -49,6 +49,8 @@ launcher:
 #    triggers + nodes, and execute pipeline DAGs.
 # -----------------------------------------------------------------------
 runner:
+  repos: []
+
   # Pool size. RollingUpdate strategy means a `helm upgrade` doesn't
   # drop all pods at once; one in-flight claim's worth of work may
   # need to retry but the pool stays available.

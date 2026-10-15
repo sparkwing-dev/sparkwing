@@ -18,6 +18,13 @@ source job and generation, while work awards have no expansion source. The
 builder and private award reader reject other shapes before source acquisition
 or node reservation. `FuzzCloudAwardUnitBindingW8` checks this boundary.
 
+Retry awards retain the original request and accepted seals. Their request run
+ID can differ from the execution run ID. Claim and bootstrap checks compare
+accepted source seals with the original request, while the capability binding
+must name the execution run. `FuzzControllerRetryAwardPreservesSealsAndFence`
+checks both boundaries through claim and exchange. The sync-generation property
+uses retained request seals when reconciling current and stale Jobs.
+
 Requested CPU and memory above the operator ceilings fail with both values in
 the error. The builder never clamps an award. CPU uses Kubernetes decimal
 quantities and rounds up to a millicore. If that quantity would exceed the

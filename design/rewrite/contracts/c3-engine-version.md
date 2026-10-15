@@ -191,7 +191,7 @@ warning on each surface.
 
 `sparkwing upgrade` changes the current repository's SDK pin and native lockfiles.
 An explicit `--version` selects a permitted release, otherwise the signed latest
-release wins. `PrepareUpgrade` computes concrete edits in a private staging
+release wins. `Upgrade` computes concrete edits in a private staging
 checkout. `UpgradeVerifier` resolves dependencies, compiles Go or type-checks
 TypeScript, then runs describe/plan with the exact verified engine. Job bodies
 never run. Only verified changes apply, with each original digest rechecked to
@@ -291,7 +291,6 @@ release resolver and need an explicit development workflow during implementation
 | [`PinEdit`](../../../internal/engine/upgrade.go) | preserves the source digest so an upgrade cannot overwrite concurrent user edits. |
 | [`UpgradePlan`](../../../internal/engine/upgrade.go) | contains concrete pin edits and the matching verified engine selection. |
 | [`UpgradeVerifier`](../../../internal/engine/upgrade.go) | checks dependency resolution, Go compilation or TypeScript type checking, then describe/plan with the exact selected engine. |
-| [`PrepareUpgrade`](../../../internal/engine/upgrade.go) | computes edits with native Go/npm pin and lockfile semantics in a private staging checkout. |
 | [`UpgradeResult`](../../../internal/engine/upgrade.go) | reports verification separately from a dry-run preview. |
 | [`Upgrade`](../../../internal/engine/upgrade.go) | verifies the staged pin changes before applying them, rechecking BeforeDigest on each input. |
 | [`SoftwareUpdate`](../../../internal/engine/upgrade.go) | keeps a verified runner replacement separate from an SDK-matched pipeline engine. |

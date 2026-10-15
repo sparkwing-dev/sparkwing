@@ -156,8 +156,8 @@ func validateHostedAward(unit controllerwire.ClaimedUnit) error {
 		if unit.Purpose != capability.PurposeWork || binding.Kind != capability.BindingNode || unit.JobID == "" || binding.NodeID != unit.JobID || binding.Attempt < 0 {
 			return errors.New("runner award has an invalid job or attempt binding")
 		}
-		if unit.Engine == nil || unit.Accepted == nil || unit.Request.RunID == "" || unit.Request.Request.Team == "" || unit.Accepted.Spec.Request.RunID != unit.Request.RunID || unit.Accepted.Spec.Request.Request.Team != unit.Request.Request.Team || unit.Accepted.Spec.Resolved.Engine != *unit.Engine {
-			return errors.New("runner award is missing its matching accepted engine and run")
+		if unit.Engine == nil || unit.Accepted == nil || unit.Execution == nil || unit.Request.RunID == "" || unit.Request.Request.Team == "" || unit.Accepted.Spec.Request.RunID != unit.Request.RunID || unit.Accepted.Spec.Request.Request.Team != unit.Request.Request.Team || unit.Accepted.Spec.Resolved.Engine != *unit.Engine {
+			return errors.New("runner award is missing its matching accepted engine, execution settings and run")
 		}
 		if unit.Runner.Name == "" || unit.Runner.Type == "" {
 			return errors.New("runner award is missing its granted runner identity")

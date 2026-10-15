@@ -30,13 +30,8 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	body, err := io.ReadAll(input)
-	if err != nil {
-		return err
-	}
 	var request engine.SDKInstallRequest
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
+	decoder := json.NewDecoder(input)
 	if err := decoder.Decode(&request); err != nil {
 		return errors.New("invalid SDK install request")
 	}

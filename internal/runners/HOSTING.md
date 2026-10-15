@@ -12,6 +12,9 @@ the authenticated transport. Decoding the opaque bearer does not establish autho
 `Hosting` confirms renewal before binding and captures the wire award before callbacks.
 Both placements share award capture, deadlines, partial-service cleanup,
 persisted-input checks and `nodehost.NewNativeHost`.
+Node awards require their accepted plan, engine and execution settings before
+confirmation or service binding. `FuzzHostingRejectsIncompleteNodeAwards` checks
+every combination of missing inputs through the remote hosting entrypoint.
 The native owner and claimed hosts own source acquisition and their only lease keeper.
 
 `RuntimeConfig.Repositories` carries the machine owner's parsed `runner.repos`.

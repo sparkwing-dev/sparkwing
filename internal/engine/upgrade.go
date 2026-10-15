@@ -72,16 +72,6 @@ type SoftwareUpdate struct {
 	Notices        []Notice
 }
 
-// PrepareUpgrade previews concrete native pin edits in a private staging checkout.
-func (r *Resolver) PrepareUpgrade(ctx context.Context, request UpgradeRequest) (plan UpgradePlan, result error) {
-	stage, plan, _, err := r.prepareUpgrade(ctx, request)
-	if err != nil {
-		return UpgradePlan{}, err
-	}
-	defer func() { result = errors.Join(result, os.RemoveAll(stage)) }()
-	return plan, nil
-}
-
 // Upgrade verifies staged code before applying digest-fenced manifest and lockfile edits.
 func (r *Resolver) Upgrade(ctx context.Context, request UpgradeRequest, verifier UpgradeVerifier) (result UpgradeResult, err error) {
 	stage, plan, resolved, err := r.prepareUpgrade(ctx, request)
@@ -478,19 +468,7 @@ func (r *Resolver) PrepareRunnerUpdate(ctx context.Context, currentVersion strin
 		return update, err
 	}
 	if ok {
-		metadata, err := os.ReadFile(filepath.Join(filepath.Dir(cached.Executable), "verification.json"))
-		if err != nil {
-			return update, err
-		}
-		var bundle ReleaseBundle
-		if err := json.Unmarshal(metadata, &bundle); err != nil {
-			return update, err
-		}
-		bundle.Asset, err = os.ReadFile(cached.Executable)
-		if err != nil {
-			return update, err
-		}
-		update.Release, err = VerifyRelease(version, target, bundle)
+		update.Release, err = readCachedRelease(version, target, cached.Executable)
 		return update, err
 	}
 	update.Release, err = r.fetchRelease(ctx, version, target)

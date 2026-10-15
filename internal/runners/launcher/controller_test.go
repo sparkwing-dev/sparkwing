@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"reflect"
 	"slices"
@@ -18,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 type launcherWireFake struct {
@@ -112,6 +114,63 @@ func TestControllerClaimPreservesAwardWithoutRetry(t *testing.T) {
 	if award, err := control.Claim(t.Context()); award != nil || !errors.Is(err, failure) || calls != 1 {
 		t.Fatalf("lost one-time delivery was replayed: calls=%d err=%v", calls, err)
 	}
+}
+
+func FuzzControllerRetryAwardPreservesSealsAndFence(f *testing.F) {
+	for kind := uint8(0); kind < 3; kind++ {
+		f.Add(kind, []byte("original-run"), false)
+		f.Add(kind, []byte("original-run"), true)
+	}
+	f.Fuzz(func(t *testing.T, kind uint8, origin []byte, changedFence bool) {
+		unit := wireAward([]capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}[kind%3])
+		unit.Request.RunID = "source-" + hex.EncodeToString(origin)
+		unit.Request.Hash = "request-hash"
+		if unit.Accepted != nil {
+			unit.Accepted.Spec.Request = unit.Request
+		}
+		if changedFence {
+			unit.Binding.RunID = unit.Request.RunID
+		}
+		control, err := NewControllerControl(launcherWireFake{claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+			return controllerwire.ClaimResponse{Claim: &unit}, nil
+		}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{unit.Unit}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		award, err := control.Claim(t.Context())
+		if changedFence {
+			if err == nil || award != nil {
+				t.Fatal("source-run binding authorized a retry execution")
+			}
+			return
+		}
+		if err != nil || award == nil || award.Binding.RunID != unit.RunID || award.Source.RepoKey != string(unit.Request.Request.Git.Repository.Key) || award.Source.SHA != unit.Request.Request.Git.SHA {
+			t.Fatalf("retry lost its execution fence or original source: award=%+v error=%v", award, err)
+		}
+		exchanged := unit
+		exchanged.Delivery, exchanged.Capability, exchanged.LeaseExpiresAt = capability.DeliveryDirect, "exchanged", *unit.ParentCapabilityExpiry
+		hosted := false
+		host := BootstrapHost{ControllerURL: "https://controller.example", NewController: func(client.EngineOptions) (controllerwire.Controller, error) {
+			return bootstrapController{exchange: func(context.Context) (controllerwire.ExchangeResponse, error) {
+				return controllerwire.ExchangeResponse{Claim: exchanged}, nil
+			}}, nil
+		}, Host: bootstrapUnitHost(func(_ context.Context, got controllerwire.ClaimedUnit) error {
+			hosted = true
+			if got.RunID != unit.RunID || got.Request.RunID != unit.Request.RunID || !reflect.DeepEqual(got.Binding, unit.Binding) {
+				t.Fatal("bootstrap lost the original seals or execution fence")
+			}
+			return nil
+		})}
+		if err := host.Run(t.Context(), *award); err != nil || !hosted {
+			t.Fatalf("retry bootstrap hosted=%v error=%v", hosted, err)
+		}
+		if unit.Accepted != nil {
+			unit.Accepted.Spec.Request.Hash += "changed"
+			if _, err := control.Claim(t.Context()); err == nil {
+				t.Fatal("different accepted source seal reached Cloud execution")
+			}
+		}
+	})
 }
 
 func TestControllerSyncUsesPersistedObservationsAndExactFences(t *testing.T) {

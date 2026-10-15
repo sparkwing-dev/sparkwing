@@ -436,6 +436,7 @@ sparkwing-runner-bundle:
   # Sensible defaults for a single-cluster install. Override if you
   # need a beefier runner pool or different label set.
   runner:
+    repos: []
     replicas: 1
     labels:
       - cluster
