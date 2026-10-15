@@ -54,6 +54,9 @@ A job renewal cannot report execution before its start transition commits.
 `Inspect` reads the executable and arguments from the actual registration.
 It uses the runner's shared parser to identify the effective config, including
 repeated flags and values that resemble flags.
+Systemd inspection requires one complete `ExecStart` command. Leading empty
+reset directives remain valid. A malformed nonempty command cannot be hidden
+by a later valid command.
 Plist inspection decodes one dictionary and a string-only `ProgramArguments`
 array. Duplicate commands, incomplete XML and extra documents are refused.
 `FuzzPlistArguments` covers literal argument recovery and those refusals.
@@ -72,6 +75,13 @@ before loading the replacement. A runner self-updater must hand native service
 work to an external owner through its installation hooks. Refresh alone does
 not complete that process handoff, refresh controller services or migrate
 schedule timers.
+
+`NativeInstallationConfig` keeps the registration's configuration and credential
+paths in its callbacks. Drain stops claims and joins renewing hosts. Refresh
+receives the installed runner version and also calls the controller/timer refresh
+boundary with the CLI's own executable and version. Restart uses the same runner
+registration. Replacement preserves symlinks and executable permissions. Windows
+retains the running image as `.old` until the next update.
 
 Component tests use real registration files and fake service managers on both
 platforms. The acceptance component sends the parsed installed argv through

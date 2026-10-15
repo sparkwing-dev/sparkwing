@@ -15,13 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
 
-// NativeInstallationConfig binds updates to the runner's existing registration.
-// Drain stops claims and joins hosts while their leases continue renewing.
-// RefreshManagedUnits receives the installed runner version and refreshes its
-// existing units. It also calls the shared controller/schedule refresh boundary
-// with that CLI's own executable and version, not the runner's identity.
-// Restart starts that same runner registration.
-// The callbacks retain their original configuration and credential locations.
+// NativeInstallationConfig binds replacement and lifecycle hooks to the installed runner.
 type NativeInstallationConfig struct {
 	Executable          string
 	Drain               func(context.Context) error
@@ -29,10 +23,7 @@ type NativeInstallationConfig struct {
 	Restart             func(context.Context) error
 }
 
-// NewNativeInstallation replaces only the installed executable, preserving its
-// path and permissions. A symlink installation keeps its link and updates the
-// resolved executable. Windows retains the running image beside it with .old
-// until the next update, when the previous process no longer holds it open.
+// NewNativeInstallation replaces the resolved executable while preserving its path and permissions.
 func NewNativeInstallation(config NativeInstallationConfig) (RunnerInstallation, error) {
 	if !filepath.IsAbs(config.Executable) || config.Drain == nil || config.RefreshManagedUnits == nil || config.Restart == nil {
 		return nil, errors.New("native runner installation requires an absolute executable path and drain, managed-unit refresh and restart hooks")

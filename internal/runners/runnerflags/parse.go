@@ -1,5 +1,4 @@
-// Package runnerflags parses the shared runner grammar for entrypoints and
-// managed-service inspection.
+// Package runnerflags parses the shared runner grammar for commands and service inspection.
 package runnerflags
 
 import (
@@ -12,8 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
 
-// Parse applies the declared command's flags without reading configuration or
-// credentials. Diagnostics receives usage output, including explicit help.
+// Parse reads declared flags without configuration or credentials and writes usage to diagnostics.
 func Parse(command string, args []string, diagnostics io.Writer) (*flag.FlagSet, error) {
 	var spec *clisurface.Command
 	for _, candidate := range clisurface.Registry() {

@@ -13,22 +13,17 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
-// ClaimController uses the same queue for every runner configuration. The server
-// derives identity, repository authorization and placement from its credential.
-// Claim must return on context cancellation; draining joins the pending request.
+// ClaimController claims through the shared queue and must honor context cancellation.
 type ClaimController interface {
 	Claim(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
 }
 
-// UnitHost dispatches a trigger to RunHost or a node to NodeHost. It owns the
-// shared lease keeper and joins it before returning, including failed startup.
-// The award and its capability stay in memory and never enter a child environment.
+// UnitHost dispatches awards to shared hosts and joins their lease keepers before returning.
 type UnitHost interface {
 	Host(context.Context, controllerwire.ClaimedUnit) error
 }
 
-// LoopConfig selects work without creating another placement implementation.
-// RunID confines a here runner; the controller still enforces its awarded scope.
+// LoopConfig selects claim kinds, capacity and lifecycle boundaries.
 type LoopConfig struct {
 	Version       string
 	Labels        []string
@@ -41,11 +36,7 @@ type LoopConfig struct {
 	ClaimUntil    time.Time
 }
 
-// Loop claims trigger and node units through one controller queue. Drain stops
-// new claims while hosts keep their leases; cancellation stops and joins hosts.
-// A pending claim cannot delay host completion, idle exit or policy refresh.
-// Interrupted requests join before another claim starts; a committed award still drains.
-// Each Loop runs once. A new configuration or replacement process uses a new Loop.
+// Loop claims triggers and jobs until stopped and joins held work before returning.
 type Loop struct {
 	Config          LoopConfig
 	Controller      ClaimController
@@ -122,8 +113,7 @@ type unitResult struct {
 	err error
 }
 
-// Run checks the signed runner policy before each award request, independently
-// of the pipeline's SDK pin. Policy denial drains existing work before returning.
+// Run checks signed runner policy before claims and drains held work on denial.
 func (l *Loop) Run(ctx context.Context) error {
 	policyErr, runErr := l.run(ctx)
 	return errors.Join(policyErr, runErr)

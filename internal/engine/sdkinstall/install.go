@@ -23,9 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-// Run serves __sdk-install in the selected engine. Version is its build stamp.
-// Input contains SDKInstallRequest without Environment. Native tools receive the
-// filtered inherited environment, and only the resulting SDKCommand reaches output.
+// Run serves __sdk-install with the selected engine's build stamp and filtered environment.
 func Run(ctx context.Context, version string, input io.Reader, output, diagnostics io.Writer) error {
 	if err := ctx.Err(); err != nil {
 		return err

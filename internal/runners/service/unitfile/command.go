@@ -32,6 +32,9 @@ func Arguments(goos, body string) []string {
 				return nil
 			}
 			args = SystemdWords(strings.TrimPrefix(value, ":"))
+			if len(args) == 0 && strings.TrimSpace(value) != "" {
+				return nil
+			}
 		}
 	}
 	return args

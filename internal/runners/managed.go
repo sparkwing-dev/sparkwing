@@ -19,9 +19,7 @@ type SoftwarePolicy interface {
 	PrepareRunnerUpdate(context.Context, string, releaseasset.Target) (engine.SoftwareUpdate, error)
 }
 
-// ManagedRunner checks policy at startup and before new claims. Its resolver
-// owns the refresh cache. A new release drains held work before replacement;
-// the hosts keep renewing until they finish, including under a revoked version.
+// ManagedRunner checks signed policy before claims and drains hosts before verified replacement.
 type ManagedRunner struct {
 	Loop         *Loop
 	Versions     SoftwarePolicy
@@ -32,8 +30,7 @@ type ManagedRunner struct {
 
 var errRunnerUpdate = errors.New("runner software update required")
 
-// Run returns after the existing registration has restarted the verified runner,
-// or after the loop stops. It never resumes claims under the replaced version.
+// Run returns after the loop stops or the installed runner restarts with its verified replacement.
 func (r ManagedRunner) Run(ctx context.Context) error {
 	if r.Loop == nil || r.Versions == nil || r.Target.Binary != releaseasset.SparkwingRunner {
 		return errors.New("managed runner requires a loop, signed version resolver and runner target")
