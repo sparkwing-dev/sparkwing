@@ -23,7 +23,7 @@ import (
 
 func checkStorageFilesystemManifests(t *testing.T) {
 	objects, dir := storageFilesystem(t)
-	checkStorageManifests(t, objects, blob.TransferClient{Transport: storageObjectHTTP{objects}}, func(key string, body []byte) {
+	checkStorageManifests(t, objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)}, func(key string, body []byte) {
 		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(key)), body, 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -39,7 +39,7 @@ func checkStorageS3Manifests(t *testing.T) {
 
 func checkStorageFilesystemManifestRecords(t *testing.T) {
 	objects, _ := storageFilesystem(t)
-	if err := acceptance.CheckBlobManifestRecords(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: storageObjectHTTP{objects}}); err != nil {
+	if err := acceptance.CheckBlobManifestRecords(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)}); err != nil {
 		t.Fatal(err)
 	}
 }

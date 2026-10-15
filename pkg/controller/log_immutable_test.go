@@ -2,52 +2,62 @@ package controller
 
 import (
 	"bytes"
-	"crypto/md5" // #nosec G501 -- existing signed log transport uses Content-MD5.
-	"encoding/base64"
 	"io"
-	"log/slog"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"testing"
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
 func TestSignedLogKeyCannotBeReplaced(t *testing.T) {
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{7}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := objects.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	s := New(nil, nil).WithDataObjects(objects)
+	_, router := s.routers(s.handleFinishRun)
+	index := 0
 	property := func(first, second [32]byte) bool {
+		index++
 		second[0] = first[0] ^ 1
-		st := new(store.Store)
-		st.SetOutputDir(t.TempDir())
-		s := &Server{store: st, outputSigner: newOutputSigner(), logger: slog.Default()}
-		key := "logs/standard/teams/team/runs/run/nodes/job/attempt-1-gen-1/seg-000001.ndjson.gz"
+		subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "team", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogTrigger, Generation: int64(index)}}
+		key, err := blob.LogObjectKey(subject, "r90", 1)
+		if err != nil {
+			t.Log(err)
+			return false
+		}
+		url, _, err := objects.SignLogPut(t.Context(), key, time.Now().Add(time.Minute))
+		if err != nil {
+			t.Log(err)
+			return false
+		}
 		put := func(body []byte) int {
-			sum := md5.Sum(body)
-			md := base64.StdEncoding.EncodeToString(sum[:])
-			q := s.outputSigner.sign("log-segment", "team", logPutSubject(key, int64(len(body)), md), time.Now().Add(time.Minute).Unix())
-			q.Set("size", strconv.Itoa(len(body)))
-			q.Set("md5", md)
-			r := httptest.NewRequest(http.MethodPut, "/?"+q.Encode(), bytes.NewReader(body))
-			r.SetPathValue("key", key)
 			w := httptest.NewRecorder()
-			s.handleLogSegmentPut(w, r)
+			router.ServeHTTP(w, httptest.NewRequest(http.MethodPut, url, bytes.NewReader(body)))
 			return w.Code
 		}
-		if put(first[:]) != http.StatusOK || put(first[:]) != http.StatusOK || put(second[:]) != http.StatusConflict {
+		if put(first[:]) != http.StatusCreated || put(first[:]) != http.StatusCreated || put(second[:]) != http.StatusBadRequest {
 			return false
 		}
-		r, err := s.logObjects().Get(t.Context(), key)
+		body, err := objects.Get(t.Context(), key)
 		if err != nil {
+			t.Log(err)
 			return false
 		}
-		body, err := io.ReadAll(r)
-		closeErr := r.Close()
-		return err == nil && closeErr == nil && bytes.Equal(body, first[:])
+		stored, err := io.ReadAll(body)
+		closeErr := body.Close()
+		return err == nil && closeErr == nil && bytes.Equal(stored, first[:])
 	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(7))}); err != nil {
+	if err := quick.Check(property, &quick.Config{MaxCount: 64, Rand: rand.New(rand.NewSource(7))}); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -44,7 +44,7 @@ func TestStorage(t *testing.T) {
 	}
 	t.Run("storage-reference-edge-laundering/filesystem-store", func(t *testing.T) {
 		objects, _ := storageFilesystem(t)
-		if err := acceptance.CheckBlobUploadIsolation(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: storageObjectHTTP{objects}}); err != nil {
+		if err := acceptance.CheckBlobUploadIsolation(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)}); err != nil {
 			t.Fatal(err)
 		}
 	})

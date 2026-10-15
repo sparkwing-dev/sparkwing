@@ -15,7 +15,7 @@ import (
 
 func checkStorageFilesystemPublication(t *testing.T) {
 	objects, _ := storageFilesystem(t)
-	checkStoragePublication(t, objects, blob.TransferClient{Transport: storageObjectHTTP{objects}})
+	checkStoragePublication(t, objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)})
 }
 
 func checkStorageS3Publication(t *testing.T) {

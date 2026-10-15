@@ -18,11 +18,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
 func checkStorageFilesystemCollection(t *testing.T) {
 	objects, _ := storageFilesystem(t)
-	transfers := blob.TransferClient{Transport: storageObjectHTTP{objects}}
+	transfers := blob.TransferClient{Transport: storageFilesystemHTTP(objects)}
 	if err := acceptance.CheckBlobCollection(t.Context(), t.TempDir(), objects, transfers); err != nil {
 		t.Fatal(err)
 	}
@@ -36,11 +37,16 @@ func (h storageObjectHTTP) RoundTrip(r *http.Request) (*http.Response, error) {
 	return w.Result(), nil
 }
 
+func storageFilesystemHTTP(objects *blob.Filesystem) storageObjectHTTP {
+	server := controller.New(nil, nil).WithDataObjects(objects).WithAuthenticator(controller.NewAuthenticator(nil, time.Minute))
+	return storageObjectHTTP{server.Handler()}
+}
+
 func storageFilesystem(t *testing.T) (*blob.Filesystem, string) {
 	t.Helper()
 	dir := t.TempDir()
 	f, err := blob.NewFilesystem(blob.FilesystemOptions{
-		Directory: dir, Endpoint: "https://controller.invalid/data/objects",
+		Directory: dir, Endpoint: "https://controller.invalid",
 		SigningKey: []byte(strings.Repeat("k", 32)),
 	})
 	if err != nil {
@@ -79,7 +85,7 @@ func checkStorageFilesystemCAS(t *testing.T) {
 			w := httptest.NewRecorder()
 			r := httptest.NewRequest(http.MethodPut, put.URL, bytes.NewReader(invalid))
 			r.ContentLength = -1
-			f.ServeHTTP(w, r)
+			storageFilesystemHTTP(f).ServeHTTP(w, r)
 			if w.Code != http.StatusBadRequest {
 				return false
 			}
@@ -87,7 +93,7 @@ func checkStorageFilesystemCAS(t *testing.T) {
 				return false
 			}
 		}
-		transfer := blob.TransferClient{Transport: storageObjectHTTP{f}}
+		transfer := blob.TransferClient{Transport: storageFilesystemHTTP(f)}
 		response, err := transfer.Transfer(t.Context(), blob.SignedTransfer{URL: put.URL, Size: object.Size, Digest: digest}, bytes.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
@@ -187,12 +193,12 @@ func checkStorageFilesystemSignatures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			r := httptest.NewRequest(changed.Method, signed.URL, http.NoBody)
+			r := httptest.NewRequest(object.Method, signed.URL, http.NoBody)
 			query := r.URL.Query()
 			query.Set("token", base64.RawURLEncoding.EncodeToString(raw))
 			r.URL.RawQuery = query.Encode()
 			w := httptest.NewRecorder()
-			f.ServeHTTP(w, r)
+			storageFilesystemHTTP(f).ServeHTTP(w, r)
 			if w.Code != http.StatusForbidden {
 				return false
 			}

@@ -22,7 +22,7 @@ import (
 func checkStorageFilesystemLogSink(t *testing.T) {
 	storageProperty(t, func(seed [16]byte, ordinal uint8, lost bool) bool {
 		objects, _ := storageFilesystem(t)
-		return checkStorageLogSink(t, objects, storageObjectHTTP{objects}, seed, ordinal, lost)
+		return checkStorageLogSink(t, objects, storageFilesystemHTTP(objects), seed, ordinal, lost)
 	})
 }
 

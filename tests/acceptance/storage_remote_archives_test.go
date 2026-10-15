@@ -16,7 +16,7 @@ import (
 
 func checkStorageFilesystemRemoteArchives(t *testing.T) {
 	objects, dir := storageFilesystem(t)
-	checkStorageRemoteArchives(t, objects, blob.TransferClient{Transport: storageObjectHTTP{objects}}, func(key string, body []byte) {
+	checkStorageRemoteArchives(t, objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)}, func(key string, body []byte) {
 		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(key)), body, 0o600); err != nil {
 			t.Fatal(err)
 		}

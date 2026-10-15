@@ -44,9 +44,12 @@ grace period. References added after marking protect their bytes at collection.
 Object age alone cannot delete a live blob. Both physical backends implement the
 leased collector's deletion interface. Replaying a deletion of absent bytes
 succeeds. The controller supplies its configured backend to the leased
-retained-data pass. Standalone S3 construction installs the backend. Filesystem
-controller construction remains an integration point. Deployment bucket
-measurement stays separate from tenant accounting and deletes nothing.
+retained-data pass. Standalone controllers install S3 or, without a bucket,
+filesystem storage under their home directory's `data` directory. Filesystem
+transfers use signed data upload, object download and log upload routes. The
+old filesystem output and raw log routes are removed. Authenticated data and
+host bindings remain integration work. Deployment bucket measurement stays
+separate from tenant accounting and deletes nothing.
 
 Memo and dependency-cache records carry repository and ref scope. Manual
 writes cannot overwrite verified branch entries. Memo reads its own scope

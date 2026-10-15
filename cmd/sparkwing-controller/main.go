@@ -76,8 +76,8 @@ func run(args []string) error {
 			"operator console. No token reaches the console. Empty leaves it off.")
 	externalURL := fs.String("external-url", "",
 		"base URL this controller answers on from outside the cluster, which is "+
-			"where runners read signed filesystem outputs. "+
-			"Empty uses the URL each request arrived at.")
+			"where runners transfer signed filesystem data and logs. "+
+			"Empty uses --addr, with localhost for a wildcard listener.")
 	oidcTokenTTL := fs.Duration("oidc-token-ttl", oidcissuer.DefaultTTL,
 		"lifetime of an OIDC ID token, from 1m to 1h")
 	trustedProxyAddr := fs.String("trusted-proxy-addr", "",
@@ -559,10 +559,17 @@ func run(args []string) error {
 			return err
 		}
 		srv = srv.WithDataObjects(objects).WithDirectUploads(client, bucket, prefix)
-	} else if st.OutputDir() == "" {
-		// safety: without the cache bucket, node outputs live on this
-		// replica's disk, which the filesystem output store serves alone.
-		st.SetOutputDir(p.Root)
+	} else {
+		objects, err := openFilesystemData(p.Root, *externalURL, *addr)
+		if err != nil {
+			return fmt.Errorf("filesystem data: %w", err)
+		}
+		defer func() {
+			if err := objects.Close(); err != nil {
+				slog.Error("close filesystem data", "err", err)
+			}
+		}()
+		srv = srv.WithDataObjects(objects)
 	}
 	if err := checkRequireAuth(st, *requireAuth); err != nil {
 		return err

@@ -21,8 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// FilesystemOptions binds a private data directory and HTTP endpoint to a signing key.
-// Replicas serving the same directory must share SigningKey. Now defaults to time.Now.
+// FilesystemOptions binds a private directory and controller URL to a shared signing key.
 type FilesystemOptions struct {
 	Directory  string
 	Endpoint   string
@@ -30,8 +29,7 @@ type FilesystemOptions struct {
 	Now        func() time.Time
 }
 
-// Filesystem serves signed object transfers. Mount it at the configured endpoint.
-// Authentication, read sets, quota and live blob rows remain controller/store concerns.
+// Filesystem serves signed transfers without granting record or read-set authority.
 type Filesystem struct {
 	root     *os.Root
 	endpoint *url.URL
@@ -79,6 +77,7 @@ func (f *Filesystem) signObject(object capability.ObjectToSign) (capability.Sign
 	}
 	token := base64.RawURLEncoding.EncodeToString(encoded)
 	u := *f.endpoint
+	u.Path, u.RawPath = strings.TrimRight(f.endpoint.Path, "/")+f.transferPath(object), ""
 	u.RawQuery = url.Values{"token": {token}, "signature": {f.signature(token)}}.Encode()
 	return capability.SignedObject{URL: u.String(), Size: object.Size, SHA256: object.SHA256, ExpiresAt: object.ExpiresAt}, nil
 }
@@ -91,7 +90,7 @@ func (f *Filesystem) signature(token string) string {
 
 func (f *Filesystem) signedRequest(r *http.Request) (capability.ObjectToSign, error) {
 	q, err := url.ParseQuery(r.URL.RawQuery)
-	if err != nil || len(q) != 2 || len(q["token"]) != 1 || len(q["signature"]) != 1 || r.URL.Path != f.endpoint.Path {
+	if err != nil || len(q) != 2 || len(q["token"]) != 1 || len(q["signature"]) != 1 {
 		return capability.ObjectToSign{}, ErrDigestNotReadable
 	}
 	token := q.Get("token")
@@ -110,10 +109,26 @@ func (f *Filesystem) signedRequest(r *http.Request) (capability.ObjectToSign, er
 	if strings.HasPrefix(object.Key, "logs/") {
 		validate = validateFilesystemLog
 	}
-	if r.Method != object.Method || validate(object, f.now()) != nil {
+	if r.Method != object.Method || validate(object, f.now()) != nil || r.URL.Path != f.transferPath(object) {
 		return object, ErrDigestNotReadable
 	}
 	return object, nil
+}
+
+func (f *Filesystem) transferPath(object capability.ObjectToSign) string {
+	if strings.HasPrefix(object.Key, "logs/") {
+		return "/api/v1/log-segments/" + object.Key
+	}
+	if object.Method == http.MethodPut {
+		return "/api/v1/data/uploads/" + path.Base(object.Key)
+	}
+	return "/api/v1/data/objects/" + object.Key
+}
+
+// VerifyTransfer checks the signed method, path, object and expiry before transfer.
+func (f *Filesystem) VerifyTransfer(r *http.Request) error {
+	_, err := f.signedRequest(r)
+	return err
 }
 
 // ServeHTTP accepts signed PUT and GET only. Raw object paths never authorize access.

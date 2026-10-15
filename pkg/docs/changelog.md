@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+- **storage (Breaking):** Standalone controllers configure the shared filesystem
+  data backend and signed transfer routes. Removed the older filesystem output
+  signer, output routes, raw log adapter and `Server.WithOutputSignKey`. See
+  [migration steps](docs/migrations/_unreleased.md#filesystem-transfers-use-the-shared-data-backend).
+
 - **storage (Breaking):** The controller's leased maintenance pass collects
   unreachable CAS objects through the configured backend. Removed bucket-listing
   accounting, the free-log-share pruner, `WithStoragePass`, `RunStoragePass`,

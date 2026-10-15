@@ -11,9 +11,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -24,7 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -40,7 +36,7 @@ const (
 	maxNodeLogStoredBytes = logseg.MaxNodeBytes + logseg.SegmentBytes
 )
 
-var errLogsUnavailable = errors.New("this controller has no object store or output directory to keep log segments in")
+var errLogsUnavailable = errors.New("this controller has no log object store")
 
 type logObjectStore interface {
 	logseg.Objects
@@ -52,21 +48,12 @@ type logObjectStore interface {
 	classes(ctx context.Context) ([]string, error)
 }
 
-// safety: the S3 store presigns and the filesystem store signs URLs back at
-// this controller, so the runner side is the same against both.
 func (s *Server) logObjects() logObjectStore {
 	if s.directUploads != nil {
 		d := s.directUploads
 		return s3LogObjects{d: d, objs: s3store.NewArtifactStore(d.bucket, d.prefix, d.client)}
 	}
-	if s.store != nil && s.store.OutputDir() != "" {
-		objs, err := fs.NewArtifactStore(s.store.OutputDir())
-		if err != nil {
-			s.logger.Error("open the log segment directory", "dir", s.store.OutputDir(), "err", err)
-			return nil
-		}
-		return fsLogObjects{s: s, objs: objs}
-	}
+
 	return nil
 }
 
@@ -154,96 +141,11 @@ func (o s3LogObjects) presignPut(ctx context.Context, _ *http.Request, _ store.T
 	return put.URL, headers, nil
 }
 
-type fsLogObjects struct {
-	s    *Server
-	objs *fs.ArtifactStore
-}
-
-func (o fsLogObjects) Get(ctx context.Context, key string) (io.ReadCloser, error) {
-	return o.objs.Get(ctx, key)
-}
-
-func (o fsLogObjects) List(ctx context.Context, prefix string) ([]string, error) {
-	return o.objs.List(ctx, prefix)
-}
-
-func (o fsLogObjects) putIfAbsent(ctx context.Context, key string, body []byte) error {
-	return sealedOnConflict(o.objs.PutIfAbsent(ctx, key, bytes.NewReader(body)))
-}
-
-func (o fsLogObjects) deletePrefix(ctx context.Context, prefix string) (int64, error) {
-	return deleteListed(ctx, o.objs, prefix)
-}
-
-// hack: the filesystem store shards a key under its first two characters, and every log key begins
-// "logs/", so the log objects all sit under lo/logs/ beneath its root.
-func (o fsLogObjects) classes(context.Context) ([]string, error) {
-	entries, err := os.ReadDir(filepath.Join(o.objs.Root, "lo", "logs"))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	var out []string
-	for _, e := range entries {
-		if e.IsDir() {
-			out = append(out, e.Name())
-		}
-	}
-	return out, err
-}
-
-func (o fsLogObjects) presignPut(_ context.Context, r *http.Request, team store.Team, key string, size int64, contentMD5 string) (string, map[string]string, error) {
-	q := o.s.outputSigner.sign("log-segment", string(team), logPutSubject(key, size, contentMD5), time.Now().Add(logSegmentURLTTL).Unix())
-	q.Set("size", strconv.FormatInt(size, 10))
-	q.Set("md5", contentMD5)
-	return o.s.externalBaseURL(r) + "/api/v1/log-segments/" + key + "?" + q.Encode(), map[string]string{"Content-MD5": contentMD5}, nil
-}
-
-func logPutSubject(key string, size int64, contentMD5 string) string {
-	return key + "\x00" + strconv.FormatInt(size, 10) + "\x00" + contentMD5
-}
-
 func sealedOnConflict(err error) error {
 	if errors.Is(err, storage.ErrPreconditionFailed) {
 		return logseg.ErrSealed
 	}
 	return err
-}
-
-// safety: each object's size is read before it goes, so the bytes reported are the ones removed.
-func deleteListed(ctx context.Context, objs storage.ArtifactStore, prefix string) (int64, error) {
-	keys, err := objs.List(ctx, prefix)
-	if err != nil {
-		return 0, err
-	}
-	var deleted int64
-	var errs []error
-	for _, k := range keys {
-		size, err := objectSize(ctx, objs, k)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if err := objs.Delete(ctx, k); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		deleted += size
-	}
-	return deleted, errors.Join(errs...)
-}
-
-func objectSize(ctx context.Context, objs storage.ArtifactStore, key string) (int64, error) {
-	body, err := objs.Get(ctx, key)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = body.Close() }()
-	if f, ok := body.(interface{ Stat() (os.FileInfo, error) }); ok {
-		if info, err := f.Stat(); err == nil {
-			return info.Size(), nil
-		}
-	}
-	return io.Copy(io.Discard, body)
 }
 
 // safety: the attempt is the one the node's claim holds now, and a writer naming an older one is refused, so a
@@ -523,52 +425,6 @@ func (s *Server) logWriterTeam(w http.ResponseWriter, r *http.Request) (store.Te
 
 // safety: the URL signs the segment's size and MD5, so a holder stores exactly the bytes the controller charged;
 // the same segment may be written again with the same bytes.
-func (s *Server) handleLogSegmentPut(w http.ResponseWriter, r *http.Request) {
-	o, ok := s.logObjects().(fsLogObjects)
-	key, q := r.PathValue("key"), r.URL.Query()
-	size, err := strconv.ParseInt(q.Get("size"), 10, 64)
-	team, signed := s.outputSigner.verify(r, "log-segment", logPutSubject(key, size, q.Get("md5")))
-	if !ok || !signed || err != nil || !strings.HasPrefix(key, "logs/") || storage.SafeArtifactKey(key) != nil ||
-		!strings.Contains(key, "/teams/"+string(team)+"/") {
-		writeError(w, http.StatusForbidden, errors.New("the upload URL is invalid or expired"))
-		return
-	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, size+1))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	sum := md5.Sum(body)
-	if int64(len(body)) != size || base64.StdEncoding.EncodeToString(sum[:]) != q.Get("md5") {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("the segment must be the %d bytes whose MD5 the URL signed", size))
-		return
-	}
-	err = o.objs.PutIfAbsent(r.Context(), key, bytes.NewReader(body))
-	if errors.Is(err, storage.ErrPreconditionFailed) {
-		stored, readErr := o.objs.Get(r.Context(), key)
-		if readErr != nil {
-			s.writeInternalError(w, r, "read existing log segment", readErr)
-			return
-		}
-		existing, readErr := io.ReadAll(io.LimitReader(stored, size+1))
-		readErr = errors.Join(readErr, stored.Close(), r.Context().Err())
-		if readErr != nil {
-			s.writeInternalError(w, r, "verify existing log segment", readErr)
-			return
-		}
-		if !bytes.Equal(existing, body) {
-			writeError(w, http.StatusConflict, blob.ErrIntegrity)
-			return
-		}
-		err = nil
-	}
-	if err != nil {
-		s.writeInternalError(w, r, "store a log segment", err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-}
-
 func (s *Server) sealNodeLog(ctx context.Context, objs logObjectStore, rec store.NodeLog, now time.Time) (*logseg.Manifest, error) {
 	m, err := logseg.SealAbandoned(ctx, objs, rec.Prefix, logseg.Manifest{
 		Subject: new(nodeLogSubject(rec)),

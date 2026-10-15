@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,11 +45,6 @@ type wingdAPI struct {
 	// so the probe is a server with the same configuration and no store.
 	probe *controller.Server
 
-	// safety: the writing and the read-only server share one output signing
-	// key, because a URL one signs is fetched through whichever the route
-	// table sends it to.
-	outputKey []byte
-
 	mu             sync.Mutex
 	builtOn        *store.Store
 	handler        http.Handler
@@ -73,7 +67,6 @@ var apiReadRoutes = []string{
 	"GET /api/v1/runs/{id}/nodes",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/output",
-	"GET /api/v1/outputs/objects/{key...}",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/metrics",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/logs",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/debug-pause",
@@ -143,12 +136,7 @@ func newWingdAPI(runs *HeldRunStore, logger *slog.Logger, ring *localsecrets.Key
 		logger:         logger,
 		requestTimeout: APIRequestTimeout,
 		probe:          controller.New(nil, logger),
-		outputKey:      newWingdOutputKey(),
 	}
-}
-
-func newWingdOutputKey() []byte {
-	return []byte(rand.Text())
 }
 
 func (a *wingdAPI) serve(ctx context.Context, ln net.Listener) {
@@ -370,7 +358,6 @@ func (a *wingdAPI) split(rw, ro *store.Store, cipher controller.Cipher) http.Han
 // error, so on the read-only handle it would fail silently.
 func (a *wingdAPI) controllerOn(st *store.Store, auth *controller.Authenticator, cipher controller.Cipher) http.Handler {
 	return controller.New(st, a.logger).
-		WithOutputSignKey(a.outputKey).
 		WithSecretsCipher(cipher).
 		WithAuthenticator(auth).
 		WithPeerPrincipal(peerPrincipal).

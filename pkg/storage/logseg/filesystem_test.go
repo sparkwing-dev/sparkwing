@@ -92,7 +92,7 @@ func (t handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func bindFilesystemLogs(t *testing.T, subject blob.LogSubject) (*logDataFixture, *blob.Filesystem, logseg.Data) {
 	t.Helper()
-	backend, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.test/objects", SigningKey: []byte(strings.Repeat("x", 32))})
+	backend, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.test", SigningKey: []byte(strings.Repeat("x", 32))})
 	if err != nil {
 		t.Fatal(err)
 	}

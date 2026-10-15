@@ -342,7 +342,6 @@ func (s *Server) WithMetricsAddr(addr string) *Server
 func (s *Server) WithMetricsListener(ln net.Listener) *Server
 func (s *Server) WithOIDCIssuer(iss *oidcissuer.Issuer) *Server
 func (s *Server) WithOperatorAccounts(ids []string) *Server
-func (s *Server) WithOutputSignKey(key []byte) *Server
 func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
@@ -399,8 +398,6 @@ func (l cronLauncher) Active(ctx context.Context, sched store.CronSchedule, runI
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error)
 func (r *flowRefusal) Error() string
 func (r *flushingStatusRecorder) Flush()
-func (o fsLogObjects) Get(ctx context.Context, key string) (io.ReadCloser, error)
-func (o fsLogObjects) List(ctx context.Context, prefix string) ([]string, error)
 func (g githubProvider) AuthorizeURL(state, verifier, redirectURI string) string
 func (g githubProvider) SignIn(ctx context.Context, code, verifier, redirectURI string) (store.SignInProfile, error)
 func (g googleProvider) AuthorizeURL(state, verifier, redirectURI string) string

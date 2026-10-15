@@ -1,5 +1,19 @@
 # Migrating to the next release
 
+## Filesystem transfers use the shared data backend
+
+The standalone controller opens its filesystem data backend under its home
+when no S3 bucket is configured. Signed transfers use
+`/api/v1/data/uploads/{upload}`, `/api/v1/data/objects/{key...}` and
+`/api/v1/log-segments/{key...}`. They use the same verified physical objects
+as the record-backed maintenance pass.
+
+Removed `Server.WithOutputSignKey`, the older `/api/v1/outputs` handlers,
+filesystem output moves and the raw filesystem log adapter. No data conversion
+or fallback is provided. The legacy S3 output/log adapters still require their
+final authenticated cutover. Local-controller construction and authenticated
+data/host bindings remain separate integration work.
+
 ## Log readers expose only reads
 
 `storage.LogStore` provides `Read`, `ReadRun` and `Stream`. Its unused

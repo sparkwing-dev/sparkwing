@@ -33,7 +33,7 @@ func TestLogClassDays(t *testing.T) {
 func TestFilesystemLogRetention(t *testing.T) {
 	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 	dir := t.TempDir()
-	backend, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid/objects", SigningKey: []byte(strings.Repeat("x", 32)), Now: func() time.Time { return now }})
+	backend, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32)), Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestFilesystemLogRetention(t *testing.T) {
 
 func TestFilesystemLogRetentionPreservesUnrecognizedFiles(t *testing.T) {
 	dir := t.TempDir()
-	backend, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid/objects", SigningKey: []byte(strings.Repeat("x", 32))})
+	backend, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: dir, Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32))})
 	if err != nil {
 		t.Fatal(err)
 	}

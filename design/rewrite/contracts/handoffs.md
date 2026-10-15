@@ -2,6 +2,44 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+## From W7 filesystem startup and transport cut
+
+**Completed W7 filesystem construction.** A standalone controller without the
+S3 backend now opens the common filesystem backend under its home/data and
+supplies it through WithDataObjects. Its public router mounts the declared signed
+data upload, object download and log upload paths. The signed token binds method,
+object, byte checks and expiry. External proxy prefixes stay in generated URLs,
+while verification uses the registered controller path. Filesystem.VerifyTransfer
+is available for C2 Endpoint.Verify. This closes standalone construction from the
+maintenance handoff below. New wingd construction still belongs to W8.
+
+**Completed W7 filesystem hard cut.** Removed fsOutputs, its output MAC and
+WithOutputSignKey, old output PUT/GET routes, fsLogObjects and the old log PUT
+handler. The orchestrator API no longer owns the removed signing key or routes.
+The common data backend supplies signed physical transfers. No compatibility
+handler was added. Legacy S3 output/log handlers and store-local output files
+remain live and still need their final caller cutover.
+
+Existing filesystem acceptance fixtures now transfer through the production
+controller Handler, including real tenant blob-record, upload and log-record
+proofs. Authorization and issuance remain seeded or contract fixtures. No new
+acceptance cell was added. Signature and immutable-log properties exercise the
+registered physical routes. The record, archive and log cells still pass.
+The full report lists verification, removed test coverage and shared files.
+
+**W1b/W2/W3/W8/W9 remaining integration.** BindData, DataAuthority, NewDataClient
+and PolicyRouter remain unimplemented. LogTransport and SegmentRecorder still
+need authenticated construction and a declared segment-commit wire operation.
+Hosts need fresh attempt/generation StorageBindings. Repo-only exact record
+lookup still needs the server's tenant/default-ref selector. Expired staging
+cleanup still needs a leased operator contract returning its keys or invoking
+ObjectBackend.DeleteObject. No W7 SQL copy or foreign contract change was added.
+The approved W1b record-mutation redesign is still assigned to W1b.
+
+A broad acceptance invocation also reached TypeScript native tests, which fail
+because sdk/typescript/node_modules/typescript/bin/tsc is absent. This is separate
+from the passing TestStorage run. See [w7-storage-report.md](w7-storage-report.md).
+
 ## From W7 controller maintenance cutover
 
 **Completed W7 maintenance integration.** The retained-data worker now passes

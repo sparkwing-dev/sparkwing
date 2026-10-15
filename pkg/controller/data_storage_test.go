@@ -78,7 +78,7 @@ func TestDataStorageMaintenancePreservesReachableTenantBytes(t *testing.T) {
 		}
 	})
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{
-		Directory: filepath.Join(root, "data"), Endpoint: "https://controller.invalid/objects",
+		Directory: filepath.Join(root, "data"), Endpoint: "https://controller.invalid",
 		SigningKey: []byte(strings.Repeat("k", 32)),
 	})
 	if err != nil {
@@ -159,7 +159,7 @@ func TestDataStorageMaintenanceHonorsForeignLease(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: filepath.Join(root, "data"), Endpoint: "https://controller.invalid/objects", SigningKey: []byte(strings.Repeat("k", 32))})
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: filepath.Join(root, "data"), Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("k", 32))})
 	if err != nil {
 		t.Fatal(err)
 	}

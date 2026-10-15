@@ -20,6 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -79,7 +80,6 @@ type Server struct {
 	downloadCDN      *sign.URLSigner
 	downloadDomain   string
 	directUploads    *directUploadS3
-	outputSigner     outputSigner
 	logRetention     map[store.Team]int
 	logLifecycle     logLifecycle
 	egress           *egress.Meter
@@ -165,7 +165,6 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 	}
 	srv := &Server{
 		store:               st,
-		outputSigner:        newOutputSigner(),
 		logger:              logger,
 		loginLimit:          newLoginLimiter(),
 		queueTimeout:        15 * time.Minute,
@@ -1013,10 +1012,13 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
-	// safety: these carry a URL signature this process minted, not a bearer.
-	router.HandleFunc("PUT /api/v1/outputs/uploads/{id}", s.handleOutputBlobPut)
-	router.HandleFunc("GET /api/v1/outputs/objects/{key...}", s.handleOutputBlobGet)
-	router.HandleFunc("PUT /api/v1/log-segments/{key...}", s.handleLogSegmentPut)
+	if s.data != nil {
+		if objects, ok := s.data.Objects.(*blob.Filesystem); ok {
+			router.Handle("PUT /api/v1/data/uploads/{upload}", objects)
+			router.Handle("GET /api/v1/data/objects/{key...}", objects)
+			router.Handle("PUT /api/v1/log-segments/{key...}", objects)
+		}
+	}
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", noStore(http.HandlerFunc(s.handleSession)))
 	router.Handle("GET /api/v1/capabilities", http.HandlerFunc(s.handleCapabilities))
@@ -1260,9 +1262,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.githubApp.checks.shutdown(ctx)
 }
 
-// WithExternalURL declares the base URL this controller answers on from
-// outside the cluster. Signed filesystem output URLs use that address.
-// Empty uses the address each request arrived at.
+// WithExternalURL declares the externally reachable controller base URL.
 func (s *Server) WithExternalURL(rawURL string) *Server {
 	s.externalURL = strings.TrimRight(strings.TrimSpace(rawURL), "/")
 	return s

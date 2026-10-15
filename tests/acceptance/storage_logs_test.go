@@ -37,9 +37,9 @@ func checkStorageFilesystemLogRecords(t *testing.T) {
 	storageProperty(t, func(seed [16]byte, ordinal uint8, lost bool) bool {
 		objects, _ := storageFilesystem(t)
 		signing := &storageLogTransport{objects: objects, class: logseg.ClassFree}
-		var transport http.RoundTripper = storageObjectHTTP{objects}
+		var transport http.RoundTripper = storageFilesystemHTTP(objects)
 		if lost {
-			transport = storageLostResponse{storageObjectHTTP{objects}}
+			transport = storageLostResponse{storageFilesystemHTTP(objects)}
 		}
 		if err := acceptance.CheckBlobLogRecords(t.Context(), t.TempDir(), signing, objects, blob.TransferClient{Transport: transport}, seed, 1+int(ordinal%17)); err != nil {
 			t.Fatal(err)
@@ -111,7 +111,7 @@ func storageLogSegment(t *testing.T, number int, body []byte) (logseg.Segment, [
 func checkStorageLogs(t *testing.T) {
 	storageProperty(t, func(seed [16]byte, ordinal uint8, lost bool) bool {
 		objects, dir := storageFilesystem(t)
-		return checkStorageLogRoundTrip(t, objects, storageObjectHTTP{objects}, func(key string, body []byte) {
+		return checkStorageLogRoundTrip(t, objects, storageFilesystemHTTP(objects), func(key string, body []byte) {
 			if err := os.WriteFile(filepath.Join(dir, key), body, 0o600); err != nil {
 				t.Fatal(err)
 			}

@@ -13,7 +13,7 @@ import (
 func checkStorageFilesystemDepcache(t *testing.T) {
 	storageProperty(t, func(seed [16]byte) bool {
 		objects, dir := storageFilesystem(t)
-		err := acceptance.CheckBlobDepcache(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: storageObjectHTTP{objects}}, func(key string) error {
+		err := acceptance.CheckBlobDepcache(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)}, func(key string) error {
 			path := filepath.Join(dir, filepath.FromSlash(key))
 			raw, err := os.ReadFile(path)
 			if err != nil {

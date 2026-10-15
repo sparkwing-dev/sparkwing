@@ -141,8 +141,12 @@ access control configuration.
 The controller returns a 60-second CloudFront URL for requests arriving
 through the public ingress. Requests through the in-cluster Service receive a
 regional S3 URL instead, so runner pods in the bucket's region can use the S3
-gateway endpoint. Local filesystem storage keeps its direct byte-serving path and
-does not need CloudFront signing keys. See [Data downloads](api.md#data-downloads)
+gateway endpoint. Without an S3 bucket, the standalone controller opens filesystem storage in
+its home directory's `data` directory and mounts signed data and log transfers.
+It uses `--external-url` when set, otherwise its listener address. Wildcard
+listener addresses use localhost in signed URLs. Set `--external-url` for remote
+runners. Filesystem storage needs no CloudFront signing keys.
+Authenticated data routes and host bindings remain integration work. See [Data downloads](api.md#data-downloads)
 for route behavior.
 The self-hosted controller runs without credit metering unless a signed license
 grants `metering` or `multi-team`. It bills no runner or storage usage, exposes

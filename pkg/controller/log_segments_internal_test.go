@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -643,62 +642,6 @@ func TestAnEndedClaimFinishesOnlyItsOwnLogWithinTheGrace(t *testing.T) {
 	}
 	if code, raw := f.do(t, http.MethodPost, "/api/v1/runs/run-d/nodes/b/log-segments", late, []byte(`{}`)); code != http.StatusForbidden {
 		t.Fatalf("a claim a later claim replaced: %d %s, want 403", code, raw)
-	}
-}
-
-func TestALostSegmentReadsAndReportsAsIncomplete(t *testing.T) {
-	for name, damage := range map[string]func(context.Context, fsLogObjects, string) error{
-		"deleted": func(ctx context.Context, objs fsLogObjects, key string) error {
-			_, err := objs.deletePrefix(ctx, key)
-			return err
-		},
-		"replaced": func(ctx context.Context, objs fsLogObjects, key string) error {
-			r, err := objs.objs.Get(ctx, key)
-			if err != nil {
-				return err
-			}
-			path := r.(*os.File).Name()
-			if err := r.Close(); err != nil {
-				return err
-			}
-			return os.WriteFile(path, []byte("not the segment the manifest names"), 0o600)
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			f := newLogSegmentFixture(t)
-			ctx := t.Context()
-			tok := f.claim(t, "a", store.ClaimTokenWork)
-			s, _ := f.sink(t, tok, "a")
-			for i := 1; i <= 4; i++ {
-				if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if _, err := s.Close(ctx, logseg.End{}); err != nil {
-				t.Fatal(err)
-			}
-			rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
-			if err != nil {
-				t.Fatal(err)
-			}
-			objs := f.srv.logObjects()
-			if err := damage(ctx, objs.(fsLogObjects), blob.LogSegmentKey(rec.Prefix, 2)); err != nil {
-				t.Fatal(err)
-			}
-			logs := segmentLogs{s: f.srv, team: store.DefaultTeam, objs: objs}
-			body, err := logs.Read(ctx, "run-d", "a", storage.ReadOpts{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(string(body), logLine(1)) || strings.Contains(string(body), logLine(4)) ||
-				!strings.Contains(string(body), "segment 2 is missing") {
-				t.Fatalf("read of a log with segment 2 %s = %q, want line 1 then a loss marker", name, body)
-			}
-			c, found, err := logs.NodeLogCompleteness(ctx, "run-d", "a", logseg.NodeProgress{Started: true}, time.Now())
-			if err != nil || !found || c.State != logseg.StateIncomplete {
-				t.Fatalf("completeness of a log with segment 2 %s = %+v, %v, %v; want incomplete", name, c, found, err)
-			}
-		})
 	}
 }
 

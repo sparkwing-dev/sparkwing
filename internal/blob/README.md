@@ -348,3 +348,10 @@ lease before physical work. Filesystem log expiry follows the same pass. The
 bucket-reconciliation worker, its free-share log pruning, listing-based counters
 and `storage_pass` health projection are removed. Read-only deployment bucket
 measurement remains separate from authoritative tenant accounting.
+
+Standalone filesystem construction and signed transfer registration now use the
+common physical backend. Existing filesystem acceptance fixtures send transfers
+through the controller Handler, including real tenant-record and log-record
+proofs. Authentication and award issuance remain seeded or contract fixtures.
+Signed paths bind the method and exact object. The old filesystem output MAC,
+output handlers, raw log adapter and log PUT handler are removed.

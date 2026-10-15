@@ -323,10 +323,20 @@ marking. The controller's age-based output pruner and the bucket measurement
 expiry callback are removed. The maintenance coordinator must bind the final
 physical backend before collecting objects.
 
-`internal/teamblob` retains scoped key construction, team validation and
-read-only bucket measurement. Its unused cache byte/multipart APIs, prefix
-deletion, directory listing and write breaker are removed. Its S3 client
-interface exposes only `ListObjectsV2`; measurement cannot mutate objects.
+`internal/teamblob` retains scoped key construction and team validation for
+legacy S3 output reads. Its cache byte/multipart APIs, prefix deletion,
+directory listing, measurement and write breaker are removed. Deployment
+measurement remains separate from authoritative tenant accounting.
+
+The standalone filesystem backend uses the controller URL as its signing base.
+It signs the C2 data upload, object download and log-segment paths. Method,
+exact object path, declared byte checks and expiry remain bound to the signed
+token. An external URL prefix belongs to the proxy, while verification uses
+the registered controller route.
+`Filesystem.VerifyTransfer` supplies C2's external endpoint proof callback.
+The common controller mounts these signed transfers without bearer middleware.
+Authenticated binding and new local-controller construction remain separate.
+Legacy filesystem output and raw log paths have been removed.
 
 `CommitObject` requires verified bytes at the exact ticket's staging key even
 when the final CAS object already exists. An absent staging key returns

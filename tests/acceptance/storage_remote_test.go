@@ -42,8 +42,10 @@ func (s storageCacheSigner) Download(ctx context.Context, q blob.GetRequest) (bl
 	if err != nil {
 		return blob.SignedTransfer{}, err
 	}
-	object, err := s.objects.Sign(ctx, capability.ObjectToSign{Method: http.MethodGet, Key: key,
-		Size: int64(len(s.bodies[q.Digest])), SHA256: string(q.Digest), ExpiresAt: time.Now().Add(time.Minute)})
+	object, err := s.objects.Sign(ctx, capability.ObjectToSign{
+		Method: http.MethodGet, Key: key,
+		Size: int64(len(s.bodies[q.Digest])), SHA256: string(q.Digest), ExpiresAt: time.Now().Add(time.Minute),
+	})
 	return blob.SignedTransfer{URL: object.URL, Headers: object.Headers, Digest: q.Digest, Size: object.Size, ExpiresAt: object.ExpiresAt}, err
 }
 
@@ -74,15 +76,17 @@ func checkStorageRemoteCache(t *testing.T) {
 			}
 		}
 		store := blob.NewSignedStore(blob.SignedStoreOptions{
-			Signer: storageCacheSigner{objects: objects, team: i.Team, bodies: bodies}, HTTPClient: blob.TransferClient{Transport: storageObjectHTTP{objects}},
+			Signer: storageCacheSigner{objects: objects, team: i.Team, bodies: bodies}, HTTPClient: blob.TransferClient{Transport: storageFilesystemHTTP(objects)},
 		})
 		if _, err := blob.OpenRemoteCache(blob.RemoteCacheOptions{}, store); err == nil {
 			return false
 		}
 		budget := blob.Budget{Deadline: time.Now().Add(time.Minute)}
 		for _, kind := range []blob.Kind{blob.KindMemo, blob.KindDepcache} {
-			key := blob.RecordKey{Team: i.Team, Kind: kind, Name: "cache", Scope: blob.Scope{Repo: repo,
-				Ref: blob.RefScope{Ref: "main", Verified: true}, Key: string(output)}}
+			key := blob.RecordKey{Team: i.Team, Kind: kind, Name: "cache", Scope: blob.Scope{
+				Repo: repo,
+				Ref:  blob.RefScope{Ref: "main", Verified: true}, Key: string(output),
+			}}
 			if kind == blob.KindMemo {
 				key.Name, key.Scope.Pipeline, key.Scope.Job = blob.MemoRecordName, "build", i.Attempt.Value.NodeID
 			}
