@@ -416,6 +416,14 @@ the exact persisted attempt or publication binding. A refused attachment rolls
 back state, attempt closure and events. An exact result replay does not reattach
 records.
 
+`Store.SetResultBlobRecords` configures the blob implementation of
+`nodeResultRecords` before the store is shared. Attachment verifies exact
+destination result keys and all required bytes in the state transaction through
+the existing record reader. It requires `data.write`, rechecks live authority
+after manifest I/O, and preserves caller-owned commit and rollback. Missing,
+expired or corrupt records prevent the result and its event from committing.
+No synthetic attempt represents an unexecuted job or a published import.
+
 `IntakePolicy` resolves request options through C4 and supplies server ceilings,
 repository authority, verified App delivery facts and log retention. The store
 requires it before admission and rechecks the caller in the intake transaction.

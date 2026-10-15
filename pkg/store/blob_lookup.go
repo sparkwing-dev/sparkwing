@@ -26,7 +26,7 @@ func (r *blobRecords) LookupRecord(ctx context.Context, request blob.RecordLooku
 	if err != nil {
 		return blob.RecordLookupResult{}, err
 	}
-	hit, err := r.lookupRecordTx(ctx, tx, a, request)
+	hit, err := r.lookupRecordTx(ctx, tx, a, request, capability.DataRead)
 	if err != nil {
 		return hit, err
 	}
@@ -36,7 +36,7 @@ func (r *blobRecords) LookupRecord(ctx context.Context, request blob.RecordLooku
 	return hit, tx.Commit()
 }
 
-func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobActor, request blob.RecordLookup) (blob.RecordLookupResult, error) {
+func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobActor, request blob.RecordLookup, grant capability.Grant) (blob.RecordLookupResult, error) {
 	result := blob.RecordLookupResult{}
 	key := request.Key
 	if key.Team != string(r.tenant.team) || key.Scope.Repo != a.authority.Repo {
@@ -83,8 +83,8 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 	if err != nil {
 		return result, err
 	}
-	// safety: manifest I/O must not carry expired read or holder rights into a result.
-	a, err = resolveBlobAuthorityTx(ctx, tx, r.tenant.team, a.authority, capability.DataRead)
+	// safety: manifest I/O must not carry expired authority into a result.
+	a, err = resolveBlobAuthorityTx(ctx, tx, r.tenant.team, a.authority, grant)
 	if err != nil {
 		return result, err
 	}
@@ -231,7 +231,7 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 				return result, blob.ErrBudget
 			}
 			recordKey := blob.RecordKey{Team: string(r.tenant.team), Kind: blob.KindMemo, Scope: blob.Scope{Repo: key.Repo, Ref: ref, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}, Name: name}
-			hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: recordKey, VerifiedDefaultOnly: a.capability.Data.Use == capability.DataRemoteCache || ref != a.authority.Ref.Scope})
+			hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: recordKey, VerifiedDefaultOnly: a.capability.Data.Use == capability.DataRemoteCache || ref != a.authority.Ref.Scope}, capability.DataRead)
 			if cacheMissError(err) {
 				continue
 			}
@@ -300,7 +300,7 @@ func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheL
 			return result, nil
 		}
 		key := blob.RecordKey{Team: string(r.tenant.team), Kind: blob.KindDepcache, Scope: blob.Scope{Repo: a.authority.Repo, Ref: fallback.ref, Key: request.Key.Key}, Name: request.Key.Name}
-		hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: key, VerifiedDefaultOnly: fallback.source == blob.RestoreDefaultBranch})
+		hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: key, VerifiedDefaultOnly: fallback.source == blob.RestoreDefaultBranch}, capability.DataRead)
 		if cacheMissError(err) {
 			continue
 		}

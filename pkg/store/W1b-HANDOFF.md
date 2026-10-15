@@ -1,10 +1,79 @@
 # W1b handoff
 
-Continues `2ed7a93aa`. W1b remains incomplete. This continuation is uncommitted.
+Continues `8da501ade`. W1b remains incomplete. This continuation is uncommitted.
 The lead owns review, commits, pipelines and native integration. W1 implementation
 files are unchanged. No Git write or candidate Sparkwing runtime was used.
 
 ## Current continuation
+
+Implemented `nodeResultRecords` on the existing blob record owner. Configure it
+with `Store.SetResultBlobRecords(manifestReader)` before sharing the store.
+The adapter verifies output and manifest records in W1's state transaction.
+The invariant is that only the exact tenant/run/job/attempt/generation result
+keys, backed by authorized records and required bytes, may accompany a result.
+The adapter uses the existing record verifier, including member metadata and
+post-I/O authority checks. `data.write` authorizes attachment without requiring
+an unrelated read grant. Explicit and embedded manifest digests must agree.
+
+Seven tests exercise the real final transition and record persistence with
+namespace/edge-policy and verified-manifest contract fakes. The first tests
+failed because no blob implementation of the result interface existed. Passing
+coverage includes 240 generated result-key forgeries, 96 generated lease-expiry
+crossings, missing/expired records, corrupt manifests, missing member edges,
+changed member sizes, conflicting manifest pointers and storage failures.
+Successful results persist record keys in exactly one result event. Refusals
+leave state, live attempts and events unchanged. Transaction tests remove and
+restore a member inside the owning transaction, then roll back a successful
+result. The configured adapter and embedded manifests are exercised separately.
+
+This ports the store-side result-transaction assertions from archived
+`TestClaimedAttemptRecordsOnlyAManifestItsRepositoryStored` to the final API.
+The complete T1 inventory row remains open because physical transfer, final
+routes and native placement evidence are outside that proof. No native
+acceptance cell is activated. The existing ten SQLite persistence cells pass.
+
+Whole-repository build, scoped vet and **153 store tests / 411 cases** pass.
+Both acceptance trees pass **20 top-level tests / 203 cases**, with **2,995
+native/platform skips**. All tenant SQL-scope, writer and twin guards pass.
+Documentation mirror, generated store API snapshot, whitespace and session-only
+comment/sleep checks pass. Required commentcheck against main still reports the
+same three inherited findings in controllerwire/contracts.go,
+state_materialize.go and state_result_records.go. Those W1/W9 files are untouched.
+Commands use the environment and package selection under Manual below. Build
+was run after the production changes. Vet and the store selection were run
+again after the final test changes. Full legacy store tests, PostgreSQL,
+physical backends, native transports, candidates and pipelines were not run.
+
+Local contract addition: SetResultBlobRecords configures an existing interface.
+W2/controller startup must install it with W7's real verified manifest reader.
+The namespace and edge functions in internal/blob are still panic stubs here.
+No foreign contract shape was changed. Two precise identity gaps need W1:
+
+1. CausePublish currently imports terminal state without an attempt payload or
+   node_attempts insertion. Its accepted job begins at attempt/generation zero.
+   Blob/log publication requires the real imported positive attempt. Result
+   records cannot be attached until that import contract is provided.
+2. Materialization can finish an unexecuted job at attempt/generation zero.
+   ResultBlobKey currently names execution attempts. W1 must define the blob
+   destination identity for a materialized result, including a retry of one,
+   before CopyMaterializedRecords can persist its edges. The source-side
+   MaterializedResultSource contract does not supply a destination identity.
+
+Billing integration, physical blob/log paths and the other real integrations
+listed below remain open. Legacy deletion is **0 lines**. No API was removed,
+and no cross-package production caller changed. W1 implementation files are
+unchanged. Shared edits are c1-data.md and the generated .apidiff/pkg_store.txt.
+Owned edits are blob_result_records.go, blob_result_records_test.go,
+blob_lookup.go, STORE-DATA.md and this handoff.
+
+Friction was the foreign contract stubs and inherited commentcheck findings.
+Two test fixture errors (duplicate capability insertion and map comparison)
+and an incorrect grant constant were corrected before final verification.
+No new service, table, setting, limit or environment variable was introduced.
+No Git writes or Sparkwing runtime commands ran. Scratch is removed after the
+final checks. The lead owns review, commits, pipelines and real integration.
+
+## Previous continuation (committed in 8da501ade)
 
 Fixed authority surviving a slow verified manifest read. The invariant is that
 manifest I/O cannot carry expired authority into a record, a memo attachment or

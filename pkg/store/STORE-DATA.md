@@ -71,6 +71,15 @@ encoding and the pure edge rule. The direct `Tenant` record methods use those
 same rules and have no manifest reader. Manifest operations through them fail
 until the caller uses the configured record store.
 
+`SetResultBlobRecords(manifestReader)` configures result attachment before the
+store is shared. The result transaction verifies each output or manifest key
+against the current tenant, run, job, attempt and generation. It reads existing
+records, verified manifest members, reference authority and existence through
+that transaction. An absent, expired, corrupt or mismatched record prevents
+attempt closure, terminal state and the result event from committing. The event
+retains the verified record keys. Attachment requires `data.write` and rechecks
+authority after manifest I/O. It leaves commit and rollback to the state owner.
+
 The record naming conventions are:
 
 - `ResultBlobKey` names output and manifest records for one destination attempt.

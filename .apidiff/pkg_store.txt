@@ -3167,6 +3167,7 @@ func (s *Store) SetOperatorCreditSettings(
 func (s *Store) SetOutputDir(dir string)
 func (s *Store) SetPlanSecretOpener(opener PlanSecretOpener)
 func (s *Store) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
+func (s *Store) SetResultBlobRecords(manifests BlobManifestReader)
 func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error
 func (s *Store) SetSignUpLimits(ctx context.Context, limits SignUpLimits) (SignUpGate, error)
 func (s *Store) SetSignUpMode(ctx context.Context, mode SignUpMode, reason, setBy string, now time.Time) (SignUpGate, error)
@@ -3866,6 +3867,7 @@ func WithoutCreditMetering(ctx context.Context) context.Context
 func WriteOutputFileDurably(path string, data []byte) error
 
 # methods on un-declared receiver types (likely a bug)
+func (r *blobRecords) AttachResultRecords(ctx context.Context, tx *storeTx, team Team, actor Actor, row NodeRow, result NodeResult) error
 func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecordRequest) (blob.Record, error)
 func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest) (blob.MemoHit, error)
 func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheLookup) (blob.DepcacheHit, error)
