@@ -2,8 +2,24 @@
 
 W8 remains incomplete. The approved pending-claim outcome redesign is implemented.
 `TestLoopPendingAwardPreservesPolicyDenial` now passes. The final runner suite has
-one retained failing regression in interruption classification, described below.
+retained failing regressions in interruption classification, described below.
 No further runtime patch was made after that review finding.
+
+This continuation adds `FuzzLoopPendingPolicyInterruption` through the public
+Run boundary. It varies nested wrappers and joins, independent denials, caller
+causes, committed awards and host failures. Eight baseline cases pass. Seed 8
+reproduces the known slice-backed-cause panic before the host adopts its award.
+The original arbitrary-cause regression also still fails. This is test preparation
+for the proposed classification redesign, which still needs a lead decision.
+No production code or API changed. Deleted production lines and new T1 ports
+are zero. The shared edit is the W8 classification entry in contracts/handoffs.md.
+
+Verification for this continuation passes the repository build, W8 vet,
+commentcheck, focused local-controller/cluster checks and the engine, launcher
+and component acceptance suites. The runner suite passes when the two known
+classification regressions are excluded. Its full run retains those failures.
+The approved outcome property passed 75,494 fuzz cases in ten seconds. No native
+acceptance cell was activated. The integration table below remains open.
 
 A pending claim returns its response, transport error and stop result independently.
 Run adopts a valid committed award before applying the stop result. Lifecycle

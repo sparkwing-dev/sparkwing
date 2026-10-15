@@ -105,3 +105,8 @@ context.Cause(ctx) panics for a slice-backed cause. The proposed replacement
 recognizes only ctx.Err's comparable sentinel at error-tree leaves and leaves
 arbitrary causes to Run's existing defer. Independent joined denials must remain
 observable. The two-strikes rule leaves this runtime change for the lead.
+
+`FuzzLoopPendingPolicyInterruption` exercises nested cancellation and denial
+trees through Run, with comparable and slice-backed caller causes and optional
+committed awards. Seed 8 reproduces the panic before its award reaches the host.
+The proposed runtime change still needs the lead's decision.
