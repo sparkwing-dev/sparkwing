@@ -131,8 +131,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).PruneEgressUsage": "drops every team's egress months past the window, which is a deployment-wide retention",
 	"ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
 		"account deletion can tell sole ownership from shared",
-	"(*Store).ExpiredOutputRuns": "the output retention sweep finds every team's expired or deleted runs holding outputs, " +
-		"with their teams, and frees each in that team",
 	"(*Store).ReconcileFreeEventBytes": "the storage pass recounts every slotted team's event bytes, each from its own " +
 		"team's runs",
 	"(*Store).finalizeClaimRoundAt": "closes the claim round of a node named by global id under the team boundary " +

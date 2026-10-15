@@ -168,9 +168,17 @@ that transaction's receipt, reference, revocation and holder changes and leave
 commit or rollback to the caller. `Tenant` uses the same checks. Supplied
 principal fields cannot widen persisted capability authority.
 
-Record commits and lookups recheck live authority after verified manifest I/O.
-A read that crosses the job lease, leaf capability or ancestor expiry returns
-no authorized result. It cannot publish a record or attach memo outputs.
+Record publication uses one transaction-local mutation owner for CommitRecord
+and CopyMemo. Both prepare every namespace and verified manifest before the
+owner takes the sorted blob locks. It checks existence, edge authority and
+immutable destinations, then reloads current writer ancestry and holder authority
+against the store clock. That final recheck is the mutation boundary. Only that
+owner persists the complete record/member batch and clears its tombstones.
+Commit or rollback remains with the caller. Failed commits return no record or
+memo hit. Immutable replay retains its persisted metadata.
+
+Lookups recheck live authority after verified manifest I/O. A read that crosses
+the job lease, leaf capability or ancestor expiry returns no authorized result.
 SQLite checks exercise both data binding rules through `Store.CheckBinding`
 and through the transaction that owns receipt changes.
 

@@ -333,6 +333,16 @@ removed with the legacy manifest-pointer endpoint. W7/W9 wire final publication
 and member validation through the record and result contracts. No manifest
 column or mutable pointer route is restored to the final schema.
 
+CommitRecord and CopyMemo use one transaction-local record mutation owner.
+They prepare every namespace and verified manifest before taking the sorted
+blob locks. After checking existence, reference edges and immutable destinations,
+the owner rechecks writer ancestry and holder authority against the store clock.
+That check is the publication boundary. The owner writes the complete destination
+batch and tombstone changes under the same transaction. Its caller owns commit
+and rollback. An expired writer cannot publish even when it was live before
+namespace or manifest preparation. Immutable replay and atomic output/manifest
+copies retain their existing contracts.
+
 Record commits normalize expiry instants to UTC and clear values in unset optional
 expiry and manifest fields. Returned metadata matches persisted metadata across
 replay and reopening. A different expiry instant still conflicts with an immutable
