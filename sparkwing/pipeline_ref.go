@@ -7,7 +7,7 @@ import (
 
 // ResolvedPipelineRef is what a PipelineResolver returns: the source
 // run id (for audit) + raw output JSON (for Ref[T].Get to unmarshal).
-type ResolvedPipelineRef struct {
+type resolvedPipelineRef struct {
 	RunID string
 	Data  []byte
 }
@@ -16,20 +16,20 @@ type ResolvedPipelineRef struct {
 // Both the local orchestrator and the cluster pod runner implement it.
 // Resolvers also emit an audit trail so the consuming node's event
 // stream records which source run fed it.
-type PipelineResolver interface {
-	resolve(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*ResolvedPipelineRef, error)
+type pipelineResolver interface {
+	resolve(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*resolvedPipelineRef, error)
 }
 
-func pipelineResolverFromContext(ctx context.Context) PipelineResolver {
-	if r, ok := ctx.Value(keyPipelineResolver).(PipelineResolver); ok {
+func pipelineResolverFromContext(ctx context.Context) pipelineResolver {
+	if r, ok := ctx.Value(keyPipelineResolver).(pipelineResolver); ok {
 		return r
 	}
 	return nil
 }
 
 // PipelineResolverFunc adapts a plain function to PipelineResolver.
-type PipelineResolverFunc func(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*ResolvedPipelineRef, error)
+type pipelineResolverFunc func(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*resolvedPipelineRef, error)
 
-func (f PipelineResolverFunc) resolve(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*ResolvedPipelineRef, error) {
+func (f pipelineResolverFunc) resolve(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*resolvedPipelineRef, error) {
 	return f(ctx, pipeline, nodeID, maxAge)
 }

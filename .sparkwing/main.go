@@ -3,7 +3,7 @@ package main
 import (
 	_ "sparkwing-pipelines/jobs"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func main() { runner.Main() }
+func main() { sparkwing.Main() }

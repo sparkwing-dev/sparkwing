@@ -128,7 +128,7 @@ func TestTriggerHost_AMemoizedGeneratorsNodesAreDispatched(t *testing.T) {
 	if run := h.run(t); run.Status != "success" {
 		t.Fatalf("memo run = %s (%s), want success", run.Status, run.Error)
 	}
-	if n := h.node(t, "targets"); n.Outcome != string(sparkwing.Cached) {
+	if n := h.node(t, "targets"); n.Outcome != string(sparkwing.Memoized) {
 		t.Fatalf("targets = %s/%s, want the memo hit", n.Status, n.Outcome)
 	}
 	for _, id := range []string{"test-a", "test-b", "summary"} {

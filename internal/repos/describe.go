@@ -11,10 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
 // SessionTimeout bounds one conversation with a pipeline binary, from start
@@ -30,9 +31,9 @@ type Session struct {
 }
 
 // Call sends req with the next request id and decodes the reply's result into
-// result. A failed reply returns its [*nodeproto.Error]; the process stays up
+// result. A failed reply returns its [*apierr.Error]; the process stays up
 // for the next request.
-func (s *Session) Call(req nodeproto.RequestOld, result any) error {
+func (s *Session) Call(req nodeproto.Request, result any) error {
 	if s.broken != nil {
 		return s.broken
 	}
@@ -46,27 +47,16 @@ func (s *Session) Call(req nodeproto.RequestOld, result any) error {
 	return reply.Decode(result)
 }
 
-// Describe sends describe and refuses a binary that speaks another protocol
-// version.
-func (s *Session) Describe() (sdkserve.DescribeDoc, error) {
-	var doc sdkserve.DescribeDoc
-	if err := s.Call(nodeproto.RequestOld{Op: nodeproto.OpDescribeOld}, &doc); err != nil {
-		return doc, err
-	}
-	if doc.Protocol != nodeproto.VersionOld {
-		sdk := "unknown SDK"
-		if doc.SDK != nil {
-			sdk = doc.SDK.Language + " SDK " + doc.SDK.Version
-		}
-		return doc, fmt.Errorf("pipeline entry speaks node protocol %q (%s); this engine speaks %q; rebuild .sparkwing against a matching SDK",
-			doc.Protocol, sdk, nodeproto.VersionOld)
-	}
-	return doc, nil
+// Describe sends describe after the session's protocol handshake.
+func (s *Session) Describe() (nodeproto.DescribeDoc, error) {
+	var doc nodeproto.DescribeDoc
+	err := s.Call(nodeproto.Request{Op: nodeproto.OpDescribe}, &doc)
+	return doc, err
 }
 
 // Describe starts the pipeline entry in dir and returns its describe reply.
-func Describe(ctx context.Context, entry pipelineentry.Command, dir string) (sdkserve.DescribeDoc, error) {
-	var doc sdkserve.DescribeDoc
+func Describe(ctx context.Context, entry pipelineentry.Command, dir string) (nodeproto.DescribeDoc, error) {
+	var doc nodeproto.DescribeDoc
 	err := Converse(ctx, entry, dir, func(s *Session) (err error) {
 		doc, err = s.Describe()
 		return err
@@ -114,7 +104,15 @@ func Converse(ctx context.Context, entry pipelineentry.Command, dir string, talk
 	})
 
 	s := &Session{requests: nodeproto.NewWriter(reqW), frames: nodeproto.NewReader(frameR)}
-	talkErr := talk(s)
+	var hello nodeproto.HelloResult
+	talkErr := s.Call(nodeproto.Request{
+		Op: nodeproto.OpHello, Protocol: nodeproto.Version,
+		Engine: &nodeproto.EngineIdentity{Version: buildinfo.Read("sparkwing", "").Version},
+		Runner: &nodeproto.RunnerIdentity{Name: "describe", Type: "local", Labels: []string{}},
+	}, &hello)
+	if talkErr == nil {
+		talkErr = talk(s)
+	}
 	if !stop() && ctx.Err() != nil {
 		// safety: the group is signaled before Wait reaps its leader, never after.
 		<-killed
@@ -138,24 +136,24 @@ func Converse(ctx context.Context, entry pipelineentry.Command, dir string, talk
 	return talkErr
 }
 
-func exchange(requests *nodeproto.Writer, r *nodeproto.Reader, req nodeproto.RequestOld) (nodeproto.ReplyOld, error) {
+func exchange(requests *nodeproto.Writer, r *nodeproto.Reader, req nodeproto.Request) (nodeproto.Reply, error) {
 	if err := requests.Send(req); err != nil {
-		return nodeproto.ReplyOld{}, err
+		return nodeproto.Reply{}, err
 	}
 	for {
 		f, err := r.Next()
 		switch {
 		case errors.Is(err, io.EOF):
-			return nodeproto.ReplyOld{}, fmt.Errorf("pipeline entry exited without answering %s; rebuild .sparkwing against a matching SDK", req.Op)
+			return nodeproto.Reply{}, fmt.Errorf("pipeline entry exited without answering %s; rebuild .sparkwing against a matching SDK", req.Op)
 		case err != nil:
-			return nodeproto.ReplyOld{}, &nodeproto.Error{Code: nodeproto.CodeProtocolError, Message: err.Error()}
-		case f.Kind != nodeproto.KindReply:
+			return nodeproto.Reply{}, &apierr.Error{Code: apierr.ProtocolError, Message: err.Error()}
+		case f.Reply == nil:
 			continue
 		case f.Reply.ID != req.ID:
 			msg := fmt.Sprintf("%v: %s", nodeproto.ErrUnknownReply, f.Reply.ID)
-			return nodeproto.ReplyOld{}, &nodeproto.Error{Code: nodeproto.CodeProtocolError, Message: msg}
+			return nodeproto.Reply{}, &apierr.Error{Code: apierr.ProtocolError, Message: msg}
 		}
-		return f.Reply, nil
+		return *f.Reply, nil
 	}
 }
 

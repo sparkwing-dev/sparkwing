@@ -36,6 +36,8 @@ type Work struct {
 	byID     map[string]*WorkStep
 	groups   []*StepGroup
 	failures ParallelFailurePolicy
+	attempt  int
+	active   map[string]bool
 }
 
 // ParallelFailurePolicy controls whether independent Work items finish after
@@ -55,53 +57,6 @@ const (
 // NewWork returns an empty Work.
 func NewWork() *Work {
 	return &Work{byID: map[string]*WorkStep{}}
-}
-
-// ParallelFailures sets the policy for independent items in this Work.
-func (w *Work) ParallelFailures(policy ParallelFailurePolicy) *Work {
-	switch policy {
-	case FailFast, CollectAll:
-		w.failures = policy
-	default:
-		panic(fmt.Sprintf("sparkwing: Work.ParallelFailures: unsupported policy %q", policy))
-	}
-	return w
-}
-
-// ParallelFailurePolicy returns the configured policy. The zero value is
-// [FailFast] for backward compatibility.
-func (w *Work) ParallelFailurePolicy() ParallelFailurePolicy {
-	if w == nil || w.failures == "" {
-		return FailFast
-	}
-	return w.failures
-}
-
-// Steps returns the work's steps in insertion order.
-func (w *Work) Steps() []*WorkStep {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	out := make([]*WorkStep, len(w.steps))
-	copy(out, w.steps)
-	return out
-}
-
-// StepByID returns the step with the given id, or nil if absent.
-func (w *Work) StepByID(id string) *WorkStep {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.byID[id]
-}
-
-// Groups returns the StepGroups declared on this Work in declaration
-// order. Each entry is a (name, members) bundle the plan-snapshot
-// walker surfaces to the dashboard so it can frame group members.
-func (w *Work) Groups() []*StepGroup {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	out := make([]*StepGroup, len(w.groups))
-	copy(out, w.groups)
-	return out
 }
 
 // Step registers a unit of work on this Work. fn must be either
@@ -240,7 +195,7 @@ func StepGet[T any](ctx context.Context, step *WorkStep) T {
 	if step == nil {
 		panic("sparkwing: StepGet: step must be non-nil")
 	}
-	wantT := reflect.TypeOf(zero)
+	wantT := reflect.TypeFor[T]()
 	if step.outType == nil {
 		panic(fmt.Sprintf(
 			"sparkwing: StepGet[%v]: step %q has no typed output "+
@@ -260,7 +215,7 @@ func StepGet[T any](ctx context.Context, step *WorkStep) T {
 			wantT, step.id, err,
 		))
 	}
-	v := step.Output()
+	v := step.output()
 	if v == nil {
 		return zero
 	}
@@ -305,10 +260,6 @@ type WorkStep struct {
 
 // ID returns the step's identifier.
 func (s *WorkStep) ID() string { return s.id }
-
-// OutputType returns the typed output reflect.Type, or nil for steps
-// that return only error.
-func (s *WorkStep) OutputType() reflect.Type { return s.outType }
 
 // WorkDep is the closed type set accepted by Work-layer [WorkStep.Needs]
 // and [StepGroup.Needs].
@@ -365,13 +316,6 @@ func addWorkDep(d WorkDep, out *[]string) {
 	add(d.workDepID())
 }
 
-// DepIDs returns the step IDs this step depends on.
-func (s *WorkStep) DepIDs() []string {
-	out := make([]string, len(s.needs))
-	copy(out, s.needs)
-	return out
-}
-
 // SkipIf registers a predicate the runner evaluates after this step's
 // upstream deps complete. Multiple SkipIf calls accumulate with OR
 // semantics.
@@ -381,9 +325,6 @@ func (s *WorkStep) SkipIf(fn SkipPredicate) *WorkStep {
 	}
 	return s
 }
-
-// SkipPredicates returns the registered skip predicates.
-func (s *WorkStep) SkipPredicates() []SkipPredicate { return s.skipIf }
 
 // ContinueOnError marks the step's failure as non-blocking for the
 // rest of the Work: in-flight sibling steps are not cancelled, and
@@ -399,10 +340,6 @@ func (s *WorkStep) ContinueOnError() *WorkStep {
 	return s
 }
 
-// IsContinueOnError reports whether this step's failure is non-
-// blocking for sibling cancellation and downstream Needs() dispatch.
-func (s *WorkStep) IsContinueOnError() bool { return s.continueOnError }
-
 // Optional marks the step as non-essential: a failure is recorded
 // (still visible in logs and step status) but does not count toward
 // the Job's rollup outcome. Implies ContinueOnError. Mirrors
@@ -415,10 +352,6 @@ func (s *WorkStep) Optional() *WorkStep {
 	return s
 }
 
-// IsOptional reports whether this step's failure is masked from the
-// Job's rollup outcome.
-func (s *WorkStep) IsOptional() bool { return s.optional }
-
 // Finally marks a step as cleanup. It runs after all declared dependencies
 // terminate, even when one failed and fail-fast cancelled ordinary siblings.
 // The cleanup uses the Job's parent context rather than the sibling-cancellation
@@ -427,9 +360,6 @@ func (s *WorkStep) Finally() *WorkStep {
 	s.finally = true
 	return s
 }
-
-// IsFinally reports whether this step is cleanup that survives sibling failure.
-func (s *WorkStep) IsFinally() bool { return s.finally }
 
 func (s *WorkStep) markDone(out any) {
 	s.mu.Lock()
@@ -446,9 +376,7 @@ func (s *WorkStep) markDone(out any) {
 	s.mu.Unlock()
 }
 
-// Output returns the resolved typed output (after the step completes)
-// or nil.
-func (s *WorkStep) Output() any {
+func (s *WorkStep) output() any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.out

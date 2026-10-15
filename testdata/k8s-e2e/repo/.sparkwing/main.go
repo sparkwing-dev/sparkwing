@@ -3,9 +3,9 @@ package main
 import (
 	_ "sparkwing-k8s-e2e-pipelines/jobs"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func main() {
-	runner.Main()
+	sparkwing.Main()
 }

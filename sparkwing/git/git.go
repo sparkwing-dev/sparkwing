@@ -4,7 +4,7 @@
 //
 // Every function takes an explicit `repoDir` parameter. Callers
 // operating on the run's working tree usually go through
-// sparkwing.RunContext.Git / sparkwing.CurrentRuntime().Git; release
+// sparkwing.RunContext.Git; release
 // pipelines that operate on sibling clones import this package
 // directly.
 //
@@ -29,7 +29,7 @@ import (
 
 	"golang.org/x/mod/semver"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
 // ErrTagAlreadyExists is returned by PushTag when the tag already
@@ -129,8 +129,9 @@ func IsDirty(ctx context.Context, repoDir string) (bool, error) {
 // ignored files; without, falls back to a filesystem walk with a
 // small skip list. .dockerignore is honored in both modes.
 //
-// Paths, file permissions, and contents contribute to the hash. Unreadable
-// inputs return an error; tracked files absent from disk are omitted.
+// Paths (including whitespace and non-ASCII names), file permissions, and contents
+// contribute to the hash. Unreadable inputs or ignore rules return an error;
+// tracked files absent from disk are omitted.
 // File contents are read from disk (not from the git blob) so
 // staged-but-not-committed changes are reflected in the hash --
 // content addressing keys off the tree the build will actually see.
@@ -142,11 +143,14 @@ func FilesetHash(ctx context.Context, repoDir string) (string, error) {
 	if files == nil {
 		files = listFilesystemFiles(repoDir)
 	}
+	ignore, err := loadDockerignore(repoDir)
+	if err != nil {
+		return "", fmt.Errorf("fileset hash ignore rules: %w", err)
+	}
 	if len(files) == 0 {
 		return "", nil
 	}
 
-	ignore := loadDockerignore(repoDir)
 	seen := map[string]bool{}
 	keep := files[:0]
 	for _, f := range files {
@@ -207,15 +211,13 @@ func listGitFiles(ctx context.Context, repoDir string) ([]string, error) {
 		}
 		dir = parent
 	}
-	tracked, err := runGit(ctx, repoDir, "ls-files")
+	listed, err := runGit(ctx, repoDir, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return nil, err
 	}
-	untracked, err := runGit(ctx, repoDir, "ls-files", "--others", "--exclude-standard")
-	if err != nil {
-		return nil, err
-	}
-	return append([]string{}, splitLines(tracked+"\n"+untracked)...), nil
+	// safety: Git terminates each literal path with NUL; line splitting loses quoted or whitespace-bearing names.
+	files := strings.Split(listed, "\x00")
+	return files[:len(files)-1], nil
 }
 
 func listFilesystemFiles(repoDir string) []string {
@@ -251,14 +253,17 @@ func listFilesystemFiles(repoDir string) []string {
 	return files
 }
 
-func loadDockerignore(repoDir string) []string {
+func loadDockerignore(repoDir string) ([]string, error) {
 	path := ".dockerignore"
 	if repoDir != "" {
 		path = filepath.Join(repoDir, ".dockerignore")
 	}
 	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var patterns []string
 	for _, line := range strings.Split(string(data), "\n") {
@@ -267,7 +272,7 @@ func loadDockerignore(repoDir string) []string {
 			patterns = append(patterns, line)
 		}
 	}
-	return patterns
+	return patterns, nil
 }
 
 func matchesIgnore(path string, patterns []string) bool {
@@ -407,7 +412,7 @@ func runGit(ctx context.Context, repoDir string, args ...string) (string, error)
 
 func runGitEnv(ctx context.Context, repoDir string, env []string, args ...string) (string, error) {
 	// safety: all public ctx-taking git helpers funnel through here; one guard covers them all.
-	planguard.Guard(ctx, "git "+firstWord(args))
+	sdkserve.RequireExecution(ctx, "git "+firstWord(args))
 	cmd := exec.CommandContext(ctx, "git", args...)
 	if repoDir != "" {
 		cmd.Dir = repoDir

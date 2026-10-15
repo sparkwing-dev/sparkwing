@@ -22,6 +22,23 @@ func TestMasker_RegisterAndMask(t *testing.T) {
 	}
 }
 
+func TestContainsSecretChecksIdentifiersEvenWhenMaskingWouldNotChangeThem(t *testing.T) {
+	m := NewMasker()
+	if m.ContainsSecret("ordinary-job") {
+		t.Fatal("an empty registry matched an identifier")
+	}
+	m.Register("***")
+	m.Register("private/value")
+	for _, identifier := range []string{"***", "job-private/value", "job-private%2Fvalue"} {
+		if !m.ContainsSecret(identifier) {
+			t.Fatalf("registered secret was accepted in %q", identifier)
+		}
+	}
+	if m.ContainsSecret("ordinary-job") {
+		t.Fatal("unrelated identifier matched a registered secret")
+	}
+}
+
 func TestCached_HitsSourceOnce(t *testing.T) {
 	var calls int32
 	src := SourceFunc(func(name string) (string, bool, error) {

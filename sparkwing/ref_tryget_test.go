@@ -78,7 +78,7 @@ func TestRefTryGet_CrossPipelineUnmarshalFailurePanics(t *testing.T) {
 }
 
 func TestRefTryGet_InRunIncompleteNodeReturnsFalse(t *testing.T) {
-	resolve := func(string) ([]byte, bool) { return nil, false }
+	resolve := func(context.Context, string) ([]byte, error) { return nil, ErrRefAbsent }
 	ctx := context.WithValue(context.Background(), keyJSONRefResolver, resolve)
 
 	if _, ok := (Ref[buildOut]{JobID: "build"}).TryGet(ctx); ok {
@@ -87,7 +87,7 @@ func TestRefTryGet_InRunIncompleteNodeReturnsFalse(t *testing.T) {
 }
 
 func TestRefTryGet_InRunReturnsValue(t *testing.T) {
-	resolve := func(string) ([]byte, bool) { return []byte(`{"digest":"d","tag":"t"}`), true }
+	resolve := func(context.Context, string) ([]byte, error) { return []byte(`{"digest":"d","tag":"t"}`), nil }
 	ctx := context.WithValue(context.Background(), keyJSONRefResolver, resolve)
 
 	got, ok := Ref[buildOut]{JobID: "build"}.TryGet(ctx)
@@ -118,7 +118,9 @@ func TestRefGet_InRunIncompleteNodePanicsWithString(t *testing.T) {
 			t.Fatalf("unexpected panic value: %q", msg)
 		}
 	}()
-	resolve := func(string) ([]byte, bool) { return nil, false }
+	resolve := func(_ context.Context, id string) ([]byte, error) {
+		return nil, fmt.Errorf("node %q has not completed: %w", id, ErrRefAbsent)
+	}
 	ctx := context.WithValue(context.Background(), keyJSONRefResolver, resolve)
 
 	Ref[buildOut]{JobID: "build"}.Get(ctx)

@@ -52,7 +52,5 @@ func (c *Cached) Resolve(ctx context.Context, name string) (string, bool, error)
 	return v, masked, nil
 }
 
-func (c *Cached) AsResolver() sparkwing.SecretResolver { return c }
-
 // ErrSecretMissing is what a [Source] returns for a name it does not hold.
 var ErrSecretMissing = sparkwing.ErrSecretMissing

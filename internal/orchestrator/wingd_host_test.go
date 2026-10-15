@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -87,15 +89,11 @@ func (p *hostTestPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing
 func buildHostTestPlan(t *testing.T, name string) *sparkwing.Plan {
 	t.Helper()
 	registerHostTestPipelines()
-	reg, ok := sparkwing.Lookup(name)
-	if !ok {
-		t.Fatalf("pipeline %q is not registered", name)
-	}
-	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: name, RunID: "host-test"})
+	built, _, err := sdkserve.DefaultOperations.Plan(context.Background(), name, map[string]string{}, nodeproto.RunContext{Pipeline: name, RunID: "host-test"})
 	if err != nil {
 		t.Fatalf("build plan %q: %v", name, err)
 	}
-	return plan
+	return built.(*sparkwing.Plan)
 }
 
 func TestUnhostedOutcome_DegradesOnEveryStandaloneSentinel(t *testing.T) {

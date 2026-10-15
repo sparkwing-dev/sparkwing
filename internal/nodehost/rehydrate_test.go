@@ -36,7 +36,7 @@ func sourceRun(t *testing.T, st *store.Store, outcomes map[string]string) {
 	}
 }
 
-func rehydratedRun(t *testing.T, st *store.Store, r *Rehydration, doc nodeproto.PlanDocOld) (*fakeExec, RunResult) {
+func rehydratedRun(t *testing.T, st *store.Store, r *Rehydration, doc nodeproto.PlanDoc) (*fakeExec, RunResult) {
 	t.Helper()
 	f := &fakeExec{}
 	return f, hostWith(t, t.Context(), st, Config{Execute: f.run, Rehydrate: r}, doc)
@@ -61,7 +61,7 @@ func skippedFromRetry(t *testing.T, st *store.Store) []string {
 func TestARetryCopiesWhatItsSourceRunAlreadySucceededAt(t *testing.T) {
 	st := openStore(t)
 	sourceRun(t, st, map[string]string{"a": "success", "b": "failed", "c": "success"})
-	doc := nodeproto.PlanDocOld{Pipeline: "p", Nodes: []nodeproto.PlanNode{{ID: "a"}, {ID: "b"}, {ID: "c", Deps: []string{"a"}}}}
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "b", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "c", Needs: []string{"a"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
 	f, res := rehydratedRun(t, st, &Rehydration{SourceRunID: sourceRunID}, doc)
 	if res.Status != "success" || !slices.Equal(f.calls, []string{"b"}) {
 		t.Fatalf("status %s ran %v, want success running only b, which failed in the source run", res.Status, f.calls)
@@ -78,12 +78,12 @@ func TestARetryCopiesWhatItsSourceRunAlreadySucceededAt(t *testing.T) {
 func TestAnAutomaticRetryRunsOnlyItsCausesAndWhatTheyReach(t *testing.T) {
 	st := openStore(t)
 	sourceRun(t, st, map[string]string{"a": "success", "b": "failed", "c": "cancelled", "d": "failed", "rescue": "skipped"})
-	doc := nodeproto.PlanDocOld{Pipeline: "p", Nodes: []nodeproto.PlanNode{
-		{ID: "a"},
-		{ID: "b"},
-		{ID: "c", Deps: []string{"b"}},
-		{ID: "d", Deps: []string{"a"}},
-		{ID: "rescue", OnFailureOf: "b"},
+	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "b", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "c", Needs: []string{"b"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "d", Needs: []string{"a"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "rescue", OnFailureOf: "b", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}
 	f, res := rehydratedRun(t, st, &Rehydration{SourceRunID: sourceRunID, Causes: []string{"b"}}, doc)
 	slices.Sort(f.calls)
@@ -107,19 +107,19 @@ func (outputGone) GetNodeOutput(context.Context, string, string) ([]byte, error)
 	return nil, store.ErrNotFound
 }
 
-func scheduled(t *testing.T, st storage.StateStoreOld, cfg Config, doc nodeproto.PlanDocOld, regenerate func(context.Context, *NodeRun, json.RawMessage) []expansion) RunResult {
+func scheduled(t *testing.T, st storage.StateStoreOld, cfg Config, doc nodeproto.PlanDoc, regenerate func(context.Context, *NodeRun, json.RawMessage) []expansion) RunResult {
 	t.Helper()
 	ctx := t.Context()
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
+	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
 	s := &scheduler{
 		run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg),
 		rehydrate: cfg.Rehydrate, rerun: map[string]bool{}, regenerate: regenerate,
 	}
-	if err := s.add(ctx, ctx, doc.Nodes, nil); err != nil {
+	if err := s.add(ctx, ctx, doc.Jobs, nil); err != nil {
 		t.Fatal(err)
 	}
 	s.loop(ctx)
@@ -132,7 +132,7 @@ func TestARetryRunsANodeWhoseRecordedOutputIsGone(t *testing.T) {
 	sourceRun(t, st, map[string]string{"a": "success"})
 	f := &fakeExec{}
 	res := scheduled(t, outputGone{st}, Config{Execute: f.run, Rehydrate: &Rehydration{SourceRunID: sourceRunID}},
-		nodeproto.PlanDocOld{Pipeline: "p", Nodes: []nodeproto.PlanNode{{ID: "a"}}}, nil)
+		nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, nil)
 	if res.Status != "success" || !f.ran("a") {
 		t.Fatalf("status %s ran %v: a node whose output is gone must run again, not copy a success with no output", res.Status, f.calls)
 	}
@@ -142,13 +142,12 @@ func TestARetryGeneratesACopiedGeneratorsNodesAgain(t *testing.T) {
 	st := openStore(t)
 	sourceRun(t, st, map[string]string{"targets": "success", "lint": "success", "summary": "cancelled", "test-a": "failed"})
 	doc := fanOutDoc()
-	doc.Pipeline = "p"
 	f := &fakeExec{}
 	var regenerated json.RawMessage
 	res := scheduled(t, st, Config{Execute: f.run, Rehydrate: &Rehydration{SourceRunID: sourceRunID}}, doc,
 		func(_ context.Context, n *NodeRun, out json.RawMessage) []expansion {
 			regenerated = out
-			return []expansion{{closure: testGenerator, nodes: []nodeproto.PlanNode{{ID: "test-a", Deps: deps(n.Plan.ID)}}}}
+			return []expansion{{closure: testGenerator, nodes: []nodeproto.JobSpec{{ID: "test-a", Needs: deps(n.Plan.ID), Steps: []nodeproto.StepSpec{{ID: "body"}}}}}}
 		})
 	if res.Status != "success" || f.ran("targets") || !f.ran("test-a") || !f.ran("summary") {
 		t.Fatalf("status %s ran %v: the copied generator's node must be generated again and run", res.Status, f.calls)
@@ -162,8 +161,7 @@ func TestARetryWithoutAnEvalProcessRunsAGeneratorAgain(t *testing.T) {
 	st := openStore(t)
 	sourceRun(t, st, map[string]string{"targets": "success", "lint": "success", "summary": "cancelled", "test-a": "failed"})
 	doc := fanOutDoc()
-	doc.Pipeline = "p"
-	f := &fakeExec{bodies: map[string]Executor{"targets": generates(nodeproto.PlanNode{ID: "test-a", Deps: deps("targets")})}}
+	f := &fakeExec{bodies: map[string]Executor{"targets": generates(nodeproto.JobSpec{ID: "test-a", Needs: deps("targets"), Steps: []nodeproto.StepSpec{{ID: "body"}}})}}
 	res := scheduled(t, st, Config{Execute: f.run, Rehydrate: &Rehydration{SourceRunID: sourceRunID}}, doc, nil)
 	if res.Status != "success" || !f.ran("targets") || !f.ran("test-a") {
 		t.Fatalf("status %s ran %v", res.Status, f.calls)
@@ -174,8 +172,7 @@ func TestAnAutomaticRetryRunsTheWaiterOfAGeneratorItRuns(t *testing.T) {
 	st := openStore(t)
 	sourceRun(t, st, map[string]string{"targets": "failed", "lint": "success", "summary": "cancelled"})
 	doc := fanOutDoc()
-	doc.Pipeline = "p"
-	f := &fakeExec{bodies: map[string]Executor{"targets": generates(nodeproto.PlanNode{ID: "test-a", Deps: deps("targets")})}}
+	f := &fakeExec{bodies: map[string]Executor{"targets": generates(nodeproto.JobSpec{ID: "test-a", Needs: deps("targets"), Steps: []nodeproto.StepSpec{{ID: "body"}}})}}
 	res := scheduled(t, st, Config{Execute: f.run, Rehydrate: &Rehydration{SourceRunID: sourceRunID, Causes: []string{"targets"}}}, doc, nil)
 	if res.Status != "success" || !f.ran("summary") || f.ran("lint") {
 		t.Fatalf("status %s ran %v: summary waits on the rerun generator's nodes, so it runs; lint copies", res.Status, f.calls)

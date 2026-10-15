@@ -1,8 +1,4 @@
-// Package sdkserve is the Go SDK's side of the node protocol
-// (docs/node-protocol.md): a pipeline binary started with
-// --sw-node-protocol reads requests from the host's request pipe, runs the
-// pipeline code they name, and writes replies and log records to the frame
-// pipe. stdout and stderr stay with pipeline code.
+// Package sdkserve serves the SDK protocol without importing author or engine implementations.
 package sdkserve
 
 import (
@@ -13,217 +9,307 @@ import (
 	"io"
 	"os"
 	"sync"
-	"sync/atomic"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeclient"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Config is what the serving loop needs from the engine packages that link
-// it, which sdkserve cannot import without a cycle.
+// Config supplies the SDK operations and identity for one serving process.
 type Config struct {
-	// SDKVersion is the Go SDK's module version, sent in describe so a
-	// refusal can name the SDK to upgrade. Empty leaves sdk out.
 	SDKVersion string
-	// PlanDoc turns a built plan into the plan document the plan request
-	// answers with.
-	PlanDoc func(*sparkwing.Plan, sparkwing.RunContext, *sparkwing.Registration) (nodeproto.PlanDocOld, error)
-	// Node reaches the host's /node/v1 routes; nil leaves secrets, other
-	// nodes' outputs, OIDC and child runs unreachable. Main sets it from what
-	// protofd read at initialization.
-	Node *nodeclient.Client
+	Operations Operations
 }
 
-// Main serves the protocol on the inherited pipes until the host closes the
-// request pipe, and returns the process exit status.
+// Main serves the inherited private pipes and returns the process exit code.
 func Main(cfg Config) int {
-	req, frames, err := protofd.Pipes()
+	in, out, err := protofd.Pipes()
 	if err == nil {
-		// safety: no command this process starts may read a handle list that
-		// names handles it does not hold.
-		err = os.Unsetenv(protofd.HandlesEnv)
-	}
-	if err == nil {
-		cfg.Node, err = nodeclient.FromProcess()
+		err = Serve(context.Background(), in, out, cfg)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "sw-node-protocol:", err)
-		return 2
-	}
-	// safety: bound before any pipeline code runs, so cleanup.Register never
-	// falls back to the session ledger in this process.
-	nodeclient.Bind(cfg.Node)
-	if err := Serve(context.Background(), req, frames, cfg); err != nil {
 		fmt.Fprintln(os.Stderr, "sw-node-protocol:", err)
 		return 1
 	}
 	return 0
 }
 
-// Planned is the state a plan request leaves behind for the requests that
-// follow it in the same process.
-type Planned struct {
-	Registration *sparkwing.Registration
-	Plan         *sparkwing.Plan
-	Run          sparkwing.RunContext
-	Doc          nodeproto.PlanDocOld
-}
-
 type server struct {
-	cfg    Config
-	frames *nodeproto.Writer
-	// safety: holds every secret value this process was handed, so records
-	// written here rather than sent to the host, such as a step command's
-	// session ledger line, are masked as the host masks what it stores.
-	masker *secrets.Masker
-	// safety: set at end of input, after which the SDK writes nothing.
-	done atomic.Bool
-
-	mu       sync.Mutex
-	planSeen bool
-	planned  *Planned
-	// safety: keyed by node and step, since the host never has one step in
-	// flight twice in a process.
-	steps map[[2]string]context.CancelFunc
+	cfg        Config
+	out        io.Writer
+	writeMu    sync.Mutex
+	writeErr   error
+	hello      *nodeproto.Request
+	planned    any
+	planSeen   bool
+	run        nodeproto.RunContext
+	stop       context.CancelFunc
+	closeInput func()
+	ids        map[string]bool
+	steps      map[[2]string]context.CancelFunc
+	active     map[string]*activeRequest
+	mu         sync.Mutex
+	workers    sync.WaitGroup
 }
 
-type handler struct {
-	needsPlan bool
-	run       func(ctx context.Context, s *server, req nodeproto.RequestOld) (any, error)
+type activeRequest struct {
+	job, step string
+	stop      context.CancelFunc
+	done      chan struct{}
 }
 
-// safety: an op absent from this table answers unknown_op, so a stub needs no
-// entry.
-var handlers = map[nodeproto.OpOld]handler{
-	nodeproto.OpDescribeOld: {run: describe},
-	nodeproto.OpPlanOld:     {run: plan},
-	nodeproto.OpRunNodeOld:  {needsPlan: true, run: runNode},
-	nodeproto.OpRunStepOld:  {needsPlan: true, run: runStep},
-	nodeproto.OpEvalOld:     {needsPlan: true, run: eval},
-	nodeproto.OpCancelOld:   {run: cancelStep},
-}
-
-// Serve answers each request read from in with a reply on out until in ends.
-// Requests run concurrently, since the host may have several eval and
-// run_step requests in flight. End of input cancels any request still
-// running and returns nil without writing anything further.
+// Serve negotiates once and joins every request when its input closes.
 func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
+	if cfg.Operations == nil {
+		cfg.Operations = DefaultOperations
+	}
+	if cfg.Operations == nil {
+		return fmt.Errorf("SDK operations unavailable")
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	s := &server{cfg: cfg, frames: nodeproto.NewWriter(out), masker: secrets.NewMasker(), steps: map[[2]string]context.CancelFunc{}}
-	r := nodeproto.NewReader(in)
+	s := &server{cfg: cfg, out: out, ids: map[string]bool{}, steps: map[[2]string]context.CancelFunc{}, active: map[string]*activeRequest{}, stop: cancel, closeInput: func() {}}
+	if closer, ok := in.(io.Closer); ok {
+		s.closeInput = func() { _ = closer.Close() }
+	}
+	stopClose := context.AfterFunc(ctx, s.closeInput)
+	defer stopClose()
+	reader := nodeproto.NewReader(in)
+	var readErr error
 	for {
-		req, err := r.NextRequest()
-		switch {
-		case errors.Is(err, io.EOF):
-			s.done.Store(true)
-			return nil
-		case req.ID == "" && err != nil:
+		req, err := reader.NextRequest()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if req.ID == "" && err != nil {
+			readErr = err
+			break
+		}
+		if req.ID == "" {
+			cancel()
+			s.workers.Wait()
 			return fmt.Errorf("unanswerable request: %w", err)
-		case err != nil:
+		}
+		if s.ids[req.ID] {
+			cancel()
+			s.workers.Wait()
+			return protocolError("duplicate request ID")
+		}
+		s.ids[req.ID] = true
+		if err != nil {
 			s.reply(req.ID, nil, err)
 			continue
 		}
-		rctx, untrack := s.track(ctx, req)
-		go func() {
-			defer untrack()
-			s.dispatch(rctx, req)
-		}()
-	}
-}
-
-func (s *server) dispatch(ctx context.Context, req nodeproto.RequestOld) {
-	h, ok := handlers[req.Op]
-	switch {
-	case !ok:
-		s.reply(req.ID, nil, &nodeproto.Error{Code: nodeproto.CodeUnknownOp, Message: fmt.Sprintf("this SDK does not implement %s", req.Op)})
-	case h.needsPlan && s.plan() == nil:
-		s.reply(req.ID, nil, &nodeproto.Error{Code: nodeproto.CodeNoPlan, Message: fmt.Sprintf("%s needs a plan earlier in this process", req.Op)})
-	default:
-		result, err := run(ctx, s, h, req)
-		s.reply(req.ID, result, err)
-	}
-}
-
-// safety: a panic in pipeline code fails its request and leaves the process
-// serving, so the host reads a reply rather than sdk_exited.
-func run(ctx context.Context, s *server, h handler, req nodeproto.RequestOld) (result any, err error) {
-	defer func() {
-		if p := recover(); p != nil {
-			perr := &nodeproto.Error{Message: fmt.Sprintf("%s panicked: %v", req.Op, p)}
-			if req.Op == nodeproto.OpPlanOld {
-				perr.Code = nodeproto.CodePlanFailed
-			}
-			result, err = nil, perr
+		if req.Op == nodeproto.OpHello {
+			s.negotiate(req)
+			continue
 		}
-	}()
-	return h.run(ctx, s, req)
-}
-
-func (s *server) plan() *Planned {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.planned
-}
-
-// safety: a result too large for one line still gets a failed reply, so the
-// host never waits on an id the SDK dropped.
-func (s *server) reply(id string, result any, err error) {
-	if err == nil {
-		var raw []byte
-		if raw, err = json.Marshal(result); err == nil {
-			if err = s.send(nodeproto.ReplyOld{ID: id, OK: true, Result: raw}); err == nil {
-				return
-			}
+		if s.hello == nil {
+			s.reply(req.ID, nil, protocolError("hello must be first"))
+			continue
+		}
+		switch req.Op {
+		case nodeproto.OpDescribe:
+			run := s.run
+			s.workers.Add(1)
+			go func() {
+				defer s.workers.Done()
+				result, err := s.execute(ctx, req, run)
+				s.reply(req.ID, result, err)
+			}()
+		case nodeproto.OpPlan:
+			result, err := s.execute(ctx, req, s.run)
+			s.reply(req.ID, result, err)
+		case nodeproto.OpCancel:
+			s.cancelRequest(req)
+		default:
+			s.start(ctx, req)
 		}
 	}
-	var perr *nodeproto.Error
-	if !errors.As(err, &perr) {
-		perr = &nodeproto.Error{Message: err.Error()}
+	if ctx.Err() != nil {
+		readErr = ctx.Err()
 	}
-	if err := s.send(nodeproto.ReplyOld{ID: id, Error: perr}); err != nil {
-		// safety: the host waits on every reply, so a frame pipe that takes
-		// none ends the process; the read loop sits in a pipe read no cancel
-		// reaches.
-		fmt.Fprintln(os.Stderr, "sw-node-protocol: write frame:", err)
-		os.Exit(1) //nolint:forbidigo // the process cannot answer, and only its exit tells the host
+	cancel()
+	s.workers.Wait()
+	if s.writeErr != nil {
+		return s.writeErr
 	}
+	return readErr
 }
 
-func (s *server) send(v any) error {
-	if s.done.Load() {
-		return nil
-	}
-	return s.frames.Send(v)
-}
-
-// safety: plan code logs to the frame pipe, the only channel the host reads
-// records from; stdout is the customer's text.
-type frameLogger struct{ s *server }
-
-func (l frameLogger) Log(level, msg string) {
-	l.Emit(sparkwing.LogRecord{TS: time.Now(), Level: level, Msg: msg})
-}
-
-// safety: the host writes step and fail-fast records from what it drives, so
-// the ones RunWork emits inside a run_node would duplicate or contradict them.
-var hostEvents = map[string]bool{
-	sparkwing.EventStepStart:    true,
-	sparkwing.EventStepEnd:      true,
-	sparkwing.EventStepSkipped:  true,
-	sparkwing.EventWorkFailFast: true,
-}
-
-func (l frameLogger) Emit(rec sparkwing.LogRecord) {
-	if hostEvents[rec.Event] {
+func (s *server) start(ctx context.Context, req nodeproto.Request) {
+	if s.planned == nil {
+		s.reply(req.ID, nil, &apierr.Error{Code: apierr.NoPlan, Message: "plan is required before execution"})
 		return
 	}
-	if rec.TS.IsZero() {
-		rec.TS = time.Now()
+	if s.hello.Binding == nil || (req.Op == nodeproto.OpRunStep && s.hello.Binding.JobID != req.Job) {
+		s.reply(req.ID, nil, protocolError("request does not match the process job binding"))
+		return
 	}
-	_ = l.s.send(rec) //nolint:errcheck // a frame pipe that breaks fails the next reply instead
+	if req.Op == nodeproto.OpEval {
+		req.Job = s.hello.Binding.JobID
+	}
+	key := [2]string{req.Job, req.Step}
+	if req.Op == nodeproto.OpRunStep {
+		s.mu.Lock()
+		_, running := s.steps[key]
+		s.mu.Unlock()
+		if running {
+			s.reply(req.ID, nil, protocolError("step already running"))
+			return
+		}
+	}
+	if prepare, ok := s.cfg.Operations.(interface {
+		Prepare(any, nodeproto.Request) error
+	}); ok {
+		if err := prepare.Prepare(s.planned, req); err != nil {
+			s.reply(req.ID, nil, err)
+			return
+		}
+	}
+	ctx, stop := context.WithCancel(ctx)
+	active := &activeRequest{job: req.Job, step: req.Step, stop: stop, done: make(chan struct{})}
+	s.mu.Lock()
+	s.active[req.ID] = active
+	s.mu.Unlock()
+	if req.Op == nodeproto.OpRunStep {
+		s.mu.Lock()
+		s.steps[key] = stop
+		s.mu.Unlock()
+	}
+	s.workers.Add(1)
+	run := s.run
+	go func() {
+		defer s.workers.Done()
+		defer stop()
+		result, err := s.execute(ctx, req, run)
+		s.mu.Lock()
+		delete(s.steps, key)
+		s.mu.Unlock()
+		s.reply(req.ID, result, err)
+		s.mu.Lock()
+		delete(s.active, req.ID)
+		close(active.done)
+		s.mu.Unlock()
+	}()
+}
+
+func (s *server) cancelRequest(req nodeproto.Request) {
+	if req.Job != "" && (s.hello.Binding == nil || req.Job != s.hello.Binding.JobID) {
+		s.reply(req.ID, nil, protocolError("cancel does not match the process job binding"))
+		return
+	}
+	s.mu.Lock()
+	selected := []*activeRequest{}
+	for id, work := range s.active {
+		if req.Target == id || req.Target == "" && req.Job == work.job && (req.Step == "" || req.Step == work.step) {
+			selected = append(selected, work)
+		}
+	}
+	s.mu.Unlock()
+	for _, work := range selected {
+		work.stop()
+	}
+	s.workers.Add(1)
+	go func() {
+		defer s.workers.Done()
+		for _, work := range selected {
+			<-work.done
+		}
+		s.reply(req.ID, struct{}{}, nil)
+	}()
+}
+
+func protocolError(message string) error {
+	return &apierr.Error{Code: apierr.ProtocolError, Message: message}
+}
+
+func (s *server) negotiate(req nodeproto.Request) {
+	if s.hello != nil {
+		s.reply(req.ID, nil, protocolError("hello is allowed once"))
+		return
+	}
+	if req.Protocol != nodeproto.Version {
+		s.reply(req.ID, nil, &apierr.Error{Code: apierr.ProtocolMismatch, Message: "unsupported SDK protocol", Hint: "rebuild the pipeline with its matching engine", Details: map[string]any{"supported": []int{nodeproto.Version}}})
+		return
+	}
+	s.hello = &req
+	s.reply(req.ID, nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: s.cfg.SDKVersion}, Features: []string{}}, nil)
+}
+
+func (s *server) execute(ctx context.Context, req nodeproto.Request, rc nodeproto.RunContext) (result any, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = &apierr.Error{Code: apierr.SDKError, Message: fmt.Sprint(p)}
+		}
+	}()
+	if req.Run != nil {
+		rc = *req.Run
+	}
+	services := &routeServices{ctx: ctx, binding: s.hello.Binding, emit: s.emit}
+	if req.Op == nodeproto.OpPlan || req.Op == nodeproto.OpDescribe {
+		services.binding = nil
+	}
+	ctx = s.cfg.Operations.Context(ctx, rc, *s.hello.Runner, services)
+	switch req.Op {
+	case nodeproto.OpDescribe:
+		result, err = s.cfg.Operations.Describe(ctx)
+	case nodeproto.OpPlan:
+		if s.planSeen {
+			err = protocolError("plan is allowed once")
+			return result, err
+		}
+		s.planSeen = true
+		s.run = rc
+		s.planned, result, err = s.cfg.Operations.Plan(ctx, req.Pipeline, req.Args, rc)
+	case nodeproto.OpRunStep, nodeproto.OpEval:
+		if req.Op == nodeproto.OpRunStep {
+			result, err = s.cfg.Operations.RunStep(ctx, s.planned, req)
+		} else {
+			result, err = s.cfg.Operations.Eval(ctx, s.planned, req)
+		}
+	default:
+		err = &apierr.Error{Code: apierr.UnknownOp, Message: "unsupported operation"}
+	}
+	return result, err
+}
+
+func (s *server) reply(id string, result any, err error) {
+	r := nodeproto.Reply{ID: id, OK: err == nil}
+	if err == nil {
+		r.Result, err = json.Marshal(result)
+	}
+	if err != nil {
+		r.OK = false
+		r.Result = nil
+		if !errors.As(err, &r.Error) {
+			r.Error = &apierr.Error{Code: apierr.SDKError, Message: err.Error()}
+		}
+	}
+	s.send(r)
+}
+func (s *server) emit(rec nodeproto.FrameLog) { s.send(rec) }
+func (s *server) send(value any) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if s.writeErr != nil {
+		return
+	}
+	raw, err := json.Marshal(value)
+	if err == nil && len(raw)+1 > nodeproto.MaxLineBytes {
+		err = fmt.Errorf("protocol frame exceeds output limit")
+	}
+	if err == nil {
+		var n int
+		raw = append(raw, '\n')
+		n, err = s.out.Write(raw)
+		if err == nil && n != len(raw) {
+			err = io.ErrShortWrite
+		}
+	}
+	s.writeErr = err
+	if err != nil {
+		s.stop()
+		s.closeInput()
+	}
 }

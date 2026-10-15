@@ -28,7 +28,8 @@ func TestAnAwaitHoldsTheNoProgressTimeout(t *testing.T) {
 		answer(http.StatusOK, map[string]string{"status": "success"})(w, r)
 	})
 	claim := claimFor(t, c.fakeController)
-	plan := nodeproto.PlanNode{ID: "deploy", Modifiers: &nodeproto.PlanModifiers{NoProgressTimeoutMS: 1000}}
+	timeoutMS := int64(1000)
+	plan := nodeproto.JobSpec{ID: "deploy", NoProgressTimeoutMS: &timeoutMS}
 
 	awaiting := func(ctx context.Context, n *nodehost.NodeRun) nodehost.Result {
 		node := nodeWithClaim("deploy", claim)

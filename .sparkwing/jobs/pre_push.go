@@ -45,7 +45,7 @@ func (PrePush) Examples() []sparkwing.Example {
 func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	plan.Resources(sparkwing.Cores(float64(prePushReservationCores(runtime.NumCPU()))))
 	plan.Priority(hookTierPriority)
-	sparkwing.Job(plan, rc.Pipeline, p)
+	sparkwing.Job(plan, rc.Pipeline, p).Cache(lintCache())
 	return nil
 }
 
@@ -56,7 +56,7 @@ func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 // FailFast still stops the first failure. The budget step enforces the one-minute
 // hard limit; run timings measure the separate ten-second warm-cache target.
 func (p *PrePush) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.ParallelFailures(sparkwing.FailFast)
+	w.FailurePolicy(sparkwing.FailFast)
 	budget := newTierBudget("pre-push", prePushBudget).over(pushRangeScope)
 	budget.step(w, "changelog", checkChangelogRequired)
 	budget.step(w, "api-spec", checkAPISpec)
