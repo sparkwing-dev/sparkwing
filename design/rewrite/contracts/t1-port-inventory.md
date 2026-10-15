@@ -1055,3 +1055,15 @@ The late-reply fixture replies after request-pipe shutdown and checks that
 cancellation prevents successful settlement. Concurrent work uses distinct
 jobs because duplicate live job/step requests are refused. This ports transport
 evidence and does not establish native placement composition.
+
+## W3 remote semaphore continuation
+
+[The remote semaphore continuation](../w3-remote-semaphore-progress.md) removes
+the unused Run.Add and Config.Execute surfaces and their unused test fixtures.
+The previously ported native scheduling tests retain their assertions.
+The parent-admission property now exercises local and remote jobs. Native
+dispatch tests use real tenant claims and transitions with the existing fake
+admission daemon. They check run/box lease retention for fresh, ready and held
+jobs, absence of local compute reservations, cancellation intent and holder
+drain before release. A generated-input property refuses foreign or regressed
+remote job snapshots. No acceptance cell is added or activated.

@@ -2,6 +2,9 @@ package nodehost
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func releaseRemote(t *testing.T, f *storeHostFixture, node string) {
@@ -140,4 +144,181 @@ func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
 	if err != nil || dependent.Outcome != store.NodeCancelled || dependent.Attempt != 0 {
 		t.Fatalf("dependent = %+v, error %v", dependent, err)
 	}
+}
+
+func TestDispatchRetainsLocalSemaphoresUntilRemoteCompletion(t *testing.T) {
+	for _, scope := range []string{"run", "box"} {
+		for _, mode := range []string{"fresh", "ready", "claimed"} {
+			t.Run(scope+"/"+mode, func(t *testing.T) {
+				plan := remotePlan()
+				for i := range plan.Jobs {
+					plan.Jobs[i].Concurrency = []nodeproto.ConcurrencySpec{{Group: "db", Scope: new(scope)}}
+					plan.Jobs[i].Resources = &nodeproto.ResourceSpec{Cores: new(8.0), MemoryBytes: new(int64(8 << 30))}
+				}
+				f := newStoreHostFixture(t, plan)
+				claims := map[string]NodeInput{}
+				if mode != "fresh" {
+					releaseRemote(t, f, "build")
+				}
+				if mode == "claimed" {
+					_, claims["build"] = claimRemote(t, f, "build")
+				}
+				f.Host.Local = func(store.NodeRow) bool { return false }
+				d := newFakeDaemon()
+				d.hostGate = make(chan struct{})
+				configureNativeAdmission(&f.Host, &LocalAdmission{Daemon: d, BoxID: testBox}, &StoreAdmission{Store: f.Tenant, Owner: f.Actor})
+				d.admitted = make(chan wingwire.AdmissionRequest, 3)
+				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+				done := make(chan error, 1)
+				joined := make(chan struct{})
+				go func() {
+					defer close(joined)
+					completion, err := f.Host.Run(ctx, f.Input)
+					if err == nil && completion.Outcome != "success" {
+						err = fmt.Errorf("completion=%+v", completion)
+					}
+					done <- err
+				}()
+				defer func() { cancel(); <-joined }()
+				for _, id := range []string{"build", "test"} {
+					select {
+					case request := <-d.admitted:
+						if request.RunID == f.Input.RunID {
+							request = <-d.admitted
+						}
+						if request.RunID != wingwire.NodeSemaphoreParticipant(f.Input.RunID, id) {
+							t.Fatalf("unexpected remote admission: %+v", request)
+						}
+					case err := <-done:
+						t.Fatalf("host returned before remote admission: %v", err)
+					case <-ctx.Done():
+						t.Fatal(context.Cause(ctx))
+					}
+					for {
+						snapshot, err := f.Tenant.ReadSnapshot(ctx, f.Input.RunID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						row, ok := ownerNode(snapshot, id)
+						if ok && row.ReadyAt != nil {
+							break
+						}
+						if err := f.Host.Wait(ctx, snapshot); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if live, _, _ := d.counts(); live != 2 {
+						t.Fatalf("ready remote job lost its semaphore: leases=%d", live)
+					}
+					input, claimed := claims[id]
+					if !claimed {
+						_, input = claimRemote(t, f, id)
+					}
+					if err := f.report(ctx, input, store.NodeSuccess); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+				if live, granted, released := d.counts(); live != 0 || granted != 3 || released != 3 {
+					t.Fatalf("leases=%d/%d/%d", live, granted, released)
+				}
+				requests := d.requests()
+				for _, req := range requests[1:] {
+					if !req.SemaphoresOnly || req.Resources != (wingwire.HostResources{}) || !req.SubLease || req.OwnerRunID != f.Input.RunID || req.OwnerLeaseToken != "lease-"+f.Input.RunID || len(req.Semaphores) != 1 || req.Semaphores[0].Name != scopedConcurrencyKey("db", scope, f.Input.RunID, testBox) {
+						t.Fatalf("remote work reserved local resources or lost its binding: %+v", req)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestDispatchAdmissionEvictionDrainsTheRemoteHolder(t *testing.T) {
+	plan := remotePlan()
+	plan.Jobs = plan.Jobs[:1]
+	plan.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "db", Scope: new("box"), OnLimit: new("cancel_others")}}
+	f := newStoreHostFixture(t, plan)
+	f.Host.Local = func(store.NodeRow) bool { return false }
+	d := newFakeDaemon()
+	configureNativeAdmission(&f.Host, &LocalAdmission{Daemon: d, BoxID: testBox}, &StoreAdmission{Store: f.Tenant, Owner: f.Actor})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	done := make(chan error, 1)
+	joined := make(chan struct{})
+	go func() {
+		defer close(joined)
+		_, err := f.Host.Run(ctx, f.Input)
+		done <- err
+	}()
+	defer func() { cancel(); <-joined }()
+	for {
+		snapshot, err := f.Tenant.ReadSnapshot(ctx, f.Input.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if row, _ := ownerNode(snapshot, "build"); row.ReadyAt != nil {
+			break
+		}
+		if err := f.Host.Wait(ctx, snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, input := claimRemote(t, f, "build")
+	d.mu.Lock()
+	held := d.leases[wingwire.NodeSemaphoreParticipant(f.Input.RunID, "build")]
+	d.mu.Unlock()
+	held.evict <- wingwire.Evicted{Key: "db", SupersededBy: "newer"}
+	for {
+		snapshot, err := f.Tenant.ReadSnapshot(ctx, f.Input.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		row, _ := ownerNode(snapshot, "build")
+		if row.CancelRequestedAt != nil {
+			if row.Status == store.StatusDone || row.ClaimedBy != input.Authority.Holder || row.Generation != input.Generation {
+				t.Fatal("eviction replaced the holder's result authority")
+			}
+			break
+		}
+		if err := f.Host.Wait(ctx, snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if live, _, _ := d.counts(); live != 2 {
+		t.Fatal("eviction released capacity before the remote holder drained")
+	}
+	if err := f.report(ctx, input, store.NodeCancelled); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err == nil || !strings.Contains(err.Error(), "newer") {
+		t.Fatalf("eviction lost its cause: %v", err)
+	}
+	if live, granted, released := d.counts(); live != 0 || granted != released {
+		t.Fatalf("leases=%d/%d/%d", live, granted, released)
+	}
+}
+
+func FuzzRemoteAdmissionPreservesJobIdentity(f *testing.F) {
+	f.Add("run", "job", "spec", int64(3), int64(4), true)
+	f.Add("foreign", "job", "spec", int64(3), int64(4), true)
+	f.Add("run", "job", "spec", int64(2), int64(4), true)
+	f.Add("run", "job", "spec", int64(3), int64(3), true)
+	f.Add("run", "job", "spec", int64(3), int64(4), false)
+	f.Fuzz(func(t *testing.T, run, job, hash string, generation, sequence int64, terminal bool) {
+		before := store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, SpecHash: "spec", Generation: 3, StateSeq: 4}
+		row := store.NodeRow{Ref: store.NodeRef{RunID: run, NodeID: job}, SpecHash: hash, Generation: generation, StateSeq: sequence, Status: store.StatusPending}
+		if terminal {
+			row.Status, row.Outcome = store.StatusDone, store.NodeSuccess
+		}
+		s := &scriptedHostStore{readSnapshot: func(context.Context, string) (store.RunSnapshot, error) {
+			return store.RunSnapshot{Run: store.RunRow{ID: run}, Nodes: []store.NodeRow{row}}, nil
+		}}
+		host := OwnerHost{Store: s, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("not terminal") }}
+		err := host.followRemote(t.Context(), t.Context(), store.Actor{}, before)
+		valid := run == before.Ref.RunID && job == before.Ref.NodeID && hash == before.SpecHash && generation >= before.Generation && sequence >= before.StateSeq && terminal
+		if (err == nil) != valid {
+			t.Fatalf("foreign, regressed or unfinished job settled: valid=%v error=%v", valid, err)
+		}
+	})
 }

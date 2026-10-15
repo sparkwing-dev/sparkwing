@@ -58,6 +58,10 @@ func (a *LocalAdmission) Run(ctx context.Context, accepted AcceptedRun, body fun
 
 // Node admits an unclaimed local job before release and holds its lease through cleanup.
 func (a *LocalAdmission) Node(ctx context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
+	return a.node(ctx, accepted, row, true, body)
+}
+
+func (a *LocalAdmission) node(ctx context.Context, accepted AcceptedRun, row store.NodeRow, local bool, body func(context.Context) error) error {
 	if err := context.Cause(ctx); err != nil {
 		return err
 	}
@@ -73,18 +77,19 @@ func (a *LocalAdmission) Node(ctx context.Context, accepted AcceptedRun, row sto
 	if err != nil {
 		return err
 	}
-	if parent.resources && len(claims) == 0 {
+	semaphoresOnly := parent.resources || !local
+	if semaphoresOnly && len(claims) == 0 {
 		return body(ctx)
 	}
 	options := spec.Resolved.Settings.Options
 	request := wingwire.AdmissionRequest{
 		OwnerRunID: accepted.RunID, OwnerLeaseToken: parent.token, SubLease: true,
 		DisplayRunID: accepted.RunID + "/" + row.Ref.NodeID, Pipeline: spec.Request.Request.Pipeline,
-		Semaphores: claims, SemaphoresOnly: parent.resources,
+		Semaphores: claims, SemaphoresOnly: semaphoresOnly,
 		Resources: localResources(row.Execution.Resources.Value), Priority: options.Priority.Value,
 		Class: options.AdmissionClass.Value,
 	}
-	if parent.resources {
+	if semaphoresOnly {
 		request.RunID = wingwire.NodeSemaphoreParticipant(accepted.RunID, row.Ref.NodeID)
 		request.Resources = wingwire.HostResources{}
 	} else {

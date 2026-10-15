@@ -20,8 +20,7 @@ const afterRunTimeoutLimit = 2 * time.Minute
 
 // safety: the skip_if closures run in an eval process of their own before the
 // node starts, so a skipped node never gets an attempt, and a closure past its
-// budget dies with that process instead of running beside the body. A custom
-// executor owns the whole node, so without Attempts the layer is off.
+// budget dies with that process instead of running beside the body.
 func skipIfLayer(cfg *Config, next Executor) Executor {
 	if cfg.Attempts == nil {
 		return next

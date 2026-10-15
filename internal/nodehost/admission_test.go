@@ -25,6 +25,7 @@ type fakeDaemon struct {
 	released int
 	hostGate chan struct{}
 	queued   chan string
+	admitted chan wingwire.AdmissionRequest
 }
 
 func newFakeDaemon() *fakeDaemon {
@@ -70,6 +71,9 @@ func (d *fakeDaemon) Acquire(ctx context.Context, req wingwire.AdmissionRequest,
 			d.live++
 			d.granted++
 			d.mu.Unlock()
+			if d.admitted != nil {
+				d.admitted <- req
+			}
 			return l, nil
 		}
 		ch := d.changed

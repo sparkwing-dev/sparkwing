@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -35,14 +36,35 @@ func (hostEnrollment) ResolveClaimProfile(context.Context, capability.Principal)
 
 type hostState struct {
 	*store.Tenant
-	changed chan struct{}
+	mu            sync.Mutex
+	subscriptions map[chan struct{}]bool
 }
 
 func (s *hostState) notify() {
-	select {
-	case s.changed <- struct{}{}:
-	default:
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for changed := range s.subscriptions {
+		select {
+		case changed <- struct{}{}:
+		default:
+		}
 	}
+}
+
+func (s *hostState) subscribe(context.Context, string) (StateSubscription, error) {
+	changed := make(chan struct{}, 1)
+	s.mu.Lock()
+	if s.subscriptions == nil {
+		s.subscriptions = map[chan struct{}]bool{}
+	}
+	s.subscriptions[changed] = true
+	s.mu.Unlock()
+	return StateSubscription{Changed: changed, Close: func() error {
+		s.mu.Lock()
+		delete(s.subscriptions, changed)
+		s.mu.Unlock()
+		return nil
+	}}, nil
 }
 
 func (s *hostState) TransitionNode(ctx context.Context, change store.NodeTransition) (store.Applied, error) {
@@ -139,7 +161,7 @@ func newStoreHostFixtureForRequest(t *testing.T, database *store.Store, plan nod
 	f := &storeHostFixture{Store: database, Tenant: tenant, Actor: actor, Control: store.Actor{Kind: store.ActorOperator, Authority: authority, CapabilityPrefix: root}}
 	f.Accepted = AcceptedRun{RunID: admitted.RunID, Spec: spec, SpecHash: string(accepted.Spec.Hash), Plan: plan, PlanHash: accepted.PlanHash}
 	f.Input = RunInput{RunID: admitted.RunID, Owner: actor, SealedRequest: requestBody, RequestHash: string(admitted.Request.Hash), Accepted: &f.Accepted, GrantedRunner: nodeproto.RunnerIdentity{Name: "host", Type: "agent", Labels: []string{}}}
-	f.State = &hostState{Tenant: tenant, changed: make(chan struct{}, 1)}
+	f.State = &hostState{Tenant: tenant}
 	f.Host = OwnerHost{Store: f.State, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Mask: func(s string) string { return s }, Renew: func(ctx context.Context, actor store.Actor, executing bool) (store.LeaseBeat, error) {
 		return database.RenewUnit(ctx, actor.CapabilityPrefix, executing)
 	}, Acquire: func(context.Context, RunInput) (*source.Entry, error) {
@@ -147,9 +169,7 @@ func newStoreHostFixtureForRequest(t *testing.T, database *store.Store, plan nod
 	}, Local: func(store.NodeRow) bool { return true }, AdoptClaim: func(context.Context, store.ReconciledNode) error { return nil }, Layer: func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 		return OwnerLayerResult{}, nil
 	}}
-	follower := StateFollower{Store: f.State, Subscribe: func(context.Context, string) (StateSubscription, error) {
-		return StateSubscription{Changed: f.State.changed, Close: func() error { return nil }}, nil
-	}}
+	follower := StateFollower{Store: f.State, Subscribe: f.State.subscribe}
 	f.Host.Wait, f.Host.WaitNode = follower.Wait, follower.WaitNode
 	f.Host.Delegator = database
 	return f

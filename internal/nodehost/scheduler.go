@@ -41,11 +41,8 @@ type Config struct {
 	// Artifacts resolves storage under the current job's authenticated binding.
 	// A job that declares artifacts requires this binding before it executes.
 	Artifacts func(context.Context, *NodeRun) (artifacts.Data, error)
-	// Execute runs one attempt of a node. Nil runs it with Attempts, and
-	// fails every node it reaches when Attempts is nil too.
-	Execute  Executor
-	Attempts *Attempts
-	Logger   *slog.Logger
+	Attempts  *Attempts
+	Logger    *slog.Logger
 	// Admission admits each node before it runs; nil admits every node at once.
 	Admission *Admission
 	// Debug holds the run's debug pauses.
@@ -152,10 +149,9 @@ type NodeRun struct {
 type Run struct {
 	validation nodeproto.ValidationContext
 	ID         string
-	// Doc is the accepted plan. Nodes added with [Run.Add] are not in it.
-	Doc      nodeproto.PlanDoc
-	Secrets  []string
-	Requires []string
+	Doc        nodeproto.PlanDoc
+	Secrets    []string
+	Requires   []string
 	// Pipeline, Args and Context are the accepted plan's request; every
 	// later process of the run plans with the same.
 	Pipeline   string
@@ -168,34 +164,9 @@ type Run struct {
 	Logger     *slog.Logger
 	// Masker is the run's; a node's result is masked with it where it is recorded.
 	Masker    *secrets.Masker
-	adds      chan addRequest
 	onlySkips map[string]string
 	// safety: set once, before any node starts, so node goroutines read it unlocked.
 	leaseToken string
-}
-
-type addRequest struct {
-	ctx   context.Context
-	nodes []nodeproto.JobSpec
-	reply chan error
-}
-
-// Add validates nodes against the run's nodes, records their rows and
-// schedules them. Only an executor of a running node of this run may call it.
-func (r *Run) Add(ctx context.Context, nodes ...nodeproto.JobSpec) error {
-	// safety: the reply is buffered so the scheduler never waits on a caller that gave up.
-	req := addRequest{ctx: ctx, nodes: nodes, reply: make(chan error, 1)}
-	select {
-	case r.adds <- req:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	select {
-	case err := <-req.reply:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
 
 // A Layer wraps the executor with one part of a node's envelope, such as
@@ -386,7 +357,7 @@ func newRun(cfg *Config, doc nodeproto.PlanDoc, args, skips map[string]string) *
 	}
 	run := &Run{
 		ID: cfg.Run.RunID, Doc: doc, validation: cfg.Session.Validation, Requires: slices.Clone(cfg.Requires), Pipeline: cfg.Pipeline, Entrypoint: cfg.Entrypoint, Args: args, Context: cfg.Run,
-		StartAt: cfg.StartAt, StopAt: cfg.StopAt, State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest),
+		StartAt: cfg.StartAt, StopAt: cfg.StopAt, State: cfg.State, Logger: cfg.Logger,
 		onlySkips: skips,
 	}
 	if cfg.Attempts != nil {
@@ -413,14 +384,11 @@ func chain(cfg *Config) Executor {
 	if cfg.Dispatch != nil {
 		return dispatchChain(cfg)
 	}
-	exec := cfg.Execute
-	if exec == nil && cfg.Attempts != nil {
-		exec = cfg.Attempts.executor(cfg)
+	exec := func(context.Context, *NodeRun) Result {
+		return Result{Outcome: sparkwing.Failed, Err: errors.New("nodehost: no attempt executor")}
 	}
-	if exec == nil {
-		exec = func(context.Context, *NodeRun) Result {
-			return Result{Outcome: sparkwing.Failed, Err: errors.New("nodehost: no attempt executor")}
-		}
+	if cfg.Attempts != nil {
+		exec = cfg.Attempts.executor(cfg)
 	}
 	inner := exec
 	exec = func(ctx context.Context, n *NodeRun) Result {
@@ -482,13 +450,9 @@ func (s *scheduler) loop(ctx context.Context) {
 			}
 			return
 		}
-		select {
-		case f := <-done:
-			running--
-			s.finish(ctx, f.id, f.res)
-		case req := <-s.run.adds:
-			req.reply <- s.add(ctx, req.ctx, req.nodes, nil)
-		}
+		f := <-done
+		running--
+		s.finish(ctx, f.id, f.res)
 	}
 }
 

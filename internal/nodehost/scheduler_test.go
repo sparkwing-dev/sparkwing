@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -17,10 +16,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const testRunID = "run-sched"
@@ -33,88 +30,6 @@ func openStore(t *testing.T) *store.Store {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	return st
-}
-
-type fakeExec struct {
-	mu     sync.Mutex
-	calls  []string
-	bodies map[string]Executor
-	seen   map[string]*NodeRun
-}
-
-func (f *fakeExec) run(ctx context.Context, n *NodeRun) Result {
-	f.mu.Lock()
-	f.calls = append(f.calls, n.Plan.ID)
-	if f.seen == nil {
-		f.seen = map[string]*NodeRun{}
-	}
-	f.seen[n.Plan.ID] = n
-	body := f.bodies[n.Plan.ID]
-	f.mu.Unlock()
-	if body == nil {
-		return Result{Outcome: sparkwing.Success}
-	}
-	return body(ctx, n)
-}
-
-func (f *fakeExec) ran(id string) bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return slices.Contains(f.calls, id)
-}
-
-func hostDoc(t *testing.T, ctx context.Context, st storage.StateStoreOld, doc nodeproto.PlanDoc, exec Executor) RunResult {
-	t.Helper()
-	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
-		return RunResult{Status: "failed", Err: err}
-	}
-	if err := validateNodes(doc.Jobs, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err != nil {
-		return RunResult{Status: "failed", Err: err}
-	}
-	return hostAccepted(t, ctx, st, doc, exec)
-}
-
-func hostAccepted(t *testing.T, ctx context.Context, st storage.StateStoreOld, doc nodeproto.PlanDoc, exec Executor) RunResult {
-	t.Helper()
-	cfg := Config{Execute: exec}
-	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
-	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
-	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
-	if err := s.add(ctx, ctx, doc.Jobs, nil); err != nil {
-		return RunResult{Status: "failed", Err: err}
-	}
-	s.loop(ctx)
-	res.Order = s.order
-	res.Status, res.Err = s.verdict(ctx)
-	return res
-}
-
-func awaitHostedResult(t *testing.T, ctx context.Context, done <-chan RunResult) RunResult {
-	t.Helper()
-	select {
-	case result := <-done:
-		return result
-	case <-ctx.Done():
-		t.Fatal("host did not finish:", context.Cause(ctx))
-		return RunResult{}
-	}
-}
-
-func nodeRow(t *testing.T, st *store.Store, id string) *store.Node {
-	t.Helper()
-	row, err := st.GetNode(t.Context(), testRunID, id)
-	if err != nil {
-		t.Fatalf("node %s: %v", id, err)
-	}
-	return row
-}
-
-func wantRow(t *testing.T, st *store.Store, id string, outcome sparkwing.Outcome, errHas string) {
-	t.Helper()
-	row := nodeRow(t, st, id)
-	if row.Status != "done" || row.Outcome != string(outcome) || !strings.Contains(row.Error, errHas) {
-		t.Errorf("node %s row status=%q outcome=%q error=%q, want done/%s containing %q", id, row.Status, row.Outcome, row.Error, outcome, errHas)
-	}
 }
 
 func deps(ids ...string) []string { return ids }

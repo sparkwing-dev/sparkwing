@@ -349,11 +349,12 @@ func TestAdmissionLeaseEndings(t *testing.T) {
 }
 
 func FuzzLocalAdmissionParentBinding(f *testing.F) {
-	f.Add("run-sched", "run-sched", "job")
-	f.Add("other:run", "run-sched", "job")
-	f.Add("run-sched", "other:run", "job")
-	f.Add("run-sched", "run-sched", "")
-	f.Fuzz(func(t *testing.T, runID, rowRunID, job string) {
+	f.Add("run-sched", "run-sched", "job", true)
+	f.Add("run-sched", "run-sched", "job", false)
+	f.Add("other:run", "run-sched", "job", false)
+	f.Add("run-sched", "other:run", "job", true)
+	f.Add("run-sched", "run-sched", "", false)
+	f.Fuzz(func(t *testing.T, runID, rowRunID, job string, local bool) {
 		d := newFakeDaemon()
 		admission := LocalAdmission{Daemon: d}
 		parent := localAdmissionSeal(t, localAdmissionOptions())
@@ -364,8 +365,9 @@ func FuzzLocalAdmissionParentBinding(f *testing.F) {
 			accepted.RunID = runID
 			row := localAdmissionRow(job)
 			row.Ref.RunID = rowRunID
+			row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "queue"}}
 			ran := false
-			err := admission.Node(ctx, accepted, row, func(context.Context) error { ran = true; return nil })
+			err := admission.node(ctx, accepted, row, local, func(context.Context) error { ran = true; return nil })
 			valid := runID == testRunID && rowRunID == testRunID && job != ""
 			if ran != valid || (err == nil) != valid {
 				t.Fatalf("run=%q row=%q job=%q ran=%v error=%v", runID, rowRunID, job, ran, err)
@@ -376,7 +378,7 @@ func FuzzLocalAdmissionParentBinding(f *testing.F) {
 			t.Fatal(err)
 		}
 		before := len(d.requests())
-		err = admission.Node(expired, parent, localAdmissionRow("after"), func(context.Context) error { t.Error("body outlived its parent lease"); return nil })
+		err = admission.node(expired, parent, localAdmissionRow("after"), local, func(context.Context) error { t.Error("body outlived its parent lease"); return nil })
 		if !errors.Is(err, context.Canceled) || len(d.requests()) != before {
 			t.Fatal("child admission reused a released parent lease:", err)
 		}

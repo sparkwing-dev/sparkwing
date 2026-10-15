@@ -55,6 +55,7 @@ type OwnerLayerResult struct {
 // trusted adapter that uses RunInput's sealed request and persisted acceptance.
 type OwnerHost struct {
 	bindAdmission func(*OwnerHost, store.Actor)
+	retainRemote  bool
 	Snapshots     CapturedEnvironmentLoader
 	Store         OwnerStore
 	Lease         lease.Keeper

@@ -3,12 +3,14 @@ package nodehost
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func configureNativeAdmission(owner *OwnerHost, local *LocalAdmission, capacity *StoreAdmission) {
+	owner.retainRemote = local != nil
 	owner.bindAdmission = func(bound *OwnerHost, actor store.Actor) {
 		if capacity == nil {
 			return
@@ -50,21 +52,18 @@ func configureNativeAdmission(owner *OwnerHost, local *LocalAdmission, capacity 
 		}
 		work := body
 		isLocal := owner.Local != nil && owner.Local(row)
-		if local != nil && !isLocal {
-			for _, group := range row.Execution.Concurrency {
-				if group.Scope == "run" || group.Scope == "box" {
-					return errors.New("remote work requires a retained local semaphore adapter")
-				}
-			}
-		}
-		if local != nil && isLocal {
-			work = func(ctx context.Context) error { return local.Node(ctx, accepted, row, body) }
+		if local != nil {
+			work = func(ctx context.Context) error { return local.node(ctx, accepted, row, isLocal, body) }
 		}
 		if capacity != nil {
 			return capacity.Node(ctx, accepted, row, work)
 		}
 		return work(ctx)
 	}
+}
+
+func hasLocalConcurrency(groups []runspec.Concurrency) bool {
+	return slices.ContainsFunc(groups, func(group runspec.Concurrency) bool { return group.Scope == "run" || group.Scope == "box" })
 }
 
 func requireCapacity(capacity *StoreAdmission, local *LocalAdmission, groups []runspec.Concurrency) error {

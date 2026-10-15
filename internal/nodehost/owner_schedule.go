@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -122,13 +124,20 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		}
 		// safety: ready work and live holders can predate this owner; neither needs a second release event.
 		for _, row := range snapshot.Nodes {
-			if active[row.Ref.NodeID] || h.Local == nil || !h.Local(row) || row.Status == store.StatusDone {
+			if active[row.Ref.NodeID] || row.Status == store.StatusDone {
+				continue
+			}
+			local := h.Local != nil && h.Local(row)
+			if !local && (!h.retainRemote || !hasLocalConcurrency(row.Execution.Concurrency)) {
 				continue
 			}
 			if row.ReadyAt != nil || row.ClaimedBy != "" {
 				launch(row.Ref.NodeID, func() error {
-					work := func(ctx context.Context) error {
-						return h.execute(ctx, input, accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: store.SourceNone})
+					work := func(workCtx context.Context) error {
+						if !local {
+							return h.followRemote(workCtx, ctx, input.Owner, row)
+						}
+						return h.execute(workCtx, input, accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: store.SourceNone})
 					}
 					if h.Admit != nil {
 						return h.Admit(ctx, accepted, row, work)
@@ -247,6 +256,7 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 		}
 	}
 	local := kind != store.DecisionApproval && h.Local != nil && h.Local(row)
+	parent := ctx
 	work := func(ctx context.Context) error {
 		change := store.NodeTransition{Ref: row.Ref, Actor: input.Owner, To: store.NodeReady, Cause: store.CauseRelease}
 		if kind == store.DecisionApproval {
@@ -259,6 +269,8 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 			if err := next(ctx, request); err != nil {
 				return err
 			}
+		} else if kind != store.DecisionApproval && h.retainRemote && hasLocalConcurrency(row.Execution.Concurrency) {
+			return h.followRemote(ctx, parent, input.Owner, row)
 		}
 		return nil
 	}
@@ -273,6 +285,45 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 		return err
 	}
 	return work(ctx)
+}
+
+func (h *OwnerHost) followRemote(ctx, parent context.Context, actor store.Actor, before store.NodeRow) error {
+	var stopped error
+	for {
+		if cause := context.Cause(ctx); cause != nil {
+			var cancelled *lease.CancelError
+			if stopped != nil || parent.Err() != nil || !errors.As(cause, &cancelled) {
+				return errors.Join(stopped, cause)
+			}
+			stopped = cause
+			_, err := h.Store.TransitionNode(parent, store.NodeTransition{
+				Ref: before.Ref, Actor: actor, To: store.NodeCancelled, Cause: store.CauseCancel,
+				Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "admission_cancelled"}},
+			})
+			if err != nil {
+				return errors.Join(stopped, err)
+			}
+			ctx = parent
+		}
+		snapshot, err := h.Store.ReadSnapshot(ctx, before.Ref.RunID)
+		if err != nil {
+			if ctx.Err() != nil && waitFailure(err, context.Cause(ctx)) == nil {
+				continue
+			}
+			return errors.Join(stopped, err)
+		}
+		row, ok := ownerNode(snapshot, before.Ref.NodeID)
+		if !ok || row.Ref != before.Ref || row.SpecHash != before.SpecHash || row.StateSeq < before.StateSeq || row.Generation < before.Generation {
+			return errors.Join(stopped, errors.New("remote admission lost its persisted job identity"))
+		}
+		if row.Status == store.StatusDone {
+			return stopped
+		}
+		if err := h.Wait(ctx, snapshot); err != nil && (ctx.Err() == nil || waitFailure(err, context.Cause(ctx)) != nil) {
+			return errors.Join(stopped, context.Cause(ctx), err)
+		}
+		before = row
+	}
 }
 
 func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted AcceptedRun, entry *source.Entry, request store.ReconcileRequest) error {
@@ -372,19 +423,24 @@ func (h *OwnerHost) wait(ctx context.Context, snapshot store.RunSnapshot, comple
 	}
 }
 
-func waitFailure(err error) error {
+func waitFailure(err error, ignored ...error) error {
 	if err == nil || err == context.Canceled {
 		return nil
+	}
+	for _, cause := range ignored {
+		if cause != nil && reflect.TypeOf(cause).Comparable() && err == cause {
+			return nil
+		}
 	}
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		var failures []error
 		for _, cause := range joined.Unwrap() {
-			failures = append(failures, waitFailure(cause))
+			failures = append(failures, waitFailure(cause, ignored...))
 		}
 		return errors.Join(failures...)
 	}
 	// safety: the requested stop may wrap cancellation together with an independent subscription failure.
-	if cause := errors.Unwrap(err); cause != nil && waitFailure(cause) == nil {
+	if cause := errors.Unwrap(err); cause != nil && waitFailure(cause, ignored...) == nil {
 		return nil
 	}
 	return err
