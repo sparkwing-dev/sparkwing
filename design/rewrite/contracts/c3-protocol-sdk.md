@@ -68,6 +68,7 @@ are part of this contract.
 | `nodehost.ClaimedNodeHost`, `ClaimStore` | Own source acquisition and renewal around the common executor for an awarded remote job. |
 | `nodehost.ExecutorActivity` | Reports progress and brackets authorized child awaits without extending the execution deadline. |
 | `nodehost.ProtocolSessionConfig`, `ProtocolSession`, `StartProtocolSession` | Launch protocol-v2 SDK processes with private pipes, request correlation, cancellation, log attribution and joined cleanup. |
+| `nodehost.SDKEnvironment`, `ProtocolSessionConfig.Environments` | Project captured host inputs, sealed run facts and persisted job environment through the shared process policy before native SDK startup. |
 | `nodehost.LayerSide` | Distinguishes owner decisions from executor work. |
 | `nodehost.OwnerSide`, `nodehost.ExecutorSide` | Name the two layer owners. |
 | `nodehost.LayerSpec`, `nodehost.LayerTable` | Declare the complete outer-to-inner envelope and retry scope. |
@@ -301,7 +302,7 @@ owner remains live. Lost authority suppresses further SDK calls. Process cleanup
 joins after route revocation and cannot turn a failed attempt into success.
 
 `ProtocolSessionConfig.Start` supplies the native executor process adapter.
-It takes an explicit process environment, a masking log sink, route revocation
+It takes a captured environment policy, a masking log sink, route revocation
 and registered cleanups. It uses the shared request validator and frame decoder.
 Tests inject those functions while their owning area is unimplemented. Wire
 request IDs are private and opaque. A cancelled request joins its SDK work before
@@ -318,6 +319,24 @@ retain revocation errors. A returned process transfers that duty to Close.
 
 The request retains its cancellation cause. Close treats this requested eval
 termination as an expected exit, but still reports revocation and reaping errors.
+
+The native Start, StartEvaluation and StartPlanning methods build their own
+environment through `ProtocolSessionConfig.Environments`. `SDKEnvironment`
+defaults to `procenv.Build` and `procenv.SplitJobEnv`. Planning uses the Plan
+kind and has no job startup assignments. Attempts and owner evaluations read
+the persisted job declaration, including generated jobs absent from the initial
+plan. They check its run, job, generation and spec hash against their input.
+The sealed spec supplies run identity, git facts, origin and DryRun. Granted
+runner identity comes from the award. Only SplitJobEnv's Startup assignments
+reach process startup. The SDK applies Body after a successful replan.
+
+Environment construction errors discard partial output and revoke the delegated
+route before returning. The low-level StartProtocolSession transport still takes
+an explicit Environment. Native adapters always replace that transport input with
+the built result. Native tests launch real SDK fixture processes and verify that
+exact environment. The environment acceptance cell uses store and procenv fakes
+and proves projection and startup refusal. W6 filtering, SDK body application,
+captured-snapshot loading and native placement assembly remain integration work.
 
 `ExecutorDependencies.Bind` and `EvaluationDependencies.Bind` delegate a new
 nodehost route bearer before each process startup. The factory uses authenticated

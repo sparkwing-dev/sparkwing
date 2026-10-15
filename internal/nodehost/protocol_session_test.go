@@ -415,7 +415,7 @@ func TestProtocolSessionChild(t *testing.T) {
 				version++
 			}
 			sdkVersion := "test"
-			if mode == "owner_expand" || mode == "owner_policy" || mode == "planner" || strings.HasPrefix(mode, "claimed_node") {
+			if mode == "owner_expand" || mode == "owner_policy" || mode == "planner" || strings.HasPrefix(mode, "claimed_node") || strings.HasPrefix(mode, "startup_") {
 				sdkVersion = "v1.0.0"
 			}
 			if mode == "planner" && request.Binding != nil {
@@ -434,6 +434,22 @@ func TestProtocolSessionChild(t *testing.T) {
 			continue
 		}
 		switch mode {
+		case "startup_stable", "startup_change":
+			switch request.Op {
+			case nodeproto.OpPlan:
+				job := sdkStartupJob(strings.TrimPrefix(mode, "startup_"))
+				if os.Getenv("SDK_STARTUP") == "change" {
+					job.Steps[0].ID = "changed"
+				}
+				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}})
+			case nodeproto.OpRunStep:
+				send(nodeproto.FrameLog{Message: "body entered"})
+				reply(request, nodeproto.RunResult{Outcome: "success"})
+			default:
+				os.Exit(12)
+			}
+		case "environment":
+			reply(request, os.Environ())
 		case "claimed_node", "claimed_node_hold":
 			switch request.Op {
 			case nodeproto.OpPlan:
@@ -583,7 +599,7 @@ func TestSDKPlanningNativeProcessesMaskStreamsAndReusePlanCache(t *testing.T) {
 	}
 	var sessions []*ProtocolSession
 	cleaned := 0
-	cfg := ProtocolSessionConfig{Environment: []string{"GORACE=atexit_sleep_ms=0"}, ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, RunCleanups: func(context.Context) error { cleaned++; return nil }}
+	cfg := ProtocolSessionConfig{Environments: sdkTestEnvironment(nil), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, RunCleanups: func(context.Context) error { cleaned++; return nil }}
 	p.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
 		process, err := cfg.StartPlanning(ctx, input, log)
 		if process != nil {
@@ -669,7 +685,7 @@ func TestOwnerPolicyNativeSkipTimeoutJoinsAndContinues(t *testing.T) {
 
 func ownerPolicyNativeSkip(t *testing.T, mode string) {
 	t.Helper()
-	in, _, deps, _ := policyFixture(t, func(job *nodeproto.JobSpec) { *job = ownerPolicyJob() })
+	in, st, deps, _ := policyFixture(t, func(job *nodeproto.JobSpec) { *job = ownerPolicyJob() })
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -683,7 +699,7 @@ func ownerPolicyNativeSkip(t *testing.T, mode string) {
 	}
 	var revoked, cleaned int
 	cfg := ProtocolSessionConfig{
-		Environment: []string{"GORACE=atexit_sleep_ms=0"}, ParseFrame: protocolTestCodec,
+		Environments: sdkTestEnvironment(st), ParseFrame: protocolTestCodec,
 		ValidateRequest: func(nodeproto.Request) error { return nil },
 		Log: func(_ context.Context, record nodeproto.FrameLog) error {
 			if record.Message == "slow entered" {
@@ -724,7 +740,7 @@ func ownerPolicyNativeSkip(t *testing.T, mode string) {
 }
 
 func TestOwnerEvaluationNativeProcess(t *testing.T) {
-	in, _, deps, _ := evaluationFixture(t)
+	in, st, deps, _ := evaluationFixture(t)
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -737,7 +753,7 @@ func TestOwnerEvaluationNativeProcess(t *testing.T) {
 		return binding, nil
 	}
 	revoked, cleaned := false, false
-	cfg := ProtocolSessionConfig{Environment: []string{"GORACE=atexit_sleep_ms=0"}, ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Revoke: func() error { revoked = true; return nil }, RunCleanups: func(context.Context) error {
+	cfg := ProtocolSessionConfig{Environments: sdkTestEnvironment(st), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Revoke: func() error { revoked = true; return nil }, RunCleanups: func(context.Context) error {
 		if !revoked {
 			return errors.New("routes still live during cleanup")
 		}

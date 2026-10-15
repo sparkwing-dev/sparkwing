@@ -184,6 +184,29 @@ Neither path removes the user's checkout. `TestMemoFollowerWithNoOutputRunsTheNo
 retains the missing-output miss proof after removal of the unused claimed-memo
 mode. The final storage/reconciliation acceptance cell remains open.
 
+`environment-startup-versus-body/hermetic-native-environment-policy` checks the
+native plan, attempt and eval adapters at the procenv boundary. The fake policy
+receives the captured base and sealed runtime identity. Attempts and evals split
+the persisted job environment before startup. Planning has no job startup values.
+A refused build discards partial environment and revokes the route once.
+`TestNativeSDKStartsUseEnvironmentPolicyAndRevokeFailures` also launches real
+fixture processes and checks their environment. The store and procenv policy
+remain fakes. W6 filtering, actual SDK body environment and placement bootstrap
+are unverified by these cells.
+
+`TestNativeSDKStartupChangeRefusesDriftBeforeBody` executes the common node host
+with real protocol pipes. A stable startup value permits the body. A value that
+changes the fixture's replan records plan_drift before execution and still joins
+route revocation and cleanup. Its store, engine resolver, validator and procenv
+policy are fakes.
+
+`TestSDKEnvironmentProjectsSealedValuesAndPersistedGeneratedJob` checks that
+generated job startup reads persistence rather than the initial plan.
+`TestSDKEnvironmentRefusesMissingOrChangedPersistedIdentity` refuses changed
+run, job, generation, declaration, hash and seal inputs before calling Build.
+The previous launcher run-flag and environment requirements now have this native
+adapter projection proof alongside the planning and source tests above.
+
 ### Complete old credential dimension
 
 | Exact old label | Final fixture and decision |

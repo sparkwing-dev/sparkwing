@@ -17,16 +17,20 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
-// ProtocolSessionConfig launches a protocol-v2 process with an explicitly built
-// environment. Log must mask before storage and return when its context ends.
+// ProtocolSessionConfig launches a protocol-v2 process. Native Start methods
+// build environments through Environments; StartProtocolSession takes the
+// explicit Environment transport input. Log must mask before storage and
+// return when its context ends.
 // Revoke removes route authority before Close joins the process.
 type ProtocolSessionConfig struct {
 	Command         []string
 	Directory       string
 	Environment     []string
+	Environments    SDKEnvironment
 	Log             func(context.Context, nodeproto.FrameLog) error
 	Revoke          func() error
 	RunCleanups     func(context.Context) error
@@ -42,6 +46,11 @@ func (cfg ProtocolSessionConfig) Start(ctx context.Context, input NodeInput, act
 		return nil, cfg.failedStartup(errors.New("SDK process requires a source entry"))
 	}
 	cfg.Command, cfg.Directory, cfg.Activity = input.Entry.Command, input.Entry.Directory, activity
+	env, err := cfg.Environments.job(ctx, procenv.Attempt, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner)
+	if err != nil {
+		return nil, cfg.failedStartup(err)
+	}
+	cfg.Environment = env
 	return cfg.start(ctx)
 }
 
@@ -52,6 +61,11 @@ func (cfg ProtocolSessionConfig) StartEvaluation(ctx context.Context, input Eval
 		return nil, cfg.failedStartup(errors.New("SDK evaluation requires a source entry"))
 	}
 	cfg.Command, cfg.Directory = input.Entry.Command, input.Entry.Directory
+	env, err := cfg.Environments.job(ctx, procenv.Eval, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner)
+	if err != nil {
+		return nil, cfg.failedStartup(err)
+	}
+	cfg.Environment = env
 	return cfg.start(ctx)
 }
 
@@ -62,6 +76,14 @@ func (cfg ProtocolSessionConfig) StartPlanning(ctx context.Context, input Planni
 		return nil, cfg.failedStartup(errors.New("SDK planning requires a source entry and log sink"))
 	}
 	cfg.Command, cfg.Directory, cfg.Log = input.Entry.Command, input.Entry.Directory, log
+	if err := context.Cause(ctx); err != nil {
+		return nil, cfg.failedStartup(err)
+	}
+	env, err := cfg.Environments.planning(input)
+	if err != nil {
+		return nil, cfg.failedStartup(err)
+	}
+	cfg.Environment = env
 	return cfg.start(ctx)
 }
 
