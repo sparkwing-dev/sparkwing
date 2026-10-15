@@ -1,6 +1,10 @@
 package client
 
-import "time"
+import (
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+)
 
 // CreateTokenRequest narrows a member credential's grants and optional expiry.
 type CreateTokenRequest struct {
@@ -33,32 +37,10 @@ type CreateServiceTokenRequest struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
-// TokenSubject identifies the account, machine, service or operator holding a credential.
-type TokenSubject struct {
-	Kind string `json:"kind"`
-	ID   string `json:"id"`
-}
-
-// TokenInfo is public capability metadata returned by the token resource.
-type TokenInfo struct {
-	Prefix         string       `json:"prefix"`
-	Team           string       `json:"team"`
-	Subject        TokenSubject `json:"subject"`
-	Audience       string       `json:"audience"`
-	Grants         []string     `json:"grants"`
-	CreatedBy      string       `json:"created_by"`
-	IssuedAt       time.Time    `json:"issued_at"`
-	ExpiresAt      *time.Time   `json:"expires_at,omitempty"`
-	LastUsedAt     *time.Time   `json:"last_used_at,omitempty"`
-	RevokedAt      *time.Time   `json:"revoked_at,omitempty"`
-	GitCredentials bool         `json:"git_credentials"`
-	Metered        bool         `json:"metered"`
-}
-
 // RotatedToken contains the one-time replacement and the old credential's grace deadline.
 type RotatedToken struct {
-	Capability   string    `json:"capability"`
-	New          TokenInfo `json:"new"`
-	OldPrefix    string    `json:"old_prefix"`
-	OldRevokedAt time.Time `json:"old_revoked_at"`
+	Capability   string              `json:"capability"`
+	New          capability.Metadata `json:"new"`
+	OldPrefix    string              `json:"old_prefix"`
+	OldRevokedAt time.Time           `json:"old_revoked_at"`
 }
