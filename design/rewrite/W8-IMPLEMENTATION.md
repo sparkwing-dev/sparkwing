@@ -1,122 +1,153 @@
 # W8 implementation handoff
 
-W8 is incomplete. The repository builds and the implemented components pass their
-focused checks. Full placement acceptance is still pending. No skipped catalog
-scenario has been represented as a passing native or Cloud run.
+W8 remains incomplete. The implementation behind the runner, engine and launcher
+contracts is exercised with component fixtures. Installed process composition,
+local controller composition and native/Cloud acceptance remain open. The
+acceptance catalog's native cells are still skipped. Component tests do not
+count as native, Windows, Actions or Kubernetes evidence.
 
-## Implemented
+## Completed before this continuation
 
-- `internal/engine` resolves exact Go and npm SDK pins, verifies signed releases
-  and executable metadata, caches verified assets, enforces the signed version
-  index, preserves verified fallback and stages pin upgrades with concurrent-edit
-  checks. Tests cover all six engine platform artifacts without executing foreign
-  binaries. npm lockfiles match the existing npm-only SDK installer.
-- `internal/runners.Loop` claims trigger and node units through one interface,
-  fences concurrent awards by generation, drains held work and joins hosts on
-  cancellation. `ManagedRunner` checks signed policy before claims and during
-  saturation, then drains before a verified software replacement. Native
-  installation remains a supplied interface.
-- The launcher has one builder for plan, eval and work. Every Job uses root,
-  a privileged native DinD sidecar, a readiness probe, a shared scratch volume
-  and a bootstrap Secret. It creates a suspended Job before the Secret, resumes
-  only after successful setup, reconciles after restart and retains cleanup
-  ownership until all containers stop.
-- `KubernetesBoundary` persists exclusive reservations with node resource-version
-  checks and a taint. It requires team dedication, a real network probe and
-  reservation-scoped cleanup. Orphan recovery waits for the original parent
-  expiry and verifies that the Job and its pods are absent.
-- The local lifecycle coordinates readiness, concurrent starts, stay promotion,
-  drain, doctor diagnostics and failed-start cleanup. The daemon accepts all four
-  activity holds. Health probes and idle API connections do not hold it alive.
-  Missing peer identity refuses access. Admission files use private permissions.
+The first session implemented exact engine pin resolution, signed release and
+version-index verification, verified machine caching and staged repository
+upgrades. It added the unified runner loop, managed version policy, the single
+plan/eval/work Job builder, bootstrap Secrets, suspended Job creation,
+reservation reconciliation and teardown ownership. Local lifecycle primitives
+cover readiness, concurrent startup, stay promotion, drain, four activity holds
+and peer-identity refusal.
 
-## Deletions and test ports
+The first session removed 8,144 lines, including 5,444 lines from the old k8s and
+warm-pool dispatchers. Its test port was `TestResolveResources_StaysQuietUnderTheCeiling`
+to `launcher.TestSizingBelowCeiling`. That work is committed on this branch.
 
-The text diff removes 8,144 lines, including replacements. Complete deletion of
-`internal/runners/k8s` and `internal/runners/warmpool` accounts for 5,444 lines.
-The old Job builder, dispatcher factories, trigger-runner flags, chart settings,
-launcher tests and local connection/schema compatibility paths were removed or
-replaced. The chart dependency archive was refreshed.
+## This continuation
 
-`TestResolveResources_StaysQuietUnderTheCeiling` is ported as
-`internal/runners/launcher/launcher_test.go:TestSizingBelowCeiling`. The inventory
-now names that actual path. Local tests replace connection holds with activity
-holds and reverse acceptance of unavailable peer identity and old state schemas.
-Runner review regressions cover reclaimed generations, cleanup errors during
-policy denial, policy refresh at capacity and overflowing CLI memory quantities.
+- Cut the old cluster pool, trigger, source, heartbeat, credential/cache and
+  agent execution paths. `start` and `warm` now parse the final registry and run
+  `ManagedRunner` through `RunnerFactory`. `run-node` and `fetch-source` use
+  `BootstrapHost`. Missing composition returns an error before execution.
+  There are no aliases for `runner`, `agent` or the duplicate `wingd` verb.
+- `runners.Hosting` dispatches trigger awards to `nodehost.RunHost` and job
+  awards to `nodehost.NodeHost`. It confirms the live award, starts the shared
+  keeper before preparation, propagates authority loss, joins renewal before
+  source cleanup and preserves both execution and cleanup failures. Host
+  preparation and keeper execution are tested through fakes of the W3 boundary.
+- The loop honors configured polling, unit kinds and a claim-count drain bound.
+  Here awards must match the selected run. Long polling does not delay idle
+  exit, claim deadlines or signed policy refresh. Error observers cannot hide
+  completed host failures. Completed failures remain visible while required
+  software updates proceed after every host has joined.
+- `NewNativeInstallation` stages verified runner bytes beside the installed
+  executable, preserves its path, symlink and permissions, and checks the staged
+  digest. Unix uses atomic replacement. Windows retains the running image and
+  restores it if publication fails. Refresh failure can be retried without
+  replacing identical bytes again. Existing registration hooks own drain,
+  unit refresh and restart. The verified runner version reaches the refresh
+  hook separately from the installed CLI's identity.
+- The runner chart calls `warm` and `--warm-module`, preserves an explicit
+  trigger-claim opt-out and omits the removed source-cache/proxy arguments and
+  environment. The image calls the runner directly. The `.netrc` seeding script
+  and its Dockerfile caller are deleted. The bundled chart archive was rebuilt.
+- `limits.Renew` and `CheckRenewal` implement their existing declarations.
+  Renewal validation avoids duration multiplication overflow.
 
-## Evidence
+The continuation deletes 33 whole files containing 6,743 lines. Additional
+removed lines replace old helpers, tests and chart configuration. It adds no
+protocol adapter or legacy execution fallback.
 
-All commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, private Go caches and
-scratch. Test parallelism was at most two per command.
+## Evidence from this continuation
 
-- Whole repository `go build -p 4 ./...` passed.
-- `go vet -p 2` passed for cluster, runners, launcher, wingd, engine, releaseasset,
-  limits and acceptance.
-- Full package tests passed for engine, releaseasset, runners, launcher, limits
-  and acceptance. The acceptance package still contains skipped catalog cells.
-- Focused cluster CLI and wingd lifecycle/identity tests passed. Focused runner
-  and wingd race tests passed. Chart tests passed.
-- `TestEngineW8Components`, `TestLocalControllerW8Components`,
-  `TestLauncherCloudPodContract`, `TestLauncherCloudBoundaryRefusal` and
-  `TestLauncherCloudPlanUsesRunBinding` pass with explicit component fixtures.
-- A compile-only check passed for the remaining orchestrator, cluster, wingd
-  client and CLI tests. Full socket/process integration could not run in this
-  sandbox. A wingd socket test failed with `setsockopt: operation not permitted`.
+All Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false` and private caches,
+Go temporary files and test roots under `/tmp/sw-astra-W8/`. Package parallelism
+was at most four for builds and two for tests.
 
-## Remaining work and contract changes needed
+- Whole repository `go build -p 4 ./...` passed. The CLI worker also passed a
+  whole repository build after its final cluster changes.
+- Full `internal/runners`, `internal/limits` and `tests/acceptance` package tests
+  passed. `internal/acceptance` compiles and has no runtime tests.
+- Cluster tests pass with only `TestStartMetricsListener_ServesMetrics` excluded.
+  The attempted full run failed at that test's TCP listen with `socket: operation
+  not permitted`. This is an unexecuted socket proof, not a passing test.
+- Vet passed for cluster, runners, limits and acceptance tests.
+- Focused runner loop/hosting race tests passed. The complete chart suite passed,
+  followed by final-tree checks for direct-source configuration, trigger opt-out
+  and the refreshed vendored chart. The runner image release-contract test passed.
+- Windows/amd64 runners tests cross-compile. Native Windows replacement and
+  service restart remain untested.
+- `TestStartAndWarmExecuteTriggerAndJobOnOneManagedLoop` tests CLI orchestration
+  with verified policy and fake claim/host implementations. Hosting tests cover
+  both host roles, source-preparation failure, cleanup and lost authority.
+- `TestEngineW8IndexFailureComponents` passes invalid-signature, signed malformed
+  content and unavailable-origin cases, each with persistent verified fallback
+  and first-use refusal. Existing W8 component acceptance tests still pass.
+- Two independent review findings were reproduced and fixed: host failures
+  preventing later required updates, and long polling delaying policy/lifecycle
+  deadlines. Their controlled-clock regression tests pass. Focused re-review
+  found both resolved.
 
-1. The old cluster pool/trigger/source/heartbeat paths remain. Wire the unified
-   loop to concrete capability-bound `RunHost`/`NodeHost` implementations, then
-   remove those paths and their old credential/cache transports. The new loop
-   is tested against the claim and host interfaces. It is not the installed
-   runner CLI's execution path yet.
-2. W2/W9 must provide the Cloud award/sync transport, including bootstrap and
-   immutable engine/deadline/source bindings. `RunLaunchCLI` accepts an injected
-   runtime factory. The binary entrypoint reports unavailable until that factory
-   can provide the new controller and verified boundary. It cannot adapt the
-   old env-bearer claim response safely.
-3. W3 must wire source acquisition, accepted engine identity and bootstrap
-   exchange into plan/eval/work entrypoints. W6's `procenv.Build` is required
-   by the native upgrade resolver and remains a stub here. Old orchestrator
-   proxy-inheritance tests need alignment with the shared environment policy.
-4. The actual controller/store/dashboard/local-consumer composition must
-   implement `LocalRuntime`, feed activity counts and reconcile local orphans.
-   W8 added `AwaitReady`, `Status`, `SetStay` and `Drain` to its own runtime port
-   because `Run` alone could not express those lifecycle operations.
-5. W9 must define the Home argument and foreground semantics for installed
-   `dashboard start --stay` and `__tick` units. `ManagedUnitManager` rendering,
-   native runner replacement, schedule refresh and restart remain open. No
-   undeclared command or environment transport was invented.
-6. Cloud deployment must supply actual network probes and node cleanup. Native
-   sidecars and pod-level resources must be enabled. EmptyDir accounting and
-   kubelet eviction provide the shared 20 GiB accounting boundary, not a
-   synchronous write quota. Real Docker, scratch exhaustion, network isolation
-   and teardown acceptance remain unverified.
-7. W9 must connect repository upgrade verification, CLI/run notices and dashboard
-   notices. W7/release publishing must preserve the historical asset matrix
-   when the current cache binary leaves the release set.
+No additional catalog cell was unskipped. No new parked test from the T1 port
+inventory was claimed as ported. Removed source and heartbeat tests exercised
+superseded APIs. Their final behavior belongs to W3 source/keeper acceptance.
 
-The full local lifecycle, dashboard install/update, Cloud DinD, engine-placement
-and runner-update acceptance cells remain open. Native Windows/macOS execution
-was not exercised. Contract changes outside W8 were not made.
+## Remaining integration and contract changes needed
 
-## Shared files
+1. **W3/W9 runner composition.** Bind `RunnerFactory` to the authenticated
+   controller, `Hosting` preparation/renewal callbacks, source acquisition,
+   accepted engine identity, admission and the real keeper. `nodehost.RunHost`,
+   `NodeHost`, `source.Acquire`, `lease.Keeper.Run` and the W9 engine client remain
+   interfaces/stubs in this checkout. `MainWithVersion` has no runtime factory.
+2. **W6 config/environment.** Supply the final `userconfig.ReadConfig` and
+   validation implementation. Native repository upgrade commands still need
+   `procenv.Build`. Factories must consume metrics, warm-module, resource,
+   deadline, admission and owner-credential preferences passed in RunnerOptions.
+3. **W9 claim grammar.** The registry/config declares `trigger-source` and
+   `holder-prefix`, but `ClaimRequest` has neither source selection nor a holder
+   preference. Nonempty values now fail explicitly. Decide the final transport
+   or remove those declarations. Do not reintroduce a legacy claim client.
+4. **W3/W9 Cloud bootstrap.** The W8 builder emits `--unit`, `--attempt`,
+   `--source-job`, `--source-generation` and `--engine`. W9's bootstrap registry
+   omits them and requires `--job` even for plan units. Reconcile that contract
+   before wiring plan/eval/work entrypoints. The source init and execution
+   containers also need a defined handoff for their single-use bootstrap.
+5. **W2/W9 launcher transport.** Implement `CloudControl.Claim/Sync` with immutable
+   award, deadline and bootstrap bindings. Wire `RunLaunchCLI` to that transport
+   and the verified Cloud boundary. Its default factory is absent.
+6. **W8 local runtime/services.** Compose the real local controller, single store
+   owner, dashboard, queue, consumer and orphan reconciliation behind
+   `LocalRuntime`. Implement native managed units once W9 specifies Home and
+   foreground arguments for `dashboard start --stay` and `__tick`. Native runner
+   replacement still needs actual service registration hooks.
+7. **Cloud deployment.** Supply real network probes and reservation-scoped node
+   cleanup, then prove native sidecars, aggregate scratch accounting, Docker
+   execution, network isolation and teardown. These remain deployment proofs.
+8. **W7/W9 follow-through.** Delete remaining cache service chart/templates/docs,
+   preserve historical release matrices, and wire upgrade/policy notices to the
+   actual CLI and dashboard. This continuation removes only runner callers of
+   the old cache transports.
 
-- `internal/limits/deadline.go` and `job_deadline_test.go`: implement the existing
-  deadline contract required by the builder.
-- `internal/releaseasset/version_contract.go`: implement the existing retained
-  release matrix and closed-set verifier required by engine resolution.
-- `internal/orchestrator/pod_node_host.go`: obtain network environment names from
-  the shared registry after deleting the dispatcher package.
-- Deleted `internal/orchestrator/k8s_placement.go`, `k8s_placement_test.go`,
-  `k8s_runner_factory.go`, `k8s_runner_factory_test.go`,
-  `trigger_runner_factory.go` and `warm_runner_factory.go`.
-- `cmd/sparkwing/update_release_workflow_test.go`: use the launcher's binary name.
-- Three `tests/acceptance/*_w8_test.go` component suites and the engine/port-inventory
-  contract documentation.
+## Shared files and mechanisms
 
-No worktree git metadata was written and no Sparkwing binary or pipeline was run. Parallel
-source edits briefly invalidated two compiler file snapshots. Stable reruns passed.
-Generated signing roots were used only inside tests and restored afterward.
-The worker scratch directory is removed after checks.
+The cluster and runners files are W8-owned. Minimal shared prerequisites/callers
+changed in this continuation are:
+
+- `internal/limits/deadline.go` and `internal/limits/renewal_test.go`.
+- `build/Dockerfile.runner` and deleted `build/runner-entrypoint.sh`.
+- `cmd/sparkwing/update_release_workflow_test.go`.
+- `tests/acceptance/engine_w8_test.go`.
+- `charts/render_test.go`.
+- `charts/sparkwing-runner-bundle/templates/runner-deployment.yaml`.
+- `charts/sparkwing-runner-bundle/templates/_helpers.tpl`.
+- `charts/sparkwing-runner-bundle/values.yaml` and `README.md`.
+- `charts/sparkwing-full/charts/sparkwing-runner-bundle-0.1.11.tgz`.
+
+W8-local mechanisms added are the host-preparation/keeper injection boundary,
+CLI runtime factories and native installation callbacks. They connect the
+existing contracts because the owning implementations are unavailable. They do
+not define another protocol or persist credentials. Real integration must wire
+these ports before any installed-runtime acceptance claim.
+
+No git metadata was written. An initial installed `sparkwing info --for-agent`
+orientation call ran before the brief's no-binary instruction was loaded. No
+candidate Sparkwing executable or pipeline ran. The metrics test's socket
+restriction is the remaining sandbox friction. Worker scratch is removed after
+all checks finish.

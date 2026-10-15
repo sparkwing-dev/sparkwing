@@ -16,6 +16,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 )
 
+const agentTokenCredential = "agent-token"
+
 // LauncherFactory binds the shared controller transport and the verified Cloud
 // boundary to the launcher. The bearer remains in the transport, never a Job.
 type LauncherFactory func(context.Context, launcher.CloudJobConfig, string) (*launcher.Launcher, error)

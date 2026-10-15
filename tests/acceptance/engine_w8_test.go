@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 )
 
@@ -22,6 +24,84 @@ type engineTransportW8 struct {
 	body, signature []byte
 	offline         bool
 	calls           int
+}
+
+func TestEngineW8IndexFailureComponents(t *testing.T) {
+	public, key, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := releaseauth.TrustedPublicKeys
+	releaseauth.TrustedPublicKeys = []string{base64.StdEncoding.EncodeToString(public)}
+	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
+	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	published := now.AddDate(0, -9, 0)
+	policy := engine.VersionIndex{Format: 1, PublishedAt: now, Latest: "v0.20.0",
+		Versions: []engine.VersionInfo{
+			{Version: "v0.10.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)},
+			{Version: "v0.20.0", PublishedAt: now.Add(-time.Hour), SupportUntil: now.Add(-time.Hour).AddDate(0, 12, 0)},
+		},
+		Minimum: engine.Restriction{Version: "v0.10.0", Reason: "minimum policy fixture", Security: true, AnnouncedAt: now, EffectiveAt: now},
+		Revoked: []engine.Restriction{{Version: "v0.10.0", Reason: "revocation fixture", Security: true, AnnouncedAt: now, EffectiveAt: now}},
+	}
+	body, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, failure := range []string{"signature", "malformed", "unavailable"} {
+		t.Run(failure, func(t *testing.T) {
+			transport := &engineTransportW8{body: body, signature: ed25519.Sign(key, body)}
+			config := engine.Config{CacheDirectory: t.TempDir(), HTTPClient: &http.Client{Transport: transport}}
+			resolver, err := engine.NewResolver(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			verified, err := resolver.Index(t.Context(), now)
+			if err != nil || !reflect.DeepEqual(verified.Index.Policy(), policy) {
+				t.Fatalf("verified fields: %v, %v", verified, err)
+			}
+			if _, err := resolver.Index(t.Context(), now.Add(limits.VersionIndexRefresh-time.Nanosecond)); err != nil {
+				t.Fatal(err)
+			}
+			if transport.calls != 2 {
+				t.Fatalf("short cache made %d calls", transport.calls)
+			}
+			switch failure {
+			case "signature":
+				transport.signature = []byte("unverified")
+			case "malformed":
+				transport.body = []byte(`{"format":1,"format":1}`)
+				transport.signature = ed25519.Sign(key, transport.body)
+			case "unavailable":
+				transport.offline = true
+			}
+			fallback, err := resolver.Index(t.Context(), now.Add(limits.VersionIndexRefresh))
+			if err != nil || !fallback.Fallback || !reflect.DeepEqual(fallback.Index.Policy(), policy) || transport.calls <= 2 {
+				t.Fatalf("fallback: %+v %v", fallback, err)
+			}
+			restarted, err := engine.NewResolver(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			persisted, err := restarted.Index(t.Context(), now.AddDate(2, 0, 0))
+			if err != nil || !persisted.Fallback || !reflect.DeepEqual(persisted.Index.Policy(), policy) {
+				t.Fatalf("persisted fallback: %+v %v", persisted, err)
+			}
+			if _, err := engine.Evaluate(persisted.Index, "v0.20.0", now.AddDate(2, 0, 0)); err != nil {
+				t.Fatalf("fallback blocked permitted release: %v", err)
+			}
+			config.CacheDirectory = t.TempDir()
+			empty, err := engine.NewResolver(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = empty.Index(t.Context(), now)
+			var problem *apierr.Error
+			if !errors.As(err, &problem) || problem.Code != apierr.Unavailable {
+				t.Fatalf("first use: %v", err)
+			}
+		})
+	}
 }
 
 func (f *engineTransportW8) RoundTrip(request *http.Request) (*http.Response, error) {

@@ -100,6 +100,32 @@ func TestManagedRunnerDrainsHeldWorkBeforeVerifiedReplacement(t *testing.T) {
 	}
 }
 
+func TestManagedRunnerUpdatesAfterCompletedUnitFailure(t *testing.T) {
+	release := runnerReleaseFixture(t)
+	initial, replacement := runnerPolicyFixtures(t)
+	policy := &managedVersionFixture{initial: initial, replacement: replacement, update: engine.SoftwareUpdate{CurrentVersion: "v0.10.0", Version: "v0.20.0", Release: release, Required: true}, started: make(chan struct{}), release: make(chan struct{}), finished: make(chan struct{}), t: t}
+	installation := &installationFixture{}
+	failure := errors.New("source cleanup failed")
+	runner := ManagedRunner{
+		Loop: &Loop{Config: LoopConfig{Version: "v0.10.0", MaxConcurrent: 1}, OnError: func(error) {},
+			Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "private"}}, nil
+			}),
+			Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error {
+				close(policy.started)
+				close(policy.finished)
+				return failure
+			}),
+		}, Versions: policy, Installation: installation, Target: release.Target(),
+	}
+	if err := runner.Run(t.Context()); !errors.Is(err, failure) {
+		t.Fatalf("lost completed failure: %v", err)
+	}
+	if !reflect.DeepEqual(installation.calls, []string{"drain", "replace", "refresh", "restart"}) {
+		t.Fatalf("required update blocked by completed work: %v", installation.calls)
+	}
+}
+
 func runnerPolicyFixtures(t *testing.T) (engine.VerifiedIndex, engine.VerifiedIndex) {
 	t.Helper()
 	public, key, err := ed25519.GenerateKey(nil)

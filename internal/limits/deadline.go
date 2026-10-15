@@ -24,10 +24,15 @@ func ChildContext(ctx context.Context, want, margin time.Duration) (context.Cont
 }
 
 // Renew returns ttl/3; callers validate positive TTLs before constructing a lease keeper.
-func Renew(ttl time.Duration) time.Duration { panic("unimplemented: c4-surface-config") }
+func Renew(ttl time.Duration) time.Duration { return ttl / 3 }
 
 // CheckRenewal refuses nonpositive values or a cadence that cannot renew twice strictly before expiry.
-func CheckRenewal(every, ttl time.Duration) error { panic("unimplemented: c4-surface-config") }
+func CheckRenewal(every, ttl time.Duration) error {
+	if every <= 0 || ttl <= 0 || every >= ttl || every >= ttl-every {
+		return errors.New("lease and renewal interval must be positive, with two renewals strictly before expiry")
+	}
+	return nil
+}
 
 // JobDeadline adds JobSlack to attemptDeadline and caps the result at ownerDeadline. A zero attempt
 // uses the owner's budget; both zero remain unbounded. An already-expired attempt or owner is ErrNoTime.

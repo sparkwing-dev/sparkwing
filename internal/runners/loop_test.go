@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -258,6 +259,11 @@ func TestLoopPreservesHostFailureWhenVersionPolicyAlsoFails(t *testing.T) {
 	checks := 0
 	loop := &Loop{
 		Config: LoopConfig{Version: "v1.2.3", MaxConcurrent: 2},
+		OnError: func(err error) {
+			if !errors.Is(err, hostErr) {
+				t.Errorf("reported host error = %v", err)
+			}
+		},
 		CheckVersion: func(context.Context, string) error {
 			checks++
 			if checks == 2 {
@@ -302,4 +308,131 @@ func TestLoopRefreshesVersionPolicyWhileAtCapacity(t *testing.T) {
 			t.Fatalf("claimed %d units with an occupied single slot", claims)
 		}
 	})
+}
+
+func TestLoopClaimBudgetDrainsWithoutAnotherRequest(t *testing.T) {
+	claims, hosted := 0, 0
+	loop := &Loop{
+		Config:       LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, MaxClaims: 2, Kinds: []capability.UnitKind{capability.UnitNode}},
+		CheckVersion: func(context.Context, string) error { return nil },
+		Controller: claimFunc(func(_ context.Context, req controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+			claims++
+			if claims > 2 {
+				return controllerwire.ClaimResponse{}, errors.New("claim budget ignored")
+			}
+			if !reflect.DeepEqual(req.Kinds, []capability.UnitKind{capability.UnitNode}) {
+				t.Fatalf("claim kinds %v", req.Kinds)
+			}
+			return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "private"}}, nil
+		}),
+		Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { hosted++; return nil }),
+	}
+	if err := loop.Run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if claims != 2 || hosted != 2 {
+		t.Fatalf("claims=%d hosted=%d", claims, hosted)
+	}
+}
+
+func TestLoopHonorsConfiguredPollInterval(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		start := time.Now()
+		calls := 0
+		loop := &Loop{Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, PollInterval: 17 * time.Second}, CheckVersion: func(context.Context, string) error { return nil },
+			Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				calls++
+				if calls == 2 {
+					if time.Since(start) != 17*time.Second {
+						t.Errorf("poll after %v", time.Since(start))
+					}
+					cancel()
+				}
+				return controllerwire.ClaimResponse{}, nil
+			}),
+			Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { t.Error("unexpected work"); return nil }),
+		}
+		if err := loop.Run(ctx); !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestLoopRefusesAwardOutsideRequestedSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config LoopConfig
+		award  controllerwire.ClaimedUnit
+	}{
+		{"here", LoopConfig{RunID: "here"}, controllerwire.ClaimedUnit{Unit: capability.UnitNode, RunID: "another"}},
+		{"kind", LoopConfig{Kinds: []capability.UnitKind{capability.UnitNode}}, controllerwire.ClaimedUnit{Unit: capability.UnitTrigger, RunID: "run"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.config.Version, tc.config.MaxConcurrent = "v1.0.0", 1
+			tc.award.UnitID, tc.award.Capability = "unit", "private"
+			loop := &Loop{Config: tc.config, CheckVersion: func(context.Context, string) error { return nil },
+				Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+					return controllerwire.ClaimResponse{Claim: &tc.award}, nil
+				}),
+				Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error {
+					t.Error("executed outside requested selection")
+					return nil
+				}),
+			}
+			if err := loop.Run(t.Context()); err == nil {
+				t.Fatal("accepted mismatched award")
+			}
+		})
+	}
+}
+
+func TestLoopLongPollDoesNotDelayLifecycleOrPolicy(t *testing.T) {
+	for _, name := range []string{"idle", "claim_deadline", "policy"} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				start := time.Now()
+				cfg := LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, PollInterval: 24 * time.Hour}
+				want := time.Minute
+				switch name {
+				case "idle":
+					cfg.IdleExit = want
+				case "claim_deadline":
+					cfg.ClaimUntil = start.Add(want)
+				case "policy":
+					want = limits.VersionIndexRefresh
+				}
+				policyErr := errors.New("version revoked")
+				checks, claims := 0, 0
+				loop := &Loop{Config: cfg, CheckVersion: func(context.Context, string) error {
+					checks++
+					if name == "policy" && checks > 1 {
+						return policyErr
+					}
+					return nil
+				},
+					Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+						claims++
+						return controllerwire.ClaimResponse{}, nil
+					}),
+					Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { t.Error("unexpected work"); return nil }),
+				}
+				err := loop.Run(t.Context())
+				if name == "policy" {
+					if !errors.Is(err, policyErr) {
+						t.Fatalf("policy error=%v", err)
+					}
+				} else if err != nil {
+					t.Fatal(err)
+				}
+				if elapsed := time.Since(start); elapsed != want {
+					t.Errorf("stopped after %s, want %s", elapsed, want)
+				}
+				if claims != 1 {
+					t.Errorf("claims=%d", claims)
+				}
+			})
+		})
+	}
 }

@@ -107,19 +107,10 @@ runner:
       cpu: "2"
       memory: 2Gi
 
-  # An external gitcache the runners fetch source through, passed as
-  # --gitcache, when cache.enabled is false. Empty fetches each run's
-  # source straight from its host.
-  gitcacheUrl: ""
-
-  # Go build and module caches. The runner compiles a repository's
-  # pipeline on the first claim of each source hash and publishes the
-  # binary to the cache service, so every source change pays one compile:
-  # three to five minutes on a two-CPU pod from empty Go caches. Both
-  # settings below shorten that compile.
+  # Go build and module caches reused by source compilation on this runner.
   goCache:
     # Modules the runner downloads into GOMODCACHE at startup, passed as
-    # --warm-modules. Empty warms the Sparkwing SDK at the runner image's
+    # --warm-module. Empty warms the Sparkwing SDK at the runner image's
     # own version, which is most of a pipeline's dependency graph. Each
     # entry may carry an @version ("example.com/mod@v1.2.3", and
     # similar); a bare path resolves at download time. ["off"] starts the
@@ -167,17 +158,11 @@ runner:
   extraVolumeMounts: []
 
 # -----------------------------------------------------------------------
-# 3. Cache. Git + artifact + go-mod proxy that runners hit on every
-#    fetch. Single-replica with RWO storage; cluster-local Service
-#    means runners never egress for a clone.
+# 3. Cache service. Single-replica with RWO storage.
 # -----------------------------------------------------------------------
 cache:
-  # Set to false to run without the cache. With no gitcache (this one,
-  # or runner.gitcacheUrl for an external one),
-  # runners fetch each run's source straight from its host with the
-  # credential the controller releases for the run: the team's GitHub
-  # App token, else the git credential the team stored for the host.
-  # Working-tree runs still need a gitcache.
+  # Set to false to omit the cache service. Runner source acquisition
+  # and package managers do not use this service.
   enabled: true
 
   # Serve the cache's blob, git and admin endpoints to anyone who can

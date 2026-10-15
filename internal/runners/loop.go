@@ -32,7 +32,10 @@ type LoopConfig struct {
 	Version       string
 	Labels        []string
 	RunID         string
+	Kinds         []capability.UnitKind
 	MaxConcurrent int
+	MaxClaims     int
+	PollInterval  time.Duration
 	IdleExit      time.Duration
 	ClaimUntil    time.Time
 }
@@ -79,8 +82,22 @@ func (l *Loop) start() (<-chan struct{}, error) {
 	if l.Controller == nil || l.Host == nil || l.CheckVersion == nil {
 		return nil, errors.New("runner requires a controller, unit host and signed version policy")
 	}
-	if l.Config.Version == "" || l.Config.MaxConcurrent < 1 || l.Config.IdleExit < 0 {
-		return nil, errors.New("runner requires its release version, positive concurrency and nonnegative idle duration")
+	if l.Config.Version == "" || l.Config.MaxConcurrent < 1 || l.Config.IdleExit < 0 || l.Config.PollInterval < 0 || l.Config.MaxClaims < 0 {
+		return nil, errors.New("runner requires its release version, positive concurrency and nonnegative durations and claim count")
+	}
+	if l.Config.Kinds == nil {
+		l.Config.Kinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}
+	}
+	if len(l.Config.Kinds) == 0 {
+		return nil, errors.New("runner must claim triggers or jobs")
+	}
+	for i, kind := range l.Config.Kinds {
+		if (kind != capability.UnitTrigger && kind != capability.UnitNode) || slices.Contains(l.Config.Kinds[:i], kind) {
+			return nil, errors.New("runner claim kinds must be distinct triggers or jobs")
+		}
+	}
+	if l.Config.PollInterval == 0 {
+		l.Config.PollInterval = limits.ClaimPoll
 	}
 	l.running = true
 	l.initDrain()
@@ -127,6 +144,7 @@ func (l *Loop) Run(ctx context.Context) (runErr error) {
 	results := make(chan unitResult, l.Config.MaxConcurrent)
 	active := make(map[unitKey]struct{})
 	idleSince := time.Now()
+	claimed := 0
 	var hostErr error
 	finish := func(result unitResult) {
 		delete(active, result.key)
@@ -136,7 +154,8 @@ func (l *Loop) Run(ctx context.Context) (runErr error) {
 		if result.err != nil {
 			if l.OnError != nil {
 				l.OnError(result.err)
-			} else if hostErr == nil {
+			}
+			if hostErr == nil {
 				hostErr = result.err
 			}
 		}
@@ -168,6 +187,9 @@ func (l *Loop) Run(ctx context.Context) (runErr error) {
 		case <-drain:
 			return nil
 		default:
+		}
+		if l.Config.MaxClaims > 0 && claimed >= l.Config.MaxClaims {
+			return nil
 		}
 		for len(active) >= l.Config.MaxConcurrent {
 			select {
@@ -220,34 +242,61 @@ func (l *Loop) Run(ctx context.Context) (runErr error) {
 			if err := validateUnit(unit); err != nil {
 				return err
 			}
+			if !slices.Contains(l.Config.Kinds, unit.Unit) || (l.Config.RunID != "" && unit.RunID != l.Config.RunID) {
+				return errors.New("controller awarded work outside the runner's requested selection")
+			}
 			key := unitKey{kind: unit.Unit, id: unit.UnitID, holder: unit.Binding.Holder, generation: unit.Binding.Generation}
 			if _, exists := active[key]; exists {
 				return errors.New("controller awarded a unit already held by this runner")
 			}
 			active[key] = struct{}{}
+			claimed++
 			go func() { results <- unitResult{key: key, err: l.Host.Host(ctx, unit)} }()
 			continue
 		}
-		timer := time.NewTimer(limits.ClaimPoll)
-		select {
-		case result := <-results:
-			finish(result)
-			idleSince = time.Now()
-		case <-timer.C:
-		case <-drain:
-			timer.Stop()
-			return nil
-		case <-ctx.Done():
-			timer.Stop()
-			return context.Cause(ctx)
+		timer := time.NewTimer(l.pollWait(idleSince, len(active) == 0))
+	pollWait:
+		for {
+			select {
+			case result := <-results:
+				finish(result)
+				break pollWait
+			case <-timer.C:
+				break pollWait
+			case <-policyRefresh.C:
+				if err := l.CheckVersion(claims, l.Config.Version); err != nil {
+					timer.Stop()
+					if claims.Err() != nil && ctx.Err() == nil {
+						return nil
+					}
+					return fmt.Errorf("runner version policy: %w", err)
+				}
+			case <-drain:
+				timer.Stop()
+				return nil
+			case <-ctx.Done():
+				timer.Stop()
+				return context.Cause(ctx)
+			}
 		}
 		timer.Stop()
 	}
 }
 
+func (l *Loop) pollWait(idleSince time.Time, idle bool) time.Duration {
+	wait := l.Config.PollInterval
+	if idle && l.Config.IdleExit > 0 {
+		wait = min(wait, time.Until(idleSince.Add(l.Config.IdleExit)))
+	}
+	if !l.Config.ClaimUntil.IsZero() {
+		wait = min(wait, time.Until(l.Config.ClaimUntil))
+	}
+	return max(wait, 0)
+}
+
 func (l *Loop) request() controllerwire.ClaimRequest {
 	req := controllerwire.ClaimRequest{RunnerVersion: l.Config.Version,
-		Kinds:  []capability.UnitKind{capability.UnitTrigger, capability.UnitNode},
+		Kinds:  slices.Clone(l.Config.Kinds),
 		Labels: slices.Clone(l.Config.Labels), RunID: l.Config.RunID}
 	if l.RequestCapacity != nil {
 		req.AvailableCores, req.AvailableMemoryBytes = l.RequestCapacity()

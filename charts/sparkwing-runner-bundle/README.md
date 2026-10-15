@@ -139,7 +139,6 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.maxConcurrent` | Per-pod node concurrency. | `2` |
 | `runner.alsoClaimTriggers` | Pool also claims webhook triggers. | `true` |
 | `runner.extraEnv` | Extra runner environment. | `[]` |
-| `runner.gitcacheUrl` | External gitcache passed as `--gitcache` when `cache.enabled=false`. | `""` |
 | `runner.image.tag` | Override sparkwing-runner tag. | (chart appVersion) |
 | `runner.goCache.warmModules` | Modules downloaded into `GOMODCACHE` at startup. Empty warms the SDK at the runner image's version. | `[]` |
 | `runner.goCache.persistence.enabled` | Mount a PVC over `GOCACHE` and `GOMODCACHE` so the caches outlive the pod. | `false` |
@@ -147,13 +146,13 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.goCache.persistence.accessModes` | Access modes on that claim. Needs `ReadWriteMany` above one replica. | `[ReadWriteMany]` |
 | `cache.enabled` | Toggle the in-cluster git cache. | `true` |
 | `cache.allowUnauthenticated` | Serve the cache's blob, git and admin endpoints without a grant. | `false` |
-| `cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy; `false` also stops the cache serving it. Must be `false` when `cache.service.type` is not `ClusterIP`, because the proxy takes no credential. | `true` |
+| `cache.dependencyProxy.enabled` | Serve the cache's pull-through proxy. Runner package managers use their own configuration. Must be `false` when `cache.service.type` is not `ClusterIP`, because the proxy takes no credential. | `true` |
 | `cache.publicUrl` | Base URL the proxy rewrites registry bodies against. Empty on a non-ClusterIP Service means each response is rewritten from its own request `Host`. | in-cluster Service URL on a ClusterIP Service |
 | `cache.repos` | `--auto-register-repos` -- comma-separated `alias=url`. | `""` |
 | `cache.sshKeySecret.name` | Required SSH-key Secret when configured. | `""` |
 | `cache.storage.size` | Cache PVC size. | `20Gi` |
 | `cache.storage.storageClassName` | Override default StorageClass. | `""` |
-| `runner.automountServiceAccountToken` | Mount the runner pod's API token. Required by the `k8s` and `warm` trigger runners. | `false` |
+| `runner.automountServiceAccountToken` | Mount the runner pod's API token. Runner execution does not require it. | `false` |
 | `serviceAccount.annotations` | Add IRSA / Workload Identity annotations. | `{}` |
 | `serviceAccount.shareAcrossComponents` | Accept one shared account when `serviceAccount.create=false`. | `false` |
 | `imagePullSecrets` | Private-registry pull secrets for both images. | `[]` |
@@ -215,12 +214,11 @@ removed". A cache started with `--controller` outside this chart also needs a
 `storage.count` service token in the file `controller-token`; the chart does
 not start the cache with `--controller`.
 
-With `cache.enabled=false` and no `runner.gitcacheUrl`, runners fetch each run's source straight from its host.
-The controller releases the credential for each run: the team's GitHub App
-token when an installation covers the repository, else the git credential
-the team stored for the host. A run with neither fails with a message naming
-both, and a runner never falls back to credentials of its own. Working-tree
-runs (`sparkwing pipeline trigger --working-tree`) still need a gitcache.
+Runners acquire sealed source directly from its host. The controller releases
+source credentials under the awarded unit capability. Temporary credential files
+belong to acquisition and are removed when git exits. The runner image does not
+seed a `.netrc` from environment credentials. Owner credentials remain subject to
+the configured repository allow-list.
 
 The chart does NOT create the Secret -- bring your own. This means
 rotating the token is `kubectl create secret ... --dry-run=client -o
@@ -262,12 +260,9 @@ container.
 
 ### Go caches across restarts
 
-The runner compiles a repository's pipeline on the first claim of each source
-hash, then publishes the binary to the cache service, so later runs of the same
-source skip the compile. Every source change still pays one, and a two-CPU pod
-takes three to five minutes to compile from empty Go caches.
-`runner.maxClaimsBeforeRestart` restarts a runner after 25 claims, and a restart
-that reschedules the pod leaves the next compile with nothing.
+Runners build pipelines from acquired source. Persistent Go build and module
+caches reduce repeated dependency work when the pod restarts. Verified engine
+releases use the separate machine engine cache.
 
 Two settings shorten it, and they compose:
 
@@ -298,12 +293,9 @@ never call the Kubernetes API, so neither mounts a ServiceAccount
 token: every pod sets `automountServiceAccountToken: false`, and the
 cache pod runs under its own ServiceAccount rather than the runner's.
 
-The opt-in `k8s` and `warm` trigger runners call the API to create and inspect
-runner Jobs. Give the runner pod a token when selecting either mode:
+The launcher owns Kubernetes Job creation. Its service account and namespace
+permissions are separate from the runner's account.
 
-```bash
---set runner.automountServiceAccountToken=true
-```
 
 Pipelines that need to reach the cluster API (e.g. `kubectl apply`,
 sealed-secrets, helm-installs) should bring their own ServiceAccount and
@@ -335,11 +327,10 @@ release contract for this chart version. Pin repository and tag for every
 enabled component to images built from one Sparkwing revision.
 
 > The runner Deployment's command is
-> `/usr/local/bin/runner-entrypoint.sh /usr/local/bin/sparkwing-runner`,
+> `/usr/local/bin/sparkwing-runner warm`,
 > so the runner image must be built from `build/Dockerfile.runner`
 > (Debian slim, the pipeline compilation Go toolchain, Node.js 22 and npm
-> for TypeScript pipelines, bash, common CLI tools, and the netrc-seeding
-> entrypoint). Point
+> for TypeScript pipelines, bash and common CLI tools). Point
 > `runner.image.repository` at an image built from that Dockerfile.
 
 
@@ -354,9 +345,7 @@ helm upgrade runners ./charts/sparkwing-runner-bundle \
 Runner pods rolling-update one at a time; in-flight claims on the
 rolled pod time out and re-queue. The cache uses `Recreate`
 because of its RWO PVC -- expect ~30s of downtime per upgrade.
-For zero-downtime cache, run a separate cache deployment with
-`cache.enabled=false` here and point runners at it with
-`runner.gitcacheUrl`.
+Runner source acquisition and package managers do not use that cache service.
 
 An upgrade from a chart that deployed `sparkwing-logs` removes its
 Deployment, Service and ServiceAccount; runners upload node logs to the

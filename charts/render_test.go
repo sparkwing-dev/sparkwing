@@ -675,7 +675,7 @@ func TestRunnerGoCachesAreEphemeralByDefault(t *testing.T) {
 			}
 		}
 	}
-	if _, ok := hasFlag(container.Args, "--warm-modules"); ok {
+	if _, ok := hasFlag(container.Args, "--warm-module"); ok {
 		t.Errorf("default runner args carry a warm list: %v", container.Args)
 	}
 
@@ -825,11 +825,11 @@ func TestRunnerWarmModulesRenderAsOneFlag(t *testing.T) {
 	}
 	args := runnerContainer(t, renderRunner(t,
 		"runner.goCache.warmModules={github.com/sparkwing-dev/sparkwing@v0.49.0,example.com/pipelines}")).Args
-	got, ok := hasFlag(args, "--warm-modules=")
+	got, ok := hasFlag(args, "--warm-module=")
 	if !ok {
 		t.Fatalf("runner args = %v, want a warm list", args)
 	}
-	if want := "--warm-modules=github.com/sparkwing-dev/sparkwing@v0.49.0,example.com/pipelines"; got != want {
+	if want := "--warm-module=github.com/sparkwing-dev/sparkwing@v0.49.0,example.com/pipelines"; got != want {
 		t.Fatalf("warm flag = %q, want %q", got, want)
 	}
 }
@@ -843,7 +843,7 @@ func TestFullChartVendorsTheRunnerGoCache(t *testing.T) {
 		"sparkwing-runner-bundle.runner.goCache.warmModules={example.com/pipelines@v1.0.0}"))
 	runner := componentResource(t, resources, "Deployment", "runner")
 	container := resourceContainer(t, runner)
-	if !containsArg(container.Args, "--warm-modules=example.com/pipelines@v1.0.0") {
+	if !containsArg(container.Args, "--warm-module=example.com/pipelines@v1.0.0") {
 		t.Errorf("vendored runner args = %v, want the warm list", container.Args)
 	}
 	build, mod := goCachePaths(t, container)
@@ -1109,34 +1109,35 @@ func TestCachePinsAWritableHome(t *testing.T) {
 	}
 }
 
-func TestRunnerPackageManagersUseTheBundledDependencyProxy(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+func TestRunnerUsesDirectSourceAndNoImplicitPackageProxy(t *testing.T) {
+	rendered := renderRunner(t)
+	env := runnerEnv(t, rendered)
+	for _, key := range []string{"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST", "SPARKWING_GITCACHE_URL", "GITHUB_TOKEN"} {
+		if _, exists := env[key]; exists {
+			t.Errorf("runner configures removed credential/proxy environment %s", key)
+		}
 	}
-	env := runnerEnv(t, renderRunner(t))
-	const host = "sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
-	for key, want := range map[string]string{
-		"GOPROXY":             "http://" + host + "/proxy/golang|https://proxy.golang.org,direct",
-		"npm_config_registry": "http://" + host + "/proxy/npm",
-		"PIP_INDEX_URL":       "http://" + host + "/proxy/pypi/simple/",
-		"PIP_TRUSTED_HOST":    host,
-	} {
-		if got := env[key]; got != want {
-			t.Errorf("%s = %q, want %q", key, got, want)
+	container := runnerContainer(t, rendered)
+	if len(container.Command) != 1 || container.Command[0] != "/usr/local/bin/sparkwing-runner" {
+		t.Fatalf("runner command = %v", container.Command)
+	}
+	if len(container.Args) == 0 || container.Args[0] != "warm" {
+		t.Fatalf("runner args = %v", container.Args)
+	}
+	for _, arg := range container.Args {
+		if strings.HasPrefix(arg, "--gitcache") || strings.HasPrefix(arg, "--dependency-proxy") {
+			t.Errorf("removed runner argument %q", arg)
 		}
 	}
 }
 
-func TestCachePublicURLMatchesTheProxyURLRunnersDial(t *testing.T) {
+func TestCachePublicURLMatchesItsService(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
 	}
 	const want = "http://sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
 	if got, _ := flagValue(runnerContainer(t, renderCache(t)).Args, "--public-url"); got != want {
 		t.Errorf("--public-url = %q, want %q", got, want)
-	}
-	if got := runnerEnv(t, renderRunner(t))["npm_config_registry"]; got != want+"/proxy/npm" {
-		t.Errorf("npm_config_registry = %q, want the same base the cache rewrites against", got)
 	}
 }
 
@@ -1169,7 +1170,7 @@ func TestCachePublicURLIsUnsetWhenClientsDialMoreThanOneAddress(t *testing.T) {
 	}
 }
 
-func TestRunnerExtraEnvOverridesADependencyProxyDefault(t *testing.T) {
+func TestRunnerExtraEnvConfiguresPackageManager(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
@@ -1179,25 +1180,6 @@ func TestRunnerExtraEnvOverridesADependencyProxyDefault(t *testing.T) {
 	if got := env["GOPROXY"]; got != "https://goproxy.internal" {
 		t.Errorf("GOPROXY = %q, want the extraEnv override", got)
 	}
-	if env["npm_config_registry"] == "" {
-		t.Error("overriding GOPROXY should not drop the other proxy defaults")
-	}
-}
-
-func TestRunnerDependencyProxyOptOut(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
-	}
-	rendered := renderRunner(t, "cache.dependencyProxy.enabled=false")
-	env := runnerEnv(t, rendered)
-	for _, key := range []string{"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST"} {
-		if _, ok := env[key]; ok {
-			t.Errorf("%s set with cache.dependencyProxy.enabled=false", key)
-		}
-	}
-	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--dependency-proxy=off") {
-		t.Errorf("runner args = %v, want --dependency-proxy=off", args)
-	}
 }
 
 func TestRunnerHasNoDependencyProxyWhenNoCacheIsDeployed(t *testing.T) {
@@ -1205,6 +1187,9 @@ func TestRunnerHasNoDependencyProxyWhenNoCacheIsDeployed(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	rendered := renderRunner(t, "cache.enabled=false", "runner.alsoClaimTriggers=false")
+	if !containsArg(runnerContainer(t, rendered).Args, "--also-claim-triggers=false") {
+		t.Error("explicit trigger-claim opt-out was lost")
+	}
 	env := runnerEnv(t, rendered)
 	for _, key := range []string{"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST"} {
 		if _, ok := env[key]; ok {
@@ -1237,32 +1222,12 @@ func TestTriggerClaimingRendersWithoutAGitcache(t *testing.T) {
 	}
 }
 
-func TestTriggerClaimingAcceptsAnExternalGitcache(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	rendered := renderRunner(t, "cache.enabled=false", "runner.gitcacheUrl=https://gitcache.example.com")
-	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--gitcache=https://gitcache.example.com") {
-		t.Errorf("runner args = %v, want --gitcache naming the external gitcache", args)
-	}
-	if got := runnerEnv(t, rendered)["SPARKWING_GITCACHE_URL"]; got != "https://gitcache.example.com" {
-		t.Errorf("SPARKWING_GITCACHE_URL = %q, want the same gitcache for the nodes' SDK helpers", got)
-	}
-	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--also-claim-triggers") {
-		t.Errorf("runner args = %v, want trigger claiming preserved", args)
-	}
-}
-
-func TestFullChartCarriesTheDependencyProxyWiring(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	env := runnerEnv(t, helmRender(t, "./sparkwing-full",
-		"charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing"))
-	const host = "sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
-	if got := env["GOPROXY"]; got != "http://"+host+"/proxy/golang|https://proxy.golang.org,direct" {
-		t.Errorf("GOPROXY = %q; the vendored sub-chart may be stale. "+
-			"Fix: helm dep up ./charts/sparkwing-full", got)
+func TestFullChartRunnerHasNoImplicitPackageProxy(t *testing.T) {
+	env := runnerEnv(t, helmRender(t, "./sparkwing-full", "charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing"))
+	for _, key := range []string{"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST", "SPARKWING_GITCACHE_URL"} {
+		if _, exists := env[key]; exists {
+			t.Errorf("vendored runner configures removed environment %s", key)
+		}
 	}
 }
 
@@ -1453,7 +1418,7 @@ func TestMaximumLengthReleaseKeepsComponentNamesAndServiceURLsDistinct(t *testin
 	controllerURL := serviceURL(controllerService)
 	cacheURL := serviceURL(cacheService)
 	runnerArgs := resourceContainer(t, componentResource(t, resources, "Deployment", "runner")).Args
-	for _, want := range []string{"--controller=" + controllerURL, "--gitcache=" + cacheURL} {
+	for _, want := range []string{"--controller=" + controllerURL} {
 		if !containsArg(runnerArgs, want) {
 			t.Errorf("runner args = %v, want %q", runnerArgs, want)
 		}

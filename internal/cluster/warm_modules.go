@@ -1,13 +1,8 @@
 package cluster
 
 import (
-	"context"
 	"fmt"
-	"log/slog"
-	"os"
-	"os/exec"
 	"strings"
-	"time"
 
 	"golang.org/x/mod/semver"
 )
@@ -60,38 +55,4 @@ func warmDefaultVersion(path, sdkVersion string) string {
 		return sdkVersion
 	}
 	return "latest"
-}
-
-func warmModuleCache(ctx context.Context, modules []string, logger *slog.Logger) {
-	if len(modules) == 0 {
-		return
-	}
-	if _, err := exec.LookPath("go"); err != nil {
-		logger.Warn("module warm skipped; no go toolchain on PATH", "err", err)
-		return
-	}
-	// safety: `go mod download path@version` resolves only outside a module, and
-	// the runner's working directory is a repository checkout often enough.
-	dir, err := os.MkdirTemp("", "sparkwing-warm-")
-	if err != nil {
-		logger.Warn("module warm skipped; no writable temporary directory", "err", err)
-		return
-	}
-	defer func() {
-		if rmErr := os.RemoveAll(dir); rmErr != nil {
-			logger.Warn("module warm: scratch directory left behind", "dir", dir, "err", rmErr)
-		}
-	}()
-
-	start := time.Now()
-	cmd := exec.CommandContext(ctx, "go", append([]string{"mod", "download"}, modules...)...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	elapsed := time.Since(start)
-	if err != nil {
-		logger.Warn("module warm failed; the next compile pays the full download",
-			"modules", modules, "warm_ms", elapsed.Milliseconds(), "err", err, "output", strings.TrimSpace(string(out)))
-		return
-	}
-	logger.Info("module cache warmed", "modules", modules, "warm_ms", elapsed.Milliseconds())
 }

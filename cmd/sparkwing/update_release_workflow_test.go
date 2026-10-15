@@ -68,10 +68,8 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 		"COPY --from=" + goImage + " /usr/local/go /usr/local/go",
 		"COPY bin/check-runner-image.sh /usr/local/bin/check-runner-image.sh",
 		"RUN /bin/sh /usr/local/bin/check-runner-image.sh",
-		"COPY build/runner-entrypoint.sh /usr/local/bin/runner-entrypoint.sh",
 		"COPY --from=build /out/" + launcher.JobBinary + " /usr/local/bin/" + launcher.JobBinary,
-		`ENTRYPOINT ["/usr/local/bin/runner-entrypoint.sh"]`,
-		`CMD ["/usr/local/bin/` + launcher.JobBinary + `"]`,
+		`ENTRYPOINT ["/usr/local/bin/` + launcher.JobBinary + `"]`,
 	} {
 		if !containsDockerInstruction(instructions, required) {
 			t.Errorf("runner image contract missing %q", required)

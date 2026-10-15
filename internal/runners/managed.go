@@ -40,18 +40,19 @@ func (r ManagedRunner) Run(ctx context.Context) error {
 	}
 	r.Loop.CheckVersion = r.checkVersion
 	err := r.Loop.Run(ctx)
-	var hostErr *hostFailure
-	if errors.As(err, &hostErr) {
-		return err
-	}
 	if !errors.Is(err, errRunnerUpdate) {
 		return err
 	}
+	var hostErr *hostFailure
+	var completedFailure error
+	if errors.As(err, &hostErr) {
+		completedFailure = hostErr
+	}
 	update, err := r.Versions.PrepareRunnerUpdate(ctx, r.Loop.Config.Version, r.Target)
 	if err != nil {
-		return fmt.Errorf("runner cannot prepare its verified automatic update: %w", err)
+		return errors.Join(completedFailure, fmt.Errorf("runner cannot prepare its verified automatic update: %w", err))
 	}
-	return ApplySoftwareUpdate(ctx, update, r.Installation)
+	return errors.Join(completedFailure, ApplySoftwareUpdate(ctx, update, r.Installation))
 }
 
 func (r ManagedRunner) checkVersion(ctx context.Context, version string) error {

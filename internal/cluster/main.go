@@ -1,16 +1,19 @@
 package cluster
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -25,19 +28,15 @@ func MainWithVersion(version string) {
 		os.Exit(2)
 	}
 	var err error
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	switch os.Args[1] {
-	case "runner":
-		err = runRunnerCLI(os.Args[2:], version)
-	case "agent":
-		err = runAgentCLI(os.Args[2:])
-	case "run-node":
-		err = orchestrator.RunNodeCommand(os.Args[2:])
+	case "start", "warm":
+		err = (RunnerCLI{}).Run(ctx, os.Args[1], os.Args[2:], version)
+	case "run-node", "fetch-source":
+		err = RunBootstrapCLI(ctx, os.Args[1], os.Args[2:], nil)
 	case "launch":
 		err = runLaunchCLI(os.Args[2:])
-	case "fetch-source":
-		err = runFetchSourceCLI(os.Args[2:])
-	case "wingd":
-		err = orchestrator.RunWingd(os.Args[2:])
 	case "version":
 		err = runRunnerVersion(os.Stdout, os.Args[2:], version)
 	case "-h", "--help", "help":
@@ -50,15 +49,19 @@ func MainWithVersion(version string) {
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, os.Args[1]+":", err)
+		var usage *usageError
+		if errors.As(err, &usage) {
+			os.Exit(2)
+		}
 		os.Exit(1)
 	}
 }
 
 func usage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: sparkwing-runner <runner|agent|run-node|launch|fetch-source|version> [flags]")
-	fmt.Fprintln(writer, "  runner   - long-lived warm pool pod (claims triggers + nodes)")
-	fmt.Fprintln(writer, "  agent    - remote machine agent (YAML-configured, off-cluster)")
-	fmt.Fprintln(writer, "  run-node - execute one claimed node (the Kubernetes Job fallback entrypoint)")
+	fmt.Fprintln(writer, "usage: sparkwing-runner <start|warm|run-node|launch|fetch-source|version> [flags]")
+	fmt.Fprintln(writer, "  start    - run from the machine config's runner section")
+	fmt.Fprintln(writer, "  warm     - claim triggers and jobs with the shared runner")
+	fmt.Fprintln(writer, "  run-node - execute a bootstrap-authorized Cloud unit")
 	fmt.Fprintln(writer, "  launch   - run controller-dispatched nodes as Kubernetes Jobs (never runs pipeline code)")
 	fmt.Fprintln(writer, "  fetch-source - a launcher Job's init container: check out the run and its private modules")
 	fmt.Fprintln(writer, "  version  - print this executable's offline build identity")
