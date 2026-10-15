@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **controller (Breaking):** Secret and git-credential inventories use the shared capability policy
+  Reads select the authenticated team and keep credential values private. An unreadable public config value fails the secret list without returning partial rows. See [migration guide](docs/migrations/_unreleased.md#credential-inventories).
 - **controller:** Data routes expose scoped memo lookup, dependency-cache lookup and memo copy
   Copy requires read and write authority and derives its destination from the live attempt. See [data records](docs/data-uploads.md).
 - **controller (Breaking):** GitHub Actions exchange issues a push-bound controller capability through the common issuer

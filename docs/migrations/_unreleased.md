@@ -1,5 +1,17 @@
 # Migrating to the next release
 
+## Credential inventories
+
+Secret and git-credential lists use the shared capability policy. Use a live
+member or verified local credential with `runs.read`. Secret inventory also
+accepts `team.admin`. The authenticated team selects the rows. Machine roots,
+claims and bootstraps cannot list them. Masked secret values and stored git
+credentials remain private. An unreadable public config value fails the whole
+secret list instead of disappearing from a successful response.
+
+Embedded controllers may supply `WithCredentialInventoryReader` using Tenant's
+existing read methods. Its reader must belong to the authenticated team.
+
 ## Source credentials
 
 `POST /api/v1/runs/{run}/source-credential` takes no body and requires a live

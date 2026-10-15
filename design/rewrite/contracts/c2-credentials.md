@@ -162,6 +162,27 @@ Responses expose public record/member metadata, excluding authority, uploader,
 source and read-set snapshots. These routes cover generic RecordStore lookup
 and commit.
 
+### Credential inventory reads
+
+GET `/api/v1/secrets` and GET `/api/v1/team/git-credentials` use PolicyRouter
+and the existing member rules. Both select the authenticated team and return
+`Cache-Control: no-store`. Caller headers and query selectors cannot select a
+different tenant. Machine roots, claims and bootstraps cannot read inventories.
+
+Secret lists omit masked values without opening their envelopes. Unmasked
+config values use the stored team's full row binding. Missing decryption returns
+`unavailable`. A failed open returns a private `internal` error with no partial
+list. Git lists expose the existing public metadata projection, without stored
+secrets, row IDs or team fields. Empty collections are arrays.
+
+CredentialInventoryReader is a local C2 subset of Tenant's existing Team,
+ListSecrets and GitCredentials methods. The default resolver uses Store.ForTeam.
+WithCredentialInventoryReader supplies that same contract to embedded
+controllers and tests. A nil or foreign-team reader fails closed. No C1
+signature changes. The replaced legacy list handlers and registrations are
+removed. Credential writes and audited per-claim secret release remain separate
+cutovers.
+
 ### Cache record transport
 
 POST `/api/v1/data/memo/lookup` takes `pipeline`, `job`, `hash` and optional
@@ -397,6 +418,7 @@ All capability names below are in `internal/capability`.
 | `controller.AuthorityRevoker`, `EngineController.ResolveOperator` | Reuse C1's existing RevokeAuthority transaction through the tenant or deployment scope. The optional resolver supports embedded controllers and fakes without another issuer or persistence owner. |
 | `controller.RunTransactions`, `EngineController.ResolveTenant`, `EngineController.ResolveRunTeam`, `Server.WithEngineController` | Supply final intake/sealing transactions and resource ownership. Production uses the existing store methods. Embedded controllers and tests may supply the same contracts without SQL or alternate authorization. |
 | `controller.SizingReader`, `controller.SizingStore`, `Server.WithSizingStore` | Supply tenant sizing reads and authority-bearing measurement transactions. Default reads use `Tenant.GetPipelineProfile`. Writes require the explicit adapter and fail closed when it is absent. |
+| `controller.CredentialInventoryReader`, `Server.WithCredentialInventoryReader` | Supply the existing tenant secret/git inventory reads with an authenticated-team check. |
 | `controller.RunStatusFacts`, `EngineController.ReadRunStatus` | Supply one committed snapshot, complete attempt history and validated log subjects for the authorized team/run. Verified engine policy supplies notices. The default uses Tenant.ReadRunView. No C1 signature changes. |
 
 The exported data tables are `Grants`, `AwardPolicies`, `LivenessPolicies`,

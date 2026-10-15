@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -208,26 +210,25 @@ func reportSecretRead(w http.ResponseWriter, sec *store.Secret, err error) bool 
 	return true
 }
 
-func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request) {
-	tn, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	tn, err := s.credentialInventory(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
 	secs, err := tn.ListSecrets()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	out := make([]secretJSON, 0, len(secs))
 	for _, sec := range secs {
-		// safety: an unmasked row is plain config every member may read, while
-		// a masked row's value never appears in a list, whoever asks. A row
-		// that does not open lists without its value, so one bad row cannot
-		// hide the others, and openStoredSecret has logged it.
 		var value string
 		if !sec.Masked {
-			if opened, oerr := s.openStoredSecret(tn.Team(), &sec); oerr == nil {
-				value = opened
+			if s.secretsCipher == nil {
+				return &apierr.Error{Code: apierr.Unavailable, Message: "secret decryption is unavailable"}
+			}
+			value, err = openSecret(s.secretsCipher, bindingForRow(tn.Team(), &sec), sec.Value)
+			if err != nil {
+				return errors.New("stored secret did not open")
 			}
 		}
 		out = append(out, secretJSON{
@@ -243,6 +244,7 @@ func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"secrets": out})
+	return nil
 }
 
 func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {

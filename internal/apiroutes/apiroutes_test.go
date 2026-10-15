@@ -220,6 +220,27 @@ func TestParseSizingEndpointsUsesActualRegistrations(t *testing.T) {
 	}
 }
 
+func TestParseCredentialInventoryEndpoints(t *testing.T) {
+	src := writeFile(t, "server.go", "s.registerCredentialInventoryRoutes(router)")
+	endpoints := `
+{Method: "GET", Pattern: "/api/v1/secrets"},
+{Method: "GET", Pattern: "/api/v1/team/git-credentials"},`
+	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "credential_inventory.go"), []byte(endpoints), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Route{
+		{Method: "GET", Path: "/api/v1/secrets", Scope: "runs.read` or `team.admin"},
+		{Method: "GET", Path: "/api/v1/team/git-credentials", Scope: "runs.read"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("inventory registrations=%+v want %+v", got, want)
+	}
+}
+
 func TestParseMissingFile(t *testing.T) {
 	if _, err := Parse(filepath.Join(t.TempDir(), "absent.go"), nil); err == nil {
 		t.Fatal("Parse on a missing file returned no error")

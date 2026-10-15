@@ -975,8 +975,15 @@ name the same repository and it means nothing either way.
 
 So one runner token cannot lift another pipeline's deploy credential by asking
 for it by name, a claim reads only its own run's declared secrets, and every
-node read leaves a `secret_released` event. `GET /api/v1/secrets` (the list) and the secret writes
-stay `admin`; the list carries each row's pipeline and shared flag.
+node read leaves a `secret_released` event.
+
+`GET /api/v1/secrets` requires live member or verified local authority with
+`runs.read` or `team.admin`. It lists only the authenticated team's rows,
+including their pipeline and shared flag. Masked values are omitted. Unmasked
+config values are decrypted with their stored row binding. If a config value
+cannot be opened, the request fails without returning a partial list. Missing
+decryption returns `unavailable`. The response uses `Cache-Control: no-store`.
+Machine roots, claims and bootstraps cannot read the inventory.
 
 `POST /api/v1/tokens` rejects unknown or duplicate grants and caller-selected
 authority fields with `400`. Issuance beyond current grants or expiry is

@@ -28,6 +28,18 @@
   },
   "routes": [
     {
+      "route": "/api/v1/secrets",
+      "kind": "api",
+      "exempt": "Requires authenticated tenant inventory and encrypted config fixtures, absent from the dashboard corpus. In-memory HTTP tests are correctness evidence. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/team/git-credentials",
+      "kind": "api",
+      "exempt": "Requires authenticated tenant inventory and stored git metadata fixtures, absent from the dashboard corpus. A refusal does not measure an inventory read. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
       "route": "/api/v1/data/memo/lookup",
       "kind": "api",
       "exempt": "Requires live cache authority and transactional fallback/read-edge fixtures, absent from the dashboard corpus. Authorized latency, cold start and response bytes remain unmeasured.",

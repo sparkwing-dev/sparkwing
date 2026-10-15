@@ -63,6 +63,11 @@ const CloudRetentionDays = 90
 func CompliantClaimPollsPerMinute() int
 const ComputeLimitRefusedCode = "compute_limit"
 const ComputeLimitRetryAfterSeconds = 5
+type CredentialInventoryReader interface {
+	Team() store.Team
+	ListSecrets() ([]store.Secret, error)
+	GitCredentials(context.Context) ([]store.GitCredential, error)
+}
 type CredentialIssuer interface {
 	ProvisionCapability(context.Context, capability.ProvisionSpec) (capability.Issued, error)
 	DelegateCapability(context.Context, capability.DelegateSpec) (capability.Issued, error)
@@ -426,6 +431,7 @@ func (s *Server) WithCacheGrantKey(key string) *Server
 func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
+func (s *Server) WithCredentialInventoryReader(resolve func(context.Context, store.Team) (CredentialInventoryReader, error)) *Server
 func (s *Server) WithCredentialIssuer(issuer CredentialIssuer) *Server
 func (s *Server) WithCreditReader(resolve func(context.Context, store.Team) (CreditReader, error)) *Server
 func (s *Server) WithDashboard(d Dashboard) *Server

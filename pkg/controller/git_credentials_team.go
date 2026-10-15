@@ -14,6 +14,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -93,21 +94,21 @@ func (s *Server) boundCipher(w http.ResponseWriter) (BoundCipher, bool) {
 	return bc, true
 }
 
-func (s *Server) handleListGitCredentials(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamMember(w, r, store.RoleReader)
-	if !ok {
-		return
+func (s *Server) handleListGitCredentials(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	t, err := s.credentialInventory(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
 	creds, err := t.GitCredentials(r.Context())
 	if err != nil {
-		s.writeInternalError(w, r, "list git credentials", err)
-		return
+		return engineLookupError(err)
 	}
 	out := make([]GitCredentialJSON, 0, len(creds))
 	for _, c := range creds {
 		out = append(out, gitCredentialJSON(c, ""))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"credentials": out})
+	return nil
 }
 
 // safety: A stored SSH key is released only after its owner confirms the fetched host-key fingerprint.

@@ -35,6 +35,12 @@ host, the kind, the pinned host key and who stored it. The controller seals
 the value under its secrets key, bound to the team and the host, so a
 controller started without `SPARKWING_SECRETS_KEY` holds none.
 
+`GET /api/v1/team/git-credentials` requires live member or verified local
+authority with `runs.read`. It lists the authenticated team's metadata and
+uses `Cache-Control: no-store`. Query parameters and caller headers cannot
+select another team. Stored secrets are omitted, including when no decryption
+key is configured. Machine roots, claims and bootstraps cannot read this list.
+
 A credential is one of these kinds:
 
 - **An SSH deploy key** (`kind: ssh`, `private_key`), unencrypted, since a
