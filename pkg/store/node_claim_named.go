@@ -136,7 +136,7 @@ func (s *Store) ClaimNamedNode(
 	// safety: a dispatcher older than the labels field sends none, so a node
 	// whose selector its labels would have to satisfy is refused, never
 	// admitted unchecked.
-	if verdict := match.EvaluateOld(profile, demand); !verdict.OK() {
+	if verdict := match.Evaluate(profile, demand); !verdict.OK() {
 		hint := ""
 		if len(opts.Labels) == 0 {
 			hint = "; the claim sent no labels, so upgrade the dispatcher to one that sends its executor's labels"

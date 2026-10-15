@@ -77,8 +77,7 @@ var ErrNoTeam = errors.New("store: team is required")
 //     cancel nothing. assertRunBelongsToTeamTx is the check to copy.
 //  7. Helpers: a helper that still takes *Store and reads a tenant-owned
 //     table is a hole the receiver change does not close. Give it a
-//     `team Team` parameter and pass t.team. loadAgentLossRetry and
-//     assertRunMutationFenceTx were both such holes.
+//     `team Team` parameter and pass t.team.
 //  8. Lookups that fail open: a lookup whose miss means "no limit"
 //     inverts when it is scoped. [Store.StorageQuotaFor] returns an
 //     unlimited quota on a miss and [StorageQuota] reads a zero limit as
@@ -241,9 +240,6 @@ func allTeams() teamScope { return teamScope{all: true} }
 // because a scoped query on an unclassified table cannot be written; the
 // guard in tenant_classification_internal_test.go refuses either mistake.
 var tenantTables = []string{
-	"agent_loss_retries",
-	"agent_loss_retry_legacy_deny_all",
-	"agent_loss_retry_node_sources",
 	"approvals",
 	"business_events",
 	"card_attempts",

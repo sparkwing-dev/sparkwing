@@ -192,10 +192,6 @@ func (l localState) FinishNodeWithReason(ctx context.Context, runID, nodeID, out
 	return l.st.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
 }
 
-func (l localState) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
-	return l.st.ResetNodeForAutoRetry(ctx, runID, nodeID)
-}
-
 func (l localState) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, start store.ExecutionStart) error {
 	fence, _ := store.NodeClaimFenceFromContext(ctx)
 	return l.st.AcknowledgeNodeExecutionStart(ctx, runID, nodeID, fence.Claimant, start)

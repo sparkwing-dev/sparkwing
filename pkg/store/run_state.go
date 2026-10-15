@@ -297,7 +297,7 @@ func guardRunEdgeTx(ctx context.Context, tx *storeTx, team Team, row RunRow, cha
 				return errors.New("run has a live owner claim")
 			}
 			wait := row.Request.Request.Options.ClaimWait
-			if !wait.Set || wait.Value <= 0 || row.Request.AdmittedAt.Add(wait.Value).After(now) {
+			if !wait.Set || wait.Value <= 0 || row.CreatedAt.Add(wait.Value).After(now) {
 				return errors.New("run queue deadline not reached")
 			}
 		} else {
@@ -349,6 +349,34 @@ func writeOwnerRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, 
 		return err
 	}
 	if count != 1 {
+		return holderRefusal()
+	}
+	return nil
+}
+
+func acceptControllerPlanTx(ctx context.Context, tx *storeTx, team Team, request PlanAcceptance, controller Actor, replay bool) error {
+	if err := checkOwnerTx(ctx, tx, team, controller, request.RunID, tx.now()); err != nil {
+		return err
+	}
+	write, err := tx.ExecContext(ctx, `UPDATE triggers SET status='done',finished_at=?,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE team=? AND id=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status='claimed'`, tx.now().UnixNano(), team, request.RunID, request.Actor.Owner.Generation, request.Actor.Owner.Holder, request.Actor.CapabilityPrefix)
+	if err != nil {
+		return err
+	}
+	count, err := write.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 1 {
+		return nil
+	}
+	if !replay {
+		return holderRefusal()
+	}
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM triggers WHERE team=? AND id=? AND generation=?`, team, request.RunID, request.Actor.Owner.Generation).Scan(&status); err != nil {
+		return err
+	}
+	if status != "done" {
 		return holderRefusal()
 	}
 	return nil

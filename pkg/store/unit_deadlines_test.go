@@ -77,3 +77,30 @@ func TestReaperApprovalDeadlineAndCancellation(t *testing.T) {
 		})
 	}
 }
+
+func TestReaperRetryQueueStartsAtNewRunCreation(t *testing.T) {
+	tenant, now, lease := ownerReaperFixture(t, false, 0, runspec.OriginTrigger)
+	request := runspec.SealedRequest{AdmittedAt: now.Add(-24 * time.Hour), Request: runspec.Request{Options: runspec.Options{ClaimWait: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Minute}}}}}
+	raw, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET request_json=?,created_at=?,claim_wait_ns=?,status='pending',lineage_json=? WHERE id='run'`, raw, now.UnixNano(), int64(time.Minute), []byte(`{"retry_of":"earlier"}`))
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE id='run'`)
+	actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, Holder: lease.Holder, Generation: lease.Generation}}
+	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: "run", To: RunFailed, Cause: RunQueueTimeout, Actor: actor}); err == nil {
+		t.Fatal("old seal expired the new queue")
+	}
+	if got, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(got) != 0 {
+		t.Fatalf("early reaping: %+v, %v", got, err)
+	}
+	*now = now.Add(time.Minute)
+	lease, err = tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := tenant.s.ReapUnits(t.Context(), lease, 10)
+	if err != nil || len(got) != 1 || !got[0].Failed {
+		t.Fatalf("queue deadline: %+v, %v", got, err)
+	}
+}

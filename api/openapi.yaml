@@ -3039,35 +3039,6 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: {type: string}
-      - in: path
-        name: nodeID
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: runs.state
-      tags: [nodes]
-      summary: Reset an ordinarily failed node for its next in-place attempt.
-      description: |
-        Clears one terminal failed attempt back to pending while retaining its
-        consumed-attempt count. The caller must present the run's exact live
-        trigger generation unless controller-internal authorization applies.
-        Agent-loss failures use the separate recovery
-        path and cannot be reset here.
-      responses:
-        "204": {description: "Node reset, or already pending and unclaimed. Empty body."}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {description: Caller lacks the exact trigger claim identity.}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: Stale generation or node state cannot be reset.}
-        "500": {$ref: "#/components/responses/InternalError"}
-
   /api/v1/runs/{id}/nodes/{nodeID}/claim/input:
     parameters:
       - {$ref: "#/components/parameters/RunID"}
@@ -7431,14 +7402,7 @@ components:
         retried_as: {type: string}
         retry_source:
           type: string
-          enum: ["", manual, auto]
-        retry_cause_node_id: {type: string}
-        retry_cause_node_ids:
-          type: array
-          items: {type: string}
-        retry_available_at: {type: string, format: date-time, nullable: true}
-        retry_deadline_at: {type: string, format: date-time, nullable: true}
-        agent_loss_retry_count: {type: integer}
+          enum: ["", manual]
         replay_of_run_id: {type: string}
         replay_of_node_id: {type: string}
         invocation:
@@ -7710,7 +7674,7 @@ components:
         retry_of: {type: string}
         retry_source:
           type: string
-          enum: ["", manual, auto]
+          enum: ["", manual]
         parent_node_id: {type: string}
         full: {type: boolean}
         repo_inherited:

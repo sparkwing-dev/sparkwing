@@ -44,6 +44,7 @@ type ScheduleExpansion struct {
 // Nodes remain in accepted plan order, including persisted expansion insert order.
 type ScheduleSnapshot struct {
 	CancelRequested bool
+	GuardRefusal    string
 	Nodes           []ScheduleNode
 	Expansions      []ScheduleExpansion
 }
@@ -92,6 +93,9 @@ func Decide(snapshot ScheduleSnapshot) ScheduleDecision {
 	}
 	if snapshot.CancelRequested {
 		return decideCancellation(nodes)
+	}
+	if snapshot.GuardRefusal != "" {
+		return decideGuardRefusal(nodes, snapshot.GuardRefusal)
 	}
 	var result ScheduleDecision
 	waiters := make(map[string][]int)
@@ -151,6 +155,35 @@ func Decide(snapshot ScheduleSnapshot) ScheduleDecision {
 	}
 	result.Outcome, result.Reason = scheduleRunVerdict(nodes)
 	return result
+}
+
+func decideGuardRefusal(nodes []ScheduleNode, reason string) ScheduleDecision {
+	result := ScheduleDecision{Outcome: "failed", Reason: reason}
+	for _, node := range nodes {
+		if node.Status == "done" {
+			continue
+		}
+		if node.Claimed || node.Status == "running" {
+			result.Outcome = ""
+			continue
+		}
+		result.Nodes = append(result.Nodes, NodeDecision{NodeID: node.ID, Generation: node.Generation, Kind: DecisionTerminal, Outcome: "skipped", Reason: reason})
+	}
+	return result
+}
+
+func runGuardRefusal(run RunRow) string {
+	if run.Spec == nil {
+		return ""
+	}
+	guards := run.Spec.Resolved.Guards
+	if guards.Passed || len(guards.When) == 0 && len(guards.Unless) == 0 && guards.Reason == "" {
+		return ""
+	}
+	if guards.Reason != "" {
+		return guards.Reason
+	}
+	return "run guard refused execution"
 }
 
 func decideCancellation(nodes []ScheduleNode) ScheduleDecision {
@@ -287,7 +320,7 @@ func (snapshot RunSnapshot) Scheduling() (ScheduleSnapshot, error) {
 	}
 	projection := scheduleProjection{
 		runID:    snapshot.Run.ID,
-		result:   ScheduleSnapshot{CancelRequested: snapshot.Run.CancelRequestedAt != nil},
+		result:   ScheduleSnapshot{CancelRequested: snapshot.Run.CancelRequestedAt != nil, GuardRefusal: runGuardRefusal(snapshot.Run)},
 		rows:     make(map[string]NodeRow, len(snapshot.Nodes)),
 		jobs:     make(map[string]nodeproto.JobSpec, len(snapshot.Nodes)),
 		groups:   make(map[string]int),

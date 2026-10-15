@@ -150,12 +150,10 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).failNodesInRun": "the trigger-claim sweep fails the open nodes of a run it reaped; the global run id comes " +
 		"off that sweep's own scan",
 	"(*Store).failStaleQueuedNodes": "the queue-wait sweep fails every team's ready nodes no runner claimed in time",
-	"(*Store).recoverExpiredNodeClaims": "the expired-claim reaper fails and retries every team's nodes whose runner lease " +
+	"(*Store).recoverExpiredNodeClaims": "the expired-claim reaper fails every team's nodes whose runner lease " +
 		"lapsed; each write names a node its own locked scan selected",
 	"(*Store).ReapExpiredNodeClaims": "clears every team's lapsed node claims in one locked pass; each write names a node " +
 		"its own scan selected",
-	"(*Store).expirePendingAgentLossRetriesTx": "expires every team's agent-loss retries past their deadline, " +
-		"because a claim that expired only its own team's would leave the rest queued past it",
 	"(*Store).ListExpiredClaims": "the local trigger consumer's sweep lists every lapsed trigger claim on the store before " +
 		"judging each one",
 	"(*Store).FinishLapsedClaim": "closes a lapsed trigger claim the local consumer's sweep selected by global id; the run " +
@@ -269,19 +267,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).SetStorageAllowance": "the operator sets an allowance by principal; storage quotas are keyed by the charged " +
 		"principal, team:<slug> for every team but the default, so the principal names the team; no writer sets their " +
 		"team column yet, and scoping these reads before a backfill would read every quota as unlimited",
-	"(*Store).createAgentLossRetryTx": "the expired-claim reaper files a lost node's retry for the source run its own scan " +
-		"selected by global id; the retry's trigger and run take the source run's team",
-	"(*Store).mergeAgentLossRetryTx": "the expired-claim reaper folds another lost node into the retry it already filed " +
-		"for the same source run, named by global id",
-	"snapshotAgentLossRetryNodesTx": "copies one source run's nodes onto the retry the reaper filed for it, by global id, " +
-		"and also runs as the v31 schema step before the team column exists",
-	"persistAgentLossRetryNodeSourceTx": "writes one source node's snapshot for the retry the reaper filed, by global id, " +
-		"and also runs as the v31 schema step before the team column exists",
-	"loadAgentLossRetryNodeSourceTx": "reads the snapshot a retry was filed with by the retry's global id, on the reaper's " +
-		"path and in the v31 schema step that predates the team column",
-	"(*Store).requiredAgentLossRetryNodeSourceTx": "the deny-all markers a pre-snapshot retry carries were written before " +
-		"the team column, so scoping this read to a team would let a legacy retry run unrefused; the retry id is global " +
-		"and its node read follows",
 }
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a

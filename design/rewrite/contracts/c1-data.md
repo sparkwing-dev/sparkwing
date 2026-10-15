@@ -127,7 +127,50 @@ settings and `AllowedPools` from intake. Every named, queued and self claim call
 absence selects the ordered eligible queue. Reservations require an explicitly
 required granted pool that intake allowed. A self-asserted `pool=` label grants
 nothing. Preferences rank only eligible work. `match.Fits` checks availability.
-The old runtime calls `EvaluateOld` until it is replaced by these contracts.
+
+`ClaimProfileResolver` supplies enrolled repository acceptance and location,
+plus the host observations needed by a self-claim. The store replaces its name,
+class and reserved pools with authenticated capability facts. Self-claims
+require this resolver because `ReconcileRequest` carries no machine observations.
+Named and queued claims still carry their observed labels and capacity in
+`UnitDemand`.
+
+`ReconciledNode.Bearer` carries the new self-claim credential after commit and
+is excluded from JSON. `nodes.owner_capability_prefix` and the matching
+`NodeRow.OwnerCapabilityPrefix` identify which live trigger award may renew
+a self-claimed job. Dispatched claims leave this field empty. Claim clearing
+also clears this field. This fence is separate from capability ancestry because
+C2 awards parent to the claimant root.
+
+`MaterializeSource.Result` names a committed terminal result by job and state
+sequence. It is exclusive with the positive execution-attempt identity in
+`Source`. This lets a later retry reuse a previously materialized result without
+inventing an execution attempt. Both variants read the outcome from persisted
+state and require the same policy-specific record authority.
+
+`RunRow.CreatedAt` is the new invocation's creation time. Queue deadlines use
+it because retries preserve the original request seal's admission time.
+`ScheduleSnapshot.GuardRefusal` carries a sealed guard refusal to the shared
+decider. Refused jobs become skipped and the run fails with the recorded reason.
+Cancellation still takes precedence. A refused seal cannot release or claim work.
+
+Materialization uses the store-local `materializationRecords` interface inside
+the state transaction. Its implementation must authorize the policy-specific
+source and copy verified output and manifest edges atomically. Memo authority
+comes from the retained record, so pruning its source run does not remove a hit.
+Retry and coalesced outcomes come from persisted terminal job and attempt rows.
+The unconfigured path refuses materialization. Tests may fake the record boundary,
+but those tests do not establish blob persistence or byte-integrity coverage.
+The matching `nodeResultRecords` interface attaches reported or published output
+and manifest records in the terminal transition transaction. It must authorize
+the exact persisted attempt or publication binding. A refused attachment rolls
+back state, attempt closure and events. An exact result replay does not reattach
+records.
+
+`IntakePolicy` resolves request options through C4 and supplies server ceilings,
+repository authority, verified App delivery facts and log retention. The store
+requires it before admission and rechecks the caller in the intake transaction.
+It does not accept client origin labels as repository or branch authority.
 
 `blob.LogSubject` is the shared identity for signing, commits, live pushes and
 reads. It contains either a positive job attempt identity or a trigger/plan/eval
@@ -170,6 +213,12 @@ C2's tagged `AuthorityRef`. A session remains a session through transaction
 rechecks. `CapabilityPrefix` remains a separate claim fence. `storeTx` implements
 C2's `AuthorityResolver`, so current ancestry, membership and grants are checked
 inside the write transaction.
+
+`Store.ResolveAuthority` and `Store.LookupCapability` expose consistent ancestry
+and membership reads to controller adapters. Lookup accepts a bearer digest.
+These methods do not authorize a route or establish a unit's live binding.
+`Store.ExchangeCapability` owns the bootstrap exchange transaction and returns
+the replacement bearer only after commit.
 
 `CapabilityRecord` stores version 1 and the full C2 capability in `authority_json`.
 The bearer digest stays in its indexed column and no raw bearer is stored. The

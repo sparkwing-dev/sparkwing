@@ -48,7 +48,7 @@ type UnitClaim struct {
 // claims use the same path; only launcher service scope can cross teams.
 // ReconcileNode self-claims use the same matching inputs and reservation checks.
 func (s *Store) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error) {
-	panic("unimplemented: c1-data")
+	return s.claimUnit(ctx, demand)
 }
 
 // ReleaseUnit returns an unstarted unit without consuming an attempt; cancellation and started leases use transitions.
@@ -70,5 +70,15 @@ var _ OperatorStore = (*Operator)(nil)
 // Profile reservations and identity come from the live capability; Demand comes
 // from the run seal and the selected unit's persisted execution settings.
 func matchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, unit UnitRef) (match.Profile, match.Demand, error) {
-	panic("unimplemented: c1-placement")
+	return resolveMatchingInputsTx(ctx, tx, request, unit)
 }
+
+// ClaimProfileResolver supplies enrolled placement facts and current host capacity.
+// Implementations must bind every result to the supplied authenticated principal.
+// ResolveClaimProfile runs inside a store transaction and must not mutate store state.
+type ClaimProfileResolver interface {
+	ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error)
+}
+
+// SetClaimProfileResolver installs enrollment and self-claim observations before concurrent use.
+func (s *Store) SetClaimProfileResolver(resolver ClaimProfileResolver) { s.claimProfiles = resolver }

@@ -7,13 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, error) {
 	v := RunRow{ID: id, Team: team}
 	var request, spec, lineage, pools, actor, plan []byte
 	var cancel, start, finish sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT number,pipeline,status,request_json,spec_json,lineage_json,plan_json,plan_hash,dispatch,allowed_pools,cancel_requested_at,started_at,finished_at,state_seq,state_digest,state_actor FROM runs WHERE team=? AND id=?`, team, id).Scan(&v.Number, &v.Pipeline, &v.State, &request, &spec, &lineage, &plan, &v.PlanHash, &v.Dispatch, &pools, &cancel, &start, &finish, &v.StateSeq, &v.StateDigest, &actor)
+	var created int64
+	err := tx.QueryRowContext(ctx, `SELECT number,pipeline,status,request_json,spec_json,lineage_json,plan_json,plan_hash,dispatch,allowed_pools,cancel_requested_at,started_at,finished_at,state_seq,state_digest,state_actor,created_at FROM runs WHERE team=? AND id=?`, team, id).Scan(&v.Number, &v.Pipeline, &v.State, &request, &spec, &lineage, &plan, &v.PlanHash, &v.Dispatch, &pools, &cancel, &start, &finish, &v.StateSeq, &v.StateDigest, &actor, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, notFound("run", id)
 	}
@@ -31,7 +34,11 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 		}
 	}
 	v.Plan = plan
+	v.CreatedAt = time.Unix(0, created).UTC()
 	v.CancelRequestedAt, v.StartedAt, v.FinishedAt = stateTime(cancel), stateTime(start), stateTime(finish)
+	if v.Request.Request.Mode == runspec.IntakePublish {
+		return v, nil
+	}
 	if v.Dispatch == "controller" && v.Spec != nil {
 		var owner OwnerLeaseRef
 		owner.Kind, owner.Name, owner.RunID = OwnerController, "controller.owner", id
@@ -53,13 +60,13 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 	return v, nil
 }
 
-const nodeReadColumns = `status,outcome,status_detail,COALESCE(claimed_by,''),capability_prefix,generation,attempt,disruptions,ready_at,lease_expires_at,started_at,finished_at,cancel_requested_at,state_seq,state_digest,state_actor,expansion,expansion_digest,execution_json,spec_json,spec_hash`
+const nodeReadColumns = `status,outcome,status_detail,COALESCE(claimed_by,''),capability_prefix,owner_capability_prefix,generation,attempt,disruptions,ready_at,lease_expires_at,started_at,finished_at,cancel_requested_at,state_seq,state_digest,state_actor,expansion,expansion_digest,execution_json,spec_json,spec_hash`
 
 func readNodeTx(ctx context.Context, tx *storeTx, team Team, ref NodeRef) (NodeRow, error) {
 	v := NodeRow{Ref: ref}
 	var ready, lease, start, finish, cancel sql.NullInt64
 	var actor, execution []byte
-	err := tx.QueryRowContext(ctx, `SELECT `+nodeReadColumns+` FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID).Scan(&v.Status, &v.Outcome, &v.StatusDetail, &v.ClaimedBy, &v.CapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &lease, &start, &finish, &cancel, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash)
+	err := tx.QueryRowContext(ctx, `SELECT `+nodeReadColumns+` FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID).Scan(&v.Status, &v.Outcome, &v.StatusDetail, &v.ClaimedBy, &v.CapabilityPrefix, &v.OwnerCapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &lease, &start, &finish, &cancel, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, notFound("job", ref.NodeID)
 	}

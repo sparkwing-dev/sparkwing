@@ -77,42 +77,6 @@ func TestPostgresReconcileOrphanedLocalRuns(t *testing.T) {
 	}
 }
 
-func TestSchemaV30_PostgresPersistsAttemptAndSchedulesAgentLossRetry(t *testing.T) {
-	st := openPGTestStore(t)
-	ctx := context.Background()
-	createRetryRunAndReadyNode(t, st, "run-pg-agent-loss", 1)
-	identity := store.ClaimIdentity{Principal: "agent:pg-desktop", TokenPrefix: "swr_pg_desktop"}
-	claimed := claimRetryNode(t, st, "run-pg-agent-loss", identity, "agent:pg-desktop:0")
-	ackNodeAttempt(t, st, claimed, identity, 1)
-	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET lease_expires_at = $1 WHERE run_id = $2 AND node_id = $3`,
-		time.Now().Add(-time.Second).UnixNano(), claimed.RunID, claimed.NodeID); err != nil {
-		t.Fatal(err)
-	}
-	recovered, err := store.Maintenance.RecoverExpiredNodeClaims(st, ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(recovered) != 1 || recovered[0].RetryRunID == "" || !recovered[0].Started || recovered[0].Invocations != 1 {
-		t.Fatalf("recovery = %+v", recovered)
-	}
-	source, err := st.GetNode(ctx, claimed.RunID, claimed.NodeID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if source.FailureReason != store.FailureAgentLost || len(source.ExecutionAttempts) != 1 ||
-		source.ExecutionAttempts[0].FinishedAt == nil || source.ExecutionAttempts[0].FailureReason != store.FailureAgentLost ||
-		source.ExecutionAttempts[0].RetryRunID != recovered[0].RetryRunID {
-		t.Fatalf("source attempt = %+v", source)
-	}
-	retry, err := st.GetRun(ctx, recovered[0].RetryRunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if retry.Status != "pending" || retry.RetryOf != claimed.RunID || retry.RetryAvailableAt == nil || retry.RetryDeadlineAt == nil {
-		t.Fatalf("retry = %+v", retry)
-	}
-}
-
 func TestPostgresClaimNextReadyNode_Concurrent(t *testing.T) {
 	st := openPGTestStore(t)
 	ctx := context.Background()

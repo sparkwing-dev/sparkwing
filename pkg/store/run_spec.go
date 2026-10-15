@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -87,7 +89,16 @@ type AcceptedExpansion struct {
 // a changed body conflicts. An empty key requests a distinct invocation.
 // Retry intake loads Lineage.RetryOf from this Tenant, carries its seals unchanged and records the new ID outside them.
 func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (AdmissionResult, error) {
-	panic("unimplemented: c1-data")
+	var result AdmissionResult
+	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		result, err = admitRun(ctx, tx, t.team, request, tx.now())
+		return err
+	})
+	if err != nil {
+		return AdmissionResult{}, err
+	}
+	return result, nil
 }
 
 // AcceptPlan validates C3 plan and restricted checkout declarations, then resolves
@@ -99,7 +110,16 @@ func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (Admission
 // Neither a request field nor an existing seal may change; a differing sealed hash returns spec_drift.
 // Published plans require live publisher authority and create importable jobs without awarding an executable claim.
 func (t *Tenant) AcceptPlan(ctx context.Context, request PlanAcceptance) (AcceptedPlan, error) {
-	panic("unimplemented: c1-data")
+	var result AcceptedPlan
+	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		result, err = sealRunSpecTx(ctx, tx, t.team, request, tx.now())
+		return err
+	})
+	if err != nil {
+		return AcceptedPlan{}, err
+	}
+	return result, nil
 }
 
 // AcceptExpansion is the single writer for successful and failed generator evaluation.
@@ -280,12 +300,173 @@ func resolveReapedExpansionTx(ctx context.Context, tx *storeTx, target expiredUn
 	return settleControllerTx(ctx, tx, target.team, target.ref.RunID, now)
 }
 
-// safety: intake and both seals own every write-once request/spec projection so retry cannot replace trusted facts.
-func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest, now time.Time) (AdmissionResult, error) {
-	panic("unimplemented: c1-data")
+func insertAdmissionTx(ctx context.Context, tx *storeTx, team Team, result AdmissionResult, snapshot admittedSnapshot, p capability.Principal, key, scope, digest string, policy IntakePolicyFacts, now time.Time) error {
+	input := snapshot.request.Request
+	body, err := json.Marshal(snapshot.request)
+	if err != nil {
+		return err
+	}
+	pools, err := json.Marshal(snapshot.request.AllowedPools)
+	if err != nil {
+		return err
+	}
+	lineage, err := json.Marshal(snapshot.lineage)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,idempotency_scope,idempotency_key,idempotency_digest,request_sealed_at,trigger_source,git_branch,git_sha,repo_key,repo_display,retry_of,lineage_json,parent_run_id,parent_node_id,dispatch,intake_mode,admission,allowed_pools,created_principal,created_at,claim_wait_ns,log_retention_class,log_retention_days) VALUES (?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, team, result.RunID, result.Number, input.Pipeline, body, snapshot.request.Hash, scope, key, digest, snapshot.request.AdmittedAt.UnixNano(), input.Origin, input.Git.Ref, input.Git.SHA, input.Git.Repository.Key, input.Git.Repository.Display, snapshot.lineage.RetryOf, lineage, snapshot.lineage.ParentRunID, snapshot.lineage.ParentJobID, input.Dispatch, input.Mode, input.Options.AdmissionClass.Value, pools, p.Capability.Subject.ID, now.UnixNano(), int64(input.Options.ClaimWait.Value), policy.LogRetentionClass, policy.LogRetentionDays)
+	if err != nil {
+		return err
+	}
+	if input.Mode == runspec.IntakePublish {
+		return nil
+	}
+	kind := capability.UnitTrigger
+	if input.Dispatch == runspec.DispatchController {
+		kind = capability.UnitPlan
+	}
+	needs, err := json.Marshal(input.Options.Requires.Value)
+	if err != nil {
+		return err
+	}
+	prefers, err := json.Marshal(input.Options.Prefers.Value)
+	if err != nil {
+		return err
+	}
+	var expires any
+	if input.Options.OwnerExecutionTimeout.Set && input.Options.OwnerExecutionTimeout.Value > 0 {
+		expires = now.Add(input.Options.OwnerExecutionTimeout.Value).UnixNano()
+	}
+	delivery, replayKey := input.Git.App.Value.DeliveryKey, appReplayKey(input)
+	if snapshot.lineage.RetryOf != "" {
+		delivery, replayKey = "", ""
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels,webhook_delivery,webhook_replay_key) VALUES (?,?,'pending',?,?,?,?,?,?,?,?)`, team, result.RunID, kind, now.UnixNano(), now.UnixNano(), expires, needs, prefers, delivery, replayKey)
+	return err
 }
 
-// safety: the second seal and plan insertion commit together after C3 validation and server-side preflight.
+func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string, spec runspec.Spec, body json.RawMessage, generation int64) error {
+	var plan nodeproto.PlanDoc
+	if err := json.Unmarshal(body, &plan); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		return err
+	}
+	write, err := tx.ExecContext(ctx, `UPDATE runs SET spec_json=?,spec_hash=?,sealed_at=?,plan_json=?,plan_hash=?,plan_accepted_generation=?,claim_wait_ns=?,admission=? WHERE team=? AND id=? AND sealed_at IS NULL`, raw, spec.Hash, spec.SealedAt.UnixNano(), []byte(body), spec.PlanHash, generation, int64(spec.Resolved.Settings.Options.ClaimWait.Value), spec.Resolved.Settings.Options.AdmissionClass.Value, team, id)
+	if err != nil {
+		return err
+	}
+	count, err := write.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return authorityError(apierr.SpecDrift, "run already has a sealed plan")
+	}
+	for _, job := range plan.Jobs {
+		execution, ok := spec.Resolved.Settings.Jobs[job.ID]
+		if !ok {
+			return authorityError(apierr.PlanInvalid, "job has no resolved execution settings")
+		}
+		raw, err := json.Marshal(job)
+		if err != nil {
+			return err
+		}
+		hash, err := tx.store.planServices().CanonicalHash(job)
+		if err != nil {
+			return err
+		}
+		expansion := ExpansionAbsent
+		if len(job.Closures.Generate) > 0 {
+			expansion = ExpansionExpected
+		}
+		if err = insertNodeTx(ctx, tx, team, NodeRow{Ref: NodeRef{id, job.ID}, Status: StatusPending, Spec: raw, SpecHash: string(hash), Execution: execution, Expansion: expansion}); err != nil {
+			return err
+		}
+	}
+	snapshot, err := readSnapshotTx(ctx, tx, team, id)
+	if err != nil {
+		return err
+	}
+	_, err = snapshot.Scheduling()
+	return err
+}
+
 func sealRunSpecTx(ctx context.Context, tx *storeTx, team Team, request PlanAcceptance, now time.Time) (AcceptedPlan, error) {
-	panic("unimplemented: c1-data")
+	var controller *Actor
+	var dispatch string
+	if err := tx.QueryRowContext(ctx, `SELECT dispatch FROM runs WHERE team=? AND id=?`, team, request.RunID).Scan(&dispatch); err != nil {
+		return AcceptedPlan{}, err
+	}
+	if dispatch == string(runspec.DispatchController) {
+		var holder string
+		var generation, until int64
+		err := tx.QueryRowContext(ctx, `SELECT holder,generation,until FROM leases WHERE name='controller.owner'`+tx.forUpdate()).Scan(&holder, &generation, &until)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return AcceptedPlan{}, err
+		}
+		if err == nil && until > now.UnixNano() {
+			controller = &Actor{Kind: ActorController, Owner: OwnerLeaseRef{Kind: OwnerController, Name: "controller.owner", RunID: request.RunID, Holder: holder, Generation: generation}}
+		}
+	}
+	if err := planAuthorityTx(ctx, tx, team, request); err != nil {
+		return AcceptedPlan{}, err
+	}
+	if err := lockStateRunTx(ctx, tx, team, request.RunID); err != nil {
+		return AcceptedPlan{}, err
+	}
+	run, err := readRunTx(ctx, tx, team, request.RunID)
+	if err != nil {
+		return AcceptedPlan{}, err
+	}
+	if run.CancelRequestedAt != nil || run.FinishedAt != nil && run.Spec == nil {
+		return AcceptedPlan{}, authorityError(apierr.IllegalTransition, "run is no longer accepting plans")
+	}
+	spec, body, err := preparePlanSealTx(ctx, tx, team, request, run)
+	if err != nil {
+		return AcceptedPlan{}, err
+	}
+	replay := run.Spec != nil
+	if replay && run.Spec.Hash != spec.Hash {
+		return AcceptedPlan{}, authorityError(apierr.SpecDrift, "plan differs from the accepted seal")
+	}
+	if err = planAuthorityTx(ctx, tx, team, request); err != nil {
+		return AcceptedPlan{}, err
+	}
+	if replay && run.FinishedAt != nil {
+		return AcceptedPlan{Spec: *run.Spec, Plan: run.Plan, PlanHash: run.PlanHash, Owner: run.Owner, Replayed: true}, nil
+	}
+	if run.Request.Request.Mode == runspec.IntakeExecute && dispatch == string(runspec.DispatchController) && controller == nil {
+		return AcceptedPlan{}, authorityError(apierr.Unavailable, "controller ownership lease is unavailable")
+	}
+	if !replay {
+		if err = writeAcceptedPlanTx(ctx, tx, team, run.ID, spec, body, request.Actor.Owner.Generation); err != nil {
+			return AcceptedPlan{}, err
+		}
+	} else {
+		spec, body = *run.Spec, run.Plan
+	}
+	if err = planAuthorityTx(ctx, tx, team, request); err != nil {
+		return AcceptedPlan{}, err
+	}
+	if run.Request.Request.Mode == runspec.IntakeExecute && dispatch == string(runspec.DispatchController) {
+		if _, err = tx.ExecContext(ctx, `UPDATE runs SET plan_accepted_generation=? WHERE team=? AND id=? AND plan_accepted_generation=0`, request.Actor.Owner.Generation, team, run.ID); err != nil {
+			return AcceptedPlan{}, err
+		}
+		if err = acceptControllerPlanTx(ctx, tx, team, request, *controller, replay); err != nil {
+			return AcceptedPlan{}, err
+		}
+		if run.State == RunPending {
+			if _, err = transitionRunTx(ctx, tx, team, RunTransition{RunID: run.ID, To: RunRunning, Actor: *controller, Cause: RunStart}, tx.now()); err != nil {
+				return AcceptedPlan{}, err
+			}
+		}
+		if err = settleControllerTx(ctx, tx, team, run.ID, tx.now()); err != nil {
+			return AcceptedPlan{}, err
+		}
+		return AcceptedPlan{Spec: spec, Plan: body, PlanHash: string(spec.PlanHash), Owner: &controller.Owner, Replayed: replay}, nil
+	}
+	return AcceptedPlan{Spec: spec, Plan: body, PlanHash: string(spec.PlanHash), Owner: run.Owner, Replayed: replay}, nil
 }

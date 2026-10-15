@@ -123,10 +123,7 @@ func (v Verdict) String() string {
 	return string(v.Reason)
 }
 
-// EvaluateOld reports whether p could ever run d: the repository filter, then the
-// selector, then the request against capacity. It reads no availability, so a
-// busy agent is still eligible.
-func EvaluateOld(p Profile, d Demand) Verdict {
+func evaluateRequirements(p Profile, d Demand) Verdict {
 	if p.Accept != nil && d.Repo != nil && !admitsRepo(p.Accept, *d.Repo, d.Trigger) {
 		return Verdict{Reason: ReasonRepo}
 	}

@@ -40,7 +40,7 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 	expired := owner.deadline.Valid && owner.deadline.Int64 <= now.UnixNano()
 	lapsed := owner.status == "claimed" && owner.lease.Valid && owner.lease.Int64 <= now.UnixNano()
 	wait := run.Request.Request.Options.ClaimWait
-	queuedOut := !owner.started.Valid && wait.Set && wait.Value > 0 && !run.Request.AdmittedAt.Add(wait.Value).After(now)
+	queuedOut := !owner.started.Valid && wait.Set && wait.Value > 0 && !run.CreatedAt.Add(wait.Value).After(now)
 	if !cancelled && !expired && !lapsed && !queuedOut && owner.status != "failed" && owner.status != "done" {
 		return nil, nil
 	}

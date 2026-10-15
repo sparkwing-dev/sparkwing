@@ -114,29 +114,30 @@ type NodeRef struct {
 
 // NodeRow contains the state facts consumed by the shared decision and reconciliation functions.
 type NodeRow struct {
-	Ref                NodeRef
-	Status             NodeStatus
-	Outcome            NodeState
-	StatusDetail       string
-	ClaimedBy          string
-	CapabilityPrefix   string
-	Generation         int64
-	Attempt            int64
-	ApplicationRetries int
-	Disruptions        int
-	ReadyAt            *time.Time
-	LeaseExpiresAt     *time.Time
-	StartedAt          *time.Time
-	FinishedAt         *time.Time
-	CancelRequestedAt  *time.Time
-	StateSeq           int64
-	StateDigest        string
-	StateActor         Actor
-	Expansion          ExpansionState
-	ExpansionDigest    string
-	Execution          runspec.JobExecutionSettings
-	Spec               json.RawMessage
-	SpecHash           string
+	Ref                   NodeRef
+	Status                NodeStatus
+	Outcome               NodeState
+	StatusDetail          string
+	ClaimedBy             string
+	CapabilityPrefix      string
+	OwnerCapabilityPrefix string
+	Generation            int64
+	Attempt               int64
+	ApplicationRetries    int
+	Disruptions           int
+	ReadyAt               *time.Time
+	LeaseExpiresAt        *time.Time
+	StartedAt             *time.Time
+	FinishedAt            *time.Time
+	CancelRequestedAt     *time.Time
+	StateSeq              int64
+	StateDigest           string
+	StateActor            Actor
+	Expansion             ExpansionState
+	ExpansionDigest       string
+	Execution             runspec.JobExecutionSettings
+	Spec                  json.RawMessage
+	SpecHash              string
 }
 
 // NodeAttempt preserves the node-wide ordinal across claims; generation is an attribute of that ordinal.
@@ -223,7 +224,7 @@ func NodeTransitions() []NodeEdge {
 		{[]NodeState{NodeReady}, []NodeState{NodePending}, owners, CauseRevoke, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
 		{[]NodeState{NodeReady}, []NodeState{NodeClaimed}, []ActorKind{ActorHolder, ActorRunHost}, CauseAward, []EdgeGuard{GuardAward, GuardUnclaimed}, false},
 		{[]NodeState{NodeReady}, []NodeState{NodeFailed}, []ActorKind{ActorReaper}, CauseQueueTimeout, []EdgeGuard{GuardQueueDeadline, GuardUnclaimed}, false},
-		{[]NodeState{NodePending, NodeReady}, terminal, []ActorKind{ActorRunHost}, CauseMaterialize, []EdgeGuard{GuardOwner, GuardMaterialize}, false},
+		{[]NodeState{NodePending, NodeReady, NodeClaimed}, terminal, []ActorKind{ActorRunHost}, CauseMaterialize, []EdgeGuard{GuardOwner, GuardMaterialize}, false},
 		{[]NodeState{NodeClaimed}, []NodeState{NodeRunning}, []ActorKind{ActorHolder}, CauseStart, []EdgeGuard{GuardHolder}, false},
 		{[]NodeState{NodeClaimed}, []NodeState{NodePending}, []ActorKind{ActorHolder}, CauseRelease, []EdgeGuard{GuardHolder}, false},
 		{[]NodeState{NodeClaimed}, []NodeState{NodePending}, []ActorKind{ActorReaper}, CauseLeaseLapse, []EdgeGuard{GuardExpired}, false},
@@ -253,6 +254,14 @@ type MaterializeSource struct {
 	Kind   SourcePolicy
 	Source runspec.AttemptIdentity
 	Record blob.RecordKey
+	Result *MaterializedResultSource
+}
+
+// MaterializedResultSource names a committed terminal result by state sequence,
+// independently of earlier execution attempts. It is exclusive with Source.
+type MaterializedResultSource struct {
+	Ref      NodeRef
+	StateSeq int64
 }
 
 // TransitionExtra carries only the columns owned by a particular edge; mismatched fields are refused.
@@ -337,7 +346,7 @@ func (t *Tenant) TransitionNode(ctx context.Context, change NodeTransition) (App
 func nodeState(row NodeRow) (NodeState, error) {
 	switch row.Status {
 	case StatusDone:
-		if !slices.Contains([]NodeState{NodeSuccess, NodeFailed, NodeCancelled, NodeSkipped, NodeSuperseded, NodeMemoized}, row.Outcome) || row.ClaimedBy != "" || row.LeaseExpiresAt != nil || row.CapabilityPrefix != "" || row.FinishedAt == nil {
+		if !slices.Contains([]NodeState{NodeSuccess, NodeFailed, NodeCancelled, NodeSkipped, NodeSuperseded, NodeMemoized}, row.Outcome) || row.ClaimedBy != "" || row.LeaseExpiresAt != nil || row.CapabilityPrefix != "" || row.OwnerCapabilityPrefix != "" || row.FinishedAt == nil {
 			return "", errors.New("invalid terminal job state")
 		}
 		return row.Outcome, nil
@@ -361,7 +370,7 @@ func nodeState(row NodeRow) (NodeState, error) {
 			}
 			return NodeClaimed, nil
 		}
-		if row.LeaseExpiresAt != nil || row.CapabilityPrefix != "" {
+		if row.LeaseExpiresAt != nil || row.CapabilityPrefix != "" || row.OwnerCapabilityPrefix != "" {
 			return "", errors.New("orphan job claim fields")
 		}
 		if row.ReadyAt != nil {
@@ -377,6 +386,13 @@ func nodeState(row NodeRow) (NodeState, error) {
 func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change NodeTransition, now time.Time) (Applied, error) {
 	if err := prepareStateActorTx(ctx, tx, team, change.Ref.RunID, change.Actor, now); err != nil {
 		return Applied{}, err
+	}
+	if change.Cause == CauseMaterialize {
+		var err error
+		change, err = materializeChangeTx(ctx, tx, team, change)
+		if err != nil {
+			return Applied{}, err
+		}
 	}
 	if err := lockStateRunTx(ctx, tx, team, change.Ref.RunID); err != nil {
 		return Applied{}, err
@@ -420,6 +436,9 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 		return refusal(ReasonIllegalEdge)
 	}
 	if err := guardNodeEdgeTx(ctx, tx, team, row, change, *edge, now); err != nil {
+		return Applied{}, err
+	}
+	if err := attachNodeResultRecordsTx(ctx, tx, team, row, change); err != nil {
 		return Applied{}, err
 	}
 	if err := applyNodeEdgeTx(ctx, tx, team, &row, change, *edge, now); err != nil {
@@ -485,9 +504,6 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 		if int64(len(change.Extra.Result.MaskedError)) > limits.ErrorBytes {
 			return errors.New("job error exceeds limit")
 		}
-		if change.Extra.Result.OutputRecord != nil || change.Extra.Result.ManifestRecord != nil {
-			return errors.New("result record attachment requires transactional blob authorization")
-		}
 	}
 	if change.Extra.Materialize != nil && change.Cause != CauseMaterialize {
 		return errors.New("unexpected materialization")
@@ -509,6 +525,15 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 		case GuardOwner:
 			if err := checkOwnerTx(ctx, tx, team, change.Actor, row.Ref.RunID, now); err != nil {
 				return err
+			}
+			if change.To == NodeReady {
+				run, err := readRunTx(ctx, tx, team, row.Ref.RunID)
+				if err != nil {
+					return err
+				}
+				if runGuardRefusal(run) != "" {
+					return errors.New("guard refused job release")
+				}
 			}
 		case GuardUnclaimed:
 			if row.ClaimedBy != "" {
@@ -572,7 +597,9 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 		case GuardApproval, GuardApprovalTimeout:
 			return checkApprovalEdgeTx(ctx, tx, team, row, change, now)
 		case GuardMaterialize:
-			return errors.New("materialization requires transactional source read authority")
+			if change.Extra.Materialize == nil || change.Extra.Result == nil {
+				return errors.New("materialization requires transactional source read authority")
+			}
 		case GuardPublication:
 			principal, err := tx.ResolveAuthority(ctx, change.Actor.Authority)
 			if err != nil {
@@ -691,6 +718,7 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 func clearNodeClaim(row *NodeRow) {
 	row.ClaimedBy = ""
 	row.CapabilityPrefix = ""
+	row.OwnerCapabilityPrefix = ""
 	row.LeaseExpiresAt = nil
 	row.ReadyAt = nil
 }
@@ -704,7 +732,7 @@ func writeNodeStateTx(ctx context.Context, tx *storeTx, team Team, row NodeRow) 
 	if row.ClaimedBy != "" {
 		holder = row.ClaimedBy
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE nodes SET status=?,outcome=?,claimed_by=?,capability_prefix=?,generation=?,attempt=?,disruptions=?,ready_at=?,lease_expires_at=?,started_at=?,finished_at=?,cancel_requested_at=?,state_seq=?,state_digest=?,state_actor=?,expansion=? WHERE team=? AND run_id=? AND node_id=? AND state_seq=?`, row.Status, row.Outcome, holder, row.CapabilityPrefix, row.Generation, row.Attempt, row.Disruptions, timeNS(row.ReadyAt), timeNS(row.LeaseExpiresAt), timeNS(row.StartedAt), timeNS(row.FinishedAt), timeNS(row.CancelRequestedAt), row.StateSeq, row.StateDigest, actor, row.Expansion, team, row.Ref.RunID, row.Ref.NodeID, row.StateSeq-1)
+	result, err := tx.ExecContext(ctx, `UPDATE nodes SET status=?,outcome=?,claimed_by=?,capability_prefix=?,owner_capability_prefix=?,generation=?,attempt=?,disruptions=?,ready_at=?,lease_expires_at=?,started_at=?,finished_at=?,cancel_requested_at=?,state_seq=?,state_digest=?,state_actor=?,expansion=? WHERE team=? AND run_id=? AND node_id=? AND state_seq=?`, row.Status, row.Outcome, holder, row.CapabilityPrefix, row.OwnerCapabilityPrefix, row.Generation, row.Attempt, row.Disruptions, timeNS(row.ReadyAt), timeNS(row.LeaseExpiresAt), timeNS(row.StartedAt), timeNS(row.FinishedAt), timeNS(row.CancelRequestedAt), row.StateSeq, row.StateDigest, actor, row.Expansion, team, row.Ref.RunID, row.Ref.NodeID, row.StateSeq-1)
 	if err != nil {
 		return err
 	}

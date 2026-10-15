@@ -104,7 +104,7 @@ func claimAttention(n store.WaitingNode, agents []agentSighting, cloud bool) str
 	profiles := make([]match.Profile, 0, len(agents)+1)
 	for _, a := range agents {
 		profiles = append(profiles, a.Profile)
-		verdict := match.EvaluateOld(a.Profile, demand)
+		verdict := match.Evaluate(a.Profile, demand)
 		switch {
 		case verdict.OK() && a.online:
 			return ""
@@ -116,7 +116,7 @@ func claimAttention(n store.WaitingNode, agents []agentSighting, cloud bool) str
 	}
 	if cloud {
 		runner := match.Profile{Class: match.ClassCloud, Location: "cloud", Labels: match.ToolLabels(match.CloudTools)}
-		if match.EvaluateOld(runner, demand).OK() {
+		if match.Evaluate(runner, demand).OK() {
 			return ""
 		}
 		profiles = append(profiles, runner)
