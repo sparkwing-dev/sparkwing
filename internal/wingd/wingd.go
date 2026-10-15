@@ -336,51 +336,6 @@ func socketDirPrefix() string {
 	return fmt.Sprintf("sparkwing-%d-", uid)
 }
 
-// PeerSockets lists the other daemons answering in the shared socket base.
-//
-// safety: discovery never unlinks a socket. A dial cannot tell a dead socket
-// from one a starting daemon has bound but not yet listened on, so unlinking
-// what looked dead deleted live daemons' sockets. A killed daemon's socket
-// stays until that home's next daemon replaces it under its election lock.
-func PeerSockets(home string) ([]string, error) {
-	own, err := SocketPath(home)
-	if err != nil {
-		return nil, err
-	}
-	base, err := socketBaseDir()
-	if err != nil {
-		return nil, err
-	}
-	dirs, err := filepath.Glob(filepath.Join(base, socketDirPrefix()+"*"))
-	if err != nil {
-		return nil, fmt.Errorf("wingd: scan daemon sockets: %w", err)
-	}
-	var peers []string
-	for _, dir := range dirs {
-		sock := filepath.Join(dir, "d.sock")
-		if sock != own && socketAlive(sock) {
-			peers = append(peers, sock)
-		}
-	}
-	return peers, nil
-}
-
-func socketAlive(sock string) bool {
-	// safety: a directory this user does not own can hold an impostor listener,
-	// so leave it alone rather than opening a connection to it.
-	if err := ValidateSocketDir(sock); err != nil {
-		return false
-	}
-	if !socketPresent(sock) {
-		return false
-	}
-	c, err := DialSocket(context.Background(), sock, 100*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	return c.Close() == nil
-}
-
 func maxSunPath() int {
 	if runtime.GOOS == "darwin" {
 		return 104

@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -69,63 +68,6 @@ func writeSocketPlaceholder(t *testing.T, sock string) string {
 		t.Fatalf("write socket placeholder: %v", err)
 	}
 	return sock
-}
-
-func bindLiveSocket(t *testing.T, home string) string {
-	t.Helper()
-	sock, err := SocketPath(home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	ln, err := bindSocket(sock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for {
-			connection, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			_ = checkPeerCredentials(connection)
-			connection.Close()
-		}
-	}()
-	t.Cleanup(func() {
-		_ = ln.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		select {
-		case <-done:
-		case <-ctx.Done():
-			t.Error("socket fixture did not stop")
-		}
-		_ = os.RemoveAll(filepath.Dir(sock))
-	})
-	return sock
-}
-
-func TestPeerSockets_FindsOtherHomesAndOmitsOwn(t *testing.T) {
-	own := t.TempDir()
-	other := t.TempDir()
-	ownSock := bindLiveSocket(t, own)
-	otherSock := bindLiveSocket(t, other)
-
-	peers, err := PeerSockets(own)
-	if err != nil {
-		t.Fatalf("peer sockets: %v", err)
-	}
-	if !slices.Contains(peers, otherSock) {
-		t.Errorf("peers %v missing another home's socket %q", peers, otherSock)
-	}
-	if slices.Contains(peers, ownSock) {
-		t.Errorf("peers %v include this home's own socket %q", peers, ownSock)
-	}
 }
 
 func TestValidateSocketPath_RejectsOverLength(t *testing.T) {

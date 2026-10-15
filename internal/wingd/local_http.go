@@ -30,7 +30,7 @@ func (s LocalHTTP) ServeAPI(ctx context.Context, listener net.Listener) error {
 	if listener == nil {
 		return errors.New("wingd: controller HTTP requires a listener")
 	}
-	return serveLocalHTTP(ctx, localAPIListener{listener}, s.API, func(ctx context.Context, connection net.Conn) context.Context {
+	return ServeLocalHTTP(ctx, localAPIListener{listener}, s.API, func(ctx context.Context, connection net.Conn) context.Context {
 		return context.WithValue(ctx, localPeerKey{}, connection.(APIConn).PeerIdentity())
 	}, nil)
 }
@@ -97,7 +97,8 @@ func (c *localHTTPConn) PeerIdentity() LocalPeerIdentity {
 	return LocalPeerIdentity{}
 }
 
-func serveLocalHTTP(ctx context.Context, listener net.Listener, handler http.Handler, connectionContext func(context.Context, net.Conn) context.Context, observe func(int)) error {
+// ServeLocalHTTP cancels and joins handlers and connections before returning.
+func ServeLocalHTTP(ctx context.Context, listener net.Listener, handler http.Handler, connectionContext func(context.Context, net.Conn) context.Context, observe func(int)) error {
 	if listener == nil || handler == nil {
 		return errors.New("wingd: controller HTTP requires a listener and shared handler")
 	}

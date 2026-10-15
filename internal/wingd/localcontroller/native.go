@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -79,21 +80,8 @@ func NativeServices(ctx context.Context, home string, owned *store.Store, bindin
 	if err != nil {
 		return runners.NativeServices{}, err
 	}
-	server := &http.Server{Handler: router, BaseContext: func(net.Listener) context.Context { return ctx }, ReadHeaderTimeout: 10 * time.Second}
-	serveDone := make(chan error, 1)
-	var serveOnce sync.Once
-	var closeOnce sync.Once
-	var closeErr error
-	closeResources = func() error {
-		closeOnce.Do(func() {
-			serveOnce.Do(func() { serveDone <- listener.Close() })
-			closeErr = errors.Join(authorities.Close(), server.Close())
-			if err := <-serveDone; !errors.Is(err, http.ErrServerClosed) {
-				closeErr = errors.Join(closeErr, err)
-			}
-		})
-		return closeErr
-	}
+	serve, closeHTTP := localProcessHTTP(ctx, listener, router, authorities.Close)
+	closeResources = closeHTTP
 	processes := &nodehost.NativeProcesses{Authorities: authorities, Masks: masks, URL: "http://" + listener.Addr().String()}
 	processes.Log = localHostLog(home, run.Run.ID, current, masker)
 	delegate := func(ctx context.Context, node string, generation, attempt int64) (nodehost.ProcessGrant, error) {
@@ -116,13 +104,16 @@ func NativeServices(ctx context.Context, home string, owned *store.Store, bindin
 		if fence.NodeID != node || fence.Generation != generation || fence.Attempt != attempt {
 			return nodehost.ProcessGrant{}, &apierr.Error{Code: apierr.PolicyMissing, Message: "local owner needs its independently awarded node authority before process delegation"}
 		}
-		serveOnce.Do(func() { go func() { serveDone <- server.Serve(listener) }() })
-		return processes.Delegate(ctx, lookup, capability.DelegateSpec{Parent: principal.Authority, Audience: capability.NodeHost,
-			Grants: principal.Capability.Grants, Binding: fence, Repositories: principal.Capability.Repositories, Data: principal.Capability.Data, ExpiresAt: principal.Capability.ExpiresAt},
+		serve()
+		return processes.Delegate(ctx, lookup, capability.DelegateSpec{
+			Parent: principal.Authority, Audience: capability.NodeHost,
+			Grants: principal.Capability.Grants, Binding: fence, Repositories: principal.Capability.Repositories, Data: principal.Capability.Data, ExpiresAt: principal.Capability.ExpiresAt,
+		},
 			nodehost.ProcessServices{RunID: run.Run.ID, Job: job})
 	}
 	follower := nodehost.StateFollower{Store: binding.Tenant, Subscribe: localStateSubscription}
-	config := nodehost.NativeHostConfig{Store: binding.Tenant, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
+	config := nodehost.NativeHostConfig{
+		Store: binding.Tenant, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
 		Source: sourceOptions, Snapshots: snapshots, Masks: masks, Processes: processes, Router: router,
 		Owner: nodehost.OwnerHost{Wait: follower.Wait, WaitNode: follower.WaitNode},
 		Planner: nodehost.SDKPlanner{Log: func(ctx context.Context, frame nodeproto.FrameLog) error {
@@ -145,6 +136,26 @@ func NativeServices(ctx context.Context, home string, owned *store.Store, bindin
 		},
 	}
 	return runners.NativeServices{Config: config, Close: closeResources}, nil
+}
+
+func localProcessHTTP(ctx context.Context, listener net.Listener, handler http.Handler, release func() error) (func(), func() error) {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	var startOnce, closeOnce sync.Once
+	var closeErr error
+	start := func() {
+		startOnce.Do(func() {
+			go func() { done <- wingd.ServeLocalHTTP(ctx, listener, handler, nil, nil) }()
+		})
+	}
+	return start, func() error {
+		closeOnce.Do(func() {
+			cancel()
+			start()
+			closeErr = errors.Join(<-done, release())
+		})
+		return closeErr
+	}
 }
 
 func localStateSubscription(ctx context.Context, _ string) (nodehost.StateSubscription, error) {

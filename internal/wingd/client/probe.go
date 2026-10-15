@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 const probeTimeout = time.Second
@@ -103,35 +102,6 @@ func Probe(ctx context.Context, sock string) (DaemonInfo, error) {
 		APIError:           ack.APIError,
 		Draining:           ack.Draining,
 	}, nil
-}
-
-func ProbeQueue(ctx context.Context, sock string) (wingwire.QueueState, error) {
-	nc, err := dial(ctx, sock, probeTimeout)
-	if err != nil {
-		if u := unreachable(sock, err); u != nil {
-			return wingwire.QueueState{}, u
-		}
-		return wingwire.QueueState{}, ErrNoDaemon
-	}
-	defer func() { _ = nc.Close() }()
-	deadline, ownCeiling := probeDeadline(ctx)
-	_ = nc.SetDeadline(deadline)
-	cl := &Client{nc: nc, dec: newFrameReader(nc), sock: sock, probe: true, connDeadline: deadline}
-	ack, err := cl.handshake("")
-	if err != nil {
-		return wingwire.QueueState{}, probeFault(sock, "queue probe", ownCeiling, err)
-	}
-	if ack.ProtocolMajor != wingd.ProtocolMajor {
-		return wingwire.QueueState{}, fmt.Errorf("wingd/client: queue probe %s: protocol %d is incompatible with %d", sock, ack.ProtocolMajor, wingd.ProtocolMajor)
-	}
-	qs, terminal, transient := cl.readQueueState()
-	if terminal != nil {
-		return wingwire.QueueState{}, terminal
-	}
-	if transient != nil {
-		return wingwire.QueueState{}, probeFault(sock, "queue probe", ownCeiling, transient)
-	}
-	return qs, nil
 }
 
 const healthProbeRetryPace = 25 * time.Millisecond

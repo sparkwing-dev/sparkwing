@@ -43,7 +43,7 @@ func TestLocalHTTPListenerFailureCancelsAndJoinsRequests(t *testing.T) {
 						if api {
 							done <- services.ServeAPI(ctx, listener)
 						} else {
-							done <- serveLocalHTTP(ctx, listener, services.Dashboard, nil, nil)
+							done <- ServeLocalHTTP(ctx, listener, services.Dashboard, nil, nil)
 						}
 					}()
 					if _, err := io.WriteString(client, "GET / HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"); err != nil {

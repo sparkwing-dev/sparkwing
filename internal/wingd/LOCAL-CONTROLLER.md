@@ -54,8 +54,11 @@ that evidence.
 
 `NativeServices` binds the owned tenant to W3's host configuration, source,
 captured environments, lease keeper, state following and process router. It
-checks current authority before allocating resources. Process listeners and
-authority registries share joined cleanup. Logs are masked before private
+checks current authority before allocating resources. Process HTTP uses the
+same joined serving lifecycle as the API and dashboard. Closing the host
+cancels requests, closes HTTP and hijacked connections, and joins handlers
+before closing process authority. Repeated close calls return the same cleanup
+error. Logs are masked before private
 JSONL writes. `StoreBinding.Refresh` reauthenticates the captured award through
 the shared C2 policy, including unit liveness, before each authority refresh.
 Owner policies, node-award adoption, authorized byte/record
