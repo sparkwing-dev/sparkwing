@@ -2,8 +2,11 @@ package nodeproto
 
 import (
 	"encoding/json"
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"errors"
+	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 func TestExpansionPreservesConcurrencyDeclarations(t *testing.T) {
@@ -34,13 +37,27 @@ func TestExpansionPreservesConcurrencyDeclarations(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			code := apierr.Code("")
-			t.Run("job-membership", func(t *testing.T) { checkPlan(t, string(raw), ctx, code) })
+			code := apierr.PlanInvalid
+			if field == "cost" {
+				code = ""
+			}
+			check := func(t *testing.T, context ValidationContext) {
+				t.Helper()
+				checkPlan(t, string(raw), context, code)
+				if code != "" {
+					_, err := ValidatePlan(raw, context)
+					var failure *apierr.Error
+					if !errors.As(err, &failure) || !strings.Contains(failure.Message, "jobs[0].concurrency[0]."+field) {
+						t.Fatalf("mismatch lost its field path: %v", err)
+					}
+				}
+			}
+			t.Run("job-membership", func(t *testing.T) { check(t, ctx) })
 			planContext := ctx
 			planContext.ExistingJobs = append([]JobSpec(nil), ctx.ExistingJobs...)
 			planContext.ExistingJobs[0].Concurrency = nil
 			planContext.ExistingConcurrency = []ConcurrencySpec{group}
-			t.Run("plan-membership", func(t *testing.T) { checkPlan(t, string(raw), planContext, code) })
+			t.Run("plan-membership", func(t *testing.T) { check(t, planContext) })
 		})
 	}
 }

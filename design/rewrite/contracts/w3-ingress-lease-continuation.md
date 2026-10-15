@@ -121,4 +121,73 @@ included the read-only installed `sparkwing info --for-agent` call.
 The worker's scratch directory is removed after all checks join. The lead retains
 committing, the pipeline gates and native placement verification.
 
+## Concurrency and self-claim continuation
+
+Invariant: an expansion cannot change an existing concurrency group's capacity,
+scope or on-limit policy. The shared validator now keeps one group definition
+while validating existing plan memberships, existing jobs and the complete raw
+expansion. It compares omitted fields using the declared global/1/queue defaults.
+Membership cost remains independent. Refusals use `plan_invalid` and name the
+conflicting field path without echoing the group. The scheduler tests exercise
+both plan-level and job-level definitions before any row is written. The W4
+membership test now expects the lead's settled refusal rule.
+
+Invariant: self-claimed execution retains its persisted award, acquired engine
+and granted runner identity. `OwnerHost` now calls `NewNodeInput`, as the claimed
+host does. The placement's input-construction callback is removed because it
+could manufacture a second execution identity. `AdoptClaim` receives the private
+award for the existing per-attempt delegation adapter. An award with a bearer
+requires this adopter. Failed adoption prevents execution. A generated property
+checks changed claims, arbitrary runner names/labels, missing and refused adoption,
+and an adopter mutating its claim object after input construction.
+
+The backoff assertion now exercises the common executor under synctest. It checks
+that retry keeps the job running under its generation, cancellation commits one
+terminal transition and no further process starts. Its old 24-line scheduler
+version is deleted. The retained plan-concurrency tests observe early host results
+before waiting for their events. Eviction workers are cancelled and joined before
+the test returns. These tests now report their removed-schema failures in under
+a second instead of hanging or reporting an error after their test has ended.
+The session test follows the canonical `frames_closed` code and accepts the shared
+parser's JSON-object diagnostic.
+
+The deleted W3 API is `OwnerHost.Bind`. Its only callers were the two owner test
+files, which now use the common constructor or test private-award adoption. The
+production Go diff removes 12 lines and adds 54. No legacy run-hosting file is
+claimed deleted in this continuation.
+
+### Verification for this continuation
+
+All Go checks use the scratch cache and temporary directory under
+`/tmp/sw-astra-W3/`, GOWORK=off, GOFLAGS=-buildvcs=false and at most four packages.
+
+| Check | Result |
+| --- | --- |
+| Whole-repository build | Passed. |
+| Scoped vet on nodehost, nodeproto, source, lease, orchestrator and both acceptance packages | Passed. |
+| Full nodeproto, lease and source packages | Passed. |
+| Focused owner, native host, process, SDK planner, state follower, executor, identity, strict expansion and session tests | Passed. |
+| Race checks on owner, native host, expansion concurrency and backoff | Passed. |
+| Self-claim identity fuzz | Passed, 1,500 executions. |
+| Existing lifecycle, recovery, environment, credential and protocol acceptance components | Passed. Product placement children remain skipped. |
+| Commentcheck against main | Clean. |
+| Sleepcheck against HEAD and git diff whitespace check | Clean. |
+| Retained plan-concurrency tests | Fail on removed `sparkwing_meta` and old store-concurrency fixtures. Both terminate without their previous hangs. |
+| Full nodehost suite | Fails on legacy schema fixtures and forbidden listening sockets. It is not a passing suite. |
+
+No acceptance cell is added or activated. W3 still owns the complete owner-policy
+composition, native orchestration caller migration and deletion of the retained
+scheduler, sessions, layers and fixtures. Required foreign contracts remain the
+full execution snapshot, fenced step reports and source attempt identity, owner
+policy/debug/approval edges, terminal storage record references and matched-engine
+host invocation. C2 authentication and delegation and W6 concurrency resolution
+are still stubs in this checkout. No foreign contract is changed.
+
+Shared code edits are `internal/nodeproto/plan_validation.go` and its expansion
+membership test, as authorized by the lead's concurrency decision. Shared prose
+edits are this continuation, `handoffs.md`, `c3-protocol-sdk.md` and the port
+inventory. No production CLI, runner or pod caller is claimed migrated. There
+are no Git writes, Sparkwing executable runs or pipeline runs. Scratch is removed
+after all checks join.
+
 <!-- design:end -->

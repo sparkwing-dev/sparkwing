@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -91,6 +92,55 @@ func TestSchedulerExpansionValidatesSourceBatchesTogether(t *testing.T) {
 				t.Fatalf("valid source batches were not accepted together: rows=%d errors=%v/%v", len(writes.nodes), s.group(testGenerator).err, s.group("targets/generate/1").err)
 			}
 		})
+	}
+}
+
+func TestSchedulerExpansionRejectsConcurrencyConflictsBeforeWrites(t *testing.T) {
+	for _, definition := range []string{"plan", "job"} {
+		for _, field := range []string{"capacity", "scope", "on_limit", "cost", "omitted"} {
+			t.Run(definition+"/"+field, func(t *testing.T) {
+				group := nodeproto.ConcurrencySpec{Group: "pool", Capacity: new(3), Scope: new("run"), OnLimit: new("queue")}
+				membership := group
+				switch field {
+				case "capacity":
+					membership.Capacity = new(4)
+				case "scope":
+					membership.Scope = new("box")
+				case "on_limit":
+					membership.OnLimit = new("fail")
+				case "cost":
+					membership.Cost = new(2)
+				case "omitted":
+					group = nodeproto.ConcurrencySpec{Group: "pool"}
+					membership.Capacity, membership.Scope = new(1), new("global")
+				}
+				doc := fanOutDoc()
+				if definition == "plan" {
+					doc.Concurrency = []nodeproto.ConcurrencySpec{group}
+				} else {
+					doc.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{group}
+				}
+				jobs := []nodeproto.JobSpec{{ID: "child", Groups: []string{testGenerator}, Steps: []nodeproto.StepSpec{{ID: "body"}}, Concurrency: []nodeproto.ConcurrencySpec{membership}}}
+				raw, err := json.Marshal(jobs)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writes := &expansionWrites{}
+				s := &scheduler{run: &Run{ID: testRunID, Doc: doc, State: writes, Logger: slog.New(slog.DiscardHandler), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}, nodes: slices.Clone(doc.Jobs), results: map[string]Result{}, started: map[string]bool{}}
+				s.expand(t.Context(), "targets", Result{Outcome: sparkwing.Success, expansions: []expansion{{closure: testGenerator, raw: raw}}})
+				failure := s.group(testGenerator).err
+				if field == "cost" || field == "omitted" {
+					if failure != nil || len(writes.nodes) != 1 {
+						t.Fatalf("valid membership refused: rows=%d error=%v", len(writes.nodes), failure)
+					}
+				} else {
+					var structured *apierr.Error
+					if len(writes.nodes) != 0 || !errors.As(failure, &structured) || structured.Code != apierr.PlanInvalid || !strings.Contains(failure.Error(), "jobs[0].concurrency[0]."+field) {
+						t.Fatalf("conflict escaped strict validation: rows=%d error=%v", len(writes.nodes), failure)
+					}
+				}
+			})
+		}
 	}
 }
 

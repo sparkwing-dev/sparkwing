@@ -81,7 +81,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 					if err != nil || request == nil {
 						return err
 					}
-					return h.execute(ctx, input.Storage, accepted, entry, *request)
+					return h.execute(ctx, input, accepted, entry, *request)
 				})
 				continue
 			}
@@ -90,7 +90,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				return RunCompletion{}, err
 			}
 			if request != nil {
-				launch(request.Ref.NodeID, func() error { return h.execute(ctx, input.Storage, accepted, entry, *request) })
+				launch(request.Ref.NodeID, func() error { return h.execute(ctx, input, accepted, entry, *request) })
 			}
 			expanded[action.NodeID] = action.Kind == store.DecisionExpand
 			changed = true
@@ -102,7 +102,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			}
 			if row.ReadyAt != nil || row.ClaimedBy != "" {
 				launch(row.Ref.NodeID, func() error {
-					return h.execute(ctx, input.Storage, accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: store.SourceNone})
+					return h.execute(ctx, input, accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: store.SourceNone})
 				})
 			}
 		}
@@ -227,9 +227,9 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 	return &request, nil
 }
 
-func (h *OwnerHost) execute(ctx context.Context, storageBinding StorageBinding, accepted AcceptedRun, entry *source.Entry, request store.ReconcileRequest) error {
-	if h.Executor == nil || h.Bind == nil {
-		return errors.New("self execution requires a node host and claim binding")
+func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted AcceptedRun, entry *source.Entry, request store.ReconcileRequest) error {
+	if h.Executor == nil || entry == nil {
+		return errors.New("self execution requires a node host and acquired entry")
 	}
 	result, err := FollowReconciliation(ctx, h.Store, request, h.WaitNode)
 	if err != nil {
@@ -238,13 +238,19 @@ func (h *OwnerHost) execute(ctx context.Context, storageBinding StorageBinding, 
 	if result.Kind != store.Execute {
 		return nil
 	}
-	input, err := h.Bind(ctx, accepted, result, entry, storageBinding)
+	input, err := NewNodeInput(accepted, result.Node, entry.Engine, run.GrantedRunner)
 	if err != nil {
 		return err
 	}
-	if input.Accepted.RunID != accepted.RunID || input.Accepted.SpecHash != accepted.SpecHash || input.Accepted.PlanHash != accepted.PlanHash || input.NodeID != request.Ref.NodeID || input.Generation != result.Claim.Generation || input.Authority.Holder != result.Claim.Holder || input.Authority.CapabilityPrefix != result.Claim.CapabilityPrefix {
-		return errors.New("node binding does not match the committed self claim")
+	if len(result.Bearer) != 0 && h.AdoptClaim == nil {
+		return errors.New("self execution requires private award adoption")
 	}
+	if h.AdoptClaim != nil {
+		if err := h.AdoptClaim(ctx, result); err != nil {
+			return err
+		}
+	}
+	input.Entry, input.Storage = entry, run.Storage
 	return h.executionError(ctx, accepted.RunID, ownerExecution{nodeID: input.NodeID, err: h.Executor.Execute(ctx, input)})
 }
 

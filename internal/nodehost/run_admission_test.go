@@ -21,7 +21,7 @@ import (
 func hostPlanned(t *testing.T, ctx context.Context, st *store.Store, runID string, doc nodeproto.PlanDoc, adm *Admission, exec Executor) (RunResult, func()) {
 	t.Helper()
 	if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "p", Status: "running"}); err != nil {
-		t.Fatal(err)
+		return RunResult{Status: "failed", Err: err}, func() {}
 	}
 	if adm != nil && adm.BoxID == nil {
 		adm.BoxID = func() string { return testBox }
@@ -110,21 +110,27 @@ func TestPlanGroupBoundsTwoRuns(t *testing.T) {
 				release()
 				first <- res
 			}()
-			recv(t, ctx, g.entered)
+			awaitHostedEvent(t, ctx, g.entered, first)
 			second := make(chan RunResult, 1)
 			go func() {
 				res, release := hostPlanned(t, ctx, st, "run-2", doc, adm, g.exec)
 				release()
 				second <- res
 			}()
-			recv(t, ctx, queued)
-			g.gate <- struct{}{}
-			if res := <-first; res.Status != "success" {
+			awaitHostedEvent(t, ctx, queued, second)
+			select {
+			case g.gate <- struct{}{}:
+			case res := <-first:
+				t.Fatalf("first host returned before release: %+v", res)
+			case <-ctx.Done():
+				t.Fatal("first body did not reach its gate:", context.Cause(ctx))
+			}
+			if res := awaitHostedResult(t, ctx, first); res.Status != "success" {
 				t.Fatalf("first run %+v", res)
 			}
-			recv(t, ctx, g.entered)
+			awaitHostedEvent(t, ctx, g.entered, second)
 			close(g.gate)
-			if res := <-second; res.Status != "success" {
+			if res := awaitHostedResult(t, ctx, second); res.Status != "success" {
 				t.Fatalf("second run %+v", res)
 			}
 			if g.peak != 1 {
@@ -186,6 +192,7 @@ func TestPlanGroupLimitPoliciesAndEviction(t *testing.T) {
 				adm.Daemon, key, scope = d, boxKey, "box"
 			}
 			g := newGauge()
+			var evicted <-chan struct{}
 			if c.evict == nil {
 				if c.daemon {
 					d.used[key] = 1
@@ -194,13 +201,23 @@ func TestPlanGroupLimitPoliciesAndEviction(t *testing.T) {
 				}
 				close(g.gate)
 			} else {
+				finished := make(chan struct{})
+				evicted = finished
 				go func() {
-					recv(t, ctx, g.entered)
-					c.evict(t, st, d)
+					defer close(finished)
+					select {
+					case <-g.entered:
+						c.evict(t, st, d)
+					case <-ctx.Done():
+					}
 				}()
 			}
 			res, release := hostPlanned(t, ctx, st, testRunID, planGrouped(scope, c.onLimit, "a", "b"), adm, g.exec)
 			release()
+			if evicted != nil {
+				cancel()
+				<-evicted
+			}
 			if res.Status != c.status || (c.err == "") != (res.Err == nil) || !strings.Contains(errText(res.Err), c.err) {
 				t.Fatalf("run %s %v, want %s with %q", res.Status, res.Err, c.status, c.err)
 			}

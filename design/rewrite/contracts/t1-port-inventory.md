@@ -1,5 +1,11 @@
 # Acceptance test port inventory
 
+The [concurrency and self-claim continuation](w3-ingress-lease-continuation.md#concurrency-and-self-claim-continuation)
+ports `TestRetryLeavesTheRowRunningThroughItsBackoff` to the common executor under
+synctest and replaces the owner input-rewrite test with a generated identity
+property. The plan-concurrency tests observe early results and join their eviction
+workers. Their removed-schema failures remain visible. No acceptance cell changes.
+
 The [W3 runtime ingress continuation](w3-ingress-lease-continuation.md) ports
 three claimed-heartbeat assertions to `lease.Keeper`, sends the existing SDK
 generator fixtures through the scheduler's raw-byte ingress, and migrates the

@@ -68,9 +68,10 @@ type OwnerHost struct {
 	WaitNode  WaitNodeChange
 	Layer     func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error)
 	Local     func(store.NodeRow) bool
-	Bind      func(context.Context, AcceptedRun, store.ReconciledNode, *source.Entry, StorageBinding) (NodeInput, error)
-	Executor  NodeHost
-	Expand    func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error)
+	// AdoptClaim retains the private award for per-attempt process delegation.
+	AdoptClaim func(context.Context, store.ReconciledNode) error
+	Executor   NodeHost
+	Expand     func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error)
 	// Mask shares the source and SDK secret registry and protects returned errors.
 	Mask func(string) string
 	// Masks serializes accepted identifiers with the shared process service registry.

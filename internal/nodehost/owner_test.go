@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -105,10 +106,13 @@ func (f *ownerFixture) TransitionNode(_ context.Context, change store.NodeTransi
 	return store.Applied{}, nil
 }
 
-func (f *ownerFixture) ReconcileNode(_ context.Context, request store.ReconcileRequest) (store.ReconciledNode, error) {
+func (f *ownerFixture) ReconcileNode(ctx context.Context, request store.ReconcileRequest) (store.ReconciledNode, error) {
 	f.record("claim")
 	expires := time.Now().Add(time.Hour)
-	return store.ReconciledNode{Kind: store.Execute, Node: store.NodeRow{Ref: request.Ref, Status: store.StatusPending, ClaimedBy: "runner", CapabilityPrefix: "claim", Generation: 2, LeaseExpiresAt: &expires}, Claim: &store.ClaimAward{Holder: "runner", CapabilityPrefix: "claim", Generation: 2, LeaseExpiresAt: expires}}, nil
+	row, _ := f.ReadNode(ctx, request.Ref)
+	row.Ref, row.Status, row.ClaimedBy, row.CapabilityPrefix = request.Ref, store.StatusPending, "runner", "claim"
+	row.Generation, row.LeaseExpiresAt = 2, &expires
+	return store.ReconciledNode{Kind: store.Execute, Node: row, Claim: &store.ClaimAward{Holder: "runner", CapabilityPrefix: "claim", Generation: 2, LeaseExpiresAt: expires}}, nil
 }
 
 func (f *ownerFixture) FinishRunAndUnit(_ context.Context, request store.FinishRunRequest) (store.Applied, error) {
@@ -131,12 +135,14 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 	unit := store.OwnerLeaseRef{Kind: store.OwnerTrigger, Name: "trigger", RunID: "run", Holder: "owner", Generation: 4}
 	f := &ownerFixture{changed: make(chan struct{}, 1), snapshot: store.RunSnapshot{Run: store.RunRow{ID: "run", State: store.RunPending, Request: runspec.SealedRequest{Request: request, Hash: "request"}, Owner: &unit}}}
 	in := RunInput{RunID: "run", SealedRequest: raw, RequestHash: "request", Owner: store.Actor{Kind: store.ActorRunHost, Owner: unit}}
+	in.GrantedRunner = nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
+	selected := engine.Resolved{Identity: engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}}
 	h := OwnerHost{
 		Mask:  func(value string) string { return value },
 		Store: f, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 		Acquire: func(context.Context, RunInput) (*source.Entry, error) {
 			f.record("acquire")
-			return &source.Entry{}, nil
+			return &source.Entry{Engine: selected}, nil
 		},
 		Prepare: func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error) {
 			f.record("prepare")
@@ -165,7 +171,7 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 	}}
 	h.Wait, h.WaitNode = follower.Wait, follower.WaitNode
 	if resumed {
-		spec := runspec.Spec{Request: f.snapshot.Run.Request, Hash: "spec", PlanHash: runspec.Hash(strings.Repeat("a", 64))}
+		spec := runspec.Spec{Request: f.snapshot.Run.Request, Hash: "spec", PlanHash: runspec.Hash(strings.Repeat("a", 64)), Resolved: runspec.Resolved{Engine: selected.Identity}}
 		f.snapshot.Run.Spec, f.snapshot.Run.PlanHash, f.snapshot.Run.Plan = &spec, strings.Repeat("a", 64), json.RawMessage(`{"jobs":[]}`)
 		accepted, err := ownerAccepted(f.snapshot.Run)
 		if err != nil {
@@ -242,7 +248,7 @@ func TestOwnerHostRejectedReattachNeverAcquires(t *testing.T) {
 
 func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)
-	f.snapshot.Nodes = []store.NodeRow{{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending}}
+	f.snapshot.Nodes = []store.NodeRow{{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending, SpecHash: "job-hash"}}
 	h.Decide = func(s store.ScheduleSnapshot) store.ScheduleDecision {
 		if s.Nodes[0].Outcome == "success" {
 			return store.ScheduleDecision{Outcome: "success"}
@@ -256,9 +262,6 @@ func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 	h.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		f.record(layer.Name)
 		return OwnerLayerResult{}, nil
-	}
-	h.Bind = func(_ context.Context, a AcceptedRun, r store.ReconciledNode, e *source.Entry, binding StorageBinding) (NodeInput, error) {
-		return NodeInput{Accepted: a, Entry: e, NodeID: r.Node.Ref.NodeID, Generation: r.Node.Generation, Authority: ClaimAuthority{Holder: r.Claim.Holder, CapabilityPrefix: r.Claim.CapabilityPrefix}}, nil
 	}
 	h.Executor = ownerNodeFunc(func(ctx context.Context, n NodeInput) error {
 		f.record("execute")

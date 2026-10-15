@@ -598,6 +598,12 @@ including a factory that returns both a grant and an error. Revocation errors
 prevent successful execution or policy acknowledgement. SDK hello receives only
 the process binding. Unbound transports may omit the factory.
 
+Owner self-claims use `NewNodeInput` with the persisted awarded row, acquired
+engine and `RunInput.GrantedRunner`. `OwnerHost.AdoptClaim` receives the private
+award for per-attempt delegation. It cannot replace the constructed input.
+An award containing a bearer requires this adopter, and a refused adoption stops
+execution. The former `OwnerHost.Bind` input-construction callback is removed.
+
 Native `ProtocolSessionConfig.Start` and `StartEvaluation` receive that validated
 revoker through the host's private input. It replaces any revoker in reusable
 session configuration before environment construction or spawn. Callers do not

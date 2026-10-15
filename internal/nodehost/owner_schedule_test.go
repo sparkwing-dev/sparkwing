@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -148,19 +149,48 @@ func TestOwnerHostRemoteDispatchNeverSelfClaims(t *testing.T) {
 	}
 }
 
-func TestOwnerHostBindingCannotReplaceSelfClaim(t *testing.T) {
-	f, h, in := newOwnerFixture(t, true)
-	h.Executor = ownerNodeFunc(func(context.Context, NodeInput) error { t.Error("executed a changed claim"); return nil })
-	h.Bind = func(_ context.Context, a AcceptedRun, r store.ReconciledNode, e *source.Entry, binding StorageBinding) (NodeInput, error) {
-		return NodeInput{Accepted: a, NodeID: r.Node.Ref.NodeID, Generation: r.Claim.Generation + 1, Authority: ClaimAuthority{Holder: r.Claim.Holder, CapabilityPrefix: r.Claim.CapabilityPrefix}}, nil
-	}
-	err := h.execute(t.Context(), StorageBinding{}, *in.Accepted, &source.Entry{}, store.ReconcileRequest{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Actor: in.Owner})
-	if err == nil {
-		t.Fatal("accepted changed generation")
-	}
-	if len(f.trace) != 1 || f.trace[0] != "claim" {
-		t.Fatalf("trace=%v", f.trace)
-	}
+func FuzzOwnerHostSelfClaimPreservesExecutionIdentity(f *testing.F) {
+	f.Add("granted", "team=one", uint8(0))
+	f.Add("granted", "team=two", uint8(1))
+	f.Add("granted", "team=three", uint8(2))
+	f.Add("granted", "team=four", uint8(4))
+	f.Fuzz(func(t *testing.T, name, label string, flags uint8) {
+		input, state, _, _ := executorFixture(t)
+		runner := nodeproto.RunnerIdentity{Name: name, Type: "agent", Labels: []string{label}}
+		expires := time.Now().Add(time.Hour)
+		state.row.LeaseExpiresAt = &expires
+		claim := &store.ClaimAward{Holder: state.row.ClaimedBy, CapabilityPrefix: state.row.CapabilityPrefix, Generation: state.row.Generation, LeaseExpiresAt: expires}
+		if flags&1 != 0 {
+			claim.Generation++
+		}
+		probe := &ownerReconcileProbe{result: store.ReconciledNode{Kind: store.Execute, Node: state.row, Claim: claim, Bearer: []byte("private-award")}}
+		adopted, executed := false, false
+		h := OwnerHost{Store: probe, AdoptClaim: func(_ context.Context, award store.ReconciledNode) error {
+			adopted = true
+			if string(award.Bearer) != "private-award" {
+				t.Fatal("private award lost before adoption")
+			}
+			if flags&4 != 0 {
+				return errors.New("award adoption refused")
+			}
+			award.Claim.Generation++
+			return nil
+		}, Executor: ownerNodeFunc(func(_ context.Context, got NodeInput) error {
+			executed = true
+			if !reflect.DeepEqual(got.GrantedRunner, runner) || !reflect.DeepEqual(got.Engine, input.Engine) || got.Generation != state.row.Generation || got.SpecHash != state.row.SpecHash || got.Authority != input.Authority || got.Entry != input.Entry {
+				t.Fatal("owner replaced persisted execution identity")
+			}
+			return nil
+		})}
+		if flags&2 != 0 {
+			h.AdoptClaim = nil
+		}
+		err := h.execute(t.Context(), RunInput{GrantedRunner: runner}, input.Accepted, input.Entry, store.ReconcileRequest{Ref: state.row.Ref})
+		valid := flags&1 == 0 && name != "" && flags&2 == 0
+		if (err == nil) != (valid && flags&4 == 0) || adopted != valid || executed != (valid && flags&4 == 0) {
+			t.Fatalf("flags=%d valid=%v adopted=%v executed=%v error=%v", flags, valid, adopted, executed, err)
+		}
+	})
 }
 
 func TestOwnerHostWaitRetainsFollowerCleanupFailure(t *testing.T) {

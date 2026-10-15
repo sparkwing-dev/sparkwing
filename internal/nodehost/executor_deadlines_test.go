@@ -20,6 +20,45 @@ type executorCleanupProcess struct {
 	cleanup func(context.Context) error
 }
 
+func TestRetryLeavesTheRowRunningThroughItsBackoff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		input, state, deps, processes := executorFixture(t)
+		input.Execution.RetryBackoff.Value = time.Hour
+		executorRetryBudget(t, &input, state, 1)
+		start := deps.Start
+		deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+			process, err := start(ctx, input, activity)
+			process.(*executorProcess).result.Outcome = "failed"
+			return process, err
+		}
+		host, err := NewNodeExecutor(deps)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() { done <- host.Execute(ctx, input) }()
+		synctest.Wait()
+		select {
+		case err := <-done:
+			t.Fatal("executor returned before backoff:", err)
+		default:
+		}
+		if len(state.changes) != 2 || state.changes[0].Cause != store.CauseStart || state.changes[1].Cause != store.CauseRetry || state.changes[1].To != store.NodeRunning || state.changes[1].Actor.Generation != input.Generation || len(*processes) != 1 {
+			t.Fatalf("backoff changed lifecycle: transitions=%+v processes=%d", state.changes, len(*processes))
+		}
+		cancel()
+		synctest.Wait()
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Fatal("cancel during backoff:", err)
+		}
+		if len(state.changes) != 3 || state.changes[2].To != store.NodeCancelled || len(*processes) != 1 {
+			t.Fatalf("backoff cancellation started work or lost its terminal write: %+v", state.changes)
+		}
+	})
+}
+
 func (p executorCleanupProcess) Cleanup(ctx context.Context) error {
 	p.cleaned++
 	return p.cleanup(ctx)
