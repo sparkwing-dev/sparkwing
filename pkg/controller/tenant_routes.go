@@ -115,8 +115,6 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/launcher/claim": resNone,
 	"POST /api/v1/launcher/sync":  resNone,
 
-	"POST /api/v1/maintenance/reconcile-orphans": resNone,
-
 	"DELETE /api/v1/me":                       resNone,
 	"GET /api/v1/me":                          resNone,
 	"POST /api/v1/me/active-team":             resNone,
@@ -185,7 +183,6 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/annotations":              resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest":        resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/attempt":                  resRun,
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset":         resRun,
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/bounce":                    resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/bounce":                   resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/bounce/consume":           resRun,

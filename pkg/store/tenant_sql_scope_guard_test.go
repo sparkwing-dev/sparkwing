@@ -144,17 +144,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).reapExpiredTriggers": "the trigger-lease reaper returns every team's lapsed claims to the queue, because a " +
 		"sweep that only reaped one team would leave the rest held",
 
-	"(*Store).reapStalePendingRuns": "the stale-run sweep fails every team's pending runs whose trigger is gone or " +
-		"finished; each write names a run its own scan selected by global id",
-
 	"(*Store).reapTimedOutApprovals": "the approval sweep resolves every team's approvals past their timeout; each write " +
 		"names an approval its own scan selected",
-	"(*Store).reconcileOrphanedLocalRuns": "the orphan sweep fails every team's runs whose orchestrator stopped " +
-		"heartbeating, and cancels pending nodes left under any terminal run",
-	"(*Store).orphanedRunsQuery": "the orphan sweep's scan of every team's running runs, with each run's own nodes' " +
-		"heartbeats",
-	"(*Store).cascadeOrphanedNodes": "fails the open nodes of a run an orphan sweep selected by global id from its own " +
-		"scan",
 
 	"(*Store).recoverExpiredNodeClaims": "the expired-claim reaper fails every team's nodes whose runner lease " +
 		"lapsed; each write names a node its own locked scan selected",

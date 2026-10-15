@@ -176,7 +176,6 @@ func (c *Client) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*
 func (c *Client) PollAdvice() time.Duration
 func (c *Client) PutCronRepo(ctx context.Context, req CronRepoRequest) (*CronReposResponse, error)
 func (c *Client) ReadNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (*LiveLogChunk, error)
-func (c *Client) ReconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error)
 func (c *Client) RecordContention(ctx context.Context, pipeline string) error
 func (c *Client) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs store.ProfileObservation) error
 func (c *Client) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error

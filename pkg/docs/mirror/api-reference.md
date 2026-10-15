@@ -68,7 +68,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/launcher/claim` | `ScopeClaimsLaunch` |
 | `POST` | `/api/v1/launcher/sync` | `ScopeClaimsLaunch` |
 | `PUT` | `/api/v1/log-segments/{key...}` | `public` |
-| `POST` | `/api/v1/maintenance/reconcile-orphans` | `admin` |
 | `DELETE` | `/api/v1/me` | `authenticated` |
 | `GET` | `/api/v1/me` | `authenticated` |
 | `POST` | `/api/v1/me/active-team` | `authenticated` |

@@ -47,7 +47,6 @@ var apiWriteRoutes = []string{
 	"POST /api/v1/crons/{id}/disarm",
 	"PUT /api/v1/crons/{id}/override",
 	"DELETE /api/v1/crons/{id}/override",
-	"POST /api/v1/maintenance/reconcile-orphans",
 	"PUT /api/v1/storage/settings",
 	"PUT /api/v1/storage/quotas/{principal}",
 	"PUT /api/v1/storage/quotas/{principal}/allowance",

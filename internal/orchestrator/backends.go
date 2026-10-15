@@ -51,19 +51,7 @@ type Backends struct {
 	APISocket string
 }
 
-// RunCoordination is the store surface a run needs for its own
-// coordination rather than for node state: the child triggers it
-// dispatches, the capacity profile it measures and is priced from, and the
-// orphan sweep. A backend that cannot answer one of these returns an error
-// wrapping [storage.ErrNotSupported] rather than panicking.
-//
-// ReconcileOrphanedLocalRuns takes the idle age a run must exceed before
-// it counts as orphaned and refuses a non-positive one with
-// [ErrOrphanThresholdRequired], because zero would sweep every run that
-// is still going. The package-level [ReconcileOrphanedLocalRuns], which
-// the CLI and the daemon call against a store they opened themselves,
-// substitutes a default instead; this method is the wire contract, where
-// the caller names the age.
+// RunCoordination handles child dispatch and resource observations for a run.
 type RunCoordination interface {
 	ListNodes(ctx context.Context, runID string) ([]*store.Node, error)
 	ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]store.MetricSample, error)
@@ -79,8 +67,6 @@ type RunCoordination interface {
 	RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs store.ProfileObservation) error
 	RecordContention(ctx context.Context, pipeline string) error
 	RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
-
-	ReconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error)
 }
 
 type StateBackend interface {
@@ -551,13 +537,6 @@ func (l localState) RecordContention(ctx context.Context, pipeline string) error
 
 func (l localState) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error {
 	return l.st.RecordWaitObservation(ctx, pipeline, wait)
-}
-
-func (l localState) ReconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
-	if threshold <= 0 {
-		return 0, fmt.Errorf("%w: got %s", ErrOrphanThresholdRequired, threshold)
-	}
-	return ReconcileOrphanedLocalRuns(ctx, l.st, threshold)
 }
 
 type localLogs struct {

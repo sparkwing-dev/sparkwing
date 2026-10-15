@@ -93,6 +93,11 @@ func (t *Tenant) TransitionRun(ctx context.Context, change RunTransition) (Appli
 
 // FinishRunAndUnit prevents a terminal run from leaving an executable owner claim behind.
 func (t *Tenant) FinishRunAndUnit(ctx context.Context, finish FinishRunRequest) (Applied, error) {
+	switch finish.Transition.To {
+	case RunSuccess, RunFailed, RunCancelled:
+	default:
+		return Applied{}, errors.New("run finish requires a terminal verdict")
+	}
 	var out Applied
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
 		if finish.Unit != finish.Transition.Actor.Owner {

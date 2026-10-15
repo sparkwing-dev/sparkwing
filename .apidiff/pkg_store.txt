@@ -1252,15 +1252,9 @@ func MachinePrincipal(name string) string
 func MachineTokenScopes() []string
 var Maintenance = storeMaintenanceFns{
 	ReapExpiredTriggers:           (*Store).reapExpiredTriggers,
-	ReapStalePendingRuns:          (*Store).reapStalePendingRuns,
-	ReapStaleRunningRuns:          (*Store).reapStaleRunningRuns,
-	ReapQueueExpiredRuns:          (*Store).reapQueueExpiredRuns,
 	ReapTimedOutApprovals:         (*Store).reapTimedOutApprovals,
-	FailNodesInRun:                (*Store).failNodesInRun,
-	FailStaleQueuedNodes:          (*Store).failStaleQueuedNodes,
 	FailExpiredNodeClaims:         (*Store).failExpiredNodeClaims,
 	RecoverExpiredNodeClaims:      (*Store).recoverExpiredNodeClaims,
-	ReconcileOrphanedLocalRuns:    (*Store).reconcileOrphanedLocalRuns,
 	ReapStaleConcurrencyHolders:   (*Store).reapStaleConcurrencyHolders,
 	ReapStaleConcurrencyWaiters:   (*Store).reapStaleConcurrencyWaiters,
 	SweepExpiredConcurrencyCache:  (*Store).sweepExpiredConcurrencyCache,

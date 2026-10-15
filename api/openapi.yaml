@@ -2855,40 +2855,6 @@ paths:
         "502": {description: The cache is unreachable or answered badly.}
         "503": {description: No cache is configured on this controller.}
 
-  /api/v1/maintenance/reconcile-orphans:
-    post:
-      x-sparkwing-scope: admin
-      tags: [runs]
-      summary: Close runs whose orchestrator process died.
-      description: |
-        Finishes every run still marked running whose run and node heartbeats
-        are all older than `threshold_nanos`, cascading its pending nodes to
-        cancelled, and answers how many runs it closed. The threshold must be
-        positive: zero would treat every running run as orphaned.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.reconcileOrphansReq
-              type: object
-              required: [threshold_nanos]
-              properties:
-                threshold_nanos: {type: integer, format: int64}
-      responses:
-        "200":
-          description: Sweep complete.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.reconcileOrphansResp
-                type: object
-                properties:
-                  reconciled: {type: integer}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "500": {$ref: "#/components/responses/InternalError"}
-
   /api/v1/pipelines/{name}/profile/contention:
     parameters: [{$ref: "#/components/parameters/PipelineName"}]
     post:

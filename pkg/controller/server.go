@@ -107,8 +107,6 @@ type Server struct {
 	trustedProxyAddr string
 	metricsLn        net.Listener
 
-	reconcileHook func(context.Context) error
-
 	runnerHeadroom *runnerHeadroomRegistry
 
 	liveLogs         *liveLogs
@@ -335,30 +333,6 @@ func (s *Server) WithMetricsListener(ln net.Listener) *Server {
 	s.metricsLn = ln
 	s.metricsAddr = ln.Addr().String()
 	return s
-}
-
-// WithReconcileHook installs a function called before list-runs /
-// get-run reads. Laptop mode passes a closure over
-// orchestrator.ReconcileOrphanedLocalRuns so stale "running" rows
-// from crashed in-process orchestrators get cleaned on the next
-// dashboard refresh. Cluster mode leaves it nil; the cluster has its
-// own reconciler.
-//
-// fn errors are intentionally swallowed by the wrapper -- a flaky
-// sweep must never block a read.
-func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server {
-	s.reconcileHook = fn
-	return s
-}
-
-func (s *Server) reconcileBeforeRead(h http.HandlerFunc) http.HandlerFunc {
-	if s.reconcileHook == nil {
-		return h
-	}
-	return func(w http.ResponseWriter, r *http.Request) {
-		_ = s.reconcileHook(r.Context())
-		h(w, r)
-	}
 }
 
 // WithSecretsCipher binds the controller's secret encryption-at-rest
@@ -812,8 +786,8 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux := http.NewServeMux()
 
 	mux.Handle("POST /api/v1/runs", requireScope(ScopeRunsState, http.HandlerFunc(s.handleCreateRun)))
-	mux.Handle("GET /api/v1/runs", requireScope(ScopeRunsRead, s.reconcileBeforeRead(s.handleListRuns)))
-	mux.Handle("GET /api/v1/runs/{id}", newClaimSensitiveRoute(claimSourceKinds, nil, http.HandlerFunc(s.handleGetRun)).orElse(requireScope(ScopeRunsRead, s.readableRun(s.reconcileBeforeRead(s.handleGetRun)), ScopeNodesClaim, ScopeTriggersClaim)))
+	mux.Handle("GET /api/v1/runs", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListRuns)))
+	mux.Handle("GET /api/v1/runs/{id}", newClaimSensitiveRoute(claimSourceKinds, nil, http.HandlerFunc(s.handleGetRun)).orElse(requireScope(ScopeRunsRead, s.readableRun(http.HandlerFunc(s.handleGetRun)), ScopeNodesClaim, ScopeTriggersClaim)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes", requireScope(ScopeRunsRead, s.readableRun(http.HandlerFunc(s.handleListNodes)), ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("GET /api/v1/runs/{id}/receipt", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetRunReceipt)))
 	mux.Handle("GET /api/v1/runs/{id}/pending-triggers", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleListPendingTriggersForParent)), ScopeNodesClaim, ScopeTriggersClaim))
@@ -917,8 +891,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/crons/{id}/disarm", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleDisarmCron)))
 	mux.Handle("PUT /api/v1/crons/{id}/override", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleSetCronOverride)))
 	mux.Handle("DELETE /api/v1/crons/{id}/override", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleClearCronOverride)))
-
-	mux.Handle("POST /api/v1/maintenance/reconcile-orphans", requireScope(ScopeAdmin, http.HandlerFunc(s.handleReconcileOrphans)))
 
 	// safety: a slot is a cross-run lock, so the routes that move one bind to the
 	// live claim on the run they name rather than to the scope alone. force-release
