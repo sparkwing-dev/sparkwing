@@ -2,7 +2,57 @@
 
 <!-- design:begin -->
 
-## This continuation
+## Continuation at d9a8ac959
+
+No runtime code changed in this continuation. No code was deleted (0 lines),
+no test was ported and no acceptance cell was added or unskipped. The available
+`bw-3095-rewrite` ref is an ancestor of this checkout. There are no unmerged
+integration-branch store or data-adapter changes to consume.
+
+Audited every W7 entry in amendments-1.md and handoffs.md against the live
+callers. The byte, record, manifest, tagged-log and leased maintenance joins
+from earlier sessions remain implemented. Their remaining callers need these
+other-area implementations or contract additions:
+
+- W2 must implement `DataController.DataAuthority`, `DataController.BindData`
+  and `client.NewDataClient`. Each still panics. `PolicyRouter` also remains a
+  stub. W7's consumers already use the declared byte and record interfaces.
+- W2/W9 must declare the authenticated log transport and segment-commit wire
+  binding. `blob.LogTransport` and `logseg.SegmentRecorder` exist, but their
+  authenticated constructors do not. `SubjectUploader` already consumes them.
+- W1 must install its transaction-local materialization copier. The only
+  assignments to `Store.materializations` are in materialize_runtime_test.go.
+  The missing production binding still returns `unavailable` from
+  state_materialize.go. A separate public `CopyMemo` call cannot replace it
+  because the copied records and terminal transition must commit together.
+- W1/W3/W9 must carry committed output/manifest record identity to readers of
+  materialized results. Their attempt may be zero. W7 cannot derive an exact
+  result key from an invented execution attempt.
+- W1b must expose leased expired-upload staging selection for physical cleanup.
+  `releaseExpiredBlobUploadQuotasTx` releases holds but returns no staging keys.
+  The approved record-mutation redesign remains W1b's work. It was not patched
+  or reprobed here under the brief's two-strikes rule.
+- W3/W8/W9 must construct fresh host storage bindings and finish local/profile
+  cutovers. Live legacy callers still use S3 output/log routes, raw S3 log
+  objects, store-local outputs and run-directory log readers. Their deletion
+  remains unfinished. No replacement credential protocol or compatibility
+  adapter was added.
+
+Fresh verification passed: whole-repository build, all storage package tests
+(`internal/blob/...`, artifacts, depcache, teamblob and `pkg/storage/...`), vet
+on those packages, controller `TestDataStorage*`, standalone
+`TestFilesystemDataStartup*`, and commentcheck against main (1,244 files).
+Commands used the scratch/cache environment recorded below and tests used
+`-p 4`. The previous full acceptance result below is historical evidence, not
+a new run. Native authenticated acceptance remains open.
+
+Only this report changed. No shared caller or foreign contract changed. There
+is no new open design question. The remaining friction is the missing joins
+listed above. The next continuation needs those other-area changes or a
+declared contract addition; another component-only proof would not close them.
+No Git write, Sparkwing binary, service or pipeline ran. Scratch was deleted.
+
+## Previous continuation
 
 Continued from ec920048a. The previous real-store record, physical log,
 manifest verification and maintenance integrations remain. No component-only
