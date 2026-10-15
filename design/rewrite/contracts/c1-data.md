@@ -2,6 +2,28 @@
 
 <!-- design:begin -->
 
+## Committed result copies
+
+`NodeRow.OutputRecord` and `ManifestRecord` persist the exact selectors committed
+with terminal state. Materialized copies use `blob.MaterializedRecordKey` with
+the destination result sequence. The destination has no synthetic attempt.
+`SetResultBlobRecords` configures both attachment and materialization. Its reader
+also supplies `VerifyBlob(context.Context, blob.Blob)` for copies. The filesystem
+and S3 backends verify every selected object and manifest member before mutation.
+
+`CopyMaterializedRecords` retains source provenance and reassigns record lifetime
+to the destination run. It uses the shared record mutation owner, leaving commit
+and rollback to reconciliation. A materialization savepoint discards all copies
+on a missing, expired or corrupt source. A materialize-only miss returns Dispatch.
+An ordinary miss continues to execution admission. Authority errors stay errors.
+Memo sources name their exact record and need no source attempt or surviving run.
+
+The private execution wire carries both selectors unchanged. Native host storage
+reads select them directly. Trigger and plan owners can read selected terminal
+records in their run. Dependencies and pinned references require the exact selected
+record even when the producing result has no attempt. Digest equality grants no
+record metadata authority.
+
 ## Payment mutation transactions
 
 Card setup, collection, payment reversal, dispute hold/release, warning and
@@ -99,12 +121,13 @@ their `node_outputs` copy branches are removed. Host memo materialization
 uses the existing transactional `blob.RecordStore.CopyMemo` contract. The
 unused backend output-read forwarding methods are removed too.
 
-`RecordStore.CopyMemo` is implemented, but the state machine's private
-`CopyMaterializedRecords` seam remains assigned only by tests. Removing that
-fixture assignment makes manual-retry, memo and coalesced reconciliation fail
-with `transactional materialization records are not configured`. W1 must bind
-the copier inside its state transaction. Calling the public copy method before
-reconciliation would commit the records separately from the terminal state.
+`Store.SetResultBlobRecords` also binds the real `CopyMaterializedRecords`
+implementation to reconciliation's transaction. Retry and memo copies retain
+exact selectors, verify physical bytes and commit with terminal state. Coalesced
+copies still require a declared persisted read edge. A source ref and matching
+spec hash grant no authority. The final waiter schema excludes the legacy
+coalesce policy, so that table cannot establish a coalesced read. This path
+refuses until its owner declares the missing authority.
 
 `Tenant.StorageStanding` reports the selected team's policy, retained event,
 blob and tagged-log bytes, and live upload reservation bytes from one snapshot.

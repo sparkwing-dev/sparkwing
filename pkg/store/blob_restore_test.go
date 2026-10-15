@@ -59,7 +59,7 @@ func plantBlobRestore(t *testing.T, s *Store, records *blobRecords, intent blob.
 		record.ManifestDigest = runspec.Optional[blob.Digest]{Set: true, Value: intent.Digest}
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return persistBlobRecordTx(t.Context(), tx, record, namespace, intent.Identity)
+		return persistBlobRecordTx(t.Context(), tx, record, namespace, intent.Identity, nil)
 	}); err != nil {
 		t.Fatal(err)
 	}

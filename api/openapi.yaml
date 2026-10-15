@@ -1383,8 +1383,16 @@ components:
             - format: date-time
               type: string
             - type: "null"
+        manifest_record:
+          anyOf:
+            - $ref: '#/components/schemas/internal.blob.RecordKey'
+            - type: "null"
         outcome:
           type: string
+        output_record:
+          anyOf:
+            - $ref: '#/components/schemas/internal.blob.RecordKey'
+            - type: "null"
         ready_at:
           anyOf:
             - format: date-time

@@ -131,7 +131,7 @@ func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecor
 		}
 	}
 	record := blob.Record{Key: request.Key, Digest: request.Digest, ManifestDigest: request.ManifestDigest, Source: a.source, Uploader: a.authority.Principal, Provenance: blobActorProvenance(a), RefFacts: a.authority.Ref, CreatedAt: tx.now(), ExpiresAt: request.ExpiresAt}
-	batch, err := r.mutateRecordsTx(ctx, tx, a, []blobRecordMutation{{record: record, scope: scope, members: members}}, false)
+	batch, err := r.mutateRecordsTx(ctx, tx, a, []blobRecordMutation{{record: record, scope: scope, members: members}}, false, nil)
 	if err != nil {
 		return blob.Record{}, err
 	}
@@ -174,7 +174,7 @@ func checkBlobWriteKey(a blobActor, key blob.RecordKey) error {
 	return nil
 }
 
-func persistBlobRecordTx(ctx context.Context, tx *storeTx, record blob.Record, scope string, destination blob.UploadIdentity) error {
+func persistBlobRecordTx(ctx context.Context, tx *storeTx, record blob.Record, scope string, destination blob.UploadIdentity, target *NodeRow) error {
 	sourceJSON, err := json.Marshal(record.Source)
 	if err != nil {
 		return err
@@ -198,6 +198,9 @@ func persistBlobRecordTx(ctx context.Context, tx *storeTx, record blob.Record, s
 		run = destination.RunID
 		a := destination.Attempt.Value
 		node, attempt, generation = a.NodeID, a.Attempt, a.Generation
+		if target != nil {
+			run, node, attempt, generation = target.Ref.RunID, target.Ref.NodeID, nil, nil
+		}
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,manifest_digest,run_id,node_id,attempt,generation,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,source_node_id,source_attempt,source_generation,verified_ref,verified_default_branch,source_sha,ref_facts_json,pipeline,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(team,kind,scope,name) DO UPDATE SET digest=excluded.digest,manifest_digest=excluded.manifest_digest,run_id=excluded.run_id,node_id=excluded.node_id,attempt=excluded.attempt,generation=excluded.generation,uploader_principal=excluded.uploader_principal,provenance=excluded.provenance,source_identity_json=excluded.source_identity_json,source_kind=excluded.source_kind,source_run_id=excluded.source_run_id,source_node_id=excluded.source_node_id,source_attempt=excluded.source_attempt,source_generation=excluded.source_generation,verified_ref=excluded.verified_ref,verified_default_branch=excluded.verified_default_branch,source_sha=excluded.source_sha,ref_facts_json=excluded.ref_facts_json,created_at=excluded.created_at,expires_at=excluded.expires_at`, record.Key.Team, record.Key.Kind, scope, record.Key.Name, record.Digest, manifest, run, node, attempt, generation, record.Key.Scope.Repo, blobRefScope(record.Key.Scope.Ref), record.Uploader, record.Provenance, sourceJSON, record.Source.Kind, record.Source.RunID, sourceNode, sourceAttempt, sourceGeneration, boolInt(record.RefFacts.Scope.Verified), boolInt(record.RefFacts.DefaultBranchVerified), record.RefFacts.SHA, factsJSON, record.Key.Scope.Pipeline, record.CreatedAt.UnixNano(), expires)
 	return err

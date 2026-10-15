@@ -78,7 +78,7 @@ func TestBlobRecordsMutationCannotOutliveAuthority(t *testing.T) {
 					if !expired {
 						now = expiry.Add(-time.Nanosecond)
 					}
-					batch, err := records.mutateRecordsTx(t.Context(), tx, authority, []blobRecordMutation{{record: record, scope: scope}}, operation == "copy")
+					batch, err := records.mutateRecordsTx(t.Context(), tx, authority, []blobRecordMutation{{record: record, scope: scope}}, operation == "copy", nil)
 					exposed := len(batch) != 0
 					if err == nil {
 						err = tx.Commit()

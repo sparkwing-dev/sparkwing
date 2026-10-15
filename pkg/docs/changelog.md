@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **store:** Reused results copy their committed output and manifest records atomically, verify all source bytes, and retain reads after source-run deletion. Missing or corrupt source bytes leave the job available to execute.
 - **store (Breaking):** Billing-policy writes use `Operator.SetCreditSettings`. The separate `SetOperatorCreditSettings` entry point is removed. Every caller now preserves installed rate tables against scalar overrides. See [migration guide](docs/migrations/_unreleased.md#billing-policy-writer).
 - **store (Breaking):** Remove `Tenant.GrantCredits`. Use `Tenant.RecordCreditGrant` with a typed request. Tenant credit reports now read balances, burn, storage charges and prices from one database snapshot. See [migration guide](docs/migrations/_unreleased.md#paid-credit-requires-verified-checkout-settlement).
 - **billing:** Fraud-warning replays retain their original payment and card. Conflicting payer evidence fails without recording a warning or freezing a team. Released warning holds remain released after restart and replay.

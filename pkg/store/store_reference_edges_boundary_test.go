@@ -138,6 +138,21 @@ func seedStoreReferenceBoundary(ctx context.Context, db *sql.DB) (blob.Authority
 			return authority, nil, err
 		}
 	}
+	key := blob.ResultRecordKey(source.Attempt.Value, "gh:1", blob.RefScope{}, "fixture", blob.KindOutput)
+	namespace, err := blob.RecordNamespace(key)
+	if err != nil {
+		return authority, nil, err
+	}
+	selector, err := json.Marshal(key)
+	if err != nil {
+		return authority, nil, err
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE blob_records SET scope=? WHERE team=? AND scope='fixture'", namespace, store.DefaultTeam); err != nil {
+		return authority, nil, err
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE nodes SET output_record=? WHERE team=? AND run_id='upload' AND node_id='a'", selector, store.DefaultTeam); err != nil {
+		return authority, nil, err
+	}
 	digests = append(digests, blob.Digest(strings.Repeat("e", 64)), blob.Digest(strings.Repeat("f", 64)))
 	return authority, digests, nil
 }

@@ -243,6 +243,8 @@ type ReconcileResponse struct {
 // It preserves the persisted state needed to resume; only a new award carries a bearer in Claim.
 type ExecutionJob struct {
 	JobDetail
+	OutputRecord       *blob.RecordKey              `json:"output_record,omitempty"`
+	ManifestRecord     *blob.RecordKey              `json:"manifest_record,omitempty"`
 	Spec               json.RawMessage              `json:"spec"`
 	SpecHash           string                       `json:"spec_hash"`
 	Execution          runspec.JobExecutionSettings `json:"execution"`

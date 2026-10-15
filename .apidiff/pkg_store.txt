@@ -1691,6 +1691,8 @@ type NodeRow struct {
 	Execution             runspec.JobExecutionSettings
 	Spec                  json.RawMessage
 	SpecHash              string
+	OutputRecord          *blob.RecordKey
+	ManifestRecord        *blob.RecordKey
 }
 const NodeRunning NodeState = "running"
 type NodeSettlement struct {
@@ -3580,6 +3582,7 @@ func WithoutCreditMetering(ctx context.Context) context.Context
 # methods on un-declared receiver types (likely a bug)
 func (r *blobRecords) AttachResultRecords(ctx context.Context, tx *storeTx, team Team, actor Actor, row NodeRow, result NodeResult) error
 func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecordRequest) (blob.Record, error)
+func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, team Team, actor Actor, ref NodeRef, source MaterializeSource) (materializedRecords, error)
 func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest) (blob.MemoHit, error)
 func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheLookup) (blob.DepcacheHit, error)
 func (r *blobRecords) LookupMemo(ctx context.Context, request blob.MemoLookup) (blob.MemoHit, error)

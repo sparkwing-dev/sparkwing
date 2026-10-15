@@ -348,8 +348,9 @@ sink consumes `logseg.Data` through `SubjectUploader`. The old segment-signing
 client, upload wire types and unused engine-log wrapper are removed. Missing
 authenticated bindings report an error while pod stdout remains available.
 Production signing, verification and recording adapters remain with the controller,
-and the host must supply the persisted subject binding. Output readers still use
-the legacy output-reference model until persisted result selectors reach callers.
+and the host must supply the persisted subject binding. The remaining legacy scheduler and controller output readers still use the
+output-reference model. Native host evaluation reads the committed result selector
+through its storage binding.
 
 The raw provider callback methods `Tenant.SaveCard`, `Tenant.HoldForDispute`,
 `Operator.PaymentTeam`, `Operator.ReversePayment`, `Operator.RecordPaymentWarning`
@@ -363,3 +364,30 @@ Console hold and release operations keep their authenticated tenant handles.
 `Store.SetTokenMetered` is removed. Legacy metering reads share one query until
 the legacy claim APIs are retired. The final runner-metering route belongs to
 C2 and operates on enrolled root capabilities.
+
+
+Materialized results persist their exact output and manifest keys on the node.
+`CopyMaterializedRecords` uses those selectors for retry and resume
+sources, or the exact scoped memo record for a memo source. It verifies every
+selected object and manifest member before copying. The records retain uploader,
+provenance and ref facts while operational ownership moves to the destination run.
+Their keys name the destination result sequence. They create no execution attempt.
+
+Copies, selectors, terminal state and the event share the reconciliation transaction.
+A missing, expired or corrupt source rolls back to the materialization savepoint
+and leaves the job available for execution. Authority refusals remain errors.
+The final writer check runs after physical verification and before record mutation.
+The configured manifest adapter must also verify selected blobs through
+`VerifyBlob`. Missing verification fails closed.
+
+`ExecutionJob` carries the committed selectors through the private controller API.
+The native host consumes them for generator evaluation and reconstruction when a
+storage binding is present. Trigger and plan owners read only selected terminal
+records in their own run. Dependency and pinned-reference readers also require
+the exact selector, including results that have no execution attempt. Another
+record pointing to the same digest grants no metadata access.
+
+Coalesced source copies remain closed until their contract supplies persisted
+read-edge authority. A source result and matching spec hash cannot grant that
+read. The legacy waiter table cannot supply it because its final schema excludes
+the coalesce policy.

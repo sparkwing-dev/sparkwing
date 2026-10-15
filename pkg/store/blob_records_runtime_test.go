@@ -143,7 +143,7 @@ func TestBlobRecordsRejectUnrelatedSameRunAndAllowDependency(t *testing.T) {
 	if err != nil || len(presence.Present) != 0 {
 		t.Fatalf("existence oracle: %+v,%v", presence, err)
 	}
-	rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1000000000000,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND run_id='run' AND node_id='job'`)
+	finishBlobRecordJob(t, records, first)
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='consumer'`, []byte(`{"id":"consumer","deps":["job"]}`))
 	if _, err := records.CommitRecord(t.Context(), request); err != nil {
 		t.Fatal(err)
@@ -311,5 +311,17 @@ func TestBlobRecordsAuthorizeManifestBeforeReadingBytes(t *testing.T) {
 	request.Digest = other.Digest
 	if _, err := records.CommitRecord(t.Context(), request); !errors.Is(err, blob.ErrDigestNotReadable) || called {
 		t.Fatalf("foreign manifest read: called=%v,err=%v", called, err)
+	}
+}
+
+func finishBlobRecordJob(t *testing.T, records *blobRecords, intent blob.UploadIntent) {
+	t.Helper()
+	records.tenant.s.SetResultBlobRecords(records.manifests)
+	id := intent.Identity.Attempt.Value
+	key := blobOutputRequest(intent).Key
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: id.Generation}
+	_, err := records.tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{id.RunID, id.NodeID}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(id.Attempt), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &key}}})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

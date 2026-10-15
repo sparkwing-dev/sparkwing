@@ -72,7 +72,7 @@ func authorizeEdge(r EdgeRequest) error {
 		if !validAttempt(a.Attempt.Value) || r.ReadSet.Reader != a.Attempt.Value {
 			return ErrDigestNotReadable
 		}
-	} else if a.Upload.Set || a.Repo == "" || r.ReadSet.Reader != (runspec.AttemptIdentity{}) {
+	} else if a.Upload.Set && (!validUpload(a.Upload.Value) || a.Upload.Value.Kind != UploadOwnerUnit || a.Upload.Value.Principal != a.Principal || a.Upload.Value.CapabilityRef != a.CapabilityRef) || a.Repo == "" || r.ReadSet.Reader != (runspec.AttemptIdentity{}) {
 		return ErrDigestNotReadable
 	}
 	for _, edge := range r.ReadSet.Edges {
@@ -83,6 +83,9 @@ func authorizeEdge(r EdgeRequest) error {
 			return nil
 		}
 		key := edge.Record
+		if a.Upload.Set && a.Upload.Value.Kind == UploadOwnerUnit && edge.Kind == EdgeDependency && (key.Kind == KindOutput || key.Kind == KindManifest) && key.Team == a.Upload.Value.Team && key.Scope.Repo == a.Repo && cacheReadKind(r.TargetKind) {
+			return nil
+		}
 		if edge.Kind == EdgeMemoScope && cacheReadKind(r.TargetKind) && cacheReadKind(key.Kind) && key.Team != "" && key.Scope.Repo == a.Repo && key.Scope.Ref.Verified {
 			return nil
 		}

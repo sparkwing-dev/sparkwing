@@ -60,7 +60,7 @@ func TestBlobMetadataFollowsReadEdgesWithoutCreatingThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader := addBlobJob(t, s, intent, "reader")
-	rewriteSchemaExec(t, s.db, "UPDATE nodes SET status='done',outcome='success',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,finished_at=? WHERE team='a' AND run_id='run' AND node_id='job'", s.now().UnixNano())
+	finishBlobRecordJob(t, records, intent)
 	if result, err := records.tenant.ReadBlob(t.Context(), reader.Authority, intent.Digest); err == nil || result != (blob.Blob{}) {
 		t.Fatalf("unrelated reader got metadata=%+v: %v", result, err)
 	}

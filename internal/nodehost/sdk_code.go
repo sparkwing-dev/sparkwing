@@ -23,6 +23,16 @@ type sdkCode struct {
 	Validation    nodeproto.ValidationContext
 }
 
+func (h *sdkCode) readResult(ctx context.Context, row store.NodeRow, storage StorageBinding) (json.RawMessage, error) {
+	if storage.Bytes != nil || storage.Records != nil {
+		return (OutputRecords{Blobs: storage.Bytes, Records: storage.Records}).ReadResult(ctx, row, storage.Authority)
+	}
+	if h.ReadOutput == nil {
+		return nil, executorError(apierr.Unavailable, "result storage is not configured")
+	}
+	return h.ReadOutput(ctx, row.Ref, row.Generation)
+}
+
 type executorSession struct {
 	process  ExecutorProcess
 	sequence atomic.Int64

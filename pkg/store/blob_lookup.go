@@ -369,7 +369,7 @@ func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest
 	if !request.Lookup.Budget.Deadline.IsZero() && !tx.now().Before(request.Lookup.Budget.Deadline) {
 		return blob.MemoHit{}, nil
 	}
-	if _, err := r.mutateRecordsTx(ctx, tx, a, batch, true); err != nil {
+	if _, err := r.mutateRecordsTx(ctx, tx, a, batch, true, nil); err != nil {
 		if cacheMissError(err) {
 			return blob.MemoHit{}, nil
 		}
