@@ -228,11 +228,6 @@ func (p ClaimPlacement) needsRunRepository() bool {
 	return false
 }
 
-type nodeKey struct {
-	runID  string
-	nodeID string
-}
-
 type nodePlacementEvent struct {
 	HolderID string   `json:"holder_id"`
 	Reason   string   `json:"reason"`

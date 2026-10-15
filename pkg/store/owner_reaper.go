@@ -39,7 +39,7 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 	cancelled := owner.cancelled.Valid || run.CancelRequestedAt != nil
 	expired := owner.deadline.Valid && owner.deadline.Int64 <= now.UnixNano()
 	lapsed := owner.status == "claimed" && owner.lease.Valid && owner.lease.Int64 <= now.UnixNano()
-	wait := run.Request.Request.Options.ClaimWait
+	wait := runClaimWait(run)
 	queuedOut := !owner.started.Valid && wait.Set && wait.Value > 0 && !run.CreatedAt.Add(wait.Value).After(now)
 	if !cancelled && !expired && !lapsed && !queuedOut && owner.status != "failed" && owner.status != "done" {
 		return nil, nil
@@ -50,13 +50,13 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 	failed := owner.status == "failed" || expired || queuedOut || owner.disruptions >= limits.MaxDisruptions || lapsed && owner.started.Valid && run.Request.Request.Origin == runspec.OriginLocal
 	result := &ReapedUnit{Team: target.team, RunID: target.ref.RunID, Kind: string(target.kind), Generation: owner.generation, Disruptions: owner.disruptions, Requeued: !cancelled && !failed, Cancelled: cancelled, Failed: failed && !cancelled}
 	if result.Requeued {
-		return result, writeOwnerRecoveryTx(ctx, tx, target, owner, "pending", now)
+		return result, writeOwnerRecoveryTx(ctx, tx, target, owner, "pending", actor, now)
 	}
 	status := "failed"
 	if cancelled {
 		status = "done"
 	}
-	if err := writeOwnerRecoveryTx(ctx, tx, target, owner, status, now); err != nil {
+	if err := writeOwnerRecoveryTx(ctx, tx, target, owner, status, actor, now); err != nil {
 		return nil, err
 	}
 	if cancelled && run.CancelRequestedAt == nil {

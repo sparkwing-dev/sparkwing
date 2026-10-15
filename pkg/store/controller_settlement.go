@@ -24,16 +24,16 @@ func transitionNodeTx(ctx context.Context, tx *storeTx, team Team, change NodeTr
 }
 
 func controllerOwnerTx(ctx context.Context, tx *storeTx, team Team, runID string, now time.Time) (*Actor, error) {
-	var dispatch string
+	var dispatch, mode string
 	var sealed sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT dispatch,sealed_at FROM runs WHERE team=? AND id=?`, team, runID).Scan(&dispatch, &sealed)
+	err := tx.QueryRowContext(ctx, `SELECT dispatch,intake_mode,sealed_at FROM runs WHERE team=? AND id=?`, team, runID).Scan(&dispatch, &mode, &sealed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, notFound("run", runID)
 	}
 	if err != nil {
 		return nil, err
 	}
-	if dispatch != "controller" || !sealed.Valid {
+	if dispatch != "controller" || mode != "execute" || !sealed.Valid {
 		return nil, nil
 	}
 	var holder string

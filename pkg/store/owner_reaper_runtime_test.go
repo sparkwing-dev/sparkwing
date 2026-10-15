@@ -238,3 +238,42 @@ func TestRunOwnerLostRefusesUnstartedLocalOwner(t *testing.T) {
 		t.Fatalf("unstarted local recovery = %+v, %v", reaped, err)
 	}
 }
+
+func TestOwnerRequeueEmitsOneCommittedEvent(t *testing.T) {
+	tenant, _, lease := ownerReaperFixture(t, true, 0, runspec.OriginTrigger)
+	for range 2 {
+		if _, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil {
+			t.Fatal(err)
+		}
+	}
+	events, err := tenant.ReadStateEvents(t.Context(), "run", 0, 20)
+	if err != nil || len(events) != 1 || events[0].Kind != "run_requeued" || events[0].NodeID != "" {
+		t.Fatalf("owner recovery events: %+v, %v", events, err)
+	}
+	run, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil || run.State != RunRunning || run.StateSeq != events[0].StateSeq {
+		t.Fatalf("owner recovery state: %+v, %v", run, err)
+	}
+}
+
+func TestOwnerRequeueRollsBackWhenEventCannotCommit(t *testing.T) {
+	tenant, _, lease := ownerReaperFixture(t, true, 0, runspec.OriginTrigger)
+	rewriteSchemaExec(t, tenant.s.db, `CREATE TRIGGER refuse_requeue BEFORE INSERT ON events WHEN NEW.kind='run_requeued' BEGIN SELECT RAISE(ABORT,'event unavailable'); END`)
+	if _, err := tenant.s.ReapUnits(t.Context(), lease, 10); err == nil {
+		t.Fatal("owner recovery ignored failed event write")
+	}
+	var status, holder string
+	var disruptions int
+	if err := tenant.s.db.QueryRow(`SELECT status,claimed_by,disruptions FROM triggers WHERE id='run'`).Scan(&status, &holder, &disruptions); err != nil || status != "claimed" || holder != "owner" || disruptions != 0 {
+		t.Fatalf("failed event changed owner: %s, %s, %d, %v", status, holder, disruptions, err)
+	}
+	run, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil || run.StateSeq != 0 {
+		t.Fatalf("failed event changed run sequence: %d, %v", run.StateSeq, err)
+	}
+	rewriteSchemaCount(t, tenant.s.db, "events", 0)
+	rewriteSchemaExec(t, tenant.s.db, `DROP TRIGGER refuse_requeue`)
+	if reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
+		t.Fatalf("recovery retry: %+v, %v", reaped, err)
+	}
+}

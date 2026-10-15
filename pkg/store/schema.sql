@@ -95,6 +95,7 @@ CREATE TABLE nodes (
     finished_at BIGINT,
     error TEXT NOT NULL DEFAULT '',
     ready_at BIGINT,
+    queue_started_at BIGINT,
     claimed_by TEXT,
     claim_principal TEXT NOT NULL DEFAULT '',
     capability_prefix TEXT NOT NULL DEFAULT '',
@@ -1339,6 +1340,8 @@ CREATE INDEX idx_runs_sha_started ON runs(team,git_sha, started_at DESC);
 CREATE INDEX idx_runs_branch_started ON runs(team,git_branch, started_at DESC);
 
 CREATE INDEX idx_nodes_claimable ON nodes(team,ready_at) WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND status != 'done';
+
+CREATE INDEX idx_nodes_queued ON nodes(team,queue_started_at) WHERE queue_started_at IS NOT NULL AND claimed_by IS NULL AND status = 'pending';
 
 CREATE INDEX idx_nodes_claimed_lease ON nodes(team,lease_expires_at) WHERE claimed_by IS NOT NULL;
 

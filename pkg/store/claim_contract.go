@@ -56,6 +56,13 @@ func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPref
 	return s.releaseUnit(ctx, claim, capabilityPrefix)
 }
 
+// RenewUnit derives the unit's team, identity and fences from its live capability.
+// Executing records the first trigger, plan or eval execution; job starts use TransitionNode.
+// Cancelled units renew to drain and return CancelRequested without recording a new start.
+func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error) {
+	return s.renewUnit(ctx, capabilityPrefix, executing)
+}
+
 // OperatorStore restricts deployment work to explicit methods without embedding a tenant or raw Store.
 type OperatorStore interface {
 	AcquireSingletonLease(context.Context, string, string, time.Duration) (SingletonLease, error)

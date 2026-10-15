@@ -150,9 +150,39 @@ state and require the same policy-specific record authority.
 
 `RunRow.CreatedAt` is the new invocation's creation time. Queue deadlines use
 it because retries preserve the original request seal's admission time.
+`nodes.queue_started_at` and `NodeRow.QueueStartedAt` retain a job's first
+release time across unstarted claim losses and releases. Execution start or
+terminal completion clears it. A started disruption therefore receives a new
+queue interval on its next release. An unclaimed pending job with an elapsed
+queue interval can fail as `queue_timeout` before its owner releases it again.
+The accepted spec supplies claim wait after seal point two. Before acceptance,
+the request seal supplies it. Named, queued and self claims enforce that same
+deadline before awarding work, even when reaping has not run yet.
 `ScheduleSnapshot.GuardRefusal` carries a sealed guard refusal to the shared
 decider. Refused jobs become skipped and the run fails with the recorded reason.
 Cancellation still takes precedence. A refused seal cannot release or claim work.
+
+`Store.RenewUnit` is the controller adapter for a unit capability and the wire's
+`executing` flag. It derives team, unit, holder and generations from the live
+capability. Trigger and plan renewal share `Tenant.RenewOwner`'s transaction
+path. Job renewal shares `Tenant.RenewNodeClaim`'s path. Eval renewal checks its
+own claim, terminal source generation and elected controller generation.
+Bootstrap credentials cannot renew. The first executing renewal records an
+owner unit's start, which distinguishes free loss from a started disruption.
+Job starts still use `TransitionNode`. Cancelled units renew for draining,
+return cancellation, and record no new execution start. Billing settlement
+must join the renewal transaction through the accounting implementation.
+
+Owner requeue clears the claim and appends one `run_requeued` event in the
+same transaction. It advances the run state sequence without changing its
+pending or running status. Repeated sweeps cannot duplicate that event.
+
+Published plans, job results and completion share one publisher check:
+controller audience, `data.write`, a run binding, publish data scope, matching
+repository and live ancestry. Completion requires an accepted plan and a
+verdict that agrees with persisted jobs. Published history has no executable
+owner, including when its dispatch field names the controller. Result-record
+attachment remains transactional and must supply its own blob authority proof.
 
 Materialization uses the store-local `materializationRecords` interface inside
 the state transaction. Its implementation must authorize the policy-specific
@@ -698,6 +728,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `UnitClaim` | UnitClaim records the store-derived team and award; source generation remains distinct from eval claim generation. |
 | `Store.ClaimUnit` | ClaimUnit applies the shared matcher and C2 Award atomically; only launcher service scope can cross teams. |
 | `Store.ReleaseUnit` | ReleaseUnit returns an unstarted unit without consuming an attempt; cancellation and started leases use transitions. |
+| `Store.RenewUnit` | Renews the capability-derived unit, records owner execution starts and delivers cancellation without accepting caller-selected fences. |
 | `OperatorStore` | OperatorStore restricts deployment work to explicit methods without embedding a tenant or raw Store. |
 
 ### pkg/store/completion_contract.go

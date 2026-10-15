@@ -95,7 +95,7 @@ const RetrySourceManual = "manual"
 // underlying database is SQLite or Postgres depending on which
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
-	resultRecords nodeResultRecords
+	resultRecords    nodeResultRecords
 	materializations materializationRecords
 	claimProfiles    ClaimProfileResolver
 	intake           intakeContracts
@@ -671,7 +671,7 @@ type Run struct {
 	RetryOf   string `json:"retry_of,omitempty"`
 	RetriedAs string `json:"retried_as,omitempty"`
 	// RetrySource is RetrySourceManual for a manually retried run.
-	RetrySource             string     `json:"retry_source,omitempty"`
+	RetrySource string `json:"retry_source,omitempty"`
 	// Replay lineage; independent of retry chain.
 	ReplayOfRunID  string `json:"replay_of_run_id,omitempty"`
 	ReplayOfNodeID string `json:"replay_of_node_id,omitempty"`
@@ -1518,8 +1518,7 @@ type Node struct {
 	// when it carried no preference. Empty on a node no claim path decided.
 	PlacementReason string `json:"placement_reason,omitempty"`
 	// PlacementHoldFrom is when the node became claimable, which the
-	// local-first hold runs from. It survives the ready_at bump a
-	// label-mismatched claim applies, so the hold expires on schedule.
+	// local-first hold runs from.
 	PlacementHoldFrom *time.Time `json:"placement_hold_from,omitempty"`
 
 	// CreditCPUClassCores is the cpu class the claim billed this node at,
@@ -2745,8 +2744,6 @@ func (t *Tenant) RevokeNodeReady(ctx context.Context, runID, nodeID string) (boo
 // a fresh lease, bound to principal. Claimable = ready_at set,
 // unclaimed, !done, and every needs_labels entry appears in
 // runnerLabels. ErrNotFound when no candidate matches.
-// Label-mismatched candidates have their ready_at bumped 1us so they
-// don't starve the FIFO queue.
 //
 // A [ClaimPlacement] on ctx adds the local-first hold: a candidate whose
 // preference runnerLabels does not satisfy is passed over while a live runner
@@ -2755,8 +2752,7 @@ func (t *Tenant) RevokeNodeReady(ctx context.Context, runID, nodeID string) (boo
 // [PlacementPreferred], [PlacementFallback], or [PlacementNone].
 //
 // claimant is the authenticated token the claim answers to;
-// [Store.PrincipalHoldsNodeClaim] and [Store.HeartbeatNodeClaim] admit
-// only that token afterwards. Pass the zero value when the caller is
+// [Store.HeartbeatNodeClaim] admits only that token afterwards. Pass the zero value when the caller is
 // unauthenticated, which leaves the claim unbound. lease is clamped to
 // [MaxLeaseDuration].
 //
@@ -2789,11 +2785,8 @@ func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, 
 	}
 
 	for range maxClaimAttempts {
-		target, mismatched, err := s.scanClaimCandidates(ctx, coordinatorID, profile, runnerLabels, placement, warm, scope)
+		target, err := s.scanClaimCandidates(ctx, coordinatorID, profile, runnerLabels, placement, warm, scope)
 		if err != nil {
-			return nil, err
-		}
-		if err := s.bumpMismatchedNodes(ctx, scope, mismatched); err != nil {
 			return nil, err
 		}
 		if target == nil {
@@ -2912,8 +2905,7 @@ func (f warmClassFilter) refusesCharge(charge ExecutorResource) bool {
 // writes nothing and holds no lock.
 func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, profile match.Profile, runnerLabels []string,
 	placement ClaimPlacement, warm warmClassFilter, scope teamScope,
-) (*claimCandidate, []nodeKey, error) {
-	var mismatched []nodeKey
+) (*claimCandidate, error) {
 	var cursor *claimCandidate
 	ghScope, scoped := GitHubRunnerScopeFrom(ctx)
 	admitted := map[string]bool{}
@@ -2922,18 +2914,17 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, p
 	for range claimScanRounds {
 		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor, warm, scope)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		for i := range batch {
 			n := &batch[i]
 			if !match.Evaluate(profile, match.Demand{Selector: n.needs}).OK() {
-				mismatched = append(mismatched, nodeKey{runID: n.runID, nodeID: n.nodeID})
 				continue
 			}
 			if scoped {
 				ok, err := ghScope.admitsRun(ctx, s, n.runID, admitted)
 				if err != nil {
-					return nil, nil, err
+					return nil, err
 				}
 				if !ok {
 					continue
@@ -2945,7 +2936,7 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, p
 			if needRepo {
 				repo, err := s.runRepositoryOf(ctx, scope, n.runID, repos)
 				if err != nil {
-					return nil, nil, err
+					return nil, err
 				}
 				demand.Repo = &repo
 			}
@@ -2957,7 +2948,7 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, p
 			}
 			refused, err := warm.refuses(ctx, storeRowQuerier{s}, n.runID, n.nodeID)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 			// safety: the node is waiting for a Kubernetes node of its own,
 			// which claims it by name, so passing over it writes nothing: a
@@ -2970,14 +2961,14 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, p
 			if n.decision.hold {
 				continue
 			}
-			return n, mismatched, nil
+			return n, nil
 		}
 		if len(batch) < claimScanBatch {
-			return nil, mismatched, nil
+			return nil, nil
 		}
 		cursor = &batch[len(batch)-1]
 	}
-	return nil, mismatched, nil
+	return nil, nil
 }
 
 func (s *Store) readClaimCandidates(
@@ -3082,36 +3073,6 @@ func decodeCandidateLabels(runID, nodeID string, raw []byte, out *[]string) bool
 		return false
 	}
 	return true
-}
-
-// safety: moves the nodes this runner's labels rule out behind the clock so
-// they do not starve the queue behind them.
-func (s *Store) bumpMismatchedNodes(ctx context.Context, scope teamScope, keys []nodeKey) error {
-	if len(keys) == 0 {
-		return nil
-	}
-	teamClause, teamArgs, err := claimTeamWhere(scope, "team")
-	if err != nil {
-		return err
-	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	for _, key := range keys {
-		args := []any{time.Now().UnixNano(), int64(time.Microsecond), key.runID, key.nodeID}
-		args = append(args, teamArgs...)
-		if _, err := tx.ExecContext(
-			ctx,
-			`UPDATE nodes SET ready_at = `+s.greatest()+`(?, ready_at + ?)
-			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND ready_at IS NOT NULL`+teamClause,
-			args...,
-		); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
 }
 
 // safety: returns nil when another runner took the node between the scan and
@@ -3384,26 +3345,6 @@ func (t *Tenant) TriggerClaimant(ctx context.Context, triggerID string) (ClaimId
 		return ClaimIdentity{}, err
 	}
 	return claimant, nil
-}
-
-// PrincipalHoldsNodeClaim reports whether claimant holds the node's
-// unexpired claim. An unbound claimant holds nothing, so an
-// unauthenticated caller never passes this check.
-func (s *Store) PrincipalHoldsNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, now time.Time) (bool, error) {
-	if !claimant.bound() {
-		return false, nil
-	}
-	var held int
-	err := s.queryRow(ctx,
-		`SELECT COUNT(*) FROM nodes
-		  WHERE run_id = ? AND node_id = ? AND claim_principal = ?
-		    AND claim_token_prefix = ?
-		    AND `+nodeClaimLiveSQL(""),
-		runID, nodeID, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held)
-	if err != nil {
-		return false, err
-	}
-	return held > 0, nil
 }
 
 // PrincipalHoldsRunClaim reports whether claimant holds an unexpired

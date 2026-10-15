@@ -16,6 +16,15 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"readAuthorityTx":               "a globally unique capability prefix or session hash identifies authority before its team and membership are resolved",
+	"revokeAuthorityTx":             "the authorized revocation path names its exact capability or session by global identity",
+	"advanceAuthGenerationsTx":      "membership and revocation changes invalidate exact ancestor session hashes, including ancestors outside the affected team",
+	"claimUnitTx":                   "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
+	"resolveMatchingInputsTx":       "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
+	"loadAwardRowTx":                "awards derive team from the globally identified unit and check it against the authenticated claimant before issuing authority",
+	"(*Store).settlePaymentFacts":   "a verified provider event identifies a committed checkout by payment mode and session id; the stored checkout supplies the team",
+	"(*Operator).maintainRetention": "the elected deployment maintenance pass expires sessions across teams while preserving live capability ancestry",
+	"deleteRetentionMetricsTx":      "the elected deployment maintenance pass selects expired metrics across teams and deletes each exact team/run/job/time identity",
 	"(*Store).DueCardCharges": "the payment worker expires every team's stale pay-now attempts in one pass " +
 		"under the ledger lock",
 	"startDueAttemptsTx": "the payment worker starts the due attempts of every team's open charges; " +
@@ -58,7 +67,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"the asker is no answer; it is the read every other claim predicate is built from",
 	"(*Store).readClaimCandidates": "the team predicate comes from claimTeamWhere at run time; " +
 		"a scope that is not exactly one team is refused there",
-	"(*Store).bumpMismatchedNodes": "shares the claim scan's runtime predicate and its refusal",
 	"(*Store).awardScannedNodeTx": "the award carries the same runtime predicate; the read that follows " +
 		"it is of the row the award just proved in team",
 	"(*Store).ClaimNamedNode": "shares the claim scan's runtime predicate and its refusal",
@@ -193,8 +201,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"claimant credential and generation, and a token prefix is unique across teams",
 	"(*Store).TriggerExecutionAttemptBelongsToLiveClaim": "matches the trigger's live claim and its attempt against the " +
 		"exact claimant credential and generation, and a token prefix is unique across teams",
-	"(*Store).PrincipalHoldsNodeClaim": "matches the node's live claim against the exact claimant credential, and a token " +
-		"prefix is unique across teams",
 	"(*Store).PrincipalHoldsRunClaim": "matches a live claim on the run's nodes against the exact claimant credential, and " +
 		"a token prefix is unique across teams",
 	"(*Store).PrincipalHoldsTriggerClaim": "matches the trigger's live claim against the exact claimant credential, and a " +

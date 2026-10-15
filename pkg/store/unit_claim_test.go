@@ -250,6 +250,68 @@ func TestClaimUnitTriggerRequirementsAndQueuePreference(t *testing.T) {
 	}
 }
 
+func TestClaimUnitMismatchPreservesQueueAndDoesNotHideEligibleWork(t *testing.T) {
+	s, demand := unitClaimFixture(t)
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, []byte(`{"requires":{"set":true,"value":["pool=prod"]}}`))
+	rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','later','pending',2,?,?)`, []byte(`{"id":"later"}`), []byte(`{}`))
+	demand.Target = nil
+	demand.Kinds = []capability.UnitKind{capability.UnitNode}
+	demand.Labels = []string{"pool=prod"}
+	claimed, err := s.ClaimUnit(t.Context(), demand)
+	if err != nil || claimed.NodeID != "later" {
+		t.Fatalf("oldest eligible claim: %+v, %v", claimed, err)
+	}
+	tenant := &Tenant{s: s, team: "a"}
+	for range 2 {
+		if _, err := s.ClaimUnit(t.Context(), demand); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("ineligible queue: %v", err)
+		}
+	}
+	row, err := tenant.ReadNode(t.Context(), NodeRef{"run", "job"})
+	if err != nil || row.ReadyAt == nil || row.ReadyAt.UnixNano() != 1 || row.StateSeq != 0 || row.ClaimedBy != "" {
+		t.Fatalf("mismatch changed queue position: %+v, %v", row, err)
+	}
+}
+
+func TestClaimUnitRefusesElapsedQueueBeforeReaping(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitNode} {
+		for _, named := range []bool{false, true} {
+			t.Run(string(kind)+map[bool]string{true: "/named", false: "/queue"}[named], func(t *testing.T) {
+				s, demand := unitClaimFixture(t)
+				var raw []byte
+				if err := s.db.QueryRow(`SELECT request_json FROM runs WHERE id='run'`).Scan(&raw); err != nil {
+					t.Fatal(err)
+				}
+				var seal runspec.SealedRequest
+				if err := json.Unmarshal(raw, &seal); err != nil {
+					t.Fatal(err)
+				}
+				seal.Request.Options.ClaimWait.Optional = runspec.Optional[time.Duration]{Set: true, Value: time.Minute}
+				raw, err := json.Marshal(seal)
+				if err != nil {
+					t.Fatal(err)
+				}
+				start := s.now().Add(-time.Minute).UnixNano()
+				rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,claim_wait_ns=?,created_at=? WHERE id='run'`, raw, int64(time.Minute), start)
+				rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=?,queue_started_at=?`, start, start)
+				demand.Kinds = []capability.UnitKind{kind}
+				if named {
+					demand.Target = &UnitRef{Kind: kind, RunID: "run"}
+					if kind == capability.UnitNode {
+						demand.Target.NodeID = "job"
+					}
+				} else {
+					demand.Target = nil
+				}
+				if _, err := s.ClaimUnit(t.Context(), demand); err == nil {
+					t.Fatal("expired queue was awarded before reaping")
+				}
+				rewriteSchemaCount(t, s.db, "billing_awards", 0)
+			})
+		}
+	}
+}
+
 func TestClaimUnitHereWindowAndReclaim(t *testing.T) {
 	for _, late := range []bool{false, true} {
 		t.Run(map[bool]string{false: "within window", true: "after window"}[late], func(t *testing.T) {

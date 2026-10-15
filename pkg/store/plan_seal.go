@@ -23,16 +23,13 @@ func planAuthorityTx(ctx context.Context, tx *storeTx, team Team, request PlanAc
 	if c.Team != string(team) || c.Audience != capability.Controller || c.Prefix != request.Actor.CapabilityPrefix || c.Binding.RunID != request.RunID {
 		return holderRefusal()
 	}
-	var mode, dispatch, repo string
+	var mode, dispatch string
 	var accepted int64
-	if err = tx.QueryRowContext(ctx, `SELECT intake_mode,dispatch,plan_accepted_generation,repo_key FROM runs WHERE team=? AND id=?`, team, request.RunID).Scan(&mode, &dispatch, &accepted, &repo); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT intake_mode,dispatch,plan_accepted_generation FROM runs WHERE team=? AND id=?`, team, request.RunID).Scan(&mode, &dispatch, &accepted); err != nil {
 		return err
 	}
 	if mode == string(runspec.IntakePublish) {
-		if request.Actor.Kind != ActorOperator || c.Binding.Kind != capability.BindingRun || !slices.Contains(c.Grants, capability.DataWrite) || c.Data == nil || c.Data.Use != capability.DataPublish || c.Data.RunID != request.RunID || c.Data.RepositoryKey != repo {
-			return holderRefusal()
-		}
-		return nil
+		return checkPublisherTx(ctx, tx, team, request.Actor, request.RunID)
 	}
 	expected := capability.UnitTrigger
 	binding := capability.BindingTrigger

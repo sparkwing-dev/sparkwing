@@ -1,141 +1,145 @@
-# Store implementation handoff
+# Store rewrite handoff
 
-This snapshot continues commit `6fb00e9a75d8aa272983135ccdf0e405fbce363e`.
-The work is uncommitted. W1b's accounting, blob and log implementation files
-were not edited.
+This session continues `0e1c55adf`. Its changes are uncommitted. The earlier
+admission, plan acceptance, claims, matching, reconciliation, materialization
+and reaper implementation remains on this branch. W1b's billing, blob and log
+files were not edited. No git writes or Sparkwing executable were run.
 
-## Implemented
+## Implemented this session
 
-- Admission allocates team run numbers, seals intake, deduplicates requests,
-  preserves retry seals and lineage, handles publication without an owner, and
-  derives pool access from authenticated facts. Here intake issues its award.
-- Plan acceptance validates declarations and resolved settings, checks secrets,
-  inserts jobs with the second seal, rejects drift, and transfers accepted
-  controller plans to the elected owner. Refused guards persist and prevent
-  execution. Replays do not repeat state changes.
-- Named, queued and self claims share matching, resource checks and capability
-  issuance. Claims enforce runner selection, granted pools, repository access,
-  Here windows and independent eval/source fences. Pending eval work can move
-  to a new elected controller.
-- Reconciliation preserves terminal results, waits for held work until the
-  reaper commits, and awards only one self-claim under contention. It reads
-  materialized outcomes from persistence and supports repeated retries of
-  results that did not create an execution attempt.
-- Self-claimed jobs record their owner capability separately from C2 ancestry.
-  Owner renewal uses this fence, refuses expired claims and excludes revoked
-  leaf credentials. New retry queue deadlines use the new invocation's creation
-  time rather than the preserved request seal's admission time.
-- Transactional interfaces connect materialization and reported result records
-  to the state writer. Refused copies and attachments roll back state and events.
-  These interfaces have fake implementations in tests and still need W1b wiring.
-- Controller recovery uses the elected `ReapUnits` path. Public store adapters
-  expose consistent authority/digest lookup and committed bootstrap exchange.
+- `Store.RenewUnit(ctx, capabilityPrefix, executing)` derives team, unit and
+  fences from live authority. It shares the existing owner and job renewal
+  transactions. It adds eval renewal with independent source, eval and controller
+  generation checks. Bootstrap credentials must exchange before renewal.
+- Executing renewal records the first trigger, plan or eval start. Repeated
+  renewal preserves that time. Reaping can now distinguish an unstarted owner
+  from a started disruption through the public store API. Cancellation reaches
+  the renewal reply and prevents a new start. Job starts use `TransitionNode`.
+- Published plan, job and completion writes share the C2 publisher check.
+  `RunPublish` validates the persisted verdict and writes completion effects.
+  Replays emit no duplicate event. Controller ownership cannot execute or settle
+  published history, including a publication carrying controller dispatch.
+- Owner recovery commits `run_requeued` with its claim clearing and run state
+  sequence. A failed event write rolls the entire recovery back.
+- Queue claims enforce expiry before reaping. Both named and queued paths
+  refuse expired work without an award. Reaping and transitions use the accepted
+  plan's claim-wait setting after seal point two. `nodes.queue_started_at`
+  preserves the queue interval across repeated unstarted losses. Execution
+  start clears it, so a started disruption receives a new interval.
+- The SQL-scope guard now documents the exact cross-team authority, award,
+  provider-checkout and operator-retention lookups in the existing implementation.
 
 ## Deleted and ported
 
-The legacy cut removes 2,174 old lines. The full diff removes 2,256 old lines,
-including replaced stubs and edited lines. Removed surfaces include
-`ResetNodeForAutoRetry`, automatic cross-run retry construction and policy
-snapshots, `RetrySourceAuto`, old controller lifecycle sweeps,
-`settleExpiredTriggerClaim`, and `EvaluateOld`.
+Removed 97 lines in complete legacy blocks: 55 implementation lines from
+`bumpMismatchedNodes`, `nodeKey` and `PrincipalHoldsNodeClaim`, plus the 42-line
+obsolete ready-bump test. Mismatch bookkeeping, obsolete comments and guard
+entries were also removed. This count excludes ordinary edited/replaced lines
+and the earlier session's 2,174-line removal.
 
-Recovery ports replace reset/retry-run assertions with same-run/team recovery,
-preserved accepted settings, monotone attempt/generation fences, cancellation
-precedence and terminal absorption. The nodehost resume test distinguishes
-requeued jobs from terminal disruption failures. Controller tests exercise the
-elected reaper. Admission ports cover immutable request fields, actor/PR/SHA/App
-trust on retry, secret classification, idempotency and expiry races. Claim ports
-cover named/queued capacity, identity spoofing, runner choice and Here windows.
-These are store and adapter proofs, not completed native acceptance cells.
+`pkg/store/node_claim_test.go` was the only caller file migrated for the removed
+ownership API. Its checks use the existing exact claim fence. There were no
+production callers. No caller outside `pkg/store` needed a change this session.
+
+The placement port reverses the ready-bump expectation: an ineligible claim
+leaves queue time and state unchanged, and eligible work behind it remains
+claimable. New focused proofs cover publication authority and result atomicity,
+completion replay, started-owner recovery, cancellation, stale renewal fences,
+bootstrap exchange, independent eval generations and accepted queue deadlines.
+The recovery port exercises four unstarted job lapses without consuming an
+attempt or disruption, then proves expiry at the original queue deadline.
+A separate started-loss test proves its next queue interval starts afresh.
+The prior session's historical port coverage remains unchanged.
 
 ## Verification
 
-All commands used `GOWORK=off GOFLAGS=-buildvcs=false`, with Go cache and temporary
-directories under the worker scratch directory. Test parallelism was at most 4.
+All Go commands used `GOWORK=off GOFLAGS=-buildvcs=false`, with `GOCACHE`,
+`GOTMPDIR` and `TMPDIR` under `/tmp/sw-astra-W1/`. Test parallelism was at most 4.
+The scratch directory is removed after checks.
 
-- `go build -p 4 ./...` passed.
+- Full repository `go build -p 4 ./...` passed.
 - `go vet -p 4` passed for `pkg/store`, `pkg/match`, `pkg/controller`,
-  `internal/nodehost`, `internal/orchestrator`, and `internal/runners/warmpool`.
-- The combined store selection passed 124 top-level tests, 345 including
-  subtests, with no failures or skips.
-- The full matcher suite passed. Focused recovery/controller/nodehost/
-  orchestrator tests passed. Acceptance catalog tests passed, but native
-  scenario cells remain skipped because the T1 driver is unimplemented.
+  `internal/nodehost`, `internal/orchestrator` and `internal/runners/warmpool`.
+- The exact W1 store selection passed 147 top-level tests, 448 including
+  subtests, with no skips. It includes all `TestTenantSQLScope` checks.
+- Full `pkg/match` tests and `tests/acceptance` catalog checks passed.
+  `internal/acceptance` has no test files. Native product scenarios still skip.
 - `git diff --check` passed.
 
-The combined store selection uses every top-level test in these files under
-`pkg/store`: `authority_runtime_test.go`, `authority_adapters_test.go`,
-`rewrite_authority_test.go`, `rewrite_schema_test.go`, `state_runtime_test.go`,
-`scheduling_contract_test.go`, `scheduling_guard_test.go`,
-`concurrency_adoption_test.go`, `maintenance_rewrite_test.go`,
-`expansion_runtime_test.go`, `expansion_success_test.go`,
-`owner_reaper_runtime_test.go`, `unit_deadlines_test.go`, `unit_release_test.go`,
-`result_runtime_test.go`, `intake_plan_runtime_test.go`, `unit_claim_test.go`,
-`unit_claim_lock_test.go`, `reconcile_runtime_test.go`,
-`materialize_runtime_test.go`, `state_result_records_test.go`, and
-`retry_recovery_runtime_test.go`.
+To reproduce the exact store selection, extract each top-level `Test` function
+from these files and pass the joined names as an anchored `-run` expression:
 
-The full legacy store suite is not green. Broader selections still hit final
-schema mismatches such as removed `triggers.pipeline` and `sparkwing_meta`.
-PostgreSQL runtime, native placement execution and Sparkwing pipelines were
-not run in this sandbox. Transient compile failures during parallel file edits
-were resolved before the final checks.
+```text
+authority_runtime_test.go authority_adapters_test.go rewrite_authority_test.go
+rewrite_schema_test.go state_runtime_test.go scheduling_contract_test.go
+scheduling_guard_test.go concurrency_adoption_test.go maintenance_rewrite_test.go
+expansion_runtime_test.go expansion_success_test.go owner_reaper_runtime_test.go
+unit_deadlines_test.go unit_release_test.go result_runtime_test.go
+intake_plan_runtime_test.go unit_claim_test.go unit_claim_lock_test.go
+reconcile_runtime_test.go materialize_runtime_test.go state_result_records_test.go
+retry_recovery_runtime_test.go publication_runtime_test.go unit_renewal_test.go
+queue_recovery_test.go tenant_sql_scope_guard_test.go
+```
 
-## Contracts and integration still open
+These are files under `pkg/store`. The combined selection has 147 tests.
 
-- C3/W6 must supply the real plan validator, sealers, hashes and setting
-  resolvers. Store tests use their contract interfaces with fakes.
-- Controllers must configure `IntakePolicy`, `ClaimProfileResolver` and
-  `PlanSecretOpener` from trusted server data.
-- W1b must connect metered award reservation, plan-unit billing settlement,
-  `materializationRecords` and `nodeResultRecords`. Its blob/log persistence
-  remains separate work.
-- W9's `controllerwire.ReuseSource` needs the terminal job/state-sequence
-  variant represented locally by `MaterializeSource.Result`. Its current
-  attempt-only wire cannot represent every repeated materialization.
-- C2 needs a contract for local connection lifetime when no execution deadline
-  exists. Issuance still refuses an award with neither a deadline nor parent
-  expiry. No arbitrary local timeout was added.
-- Here lost-response recovery cannot reconstruct a bearer from its persisted
-  digest. Identical intake replay returns the original capability prefix.
-  C2 needs to define credential recovery without storing raw bearers.
-- W2/W3/W8/W9 still need engine-route, host and runner wiring. W8's old fallback
-  profile must supply trusted identity fields instead of advertised labels.
-  Completion outbox delivery and native acceptance remain open.
-- `RecoverExpiredNodeClaims` still has legacy test callers in
-  `credit_expired_claim_settle_test.go`, `run_control_test.go`, and W3's
-  `trigger_host_test.go` / `trigger_host_generators_test.go`. The first belongs
-  to W1b and was left untouched. Unused `RunReaperLeased` remains beside W1b's
-  storage leases. Other legacy store APIs and `StateStoreOld` callers still
-  need migration and deletion.
+The full legacy suite is not green. A broader reconciliation test pattern hit
+`reap_pending_test.go`'s removed `triggers.pipeline` and
+`team_storage_test.go`'s removed `sparkwing_meta`. Those failures were outside
+the exact rewrite selection. PostgreSQL, native processes, cluster execution,
+race instrumentation and Sparkwing pipelines were not run.
 
-The local contract additions are recorded in `contracts/c1-data.md`: server
-policy/profile interfaces, authority adapters, the self-claim owner column,
-creation-time projection, guard refusal, terminal-result source identity,
-transactional record interfaces and delivery of the self-claim bearer.
+## Acceptance and remaining work
 
-## Shared files touched
+No native acceptance cell was activated. The T1 catalog contains native,
+cluster and hosted targets, and its driver remains unimplemented. Store fixtures
+with contract fakes cannot count as those placements. The new package tests
+prove store portions of publication, result atomicity, loss recovery,
+cancellation, lease fencing and placement queue invariants.
 
-- `api/openapi.yaml`
-- `design/rewrite/contracts/c1-data.md`
-- `docs/api-reference.md`, `docs/auth.md`, `docs/observability.md`
-- `pkg/docs/mirror/api-reference.md`, `pkg/docs/mirror/auth.md`,
-  `pkg/docs/mirror/observability.md`
-- `internal/nodehost/scheduler.go`, `internal/nodehost/recovery_resume_test.go`
-- `internal/orchestrator/backends.go`, `internal/orchestrator/hosted_run.go`,
-  `internal/orchestrator/hosted_rehydrate_test.go`,
-  `internal/orchestrator/retry_environment_test.go`,
-  `internal/orchestrator/submission_environment_test.go`,
-  `internal/orchestrator/trigger_host.go`,
-  `internal/orchestrator/wingd_api_routes_test.go`
-- `internal/runners/warmpool/warmpool.go`
-- `pkg/controller/claim_attention.go`, `pkg/controller/client/client.go`,
-  `pkg/controller/error_response_test.go`,
-  `pkg/controller/expired_claim_internal_test.go` (deleted),
-  `pkg/controller/handlers.go`, `pkg/controller/reaper_lease_internal_test.go`,
-  `pkg/controller/server.go`
-- `pkg/match/contract.go`, `pkg/match/contract_test.go`,
-  `pkg/match/labels_test.go`, `pkg/match/match.go`,
-  `pkg/match/match_test.go`, `pkg/match/tools_test.go`
+- C3/W6 must supply the real plan validator, hashes, sealers and setting
+  resolvers. Tests continue to fake those contract boundaries.
+- W2/W3/W8/W9 must wire intake policy, enrolled profiles, secret opening,
+  `RenewUnit`, the engine routes and the host/runner lifecycle. No renewal
+  adapter is a claim that its HTTP or process integration has landed.
+- W1b must join reservation and billing settlement to award, renewal, result
+  and plan-end transactions. It must connect `materializationRecords` and
+  `nodeResultRecords`. Output, manifest and log integration remains unproved.
+- W9's reuse source needs the terminal result/state-sequence variant already
+  represented by `MaterializeSource.Result`.
+- C2 still needs local credential lifetime without an execution deadline and
+  lost-response recovery for a Here credential whose raw bearer is not stored.
+- Published generator topology needs a C2 publication alternative for expansion
+  submission: the declared route only accepts owner/eval expansion authority,
+  while publication has no executable owner. Imported output-attempt identity
+  also needs agreement with W1b/W7's upload contract. Metadata-only publication
+  passing here is not proof of complete publication with outputs and generators.
+- Completion outbox delivery and broad legacy API removal remain. In particular,
+  `StateStoreOld`, old claim/plan paths and old recovery APIs still have callers.
+  `RecoverExpiredNodeClaims` and `ReapExpiredNodeClaims` retain W1b test callers.
+  `RunReaperLeased` remains in W1b's shared storage-lease file and was untouched.
+
+The local contract additions are `Store.RenewUnit`, `NodeRow.QueueStartedAt`,
+`nodes.queue_started_at`, its queue index, and the pending-to-failed queue-timeout
+edge for a previously released job. They are documented in `contracts/c1-data.md`.
+The new field is needed because `ready_at` is cleared on requeue. Keeping it set
+would incorrectly derive ready state and bypass the owner's release decision.
+Renewal shares the existing transaction paths because the old owner API has no
+activity argument and no eval-unit path.
+
+No other area's contract was changed. Independent review and landing remain
+with the lead.
+
+## Shared files and friction
+
+Outside `pkg/store`, only `design/rewrite/contracts/c1-data.md` and this handoff
+changed. The shared `pkg/store/schema.sql` change is confined to the job queue
+column and index. W1b implementation files, controller wire and native
+acceptance catalogs are untouched.
+
+The remaining integration stubs and obsolete-schema legacy fixtures limit the
+available evidence. The sandbox and swarm brief prohibit native Sparkwing runs
+and git writes. Scoped Go checks work with the worker-owned cache and scratch
+paths.
 
 STATUS: CONTINUE

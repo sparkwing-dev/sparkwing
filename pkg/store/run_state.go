@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
@@ -249,31 +250,7 @@ func guardRunEdgeTx(ctx context.Context, tx *storeTx, team Team, row RunRow, cha
 				return err
 			}
 		}
-		var pending int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes WHERE team=? AND run_id=? AND (status<>'done' OR expansion='expected')`, team, row.ID).Scan(&pending); err != nil {
-			return err
-		}
-		if pending != 0 {
-			return errors.New("run has unsettled jobs or expansions")
-		}
-		if row.Spec != nil {
-			snapshot, err := readSnapshotTx(ctx, tx, team, row.ID)
-			if err != nil {
-				return err
-			}
-			graph, err := snapshot.Scheduling()
-			if err != nil {
-				return err
-			}
-			decision := Decide(graph)
-			if decision.Outcome != string(change.To) {
-				return errors.New("run verdict disagrees with persisted jobs")
-			}
-		}
-		if row.CancelRequestedAt != nil && change.To != RunCancelled {
-			return errors.New("cancellation takes precedence")
-		}
-		return nil
+		return checkRunVerdictTx(ctx, tx, team, row, change.To)
 	case RunOwnerLost, RunQueueTimeout:
 		if row.CancelRequestedAt != nil && change.To != RunCancelled {
 			return errors.New("cancellation takes precedence")
@@ -296,7 +273,7 @@ func guardRunEdgeTx(ctx context.Context, tx *storeTx, team Team, row RunRow, cha
 			if liveOwners != 0 {
 				return errors.New("run has a live owner claim")
 			}
-			wait := row.Request.Request.Options.ClaimWait
+			wait := runClaimWait(row)
 			if !wait.Set || wait.Value <= 0 || row.CreatedAt.Add(wait.Value).After(now) {
 				return errors.New("run queue deadline not reached")
 			}
@@ -326,13 +303,47 @@ func guardRunEdgeTx(ctx context.Context, tx *storeTx, team Team, row RunRow, cha
 		}
 		return nil
 	case RunPublish:
-		return errors.New("published completion requires validated imported results")
+		if err := checkPublisherTx(ctx, tx, team, change.Actor, row.ID); err != nil {
+			return err
+		}
+		if row.Spec == nil {
+			return errors.New("published run has no accepted plan")
+		}
+		return checkRunVerdictTx(ctx, tx, team, row, change.To)
 	default:
 		return errors.New("unknown run transition cause")
 	}
 }
 
-func writeOwnerRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, owner ownerRecovery, status string, now time.Time) error {
+func checkRunVerdictTx(ctx context.Context, tx *storeTx, team Team, row RunRow, outcome RunState) error {
+	var pending int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes WHERE team=? AND run_id=? AND (status<>'done' OR expansion='expected')`, team, row.ID).Scan(&pending); err != nil {
+		return err
+	}
+	if pending != 0 {
+		return errors.New("run has unsettled jobs or expansions")
+	}
+	if row.Spec != nil {
+		snapshot, err := readSnapshotTx(ctx, tx, team, row.ID)
+		if err != nil {
+			return err
+		}
+		graph, err := snapshot.Scheduling()
+		if err != nil {
+			return err
+		}
+		decision := Decide(graph)
+		if decision.Outcome != string(outcome) {
+			return errors.New("run verdict disagrees with persisted jobs")
+		}
+	}
+	if row.CancelRequestedAt != nil && outcome != RunCancelled {
+		return errors.New("cancellation takes precedence")
+	}
+	return nil
+}
+
+func writeOwnerRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, owner ownerRecovery, status string, actor Actor, now time.Time) error {
 	var started, finished any
 	if status != "pending" {
 		finished = now.UnixNano()
@@ -351,7 +362,33 @@ func writeOwnerRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, 
 	if count != 1 {
 		return holderRefusal()
 	}
-	return nil
+	if status != "pending" {
+		return nil
+	}
+	run, err := readRunTx(ctx, tx, target.team, target.ref.RunID)
+	if err != nil {
+		return err
+	}
+	if run.FinishedAt != nil || run.CancelRequestedAt != nil {
+		return holderRefusal()
+	}
+	payload := struct {
+		Unit        string `json:"unit"`
+		Generation  int64  `json:"generation"`
+		Disruptions int    `json:"disruptions"`
+	}{string(target.kind), owner.generation, owner.disruptions}
+	digest, err := stateHash(payload)
+	if err != nil {
+		return err
+	}
+	actorJSON, err := json.Marshal(actor)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET state_seq=state_seq+1,state_digest=?,state_actor=? WHERE team=? AND id=?`, digest, actorJSON, target.team, target.ref.RunID); err != nil {
+		return err
+	}
+	return appendStateEventTx(ctx, tx, target.team, NodeRef{RunID: target.ref.RunID}, "run_requeued", run.StateSeq+1, payload, now)
 }
 
 func acceptControllerPlanTx(ctx context.Context, tx *storeTx, team Team, request PlanAcceptance, controller Actor, replay bool) error {
@@ -391,6 +428,27 @@ func writeEvalRecoveryTx(ctx context.Context, tx *storeTx, target expiredUnit, u
 		}
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE eval_units SET status=?,disruptions=?,claimed_by=NULL,capability_prefix='',lease_expires_at=NULL,claimed_at=NULL,started_at=?,finished_at=? WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND generation=?`, status, unit.disruptions, started, finished, target.team, target.ref.RunID, target.ref.NodeID, target.sourceGeneration, unit.generation)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return holderRefusal()
+	}
+	return nil
+}
+
+func startOwnerUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, actor Actor) error {
+	var result sql.Result
+	var err error
+	if unit.Kind == capability.UnitEval {
+		result, err = tx.ExecContext(ctx, `UPDATE eval_units SET status='running',started_at=COALESCE(started_at,?) WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status IN ('claimed','running')`, tx.now().UnixNano(), team, unit.RunID, unit.NodeID, unit.SourceGeneration, actor.Generation, actor.Holder, actor.CapabilityPrefix)
+	} else {
+		result, err = tx.ExecContext(ctx, `UPDATE triggers SET started_at=COALESCE(started_at,?) WHERE team=? AND id=? AND unit_kind=? AND generation=? AND claimed_by=? AND capability_prefix=? AND status='claimed'`, tx.now().UnixNano(), team, unit.RunID, unit.Kind, actor.Generation, actor.Holder, actor.CapabilityPrefix)
+	}
 	if err != nil {
 		return err
 	}

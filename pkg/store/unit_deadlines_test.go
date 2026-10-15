@@ -6,7 +6,35 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
+
+func TestReaperUsesAcceptedPlanClaimWait(t *testing.T) {
+	tenant, request, now := planFixture(t, runspec.DispatchController)
+	request.Seal.Declarations.Pipeline.ClaimWait.Optional = runspec.Optional[time.Duration]{Set: true, Value: time.Minute}
+	request.Seal.Resolved.Settings.Options.ClaimWait = request.Seal.Declarations.Pipeline.ClaimWait
+	tenant.s.intake = fakeIntakeContracts{resolve: func(input settings.PlanInputs) (runspec.ExecutionSettings, error) {
+		resolved, err := (fakeIntakeContracts{}).ResolvePlan(input)
+		resolved.Options.ClaimWait = input.Declarations.Pipeline.ClaimWait
+		return resolved, err
+	}}
+	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	*now = now.Add(time.Minute)
+	lease, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10)
+	if err != nil || len(reaped) != 1 || !reaped[0].Failed {
+		t.Fatalf("accepted claim wait: %+v, %v", reaped, err)
+	}
+	run, err := tenant.ReadRun(t.Context(), request.RunID)
+	if err != nil || run.State != RunFailed {
+		t.Fatalf("expired plan state: %s, %v", run.State, err)
+	}
+}
 
 func TestReaperExpiresUnclaimedOwnerAndJobQueues(t *testing.T) {
 	for _, kind := range []string{"owner", "job"} {
@@ -21,7 +49,7 @@ func TestReaperExpiresUnclaimedOwnerAndJobQueues(t *testing.T) {
 			rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='pending',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE id='run'`)
 			if kind == "job" {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='claimed',claimed_by='live',lease_expires_at=? WHERE id='run'`, now.Add(time.Hour).UnixNano())
-				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,ready_at) VALUES ('a','run','queued','pending',?, ?,?)`, []byte(`{"id":"queued"}`), []byte(`{}`), now.Add(-time.Minute).UnixNano())
+				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,ready_at,queue_started_at) VALUES ('a','run','queued','pending',?, ?,?,?)`, []byte(`{"id":"queued"}`), []byte(`{}`), now.Add(-time.Minute).UnixNano(), now.Add(-time.Minute).UnixNano())
 			}
 			*now = now.Add(-time.Nanosecond)
 			if reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 0 {

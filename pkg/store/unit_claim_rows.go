@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -49,6 +50,14 @@ func checkClaimantBindingTx(ctx context.Context, tx *storeTx, c capability.Capab
 
 func checkClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef) error {
 	now := tx.now().UnixNano()
+	run, err := readRunTx(ctx, tx, team, unit.RunID)
+	if err != nil {
+		return err
+	}
+	if run.FinishedAt != nil || run.CancelRequestedAt != nil || run.Request.Request.Mode == "publish" {
+		return holderRefusal()
+	}
+	wait := runClaimWait(run)
 	if unit.Kind == capability.UnitNode {
 		row, err := readNodeTx(ctx, tx, team, NodeRef{unit.RunID, unit.NodeID})
 		if err != nil {
@@ -59,6 +68,9 @@ func checkClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 			return err
 		}
 		if state != NodeReady || row.CancelRequestedAt != nil || row.ReadyAt.UnixNano() > now {
+			return holderRefusal()
+		}
+		if wait.Set && wait.Value > 0 && (row.QueueStartedAt == nil || !row.QueueStartedAt.Add(wait.Value).After(time.Unix(0, now))) {
 			return holderRefusal()
 		}
 		return nil
@@ -94,12 +106,15 @@ func checkClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 		}
 	} else {
 		var available int64
-		var cancelled sql.NullInt64
-		err := tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,expires_at,available_at,cancel_requested_at FROM triggers WHERE team=? AND id=? AND unit_kind=?`+tx.forUpdate(), team, unit.RunID, unit.Kind).Scan(&status, &holder, &prefix, &expiry, &available, &cancelled)
+		var cancelled, started sql.NullInt64
+		err := tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,expires_at,available_at,cancel_requested_at,started_at FROM triggers WHERE team=? AND id=? AND unit_kind=?`+tx.forUpdate(), team, unit.RunID, unit.Kind).Scan(&status, &holder, &prefix, &expiry, &available, &cancelled, &started)
 		if err != nil {
 			return err
 		}
 		if available > now || cancelled.Valid {
+			return holderRefusal()
+		}
+		if !started.Valid && wait.Set && wait.Value > 0 && !run.CreatedAt.Add(wait.Value).After(time.Unix(0, now)) {
 			return holderRefusal()
 		}
 	}
@@ -211,14 +226,14 @@ func queuedClaimQuery(c capability.Capability, kind capability.UnitKind, now int
 	args := []any{}
 	switch kind {
 	case capability.UnitNode:
-		query = `SELECT r.id,n.node_id,0,r.created_at FROM runs r JOIN nodes n ON n.team=r.team AND n.run_id=r.id WHERE n.status='pending' AND n.ready_at IS NOT NULL AND n.ready_at<=? AND n.claimed_by IS NULL AND n.cancel_requested_at IS NULL`
-		args = append(args, now)
+		query = `SELECT r.id,n.node_id,0,r.created_at FROM runs r JOIN nodes n ON n.team=r.team AND n.run_id=r.id WHERE n.status='pending' AND n.ready_at IS NOT NULL AND n.ready_at<=? AND n.claimed_by IS NULL AND n.cancel_requested_at IS NULL AND (r.claim_wait_ns<=0 OR n.queue_started_at>?-r.claim_wait_ns)`
+		args = append(args, now, now)
 	case capability.UnitEval:
 		query = `SELECT r.id,e.source_node_id,e.source_generation,r.created_at FROM runs r JOIN eval_units e ON e.team=r.team AND e.run_id=r.id JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id JOIN leases l ON l.name=e.owner_lease_name WHERE e.status='pending' AND e.claimed_by IS NULL AND (e.expires_at IS NULL OR e.expires_at>?) AND l.name='controller.owner' AND l.until>? AND n.generation=e.source_generation AND n.outcome IN ('success','memoized') AND n.expansion='expected'`
 		args = append(args, now, now)
 	default:
-		query = `SELECT r.id,'',0,r.created_at FROM runs r JOIN triggers t ON t.team=r.team AND t.id=r.id WHERE t.unit_kind=? AND t.status='pending' AND t.claimed_by IS NULL AND t.cancel_requested_at IS NULL AND t.available_at<=?`
-		args = append(args, string(kind), now)
+		query = `SELECT r.id,'',0,r.created_at FROM runs r JOIN triggers t ON t.team=r.team AND t.id=r.id WHERE t.unit_kind=? AND t.status='pending' AND t.claimed_by IS NULL AND t.cancel_requested_at IS NULL AND t.available_at<=? AND (t.started_at IS NOT NULL OR r.claim_wait_ns<=0 OR r.created_at>?-r.claim_wait_ns)`
+		args = append(args, string(kind), now, now)
 	}
 	query += ` AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL AND r.intake_mode='execute' AND NOT EXISTS (SELECT 1 FROM triggers deadline WHERE deadline.team=r.team AND deadline.id=r.id AND deadline.expires_at<=?)`
 	args = append(args, now)
