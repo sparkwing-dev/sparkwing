@@ -167,6 +167,7 @@ type TransitionCause string
 const (
 	CauseRelease         TransitionCause = "release"
 	CauseDependency      TransitionCause = "dependency"
+	CauseOwnerPolicy     TransitionCause = "owner_policy"
 	CauseApprovalOpen    TransitionCause = "approval_open"
 	CauseApprovalResolve TransitionCause = "approval_resolve"
 	CauseApprovalTimeout TransitionCause = "approval_timeout"
@@ -188,6 +189,7 @@ type EdgeGuard string
 // Guard values are requirements, not actor-supplied booleans.
 const (
 	GuardOwner           EdgeGuard = "live_owner"
+	GuardOwnerPolicy     EdgeGuard = "typed_owner_policy"
 	GuardUnclaimed       EdgeGuard = "unclaimed"
 	GuardHolder          EdgeGuard = "live_exact_holder"
 	GuardAward           EdgeGuard = "atomic_award"
@@ -224,6 +226,7 @@ func NodeTransitions() []NodeEdge {
 		{[]NodeState{NodePending}, terminal, []ActorKind{ActorOperator}, CausePublish, []EdgeGuard{GuardPublication}, false},
 		{[]NodeState{NodePending}, []NodeState{NodeReady}, owners, CauseRelease, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
 		{[]NodeState{NodePending}, []NodeState{NodeSkipped, NodeCancelled}, owners, CauseDependency, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
+		{[]NodeState{NodePending}, []NodeState{NodeSuccess, NodeFailed, NodeSkipped}, owners, CauseOwnerPolicy, []EdgeGuard{GuardOwner, GuardUnclaimed, GuardOwnerPolicy}, false},
 		{[]NodeState{NodePending, NodeReady}, []NodeState{NodeApprovalPending}, owners, CauseApprovalOpen, []EdgeGuard{GuardOwner, GuardUnclaimed}, false},
 		{[]NodeState{NodeApprovalPending}, []NodeState{NodeSuccess, NodeFailed}, []ActorKind{ActorOperator}, CauseApprovalResolve, []EdgeGuard{GuardApproval}, false},
 		{[]NodeState{NodeApprovalPending}, []NodeState{NodeSuccess, NodeFailed}, []ActorKind{ActorReaper, ActorRunHost}, CauseApprovalTimeout, []EdgeGuard{GuardApprovalTimeout}, false},
@@ -275,6 +278,7 @@ type MaterializedResultSource struct {
 
 // TransitionExtra carries only the columns owned by a particular edge; mismatched fields are refused.
 type TransitionExtra struct {
+	OwnerPolicy *OwnerPolicyResult
 	Result      *NodeResult
 	Materialize *MaterializeSource
 	Approval    *ApprovalResolution
@@ -577,6 +581,9 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 	if change.Extra.Materialize != nil && change.Cause != CauseMaterialize {
 		return errors.New("unexpected materialization")
 	}
+	if change.Extra.OwnerPolicy != nil && change.Cause != CauseOwnerPolicy {
+		return errors.New("unexpected owner policy result")
+	}
 	if change.Extra.Approval != nil && change.Cause != CauseApprovalResolve && change.Cause != CauseApprovalTimeout {
 		return errors.New("unexpected approval")
 	}
@@ -607,6 +614,17 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, c
 		case GuardUnclaimed:
 			if row.ClaimedBy != "" {
 				return holderRefusal()
+			}
+		case GuardOwnerPolicy:
+			run, err := readRunTx(ctx, tx, team, row.Ref.RunID)
+			if err != nil {
+				return err
+			}
+			if run.CancelRequestedAt != nil || row.CancelRequestedAt != nil {
+				return holderRefusal()
+			}
+			if err := checkNodeOwnerPolicy(row, change); err != nil {
+				return err
 			}
 		case GuardHolder:
 			if err := checkHolderTx(ctx, tx, team, row, change.Actor, now); err != nil {
@@ -721,6 +739,9 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, 
 		}
 	case NodeClaimed:
 		award := change.Extra.Claim
+		if err := rebindCapacityGenerationTx(ctx, tx, team, row.Ref, row.Generation, award.Generation); err != nil {
+			return err
+		}
 		row.ClaimedBy = award.Holder
 		row.CapabilityPrefix = award.CapabilityPrefix
 		row.Generation = award.Generation

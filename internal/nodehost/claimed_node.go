@@ -65,7 +65,10 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 		beat, err := h.Store.RenewNodeClaim(ctx, ref, actor)
 		return lease.Beat{CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err
 	}
-	ctx, stop := startHostKeeper(parent, keeper)
+	ctx, stop := parent, func() {}
+	if !lease.Adopt(parent, lease.Identity{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID, Holder: actor.Holder, Generation: actor.Generation}, func() bool { return true }) {
+		ctx, stop = startHostKeeper(parent, keeper)
+	}
 	defer stop()
 	if err := context.Cause(ctx); err != nil {
 		return h.setupFailure(ctx, input, err)

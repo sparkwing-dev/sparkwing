@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -191,9 +192,26 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 	}
 	preparing.Store(false)
 	if h.Around != nil {
-		return h.Around(ctx, accepted, func(ctx context.Context) (RunCompletion, error) {
+		completion, err := h.Around(ctx, accepted, func(ctx context.Context) (RunCompletion, error) {
 			return h.schedule(ctx, input, accepted, entry)
 		})
+		var refused *AdmissionFailure
+		if errors.As(err, &refused) && waitFailure(err, refused) == nil && (refused.Outcome == store.NodeSkipped || refused.Outcome == store.NodeFailed) {
+			policy := admissionPolicy(refused, input.Owner.Owner.Generation)
+			outcome := store.RunFailed
+			if refused.Outcome == store.NodeSkipped {
+				outcome = store.RunSuccess
+			}
+			_, err = h.Store.FinishRunAndUnit(ctx, store.FinishRunRequest{Unit: input.Owner.Owner, Transition: store.RunTransition{
+				RunID: input.RunID, Actor: input.Owner, To: outcome, Cause: store.RunPolicyRefused,
+				OwnerPolicy: &policy, Reason: refused.Reason,
+			}})
+			if err != nil {
+				return RunCompletion{}, err
+			}
+			completion = RunCompletion{Outcome: string(outcome), Reason: refused.Reason}
+		}
+		return completion, err
 	}
 	return h.schedule(ctx, input, accepted, entry)
 }
@@ -224,6 +242,9 @@ func (h *OwnerHost) acquire(ctx context.Context, input RunInput, row store.RunRo
 }
 
 func (h *OwnerHost) keepOwner(parent context.Context, actor store.Actor, computing func() bool) (context.Context, func()) {
+	if lease.Adopt(parent, lease.Identity{Kind: capability.UnitKind(actor.Owner.Kind), RunID: actor.Owner.RunID, Holder: actor.Owner.Holder, Generation: actor.Owner.Generation}, computing) {
+		return parent, func() {}
+	}
 	keeper := h.Lease
 	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {
 		beat, err := h.Renew(ctx, actor, computing())

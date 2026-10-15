@@ -6,10 +6,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// safety: --sw-only keeps the matched nodes and what they depend on; OnFailure recovery nodes and nodes a
-// generator adds later are never cut, as in the dispatcher.
 func onlySkips(doc nodeproto.PlanDoc, pattern, start, stop string) (map[string]string, error) {
 	if pattern == "" {
 		return nil, nil
@@ -17,11 +16,8 @@ func onlySkips(doc nodeproto.PlanDoc, pattern, start, stop string) (map[string]s
 	if start != "" || stop != "" {
 		return nil, fmt.Errorf("--only is mutually exclusive with --start-at / --stop-at")
 	}
-	byID := make(map[string]nodeproto.JobSpec, len(doc.Jobs))
-	keep := map[string]bool{}
 	var ids, matched []string
 	for _, n := range doc.Jobs {
-		byID[n.ID] = n
 		ids = append(ids, n.ID)
 		ok, err := path.Match(pattern, n.ID)
 		if err != nil {
@@ -37,13 +33,9 @@ func onlySkips(doc nodeproto.PlanDoc, pattern, start, stop string) (map[string]s
 	if len(matched) == 0 {
 		return nil, fmt.Errorf("--only=%q matched no jobs (declared: %v)", pattern, ids)
 	}
-	for len(matched) > 0 {
-		id := matched[len(matched)-1]
-		matched = matched[:len(matched)-1]
-		if n, ok := byID[id]; ok && !keep[id] {
-			keep[id] = true
-			matched = append(matched, n.Needs...)
-		}
+	keep, err := store.PlanDependencyClosure(doc, matched)
+	if err != nil {
+		return nil, err
 	}
 	skip := map[string]string{}
 	for _, n := range doc.Jobs {

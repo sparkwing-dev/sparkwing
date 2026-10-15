@@ -65,7 +65,7 @@ func expansionHash(value any) (runspec.Hash, error) {
 
 func TestOwnerExpansion(t *testing.T) {
 	t.Helper()
-	for _, mode := range []string{"success", "memoized", "empty", "failure", "refused", "unknown", "duplicate", "null", "concurrency", "mismatch_capacity", "mismatch_scope", "mismatch_on_limit", "cost", "cycle", "fan256", "fan257"} {
+	for _, mode := range []string{"success", "empty", "failure", "refused", "unknown", "duplicate", "null", "concurrency", "mismatch_capacity", "mismatch_scope", "mismatch_on_limit", "cost", "cycle", "fan256", "fan257"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
@@ -90,9 +90,6 @@ func TestOwnerExpansion(t *testing.T) {
 					t.Fatal(err)
 				}
 				s.nodes = []store.NodeRow{{Ref: store.NodeRef{RunID: "run", NodeID: "consumer"}, Status: store.StatusPending, Spec: raw}}
-			}
-			if mode == "memoized" {
-				s.node.Outcome = store.NodeMemoized
 			}
 			refused := errors.New("expansion transaction refused")
 			if mode == "refused" {

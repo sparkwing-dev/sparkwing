@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -53,6 +54,187 @@ func TestStoreAdmissionSQLiteRetainsUntilTerminalTransition(t *testing.T) {
 	state, err = fixture.Tenant.GetConcurrencyState(t.Context(), "global:db")
 	if err != nil || len(state.Holders) != 0 || len(state.Waiters) != 0 {
 		t.Fatalf("terminal state=%+v err=%v", state, err)
+	}
+}
+
+func TestStoreAdmissionSQLiteCancelOthersCancelsBoundWorkBeforeReplacement(t *testing.T) {
+	first := newStoreHostFixture(t, capacityPlan("cancel_others", 0, "a"))
+	second := newStoreHostFixtureOn(t, first.Store, capacityPlan("cancel_others", 0, "a"), runspec.Options{})
+	for _, fixture := range []*storeHostFixture{first, second} {
+		admission := StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
+		if err := admission.Node(t.Context(), fixture.Accepted, capacityRow(t, fixture, "a"), func(context.Context) error {
+			if fixture == second {
+				row := capacityRow(t, first, "a")
+				if row.CancelRequestedAt == nil && row.Outcome != store.NodeCancelled {
+					t.Fatal("replacement entered before bound work received cancellation")
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestStoreAdmissionSQLiteCancelOthersReachesRunningUnitRenewal(t *testing.T) {
+	first := newStoreHostFixture(t, capacityPlan("cancel_others", 0, "a"))
+	second := newStoreHostFixtureOn(t, first.Store, capacityPlan("cancel_others", 0, "a"), runspec.Options{})
+	admission := StoreAdmission{Store: first.Tenant, Owner: first.Actor}
+	row := capacityRow(t, first, "a")
+	if err := admission.Node(t.Context(), first.Accepted, row, func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.Tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: row.Ref, To: store.NodeReady, Actor: first.Actor, Cause: store.CauseRelease}); err != nil {
+		t.Fatal(err)
+	}
+	award, err := first.Tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: row.Ref, Actor: first.Actor, Policy: store.SourceNone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Node.CapabilityPrefix}, CapabilityPrefix: award.Node.CapabilityPrefix, Holder: award.Node.ClaimedBy, Generation: award.Node.Generation}
+	if _, err := first.Tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: row.Ref, To: store.NodeRunning, Actor: actor, Cause: store.CauseStart, SourceAttempt: &award.Node.Attempt}); err != nil {
+		t.Fatal(err)
+	}
+	replacement := StoreAdmission{Store: second.Tenant, Owner: second.Actor}
+	if err := replacement.Node(t.Context(), second.Accepted, capacityRow(t, second, "a"), func(context.Context) error {
+		beat, err := first.Store.RenewUnit(t.Context(), award.Node.CapabilityPrefix, true)
+		if err != nil || !beat.CancelRequested {
+			t.Fatalf("superseded running unit renewed without cancellation: %+v, %v", beat, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if row := capacityRow(t, first, "a"); row.Status != store.StatusRunning || row.CancelRequestedAt == nil {
+		t.Fatalf("running work did not retain cooperative cancellation: %+v", row)
+	}
+}
+
+func TestStoreAdmissionSQLiteCancelOthersStopsOwnerSelfClaimedExecution(t *testing.T) {
+	first := newStoreHostFixture(t, capacityPlan("cancel_others", 0, "a"))
+	second := newStoreHostFixtureOn(t, first.Store, capacityPlan("cancel_others", 0, "a"), runspec.Options{})
+	admission := StoreAdmission{Store: first.Tenant, Owner: first.Actor}
+	first.Host.Admit = admission.Node
+	started := make(chan context.Context, 1)
+	observed := make(chan struct{}, 1)
+	wait := first.Host.Wait
+	first.Host.Wait = func(ctx context.Context, before store.RunSnapshot) error {
+		for _, row := range before.Nodes {
+			if row.CancelRequestedAt != nil && row.Status != store.StatusDone {
+				select {
+				case observed <- struct{}{}:
+				default:
+				}
+			}
+		}
+		return wait(ctx, before)
+	}
+	first.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+		ref := store.NodeRef{RunID: first.Accepted.RunID, NodeID: input.NodeID}
+		actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, Holder: input.Authority.Holder, Generation: input.Generation}
+		applied, err := first.State.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: new(input.Attempt)})
+		if err != nil {
+			return err
+		}
+		started <- ctx
+		<-ctx.Done()
+		_, err = first.State.TransitionNode(context.WithoutCancel(ctx), store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeCancelled, Cause: store.CauseReport, SourceAttempt: new(applied.Attempt), Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "concurrency superseded"}}})
+		return err
+	})
+	type result struct {
+		completion RunCompletion
+		err        error
+	}
+	finished := make(chan result, 1)
+	joined := make(chan struct{})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	go func() {
+		defer close(joined)
+		completion, err := first.Host.Run(ctx, first.Input)
+		finished <- result{completion, err}
+	}()
+	defer func() { cancel(); <-joined }()
+	var execution context.Context
+	select {
+	case execution = <-started:
+	case result := <-finished:
+		t.Fatalf("owner exited before self-claimed execution: %+v, %v", result.completion, result.err)
+	case <-ctx.Done():
+		t.Fatal(context.Cause(ctx))
+	}
+	replacement := StoreAdmission{Store: second.Tenant, Owner: second.Actor}
+	if err := replacement.Node(ctx, second.Accepted, capacityRow(t, second, "a"), func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	first.State.notify()
+	var completed result
+	select {
+	case <-observed:
+		if execution.Err() == nil {
+			t.Fatal("owner observed supersession but left its active self-claimed body running")
+		}
+		select {
+		case completed = <-finished:
+		case <-ctx.Done():
+			t.Fatal(context.Cause(ctx))
+		}
+	case completed = <-finished:
+	case <-ctx.Done():
+		t.Fatal(context.Cause(ctx))
+	}
+	if completed.err != nil || completed.completion.Outcome != "failed" {
+		t.Fatalf("owner did not settle after supersession: %+v, %v", completed.completion, completed.err)
+	}
+	row := capacityRow(t, first, "a")
+	if row.Status != store.StatusDone || row.Outcome != store.NodeCancelled || row.CancelRequestedAt == nil {
+		t.Fatalf("self-claimed cancellation was not persisted: %+v", row)
+	}
+}
+
+func TestStoreAdmissionSQLiteCancelOthersReachesPlanUnitRenewal(t *testing.T) {
+	first := newStoreHostFixture(t, planGrouped("global", "cancel_others", "a"))
+	second := newStoreHostFixtureOn(t, first.Store, planGrouped("global", "cancel_others", "a"), runspec.Options{})
+	for _, fixture := range []*storeHostFixture{first, second} {
+		admission := StoreAdmission{Store: fixture.Tenant, Owner: fixture.Actor}
+		if _, err := admission.Run(t.Context(), fixture.Accepted, func(context.Context) (RunCompletion, error) {
+			if fixture == second {
+				beat, err := first.Store.RenewUnit(t.Context(), first.Actor.CapabilityPrefix, false)
+				if err != nil || !beat.CancelRequested {
+					t.Fatalf("superseded plan renewed without cancellation: %+v, %v", beat, err)
+				}
+			}
+			return RunCompletion{}, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+type capacityMutationBoundary struct {
+	*store.Tenant
+	beforeAcquire func()
+}
+
+func (s capacityMutationBoundary) AcquireCapacity(ctx context.Context, request store.AcquireSlotRequest, binding store.CapacityBinding, actor store.Actor) (store.AcquireSlotResponse, error) {
+	s.beforeAcquire()
+	return s.Tenant.AcquireCapacity(ctx, request, binding, actor)
+}
+
+func TestStoreAdmissionSQLiteFencesAcquisitionAfterAdoption(t *testing.T) {
+	fixture := newStoreHostFixture(t, capacityPlan("queue", 0, "a"))
+	boundary := capacityMutationBoundary{Tenant: fixture.Tenant, beforeAcquire: func() {
+		if _, err := fixture.Store.DB().ExecContext(t.Context(), `UPDATE triggers SET generation=generation+1 WHERE team=? AND id=?`, store.DefaultTeam, fixture.Accepted.RunID); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	admission := StoreAdmission{Store: boundary, Owner: fixture.Actor}
+	err := admission.Node(t.Context(), fixture.Accepted, capacityRow(t, fixture, "a"), func(context.Context) error { t.Fatal("stale owner ran"); return nil })
+	if err == nil {
+		t.Fatal("stale owner acquired capacity")
+	}
+	state, stateErr := fixture.Tenant.GetConcurrencyState(t.Context(), "global:db")
+	if !errors.Is(stateErr, store.ErrNotFound) && (stateErr != nil || len(state.Holders) != 0 || len(state.Waiters) != 0) {
+		t.Fatalf("stale owner mutated capacity: %+v, %v", state, stateErr)
 	}
 }
 

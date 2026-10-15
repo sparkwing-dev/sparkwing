@@ -1,5 +1,26 @@
 # C3 protocol and SDK contract
 
+Owner admission refusals use typed store policy results under the live owner and
+captured work generation. Job skip, failure and queue timeout finish the unreleased
+job. Plan refusal preserves completed work, finishes every remaining unreleased
+job, disposes unresolved expansions, and finishes the run and its owner unit in
+one transaction. An approval's true SkipIf persists success without an attempt
+and releases its dependents.
+
+Hosting keeps one exact-unit keeper through preparation and execution, keyed by
+unit kind, run, job, holder and generation. OwnerHost and ClaimedNodeHost adopt
+that keeper. The owner supplies its current compute activity to the same renewal
+projection. Standalone hosts own their own keeper.
+
+The owner projects persisted job cancellation intent onto its active self-claimed
+work contexts. Unclaimed cancellation settles before stopping admission. Another
+holder retains admission until its claim drains. Independent cleanup failures
+remain errors when execution is cancelled.
+
+An unclaimed memoized source can have generation zero. Expansion delegation and
+authentication validate that terminal source generation independently from the
+positive generation of the live owner lease.
+
 [The native store composition proof](../w3-native-composition-progress.md) runs
 the shared native owner and claimed host with real SQLite transitions, Git
 checkout acquisition, SDK pipes, process delegation and result-record commits.
@@ -25,40 +46,38 @@ source/step selection bindings remain open.
 [The local hosting cut](../w3-local-hosting-cut-progress.md) removes the local
 scheduler, Server, attempt chain, source compiler and trigger shepherd. Local
 foreground and claimed-trigger callers use typed intake/awards and the shared
-host boundary. The native runtime binding and legacy local intake/consumer
-migration remain open. Remote reconciliation now carries terminal result
-references declared by W9.
+host boundary. The native runtime binding remains open. Remote reconciliation
+now carries terminal result references declared by W9.
 
 [The remote hosting cut](../w3-remote-hosting-cut-progress.md) routes initial here
 hosting through the same sealed owner handoff as resume. It deletes the legacy
 trigger dispatcher, pod host, remote service proxy and scheduler resume path.
-Native placement composition and the local scheduler/server cut remain open.
+Native placement composition remains open.
 
 
 [The runtime helper cut](../w3-runtime-helper-cut-progress.md) deletes the legacy
 runner adapter and duplicate remote-environment and Windows Job Object code.
-Production placement migration and the legacy scheduler cut remain open.
+Production placement migration remains open.
 
 [The native input cut](../w3-native-input-cut-progress.md) moves here resume to
 the same awarded-input constructor as runner hosting. RunInput.SealedRequest
 contains the sealed request's Request payload. Retries retain the original
 request and spec while RunInput.RunID names the newly awarded run. Preparation
-cannot replace its owner fence or granted runner. The legacy placement cut
+cannot replace its owner fence or granted runner. Native placement migration
 remains open.
 
 [The consumer lease cut](../w3-consumer-lease-cut-progress.md) removes the local
 consumer's heartbeat loop and unused runner-host helpers. The consumer now uses
-the shared keeper. Native placement migration and legacy scheduler deletion
-remain open.
+the shared keeper. Native placement migration remains open.
 
 [The process transport cut](../w3-process-transport-cut-progress.md) removes
 Session and StartSession. Retained planners and attempts use ProtocolSession.
-The legacy scheduler, services and native placement cutovers remain open.
+Native service and placement cutovers remain open.
 
 [The envelope consolidation](../w3-envelope-consolidation-progress.md) removes
 duplicate layer orders and the local planning loop. Retained local, trigger and
-pod paths use LayerTable and native progress handling. Their migration to
-OwnerHost and the remaining legacy deletion stay open.
+pod paths use LayerTable and native progress handling. Native owner-policy and
+placement cutovers remain open.
 
 [Shared steps and alias callers](w3-ingress-lease-continuation.md#shared-steps-and-alias-caller-continuation)
 replaces the retained step scheduler with the common graph driver and carries
@@ -68,12 +87,12 @@ Native owner-policy and placement cutovers remain open.
 [Runtime ingress and lease continuation](w3-ingress-lease-continuation.md)
 connects the retained scheduler to raw-byte validation and common environment
 projection and removes another claim-heartbeat loop. Native caller migration
-and legacy runtime deletion remain open.
+remains open.
 
 [Native assembly and router cutover](w3-router-native-continuation.md) joins the
 owner and claimed-node host around one executor, transport, engine resolver and
 environment builder. The registered service router uses the v2 routes and errors.
-Native placements and the remaining legacy runtime cut stay open.
+Native placements remain open.
 
 [Native grant handoff](w3-native-grant-continuation.md) passes the validated
 revoker into native attempt and owner-evaluation startup. It ports real Go SDK
@@ -98,7 +117,7 @@ contents and adds real Go SDK process proofs. Native runtime migration remains o
 [Services and process environments](w3-services-continuation.md) completes the
 shared service registrar, separates pipeline aliases from registered entries,
 and supplies complete native cleanup environments. Native runtime migration
-and legacy deletion remain open.
+remains open.
 
 [Checkout planning](w3-checkout-continuation.md) connects the common owner to
 acquired project files, shared argument and guard resolution, and plan-dependent
@@ -197,7 +216,7 @@ The capability and layer tables contain the complete target data.
 | Hello, operations, frames, describe, flat plan and shared validation | `internal/nodeproto/*_contract.go` |
 | Windows inherited-handle argv spelling | `internal/protofd/transport_contract.go` |
 | Run and node host roles, layer order, event-following reconciliation | `internal/nodehost/host.go` |
-| Pure graph decisions and consistent snapshot projection | `pkg/store/scheduling_contract.go` |
+| Pure graph decisions, selection dependency closure and consistent snapshot projection | `pkg/store/scheduling_contract.go` |
 | Every unit's renewal loop | `internal/lease/keeper.go` |
 | Checkout and entry acquisition | `internal/source/source.go` |
 | Plan cache identity, eligibility and validated hits | `internal/nodehost/plan_cache.go` |
@@ -729,8 +748,10 @@ non-boolean results, drift, SDK failures and cleanup errors prevent dispatch.
 `NewNativeHost` installs this evaluator for the `skip_if` owner layer. Approval
 opening uses the store transition and state follower. Its caller-supplied
 `Owner.Layer` handles active debug, memo and admission policies. Jobs without
-those policies need no callback. Local execution still requires admission,
-even without a concurrency group. The
+those policies need no callback. Local execution requires machine CPU/memory
+admission independently from store concurrency groups, including when no group
+is declared. Selection uses the scheduler's dependency closure, including present
+optional dependencies and generator sources. The
 native layer logs timeout indices and proposes a skipped transition only after
 evaluation, revocation and cleanup join. Approval SkipIf success still requires
 the missing C1 owner approval-success edge. The native layer refuses that case
@@ -924,9 +945,8 @@ owns catch-up and progress checks. It adds no polling interval or lease inferenc
 The recovery acceptance cell uses the follower with fake persistence and
 subscriptions. Native controller and local-controller subscriptions remain open.
 
-The legacy envelope, scheduler, Session, Server, dispatched-pod executor and
-run-host entry points are removed. A terminal row stays terminal. Only a
-committed requeue permits recovery. Application retries retain their existing
+A terminal row stays terminal. Only a committed requeue permits recovery.
+Application retries retain their existing
 budget and backoff under the common executor's attempt fence. Production
 runner, launcher and local factories still need the shared native host assembly.
 

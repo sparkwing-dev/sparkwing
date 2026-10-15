@@ -47,11 +47,14 @@ func configureNativeAdmission(owner *OwnerHost, local *LocalAdmission, capacity 
 		return work(ctx)
 	}
 	owner.Admit = func(ctx context.Context, accepted AcceptedRun, row store.NodeRow, body func(context.Context) error) error {
+		isLocal := owner.Local != nil && owner.Local(row)
+		if err := requireMachineAdmission(local, isLocal); err != nil {
+			return err
+		}
 		if err := requireCapacity(capacity, local, row.Execution.Concurrency); err != nil {
 			return err
 		}
 		work := body
-		isLocal := owner.Local != nil && owner.Local(row)
 		if local != nil {
 			work = func(ctx context.Context) error { return local.node(ctx, accepted, row, isLocal, body) }
 		}
@@ -60,6 +63,13 @@ func configureNativeAdmission(owner *OwnerHost, local *LocalAdmission, capacity 
 		}
 		return work(ctx)
 	}
+}
+
+func requireMachineAdmission(local *LocalAdmission, isLocal bool) error {
+	if isLocal && local == nil {
+		return errors.New("local execution requires machine admission")
+	}
+	return nil
 }
 
 func hasLocalConcurrency(groups []runspec.Concurrency) bool {

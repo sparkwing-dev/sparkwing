@@ -99,6 +99,52 @@ func TestOnlyRefusesWhatTheDispatcherRefused(t *testing.T) {
 	}
 }
 
+func TestOnlyPreservesSchedulerDependencyKinds(t *testing.T) {
+	for _, generated := range []bool{false, true} {
+		t.Run(strconv.FormatBool(generated), func(t *testing.T) {
+			doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+				{ID: "prerequisite", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+				{ID: "consumer", NeedsIfPresent: []string{"prerequisite", "absent"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+				{ID: "outside", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			}}
+			if generated {
+				doc.Jobs[0].Closures.Generate = []string{"children"}
+				doc.Jobs[1].NeedsIfPresent = nil
+				doc.Jobs[1].NeedsGenerated = []string{"children"}
+			}
+			fixture := newStoreHostFixtureOn(t, openStore(t), doc, runspec.Options{Only: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "consumer"}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}})
+			fixture.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+				return json.RawMessage(`{"jobs":[{"id":"child","deps":["prerequisite"],"groups":["children"],"steps":[{"id":"body"}]}]}`), nil, nil
+			}
+			fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+				return fixture.report(ctx, input, store.NodeSuccess)
+			})
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			completion, err := fixture.Host.Run(ctx, fixture.Input)
+			if err != nil || completion.Outcome != "success" {
+				t.Fatalf("completion=%+v error=%v", completion, err)
+			}
+			for _, id := range []string{"prerequisite", "consumer", "outside"} {
+				row, err := fixture.Tenant.ReadNode(ctx, store.NodeRef{RunID: fixture.Accepted.RunID, NodeID: id})
+				want := store.NodeSuccess
+				if id == "outside" {
+					want = store.NodeSkipped
+				}
+				if err != nil || row.Status != store.StatusDone || row.Outcome != want {
+					t.Errorf("%s: row=%+v error=%v, want %s", id, row, err, want)
+				}
+			}
+			if generated {
+				row, err := fixture.Tenant.ReadNode(ctx, store.NodeRef{RunID: fixture.Accepted.RunID, NodeID: "child"})
+				if err != nil || row.Outcome != store.NodeSuccess {
+					t.Errorf("generated child: row=%+v error=%v", row, err)
+				}
+			}
+		})
+	}
+}
+
 func TestOwnerRefusesUnknownStepWindowBeforeDispatch(t *testing.T) {
 	for _, resumed := range []bool{false, true} {
 		t.Run(strconv.FormatBool(resumed), func(t *testing.T) {

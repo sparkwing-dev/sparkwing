@@ -64,8 +64,9 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 	if err != nil {
 		return err
 	}
+	ctx, computing := lease.Bind(ctx, lease.Identity{Kind: unit.Unit, RunID: unit.RunID, NodeID: unit.JobID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation})
 	renew := func(ctx context.Context) (lease.Beat, error) {
-		response, err := controller.Renew(ctx, unit.UnitID, controllerwire.RenewalRequest{})
+		response, err := controller.Renew(ctx, unit.UnitID, controllerwire.RenewalRequest{Executing: computing()})
 		if err != nil {
 			return lease.Beat{}, err
 		}

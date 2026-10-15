@@ -427,6 +427,18 @@ func TestLocalAdmissionDaemonQueueCancelTimeoutAndPolicies(t *testing.T) {
 					if failure == nil || policy == "timeout" && !errors.Is(failure, errQueueTimeout) || policy == "cancel" && !errors.Is(failure, context.Canceled) {
 						t.Fatalf("policy=%s error=%v", policy, failure)
 					}
+					if policy != "cancel" {
+						var decision *AdmissionFailure
+						want, reason := store.NodeFailed, ""
+						if policy == "skip" {
+							want = store.NodeSkipped
+						} else if policy == "timeout" {
+							reason = store.FailureQueueTimeout
+						}
+						if !errors.As(failure, &decision) || decision.Outcome != want || decision.Reason != reason {
+							t.Fatalf("policy=%s lost outcome=%s reason=%q: %v", policy, want, reason, failure)
+						}
+					}
 					return RunCompletion{}, nil
 				})
 				if err != nil {

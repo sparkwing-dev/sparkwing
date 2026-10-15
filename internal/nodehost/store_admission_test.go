@@ -16,15 +16,14 @@ import (
 
 type capacityProbe struct {
 	CapacityStore
-	request   store.AcquireSlotRequest
-	requests  []store.AcquireSlotRequest
-	binding   store.CapacityBinding
-	holder    *store.CapacityHolder
-	waiter    *store.CapacityWaiter
-	kind      store.AcquireKind
-	adopt     func(store.CapacityAdoption) store.CapacityAdoption
-	resolve   func(context.Context) (store.WaiterResolution, error)
-	cancelled int
+	request  store.AcquireSlotRequest
+	requests []store.AcquireSlotRequest
+	binding  store.CapacityBinding
+	holder   *store.CapacityHolder
+	waiter   *store.CapacityWaiter
+	kind     store.AcquireKind
+	adopt    func(store.CapacityAdoption) store.CapacityAdoption
+	resolve  func(context.Context) (store.WaiterResolution, error)
 }
 
 func (s *capacityProbe) AdoptCapacity(_ context.Context, key, id string, binding store.CapacityBinding, _ store.Actor) (store.CapacityAdoption, error) {
@@ -42,7 +41,8 @@ func (s *capacityProbe) AdoptCapacity(_ context.Context, key, id string, binding
 	return result, nil
 }
 
-func (s *capacityProbe) AcquireConcurrencySlot(_ context.Context, request store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
+func (s *capacityProbe) AcquireCapacity(_ context.Context, request store.AcquireSlotRequest, binding store.CapacityBinding, _ store.Actor) (store.AcquireSlotResponse, error) {
+	s.binding = binding
 	s.request = request
 	s.requests = append(s.requests, request)
 	kind := s.kind
@@ -58,17 +58,11 @@ func (s *capacityProbe) AcquireConcurrencySlot(_ context.Context, request store.
 	return store.AcquireSlotResponse{Kind: kind, HolderID: request.HolderID}, nil
 }
 
-func (s *capacityProbe) ResolveWaiter(ctx context.Context, _, _, _, _, _, _ string, _ bool) (store.WaiterResolution, error) {
+func (s *capacityProbe) ResolveCapacityWaiter(ctx context.Context, _ string, _ store.CapacityBinding, _ store.Actor) (store.WaiterResolution, error) {
 	if s.resolve != nil {
 		return s.resolve(ctx)
 	}
 	return store.WaiterResolution{Status: store.WaiterStillWaiting}, nil
-}
-
-func (s *capacityProbe) CancelWaiter(context.Context, string, string, string) (bool, error) {
-	s.cancelled++
-	s.waiter = nil
-	return true, nil
 }
 
 func capacityFixture(t *testing.T) (*StoreAdmission, *capacityProbe, AcceptedRun, store.NodeRow) {
@@ -90,7 +84,7 @@ func TestStoreAdmissionRetainsCapacityAfterOwnerWorkReturns(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(probe.requests) != 1 || probe.holder == nil || probe.holder.Binding.Generation != row.Generation || probe.cancelled != 0 {
+	if len(probe.requests) != 1 || probe.holder == nil || probe.holder.Binding.Generation != row.Generation {
 		t.Fatalf("capacity continuity lost: %+v", probe)
 	}
 }
@@ -129,10 +123,12 @@ func TestStoreAdmissionAdoptedWaiterKeepsOriginalQueueDeadline(t *testing.T) {
 		budget := int64(10)
 		row.Execution.Concurrency[0].QueueTimeoutMS = &budget
 		probe.waiter = &store.CapacityWaiter{Key: "global:db", ID: accepted.RunID + "/job", Binding: store.CapacityBinding{RunID: accepted.RunID, NodeID: "job", Generation: row.Generation}, ArrivedAt: time.Now().Add(-time.Second)}
-		started := time.Now()
+		probe.resolve = func(context.Context) (store.WaiterResolution, error) {
+			return store.WaiterResolution{Status: store.WaiterExpired}, nil
+		}
 		err := admission.Node(t.Context(), accepted, row, func(context.Context) error { t.Error("ran an expired waiter"); return nil })
 		var failure *AdmissionFailure
-		if !errors.As(err, &failure) || !errors.Is(err, errQueueTimeout) || failure.Reason != store.FailureQueueTimeout || probe.cancelled != 1 || time.Since(started) != 0 {
+		if !errors.As(err, &failure) || !errors.Is(err, errQueueTimeout) || failure.Reason != store.FailureQueueTimeout {
 			t.Fatalf("deadline restarted: %v", err)
 		}
 	})
@@ -145,7 +141,7 @@ func TestStoreAdmissionWaiterSurvivesOwnerLoss(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		admission.Queued = func(context.Context, store.NodeRef, store.AcquireSlotResponse) error { cancel(); return nil }
 		err := admission.Node(ctx, accepted, row, func(context.Context) error { t.Error("ran after owner loss"); return nil })
-		if !errors.Is(err, context.Canceled) || probe.cancelled != 0 || probe.waiter == nil {
+		if !errors.Is(err, context.Canceled) || probe.waiter == nil {
 			t.Fatalf("lost continuous waiter: %v", err)
 		}
 	})

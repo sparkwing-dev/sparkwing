@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -22,9 +21,8 @@ const (
 // CapacityStore supplies tenant-scoped admission and continuous adoption.
 type CapacityStore interface {
 	AdoptCapacity(context.Context, string, string, store.CapacityBinding, store.Actor) (store.CapacityAdoption, error)
-	AcquireConcurrencySlot(context.Context, store.AcquireSlotRequest) (store.AcquireSlotResponse, error)
-	ResolveWaiter(context.Context, string, string, string, string, string, string, bool) (store.WaiterResolution, error)
-	CancelWaiter(context.Context, string, string, string) (bool, error)
+	AcquireCapacity(context.Context, store.AcquireSlotRequest, store.CapacityBinding, store.Actor) (store.AcquireSlotResponse, error)
+	ResolveCapacityWaiter(context.Context, string, store.CapacityBinding, store.Actor) (store.WaiterResolution, error)
 }
 
 // StoreAdmission binds sealed concurrency groups to their live run or job.
@@ -124,12 +122,12 @@ func (a *StoreAdmission) group(ctx context.Context, key string, binding store.Ca
 	default:
 		return errors.New("capacity adoption returned an unknown decision")
 	}
-	response, err := a.Store.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	response, err := a.Store.AcquireCapacity(ctx, store.AcquireSlotRequest{
 		Key: key, HolderID: id, RunID: binding.RunID, NodeID: binding.NodeID,
 		Capacity: group.Capacity, Cost: group.Cost, Policy: group.OnLimit,
 		CancelTimeout: time.Duration(value(group.CancelTimeoutMS)) * time.Millisecond,
 		Lease:         store.DefaultConcurrencyLease,
-	})
+	}, binding, a.Owner)
 	if err != nil {
 		return err
 	}
@@ -184,12 +182,6 @@ func (a *StoreAdmission) wait(ctx context.Context, key, id string, binding store
 	if arrival.IsZero() {
 		return errors.New("capacity waiter has no persisted arrival time")
 	}
-	var timeout <-chan time.Time
-	if budget := value(group.QueueTimeoutMS); budget > 0 {
-		timer := time.NewTimer(time.Until(arrival.Add(time.Duration(budget) * time.Millisecond)))
-		defer timer.Stop()
-		timeout = timer.C
-	}
 	tick := time.NewTicker(waiterPoll)
 	defer tick.Stop()
 	var failingSince time.Time
@@ -197,14 +189,9 @@ func (a *StoreAdmission) wait(ctx context.Context, key, id string, binding store
 		select {
 		case <-ctx.Done():
 			return context.Cause(ctx)
-		case <-timeout:
-			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
-			_, err := a.Store.CancelWaiter(cleanup, key, binding.RunID, binding.NodeID)
-			cancel()
-			return errors.Join(&AdmissionFailure{Outcome: store.NodeFailed, Reason: store.FailureQueueTimeout, Err: errQueueTimeout}, err)
 		case <-tick.C:
 		}
-		response, err := a.Store.ResolveWaiter(ctx, key, binding.RunID, binding.NodeID, "", "", "", false)
+		response, err := a.Store.ResolveCapacityWaiter(ctx, key, binding, a.Owner)
 		if err != nil {
 			if failingSince.IsZero() {
 				failingSince = time.Now()
@@ -222,6 +209,8 @@ func (a *StoreAdmission) wait(ctx context.Context, key, id string, binding store
 				return errors.New("promoted capacity changed its holder identity")
 			}
 			return a.confirm(ctx, key, id, binding, group.Cost)
+		case store.WaiterExpired:
+			return &AdmissionFailure{Outcome: store.NodeFailed, Reason: store.FailureQueueTimeout, Err: errQueueTimeout}
 		case store.WaiterCancelled:
 			return &AdmissionFailure{Outcome: store.NodeSuperseded, Err: &lease.CancelError{Reason: "capacity waiter was superseded"}}
 		default:

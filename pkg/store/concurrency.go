@@ -248,7 +248,8 @@ type ConcurrencyWaiter struct {
 	Position int
 
 	// safety: unexported for the same reason as ConcurrencyHolder.team.
-	team Team
+	team       Team
+	generation int64
 }
 
 // safety: a bare key no longer identifies a row, and a fleet-wide sweep
@@ -313,8 +314,7 @@ func scrubInheritedHolder(holder *ConcurrencyHolder) {
 	}
 }
 
-// AcquireConcurrencySlot atomically admits work using this tenant's capacity, cache and waiters.
-func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest) (AcquireSlotResponse, error) {
+func (t *Tenant) acquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest, fence *capacityFence) (AcquireSlotResponse, error) {
 	if req.Key == "" {
 		return AcquireSlotResponse{}, errors.New("concurrency: empty key")
 	}
@@ -353,11 +353,17 @@ func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// safety: entries-row lock before any other row touch -- one lock
-	// order (entries, then cache, then holders/waiters) across every
-	// path, so a release writing cache after deleting its holder can't
-	// deadlock an acquire that read cache first.
+	if fence != nil {
+		if err := prepareCapacityAcquisitionTx(ctx, tx, t.team, req.Key, *fence); err != nil {
+			return AcquireSlotResponse{}, err
+		}
+	}
+
 	if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, req.Key); err != nil {
+		return AcquireSlotResponse{}, err
+	}
+
+	if err := checkCapacityMutationTx(ctx, tx, t.team, req.Key, req.HolderID, fence); err != nil {
 		return AcquireSlotResponse{}, err
 	}
 
@@ -605,6 +611,13 @@ func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 			if err != nil {
 				return AcquireSlotResponse{}, err
 			}
+			if fence != nil {
+				for _, id := range ids {
+					if err := cancelSupersededCapacityTx(ctx, tx, t.team, req.Key, id, fence.actor); err != nil {
+						return AcquireSlotResponse{}, err
+					}
+				}
+			}
 			expandedSupersededIDs = append(expandedSupersededIDs, ids...)
 		}
 		supersededIDs = expandedSupersededIDs
@@ -781,6 +794,20 @@ func txEarlierRunnableQueueWaiter(ctx context.Context, tx *storeTx, team Team, k
 	used := acct.used
 	holderMin := acct.floor
 	for _, w := range waiters {
+		current, err := capacityWaiterCurrentTx(ctx, tx, team, w)
+		if err != nil {
+			return false, err
+		}
+		if !current {
+			continue
+		}
+		deadline, err := capacityQueueDeadlineTx(ctx, tx, team, w)
+		if err != nil {
+			return false, err
+		}
+		if !deadline.IsZero() && !deadline.After(tx.now()) {
+			continue
+		}
 		if currentQueued && w.ArrivedAt.UnixNano() >= currentArrivedNS {
 			continue
 		}
@@ -942,6 +969,14 @@ func txPromoteCoalesceWaiter(ctx context.Context, tx *storeTx, team Team, key, r
 		return nil, nil
 	}
 
+	current, err := capacityWaiterCurrentTx(ctx, tx, team, *waiter)
+	if err != nil {
+		return nil, err
+	}
+	if !current {
+		return nil, nil
+	}
+
 	acct, err := txConcurrencyAccounting(ctx, tx, team, key, nowNS)
 	if err != nil {
 		return nil, err
@@ -1039,6 +1074,20 @@ func txPromoteWaitersLocked(ctx context.Context, tx *storeTx, team Team, key str
 
 	var promoted []ConcurrencyWaiter
 	for _, w := range candidates {
+		current, err := capacityWaiterCurrentTx(ctx, tx, team, w)
+		if err != nil {
+			return nil, err
+		}
+		if !current {
+			continue
+		}
+		deadline, err := capacityQueueDeadlineTx(ctx, tx, team, w)
+		if err != nil {
+			return nil, err
+		}
+		if !deadline.IsZero() && !deadline.After(tx.now()) {
+			continue
+		}
 		if !live[w.RunID] && !polling.matches(w) {
 			if _, derr := txDeleteWaiter(ctx, tx, w.team, w.Key, w.RunID, w.NodeID); derr != nil {
 				return nil, derr
@@ -1347,95 +1396,6 @@ func txSupersedeHolderAndInherited(ctx context.Context, tx *storeTx, team Team, 
 	return ids, nil
 }
 
-// HeartbeatConcurrencySlot renews an unexpired tenant holder and reports supersession.
-func (t *Tenant) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error) {
-	return t.heartbeatConcurrencySlot(ctx, key, holderID, lease, time.Sleep)
-}
-
-func (t *Tenant) heartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration, sleep func(time.Duration)) (expires time.Time, superseded bool, err error) {
-	if lease <= 0 {
-		lease = DefaultConcurrencyLease
-	}
-	err = retryOnBusyWithSleep(func() error {
-		var once error
-		expires, superseded, once = t.heartbeatConcurrencySlotOnce(ctx, key, holderID, lease)
-		return once
-	}, sleep)
-	return expires, superseded, err
-}
-
-func (t *Tenant) heartbeatConcurrencySlotOnce(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return time.Time{}, false, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// safety: entries-row lock first (same order as acquire) so a lease
-	// extension can't race a promotion admitting into the same budget.
-	if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, key); err != nil {
-		return time.Time{}, false, err
-	}
-
-	// safety: clock read after the lock, or a stale timestamp lets a
-	// heartbeat revive a holder whose lease already lapsed.
-	now := tx.now()
-	expires = now.Add(lease)
-
-	var superInt int
-	var leaseNS int64
-	err = tx.QueryRowContext(
-		ctx,
-		`SELECT superseded, lease_expires_at FROM concurrency_holders WHERE team = ? AND key = ? AND holder_id = ?`,
-		string(t.team), key, holderID,
-	).Scan(&superInt, &leaseNS)
-	if errors.Is(err, sql.ErrNoRows) {
-		return time.Time{}, false, ErrLockHeld
-	}
-	if err != nil {
-		return time.Time{}, false, err
-	}
-	// safety: expired lease means admission may have reassigned the budget; reviving would double-admit.
-	if leaseNS <= now.UnixNano() {
-		return time.Time{}, false, ErrLockHeld
-	}
-	if _, err := tx.ExecContext(
-		ctx,
-		`UPDATE concurrency_holders SET lease_expires_at = ? WHERE team = ? AND key = ? AND holder_id = ?`,
-		expires.UnixNano(), string(t.team), key, holderID,
-	); err != nil {
-		return time.Time{}, false, err
-	}
-	if err := txCommitChecked(ctx, tx, now.UnixNano(), concurrencyKey{t.team, key}); err != nil {
-		return time.Time{}, false, err
-	}
-	return expires, superInt == 1, nil
-}
-
-// ReleaseConcurrencySlot releases a tenant holder and stores its reusable cache result.
-func (t *Tenant) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// safety: entries-row lock first, keeping the one lock order shared
-	// with acquire and release+promote.
-	if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, key); err != nil {
-		return false, err
-	}
-
-	released, _, _, err := txReleaseHolder(ctx, tx, t.team, key, holderID, outcome, outputRef, cacheKeyHash, ttl)
-	if err != nil {
-		return false, err
-	}
-	if err := txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, key}); err != nil {
-		return false, err
-	}
-	return released, nil
-}
-
 func txReleaseHolder(ctx context.Context, tx *storeTx, team Team, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (released bool, runID, nodeID string, err error) {
 	var supersededInt int
 	var leaseNS, queueArrivedNS int64
@@ -1598,109 +1558,6 @@ func txCacheLookup(ctx context.Context, tx *storeTx, team Team, key, cacheKeyHas
 	return &hit, nil
 }
 
-// ReleaseAndNotify atomically releases a tenant holder, resolves followers and promotes waiters.
-func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error) {
-	if promoteLease <= 0 {
-		promoteLease = DefaultConcurrencyLease
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return false, nil, nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// safety: entries-row lock before any row writes (same order as
-	// acquire) so release+promote serializes with admissions without
-	// inverting lock order against a concurrent acquire.
-	var hasEntry int
-	err = tx.QueryRowContext(
-		ctx,
-		`SELECT 1 FROM concurrency_entries WHERE team = ? AND key = ?`+t.s.forUpdate(), string(t.team), key,
-	).Scan(&hasEntry)
-	entryDeclared := err == nil
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return false, nil, nil, err
-	}
-
-	released, runID, nodeID, err := txReleaseHolder(ctx, tx, t.team, key, holderID, outcome, outputRef, cacheKeyHash, ttl)
-	if err != nil {
-		return false, nil, nil, err
-	}
-	if released && coalesceFollowersCanInherit(outcome) {
-		followers, err = txDrainCoalesceFollowers(ctx, tx, t.team, key, runID, nodeID)
-		if err != nil {
-			return false, nil, nil, err
-		}
-	}
-
-	if !entryDeclared {
-		return released, followers, nil, txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, key})
-	}
-	now := tx.now()
-	nowNS := now.UnixNano()
-	expiresNS := now.Add(promoteLease).UnixNano()
-	promoted, err = txPromoteWaiters(ctx, tx, t.team, key, nowNS, expiresNS)
-	if err != nil {
-		return false, nil, nil, err
-	}
-
-	if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
-		return false, nil, nil, err
-	}
-	return released, followers, promoted, nil
-}
-
-// ResolveCoalesceFollowers drains this tenant's waiters for the named leader.
-func (t *Tenant) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	out, err := txDrainCoalesceFollowers(ctx, tx, t.team, key, leaderRunID, leaderNodeID)
-	if err != nil {
-		return nil, err
-	}
-	if err := txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, key}); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func txDrainCoalesceFollowers(ctx context.Context, tx *storeTx, team Team, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error) {
-	rows, err := tx.QueryContext(
-		ctx,
-		`SELECT `+waiterColumns+`
-		   FROM concurrency_waiters
-		  WHERE team = ? AND key = ? AND policy = ? AND leader_run_id = ? AND leader_node_id = ?
-		  ORDER BY arrived_at ASC`,
-		string(team), key, OnLimitCoalesce, leaderRunID, leaderNodeID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	var out []ConcurrencyWaiter
-	for rows.Next() {
-		w, err := scanWaiter(rows)
-		if err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		out = append(out, w)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for _, w := range out {
-		if _, err := txDeleteWaiter(ctx, tx, w.team, w.Key, w.RunID, w.NodeID); err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
-}
-
 func coalesceFollowersCanInherit(outcome string) bool {
 	return outcome == "success"
 }
@@ -1784,42 +1641,6 @@ func txDeleteWaiter(ctx context.Context, tx *storeTx, team Team, key, runID, nod
 	return n > 0, nil
 }
 
-// PromoteNextWaiters admits this tenant's queued waiters in arrival order.
-func (t *Tenant) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error) {
-	if lease <= 0 {
-		lease = DefaultConcurrencyLease
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var hasEntry int
-	err = tx.QueryRowContext(
-		ctx,
-		`SELECT 1 FROM concurrency_entries WHERE team = ? AND key = ?`+t.s.forUpdate(), string(t.team), key,
-	).Scan(&hasEntry)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, key})
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	now := tx.now()
-	nowNS := now.UnixNano()
-	expiresNS := now.Add(lease).UnixNano()
-	promote, err := txPromoteWaiters(ctx, tx, t.team, key, nowNS, expiresNS)
-	if err != nil {
-		return nil, err
-	}
-	if err := txCommitChecked(ctx, tx, nowNS, concurrencyKey{t.team, key}); err != nil {
-		return nil, err
-	}
-	return promote, nil
-}
-
 // WaiterStatus is what a polling waiter observes.
 type WaiterStatus string
 
@@ -1835,6 +1656,7 @@ const (
 	WaiterLeaderFinished WaiterStatus = "leader_finished"
 
 	WaiterCancelled WaiterStatus = "cancelled"
+	WaiterExpired   WaiterStatus = "expired"
 )
 
 // WaiterResolution: fields populate per Status.
@@ -1865,13 +1687,18 @@ type WaiterResolution struct {
 	Holders     []ConcurrencyHolder
 }
 
-// ResolveWaiter reads this tenant's waiter or cached result without inserting a waiter.
-func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error) {
+func (t *Tenant) resolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool, fence *capacityFence) (WaiterResolution, error) {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return WaiterResolution{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	if fence != nil {
+		if err := checkCapacityFenceTx(ctx, tx, t.team, *fence); err != nil {
+			return WaiterResolution{}, err
+		}
+	}
 
 	// safety: clock read after BEGIN so liveness answers match what the
 	// serialized writers committed, not a pre-wait snapshot.
@@ -1879,6 +1706,10 @@ func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 	if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, key); err != nil {
 		return WaiterResolution{}, err
 	}
+	if err := checkCapacityMutationTx(ctx, tx, t.team, key, "", fence); err != nil {
+		return WaiterResolution{}, err
+	}
+	nowNS = tx.now().UnixNano()
 	if _, err := txReapTerminalConcurrencyHolders(ctx, tx, t.team, key); err != nil {
 		return WaiterResolution{}, err
 	}
@@ -1929,6 +1760,19 @@ func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 		string(t.team), key, runID, nodeID, nowNS,
 	))
 	if err == nil {
+		deadline, err := capacityQueueDeadlineTx(ctx, tx, t.team, waiter)
+		if err != nil {
+			return WaiterResolution{}, err
+		}
+		if !deadline.IsZero() && !deadline.After(tx.now()) {
+			if _, err := txDeleteWaiter(ctx, tx, t.team, key, runID, nodeID); err != nil {
+				return WaiterResolution{}, err
+			}
+			if err := tx.Commit(); err != nil {
+				return WaiterResolution{}, err
+			}
+			return WaiterResolution{Status: WaiterExpired}, nil
+		}
 		if waiter.Policy == OnLimitCoalesce {
 			leaderRun := waiter.LeaderRunID
 			leaderNode := waiter.LeaderNodeID
@@ -2064,49 +1908,6 @@ func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 		return WaiterResolution{}, err
 	}
 	return WaiterResolution{Status: WaiterCancelled}, nil
-}
-
-// CancelWaiter removes this tenant's waiter or promoted holder for the named work.
-func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// safety: entries-row lock first; the cancel may reclaim a holder and
-	// promote, which must serialize with concurrent admissions.
-	if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, key); err != nil {
-		return false, err
-	}
-
-	waiterDeleted, err := txDeleteWaiter(ctx, tx, t.team, key, runID, nodeID)
-	if err != nil {
-		return false, err
-	}
-
-	hres, err := tx.ExecContext(
-		ctx,
-		`DELETE FROM concurrency_holders WHERE team = ? AND key = ? AND run_id = ? AND node_id = ?`,
-		string(t.team), key, runID, nodeID,
-	)
-	if err != nil {
-		return false, err
-	}
-	hn, err := hres.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	if hn > 0 {
-		now := tx.now()
-		if _, err := txPromoteWaiters(ctx, tx, t.team, key, now.UnixNano(), now.Add(DefaultConcurrencyLease).UnixNano()); err != nil {
-			return false, err
-		}
-	}
-	if err := txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, key}); err != nil {
-		return false, err
-	}
-	return waiterDeleted || hn > 0, nil
 }
 
 // GetConcurrencyState returns this tenant's capacity, holders and waiters for a key.
@@ -2261,52 +2062,6 @@ func reapStaleConcurrencyHoldersTx(ctx context.Context, tx *storeTx, team Team, 
 	return stale, nil
 }
 
-// ForceReleaseSupersededHolders removes this tenant's superseded holders.
-func (t *Tenant) ForceReleaseSupersededHolders(ctx context.Context, key string) ([]ConcurrencyHolder, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// safety: entries-row lock first; dropping superseded rows changes
-	// what a concurrent promotion may reclaim.
-	if err := txLockEntry(ctx, tx, t.s.forUpdate(), t.team, key); err != nil {
-		return nil, err
-	}
-
-	rows, err := tx.QueryContext(
-		ctx,
-		`SELECT `+holderColumns+`
-		   FROM concurrency_holders WHERE team = ? AND key = ? AND superseded = 1`, string(t.team), key,
-	)
-	if err != nil {
-		return nil, err
-	}
-	var out []ConcurrencyHolder
-	for rows.Next() {
-		h, err := scanHolder(rows)
-		if err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		out = append(out, h)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for _, h := range out {
-		if err := txDeleteHolder(ctx, tx, h.team, h.Key, h.HolderID); err != nil {
-			return nil, err
-		}
-	}
-	if err := txCommitChecked(ctx, tx, tx.now().UnixNano(), concurrencyKey{t.team, key}); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func reapStaleConcurrencyWaitersTx(ctx context.Context, tx *storeTx, team Team, key string, maxAge time.Duration) ([]ConcurrencyWaiter, error) {
 	now := tx.now()
 	ns := now.UnixNano()
@@ -2369,7 +2124,7 @@ func scanWaiter(rs rowScanner) (ConcurrencyWaiter, error) {
 	var w ConcurrencyWaiter
 	var arrivedNS, cancelNS int64
 	if err := rs.Scan(&w.Key, &w.RunID, &w.NodeID, &w.HolderID, &arrivedNS, &w.Policy,
-		&w.CacheKeyHash, &w.LeaderRunID, &w.LeaderNodeID, &cancelNS, &w.Cost, &w.DeclaredCapacity, &w.team); err != nil {
+		&w.CacheKeyHash, &w.LeaderRunID, &w.LeaderNodeID, &cancelNS, &w.Cost, &w.DeclaredCapacity, &w.team, &w.generation); err != nil {
 		return ConcurrencyWaiter{}, err
 	}
 	w.ArrivedAt = time.Unix(0, arrivedNS)
@@ -2377,7 +2132,7 @@ func scanWaiter(rs rowScanner) (ConcurrencyWaiter, error) {
 	return w, nil
 }
 
-const waiterColumns = `key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity, team`
+const waiterColumns = `key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity, team, generation`
 
 func nodeIDOrDash(nodeID string) string {
 	if strings.TrimSpace(nodeID) == "" {

@@ -160,7 +160,7 @@ func (a *LocalAdmission) hold(parent context.Context, ref store.NodeRef, request
 		if err == nil {
 			err = errors.New("local admission returned no lease")
 		}
-		return errors.Join(context.Cause(ctx), err)
+		return localAdmissionFailure(errors.Join(context.Cause(ctx), err))
 	}
 	joined := make(chan error, 1)
 	go func() {
@@ -181,10 +181,26 @@ func (a *LocalAdmission) hold(parent context.Context, ref store.NodeRef, request
 	defer func() {
 		releaseErr := held.Release()
 		watchErr := <-joined
-		err = errors.Join(err, context.Cause(ctx), releaseErr, watchErr)
+		err = errors.Join(err, localAdmissionFailure(context.Cause(ctx)), releaseErr, watchErr)
 	}()
 	if err == nil && context.Cause(ctx) == nil {
 		err = body(ctx, held)
+	}
+	return err
+}
+
+func localAdmissionFailure(err error) error {
+	if errors.Is(err, errQueueTimeout) {
+		return errors.Join(&AdmissionFailure{Outcome: store.NodeFailed, Reason: store.FailureQueueTimeout, Err: err}, waitFailure(err, errQueueTimeout))
+	}
+	var refused *wingdclient.AdmissionError
+	if errors.As(err, &refused) {
+		switch refused.Policy {
+		case wingwire.PolicySkip:
+			return errors.Join(&AdmissionFailure{Outcome: store.NodeSkipped, Err: err}, waitFailure(err, refused))
+		case wingwire.PolicyFail:
+			return errors.Join(&AdmissionFailure{Outcome: store.NodeFailed, Err: err}, waitFailure(err, refused))
+		}
 	}
 	return err
 }

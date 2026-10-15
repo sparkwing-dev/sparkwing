@@ -24,11 +24,11 @@ func checkRecoveryCapacity(ctx context.Context, root string) (err error) {
 	}
 	for _, group := range []struct{ key, node string }{{"node", "job"}, {"plan", ""}} {
 		request := store.AcquireSlotRequest{Key: group.key, HolderID: "original", RunID: "run", NodeID: group.node, Capacity: 1, Cost: 1, Lease: time.Hour, Policy: store.OnLimitQueue}
-		if got, err := f.tenant.AcquireConcurrencySlot(ctx, request); err != nil || got.Kind != store.AcquireGranted {
+		if got, err := acquireRecoveryCapacity(ctx, f, request); err != nil || got.Kind != store.AcquireGranted {
 			return fmt.Errorf("acquire %s: %+v, %v", group.key, got, err)
 		}
 		request.RunID, request.HolderID = "competitor", "waiting"
-		if got, err := f.tenant.AcquireConcurrencySlot(ctx, request); err != nil || got.Kind != store.AcquireQueued {
+		if got, err := acquireRecoveryCapacity(ctx, f, request); err != nil || got.Kind != store.AcquireQueued {
 			return fmt.Errorf("queue %s: %+v, %v", group.key, got, err)
 		}
 	}
@@ -63,8 +63,8 @@ func checkRecoveryCapacity(ctx context.Context, root string) (err error) {
 		if err != nil || adopted.Kind != store.AdoptHolder || adopted.Holder == nil || adopted.Holder.Binding.Generation != generation {
 			return fmt.Errorf("adopt %s: %+v, %v", group.key, adopted, err)
 		}
-		if promoted, err := f.tenant.PromoteNextWaiters(ctx, group.key, time.Hour); err != nil || len(promoted) != 0 {
-			return fmt.Errorf("live %s capacity admitted competitor: %+v, %v", group.key, promoted, err)
+		if resolution, err := resolveRecoveryCapacity(ctx, f.tenant, group.key, group.node); err != nil || resolution.Status != store.WaiterStillWaiting {
+			return fmt.Errorf("live %s capacity admitted competitor: %+v, %v", group.key, resolution, err)
 		}
 	}
 	if _, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Actor: f.holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: recoverySourceAttempt(1)}); err != nil {
@@ -96,16 +96,61 @@ SELECT team,'competitor',2,pipeline,'running',request_json,request_hash,request_
 }
 
 func checkCapacityWinner(ctx context.Context, tenant *store.Tenant, key string) error {
-	promoted, err := tenant.PromoteNextWaiters(ctx, key, time.Hour)
-	if err != nil || len(promoted) != 1 || promoted[0].RunID != "competitor" {
-		return fmt.Errorf("released %s capacity: %+v, %v", key, promoted, err)
+	nodeID := "job"
+	if key == "plan" {
+		nodeID = ""
 	}
-	if repeated, err := tenant.PromoteNextWaiters(ctx, key, time.Hour); err != nil || len(repeated) != 0 {
-		return fmt.Errorf("duplicate %s promotion: %+v, %v", key, repeated, err)
+	for range 2 {
+		resolution, err := resolveRecoveryCapacity(ctx, tenant, key, nodeID)
+		if err != nil || resolution.Status != store.WaiterPromoted || resolution.HolderID != "waiting" {
+			return fmt.Errorf("released %s capacity: %+v, %v", key, resolution, err)
+		}
 	}
 	state, err := tenant.GetConcurrencyState(ctx, key)
 	if err != nil || state.UsedCost != 1 || len(state.Holders) != 1 || state.Holders[0].RunID != "competitor" || len(state.Waiters) != 0 {
 		return fmt.Errorf("winner %s: %+v, %v", key, state, err)
 	}
 	return nil
+}
+
+func acquireRecoveryCapacity(ctx context.Context, f storeRecoveryFixture, request store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
+	actor := f.owner
+	if request.RunID != actor.Owner.RunID {
+		run, err := f.tenant.ReadRun(ctx, request.RunID)
+		if err != nil {
+			return store.AcquireSlotResponse{}, err
+		}
+		if run.Owner == nil {
+			return store.AcquireSlotResponse{}, errors.New("capacity competitor has no owner")
+		}
+		actor = store.Actor{Kind: store.ActorController, Owner: *run.Owner}
+	}
+	binding := store.CapacityBinding{RunID: request.RunID, NodeID: request.NodeID, Generation: actor.Owner.Generation}
+	if request.NodeID != "" {
+		row, err := f.tenant.ReadNode(ctx, store.NodeRef{RunID: request.RunID, NodeID: request.NodeID})
+		if err != nil {
+			return store.AcquireSlotResponse{}, err
+		}
+		binding.Generation = row.Generation
+	}
+	return f.tenant.AcquireCapacity(ctx, request, binding, actor)
+}
+
+func resolveRecoveryCapacity(ctx context.Context, tenant *store.Tenant, key, nodeID string) (store.WaiterResolution, error) {
+	run, err := tenant.ReadRun(ctx, "competitor")
+	if err != nil {
+		return store.WaiterResolution{}, err
+	}
+	if run.Owner == nil {
+		return store.WaiterResolution{}, errors.New("capacity competitor has no owner")
+	}
+	binding := store.CapacityBinding{RunID: run.ID, NodeID: nodeID, Generation: run.Owner.Generation}
+	if nodeID != "" {
+		row, err := tenant.ReadNode(ctx, store.NodeRef{RunID: run.ID, NodeID: nodeID})
+		if err != nil {
+			return store.WaiterResolution{}, err
+		}
+		binding.Generation = row.Generation
+	}
+	return tenant.ResolveCapacityWaiter(ctx, key, binding, store.Actor{Kind: store.ActorController, Owner: *run.Owner})
 }

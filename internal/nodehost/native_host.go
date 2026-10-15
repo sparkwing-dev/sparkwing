@@ -115,8 +115,14 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 		if layer.Name == "approval" {
 			return OwnerLayerResult{}, nil
 		}
-		if layer.Name == "admission" && (config.Capacity != nil || config.Admission != nil && owner.Local != nil && owner.Local(row)) {
-			return OwnerLayerResult{}, nil
+		if layer.Name == "admission" {
+			isLocal := owner.Local != nil && owner.Local(row)
+			if err := requireMachineAdmission(config.Admission, isLocal); err != nil {
+				return OwnerLayerResult{}, err
+			}
+			if config.Capacity != nil || isLocal {
+				return OwnerLayerResult{}, nil
+			}
 		}
 		if layers == nil {
 			unused, err := unusedOwnerPolicy(layer.Name, input, row, owner.Local)

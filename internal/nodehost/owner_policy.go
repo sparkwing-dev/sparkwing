@@ -168,7 +168,13 @@ func (h *OwnerEvaluator) skipLayer(ctx context.Context, input EvaluationInput, r
 		return OwnerLayerResult{}, err
 	}
 	if job.Approval != nil {
-		return OwnerLayerResult{}, executorError(apierr.IllegalTransition, "approval SkipIf requires an owner approval-success transition")
+		return OwnerLayerResult{Transition: &store.NodeTransition{
+			To: store.NodeSuccess, Cause: store.CauseOwnerPolicy,
+			Extra: store.TransitionExtra{
+				OwnerPolicy: &store.OwnerPolicyResult{Kind: store.PolicyApprovalBypass, Generation: row.Generation},
+				Result:      &store.NodeResult{Outcome: store.NodeSuccess, Reason: "skip_if"},
+			},
+		}}, nil
 	}
 	return OwnerLayerResult{Transition: &store.NodeTransition{
 		To: store.NodeSkipped, Cause: store.CauseDependency,
