@@ -332,10 +332,10 @@ func (s *Server) oauthSignIn(ctx context.Context, name, code, verifier, redirect
 	case errors.Is(err, errSignInUnverified):
 		return nil, "", refuse(http.StatusForbidden, "", name+" has not verified this account's email address")
 	case errors.Is(err, errSignInRejected):
-		s.logger.Info("sign-in rejected", "provider", name, "reason", err.Error())
+		s.logger.Info("sign-in rejected", "provider", name)
 		return nil, "", refuse(http.StatusUnauthorized, "", "that sign-in could not be verified; start again")
 	case err != nil:
-		s.logger.Warn("sign-in failed", "provider", name, "error", err.Error())
+		s.logger.Warn("sign-in failed", "provider", name)
 		return nil, "", refuse(http.StatusBadGateway, "", name+" could not be reached to finish the sign-in")
 	}
 	now := time.Now().UTC()

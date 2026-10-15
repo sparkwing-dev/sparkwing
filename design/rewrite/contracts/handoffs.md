@@ -2,6 +2,31 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+**W2 OAuth continuation.** OAuth start and callback now use PolicyRouter and
+their named browser proof. Eight active HTTP tests cover real SQLite account
+sessions through a fake provider transport. Generated proof and PKCE refusals
+create no session. Errors and audit records exclude provider diagnostics and
+credentials. The callback retains the identity-link continuation without
+redeeming its code. See [W2-oauth-handoff.md](../W2-oauth-handoff.md).
+
+**W1: roleless sessions and identity-link nonce storage.**
+CreateIdentityAccountSession requires a membership even when ResolveSignIn
+returns a verified waitlisted account with no active team. Supply its final
+roleless session representation through creation, renewal and
+AuthenticationReader. It must satisfy account-only policy while granting no
+team authority. ConsumeIdentityLinkState queries identity_link_states, which
+is absent from schema.sql. Supply the durable, replica-safe one-use state
+contract before W2 cuts over link completion. These are real C1 gaps. W2 has
+added no alternate issuer, SQL table or in-memory nonce registry.
+
+**W1/W2/W6/W8: startup bootstrap contract.** The mounted bootstrap-admin-token
+is an input raw credential, but ProvisionCapability/Store.Issue generate a new
+raw capability and accept no seeded presentation. EnsureBootstrapAdminToken
+still calls the retired token table. Resolve that delivery mismatch before
+W2 replaces startup provisioning. The trusted bootstrap gate must remain in
+the issuing transaction and revocation must survive restart. No C1 or C4
+signature changed in this continuation.
+
 **W1/W2: root enrollment origin integration.** W2 now registers POST
 /api/v1/runners and POST /api/v1/operator/tokens through PolicyRouter and the
 existing CredentialIssuer.ProvisionCapability. C2 declares their strict local

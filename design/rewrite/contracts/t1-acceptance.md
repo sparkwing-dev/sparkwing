@@ -301,7 +301,12 @@ session creation, digest lookup, sealed CSRF-key persistence, reopening, demotio
 and revocation against a real SQLite file. It also checks maintenance-fence
 refusal, expired-session cleanup, preservation of a live session and persistence
 after another reopen. It is store-boundary evidence. Native
-browser, OAuth and production C2 route-matrix cells remain blocked. The existing
+browser, OAuth and production C2 route-matrix cells remain blocked. Eight
+TestOAuthHTTP* component tests exercise registered OAuth start/callback routes,
+generated proof and PKCE refusals, replay, private diagnostics, link continuation
+and real SQLite session authentication through a fake GitHub provider transport.
+They do not establish native browser/provider integration or roleless sessions.
+The existing
 `recovery-cancel-beats-loss/store-sqlite` proof also checks that the first reason
 survives cooperative draining, reaping and reopening.
 

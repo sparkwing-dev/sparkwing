@@ -106,6 +106,26 @@ func TestParseBrowserSessionEndpointUsesNamedProof(t *testing.T) {
 	}
 }
 
+func TestParseOAuthEndpointsUsesNamedProof(t *testing.T) {
+	src := writeFile(t, "browser.go", "s.registerPolicyEndpoints(mux, s.oauthEndpoints())")
+	endpoints := `{Method: "GET", Pattern: "/auth/{provider}/start", Authentication: capability.AuthBrowserFlow},
+{Method: "GET", Pattern: "/auth/{provider}/callback", Authentication: capability.AuthBrowserFlow},`
+	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "browser_oauth_routes.go"), []byte(endpoints), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Route{
+		{Method: "GET", Path: "/auth/{provider}/callback", Scope: "browser_flow_csrf_nonce"},
+		{Method: "GET", Path: "/auth/{provider}/start", Scope: "browser_flow_csrf_nonce"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("OAuth registration=%+v want=%+v", got, want)
+	}
+}
+
 func TestParseSourceEndpointsUsesActualRegistrations(t *testing.T) {
 	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.sourceEndpoints())")
 	endpoints := `{Method: "POST", Pattern: "/api/v1/runs/{run}/source-credential", Authentication: capability.AuthCapability},

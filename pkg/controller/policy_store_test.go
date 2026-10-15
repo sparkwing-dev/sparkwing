@@ -101,7 +101,7 @@ func TestServerPolicySessionsCheckCommittedIdentityAndCSRF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := New(s, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher)
+	server := New(s, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithLicense(accountSessionTestLicense(t))
 	raw, csrf, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)

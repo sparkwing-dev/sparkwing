@@ -1467,10 +1467,19 @@ origin: `GET /auth/<provider>/start` creates a state and a PKCE verifier,
 keeps the provider, state, verifier and return path in a ten-minute
 `__Host-sw_oauth` cookie (`Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`), and
 redirects to the provider. The provider returns to
-`GET /auth/<provider>/callback`, which refuses a callback whose `state` does
-not match that cookie or whose provider is not the one the flow started with,
-then redeems the code and sets the session cookies. Any other provider name
-answers `404`.
+`GET /auth/<provider>/callback`. Both routes use the shared policy router's
+browser proof. Callback requires one flow cookie, the matching provider and
+one matching state. It accepts one code or a provider refusal. Duplicate
+selectors and unsupported methods fail before provider access. A valid code
+is redeemed with that flow's verifier before the controller creates a session
+and sets its cookies. Refused proofs preserve the flow. Any other provider
+name answers `404`.
+
+Refusals use the common error envelope and `Cache-Control: no-store`.
+An invalid or replayed code returns `401`, an unverified email returns `403`,
+and a provider or session backend failure returns `503`. The existing login
+budgets return `429` with `Retry-After`. HEAD returns `405`. Error responses
+and audit records omit codes, verifiers, access tokens and provider diagnostics.
 
 Register `https://<console-host>/auth/<provider>/callback` as the OAuth
 client's redirect URI (the authorization callback URL on GitHub), and list it

@@ -4,6 +4,42 @@
 
 ## Amendment 1: selected routes and trusted adapters
 
+### OAuth browser proof
+
+GET `/auth/{provider}/start` and GET `/auth/{provider}/callback` register
+through PolicyRouter with AuthBrowserFlow. Their verifiers apply the existing
+login budgets and require a licensed, configured Google or GitHub provider
+and an allowlisted redirect URI. Start creates state and a PKCE verifier.
+Callback requires one flow cookie, the same provider and one matching state.
+A successful callback requires one nonempty code. A declined callback requires
+one nonempty error and no code. Ambiguous or malformed query selectors fail
+before provider access. Unknown flow modes and completed link cookies cannot
+enter the callback again.
+
+The verifier redeems the sign-in code and calls C1's existing
+CreateIdentityAccountSession. The response handler receives that verified
+session, clears the flow, ends the browser's prior session, sets private session
+cookies and renders a same-origin return path. Refused proofs preserve the
+flow cookie. Provider codes, verifiers, access tokens, session cookies and
+upstream diagnostics enter neither error responses nor audit logs. Existing
+rate limits retain Retry-After through the canonical error envelope. HEAD and
+unsupported methods return the shared 405.
+
+The link callback carries a verified code/state flow to its same-site completion
+page. It redeems no code and creates no session. Link start and completion still
+need their policy cutover and C1's durable nonce consumption. The final schema
+has no identity_link_states table although ConsumeIdentityLinkState uses it.
+No schema or nonce fallback is added here.
+
+Eight HTTP tests use the real GitHub client, a fake provider transport and real
+SQLite session persistence. Properties generate invalid browser proofs and PKCE
+verifiers. The new session authenticates through the default digest snapshot,
+and replay creates no second session. These are controller component proofs.
+Native OAuth/browser, Google provider and full route-matrix cells remain open.
+C1 still needs roleless account-session creation and authority resolution.
+A waitlisted account with no membership is verified by the provider but refused
+by CreateIdentityAccountSession. No W2 SQL or substitute session issuer is added.
+
 ### Session lifecycle transport
 
 Ordinary capability-policy routes accept one Bearer or Session authorization

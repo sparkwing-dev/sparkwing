@@ -1,5 +1,17 @@
 # Acceptance test port inventory
 
+W2 OAuth ports: TestOAuthCallbackRefusesAFlowThisBrowserDidNotStart moves to
+TestOAuthHTTPProofProperty, TestOAuthHTTPPKCEProperty,
+TestOAuthHTTPSessionAndReplay and TestOAuthHTTPDeclineAndSafeNext in
+tests/acceptance/oauth_http_test.go. They retain missing flow, wrong state,
+wrong provider, replay and consent refusal and add ambiguous selectors,
+credential privacy and real session authentication. TestOAuthStartRefusesAnUnknownProvider
+moves to TestOAuthHTTPMethodsAndUnknownProvider. TestOAuthSignInAuditNamesTheAccount
+moves to TestOAuthHTTPSessionAndReplay. The 97-line old browser_oauth_test.go
+is deleted. The provider transport is fake. SQLite identity/session creation,
+PKCE client requests and the registered controller boundary are real. These
+three ports establish component behavior and complete no native matrix cell.
+
 W2 root provisioning ports: `TestMintingAMachineTokenRequiresValidRepositories`
 is replaced by `TestRootProvisioningHTTPInput` and the scope property. It
 retains host/path and shell-input refusals and adds server-derived origin,

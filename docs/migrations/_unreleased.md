@@ -1,5 +1,19 @@
 # Migrating to the next release
 
+## OAuth browser callbacks
+
+OAuth start and callback use the shared route policy and browser-flow verifier.
+Callback requires one flow cookie, one matching state and one code. A declined
+callback carries one error and no code. Remove duplicate query selectors.
+Refused proofs preserve the flow cookie. HEAD and unsupported methods return
+the common `405 method_not_allowed` error.
+
+Refusals return the common error envelope instead of a sign-in HTML page.
+An invalid or replayed code returns `401 unauthenticated`. An unverified email
+returns `403 forbidden`. Provider and session backend failures return
+`503 unavailable`. The existing login budgets retain `429` and `Retry-After`.
+Successful navigation and same-origin return paths retain their browser pages.
+
 ## Capability inventory and rotation
 
 Use `GET /api/v1/tokens` instead of `GET /api/v1/team/tokens`. The collection

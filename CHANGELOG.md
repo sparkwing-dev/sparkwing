@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **controller (Breaking):** OAuth browser callbacks verify proof through the shared route policy
+  Start and callback require the configured provider and redirect. Callback refuses ambiguous flow cookies or query selectors before provider access. Refusals return canonical errors without upstream diagnostics or credentials. See [migration guide](docs/migrations/_unreleased.md#oauth-browser-callbacks).
 - **controller (Breaking):** Machine enrollment and deployment service issuance use the capability issuer and shared route policy
   Machines use `/api/v1/runners` under `team.admin`; services use `/api/v1/operator/tokens` under operator authority. The legacy team-token mint is removed. Both return the capability once and refuse automatic replay. See [migration guide](docs/migrations/_unreleased.md#root-provisioning).
 - **controller (Breaking):** Capability inventories and rotation use the shared policy and authority-bearing store transactions
