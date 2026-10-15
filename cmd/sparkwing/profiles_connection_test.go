@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type profileTransport func(*http.Request) (*http.Response, error)
@@ -42,8 +41,6 @@ func TestProfilesAddStoresExistingCredentialAfterProbe(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/runs":
 			return 200, `{"runs":[]}`
-		case "/api/v1/auth/whoami":
-			return 200, `{"principal":"person","kind":"user","scopes":["runs.read"]}`
 		default:
 			t.Fatalf("unexpected request: %s", r.URL)
 			return 500, ""
@@ -126,20 +123,24 @@ func TestProfilesAddProbeFailureDoesNotWrite(t *testing.T) {
 	}
 }
 
-func TestProfilesRemoveRevokesOnlyUserCredential(t *testing.T) {
+func TestProfilesRemoveRevokesOnlyMemberCredential(t *testing.T) {
 	for _, tc := range []struct {
 		name, kind, principal string
-		revokeStatus          int
+		revoked               bool
 		wantRemoved           bool
 	}{
-		{"user", store.TokenKindUser, "person", 204, true},
-		{"team member", store.TokenKindTeam, "person", 204, true},
-		{"machine", store.TokenKindTeam, "agent:box", 204, false},
-		{"revoke refused", store.TokenKindUser, "person", 403, false},
+		{"member", "member", "person", true, true},
+		{"principal is not authority", "member", "agent:box", true, true},
+		{"machine", "runner", "box", true, false},
+		{"revocation unconfirmed", "member", "person", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := profilesFixturePath(t)
-			token := "swu_12345678_long_private"
+			token := "swk_12345678_long_private"
+			prefix, err := tokenPrefix(token)
+			if err != nil {
+				t.Fatal(err)
+			}
 			cfg := &profile.Config{Profiles: map[string]*profile.Profile{"prod": {Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example", Token: token}}}}
 			if err := profile.Save(path, cfg); err != nil {
 				t.Fatal(err)
@@ -150,11 +151,17 @@ func TestProfilesRemoveRevokesOnlyUserCredential(t *testing.T) {
 					t.Fatal("missing bearer")
 				}
 				if r.Method == "GET" {
-					return 200, `{"kind":"` + tc.kind + `","principal":"` + tc.principal + `"}`
+					if r.URL.Path != "/api/v1/tokens/"+prefix {
+						t.Fatalf("metadata route: %s", r.URL)
+					}
+					return 200, `{"prefix":"` + prefix + `","kind":"` + tc.kind + `","principal":"` + tc.principal + `","scopes":[]}`
 				}
 				if r.Method == "DELETE" {
 					deletes++
-					return tc.revokeStatus, `{"error":"refused"}`
+					if tc.revoked {
+						return 200, `{"prefix":"` + prefix + `","revoked":true}`
+					}
+					return 200, `{"prefix":"` + prefix + `","revoked":false}`
 				}
 				t.Fatalf("unexpected request: %s", r.Method)
 				return 500, ""

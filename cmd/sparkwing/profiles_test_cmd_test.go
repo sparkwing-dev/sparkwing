@@ -1,16 +1,12 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
@@ -96,97 +92,23 @@ func TestInterpretHealthBody(t *testing.T) {
 	}
 }
 
-func healthBody(status int, body string) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		_, _ = w.Write([]byte(body))
-	}
-}
-
-func TestProbeLogsReportsWhetherTheControllerKeepsNodeLogs(t *testing.T) {
+func TestProbeAuthChecksFinalRunsRoute(t *testing.T) {
 	for _, tc := range []struct {
-		name, body string
-		status     int
-		want       string
-	}{
-		{"keeps segments", `{"logs":{"segments":true}}`, http.StatusOK, "ok"},
-		{"keeps none", `{"logs":{"segments":false}}`, http.StatusOK, "warn"},
-		{"cannot say", `{}`, http.StatusInternalServerError, "warn"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctrl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/api/v1/capabilities" {
-					http.NotFound(w, r)
-					return
+		status int
+		want   string
+	}{{http.StatusOK, "ok"}, {http.StatusUnauthorized, "fail"}, {http.StatusForbidden, "fail"}} {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			calls := 0
+			profileHTTPFixture(t, func(req *http.Request) (int, string) {
+				calls++
+				if req.Method != "GET" || req.URL.Path != "/api/v1/runs" || req.URL.Query().Get("limit") != "1" || req.Header.Get("Authorization") != "Bearer private-credential" {
+					t.Fatalf("auth probe: %s %s", req.Method, req.URL)
 				}
-				w.WriteHeader(tc.status)
-				_, _ = w.Write([]byte(tc.body))
-			}))
-			t.Cleanup(ctrl.Close)
-			prof := &profile.Profile{Controller: &profile.ControllerSpec{URL: ctrl.URL, Token: "swu_test"}}
-			if got := probeLogs(context.Background(), prof); got.Status != tc.want {
-				t.Fatalf("probeLogs = %+v, want status %s", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestProbeGitcacheReportsAnAnnouncedCacheHealthFailure(t *testing.T) {
-	discovery.ResetCache()
-	t.Cleanup(discovery.ResetCache)
-	cache := httptest.NewServer(healthBody(http.StatusServiceUnavailable, `{"status":"degraded"}`))
-	t.Cleanup(cache.Close)
-	ctrl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(discovery.Services{CachePod: cache.URL})
-	}))
-	t.Cleanup(ctrl.Close)
-
-	prof := &profile.Profile{Controller: &profile.ControllerSpec{URL: ctrl.URL, Token: "swu_test"}}
-	got := probeGitcache(context.Background(), prof)
-	if got.Status != "fail" || !strings.Contains(got.Detail, "health returned") {
-		t.Fatalf("announced unhealthy cache probe = %+v, want failure", got)
-	}
-}
-
-func TestProbeAuthWarnsOnTheControllersAnonymousPrincipal(t *testing.T) {
-	cases := []struct {
-		name       string
-		whoami     string
-		wantStatus string
-		wantDetail string
-	}{
-		{
-			name:       "anonymous principal",
-			whoami:     `{"principal":"unauthed","kind":"none"}`,
-			wantStatus: "warn",
-			wantDetail: "serving unauthenticated",
-		},
-		{
-			name:       "real principal",
-			whoami:     `{"principal":"runner-1","kind":"runner","scopes":["logs.read"]}`,
-			wantStatus: "ok",
-			wantDetail: "principal=runner-1",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			ctrl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if strings.HasSuffix(r.URL.Path, "/auth/whoami") {
-					_, _ = w.Write([]byte(tc.whoami))
-					return
-				}
-				_, _ = w.Write([]byte(`{"runs":[]}`))
-			}))
-			defer ctrl.Close()
-
-			prof := &profile.Profile{Controller: &profile.ControllerSpec{URL: ctrl.URL, Token: "swu_test"}}
-			got := probeAuth(context.Background(), prof)
-			if got.Status != tc.wantStatus {
-				t.Errorf("status = %q, want %q (detail %q)", got.Status, tc.wantStatus, got.Detail)
-			}
-			if !strings.Contains(got.Detail, tc.wantDetail) {
-				t.Errorf("detail = %q, want it to mention %q", got.Detail, tc.wantDetail)
+				return tc.status, `{"runs":[],"next_cursor":"","truncated":false}`
+			})
+			result := probeAuth(t.Context(), &profile.Profile{Controller: &profile.ControllerSpec{URL: "https://controller.example", Token: "private-credential"}})
+			if result.Status != tc.want || calls != 1 {
+				t.Fatalf("probe: %+v calls=%d", result, calls)
 			}
 		})
 	}

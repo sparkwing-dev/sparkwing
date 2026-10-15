@@ -11,7 +11,7 @@ Manage secrets in this machine's local store or on a controller
 ### Subcommands
 
 - `delete` -- Remove a secret
-- `get` -- Print a secret's raw value to stdout
+- `get` -- Read a secret's value
 - `list` -- List secret names + metadata
 - `rotate` -- Re-encrypt every stored secret under the current key
 - `set` -- Store (or replace) a secret value
@@ -29,6 +29,8 @@ Manage secrets in this machine's local store or on a controller
 
 Remove a secret
 
+Delete the exact pipeline or unscoped row. JSON retains whether the row was deleted or already absent; plain emits the name.
+
 ### Flags
 
 | Flag | Description |
@@ -43,7 +45,9 @@ Remove a secret
 
 ## `sparkwing secrets get`
 
-Print a secret's raw value to stdout
+Read a secret's value
+
+This explicit authorized read includes the value. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline.
 
 ### Flags
 
@@ -61,6 +65,8 @@ Print a secret's raw value to stdout
 
 List secret names + metadata
 
+List metadata without values, including pipeline visibility and pool restrictions. Search matches names case-insensitively. JSON emits metadata records; plain emits names.
+
 ### Flags
 
 | Flag | Description |
@@ -75,6 +81,8 @@ List secret names + metadata
 ## `sparkwing secrets rotate`
 
 Re-encrypt every stored secret under the current key
+
+Retain rotated counts and skipped row names/pipelines. The previous key is still needed when any row was skipped. JSON includes the controller's replay marker.
 
 ### Flags
 
@@ -92,7 +100,9 @@ Store (or replace) a secret value
 
 Restricted --only-on secrets require matching pool demands at seal and reserved pools at release; restricted secrets are refused for here machines.
 
-If neither --value nor --file is supplied, read the value from stdin. --variable stores an unmasked value.
+If neither --value nor --file is supplied, read the value from stdin. Preserve empty values and trailing newlines. --variable stores an unmasked value.
+
+Local unscoped writes are shared with local pipelines. Controller writes preserve explicit --pipeline or --shared selection. JSON returns metadata and replay without the value; plain emits the name.
 
 ### Flags
 

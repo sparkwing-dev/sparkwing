@@ -365,7 +365,7 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 			{Name: "reserved-for", Argument: "POOL", Repeatable: true, CommaList: true},
 		}},
-		{Path: "sparkwing runners list", Authority: TeamCredential, Flags: []Flag{
+		{Path: "sparkwing runners list", Authority: TeamCredential, Rules: []string{"Read the same runner details from the local controller or a selected profile. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
 			{Name: "quiet", Short: "q"},
 		}},
@@ -595,24 +595,24 @@ func Registry() []Command {
 			{Name: "all-repos"},
 		}},
 		{Path: "sparkwing secrets", Flags: []Flag{}},
-		{Path: "sparkwing secrets delete", Flags: []Flag{
+		{Path: "sparkwing secrets delete", Rules: []string{"Delete the exact pipeline or unscoped row. JSON retains whether the row was deleted or already absent; plain emits the name."}, Flags: []Flag{
 			{Name: "secret", Argument: "NAME", Required: true},
 			{Name: "pipeline", Argument: "NAME"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets get", Flags: []Flag{
+		{Path: "sparkwing secrets get", Rules: []string{"This explicit authorized read includes the value. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline."}, Flags: []Flag{
 			{Name: "secret", Argument: "NAME", Required: true},
 			{Name: "pipeline", Argument: "NAME"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets list", Flags: []Flag{
+		{Path: "sparkwing secrets list", Rules: []string{"List metadata without values, including pipeline visibility and pool restrictions. Search matches names case-insensitively. JSON emits metadata records; plain emits names."}, Flags: []Flag{
 			{Name: "search", Argument: "PATTERN"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets rotate", Flags: []Flag{
+		{Path: "sparkwing secrets rotate", Rules: []string{"Retain rotated counts and skipped row names/pipelines. The previous key is still needed when any row was skipped. JSON includes the controller's replay marker."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets set", Rules: []string{"Restricted --only-on secrets require matching pool demands at seal and reserved pools at release; restricted secrets are refused for here machines.", "If neither --value nor --file is supplied, read the value from stdin. --variable stores an unmasked value."}, Flags: []Flag{
+		{Path: "sparkwing secrets set", Rules: []string{"Restricted --only-on secrets require matching pool demands at seal and reserved pools at release; restricted secrets are refused for here machines.", "If neither --value nor --file is supplied, read the value from stdin. Preserve empty values and trailing newlines. --variable stores an unmasked value.", "Local unscoped writes are shared with local pipelines. Controller writes preserve explicit --pipeline or --shared selection. JSON returns metadata and replay without the value; plain emits the name."}, Flags: []Flag{
 			{Name: "secret", Argument: "NAME", Required: true},
 			{Name: "value", Argument: "VALUE", Conflicts: []string{"file"}},
 			{Name: "file", Argument: "PATH", Conflicts: []string{"value"}},

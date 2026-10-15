@@ -245,4 +245,63 @@ bearer and metadata in one document. Plain emits the new bearer once. Revocation
 JSON retains its result and plain emits the prefix. Structured controller errors
 pass through without replacement envelopes.
 
+### Secret management and runner observations
+
+W9 adds `SecretManager` and `RunnerReader` projections on existing C2 routes.
+W2 must serve them, while W1/W2 own persistence, encryption and authorization.
+No route, permission alternative or credential rule changes. Fake-backed CLI
+and transport tests do not establish encryption, pool preflight or release.
+
+`SecretManager.ListSecrets` reads `GET /api/v1/secrets` as `Secrets`. Its
+`SecretMetadata` rows retain name, principal, pipeline, masked/shared/bound flags,
+`only_on` pool, and creation/update seconds. Metadata types contain no value.
+Unknown additive fields cannot copy raw values into metadata output.
+
+`ReadSecret` uses `GET /api/v1/secrets/{name}?pipeline=` and returns a
+`SecretValue`, with required `value` even when empty. A scoped read may return
+the exact pipeline row or a shared unscoped fallback. Release to an executing
+job remains a separate bound-claim authorization decision. Only an explicit
+authorized management read returns the value to the CLI.
+
+`WriteSecret` posts `SecretWrite` to `/api/v1/secrets`. It carries name, value,
+pipeline, explicit masked/shared flags and optional `only_on`. The request
+cannot select its owner or encryption result. `SecretWritten` returns the
+encrypted/bound metadata and replay marker. The client refuses an unconfirmed
+restriction, visibility change or unbound result. W1/W2 must persist `only_on`
+and enforce it at plan acceptance and release, including here refusal.
+
+`DeleteSecret` uses `DELETE /api/v1/secrets/{name}?pipeline=` and returns
+`SecretDeletion` with the exact row selector and a deleted/absent bit. Deletion
+has no pipeline fallback. Rotation posts to `/api/v1/secrets/rotate` and returns
+`SecretRotation` with a nonnegative rotated count, skipped name/pipeline pairs
+and replay marker. Any skipped row means the previous key is still needed.
+Writes and rotations carry stable header idempotency keys and exact retry bodies.
+
+CLI value input preserves stdin/file bytes, trailing newlines and explicit empty
+`--value`. Local unscoped writes remain shared with local pipelines. Remote
+visibility comes from explicit `--pipeline`/`--shared`. List JSON is metadata
+NDJSON. Get JSON includes metadata and value. Pretty/plain get writes raw bytes
+without a newline. Mutation JSON preserves confirmed results without echoing
+write inputs. Name search is case-insensitive. Final server projections remain
+integration requirements.
+
+`RunnerReader.ListRunners` reads `GET /api/v1/runners` as `Runners`. Each
+`RunnerDetail` retains granted name/class/location, separate free labels and
+reserved pools, repository fences, metering, maximum concurrency, total capacity,
+status and last seen. Active work retains separate run and optional job IDs.
+Optional headroom carries fractional cores, memory bytes, queue depth and the
+controller's observation timestamp. Absence is not replaced with a zero sample.
+Names are unique in a team projection. Invalid resources, timestamps or repeated
+names fail as protocol errors. Future status/class values remain readable.
+
+The CLI uses the same reader for api.sock and profiles. JSON retains all details,
+plain emits names, and quiet JSON emits name objects. The removed `/agents`
+reader and unreachable cluster-health report have no forwarding paths. Runner
+enrollment and service installation still need their W6/W8 integration.
+
+Profile removal uses `TokenManager.ReadToken` and confirmed `RevokeToken`.
+Only `member` metadata permits automatic connection-token revocation. Principal
+spelling never supplies credential kind. A lookup/revocation failure retains the
+saved connection. Machine credentials require explicit `--keep-token`.
+
 <!-- design:end -->

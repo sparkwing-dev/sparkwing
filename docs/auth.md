@@ -808,63 +808,45 @@ request that carries no principal is refused.
 
 ## Secret ownership
 
-A secret carries an owning pipeline, or none. Store one with
-`sparkwing secrets set --name DEPLOY_KEY --file ./key --pipeline deploy-web
---profile prod`. A secret stored with neither `--pipeline` nor `--shared`
-answers `admin` callers only; `--shared` opens an unscoped secret to **every
-run in the cluster**, so reserve it for values that are genuinely shared, such
-as a registry pull token.
+Use `sparkwing secrets set --secret DEPLOY_KEY --file ./key --pipeline deploy-web
+--profile prod` to propose a pipeline-owned secret. `--shared` selects an unscoped
+row for every authorized pipeline in the team. Without either selection, a
+remote write stays unscoped and private to authorized management reads. Local
+unscoped writes are shared with local pipelines.
 
-The scope is the pipeline and not the repository, because a run's repository is
-a string its submitter typed: the product grants nothing on it. Two teams may
-name the same repository and it means nothing either way.
+`--variable` stores an unmasked value. Input from `--value`, `--file` or stdin
+keeps empty values and trailing newlines. Set output contains metadata rather
+than the submitted value. `--only-on prod` carries a reserved-pool restriction
+unchanged to the controller.
 
-`GET /api/v1/secrets/{name}` resolves differently per principal:
+`secrets list` returns metadata, including pipeline visibility, encryption
+binding and the pool restriction. JSON emits one record per row and contains no
+value. Plain emits names. `--search` matches names case-insensitively.
 
-- An `admin` principal reads any row. `?pipeline=<name>` selects a pipeline's
-  row, `?run=<id>` selects the pipeline of that run, and without either the
-  unscoped row answers.
-- A `team.admin` principal reads its own team's rows the same way, a
-  management read by name. A masked row answers it `403 write_only`.
-- Any other bearer, a runner's token or a `secrets.read` token included, is
-  answered `403 claim_required`, even while it holds the run's claim: a node
-  reads with its claim token.
-- A claim token (a controller-dispatched work node's, a runner's node claim
-  or a runner's trigger claim) names its own run with `?run=<id>` and reads
-  only a name the run's plan declares, resolved against the run's pipeline
-  and falling back to an unscoped row only when that row is shared. Each
-  release is recorded as a `secret_released` event on the run, naming the
-  node for a node's claim. The pipeline's code declares its secrets, as in GitHub
-  Actions, so push access to the repository is the trust boundary; fork pull
-  requests never run on this path. A plan is refused when a declared name
-  breaks the secret-name grammar, it declares more than 100 names, or a
-  required name resolves to no row the run may read, and a
-  read of an undeclared name is answered `403` `secret_undeclared` and logged
-  as an `audit` record with `event=secret_undeclared` and the claim's token
-  prefix. A team-shared secret is readable by any of the team's opted-in
-  repositories whose pipeline declares its name; scoping a shared secret to
-  chosen repositories is a future feature.
+`secrets get --secret DEPLOY_KEY --pipeline deploy-web --profile prod` is an
+explicit value read subject to controller authorization. JSON contains metadata
+and the value. Use `-o plain` for exact raw bytes without an added newline. A
+pipeline read may fall back to a shared unscoped row. Deletion always selects
+one exact row and reports whether it was deleted or already absent.
 
-So one runner token cannot lift another pipeline's deploy credential by asking
-for it by name, a claim reads only its own run's declared secrets, and every
-node read leaves a `secret_released` event. `GET /api/v1/secrets` (the list) and the secret writes
-stay `admin`; the list carries each row's pipeline and shared flag.
+`secrets rotate` retains the number of rows rewritten and the name/pipeline of
+each skipped row. Keep the previous encryption key while any row is skipped.
+Write and rotation retries keep the same body and idempotency key.
 
-Token creation validates scopes against that same set: a scope the
-controller does not honor is rejected with a `400` naming the offending
-scope and the valid set, so a typo fails at mint time instead of
-producing a token that authenticates and then fails every scope check.
-A token with no scopes is still legal; it just unlocks nothing.
+<!-- design:begin -->
+The final controller implements these management projections and derives the
+owner from authentication. Metadata reads use `runs.read` or `team.admin`.
+Management writes, deletion and rotation require `team.admin`. Explicit value
+reads use `secrets.read` or `team.admin`, subject to the controller's complete
+policy. A job receives secrets through its live bound claim and declared secret
+set. A machine label or a typed repository string grants no release authority.
 
-Per-endpoint scope annotations live in `pkg/controller/server.go`. If
-you add a new route, annotate it with `requireScope`.
-
-`GET /api/v1/auth/whoami` is authenticated by the middleware like any
-other route but carries no scope check, so any valid token can read
-back its own principal, kind, scopes, and prefix. It shows as `public` in
-[api-reference.md](api-reference.md) because that table is generated
-from `requireScope` wrappers -- there, `public` means no scope check,
-not no authentication.
+For `only_on` secrets, plan acceptance requires matching pool demand and release
+requires an awarded reserved pool. Here machines cannot receive restricted
+secrets. Persistence, encryption, preflight and release enforcement require the
+final controller implementation. CLI/transport fixtures do not prove those
+server behaviors.
+<!-- design:end -->
 
 ## Teams and sign-in
 

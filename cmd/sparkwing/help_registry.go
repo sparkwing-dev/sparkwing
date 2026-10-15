@@ -264,7 +264,7 @@ var commandSynopses = map[string]string{
 	"sparkwing schedules uninstall":                 "Disarm a repo's schedules, and remove the timer when nothing is left",
 	"sparkwing secrets":                             "Manage secrets in this machine's local store or on a controller",
 	"sparkwing secrets delete":                      "Remove a secret",
-	"sparkwing secrets get":                         "Print a secret's raw value to stdout",
+	"sparkwing secrets get":                         "Read a secret's value",
 	"sparkwing secrets list":                        "List secret names + metadata",
 	"sparkwing secrets rotate":                      "Re-encrypt every stored secret under the current key",
 	"sparkwing secrets set":                         "Store (or replace) a secret value",
@@ -360,20 +360,12 @@ var (
 	cmdHooksInstall                   = surfaceCommand("sparkwing pipeline hooks install")
 	cmdHooksUninstall                 = surfaceCommand("sparkwing pipeline hooks uninstall")
 	cmdHooksStatus                    = surfaceCommand("sparkwing pipeline hooks status")
-	cmdSecret                         = surfaceCommand("sparkwing secrets")
-	cmdSecretSet                      = surfaceCommand("sparkwing secrets set")
-	cmdSecretGet                      = surfaceCommand("sparkwing secrets get")
-	cmdSecretList                     = surfaceCommand("sparkwing secrets list")
-	cmdSecretDelete                   = surfaceCommand("sparkwing secrets delete")
-	cmdSecretRotate                   = surfaceCommand("sparkwing secrets rotate")
 	cmdTriggers                       = Command{Path: "sparkwing cluster triggers", Hidden: true}
 	cmdTriggersList                   = Command{Path: "sparkwing cluster triggers list", Hidden: true}
 	cmdTriggersGet                    = Command{Path: "sparkwing cluster triggers get", Hidden: true}
-	cmdAgents                         = surfaceCommand("sparkwing runners")
 	cmdRunners                        = surfaceCommand("sparkwing runners")
 	cmdRunnersAdd                     = surfaceCommand("sparkwing runners add")
 	cmdRunnersRemove                  = surfaceCommand("sparkwing runners remove")
-	cmdAgentsList                     = surfaceCommand("sparkwing runners list")
 	cmdClusterConcurrency             = Command{Path: "sparkwing cluster concurrency", Hidden: true}
 	cmdClusterObjectStore             = surfaceCommand("sparkwing operator object-store")
 	cmdClusterObjectStoreStatus       = surfaceCommand("sparkwing operator object-store status")

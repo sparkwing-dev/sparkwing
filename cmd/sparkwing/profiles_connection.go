@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	neturl "net/url"
@@ -13,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func addProfile(inv clisurface.Invocation, format string) error {
@@ -104,20 +102,19 @@ func revokeProfileToken(p *profile.Profile) error {
 		return fmt.Errorf("profiles remove: %w; use --keep-token to remove only the connection", err)
 	}
 	ctx := context.Background()
-	c := client.NewWithToken(p.ControllerURL(), nil, raw)
-	response, err := c.LookupToken(ctx, prefix)
+	c, err := client.NewTokenManager(client.EngineOptions{URL: p.ControllerURL(), Bearer: func(context.Context) (string, error) { return raw, nil }}, false)
+	if err != nil {
+		return err
+	}
+	found, err := c.ReadToken(ctx, prefix)
 	if err != nil {
 		return fmt.Errorf("profiles remove: cannot look up token %s: %w; use --keep-token to remove only the connection", prefix, err)
 	}
-	var found client.TokenInfo
-	if err := json.Unmarshal(response, &found); err != nil {
-		return fmt.Errorf("profiles remove: decode token: %w", err)
-	}
 	// safety: removing a connection must not revoke a runner's machine credential.
-	if store.ActingKind(found.Kind, found.Principal) != store.TokenKindUser {
+	if found.Kind != "member" {
 		return errors.New("profiles remove: the connection holds a machine credential; use --keep-token to remove only the connection")
 	}
-	if err := c.RevokeToken(ctx, prefix); err != nil {
+	if _, err := c.RevokeToken(ctx, prefix); err != nil {
 		return fmt.Errorf("profiles remove: cannot revoke token %s: %w; use --keep-token to remove only the connection", prefix, err)
 	}
 	return nil

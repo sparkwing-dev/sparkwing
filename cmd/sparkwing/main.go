@@ -407,8 +407,8 @@ func dispatchCommand(args []string) error {
 	case "schedules":
 		return runCrons(args[1:])
 	case "runners":
-		if args[1] == "list" {
-			return runAgentsList(args[2:])
+		if len(args) > 1 && args[1] == "list" {
+			return runRunnersList(context.Background(), args[2:])
 		}
 		return runRunners(args[1:])
 	case "tokens":

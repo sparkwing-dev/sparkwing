@@ -52,6 +52,8 @@ Use team credentials; only a team admin sets --reserved-for. --repos is the expl
 
 List runners and their capacity
 
+Read the same runner details from the local controller or a selected profile. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects.
+
 ### Flags
 
 | Flag | Description |
