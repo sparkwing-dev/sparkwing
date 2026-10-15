@@ -78,5 +78,7 @@ func TestStorage(t *testing.T) {
 	t.Run("storage-memo-and-depcache-scope/s3-archives", checkStorageS3Depcache)
 	t.Run("storage-local-remote-cache-opt-in/filesystem-archives", checkStorageFilesystemRemoteArchives)
 	t.Run("storage-local-remote-cache-opt-in/s3-archives", checkStorageS3RemoteArchives)
+	t.Run("storage-publish-one-way/filesystem-components", checkStorageFilesystemPublication)
+	t.Run("storage-publish-one-way/s3-components", checkStorageS3Publication)
 	pendingScenarios(t, "storage")
 }

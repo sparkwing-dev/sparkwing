@@ -2,6 +2,28 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+## From W7 publication byte components
+
+**Completed W7 component evidence.** `TestStorage` cells
+`storage-publish-one-way/filesystem-components` and `s3-components` each pass
+128 generated imported attempts and payloads, including empty output. They join
+output writes, artifact capture, signed transfers, immutable physical publication,
+verified reads and artifact staging. Ten altered uploader selectors per case fail
+before upload. Refused record updates preserve prior records, readable output
+and local files. Both cells pass with the race detector.
+
+Invariant: only the bound imported attempt can publish output or artifact bytes,
+and a refused record update cannot replace an earlier committed result.
+
+Signer/record callbacks are contract fakes because W2's authenticated binding
+remains unimplemented. W1/W2/W3/W9 still own published intake, local provenance,
+`trust_local_builds`, terminal results, log transport and separate CLI publication
+failure. These component cells do not close the native publication proof.
+Whole-repository build, storage tests, focused vet, documentation drift checks,
+commentcheck and sleepcheck pass. Full `TestStorage` reports 76 passing events
+and the existing 425 skips. No contract or runtime API changed. No additional
+legacy deletion is claimed while its final production bindings remain open.
+
 ## From W7 remote archive integration and log-reader cut
 
 **Completed W7 fix.** The signed filesystem and S3 remote archive proofs first

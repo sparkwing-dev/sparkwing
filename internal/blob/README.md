@@ -109,6 +109,13 @@ destination manifest under the destination run and job's same key layout.
 `Manifest` and `DecodeManifest` define the shared bytes/member agreement for
 staging and memo reads. This includes each file's path, digest, size and mode.
 
+Publication component checks exercise output and artifact writes through signed
+filesystem and S3 transfers with imported attempt identities. Forged uploader
+selectors fail before upload. Refused record updates return errors and preserve
+the preceding records, readable output and local files. Record authority is a
+contract fake. Controller intake, local provenance, `trust_local_builds` and
+the CLI's separate publication result still require their owning integrations.
+
 `MaterializeMemo` asks `RecordStore.CopyMemo` for an atomic, authorized copy,
 then verifies the output, manifest and every member within the lookup budget.
 Missing or corrupt bytes, a refused edge or a failed copy produces a miss.

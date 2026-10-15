@@ -4,98 +4,75 @@
 
 ## Latest continuation
 
-Started at `a06e2a6a7` with a clean worktree and no merge in progress.
-Earlier W7 work remains committed. All W7 entries in `amendments-1.md` and
-`handoffs.md` were checked. No additional amendments file exists on this branch.
+Started at `83732aab8` with a clean worktree and no merge in progress.
+Earlier W7 implementations and deletions remain committed. The W7 entries in
+`amendments-1.md` and `handoffs.md` were checked. No later amendments file exists
+on this branch. No new W7 runtime stub or contract repair was found.
 
-Invariant: a local ref cannot select remote bytes, failed verification preserves
-the destination, and a local save cannot publish into the shared cache.
+Added publication component properties for filesystem and S3. Each backend
+receives 128 generated imported attempts and payloads, including empty output.
+They join `OutputData`, artifact capture, signed upload, physical immutable
+publication, verified output reads and artifact staging. Ten forged selectors
+per case cover team, run, job, attempt, generation, principal, capability,
+missing imported attempt, changed identity kind and missing publication binding.
+All fail before byte upload or record commit. Refused output and manifest
+updates return errors and preserve prior records, readable output and local files.
 
-New signed filesystem and S3 archive acceptance checks reproduced
-`empty or invalid record namespace component`. `NewRemoteReader` leaves the
-ref unset because the server selects the verified default branch. The remote
-client incorrectly validated that read selector as a write namespace. Memo and
-depcache now validate their logical fields and keep the ref absent in the
-verified-default-only request. Returned record evidence is still checked before
-bytes become readable. The `RemoteCache` comment clarifies this existing
-contract. No type or method signature changed.
+Invariant: only the bound imported attempt can publish output or artifact bytes,
+and a refused record update cannot replace an earlier committed result.
 
-`FuzzRemoteCacheSelectsServerDefaultRef` passes 1,000 generated cases. Empty,
-manual, path-like and control-character local refs cannot affect the server's
-selector. Memo and depcache both resolve the verified default record.
+The signer and record callbacks are contract fakes. The byte paths use real
+filesystem handlers or the real S3 signer and SDK with a fake object service.
+These checks do not establish controller intake, local provenance,
+`trust_local_builds`, terminal transitions, published logs or CLI exit behavior.
+Those remain integration work for W1/W2/W3/W9. No runtime API or contract changed.
 
-Two new acceptance cells each pass 128 generated cases through signed upload,
-immutable physical publication, default-only lookup, verified download and
-archive extraction. They refuse forged repository/ref/key records, preserve
-existing files after equal-length corruption or missing objects, and leave
-empty destinations absent on failure. Failed work saves no local archive.
-Successful cold work saves locally and restores with the remote object still
-missing. Read bindings have no upload or record-write implementation.
+## Deleted and ported
 
-The filesystem proof uses real files and signed HTTP handlers. S3 uses the real
-signer and SDK with a fake object service. Record and authentication callbacks
-are contract fakes. These proofs close the W7 adapter gap without waiting for
-W2's authenticated transport. They do not claim native controller or host
-integration.
+Deleted **0 runtime lines** in this continuation. The remaining legacy output
+and log paths have live controller, host and CLI callers. Their final bindings
+are still owned by other areas as listed below. Earlier cache-service,
+filesystem append-log and raw-factory cuts were not repeated.
 
-## Deleted
+No new parked source test is claimed ported. The existing storage ports still
+pass. The two new cells cover the byte/record portion of publication using the
+final contract instead of invoking the legacy publication path.
 
-Removed `LogStore.Append`, `LogStore.DeleteRun`, `NodeLogs.Append`,
-`NodeLogs.DeleteRun`, the matching `segmentLogs` methods and the unused
-`storage.SafeLogIDs`. These four runtime files delete **41 lines** and add two
-replacement GoDoc lines. The controller's internal run-deletion path still
-owns physical log cleanup. Production callers compile. No compatibility method remains.
-
-The storage API snapshot is regenerated, including earlier W7 manifest-adapter
-and usage changes that were missing from it. The shared client snapshot removes
-only the two deleted methods. Its unrelated stale `ResetNodeForAutoRetry` entry
-remains for W3/W9/lead. Source docs, the migration note and embedded copies are
-updated. Earlier filesystem log, cache-service and raw-factory cuts are not
-repeated or recounted as new deletions.
-
-## Acceptance and ports
+## Acceptance and verification
 
 New passing cells:
 
-- `TestStorage/storage-local-remote-cache-opt-in/filesystem-archives`
-- `TestStorage/storage-local-remote-cache-opt-in/s3-archives`
+- `TestStorage/storage-publish-one-way/filesystem-components`
+- `TestStorage/storage-publish-one-way/s3-components`
 
-The full `TestStorage` run passes with **74 passing test events** and **425
-skips**. The skips remain 424 native skeleton cells and the known W1 physical
-log-slot mismatch. Both new archive cells also pass with the race detector.
-No new parked source function is claimed ported. Earlier output, artifact,
-memo, retention, receipt, archive and segmented-log ports remain passing.
+Both pass with race detection. Full `TestStorage` reports **76 passing test
+events and 425 skips**. The skips remain 424 native skeleton cells and W1's
+known physical log-slot mismatch. No native matrix cell was reclassified.
 
-## Verification
-
-Go commands used `GOWORK=off GOFLAGS=-buildvcs=false GOMAXPROCS=4`,
+Go commands use `GOWORK=off GOFLAGS=-buildvcs=false GOMAXPROCS=4`,
 `GOCACHE=/tmp/sw-astra-W7/cache`, `GOTMPDIR=/tmp/sw-astra-W7/gotmp` and
-`TMPDIR=/tmp/sw-astra-W7/tmp`. All tests used at most `-p 4`.
+`TMPDIR=/tmp/sw-astra-W7/tmp`. Tests use at most `-p 4`.
 
 Passed:
 
 - `go build -p 4 ./...` for the whole repository.
 - `go test -p 4 ./internal/blob/... ./internal/artifacts ./internal/depcache ./pkg/storage/...`.
 - `go test -json -p 4 ./tests/acceptance -run '^TestStorage$' -count=1`.
-- `go test -race -p 4 ./tests/acceptance -run '^TestStorage/storage-local-remote-cache-opt-in/(filesystem|s3)-archives$' -count=1`.
-- `go test -p 4 ./internal/blob -run '^$' -fuzz '^FuzzRemoteCacheSelectsServerDefaultRef$' -fuzztime=1000x`.
-- Vet for those storage packages, acceptance, `pkg/controller` and `pkg/controller/client`.
+- `go test -race -p 4 ./tests/acceptance -run '^TestStorage/storage-publish-one-way/(filesystem|s3)-components$' -count=1`.
+- `go vet -p 4` for the storage packages above and `./tests/acceptance`.
 - `TestPkgDocsContentMatchesDocsRoot` and `TestEmbeddedChangelogMatchesRoot`.
-- `go run ./internal/commentcheck -base main .`, clean across 1114 files.
+- `go run ./internal/commentcheck -base main .`.
 - `go run ./internal/sleepcheck -base HEAD .`.
 - Formatting and diff whitespace checks.
 
-The first archive run failed on both backends before the ref-selector fix.
-After the fix, both cells passed, followed by the full storage suite and race
-run. A Go overlay restoring only `remote.go` from HEAD makes the new fuzz seeds
-fail on empty and control-character refs. One combined regex ran no acceptance
-tests and is not counted as evidence.
-The full acceptance run above exercised the final refactored tests.
+The first publication run refused the fixture because it omitted repository/ref
+scope. Correcting the fixture made both backend cells pass. No product defect
+or runtime fix is claimed from that failure.
 
-Bootstrap discovery ran the installed `sparkwing info --for-agent`. No candidate
-runtime, pipeline, Git write, release, native platform, PostgreSQL or external
-service ran. The lead owns native integration and independent
-review. Scratch is deleted before the final response.
+The supplied Xwing environment was reused. No Sparkwing binary, pipeline,
+Git write, deployment or external service ran. Scratch is deleted before the
+final response. The lead retains independent review, committing and native QA.
+There is no adopter-facing behavior change or changelog impact.
 
 ## Amendment and handoff ledger
 
@@ -142,23 +119,18 @@ are open.
 
 ## Shared files and friction
 
-Shared runtime caller edits are only `pkg/controller/log_reads.go` and
-`pkg/controller/client/logs.go`. Both remove the unused methods.
+Shared acceptance edits are `tests/acceptance/storage_test.go`,
+`storage_materialization_test.go` and new `storage_publication_test.go`.
+The shared record fake now supports a refused commit without altering earlier
+materialization cases. Shared docs are `handoffs.md` and this report.
+The W7-owned `internal/blob/README.md` describes the component evidence.
+No caller in another runtime package changed.
 
-Shared acceptance edits are `tests/acceptance/storage_test.go` and new
-`tests/acceptance/storage_remote_archives_test.go`. Shared generated API files
-are `.apidiff/pkg_storage.txt` and `.apidiff/pkg_controller_client.txt`.
-
-Shared docs are `CHANGELOG.md`, `VERSIONING.md`, `pkg/docs/changelog.md`,
-`docs/migrations/_unreleased.md`, its embedded mirror, `handoffs.md` and this
-report. Other edits belong to W7's blob and storage packages.
-
-No cross-area contract change, product question, customer limit, setting,
-dependency, environment variable or new runtime mechanism is requested.
-Friction remains the W1 layouts and W2's unimplemented authenticated adapters.
-The full API snapshot also retains unrelated drift outside W7's owned surface.
-The supplied Xwing environment was reused. The lead retains committing,
-landing and the remaining integration work.
+No cross-area contract change or open product question is requested. No runtime
+mechanism, limit, setting, dependency or environment variable was added.
+The remaining friction is W1's result/memo/log layouts and W2's unimplemented
+bindings. All W7-owned contract components have implementations and fake-backed
+proofs. W7 remains incomplete until real bindings replace the live legacy paths.
 
 <!-- design:end -->
 

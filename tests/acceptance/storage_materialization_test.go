@@ -52,12 +52,16 @@ func (s *storageMaterializationSigner) Commit(ctx context.Context, q blob.Commit
 
 type storageMaterializationRecords struct {
 	blob.RecordStore
-	results map[blob.RecordKey]blob.RecordLookupResult
-	hit     blob.MemoHit
-	copyErr error
+	results   map[blob.RecordKey]blob.RecordLookupResult
+	hit       blob.MemoHit
+	copyErr   error
+	commitErr error
 }
 
 func (r *storageMaterializationRecords) CommitRecord(_ context.Context, q blob.CommitRecordRequest) (blob.Record, error) {
+	if r.commitErr != nil {
+		return blob.Record{}, r.commitErr
+	}
 	record := blob.Record{Key: q.Key, Digest: q.Digest, Source: q.Source}
 	r.results[q.Key] = blob.RecordLookupResult{Found: true, Record: record, Members: slices.Clone(q.Members)}
 	return record, nil
