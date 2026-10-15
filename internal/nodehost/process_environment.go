@@ -62,12 +62,24 @@ func (e SDKEnvironment) jobEnvironments(ctx context.Context, kind procenv.Kind, 
 	if err := json.Unmarshal(row.Spec, &job); err != nil || job.ID != nodeID {
 		return nil, nil, executorError(apierr.PlanDrift, "SDK environment has an invalid job declaration")
 	}
-	assignments := make([]procenv.Assignment, 0, len(job.Env))
-	for name, value := range job.Env {
+	runtime := sdkRuntime(executorRunContext(spec), runner)
+	// safety: retry seals retain the source run ID; runtime identity belongs to the destination row.
+	runtime.RunID = accepted.RunID
+	runtime.JobID = nodeID
+	if err := context.Cause(ctx); err != nil {
+		return nil, nil, err
+	}
+	return projectJobEnvironment(kind, job.Env, runtime, cleanup, e.Split, func(kind procenv.Kind, runtime procenv.Runtime) ([]string, error) {
+		return e.build(ctx, kind, spec.Request.Request.Env, runtime)
+	})
+}
+
+func projectJobEnvironment(kind procenv.Kind, env map[string]nodeproto.EnvValue, runtime procenv.Runtime, cleanup bool, split func([]procenv.Assignment) (procenv.JobEnv, error), build func(procenv.Kind, procenv.Runtime) ([]string, error)) ([]string, []string, error) {
+	assignments := make([]procenv.Assignment, 0, len(env))
+	for name, value := range env {
 		assignments = append(assignments, procenv.Assignment{Name: name, Value: value.Value, Startup: value.Startup})
 	}
 	sort.Slice(assignments, func(i, j int) bool { return assignments[i].Name < assignments[j].Name })
-	split := e.Split
 	if split == nil {
 		split = procenv.SplitJobEnv
 	}
@@ -75,39 +87,33 @@ func (e SDKEnvironment) jobEnvironments(ctx context.Context, kind procenv.Kind, 
 	if err != nil {
 		return nil, nil, err
 	}
-	runtime := sdkRuntime(executorRunContext(spec), runner)
-	// safety: retry seals retain the source run ID; runtime identity belongs to the destination row.
-	runtime.RunID = accepted.RunID
-	runtime.JobID, runtime.Startup = nodeID, jobEnv.Startup
-	if err := context.Cause(ctx); err != nil {
-		return nil, nil, err
-	}
+	runtime.Startup = jobEnv.Startup
 	if kind == procenv.StepTool || kind == procenv.Cleanup {
 		runtime.Startup = append(runtime.Startup, jobEnv.Body...)
-		attempt, err := e.build(ctx, procenv.Attempt, spec.Request.Request.Env, runtime)
+		attempt, err := build(procenv.Attempt, runtime)
 		if err != nil {
 			return nil, nil, err
 		}
-		env, err := e.build(ctx, kind, spec.Request.Request.Env, procenv.Runtime{AttemptEnv: attempt})
+		env, err := build(kind, procenv.Runtime{AttemptEnv: attempt})
 		return env, nil, err
 	}
-	env, err := e.build(ctx, kind, spec.Request.Request.Env, runtime)
+	startup, err := build(kind, runtime)
 	if err != nil || !cleanup {
-		return env, nil, err
+		return startup, nil, err
 	}
-	complete := env
+	complete := startup
 	if len(jobEnv.Body) != 0 {
 		runtime.Startup = append(slices.Clone(runtime.Startup), jobEnv.Body...)
-		complete, err = e.build(ctx, procenv.Attempt, spec.Request.Request.Env, runtime)
+		complete, err = build(procenv.Attempt, runtime)
 		if err != nil {
 			return nil, nil, err
 		}
 	}
-	complete, err = e.build(ctx, procenv.Cleanup, spec.Request.Request.Env, procenv.Runtime{AttemptEnv: complete})
+	complete, err = build(procenv.Cleanup, procenv.Runtime{AttemptEnv: complete})
 	if err != nil {
 		return nil, nil, err
 	}
-	return env, complete, nil
+	return startup, complete, nil
 }
 
 func (e SDKEnvironment) build(ctx context.Context, kind procenv.Kind, seal runspec.EnvSnapshot, runtime procenv.Runtime) ([]string, error) {

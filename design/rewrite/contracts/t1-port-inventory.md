@@ -1,5 +1,12 @@
 # Acceptance test port inventory
 
+The [W3 runtime ingress continuation](w3-ingress-lease-continuation.md) ports
+three claimed-heartbeat assertions to `lease.Keeper`, sends the existing SDK
+generator fixtures through the scheduler's raw-byte ingress, and migrates the
+startup/body/dry-run assertions to procenv. The debug wait now reports an early
+host failure. It adds no acceptance cell. Store-backed legacy runtime ports and
+native placements remain open.
+
 This repository-owned inventory records every parked source function and its required port. Acceptance destinations name existing skeletons; package destinations name required focused proofs to implement with their owning area. A scenario is complete only when every mapped case is implemented. Product skeletons remain skipped until their required areas exist; a wrong result must fail once activated.
 
 Branch labels below retain the descriptive suffix of each source branch. Tracker prefixes are omitted because repository files cannot contain tracker identifiers. The full Git revision identifies the exact branch snapshot independently of ref movement. Resolve source files with `git show <revision>:<file>`; removed predecessors are present before the branch comparison range. This inventory requires no personal filesystem path or live branch ref.

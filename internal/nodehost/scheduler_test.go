@@ -66,10 +66,10 @@ func (f *fakeExec) ran(id string) bool {
 func hostDoc(t *testing.T, ctx context.Context, st storage.StateStoreOld, doc nodeproto.PlanDoc, exec Executor) RunResult {
 	t.Helper()
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
-		t.Fatal(err)
+		return RunResult{Status: "failed", Err: err}
 	}
 	if err := validateNodes(doc.Jobs, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err != nil {
-		t.Fatalf("validate: %v", err)
+		return RunResult{Status: "failed", Err: err}
 	}
 	return hostAccepted(t, ctx, st, doc, exec)
 }
@@ -81,12 +81,23 @@ func hostAccepted(t *testing.T, ctx context.Context, st storage.StateStoreOld, d
 	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
 	if err := s.add(ctx, ctx, doc.Jobs, nil); err != nil {
-		t.Fatalf("add: %v", err)
+		return RunResult{Status: "failed", Err: err}
 	}
 	s.loop(ctx)
 	res.Order = s.order
 	res.Status, res.Err = s.verdict(ctx)
 	return res
+}
+
+func awaitHostedResult(t *testing.T, ctx context.Context, done <-chan RunResult) RunResult {
+	t.Helper()
+	select {
+	case result := <-done:
+		return result
+	case <-ctx.Done():
+		t.Fatal("host did not finish:", context.Cause(ctx))
+		return RunResult{}
+	}
 }
 
 func nodeRow(t *testing.T, st *store.Store, id string) *store.Node {
@@ -302,7 +313,8 @@ func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
 	}}}
 	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
 		{ID: "base", Requires: []string{"linux"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "gpu", Needs: deps("base"), NeedsIfPresent: deps("extra"),
+		{
+			ID: "gpu", Needs: deps("base"), NeedsIfPresent: deps("extra"),
 			Requires: []string{"gpu", "linux", "big"}, Prefers: []string{"fast"}, Resources: &nodeproto.ResourceSpec{Cores: new(float64(4)), MemoryBytes: new(int64(1 << 30))}, Steps: []nodeproto.StepSpec{{ID: "body"}},
 		},
 	}}

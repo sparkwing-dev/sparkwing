@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -50,9 +51,14 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 	if cfg.Sink == nil {
 		cfg.Sink = discardSink{}
 	}
-	scfg := dryRunSession(cfg, req.Run.DryRun)
+	scfg := cfg
 	scfg.Binding = nil
 	scfg.HoldOutput, scfg.Masker = true, req.Masker
+	var err error
+	scfg.Env, err = buildSessionEnvironment(scfg, procenv.Plan, sdkRuntime(req.Run, scfg.Runner))
+	if err != nil {
+		return PlannedRun{}, maskErr(req.Masker, err)
+	}
 	sess, err := StartSession(ctx, scfg)
 	if err != nil {
 		return PlannedRun{}, err

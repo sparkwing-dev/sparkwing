@@ -1,5 +1,10 @@
 # C3 protocol and SDK contract
 
+[Runtime ingress and lease continuation](w3-ingress-lease-continuation.md)
+connects the retained scheduler to raw-byte validation and common environment
+projection and removes another claim-heartbeat loop. Native caller migration
+and legacy runtime deletion remain open.
+
 [Native assembly and router cutover](w3-router-native-continuation.md) joins the
 owner and claimed-node host around one executor, transport, engine resolver and
 environment builder. The registered service router uses the v2 routes and errors.

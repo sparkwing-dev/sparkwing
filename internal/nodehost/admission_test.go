@@ -325,15 +325,17 @@ func recv(t *testing.T, ctx context.Context, c <-chan string) string {
 	}
 }
 
-func awaitAdmission(t *testing.T, ctx context.Context, event <-chan string, done <-chan RunResult) {
+func awaitHostedEvent(t *testing.T, ctx context.Context, event <-chan string, done <-chan RunResult) string {
 	t.Helper()
 	select {
-	case <-event:
+	case value := <-event:
+		return value
 	case result := <-done:
-		t.Fatalf("host returned before admission: %v", result.Err)
+		t.Fatalf("host returned before its event: %v", result.Err)
 	case <-ctx.Done():
-		t.Fatal("admission did not make progress:", context.Cause(ctx))
+		t.Fatal("host event did not arrive:", context.Cause(ctx))
 	}
+	return ""
 }
 
 func TestAdmissionLeasesHostAroundEachNode(t *testing.T) {
@@ -430,10 +432,10 @@ func TestAdmissionDaemonGroupBoundsParallelNodes(t *testing.T) {
 	doc := nodeproto.PlanDoc{Jobs: grouped("box", "queue", 2, 0, "a", "b", "c", "d")}
 	done := make(chan RunResult, 1)
 	go func() { done <- runAdmitted(t, ctx, st, doc, &Admission{Daemon: d}, g.exec) }()
-	awaitAdmission(t, ctx, g.entered, done)
-	awaitAdmission(t, ctx, g.entered, done)
-	awaitAdmission(t, ctx, d.queued, done)
-	awaitAdmission(t, ctx, d.queued, done)
+	awaitHostedEvent(t, ctx, g.entered, done)
+	awaitHostedEvent(t, ctx, g.entered, done)
+	awaitHostedEvent(t, ctx, d.queued, done)
+	awaitHostedEvent(t, ctx, d.queued, done)
 	close(g.gate)
 	var res RunResult
 	select {
@@ -463,10 +465,10 @@ func TestAdmissionStoreGroupBoundsParallelNodes(t *testing.T) {
 	doc := nodeproto.PlanDoc{Jobs: grouped("", "queue", 2, 0, "a", "b", "c", "d")}
 	done := make(chan RunResult, 1)
 	go func() { done <- runAdmitted(t, ctx, st, doc, &Admission{Slots: slots}, g.exec) }()
-	awaitAdmission(t, ctx, g.entered, done)
-	awaitAdmission(t, ctx, g.entered, done)
-	awaitAdmission(t, ctx, slots.queued, done)
-	awaitAdmission(t, ctx, slots.queued, done)
+	awaitHostedEvent(t, ctx, g.entered, done)
+	awaitHostedEvent(t, ctx, g.entered, done)
+	awaitHostedEvent(t, ctx, slots.queued, done)
+	awaitHostedEvent(t, ctx, slots.queued, done)
 	close(g.gate)
 	var res RunResult
 	select {

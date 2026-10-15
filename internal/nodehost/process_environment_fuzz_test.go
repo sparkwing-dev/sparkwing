@@ -30,6 +30,10 @@ func FuzzSDKCleanupEnvironment(f *testing.F) {
 		st.row.Spec, _ = json.Marshal(job)
 		policy := SDKEnvironment{Base: procenv.Base{Local: true, Captured: captured}, Store: st}
 		env, complete, err := policy.jobEnvironments(t.Context(), procenv.Attempt, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner, true)
+		legacyEnv, legacyComplete, legacyErr := attemptEnvironments(SessionConfig{Env: captured, Runner: input.GrantedRunner}, &NodeRun{Run: &Run{ID: input.Accepted.RunID, Context: executorRunContext(spec)}, Plan: job})
+		if (err == nil) != (legacyErr == nil) || !slices.Equal(env, legacyEnv) || !slices.Equal(complete, legacyComplete) {
+			t.Fatal("host entry points disagree on their environment projection")
+		}
 		if err != nil {
 			if len(env) != 0 || len(complete) != 0 {
 				t.Fatal("refused projection returned a partial environment")

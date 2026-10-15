@@ -15,7 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
@@ -329,17 +331,9 @@ func (h *claimedNodeHost) RunNode(ctx context.Context, req runner.Request) runne
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
 	}
 	ctx = store.WithNodeClaimFence(store.WithoutClaimFences(ctx), fence)
-	ctx, abandon := context.WithCancelCause(ctx)
-	defer abandon(nil)
-	beatCtx, stopBeat := context.WithCancel(ctx)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		heartbeatDispatchedClaim(beatCtx, client.NewWithToken(h.controllerURL, nil, n.ClaimToken),
-			req.RunID, req.NodeID, fence, store.MaxLeaseDuration, abandon, h.logger)
-	}()
-	defer func() { stopBeat(); wg.Wait() }()
+	ctx, stop := nodeClaimKeeper(client.NewWithToken(h.controllerURL, nil, n.ClaimToken),
+		req.RunID, req.NodeID, fence, store.MaxLeaseDuration).Run(ctx)
+	defer stop()
 	grant := RequestRunCacheGrant(ctx, h.controllerURL, n.ClaimToken, req.RunID, h.logger)
 	art, err := supervisorArtifactStore(ctx, h.controllerURL, req.RunID, "", grant)
 	if err == nil {
@@ -348,15 +342,31 @@ func (h *claimedNodeHost) RunNode(ctx context.Context, req runner.Request) runne
 			entry: h.entry, dir: h.dir, controllerURL: h.controllerURL, token: n.ClaimToken,
 			runID: req.RunID, nodeID: req.NodeID, cacheGrant: grant, artifacts: art, logger: h.logger,
 		}); err == nil {
+			res.Err = errors.Join(res.Err, context.Cause(ctx))
 			return res
 		}
 	}
+	err = errors.Join(err, context.Cause(ctx))
 	// safety: only this claim may write the node now, so a host that never started finishes the row under it.
 	if ferr := client.NewWithToken(h.controllerURL, nil, n.ClaimToken).FinishNodeWithReason(context.WithoutCancel(ctx),
 		req.RunID, req.NodeID, string(sparkwing.Failed), nodehost.RecordedErrText(err), nil, store.FailureUnknown, nil); ferr != nil {
 		h.logger.Warn("trigger host: finish a node whose host never started", "run_id", req.RunID, "node_id", req.NodeID, "err", ferr)
 	}
 	return runner.Result{Outcome: sparkwing.Failed, Err: err}
+}
+
+func nodeClaimKeeper(ctrl *client.Client, runID, nodeID string, fence store.NodeClaimFence, duration time.Duration) lease.Keeper {
+	return lease.Keeper{Interval: store.DispatchedHeartbeatInterval, Lease: duration, Renew: func(ctx context.Context) (lease.Beat, error) {
+		err := ctrl.HeartbeatNodeClaim(store.WithNodeClaimFence(ctx, fence), runID, nodeID, fence.HolderID, duration, nil)
+		switch {
+		case errors.Is(err, store.ErrClaimCancelRequested):
+			return lease.Beat{CancelRequested: true}, nil
+		case errors.Is(err, store.ErrLockHeld) || client.IsTokenDead(err):
+			return lease.Beat{}, &apierr.Error{Code: apierr.LockHeld, Message: "job claim ended"}
+		default:
+			return lease.Beat{}, err
+		}
+	}}
 }
 
 // safety: a run host's eval and approval lines go to this runner's own log,

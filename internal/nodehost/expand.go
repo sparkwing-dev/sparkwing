@@ -1,6 +1,7 @@
 package nodehost
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 
 type expansion struct {
 	closure string
+	raw     json.RawMessage
 	nodes   []nodeproto.JobSpec
 	err     error
 	// safety: set when err is a recorded batch the generator no longer reproduces; nodes are what it recorded.
@@ -37,35 +39,143 @@ func generate(ctx context.Context, sess *Session, n *NodeRun) []expansion {
 	}
 	out := make([]expansion, 0, len(n.Plan.Closures.Generate))
 	for _, id := range n.Plan.Closures.Generate {
-		nodes, err := evalGenerator(ctx, sess, id)
-		out = append(out, expansion{closure: id, nodes: nodes, err: err})
+		raw, err := evalGenerator(ctx, sess, id)
+		out = append(out, expansion{closure: id, raw: raw, err: err})
 	}
 	return out
 }
 
 // safety: generated jobs remain declarations; the host derives their stored hashes.
-func evalGenerator(ctx context.Context, sess *Session, closure string) ([]nodeproto.JobSpec, error) {
+func evalGenerator(ctx context.Context, sess *Session, closure string) (json.RawMessage, error) {
 	var res nodeproto.EvalResult
 	if err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: closure}, &res); err != nil {
 		return nil, err
 	}
-	value, err := evalValue(res, "generate")
+	return evalValue(res, "generate")
+}
+
+func validateExpansions(run *Run, source string, existing []nodeproto.JobSpec, expansions []expansion) ([]expansion, error) {
+	var groups []string
+	for _, job := range existing {
+		if job.ID == source {
+			groups = job.Closures.Generate
+		}
+	}
+	return validateExpansionBatches(run, source, existing, expansions, groups)
+}
+
+func validateExpansionBatches(run *Run, source string, existing []nodeproto.JobSpec, expansions []expansion, groups []string) ([]expansion, error) {
+	ordered := make([]expansion, 0, len(groups))
+	counts := make([]int, 0, len(groups))
+	jobs := []json.RawMessage{}
+	for _, group := range groups {
+		i := slices.IndexFunc(expansions, func(e expansion) bool { return e.closure == group })
+		if i < 0 {
+			return nil, invalid("generator %s did not run", group)
+		}
+		e := expansions[i]
+		if e.drifted {
+			return expansions, nil
+		}
+		if e.err != nil {
+			return nil, e.err
+		}
+		raw := e.raw
+		if raw == nil {
+			var err error
+			raw, err = json.Marshal(append([]nodeproto.JobSpec{}, e.nodes...))
+			if err != nil {
+				return nil, err
+			}
+		}
+		var members []json.RawMessage
+		if len(bytes.TrimSpace(raw)) == 0 || bytes.TrimSpace(raw)[0] != '[' || json.Unmarshal(raw, &members) != nil {
+			return nil, invalid("generator %s returned no jobs array", group)
+		}
+		ordered, counts, jobs = append(ordered, e), append(counts, len(members)), append(jobs, members...)
+	}
+	body, err := json.Marshal(struct {
+		Jobs []json.RawMessage `json:"jobs"`
+	}{jobs})
 	if err != nil {
 		return nil, err
 	}
-	var raws []json.RawMessage
-	if err := json.Unmarshal(value, &raws); err != nil {
-		return nil, invalid("generator %s returned no array of node documents: %v", closure, err)
+	validation := run.validation
+	validation.Expansion, validation.SourceJob = true, source
+	validation.ExistingJobs, validation.ExistingConcurrency = existing, run.Doc.Concurrency
+	plan, err := nodeproto.ValidatePlan(body, validation)
+	if err != nil {
+		return nil, err
 	}
-	nodes := make([]nodeproto.JobSpec, 0, len(raws))
-	for i, raw := range raws {
-		var node nodeproto.JobSpec
-		if err := json.Unmarshal(raw, &node); err != nil {
-			return nil, invalid("generator %s node %d: %v", closure, i, err)
+	offset := 0
+	for i, count := range counts {
+		ordered[i].nodes = plan.Jobs[offset : offset+count]
+		for _, job := range ordered[i].nodes {
+			if !slices.Contains(job.Groups, ordered[i].closure) {
+				return nil, invalid("generated job %s does not belong to its evaluated generator", job.ID)
+			}
 		}
-		nodes = append(nodes, node)
+		offset += count
 	}
-	return nodes, nil
+	return ordered, nil
+}
+
+func replayGeneratorJobs(ctx context.Context, n *NodeRun, closure string, raw json.RawMessage) ([]nodeproto.JobSpec, error) {
+	jobs := slices.Clone(n.Run.Doc.Jobs)
+	lister, ok := baseState(n.Run.State).(nodeLister)
+	if !ok {
+		return nil, invalid("generator reconstruction requires persisted declarations")
+	}
+	rows, err := lister.ListNodes(ctx, n.Run.ID)
+	if err != nil {
+		return nil, err
+	}
+	expected := map[string]*store.Node{}
+	for _, row := range rows {
+		if row == nil || row.RunID != n.Run.ID {
+			return nil, executorError(apierr.PlanDrift, "generator reconstruction has a foreign row")
+		}
+		if row.Generated == nil {
+			continue
+		}
+		var job nodeproto.JobSpec
+		if err := json.Unmarshal(row.Generated.Spec, &job); err != nil || job.ID != row.NodeID || row.SpecHash == "" || jobHash(job) != row.SpecHash {
+			return nil, invalid("invalid persisted generator declaration")
+		}
+		if row.Generated.Generator == closure {
+			if expected[job.ID] != nil {
+				return nil, executorError(apierr.PlanDrift, "generator reconstruction has duplicate accepted members")
+			}
+			expected[job.ID] = row
+			continue
+		}
+		jobs = append(jobs, job)
+	}
+	for _, row := range expected {
+		if row.Generated.Batch != len(expected) {
+			return nil, executorError(apierr.PlanDrift, "generator replay has an incomplete accepted batch")
+		}
+	}
+	for _, job := range jobs {
+		if !slices.Contains(job.Closures.Generate, closure) {
+			continue
+		}
+		validated, err := validateExpansionBatches(n.Run, job.ID, jobs, []expansion{{closure: closure, raw: raw}}, []string{closure})
+		if err != nil {
+			return nil, err
+		}
+		if len(validated[0].nodes) != len(expected) {
+			return nil, executorError(apierr.PlanDrift, "generator replay changed the accepted member set")
+		}
+		for _, generated := range validated[0].nodes {
+			row := expected[generated.ID]
+			if row == nil || row.Generated.Source != job.ID || row.SpecHash != jobHash(generated) {
+				return nil, executorError(apierr.PlanDrift, "generator replay changed a persisted declaration")
+			}
+		}
+		return validated[0].nodes, nil
+	}
+	return nil, invalid("recorded generator is absent from its source")
 }
 
 // safety: a generated node's code is in no process until its generators run
@@ -74,8 +184,11 @@ func evalGenerator(ctx context.Context, sess *Session, closure string) ([]nodepr
 func regenerate(ctx context.Context, sess *Session, n *NodeRun) error {
 	var nodes []nodeproto.JobSpec
 	for _, closure := range n.Generators {
-		var err error
-		if nodes, err = evalGenerator(ctx, sess, closure); err != nil {
+		raw, err := evalGenerator(ctx, sess, closure)
+		if err != nil {
+			return err
+		}
+		if nodes, err = replayGeneratorJobs(ctx, n, closure, raw); err != nil {
 			return err
 		}
 	}
@@ -101,12 +214,21 @@ func (s *scheduler) expand(ctx context.Context, source string, res Result) {
 	if i < 0 || len(s.nodes[i].Closures.Generate) == 0 {
 		return
 	}
+	var validationErr error
+	if res.Outcome.OK() {
+		res.expansions, validationErr = validateExpansions(s.run, source, s.nodes, res.expansions)
+		if validationErr != nil {
+			s.drifts = append(s.drifts, validationErr)
+		}
+	}
 	for _, id := range s.nodes[i].Closures.Generate {
 		j := slices.IndexFunc(res.expansions, func(e expansion) bool { return e.closure == id })
 		var err error
 		switch {
 		case !res.Outcome.OK():
 			err = fmt.Errorf("expansion source %q did not succeed (outcome=%s)", source, res.Outcome)
+		case validationErr != nil:
+			err = validationErr
 		case j < 0:
 			err = fmt.Errorf("generator %s did not run", id)
 		case res.expansions[j].drifted:
@@ -140,19 +262,8 @@ func (s *scheduler) endDrifted(ctx context.Context, source string, e expansion) 
 	}
 }
 
-// safety: a generated node that does not need its source could start before
-// the output it was generated from is recorded, so the batch is refused.
 func (s *scheduler) addGenerated(ctx context.Context, source string, e expansion) error {
-	ids := make(map[string]bool, len(e.nodes))
-	for _, n := range e.nodes {
-		ids[n.ID] = true
-	}
-	for _, n := range e.nodes {
-		if !slices.Contains(n.Needs, source) && !ids[n.OnFailureOf] {
-			return invalid("generator %s returned node %s, which does not need its source %s", e.closure, n.ID, source)
-		}
-	}
-	if err := s.add(ctx, context.WithoutCancel(ctx), e.nodes, &expansionFrom{source: source, closure: e.closure}); err != nil {
+	if err := s.recordNodes(ctx, context.WithoutCancel(ctx), e.nodes, &expansionFrom{source: source, closure: e.closure}); err != nil {
 		return err
 	}
 	if s.addedBy == nil {
@@ -324,6 +435,19 @@ func (s *scheduler) recordedExpansions(ctx context.Context, n nodeproto.JobSpec,
 			}
 		}
 	}
+	if genErr == nil && len(regenerated) > 0 {
+		existing := slices.Clone(s.nodes)
+		if !slices.ContainsFunc(existing, func(job nodeproto.JobSpec) bool { return job.ID == n.ID }) {
+			existing = append(existing, n)
+		}
+		// safety: complete batches already passed acceptance and need no second evaluation.
+		for _, batch := range batches {
+			if batch.complete {
+				regenerated = append(regenerated, batch.expansion)
+			}
+		}
+		regenerated, genErr = validateExpansions(s.run, n.ID, existing, regenerated)
+	}
 	result := make([]expansion, 0, len(batches))
 	for _, b := range batches {
 		if b.complete {
@@ -367,6 +491,6 @@ func reconcileRecorded(b recordedBatch, regenerated []expansion, genErr error) e
 			return e
 		}
 	}
-	e.nodes = regenerated[j].nodes
+	e.nodes, e.raw = regenerated[j].nodes, regenerated[j].raw
 	return e
 }

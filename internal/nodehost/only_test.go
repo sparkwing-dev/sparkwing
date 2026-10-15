@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -71,10 +72,19 @@ func TestOnlyRefusesWhatTheDispatcherRefused(t *testing.T) {
 }
 
 func TestDryRunEnvHandsTheSwitchToTheNode(t *testing.T) {
-	if got := dryRunEnv(&NodeRun{Run: &Run{Context: nodeproto.RunContext{DryRun: true}, validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}}); !slices.Equal(got, []string{"SPARKWING_DRY_RUN=1"}) {
-		t.Errorf("env = %v, want the dry-run switch", got)
-	}
-	if got := dryRunEnv(&NodeRun{Run: &Run{validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}}); got != nil {
-		t.Errorf("env = %v, want nothing for a real run", got)
+	for _, dryRun := range []bool{true, false} {
+		cfg := Config{Session: SessionConfig{Env: []string{}}, Run: nodeproto.RunContext{DryRun: dryRun}}
+		planned, err := planSession(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		attempt, _, err := attemptEnvironments(cfg.Session, &NodeRun{Run: &Run{Context: cfg.Run}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "SPARKWING_DRY_RUN=" + strconv.FormatBool(dryRun)
+		if !slices.Contains(planned.Env, want) || !slices.Contains(attempt, want) {
+			t.Fatalf("plan=%v attempt=%v, want %s", planned.Env, attempt, want)
+		}
 	}
 }

@@ -245,7 +245,10 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		masker = cfg.Attempts.Masker
 	}
 	cfg.State, cfg.Logger = maskState(cfg.State, masker), maskLogger(cfg.Logger, masker)
-	scfg := planSession(cfg)
+	scfg, err := planSession(cfg)
+	if err != nil {
+		return RunResult{}, maskErr(masker, err)
+	}
 	scfg.HoldOutput, scfg.Masker = true, masker
 	sess, err := StartSession(ctx, scfg)
 	if err != nil {
@@ -610,6 +613,10 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.JobSpec
 	if err := validateNodes(append(slices.Clone(s.nodes), nodes...), s.run.validation); err != nil {
 		return err
 	}
+	return s.recordNodes(ctx, writeCtx, nodes, from)
+}
+
+func (s *scheduler) recordNodes(ctx, writeCtx context.Context, nodes []nodeproto.JobSpec, from *expansionFrom) error {
 	existing, err := s.resumedRows(writeCtx, nodes)
 	if err != nil {
 		return err
