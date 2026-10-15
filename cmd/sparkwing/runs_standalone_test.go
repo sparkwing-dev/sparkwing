@@ -67,28 +67,6 @@ func TestRunJobsReceipt_ReadsAStandaloneRun(t *testing.T) {
 	}
 }
 
-func TestRunsCancel_StandaloneRunRefusesWithoutACommand(t *testing.T) {
-	paths := standaloneHome(t)
-	out := captureStdout(t, func() {
-		t.Setenv("SPARKWING_HOME", paths.Root)
-		err := runRunsCancel(context.Background(), []string{"--run", "run-alone"})
-		if err == nil {
-			t.Fatal("expected cancel to fail for a standalone run")
-		}
-	})
-	if !strings.Contains(out, filepath.Join(paths.StandaloneDir(), "state.db")) {
-		t.Fatalf("cancel did not name the standalone store:\n%s", out)
-	}
-	if !strings.Contains(out, "cannot cancel") {
-		t.Fatalf("cancel did not say it cannot cancel a standalone run:\n%s", out)
-	}
-	for _, banned := range []string{"SPARKWING_HOME", "not found"} {
-		if strings.Contains(out, banned) {
-			t.Fatalf("cancel output still contains %q:\n%s", banned, out)
-		}
-	}
-}
-
 func TestRunsRetry_StandaloneRunReachesTheRefusalWithNoDashboard(t *testing.T) {
 	standaloneHome(t)
 	err := runRunsRetry(context.Background(), []string{"--run", "run-alone", "--failed"})

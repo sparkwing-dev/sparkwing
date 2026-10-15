@@ -11,11 +11,13 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
 type planPreviewDoc struct {
@@ -59,65 +61,14 @@ type pipelinePlanArgs struct {
 }
 
 func parsePipelinePlanArgs(args []string) (pipelinePlanArgs, bool, error) {
-	var parsed pipelinePlanArgs
-	for i := 0; i < len(args); i++ {
-		tok := args[i]
-		switch {
-		case tok == "-h", tok == "--help":
-			return parsed, true, nil
-		case tok == "--":
-			parsed.passthrough = append(parsed.passthrough, args[i+1:]...)
-			return parsed, false, nil
-		case tok == "-o", tok == "--output":
-			if i+1 >= len(args) {
-				return parsed, false, errors.New("plan: --output expects a value")
-			}
-			parsed.output = args[i+1]
-			i++
-		case strings.HasPrefix(tok, "--output="):
-			parsed.output = strings.TrimPrefix(tok, "--output=")
-		case strings.HasPrefix(tok, "-o="):
-			parsed.output = strings.TrimPrefix(tok, "-o=")
-		case tok == "--name":
-			if i+1 >= len(args) {
-				return parsed, false, errors.New("plan: --name expects a value")
-			}
-			parsed.pipeline = args[i+1]
-			i++
-		case strings.HasPrefix(tok, "--name="):
-			parsed.pipeline = strings.TrimPrefix(tok, "--name=")
-		case tok == "--sw-start-at":
-			if i+1 >= len(args) {
-				return parsed, false, errors.New("plan: --start-at expects a value")
-			}
-			parsed.startAt = args[i+1]
-			i++
-		case strings.HasPrefix(tok, "--sw-start-at="):
-			parsed.startAt = strings.TrimPrefix(tok, "--sw-start-at=")
-		case tok == "--sw-stop-at":
-			if i+1 >= len(args) {
-				return parsed, false, errors.New("plan: --stop-at expects a value")
-			}
-			parsed.stopAt = args[i+1]
-			i++
-		case strings.HasPrefix(tok, "--sw-stop-at="):
-			parsed.stopAt = strings.TrimPrefix(tok, "--sw-stop-at=")
-		default:
-			parsed.passthrough = append(parsed.passthrough, tok)
-		}
+	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "plan"}, args...))
+	if err != nil {
+		return pipelinePlanArgs{}, false, err
 	}
-	return parsed, false, nil
+	return pipelinePlanArgs{output: inv.Output(color.IsInteractiveStdout()), pipeline: inv.Value("pipeline"), startAt: inv.Value("start-at"), stopAt: inv.Value("stop-at")}, inv.Help(), nil
 }
 
 func runPipelinePlan(args []string) error {
-	if static, rest := takeStaticFlag(args); static {
-		for _, tok := range rest {
-			if strings.HasPrefix(tok, "--sw-start-at") || strings.HasPrefix(tok, "--sw-stop-at") || strings.HasPrefix(tok, "--start-at") || strings.HasPrefix(tok, "--stop-at") {
-				return errors.New("plan --static: --start-at and --stop-at need the runtime plan; drop --static")
-			}
-		}
-		return runPipelineExplain(rest)
-	}
 	parsed, helpRequested, err := parsePipelinePlanArgs(args)
 	if err != nil {
 		return err
@@ -128,7 +79,7 @@ func runPipelinePlan(args []string) error {
 	}
 	if parsed.pipeline == "" {
 		PrintHelp(cmdPipelinePlan, os.Stderr)
-		return errors.New("plan: --name is required")
+		return errors.New("plan: --pipeline is required")
 	}
 	format, err := resolveOutputFormat(parsed.output, cmdPipelinePlan.Path)
 	if err != nil {

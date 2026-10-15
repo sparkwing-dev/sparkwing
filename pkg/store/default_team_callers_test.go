@@ -32,9 +32,7 @@ const (
 // rows go unread.
 var defaultTeamCallers = map[string]string{
 	"cmd/sparkwing.(cronLauncher).Active":                              defaultTeamCrons,
-	"cmd/sparkwing.(storeBouncer).RequestNodeBounce":                   defaultTeamCli,
 	"cmd/sparkwing.addLocalAnnotation":                                 defaultTeamCli,
-	"cmd/sparkwing.cancelQueuedLocalRuns":                              defaultTeamCli,
 	"cmd/sparkwing.existingSubmissionResult":                           defaultTeamCli,
 	"cmd/sparkwing.findExistingSubmission":                             defaultTeamCli,
 	"cmd/sparkwing.listLocalAnnotations":                               defaultTeamCli,

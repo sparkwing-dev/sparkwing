@@ -59,11 +59,11 @@ func runRunners(args []string) error {
 func runRunnersAdd(args []string) error {
 	fs := flag.NewFlagSet(cmdRunnersAdd.Path, flag.ContinueOnError)
 	on := addProfileFlag(fs)
-	name := fs.String("name", "", "runner name, shown in the dashboard")
+	name := fs.String("runner", "", "runner name, shown in the dashboard")
 	maxConcurrent := fs.Int("max-concurrent", 2, "concurrent jobs this machine accepts")
 	contribution := fs.String("contribution", "50%,50%", "CPU and memory this machine contributes")
-	labels := fs.String("labels", "", "comma-separated self-asserted placement labels")
-	allowRepos := fs.StringArray("allow-repo", nil, "repository this machine may build and fetch directly (repeatable)")
+	labels := fs.String("label", "", "comma-separated self-asserted placement labels")
+	allowRepos := fs.StringArray("repos", nil, "repository this machine may build and fetch directly (repeatable)")
 	configPath := fs.String("config", "", "config.yaml whose agent section to write (default: ~/.config/sparkwing/config.yaml)")
 	force := fs.Bool("force", false, "replace an existing agent section")
 	noService := fs.Bool("no-service", false, "write the config without installing or starting the service")
@@ -74,7 +74,7 @@ func runRunnersAdd(args []string) error {
 		return err
 	}
 	if strings.TrimSpace(*name) == "" {
-		return errors.New("runners add: --name is required")
+		return errors.New("runners add: --runner is required")
 	}
 	if *maxConcurrent < 1 {
 		return fmt.Errorf("runners add: --max-concurrent must be at least 1, got %d", *maxConcurrent)

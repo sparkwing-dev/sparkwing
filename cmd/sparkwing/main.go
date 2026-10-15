@@ -14,7 +14,9 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -35,11 +37,12 @@ func init() {
 }
 
 func main() {
-	cleanupStaleUpdate()
 	toolchainActive = takeToolchainActive()
 
 	if err := runSparkwing(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, color.Red(color.Bold("sparkwing error:")), err)
+		if writeErr := writeInvocationError(os.Stderr, err, apierr.WriteJSON); writeErr != nil {
+			fmt.Fprintln(os.Stderr, "sparkwing: write diagnostic:", writeErr)
+		}
 		os.Exit(exitCodeFor(err))
 	}
 }
@@ -84,6 +87,10 @@ func exitCodeFor(err error) int {
 	if err == nil {
 		return 0
 	}
+	var usage *clisurface.UsageError
+	if errors.As(err, &usage) {
+		return int(clisurface.ExitUsage)
+	}
 	var commandError *cliError
 	if errors.As(err, &commandError) {
 		if commandError.code == 0 {
@@ -113,6 +120,13 @@ func dispatchRun(args []string) error {
 	if flags.parseErr != nil {
 		return flags.parseErr
 	}
+	for _, option := range []struct{ name, value string }{
+		{"publish", flags.publish}, {"sw-cache-from", flags.cacheFrom}, {"target", flags.target},
+	} {
+		if option.value != "" {
+			return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "run: --" + option.name + " is unavailable in this build"}
+		}
+	}
 	var err error
 
 	if flags.profile != "" {
@@ -121,9 +135,6 @@ func dispatchRun(args []string) error {
 	}
 	if flags.unknownRunnerFlag != "" {
 		return fmt.Errorf("run: unknown runner flag %q; see `sparkwing run --help`, or put pipeline arguments after --", flags.unknownRunnerFlag)
-	}
-	if separator := slices.Index(passthrough, "--"); separator >= 0 {
-		passthrough = slices.Delete(passthrough, separator, separator+1)
 	}
 	priority := ""
 	if flags.prioritySet {
@@ -202,13 +213,7 @@ func dispatchRun(args []string) error {
 	}
 
 	env := os.Environ()
-	logFormat := os.Getenv("SPARKWING_LOG_FORMAT")
-	if logFormat == "" {
-		logFormat = logFormatJSON
-		if color.IsInteractiveStdout() {
-			logFormat = logFormatPretty
-		}
-	}
+	logFormat := flags.outputFormat
 	if flags.index != "" {
 		bound, bindErr := bindRunIndex(env, flags.index, os.Stdout, logFormat)
 		if bindErr != nil {
@@ -329,25 +334,58 @@ func printPin(pipelineName string) {
 	}
 }
 
-func runSparkwing(args []string) error {
-	args, err := moveRootFlags(args)
+func runSparkwing(args []string) (result error) {
+	inv, err := clisurface.Parse("sparkwing", args)
+	defer func() {
+		if result != nil {
+			result = &invocationError{inv: inv, cause: result}
+		}
+	}()
 	if err != nil {
 		return err
 	}
-	toolchainReplayArgs = args
-	if cmd, ok := commandHelp(args); ok {
-		requested, _, err := requestedOutput(args)
-		if err != nil {
-			return err
-		}
-		mode, err := resolveOutputFormat(requested, cmd.Path)
-		if err != nil {
-			return err
-		}
-		return writeCommandHelp(*cmd, os.Stdout, mode)
+	if inv.Help() || inv.Command.Path != "sparkwing version" && len(childCommands(inv.Command.Path)) > 0 {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
+	if checkout := inv.Value("checkout"); checkout != "" {
+		previous, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		if err := os.Chdir(checkout); err != nil {
+			return err
+		}
+		defer func() { result = errors.Join(result, os.Chdir(previous)) }()
+	}
+	cleanupStaleUpdate()
+	args = invocationArgs(inv)
+	toolchainReplayArgs = args
 	gitenv.Unbind()
 	noteVersionTransition(os.Stderr, args[0])
+	return dispatchCommand(args)
+}
+
+func invocationArgs(inv clisurface.Invocation) []string {
+	args := strings.Fields(strings.TrimPrefix(inv.Command.Path, "sparkwing "))
+	if inv.Pipeline != "" {
+		args = append(args, inv.Pipeline)
+	}
+	for _, f := range append(clisurface.GlobalFlags(), inv.Command.Flags...) {
+		if f.Name == "checkout" || f.Name == "help" || f.Name == "help-all" {
+			continue
+		}
+		for _, value := range inv.Flags[f.Name] {
+			args = append(args, "--"+f.Name+"="+value)
+		}
+	}
+	if inv.Args != nil {
+		args = append(args, "--")
+		args = append(args, inv.Args...)
+	}
+	return args
+}
+
+func dispatchCommand(args []string) error {
 	switch args[0] {
 	case "info":
 		return runInfo(args[1:])
@@ -363,27 +401,34 @@ func runSparkwing(args []string) error {
 		return runCache(args[1:])
 	case "daemon":
 		return runDaemon(args[1:])
-
-	case "serve":
+	case "dashboard":
 		return runDashboard(args[1:])
-
 	case "repos":
 		return runRepos(args[1:])
-
-	case "crons":
+	case "schedules":
 		return runCrons(args[1:])
-
-	case "cloud":
-		return runCloud(args[1:])
-	case "cluster":
-		return runCluster(args[1:])
+	case "runners":
+		if args[1] == "list" {
+			return runAgentsList(args[2:])
+		}
+		return runRunners(args[1:])
+	case "tokens":
+		return runTokens(args[1:])
+	case "profiles":
+		return runProfiles(args[1:])
+	case "operator":
+		switch args[1] {
+		case "limits":
+			return runComputeLimits(args[2:])
+		case "object-store":
+			return runClusterObjectStore(args[2:])
+		case "tokens":
+			return runTokens(args[2:])
+		}
 	case "doctor":
 		return runDoctor(args[1:])
 	case "secrets":
 		return runSecret(args[1:])
-
-	case "configure":
-		return runConfigure(args[1:])
 	case "completion":
 		return runCompletion(args[1:])
 	case "examples":
@@ -394,29 +439,20 @@ func runSparkwing(args []string) error {
 		return runCommands(args[1:])
 	case "update":
 		return runUpdate(args[1:])
-	case "version", "--version", "-V":
+	case "version":
 		return runVersion(args[1:])
-
 	case "debug":
 		return runDebug(args[1:])
-
 	case "wingd":
 		return runWingd(args[1:])
-	case "__dashboard-supervise":
-		return runDashboardSupervise(args[1:])
-	case consumerSpawnVerb:
-		return runRunsConsumeDetached(args[1:])
+	case "__tick":
+		return runCronsTick(args[1:])
 	case "__host-trigger":
 		return runTriggerHost(args[1:])
 	case "__complete":
 		return runInternalComplete(args[1:])
-	case "help", "-h", "--help":
-		PrintHelp(cmdSparkwing, os.Stdout)
-		return nil
-	default:
-		PrintHelp(cmdSparkwing, os.Stderr)
-		return fmt.Errorf("unknown subcommand %q", args[0])
 	}
+	return fmt.Errorf("%s: execution is not implemented", args[0])
 }
 
 func runRunsApprovals(contextValue context.Context, paths orchestrator.Paths, args []string) error {
@@ -436,56 +472,6 @@ func runRunsApprovals(contextValue context.Context, paths orchestrator.Paths, ar
 	default:
 		PrintHelp(cmdApprovals, os.Stderr)
 		return fmt.Errorf("runs approvals: unknown subcommand %q", args[0])
-	}
-}
-
-func runCluster(args []string) error {
-	if handleParentHelp(cmdCluster, args) {
-		return nil
-	}
-	if len(args) == 0 {
-		PrintHelp(cmdCluster, os.Stdout)
-		return nil
-	}
-	switch args[0] {
-	case "agents":
-		return runAgents(args[1:])
-	case "runners":
-		return runRunners(args[1:])
-	case "worker":
-		return runWorker(args[1:])
-	case "triggers":
-		return runTriggers(args[1:])
-	case "tokens":
-		return runTokens(args[1:])
-	case "limits":
-		return runComputeLimits(args[1:])
-	case "concurrency":
-		return runConcurrency(args[1:])
-	case "object-store":
-		return runClusterObjectStore(args[1:])
-	default:
-		PrintHelp(cmdCluster, os.Stderr)
-		return fmt.Errorf("cluster: unknown subcommand %q", args[0])
-	}
-}
-
-func runConfigure(args []string) error {
-	if handleParentHelp(cmdConfigure, args) {
-		return nil
-	}
-	if len(args) == 0 {
-		PrintHelp(cmdConfigure, os.Stdout)
-		return nil
-	}
-	switch args[0] {
-	case "init":
-		return runConfigureInit(args[1:])
-	case "profiles":
-		return runProfiles(args[1:])
-	default:
-		PrintHelp(cmdConfigure, os.Stderr)
-		return fmt.Errorf("configure: unknown subcommand %q", args[0])
 	}
 }
 
@@ -533,7 +519,7 @@ func runJobs(args []string) error {
 		rootOnly := fs.Bool("root-only", false, "exclude child runs")
 		wait := fs.Bool("wait", false, "block until at least one run matches")
 		waitTimeout := fs.Duration("wait-timeout", 2*time.Minute, "give up (exit 2) after this long when --wait is set")
-		watch := fs.BoolP("watch", "w", false, "keep polling and print each newer matching run as it appears")
+		watch := fs.BoolP("follow", "f", false, "keep polling and print each newer matching run as it appears")
 		groupBy := fs.String("group-by", "", "with --status failed: one failure row per run, or cluster by step or node (run|step|node)")
 		if err := parseAndCheck(cmdJobsList, fs, args[1:]); err != nil {
 			if errors.Is(err, errHelpRequested) {
@@ -717,10 +703,10 @@ func runJobs(args []string) error {
 		}
 		return statusExitCode(status)
 
-	case "logs":
+	case "logs", "grep":
 		fs := flag.NewFlagSet(cmdJobsLogs.Path, flag.ContinueOnError)
 		runID := fs.String("run", "", "run identifier")
-		node := fs.String("node", "", "limit output to one node id")
+		node := fs.String("job", "", "limit output to one node id")
 		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 		follow := fs.BoolP("follow", "f", false, "tail the log(s) until the run terminates")
 		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block) instead of this machine's store")

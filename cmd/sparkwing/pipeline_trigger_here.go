@@ -21,12 +21,11 @@ const hereHeartbeat = 5 * time.Second
 
 func checkHereFlags(flags triggerFlags) error {
 	switch {
-	case flags.runner == "" && flags.reason != "":
+	case flags.runner != hereRunnerFlag && flags.reason != "":
 		return errors.New("--reason is recorded only with --runner here")
-	case flags.runner == "":
-		return nil
 	case flags.runner != hereRunnerFlag:
-		return fmt.Errorf("--runner takes %q (start a one-shot runner on this machine); got %q", hereRunnerFlag, flags.runner)
+		return nil
+
 	case strings.TrimSpace(flags.reason) == "":
 		return errors.New("--runner here needs --reason TEXT, which the run records")
 	case flags.detach:

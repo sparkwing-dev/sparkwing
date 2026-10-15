@@ -122,7 +122,7 @@ func runComputeLimitsShow(args []string) error {
 func runComputeLimitsSet(args []string) error {
 	fs := flag.NewFlagSet(cmdLimitsSet.Path, flag.ContinueOnError)
 	on := addProfileFlag(fs)
-	name := fs.String("name", "", "guard name")
+	name := fs.String("setting", "", "guard name")
 	value := fs.Int64("value", -1, "ceiling; 0 removes it")
 	if err := parseAndCheck(cmdLimitsSet, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -131,7 +131,7 @@ func runComputeLimitsSet(args []string) error {
 		return err
 	}
 	if !store.ValidComputeLimit(*name) {
-		return fmt.Errorf("limits set: --name must be one of %s",
+		return fmt.Errorf("limits set: --setting must be one of %s",
 			strings.Join(store.ComputeLimitNames(), ", "))
 	}
 	if *value < 0 {

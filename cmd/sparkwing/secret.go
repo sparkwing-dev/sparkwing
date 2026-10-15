@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -129,17 +130,17 @@ func runSecretSet(args []string) error {
 		}
 		return err
 	}
-	name := v.String("name")
+	name := v.String("secret")
 	value := v.String("value")
 	file := v.String("file")
-	plain := v.Bool("plain")
+	plain := v.Bool("variable")
 	pipeline := v.String("pipeline")
 	shared := v.Bool("shared")
-	if !fs.Changed("value") && !fs.Changed("file") {
-		return errors.New("secret set: either --value or --file is required")
+	if v.String("only-on") != "" {
+		return errors.New("secrets set: restricted secret writes need the controller capability API")
 	}
 	if name == "" {
-		return errors.New("secret set: --name is required")
+		return errors.New("secret set: --secret is required")
 	}
 	if err := secrets.ValidateName(name); err != nil {
 		return fmt.Errorf("secret set: %w", err)
@@ -153,6 +154,13 @@ func runSecretSet(args []string) error {
 		data, err := os.ReadFile(file)
 		if err != nil {
 			return fmt.Errorf("secret set: read %s: %w", file, err)
+		}
+		raw = string(data)
+	}
+	if !fs.Changed("value") && !fs.Changed("file") {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("read secret value: %w", err)
 		}
 		raw = string(data)
 	}
@@ -194,10 +202,10 @@ func runSecretGet(args []string) error {
 		}
 		return err
 	}
-	name := v.String("name")
+	name := v.String("secret")
 	pipeline := v.String("pipeline")
 	if name == "" {
-		return errors.New("secret get: --name is required")
+		return errors.New("secret get: --secret is required")
 	}
 	target, err := openSecretsTarget(fs, v.String("profile"), "secret get", false)
 	if err != nil {
@@ -229,7 +237,7 @@ func runSecretList(args []string) error {
 		}
 		return err
 	}
-	grep := v.String("grep")
+	grep := v.String("search")
 	target, err := openSecretsTarget(fs, v.String("profile"), "secret list", false)
 	if err != nil {
 		return err
@@ -286,10 +294,10 @@ func runSecretDelete(args []string) error {
 		}
 		return err
 	}
-	name := v.String("name")
+	name := v.String("secret")
 	pipeline := v.String("pipeline")
 	if name == "" {
-		return errors.New("secret delete: --name is required")
+		return errors.New("secret delete: --secret is required")
 	}
 	target, err := openSecretsTarget(fs, v.String("profile"), "secret delete", false)
 	if err != nil {

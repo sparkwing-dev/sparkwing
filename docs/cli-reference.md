@@ -7,68 +7,55 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 ## Command groups
 
 - [`sparkwing cache`](cli-cache.md) -- Inspect or trim the compiled pipeline binary cache
-- [`sparkwing cloud`](cli-cloud.md) -- Connect this machine to a sparkwing controller
-- [`sparkwing cluster`](cli-cluster.md) -- Operate and inspect the sparkwing cluster
-- [`sparkwing commands`](cli-commands.md) -- Index of every command: one path and synopsis per line
-- [`sparkwing completion`](cli-completion.md) -- Emit a shell completion script (bash\|zsh\|fish)
-- [`sparkwing configure`](cli-configure.md) -- Configure laptop-local settings
-- [`sparkwing crons`](cli-crons.md) -- Arm, inspect and drive this host's local pipeline schedules
-- [`sparkwing daemon`](cli-daemon.md) -- Inspect or refresh the local admission daemon
+- [`sparkwing commands`](cli-commands.md) -- Search the command index or export the CLI reference
+- [`sparkwing completion`](cli-completion.md) -- Emit a shell completion script
+- [`sparkwing daemon`](cli-daemon.md) -- Inspect and manage the local controller
+- [`sparkwing dashboard`](cli-dashboard.md) -- Manage the local dashboard
 - [`sparkwing debug`](cli-debug.md) -- Interactive debugging for pipeline runs
 - [`sparkwing docs`](cli-docs.md) -- Embedded user docs (offline)
 - [`sparkwing doctor`](cli-doctor.md) -- Inspect and repair abandoned local state
 - [`sparkwing examples`](cli-examples.md) -- Read complete example pipelines
 - [`sparkwing info`](cli-info.md) -- Describe Sparkwing and the selected project
+- [`sparkwing operator`](cli-operator.md) -- Manage deployment operations
 - [`sparkwing pipeline`](cli-pipeline.md) -- This repo's pipelines
-- [`sparkwing queue`](cli-queue.md) -- Inspect local admission holders, connections, and waiters
+- [`sparkwing pools`](cli-pools.md) -- Manage team runner pools
+- [`sparkwing profiles`](cli-profiles.md) -- Manage controller connection profiles
+- [`sparkwing queue`](cli-queue.md) -- Inspect queued work and scheduling priority
 - [`sparkwing repos`](cli-repos.md) -- The machine's fleet of sparkwing repos and their SDK pins
 - [`sparkwing run`](cli-run.md) -- Invoke a pipeline
+- [`sparkwing runners`](cli-runners.md) -- Manage runners
 - [`sparkwing runs`](cli-runs.md) -- Inspect and control pipeline runs
+- [`sparkwing schedules`](cli-schedules.md) -- Manage scheduled pipeline runs
 - [`sparkwing secrets`](cli-secrets.md) -- Manage secrets in this machine's local store or on a controller
-- [`sparkwing serve`](cli-serve.md) -- Manage the local dashboard + API server
+- [`sparkwing tokens`](cli-tokens.md) -- Manage team credentials
 - [`sparkwing update`](cli-update.md) -- Update the CLI binary
+- [`sparkwing upgrade`](cli-upgrade.md) -- Upgrade repository SDK pins
 - [`sparkwing version`](cli-version.md) -- Inspect versions (CLI, SDK, sparks)
 
 ## `sparkwing`
 
-sparkwing -- CI/CD pipelines written in Go
+Run and inspect pipelines
 
-Sparkwing is a self-hosted pipeline runner. Pipelines are Go
-programs in a repo's .sparkwing/ directory, triggered by git hooks,
-webhooks, schedules, or manual invocation. Use 'sparkwing run
-<pipeline>' to invoke one; 'sparkwing pipeline list' / 'describe'
-for agent-facing discovery.
+Run pipelines locally with run, or submit them to a controller with pipeline trigger. Use commands --search to find commands and --help for their flags.
 
-Three flags go before any verb:
-  -C DIR          run as if started in DIR (the .sparkwing search starts there)
-  --profile NAME  select a profile; the verb must accept --profile
-  -o FORMAT       pretty | json | plain, for verbs that print a document
+### Flags
 
-Without --profile, every verb acts on this machine's store. Neither the
-environment nor the project config selects a profile, so a command reaches a
-controller or a profile's remote backends only when --profile names it.
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
 
 ### Examples
 
 ```sh
-# Run a pipeline (positional shortcut)
-sparkwing run fictional-build
+# Run a pipeline locally
+sparkwing run build
 
-# First command an agent should run
-sparkwing info --for-agent
-
-# List every invocable (agents)
-sparkwing pipeline list -o json
-
-# Inspect one pipeline's full metadata
-sparkwing pipeline describe --name fictional-release -o json
-
-# Bootstrap + scaffold your first pipeline in a new repository
-sparkwing pipeline new --name release
+# Inspect a pipeline
+sparkwing pipeline describe --pipeline build
 
 # Start the local dashboard
-sparkwing serve start
-
-# List another checkout's pipelines
-sparkwing -C ~/code/other pipeline list
+sparkwing dashboard start
 ```

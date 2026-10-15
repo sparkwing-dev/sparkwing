@@ -44,17 +44,11 @@ profiles:
     state: { type: sqlite, path: /tmp/example-project.db }
 `
 
-func TestResolveProfileFlag_FindsProjectProfile(t *testing.T) {
-	writeProfilesFixture(t, "profiles:\n  laptop: { state: { type: sqlite } }\n")
+func TestResolveProfileFlag_RefusesProjectProfile(t *testing.T) {
+	writeProfilesFixture(t, "profiles:\n  laptop: { controller: { url: https://safe.example } }\n")
 	projectAt(t, bucketProject)
-
-	p, err := resolveProfileFlag("bucket")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	state := p.StateString()
-	if !strings.Contains(state, "example-project.db") {
-		t.Errorf("state surface: got %q, want the project profile's database", state)
+	if p, err := resolveProfileFlag("bucket"); err == nil || p != nil {
+		t.Fatalf("project supplied a connection: %#v, %v", p, err)
 	}
 }
 
@@ -72,7 +66,7 @@ func TestResolveProfileFlag_UserProfileWinsNameCollision(t *testing.T) {
 	}
 }
 
-func TestResolveProfileFlag_NotFoundNamesBothNamespaces(t *testing.T) {
+func TestResolveProfileFlag_NotFoundNamesOnlyMachineConfig(t *testing.T) {
 	writeProfilesFixture(t, "profiles:\n  laptop: { state: { type: sqlite } }\n")
 	projectAt(t, bucketProject)
 
@@ -80,8 +74,8 @@ func TestResolveProfileFlag_NotFoundNamesBothNamespaces(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected not-found error")
 	}
-	if !strings.Contains(err.Error(), "sparkwing.yaml") {
-		t.Errorf("message should say the project file was checked too: %q", err.Error())
+	if strings.Contains(err.Error(), "sparkwing.yaml") {
+		t.Errorf("message should name only machine config: %q", err.Error())
 	}
 }
 
@@ -101,7 +95,7 @@ func TestResolveProfileChain_NoFlagSelectsNothingAProjectDeclares(t *testing.T) 
 	}
 }
 
-func TestResolveProfileFlag_ProjectS3StateFailsToLoad(t *testing.T) {
+func TestResolveProfileFlag_IgnoresInvalidProjectProfile(t *testing.T) {
 	writeProfilesFixture(t, "profiles:\n  laptop: { state: { type: sqlite } }\n")
 	projectAt(t, `
 profiles:
@@ -110,7 +104,7 @@ profiles:
     state: { type: s3, bucket: example-bucket, prefix: state }
 `)
 	_, err := resolveProfileFlag("bucket")
-	if err == nil || !strings.Contains(err.Error(), "state.type: s3 is removed") {
-		t.Fatalf("resolve = %v, want the removed state type named", err)
+	if err == nil || !strings.Contains(err.Error(), `profile "bucket" not found`) {
+		t.Fatalf("resolve = %v, want missing machine connection", err)
 	}
 }

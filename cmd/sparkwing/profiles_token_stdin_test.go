@@ -60,13 +60,13 @@ func TestReadTokenStdinTrimsPipedInput(t *testing.T) {
 	}
 }
 
-func TestCloudConnectNoProbeReadsTokenFromStdin(t *testing.T) {
+func TestProfilesAddNoProbeReadsTokenFromStdin(t *testing.T) {
 	path := profilesFixturePath(t)
 	withStdin(t, "swu_from_stdin\n")
 	out := captureStdout(t, func() {
-		args := []string{"--name", "prod", "--controller", "https://api.example.dev", "--token-stdin", "--no-probe"}
-		if err := runCloudConnect(args); err != nil {
-			t.Errorf("cloud connect: %v", err)
+		args := []string{"--profile", "prod", "--controller", "https://api.example.dev", "--token-stdin", "--no-probe"}
+		if err := runProfiles(append([]string{"add"}, args...)); err != nil {
+			t.Errorf("profiles add: %v", err)
 		}
 	})
 	if strings.Contains(out, "swu_from_stdin") {
@@ -81,14 +81,14 @@ func TestProfilesSetReadsTokenFromStdin(t *testing.T) {
 	path := profilesFixturePath(t)
 	withStdin(t, "swu_first\n")
 	captureStdout(t, func() {
-		args := []string{"--name", "prod", "--controller", "https://api.example.dev", "--token-stdin", "--no-probe"}
-		if err := runCloudConnect(args); err != nil {
-			t.Fatalf("cloud connect: %v", err)
+		args := []string{"--profile", "prod", "--controller", "https://api.example.dev", "--token-stdin", "--no-probe"}
+		if err := runProfiles(append([]string{"add"}, args...)); err != nil {
+			t.Fatalf("profiles add: %v", err)
 		}
 	})
 	withStdin(t, "swu_rotated\n")
 	captureStdout(t, func() {
-		if err := runProfilesSet([]string{"--name", "prod", "--token-stdin"}); err != nil {
+		if err := runProfiles([]string{"set", "--profile", "prod", "--token-stdin"}); err != nil {
 			t.Fatalf("profiles set: %v", err)
 		}
 	})
@@ -103,7 +103,7 @@ func TestProfilesTokenFlagsConflict(t *testing.T) {
 		run  func([]string) error
 		args []string
 	}{
-		{"set", runProfilesSet, []string{"--name", "prod", "--token", "swu_x", "--token-stdin"}},
+		{"set", runProfiles, []string{"set", "--profile", "prod", "--token", "swu_x", "--token-stdin"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			profilesFixturePath(t)
@@ -112,7 +112,7 @@ func TestProfilesTokenFlagsConflict(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected --token with --token-stdin to be rejected")
 			}
-			if !strings.Contains(err.Error(), "cannot be used together") {
+			if !strings.Contains(err.Error(), "conflicts with") {
 				t.Errorf("error = %v, want a conflict about --token and --token-stdin", err)
 			}
 		})

@@ -8,34 +8,38 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"text/tabwriter"
 
-	flag "github.com/spf13/pflag"
-	"golang.org/x/term"
-
-	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"golang.org/x/term"
 )
 
 func runProfiles(args []string) error {
-	if handleParentHelp(cmdProfiles, args) {
-		return nil
+	inv, err := clisurface.Parse("sparkwing", append([]string{"profiles"}, args...))
+	if err != nil {
+		return err
 	}
-	if len(args) == 0 {
-		PrintHelp(cmdProfiles, os.Stderr)
-		return errors.New("profiles: subcommand required")
+	format := inv.Output(term.IsTerminal(int(os.Stdout.Fd())))
+	if inv.Help() || inv.Command.Path == "sparkwing profiles" {
+		return writeCommandHelp(surfaceCommand(inv.Command.Path), os.Stdout, format)
 	}
-	switch args[0] {
-	case "list":
-		return runProfilesList(args[1:])
-	case "show":
-		return runProfilesShow(args[1:])
-	case "set":
-		return runProfilesSet(args[1:])
-	default:
-		PrintHelp(cmdProfiles, os.Stderr)
-		return fmt.Errorf("profiles: unknown subcommand %q", args[0])
+	switch inv.Command.Path {
+	case "sparkwing profiles add":
+		return addProfile(inv, format)
+	case "sparkwing profiles remove":
+		return removeProfile(inv, format)
+	case "sparkwing profiles list":
+		return listProfiles(format)
+	case "sparkwing profiles show":
+		p, err := resolveProfileFlag(inv.Value("profile"))
+		if err != nil {
+			return err
+		}
+		return writeProfile(p, format)
+	case "sparkwing profiles set":
+		return setProfile(inv, format)
 	}
+	return errors.New("profiles: subcommand required")
 }
 
 func loadCfg() (*profile.Config, string, error) {
@@ -50,152 +54,46 @@ func loadCfg() (*profile.Config, string, error) {
 	return cfg, path, nil
 }
 
-type profileIndex struct {
-	Name       string `json:"name"`
-	Controller string `json:"controller,omitempty"`
-	Token      string `json:"token,omitempty"`
-}
-
-func runProfilesList(args []string) error {
-	fs := flag.NewFlagSet(cmdProfilesList.Path, flag.ContinueOnError)
-	var output string
-	fs.StringVarP(&output, "output", "o", "", "pretty | json | plain")
-	if err := parseAndCheck(cmdProfilesList, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	format, err := resolveOutputFormat(output, cmdProfilesList.Path)
-	if err != nil {
-		return err
-	}
-	cfg, path, err := loadCfg()
-	if err != nil {
-		return err
-	}
-
-	if len(cfg.Profiles) == 0 {
-		fmt.Fprintln(os.Stderr, "no profiles configured")
-		fmt.Fprintf(os.Stderr, "expected at %s -- connect one with `sparkwing cloud connect --controller URL`\n", path)
-		return nil
-	}
-	index := make([]profileIndex, 0, len(cfg.Profiles))
-	for _, name := range cfg.Names() {
-		p := cfg.Profiles[name]
-		index = append(index, profileIndex{
-			Name:       name,
-			Controller: p.ControllerURL(),
-			Token:      redactToken(p.ControllerToken()),
-		})
-	}
-	switch format {
-	case "json":
-		return ndjson.Write(os.Stdout, index)
-	case "plain":
-		for _, p := range index {
-			fmt.Println(p.Name)
-		}
-		return nil
-	}
-	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tCONTROLLER\tTOKEN")
-	for _, p := range index {
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", p.Name, emptyDash(p.Controller), p.Token)
-	}
-	_ = tw.Flush()
-	return nil
-}
-
-func runProfilesShow(args []string) error {
-	fs := flag.NewFlagSet(cmdProfilesShow.Path, flag.ContinueOnError)
-	nameFlag := fs.String("name", "", "profile name")
-	showToken := fs.Bool("show-token", false, "print the raw token (redacted by default)")
-	profileName := fs.String("profile", "", "without --name: which profile --profile NAME would select")
-	output := fs.StringP("output", "o", "pretty", "output format: pretty | json")
-	if err := parseAndCheck(cmdProfilesShow, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("profiles show: unexpected positional %q (use --name or --profile)", fs.Arg(0))
-	}
-	name := *nameFlag
-	if name == "" {
-		return showSelectedProfile(*profileName, *output)
-	}
-	if fs.Changed("profile") {
-		return errors.New("profiles show: --name and --profile select different reports; pass one")
-	}
-	if fs.Changed("output") && *output == "json" {
-		return errors.New("profiles show --name: prints text; use `sparkwing configure profiles list -o json` for records")
-	}
-	cfg, _, err := loadCfg()
-	if err != nil {
-		return err
-	}
-	p, ok := cfg.Profiles[name]
-	if !ok {
-		return fmt.Errorf("profiles show: %q not found", name)
-	}
-	fmt.Fprintf(os.Stdout, "name:       %s\n", p.Name)
-	fmt.Fprintf(os.Stdout, "controller: %s\n", p.ControllerURL())
-	fmt.Fprintf(os.Stdout, "state:      %s\n", p.StateString())
-	if *showToken {
-		fmt.Fprintf(os.Stdout, "token:      %s\n", emptyDash(p.ControllerToken()))
-	} else {
-		fmt.Fprintf(os.Stdout, "token:      %s\n", redactToken(p.ControllerToken()))
-	}
-	return nil
-}
-
-func runProfilesSet(args []string) error {
-	fs := flag.NewFlagSet(cmdProfilesSet.Path, flag.ContinueOnError)
-	nameFlag := fs.String("name", "", "profile name to mutate")
-	controller := fs.String("controller", "", "new controller URL")
-	token := fs.String("token", "", "new bearer token, visible to other processes in the process list and shell history")
-	tokenStdin := fs.Bool("token-stdin", false, "read the new bearer token from stdin, prompting without echo when stdin is a terminal")
-	if err := parseAndCheck(cmdProfilesSet, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	name := *nameFlag
+func setProfile(inv clisurface.Invocation, format string) error {
+	name := inv.Value("profile")
 	cfg, path, err := loadCfg()
 	if err != nil {
 		return err
 	}
 	p, ok := cfg.Profiles[name]
-	if !ok {
+	if !ok || p == nil {
 		return fmt.Errorf("profiles set: %q not found", name)
 	}
-	if *tokenStdin {
-		read, err := readTokenStdin(os.Stdin, os.Stderr, fmt.Sprintf("new bearer token for %q", name))
+	if inv.Has("controller") {
+		base, err := normalizeControllerURL(inv.Value("controller"))
 		if err != nil {
 			return err
 		}
-		*token = read
-	}
-	tokenGiven := fs.Changed("token") || *tokenStdin
-	if fs.Changed("controller") || tokenGiven {
 		if p.Controller == nil {
 			p.Controller = &profile.ControllerSpec{}
 		}
-		if fs.Changed("controller") {
-			p.Controller.URL = *controller
+		p.Controller.URL = base
+	}
+	token := inv.Value("token")
+	if inv.Bool("token-stdin") {
+		token, err = readTokenStdin(os.Stdin, os.Stderr, fmt.Sprintf("new bearer token for %q", name))
+		if err != nil {
+			return err
 		}
-		if tokenGiven {
-			p.Controller.Token = *token
+		if token == "" {
+			return errors.New("profiles set: stdin carried no token")
 		}
+	}
+	if inv.Has("token") || inv.Bool("token-stdin") {
+		if p.Controller == nil {
+			p.Controller = &profile.ControllerSpec{}
+		}
+		p.Controller.Token = token
 	}
 	if err := profile.Save(path, cfg); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stdout, "updated profile %q\n", name)
-	return nil
+	return writeProfile(p, format)
 }
 
 func readTokenStdin(in *os.File, prompt io.Writer, label string) (string, error) {

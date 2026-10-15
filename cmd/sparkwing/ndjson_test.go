@@ -111,7 +111,7 @@ func TestProfilesListStreamsRedactedRecords(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", path)
 
 	out := captureStdout(t, func() {
-		if err := runProfilesList([]string{"-o", "json"}); err != nil {
+		if err := runProfiles([]string{"list", "-o", "json"}); err != nil {
 			t.Errorf("profiles list: %v", err)
 		}
 	})

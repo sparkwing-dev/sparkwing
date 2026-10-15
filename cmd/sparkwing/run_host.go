@@ -63,12 +63,22 @@ func (r *pipelineRun) host(h hostedRun) error {
 	if flags.workers > 0 {
 		extra["workers"] = flags.workers
 	}
+	debug := orchestrator.DebugDirectivesFromEnv()
+	if flags.pauseBefore != nil {
+		debug.PauseBefore = flags.pauseBefore
+	}
+	if flags.pauseAfter != nil {
+		debug.PauseAfter = flags.pauseAfter
+	}
+	if flags.pauseOnFailure != nil {
+		debug.PauseOnFailure = *flags.pauseOnFailure
+	}
 	opts := orchestrator.Options{
 		Pipeline:      h.schema.Name,
 		RunHandlePath: h.runHandle,
 		Args:          h.args,
 		Git:           orchestrator.DetectGit(repoRoot),
-		Debug:         orchestrator.DebugDirectivesFromEnv(),
+		Debug:         debug,
 		StartAt:       flags.startAt,
 		StopAt:        flags.stopAt,
 		Only:          flags.only,

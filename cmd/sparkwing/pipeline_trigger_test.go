@@ -157,7 +157,7 @@ func TestPipelineTrigger_MissingProfile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected --profile-required error")
 	}
-	if !strings.Contains(err.Error(), "--profile NAME is required") {
+	if !strings.Contains(err.Error(), "--profile is required") {
 		t.Errorf("message = %q", err.Error())
 	}
 	if code := exitCodeFor(err); code != 2 {
@@ -215,7 +215,7 @@ func TestPipelineTrigger_DetachFiresTriggerOnly(t *testing.T) {
 	enterGitCheckout(t, triggerTestOrigin)
 
 	out := captureStdout(t, func() {
-		if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--detach", "--version", "v1.2.3"}); err != nil {
+		if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--detach", "-o", "plain", "--", "--version", "v1.2.3"}); err != nil {
 			t.Errorf("trigger: %v", err)
 		}
 	})

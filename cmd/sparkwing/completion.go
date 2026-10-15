@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -19,7 +21,7 @@ import (
 func runCompletion(args []string) error {
 	fs := flag.NewFlagSet(cmdCompletion.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "pretty | json | plain")
-	shell := fs.String("shell", "", "shell to emit completion for (bash | zsh | fish)")
+	shell := fs.String("shell", "", "shell to emit completion for (bash | zsh | fish | powershell)")
 	if err := parseAndCheck(cmdCompletion, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -32,7 +34,7 @@ func runCompletion(args []string) error {
 	}
 	if *shell == "" {
 		PrintHelp(cmdCompletion, os.Stderr)
-		return errors.New("completion: --shell is required (bash | zsh | fish)")
+		return errors.New("completion: --shell is required (bash | zsh | fish | powershell)")
 	}
 	switch *shell {
 	case "bash":
@@ -41,12 +43,14 @@ func runCompletion(args []string) error {
 		return writeText(os.Stdout, "artifact", renderZsh(), *output)
 	case "fish":
 		return writeText(os.Stdout, "artifact", renderFish(), *output)
+	case "powershell":
+		return writeText(os.Stdout, "artifact", renderPowerShell(), *output)
 	default:
-		return fmt.Errorf("completion: unknown shell %q (expected bash|zsh|fish)", *shell)
+		return fmt.Errorf("completion: unknown shell %q (expected bash|zsh|fish|powershell)", *shell)
 	}
 }
 
-var internalCompleters = map[string]func([]string) error{
+var internalCompleters = map[string]func(io.Writer, []string) error{
 	"profiles":       runInternalCompleteProfiles,
 	"pipelines":      runInternalCompletePipelines,
 	"flags":          runInternalCompleteFlags,
@@ -56,17 +60,24 @@ var internalCompleters = map[string]func([]string) error{
 }
 
 func runInternalComplete(args []string) error {
-	if len(args) == 0 {
-		return errors.New("__complete: KIND required")
+	inv, err := clisurface.Parse("sparkwing", append([]string{"__complete"}, args...))
+	if err != nil {
+		return err
 	}
-	complete, ok := internalCompleters[args[0]]
-	if !ok {
-		return fmt.Errorf("__complete: unknown kind %q", args[0])
+	var out strings.Builder
+	for _, kind := range inv.Flags["kind"] {
+		complete, ok := internalCompleters[kind]
+		if !ok {
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: "unknown completion kind"}
+		}
+		if err := complete(&out, strings.Fields(inv.Value("word"))); err != nil {
+			return err
+		}
 	}
-	return complete(args[1:])
+	return writeText(os.Stdout, "completion", out.String(), inv.Output(false))
 }
 
-func runInternalCompleteProfiles(_ []string) error {
+func runInternalCompleteProfiles(w io.Writer, _ []string) error {
 	path, err := profile.DefaultPath()
 	if err != nil {
 		return nil //nolint:nilerr // silent failure is correct for completion context
@@ -76,12 +87,12 @@ func runInternalCompleteProfiles(_ []string) error {
 		return nil //nolint:nilerr // silent failure is correct for completion context
 	}
 	for _, n := range cfg.Names() {
-		fmt.Println(n)
+		fmt.Fprintln(w, n)
 	}
 	return nil
 }
 
-func runInternalCompletePipelines(_ []string) error {
+func runInternalCompletePipelines(w io.Writer, _ []string) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil //nolint:nilerr // silent failure is correct for completion context
@@ -119,7 +130,7 @@ func runInternalCompletePipelines(_ []string) error {
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].name < rows[j].name })
 	for _, r := range rows {
-		fmt.Printf("%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 			strings.ReplaceAll(r.name, "\t", " "),
 			"",
 			r.kind,
@@ -128,7 +139,7 @@ func runInternalCompletePipelines(_ []string) error {
 	return nil
 }
 
-func runInternalCompleteFlags(args []string) error {
+func runInternalCompleteFlags(w io.Writer, args []string) error {
 	if len(args) == 0 {
 		return nil
 	}
@@ -142,7 +153,7 @@ func runInternalCompleteFlags(args []string) error {
 		for _, f := range visibleFlagsForHelp(cmd, true) {
 			desc := requirementTag(f.Required, f.RequiredWhen, false) + f.Desc
 			desc = strings.ReplaceAll(desc, "\t", " ")
-			fmt.Printf("--%s\t%s\n", f.Name, desc)
+			fmt.Fprintf(w, "--%s\t%s\n", f.Name, desc)
 		}
 		return nil
 	}
@@ -165,7 +176,7 @@ func requirementTag(required bool, requiredWhen string, pipelineArg bool) string
 	return "[" + req + "] "
 }
 
-func runInternalCompletePipelineFlags(args []string) error {
+func runInternalCompletePipelineFlags(w io.Writer, args []string) error {
 	if len(args) != 1 {
 		return nil
 	}
@@ -187,7 +198,7 @@ func runInternalCompletePipelineFlags(args []string) error {
 			}
 			desc := requirementTag(a.Required, "", true) + body
 			desc = strings.ReplaceAll(desc, "\t", " ")
-			fmt.Printf("--%s\t%s\n", a.Name, desc)
+			fmt.Fprintf(w, "--%s\t%s\n", a.Name, desc)
 		}
 		return nil
 	}
@@ -219,7 +230,7 @@ func walkUpForSparkwing(start string) (string, bool) {
 	}
 }
 
-func runInternalCompleteHint(args []string) error {
+func runInternalCompleteHint(w io.Writer, args []string) error {
 	cmds := commandsByArgvPath()
 	for n := len(args); n >= 1; n-- {
 		key := strings.Join(args[:n], " ")
@@ -236,7 +247,7 @@ func runInternalCompleteHint(args []string) error {
 		if p.Required {
 			req = "required"
 		}
-		fmt.Printf("%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\n",
 			strings.ReplaceAll(p.Name, "\t", " "),
 			req,
 			strings.ReplaceAll(p.Desc, "\t", " "))
@@ -245,7 +256,7 @@ func runInternalCompleteHint(args []string) error {
 	return nil
 }
 
-func runInternalCompleteVerbs(args []string) error {
+func runInternalCompleteVerbs(w io.Writer, args []string) error {
 	key := strings.Join(args, " ")
 	parents := parentCommands()
 	cmd, ok := parents[key]
@@ -253,7 +264,7 @@ func runInternalCompleteVerbs(args []string) error {
 		return nil
 	}
 	for _, s := range completableSubcommands(cmd) {
-		fmt.Printf("%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\n",
 			strings.ReplaceAll(s.Name, "\t", " "),
 			strings.ReplaceAll(s.Synopsis, "\t", " "))
 	}
@@ -403,7 +414,7 @@ _sparkwing_complete() {
     # Flag completion: current word starts with '-'.
     if [[ "$cur" == -* ]]; then
         local -a out=()
-        while IFS= read -r line; do out+=("$line"); done < <(sparkwing __complete flags ${swpath[@]+"${swpath[@]}"} 2>/dev/null | cut -f1)
+        while IFS= read -r line; do out+=("$line"); done < <(sparkwing __complete --kind flags --word "${swpath[*]-}" -o plain 2>/dev/null | cut -f1)
         COMPREPLY=( $(compgen -W "${out[*]-}" -- "$cur") )
         return
     fi
@@ -411,7 +422,7 @@ _sparkwing_complete() {
     # Value completion for --profile names.
     if [[ "$prev" == "--profile" ]]; then
         local names
-        names=$(sparkwing __complete profiles 2>/dev/null)
+        names=$(sparkwing __complete --kind profiles -o plain 2>/dev/null)
         COMPREPLY=( $(compgen -W "$names" -- "$cur") )
         return
     fi
@@ -419,7 +430,7 @@ _sparkwing_complete() {
     # Value completion for --pipeline pipeline names.
     if [[ "$prev" == "--pipeline" ]]; then
         local names
-        names=$(sparkwing __complete pipelines 2>/dev/null | cut -f1)
+        names=$(sparkwing __complete --kind pipelines -o plain 2>/dev/null | cut -f1)
         COMPREPLY=( $(compgen -W "$names" -- "$cur") )
         return
     fi
@@ -429,7 +440,7 @@ _sparkwing_complete() {
     # for specific flags (above: --profile, --pipeline) happens before this
     # block.
     local -a kids=()
-    while IFS= read -r line; do kids+=("$line"); done < <(sparkwing __complete verbs ${swpath[@]+"${swpath[@]}"} 2>/dev/null | cut -f1)
+    while IFS= read -r line; do kids+=("$line"); done < <(sparkwing __complete --kind verbs --word "${swpath[*]-}" -o plain 2>/dev/null | cut -f1)
     if (( ${#kids[@]} > 0 )); then
         COMPREPLY=( $(compgen -W "${kids[*]}" -- "$cur") )
         return
@@ -441,7 +452,7 @@ _sparkwing_complete() {
     # so we replicate it here. Filtering by "$cur" is a no-op when
     # empty, but keeps things tidy if the user typed a partial flag.
     local -a leafFlags=()
-    while IFS= read -r line; do leafFlags+=("$line"); done < <(sparkwing __complete flags ${swpath[@]+"${swpath[@]}"} 2>/dev/null | cut -f1)
+    while IFS= read -r line; do leafFlags+=("$line"); done < <(sparkwing __complete --kind flags --word "${swpath[*]-}" -o plain 2>/dev/null | cut -f1)
     if (( ${#leafFlags[@]} > 0 )); then
         COMPREPLY=( $(compgen -W "${leafFlags[*]}" -- "$cur") )
     fi
@@ -498,7 +509,7 @@ _sparkwing() {
     # Value completion: --profile <TAB> -> profile names.
     if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--profile" ]]; then
         local -a profs
-        profs=( ${(f)"$(sparkwing __complete profiles 2>/dev/null)"} )
+        profs=( ${(f)"$(sparkwing __complete --kind profiles -o plain 2>/dev/null)"} )
         _describe -t profiles 'profile' profs
         return
     fi
@@ -541,7 +552,7 @@ _sparkwing() {
 # doesn't try to auto-select a value (there is no enumerable set).
 _sparkwing_positional_hint() {
     local line name req desc
-    line=$(sparkwing __complete hint "$@" 2>/dev/null)
+    line=$(sparkwing __complete --kind hint --word "$*" -o plain 2>/dev/null)
     if [[ -z "$line" ]]; then
         return 1
     fi
@@ -572,7 +583,7 @@ _sparkwing_complete_verbs() {
         else
             descs+=("${(r:14:: :)name}  $desc")
         fi
-    done < <(sparkwing __complete verbs "$@" 2>/dev/null)
+    done < <(sparkwing __complete --kind verbs --word "$*" -o plain 2>/dev/null)
     if (( ${#names[@]} > 0 )); then
         compadd -l -d descs -a names
         return 0
@@ -616,12 +627,12 @@ _sparkwing_complete_flags() {
     if (( $# >= 2 )) && [[ "$1" == "run" ]]; then
         while IFS= read -r line; do
             _sw_absorb_flag_line
-        done < <(sparkwing __complete pipeline-flags "$2" 2>/dev/null)
+        done < <(sparkwing __complete --kind pipeline-flags --word "$2" -o plain 2>/dev/null)
     fi
 
     while IFS= read -r line; do
         _sw_absorb_flag_line
-    done < <(sparkwing __complete flags "$@" 2>/dev/null)
+    done < <(sparkwing __complete --kind flags --word "$*" -o plain 2>/dev/null)
 
     (( ${#names[@]} == 0 )) && return
     compadd -l -J "flags" -d descs -a names
@@ -665,7 +676,7 @@ _sparkwing_complete_pipelines() {
         local _sw_len=${#name}
         (( _sw_len > _sw_name_cap )) && _sw_len=$_sw_name_cap
         (( _sw_len > _sw_name_width )) && _sw_name_width=$_sw_len
-    done < <(sparkwing __complete pipelines 2>/dev/null)
+    done < <(sparkwing __complete --kind pipelines -o plain 2>/dev/null)
 
     # Second pass: render every row at the single global width.
     local g nm k d col padded padded_name label
@@ -741,12 +752,12 @@ func renderFish() string {
 #   (or write to ~/.config/fish/completions/sparkwing.fish)
 
 function __sparkwing_profiles
-    sparkwing __complete profiles 2>/dev/null
+    sparkwing __complete --kind profiles -o plain 2>/dev/null
 end
 
 function __sparkwing_pipelines
     # Columns: name, group, kind, desc. Fish wants name\tdesc.
-    sparkwing __complete pipelines 2>/dev/null | awk -F '\t' '{print $1"\t"$4}'
+    sparkwing __complete --kind pipelines -o plain 2>/dev/null | awk -F '\t' '{print $1"\t"$4}'
 end
 
 function __sparkwing_has_path
@@ -835,4 +846,21 @@ func joinSubcommandNames(subs []SubcommandRef) string {
 		parts[i] = s.Name
 	}
 	return strings.Join(parts, " ")
+}
+
+func renderPowerShell() string {
+	return `Register-ArgumentCompleter -Native -CommandName sparkwing -ScriptBlock {
+    param($wordToComplete, $commandAst, $cursorPosition)
+    $parts = @($commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object { $_.Extent.Text })
+    if ($wordToComplete -and $parts.Count -gt 0) { $parts = @($parts | Select-Object -SkipLast 1) }
+    $kind = if ($wordToComplete.StartsWith('-')) { 'flags' } else { 'verbs' }
+    $path = $parts -join ' '
+    sparkwing __complete --kind $kind --word=$path -o plain 2>$null | ForEach-Object {
+        $row = $_ -split "\t", 2
+        if ($row[0].StartsWith($wordToComplete)) {
+            [System.Management.Automation.CompletionResult]::new($row[0], $row[0], 'ParameterValue', $row[-1])
+        }
+    }
+}
+`
 }

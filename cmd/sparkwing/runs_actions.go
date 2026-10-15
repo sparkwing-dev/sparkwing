@@ -13,7 +13,6 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -113,7 +112,7 @@ func runRunsRetry(ctx context.Context, args []string) error {
 	runIDs := multiFlagVar(fs, "run", "source run id (repeatable; can also be a positional or `-` for stdin)")
 	on := fs.String("profile", "", "profile name for remote runs; omit for local runs")
 	fromFailed := fs.Bool("failed", false, "rerun from failed: reuse passed nodes, re-execute only failed or unreached")
-	all := fs.Bool("all", false, "rerun all: re-execute every node from scratch")
+	all := fs.Bool("all-jobs", false, "rerun all: re-execute every node from scratch")
 	if err := parseAndCheck(cmdJobsRetry, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -125,9 +124,9 @@ func runRunsRetry(ctx context.Context, args []string) error {
 	}
 	switch {
 	case *fromFailed && *all:
-		return fmt.Errorf("%s: --failed and --all are mutually exclusive", cmdJobsRetry.Path)
+		return fmt.Errorf("%s: --failed and --all-jobs are mutually exclusive", cmdJobsRetry.Path)
 	case !*fromFailed && !*all:
-		return fmt.Errorf("%s: pass --failed (reuse passed nodes) or --all (re-execute everything)", cmdJobsRetry.Path)
+		return fmt.Errorf("%s: pass --failed (reuse passed nodes) or --all-jobs (re-execute everything)", cmdJobsRetry.Path)
 	}
 	full := *all
 	ids, err := collectRunIDs(*runIDs, os.Stdin)
@@ -213,135 +212,6 @@ func profileSuffix(on string) string {
 		return ""
 	}
 	return " --profile " + on
-}
-
-func runRunsCancel(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet(cmdJobsCancel.Path, flag.ContinueOnError)
-	runIDs := multiFlagVar(fs, "run", "run id to cancel (repeatable; use --run - to read ids from stdin)")
-	on := fs.String("profile", "", "profile name for remote runs; omit for local runs")
-	if err := parseAndCheck(cmdJobsCancel, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if rest := fs.Args(); len(rest) > 0 {
-		return fmt.Errorf("%s: unexpected positional %q (use --run, repeatable)", cmdJobsCancel.Path, rest[0])
-	}
-	ids, err := collectRunIDs(*runIDs, os.Stdin)
-	if err != nil {
-		return err
-	}
-	if len(ids) == 0 {
-		return fmt.Errorf("%s: at least one --run RUN_ID is required (use --run - to read ids from stdin)", cmdJobsCancel.Path)
-	}
-
-	var results []runResult
-	remaining := ids
-	if *on == "" {
-		results, remaining = cancelLocalRunsViaDaemon(ctx, "", Version, ids)
-
-		var queued []runResult
-		queued, remaining = cancelQueuedLocalRuns(ctx, "", remaining)
-		results = append(results, queued...)
-
-		var standalone []runResult
-		standalone, remaining = standaloneLocalRuns(ctx, "", remaining, cmdJobsCancel.Path,
-			orchestrator.StandaloneCancelRefusal)
-		results = append(results, standalone...)
-	}
-	if len(remaining) == 0 {
-		return reportResults(os.Stdout, "cancel", results)
-	}
-
-	c, err := resolveRunsClient(*on, cmdJobsCancel.Path)
-	if err != nil {
-
-		if len(results) == 0 {
-			return err
-		}
-		for _, id := range remaining {
-			results = append(results, runResult{RunID: id, Error: err.Error()})
-		}
-		return reportResults(os.Stdout, "cancel", results)
-	}
-	for _, id := range remaining {
-		results = append(results, cancelOne(ctx, c, id))
-	}
-	return reportResults(os.Stdout, "cancel", results)
-}
-
-type runCanceler interface {
-	CancelRun(ctx context.Context, id string) error
-	GetRun(ctx context.Context, id string) (*store.Run, error)
-}
-
-func cancelOne(ctx context.Context, c runCanceler, id string) runResult {
-	err := c.CancelRun(ctx, id)
-	if err == nil {
-		return runResult{RunID: id, OK: true}
-	}
-	if !errors.Is(err, store.ErrNotFound) {
-		return runResult{RunID: id, Error: err.Error()}
-	}
-	if run, gerr := c.GetRun(ctx, id); gerr == nil && run != nil && isTerminalRunStatus(run.Status) {
-		return runResult{RunID: id, OK: true, Note: terminalCancelNote(run.Status)}
-	}
-	return runResult{RunID: id, Error: fmt.Sprintf("run %s not found", id)}
-}
-
-func terminalCancelNote(status string) string {
-	if status == "cancelled" {
-		return "already cancelled -- nothing to cancel"
-	}
-	return fmt.Sprintf("already finished (%s) -- nothing to cancel", status)
-}
-
-func cancelLocalRunsViaDaemon(ctx context.Context, home, version string, ids []string) (done []runResult, remaining []string) {
-	for _, id := range ids {
-		found, err := wingdclient.Cancel(ctx, wingdclient.Options{Home: home, Version: version}, id)
-		if err == nil && found {
-			done = append(done, runResult{RunID: id, OK: true})
-			continue
-		}
-		remaining = append(remaining, id)
-	}
-	return done, remaining
-}
-
-func cancelQueuedLocalRuns(ctx context.Context, home string, ids []string) (done []runResult, remaining []string) {
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	paths, err := submitPaths(home)
-	if err != nil {
-		return nil, ids
-	}
-	if _, serr := os.Stat(paths.StateDB()); serr != nil {
-		return nil, ids
-	}
-	st, err := store.Open(paths.StateDB())
-	if err != nil {
-		return nil, ids
-	}
-	defer func() { _ = st.Close() }()
-
-	for _, id := range ids {
-		cancelled, cerr := st.CancelPendingTrigger(ctx, id)
-		switch {
-		case cerr != nil:
-			done = append(done, runResult{RunID: id, Error: "cancel queued run: " + cerr.Error()})
-		case cancelled:
-			if derr := orchestrator.DiscardSubmissionEnvironment(paths.Root, id); derr != nil {
-				done = append(done, runResult{RunID: id, Error: "discard submission environment: " + derr.Error()})
-			} else {
-				done = append(done, runResult{RunID: id, OK: true, Note: "cancelled before dispatch"})
-			}
-		default:
-			remaining = append(remaining, id)
-		}
-	}
-	return done, remaining
 }
 
 func standaloneLocalRuns(

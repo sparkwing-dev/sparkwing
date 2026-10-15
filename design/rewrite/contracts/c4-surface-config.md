@@ -213,6 +213,9 @@ pipeline arguments start after `--`. Only run and pipeline trigger take a
 pipeline positional. Output selection is validated before side effects; lists
 are NDJSON and diagnostics use the C2 error object on stderr.
 
+`__complete --word` accepts an empty value to select root completions. Shell
+completion requests use `--kind` and `--word`, with explicit plain output.
+
 - `run` is local. `--publish P` uploads the record/results/logs with local
   provenance under trust_local_builds; publication failure cannot fail the run.
   `--sw-cache-from P` or run.cache_from reads only authorized verified-default-

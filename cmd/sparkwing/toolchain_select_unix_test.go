@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
 
 const toolchainExecHelperEnv = "SPARKWING_TOOLCHAIN_EXEC_HELPER"
@@ -423,7 +425,8 @@ func TestRunToolchainReplaysTheArgvAfterRootFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(start)
-	args, err := moveRootFlags([]string{"-C", "project", "--profile", "prod", "run", "build", "--sw-dry-run"})
+	inv, err := clisurface.Parse("sparkwing", []string{"-C", "project", "run", "build", "--sw-dry-run"})
+	args := invocationArgs(inv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,7 +446,7 @@ func TestRunToolchainReplaysTheArgvAfterRootFlags(t *testing.T) {
 	if err := runToolchain(&out, toolchainDecision{action: toolchainSwitch, installed: "v9.9.8", pin: "v9.9.9"}); err != nil {
 		t.Fatalf("runToolchain: %v", err)
 	}
-	if got := strings.Join(replayed, " "); got != "run build --profile prod --sw-dry-run" {
+	if got := strings.Join(replayed, " "); got != "run build --sw-dry-run=true" {
 		t.Fatalf("replayed argv = %q, want the verb with -C applied and gone", got)
 	}
 }

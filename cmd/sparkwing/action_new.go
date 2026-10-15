@@ -23,7 +23,7 @@ import (
 
 func runPipelineNew(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineNew.Path, flag.ContinueOnError)
-	pipelineName := fs.String("name", "", "new pipeline name (kebab-case, e.g. deploy-staging)")
+	pipelineName := fs.String("pipeline", "", "new pipeline name (kebab-case, e.g. deploy-staging)")
 	template := fs.String("template", "minimal", "shape to scaffold: minimal | build-test-deploy | ci-pr-check | release | scheduled-report")
 	hidden := fs.Bool("hidden", false, "mark the entry hidden in tab-complete menus")
 	short := fs.String("short", "", "short one-line description (ShortHelp / frontmatter desc)")
@@ -36,11 +36,11 @@ func runPipelineNew(args []string) error {
 	}
 	if fs.NArg() > 0 {
 		PrintHelp(cmdPipelineNew, os.Stderr)
-		return fmt.Errorf("new: unexpected positional %q (use --name)", fs.Arg(0))
+		return fmt.Errorf("new: unexpected positional %q (use --pipeline)", fs.Arg(0))
 	}
 	if *pipelineName == "" {
 		PrintHelp(cmdPipelineNew, os.Stderr)
-		return errors.New("new: --name is required (e.g. --name deploy-staging)")
+		return errors.New("new: --pipeline is required (e.g. --pipeline deploy-staging)")
 	}
 	name := *pipelineName
 	if err := validatePipelineName(name); err != nil {
@@ -77,7 +77,7 @@ func runPipelineNew(args []string) error {
 	shape, ok := builtinShapeByName(*template)
 	if !ok {
 		return fmt.Errorf("new: unknown shape %q -- pipeline new takes a shape, one of: %s\n"+
-			"  a worked pipeline to read instead: sparkwing examples --name %s --body",
+			"  a worked pipeline to read instead: sparkwing examples --example %s --body",
 			*template, strings.Join(builtinShapeNames(), ", "), *template)
 	}
 	trigger, err := resolveTrigger(shape, parseOnFlag(*on), fs.Changed("on"))
@@ -103,8 +103,8 @@ func printExamplesHint() {
 		color.Dim("note:"), color.Bold("minimal"))
 	fmt.Printf("      %d worked pipelines exist to read for how a real one is built:\n", len(list))
 	printAlignedSteps([]InfoNextStep{
-		{Command: "sparkwing docs search -q <what you are doing>", Purpose: "usually the fastest way in"},
-		{Command: "sparkwing examples --name <name> --body", Purpose: "read one in full"},
+		{Command: "sparkwing docs search --search <what you are doing>", Purpose: "usually the fastest way in"},
+		{Command: "sparkwing examples --example <name> --body", Purpose: "read one in full"},
 	})
 }
 
@@ -297,7 +297,7 @@ func resolveTrigger(shape builtinShape, on []string, explicit bool) (string, err
 		if !ok {
 			return "", fmt.Errorf("new: unknown trigger %q -- --on takes any of: %s\n"+
 				"  combine them with a comma or by repeating --on\n"+
-				"  every trigger type and its fields: sparkwing docs search -q \"on: trigger\"",
+				"  every trigger type and its fields: sparkwing docs search --search \"on: trigger\"",
 				event, strings.Join(triggerEventNames, ", "))
 		}
 		if event == manualTrigger {
@@ -342,7 +342,7 @@ func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl 
 	struct_ := kebabToPascal(name)
 	file := filepath.Join(sparkwingDir, "jobs", goJobFilename(name))
 	if _, err := os.Stat(file); err == nil {
-		return fmt.Errorf("refusing to overwrite %s\n  pick a different --name, or delete the file first if you want to regenerate", file)
+		return fmt.Errorf("refusing to overwrite %s\n  pick a different --pipeline, or delete the file first if you want to regenerate", file)
 	}
 	body := renderBuiltinTemplate(name, short, tmpl)
 	if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
@@ -399,12 +399,12 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 
 	if len(triggerEvents(trigger)) == 0 {
 		tips = append(tips, InfoNextStep{
-			Command: `sparkwing docs search -q "on: trigger"`,
+			Command: `sparkwing docs search --search "on: trigger"`,
 			Purpose: "fire it on push / pull request / schedule instead of by hand",
 		})
 	} else {
 		tips = append(tips, InfoNextStep{
-			Command: `sparkwing docs search -q "on: trigger"`,
+			Command: `sparkwing docs search --search "on: trigger"`,
 			Purpose: "the other trigger types, and the fields this one takes",
 		})
 	}
@@ -596,7 +596,7 @@ func (p {{STRUCT}}) Help() string { return p.ShortHelp() }
 func ({{STRUCT}}) Examples() []sw.Example {
 	return []sw.Example{
 		{Comment: "Run the gate locally", Command: "sparkwing run {{NAME}}"},
-		{Comment: "Render the DAG without running", Command: "sparkwing pipeline plan --static --name {{NAME}}"},
+		{Comment: "Render the DAG without running", Command: "sparkwing pipeline plan --pipeline {{NAME}}"},
 	}
 }
 
@@ -681,7 +681,7 @@ func (p {{STRUCT}}) Help() string { return p.ShortHelp() }
 func ({{STRUCT}}) Examples() []sw.Example {
 	return []sw.Example{
 		{Comment: "Run the release flow", Command: "sparkwing run {{NAME}}"},
-		{Comment: "Render the DAG without running", Command: "sparkwing pipeline plan --static --name {{NAME}}"},
+		{Comment: "Render the DAG without running", Command: "sparkwing pipeline plan --pipeline {{NAME}}"},
 	}
 }
 
@@ -775,7 +775,7 @@ func (p {{STRUCT}}) Help() string { return p.ShortHelp() }
 func ({{STRUCT}}) Examples() []sw.Example {
 	return []sw.Example{
 		{Comment: "Run the report now", Command: "sparkwing run {{NAME}}"},
-		{Comment: "Render the fan-out DAG", Command: "sparkwing pipeline plan --static --name {{NAME}}"},
+		{Comment: "Render the fan-out DAG", Command: "sparkwing pipeline plan --pipeline {{NAME}}"},
 	}
 }
 

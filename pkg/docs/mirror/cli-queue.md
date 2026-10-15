@@ -6,188 +6,49 @@ Every `sparkwing queue` command, flag, and argument, generated from the CLI's ow
 
 ## `sparkwing queue`
 
-Inspect local admission holders, connections, and waiters
-
-Reports the local admission daemon's resource capacity, usage, and queue in
-two sections: running work, then queued work in admission order.
-
-A running row carries the repository, elapsed time, charge, and, from the
-run's measured p50 profile, its expected remaining time and the clock time it
-is expected to finish. A queued row carries its position, priority, cost, how
-long it has waited, the resource it waits on, and, from the daemon's
-admission simulation, when it is expected to start and finish. Attached child
-runs appear under their parent. Connected runs that hold no resources have
-separate rows.
-
-An estimate exists only where the measurements behind it do, and a cell
-without one says which measurement is missing. "unmeasured" is a row the
-daemon has no profile for. "past p50" is a run that has already outlived the
-profile it has, which no longer predicts it. "unknown" is a queued row the
-daemon cannot place, because a run ahead of it has no estimate of its own.
-None of the three is replaced by a guess. The header counts the queued runs
-with no profile, because those are the ones that starve.
-'sparkwing queue priority' re-ranks a queued run.
-
-A stalled holder includes a cancellation command:
-'sparkwing runs cancel --run <id>'. Inspect the holder before cancelling it.
-The queue command only reports state.
-
-Output is pretty on a terminal and JSON when piped. Select JSON explicitly
-with -o json, or tab-separated records with -o plain. JSON carries each
-estimate as milliseconds from the snapshot and as an RFC3339 clock time;
-plain carries humanized durations and RFC3339 clock times.
-
-An absent daemon reports an empty queue and exits 0. An unreachable daemon
-reports the connection failure and exits 4; its queue state is unknown.
-
-With --profile NAME, the view reads that profile's controller and shows each
-concurrency key, its holders and waiters, and registered runner capacity.
-
-'sparkwing queue' and 'sparkwing queue list' print the same listing.
+Inspect queued work and scheduling priority
 
 ### Subcommands
 
 - `list` -- List running and queued work with expected start and finish
-- `priority` -- Re-rank a run that is already queued for local admission
+- `priority` -- Change the priority of queued work
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain |
-| `--profile NAME` | Inspect this profile's controller instead of the local daemon |
-
-### Examples
-
-```sh
-# Show the current queue
-sparkwing queue list
-
-# Agent-readable snapshot
-sparkwing queue list -o json
-
-# One record per line for shell pipelines
-sparkwing queue list -o plain
-
-# Inspect a controller's admission state
-sparkwing queue list --profile prod
-
-# Move a queued run to the front
-sparkwing queue priority --run build-123 --set front
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
 
 ## `sparkwing queue list`
 
 List running and queued work with expected start and finish
 
-Reports the local admission daemon's resource capacity, usage, and queue in
-two sections: running work, then queued work in admission order.
-
-A running row carries the repository, elapsed time, charge, and, from the
-run's measured p50 profile, its expected remaining time and the clock time it
-is expected to finish. A queued row carries its position, priority, cost, how
-long it has waited, the resource it waits on, and, from the daemon's
-admission simulation, when it is expected to start and finish. Attached child
-runs appear under their parent. Connected runs that hold no resources have
-separate rows.
-
-An estimate exists only where the measurements behind it do, and a cell
-without one says which measurement is missing. "unmeasured" is a row the
-daemon has no profile for. "past p50" is a run that has already outlived the
-profile it has, which no longer predicts it. "unknown" is a queued row the
-daemon cannot place, because a run ahead of it has no estimate of its own.
-None of the three is replaced by a guess. The header counts the queued runs
-with no profile, because those are the ones that starve.
-'sparkwing queue priority' re-ranks a queued run.
-
-A stalled holder includes a cancellation command:
-'sparkwing runs cancel --run <id>'. Inspect the holder before cancelling it.
-The queue command only reports state.
-
-Output is pretty on a terminal and JSON when piped. Select JSON explicitly
-with -o json, or tab-separated records with -o plain. JSON carries each
-estimate as milliseconds from the snapshot and as an RFC3339 clock time;
-plain carries humanized durations and RFC3339 clock times.
-
-An absent daemon reports an empty queue and exits 0. An unreachable daemon
-reports the connection failure and exits 4; its queue state is unknown.
-
-With --profile NAME, the view reads that profile's controller and shows each
-concurrency key, its holders and waiters, and registered runner capacity.
-
-This is the same output as 'sparkwing queue'.
-
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain |
-| `--profile NAME` | Inspect this profile's controller instead of the local daemon |
-
-### Examples
-
-```sh
-# Show the current queue
-sparkwing queue list
-
-# Agent-readable snapshot
-sparkwing queue list -o json
-
-# One record per line for shell pipelines
-sparkwing queue list -o plain
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--profile PROFILE` | Connection profiles come only from the user's config; allowed before the verb if the command accepts it. Local run refuses --profile. |
+| `--group GROUP` | group |
 
 ## `sparkwing queue priority`
 
-Re-rank a run that is already queued for local admission
-
-Changes the admission priority of a run the local daemon is
-already arbitrating, without restarting it. Higher priorities admit
-first and ties keep their arrival order, exactly as at launch. A raise
-that frees the run to start admits it immediately.
-
---set takes an integer, or `front` / `back`. The relative forms
-resolve against the waiters that are not part of this run: front is one
-above the highest other waiter's priority, back is one below the lowest,
-and both fall back to a step either side of zero when nothing else is
-waiting. Asking for front twice is therefore stable instead of an
-escalating race with the run's own rank.
-
-One run is several admission participants -- the run itself, and each of
-its nodes admitting on its own. All of them move together, and the new
-rank is remembered, so a node admitting later lands at it too instead of
-at the priority its plan carried. The daemon forgets that rank once the
-run has released every lease and has no participant waiting.
-
-When the run already holds a lease there is nothing to re-order: the
-command says so, and the change reaches only the node admissions the run
-has yet to make.
-
-Exits 0 whether the rank moved or was already what you asked for, 1 when
-the daemon does not know the run -- a submitted run the consumer has not
-claimed yet is not queued here, so it is not visible to local admission --
-and 4 when the daemon's socket cannot be reached at all.
+Change the priority of queued work
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--run ID` | Run id to re-rank (required) |
-| `--set VALUE` | New priority: an integer, front, or back (required) |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain |
-
-### Examples
-
-```sh
-# Send a queued run to the front
-sparkwing queue priority --run build-123 --set front
-
-# Park a run behind everything else
-sparkwing queue priority --run nightly-42 --set back
-
-# Set an explicit rank
-sparkwing queue priority --run build-123 --set 7
-
-# Agent-readable answer
-sparkwing queue priority --run build-123 --set 7 -o json
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--run ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. |
+| `--set VALUE` | set |
+| `--group GROUP` | group |

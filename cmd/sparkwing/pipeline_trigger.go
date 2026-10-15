@@ -2,108 +2,47 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
 type triggerFlags struct {
-	pipeline         string
-	profile          string
-	detach           bool
-	workingTree      bool
-	wantHelp         bool
-	allowSecretFiles []string
-	runner           string
-	reason           string
-	passthrough      []string
+	pipeline                         string
+	profile                          string
+	detach                           bool
+	workingTree                      bool
+	wantHelp                         bool
+	allowSecretFiles                 []string
+	runner                           string
+	reason                           string
+	passthrough                      []string
+	resume, ref, pipelineRef, output string
 }
 
 func parseTriggerFlags(args []string) (triggerFlags, error) {
-	if len(args) == 0 {
-		return triggerFlags{}, errors.New("pipeline name required (e.g. `sparkwing pipeline trigger release --profile prod`)")
-	}
-	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		return triggerFlags{wantHelp: true}, nil
-	}
-	flags := triggerFlags{pipeline: args[0]}
-	if strings.HasPrefix(flags.pipeline, "-") {
-		return triggerFlags{}, fmt.Errorf("pipeline name must come first; got flag %q", flags.pipeline)
-	}
-
-	rest := args[1:]
-	i := 0
-	for i < len(rest) {
-		a := rest[i]
-		switch {
-		case a == "--":
-			flags.passthrough = append(flags.passthrough, rest[i+1:]...)
-			i = len(rest)
-		case a == "-h" || a == "--help":
-			return triggerFlags{wantHelp: true}, nil
-		case a == "--profile":
-			if i+1 < len(rest) {
-				flags.profile = rest[i+1]
-				i += 2
-				continue
-			}
-			i++
-		case strings.HasPrefix(a, "--profile="):
-			flags.profile = strings.TrimPrefix(a, "--profile=")
-			i++
-		case a == "--detach":
-			flags.detach = true
-			i++
-		case a == "--detach=true":
-			flags.detach = true
-			i++
-		case a == "--detach=false":
-			flags.detach = false
-			i++
-		case a == "--working-tree" || a == "--working-tree=true":
-			flags.workingTree = true
-			i++
-		case a == "--working-tree=false":
-			flags.workingTree = false
-			i++
-		case a == "--allow-secret-file":
-			if i+1 < len(rest) {
-				flags.allowSecretFiles = append(flags.allowSecretFiles, rest[i+1])
-				i += 2
-				continue
-			}
-			i++
-		case strings.HasPrefix(a, "--allow-secret-file="):
-			flags.allowSecretFiles = append(flags.allowSecretFiles, strings.TrimPrefix(a, "--allow-secret-file="))
-			i++
-		case a == "--runner" || a == "--reason":
-			if i+1 >= len(rest) {
-				return triggerFlags{}, fmt.Errorf("%s needs a value", a)
-			}
-			if a == "--runner" {
-				flags.runner = rest[i+1]
-			} else {
-				flags.reason = rest[i+1]
-			}
-			i += 2
-		case strings.HasPrefix(a, "--runner="):
-			flags.runner = strings.TrimPrefix(a, "--runner=")
-			i++
-		case strings.HasPrefix(a, "--reason="):
-			flags.reason = strings.TrimPrefix(a, "--reason=")
-			i++
-		default:
-			flags.passthrough = append(flags.passthrough, a)
-			i++
-		}
-	}
-	if err := checkHereFlags(flags); err != nil {
+	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "trigger"}, args...))
+	if err != nil {
 		return triggerFlags{}, err
+	}
+	flags := triggerFlags{
+		pipeline: inv.Pipeline, profile: inv.Value("profile"), detach: inv.Bool("detach"),
+		workingTree: inv.Bool("working-tree"), wantHelp: inv.Help(),
+		allowSecretFiles: inv.Flags["allow-secret-file"], runner: inv.Value("runner"),
+		reason: inv.Value("reason"), passthrough: inv.Args, resume: inv.Value("resume"),
+		ref: inv.Value("ref"), pipelineRef: inv.Value("pipeline-ref"), output: inv.Output(color.IsInteractiveStdout()),
+	}
+	if !flags.wantHelp && flags.resume == "" {
+		if err := checkHereFlags(flags); err != nil {
+			return triggerFlags{}, &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
+		}
 	}
 	return flags, nil
 }
@@ -117,6 +56,9 @@ func runPipelineTrigger(args []string) error {
 	if err != nil {
 		PrintHelp(cmdPipelineTrigger, os.Stderr)
 		return fmt.Errorf("pipeline trigger: %w", err)
+	}
+	if flags.resume != "" || flags.pipelineRef != "" {
+		return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "pipeline trigger: resume and pipeline revision selection are unavailable in this build"}
 	}
 	if flags.profile == "" {
 		return exitErrorf(2, "pipeline trigger: --profile NAME is required (the controller this trigger submits to)")
@@ -143,7 +85,7 @@ func runPipelineTrigger(args []string) error {
 		}
 	}
 	resp, err := createRemoteTrigger(prof, flags.pipeline, source,
-		runFlags{allowSecretFiles: flags.allowSecretFiles, hereReason: flags.reason}, flags.passthrough, flags.workingTree)
+		runFlags{allowSecretFiles: flags.allowSecretFiles, hereReason: flags.reason, runner: flags.runner, ref: flags.ref}, flags.passthrough, flags.workingTree)
 	if err != nil {
 		return err
 	}
@@ -152,6 +94,9 @@ func runPipelineTrigger(args []string) error {
 	}
 
 	if flags.detach {
+		if flags.output == "json" {
+			return jsonEncode(os.Stdout, map[string]string{"run_id": resp.RunID})
+		}
 		fmt.Fprintln(os.Stdout, resp.RunID)
 		return nil
 	}
@@ -160,7 +105,7 @@ func runPipelineTrigger(args []string) error {
 	fmt.Fprintf(os.Stderr, "triggered %s on %s as %s (status=%s); following...\n",
 		flags.pipeline, prof.Name, resp.RunID, resp.Status)
 
-	format, ferr := resolveTTYAwareOutput("", "pipeline trigger")
+	format, ferr := resolveTTYAwareOutput(flags.output, "pipeline trigger")
 	if ferr != nil {
 		return ferr
 	}

@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 
 	"github.com/sparkwing-dev/sparkwing/internal/pipelinelint"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -22,56 +23,11 @@ type pipelineLintArgs struct {
 }
 
 func parsePipelineLintArgs(args []string) (pipelineLintArgs, bool, error) {
-	parsed := pipelineLintArgs{output: "pretty"}
-	for i := 0; i < len(args); i++ {
-		tok := args[i]
-		valueFor := func() (string, error) {
-			if i+1 >= len(args) {
-				return "", fmt.Errorf("lint: %s expects a value", tok)
-			}
-			i++
-			return args[i], nil
-		}
-		switch {
-		case tok == "-h", tok == "--help":
-			return parsed, true, nil
-		case tok == "--all", tok == "--all=true":
-			parsed.all = true
-		case tok == "--all=false":
-			parsed.all = false
-		case tok == "--rules", tok == "--rules=true":
-			parsed.rules = true
-		case tok == "-o", tok == "--output":
-			v, err := valueFor()
-			if err != nil {
-				return parsed, false, err
-			}
-			parsed.output = v
-		case strings.HasPrefix(tok, "--output="):
-			parsed.output = strings.TrimPrefix(tok, "--output=")
-		case strings.HasPrefix(tok, "-o="):
-			parsed.output = strings.TrimPrefix(tok, "-o=")
-		case tok == "--name":
-			v, err := valueFor()
-			if err != nil {
-				return parsed, false, err
-			}
-			parsed.pipeline = v
-		case strings.HasPrefix(tok, "--name="):
-			parsed.pipeline = strings.TrimPrefix(tok, "--name=")
-		case tok == "--dir":
-			v, err := valueFor()
-			if err != nil {
-				return parsed, false, err
-			}
-			parsed.dir = v
-		case strings.HasPrefix(tok, "--dir="):
-			parsed.dir = strings.TrimPrefix(tok, "--dir=")
-		default:
-			return parsed, false, fmt.Errorf("lint: unknown flag %q (see `sparkwing pipeline lint --help`)", tok)
-		}
+	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "lint"}, args...))
+	if err != nil {
+		return pipelineLintArgs{}, false, err
 	}
-	return parsed, false, nil
+	return pipelineLintArgs{output: inv.Output(color.IsInteractiveStdout()), pipeline: inv.Value("pipeline"), dir: inv.Value("dir"), all: !inv.Has("pipeline"), rules: inv.Bool("rules")}, inv.Help(), nil
 }
 
 func runPipelineLint(args []string) error {
@@ -91,7 +47,7 @@ func runPipelineLint(args []string) error {
 		return printLintRules(format)
 	}
 	if parsed.all && parsed.pipeline != "" {
-		return errors.New("lint: --all and --name are mutually exclusive")
+		return errors.New("lint: --all and --pipeline are mutually exclusive")
 	}
 	if !parsed.all && parsed.pipeline == "" {
 		parsed.all = true

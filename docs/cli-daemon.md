@@ -6,184 +6,95 @@ Every `sparkwing daemon` command, flag, and argument, generated from the CLI's o
 
 ## `sparkwing daemon`
 
-Inspect or refresh the local admission daemon
-
-The admission daemon starts on demand when a pipeline needs it. Status never
-starts one. Restart replaces only an answering daemon with this installed
-build, using the same drain, durable lease, and reattachment path as automatic
-version takeover; a stopped daemon stays stopped. Stop drains an answering
-daemon and launches no successor. The supervisor keeps a daemon whose heartbeat
-counter advances during failed health probes. A whole-machine pause restarts the
-stale window when the supervisor resumes. See [Diagnosing admission](diagnosing-admission.md)
-for event records and dump paths.
+Inspect and manage the local controller
 
 ### Subcommands
 
-- `status` -- Report whether wingd is running and which build it serves
-- `events` -- Read retained admission events without starting the daemon
-- `restart` -- Refresh an answering wingd to this installed build
-- `stop` -- Drain an answering wingd and leave it stopped
+- `events` -- Read retained local controller events
 - `recover-state` -- Preserve unreadable daemon state after its holders stop
-
-### Examples
-
-```sh
-# Machine-readable status
-sparkwing daemon status -o json
-
-# Refresh only if already running
-sparkwing daemon restart
-
-# Stop it and leave it stopped
-sparkwing daemon stop
-```
-
-## `sparkwing daemon events`
-
-Read retained admission events without starting the daemon
-
-Reads the size-capped journal in the daemon directory. Lists the newest 50 matching records and reports how to fetch older ones. Child attach records show requested and resolved parents; cancel records show affected and blocked runs. Unreadable records are skipped and counted on stderr. Human output names the directory when no events are retained. JSON output is one record per line.
-
---explain --run ID explains that run's admission history in sentences instead, including descendant node slots and attached children; JSON output keeps the structured records.
+- `restart` -- Restart an answering local controller
+- `status` -- Report local controller status
+- `stop` -- Stop the local controller
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--run ID` | Filter by run ID |
-| `--since DURATION` | Lookback duration |
-| `--kind KIND` | Record kind (repeatable) |
-| `--incarnation N` | Daemon incarnation |
-| `--limit N` | Maximum records (default 50; 0 for all) |
-| `--offset N` | Matching records to skip from newest |
-| `--explain` | With --run, explain the run's admission history in sentences |
-| `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
 
-### Examples
+## `sparkwing daemon events`
 
-```sh
-# Events for one run
-sparkwing daemon events --run abc -o json
+Read retained local controller events
 
-# Explain one run's admission history
-sparkwing daemon events --run abc --explain
-```
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--run ID` | Stable run ID or per-team run number; '-' reads run IDs from stdin on cancel, retry and prune. |
+| `--since DURATION` | since |
+| `--kind KIND` | kind Repeatable; comma-separated values are accepted. |
+| `--incarnation N` | incarnation |
+| `--limit N` | Pagination count at least one, continued with --cursor; zero is invalid. |
+| `--explain` | explain |
+| `--cursor CURSOR` | Continue from next_cursor using the same filters. |
 
 ## `sparkwing daemon recover-state`
 
 Preserve unreadable daemon state after its holders stop
 
-Fail-closed recovery for a daemon that cannot parse its durable state. The
-unreadable bytes may describe leases whose runs still hold host capacity, so
-first stop or verify those runs, then pass --yes. Recovery holds the
-daemon election lock, moves state.json to a state.json.corrupt-<time> forensic
-copy, and never discards readable state.
-
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--yes` | Confirm every run described by the unreadable state has stopped (required) |
-
-### Examples
-
-```sh
-# Recover only after verifying the described runs stopped
-SPARKWING_HOME=/path/to/home sparkwing daemon recover-state --yes
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--yes` | Confirm bulk destruction. (required) |
 
 ## `sparkwing daemon restart`
 
-Refresh an answering wingd to this installed build
-
-Refresh an answering daemon when its build differs from this installed build.
-With --force, drain and replace an answering daemon even when the builds
-match. Existing holders reconnect and reattach through durable leases. If no
-daemon is running, nothing is started.
+Restart an answering local controller
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
-| `--force` | Replace the daemon even when it already serves this build |
-
-### Examples
-
-```sh
-# Refresh only if already running
-sparkwing daemon restart
-
-# Replace an answering daemon
-sparkwing daemon restart --force
-
-# Machine-readable result
-sparkwing daemon restart -o json
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--force` | Replace an existing object. |
 
 ## `sparkwing daemon status`
 
-Report whether wingd is running and which build it serves
-
-Reports daemon reachability and source build identity. An absent daemon exits
-zero. An unreachable socket returns an error.
-
-running_revision identifies the build. daemon_schema_version and
-store_schema_version name the store schema the daemon understands and the one
-the store records; a store ahead of its daemon is reported as diverged.
-
-store_schema_error reports a store the CLI could not read. daemon_store_ready
-and daemon_store_error describe the daemon's own store handle. The daemon
-evicts runs whose terminal state it cannot check. store_path identifies the
-store it tried to open.
-
-Pipeline runs fail while the daemon cannot open its store. Older daemons omit
-fields they cannot report.
-
-api_socket names the controller API socket. api_ready reports whether it is
-bound, and api_error explains a binding failure. A daemon that supports the
-API but cannot bind its socket is unhealthy. Older daemons omit api_ready.
-
-artifact_store_error reports failure to open the configured cache. The daemon
-continues serving with artifact routes disabled.
+Report local controller status
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
-
-### Examples
-
-```sh
-# Machine-readable status
-sparkwing daemon status -o json
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
 
 ## `sparkwing daemon stop`
 
-Drain an answering wingd and leave it stopped
-
-Drains an answering daemon through the same wire request a restart uses, then
-waits for its admission socket to go quiet and its election lock to be
-released. No successor is launched, and the supervisor exits with the worker it
-started, so the pair stays down until the next run needs a daemon. An absent
-daemon is a no-op and exits zero.
-
-A run still holding admission finishes against the store it already opened.
+Stop the local controller
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
-
-### Examples
-
-```sh
-# Stop this machine's daemon
-sparkwing daemon stop
-
-# Machine-readable result
-sparkwing daemon stop -o json
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |

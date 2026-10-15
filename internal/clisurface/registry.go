@@ -6,7 +6,7 @@ func Registry() []Command {
 		{Path: "sparkwing", Flags: []Flag{}},
 		{Path: "sparkwing __complete", Hidden: true, Flags: []Flag{
 			{Name: "kind", Argument: "KIND", Repeatable: true, CommaList: true},
-			{Name: "word", Argument: "WORD"},
+			{Name: "word", Argument: "VALUE", Meaning: "Command words to complete; empty selects the root."},
 		}},
 		{Path: "sparkwing __host-trigger", Hidden: true, Flags: []Flag{
 			{Name: "standalone-reason", Argument: "REASON"},

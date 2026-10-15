@@ -20,10 +20,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/directdata"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -41,9 +43,13 @@ func atoiNonNeg(s string) (int, error) {
 }
 
 type runFlags struct {
-	parseErr          error
-	unknownRunnerFlag string
-	ref               string
+	parseErr                   error
+	unknownRunnerFlag          string
+	ref                        string
+	publish, cacheFrom, target string
+	pauseBefore, pauseAfter    []string
+	pauseOnFailure             *bool
+	runner                     string
 
 	profile  string
 	noUpdate bool
@@ -99,7 +105,6 @@ func (flags runFlags) detachedOnlyFlags() []detachedOnlyFlag {
 		{"--sw-request-id", flags.requestID},
 		{"--sw-consumer-idle", flags.consumerIdle},
 		{"--sw-consumer-claim-lease", flags.consumerClaimLease},
-		{"--sw-output", flags.outputFormat},
 	}
 }
 
@@ -161,252 +166,48 @@ func appendCSV(out []string, v string) []string {
 }
 
 func parseRunFlags(args []string) (runFlags, []string) {
-	var flags runFlags
-	passthroughArgs := make([]string, 0, len(args))
-	argumentIndex := 0
-	for argumentIndex < len(args) {
-		argument := args[argumentIndex]
-		if argument == "--" {
-			return flags, append(passthroughArgs, args[argumentIndex:]...)
-		}
-		switch {
-		case argument == "--sw-ref":
-			if argumentIndex+1 < len(args) {
-				flags.ref = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-ref="):
-			flags.ref = strings.TrimPrefix(argument, "--sw-ref=")
-			argumentIndex++
-		// safety: a removed flag left to the passthrough would reach the
-		// pipeline as an argument named profile, so it is refused instead.
-		case argument == "--profile":
-			flags.profile = "<name>"
-			if argumentIndex+1 < len(args) {
-				flags.profile = args[argumentIndex+1]
-				argumentIndex++
-			}
-			argumentIndex++
-		case strings.HasPrefix(argument, "--profile="):
-			flags.profile = strings.TrimPrefix(argument, "--profile=")
-			argumentIndex++
-		case argument == "--sw-no-update":
-			flags.noUpdate = true
-			argumentIndex++
-		case argument == "--sw-no-bincache":
-			flags.noBincache = true
-			argumentIndex++
-		case argument == "--sw-hash-all-files":
-			flags.hashAllFiles = true
-			argumentIndex++
-		case argument == "--sw-allow-unadmitted":
-			flags.allowUnadmitted = true
-			argumentIndex++
-		case argument == "--sw-verbose", argument == "-v":
-			flags.verbose = true
-			argumentIndex++
-		case argument == "--sw-mode":
-			if argumentIndex+1 < len(args) {
-				flags.mode = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-mode="):
-			flags.mode = strings.TrimPrefix(argument, "--sw-mode=")
-			argumentIndex++
-		case argument == "--sw-workers":
-			value := ""
-			if argumentIndex+1 < len(args) {
-				value = args[argumentIndex+1]
-				argumentIndex++
-			}
-			n, err := atoiNonNeg(value)
-			if err != nil {
-				flags.parseErr = fmt.Errorf("run: --sw-workers must be a nonnegative integer, got %q", value)
-			} else {
-				flags.workers = n
-			}
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-workers="):
-			value := strings.TrimPrefix(argument, "--sw-workers=")
-			n, err := atoiNonNeg(value)
-			if err != nil {
-				flags.parseErr = fmt.Errorf("run: --sw-workers must be a nonnegative integer, got %q", value)
-			} else {
-				flags.workers = n
-			}
-			argumentIndex++
-		// safety: invalid priorities must fail before the run enters the queue.
-		case argument == "--sw-priority":
-			flags.prioritySet = true
-			if argumentIndex+1 < len(args) {
-				flags.priority = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-priority="):
-			flags.priority = strings.TrimPrefix(argument, "--sw-priority=")
-			flags.prioritySet = true
-			argumentIndex++
-		case argument == "--sw-start-at":
-			if argumentIndex+1 < len(args) {
-				flags.startAt = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-start-at="):
-			flags.startAt = strings.TrimPrefix(argument, "--sw-start-at=")
-			argumentIndex++
-		case argument == "--sw-stop-at":
-			if argumentIndex+1 < len(args) {
-				flags.stopAt = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-stop-at="):
-			flags.stopAt = strings.TrimPrefix(argument, "--sw-stop-at=")
-			argumentIndex++
-		case argument == "--sw-only":
-			if argumentIndex+1 < len(args) {
-				flags.only = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-only="):
-			flags.only = strings.TrimPrefix(argument, "--sw-only=")
-			argumentIndex++
-		case argument == "--sw-no-cache":
-			flags.noCache = true
-			argumentIndex++
-		case argument == "--sw-dry-run", argument == "--dry-run=true":
-			flags.dryRun = true
-			argumentIndex++
-		case argument == "--dry-run=false":
-			flags.dryRun = false
-			argumentIndex++
-		case argument == "--sw-allow":
-			if argumentIndex+1 < len(args) {
-				flags.allow = appendCSV(flags.allow, args[argumentIndex+1])
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-allow="):
-			flags.allow = appendCSV(flags.allow, strings.TrimPrefix(argument, "--sw-allow="))
-			argumentIndex++
-		case argument == "--sw-index":
-			if argumentIndex+1 < len(args) {
-				flags.index = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-index="):
-			flags.index = strings.TrimPrefix(argument, "--sw-index=")
-			argumentIndex++
-		case argument == "--sw-run-handle-file":
-			if argumentIndex+1 < len(args) {
-				flags.runHandleFile = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-run-handle-file="):
-			flags.runHandleFile = strings.TrimPrefix(argument, "--sw-run-handle-file=")
-			argumentIndex++
-		case argument == "--sw-detached":
-			flags.detached = true
-			argumentIndex++
-		case argument == "--sw-pipeline-ref":
-			if argumentIndex+1 < len(args) {
-				flags.pipelineRef = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-pipeline-ref="):
-			flags.pipelineRef = strings.TrimPrefix(argument, "--sw-pipeline-ref=")
-			argumentIndex++
-		case argument == "--sw-idempotency-key":
-			if argumentIndex+1 < len(args) {
-				flags.idempotencyKey = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-idempotency-key="):
-			flags.idempotencyKey = strings.TrimPrefix(argument, "--sw-idempotency-key=")
-			argumentIndex++
-		case argument == "--sw-request-id":
-			if argumentIndex+1 < len(args) {
-				flags.requestID = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-request-id="):
-			flags.requestID = strings.TrimPrefix(argument, "--sw-request-id=")
-			argumentIndex++
-		case argument == "--sw-consumer-idle":
-			if argumentIndex+1 < len(args) {
-				flags.consumerIdle = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-consumer-idle="):
-			flags.consumerIdle = strings.TrimPrefix(argument, "--sw-consumer-idle=")
-			argumentIndex++
-		case argument == "--sw-consumer-claim-lease":
-			if argumentIndex+1 < len(args) {
-				flags.consumerClaimLease = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-consumer-claim-lease="):
-			flags.consumerClaimLease = strings.TrimPrefix(argument, "--sw-consumer-claim-lease=")
-			argumentIndex++
-		case argument == "--sw-output":
-			if argumentIndex+1 < len(args) {
-				flags.outputFormat = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-output="):
-			flags.outputFormat = strings.TrimPrefix(argument, "--sw-output=")
-			argumentIndex++
-		default:
-			if strings.HasPrefix(argument, "--sw-") && flags.unknownRunnerFlag == "" {
-				flags.unknownRunnerFlag = argument
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		}
+	inv, err := clisurface.Parse("sparkwing", append([]string{"run", "pipeline"}, args...))
+	if err != nil {
+		return runFlags{parseErr: err}, nil
 	}
-	return flags, passthroughArgs
+	output := runOutput(inv, os.Getenv("SPARKWING_LOG_FORMAT"), color.IsInteractiveStdout())
+	if output != "pretty" && output != "json" && output != "plain" {
+		return runFlags{parseErr: errors.New("SPARKWING_LOG_FORMAT must be pretty, json or plain")}, nil
+	}
+	workers, _ := strconv.Atoi(inv.Value("sw-workers"))
+	var pause *bool
+	if inv.Has("sw-pause-on-failure") {
+		value := inv.Bool("sw-pause-on-failure")
+		pause = &value
+	}
+	return runFlags{
+		publish: inv.Value("publish"), cacheFrom: inv.Value("sw-cache-from"), target: inv.Value("target"),
+		pauseBefore: inv.Flags["sw-pause-before"], pauseAfter: inv.Flags["sw-pause-after"], pauseOnFailure: pause,
+		ref: inv.Value("sw-ref"), pipelineRef: inv.Value("sw-pipeline-ref"),
+		noUpdate: inv.Bool("sw-no-update"), verbose: inv.Bool("sw-verbose"),
+		noBincache: inv.Bool("sw-no-bincache"), hashAllFiles: inv.Bool("sw-hash-all-files"),
+		allowUnadmitted: inv.Bool("sw-allow-unadmitted"), workers: workers,
+		priority: inv.Value("sw-priority"), prioritySet: inv.Has("sw-priority"),
+		startAt: inv.Value("sw-start-at"), stopAt: inv.Value("sw-stop-at"),
+		only: inv.Value("sw-only"), noCache: inv.Bool("sw-no-memo"),
+		dryRun: inv.Bool("sw-dry-run"), allow: inv.Flags["sw-allow-risk"],
+		index: inv.Value("sw-index"), runHandleFile: inv.Value("sw-run-handle-file"),
+		detached: inv.Bool("sw-detached"), idempotencyKey: inv.Value("sw-idempotency-key"),
+		requestID: inv.Value("sw-request-id"), outputFormat: output,
+	}, inv.Args
+}
+
+func runOutput(inv clisurface.Invocation, environment string, terminal bool) string {
+	if inv.Has("sw-output") {
+		return inv.Value("sw-output")
+	}
+	if inv.Has("output") {
+		return inv.Value("output")
+	}
+	if environment != "" {
+		return environment
+	}
+	return inv.Output(terminal)
 }
 
 const EventIndexBound = "index_bound"
@@ -599,9 +400,7 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 			GithubRepo:  githubRepository,
 		},
 	}
-	if flags.hereReason != "" {
-		request.Runner, request.Reason = "here", flags.hereReason
-	}
+	request.Runner, request.Reason = flags.runner, flags.hereReason
 
 	if snapshot != nil {
 		key, uploadErr := uploadSourceBundle(runProfile, snapshot)

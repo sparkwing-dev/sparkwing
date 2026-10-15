@@ -32,7 +32,7 @@ func resolveApprovalVerb(ctx context.Context, paths orchestrator.Paths, args []s
 	on := fs.String("profile", "", "profile name (default: local)")
 	comment := fs.String("comment", "", "optional operator note recorded on the approval")
 	runIDFlag := fs.String("run", "", "run ID holding the approval gate")
-	nodeIDFlag := fs.String("node", "", "node ID of the approval gate")
+	nodeIDFlag := fs.String("job", "", "node ID of the approval gate")
 	if err := parseAndCheck(cmd, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -40,10 +40,10 @@ func resolveApprovalVerb(ctx context.Context, paths orchestrator.Paths, args []s
 		return err
 	}
 	if rest := fs.Args(); len(rest) > 0 {
-		return fmt.Errorf("%s: unexpected positional %q (use --run and --node)", cmd.Path, rest[0])
+		return fmt.Errorf("%s: unexpected positional %q (use --run and --job)", cmd.Path, rest[0])
 	}
 	if *runIDFlag == "" || *nodeIDFlag == "" {
-		return fmt.Errorf("%s: --run and --node are required", cmd.Path)
+		return fmt.Errorf("%s: --run and --job are required", cmd.Path)
 	}
 	runID := *runIDFlag
 	nodeID := *nodeIDFlag

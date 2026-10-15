@@ -18,7 +18,7 @@ same command reaches any controller you can reach, including one your team
 runs:
 
 ```bash
-sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
+sparkwing profiles add --controller https://api.sparkwing.example --token-stdin
 ```
 
 Start local. Read [Install](#install) and [Quick start](#quick-start),
@@ -344,7 +344,7 @@ sparkwing pipeline trigger build --profile dev --working-tree  # uncommitted cha
 sparkwing pipeline trigger build --profile prod        # run on the "prod" cluster
 ```
 
-Cluster names are profiles. `sparkwing cloud connect` writes one; see
+Cluster names are profiles. `sparkwing profiles add` writes one; see
 [Sparkwing Cloud](#sparkwing-cloud). Sparkwing itself
 does not run in-cluster locally - clusters named by `--profile` are
 user-managed deploy targets, not local sparkwing deployments.
@@ -357,24 +357,19 @@ reach it over outbound HTTPS. The same command reaches any controller you
 can reach, Sparkwing Cloud and one your team runs alike.
 
 ```bash
-sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
+sparkwing profiles add --controller https://api.sparkwing.example --token-stdin
 ```
 
-It reads the token you were given on stdin, writes the profile into
-`~/.config/sparkwing/config.yaml`, and prints the dashboard URL the
-controller announces along with the same probes `sparkwing configure profiles
-test` runs. Nothing here asks you to edit YAML.
+It reads the token from stdin, verifies the connection, and saves the profile in
+`~/.config/sparkwing/config.yaml`. The result contains the controller URL and a
+redacted token prefix. Use `sparkwing profiles show --profile NAME` to inspect
+it and `sparkwing profiles set --profile NAME --token-stdin` to replace its token.
 
-An administrator of a controller mints those tokens with
-`--admin-token-stdin` instead, which reads an admin credential and issues a
-user token carrying `runs.read`, `runs.write`, `triggers.read`, `logs.read`
-and `approvals.write`. The admin token is never stored. See
-[Self-hosting](self-hosting.md) for running the controller that issues them.
-
-The profile is named after the controller host (`api-sparkwing-example`
-above) unless you pass `--name`. An existing profile of that
-name is replaced only with `--force`, because the token it holds stays live
-until it is revoked.
+The profile name comes from the controller host unless `--profile` names it.
+An existing profile is replaced only with `--force`. Removing a profile with
+`sparkwing profiles remove --profile NAME` revokes its token first.
+`--keep-token` removes only the saved connection. Project configuration cannot
+supply connection profiles or credentials.
 
 Commands reach the connection only when they name it with `--profile`;
 without the flag they act on this machine's store.
@@ -419,7 +414,7 @@ this browser.
 token** mints a personal token and shows it once with two commands:
 
 ```bash
-sparkwing cloud connect --controller https://api.sparkwing.example --name acme --token-stdin
+sparkwing profiles add --controller https://api.sparkwing.example --profile acme --token-stdin
 sparkwing pipeline trigger <pipeline> --profile acme
 ```
 

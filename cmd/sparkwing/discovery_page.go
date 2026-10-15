@@ -23,8 +23,8 @@ type discoveryPaging struct {
 
 func (p discoveryPaging) bounds(keys []string) (int, int, discoveryPage, error) {
 	summary := discoveryPage{Kind: "page", Total: len(keys), Limit: p.limit}
-	if p.limit < 0 {
-		return 0, 0, summary, fmt.Errorf("--limit must be zero or greater")
+	if p.limit < 1 {
+		return 0, 0, summary, fmt.Errorf("--limit must be at least one")
 	}
 	start := 0
 	if p.cursor != "" {
@@ -36,11 +36,11 @@ func (p discoveryPaging) bounds(keys []string) (int, int, discoveryPage, error) 
 			}
 		}
 		if !found {
-			return 0, 0, summary, fmt.Errorf("--cursor does not match this result set; repeat the query without a cursor")
+			return 0, 0, summary, fmt.Errorf("--cursor does not match this result set; repeat the search without a cursor")
 		}
 	}
 	end := len(keys)
-	if p.limit > 0 && p.limit < end-start {
+	if p.limit < end-start {
 		end = start + p.limit
 	}
 	summary.Returned, summary.Truncated = end-start, end < len(keys)
@@ -59,7 +59,7 @@ func (p discoveryPage) write(mode string) error {
 		w = os.Stderr
 	}
 	if p.Truncated {
-		_, err := fmt.Fprintf(w, "%d of %d matches; continue with the same filters and --cursor %q (or --limit 0 for all)\n", p.Returned, p.Total, p.NextCursor)
+		_, err := fmt.Fprintf(w, "%d of %d matches; continue with the same filters and --cursor %q\n", p.Returned, p.Total, p.NextCursor)
 		return err
 	}
 	if mode == "pretty" {

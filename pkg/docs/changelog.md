@@ -76,6 +76,8 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
+- **cli (Breaking):** Command parsing and help use the final command registry
+  Removed command families and unknown flags fail before state access. Pipeline arguments require `--`. Discovery uses `--search`, `--all`, and positive page limits. Controller connections use `profiles add|list|show|set|remove` and come only from machine configuration. Run flags use `--sw-no-memo` and `--sw-allow-risk`. Cancellation uses the shared controller API for local and remote runs and preserves its applied result.
 - **runner + cli:** A guard that names `git:branch=default` refuses the run when the repository's default branch cannot be resolved, instead of treating the token as unmatched
 - **store (Breaking):** Schema version 2 adds `triggers.runner_pin`; a store recording version 1 is refused like any other version and must be deleted
 - **runner:** a run the trigger runner hosts is bounded at six hours, GitHub Actions' default job timeout, instead of the 30 minutes its handler process had

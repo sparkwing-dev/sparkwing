@@ -45,7 +45,7 @@ func runRunsAnnotations(ctx context.Context, paths orchestrator.Paths, args []st
 func runAnnotationsList(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdAnnotationsList.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier (required)")
-	nodeID := fs.String("node", "", "limit to one node id")
+	nodeID := fs.String("job", "", "limit to one node id")
 	stepID := fs.String("step", "", "limit to one step id (implies node-scope or step-scope reads)")
 	includeSteps := fs.Bool("steps", false, "include per-step annotations as separate rows")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
@@ -220,7 +220,7 @@ func writeAnnotationsJSON(w io.Writer, entries []annotationEntry) error {
 func runAnnotationsAdd(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdAnnotationsAdd.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier (required)")
-	nodeID := fs.String("node", "", "node identifier (required)")
+	nodeID := fs.String("job", "", "node identifier (required)")
 	stepID := fs.String("step", "", "step identifier (optional; annotates the step instead of the node)")
 	msg := fs.StringP("message", "m", "", "annotation text (required)")
 	on := fs.String("profile", "", "profile name; omit for local-only")
@@ -231,7 +231,7 @@ func runAnnotationsAdd(ctx context.Context, paths orchestrator.Paths, args []str
 		return err
 	}
 	if *runID == "" || *nodeID == "" {
-		return fmt.Errorf("%s: --run and --node are required", cmdAnnotationsAdd.Path)
+		return fmt.Errorf("%s: --run and --job are required", cmdAnnotationsAdd.Path)
 	}
 	if *msg == "" {
 		return fmt.Errorf("%s: --message is required", cmdAnnotationsAdd.Path)

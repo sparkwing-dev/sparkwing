@@ -46,6 +46,7 @@ func TestParseGrammar(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"run", "check", "--sw-workers", "1", "--", "--x=1"},
+		{"__complete", "--kind=verbs", "--word=", "-o", "plain"},
 		{"pipeline", "trigger", "--resume", "r1", "--profile", "prod"},
 		{"runs", "cancel", "--run", "-"}, {"runs", "list", "-ojson", "--limit=1", "--cursor", "c"},
 		{"runs", "status", "--help"}, {"run", "--help-all"},

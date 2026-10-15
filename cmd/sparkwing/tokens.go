@@ -85,7 +85,7 @@ func runTokensList(args []string) error {
 	on := addProfileFlag(fs)
 	kind := fs.String("type", "", "filter by type (user|runner|service)")
 	includeRevoked := fs.Bool("include-revoked", false, "include revoked tokens")
-	prefix := fs.String("prefix", "", "print the full record of the one token with this non-secret prefix")
+	prefix := fs.String("token", "", "print the full record of the one token with this non-secret prefix")
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
 	if err := parseAndCheck(cmdTokensList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -158,7 +158,7 @@ func formatScopes(scopes []string) string {
 func runTokensRevoke(args []string) error {
 	fs := flag.NewFlagSet(cmdTokensRevoke.Path, flag.ContinueOnError)
 	on := addProfileFlag(fs)
-	prefix := fs.String("prefix", "", "non-secret token prefix (from 'tokens list')")
+	prefix := fs.String("token", "", "non-secret token prefix (from 'tokens list')")
 	if err := parseAndCheck(cmdTokensRevoke, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -197,7 +197,7 @@ func printTokenRecord(c *client.Client, prefix string) error {
 func runTokensRotate(args []string) error {
 	fs := flag.NewFlagSet(cmdTokensRotate.Path, flag.ContinueOnError)
 	on := addProfileFlag(fs)
-	prefix := fs.String("prefix", "", "non-secret token prefix")
+	prefix := fs.String("token", "", "non-secret token prefix")
 	grace := fs.Duration("grace", 24*time.Hour, "window during which the old token still authenticates (max 168h)")
 	ttl := fs.Duration("ttl", 0, "TTL of the new token (0 = preserve the old token's remaining TTL)")
 	if err := parseAndCheck(cmdTokensRotate, fs, args); err != nil {

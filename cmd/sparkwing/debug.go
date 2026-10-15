@@ -28,7 +28,7 @@ func runDebug(args []string) error {
 	switch args[0] {
 	case "run":
 		return runDebugRun(args[1:])
-	case "release":
+	case "resume":
 		return runDebugRelease(args[1:])
 	case "attach":
 		return runDebugAttach(args[1:])
@@ -120,7 +120,7 @@ func runDebugRun(args []string) error {
 	if pauseOnFailure {
 		fmt.Fprintln(os.Stderr, "  pause-on-failure: true")
 	}
-	fmt.Fprintln(os.Stderr, "  release with: sparkwing debug release --run <id> --node <name>")
+	fmt.Fprintln(os.Stderr, "  release with: sparkwing debug release --run <id> --job <name>")
 
 	return dispatchRun(append([]string{pipelineName}, remaining...))
 }
@@ -137,7 +137,7 @@ const defaultDebugNamespace = "sparkwing"
 func parseDebugTarget(cmd Command, args []string) (debugTargetFlags, error) {
 	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
-	nodeID := fs.String("node", "", "node id")
+	nodeID := fs.String("job", "", "node id")
 	on := fs.String("profile", "", "profile name (cluster mode)")
 	namespace := defaultDebugNamespace
 	if cmd.Path == cmdDebugAttach.Path {
@@ -147,7 +147,7 @@ func parseDebugTarget(cmd Command, args []string) (debugTargetFlags, error) {
 		return debugTargetFlags{}, err
 	}
 	if *runID == "" || *nodeID == "" {
-		return debugTargetFlags{}, fmt.Errorf("%s: --run and --node are required", cmd.Path)
+		return debugTargetFlags{}, fmt.Errorf("%s: --run and --job are required", cmd.Path)
 	}
 	return debugTargetFlags{run: *runID, node: *nodeID, on: *on, namespace: namespace}, nil
 }
