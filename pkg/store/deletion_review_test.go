@@ -239,7 +239,7 @@ func TestTeamRecheckRemovesRowsWrittenAfterThePurge(t *testing.T) {
 	}
 	deleteAndPurge(t, st, "acme", now)
 	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st,
-		`INSERT INTO egress_usage (principal, month, bytes, updated_at, team) VALUES ('late', '2026-09', 1, 1, 'acme')`)); err != nil {
+		`INSERT INTO egress_usage (replica_id, period, bytes, updated_at, team) VALUES ('replica', '2026-09', 1, 1, 'acme')`)); err != nil {
 		t.Fatal(err)
 	}
 	op := st.AsOperator()
@@ -293,7 +293,7 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 	team := string(owner.PersonalTeam)
 	bystander := string(leaver.PersonalTeam)
 	for _, q := range []string{
-		`INSERT INTO egress_usage (principal, month, bytes, updated_at, team) VALUES ('leaver@example.com', '2026-09', 700, 1, '` + team + `')`,
+		`INSERT INTO egress_usage (replica_id, period, bytes, updated_at, team) VALUES ('replica', '2026-09', 700, 1, '` + team + `')`,
 		`INSERT INTO debug_pauses (run_id, node_id, reason, paused_at, expires_at, released_by, team) VALUES ('run-l', 'n', 'r', 1, 2, 'leaver@example.com', '` + team + `')`,
 		`INSERT INTO approvals (run_id, node_id, requested_at, approver, team) VALUES ('run-l', 'n', 1, 'deploy-bot', '` + team + `')`,
 		`INSERT INTO cron_schedules (id, repo_path, pipeline, cron, tz, overlap, catch_up_ns, armed_at, armed_by, updated_at, cursor_at, team)
@@ -315,7 +315,6 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ table, col string }{
-		{"egress_usage", "principal"},
 		{"credit_grants", "created_by"},
 		{"secrets", "principal"},
 		{"triggers", "trigger_user"},
@@ -347,7 +346,7 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 	if payload != `{"by":"deleted user"}` {
 		t.Errorf("event payload = %s", payload)
 	}
-	if n := countWhere(t, st, "egress_usage", "principal = '"+store.DeletedUserLabel+"' AND bytes = 700"); n != 1 {
-		t.Error("egress bytes were not kept under the deleted-user label")
+	if n := countWhere(t, st, "egress_usage", "replica_id = 'replica' AND team = '"+team+"' AND bytes = 700"); n != 1 {
+		t.Error("tenant egress bytes changed during account deletion")
 	}
 }

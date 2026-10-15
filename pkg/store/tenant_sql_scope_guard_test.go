@@ -117,7 +117,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +
 		"another team is refused; a dispute id is unique across teams",
 
-	"(*Store).PruneEgressUsage": "drops every team's egress months past the window, which is a deployment-wide retention",
+	"(*Operator).PruneEgressUsage": "expires every team's egress reports under the maintenance lease",
 	"ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
 		"account deletion can tell sole ownership from shared",
 	"(*Store).finalizeClaimRoundAt": "closes the claim round of a node named by global id under the team boundary " +
@@ -165,10 +165,7 @@ var reviewedUnscopedSQL = map[string]string{
 		"principal",
 	"(*Operator).TopStorageTeams": "the operator's storage report ranks every team's monthly bytes, each keyed by its team " +
 		"principal",
-	"(*Store).ListEgressUsage": "the controller restores the deployment's egress meter, which counts every principal, " +
-		"before it serves",
-	"(*Store).RecordEgressUsage": "the controller persists the deployment's egress meter for every principal it counted; " +
-		"each principal names its own team",
+	"(*Operator).EgressUsageAcrossTeams": "reloads team egress totals into the controller alarm before serving",
 	"(*Store).selectTokensByPrefix": "authenticates a presented token by its prefix before its team is known; a token " +
 		"prefix is unique across teams and the row it returns carries its team",
 	"selectTokensByPrefixTx": "reads the credential the operator's rotate names by its prefix, which is unique across " +

@@ -409,3 +409,16 @@ The source reports describe residual failures that their committed tests do not 
 - Final positive permission tests use valid requests. Expected grants come from independent architecture cases, not from the policy table's own output.
 - Race cases coordinate at a real transaction or request-body boundary. A sleep that merely hopes to produce an ordering is insufficient evidence.
 - Run package tests for local invariants and acceptance scenarios for cross-process behavior. The parked test counts are inventory counts, not launch coverage claims.
+
+## Egress persistence cutover
+
+The three tests in `pkg/store/egress_test.go` are replaced by final-schema proofs
+in `egress_accounting_runtime_test.go`. Round-trip, monotone usage and expiration
+now use additive tenant and replica rows, public day/month reports and the leased
+pruner. Invalid writer identity and negative increments fail through `AddUsage`.
+The controller's old flush/retry/restore tests are replaced by request delivery,
+tenant attribution, nil-meter persistence, short-write, restart-alarm and loud
+write-failure proofs in `egress_accounting_internal_test.go`. Timer-flush and
+closing-month backlog expectations retire with that implementation.
+The SQLite replica acceptance cell reads public egress totals after reopening.
+Native/platform cells remain unclaimed.

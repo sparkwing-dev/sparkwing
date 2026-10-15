@@ -1,5 +1,20 @@
 # Migrating to the next release
 
+## Egress accounting uses tenant and replica counters
+
+`Store.RecordEgressUsage`, `Store.ListEgressUsage` and `Store.PruneEgressUsage`
+are removed. Write additive bytes with `Tenant.AddUsage` using `egress_bytes`,
+a UTC day and the controller's trusted replica ID. Read day or month totals with
+`Tenant.EgressUsage`. Deployment reports use `Operator.EgressUsageAcrossTeams`.
+Pruning uses `Operator.PruneEgressUsage` with the maintenance lease.
+
+The controller records delivered successful-response bytes at request completion,
+including partial transfers and reads served without an in-memory meter. Logs
+consume egress while remaining exempt from download caps. Alarm reload uses team
+totals. A failed counter write emits an error. A controller crash before request
+completion can lose that request's egress sample. Thirteen months of reports stay
+available. There is no principal-based persistence or periodic flush.
+
 ## Event charges use tenant handles and replica identity
 
 `Store.AppendEventCharged` is removed. Obtain a tenant with `Store.ForTeam`,

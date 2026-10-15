@@ -872,6 +872,20 @@ are exempt from download quota. Deferred plan counters add no enforcement here.
 The unused service-wide `egress_day` table is removed. Tenant egress remains in
 `egress_usage` with period and replica identity.
 
+`Tenant.AddUsage` owns egress writes under tenant, UTC day and trusted replica
+identity. The controller records delivered successful-response bytes once at
+request completion, including partial writes and cancelled request contexts.
+An absent in-memory meter still records durable tenant usage. Logs count as
+egress without consuming download quota. Accounting errors are logged. A process
+termination before request completion can lose that request's egress sample.
+`Tenant.EgressUsage` sums replicas for a UTC day or month.
+`Operator.EgressUsageAcrossTeams` supplies team totals for startup alarm reload.
+`Operator.PruneEgressUsage` retains thirteen months under the maintenance lease
+and store clock. `Store.RecordEgressUsage`, `Store.ListEgressUsage` and the raw
+`Store.PruneEgressUsage` are removed with the controller's principal flush timer.
+Account deletion leaves the tenant counters unchanged because they have no user
+identity. No schema or policy limit changes.
+
 `Tenant.AppendEventCharged` replaces the raw Store event writer. Its trusted
 replica identity comes from the controller. The method accepts no principal,
 team or clock. It locks the tenant's run and commits the event, retained run

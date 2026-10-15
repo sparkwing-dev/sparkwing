@@ -173,7 +173,7 @@ second run over the same data removes nothing more.
 | API, CLI and runner tokens | revoked or expired more than 30 days ago | controller, hourly storage pass | none |
 | Browser sessions, GitHub runner credentials | expired | controller, hourly storage pass | none |
 | Cron fire history | beyond 200 per schedule | controller, on each fire | none |
-| Egress usage rows | older than 13 months | controller, monthly | none |
+| Egress usage rows | older than 13 months | leased controller maintenance | none |
 | Team download days | older than 7 days | controller, hourly storage pass | none |
 | Storage reservations | an hour after a writer took one it never committed or released | controller, on the team's next write and in the hourly storage pass | none |
 
@@ -221,7 +221,7 @@ bounds it. The last column is where the bound is enforced or defaulted.
 | Invitations | 50 open and 100 sent per day per team, each expiring after 7 days | `pkg/store/identity.go` |
 | Browser sessions | seven days after last use, 30 days at most; deleted once expired | `pkg/controller/auth_handlers.go` |
 | Bytes the controller serves | the team's daily download cap for artifacts and git fetches, never for log reads; a daily alarm on a limits profile that refuses nothing | `pkg/controller/egress.go`, `pkg/controller/limits_profile.go` |
-| Egress usage rows | 13 months | `pkg/store/egress.go` |
+| Egress usage rows | 13 months | `pkg/store/egress_accounting.go` |
 | Controller requests | per-token request budget, per-runner claim and heartbeat budgets, and the sign-in limiter, on a limits profile | `pkg/controller/limits_profile.go` |
 
 A controller started without `--limits-profile` sets no request, flood or

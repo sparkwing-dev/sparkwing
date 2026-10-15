@@ -1,153 +1,162 @@
 # W1b handoff
 
-Continues session 6 on HEAD fd430813d. W1b remains incomplete. The lead owns
+Continues session 7 at HEAD 201145e74. W1b remains incomplete. The lead owns
 commits, independent review, pipelines and native integration.
 
 ## This continuation
 
-The first two lead handoffs were already done. The complete generated
-TestBlobRecordsMutationCannotOutliveAuthority run passes unchanged. The output
-catalog removals remain absent. W1's lifecycle implementation files were not edited.
+The first two lead handoffs remain complete. The full generated
+TestBlobRecordsMutationCannotOutliveAuthority test passes. The retired output
+catalog entries remain absent. W1 lifecycle implementation files were not edited.
 
-The third lead handoff advances by retiring the principal-based event writer.
-Tenant.AppendEventCharged replaces Store.AppendEventCharged. Its first string
-argument is the controller's trusted replica identity. It accepts no principal,
-team or clock. The controller reuses leaseHolder and obtains the tenant from the
-request's verified team. HTTP request and response shapes do not change.
+The third lead handoff advances by retiring principal egress persistence.
+Store.RecordEgressUsage, Store.ListEgressUsage and Store.PruneEgressUsage are gone.
+Tenant.AddUsage writes additive egress bytes with trusted replica identity.
+Tenant.EgressUsage reports one team's UTC day or month across replicas.
+Operator.EgressUsageAcrossTeams supplies team aggregates for alarm reload.
+Operator.PruneEgressUsage uses the maintenance lease and store clock to preserve
+thirteen months. No schema change was required.
 
-Invariant: an event, its retained-byte count, quota debit and replica usage commit
-together in the selected tenant. A refusal changes none of them. The initial
-final-schema regression failed with "no such column: principal".
+Invariant: delivered bytes add once to the authenticated tenant, and one replica
+cannot replace another replica's usage. Generated SQLite tests vary hostile
+replica identities and byte counts through independent clients. They check
+foreign-team isolation and public day/month totals. The initial regression failed
+because the replacement tenant and operator APIs did not exist.
 
-The writer locks the tenant's run and shares storage admission with verified
-uploads. It charges monthly and lifetime run bytes without spending object
-capacity. Pending uploads consume the same capacity. Aborting a ticket releases
-capacity for events. Events reduce the capacity available to later uploads.
-The shared quota owner selects the month after its lock. Run usage survives month
-changes. Additive monthly and run rows carry tenant and replica identity.
-Usage is recorded even without configured limits. The retained event total still
-comes from runs.event_bytes. Kind bytes count alongside payload bytes.
+The controller records delivered successful-response bytes at request completion.
+Its existing lease-holder identity supplies the replica. Request query fields
+cannot select either team or replica. HEAD and error bodies add nothing. A short
+write counts only bytes actually delivered. Cancelled request contexts cannot
+cancel the accounting write. The optional process meter still owns concurrency
+and alarms. Durable usage also works without that meter. Logs remain exempt from
+download caps while consuming egress bytes. A failed accounting write logs an
+error. A process exit before request completion can lose that request's sample.
+This limitation is documented in the contract and migration guide.
 
-The existing event-size, run-byte and event-count caps, free share, funding and
-claim-fence handling remain. Priced storage checks credit using the store clock.
-Overflow and any failed quota, usage or event insert roll back the whole write
-and return no sequence. The generated tenant property varies byte counts and
-hostile replica strings through independent SQLite clients. It checks refusal
-of foreign runs and conservation across run counters, quota and usage reports.
+The store rejects malformed reporting periods, negative persisted counters and
+overflow. Counter overflow leaves the existing row unchanged. Pruning refuses a
+stale maintenance fence. Reports and expiration survive reopening. Account
+deletion leaves egress rows intact because they contain no user identity.
 
-Deleted 162 legacy implementation lines from storage.go, including the raw API,
-principal quota writer, old quota checks and principal lock. Deleted 347 old test
-lines. The replacement event owner is 86 lines. Shared storage helper changes
-reuse the upload quota and usage owners. Including the 94-line acceptance helper,
-the non-test Go diff adds 230 lines and removes 204, a net increase of 26.
-No new table, setting, environment variable, cap, timeout or service was added.
+Startup alarm reload preserves both day and month totals beyond the process
+meter's principal cardinality. The real 10,002-team controller regression first
+returned month=10,001. The loader now supplies the summed month through the
+meter's existing aggregate restoration field. The regression passes.
+
+Deleted 139 legacy store implementation lines: all 125 lines of egress.go and the
+14-line obsolete account-relabel block. Deleted 312 old test lines: 117 in the
+store and 195 in the controller. Across all non-test Go changes, 167 lines were
+added and 243 removed, a net reduction of 76 lines.
 
 ## Ports and acceptance
 
-Ported the five charged-storage tests and seven event-cap tests from storage_test.go
-and event_limits_test.go to event_accounting_runtime_test.go and
-event_policy_runtime_test.go. Preserved per-run/month/event/count limits, kind
-validation, kind byte cost, concurrent capacity, uncharged event counters and
-failed-write rollback. The old no-quota test now requires accounting because final
-replica counters record all writes. Free-share, funded/held and priced-storage
-checks use final-schema fixtures. The old fixture callers still compile.
+Ported the three store egress tests to final-schema replica conservation,
+round-trip, ordering, invalid inputs, overflow and leased expiration proofs.
+The controller's obsolete flush/backlog/retry expectations retire with its timer.
+Replacement checks prove actual delivery, authenticated attribution, nil-meter
+persistence, partial writes, cancelled contexts, loud failures and alarm reload.
+The internal egress writer has a direct delivered-byte test with and without a
+meter. Its existing stream-control implementation remains shared.
 
-storage-replica-safe-accounting/store-data-sqlite now includes the real event API
-through independent clients, competition with a pending upload, a final-capacity
-race, reopening and the exhausted cap. All 12 existing store-data-sqlite proofs
-pass. No new native cell or archived T1 source row is marked complete. The
-controller component proof exercises the actual handler and persistence without a
-socket. It uses a trusted operator principal and does not prove final C2 routing.
+storage-replica-safe-accounting/store-data-sqlite now reads real public egress
+day/month totals after reopening. All 12 existing SQLite storage/billing proofs
+pass. No native cell or archived T1 source row is newly marked complete.
 
 ## Verification
 
-All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4,
-and GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W1b/.
+Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and -p 4.
+GOCACHE, GOTMPDIR and TMPDIR are under /tmp/sw-astra-W1b/.
 
-- Whole-repository go build -p 4 ./... passed on the final production tree.
-- Scoped go vet passed for store, controller and both acceptance trees.
-- Final store selection passed 172 top-level tests / 575 cases. The additional
-  priced-event test passed separately, totaling 173 tests / 576 cases.
-- Four focused controller tests passed, including event and download accounting
-  and final-inventory/tagged-log maintenance.
+- Whole-repository go build -p 4 ./... passed.
+- Scoped go vet passed for store, controller, egress and both acceptance trees.
+- The inherited store-data selection passed 175 top-level tests / 578 cases.
+  The additional corruption/overflow test passed separately, totaling 176 tests
+  and 579 cases. The three egress tests also passed together after formatting.
+- Five focused controller tests passed, including the four egress proofs and the
+  tenant event proof. All internal/egress tests passed except two socket tests
+  excluded because this sandbox cannot create a listener.
 - TestStorage and TestBilling passed 43 cases, including all 12 SQLite proofs.
-  The 562 native/platform skeleton skips remain unclaimed.
+  The 562 platform/native skeleton skips remain unclaimed.
 - commentcheck -base main, sleepcheck -base HEAD, gofmt, git diff --check,
   sync-docs.sh --check and check-changelog.sh passed.
 - The regenerated store API snapshot matches. Full directory comparison still
-  finds the inherited .apidiff/pkg_runner.txt for a package no longer generated.
+  finds inherited .apidiff/pkg_runner.txt for a package no longer generated.
 
-The final store regex is
+The store selection is
 ^(TestBlob|TestLogPersistence|TestLogPublication|TestLogMaintenance|TestStoreData|TestRetainedStorage|TestPaymentSettlement|TestMeteredAccounting|TestTenantSQLScope|TestTenantWriters|TestTenantTwins).
-Acceptance uses ^(TestStorage|TestBilling)$ on the two acceptance trees.
+The controller selection is
+^(TestControllerEgress.*|TestControllerEventsUseTenantAndReplica)$.
+Internal egress uses -skip
+^(TestServeKeepsTheStreamControlsAHandlerAsksFor|TestServeForwardsHijack)$.
+Acceptance uses ^(TestStorage|TestBilling)$ on both acceptance trees.
 
-An earlier broad selection also reached 15 old metered Store tests that fail on
-removed tokens/sparkwing_meta tables or the old triggers.pipeline column. Controller's TestMeteredRoutesStillServeTheRunnerAndCLITokens
-and TestStorageWritesUnboundedWithoutAQuota fail on the removed tokens table.
-TestBillingTrust_OperatorGrantsAndRevokes tries to open a forbidden socket and
-panics. The first controller event fixture failed on sparkwing_meta. It now uses
-the existing final-schema engineRuntimeStore fixture. These broad failures are
-retained as friction, not represented as fixed by a narrower selection.
-No full-store, full-controller, PostgreSQL, provider or native-platform pass is claimed.
+An earlier broader component regex reached TestHandleClaimNode_NamesAPollIntervalWhileIdle
+and TestHandleClaimTrigger_WithholdsAdviceRightAfterAnAward. Their old fixtures
+fail on missing sparkwing_meta or triggers.pipeline. Controller's
+TestHeadRequestsChargeNothingAndHoldNoSlot and
+TestConcurrentDownloadsAreCappedPerPrincipal fail on the removed tokens table.
+The internal egress stream-control test panics when httptest cannot bind a socket.
+These failures remain reported. No full-store, full-controller, PostgreSQL,
+physical-backend, provider or native-platform pass is claimed. The minimally
+migrated deletion fixtures still depend on the unrelated legacy identity APIs.
 
 ## Remaining assignments and real integration
 
-- A1-24: transaction-owned data authorization and binding proofs remain intact.
-  W2 DataController.DataAuthority and BindData still need real adapters.
-- A1-27: this checkout still refuses metered roots in authority_issue.go and
-  persists unmetered awards separately. W1's session-18 work contains the real
-  lifecycle join in unit_billing.go. The lead must integrate that parallel work.
-  W1b did not copy or edit it. W1b still owns spend-exhaustion/grace enforcement
-  and the legacy accounting cut after integration. C2 SettleBilling remains a
-  panic stub. W3 must report owner compute so customer-runner waits stay excluded.
-  Accounting tests continue to use calculator contract fakes.
-- A1-28: committed-checkout settlement and raw paid-grant refusal remain done.
-  W2 owns provider verification and the HTTP adapter. VerifiedPaymentEvent.Event
+- A1-24 remains implemented at the store boundary. W2's real DataAuthority and
+  BindData adapters remain open.
+- A1-27 still needs W1's parallel lifecycle join merged. This checkout's
+  authority_issue.go still refuses metered roots. unit_billing.go is absent.
+  W1's session-18 report contains the issuance/start/renewal/finish/reap join.
+  C2 SettleBilling remains a panic stub. W1b's calculators remain tested through
+  contract fakes. Spend/grace enforcement and the old claim-credit cut remain.
+  W3 must report owner compute so customer-runner waits stay excluded.
+- A1-28's committed-checkout settlement and raw paid-grant refusal remain done.
+  W2 still owns provider verification and the HTTP adapter. VerifiedPaymentEvent
   remains a stub. Card billing retains its payment-linked settlement contract.
-- A1-29 through A1-35: upload tickets, tagged receipts, provenance, record/member
-  persistence, read-set authorization, memo/depcache, tombstones and tagged logs
-  remain implemented behind contracts. W7 RecordNamespace and AuthorizeEdge are
-  still stubs. Store proofs use contract fakes. Physical verification/deletion,
-  manifest-reader configuration, GC, signed transfers, binary execution policy
-  and proxy egress remain integration work. Allowance-driven eviction stays open.
-- Legacy claim-credit, principal egress counters, raw storage reservations,
-  output objects, direct uploads and node-log transport still need consumer cuts.
-  The principal event accounting cut is complete. The custom-event controller
-  transport still uses the inherited claim-fence adapter. C2 routing and real
-  capability-backed event writes are not claimed by its trusted-operator proof.
-  The source/artifact/binary data_download adapter still uses cache grants.
-  Materialization and imported-owner-log identity handoffs remain open.
-- A1-53: native placements, provider/backend and PostgreSQL evidence remain with
-  the lead and integrating areas. The first two lead entries are done. The third
-  remains in progress. No new foreign contract change or open decision is raised.
+- A1-29 through A1-35 remain implemented behind the store contracts: tagged
+  uploads and receipts, provenance, records and members, memo/depcache, read-set
+  authorization, tombstones and logs. W7 RecordNamespace and AuthorizeEdge remain
+  panic stubs. Physical verification/deletion, manifest-reader setup, GC,
+  signed transfers, binary policy and proxy egress remain real integration work.
+  Allowance-driven physical eviction stays open.
+- The principal event and egress cuts are complete. Legacy raw storage
+  reservations, output objects, direct uploads, claim-credit and node-log
+  transports still need consumer cuts. The cache-grant source/artifact/binary
+  download adapter, capability event transport, materialization and imported
+  owner-log identity remain open.
+- A1-53 remains with the lead and integrating areas for PostgreSQL, provider,
+  physical-backend and native-placement evidence.
 
-## Shared files, assumptions and friction
+No new foreign contract change or unresolved product decision is raised. The
+first two lead entries are done. The third is still in progress.
 
-Shared production caller migration: pkg/controller/handlers.go.
-Shared controller proof: pkg/controller/event_accounting_internal_test.go.
-Acceptance changes: internal/acceptance/store_data.go and new store_event.go.
-Owned tests with minimal caller migrations: free_tier_test.go,
-credit_freeze_standing_test.go and storage_credits_test.go.
+## Shared files and assumptions
 
-W1 catalog-only change: tenant_sql_scope_guard_test.go loses the extinct
-(*Store).chargeStorageTx exemption and the now-scoped refuseEventOverLimitsTx
-exemption, five lines total. The scope guard requires deleting stale exemptions.
-This is a caller/catalog migration under the third lead handoff. No W1 admission,
-claim, transition, reconciliation or reaping code changed.
+Shared production caller migrations: pkg/controller/egress.go, server.go and
+storage.go, plus internal/egress/egress.go. The egress Handle method returns actual
+delivered bytes through its existing writer, preserving flush/hijack controls.
+Shared acceptance change: internal/acceptance/store_data.go.
+Shared controller test: egress_accounting_internal_test.go replaces the retired
+egress_internal_test.go.
+
+Minimal W1 file edits: deletion.go removes only the obsolete egress relabel SQL.
+deletion_review_test.go migrates only egress columns and assertions.
+tenant_sql_scope_guard_test.go replaces the retired egress exemptions with the
+named operator read and leased prune. No admission, claim, transition,
+reconciliation or reaping code changed.
 
 Shared docs: contracts/c1-data.md, contracts/t1-port-inventory.md, CHANGELOG.md,
-docs/migrations/_unreleased.md, .apidiff/pkg_store.txt and sync-docs-generated
-copies under pkg/docs. STORE-DATA.md documents the persistence owner.
+docs/limits.md, docs/migrations/_unreleased.md, .apidiff/pkg_store.txt and generated
+copies under pkg/docs. STORE-DATA.md records the persistence owner.
 
-Mechanisms added: the tenant event owner replaces the raw writer using existing
-shared quota and replica rows. The quota helper and usage writer are shared with
-uploads because separate read-modify-write counters would admit the same bytes
-twice. An API rename alone leaves the deleted principal schema in use. Undo means
-restoring the raw writer, its callers and the helper implementations. There is no
-compatibility wrapper or second admission store.
+Mechanisms added: tenant and operator egress reports replace the deleted raw
+surface using the existing replica table and AddUsage writer. Request completion
+replaces the controller's periodic principal flush. The existing maintenance
+lease owns expiration. The old high-water API could not represent summed replica
+usage or write the final schema. Undo would restore those APIs and their callers.
+No new table, setting, environment variable, cap, timeout, queue or service exists.
 
-The lead still needs independent review. No Git write, candidate binary, service,
-pipeline, deployment, release or harness-memory write ran. Installed CLI discovery
-ran before implementation. HEAD remains fd430813d. The shared repository has no local user identity or
-core.worktree override. All owned check processes exited. Scratch was deleted
-after the final checks.
+The lead still needs independent review. No Git write, Sparkwing binary,
+candidate, pipeline, service, deployment, release or harness-memory write ran.
+HEAD remains 201145e74. The shared Git config has no local user identity or
+core.worktree override. Scratch is deleted after the final checks.

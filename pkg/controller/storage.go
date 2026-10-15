@@ -106,6 +106,10 @@ func (s *Server) maintainRetainedData(ctx context.Context) {
 		s.logger.Error("storage maintenance lease failed", "err", err)
 		return
 	}
+	if _, err := operator.PruneEgressUsage(ctx, lease); err != nil {
+		s.logger.Error("egress usage prune failed", "err", err)
+		return
+	}
 	retained, err := operator.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 5000})
 	if err != nil {
 		s.logger.Error("storage retention failed", "err", err)

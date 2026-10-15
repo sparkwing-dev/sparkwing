@@ -86,7 +86,6 @@ type Server struct {
 	egress           *egress.Meter
 	// safety: the reaper goroutine is this field's only reader and
 	// writer, which is what lets the once-a-month prune gate skip a lock.
-	egressPrunedMonth string
 
 	cachePodURL  string
 	dashboardURL string
@@ -1354,7 +1353,6 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.sweepEgressUsage(ctx)
 			s.reapLeased(ctx)
 			s.reconcileOwnedRuns(ctx)
 			s.sampleOperationalSeries(ctx)

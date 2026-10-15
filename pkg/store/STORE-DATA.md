@@ -33,8 +33,22 @@ The controller's signed downloads and delivered-byte middleware use the tenant
 method and their existing lease-holder identity for replica accounting. Log and
 live-log reads stay exempt. The SQLite replica acceptance proof races real
 charges through independent clients and checks the exhausted cap after reopening.
-The principal egress-meter persistence, signed-data capability adapter and native
-PostgreSQL path remain integration work.
+The signed-data capability adapter and native PostgreSQL path remain integration
+work.
+
+Egress writes use `Tenant.AddUsage` with the authenticated team, trusted replica
+identity and UTC day. The controller records actual successful-response bytes
+when the request ends, including partial writes and requests whose context was
+cancelled. An absent in-memory meter still records tenant usage. Logs consume
+egress bytes while remaining exempt from download caps. A failed write is logged
+as an error. Process termination before a request ends can lose its egress sample.
+
+`Tenant.EgressUsage` sums replicas for one UTC day or month.
+`Operator.EgressUsageAcrossTeams` supplies team aggregates for alarm restoration.
+Neither report exposes principal identities. `Operator.PruneEgressUsage` preserves
+thirteen months under the existing maintenance lease and store clock. The raw
+Store high-water-mark writer, reader, unleased prune and controller timer flush
+are removed. Deleting an account leaves tenant egress counters unchanged.
 
 `Store.StorageStandingFor`, `Store.TeamStorage`, `TeamStorageUsage` and
 `Store.ReconcileFreeEventBytes` are removed. `free_slots` retains slot ownership
