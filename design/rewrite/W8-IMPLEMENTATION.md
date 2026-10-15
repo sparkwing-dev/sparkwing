@@ -210,8 +210,8 @@ Detached startup and dashboard commands still need CLI composition.
    cleanup in the final adapters; the deleted server no longer supplies them.
 7. **W8/W9 local transport and services.** Bind `client.NewLocalLifecycle` into
    CLI composition. It supplies foreign-owner query, stay, dashboard startup
-   and drain. Replace the older admission spawner, which still invokes removed
-   `wingd supervise`, once W9 specifies detached process arguments.
+   and drain. The admission spawner uses the declared `wingd supervise`
+   entrypoint; its `wingd run` child still needs the shared-controller factory.
    Implement native managed units once W9 specifies
    Home and foreground arguments for `dashboard start --stay` and `__tick`.
    Native runner replacement needs actual service registration hooks. Windows
@@ -560,9 +560,10 @@ added, and no other area's contract changed.
 
 This remains in-process startup plus foreign-owner reuse. W9 must bind the
 constructor and shared-controller factory, then define Home and foreground
-arguments for detached startup and installed units. The existing admission
-spawner still invokes removed `wingd supervise`; it is not a valid controller
-startup integration. W1/W2/W3 services and authenticated host transports,
+arguments for detached startup and installed units. The admission spawner uses
+the declared `wingd supervise` entrypoint. Its `wingd run` child still lacks the
+shared-controller factory, so installed controller startup remains unbound.
+W1/W2/W3 services and authenticated host transports,
 Cloud bootstrap grammar and source handoff, native Windows SID identity,
 managed services and deployed Cloud probes/cleanup remain open.
 
@@ -604,3 +605,103 @@ was found. An initial installed `sparkwing info --for-agent` discovery ran
 before the swarm brief's no-binary rule was loaded. No candidate, pipeline or
 stateful Sparkwing command followed. Worker scratch was removed after all
 checks and independent review finished.
+
+## Eighth session: native runner registrations
+
+The native runner service moves from `internal/agentservice` to
+`internal/runners/service`. Linux and macOS registrations now execute the
+final foreground `start --config` command. The package retains login startup,
+restart-on-failure, managed-file ownership and config-path protection. Native
+service commands receive the caller's context. W9's caller imports and manual
+start hints are migrated, with no old-package forwarding shim.
+
+`Inspect` reads executable/argv from the actual file. `Refresh` rewrites an
+existing registration and restarts an active service from an external updater.
+It preserves missing and stopped services, refuses foreign or other-config
+registrations, and never opens the machine config or credentials. Linux uses
+`try-restart`. macOS reloads only `state = running`; inactive registrations take
+updated file contents on their next load. Errors preserve the file and reach
+the caller. Native macOS self-update still needs an external owner: a launchd
+reload stops the process performing it before loading its replacement.
+
+The duplicate shell installer, both native templates and its shell test are
+removed: **four obsolete files, 485 lines**. The old package's three files are
+relocated, not counted as deleted subsystem lines. The removed shell-marker
+adoption branch/test has no compatibility replacement. The Go service owns
+registration rendering. W9/W6/W2 still need final runner enrollment and private
+credential files; the surviving CLI enrollment code writes the old config.
+
+Independent review reproduced two defects: restarting a loaded but inactive
+launchd job, and config inspection disagreeing with actual flag consumption.
+The stopped-state check is fixed. The existing runner parser now lives in
+`internal/runners/runnerflags`, shared by entrypoints and registration
+inspection. This also covers values consumed by another flag, repeated config
+flags and end-of-options. Review reproductions pass against a frozen final
+snapshot, and final re-review found no remaining concrete issue.
+
+### Eighth-session evidence
+
+- Whole-repository `go build -p 4 ./...` passes after the API move and parser
+  extraction.
+- Vet passes for runners and subpackages, cluster, engine, wingd and
+  subpackages, the CLI and both acceptance packages.
+- Full runners, launcher, service, engine and acceptance tests pass.
+  `internal/acceptance` compiles and contains no runtime tests. Cluster passes
+  with only the previously established socket-bound metrics test excluded.
+- Full service and acceptance tests pass under `-race -p 4` on the final code.
+- `TestRunnerServiceW8Components/linux` and `/darwin` pass. These read real
+  registration files, run their argv through the actual runner parser with fake
+  config/runtime boundaries, refresh without changing config bytes, and remove
+  the registration through fake service managers. These are component cells.
+- Windows/amd64 service tests cross-compile. This is not native Windows proof.
+- CLI tests compile. Full native CLI, service-manager and login execution are
+  untested because their sockets/platforms are outside this sandbox.
+- Commentcheck, sleepcheck, docs-mirror drift and `git diff --check` pass.
+
+No native catalog cell was activated. There is no additional T1 parked-test
+port. The existing native installer tests move with their implementation; the
+shell-marker adoption case disappears with the removed installer.
+
+### Eighth-session remaining contracts and shared files
+
+No other area's declared contract changed. The existing integration requests
+above still apply. W9 must settle Home arguments and foreground semantics for
+controller/timer units, bind the shared-controller factory, and replace legacy
+runner enrollment. W2/W9 also need a final Actions exchange result carrying the
+server's complete push binding; the legacy response omits ref/SHA/workflow
+identity. W3 source/host and keeper composition, launcher claim/sync/bootstrap
+transport, Windows SID transport, native update ownership, and deployed Cloud
+probes/cleanup remain open. No native runtime completion is claimed.
+
+The local API additions are service inspection/refresh and a shared extraction
+of the existing parser. A verb-only replacement leaves upgrades and real argv
+inspection incomplete. A separate hand-written config scanner reproduced
+multiple disagreements with execution. Sharing the parser removes that second
+policy without changing grammar. No environment variable, timeout, credential
+format or compatibility mechanism was added.
+
+Shared edits outside the W8 directories:
+
+- `cmd/sparkwing/runners.go` and `runners_test.go`: package/context API callers
+  and final manual-start argv. No enrollment schema or authorization rewrite.
+- Deleted `internal/agentservice/{agentservice.go,agentservice_test.go,leak_test.go}`
+  after relocation.
+- Deleted `install/service-install.sh`,
+  `install/linux/sparkwing-runner.service.template`,
+  `install/macos/com.sparkwing.runner.plist.template`, and
+  `bin/service-install-test.sh`.
+- `tests/acceptance/runner_service_w8_test.go`, `docs/self-hosting.md` and its
+  generated mirror, plus this handoff.
+
+The local-controller source docs and handoff now correctly say that
+`wingd supervise` remains declared and dispatched. Its `wingd run` child lacks
+the shared-controller factory. The earlier report's claim that the command
+was removed was incorrect.
+
+Friction remains native sockets and unavailable platform fixtures. Standards
+matching rejects a snapshot without Git metadata; review matched standards on
+the real tree and reviewed an immutable source snapshot. No Sparkwing binary
+or pipeline ran. No Git metadata was written. All Go caches, temporary files,
+review snapshots and cross-compile outputs stay under `/tmp/sw-astra-W8/`,
+which is removed after checks and review finish. Changes are uncommitted for
+the lead.

@@ -258,14 +258,6 @@ From a source checkout, `bash bin/install.sh` installs both `sparkwing` and
 updates both binaries from the same checkout. Keep that directory on the
 service's PATH when using the source installer.
 
-The command needs an admin credential on the profile, because minting a token
-is an admin route. A machine whose operator holds no admin token uses the
-interactive installer with a token an administrator minted for them:
-
-```bash
-bash install/service-install.sh
-```
-
 GitHub Releases also contain `sparkwing-runner` binaries for amd64 and arm64
 on macOS, Linux, and Windows (Windows asset names end in `.exe`). Before
 registering or restarting a downloaded runner, inspect its embedded identity
@@ -280,35 +272,21 @@ VCS provenance embedded by the Go build. The runner does not yet download or
 replace its own executable; update the service binary through the same installer
 or service manager you used to install it.
 
-The installer asks for the controller URL, API token, runner name,
-and maximum concurrent jobs. It writes the agent format `sparkwing cluster
-runners add` writes, which uses FIFO claims with local admission enabled. Its default CPU
-and memory contribution ceiling is 50%. On macOS it installs a LaunchAgent under
-`~/Library/LaunchAgents/`. On Linux it installs a systemd user unit under
-`~/.config/systemd/user/`.
+Runner service definitions run `sparkwing-runner start --config PATH` in the
+foreground. Linux uses a systemd user service. macOS uses a launchd agent.
+The service file names an existing machine configuration and contains no
+credential. The duplicate shell enrollment installer has been removed.
 
-The agent defaults `gitcache` to the controller's claim-scoped proxy. Set
-`SPARKWING_GITCACHE_URL` only for a direct cache on a trusted LAN, VPN, or
-tailnet; the value is stored in the mode-0600 agent configuration. The agent
-holds no cache token: for each claimed run it asks the controller for a cache
-grant, and runs without the binary cache when the controller mints none.
+<!-- design:begin -->
 
-For unattended installation, supply the same values as environment variables:
+Runner enrollment must write the validated `runner` section and its private
+credential files. The shared controller and host composition must be connected
+before the installed runner can execute work. An updater outside the runner's
+service can refresh the managed registration while preserving its config path
+and stopped state. Automatic self-update must hand service replacement to an
+external owner because a launchd reload stops the process performing it.
 
-```bash
-SPARKWING_CONTROLLER=https://api-sparkwing.example.com \
-SPARKWING_API_TOKEN="$MY_TOKEN" \
-RUNNER_NAME=dev-laptop \
-MAX_CONCURRENT=2 \
-SPARKWING_CONTRIBUTION='4,8gb' \
-SPARKWING_LOCAL_RESERVE='1,2gb' \
-bash install/service-install.sh --yes
-```
-
-`SPARKWING_CONTRIBUTION` and `SPARKWING_LOCAL_RESERVE` use the same machine
-budget grammar as local admission. The contribution defaults to `50%,50%`;
-the reserve defaults to empty because the contribution already retains half
-the machine for other work.
+<!-- design:end -->
 
 A runner warms its Go module cache at startup from `--warm-modules`, a comma-separated list of module paths with an
 optional `@version`; it defaults to the SDK at the runner's own version, and

@@ -128,8 +128,9 @@ finishes, even though they no longer report ready.
 
 The adapter supplies process composition without a detached launcher. The CLI
 must use it with the shared-controller factory and supply detached startup once
-its argument contract is defined. The older admission spawner still names the
-removed `wingd supervise` command and cannot supply that startup.
+its argument contract is defined. The admission spawner uses the declared
+`wingd supervise` entrypoint. Its `wingd run` child still lacks the shared
+controller factory needed for startup.
 `NewLocalRuntime` refuses a foreign election before opening its store. Windows
 transport still refuses API access when it cannot supply a client SID.
 

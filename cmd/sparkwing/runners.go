@@ -18,9 +18,9 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
-	"github.com/sparkwing-dev/sparkwing/internal/agentservice"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/runners/service"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -273,7 +273,6 @@ func validateAgentFileConfig(cfg agentFileConfig) error {
 	return nil
 }
 
-// safety: the claim-mode subset install/service-install.sh writes.
 type agentFileConfig struct {
 	Controller     string   `yaml:"controller"`
 	Token          string   `yaml:"token"`
@@ -328,7 +327,7 @@ func firstNonBlank(values ...string) string {
 
 // safety: the decision about this machine's service manager, taken before anything irreversible happens.
 type runnerServicePlan struct {
-	host    agentservice.Host
+	host    service.Host
 	skipped bool
 	manual  bool
 }
@@ -349,8 +348,8 @@ func planRunnerService(configPath string, skip bool) (runnerServicePlan, error) 
 	if host.Binary == "" {
 		return runnerServicePlan{}, errRunnerBinaryMissing()
 	}
-	if err := agentservice.Preflight(host); err != nil {
-		if errors.Is(err, agentservice.ErrUnsupported) {
+	if err := service.Preflight(context.Background(), host); err != nil {
+		if errors.Is(err, service.ErrUnsupported) {
 			return runnerServicePlan{manual: true}, nil
 		}
 		return runnerServicePlan{}, err
@@ -361,13 +360,13 @@ func planRunnerService(configPath string, skip bool) (runnerServicePlan, error) 
 func (p runnerServicePlan) start(configPath string) error {
 	switch {
 	case p.skipped:
-		fmt.Printf("skipped the service install; start the runner with `%s agent --config %s`\n", runnerBinaryName, configPath)
+		fmt.Printf("skipped the service install; start the runner with `%s start --config %s`\n", runnerBinaryName, configPath)
 		return nil
 	case p.manual:
 		printWindowsServiceSteps(configPath)
 		return nil
 	}
-	state, err := agentservice.Install(p.host)
+	state, err := service.Install(context.Background(), p.host)
 	if err != nil {
 		return err
 	}
@@ -384,9 +383,9 @@ func stopRunnerService(configPath string, skip bool) error {
 	if err != nil {
 		return err
 	}
-	state, err := agentservice.Uninstall(host)
+	state, err := service.Uninstall(context.Background(), host)
 	if err != nil {
-		if errors.Is(err, agentservice.ErrUnsupported) {
+		if errors.Is(err, service.ErrUnsupported) {
 			return nil
 		}
 		return err
@@ -399,14 +398,14 @@ func printWindowsServiceSteps(configPath string) {
 	fmt.Println()
 	fmt.Println("this installer creates no Windows service. Supervise the runner yourself:")
 	fmt.Printf("  1. put %s.exe on PATH\n", runnerBinaryName)
-	fmt.Printf("  2. run `%s.exe agent --config %s`\n", runnerBinaryName, configPath)
+	fmt.Printf("  2. run `%s.exe start --config %s`\n", runnerBinaryName, configPath)
 	fmt.Println("  3. register that command with your service manager so it restarts at logon")
 }
 
-func defaultRunnerServiceHost(configPath string) (agentservice.Host, error) {
+func defaultRunnerServiceHost(configPath string) (service.Host, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return agentservice.Host{}, fmt.Errorf("resolve the home directory the service is installed under: %w", err)
+		return service.Host{}, fmt.Errorf("resolve the home directory the service is installed under: %w", err)
 	}
 	configHome := os.Getenv("XDG_CONFIG_HOME")
 	if configHome == "" {
@@ -414,9 +413,9 @@ func defaultRunnerServiceHost(configPath string) (agentservice.Host, error) {
 	}
 	root, err := paths.DefaultPaths()
 	if err != nil {
-		return agentservice.Host{}, err
+		return service.Host{}, err
 	}
-	return agentservice.Host{
+	return service.Host{
 		GOOS:       runnerServiceGOOS,
 		Home:       home,
 		ConfigHome: configHome,
@@ -424,7 +423,7 @@ func defaultRunnerServiceHost(configPath string) (agentservice.Host, error) {
 		ConfigPath: configPath,
 		LogPath:    filepath.Join(root.Root, "runner.log"),
 		UID:        os.Getuid(),
-		Exec:       agentservice.DefaultExec,
+		Exec:       service.DefaultExec,
 	}, nil
 }
 

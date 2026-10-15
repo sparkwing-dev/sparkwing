@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http/httptest"
@@ -13,8 +14,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
-	"github.com/sparkwing-dev/sparkwing/internal/agentservice"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/runners/service"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -64,14 +65,14 @@ func newRunnersFixture(t *testing.T) *runnersFixture {
 	if runtime.GOOS == "windows" {
 		f.binary = "C:/usr/local/bin/sparkwing-runner.exe"
 	}
-	t.Cleanup(swapRunnerServiceHost(func(configPath string) (agentservice.Host, error) {
-		return agentservice.Host{
+	t.Cleanup(swapRunnerServiceHost(func(configPath string) (service.Host, error) {
+		return service.Host{
 			GOOS:       "linux",
 			Home:       home,
 			ConfigHome: filepath.Join(home, ".config"),
 			Binary:     f.binary,
 			ConfigPath: configPath,
-			Exec: func(name string, args ...string) (string, error) {
+			Exec: func(_ context.Context, name string, args ...string) (string, error) {
 				call := strings.TrimSpace(name + " " + strings.Join(args, " "))
 				calls = append(calls, call)
 				for prefix, out := range f.failExec {
@@ -86,7 +87,7 @@ func newRunnersFixture(t *testing.T) *runnersFixture {
 	return f
 }
 
-func swapRunnerServiceHost(fn func(string) (agentservice.Host, error)) func() {
+func swapRunnerServiceHost(fn func(string) (service.Host, error)) func() {
 	prev := runnerServiceHost
 	previousGOOS := runnerServiceGOOS
 	runnerServiceGOOS = "linux"
@@ -197,7 +198,7 @@ func TestRunnersAddSkipsTheServiceWhenAsked(t *testing.T) {
 	if len(*f.calls) != 0 {
 		t.Errorf("--no-service still drove the service manager: %v", *f.calls)
 	}
-	if !strings.Contains(out, "agent --config "+f.config) {
+	if !strings.Contains(out, "start --config "+f.config) {
 		t.Errorf("output does not name the manual start command:\n%s", out)
 	}
 }

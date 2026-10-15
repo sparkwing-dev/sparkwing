@@ -1,56 +1,39 @@
-// Package agentservice installs the per-user OS service that runs
-// `sparkwing-runner agent`: a systemd user unit on Linux, a launchd agent on
-// macOS. It writes the same unit and plist, under the same names, that
-// install/service-install.sh writes from its templates, so a machine enrolled
-// by either route has one service.
-//
-// A file this package writes carries [Marker]; a file the shell installer
-// wrote carries its own. A file with neither is left alone, so a unit an
-// operator wrote by hand is never overwritten or removed. [Uninstall] also
-// leaves a managed file alone when the agent config baked into it is not the
-// one it was asked about, so two runners on one machine do not remove each
-// other. All contact with the machine -- systemctl, launchctl, the home and
-// config directories, the binary path -- arrives through [Host], so a test
-// decides what the machine looks like and both platforms are exercised
-// anywhere.
-//
-// On Linux the unit goes where systemd reads user units:
-// $XDG_CONFIG_HOME/systemd/user, falling back to ~/.config/systemd/user.
-// install/service-install.sh writes ~/.config/systemd/user unconditionally, so
-// on a host that sets XDG_CONFIG_HOME to anything else the two paths differ
-// and neither adopts the other's unit. Matching the script there would put the
-// unit where systemd does not look, so this package follows systemd instead.
-package agentservice
+// Package service installs and refreshes the runner's per-user systemd service
+// or launchd agent. Units run sparkwing-runner start against an existing machine
+// configuration. Files without Marker remain untouched. Refresh and Uninstall
+// also preserve registrations for another configuration.
+package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
 )
 
 const (
 	// Marker appears verbatim in every file this package writes.
 	Marker = "Installed by sparkwing"
 
-	// safety: the shell installer's own marker, so a machine it enrolled is managed from here rather than refused.
-	installerMarker = "Installed by install/service-install.sh"
-
-	// ServiceName is the systemd user unit that runs the agent.
+	// ServiceName is the systemd user unit that runs the runner.
 	ServiceName = "sparkwing-runner.service"
 
-	// Label is the launchd label of the agent.
+	// Label is the launchd label of the runner.
 	Label = "com.sparkwing.runner"
 
-	// PlistName is the file launchd reads the agent from.
+	// PlistName is the file launchd reads the runner from.
 	PlistName = Label + ".plist"
 )
 
-// safety: 0600 like the shell installer; the unit and plist name the operator's home and binary paths.
+// safety: the unit and plist name the operator's private configuration paths.
 const fileMode os.FileMode = 0o600
 
 // ErrUnsupported is returned, wrapped, for a GOOS that has no runner service.
@@ -70,11 +53,11 @@ type Host struct {
 	// Binary is the absolute path of the sparkwing-runner binary.
 	Binary string
 
-	// ConfigPath is the config.yaml whose agent section the service reads its
-	// credential from.
+	// ConfigPath is the config.yaml whose runner section the service reads its
+	// credential-file location from.
 	ConfigPath string
 
-	// LogPath receives the agent's stdout and stderr on macOS. systemd
+	// LogPath receives the runner's stdout and stderr on macOS. systemd
 	// journals the unit instead.
 	LogPath string
 
@@ -82,7 +65,7 @@ type Host struct {
 	UID int
 
 	// Exec runs systemctl or launchctl and returns stdout and stderr combined.
-	Exec func(name string, args ...string) (string, error)
+	Exec func(context.Context, string, ...string) (string, error)
 }
 
 // State describes the service as it exists on the host.
@@ -90,11 +73,10 @@ type State struct {
 	// Installed reports a managed unit or plist at the expected path.
 	Installed bool `json:"installed"`
 
-	// Foreign reports a file at that path that neither this package nor the
-	// shell installer wrote. Such a file is never overwritten or removed.
+	// Foreign reports a file without Marker. It is never overwritten or removed.
 	Foreign bool `json:"foreign"`
 
-	// Mismatch reports a managed file that runs a different agent config than
+	// Mismatch reports a managed file that runs a different runner config than
 	// the one [Host] names. [Uninstall] leaves such a file in place.
 	Mismatch bool `json:"mismatch"`
 
@@ -104,30 +86,40 @@ type State struct {
 	// Path is the unit or plist path.
 	Path string `json:"path"`
 
+	// Binary and Arguments are read from the installed unit, without opening configuration.
+	Binary    string   `json:"binary,omitempty"`
+	Arguments []string `json:"arguments,omitempty"`
+
 	// Detail is one sentence for a human.
 	Detail string `json:"detail,omitempty"`
 }
 
 // Install writes the service file, starts it, and reports the state that
 // follows. A foreign file is an error and nothing is written.
-func Install(h Host) (State, error) {
+func Install(ctx context.Context, h Host) (State, error) {
+	if err := ctx.Err(); err != nil {
+		return State{}, err
+	}
 	switch h.GOOS {
 	case "linux":
-		return installLinux(h)
+		return installLinux(ctx, h)
 	case "darwin":
-		return installDarwin(h)
+		return installDarwin(ctx, h)
 	}
 	return State{}, unsupported(h.GOOS)
 }
 
 // Uninstall stops the service and removes the file sparkwing wrote. A foreign
 // file is left in place and reported through State.Foreign.
-func Uninstall(h Host) (State, error) {
+func Uninstall(ctx context.Context, h Host) (State, error) {
+	if err := ctx.Err(); err != nil {
+		return State{}, err
+	}
 	switch h.GOOS {
 	case "linux":
-		return uninstallLinux(h)
+		return uninstallLinux(ctx, h)
 	case "darwin":
-		return uninstallDarwin(h)
+		return uninstallDarwin(ctx, h)
 	}
 	return State{}, unsupported(h.GOOS)
 }
@@ -136,17 +128,20 @@ func Uninstall(h Host) (State, error) {
 // binary and config paths resolve, and the service manager answers. Call it
 // before doing anything expensive or irreversible, so a host that cannot
 // supervise a runner fails before the work rather than after it.
-func Preflight(h Host) error {
+func Preflight(ctx context.Context, h Host) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	switch h.GOOS {
 	case "linux":
 		if err := requireHost(h); err != nil {
 			return err
 		}
 		if h.ConfigHome == "" {
-			return errors.New("agentservice: Host.ConfigHome is required on linux")
+			return errors.New("runner service: Host.ConfigHome is required on linux")
 		}
-		if out, err := h.run("systemctl", "--user", "show", "-p", "Version", "--value"); err != nil {
-			return fmt.Errorf("agentservice: systemd user session is unreachable (systemctl --user show): %w: %s",
+		if out, err := h.run(ctx, "systemctl", "--user", "show", "-p", "Version", "--value"); err != nil {
+			return fmt.Errorf("runner service: systemd user session is unreachable (systemctl --user show): %w: %s",
 				err, strings.TrimSpace(out))
 		}
 		return nil
@@ -155,10 +150,10 @@ func Preflight(h Host) error {
 			return err
 		}
 		if h.Home == "" {
-			return errors.New("agentservice: Host.Home is required on darwin")
+			return errors.New("runner service: Host.Home is required on darwin")
 		}
-		if out, err := h.run("launchctl", "print", h.domainTarget()); err != nil {
-			return fmt.Errorf("agentservice: launchd domain %s is unreachable (launchctl print): %w: %s",
+		if out, err := h.run(ctx, "launchctl", "print", h.domainTarget()); err != nil {
+			return fmt.Errorf("runner service: launchd domain %s is unreachable (launchctl print): %w: %s",
 				h.domainTarget(), err, strings.TrimSpace(out))
 		}
 		return nil
@@ -168,8 +163,8 @@ func Preflight(h Host) error {
 
 // DefaultExec runs a command and returns its output, stdout and stderr
 // combined, for a Host that talks to the real machine.
-func DefaultExec(name string, args ...string) (string, error) {
-	out, err := exec.Command(name, args...).CombinedOutput()
+func DefaultExec(ctx context.Context, name string, args ...string) (string, error) {
+	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	return string(out), err
 }
 
@@ -183,12 +178,12 @@ func PlistPath(h Host) string {
 	return filepath.Join(h.Home, "Library", "LaunchAgents", PlistName)
 }
 
-func installLinux(h Host) (State, error) {
+func installLinux(ctx context.Context, h Host) (State, error) {
 	if err := requireHost(h); err != nil {
 		return State{}, err
 	}
 	if h.ConfigHome == "" {
-		return State{}, errors.New("agentservice: Host.ConfigHome is required on linux")
+		return State{}, errors.New("runner service: Host.ConfigHome is required on linux")
 	}
 	path := UnitPath(h)
 	existing, err := readManaged(path)
@@ -203,22 +198,22 @@ func installLinux(h Host) (State, error) {
 	}
 
 	state := State{Installed: true, Path: path}
-	if out, err := h.run("systemctl", "--user", "daemon-reload"); err != nil {
+	if out, err := h.run(ctx, "systemctl", "--user", "daemon-reload"); err != nil {
 		state.Detail = "the unit is written but systemd did not reload it"
-		return state, fmt.Errorf("agentservice: systemctl --user daemon-reload: %w: %s", err, strings.TrimSpace(out))
+		return state, fmt.Errorf("runner service: systemctl --user daemon-reload: %w: %s", err, strings.TrimSpace(out))
 	}
-	if out, err := h.run("systemctl", "--user", "enable", "--now", ServiceName); err != nil {
+	if out, err := h.run(ctx, "systemctl", "--user", "enable", "--now", ServiceName); err != nil {
 		state.Detail = "the unit is written but systemd did not start it"
-		return state, fmt.Errorf("agentservice: systemctl --user enable --now %s: %w: %s", ServiceName, err, strings.TrimSpace(out))
+		return state, fmt.Errorf("runner service: systemctl --user enable --now %s: %w: %s", ServiceName, err, strings.TrimSpace(out))
 	}
 	state.Running = true
-	state.Detail = fmt.Sprintf("%s is enabled and running %s agent", ServiceName, h.Binary)
+	state.Detail = fmt.Sprintf("%s is enabled and running %s start", ServiceName, h.Binary)
 	return state, nil
 }
 
-func uninstallLinux(h Host) (State, error) {
+func uninstallLinux(ctx context.Context, h Host) (State, error) {
 	if h.ConfigHome == "" {
-		return State{}, errors.New("agentservice: Host.ConfigHome is required on linux")
+		return State{}, errors.New("runner service: Host.ConfigHome is required on linux")
 	}
 	path := UnitPath(h)
 	existing, err := readManaged(path)
@@ -236,15 +231,15 @@ func uninstallLinux(h Host) (State, error) {
 	}
 
 	var stopErr error
-	if out, err := h.run("systemctl", "--user", "disable", "--now", ServiceName); err != nil && !notLoaded(out) {
-		stopErr = fmt.Errorf("agentservice: systemctl --user disable --now %s: %w: %s", ServiceName, err, strings.TrimSpace(out))
+	if out, err := h.run(ctx, "systemctl", "--user", "disable", "--now", ServiceName); err != nil && !notLoaded(out) {
+		stopErr = fmt.Errorf("runner service: systemctl --user disable --now %s: %w: %s", ServiceName, err, strings.TrimSpace(out))
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return State{Path: path}, errors.Join(stopErr, fmt.Errorf("agentservice: remove %s: %w", path, err))
+		return State{Path: path}, errors.Join(stopErr, fmt.Errorf("runner service: remove %s: %w", path, err))
 	}
 	state := State{Path: path, Detail: "the sparkwing runner service is stopped and removed"}
-	if out, err := h.run("systemctl", "--user", "daemon-reload"); err != nil {
-		return state, errors.Join(stopErr, fmt.Errorf("agentservice: systemctl --user daemon-reload: %w: %s", err, strings.TrimSpace(out)))
+	if out, err := h.run(ctx, "systemctl", "--user", "daemon-reload"); err != nil {
+		return state, errors.Join(stopErr, fmt.Errorf("runner service: systemctl --user daemon-reload: %w: %s", err, strings.TrimSpace(out)))
 	}
 	if stopErr != nil {
 		state.Detail = "the unit is removed but systemd reported an error stopping it"
@@ -252,12 +247,12 @@ func uninstallLinux(h Host) (State, error) {
 	return state, stopErr
 }
 
-func installDarwin(h Host) (State, error) {
+func installDarwin(ctx context.Context, h Host) (State, error) {
 	if err := requireHost(h); err != nil {
 		return State{}, err
 	}
 	if h.Home == "" {
-		return State{}, errors.New("agentservice: Host.Home is required on darwin")
+		return State{}, errors.New("runner service: Host.Home is required on darwin")
 	}
 	path := PlistPath(h)
 	existing, err := readManaged(path)
@@ -275,31 +270,31 @@ func installDarwin(h Host) (State, error) {
 	}
 
 	state := State{Installed: true, Path: path}
-	stale := bootoutStale(h)
-	if out, err := h.run("launchctl", "bootstrap", h.domainTarget(), path); err != nil {
+	stale := bootoutStale(ctx, h)
+	if out, err := h.run(ctx, "launchctl", "bootstrap", h.domainTarget(), path); err != nil {
 		state.Detail = "the plist is written but launchd did not load it"
-		return state, fmt.Errorf("agentservice: launchctl bootstrap %s %s: %w: %s%s",
+		return state, fmt.Errorf("runner service: launchctl bootstrap %s %s: %w: %s%s",
 			h.domainTarget(), path, err, strings.TrimSpace(out), stale)
 	}
 	state.Running = true
-	state.Detail = fmt.Sprintf("%s is loaded and running %s agent", Label, h.Binary)
+	state.Detail = fmt.Sprintf("%s is loaded and running %s start", Label, h.Binary)
 	return state, nil
 }
 
 // safety: launchd refuses to bootstrap a label already in the domain, and a first
 // install has nothing loaded, so failure here is ordinary and is only echoed when
 // the bootstrap that follows also fails.
-func bootoutStale(h Host) string {
-	out, err := h.run("launchctl", "bootout", h.serviceTarget())
+func bootoutStale(ctx context.Context, h Host) string {
+	out, err := h.run(ctx, "launchctl", "bootout", h.serviceTarget())
 	if err == nil || strings.TrimSpace(out) == "" {
 		return ""
 	}
 	return fmt.Sprintf(" (the preceding bootout said: %s)", strings.TrimSpace(out))
 }
 
-func uninstallDarwin(h Host) (State, error) {
+func uninstallDarwin(ctx context.Context, h Host) (State, error) {
 	if h.Home == "" {
-		return State{}, errors.New("agentservice: Host.Home is required on darwin")
+		return State{}, errors.New("runner service: Host.Home is required on darwin")
 	}
 	path := PlistPath(h)
 	existing, err := readManaged(path)
@@ -317,11 +312,11 @@ func uninstallDarwin(h Host) (State, error) {
 	}
 
 	var stopErr error
-	if out, err := h.run("launchctl", "bootout", h.serviceTarget()); err != nil && !notLoaded(out) {
-		stopErr = fmt.Errorf("agentservice: launchctl bootout %s: %w: %s", h.serviceTarget(), err, strings.TrimSpace(out))
+	if out, err := h.run(ctx, "launchctl", "bootout", h.serviceTarget()); err != nil && !notLoaded(out) {
+		stopErr = fmt.Errorf("runner service: launchctl bootout %s: %w: %s", h.serviceTarget(), err, strings.TrimSpace(out))
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return State{Path: path}, errors.Join(stopErr, fmt.Errorf("agentservice: remove %s: %w", path, err))
+		return State{Path: path}, errors.Join(stopErr, fmt.Errorf("runner service: remove %s: %w", path, err))
 	}
 	state := State{Path: path, Detail: "the sparkwing runner service is stopped and removed"}
 	if stopErr != nil {
@@ -334,19 +329,22 @@ func (h Host) serviceTarget() string { return fmt.Sprintf("gui/%d/%s", h.UID, La
 
 func (h Host) domainTarget() string { return fmt.Sprintf("gui/%d", h.UID) }
 
-func (h Host) run(name string, args ...string) (string, error) {
+func (h Host) run(ctx context.Context, name string, args ...string) (string, error) {
 	if h.Exec == nil {
-		return "", errors.New("agentservice: Host.Exec is required")
+		return "", errors.New("runner service: Host.Exec is required")
 	}
-	return h.Exec(name, args...)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return h.Exec(ctx, name, args...)
 }
 
 func requireHost(h Host) error {
 	if h.Binary == "" || !filepath.IsAbs(h.Binary) {
-		return fmt.Errorf("agentservice: Host.Binary must be an absolute path, got %q", h.Binary)
+		return fmt.Errorf("runner service: Host.Binary must be an absolute path, got %q", h.Binary)
 	}
 	if h.ConfigPath == "" || !filepath.IsAbs(h.ConfigPath) {
-		return fmt.Errorf("agentservice: Host.ConfigPath must be an absolute path, got %q", h.ConfigPath)
+		return fmt.Errorf("runner service: Host.ConfigPath must be an absolute path, got %q", h.ConfigPath)
 	}
 	return nil
 }
@@ -355,7 +353,7 @@ func unsupported(goos string) error {
 	if goos == "" {
 		goos = "unknown"
 	}
-	return fmt.Errorf("agentservice: %s: %w", goos, ErrUnsupported)
+	return fmt.Errorf("runner service: %s: %w", goos, ErrUnsupported)
 }
 
 type managed struct {
@@ -372,12 +370,12 @@ func readManaged(path string) (managed, error) {
 		return managed{}, nil
 	}
 	if err != nil {
-		return managed{}, fmt.Errorf("agentservice: read %s: %w", path, err)
+		return managed{}, fmt.Errorf("runner service: read %s: %w", path, err)
 	}
 	text := string(body)
 	return managed{
 		exists: true,
-		ours:   strings.Contains(text, Marker) || strings.Contains(text, installerMarker),
+		ours:   strings.Contains(text, Marker),
 		body:   text,
 	}, nil
 }
@@ -387,17 +385,17 @@ func foreignState(path string) State {
 }
 
 func foreignError(path string) error {
-	return fmt.Errorf("agentservice: %s was not written by sparkwing (it lacks %q); move it aside before installing", path, Marker)
+	return fmt.Errorf("runner service: %s was not written by sparkwing (it lacks %q); move it aside before installing", path, Marker)
 }
 
 func writeManaged(path, body string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("agentservice: create %s: %w", dir, err)
+		return fmt.Errorf("runner service: create %s: %w", dir, err)
 	}
-	f, err := os.CreateTemp(dir, ".agentservice-*.tmp")
+	f, err := os.CreateTemp(dir, ".runner-service-*.tmp")
 	if err != nil {
-		return fmt.Errorf("agentservice: create temp file in %s: %w", dir, err)
+		return fmt.Errorf("runner service: create temp file in %s: %w", dir, err)
 	}
 	tmp := f.Name()
 	defer func() {
@@ -407,17 +405,17 @@ func writeManaged(path, body string) error {
 	}()
 	if _, err := f.WriteString(body); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("agentservice: write %s: %w", tmp, err)
+		return fmt.Errorf("runner service: write %s: %w", tmp, err)
 	}
 	if err := f.Chmod(fileMode); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("agentservice: chmod %s: %w", tmp, err)
+		return fmt.Errorf("runner service: chmod %s: %w", tmp, err)
 	}
 	if err := f.Close(); err != nil {
-		return fmt.Errorf("agentservice: close %s: %w", tmp, err)
+		return fmt.Errorf("runner service: close %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("agentservice: rename %s to %s: %w", tmp, path, err)
+		return fmt.Errorf("runner service: rename %s to %s: %w", tmp, path, err)
 	}
 	return nil
 }
@@ -429,7 +427,7 @@ func ensureLogDir(logPath string) error {
 	}
 	dir := filepath.Dir(logPath)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("agentservice: create %s: %w", dir, err)
+		return fmt.Errorf("runner service: create %s: %w", dir, err)
 	}
 	return nil
 }
@@ -460,7 +458,7 @@ func sameConfig(found, want string) bool {
 func mismatchState(path, found, want string) State {
 	return State{
 		Path: path, Installed: true, Mismatch: true,
-		Detail: fmt.Sprintf("%s runs the agent config %s, not %s, so sparkwing left it alone", path, describeConfig(found), want),
+		Detail: fmt.Sprintf("%s runs the runner config %s, not %s, so sparkwing left it alone", path, describeConfig(found), want),
 	}
 }
 
@@ -473,25 +471,33 @@ func describeConfig(found string) string {
 
 // safety: the unit is the only record of the config it runs; nothing keeps a sidecar.
 func unitConfigPath(unit string) string {
+	return configArgument(unitArguments(unit))
+}
+
+func unitArguments(unit string) []string {
 	for _, line := range strings.Split(unit, "\n") {
 		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "ExecStart=")
 		if !ok {
 			continue
 		}
-		return configArgument(systemdWords(rest))
+		return systemdWords(rest)
 	}
-	return ""
+	return nil
 }
 
 // safety: the plist is the only record of the config it runs; nothing keeps a sidecar.
 func plistConfigPath(body []byte) string {
+	return configArgument(plistArguments(body))
+}
+
+func plistArguments(body []byte) []string {
 	dec := xml.NewDecoder(bytes.NewReader(body))
 	inKey, inArgs := false, false
 	var args []string
 	for {
 		tok, err := dec.Token()
 		if err != nil {
-			return configArgument(args)
+			return nil
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
@@ -504,7 +510,7 @@ func plistConfigPath(body []byte) string {
 				}
 				var v string
 				if err := dec.DecodeElement(&v, &t); err != nil {
-					return configArgument(args)
+					return nil
 				}
 				args = append(args, v)
 			case "array":
@@ -523,7 +529,7 @@ func plistConfigPath(body []byte) string {
 				inKey = false
 			case "array":
 				if inArgs {
-					return configArgument(args)
+					return args
 				}
 			}
 		}
@@ -531,15 +537,15 @@ func plistConfigPath(body []byte) string {
 }
 
 func configArgument(words []string) string {
-	for i, w := range words {
-		if w == "--config" && i+1 < len(words) {
-			return words[i+1]
-		}
-		if rest, ok := strings.CutPrefix(w, "--config="); ok {
-			return rest
-		}
+	if len(words) < 2 || words[1] != "start" {
+		return ""
 	}
-	return ""
+	flags, err := runnerflags.Parse("start", words[2:], io.Discard)
+	if err != nil {
+		return ""
+	}
+	config, _ := flags.GetString("config")
+	return config
 }
 
 // safety: systemd's own splitting, so a quoted path with a space stays one word.
@@ -582,7 +588,7 @@ func serviceUnit(h Host) string {
 	b.WriteString("After=network-online.target\n")
 	b.WriteString("Wants=network-online.target\n\n")
 	b.WriteString("[Service]\nType=simple\n")
-	fmt.Fprintf(&b, "ExecStart=%s agent --config %s\n", systemdWord(h.Binary), systemdWord(h.ConfigPath))
+	fmt.Fprintf(&b, "ExecStart=%s start --config %s\n", systemdWord(h.Binary), systemdWord(h.ConfigPath))
 	// safety: a runner the operator stopped must stay stopped.
 	b.WriteString("Restart=on-failure\nRestartSec=10\n")
 	b.WriteString("StandardOutput=journal\nStandardError=journal\n")
@@ -598,7 +604,7 @@ func agentPlist(h Host) string {
 	b.WriteString("<plist version=\"1.0\">\n<dict>\n")
 	fmt.Fprintf(&b, "  <key>Label</key>\n  <string>%s</string>\n\n", xmlText(Label))
 	b.WriteString("  <key>ProgramArguments</key>\n  <array>\n")
-	for _, arg := range []string{h.Binary, "agent", "--config", h.ConfigPath} {
+	for _, arg := range []string{h.Binary, "start", "--config", h.ConfigPath} {
 		fmt.Fprintf(&b, "    <string>%s</string>\n", xmlText(arg))
 	}
 	b.WriteString("  </array>\n\n")

@@ -1,6 +1,7 @@
-package agentservice
+package service
 
 import (
+	"context"
 	"encoding/xml"
 	"errors"
 	"os"
@@ -16,13 +17,16 @@ type fakeExec struct {
 	fail  map[string]string
 }
 
-func (f *fakeExec) run(name string, args ...string) (string, error) {
+func (f *fakeExec) run(_ context.Context, name string, args ...string) (string, error) {
 	call := strings.TrimSpace(name + " " + strings.Join(args, " "))
 	f.calls = append(f.calls, call)
 	for prefix, out := range f.fail {
 		if strings.HasPrefix(call, prefix) {
 			return out, errors.New("exit status 1")
 		}
+	}
+	if name == "launchctl" && len(args) > 0 && args[0] == "print" {
+		return "state = running\n", nil
 	}
 	return "", nil
 }
@@ -65,7 +69,7 @@ func darwinHost(t *testing.T, exec *fakeExec) Host {
 func TestInstallLinuxWritesUnitAndStartsIt(t *testing.T) {
 	exec := &fakeExec{}
 	h := linuxHost(t, exec)
-	state, err := Install(h)
+	state, err := Install(t.Context(), h)
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -82,7 +86,7 @@ func TestInstallLinuxWritesUnitAndStartsIt(t *testing.T) {
 	unit := string(body)
 	for _, want := range []string{
 		Marker,
-		"ExecStart=" + systemdWord(h.Binary) + " agent --config " + systemdWord(h.ConfigPath),
+		"ExecStart=" + systemdWord(h.Binary) + " start --config " + systemdWord(h.ConfigPath),
 		"Restart=on-failure",
 		"WantedBy=default.target",
 	} {
@@ -109,7 +113,7 @@ func TestInstallLinuxWritesUnitAndStartsIt(t *testing.T) {
 func TestInstallDarwinWritesPlistAndLoadsIt(t *testing.T) {
 	exec := &fakeExec{}
 	h := darwinHost(t, exec)
-	state, err := Install(h)
+	state, err := Install(t.Context(), h)
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -125,7 +129,7 @@ func TestInstallDarwinWritesPlistAndLoadsIt(t *testing.T) {
 		t.Fatalf("plist is not well-formed XML: %v", err)
 	}
 	plist := string(body)
-	for _, want := range []string{Marker, "<string>" + Label + "</string>", "<string>agent</string>", h.ConfigPath} {
+	for _, want := range []string{Marker, "<string>" + Label + "</string>", "<string>start</string>", h.ConfigPath} {
 		if !strings.Contains(plist, want) {
 			t.Errorf("plist missing %q:\n%s", want, plist)
 		}
@@ -152,7 +156,7 @@ func TestInstallRefusesAForeignUnit(t *testing.T) {
 	if err := os.WriteFile(path, []byte("[Service]\nExecStart=/usr/bin/true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	state, err := Install(h)
+	state, err := Install(t.Context(), h)
 	if err == nil {
 		t.Fatal("Install overwrote a unit sparkwing did not write")
 	}
@@ -165,26 +169,6 @@ func TestInstallRefusesAForeignUnit(t *testing.T) {
 	}
 	if len(exec.calls) != 0 {
 		t.Errorf("a refused install still talked to systemd: %v", exec.calls)
-	}
-}
-
-func TestInstallAdoptsAUnitTheShellInstallerWrote(t *testing.T) {
-	exec := &fakeExec{}
-	h := linuxHost(t, exec)
-	path := UnitPath(h)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	body := "# sparkwing-runner systemd user service template.\n# " + installerMarker + " -- do not edit directly.\n"
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	state, err := Install(h)
-	if err != nil {
-		t.Fatalf("Install over a shell-installed unit: %v", err)
-	}
-	if state.Foreign {
-		t.Errorf("state = %+v, want the shell installer's unit adopted", state)
 	}
 }
 
@@ -206,12 +190,12 @@ func TestUninstallStopsAndRemoves(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			install := &fakeExec{}
 			h := tc.host(t, install)
-			if _, err := Install(h); err != nil {
+			if _, err := Install(t.Context(), h); err != nil {
 				t.Fatalf("Install: %v", err)
 			}
 			exec := &fakeExec{}
 			h.Exec = exec.run
-			state, err := Uninstall(h)
+			state, err := Uninstall(t.Context(), h)
 			if err != nil {
 				t.Fatalf("Uninstall: %v", err)
 			}
@@ -231,7 +215,7 @@ func TestUninstallStopsAndRemoves(t *testing.T) {
 func TestUninstallWithNothingInstalledIsQuiet(t *testing.T) {
 	exec := &fakeExec{}
 	h := linuxHost(t, exec)
-	state, err := Uninstall(h)
+	state, err := Uninstall(t.Context(), h)
 	if err != nil {
 		t.Fatalf("Uninstall: %v", err)
 	}
@@ -246,14 +230,14 @@ func TestUninstallWithNothingInstalledIsQuiet(t *testing.T) {
 func TestUninstallToleratesAServiceAlreadyGone(t *testing.T) {
 	install := &fakeExec{}
 	h := linuxHost(t, install)
-	if _, err := Install(h); err != nil {
+	if _, err := Install(t.Context(), h); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
 	exec := &fakeExec{fail: map[string]string{
 		"systemctl --user disable": "Failed to disable unit: Unit file sparkwing-runner.service does not exist.",
 	}}
 	h.Exec = exec.run
-	if _, err := Uninstall(h); err != nil {
+	if _, err := Uninstall(t.Context(), h); err != nil {
 		t.Fatalf("Uninstall: %v", err)
 	}
 	if _, err := os.Stat(UnitPath(h)); !errors.Is(err, os.ErrNotExist) {
@@ -262,10 +246,10 @@ func TestUninstallToleratesAServiceAlreadyGone(t *testing.T) {
 }
 
 func TestUnsupportedGOOS(t *testing.T) {
-	if _, err := Install(Host{GOOS: "windows"}); !errors.Is(err, ErrUnsupported) {
+	if _, err := Install(t.Context(), Host{GOOS: "windows"}); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("Install on windows = %v, want ErrUnsupported", err)
 	}
-	if _, err := Uninstall(Host{GOOS: "windows"}); !errors.Is(err, ErrUnsupported) {
+	if _, err := Uninstall(t.Context(), Host{GOOS: "windows"}); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("Uninstall on windows = %v, want ErrUnsupported", err)
 	}
 }
@@ -274,12 +258,12 @@ func TestInstallRequiresAbsolutePaths(t *testing.T) {
 	exec := &fakeExec{}
 	h := linuxHost(t, exec)
 	h.Binary = "sparkwing-runner"
-	if _, err := Install(h); err == nil {
+	if _, err := Install(t.Context(), h); err == nil {
 		t.Fatal("Install accepted a relative binary path")
 	}
 	h = linuxHost(t, exec)
 	h.ConfigPath = "config.yaml"
-	if _, err := Install(h); err == nil {
+	if _, err := Install(t.Context(), h); err == nil {
 		t.Fatal("Install accepted a relative config path")
 	}
 }
@@ -309,7 +293,7 @@ func TestUninstallLeavesAServiceRunningAnotherConfig(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			install := &fakeExec{}
 			h := tc.host(t, install)
-			if _, err := Install(h); err != nil {
+			if _, err := Install(t.Context(), h); err != nil {
 				t.Fatalf("Install: %v", err)
 			}
 			exec := &fakeExec{}
@@ -317,7 +301,7 @@ func TestUninstallLeavesAServiceRunningAnotherConfig(t *testing.T) {
 			other.Exec = exec.run
 			other.ConfigPath = filepath.Join(filepath.Dir(h.ConfigPath), "other-config.yaml")
 
-			state, err := Uninstall(other)
+			state, err := Uninstall(t.Context(), other)
 			if err != nil {
 				t.Fatalf("Uninstall: %v", err)
 			}
@@ -363,14 +347,14 @@ func TestPreflightReportsAnUnreachableServiceManager(t *testing.T) {
 		"systemctl --user show": "Failed to connect to bus: No medium found",
 	}}
 	h := linuxHost(t, exec)
-	err := Preflight(h)
+	err := Preflight(t.Context(), h)
 	if err == nil || !strings.Contains(err.Error(), "systemd user session is unreachable") {
 		t.Fatalf("Preflight = %v, want an unreachable systemd session", err)
 	}
 
 	clean := &fakeExec{}
 	h = linuxHost(t, clean)
-	if err := Preflight(h); err != nil {
+	if err := Preflight(t.Context(), h); err != nil {
 		t.Fatalf("Preflight on a reachable session: %v", err)
 	}
 	if len(clean.calls) != 1 {
@@ -379,19 +363,19 @@ func TestPreflightReportsAnUnreachableServiceManager(t *testing.T) {
 
 	darwin := &fakeExec{}
 	dh := darwinHost(t, darwin)
-	if err := Preflight(dh); err != nil {
+	if err := Preflight(t.Context(), dh); err != nil {
 		t.Fatalf("Preflight on darwin: %v", err)
 	}
 	if !slices.Contains(darwin.calls, "launchctl print gui/501") {
 		t.Errorf("darwin preflight calls = %v", darwin.calls)
 	}
 
-	if err := Preflight(Host{GOOS: "windows"}); !errors.Is(err, ErrUnsupported) {
+	if err := Preflight(t.Context(), Host{GOOS: "windows"}); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("Preflight on windows = %v, want ErrUnsupported", err)
 	}
 	bad := linuxHost(t, &fakeExec{})
 	bad.Binary = "sparkwing-runner"
-	if err := Preflight(bad); err == nil {
+	if err := Preflight(t.Context(), bad); err == nil {
 		t.Fatal("Preflight accepted a relative binary path")
 	}
 }

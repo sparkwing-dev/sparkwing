@@ -1,4 +1,4 @@
-package agentservice
+package service
 
 import (
 	"testing"
