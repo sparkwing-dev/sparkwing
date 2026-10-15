@@ -37,12 +37,8 @@ func main() {
 }
 
 func runWingdMode(args []string) {
-	if len(args) == 0 || (args[0] != "run" && args[0] != "supervise") {
-		fail("usage: wingd run|supervise [--home DIR]")
-	}
-	if args[0] == "supervise" {
-		superviseMode(args[1:])
-		return
+	if len(args) == 0 || args[0] != "run" {
+		fail("usage: wingd run [--home DIR]")
 	}
 	fs := flag.NewFlagSet("wingd run", flag.ExitOnError)
 	home := fs.String("home", "", "")
@@ -67,22 +63,6 @@ func runWingdMode(args []string) {
 	defer stop()
 	if err := d.Run(ctx); err != nil && err != wingd.ErrNotElected {
 		fail("run: %v", err)
-	}
-}
-
-func superviseMode(args []string) {
-	self, err := os.Executable()
-	if err != nil {
-		fail("locate own binary: %v", err)
-	}
-	// #nosec G702 -- a test program re-executing its own binary as argv without a shell
-	cmd := exec.Command(self, append([]string{"wingd", "run"}, args...)...)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			os.Exit(ee.ExitCode())
-		}
-		fail("supervised child: %v", err)
 	}
 }
 

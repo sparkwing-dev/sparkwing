@@ -45,7 +45,7 @@ func buildFixture(t *testing.T) string {
 		fixtureDir = dir
 		bin := filepath.Join(dir, "testprog"+processFixtureSuffix())
 		cmd := exec.Command("go", "build", "-o", bin,
-			"github.com/sparkwing-dev/sparkwing/internal/wingd/testprog")
+			"github.com/sparkwing-dev/sparkwing/internal/wingd/testdata/testprog")
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			fixtureErr = err
