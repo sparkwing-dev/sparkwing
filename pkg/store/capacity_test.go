@@ -131,7 +131,7 @@ func TestPartialProfileObservationOnlyRaisesResources(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	before, err := st.ProfileSamples(ctx, "partial", "")
+	before, err := tenantFor(t, st, store.DefaultTeam).ProfileSamples(ctx, "partial", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestPartialProfileObservationOnlyRaisesResources(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	unchanged, err := st.ProfileSamples(ctx, "partial", "")
+	unchanged, err := tenantFor(t, st, store.DefaultTeam).ProfileSamples(ctx, "partial", "")
 	if err != nil {
 		t.Fatal(err)
 	}

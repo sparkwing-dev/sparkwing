@@ -111,6 +111,12 @@ Their raw `Store` methods are removed. The unused raw `SetRetriedAs`,
 `ActiveConcurrencyHolder` and `ListSpawnedChildrenByRun` wrappers are removed.
 Their tenant methods remain while legacy callers migrate.
 
+`Tenant.ResetPipelineProfile`, `Tenant.ResetAllProfiles` and
+`Tenant.ProfileSamples` own capacity resets and sample reads. Their raw Store
+twins are removed. Local stats reset selects DefaultTeam explicitly. The local
+dashboard selects the request's tenant before reading profiles or samples.
+Query parameters cannot select another team's profiles.
+
 `Tenant.ReadOwnerSnapshot` reads the current owner authority, lease and scheduling
 state in one snapshot. A replaced, expired or revoked owner receives no snapshot.
 Cancellation remains readable while a held owner drains. The controller transports

@@ -543,34 +543,12 @@ type ProfileResetSummary struct {
 	FloorsDropped  int      `json:"floors_dropped"`
 }
 
-// ResetPipelineProfile clears one pipeline's learned capacity profile --
-// its windowed samples, duration and peak percentiles, queue waits,
-// contention tally, and contended-run demand floor across the rollup and
-// every node row -- so it re-learns from a cold start. The floor goes
-// whether or not measured samples sit behind it, since a pipeline can be
-// priced off a floor it earned before it ever finished a clean run. An
-// explicit .Resources() pin is preserved: a pinned row is zeroed in place
-// rather than deleted, so admission keeps charging the pin meanwhile.
-// Resetting a pipeline with no stored profile is a no-op that reports zero
-// counts.
-func (s *Store) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error) {
-	return s.defaultTenant().resetProfiles(ctx, pipeline)
-}
-
-// ResetPipelineProfile clears one of t's pipeline profiles.
-// See [Store.ResetPipelineProfile].
+// ResetPipelineProfile clears one tenant pipeline's learned observations and floors while preserving resource pins.
 func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error) {
 	return t.resetProfiles(ctx, pipeline)
 }
 
-// ResetAllProfiles clears every pipeline's learned capacity profile,
-// preserving pins, with the same semantics as [Store.ResetPipelineProfile].
-func (s *Store) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error) {
-	return s.defaultTenant().resetProfiles(ctx, "")
-}
-
-// ResetAllProfiles clears every profile of t's team.
-// See [Store.ResetAllProfiles].
+// ResetAllProfiles clears this tenant's learned observations and floors while preserving resource pins.
 func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error) {
 	return t.resetProfiles(ctx, "")
 }
@@ -988,17 +966,7 @@ type ProfileSample struct {
 	PeakMemoryBytes int64         `json:"peak_memory_bytes"`
 }
 
-// ProfileSamples returns the (pipeline, node) profile's stored sample
-// window, oldest run first, or nil when nothing is stored for the key. A
-// window written under a sample schema too old to price from reads as empty,
-// the same way [Store.GetPipelineProfile] reports zeroes for such a row, so
-// the two never describe one profile differently.
-func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error) {
-	return s.defaultTenant().ProfileSamples(ctx, pipeline, nodeID)
-}
-
-// ProfileSamples returns t's stored sample window for the (pipeline,
-// node). See [Store.ProfileSamples].
+// ProfileSamples returns this tenant's stored sample window in arrival order, or nil for a missing or obsolete window.
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error) {
 	var raw []byte
 	if err := t.s.queryRow(ctx,

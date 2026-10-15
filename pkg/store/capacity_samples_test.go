@@ -23,7 +23,7 @@ func TestProfileSamples_ReturnsWindowOldestFirst(t *testing.T) {
 		}
 	}
 
-	samples, err := st.ProfileSamples(ctx, "demo", "")
+	samples, err := tenantFor(t, st, store.DefaultTeam).ProfileSamples(ctx, "demo", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestProfileSamples_ReproduceStoredCharges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	samples, err := st.ProfileSamples(ctx, "demo", "")
+	samples, err := tenantFor(t, st, store.DefaultTeam).ProfileSamples(ctx, "demo", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestProfileSamples_ReproduceStoredCharges(t *testing.T) {
 }
 
 func TestProfileSamples_AbsentProfileReturnsNil(t *testing.T) {
-	samples, err := storetest.Open(t).ProfileSamples(context.Background(), "never-run", "")
+	samples, err := tenantFor(t, storetest.Open(t), store.DefaultTeam).ProfileSamples(context.Background(), "never-run", "")
 	if err != nil {
 		t.Fatal(err)
 	}

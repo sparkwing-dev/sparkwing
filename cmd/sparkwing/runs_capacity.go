@@ -110,10 +110,14 @@ func runCapacityReset(ctx context.Context, paths orchestrator.Paths, pipeline st
 	defer func() { _ = st.Close() }()
 
 	var summary store.ProfileResetSummary
+	tenant, err := st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return err
+	}
 	if resetAll {
-		summary, err = st.ResetAllProfiles(ctx)
+		summary, err = tenant.ResetAllProfiles(ctx)
 	} else {
-		summary, err = resetNamedProfile(ctx, st, pipeline)
+		summary, err = resetNamedProfile(ctx, tenant, pipeline)
 	}
 	if err != nil {
 		return err
@@ -149,7 +153,7 @@ func runCapacityReset(ctx context.Context, paths orchestrator.Paths, pipeline st
 	return nil
 }
 
-func resetNamedProfile(ctx context.Context, st *store.Store, name string) (store.ProfileResetSummary, error) {
+func resetNamedProfile(ctx context.Context, st *store.Tenant, name string) (store.ProfileResetSummary, error) {
 	all, err := st.ListPipelineProfiles(ctx, "")
 	if err != nil {
 		return store.ProfileResetSummary{}, err

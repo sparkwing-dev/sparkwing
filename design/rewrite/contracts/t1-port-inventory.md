@@ -18,6 +18,33 @@ and racing reconciliations.
 Enrollment is a contract fake. Native owner processes and HTTP remain required
 by the existing placement cells.
 
+`recovery_test.go:TestRecovery/recovery-unstarted-lapse/store-sqlite` exercises
+five unstarted job lapses, reopening after each requeue. Attempts, disruptions
+and application retries stay zero. Each next award advances generation. The
+first execution then starts attempt one. Old holders cannot finish the job,
+and the five lapses create no sibling run. This adds coverage to the existing
+recovery ports without completing the native process cells.
+
+`placement_test.go:TestPlacement/placement-granted-identity-and-capacity/store-sqlite`
+extends the existing package ports into active SQLite acceptance. It checks
+named and queued claims for capacity, authenticated name, self-asserted labels,
+repository enrollment, metering and granted pool toleration. Matcher, authority,
+claims, events and billing-award persistence are real. Enrollment is a contract
+fake. Refusals must come from matching, leave no events or billing awards, and
+permit a subsequent claim when the missing requirement is supplied. Metered
+success and launcher settlement remain outside this proof.
+
+The archived cases exercised by that cell are
+TestQueueClaimNeverTakesANodeLargerThanTheRunnersCapacity,
+TestQueueClaimBindsNameToTheTokenPrincipal,
+TestNamedClaimAppliesTheClaimantsProfile,
+TestNamedClaimOfAMeteredAgentObeysItsAcceptList,
+TestNamedClaimFromADispatcherThatSendsNoLabels,
+TestPlacementToday_TriggerClaimMatchesNoLabels and
+TestPlacementToday_SelfAssertedLabelsSatisfyRequires from the placement snapshot.
+The package ports already replaced their old fixtures. This continuation adds
+no new archived source-function identity to the inventory.
+
 `credentials_test.go:TestCredentials/credentials-operator-console-split/store-sqlite`
 checks trusted bootstrap/service issuance, rejection of console grants and
 independent root revocation through the final store API. Origin verification is

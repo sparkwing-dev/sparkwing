@@ -41,14 +41,14 @@ func TestProfileHistory(t *testing.T) {
 				for _, count := range []int{0, 1} {
 					seed := func() {
 						t.Helper()
-						if _, err := st.DB().Exec(storetest.Rebind(st, `DELETE FROM pipeline_profiles WHERE pipeline = ?`), "history"); err != nil {
+						if _, err := st.DB().Exec(storetest.Rebind(st, `DELETE FROM pipeline_profiles WHERE team = ? AND pipeline = ?`), store.DefaultTeam, "history"); err != nil {
 							t.Fatal(err)
 						}
 						_, err := st.DB().Exec(storetest.Rebind(st, `INSERT INTO pipeline_profiles
- (pipeline,node_id,p50_duration_ms,p99_duration_ms,peak_cores,peak_memory_bytes,sample_count,cpu_measured,updated_at,samples_json,
+ (team,pipeline,node_id,p50_duration_ms,p99_duration_ms,peak_cores,peak_memory_bytes,sample_count,cpu_measured,updated_at,samples_json,
  plan_hash,floor_cores,floor_memory_bytes,prev_peak_cores,prev_peak_memory_bytes,sustained_cores,prev_sustained_cores,
  pinned_cores,pinned_memory_bytes,wait_p50_ms,wait_p99_ms,wait_sample_count,contended_count)
- VALUES (?,?,9000,9000,14,450,?,1,1,?,'old-plan',10,400,16,500,12,13,2,100,3,7,2,6)`), "history", node, count, document.raw)
+ VALUES (?,?,?,9000,9000,14,450,?,1,1,?,'old-plan',10,400,16,500,12,13,2,100,3,7,2,6)`), store.DefaultTeam, "history", node, count, document.raw)
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -86,7 +86,7 @@ func TestProfileHistory(t *testing.T) {
 					if profiles[0].CPUMeasured || profiles[0].PlanHash != "" {
 						t.Errorf("obsolete list metadata survived: %+v", profiles[0])
 					}
-					window, err := st.ProfileSamples(ctx, "history", node)
+					window, err := tenantFor(t, st, store.DefaultTeam).ProfileSamples(ctx, "history", node)
 					if err != nil || len(window) != 0 {
 						t.Errorf("obsolete samples: %v, %v", window, err)
 					}
@@ -99,7 +99,7 @@ func TestProfileHistory(t *testing.T) {
 						}
 					}
 					var after []byte
-					if err := st.DB().QueryRow(storetest.Rebind(st, `SELECT samples_json FROM pipeline_profiles WHERE pipeline = ? AND node_id = ?`), "history", node).Scan(&after); err != nil {
+					if err := st.DB().QueryRow(storetest.Rebind(st, `SELECT samples_json FROM pipeline_profiles WHERE team = ? AND pipeline = ? AND node_id = ?`), store.DefaultTeam, "history", node).Scan(&after); err != nil {
 						t.Fatal(err)
 					}
 					if string(after) != string(document.raw) {

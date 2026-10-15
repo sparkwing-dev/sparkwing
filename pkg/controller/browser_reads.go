@@ -26,12 +26,15 @@ func (s *Server) dashboardRead(read func(backend.Backend) http.HandlerFunc) http
 	})
 }
 
-// safety: learned capacity profiles are machine-wide rows with no team, so only a host's own dashboard reads them.
 func (s *Server) capacityRead(read func(web.ProfileReader) http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reader web.ProfileReader
 		if s.dashboard != nil && s.dashboard.Local {
-			reader = s.store
+			tenant, ok := s.requestTenant(w, r)
+			if !ok {
+				return
+			}
+			reader = tenant
 		}
 		read(reader).ServeHTTP(w, r)
 	})

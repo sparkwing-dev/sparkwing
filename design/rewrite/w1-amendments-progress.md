@@ -1,5 +1,9 @@
 # W1 store handoff
 
+The next continuation is in [w1-session8-progress.md](w1-session8-progress.md).
+It adds active matching and unstarted-lapse SQLite proofs, retires three profile
+Store twins and scopes the local capacity dashboard to its request tenant.
+
 W1 remains incomplete. This continuation starts from 5ede4a650. The inherited
 work is committed, and this continuation is left for the lead to review and
 commit. There are no unmerged index entries. W1b implementation files are
