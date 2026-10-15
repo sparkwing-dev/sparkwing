@@ -18,38 +18,28 @@ func setProfileCmdFixture(t *testing.T, body string) {
 	t.Setenv("SPARKWING_CONFIG", path)
 }
 
-func TestProfileCmd_NoFlagYieldsNoProfile(t *testing.T) {
-	setProfileCmdFixture(t, `
-profiles:
-  prod: { controller: { url: https://api.example.dev } }
-  team: { state: { type: sqlite, path: /tmp/team.db } }
-`)
-	out := captureStdout(t, func() {
-		if err := runProfilesShow(nil); err != nil {
-			t.Errorf("profile: %v", err)
-		}
-	})
-	if !strings.Contains(out, "no --profile") {
-		t.Errorf("expected 'no --profile' banner; got:\n%s", out)
+func TestProfileCmd_RequiresSelection(t *testing.T) {
+	if err := runProfiles([]string{"show"}); err == nil {
+		t.Fatal("show accepted missing --profile")
 	}
 }
 
-func TestProfileCmd_FlagSelectsHypothetical(t *testing.T) {
+func TestProfileCmd_FlagSelectsConnection(t *testing.T) {
 	setProfileCmdFixture(t, `
 profiles:
   prod: { controller: { url: https://api.example.dev } }
-  team: { state: { type: sqlite, path: /tmp/team.db } }
+  team: { controller: { url: https://team.example.dev } }
 `)
 	out := captureStdout(t, func() {
-		if err := runProfilesShow([]string{"--profile", "team", "--output", "pretty"}); err != nil {
+		if err := runProfiles([]string{"show", "--profile", "team", "--output", "pretty"}); err != nil {
 			t.Errorf("profile: %v", err)
 		}
 	})
-	if !strings.Contains(out, "effective profile: team") {
-		t.Errorf("expected team selected; got:\n%s", out)
+	if !strings.Contains(out, "name:       team") {
+		t.Errorf("expected team connection; got:\n%s", out)
 	}
-	if !strings.Contains(out, "flag (--profile team)") {
-		t.Errorf("expected flag source; got:\n%s", out)
+	if !strings.Contains(out, "controller:") {
+		t.Errorf("expected controller; got:\n%s", out)
 	}
 }
 
@@ -58,7 +48,7 @@ func TestProfileCmd_NotFound(t *testing.T) {
 profiles:
   prod: { controller: { url: https://api.example.dev } }
 `)
-	err := runProfilesShow([]string{"--profile", "bogus"})
+	err := runProfiles([]string{"show", "--profile", "bogus"})
 	if err == nil {
 		t.Fatal("expected not-found error")
 	}
@@ -67,28 +57,25 @@ profiles:
 	}
 }
 
-func TestProfileCmd_JSONEffectiveName(t *testing.T) {
+func TestProfileCmd_JSONConnectionName(t *testing.T) {
 	setProfileCmdFixture(t, `
 profiles:
   prod: { controller: { url: https://api.example.dev, token: swu_secret } }
 `)
 	out := captureStdout(t, func() {
-		if err := runProfilesShow([]string{"--profile", "prod", "-o", "json"}); err != nil {
+		if err := runProfiles([]string{"show", "--profile", "prod", "-o", "json"}); err != nil {
 			t.Errorf("profile: %v", err)
 		}
 	})
-	var report profileReportJSON
+	var report profileIndex
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("output is not parseable JSON: %v\n%s", err, out)
 	}
-	if report.Effective.Name != "prod" {
-		t.Errorf("effective.name = %q, want prod", report.Effective.Name)
+	if report.Name != "prod" {
+		t.Errorf("name = %q, want prod", report.Name)
 	}
-	if report.Effective.Source != "flag" {
-		t.Errorf("effective.source = %q, want flag", report.Effective.Source)
-	}
-	if report.Effective.State != "controller://prod" {
-		t.Errorf("effective.state = %q, want controller://prod", report.Effective.State)
+	if report.Controller != "https://api.example.dev" {
+		t.Errorf("controller = %q, want https://api.example.dev", report.Controller)
 	}
 	if strings.Contains(out, "swu_secret") {
 		t.Errorf("token leaked into output:\n%s", out)
@@ -97,7 +84,7 @@ profiles:
 
 func TestProfileCmd_RejectsPositionalArg(t *testing.T) {
 	setProfileCmdFixture(t, "profiles:\n  prod: { controller: { url: https://x } }\n")
-	err := runProfilesShow([]string{"prod"})
+	err := runProfiles([]string{"show", "prod"})
 	if err == nil {
 		t.Fatal("expected error on positional arg")
 	}

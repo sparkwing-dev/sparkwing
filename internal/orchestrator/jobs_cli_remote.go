@@ -113,51 +113,6 @@ func renderRemoteStatus(run *store.Run, nodes []*store.Node, stepsByNode map[str
 	return nil
 }
 
-func RemoteRunOutcome(ctx context.Context, controllerURL, token, runID string, out io.Writer) (string, error) {
-	if controllerURL == "" {
-		return "", errors.New("RemoteRunOutcome: controller URL required")
-	}
-	if out == nil {
-		out = io.Discard
-	}
-	c := client.NewWithToken(controllerURL, nil, token)
-	run, err := getRunRetrying(ctx, c, runID)
-	if err != nil {
-		return "", err
-	}
-	if run == nil {
-		return "", fmt.Errorf("run %s: controller returned no run record", runID)
-	}
-	if run.Status == "success" {
-		return run.Status, nil
-	}
-	nodes, err := c.ListNodes(ctx, runID)
-	if err != nil {
-		fmt.Fprintf(out, "\nrun %s finished %s (node detail unavailable: %v)\n", run.ID, run.Status, err)
-		return run.Status, nil
-	}
-	steps, _ := c.ListNodeSteps(ctx, runID)
-	approvals, _ := c.ListApprovalsForRun(ctx, runID)
-	fmt.Fprintln(out)
-	_ = renderRemoteStatus(run, nodes, groupStepsByNode(steps), approvals, out, false, false)
-	return run.Status, nil
-}
-
-const remoteOutcomeRetryDelay = 250 * time.Millisecond
-
-func getRunRetrying(ctx context.Context, c *client.Client, runID string) (*store.Run, error) {
-	run, err := c.GetRun(ctx, runID)
-	if err == nil {
-		return run, nil
-	}
-	select {
-	case <-ctx.Done():
-		return nil, err
-	case <-time.After(remoteOutcomeRetryDelay):
-	}
-	return c.GetRun(ctx, runID)
-}
-
 func JobErrorsRemote(ctx context.Context, controllerURL, token, runID string, asJSON bool, out io.Writer) error {
 	if controllerURL == "" {
 		return errors.New("JobErrorsRemote: controller URL required")

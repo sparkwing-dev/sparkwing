@@ -64,7 +64,11 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 	c.Prefix = raw[:16]
 	c.Digest = sha256.Sum256([]byte(raw))
 	c.IssuedAt = tx.now()
-	if err := persistCapabilityTx(ctx, tx, c); err != nil {
+	var origin *CapabilityOrigin
+	if request.Provision != nil {
+		origin = &CapabilityOrigin{Kind: request.Provision.Kind, RegistrationID: request.Provision.RegistrationID}
+	}
+	if err := persistCapabilityTx(ctx, tx, c, origin); err != nil {
 		return capability.Issued{}, err
 	}
 	if request.Provision != nil {

@@ -20,11 +20,21 @@ import (
 type CapabilityRecord struct {
 	Version int                   `json:"version"`
 	Value   capability.Capability `json:"value"`
+	Origin  *CapabilityOrigin     `json:"origin,omitempty"`
+}
+
+// CapabilityOrigin retains the trusted provisioning kind and registration.
+type CapabilityOrigin struct {
+	Kind           capability.ProvisionKind `json:"kind"`
+	RegistrationID string                   `json:"registration_id,omitempty"`
 }
 
 // Validate rejects incomplete or unknown persisted authority shapes.
 func (r CapabilityRecord) Validate() error {
 	c := r.Value
+	if r.Origin != nil && !validCapabilityOrigin(c, *r.Origin) {
+		return authorityError(apierr.IntegrityFailure, "invalid capability origin")
+	}
 	if r.Version != 1 || c.Prefix == "" || c.Subject.ID == "" || c.IssuedAt.IsZero() {
 		return authorityError(apierr.IntegrityFailure, "invalid capability envelope")
 	}
@@ -189,8 +199,11 @@ func authorityProjection(c capability.Capability) ([]any, error) {
 	return []any{c.Prefix, optionalString(c.Team), string(c.Subject.Kind), c.Subject.ID, string(c.Audience), grants, string(c.Issuance), int64(1), parentKind, parentID, optionalString(string(c.Purpose)), optionalString(string(c.Delivery)), optionalString(c.UnitID), billingUnit, string(c.Binding.Kind), optionalString(c.Binding.RunID), optionalString(c.Binding.NodeID), generation, optionalString(c.Binding.Holder), optionalTime(c.Binding.ClaimBy), pools, c.IssuedAt.UnixNano(), optionalTime(c.ExpiresAt), optionalTime(c.RevokedAt), metered, payer, executor, reservation, start, optionalString(string(c.Unit)), expansion, repo, repos, ref, sha}, nil
 }
 
-func persistCapabilityTx(ctx context.Context, tx *storeTx, c capability.Capability) error {
+func persistCapabilityTx(ctx context.Context, tx *storeTx, c capability.Capability, origin ...*CapabilityOrigin) error {
 	record := CapabilityRecord{Version: 1, Value: c}
+	if len(origin) > 0 {
+		record.Origin = origin[0]
+	}
 	if err := record.Validate(); err != nil {
 		return err
 	}
@@ -213,6 +226,11 @@ func persistCapabilityTx(ctx context.Context, tx *storeTx, c capability.Capabili
 
 // safety: indexed columns may accelerate lookup but cannot add authority to the envelope.
 func loadCapabilityTx(ctx context.Context, tx *storeTx, prefix string) (capability.Capability, error) {
+	record, err := loadCapabilityRecordTx(ctx, tx, prefix)
+	return record.Value, err
+}
+
+func loadCapabilityRecordTx(ctx context.Context, tx *storeTx, prefix string) (CapabilityRecord, error) {
 	var digest string
 	var body []byte
 	actual := make([]any, len(authorityColumns))
@@ -222,33 +240,33 @@ func loadCapabilityTx(ctx context.Context, tx *storeTx, prefix string) (capabili
 	}
 	err := tx.QueryRowContext(ctx, "SELECT digest,authority_json,"+strings.Join(authorityColumns, ",")+" FROM capabilities WHERE prefix = ?", prefix).Scan(dest...)
 	if errors.Is(err, sql.ErrNoRows) {
-		return capability.Capability{}, authorityError(apierr.Unauthenticated, "authority is unavailable")
+		return CapabilityRecord{}, authorityError(apierr.Unauthenticated, "authority is unavailable")
 	}
 	if err != nil {
-		return capability.Capability{}, err
+		return CapabilityRecord{}, err
 	}
 	var record CapabilityRecord
 	if err := json.Unmarshal(body, &record); err != nil {
-		return capability.Capability{}, authorityError(apierr.IntegrityFailure, "invalid capability envelope")
+		return CapabilityRecord{}, authorityError(apierr.IntegrityFailure, "invalid capability envelope")
 	}
 	if err := record.Validate(); err != nil {
-		return capability.Capability{}, err
+		return CapabilityRecord{}, err
 	}
 	expected, err := authorityProjection(record.Value)
 	if err != nil {
-		return capability.Capability{}, err
+		return CapabilityRecord{}, err
 	}
 	for i, v := range actual {
 		if !equalProjection(v, expected[i]) {
-			return capability.Capability{}, authorityError(apierr.IntegrityFailure, "capability projection mismatch: "+authorityColumns[i])
+			return CapabilityRecord{}, authorityError(apierr.IntegrityFailure, "capability projection mismatch: "+authorityColumns[i])
 		}
 	}
 	bytes, err := hex.DecodeString(digest)
 	if err != nil || len(bytes) != sha256.Size {
-		return capability.Capability{}, authorityError(apierr.IntegrityFailure, "invalid bearer digest")
+		return CapabilityRecord{}, authorityError(apierr.IntegrityFailure, "invalid bearer digest")
 	}
 	copy(record.Value.Digest[:], bytes)
-	return record.Value, nil
+	return record, nil
 }
 
 func equalProjection(a, b any) bool {
@@ -453,7 +471,12 @@ func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capabi
 		return authorityError(apierr.Forbidden, "revocation target belongs to another team")
 	}
 	if !slices.Contains(p.Capability.Grants, capability.TeamAdmin) && p.Authority != target {
-		return authorityError(apierr.Forbidden, "revocation requires team administration or own authority")
+		if target.Kind != capability.AuthorityCapability {
+			return bindingRefusal()
+		}
+		if err := bindingTokenTx(ctx, tx, p.Capability, capability.Target{Team: string(t.team), TokenPrefix: target.ID}); err != nil {
+			return err
+		}
 	}
 	if err := revokeAuthorityTx(ctx, tx, target); err != nil {
 		return err
@@ -492,12 +515,12 @@ func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capa
 func revokeAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) error {
 	now := tx.now()
 	if ref.Kind == capability.AuthorityCapability {
-		c, err := loadCapabilityTx(ctx, tx, ref.ID)
+		record, err := loadCapabilityRecordTx(ctx, tx, ref.ID)
 		if err != nil {
 			return err
 		}
-		c.RevokedAt = &now
-		body, err := json.Marshal(CapabilityRecord{Version: 1, Value: c})
+		record.Value.RevokedAt = &now
+		body, err := json.Marshal(record)
 		if err != nil {
 			return err
 		}

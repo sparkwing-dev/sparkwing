@@ -50,6 +50,7 @@ type updateReceipt struct {
 	Digest          string         `json:"sha256,omitempty"`
 	Replacement     string         `json:"sdk_replace,omitempty"`
 	ResolvedRelease string         `json:"resolved_release,omitempty"`
+	ManagedUnits    string         `json:"managed_units,omitempty"`
 }
 
 func installedArtifactIdentity(path string) updateIdentity {
@@ -508,7 +509,11 @@ func sdkInspectionReason(err error) string {
 }
 
 func finishUpdateCheck(report updateCheckReport, mode string) error {
-	if err := writeUpdateCheck(os.Stdout, report, mode); err != nil {
+	return renderUpdateCheck(os.Stdout, report, mode)
+}
+
+func renderUpdateCheck(out io.Writer, report updateCheckReport, mode string) error {
+	if err := writeUpdateCheck(out, report, mode); err != nil {
 		return err
 	}
 	switch report.Status {
@@ -539,17 +544,19 @@ func writeUpdateCheck(w io.Writer, report updateCheckReport, mode string) error 
 		_, err := fmt.Fprintln(w, report.Status)
 		return err
 	}
-	fmt.Fprintf(w, "sparkwing %s update check\n  installed: %s\n  available: %s\n  status:    %s\n", report.Target, updateIdentityLabel(report.Installed), updateIdentityLabel(report.Available), report.Status)
+	var text strings.Builder
+	fmt.Fprintf(&text, "sparkwing %s update check\n  installed: %s\n  available: %s\n  status:    %s\n", report.Target, updateIdentityLabel(report.Installed), updateIdentityLabel(report.Available), report.Status)
 	if report.Installed.Path != "" {
-		fmt.Fprintf(w, "  path:      %s\n", report.Installed.Path)
+		fmt.Fprintf(&text, "  path:      %s\n", report.Installed.Path)
 	}
 	if report.Reason != "" {
-		fmt.Fprintf(w, "  reason:    %s\n", report.Reason)
+		fmt.Fprintf(&text, "  reason:    %s\n", report.Reason)
 	}
 	if report.BlockedReason != "" {
-		fmt.Fprintf(w, "  blocked:   %s\n", report.BlockedReason)
+		fmt.Fprintf(&text, "  blocked:   %s\n", report.BlockedReason)
 	}
-	return nil
+	_, err := io.WriteString(w, text.String())
+	return err
 }
 
 func writeUpdateReceipt(w io.Writer, result updateReceipt, mode string) error {
@@ -560,18 +567,23 @@ func writeUpdateReceipt(w io.Writer, result updateReceipt, mode string) error {
 		_, err := fmt.Fprintln(w, updateIdentityLabel(result.After))
 		return err
 	}
-	fmt.Fprintf(w, "sparkwing %s %s\n  before:    %s\n  installed: %s\n", result.Target, result.Status, updateIdentityLabel(result.Before), updateIdentityLabel(result.After))
+	var text strings.Builder
+	fmt.Fprintf(&text, "sparkwing %s %s\n  before:    %s\n  installed: %s\n", result.Target, result.Status, updateIdentityLabel(result.Before), updateIdentityLabel(result.After))
 	if result.After.Path != "" {
-		fmt.Fprintf(w, "  path:      %s\n", result.After.Path)
+		fmt.Fprintf(&text, "  path:      %s\n", result.After.Path)
 	}
 	if result.Digest != "" {
-		fmt.Fprintf(w, "  sha256:    %s\n", result.Digest)
+		fmt.Fprintf(&text, "  sha256:    %s\n", result.Digest)
 	}
 	if result.Replacement != "" {
-		fmt.Fprintf(w, "  replace:   %s\n", result.Replacement)
+		fmt.Fprintf(&text, "  replace:   %s\n", result.Replacement)
 	}
 	if result.ResolvedRelease != "" && result.After.Version == "" {
-		fmt.Fprintf(w, "  release:   %s\n", result.ResolvedRelease)
+		fmt.Fprintf(&text, "  release:   %s\n", result.ResolvedRelease)
 	}
-	return nil
+	if result.ManagedUnits != "" {
+		fmt.Fprintf(&text, "  managed units: %s\n", result.ManagedUnits)
+	}
+	_, err := io.WriteString(w, text.String())
+	return err
 }

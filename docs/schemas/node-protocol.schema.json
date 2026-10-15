@@ -1,65 +1,504 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Sparkwing node protocol: requests and replies",
-  "description": "The stdio messages of docs/node-protocol.md. The host writes a request per line on the request pipe (descriptor 3 on Unix); the SDK writes replies and log records, a frame per line, on the frame pipe (descriptor 4 on Unix). stdout and stderr carry customer text only. The result of describe and plan is defined in describe.schema.json; run_node and run_step answer a runResult, eval an evalResult.",
   "$defs": {
-    "request": {
-      "type": "object",
+    "annotationRequest": {
+      "additionalProperties": true,
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Assigned by the host, unique within the process."
+        "column": {
+          "minimum": 1,
+          "type": "integer"
         },
-        "op": {
-          "enum": [
-            "describe",
-            "plan",
-            "run_node",
-            "run_step",
-            "cancel",
-            "eval"
-          ]
+        "end_line": {
+          "minimum": 1,
+          "type": "integer"
         },
-        "pipeline": {
+        "file": {
           "type": "string"
         },
-        "args": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "Flag name to string value."
+        "level": {
+          "enum": [
+            "notice",
+            "warning",
+            "error"
+          ],
+          "type": "string"
         },
-        "run": {
-          "$ref": "#/$defs/runContext"
+        "line": {
+          "minimum": 1,
+          "type": "integer"
         },
-        "node": {
+        "message": {
           "type": "string"
         },
         "step": {
           "type": "string"
-        },
-        "attempt": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "failure": {
-          "$ref": "#/$defs/failure"
-        },
-        "closure": {
-          "type": "string"
-        },
-        "input": {
-          "type": "object",
-          "description": "Kind-specific input; after_run takes {outcome, error?} with error a string."
         }
       },
       "required": [
-        "id",
-        "op"
+        "level",
+        "message"
       ],
-      "additionalProperties": false,
+      "type": "object"
+    },
+    "engineIdentity": {
+      "additionalProperties": true,
+      "properties": {
+        "version": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "type": "object"
+    },
+    "evalResult": {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/replyError"
+        },
+        "value": {}
+      },
+      "required": [
+        "value"
+      ],
+      "type": "object"
+    },
+    "failure": {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/replyError"
+        },
+        "job": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "job",
+        "stage",
+        "error"
+      ],
+      "type": "object"
+    },
+    "git": {
+      "additionalProperties": true,
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "default_branch": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "repo_url": {
+          "type": "string"
+        },
+        "sha": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha",
+        "branch"
+      ],
+      "type": "object"
+    },
+    "helloResult": {
+      "additionalProperties": true,
+      "properties": {
+        "features": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "protocol": {
+          "const": 2,
+          "type": "integer"
+        },
+        "sdk": {
+          "$ref": "#/$defs/sdk"
+        }
+      },
+      "required": [
+        "protocol",
+        "sdk",
+        "features"
+      ],
+      "type": "object"
+    },
+    "maskRequest": {
+      "additionalProperties": true,
+      "properties": {
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "type": "object"
+    },
+    "processBinding": {
+      "additionalProperties": true,
+      "properties": {
+        "job_id": {
+          "type": "string"
+        },
+        "routes": {
+          "$ref": "#/$defs/processRoutes"
+        },
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "job_id",
+        "routes"
+      ],
+      "type": "object"
+    },
+    "processRoutes": {
+      "additionalProperties": true,
+      "properties": {
+        "bearer": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "bearer"
+      ],
+      "type": "object"
+    },
+    "pullRequest": {
+      "additionalProperties": true,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "base_ref": {
+          "type": "string"
+        },
+        "base_sha": {
+          "type": "string"
+        },
+        "head_ref": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "number": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "number"
+      ],
+      "type": "object"
+    },
+    "reply": {
+      "additionalProperties": true,
+      "oneOf": [
+        {
+          "not": {
+            "required": [
+              "error"
+            ]
+          },
+          "properties": {
+            "ok": {
+              "const": true
+            }
+          },
+          "required": [
+            "result"
+          ]
+        },
+        {
+          "not": {
+            "required": [
+              "result"
+            ]
+          },
+          "properties": {
+            "ok": {
+              "const": false
+            }
+          },
+          "required": [
+            "error"
+          ]
+        }
+      ],
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/replyError"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "reply": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "result": {}
+      },
+      "required": [
+        "reply",
+        "ok"
+      ],
+      "type": "object"
+    },
+    "replyError": {
+      "additionalProperties": true,
+      "not": {
+        "required": [
+          "error"
+        ]
+      },
+      "properties": {
+        "code": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": {},
+          "type": "object"
+        },
+        "hint": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "request": {
+      "additionalProperties": true,
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "hello"
+              }
+            },
+            "required": [
+              "op"
+            ]
+          },
+          "then": {
+            "allOf": [
+              {
+                "not": {
+                  "required": [
+                    "pipeline"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "args"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "run"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "job"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "step"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "attempt"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "failure"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "closure"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "input"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "target"
+                  ]
+                }
+              }
+            ],
+            "required": [
+              "protocol",
+              "engine",
+              "runner"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "describe"
+              }
+            },
+            "required": [
+              "op"
+            ]
+          },
+          "then": {
+            "allOf": [
+              {
+                "not": {
+                  "required": [
+                    "protocol"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "engine"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "runner"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "binding"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "pipeline"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "args"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "run"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "job"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "step"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "attempt"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "failure"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "closure"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "input"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "target"
+                  ]
+                }
+              }
+            ]
+          }
+        },
         {
           "if": {
             "properties": {
@@ -72,28 +511,89 @@
             ]
           },
           "then": {
+            "allOf": [
+              {
+                "not": {
+                  "required": [
+                    "protocol"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "engine"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "runner"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "binding"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "job"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "step"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "attempt"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "failure"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "closure"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "input"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "target"
+                  ]
+                }
+              }
+            ],
             "required": [
               "pipeline",
               "args",
               "run"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "op": {
-                "const": "run_node"
-              }
-            },
-            "required": [
-              "op"
-            ]
-          },
-          "then": {
-            "required": [
-              "node",
-              "attempt"
             ]
           }
         },
@@ -109,28 +609,82 @@
             ]
           },
           "then": {
+            "allOf": [
+              {
+                "not": {
+                  "required": [
+                    "protocol"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "engine"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "runner"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "binding"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "pipeline"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "args"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "run"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "closure"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "input"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "target"
+                  ]
+                }
+              }
+            ],
             "required": [
-              "node",
+              "job",
               "step",
               "attempt"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "op": {
-                "const": "cancel"
-              }
-            },
-            "required": [
-              "op"
-            ]
-          },
-          "then": {
-            "required": [
-              "node",
-              "step"
             ]
           }
         },
@@ -146,277 +700,411 @@
             ]
           },
           "then": {
+            "allOf": [
+              {
+                "not": {
+                  "required": [
+                    "protocol"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "engine"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "runner"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "binding"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "pipeline"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "args"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "run"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "target"
+                  ]
+                }
+              }
+            ],
             "required": [
               "closure"
             ]
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "cancel"
+              }
+            },
+            "required": [
+              "op"
+            ]
+          },
+          "then": {
+            "allOf": [
+              {
+                "not": {
+                  "required": [
+                    "protocol"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "engine"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "runner"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "binding"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "pipeline"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "args"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "run"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "attempt"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "failure"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "closure"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "required": [
+                    "input"
+                  ]
+                }
+              },
+              {
+                "oneOf": [
+                  {
+                    "not": {
+                      "anyOf": [
+                        {
+                          "required": [
+                            "job"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "step"
+                          ]
+                        }
+                      ]
+                    },
+                    "required": [
+                      "target"
+                    ]
+                  },
+                  {
+                    "not": {
+                      "required": [
+                        "target"
+                      ]
+                    },
+                    "required": [
+                      "job"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
         }
-      ]
-    },
-    "runContext": {
-      "type": "object",
-      "description": "The run a plan is built for. Plan code reads it as its run context; the pipeline is the request's own pipeline field.",
+      ],
       "properties": {
-        "run_id": {
+        "args": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "attempt": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "binding": {
+          "$ref": "#/$defs/processBinding"
+        },
+        "closure": {
+          "minLength": 1,
           "type": "string"
         },
-        "started_at": {
-          "type": "string",
-          "description": "RFC 3339."
+        "engine": {
+          "$ref": "#/$defs/engineIdentity"
         },
-        "trigger": {
-          "$ref": "#/$defs/trigger"
+        "failure": {
+          "$ref": "#/$defs/failure"
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "input": {},
+        "job": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "hello",
+            "describe",
+            "plan",
+            "run_step",
+            "eval",
+            "cancel"
+          ],
+          "type": "string"
+        },
+        "pipeline": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "protocol": {
+          "const": 2,
+          "type": "integer"
+        },
+        "run": {
+          "$ref": "#/$defs/runContext"
+        },
+        "runner": {
+          "$ref": "#/$defs/runnerIdentity"
+        },
+        "settled": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "step": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "target": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "op"
+      ],
+      "type": "object"
+    },
+    "runContext": {
+      "additionalProperties": true,
+      "properties": {
+        "dry_run": {
+          "type": "boolean"
         },
         "git": {
           "$ref": "#/$defs/git"
         },
-        "dry_run": {
+        "no_memo": {
           "type": "boolean"
         },
-        "no_cache": {
-          "type": "boolean"
+        "pipeline": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "trigger": {
+          "$ref": "#/$defs/trigger"
         }
       },
       "required": [
-        "run_id"
+        "run_id",
+        "pipeline"
       ],
-      "additionalProperties": false
+      "type": "object"
+    },
+    "runResult": {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/replyError"
+        },
+        "outcome": {
+          "enum": [
+            "success",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "output": {}
+      },
+      "required": [
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "runnerIdentity": {
+      "additionalProperties": true,
+      "properties": {
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "labels"
+      ],
+      "type": "object"
+    },
+    "sdk": {
+      "additionalProperties": true,
+      "properties": {
+        "language": {
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "language",
+        "version"
+      ],
+      "type": "object"
+    },
+    "summaryRequest": {
+      "additionalProperties": true,
+      "properties": {
+        "markdown": {
+          "type": "string"
+        },
+        "step": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "markdown"
+      ],
+      "type": "object"
     },
     "trigger": {
-      "type": "object",
+      "additionalProperties": true,
       "properties": {
+        "pull_request": {
+          "$ref": "#/$defs/pullRequest"
+        },
         "source": {
-          "enum": [
-            "manual",
-            "push",
-            "schedule",
-            "webhook"
-          ]
+          "type": "string"
         },
         "user": {
           "type": "string"
-        },
-        "pull_request": {
-          "$ref": "#/$defs/pullRequest"
         }
       },
       "required": [
         "source"
       ],
-      "additionalProperties": false
-    },
-    "pullRequest": {
-      "type": "object",
-      "properties": {
-        "number": {
-          "type": "integer"
-        },
-        "action": {
-          "type": "string"
-        },
-        "base_ref": {
-          "type": "string"
-        },
-        "base_sha": {
-          "type": "string"
-        },
-        "head_ref": {
-          "type": "string"
-        },
-        "head_sha": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "number"
-      ],
-      "additionalProperties": false
-    },
-    "git": {
-      "type": "object",
-      "properties": {
-        "sha": {
-          "type": "string"
-        },
-        "branch": {
-          "type": "string"
-        },
-        "default_branch": {
-          "type": "string"
-        },
-        "repo": {
-          "type": "string",
-          "description": "owner/name."
-        },
-        "repo_url": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "sha",
-        "branch"
-      ],
-      "additionalProperties": false
-    },
-    "failure": {
-      "type": "object",
-      "description": "How the parent of an on_failure node failed.",
-      "properties": {
-        "node": {
-          "type": "string"
-        },
-        "stage": {
-          "enum": [
-            "action",
-            "verify"
-          ]
-        },
-        "message": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "node",
-        "stage",
-        "message"
-      ],
-      "additionalProperties": false
-    },
-    "reply": {
-      "type": "object",
-      "description": "A frame that is a JSON object with a reply key. A successful reply carries no error; a failed one carries no result.",
-      "properties": {
-        "reply": {
-          "type": "string",
-          "description": "The id of the request this answers."
-        },
-        "ok": {
-          "type": "boolean"
-        },
-        "result": {
-          "type": "object"
-        },
-        "error": {
-          "$ref": "#/$defs/replyError"
-        }
-      },
-      "required": [
-        "reply",
-        "ok"
-      ],
-      "additionalProperties": false,
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "ok": {
-                "const": true
-              }
-            },
-            "required": [
-              "ok"
-            ]
-          },
-          "then": {
-            "required": [
-              "result"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "ok": {
-                "const": false
-              }
-            },
-            "required": [
-              "ok"
-            ]
-          },
-          "then": {
-            "required": [
-              "error"
-            ]
-          }
-        }
-      ]
-    },
-    "replyError": {
-      "type": "object",
-      "description": "Why the SDK could not do what the request asked.",
-      "properties": {
-        "code": {
-          "type": "string",
-          "description": "Optional. unknown_op, unknown_pipeline, unknown_node, unknown_step, unknown_closure, no_plan, bad_request, invalid_args or plan_failed. The host treats a missing or unknown code as sdk_error."
-        },
-        "message": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "message"
-      ],
-      "additionalProperties": false
-    },
-    "runResult": {
-      "type": "object",
-      "description": "The result of run_node and run_step.",
-      "properties": {
-        "outcome": {
-          "enum": [
-            "success",
-            "failed"
-          ]
-        },
-        "error": {
-          "type": "string",
-          "description": "The message of an error the body returned or threw."
-        },
-        "output": {
-          "description": "The body's JSON output. On run_step only the result step carries it."
-        }
-      },
-      "required": [
-        "outcome"
-      ],
-      "additionalProperties": false
-    },
-    "evalResult": {
-      "type": "object",
-      "description": "The result of eval. value is a boolean for skip_if, a string or null for cache_key, null for before_run, verify and after_run, and an array of node documents for generator.",
-      "properties": {
-        "value": {},
-        "error": {
-          "type": "string",
-          "description": "The message of an error the closure returned or threw."
-        }
-      },
-      "additionalProperties": false
-    },
-    "routeError": {
-      "type": "object",
-      "description": "The body of every error response from a /node/v1/ route.",
-      "properties": {
-        "error": {
-          "type": "string"
-        },
-        "code": {
-          "type": "string"
-        },
-        "supported": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "On 426 only: the version the host speaks."
-        }
-      },
-      "required": [
-        "error",
-        "code"
-      ],
-      "additionalProperties": false
+      "type": "object"
     }
-  }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Generated from internal/nodeproto. Select a $defs entry for each message. Hello negotiates once; other messages carry no version. Stateful ordering, correlation and duplicate-key checks belong to the protocol reader.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/reply"
+    }
+  ],
+  "title": "Sparkwing node protocol v2: requests and replies"
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,94 +11,62 @@ import (
 	"strconv"
 	"time"
 
-	flag "github.com/spf13/pflag"
-
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 const queuePriorityTimeout = 10 * time.Second
 
-// queuePriorityInvisible is the caveat every not-found answer carries: local
-// admission only knows runs a consumer has already claimed and started.
-const queuePriorityInvisible = "a submitted run the consumer has not claimed yet is not queued here"
+type queuePriorityResult = controllerwire.QueuePriorityResult
 
-type queuePriorityResult struct {
-	RunID string `json:"run_id"`
-	wingwire.SetPriorityAck
-	PreviousPosition int `json:"previous_position,omitempty"`
-}
-
-var queuePriorityClientOptions = func(home string) wingdclient.Options {
-	opts := wingdclient.Options{Home: home, Version: Version}
-	opts.Spawn = func(string, string) error { return wingdclient.ErrNoDaemon }
-	opts.NoTakeover = true
-	return opts
-}
-
-func runQueuePriority(args []string) error {
-	fs := flag.NewFlagSet(cmdQueuePriority.Path, flag.ContinueOnError)
-	run := fs.String("run", "", "run id to re-rank")
-	set := fs.String("set", "", "new priority: an integer, front, or back")
-	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	if err := parseAndCheck(cmdQueuePriority, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func queuePriorityInput(inv clisurface.Invocation) (controllerwire.QueuePriorityWrite, error) {
+	var input controllerwire.QueuePriorityWrite
+	if inv.Command.Path != "sparkwing queue priority" {
+		return input, nil
 	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("queue priority: unexpected positional %q (queue priority takes flags only)", fs.Arg(0))
-	}
-	format, err := resolveTTYAwareOutput(*outFmt, cmdQueuePriority.Path)
+	priority, mode, err := parseQueuePriority(inv.Value("set"))
 	if err != nil {
-		return err
+		return input, &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
 	}
-	if *run == "" {
-		return fmt.Errorf("queue priority: --run is required")
+	input = controllerwire.QueuePriorityWrite{RunID: inv.Value("run"), Mode: mode}
+	if mode == "" {
+		input.Priority = &priority
 	}
-	priority, mode, err := parseQueuePriority(*set)
-	if err != nil {
-		return err
+	if err := input.Validate(); err != nil {
+		return input, &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), queuePriorityTimeout)
-	defer cancel()
-
-	res, err := applyQueuePriority(ctx, "", *run, priority, mode)
-	if err != nil {
-		if errors.Is(err, wingdclient.ErrNoDaemon) {
-			// No daemon means nothing is queued, so the run is as absent as it
-			// gets rather than a machine this command failed to reach.
-			return renderQueuePriorityMissing(os.Stdout, format, *run, "no admission daemon is running")
-		}
-		if errors.Is(err, wingdclient.ErrDaemonUnreachable) {
-			return exitError(4, fmt.Errorf("queue priority: %w", err))
-		}
-		return fmt.Errorf("queue priority: %w", err)
+	if inv.Value("group") == "" && inv.Value("profile") != "" {
+		return input, &apierr.Error{Code: apierr.PolicyMissing, Message: "remote run priority has no authorized controller route", Hint: "select a concurrency group with --group"}
 	}
-	if !res.Found {
-		return renderQueuePriorityMissing(os.Stdout, format, *run, res.Reason)
+	if inv.Value("group") != "" {
+		input.IdempotencyKey = rand.Text()
 	}
-	return renderQueuePriority(os.Stdout, res, format)
+	return input, nil
 }
 
 func parseQueuePriority(set string) (priority int, mode string, err error) {
 	switch set {
 	case "":
-		return 0, "", fmt.Errorf("queue priority: --set is required (an integer, front, or back)")
+		return 0, "", fmt.Errorf("--set is required (an integer, front, or back)")
 	case "front", "back":
 		return 0, set, nil
 	}
 	n, perr := strconv.Atoi(set)
 	if perr != nil {
-		return 0, "", fmt.Errorf("queue priority: --set %q is not an integer, front, or back", set)
+		return 0, "", fmt.Errorf("--set %q is not an integer, front, or back", set)
 	}
 	return n, "", nil
 }
 
 func applyQueuePriority(ctx context.Context, home, runID string, priority int, mode string) (queuePriorityResult, error) {
-	cl, err := wingdclient.EnsureDaemon(ctx, queuePriorityClientOptions(home))
+	opts := wingdclient.Options{Home: home, Version: installedVersion(), NoTakeover: true}
+	opts.Spawn = func(string, string) error { return wingdclient.ErrNoDaemon }
+	cl, err := wingdclient.EnsureDaemon(ctx, opts)
+	if errors.Is(err, wingdclient.ErrNoDaemon) {
+		return queuePriorityResult{RunID: runID}, nil
+	}
 	if err != nil {
 		return queuePriorityResult{}, err
 	}
@@ -108,14 +77,14 @@ func applyQueuePriority(ctx context.Context, home, runID string, priority int, m
 	}()
 
 	res := queuePriorityResult{RunID: runID}
-	// The ack carries the rank's landing place; the position it left comes from
-	// the queue as it stands before the change.
-	if qs, qerr := cl.QueueState(ctx); qerr == nil {
-		for _, w := range qs.Waiters {
-			if w.RunID == runID {
-				res.PreviousPosition = w.Position
-				break
-			}
+	qs, err := cl.QueueState(ctx)
+	if err != nil {
+		return queuePriorityResult{}, err
+	}
+	for _, w := range qs.Waiters {
+		if w.RunID == runID {
+			res.PreviousPosition = w.Position
+			break
 		}
 	}
 	ack, err := cl.SetPriority(ctx, runID, priority, mode)
@@ -126,22 +95,30 @@ func applyQueuePriority(ctx context.Context, home, runID string, priority int, m
 	return res, nil
 }
 
-func renderQueuePriorityMissing(out io.Writer, format, runID, reason string) error {
+func renderQueuePriorityMissing(out io.Writer, format string, res queuePriorityResult) error {
+	runID, reason := res.RunID, res.Reason
 	if reason == "" {
 		reason = "not in local admission"
+		if res.Group != "" {
+			reason = "not in concurrency group " + res.Group
+		}
 	}
-	res := queuePriorityResult{RunID: runID, SetPriorityAck: wingwire.SetPriorityAck{Reason: reason}}
+	res.Reason = reason
 	switch format {
 	case "json":
 		if err := queuePriorityJSON(out, res); err != nil {
 			return err
 		}
 	case "plain":
-		fmt.Fprintf(out, "priority\t%s\tnot_found\t%s\n", runID, reason)
+		if _, err := fmt.Fprintf(out, "priority\t%s\tnot_found\t%s\n", runID, reason); err != nil {
+			return err
+		}
 	default:
-		fmt.Fprintf(out, "run %s: %s\n", runID, reason)
+		if _, err := fmt.Fprintf(out, "run %s: %s\n", runID, reason); err != nil {
+			return err
+		}
 	}
-	return exitError(1, fmt.Errorf("run %s: %s; %s", runID, reason, queuePriorityInvisible))
+	return exitError(1, fmt.Errorf("run %s: %s", runID, reason))
 }
 
 func renderQueuePriority(out io.Writer, res queuePriorityResult, format string) error {
@@ -149,18 +126,21 @@ func renderQueuePriority(out io.Writer, res queuePriorityResult, format string) 
 	case "json":
 		return queuePriorityJSON(out, res)
 	case "plain":
-		fmt.Fprintf(out, "priority\t%s\t%d\t%d\t%d\t%d\t%d\t%t\n",
+		_, err := fmt.Fprintf(out, "priority\t%s\t%d\t%d\t%d\t%d\t%d\t%t\n",
 			res.RunID, res.Previous, res.Priority, res.PreviousPosition, res.Position, res.Participants, res.Holding)
-		return nil
+		return err
 	default:
 		line := fmt.Sprintf("run %s: priority %d -> %d", res.RunID, res.Previous, res.Priority)
 		if res.PreviousPosition > 0 || res.Position > 0 {
 			line += fmt.Sprintf(", position %s -> %s",
 				queuePositionWord(res.PreviousPosition), queuePositionWord(res.Position))
 		}
-		fmt.Fprintln(out, line)
+		if _, err := fmt.Fprintln(out, line); err != nil {
+			return err
+		}
 		if res.Holding {
-			fmt.Fprintf(out, "run %s already holds a lease, which keeps its place; its waiting participants moved, and the node admissions it has yet to make land at %d\n", res.RunID, res.Priority)
+			_, err := fmt.Fprintf(out, "run %s already holds a lease, which keeps its place; its waiting participants moved, and the job admissions it has yet to make land at %d\n", res.RunID, res.Priority)
+			return err
 		}
 		return nil
 	}

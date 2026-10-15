@@ -26,8 +26,8 @@ func TestParseRunFlags_Index(t *testing.T) {
 			if wf.index != tc.want {
 				t.Errorf("index = %q, want %q", wf.index, tc.want)
 			}
-			if tc.want == "" && !slices.Contains(pass, "--sw-index") {
-				t.Errorf("incomplete --sw-index should pass through; got passthrough=%v", pass)
+			if tc.want == "" && (wf.parseErr == nil || len(pass) != 0) {
+				t.Errorf("incomplete --sw-index must be a usage error; got passthrough=%v", pass)
 			}
 		})
 	}

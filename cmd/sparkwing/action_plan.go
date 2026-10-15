@@ -12,23 +12,25 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
 type planPreviewDoc struct {
-	Pipeline     string               `json:"pipeline"`
-	ResolvedArgs map[string]string    `json:"resolved_args,omitempty"`
-	StartAt      string               `json:"start_at,omitempty"`
-	StopAt       string               `json:"stop_at,omitempty"`
-	Nodes        []planPreviewNodeDoc `json:"nodes"`
+	Pipeline     string              `json:"pipeline"`
+	ResolvedArgs map[string]string   `json:"resolved_args,omitempty"`
+	StartAt      string              `json:"start_at,omitempty"`
+	StopAt       string              `json:"stop_at,omitempty"`
+	Jobs         []planPreviewJobDoc `json:"jobs"`
 }
 
-type planPreviewNodeDoc struct {
+type planPreviewJobDoc struct {
 	ID          string              `json:"id"`
 	Deps        []string            `json:"deps,omitempty"`
 	IsApproval  bool                `json:"is_approval,omitempty"`
@@ -61,65 +63,14 @@ type pipelinePlanArgs struct {
 }
 
 func parsePipelinePlanArgs(args []string) (pipelinePlanArgs, bool, error) {
-	var parsed pipelinePlanArgs
-	for i := 0; i < len(args); i++ {
-		tok := args[i]
-		switch {
-		case tok == "-h", tok == "--help":
-			return parsed, true, nil
-		case tok == "--":
-			parsed.passthrough = append(parsed.passthrough, args[i+1:]...)
-			return parsed, false, nil
-		case tok == "-o", tok == "--output":
-			if i+1 >= len(args) {
-				return parsed, false, errors.New("plan: --output expects a value")
-			}
-			parsed.output = args[i+1]
-			i++
-		case strings.HasPrefix(tok, "--output="):
-			parsed.output = strings.TrimPrefix(tok, "--output=")
-		case strings.HasPrefix(tok, "-o="):
-			parsed.output = strings.TrimPrefix(tok, "-o=")
-		case tok == "--name":
-			if i+1 >= len(args) {
-				return parsed, false, errors.New("plan: --name expects a value")
-			}
-			parsed.pipeline = args[i+1]
-			i++
-		case strings.HasPrefix(tok, "--name="):
-			parsed.pipeline = strings.TrimPrefix(tok, "--name=")
-		case tok == "--sw-start-at":
-			if i+1 >= len(args) {
-				return parsed, false, errors.New("plan: --start-at expects a value")
-			}
-			parsed.startAt = args[i+1]
-			i++
-		case strings.HasPrefix(tok, "--sw-start-at="):
-			parsed.startAt = strings.TrimPrefix(tok, "--sw-start-at=")
-		case tok == "--sw-stop-at":
-			if i+1 >= len(args) {
-				return parsed, false, errors.New("plan: --stop-at expects a value")
-			}
-			parsed.stopAt = args[i+1]
-			i++
-		case strings.HasPrefix(tok, "--sw-stop-at="):
-			parsed.stopAt = strings.TrimPrefix(tok, "--sw-stop-at=")
-		default:
-			parsed.passthrough = append(parsed.passthrough, tok)
-		}
+	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "plan"}, args...))
+	if err != nil {
+		return pipelinePlanArgs{}, false, err
 	}
-	return parsed, false, nil
+	return pipelinePlanArgs{output: inv.Output(color.IsInteractiveStdout()), pipeline: inv.Value("pipeline"), startAt: inv.Value("start-at"), stopAt: inv.Value("stop-at"), passthrough: inv.Args}, inv.Help(), nil
 }
 
 func runPipelinePlan(args []string) error {
-	if static, rest := takeStaticFlag(args); static {
-		for _, tok := range rest {
-			if strings.HasPrefix(tok, "--sw-start-at") || strings.HasPrefix(tok, "--sw-stop-at") || strings.HasPrefix(tok, "--start-at") || strings.HasPrefix(tok, "--stop-at") {
-				return errors.New("plan --static: --start-at and --stop-at need the runtime plan; drop --static")
-			}
-		}
-		return runPipelineExplain(rest)
-	}
 	parsed, helpRequested, err := parsePipelinePlanArgs(args)
 	if err != nil {
 		return err
@@ -130,7 +81,7 @@ func runPipelinePlan(args []string) error {
 	}
 	if parsed.pipeline == "" {
 		PrintHelp(cmdPipelinePlan, os.Stderr)
-		return errors.New("plan: --name is required")
+		return errors.New("plan: --pipeline is required")
 	}
 	format, err := resolveOutputFormat(parsed.output, cmdPipelinePlan.Path)
 	if err != nil {
@@ -196,28 +147,37 @@ type planned struct {
 // protocol cannot seal, so plan reports it as decided at run time instead.
 func planOverProtocol(ctx context.Context, entry pipelineentry.Command, dir, pipeline string, args []string, runID string) (planned, error) {
 	out := planned{pipeline: pipeline}
-	err := repos.Converse(ctx, entry, dir, func(s *repos.Session) error {
+	identity, err := pipelineIdentityAt(filepath.Join(dir, ".sparkwing"), pipeline)
+	if err != nil {
+		return out, err
+	}
+	masker := secrets.NewMasker()
+	err = repos.Converse(ctx, entry, dir, func(s *repos.Session) error {
 		described, err := s.Describe()
 		if err != nil {
 			return err
 		}
-		schema, err := findPipelineSchema(described.Pipelines, pipeline)
+		schema, err := boundPipelineSchema(described.Pipelines, identity)
 		if err != nil {
 			return err
 		}
-		if out.args, err = parsePipelineArgs(schema, args); err != nil {
+		resolvedArgs, err := parsePipelineArgs(schema, args)
+		if err != nil {
 			return &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
 		}
-		masker := secrets.NewMasker()
+		out.args = maps.Clone(resolvedArgs)
 		for _, arg := range schema.Args {
 			if arg.Secret {
 				if arg.Default != nil {
 					masker.Register(*arg.Default)
 				}
-				masker.Register(out.args[arg.Name])
+				masker.Register(resolvedArgs[arg.Name])
+				if _, present := out.args[arg.Name]; present {
+					out.args[arg.Name] = "***"
+				}
 			}
 		}
-		req := nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: pipeline, Args: out.args, Run: &nodeproto.RunContext{RunID: runID, Pipeline: pipeline}}
+		req := nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: identity.Entrypoint, Args: resolvedArgs, Run: &nodeproto.RunContext{RunID: runID, Pipeline: pipeline}}
 		var raw json.RawMessage
 		if err := s.Call(req, &raw); err != nil {
 			return err
@@ -225,7 +185,10 @@ func planOverProtocol(ctx context.Context, entry pipelineentry.Command, dir, pip
 		out.doc, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: masker})
 		return err
 	})
-	return out, planError(pipeline, err)
+	if err != nil {
+		err = &maskedCLIError{err: planError(pipeline, err), masker: masker}
+	}
+	return out, err
 }
 
 type planFailure struct {
@@ -262,7 +225,7 @@ func previewPlan(p planned, startAt, stopAt string) (planPreviewDoc, error) {
 		return doc, err
 	}
 	for _, n := range p.doc.Jobs {
-		pn := planPreviewNodeDoc{ID: n.ID, Deps: n.Needs, IsApproval: n.Approval != nil, OnFailureOf: n.OnFailureOf, Decision: "would_run"}
+		pn := planPreviewJobDoc{ID: n.ID, Deps: n.Needs, IsApproval: n.Approval != nil, OnFailureOf: n.OnFailureOf, Decision: "would_run"}
 		if len(n.Steps) > 0 && n.Approval == nil {
 			pn.Work = &planPreviewWorkDoc{}
 			ranged := rangeSkips(n.Steps, startAt, stopAt)
@@ -283,7 +246,7 @@ func previewPlan(p planned, startAt, stopAt string) (planPreviewDoc, error) {
 				pn.Decision, pn.SkipReason = "would_skip", "all_steps_skipped"
 			}
 		}
-		doc.Nodes = append(doc.Nodes, pn)
+		doc.Jobs = append(doc.Jobs, pn)
 	}
 	return doc, nil
 }
@@ -372,17 +335,17 @@ func printPlanPreview(doc *planPreviewDoc) {
 			fmt.Printf("  %s=%s\n", k, doc.ResolvedArgs[k])
 		}
 	}
-	if len(doc.Nodes) == 0 {
-		fmt.Println("(no nodes)")
+	if len(doc.Jobs) == 0 {
+		fmt.Println("(no jobs)")
 		return
 	}
-	for _, n := range doc.Nodes {
-		printPlanPreviewNode(&n, "  ")
+	for _, n := range doc.Jobs {
+		printPlanPreviewJob(&n, "  ")
 	}
 }
 
-func printPlanPreviewNode(n *planPreviewNodeDoc, indent string) {
-	tag := "Node"
+func printPlanPreviewJob(n *planPreviewJobDoc, indent string) {
+	tag := "Job"
 	if n.IsApproval {
 		tag = "Approval"
 	}
@@ -430,21 +393,4 @@ func orDashStr(s string) string {
 		return "-"
 	}
 	return s
-}
-
-func takeStaticFlag(args []string) (bool, []string) {
-	rest := make([]string, 0, len(args))
-	static := false
-	for i, tok := range args {
-		if tok == "--" {
-			rest = append(rest, args[i:]...)
-			break
-		}
-		if tok == "--static" || tok == "--static=true" {
-			static = true
-			continue
-		}
-		rest = append(rest, tok)
-	}
-	return static, rest
 }

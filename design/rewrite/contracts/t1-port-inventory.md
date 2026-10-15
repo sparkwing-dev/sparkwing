@@ -135,6 +135,18 @@ Branch labels below retain the descriptive suffix of each source branch. Tracker
 
 The primary inventory has 74 changed or added functions: 6 lifecycle, 6 state-machine, 4 placement, 1 credential matrix, 23 run-input, 24 storage, and 10 state/security. Placement also contributes 10 existing functions. Six removed predecessors bring the total to 90 unique revision/file/function identities. Subcases do not increase that count. Source objects were inspected statically; this is not evidence that old or target product tests pass.
 
+Capability management ports the legacy TestRotateToken, its concurrent-revocation
+regression and both revocation tests to pkg/store/capability_inventory_test.go.
+The ports retain grace validity, explicit-revocation precedence, terminal
+revocation refusal and distinct replacements. Generated deadlines now exercise
+nanosecond boundaries and descendants. Independent SQLite connections race
+rotation and revocation. A failed origin check or write returns no bearer.
+The old four functions are deleted. The added
+credentials-delegation-subset/store-sqlite cell proves persistence through two
+reopenings. TestCapabilityManagementHTTPUsesStoreTransactions exercises the
+production manager through the actual controller policy, session proof and CSRF.
+These components do not complete native placement or PostgreSQL cells.
+
 ## Source snapshots
 
 `pkg/store/download_accounting_runtime_test.go` ports

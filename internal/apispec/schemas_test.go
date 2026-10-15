@@ -1,278 +1,119 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
+	"encoding/json"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	wire "github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
-const fakeTypes = `package fake
-
-type Sample struct {
-	Name    string ` + "`json:\"name\"`" + `
-	TTLSecs int64  ` + "`json:\"ttl_secs,omitempty\"`" + `
-	Hidden  string ` + "`json:\"-\"`" + `
-}
-
-type Server struct{}
-
-func (s *Server) handleThing() {
-	var body struct {
-		Message string ` + "`json:\"message\"`" + `
-	}
-	_ = body
-}
-`
-
-func fakeRoot(t *testing.T) string {
+func schemaDefinition(t *testing.T, b *schemaBuilder, value schema) schema {
 	t.Helper()
-	root := t.TempDir()
-	dir := filepath.Join(root, "fake")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
+	if ref, ok := value["$ref"].(string); ok {
+		return b.definitions[strings.TrimPrefix(ref, "#/components/schemas/")].(schema)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "types.go"), []byte(fakeTypes), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	return root
+	return value
 }
 
-func specWithSchema(body string) string {
-	return "openapi: 3.0.3\ncomponents:\n  schemas:\n    Sample:\n" + body
-}
-
-const matchingSample = `      x-sparkwing-go-type: fake.Sample
-      type: object
-      properties:
-        name: {type: string}
-        ttl_secs: {type: integer, format: int64}
-`
-
-func TestSchemaCheckAcceptsASchemaThatMatchesItsGoType(t *testing.T) {
-	if err := checkSchemaDrift(specWithSchema(matchingSample), fakeRoot(t)); err != nil {
-		t.Fatalf("checkSchemaDrift: %v", err)
-	}
-}
-
-func TestSchemaCheckRejectsDrift(t *testing.T) {
-	cases := []struct {
-		name string
-		body string
-		want string
-	}{
-		{
-			name: "member the Go type does not serialize",
-			body: `      x-sparkwing-go-type: fake.Sample
-      type: object
-      properties:
-        name: {type: string}
-        ttl_secs: {type: integer}
-        plan_admission: {type: object}
-`,
-			want: `documents "plan_admission", which fake.Sample does not serialize`,
-		},
-		{
-			name: "member the schema drops",
-			body: `      x-sparkwing-go-type: fake.Sample
-      type: object
-      properties:
-        name: {type: string}
-`,
-			want: `omits "ttl_secs", which fake.Sample serializes`,
-		},
-		{
-			name: "member documented as the wrong type",
-			body: `      x-sparkwing-go-type: fake.Sample
-      type: object
-      properties:
-        name: {type: string}
-        ttl_secs: {type: string, format: date-time}
-`,
-			want: `documents "ttl_secs" as string`,
-		},
-		{
-			name: "object naming no Go type",
-			body: `      type: object
-      properties:
-        name: {type: string}
-`,
-			want: "no x-sparkwing-go-type",
-		},
-		{
-			name: "object naming a type that does not exist",
-			body: `      x-sparkwing-go-type: fake.Missing
-      type: object
-      properties:
-        name: {type: string}
-`,
-			want: "fake declares no struct type Missing",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := checkSchemaDrift(specWithSchema(tc.body), fakeRoot(t))
-			if err == nil {
-				t.Fatalf("checkSchemaDrift accepted %s", tc.name)
+func TestSchemasDescribeSharedJSONInsteadOfStoreRows(t *testing.T) {
+	for _, example := range []any{
+		wire.AnnotationWrite{Annotation: wire.Annotation{Level: "error", Message: "failed"}, StepID: "test"},
+		wire.QueuePriorityResult{RunID: "run"},
+		wire.RunDetail{},
+		wire.ScheduleJob{},
+		wire.DataUploadRequest{},
+		wire.TokenCreate{},
+	} {
+		b := schemaBuilder{definitions: schema{}}
+		definition := schemaDefinition(t, &b, b.value(reflect.TypeOf(example)))
+		if b.err != nil {
+			t.Fatal(b.err)
+		}
+		body, err := json.Marshal(example)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var serialized map[string]any
+		if err := json.Unmarshal(body, &serialized); err != nil {
+			t.Fatal(err)
+		}
+		properties := definition["properties"].(schema)
+		for key := range serialized {
+			if properties[key] == nil {
+				t.Errorf("%T schema omits serialized %s", example, key)
 			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("checkSchemaDrift = %v, want it to mention %q", err, tc.want)
+		}
+		if required, ok := definition["required"].([]string); ok {
+			for _, key := range required {
+				if _, ok := serialized[key]; !ok {
+					t.Errorf("%T requires omitted JSON field %s", example, key)
+				}
 			}
-		})
+		}
+		for _, hidden := range []string{"idempotency_key", "env_json", "capability"} {
+			if properties[hidden] != nil {
+				t.Errorf("%T publishes hidden field %s", example, hidden)
+			}
+		}
 	}
 }
 
-func TestSchemaCheckSkipsAShapeDeclaredHandBuilt(t *testing.T) {
-	body := `      x-sparkwing-go-type: none
-      type: object
-      properties:
-        anything: {type: string}
-`
-	if err := checkSchemaDrift(specWithSchema(body), fakeRoot(t)); err != nil {
-		t.Fatalf("checkSchemaDrift: %v", err)
+type shapeExample struct {
+	Raw    json.RawMessage `json:"raw"`
+	Bytes  []byte          `json:"bytes"`
+	When   time.Time       `json:"when"`
+	Zero   *int            `json:"zero,omitempty"`
+	Count  int             `json:"count,string"`
+	Rows   []string        `json:"rows"`
+	Labels map[string]int  `json:"labels"`
+	Hidden string          `json:"-"`
+}
+
+func TestSchemaPreservesOmissionNullAndEncodedShapes(t *testing.T) {
+	b := schemaBuilder{definitions: schema{}}
+	definition := schemaDefinition(t, &b, b.value(reflect.TypeFor[shapeExample]()))
+	properties := definition["properties"].(schema)
+	if len(properties) != 7 {
+		t.Fatalf("properties: %v", properties)
+	}
+	if len(properties["raw"].(schema)) != 0 {
+		t.Fatal("raw JSON was constrained to a byte string")
+	}
+	if properties["when"].(schema)["format"] != "date-time" || properties["count"].(schema)["type"] != "string" {
+		t.Fatal("custom JSON serialization shape lost")
+	}
+	for _, name := range []string{"bytes", "zero", "rows", "labels"} {
+		branches := properties[name].(schema)["anyOf"].([]any)
+		if branches[1].(schema)["type"] != "null" {
+			t.Fatalf("%s lost null", name)
+		}
+	}
+	bytes := properties["bytes"].(schema)["anyOf"].([]any)[0].(schema)
+	if bytes["type"] != "string" || bytes["contentEncoding"] != "base64" {
+		t.Fatal("byte slices are base64 JSON strings")
+	}
+	required := definition["required"].([]string)
+	if slices.Contains(required, "zero") || len(required) != 6 {
+		t.Fatalf("required: %v", required)
 	}
 }
 
-func TestSchemaCheckReachesNestedObjectsAndArrayItems(t *testing.T) {
-	body := `      x-sparkwing-go-type: fake.Sample
-      type: object
-      properties:
-        name: {type: string}
-        ttl_secs: {type: integer}
-        nested:
-          type: object
-          properties:
-            whatever: {type: string}
-`
-	err := checkSchemaDrift(specWithSchema(body), fakeRoot(t))
-	if err == nil {
-		t.Fatal("checkSchemaDrift accepted an undeclared nested object")
+func TestSchemasRefuseUnsupportedJSONBeforePublishing(t *testing.T) {
+	for _, kind := range []reflect.Type{reflect.TypeFor[chan int](), reflect.TypeFor[map[bool]string]()} {
+		b := schemaBuilder{definitions: schema{}}
+		b.value(kind)
+		if b.err == nil {
+			t.Fatalf("unsupported shape %s succeeded", kind)
+		}
 	}
-	if !strings.Contains(err.Error(), "components.schemas.Sample.properties.nested: object has properties but no x-sparkwing-go-type") {
-		t.Fatalf("checkSchemaDrift = %v, want it to name the nested object", err)
-	}
-
-	body = `      x-sparkwing-go-type: fake.Sample
-      type: object
-      properties:
-        name: {type: string}
-        ttl_secs: {type: integer}
-        rows:
-          type: array
-          items:
-            type: object
-            properties:
-              whatever: {type: string}
-`
-	err = checkSchemaDrift(specWithSchema(body), fakeRoot(t))
-	if err == nil {
-		t.Fatal("checkSchemaDrift accepted an undeclared array item object")
-	}
-	if !strings.Contains(err.Error(), "components.schemas.Sample.properties.rows.items: object has properties but no x-sparkwing-go-type") {
-		t.Fatalf("checkSchemaDrift = %v, want it to name the array item object", err)
-	}
-}
-
-func TestSchemaCheckReachesAnInlineRequestBody(t *testing.T) {
-	spec := `openapi: 3.0.3
-paths:
-  /api/v1/things:
-    post:
-      requestBody:
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: fake.Sample
-              type: object
-              properties:
-                name: {type: string}
-                ttl_secs: {type: integer}
-                invented: {type: string}
-`
-	err := checkSchemaDrift(spec, fakeRoot(t))
-	if err == nil {
-		t.Fatal("checkSchemaDrift accepted a drifted inline request body")
-	}
-	if !strings.Contains(err.Error(), `documents "invented", which fake.Sample does not serialize`) {
-		t.Fatalf("checkSchemaDrift = %v, want the inline body's drift", err)
-	}
-}
-
-func TestSchemaCheckReachesAnAllOfBranch(t *testing.T) {
-	body := `      type: object
-      allOf:
-        - x-sparkwing-go-type: fake.Sample
-          type: object
-          properties:
-            name: {type: string}
-            ttl_secs: {type: integer}
-            invented: {type: string}
-`
-	err := checkSchemaDrift(specWithSchema(body), fakeRoot(t))
-	if err == nil {
-		t.Fatal("checkSchemaDrift accepted a drifted allOf branch")
-	}
-	if !strings.Contains(err.Error(), `components.schemas.Sample.allOf[0]: documents "invented"`) {
-		t.Fatalf("checkSchemaDrift = %v, want the allOf branch's drift", err)
-	}
-}
-
-func TestSchemaCheckAddressesABodyDeclaredInsideItsHandler(t *testing.T) {
-	body := `      x-sparkwing-go-type: fake.Server.handleThing.body
-      type: object
-      properties:
-        message: {type: string}
-`
-	if err := checkSchemaDrift(specWithSchema(body), fakeRoot(t)); err != nil {
-		t.Fatalf("checkSchemaDrift: %v", err)
-	}
-
-	drifted := `      x-sparkwing-go-type: fake.Server.handleThing.body
-      type: object
-      properties:
-        annotation: {type: string}
-`
-	err := checkSchemaDrift(specWithSchema(drifted), fakeRoot(t))
-	if err == nil {
-		t.Fatal("checkSchemaDrift accepted a body naming a member the handler does not read")
-	}
-	if !strings.Contains(err.Error(), `documents "annotation", which fake.Server.handleThing.body does not serialize`) {
-		t.Fatalf("checkSchemaDrift = %v, want the handler body's drift", err)
-	}
-}
-
-func TestSchemaCheckPartialAllowsAnUndocumentedMemberButNotAnInventedOne(t *testing.T) {
-	partial := `      x-sparkwing-go-partial: fake.Sample
-      type: object
-      properties:
-        name: {type: string}
-`
-	if err := checkSchemaDrift(specWithSchema(partial), fakeRoot(t)); err != nil {
-		t.Fatalf("checkSchemaDrift rejected a declared-partial shape: %v", err)
-	}
-
-	invented := `      x-sparkwing-go-partial: fake.Sample
-      type: object
-      properties:
-        name: {type: string}
-        invented: {type: string}
-`
-	err := checkSchemaDrift(specWithSchema(invented), fakeRoot(t))
-	if err == nil {
-		t.Fatal("checkSchemaDrift accepted an invented member on a declared-partial shape")
-	}
-	if !strings.Contains(err.Error(), `documents "invented", which fake.Sample does not serialize`) {
-		t.Fatalf("checkSchemaDrift = %v, want the invented member reported", err)
-	}
-}
-
-func TestCommittedSpecMatchesTheGoTypesItNames(t *testing.T) {
-	root := repoRoot(t)
-	body, err := os.ReadFile(filepath.Join(root, "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatalf("read api/openapi.yaml: %v", err)
-	}
-	if err := checkSchemaDrift(string(body), root); err != nil {
-		t.Errorf("api/openapi.yaml has drifted from the controller's wire types:\n%v", err)
+	b := schemaBuilder{definitions: schema{}}
+	first := schemaDefinition(t, &b, b.value(reflect.TypeFor[struct{ A string }]()))
+	second := schemaDefinition(t, &b, b.value(reflect.TypeFor[struct{ B int }]()))
+	if first["properties"].(schema)["A"] == nil || second["properties"].(schema)["B"] == nil {
+		t.Fatal("anonymous shapes borrowed one another's fields")
 	}
 }

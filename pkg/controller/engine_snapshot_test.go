@@ -3,11 +3,9 @@ package controller
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"testing"
 	"testing/quick"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -33,8 +31,8 @@ func TestEngineSnapshotRetainsEmptyExpansionAndPersistedState(t *testing.T) {
 	}
 }
 
-func TestEngineSnapshotRefusesCorruptionAndUnrepresentableGuard(t *testing.T) {
-	for _, problem := range []string{"declaration", "guard", "foreign_team", "revoked", "owner_replaced", "lease_expired"} {
+func TestEngineSnapshotRefusesCorruptionAndStaleAuthority(t *testing.T) {
+	for _, problem := range []string{"declaration", "foreign_team", "revoked", "owner_replaced", "lease_expired"} {
 		t.Run(problem, func(t *testing.T) {
 			server, _ := engineRuntimeStore(t)
 			owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
@@ -42,12 +40,6 @@ func TestEngineSnapshotRefusesCorruptionAndUnrepresentableGuard(t *testing.T) {
 			switch problem {
 			case "declaration":
 				engineSQL(t, server.Store, `UPDATE runs SET plan_json=?`, []byte(`{"jobs":[{"id":"missing"}]}`))
-			case "guard":
-				spec, err := json.Marshal(runspec.Spec{Resolved: runspec.Resolved{Guards: runspec.Guards{Reason: "guard refused"}}})
-				if err != nil {
-					t.Fatal(err)
-				}
-				engineSQL(t, server.Store, `UPDATE runs SET spec_json=?`, spec)
 			case "foreign_team":
 				owner.Target.Team = "b"
 			case "revoked":
@@ -60,17 +52,6 @@ func TestEngineSnapshotRefusesCorruptionAndUnrepresentableGuard(t *testing.T) {
 			got, err := server.Snapshot(t.Context(), owner)
 			if err == nil || got.RunID != "" || len(got.Jobs) != 0 {
 				t.Fatalf("invalid snapshot returned data: %+v, %v", got, err)
-			}
-			if problem == "guard" {
-				var failure *apierr.Error
-				if !errors.As(err, &failure) || failure.Code != apierr.Unavailable {
-					t.Fatalf("missing guard transport: %v", err)
-				}
-				engineSQL(t, server.Store, `UPDATE runs SET cancel_requested_at=1`)
-				cancelled, err := server.Snapshot(t.Context(), owner)
-				if err != nil || !cancelled.CancelRequested {
-					t.Fatalf("guard blocked cancellation: %+v, %v", cancelled, err)
-				}
 			}
 		})
 	}
@@ -88,5 +69,24 @@ func TestEngineSnapshotRefusesEveryReplacementOwnerFence(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEngineSnapshotRetainsSealedGuardRefusal(t *testing.T) {
+	server, _ := engineRuntimeStore(t)
+	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
+	spec, err := json.Marshal(runspec.Spec{Resolved: runspec.Resolved{Guards: runspec.Guards{Reason: "guard refused"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, server.Store, `UPDATE runs SET plan_json=?,plan_hash='plan',sealed_at=1,spec_json=?,spec_hash='spec'`, []byte(`{"jobs":[]}`), spec)
+	got, err := server.Snapshot(t.Context(), owner)
+	if err != nil || got.GuardRefusal != "guard refused" || got.CancelRequested {
+		t.Fatalf("sealed guard: %+v, %v", got, err)
+	}
+	engineSQL(t, server.Store, `UPDATE runs SET cancel_requested_at=1`)
+	got, err = server.Snapshot(t.Context(), owner)
+	if err != nil || !got.CancelRequested || got.GuardRefusal != "guard refused" {
+		t.Fatalf("cancelled guard: %+v, %v", got, err)
 	}
 }

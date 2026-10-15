@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // Dialect identifies the SQL flavor a Store is backed by. The Store
@@ -126,6 +128,7 @@ type storeTx struct {
 	dialect      Dialect
 	store        *Store
 	snapshotRead bool
+	rotatingRoot *capability.Capability
 }
 
 func (s *Store) now() time.Time {

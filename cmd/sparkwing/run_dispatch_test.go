@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,166 +8,52 @@ import (
 	"testing"
 )
 
-func TestParseRunFlags_Only(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{"space-separated", []string{"--sw-only", "fictional-stage-*"}, "fictional-stage-*"},
-		{"equals-form", []string{"--sw-only=fictional-stage-*"}, "fictional-stage-*"},
-		{"empty-trailing-flag-falls-through", []string{"--sw-only"}, ""},
+func TestParseRunFlagsFinalGrammar(t *testing.T) {
+	flags, args := parseRunFlags([]string{"--sw-only=build-*", "--sw-no-memo", "--sw-allow-risk", "deploy,prod", "--sw-pause-before", "build,test", "--sw-pause-after=publish", "--sw-pause-on-failure=false", "--sw-run-handle-file=/tmp/result", "--", "--sw-no-cache", "--", "value"})
+	if flags.parseErr != nil {
+		t.Fatal(flags.parseErr)
 	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			flags, passthroughArgs := parseRunFlags(testCase.args)
-			if flags.only != testCase.want {
-				t.Errorf("only = %q, want %q", flags.only, testCase.want)
-			}
-			if testCase.want == "" && !slices.Contains(passthroughArgs, "--sw-only") {
-				t.Errorf("incomplete --sw-only should pass through; got passthrough=%v", passthroughArgs)
-			}
-		})
+	if flags.only != "build-*" || !flags.noCache || !slices.Equal(flags.allow, []string{"deploy", "prod"}) || flags.runHandleFile != "/tmp/result" {
+		t.Fatalf("flags: %#v", flags)
+	}
+	if !slices.Equal(flags.pauseBefore, []string{"build", "test"}) || !slices.Equal(flags.pauseAfter, []string{"publish"}) || flags.pauseOnFailure == nil || *flags.pauseOnFailure {
+		t.Fatalf("pause flags: %#v", flags)
+	}
+	if !slices.Equal(args, []string{"--sw-no-cache", "--", "value"}) {
+		t.Fatalf("pipeline args: %v", args)
 	}
 }
 
-func TestParseRunFlags_NoCache(t *testing.T) {
-	flags, passthroughArgs := parseRunFlags([]string{"--sw-no-cache"})
-	if !flags.noCache {
-		t.Errorf("noCache: want true got false")
-	}
-	if len(passthroughArgs) != 0 {
-		t.Errorf("passthrough should be empty, got %v", passthroughArgs)
-	}
-}
-
-func TestParseRunFlags_RunHandleFile(t *testing.T) {
-	flags, passthroughArgs := parseRunFlags([]string{"--sw-run-handle-file", "/tmp/fictional-run.json", "--target", "fictional-production"})
-	if flags.runHandleFile != "/tmp/fictional-run.json" {
-		t.Fatalf("runHandleFile = %q", flags.runHandleFile)
-	}
-	if got := strings.Join(passthroughArgs, " "); got != "--target fictional-production" {
-		t.Fatalf("passthrough = %q", got)
-	}
-}
-
-func TestParseRunFlags_RetiredSwLocalOnlyIsUnknown(t *testing.T) {
-	flags, passthroughArgs := parseRunFlags([]string{"--sw-local-only"})
-	if flags.unknownRunnerFlag != "--sw-local-only" {
-		t.Errorf("--sw-local-only should be refused as an unknown runner flag; got %q (passthrough %v)", flags.unknownRunnerFlag, passthroughArgs)
-	}
-}
-
-func TestParseRunFlags_OnlyAndNoCacheCoexist(t *testing.T) {
-	flags, _ := parseRunFlags([]string{"--sw-only=fictional-check-*", "--sw-no-cache"})
-	if flags.only != "fictional-check-*" {
-		t.Errorf("only = %q, want fictional-check-*", flags.only)
-	}
-	if !flags.noCache {
-		t.Errorf("noCache: want true got false")
-	}
-}
-
-func TestParseRunFlags_UnknownFlagsPassThrough(t *testing.T) {
-	_, passthroughArgs := parseRunFlags([]string{"--sw-only=*", "--user-flag", "v", "--other"})
-	expectedArguments := []string{"--user-flag", "v", "--other"}
-	if !slices.Equal(passthroughArgs, expectedArguments) {
-		t.Errorf("passthrough = %v, want %v", passthroughArgs, expectedArguments)
-	}
-}
-
-func TestParseRunFlags_ProfileNeverReachesThePipeline(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{"space-separated", []string{"--profile", "fictional-production"}, "fictional-production"},
-		{"equals-form", []string{"--profile=fictional-production"}, "fictional-production"},
-		{"trailing-flag", []string{"--profile"}, "<name>"},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			flags, passthroughArgs := parseRunFlags(testCase.args)
-			if flags.profile != testCase.want {
-				t.Errorf("profile = %q, want %q", flags.profile, testCase.want)
-			}
-			if len(passthroughArgs) != 0 {
-				t.Errorf("--profile reached the pipeline arguments: %v", passthroughArgs)
-			}
-		})
-	}
-}
-
-func TestDispatchRun_RefusesProfileBeforeSideEffects(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", "")
-	empty := t.TempDir()
-	t.Chdir(empty)
-	err := dispatchRun([]string{"deploy", "--profile", "prod"})
-	if err == nil || !strings.Contains(err.Error(), "--profile is removed") ||
-		!strings.Contains(err.Error(), "sparkwing pipeline trigger deploy --profile prod") {
-		t.Fatalf("dispatch error = %v, want the removal and the pipeline trigger command", err)
-	}
-	if os.Getenv("SPARKWING_HOME") != "" {
-		t.Error("refused --profile changed the environment")
-	}
-}
-
-func TestParseRunFlags_RetiredSwProfileIsUnknown(t *testing.T) {
-	flags, passthroughArgs := parseRunFlags([]string{"--sw-profile", "fictional-remote"})
-	if flags.profile != "" {
-		t.Errorf("--sw-profile should not set profile; got %q", flags.profile)
-	}
-	if flags.unknownRunnerFlag != "--sw-profile" {
-		t.Errorf("--sw-profile should be refused as an unknown runner flag; got %q (passthrough %v)", flags.unknownRunnerFlag, passthroughArgs)
-	}
-}
-
-func TestParseRunFlags_SeparatorPreservesPipelineArguments(t *testing.T) {
-	want := []string{"--", "--sw-priority", "back", "--sw-no-cache", "--sw-mystery", "--profile", "fictional"}
-	args := append([]string{"--sw-priority=front"}, want...)
-	flags, passthroughArgs := parseRunFlags(args)
-	if flags.priority != "front" || !flags.prioritySet || flags.noCache || flags.profile != "" {
-		t.Fatalf("runner flags = %+v", flags)
-	}
-	if !slices.Equal(passthroughArgs, want) {
-		t.Fatalf("pipeline arguments = %q, want %q", passthroughArgs, want)
-	}
-}
-
-func TestDispatchRun_UnknownRunnerFlagPrecedesSideEffects(t *testing.T) {
-	for _, unknown := range []string{"--sw-mystery", "--sw-mystery=value"} {
-		t.Run(unknown, func(t *testing.T) {
-			t.Setenv("SPARKWING_HOME", "")
-			t.Setenv("XDG_CONFIG_HOME", "")
-			t.Chdir(t.TempDir())
-			err := dispatchRun([]string{"fictional", unknown})
-			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("unknown runner flag %q", unknown)) {
-				t.Errorf("dispatch error = %v, want unknown runner flag %q", err, unknown)
-			}
-			if os.Getenv("SPARKWING_HOME") != "" || os.Getenv("XDG_CONFIG_HOME") != "" {
-				t.Error("rejected runner flag changed the environment")
-			}
-		})
-	}
-}
-
-func TestDispatchRun_SeparatorPassesRetiredFlagsToPipeline(t *testing.T) {
-	empty := t.TempDir()
-	t.Chdir(empty)
-	err := dispatchRun([]string{"fictional", "--", "--sw-profile", "fictional"})
-	if err == nil || !strings.Contains(err.Error(), "no .sparkwing/main.go or TypeScript .sparkwing/package.json found from "+empty) {
-		t.Fatalf("dispatch error = %v, want pipeline directory lookup", err)
-	}
-}
-
-func TestDispatchRunRejectsMalformedWorkersBeforeProjectLookup(t *testing.T) {
-	t.Chdir(t.TempDir())
-	for _, args := range [][]string{{"--sw-workers=four"}, {"--sw-workers=-2"}, {"--sw-workers", "four"}, {"--sw-workers", "-2"}, {"--sw-workers"}} {
-		err := dispatchRun(append([]string{"missing-pipeline"}, args...))
-		if err == nil || !strings.Contains(err.Error(), "--sw-workers must be a nonnegative integer") {
-			t.Fatalf("%v error=%v", args, err)
+func TestParseRunFlagsRejectsInvalidBeforeExecution(t *testing.T) {
+	for _, args := range [][]string{
+		{"--sw-only"}, {"--sw-index"}, {"--sw-workers=0"}, {"--sw-workers=-1"}, {"--sw-workers=x"},
+		{"--sw-no-cache"}, {"--sw-allow=prod"}, {"--profile=prod"}, {"--sw-profile=prod"}, {"--unknown"},
+		{"--sw-detached", "--sw-workers=1"}, {"--sw-request-id=id"}, {"--sw-consumer-idle=1m"},
+	} {
+		flags, args := parseRunFlags(args)
+		if flags.parseErr == nil || exitCodeFor(flags.parseErr) != 2 || len(args) != 0 {
+			t.Fatalf("accepted invalid args: %#v %v", flags, args)
 		}
+	}
+}
+
+func TestParseRunFlagsRetainsPublicationSelection(t *testing.T) {
+	flags, _ := parseRunFlags([]string{"--publish=ci", "--sw-cache-from=ci", "--target=arm64"})
+	if flags.parseErr != nil || flags.publish != "ci" || flags.cacheFrom != "ci" || flags.target != "arm64" {
+		t.Fatalf("selection lost: %#v", flags)
+	}
+}
+
+func TestDispatchRunValidationPrecedesSideEffects(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "absent")
+	t.Setenv("SPARKWING_HOME", home)
+	for _, args := range [][]string{{"build", "--profile=prod"}, {"build", "--sw-workers=0"}, {"build", "--unknown"}} {
+		if err := dispatchRun(args); exitCodeFor(err) != 2 {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("created state: %v", err)
 	}
 }
 
@@ -211,15 +96,5 @@ func TestSetupRefWorktreeCleanupLeavesNothingRegistered(t *testing.T) {
 	}
 	if strings.Contains(list, worktree) {
 		t.Errorf("worktree still registered:\n%s", list)
-	}
-}
-
-func TestParseRunFlags_OneOffSwitches(t *testing.T) {
-	flags, rest := parseRunFlags([]string{"--sw-no-bincache", "--sw-hash-all-files", "--sw-allow-unadmitted", "--keep"})
-	if !flags.noBincache || !flags.hashAllFiles || !flags.allowUnadmitted {
-		t.Fatalf("flags = %+v, want every one-off switch set", flags)
-	}
-	if len(rest) != 1 || rest[0] != "--keep" {
-		t.Fatalf("passthrough = %v, want only --keep", rest)
 	}
 }

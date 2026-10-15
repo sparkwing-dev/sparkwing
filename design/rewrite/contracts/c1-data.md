@@ -2,6 +2,39 @@
 
 <!-- design:begin -->
 
+## Capability inventory and rotation
+
+Tenant and Operator implement C2's CapabilityManager. Collection and detail reads
+rerun the selected route alternative against current ancestry and membership in
+one snapshot. A tenant member sees owned account and machine credentials. A
+current team administrator sees the team's inventory. Operator reads expose only
+deployment service and operator roots. Execution awards, push credentials,
+node-host credentials and private authority fields stay outside this inventory.
+
+Rotation locks the predecessor, rechecks current ownership and issues its
+replacement through Store.Issue. Delegated credentials keep their original
+parent. Provisioned roots keep their origin and registration in CapabilityRecord.Origin.
+The committing transaction preserves scopes, owner, metering and source consent,
+checks current origin or parent ceilings, schedules the predecessor's grace
+and advances its authority generation. Expiry during origin verification rolls
+back the replacement. No bearer leaves a failed transaction.
+
+A transaction-scoped replacement identifies the locked root to the existing
+provisioner. It permits replacing an owned member root under current account or
+team-admin authority, preserves existing machine metering, and requires current
+deployment token authority to replace a bootstrap operator root. It cannot
+change the locked root's scope. Ordinary member-root creation still requires a
+session. Machine and service replacement rechecks the configured origin policy.
+Missing provisioning origin is an integrity failure. No legacy-token fallback
+or new issuance variant exists.
+
+The SQLite credentials-delegation-subset/store-sqlite cell verifies inventory,
+root and descendant behavior, rotation and revocation through two reopenings.
+The real HTTP component uses the default Tenant manager with session proof and
+CSRF. Machine/service origin components use the declared ProvisionPolicy fake.
+Production enrollment policy, console sessions and native PostgreSQL remain
+integration obligations.
+
 ## Controller result verification
 
 `Server.WithDataObjects` installs `storage.BlobManifests{Objects: objects}` through

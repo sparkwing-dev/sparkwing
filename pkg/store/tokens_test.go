@@ -184,40 +184,6 @@ func TestTokenKindFromPrefix(t *testing.T) {
 	}
 }
 
-func TestRotateToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	s := newTestStore(t)
-	now := time.Now().UTC()
-
-	rawA, tokA, err := s.CreateToken("pool", TokenKindRunner, []string{"nodes.claim"}, 30*24*time.Hour, now)
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-
-	rawB, newTok, oldTok, err := s.RotateToken(tokA.Prefix, 24*time.Hour, 30*24*time.Hour, now)
-	if err != nil {
-		t.Fatalf("RotateToken: %v", err)
-	}
-	if newTok.Prefix == tokA.Prefix {
-		t.Fatalf("new token shares prefix with old")
-	}
-	if oldTok.ReplacedBy != newTok.Prefix {
-		t.Fatalf("old.replaced_by = %q, want %q", oldTok.ReplacedBy, newTok.Prefix)
-	}
-
-	if _, err := s.LookupToken(rawA, now.Add(12*time.Hour)); err != nil {
-		t.Fatalf("old token should authenticate during grace: %v", err)
-	}
-	if _, err := s.LookupToken(rawA, now.Add(25*time.Hour)); err == nil {
-		t.Fatalf("old token should not authenticate after grace")
-	}
-	if _, err := s.LookupToken(rawB, now.Add(time.Second)); err != nil {
-		t.Fatalf("new token should authenticate: %v", err)
-	}
-}
-
 func TestCreateToken_ConcurrentMintsGetDistinctPrefixes(t *testing.T) {
 	s := newTestStore(t)
 	now := time.Now().UTC()
@@ -343,70 +309,6 @@ func fakeArgonKey(secret, salt []byte, keyLen uint32) []byte {
 	out := make([]byte, keyLen)
 	copy(out, sum[:])
 	return out
-}
-
-func TestRotateToken_ARevokeDuringTheMintIsNotUndone(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	s := newTestStore(t)
-	now := time.Now().UTC()
-
-	restore := argonIDFunc
-	t.Cleanup(func() { argonIDFunc = restore })
-
-	armed := false
-	var once sync.Once
-	var revokeErr error
-	revokeDone := make(chan struct{})
-	prefix := ""
-	argonIDFunc = func(secret, salt []byte, _, _ uint32, _ uint8, keyLen uint32) []byte {
-		if armed {
-			once.Do(func() {
-				go func() {
-					revokeErr = s.RevokeToken(prefix, now)
-					close(revokeDone)
-				}()
-				select {
-				case <-revokeDone:
-				case <-time.After(200 * time.Millisecond):
-				}
-			})
-		}
-		return fakeArgonKey(secret, salt, keyLen)
-	}
-
-	raw, tok, err := s.CreateToken("alice", TokenKindUser, []string{"admin"}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-	prefix = tok.Prefix
-	armed = true
-
-	_, _, _, err = s.RotateToken(prefix, 24*time.Hour, 0, now)
-	if err != nil && !strings.Contains(err.Error(), "already revoked") {
-		t.Fatalf("RotateToken: %v", err)
-	}
-
-	select {
-	case <-revokeDone:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the concurrent revoke never finished")
-	}
-	if revokeErr != nil {
-		t.Fatalf("RevokeToken: %v", revokeErr)
-	}
-
-	if _, err := s.LookupToken(raw, now.Add(time.Minute)); err == nil {
-		t.Fatal("the revoked token still authenticates after the rotation")
-	}
-	revoked, err := s.LookupTokenByPrefix(prefix)
-	if err != nil {
-		t.Fatalf("LookupTokenByPrefix: %v", err)
-	}
-	if revoked.RevokedAt == nil || revoked.RevokedAt.After(now) {
-		t.Fatalf("revoked_at = %v, want no later than the revoke at %v", revoked.RevokedAt, now)
-	}
 }
 
 func TestMintRetryOnlyMatchesAPrefixCollision(t *testing.T) {

@@ -253,9 +253,14 @@ type CPUClass struct {
 	MemoryBytes int64
 }
 func CPUClassMemoryBytes(cores int64) int64
+type CapabilityOrigin struct {
+	Kind           capability.ProvisionKind
+	RegistrationID string
+}
 type CapabilityRecord struct {
 	Version int
 	Value   capability.Capability
+	Origin  *CapabilityOrigin
 }
 func (r CapabilityRecord) Validate() error
 type CapacityAdoption struct {
@@ -1818,6 +1823,7 @@ func (o *Operator) EgressUsageAcrossTeams(ctx context.Context, period string) (_
 func (o *Operator) FinishTeamRecheck(ctx context.Context, team Team, holder string, now time.Time) error
 func (o *Operator) GetCronTick(ctx context.Context) (tick CronTick, err error)
 func (o *Operator) GitHubAppInstallationTeam(ctx context.Context, installation int64) (GitHubAppInstallation, error)
+func (o *Operator) ListCapabilities(ctx context.Context, a capability.Authorized, filter capability.InventoryFilter) ([]capability.Metadata, error)
 func (o *Operator) ListCronSchedulesAcrossTeams(ctx context.Context) ([]CronSchedule, error)
 func (o *Operator) ListStorageQuotas(ctx context.Context) (_ []StorageQuota, err error)
 func (o *Operator) ListTeams(ctx context.Context) (_ []Team, err error)
@@ -1828,12 +1834,14 @@ func (o *Operator) MarkBlobTombstones(ctx context.Context, lease SingletonLease,
 func (o *Operator) PendingTeamDeletions(ctx context.Context) ([]TeamDeletion, error)
 func (o *Operator) PruneEgressUsage(ctx context.Context, lease SingletonLease) (int64, error)
 func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, now time.Time, recheckAfter time.Duration) error
+func (o *Operator) ReadCapability(ctx context.Context, a capability.Authorized) (capability.Metadata, error)
 func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonLease, after string, limit int) ([]ControllerRun, error)
 func (o *Operator) RecordCronTick(ctx context.Context, tick CronTick) error
 func (o *Operator) RecordTeamDeletionFailure(ctx context.Context, team Team, cause string) error
 func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease, ttl time.Duration) (SingletonLease, error)
 func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.Time) (TeamDeletion, []string, error)
 func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error
+func (o *Operator) RotateCapability(ctx context.Context, a capability.Authorized, grace time.Duration, expires *time.Time) (capability.Rotation, error)
 func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error)
 func (o *Operator) SealAbandonedLogStreams(ctx context.Context, lease SingletonLease, limit int) (int64, error)
 func (o *Operator) SeedRunRetention(ctx context.Context, days int64) (bool, error)
@@ -1845,6 +1853,7 @@ func (o *Operator) SetOperatorCreditSettings(
 ) (_ CreditSettings, err error)
 func (o *Operator) SetStorageSettings(ctx context.Context, in StorageSettings) error
 func (o *Operator) StorageSettings(ctx context.Context) (StorageSettings, error)
+func (o *Operator) Team() Team
 func (o *Operator) TeamRunIDs(ctx context.Context, team Team) (_ []string, err error)
 func (o *Operator) TopStorageTeams(ctx context.Context, month string, limit int) (_ []StorageTeamUsage, err error)
 func (o *Operator) TriggerTeam(ctx context.Context, triggerID string) (Team, error)
@@ -3251,6 +3260,7 @@ func (t *Tenant) Info(ctx context.Context) (TeamInfo, error)
 func (t *Tenant) Invitations(ctx context.Context, now time.Time) (_ []Invitation, err error)
 func (t *Tenant) ListAgentClaims(ctx context.Context, since time.Time) (_ []AgentClaim, err error)
 func (t *Tenant) ListApprovalsForRun(ctx context.Context, runID string) (_ []*Approval, err error)
+func (t *Tenant) ListCapabilities(ctx context.Context, a capability.Authorized, filter capability.InventoryFilter) ([]capability.Metadata, error)
 func (t *Tenant) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
 func (t *Tenant) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error)
 func (t *Tenant) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGrant, err error)
@@ -3294,6 +3304,7 @@ func (t *Tenant) PromoteNextWaiters(ctx context.Context, key string, lease time.
 func (t *Tenant) PutGitCredential(ctx context.Context, c GitCredential, now time.Time) (_ GitCredential, err error)
 func (t *Tenant) PutGitHubAppAutomation(ctx context.Context, a GitHubAppAutomation, now time.Time) error
 func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, now time.Time) (GitHubAppTrigger, error)
+func (t *Tenant) ReadCapability(ctx context.Context, a capability.Authorized) (capability.Metadata, error)
 func (t *Tenant) ReadFailure(ctx context.Context, source NodeRef, generation int64, actor Actor) (*nodeproto.JobFailure, error)
 func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.LogReadRequest) (LogSegments, error)
 func (t *Tenant) ReadNode(ctx context.Context, ref NodeRef) (NodeRow, error)
@@ -3346,6 +3357,7 @@ func (t *Tenant) RetryRunEffect(ctx context.Context, delivery EffectDelivery, ne
 func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error
 func (t *Tenant) RevokeGitHubRunner(ctx context.Context, a capability.Authorized, repositoryID int64) error
 func (t *Tenant) RevokeTeamToken(ctx context.Context, prefix string, now time.Time) error
+func (t *Tenant) RotateCapability(ctx context.Context, a capability.Authorized, grace time.Duration, expires *time.Time) (capability.Rotation, error)
 func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized, secret func(Secret) (string, error), git func(GitCredential) (string, error)) (int, int, error)
 func (t *Tenant) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
 func (t *Tenant) SaveCard(ctx context.Context, c Card, actor string, now time.Time) (err error)
