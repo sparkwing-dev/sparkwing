@@ -1,175 +1,139 @@
 # W1b handoff
 
-W1b is incomplete. The new persistence code is ready for integration testing,
-but the legacy cut and acceptance driver remain open. No W1 admission, claim,
-state, reaper, schema or retention file was edited. No git writes were made.
+W1b remains incomplete. Upload ticket persistence is implemented. W1 integration,
+native acceptance and the remaining legacy cuts are open. No claim, state,
+admission, reaper or schema implementation file was edited. The duplicate
+`plan_secret_contract.go` stub was deleted because the merged tree declared
+`PlanSecretOpener` and its setter twice. W1's `plan_contracts.go` implementation
+stays in place. No git writes were made.
 
-## Continuation changes
+## This continuation
 
-- `CommitBlob` requires `BlobAccounting`. It commits quota settlement, unique
-  byte/object usage and the uploader receipt in the same transaction. Replays
-  cannot reuse a settled reservation for a new upload. Tests cover rollback,
-  abort, expiry, zero bytes, independent SQLite clients and reopen before/after
-  settlement. These are store proofs, not controller crash or native-lane proofs.
-- Checkout creation writes the final schema's mode, USD cents and credit amount.
-  A pending checkout uses its own ID in the session column until attachment.
-  Attachment cannot replace a provider session or change a settled checkout.
-  Abort preserves the financial row and releases its purchase hold. Removed
-  the old age-based checkout deletion (10 lines including its constant).
-- A billing pause cannot rewind a renewal's charged compute checkpoint.
-- Record lookup checks the named record's authority, even when its digest is
-  readable through another record. Memo reads/writes require an accepted memo
-  declaration, and memo writes require an input hash.
+- Implemented `ReserveBlobUpload`, `LookupBlobUpload`, `CommitBlobUpload` and
+  `AbortBlobUpload` against the final uploads table. Tickets bind the exact
+  uploader, digest, size, expiry, provenance, sealed ref and quota reservation.
+  Ticket/reservation creation commits together. Commit atomically records
+  existence, receipt, ticket completion, unique-byte usage and quota settlement.
+- Replay is immutable. Abort is durable and idempotent. Released tickets cannot
+  reopen. Committed tickets replay after expiry while authority is live. Owner
+  units and imported publication attempts round-trip through SQL.
+- Readable duplicates reserve no additional bytes and work at the quota ceiling.
+  Unreadable duplicates still require a full reservation. Zero reservations
+  cannot fund bytes that disappear before commit. Upload admission shares the
+  quota lock with generic reservations and independent store clients.
+- The leased tombstone-mark phase releases expired upload reservations, including
+  those whose upload rows disappeared through run retention.
+- `Authority.Upload` hints must match live identity. Publication uploads retain
+  local provenance and cannot manufacture an unimported job output.
+- Payment settlement writes checkout audit events once per transition and clears
+  exhaustion when the resulting balance is positive. Audit failure rolls back
+  the financial write.
+- Added a SQLite acceptance boundary for replica sums, quota races, release replay
+  and singleton ownership. It uses public store APIs and an independent SQL
+  oracle. Native placement targets remain skipped.
 
-The changed API is store-local. W7 must pass the reservation recovered from its
-signed ticket and a server-selected replica ID. No other area's contract changed.
-Creation uses the existing USD credit-purchase unit. The controller must persist
-`settings.payment_mode` from its provider configuration before opening checkouts.
+Deleted the 40-line provisional `BlobVerifier`/`CommitBlob` preamble and the
+15-line duplicate plan-secret stub. `BlobAccounting` is private. Replaced 349
+lines of provisional tests with public ticket tests, moving the surviving
+helpers into `upload_helpers_test.go`. Legacy direct-upload, log, storage-credit
+and claim-time accounting implementations remain.
 
-Only `pkg/store` changed. Existing files changed in this continuation are
-`blob_gc_test.go`, `blob_lookup.go`, `blob_persistence.go`,
-`blob_read_authority.go`, `blob_receipts_test.go`, `blob_record_runtime.go`,
-`blob_records_runtime_test.go`, `credit_checkouts.go`, `metered_accounting.go`,
-`metered_accounting_test.go`, `payment_contract.go` and these two Markdown files.
-The four new files are `blob_accounting.go`, `blob_accounting_test.go`,
-`blob_scope_test.go` and `payment_checkout_test.go`.
+New tests cover the store portions of T1's interrupted-upload replay, checksum
+conflict, deduplication at a quota ceiling, uploader isolation and quota restart
+obligations. No complete native port-inventory item is claimed.
 
-Remaining legacy settlement APIs include `CloseCreditCheckout` and the
-`CreditGrantRequest.Checkout` path. They must be removed with their controller
-callers in the payment-route cut. The legacy blob, log, storage-credit and
-claim-time accounting paths also remain. No full hard cut is claimed.
+## Existing implementation retained
 
-The writer guard now needs `storage_month_usage` and `storage_run_usage` removed
-from `tablesWithNoTeamWriter`, and its expected count lowered by two, because
-blob commits now write both with explicit teams. This W1-owned guard was left
-unchanged. The prior SQL guard exemptions remain open.
+Immutable billing awards, price/card snapshots, reservations, interval starts and
+pauses, renewal checkpoints, settlement and original-card/day refunds survive
+run/capability pruning. Tests fake C2's missing calculator. Pauses cannot rewind
+charged checkpoints.
 
-## Implemented
+Payment-facts settlement derives teams/credits from checkouts, deduplicates events
+and provider payments, handles late payment, and rejects cross-team payment reuse.
+Checkout creation persists mode, USD cents and credits. Attachment is immutable.
 
-- Immutable billing awards, reservation and rate snapshots, interval start/pause,
-  renewal checkpoints, final settlement, original-card/day refunds, replay and
-  ledger locking. Settlement survives claimant pruning. Overlapping intervals,
-  future timestamps and conflicting replays fail.
-- Payment settlement uses the credit ledger lock and refuses a provider payment
-  already associated with another checkout, including another team's checkout.
-- Verified blob commits retain exact uploader identity. Records validate every
-  digest and manifest member. Read sets follow receipts, dependencies, generated
-  groups, declared pinned pipeline references and authorized cache scopes.
-- Memo lookup/copy, depcache pointers, server-owned ref checks, cold/miss failure
-  handling, and source provenance that survives source-run deletion.
-- Leased tombstone marking and collection with shared blob locks, a grace period,
-  recursive reachability, a final reachability recheck and failure replay.
-- Public tagged log persistence, strict subject shape, derived segment object
-  keys, contiguous immutable segments, final seals, terminal tail grace, owner
-  and eval fencing, and reads under current authority.
+Blob records check each primary, manifest and member digest for existence and
+edge authority. Receipts, dependencies, generated groups, declared pinned pipeline
+references and cache scopes supply read edges. Memo declarations and input hashes
+are required. Record metadata requires authority over that named record. Memo
+copies commit both result records together. Bad cache bytes become misses/cold
+restores. Source provenance survives source-run deletion. Leased tombstones use
+shared locks, recursive reachability, grace and deletion-failure replay.
 
-## W1 integration
+Tagged logs retain derived object keys, contiguous immutable segments, empty
+seals, exact final replay, bounded job tail grace and current read authority.
+Incomplete logs do not alter job outcome.
 
-1. In `authority_issue.go`, replace the metered-award refusal and the unmetered-only
-   `persistBillingAwardTx` call with derived metering and `recordBillingAwardTx`.
-   Pricing and reservation size must come from server settings and the accepted
-   resource envelope. The helper accepts those resolved values, never wire input.
-2. Call `startBillableIntervalTx` at actual execution start for launcher awards.
-   Pause/resume metered hosts around customer-runner waits. Use a new interval key
-   per compute span. `at_award` opens the first span when the award is stored.
-3. Call `chargeBillingAwardTx` inside renewal and `settleBillingAwardTx` inside
-   terminal, release and reaper transactions. Pass the persisted lapse when a
-   lease expires. Retain existing credit exhaustion and stop decisions.
-4. Wire memo-copy records into reconciliation and terminal result authorization.
-   The exposed copy path presently requires a live job attempt. Owner-side
-   materialization before execution still needs a transaction path aligned with
-   W1's attempt and claim decisions. Do not start compute just to copy a memo.
-5. Award data scopes must include permitted verified default/PR-base read refs.
-   The predecessor's `awardDataScope` populates only the write ref.
-6. Invoke the two blob GC phases from the existing leased maintenance pass.
-   No separate service or maintenance lease was added.
+## Integration still required
 
-## W2 and W7 integration
+1. W1 must use `recordBillingAwardTx` with server-derived metering, resources and
+   pricing. Issuance still refuses metered roots and calls unmetered
+   `persistBillingAwardTx` here. Start launcher intervals at execution, pause
+   around customer-runner waits, charge renewals, and settle terminal/release/reap
+   transactions at their persisted end/lapse. Reconciliation needs atomic memo
+   materialization before memoized success, without starting compute merely to
+   copy. Award data scopes need permitted default/base refs.
+2. W2 must implement C2 `SettleBilling`, payment authentication and
+   `VerifiedPaymentEvent.Event`. Store tests exercise verified facts, not provider
+   signatures. Controller configuration must persist payment mode.
+3. W7 must use ticket APIs for signing, physical commit and abort. Pass observed
+   bytes after `ObjectBackend.CommitObject` and fill the required
+   `VerifiedUploadCommit.ReplicaID` from controller configuration. Supply the
+   verified manifest reader and blob deleter. Namespace/edge functions remain
+   stubs here and are faked in record tests.
+4. W1 must invoke both blob GC phases from leased maintenance. Mark now releases
+   expired ticket reservations. W2/W7 log signing must use
+   `LogSegmentObjectKey` and persisted retention classes. Proxy egress, backend
+   lifecycle rules, actual byte integrity and live-ring fallback remain external.
+5. Remove `CloseCreditCheckout`, `CreditGrantRequest.Checkout` and legacy paid
+   grant routes with W2's payment-route cut. Console reversal/payment lookup
+   still expect a raw grant reference. New grants use
+   `payment:<mode>:<checkout>`, linking provider IDs through checkout/event rows.
+   Move those lookups to the persisted payment/grant association.
+6. Remove remaining legacy blob/log/storage-credit and claim-time billing APIs
+   with their consumers. W1-owned writer/SQL guard bookkeeping remains open:
+   storage usage tables are now written, provider payment lookups cross teams
+   under provider authority, and existing authority/retention exemptions remain.
 
-- C2 `SettleBilling` and `VerifiedPaymentEvent.Event` are still stubs in this
-  checkout. Accounting tests inject the calculator. Payment tests exercise the
-  transactional verified-facts boundary. Signed-provider integration is unproved.
-- `blob.RecordNamespace` and `blob.AuthorizeEdge` are still stubs. Tests inject
-  implementations of the existing contract functions. Default record methods
-  call the shared implementation and therefore need W7's implementation.
-- Supply `BlobVerifier`, `BlobManifestReader` and `BlobDeleter` from the signed
-  byte backend. `Tenant.BlobRecords(reader)` implements the record interface with
-  verified manifest metadata. The plain Tenant methods have no manifest reader.
-- Signing must use `LogSegmentObjectKey` and the run's persisted retention class.
-  Proxy egress, live-ring fallback and actual byte integrity remain W2/W7 work.
-- Connect signing tickets to `CommitBlob`'s required `BlobAccounting`. The store
-  now settles the reservation atomically and counts each new blob once. The byte
-  backend must retain the signed ticket's intent and reservation for replay.
+No other area's contract changed. The local C1 addition is the required trusted
+`VerifiedUploadCommit.ReplicaID`. Ticket IDs use one ASCII
+letter/digit/underscore/hyphen segment. Ref facts come from the immutable sealed
+request after checking persisted repo/ref projections. Cloud provenance keeps the
+existing awarded-executor-class mapping. Confirm it against C2/W7 trusted builders.
 
-## Local contract additions and assumptions
+## Verification
 
-`STORE-DATA.md` documents the added integration methods and record naming.
-`ResultBlobKey` isolates result keys by attempt. Memo names are `output` or
-`manifest`; depcache scope excludes pipeline/job. These conventions need adoption
-by W1/W7 callers. No other area's contract file was changed.
+All commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, and `GOCACHE`,
+`GOTMPDIR` and `TMPDIR` beneath `/tmp/sw-astra-W1b/`. Test parallelism was at most
+four. No Sparkwing binary, pipeline, installed daemon or provider was run.
 
-Manifest path/mode metadata stays in verified manifest bytes because the frozen
-`blob_members` table stores only digest edges. Live receipts remain GC roots until
-run retention removes them, because they grant the uploader continued read access.
-Cloud provenance derives from the awarded executor class for non-publication
-records. Confirm that mapping against C2/W7's trusted-builder path during integration.
+- Repository `go build -p 4 ./...` passed.
+- `go vet -p 4 ./pkg/store/... ./internal/acceptance/... ./tests/acceptance/...`
+  passed.
+- Focused store selection passed 56 top-level tests and 102 cases. The final
+  missing-bytes deduplication test also passed, for 57 tests/103 cases total.
+  Selection: `^(TestStoreDataMetered|TestLogPersistence|TestResult|TestBlob|TestPayment)`.
+- Upload tickets and payment settlement passed under `-race -p 4`. The final
+  deduplication failure test also passed under the race detector.
+- `go test -p 4 ./internal/acceptance ./tests/acceptance -count=1` passed.
+  The new cell is
+  `TestStorage/storage-replica-safe-accounting/store-data-sqlite`. It also passed
+  under `-race`. Native targets remain skipped. This boundary checks aggregate
+  runs, not principal admission through authenticated routes.
+- Full store tests still fail on `TestRecordProfileObservation_IgnoresLegacySamples`
+  (`pipeline_profiles.team`), `ExampleOpen` and `teststore.TestOpenKeepsStateSeparate`
+  (removed `sparkwing_meta`). Those fixtures were left to their owners.
+- `git diff --check` passed. HEAD stayed `1793d602b`. No local Git identity or
+  `core.worktree` override appeared. PostgreSQL/native integrations are unproved.
 
-## Verification and limits
+Shared files: deleted `pkg/store/plan_secret_contract.go`, corrected its references
+in `design/rewrite/contracts/c1-data.md` and `amendments-1.md`, added
+`internal/acceptance/store_data.go`, and activated its boundary in
+`tests/acceptance/storage_test.go`. All other changes are W1b-owned store files.
+No production caller outside pkg/store changed.
 
-Continuation verification passed: repository `go build -p 4 ./...`,
-`go vet -p 4 ./pkg/store/...`, and 52 focused top-level tests (91 including
-subtests). `git diff --check` passed. The focused selection is the expression
-below with `TestBlobAccounting`, `TestBlobRecords` and `TestPaymentCheckout`
-included, or the shorter equivalent
-`^(TestStoreDataMetered|TestLogPersistence|TestResult|TestBlob|TestPayment)`.
-Race verification passed with `-race -p 4 -count=1` and selection
-`^(TestBlobAccounting|TestPaymentCheckout|TestBlobRecordsLookupCannot|TestBlobRecordsMemoRequires|TestStoreDataMeteredPause)`.
-All checks used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, and private `GOCACHE`,
-`GOTMPDIR` and `TMPDIR` under `/tmp/sw-astra-W1b/`. All check processes exited
-before that directory was removed. No Sparkwing binary or pipeline was run.
-
-`go test -p 4 ./pkg/store/... -failfast -count=1` failed on the existing
-`pipeline_profiles.team` and `sparkwing_meta` assumptions. The tenant SQL scope
-guard reports the existing authority, retention and provider-payment lookups.
-The tenant writer guard reports the two newly implemented storage-usage writers
-listed above. These guard files were not edited.
-
-New tests port the store portions of T1's quota crash/replay, unique-byte
-accounting, undeclared memo and bare-key refusals, and reference-edge isolation.
-They do not close a whole port-inventory item or native acceptance cell.
-
-Predecessor verification passed: repository `go build -p 4 ./...`,
-`go vet -p 4 ./pkg/store/...`, and 34 focused top-level tests (63 passing
-cases including subtests). `git diff --check` passed. Focused tests use real SQLite
-transactions and fake only the missing calculator, namespace/edge functions and
-byte backend. The repository build and store vet use the prescribed isolated Go
-cache. PostgreSQL, native signers, payment signatures and the end-to-end acceptance
-matrix have not been proved.
-
-The broader legacy metering selection fails on removed `tokens`, `sparkwing_meta`
-and trigger columns. The tenant SQL guard also fails on predecessor authority,
-retention and payment lookup statements. Provider checkout lookup and payment-ID
-deduplication intentionally cross teams under provider authority and need the
-`(*Store).settlePaymentFacts` exemption in the shared guard. W1's guard was left
-unchanged. Its writer checks pass.
-
-No acceptance cells were unskipped. New tests cover portions of the T1 manifest,
-reference-edge, upload-conflict, memo-copy and retention obligations, but no full
-port-inventory item is claimed closed. Legacy accounting/blob/log callers and
-implementations still need deletion.
-
-Existing files touched are `blob_records.go`, `payment_contract.go`,
-`result_contract.go`, `result_logs.go` and the log cases in `result_runtime_test.go`.
-All other additions are W1b-owned files in `pkg/store`. No files outside that
-package were changed.
-
-Reproduce the focused test selection with `go test -p 4 ./pkg/store -count=1`
-and this `-run` value:
-
-```text
-^(TestStoreDataMetered|TestLogPersistence|TestResult|TestBlobPersistence|TestBlobGC|TestBlobRecords|TestPaymentSettlement)
-```
-
-The commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, and private
-`GOCACHE`, `GOTMPDIR` and final-run `TMPDIR` beneath `/tmp/sw-astra-W1b/`.
-All verification processes exited before that directory was removed.
+Friction: duplicate secret declarations broke the initial merged build. One race
+selector ran no tests and was replaced with separate selectors before claiming
+evidence. Legacy fixtures and external implementation stubs remain. The scratch
+directory was deleted after every check process exited.

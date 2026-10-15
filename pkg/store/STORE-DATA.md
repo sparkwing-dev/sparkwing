@@ -31,22 +31,37 @@ Checkout creation snapshots the configured payment mode, USD cents and credits.
 Until the provider session is attached, the checkout ID occupies the required
 session column. Settlement refuses that pending identity. Attachment is immutable,
 and abort closes only an unattached checkout. Financial checkout rows survive
-later checkout creation and abort.
+later checkout creation and abort. Settlement records each checkout transition
+once and clears exhaustion only when the resulting balance is positive. Audit
+failure rolls the financial result back.
 
-`CommitBlob` takes the signed upload intent, `BlobAccounting` and a `BlobVerifier`. Verification
-must bind the uploader and original signed ticket to a completed upload, check
-size and SHA-256, and confirm the immutable commit. An existing CAS object alone
-cannot establish upload authority. The store then resolves
-authority again and commits existence and the uploader receipt together. A job
-receipt retains its exact team, run, job, attempt, generation and capability.
-Owner and publication identities remain tagged. The signer reserves storage
-quota before issuing a ticket and binds the reservation ID to that ticket.
-It supplies the replica identity when committing. Neither accounting field comes
-from the caller's commit body. Blob existence, receipt, reservation settlement
-and per-replica usage commit together. Only the insertion of a new blob counts
-bytes and an object. A deduplicated upload commits its reservation with zero used
-bytes. Abort uses `SettleQuota(id, 0)`. Replaying a committed reservation requires
-an existing exact receipt and matching size, so it cannot create another upload.
+`ReserveBlobUpload` binds the upload ticket, tagged uploader, size, digest,
+provenance, sealed ref and quota reservation in one transaction. The adapter
+chooses a ticket ID within its authenticated idempotency scope. That ID is one
+ASCII letter/digit/underscore/hyphen path segment. Staging keys are
+`teams/<team>/pending/<ticket>`. Immutable keys are `teams/<team>/cas/<digest>`.
+Replays must retain every immutable fact, including expiry. A released ticket
+cannot reopen. The internal quota reservation ID is `upload:<ticket>`.
+
+`LookupBlobUpload` rechecks the exact uploader and live authority before physical
+publication. The backend must verify size and SHA-256 and finish `CommitObject`
+before passing server-observed bytes to `CommitBlobUpload`. The commit request's
+replica ID comes from controller configuration. It never comes from client JSON.
+An existing CAS object alone cannot establish upload authority. Commit checks
+the ticket and authority again, then records existence, the exact receipt, ticket
+completion, quota settlement and per-replica usage in one transaction. A job
+receipt retains team, run, job, attempt, generation and capability. Owner and
+publication identities remain tagged.
+
+Only a new blob counts bytes and an object. A readable duplicate reserves zero
+additional bytes, so it can be uploaded at the quota ceiling. Unreadable bytes
+still require a full reservation, which prevents a quota-based existence oracle.
+Commit rechecks whether it inserted new content before consuming the reservation.
+Deduplicated and empty uploads still commit their reservations. Exact replay
+requires the original receipt and size and remains valid after ticket expiry.
+`AbortBlobUpload` releases only an uncommitted reservation. Abort replay and an
+abort following commit preserve the receipt. The leased tombstone-mark phase
+releases expired ticket reservations, including those orphaned by run deletion.
 
 `BlobRecords(manifestReader)` provides the `blob.RecordStore` contract. The
 manifest reader verifies bytes before decoding paths, modes and sizes. SQL stores

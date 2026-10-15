@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"reflect"
 	"slices"
 	"strings"
 
@@ -17,51 +16,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// BlobVerifier proves that this uploader completed a size- and digest-verified upload.
-// The implementation binds the original signed ticket to its staging bytes and immutable commit.
-// Finding an existing CAS object, even with a matching checksum, cannot mint an uploader receipt.
-type BlobVerifier interface {
-	VerifyCommittedBlob(context.Context, blob.UploadIntent) error
-}
-
-// CommitBlob records existence and an exact uploader receipt after byte verification.
-// The signer supplies the original upload intent; authority is rechecked after verification.
-func (t *Tenant) CommitBlob(ctx context.Context, intent blob.UploadIntent, accounting BlobAccounting, verifier BlobVerifier) (blob.Receipt, error) {
-	if verifier == nil || !validBlobDigest(intent.Digest) || intent.Size < 0 {
-		return blob.Receipt{}, authorityError(apierr.BadRequest, "verified blob commit is required")
-	}
-	if err := t.s.inTx(ctx, func(tx *storeTx) error {
-		resolved, err := resolveBlobAuthorityTx(ctx, tx, t.team, intent.Authority, capability.DataWrite)
-		if err != nil {
-			return err
-		}
-		if !reflect.DeepEqual(intent.Identity, resolved.source) {
-			return authorityError(apierr.Forbidden, "upload identity differs from live authority")
-		}
-		return nil
-	}); err != nil {
-		return blob.Receipt{}, err
-	}
-	if err := verifier.VerifyCommittedBlob(ctx, intent); err != nil {
-		return blob.Receipt{}, err
-	}
-	tx, err := t.s.beginTx(ctx)
+func commitVerifiedBlobTx(ctx context.Context, tx *storeTx, team Team, auth blobActor, intent blob.UploadIntent, accounting blobAccounting) (blob.Receipt, error) {
+	quota, err := lockBlobQuotaTx(ctx, tx, team, accounting)
 	if err != nil {
 		return blob.Receipt{}, err
 	}
-	defer rollbackOrLog(tx)
-	auth, err := resolveBlobAuthorityTx(ctx, tx, t.team, intent.Authority, capability.DataWrite)
-	if err != nil {
-		return blob.Receipt{}, err
-	}
-	if !reflect.DeepEqual(intent.Identity, auth.source) {
-		return blob.Receipt{}, authorityError(apierr.Forbidden, "upload identity differs from live authority")
-	}
-	quota, err := lockBlobQuotaTx(ctx, tx, t.team, accounting, intent.Size)
-	if err != nil {
-		return blob.Receipt{}, err
-	}
-	if err := advisoryLockTx(ctx, tx, "blob:"+string(t.team)+":"+string(intent.Digest)); err != nil {
+	if err := advisoryLockTx(ctx, tx, "blob:"+string(team)+":"+string(intent.Digest)); err != nil {
 		return blob.Receipt{}, err
 	}
 	if quota.state == "committed" {
@@ -72,16 +32,16 @@ func (t *Tenant) CommitBlob(ctx context.Context, intent blob.UploadIntent, accou
 		if !receipt.Set {
 			return blob.Receipt{}, authorityError(apierr.Conflict, "upload reservation is already committed")
 		}
-		size, err := requireBlobTx(ctx, tx, t.team, intent.Digest)
+		size, err := requireBlobTx(ctx, tx, team, intent.Digest)
 		if err != nil {
 			return blob.Receipt{}, err
 		}
 		if size != intent.Size {
 			return blob.Receipt{}, blob.ErrIntegrity
 		}
-		return receipt.Value, tx.Commit()
+		return receipt.Value, nil
 	}
-	inserted, err := tx.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", t.team, intent.Digest, intent.Size, tx.now().UnixNano())
+	inserted, err := tx.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", team, intent.Digest, intent.Size, tx.now().UnixNano())
 	if err != nil {
 		return blob.Receipt{}, err
 	}
@@ -89,8 +49,11 @@ func (t *Tenant) CommitBlob(ctx context.Context, intent blob.UploadIntent, accou
 	if err != nil {
 		return blob.Receipt{}, err
 	}
+	if quota.amount < intent.Size*objects {
+		return blob.Receipt{}, authorityError(apierr.Conflict, "upload exceeds its reservation")
+	}
 	var size int64
-	if err := tx.QueryRowContext(ctx, "SELECT size FROM blobs WHERE team=? AND digest=?", t.team, intent.Digest).Scan(&size); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT size FROM blobs WHERE team=? AND digest=?", team, intent.Digest).Scan(&size); err != nil {
 		return blob.Receipt{}, err
 	}
 	if size != intent.Size {
@@ -100,13 +63,13 @@ func (t *Tenant) CommitBlob(ctx context.Context, intent blob.UploadIntent, accou
 	if err != nil {
 		return blob.Receipt{}, err
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", t.team, intent.Digest); err != nil {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", team, intent.Digest); err != nil {
 		return blob.Receipt{}, err
 	}
-	if err := settleBlobQuotaTx(ctx, tx, t.team, auth.source.RunID, accounting, quota, intent.Size*objects, objects); err != nil {
+	if err := settleBlobQuotaTx(ctx, tx, team, auth.source.RunID, accounting, quota, intent.Size*objects, objects); err != nil {
 		return blob.Receipt{}, err
 	}
-	return receipt, tx.Commit()
+	return receipt, nil
 }
 
 func validBlobDigest(digest blob.Digest) bool {
@@ -242,14 +205,22 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 	default:
 		return a, holderRefusal()
 	}
+	a.authority.Upload = runspec.Optional[blob.UploadIdentity]{Set: true, Value: a.source}
 	return a, checkBlobAuthorityHints(input, a.authority)
 }
 
 func checkBlobAuthorityHints(input, actual blob.Authority) error {
-	if (input.Principal != "" && input.Principal != actual.Principal) || (input.Repo != "" && input.Repo != actual.Repo) || (input.Attempt.Set && input.Attempt != actual.Attempt) || (input.Ref != (blob.RefFacts{}) && input.Ref != actual.Ref) {
+	if (input.Principal != "" && input.Principal != actual.Principal) || (input.Repo != "" && input.Repo != actual.Repo) || (input.Attempt.Set && input.Attempt != actual.Attempt) || (input.Ref != (blob.RefFacts{}) && input.Ref != actual.Ref) || (input.Upload.Set && input.Upload != actual.Upload) {
 		return authorityError(apierr.Forbidden, "blob authority differs from persisted scope")
 	}
 	return nil
+}
+
+func blobActorProvenance(a blobActor) blob.Provenance {
+	if a.mode != "publish" && a.capability.Billing != nil && a.capability.Billing.ExecutorClass == "cloud" {
+		return blob.ProvenanceCloud
+	}
+	return blob.ProvenanceLocal
 }
 
 func insertBlobReceiptTx(ctx context.Context, tx *storeTx, source blob.UploadIdentity, digest blob.Digest) (blob.Receipt, error) {
@@ -259,21 +230,9 @@ func insertBlobReceiptTx(ctx context.Context, tx *storeTx, source blob.UploadIde
 	}
 	sum := sha256.Sum256(append(body, []byte(digest)...))
 	id := hex.EncodeToString(sum[:])
-	var node, attempt, generation, unitKind, unitID, unitGeneration, unitSource any
-	if source.Attempt.Set {
-		a := source.Attempt.Value
-		node, attempt, generation = a.NodeID, a.Attempt, a.Generation
-	}
-	if source.Unit.Set {
-		u := source.Unit.Value
-		unitKind, unitID, unitGeneration = u.Kind, u.ID, u.Generation
-		if u.Source.Set {
-			encoded, err := json.Marshal(u.Source.Value)
-			if err != nil {
-				return blob.Receipt{}, err
-			}
-			unitSource = encoded
-		}
+	node, attempt, generation, unitKind, unitID, unitGeneration, unitSource, err := blobUploadColumns(source)
+	if err != nil {
+		return blob.Receipt{}, err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO blob_receipts(team,id,run_id,node_id,attempt,generation,uploader_kind,unit_kind,unit_id,unit_generation,unit_source_json,digest,uploader_principal,capability_prefix,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(team,id) DO NOTHING`, source.Team, id, source.RunID, node, attempt, generation, source.Kind, unitKind, unitID, unitGeneration, unitSource, digest, source.Principal, source.CapabilityRef, tx.now().UnixNano())
 	if err != nil {

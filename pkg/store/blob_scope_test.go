@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -15,7 +14,7 @@ func TestBlobRecordsLookupCannotBorrowAnotherRecordsDigestAuthority(t *testing.T
 		t.Fatal(err)
 	}
 	other := addBlobJob(t, s, intent, "unrelated")
-	if _, err := records.tenant.CommitBlob(t.Context(), other, reserveBlobTestQuota(t, records.tenant, other.Size), blobVerifierFunc(func(_ context.Context, _ blob.UploadIntent) error { return nil })); err != nil {
+	if _, err := commitTestBlob(t, records.tenant, other); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := records.CommitRecord(t.Context(), blobOutputRequest(other)); err != nil {

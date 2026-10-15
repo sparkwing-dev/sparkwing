@@ -36,6 +36,9 @@ func (o *Operator) MarkBlobTombstones(ctx context.Context, lease SingletonLease,
 	if err := assertSingletonLeaseTx(ctx, tx, lease, "maintenance", tx.now()); err != nil {
 		return 0, err
 	}
+	if err := releaseExpiredBlobUploadQuotasTx(ctx, tx, limit); err != nil {
+		return 0, err
+	}
 	rows, err := tx.QueryContext(ctx, reachableBlobsSQL+`SELECT b.team,b.digest FROM blobs b WHERE NOT EXISTS(SELECT 1 FROM reachable r WHERE r.team=b.team AND r.digest=b.digest) AND NOT EXISTS(SELECT 1 FROM blob_tombstones t WHERE t.team=b.team AND t.digest=b.digest) ORDER BY b.team,b.digest LIMIT ?`, limit)
 	if err != nil {
 		return 0, err

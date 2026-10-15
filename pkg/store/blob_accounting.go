@@ -8,9 +8,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
-// BlobAccounting identifies the signing reservation and the committing replica.
+// blobAccounting identifies the signing reservation and the committing replica.
 // The controller restores these fields from its signed upload ticket, never commit input.
-type BlobAccounting struct {
+type blobAccounting struct {
 	ReservationID string
 	ReplicaID     string
 }
@@ -20,7 +20,7 @@ type blobQuota struct {
 	amount                       int64
 }
 
-func lockBlobQuotaTx(ctx context.Context, tx *storeTx, team Team, accounting BlobAccounting, size int64) (blobQuota, error) {
+func lockBlobQuotaTx(ctx context.Context, tx *storeTx, team Team, accounting blobAccounting) (blobQuota, error) {
 	var q blobQuota
 	if accounting.ReservationID == "" || accounting.ReplicaID == "" {
 		return q, authorityError(apierr.BadRequest, "upload accounting is required")
@@ -40,9 +40,6 @@ func lockBlobQuotaTx(ctx context.Context, tx *storeTx, team Team, accounting Blo
 	if err != nil {
 		return q, err
 	}
-	if q.amount < size {
-		return q, authorityError(apierr.Conflict, "upload exceeds its reservation")
-	}
 	if q.state == "released" || (q.state == "held" && expires <= tx.now().UnixNano()) {
 		return q, ErrLockHeld
 	}
@@ -51,7 +48,7 @@ func lockBlobQuotaTx(ctx context.Context, tx *storeTx, team Team, accounting Blo
 
 // safety: the blob insert, receipt, reservation and replica counters share one commit.
 // Even deduplicated uploads commit their reservation so an abort cannot be replayed as a PUT.
-func settleBlobQuotaTx(ctx context.Context, tx *storeTx, team Team, run string, accounting BlobAccounting, q blobQuota, size, objects int64) error {
+func settleBlobQuotaTx(ctx context.Context, tx *storeTx, team Team, run string, accounting blobAccounting, q blobQuota, size, objects int64) error {
 	if q.period == q.currentPeriod {
 		result, err := tx.ExecContext(ctx, `UPDATE quota_admission SET used=used+?,reserved=reserved-?,updated_at=? WHERE team=? AND quota='storage' AND reserved>=? AND used<=9223372036854775807-?`, size, q.amount, tx.now().UnixNano(), team, q.amount, size)
 		if err != nil {

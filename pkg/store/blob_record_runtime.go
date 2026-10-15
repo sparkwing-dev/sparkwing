@@ -151,10 +151,7 @@ func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecor
 			return blob.Record{}, authorityError(apierr.BadRequest, "manifest-only memo must identify its manifest")
 		}
 	}
-	record := blob.Record{Key: request.Key, Digest: request.Digest, ManifestDigest: request.ManifestDigest, Source: a.source, Uploader: a.authority.Principal, Provenance: blob.ProvenanceLocal, RefFacts: a.authority.Ref, CreatedAt: tx.now(), ExpiresAt: request.ExpiresAt}
-	if a.mode != "publish" && a.capability.Billing != nil && a.capability.Billing.ExecutorClass == "cloud" {
-		record.Provenance = blob.ProvenanceCloud
-	}
+	record := blob.Record{Key: request.Key, Digest: request.Digest, ManifestDigest: request.ManifestDigest, Source: a.source, Uploader: a.authority.Principal, Provenance: blobActorProvenance(a), RefFacts: a.authority.Ref, CreatedAt: tx.now(), ExpiresAt: request.ExpiresAt}
 	existing, found, err := readBlobRecordTx(ctx, tx, request.Key, scope)
 	if err != nil {
 		return blob.Record{}, err

@@ -7,7 +7,7 @@
 [Amendments 1](amendments-1.md) records the worker requests and assignments.
 These declarations leave transaction implementation with W1.
 
-- `plan_secret_contract.go` declares `PlanSecretOpener`. The controller installs
+- `plan_contracts.go` declares `PlanSecretOpener`. The controller installs
   the trusted decryptor before serving. Acceptance selects tenant/pipeline secrets
   in its transaction and passes plaintext only to validation. Neither intake facts
   nor secret values arrive as trusted planner JSON. `Resolved.SecretArgs` retains
@@ -61,6 +61,8 @@ and AbortBlobUpload using the existing uploads table. Reservation binds tenant,
 uploader, digest, size, expiry, provenance and ref facts before signing. The
 physical backend verifies size/digest before W1 commits existence and the exact
 receipt with quota settlement. Commit repeats live authority and fence checks.
+`VerifiedUploadCommit.ReplicaID` is trusted controller configuration, never a
+client-selected field. The ticket ID also binds the persisted quota reservation.
 Existing CAS bytes grant no receipt. Failed settlement grants no edge. Abort or
 leased retention releases uncommitted reservations without deleting a live blob.
 
