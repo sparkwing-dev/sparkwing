@@ -140,6 +140,11 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 		if err := p.Plan(sdkserve.DeclarationContext(ctx), plan, in, rc); err != nil {
 			return nil, err
 		}
+		for _, job := range plan.nodes {
+			if recovery := job.onFailure; recovery != nil {
+				registerJobArgs(plan, recovery.id, recovery.job)
+			}
+		}
 		if err := assertJobArgsDisjoint(plan, schema); err != nil {
 			return nil, fmt.Errorf("pipeline %q: %w", name, err)
 		}

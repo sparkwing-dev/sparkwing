@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/internal/swtags"
 	"reflect"
 	"sort"
+
+	"github.com/sparkwing-dev/sparkwing/internal/swtags"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
@@ -37,7 +38,7 @@ func (sdkOperations) Describe(ctx context.Context) (nodeproto.DescribeDoc, error
 			if f.isExtraBag {
 				continue
 			}
-			d.Args = append(d.Args, nodeproto.ArgumentDescription{Name: f.Name, Short: f.Short, Type: f.Type, Required: f.Required, Description: f.Description, Default: declaredDefault(f), Enum: f.Enum, Secret: f.Secret})
+			d.Args = append(d.Args, nodeproto.ArgumentDescription{Name: f.Name, Short: f.Short, Type: f.Type, Required: f.Required, Description: f.Description, Default: declaredDefault(f.Default), Enum: f.Enum, Secret: f.Secret})
 		}
 		if h, ok := p.(SecretsProvider); ok {
 			fields, err := secretDeclarations(h.Secrets())
@@ -48,7 +49,7 @@ func (sdkOperations) Describe(ctx context.Context) (nodeproto.DescribeDoc, error
 		}
 		if plan := descriptionPlan(ctx, reg); plan != nil {
 			for _, a := range plan.declaredArguments() {
-				d.Args = append(d.Args, nodeproto.ArgumentDescription{Name: a.Name, Short: a.Short, Type: a.Type, Required: a.Required, Description: a.Desc, Enum: a.Enum, JobID: a.JobID})
+				d.Args = append(d.Args, nodeproto.ArgumentDescription{Name: a.Name, Short: a.Short, Type: a.Type, Required: a.Required, Description: a.Desc, Default: declaredDefault(a.Default), Enum: a.Enum, JobID: a.JobID})
 			}
 			riskSet := map[string]bool{}
 			for _, job := range planDocument(plan).Jobs {
@@ -70,6 +71,7 @@ func (sdkOperations) Describe(ctx context.Context) (nodeproto.DescribeDoc, error
 	}
 	return doc, nil
 }
+
 func secretDeclarations(raw any) ([]nodeproto.SecretDeclaration, error) {
 	if raw == nil {
 		return nil, nil
@@ -94,6 +96,7 @@ func secretDeclarations(raw any) ([]nodeproto.SecretDeclaration, error) {
 	}
 	return out, nil
 }
+
 func descriptionPlan(ctx context.Context, reg *registration) (plan *Plan) {
 	defer func() {
 		if recover() != nil {
@@ -146,10 +149,9 @@ func resolveTypedSecrets(ctx context.Context) any {
 	return raw
 }
 
-func declaredDefault(f inputField) *string {
-	if f.Default == "" {
+func declaredDefault(value string) *string {
+	if value == "" {
 		return nil
 	}
-	v := f.Default
-	return &v
+	return &value
 }

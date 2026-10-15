@@ -269,10 +269,17 @@ func (j *jobargsTargetJob) Work(w *Work) (*WorkStep, error) {
 	return Step(w, "run", func(_ context.Context) error { return nil }), nil
 }
 
-type jobargsCollidePipe struct{ job Workable }
+type jobargsCollidePipe struct {
+	job      Workable
+	recovery bool
+}
 
 func (c jobargsCollidePipe) Plan(_ context.Context, plan *Plan, _ jobargsPipeInputs, _ RunContext) error {
-	Job(plan, "deploy", c.job)
+	if c.recovery {
+		Job(plan, "source", func(context.Context) error { return nil }).OnFailure("recover", c.job)
+	} else {
+		Job(plan, "deploy", c.job)
+	}
 	return nil
 }
 
@@ -284,15 +291,23 @@ func TestInvoke_RefusesJobFlagsThatShadowPipelineInputs(t *testing.T) {
 		"short": {&jobargsTagJob{}, "-t for --tag"},
 		"long":  {&jobargsTargetJob{}, "declares --target"},
 	} {
-		t.Run(name, func(t *testing.T) {
-			pipe := "jobargs-collide-" + name
-			job := tc.job
-			Register[jobargsPipeInputs](pipe, func() Pipeline[jobargsPipeInputs] { return jobargsCollidePipe{job: job} })
-			reg, _ := lookup(pipe)
-			_, err := reg.Invoke(context.Background(), map[string]string{"target": "prod"}, RunContext{Pipeline: pipe})
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("Invoke = %v, want an error containing %q", err, tc.want)
+		for _, recovery := range []bool{false, true} {
+			kind := "job"
+			if recovery {
+				kind = "recovery"
 			}
-		})
+			t.Run(name+"/"+kind, func(t *testing.T) {
+				pipe := "jobargs-collide-" + name + "-" + kind
+				job := tc.job
+				Register[jobargsPipeInputs](pipe, func() Pipeline[jobargsPipeInputs] {
+					return jobargsCollidePipe{job: job, recovery: recovery}
+				})
+				reg, _ := lookup(pipe)
+				_, err := reg.Invoke(t.Context(), map[string]string{"target": "prod"}, RunContext{Pipeline: pipe})
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("Invoke = %v, want an error containing %q", err, tc.want)
+				}
+			})
+		}
 	}
 }
