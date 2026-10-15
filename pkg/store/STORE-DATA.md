@@ -51,6 +51,14 @@ transition and accounting in one transaction. They apply the existing spend
 policy to the resulting balance. A pause cannot precede the interval's last
 charged checkpoint.
 
+The unused expired-claim settlement adapter is removed. Reapers must use the
+immutable award and interval helpers in their state transaction. Generated
+SQLite tests settle through an earlier persisted lapse after database reopening,
+race two settlement connections, and replay the committed result. The original
+rate, CPU class, card and refund day survive claimant pruning and pricing/card
+changes. C2 calculation is a contract fake in these tests. Claim/start/reaper
+wiring and native execution remain integration obligations.
+
 `SettlePayment` resolves the team and credit amount from a committed checkout.
 Provider mode, event identity, signed amount, currency and payment identity must
 match. The ledger lock serializes payment grants with reservations. A provider

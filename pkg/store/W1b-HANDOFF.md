@@ -1,9 +1,122 @@
 # W1b handoff
 
-Continues `440f2127f`. W1b remains incomplete.
+Continues `df0ddfe17` / `ccafea7d1`. W1b remains incomplete.
 The lead owns commits, independent review, pipelines and native integration.
 
 ## Current continuation
+
+Removed `expiredClaim` and `settleExpiredClaimTx` after W1 retired their reaper
+callers. Deleted **15 legacy runtime lines** and **94 legacy test lines**.
+The two old tail/refund tests now use the immutable billing helpers through
+TestStoreDataMeteredDisruptionReplayUsesAwardedTerms. Its generated proof also
+replaces a **40-line final-schema example test**. No public API, schema, rate,
+limit or production mechanism was added. No caller outside pkg/store changed.
+
+Invariant: settlement uses the award's persisted tariff and billable intervals
+through the recorded lapse, commits once, and rolls back with its owning
+transaction.
+
+The proof has 64 fixed cases and 48 seeded generated cases. It covers plan,
+eval, job and host units, executing at_award claims and delayed at_start claims,
+including at_start work that never begins. It checkpoints compute, advances the
+store clock two days past the lapse, prunes claimant authority and changes the
+current rate and card. An injected failure after settlement rolls back charges
+and interval checkpoints. After reopening, two SQLite connections race final
+settlement. A second reopening replays without invoking the calculator.
+Charges retain the awarded rate, CPU class and card. Refunds return spend to
+the reservation's original day. The exact ledger uses the recorded lapse,
+including 7, 60, 61 and 240-second fixed examples.
+
+C2's calculator is a contract fake. These tests prove store persistence and
+serialization, not metered issuance, claim fencing, reaper selection, provider
+execution or native placement. The at_award path represents compute that has
+begun. Its separate never-started refund contract remains open. The old
+PostgreSQL skipped-claim and dispute-lock tests are retained because their full
+integration obligations have not been replaced.
+
+## Verification for this continuation
+
+Checks use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4 and
+GOCACHE/GOTMPDIR/TMPDIR beneath /tmp/sw-astra-W1b/. Commands use
+`go -C /home/bombuntu/.xwing/envs/1088/sparkwing`.
+
+- Whole-repository `go build -p 4 ./...` passed.
+- `go vet -p 4 ./pkg/store/... ./internal/acceptance/...
+  ./tests/acceptance/...` passed.
+- The retained W1b store selection below passed **191 top-level tests / 572
+  cases** with no skips. It includes the new 112-case property. It excludes the
+  known red publication property and the two stale W1 catalog guards. This is
+  not a full-store pass.
+- `go test -json -p 4 ./internal/acceptance/... ./tests/acceptance/...
+  -run '^(TestStorage|TestBilling)$' -count=1 -timeout=180s` passed **2 top-level
+  tests / 43 cases**, including all **12 existing SQLite data/billing proofs**.
+  The native/platform skeleton retains **562 skips**. No new cell was activated.
+- Required `go run -p 4 ./internal/commentcheck -base main .` passed across
+  **1011 files**. Session `sleepcheck -base HEAD` and whitespace checks passed.
+- The focused race selection passed **1 top-level test / 5 cases** in
+  **8.064 seconds**. Its four SQLite cases cover all billing units with a
+  240-second execution, delayed at_start and concurrent settlement connections.
+  The earlier full-property race command hit its 180-second timeout during
+  temporary-directory cleanup. No full-property race pass is claimed. Fixtures
+  now clean up after each named case, bounding live fixture resources.
+
+The store command is `go test -json -p 4 ./pkg/store -count=1 -timeout=180s`,
+with `-skip '^TestBlobRecordsMutationCannotOutliveAuthority$'` and the same
+`-run` selection recorded in the previous continuation. The focused command is
+`go test -race -json -p 4 ./pkg/store -count=1 -timeout=180s`, with:
+
+```text
+-run '^TestStoreDataMeteredDisruptionReplayUsesAwardedTerms$/^unit=[0-3]$/^at_award=false$/^started=true$/^elapsed=239$/^rate=9$'
+```
+
+Recreate scratch cache and tmp directories before reproducing. The lead owns
+pipelines and independent review. No PostgreSQL, provider, real-backend or
+native-placement result is claimed.
+
+## Remaining decisions and integration
+
+No foreign contract changed. Amendment status remains:
+
+- A1-24 retains the transaction-owned data checker and binding proof.
+- A1-27 still needs W1's claim/start/wait/renew/finish/reap joins to the immutable
+  billing helpers. W1/W2 must resolve the at_award never-started refund and the
+  explicit customer-wait input. C2 SettleBilling remains a panic stub.
+- A1-28 retains committed-checkout event settlement. W2 still owns provider
+  verification and removal of caller-selected paid grants. VerifiedPaymentEvent
+  access and verification remain panic stubs.
+- A1-29 through A1-35 retain upload/receipt/provenance/member/reference/depcache,
+  tombstone and tagged-log persistence. The record-publication redesign below
+  remains pending the lead's two-strikes decision. Its six enabled regressions
+  remain red and are excluded explicitly from the broad selection. W7 namespace
+  and edge rules remain stubs. Verified manifests, physical backends and GC,
+  binary execution, W2/W9 transports, trusted replica identity, proxy egress,
+  materialization destination identities and imported owner-log identities
+  remain real integrations or previously recorded contract requests.
+- A1-53 requires native evidence. The W1 reaper handoff is addressed by removing
+  the unused expired-claim adapter. No other handoff adds W1b work.
+
+W1's stale output_runs/output_tombstones catalog entries and removed
+ExpiredOutputRuns guard exemption remain unchanged under split ownership.
+Legacy claim-credit, raw storage, output, direct-upload and log consumers still
+need their owners' cutover. No full-store green or native acceptance is claimed.
+
+## Files and friction for this continuation
+
+All changes are W1b-owned pkg/store files: credits.go,
+credit_expired_claim_settle_test.go, metered_accounting_test.go,
+metered_disruption_test.go, STORE-DATA.md and this handoff. No W1 implementation,
+shared file or other-package caller changed. No archived T1 inventory row is
+newly closed. No acceptance cell is newly activated.
+
+Friction remains the existing stubs, W1 catalog cleanup and publication decision.
+The full-property race budget was insufficient. The normal suite covers every
+case, while the bounded race selection exercises the new concurrency boundary.
+No service, provider, deployment, release, Git write or harness-memory write ran.
+Scratch was deleted after verification. Git identity remains unchanged, with no
+core.worktree setting. The lead retains commits, pipelines,
+independent review and native integration.
+
+## Previous continuation (committed in ccafea7d1)
 
 Reversed the legacy expectation that a later node finish extends an ended
 attempt's log tail. Removed

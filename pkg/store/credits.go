@@ -1686,21 +1686,6 @@ func (s *Store) chargeNodeTx(
 	return out, nil
 }
 
-type expiredClaim struct {
-	runID, nodeID, tokenPrefix string
-	leaseNS                    int64
-}
-
-// safety: the holder stopped renewing, so the node ran until its lease ran out and no later; the
-// interval since the last charge bills to there, under a heartbeat's per-charge cap, before the
-// anchoring claim is cleared. A lease lost before execution bills the same way, since billing starts
-// when the machine starts work; a claim whose machine never started is refunded whole by the settle.
-func (s *Store) settleExpiredClaimTx(ctx context.Context, tx *storeTx, claim expiredClaim, nowNS int64) error {
-	_, err := s.chargeNodeTx(ctx, tx, claim.runID, claim.nodeID, claim.tokenPrefix,
-		time.Unix(0, min(claim.leaseNS, nowNS)), true)
-	return err
-}
-
 // safety: the team travels in this struct rather than as a Team parameter,
 // because the statements around it also read and write `nodes`, whose rows do
 // not carry a usable team yet; a parameter would make the scope guard demand a
