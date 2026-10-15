@@ -1,113 +1,131 @@
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
-import { after, before, test } from "node:test";
-import { NodeRoutes, RouteError, routeConfigFromEnv } from "../src/routes.ts";
+import { test } from "node:test";
+import { NodeRoutes } from "../src/routes.ts";
 
-let server: Server;
-let base = "";
-const seen: Array<{ url: string; auth: string; protocol: string }> = [];
-
-before(async () => {
-  server = createServer((req, res) => {
-    seen.push({
-      url: req.url ?? "",
-      auth: req.headers.authorization ?? "",
-      protocol: String(req.headers["sparkwing-node-protocol"] ?? ""),
-    });
-    const json = (status: number, body: unknown) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
-    if (req.url === "/elsewhere") return json(200, { value: "leaked" });
-    if (req.headers.authorization !== "Bearer node-token") return json(401, { error: "bearer unknown", code: "unauthorized" });
-    switch (req.url) {
-      case "/node/v1/secrets/API_KEY":
-        return json(200, { value: "s3cret", masked: true });
-      case "/node/v1/secrets/MOVED":
-        return res.writeHead(302, { location: "/elsewhere" }).end();
-      case "/node/v1/nodes/build/output":
-        return json(200, { output: { digest: "sha-1" } });
-      case "/node/v1/nodes/build%2Flinux/output":
-        return json(200, { output: "linux" });
-      case "/node/v1/nodes/empty/output":
-        return json(200, { output: null });
-      case "/node/v1/nodes/shapeless/output":
-        return json(200, {});
-      case "/node/v1/nodes/running/output":
-        return json(409, { error: "node is not done", code: "not_ready" });
-      default:
-        return json(404, { error: "no such secret", code: "secret_not_found" });
-    }
+test("bound routes carry hello credentials only in Authorization and reject redirects", async () => {
+  const requests: [string, RequestInit][] = [];
+  const routes = new NodeRoutes({ url: "http://127.0.0.1:12345", bearer: "pipe-only" }, async (url, options) => {
+    requests.push([String(url), options!]);
+    return new Response(JSON.stringify({ value: "secret", masked: true }));
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  assert.equal(await routes.secret("KEY", new AbortController().signal), "secret");
+  assert.equal(requests[0]![0], "http://127.0.0.1:12345/node/v1/secrets/KEY");
+  assert.deepEqual(requests[0]![1].headers, { accept: "application/json", authorization: "Bearer pipe-only" });
+  assert.equal(requests[0]![1].redirect, "error");
 });
 
-after(() => new Promise<void>((resolve) => server.close(() => resolve())));
-
-test("secret and output call the node routes with the bearer and protocol header", async () => {
-  const routes = new NodeRoutes({ baseUrl: base, token: "node-token" });
-  assert.equal(await routes.secret("API_KEY"), "s3cret");
-  assert.deepEqual(await routes.output("build"), { digest: "sha-1" });
-  assert.equal(await routes.output("build/linux"), "linux", "a / in a node id is escaped");
-  assert.ok(
-    seen.every((s) => s.auth === "Bearer node-token" && s.protocol === "1"),
-    JSON.stringify(seen),
-  );
-});
-
-test("a node that recorded no output reads as null, and a reply without the field fails", async () => {
-  const routes = new NodeRoutes({ baseUrl: base, token: "node-token" });
-  assert.equal(await routes.output("empty"), null);
-  await assert.rejects(routes.output("shapeless"), /without an output field/);
-});
-
-test("a route error carries its status and code", async () => {
-  const routes = new NodeRoutes({ baseUrl: base, token: "node-token" });
-  await assert.rejects(
-    routes.secret("MISSING"),
-    (err: unknown) => err instanceof RouteError && err.status === 404 && err.code === "secret_not_found",
+test("canonical route errors preserve future codes and reject double envelopes", async () => {
+  const signal = new AbortController().signal;
+  const routes = new NodeRoutes(
+    { url: "http://127.0.0.1:12345", bearer: "pipe-only" },
+    async () =>
+      new Response(
+        JSON.stringify({ error: { code: "future_error", message: "refused", hint: "retry later", details: { reason: "future" } } }),
+        { status: 409 },
+      ),
   );
   await assert.rejects(
-    routes.output("running"),
-    (err: unknown) => err instanceof RouteError && err.status === 409 && err.code === "not_ready",
+    routes.output("producer", signal),
+    (e: any) => e.code === "future_error" && e.hint === "retry later" && e.details.reason === "future",
   );
-  const stranger = new NodeRoutes({ baseUrl: base, token: "wrong" });
-  await assert.rejects(stranger.secret("API_KEY"), (err: unknown) => err instanceof RouteError && err.code === "unauthorized");
+  const bad = new NodeRoutes(
+    { url: "http://127.0.0.1:12345", bearer: "pipe-only" },
+    async () => new Response('{"error":{"error":{"code":"bad_request","message":"no"}}}', { status: 400 }),
+  );
+  await assert.rejects(bad.output("producer", signal), /invalid error object/);
 });
 
-test("a redirect is refused rather than followed with the bearer", async () => {
-  const routes = new NodeRoutes({ baseUrl: base, token: "node-token" });
-  await assert.rejects(routes.secret("MOVED"), (err: unknown) => err instanceof RouteError && err.status === 302);
-  assert.ok(!seen.some((s) => s.url === "/elsewhere"));
-});
-
-test("the route config comes from the node environment and must name loopback", () => {
+test("child inputs are explicit, raw args win, and fresh repos default to main", async () => {
+  const calls: { url: string; body?: any }[] = [];
+  const routes = new NodeRoutes({ url: "http://127.0.0.1:12345", bearer: "pipe-only" }, async (url, options) => {
+    calls.push({ url: String(url), ...(options?.body ? { body: JSON.parse(String(options.body)) } : {}) });
+    return String(url).endsWith("/children")
+      ? new Response('{"run_id":"child"}', { status: 201 })
+      : new Response('{"status":"success","output":{"value":7}}');
+  });
   assert.deepEqual(
-    routeConfigFromEnv({
-      SPARKWING_NODE_URL: "http://127.0.0.1:41873",
-      SPARKWING_NODE_TOKEN: "t",
-    }),
-    {
-      baseUrl: "http://127.0.0.1:41873",
-      token: "t",
-    },
+    await routes.runPipeline(
+      "build",
+      "result",
+      { repo: "owner/child", inputs: { count: 2, enabled: false, targets: ["one", "two"] }, args: { count: "3" } },
+      new AbortController().signal,
+    ),
+    { value: 7 },
   );
-  assert.equal(routeConfigFromEnv({}), undefined, "a process bound to no node has no routes");
-  for (const url of [
-    "http://example.com:80",
-    "https://127.0.0.1:1",
-    "http://127.0.0.1",
-    "http://u:p@127.0.0.1:1",
-    "http://127.0.0.1:1/x",
-  ]) {
-    assert.throws(
-      () =>
-        routeConfigFromEnv({
-          SPARKWING_NODE_URL: url,
-          SPARKWING_NODE_TOKEN: "t",
-        }),
-      /loopback|must be http/,
-      url,
+  assert.deepEqual(calls[0]!.body, {
+    pipeline: "build",
+    repo: "owner/child",
+    branch: "main",
+    args: { count: "3", enabled: "false", targets: "one,two" },
+  });
+  assert.match(calls[1]!.url, /\/children\/child\/await\?job=result&wait_ms=60000$/);
+});
+
+test("cancelling a child wait does not send child cancellation", async () => {
+  const paths: string[] = [];
+  const abort = new AbortController();
+  const routes = new NodeRoutes({ url: "http://127.0.0.1:12345", bearer: "pipe-only" }, async (url, options) => {
+    paths.push(String(url));
+    if (paths.length === 1) return new Response('{"run_id":"child"}', { status: 201 });
+    abort.abort(new Error("stop waiting"));
+    options?.signal?.throwIfAborted();
+    throw new Error("unreachable");
+  });
+  await assert.rejects(routes.runPipeline("build", "result", {}, abort.signal), /stop waiting/);
+  assert.equal(paths.length, 2);
+  assert.ok(paths.every((path) => !path.includes("cancel")));
+});
+
+test("annotations, summaries and masks await delivery errors", async () => {
+  const signal = new AbortController().signal;
+  const bodies: any[] = [];
+  const routes = new NodeRoutes({ url: "http://127.0.0.1:12345", bearer: "pipe-only" }, async (_url, options) => {
+    bodies.push(JSON.parse(String(options?.body)));
+    return new Response('{"error":{"code":"unavailable","message":"delivery failed"}}', { status: 503 });
+  });
+  await assert.rejects(routes.annotate({ message: "note", file: "file.ts", line: 1, endLine: 3, column: 2 }, signal), /delivery failed/);
+  await assert.rejects(routes.summary("markdown", signal), /delivery failed/);
+  await assert.rejects(routes.mask("secret", signal), /delivery failed/);
+  assert.deepEqual(bodies, [
+    { message: "note", level: "info", file: "file.ts", line: 1, column: 2, end_line: 3 },
+    { markdown: "markdown" },
+    { value: "secret" },
+  ]);
+});
+
+test("child timeout ends waiting, preserves prototype-shaped input keys, and rejects invalid durations", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let entered!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const paths: string[] = [];
+  const routes = new NodeRoutes({ url: "http://127.0.0.1:12345", bearer: "pipe-only" }, async (url, options) => {
+    paths.push(String(url));
+    if (paths.length === 1) {
+      const body = JSON.parse(String(options?.body));
+      assert.equal(body.args["__proto__"], "kept");
+      return new Response('{"run_id":"child"}', { status: 201 });
+    }
+    entered();
+    return new Promise((_resolve, reject) =>
+      options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true }),
     );
-  }
-  assert.throws(() => routeConfigFromEnv({ SPARKWING_NODE_URL: "http://[::1]:1" }), /SPARKWING_NODE_TOKEN is empty/);
+  });
+  const result = routes.runPipeline(
+    "build",
+    "result",
+    { timeoutMs: 10, inputs: JSON.parse('{"__proto__":"kept"}') },
+    new AbortController().signal,
+  );
+  const rejected = assert.rejects(result, /child wait timed out/);
+  await waiting;
+  t.mock.timers.tick(10);
+  await rejected;
+  assert.equal(paths.length, 2);
+  for (const timeoutMs of [-1, NaN, 0.5])
+    await assert.rejects(
+      routes.runPipeline("build", "result", { timeoutMs }, new AbortController().signal),
+      (e: any) => e.code === "invalid_args",
+    );
 });

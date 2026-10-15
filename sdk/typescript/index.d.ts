@@ -29,7 +29,7 @@ export interface Logger { debug(message: string, attrs?: Record<string, unknown>
 /** contract: File locations let consumers link a diagnostic to source. */
 export interface Annotation { message: string; level?: Level; file?: string; line?: number; endLine?: number; column?: number; }
 /** safety: Callers branch on code; unknown codes remain ordinary failures. */
-export declare class SDKError extends Error { readonly code: string; readonly hint?: string; readonly details?: Readonly<Record<string, unknown>>; }
+export declare class SDKError extends Error { constructor(message: string, options?: { code: string; hint?: string; details?: Readonly<Record<string, unknown>> }); readonly code: string; readonly hint?: string; readonly details?: Readonly<Record<string, unknown>>; }
 /** safety: Bound operations use the hello bearer in memory and never expose it here. */
 export interface Context {
   readonly run: RunContext;
@@ -278,7 +278,7 @@ export interface EnvironmentDescription { name: string; description?: string; de
 /** contract: Failed launch and signal termination both use -1, distinguished by ExecError.terminated. */
 export declare const exitNotStarted: -1;
 /** contract: Command failure preserves output and termination cause for diagnostics. */
-export declare class ExecError extends Error { readonly command: string; readonly stdout: string; readonly stderr: string; readonly exitCode: number; readonly cause?: unknown; readonly terminated: "" | "cancellation" | "signal"; }
+export declare class ExecError extends Error { constructor(result: ExecResult, terminated?: "" | "cancellation" | "signal", cause?: unknown); readonly command: string; readonly stdout: string; readonly stderr: string; readonly exitCode: number; readonly cause?: unknown; readonly terminated: "" | "cancellation" | "signal"; }
 /** contract: A command executes only when a result method is called. */
 export interface Cmd {
   dir(path: string): this;
@@ -372,8 +372,8 @@ export declare namespace services {
 /** contract: Context-level command env is inherited until explicit command options override it. */
 export declare function withCommandEnv(ctx: Context, env: Readonly<Record<string, string>>): Context;
 /** contract: Input errors distinguish invalid author arguments from execution failures. */
-export declare class InputError extends Error { readonly cause: unknown; }
+export declare class InputError extends Error { constructor(cause: unknown); readonly cause: unknown; }
 /** contract: Verification errors preserve postcondition failure classification. */
-export declare class VerifyError extends Error { readonly cause: unknown; }
+export declare class VerifyError extends Error { constructor(cause: unknown); readonly cause: unknown; }
 /** contract: Step errors preserve the failing step and its underlying failure. */
-export declare class StepError extends Error { readonly stepId: string; readonly cause: unknown; }
+export declare class StepError extends Error { constructor(stepId: string, cause: unknown); readonly stepId: string; readonly cause: unknown; }
