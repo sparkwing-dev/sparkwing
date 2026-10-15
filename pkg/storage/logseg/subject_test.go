@@ -482,7 +482,7 @@ func TestSubjectPrefixKeepsEveryFenceDistinct(t *testing.T) {
 				s.Unit = &u
 				s.Unit.Generation += int64(i)
 			}
-			key, err := logseg.SubjectPrefix("r90", s)
+			key, err := blob.LogSubjectPrefix("r90", s)
 			if err != nil || seen[key] {
 				t.Fatalf("colliding prefix = %q, %v", key, err)
 			}
@@ -491,7 +491,7 @@ func TestSubjectPrefixKeepsEveryFenceDistinct(t *testing.T) {
 	}
 	eval := ownerSubject(blob.LogEval)
 	eval.Unit.Source.Generation++
-	prefix, err := logseg.SubjectPrefix("r90", eval)
+	prefix, err := blob.LogSubjectPrefix("r90", eval)
 	if err != nil || seen[prefix] {
 		t.Fatalf("source fence collision = %q, %v", prefix, err)
 	}

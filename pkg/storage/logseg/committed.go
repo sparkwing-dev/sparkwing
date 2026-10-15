@@ -96,8 +96,8 @@ func (r CommittedReader) Read(ctx context.Context, actor store.Actor, request bl
 }
 
 func validateRanges(request blob.LogReadRequest, view store.LogSegments) error {
-	want, err := SubjectPrefix(ClassStandard, request.Subject)
-	got, gotErr := SubjectPrefix(ClassStandard, view.Subject)
+	want, err := blob.LogSubjectPrefix(ClassStandard, request.Subject)
+	got, gotErr := blob.LogSubjectPrefix(ClassStandard, view.Subject)
 	if err != nil || gotErr != nil || got != want || (view.Complete && view.IncompleteReason != "") {
 		return blob.ErrIntegrity
 	}
@@ -108,9 +108,9 @@ func validateRanges(request blob.LogReadRequest, view store.LogSegments) error {
 		if len(parts) != 3 || parts[0] != "logs" {
 			return blob.ErrIntegrity
 		}
-		expected, err := SubjectPrefix(parts[1], request.Subject)
+		expected, err := blob.LogSubjectPrefix(parts[1], request.Subject)
 		if err != nil || seg.Index < 1 || seg.Index > int64(limits.MaxLogSegmentNumber) || seg.Offset < 0 || seg.Size <= 0 || seg.Size > math.MaxInt64-seg.Offset ||
-			seg.ObjectKey != SegmentKey(expected, int(seg.Index)) || (i > 0 && (seg.Offset != end || seg.Index != index+1 || prefix != expected)) ||
+			seg.ObjectKey != blob.LogSegmentKey(expected, int(seg.Index)) || (i > 0 && (seg.Offset != end || seg.Index != index+1 || prefix != expected)) ||
 			(i == 0 && seg.Offset > request.Offset) {
 			return blob.ErrIntegrity
 		}

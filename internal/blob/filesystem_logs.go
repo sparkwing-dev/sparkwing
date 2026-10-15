@@ -11,7 +11,6 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -56,13 +55,7 @@ func logObjectLimit(key string) (int64, error) {
 	if name == "manifest.json" {
 		return limits.LogManifestBytes, nil
 	}
-	digits, ok := strings.CutPrefix(name, "seg-")
-	if !ok {
-		return 0, fmt.Errorf("invalid log object name")
-	}
-	digits, ok = strings.CutSuffix(digits, ".ndjson.gz")
-	n, err := strconv.Atoi(digits)
-	if !ok || err != nil || n < 1 || n > limits.MaxLogSegmentNumber || fmt.Sprintf("%06d", n) != digits {
+	if _, ok := LogSegmentNumber("", name); !ok {
 		return 0, fmt.Errorf("invalid log segment number")
 	}
 	return limits.LogSegmentUploadBytes, nil

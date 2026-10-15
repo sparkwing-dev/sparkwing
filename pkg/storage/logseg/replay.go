@@ -25,16 +25,13 @@ func (v UploadVerifier) Verify(ctx context.Context, check blob.LogUploadCheck, c
 	if v.Objects == nil {
 		return fmt.Errorf("logseg: upload verification requires objects")
 	}
-	prefix, err := SubjectPrefix(class, check.Subject)
+	key, err := blob.LogObjectKey(check.Subject, class, check.Index)
 	if err != nil {
 		return err
 	}
-	if check.Index < 0 || check.Index > int64(limits.MaxLogSegmentNumber) {
-		return blob.ErrIntegrity
-	}
-	key, limit := ManifestKey(prefix), limits.LogManifestBytes
+	limit := limits.LogManifestBytes
 	if check.Index > 0 {
-		key, limit = SegmentKey(prefix, int(check.Index)), limits.LogSegmentUploadBytes
+		limit = limits.LogSegmentUploadBytes
 	}
 	digest, err := hex.DecodeString(string(check.Digest))
 	if check.Size <= 0 || check.Size > limit || err != nil || len(digest) != sha256.Size || hex.EncodeToString(digest) != string(check.Digest) {

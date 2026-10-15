@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
@@ -31,7 +33,7 @@ func TestTeamDeletionDeletesLogsAgainAfterUploadURLsLapse(t *testing.T) {
 	ctx := context.Background()
 	start := time.Now()
 	f.srv.ProcessTeamDeletions(ctx, start.Add(5*time.Minute))
-	key := logseg.SegmentKey("logs/"+logseg.ClassStandard+"/teams/acme/runs/run-1/a/a1-g1/", 1)
+	key := blob.LogSegmentKey("logs/"+logseg.ClassStandard+"/teams/acme/runs/run-1/a/a1-g1/", 1)
 	if err := objs.PutIfAbsent(ctx, key, strings.NewReader("written through a URL issued before the purge")); err != nil {
 		t.Fatal(err)
 	}

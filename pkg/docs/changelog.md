@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **storage:** (Breaking) Physical log key helpers move from `logseg` to
+  `internal/blob`. Signed log slots reserve zero for the final manifest and use
+  positive segment indexes. Store and authenticated transport binding remain pending.
+
 - **storage:** SDK and host dependency-cache keys share workspace-contained
   lockfile reads. Go module caches use the protocol resolver. Signed-data cache
   saves refresh the upload binding after retries. Refused bindings run cold.

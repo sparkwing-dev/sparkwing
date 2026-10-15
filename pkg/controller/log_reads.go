@@ -9,6 +9,8 @@ import (
 	"io"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
@@ -348,7 +350,7 @@ func (s *Server) deleteRunSegments(ctx context.Context, objs logObjectStore, tea
 		}
 	}
 	for _, class := range s.logClasses() {
-		prefix, err := logseg.RunPrefix(class, string(team), runID)
+		prefix, err := blob.LogRunPrefix(class, string(team), runID)
 		if err != nil {
 			return deleted, err
 		}

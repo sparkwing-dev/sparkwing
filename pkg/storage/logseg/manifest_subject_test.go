@@ -12,7 +12,7 @@ import (
 
 func TestOpenRejectsManifestForAnotherSubject(t *testing.T) {
 	subject := jobSubject()
-	prefix, err := logseg.SubjectPrefix(logseg.ClassStandard, subject)
+	prefix, err := blob.LogSubjectPrefix(logseg.ClassStandard, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestOpenRejectsManifestForAnotherSubject(t *testing.T) {
 				t.Fatal(err)
 			}
 			objects := newMemObjects()
-			objects.put(logseg.ManifestKey(prefix), raw)
+			objects.put(blob.LogManifestKey(prefix), raw)
 			if _, err := logseg.Open(t.Context(), objects, prefix); !errors.Is(err, logseg.ErrBadManifest) {
 				t.Fatalf("foreign manifest opened: %v", err)
 			}
@@ -54,7 +54,7 @@ func TestParseManifestRequiresTaggedSubject(t *testing.T) {
 }
 
 func TestAbandonedSealCannotChangeSubject(t *testing.T) {
-	prefix, err := logseg.SubjectPrefix(logseg.ClassStandard, jobSubject())
+	prefix, err := blob.LogSubjectPrefix(logseg.ClassStandard, jobSubject())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestSinkCopiesItsSubject(t *testing.T) {
 		if subject.Kind == blob.LogOwnerUnit {
 			want = ownerSubject(blob.LogEval)
 		}
-		prefix, err := logseg.SubjectPrefix(logseg.ClassStandard, want)
+		prefix, err := blob.LogSubjectPrefix(logseg.ClassStandard, want)
 		if err != nil {
 			t.Fatal(err)
 		}

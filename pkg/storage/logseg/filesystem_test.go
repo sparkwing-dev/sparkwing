@@ -139,11 +139,11 @@ func TestFilesystemTaggedLogRoundTrip(t *testing.T) {
 					t.Fatalf("read from %d = %q, %v", offset, got, err)
 				}
 			}
-			prefix, err := logseg.SubjectPrefix("r90", subject)
+			prefix, err := blob.LogSubjectPrefix("r90", subject)
 			if err != nil {
 				t.Fatal(err)
 			}
-			manifest, err := backend.Get(t.Context(), logseg.ManifestKey(prefix))
+			manifest, err := backend.Get(t.Context(), blob.LogManifestKey(prefix))
 			if err != nil {
 				t.Fatal(err)
 			}

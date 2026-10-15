@@ -120,4 +120,9 @@ and host bindings.
 Both backends open exact log keys for this reader. The S3 backend checks response
 lengths against the segment or manifest bound before returning a stream.
 
+Physical log keys have one owner in `internal/blob`. Signed slots use
+`LogObjectKey`: zero names the final manifest and positive indexes name immutable
+segments. The physical uploader-to-store proof remains blocked by the store's
+separate key layout and zero-based records. Component proofs use record fakes.
+
 <!-- design:end -->

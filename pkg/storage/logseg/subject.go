@@ -137,7 +137,7 @@ func (u *SubjectUploader) PutSegment(ctx context.Context, seg Segment, body []by
 	if err := u.put(ctx, int64(seg.N), slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {
 		return err
 	}
-	record := store.Segment{Index: int64(seg.N), Offset: u.bytes, Size: seg.Bytes, Digest: seg.SHA256, ObjectKey: SegmentKey(u.prefix, seg.N)}
+	record := store.Segment{Index: int64(seg.N), Offset: u.bytes, Size: seg.Bytes, Digest: seg.SHA256, ObjectKey: blob.LogSegmentKey(u.prefix, seg.N)}
 	if err := u.commit(ctx, []store.Segment{record}, false, ""); err != nil {
 		return err
 	}
@@ -186,8 +186,8 @@ func (u *SubjectUploader) sign(ctx context.Context, first int64) error {
 		return err
 	}
 	now = time.Now()
-	prefix, err := SubjectPrefix(batch.RetentionClass, batch.Subject)
-	want, wantErr := SubjectPrefix(batch.RetentionClass, u.data.Subject)
+	prefix, err := blob.LogSubjectPrefix(batch.RetentionClass, batch.Subject)
+	want, wantErr := blob.LogSubjectPrefix(batch.RetentionClass, u.data.Subject)
 	if err != nil || wantErr != nil || prefix != want || len(batch.Segments) != count || !validLogURL(batch.ManifestURL) ||
 		!batch.ExpiresAt.After(now) || (u.prefix != "" && prefix != u.prefix) {
 		return blob.ErrIntegrity
@@ -263,8 +263,8 @@ func (u *SubjectUploader) PutManifest(ctx context.Context, m Manifest) error {
 		}
 	}
 	if m.Subject != nil {
-		prefix, err := SubjectPrefix(ClassStandard, *m.Subject)
-		want, wantErr := SubjectPrefix(ClassStandard, u.data.Subject)
+		prefix, err := blob.LogSubjectPrefix(ClassStandard, *m.Subject)
+		want, wantErr := blob.LogSubjectPrefix(ClassStandard, u.data.Subject)
 		if err != nil || wantErr != nil || prefix != want {
 			return blob.ErrIntegrity
 		}
@@ -300,7 +300,7 @@ func (u *SubjectUploader) PutManifest(ctx context.Context, m Manifest) error {
 	var records []store.Segment
 	var offset int64
 	for _, seg := range u.segments {
-		records = append(records, store.Segment{Index: int64(seg.N), Offset: offset, Size: seg.Bytes, Digest: seg.SHA256, ObjectKey: SegmentKey(u.prefix, seg.N)})
+		records = append(records, store.Segment{Index: int64(seg.N), Offset: offset, Size: seg.Bytes, Digest: seg.SHA256, ObjectKey: blob.LogSegmentKey(u.prefix, seg.N)})
 		offset += seg.Bytes
 	}
 	if err := u.commit(ctx, records, true, m.Reason); err != nil {

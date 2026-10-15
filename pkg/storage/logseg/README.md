@@ -10,7 +10,7 @@ the immutable source generation.
 so changes to the caller's value cannot retag the log. Every stored manifest
 requires a valid subject. Flat run, node, attempt and generation fields are
 removed. `Open` checks that the manifest's subject produces the requested
-`SubjectPrefix`. `SealAbandoned` checks that binding before reading or writing
+`blob.LogSubjectPrefix`. `SealAbandoned` checks that binding before reading or writing
 objects. `AttemptPrefix` is removed.
 
 `SubjectUploader` verifies compressed bytes, raw size and line coverage before
@@ -81,3 +81,14 @@ digest are unknown. The existing job-only controller and host transport uses
 tagged manifest identities and prefixes. It still signs individual segments.
 Owner-unit transport, batch-signing routes and transactional record bindings
 remain separate integration work.
+
+`internal/blob` owns physical log keys. `LogObjectKey` reserves index zero for
+the final manifest and positive indexes for segments. Signing, verification and
+reads use its prefix and filename helpers. The former `logseg` key helpers are
+removed. The store can use this owner without importing `logseg`.
+
+The filesystem-records acceptance cell joins signed uploads to real SQLite
+records, reopens the store and checks offset reads and revoked readers. It is
+blocked because the store uses a separate hashed namespace and starts segment
+records at zero. The first real commit refuses the signed segment. The component
+checks use record fakes and do not close that integration gap.

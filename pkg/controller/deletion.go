@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -348,7 +347,7 @@ func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team) error {
 			return err
 		}
 		for _, class := range classes {
-			prefix := logseg.ClassPrefix(class) + "teams/" + string(team) + "/"
+			prefix := blob.LogClassPrefix(class) + "teams/" + string(team) + "/"
 			if _, err := objs.deletePrefix(ctx, prefix); err != nil {
 				return fmt.Errorf("delete the team's log segments under %s: %w", prefix, err)
 			}

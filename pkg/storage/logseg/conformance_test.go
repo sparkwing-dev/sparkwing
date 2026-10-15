@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/conformance"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
@@ -28,7 +30,7 @@ type segmentNode struct {
 }
 
 func (s *segmentLogStore) prefix(runID, nodeID string) string {
-	p, err := logseg.SubjectPrefix(logseg.ClassStandard, keySubject("acme", runID, nodeID, 1, 1))
+	p, err := blob.LogSubjectPrefix(logseg.ClassStandard, keySubject("acme", runID, nodeID, 1, 1))
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -96,7 +98,7 @@ func (s *segmentLogStore) Stream(context.Context, string, string) (io.ReadCloser
 }
 
 func (s *segmentLogStore) DeleteRun(ctx context.Context, runID string) error {
-	run, err := logseg.RunPrefix(logseg.ClassStandard, "acme", runID)
+	run, err := blob.LogRunPrefix(logseg.ClassStandard, "acme", runID)
 	if err != nil {
 		return err
 	}

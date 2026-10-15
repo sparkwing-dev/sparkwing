@@ -240,9 +240,11 @@ func (u *LogSegmentUploader) request(ctx context.Context, req store.LogSegmentRe
 	if len(parts) < 4 {
 		return grant, blob.ErrIntegrity
 	}
-	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: parts[3], RunID: u.runID,
-		Attempt: &runspec.AttemptIdentity{Team: parts[3], RunID: u.runID, NodeID: u.nodeID, Attempt: grant.Attempt, Generation: grant.Generation}}
-	prefix, err := logseg.SubjectPrefix(parts[1], subject)
+	subject := blob.LogSubject{
+		Kind: blob.LogJobAttempt, Team: parts[3], RunID: u.runID,
+		Attempt: &runspec.AttemptIdentity{Team: parts[3], RunID: u.runID, NodeID: u.nodeID, Attempt: grant.Attempt, Generation: grant.Generation},
+	}
+	prefix, err := blob.LogSubjectPrefix(parts[1], subject)
 	if err != nil || prefix != grant.Prefix || (req.Attempt != 0 && (req.Attempt != grant.Attempt || req.Generation != grant.Generation)) {
 		return grant, blob.ErrIntegrity
 	}
@@ -280,12 +282,12 @@ func (u *LogSegmentUploader) PutSegment(ctx context.Context, seg logseg.Segment,
 // named.
 func (u *LogSegmentUploader) PutManifest(ctx context.Context, m logseg.Manifest) error {
 	subject := u.Subject()
-	want, err := logseg.SubjectPrefix(logseg.ClassStandard, subject)
+	want, err := blob.LogSubjectPrefix(logseg.ClassStandard, subject)
 	if err != nil {
 		return err
 	}
 	if m.Subject != nil {
-		got, err := logseg.SubjectPrefix(logseg.ClassStandard, *m.Subject)
+		got, err := blob.LogSubjectPrefix(logseg.ClassStandard, *m.Subject)
 		if err != nil || got != want {
 			return blob.ErrIntegrity
 		}

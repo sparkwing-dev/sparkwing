@@ -103,7 +103,7 @@ func (s *Server) checkLogLifecycle(ctx context.Context, d *directUploadS3) map[s
 	}
 	for _, class := range s.logClasses() {
 		days, _ := blob.LogClassDays(class)
-		prefix := d.prefix + "/" + logseg.ClassPrefix(class)
+		prefix := d.prefix + "/" + blob.LogClassPrefix(class)
 		if !blob.LogLifecycleExpires(rules, prefix, days) {
 			missing[class] = fmt.Errorf("bucket %s has no enabled lifecycle rule expiring prefix %q after %d days; add one",
 				d.bucket, prefix, days)

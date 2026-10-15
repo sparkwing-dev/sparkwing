@@ -60,5 +60,6 @@ func TestStorage(t *testing.T) {
 	t.Run("storage-components/dependency-key-contract", checkStorageDependencyKeys)
 	t.Run("storage-components/dependency-key-containment", checkStorageKeyContainment)
 	t.Run("storage-components/go-modules-resolver", checkStorageGoModulesResolver)
+	t.Run("storage-log-segments-and-fallback/filesystem-records", checkStorageFilesystemLogRecords)
 	pendingScenarios(t, "storage")
 }

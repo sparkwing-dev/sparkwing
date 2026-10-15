@@ -170,11 +170,11 @@ func TestS3LogConflictCannotAuthorizeCommit(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			prefix, err := logseg.SubjectPrefix("r90", data.Subject)
+			prefix, err := blob.LogSubjectPrefix("r90", data.Subject)
 			if err != nil {
 				t.Fatal(err)
 			}
-			key := logseg.SegmentKey(prefix, 1)
+			key := blob.LogSegmentKey(prefix, 1)
 			seg, body := subjectSegment(t, 1, "line\n")
 			switch fault {
 			case "segment conflict":
@@ -185,7 +185,7 @@ func TestS3LogConflictCannotAuthorizeCommit(t *testing.T) {
 				if err := put(); err != nil {
 					t.Fatal(err)
 				}
-				key = logseg.ManifestKey(prefix)
+				key = blob.LogManifestKey(prefix)
 				objects.objects[key] = []byte("another manifest")
 				put = func() error {
 					return u.PutManifest(t.Context(), logseg.Manifest{Status: logseg.StatusComplete, Segments: []logseg.Segment{seg}})

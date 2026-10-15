@@ -29,7 +29,7 @@ func (f *committedRecords) ReadLogSegments(_ context.Context, actor store.Actor,
 
 func committedFixture(t *testing.T, subject blob.LogSubject) (logseg.CommittedReader, *committedRecords, *memObjects, string) {
 	t.Helper()
-	prefix, err := logseg.SubjectPrefix("r90", subject)
+	prefix, err := blob.LogSubjectPrefix("r90", subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func committedFixture(t *testing.T, subject blob.LogSubject) (logseg.CommittedRe
 	for i := 1; i <= 3; i++ {
 		line := strings.Repeat(string(rune('a'+i-1)), i) + "\n"
 		seg, body := subjectSegment(t, i, line)
-		key := logseg.SegmentKey(prefix, i)
+		key := blob.LogSegmentKey(prefix, i)
 		objects.put(key, body)
 		f.view.Segments = append(f.view.Segments, store.Segment{Index: int64(i), Offset: offset, Size: seg.Bytes, Digest: seg.SHA256, ObjectKey: key})
 		offset += seg.Bytes

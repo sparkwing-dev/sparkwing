@@ -13,6 +13,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -30,6 +31,22 @@ func (r *storageLogRecords) RecordSegments(_ context.Context, q store.SegmentCom
 		r.view.Segments = append(r.view.Segments, q.Segments...)
 	}
 	return nil
+}
+
+func checkStorageFilesystemLogRecords(t *testing.T) {
+	t.Skip("W1 record keys and zero-based indexes differ from C1 signed log slots; see handoffs.md")
+	storageProperty(t, func(seed [16]byte, ordinal uint8, lost bool) bool {
+		objects, _ := storageFilesystem(t)
+		signing := &storageLogTransport{objects: objects, class: logseg.ClassFree}
+		var transport http.RoundTripper = storageObjectHTTP{objects}
+		if lost {
+			transport = storageLostResponse{storageObjectHTTP{objects}}
+		}
+		if err := acceptance.CheckBlobLogRecords(t.Context(), t.TempDir(), signing, objects, blob.TransferClient{Transport: transport}, seed, 1+int(ordinal%17)); err != nil {
+			t.Fatal(err)
+		}
+		return true
+	})
 }
 
 func (r *storageLogRecords) ReadLogSegments(context.Context, store.Actor, blob.LogReadRequest) (store.LogSegments, error) {
@@ -75,8 +92,10 @@ func storageLogSegment(t *testing.T, number int, body []byte) (logseg.Segment, [
 		t.Fatal(err)
 	}
 	raw := compressed.Bytes()
-	return logseg.Segment{N: number, FirstSeq: int64(number), LastSeq: int64(number), Lines: 1,
-		Bytes: int64(len(body)), StoredBytes: int64(len(raw)), SHA256: string(storageDigest(raw))}, raw
+	return logseg.Segment{
+		N: number, FirstSeq: int64(number), LastSeq: int64(number), Lines: 1,
+		Bytes: int64(len(body)), StoredBytes: int64(len(raw)), SHA256: string(storageDigest(raw)),
+	}, raw
 }
 
 func checkStorageLogs(t *testing.T) {
@@ -104,8 +123,10 @@ func checkStorageLogs(t *testing.T) {
 		if lost {
 			transport = storageLostResponse{storageObjectHTTP{f}}
 		}
-		uploader, err := logseg.NewSubjectUploader(logseg.Data{Subject: subject, Transport: signing,
-			HTTPClient: blob.TransferClient{Transport: transport}, Records: records})
+		uploader, err := logseg.NewSubjectUploader(logseg.Data{
+			Subject: subject, Transport: signing,
+			HTTPClient: blob.TransferClient{Transport: transport}, Records: records,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}

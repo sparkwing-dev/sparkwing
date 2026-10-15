@@ -538,6 +538,13 @@ an error. A changed payload, missing object or failed close cannot recover.
 subject, proxy bytes through the controller, meter egress and apply the log
 exception to download caps. Persisted segments fill gaps or stalls in the ring.
 
+`blob.LogObjectKey(subject, class, index)` owns the physical key for every signed
+log slot. Index zero names the final manifest. Physical segment slots start at
+one in signing and verification.
+`LogSubjectPrefix`, `LogSegmentKey` and `LogManifestKey` are its shared key builders.
+The physical layout is `logs/<class>/teams/<team>/runs/<run>/`, followed by the
+tagged job or unit fence. Persisted references must name those physical objects.
+
 The `storage-hasmany-read-set/store-data-sqlite` proof uses exact imported job
 attempts under a preseeded publication capability. It checks hidden unrelated and
 foreign existence, budget expiry, reservation and failed-commit refusal, independent

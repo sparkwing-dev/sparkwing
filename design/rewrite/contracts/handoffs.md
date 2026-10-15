@@ -2,6 +2,30 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+## From W7 physical log integration
+
+**W1 log slot contract.** W7 now provides `blob.LogObjectKey(subject, class, index)`
+and the shared prefix/filename helpers in `internal/blob/log_keys.go`. They have
+no store dependency. Index zero selects the manifest. Segment indexes start at
+one in the signed log contract. The `logseg` copies are deleted and all
+their callers use the physical owner.
+
+The new `CheckBlobLogRecords` proof joins the real signed filesystem uploader to
+`Tenant.RecordSegments`, then reopens SQLite and checks verified offset reads and
+revocation. It fails on the first segment with
+`log segment object belongs to another signing slot`. `LogSegmentObjectKey`
+instead derives `teams/<team>/logs/<class>/<run>/<subject-hash>/<index>`, and
+`appendSegmentsTx` starts records at zero. W1 must settle the record-slot contract
+before this integration can pass. W7 recommends using the shared physical key
+owner, starting records at one and porting the store-only zero-based fixtures.
+That avoids a second layout or an index translation. Remove the explicit skip in
+`checkStorageFilesystemLogRecords` when that boundary passes. Command:
+`go test -p 4 ./tests/acceptance -run '^TestStorage/storage-log-segments-and-fallback/filesystem-records$' -count=1`.
+
+The initial failure was executed before the explicit skip was added. The cell
+remains blocked and does not count as passing acceptance evidence. W7 changed
+its own helper contract only. W1's persistence implementation is untouched.
+
 ## From W7 manifest admission
 
 **W2 verified manifest binding.** `storage.BlobManifests{Objects: objects}` now

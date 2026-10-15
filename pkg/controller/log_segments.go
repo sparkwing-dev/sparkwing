@@ -404,7 +404,7 @@ func (s *Server) handleLogSegments(w http.ResponseWriter, r *http.Request) {
 		s.writeStorageRefusal(w, r, err)
 		return
 	}
-	u, headers, err := objs.presignPut(r.Context(), r, team, logseg.SegmentKey(rec.Prefix, req.N), req.Size, req.MD5)
+	u, headers, err := objs.presignPut(r.Context(), r, team, blob.LogSegmentKey(rec.Prefix, req.N), req.Size, req.MD5)
 	if err != nil {
 		s.writeInternalError(w, r, "presign a log segment", err)
 		return
@@ -498,7 +498,7 @@ func (s *Server) handleLogManifest(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "encode a log manifest", err)
 		return
 	}
-	switch err := objs.putIfAbsent(r.Context(), logseg.ManifestKey(rec.Prefix), body); {
+	switch err := objs.putIfAbsent(r.Context(), blob.LogManifestKey(rec.Prefix), body); {
 	case errors.Is(err, logseg.ErrSealed):
 		writeError(w, http.StatusPreconditionFailed, err)
 		return
@@ -543,7 +543,7 @@ func (s *Server) openNodeLog(w http.ResponseWriter, r *http.Request, want store.
 		writeError(w, http.StatusServiceUnavailable, err)
 		return store.NodeLog{}, false
 	}
-	if want.Prefix, err = logseg.SubjectPrefix(class, nodeLogSubject(want)); err != nil {
+	if want.Prefix, err = blob.LogSubjectPrefix(class, nodeLogSubject(want)); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return store.NodeLog{}, false
 	}

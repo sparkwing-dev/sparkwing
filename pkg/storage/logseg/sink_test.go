@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 )
@@ -298,7 +300,7 @@ func TestReaderStopsAtASegmentFailingItsDigest(t *testing.T) {
 	if _, err := s.Close(context.Background(), logseg.End{}); err != nil {
 		t.Fatal(err)
 	}
-	objs.put(logseg.SegmentKey(testPrefix, 2), []byte("tampered"))
+	objs.put(blob.LogSegmentKey(testPrefix, 2), []byte("tampered"))
 	l, got := readAll(t, objs, storage.ReadOpts{})
 	if got != line(1) || l.Broken != 2 {
 		t.Fatalf("read %q, broken %d", got, l.Broken)

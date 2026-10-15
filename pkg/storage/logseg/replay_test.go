@@ -40,13 +40,13 @@ func TestLogUploadReplayVerifiesExactObject(t *testing.T) {
 			if err := verifier.Verify(t.Context(), check, "r90"); err != nil {
 				t.Fatal(err)
 			}
-			prefix, err := logseg.SubjectPrefix("r90", subject)
+			prefix, err := blob.LogSubjectPrefix("r90", subject)
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := logseg.ManifestKey(prefix)
+			want := blob.LogManifestKey(prefix)
 			if index > 0 {
-				want = logseg.SegmentKey(prefix, int(index))
+				want = blob.LogSegmentKey(prefix, int(index))
 			}
 			if objects.key != want || !objects.body.closed {
 				t.Fatalf("verification key = %q, want %q, closed = %v", objects.key, want, objects.body.closed)

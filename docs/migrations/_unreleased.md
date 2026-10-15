@@ -8,7 +8,8 @@
   trigger, plan or eval unit. Job keys include `/jobs/`. Owner keys include
   `/units/`. Readers reject a manifest whose subject differs from its key.
 - **Upgrade steps:** pass `Options.Subject` when creating a log sink and use
-  `SubjectPrefix` for object keys. Update readers and writers together. Existing
+  `blob.LogObjectKey` for signed slots and `blob.LogSubjectPrefix` for prefixes.
+  The former `logseg` key helpers are removed. Update readers and writers together. Existing
   untagged manifests require a fresh run. There is no old-format reader.
 
 ## Direct source fetches own their Git objects

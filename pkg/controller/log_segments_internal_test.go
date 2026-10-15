@@ -348,8 +348,10 @@ func TestUnrecordedLogObjectsAreNotReadable(t *testing.T) {
 	f := newLogSegmentFixture(t)
 	ctx := t.Context()
 	objs := f.srv.logObjects()
-	prefix, err := logseg.SubjectPrefix(logseg.ClassFree, blob.LogSubject{Kind: blob.LogJobAttempt, Team: string(store.DefaultTeam), RunID: "run-d",
-		Attempt: &runspec.AttemptIdentity{Team: string(store.DefaultTeam), RunID: "run-d", NodeID: "b", Attempt: 1, Generation: 1}})
+	prefix, err := blob.LogSubjectPrefix(logseg.ClassFree, blob.LogSubject{
+		Kind: blob.LogJobAttempt, Team: string(store.DefaultTeam), RunID: "run-d",
+		Attempt: &runspec.AttemptIdentity{Team: string(store.DefaultTeam), RunID: "run-d", NodeID: "b", Attempt: 1, Generation: 1},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,14 +360,14 @@ func TestUnrecordedLogObjectsAreNotReadable(t *testing.T) {
 	_, _ = zw.Write([]byte("exported line\n"))
 	_ = zw.Close()
 	sum := sha256.Sum256(gz.Bytes())
-	if err := objs.putIfAbsent(ctx, logseg.SegmentKey(prefix, 1), gz.Bytes()); err != nil {
+	if err := objs.putIfAbsent(ctx, blob.LogSegmentKey(prefix, 1), gz.Bytes()); err != nil {
 		t.Fatal(err)
 	}
 	manifest, _ := logseg.Manifest{
 		Version: logseg.ManifestVersion, Subject: new(nodeLogSubject(store.NodeLog{Team: store.DefaultTeam, RunID: "run-d", NodeID: "b", Attempt: 1, Generation: 1})), Status: logseg.StatusComplete,
 		Lines: 1, Segments: []logseg.Segment{{N: 1, FirstSeq: 1, LastSeq: 1, Lines: 1, SHA256: hex.EncodeToString(sum[:])}},
 	}.Marshal()
-	if err := objs.putIfAbsent(ctx, logseg.ManifestKey(prefix), manifest); err != nil {
+	if err := objs.putIfAbsent(ctx, blob.LogManifestKey(prefix), manifest); err != nil {
 		t.Fatal(err)
 	}
 	logs := f.srv.dashboardLogs(store.DefaultTeam)
@@ -775,7 +777,7 @@ func TestALostSegmentReadsAndReportsAsIncomplete(t *testing.T) {
 				t.Fatal(err)
 			}
 			objs := f.srv.logObjects()
-			if err := damage(ctx, objs.(fsLogObjects), logseg.SegmentKey(rec.Prefix, 2)); err != nil {
+			if err := damage(ctx, objs.(fsLogObjects), blob.LogSegmentKey(rec.Prefix, 2)); err != nil {
 				t.Fatal(err)
 			}
 			logs := segmentLogs{s: f.srv, team: store.DefaultTeam, objs: objs}
@@ -899,7 +901,7 @@ func TestPruningCountsTheBytesItDeletes(t *testing.T) {
 		if _, err := f.st.OpenNodeLog(ctx, store.NodeLog{Team: store.DefaultTeam, RunID: runID, NodeID: "a", Attempt: 1, Generation: 1, Prefix: prefix}, at); err != nil {
 			t.Fatal(err)
 		}
-		if err := objs.putIfAbsent(ctx, logseg.SegmentKey(prefix, 1), bytes.Repeat([]byte("x"), 100)); err != nil {
+		if err := objs.putIfAbsent(ctx, blob.LogSegmentKey(prefix, 1), bytes.Repeat([]byte("x"), 100)); err != nil {
 			t.Fatal(err)
 		}
 		prefixes[runID] = prefix
@@ -922,8 +924,10 @@ func sealedAttempt(t *testing.T, f logSegmentFixture, runID string, attempt, gen
 	t.Helper()
 	ctx := t.Context()
 	objs := f.srv.logObjects()
-	prefix, err := logseg.SubjectPrefix(logseg.ClassStandard, blob.LogSubject{Kind: blob.LogJobAttempt, Team: string(store.DefaultTeam), RunID: runID,
-		Attempt: &runspec.AttemptIdentity{Team: string(store.DefaultTeam), RunID: runID, NodeID: "a", Attempt: attempt, Generation: generation}})
+	prefix, err := blob.LogSubjectPrefix(logseg.ClassStandard, blob.LogSubject{
+		Kind: blob.LogJobAttempt, Team: string(store.DefaultTeam), RunID: runID,
+		Attempt: &runspec.AttemptIdentity{Team: string(store.DefaultTeam), RunID: runID, NodeID: "a", Attempt: attempt, Generation: generation},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -935,7 +939,7 @@ func sealedAttempt(t *testing.T, f logSegmentFixture, runID string, attempt, gen
 	if err := zw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := objs.putIfAbsent(ctx, logseg.SegmentKey(prefix, 1), gz.Bytes()); err != nil {
+	if err := objs.putIfAbsent(ctx, blob.LogSegmentKey(prefix, 1), gz.Bytes()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := logseg.SealAbandoned(ctx, objs, prefix, logseg.Manifest{Subject: new(nodeLogSubject(store.NodeLog{Team: store.DefaultTeam, RunID: runID, NodeID: "a", Attempt: attempt, Generation: generation}))},

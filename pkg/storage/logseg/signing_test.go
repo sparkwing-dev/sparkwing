@@ -44,17 +44,17 @@ func TestLogBatchSigning(t *testing.T) {
 				if len(batch.Segments) != 16 || !reflect.DeepEqual(batch.Subject, subject) || batch.RetentionClass != class || !batch.ExpiresAt.Equal(now.Add(15*time.Minute)) || !reflect.DeepEqual(checked, []string{class}) {
 					t.Fatalf("batch = %+v, lifecycle = %v", batch, checked)
 				}
-				prefix, err := logseg.SubjectPrefix(class, subject)
+				prefix, err := blob.LogSubjectPrefix(class, subject)
 				if err != nil {
 					t.Fatal(err)
 				}
 				for i, slot := range batch.Segments {
-					key := logseg.SegmentKey(prefix, 17+i)
+					key := blob.LogSegmentKey(prefix, 17+i)
 					if slot.Index != int64(17+i) || slot.URL != "https://objects.test/"+key || slot.Headers["X-Object-Key"] != key || !slot.ExpiresAt.Equal(batch.ExpiresAt) || backend.keys[i] != key || !backend.expires[i].Equal(batch.ExpiresAt) {
 						t.Fatalf("slot %d = %+v", i, slot)
 					}
 				}
-				if len(backend.keys) != 17 || backend.keys[16] != logseg.ManifestKey(prefix) || batch.ManifestURL != "https://objects.test/"+backend.keys[16] || batch.ManifestHeaders["X-Object-Key"] != backend.keys[16] {
+				if len(backend.keys) != 17 || backend.keys[16] != blob.LogManifestKey(prefix) || batch.ManifestURL != "https://objects.test/"+backend.keys[16] || batch.ManifestHeaders["X-Object-Key"] != backend.keys[16] {
 					t.Fatalf("manifest = %q, keys = %v", batch.ManifestURL, backend.keys)
 				}
 				if batch.Subject.Attempt != nil {

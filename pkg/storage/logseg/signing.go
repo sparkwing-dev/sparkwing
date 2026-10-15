@@ -38,7 +38,7 @@ func (s BatchSigner) Sign(ctx context.Context, request blob.LogSigningRequest, c
 		return blob.LogUploadBatch{}, fmt.Errorf("logseg: invalid segment signing range")
 	}
 	subject := cloneSubject(request.Subject)
-	prefix, err := SubjectPrefix(class, subject)
+	prefix, err := blob.LogSubjectPrefix(class, subject)
 	if err != nil {
 		return blob.LogUploadBatch{}, err
 	}
@@ -55,13 +55,13 @@ func (s BatchSigner) Sign(ctx context.Context, request blob.LogSigningRequest, c
 			return blob.LogUploadBatch{}, err
 		}
 		index := request.FirstSegment + int64(i)
-		u, headers, err := s.Objects.SignLogPut(ctx, SegmentKey(prefix, int(index)), batch.ExpiresAt)
+		u, headers, err := s.Objects.SignLogPut(ctx, blob.LogSegmentKey(prefix, int(index)), batch.ExpiresAt)
 		if err != nil {
 			return blob.LogUploadBatch{}, err
 		}
 		batch.Segments = append(batch.Segments, blob.LogUploadURL{Index: index, URL: u, Headers: headers, ExpiresAt: batch.ExpiresAt})
 	}
-	batch.ManifestURL, batch.ManifestHeaders, err = s.Objects.SignLogPut(ctx, ManifestKey(prefix), batch.ExpiresAt)
+	batch.ManifestURL, batch.ManifestHeaders, err = s.Objects.SignLogPut(ctx, blob.LogManifestKey(prefix), batch.ExpiresAt)
 	if err != nil {
 		return blob.LogUploadBatch{}, err
 	}

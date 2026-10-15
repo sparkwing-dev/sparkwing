@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 )
@@ -104,7 +106,7 @@ func (u *memUploader) PutSegment(_ context.Context, seg logseg.Segment, body []b
 	if refuse {
 		return errUnreachable
 	}
-	u.objs.put(logseg.SegmentKey(u.prefix, seg.N), body)
+	u.objs.put(blob.LogSegmentKey(u.prefix, seg.N), body)
 	u.stored <- seg.N
 	return nil
 }
@@ -120,7 +122,7 @@ func (u *memUploader) PutManifest(ctx context.Context, m logseg.Manifest) error 
 	if err != nil {
 		return err
 	}
-	return u.objs.putIfAbsent(ctx, logseg.ManifestKey(u.prefix), raw)
+	return u.objs.putIfAbsent(ctx, blob.LogManifestKey(u.prefix), raw)
 }
 
 func (u *memUploader) kill() {
