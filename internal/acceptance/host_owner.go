@@ -49,7 +49,7 @@ func (s *ownerSealStore) AcceptPlan(_ context.Context, input store.PlanAcceptanc
 		return store.AcceptedPlan{}, errors.New("host replaced intake")
 	}
 	s.row.Plan, s.row.PlanHash = input.Seal.Plan, ownerPlanHash
-	s.row.Spec = &runspec.Spec{Request: input.Seal.Request, Hash: "spec", PlanHash: ownerPlanHash}
+	s.row.Spec = &runspec.Spec{Request: input.Seal.Request, Hash: "spec", PlanHash: ownerPlanHash, Resolved: input.Seal.Resolved}
 	return store.AcceptedPlan{Spec: *s.row.Spec, Plan: s.row.Plan, PlanHash: s.row.PlanHash}, nil
 }
 

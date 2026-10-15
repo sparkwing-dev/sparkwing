@@ -17,6 +17,8 @@ func pendingScenarios(t *testing.T, group string) {
 		count++
 		t.Run(scenario.ID, func(t *testing.T) {
 			switch scenario.ID {
+			case "credentials-secret-identifiers":
+				t.Run("hermetic-planning-defaults", acceptance.CheckPlanningDefaults)
 			case "lifecycle-approval-decisions-and-owner-rights":
 				t.Run("hermetic-policy-evaluation", acceptance.CheckOwnerApprovalPolicies)
 			case "lifecycle-generator-barrier":

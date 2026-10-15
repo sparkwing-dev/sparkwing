@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -62,12 +63,16 @@ func (s *executorSession) call(ctx context.Context, request nodeproto.Request, r
 }
 
 func (h *sdkCode) hello(ctx context.Context, session *executorSession, input NodeInput) error {
+	return sdkHello(ctx, session, input.Engine.Identity, input.GrantedRunner, &input.RouteBinding)
+}
+
+func sdkHello(ctx context.Context, session *executorSession, identity engine.Identity, runner nodeproto.RunnerIdentity, binding *nodeproto.ProcessBinding) error {
 	var hello nodeproto.HelloResult
-	err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: input.Engine.Identity.Version}, Runner: &input.GrantedRunner, Binding: &input.RouteBinding}, &hello)
+	err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: identity.Version}, Runner: &runner, Binding: binding}, &hello)
 	if err != nil {
 		return err
 	}
-	if hello.Protocol != nodeproto.Version || hello.SDK.Language != string(input.Engine.Identity.Pin.SDK) || strings.TrimPrefix(hello.SDK.Version, "v") != strings.TrimPrefix(input.Engine.Identity.Pin.Version, "v") {
+	if hello.Protocol != nodeproto.Version || hello.SDK.Language != string(identity.Pin.SDK) || strings.TrimPrefix(hello.SDK.Version, "v") != strings.TrimPrefix(identity.Pin.Version, "v") {
 		return executorError(apierr.ProtocolMismatch, "SDK hello does not match the sealed engine and SDK pin")
 	}
 	return nil

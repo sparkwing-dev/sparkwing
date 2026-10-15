@@ -17,7 +17,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
 func protocolTestCodec(line []byte) (nodeproto.Frame, error) {
@@ -412,8 +415,11 @@ func TestProtocolSessionChild(t *testing.T) {
 				version++
 			}
 			sdkVersion := "test"
-			if mode == "owner_expand" || mode == "owner_policy" {
+			if mode == "owner_expand" || mode == "owner_policy" || mode == "planner" {
 				sdkVersion = "v1.0.0"
+			}
+			if mode == "planner" && request.Binding != nil {
+				os.Exit(8)
 			}
 			reply(request, nodeproto.HelloResult{Protocol: version, SDK: nodeproto.SDKIdentity{Language: "go", Version: sdkVersion}, Features: []string{}})
 			if mode == "blocked" {
@@ -428,6 +434,22 @@ func TestProtocolSessionChild(t *testing.T) {
 			continue
 		}
 		switch mode {
+		case "planner":
+			switch request.Op {
+			case nodeproto.OpDescribe:
+				secret := "private-plan-default"
+				send(nodeproto.FrameLog{Level: "info", Message: secret, Attrs: json.RawMessage(`{"escaped":"private-plan-def\u0061ult"}`)})
+				fmt.Fprintln(os.Stdout, secret)
+				fmt.Fprintln(os.Stderr, secret)
+				reply(request, nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{{Name: "build", Args: []nodeproto.ArgumentDescription{{Name: "token", Secret: true, Default: &secret}}}}})
+			case nodeproto.OpPlan:
+				if request.Args["token"] != "private-plan-default" || request.Run.RunID != "run" {
+					os.Exit(9)
+				}
+				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "job"}}})
+			default:
+				os.Exit(10)
+			}
 		case "owner_policy":
 			switch request.Op {
 			case nodeproto.OpPlan:
@@ -517,6 +539,101 @@ func TestProtocolSessionChild(t *testing.T) {
 		default:
 			reply(request, map[string]bool{})
 		}
+	}
+}
+
+func TestSDKPlanningNativeProcessesMaskStreamsAndReusePlanCache(t *testing.T) {
+	p, input, f, _ := sdkPlanningFixture(t)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.Entry.Command = []string{exe, "-test.run=^TestProtocolSessionChild$", "--", "planner"}
+	input.Entry.Engine.Identity.Pin.SDK, input.Entry.Engine.Identity.Pin.Version = engine.GoSDK, "v1.0.0"
+	p.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+		return input.Entry.Engine, nil
+	}
+	var mu sync.Mutex
+	var logs []nodeproto.FrameLog
+	p.Log = func(_ context.Context, record nodeproto.FrameLog) error {
+		mu.Lock()
+		defer mu.Unlock()
+		logs = append(logs, record)
+		return nil
+	}
+	var sessions []*ProtocolSession
+	cleaned := 0
+	cfg := ProtocolSessionConfig{Environment: []string{"GORACE=atexit_sleep_ms=0"}, ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, RunCleanups: func(context.Context) error { cleaned++; return nil }}
+	p.Start = func(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+		process, err := cfg.StartPlanning(ctx, input, log)
+		if process != nil {
+			sessions = append(sessions, process.(*ProtocolSession))
+		}
+		return process, err
+	}
+	for i := range 2 {
+		prepared, err := p.Prepare(t.Context(), input, f.input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := PlanInitial(t.Context(), prepared.Input, prepared.Functions)
+		if err != nil || result.CacheHit != (i == 1) {
+			t.Fatalf("plan %d = %+v, %v", i, result, err)
+		}
+	}
+	if len(sessions) != 3 || cleaned != 3 {
+		t.Fatalf("processes = %d, cleanups = %d", len(sessions), cleaned)
+	}
+	for _, session := range sessions {
+		if session.cmd.ProcessState == nil {
+			t.Fatal("planner returned with a live SDK process")
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(logs) < 6 {
+		t.Fatalf("lost describe streams: %+v", logs)
+	}
+	for _, record := range logs {
+		if strings.Contains(record.Message, "private") || strings.Contains(string(record.Attrs), "private") {
+			t.Fatalf("unmasked planning log: %+v", record)
+		}
+	}
+}
+
+func TestProtocolSessionFailedStartupRevokesDelegatedRoute(t *testing.T) {
+	for _, mode := range []string{"missing_command", "cancelled", "exec_failure", "adapter"} {
+		t.Run(mode, func(t *testing.T) {
+			revoked := 0
+			revokeErr := errors.New("revocation failed")
+			cfg := ProtocolSessionConfig{Command: []string{"/missing-sdk-entry"}, Revoke: func() error { revoked++; return revokeErr }}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if mode == "missing_command" {
+				cfg.Command = nil
+			}
+			if mode == "cancelled" {
+				cancel()
+			}
+			var err error
+			if mode == "adapter" {
+				process, startErr := cfg.Start(ctx, NodeInput{Entry: &source.Entry{Command: cfg.Command}}, ExecutorActivity{})
+				err = startErr
+				if process != nil {
+					t.Fatal("failed startup returned a typed nil process")
+				}
+			} else {
+				session, startErr := StartProtocolSession(ctx, cfg)
+				err = startErr
+				if session != nil {
+					_ = session.Close()
+					t.Fatal("unexpected process")
+				}
+			}
+			if revoked != 1 || !errors.Is(err, revokeErr) {
+				t.Fatalf("revocations = %d, error = %v", revoked, err)
+			}
+		})
 	}
 }
 

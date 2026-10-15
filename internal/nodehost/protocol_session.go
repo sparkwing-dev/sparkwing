@@ -39,20 +39,45 @@ type ProtocolSessionConfig struct {
 // start, so the delegated bearer never enters argv or the process environment.
 func (cfg ProtocolSessionConfig) Start(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
 	if input.Entry == nil {
-		return nil, errors.New("SDK process requires a source entry")
+		return nil, cfg.failedStartup(errors.New("SDK process requires a source entry"))
 	}
 	cfg.Command, cfg.Directory, cfg.Activity = input.Entry.Command, input.Entry.Directory, activity
-	return StartProtocolSession(ctx, cfg)
+	return cfg.start(ctx)
 }
 
 // StartEvaluation launches owner closures using the same private transport as
 // execution. Configure Log for run logs and Revoke for the delegated eval route.
 func (cfg ProtocolSessionConfig) StartEvaluation(ctx context.Context, input EvaluationInput) (ExecutorProcess, error) {
 	if input.Entry == nil {
-		return nil, errors.New("SDK evaluation requires a source entry")
+		return nil, cfg.failedStartup(errors.New("SDK evaluation requires a source entry"))
 	}
 	cfg.Command, cfg.Directory = input.Entry.Command, input.Entry.Directory
-	return StartProtocolSession(ctx, cfg)
+	return cfg.start(ctx)
+}
+
+// StartPlanning sends all describe and plan output through the planner's secret
+// gate. Planning hello carries no binding and requires no delegated route.
+func (cfg ProtocolSessionConfig) StartPlanning(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+	if input.Entry == nil || log == nil {
+		return nil, cfg.failedStartup(errors.New("SDK planning requires a source entry and log sink"))
+	}
+	cfg.Command, cfg.Directory, cfg.Log = input.Entry.Command, input.Entry.Directory, log
+	return cfg.start(ctx)
+}
+
+func (cfg ProtocolSessionConfig) start(ctx context.Context) (ExecutorProcess, error) {
+	session, err := StartProtocolSession(ctx, cfg)
+	if session == nil {
+		return nil, err
+	}
+	return session, err
+}
+
+func (cfg ProtocolSessionConfig) failedStartup(err error) error {
+	if cfg.Revoke != nil {
+		err = errors.Join(err, cfg.Revoke())
+	}
+	return err
 }
 
 type protocolCall struct {
@@ -96,7 +121,12 @@ func (e *protocolEvalStopped) Unwrap() error { return e.cause }
 
 // StartProtocolSession starts the acquired command with private protocol pipes.
 // Callers must Close every returned session, including after a rejected hello.
-func StartProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (*ProtocolSession, error) {
+func StartProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (session *ProtocolSession, err error) {
+	defer func() {
+		if session == nil {
+			err = cfg.failedStartup(err)
+		}
+	}()
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}

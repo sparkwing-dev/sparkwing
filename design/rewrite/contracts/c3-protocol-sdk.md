@@ -59,6 +59,8 @@ are part of this contract.
 | `nodehost.OwnerEvaluator`, `NewOwnerEvaluator`, `EvaluationInput`, `EvaluationDependencies`, `EvaluationStore` | Reconstruct accepted source code and evaluate every source generator through the common protocol and hash checks. |
 | `nodehost.OwnerEvaluator.SkipIf`, `SkipEvaluation`, `OwnerEvaluator.MemoKey` | Evaluate pre-dispatch conditions and memo keys without starting job attempts or writing lifecycle state. |
 | `nodehost.ProtocolSessionConfig.StartEvaluation` | Launches the owner evaluator with private pipes, run-log attribution and route revocation. |
+| `nodehost.SDKPlanner`, `PlanningProcessInput`, `PreparedPlanning` | Describe acquired code, resolve SDK argument defaults and supply lazy planning through the common cache boundary. |
+| `nodehost.ProtocolSessionConfig.StartPlanning` | Launches unbound describe/plan processes and routes every output stream through the planning secret gate. |
 | `nodehost.ClaimAuthority` | Refers to authenticated executor authority without granting it from a request body. |
 | `nodehost.NodeInput` | Binds an attempt to accepted spec, node, generation, runner and route bearer. |
 | `nodehost.NodeHost.Execute` | Replans, checks drift, runs executor layers and reports through store transitions. |
@@ -213,6 +215,27 @@ passes `AcceptPlan`. Cache diagnostics omit input hashes and declaration content
 
 ## Host adapter boundaries
 
+`SDKPlanner.Prepare` runs describe with the acquired engine and granted runner
+identity. Describe and plan hello omit job bindings. All declared secret defaults,
+including defaults from other pipelines in the entry, enter the run's masker
+before describe output is released. Explicit argument values, including empty
+strings, override defaults. `PreparedPlanning.Args` and `SecretArgs` supply the
+resolved inputs for `AcceptPlan`. The owner uses the returned description for
+secret declarations, risks and guard evaluation. It retains both YAML layers.
+
+Prepare closes and cleans up the describe process. Its lazy `Functions.Plan`
+starts a separate process only on a cache miss. Both starts recheck engine policy.
+The cache identity includes the describe reply, resolved args, SDK-visible run
+context, granted runner, target platform and the host's runner-input digest.
+Other source, environment and project digests still come from the host. Cached
+plans pass the current secret matcher and shared validator before acceptance.
+
+Describe retains the thirty-second budget and eight-MiB output staging bound.
+Overflow is counted and reported. A failed describe withholds unknown-secret
+output and error text. Successful describe releases masked frames, stdout and
+stderr into run logs. Plan, validation and cleanup errors are masked before they
+leave the host. A failed close or cleanup discards the proposed plan.
+
 `OwnerHost` waits for its first successful renewal before acquiring source.
 Acquisition receives the persisted acceptance on resume, even when the caller
 omitted it. Checkout resolution cannot replace the stored intake request.
@@ -246,6 +269,10 @@ The protocol defines cancellation by job and step, but eval carries only a
 closure ID. Until C3's protocol owner defines eval cancellation, the native
 session terminates and joins on an eval timeout. Host-registered cleanup still
 runs. Finally or after_run requiring that SDK process cannot run after this cut.
+
+Process startup owns route revocation even when no process starts. Failed
+validation, cancelled setup and exec errors revoke the delegated route once and
+retain revocation errors. A returned process transfers that duty to Close.
 
 The request retains its cancellation cause. Close treats this requested eval
 termination as an expected exit, but still reports revocation and reaping errors.
