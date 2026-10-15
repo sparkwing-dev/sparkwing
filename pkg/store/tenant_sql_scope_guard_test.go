@@ -42,20 +42,11 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).DueCardRefunds":      "the payment worker lists every team's queued refunds in one pass",
 	"(*Store).ReportCardRefund": "Stripe names a refund by its payment and refund ids alone; the team is what " +
 		"the queued row says",
-	"globalRunnerRefusal":                 "the global concurrent runner cap counts live claims from every team",
-	"globalRunsPerHourRefusal":            "the global hourly cap counts runs from every team",
-	"(*Store).NodeClaimFenceNodeForRun":   "the run ID is global, and the query matches its exact claimant and generation",
-	"(*Store).PruneStorageCommitReceipts": "the hourly storage pass drops receipt rows past the retry window for every team",
-	"(*Store).expiredReservationRows": "the sweep finds which teams hold expired reservations; each release " +
-		"then runs under that team's own row lock",
-	"(*Store).StorageMarks":          "the storage pass reconciles every team's count of one store from one bucket listing",
-	"(*Store).TeamsOverFreeLogShare": "the storage pass finds every team whose logs are past its share, slot or no slot",
-	"lockCommittedTx":                "the storage pass reconciles every team's count of one store from one bucket listing",
-	"(*Store).PruneDownloadDays": "drops every team's download days past the window, which is a deployment-wide " +
-		"retention, not one team's data",
-
-	"runOwnerTx":             "asks which team owns an id, so an answer scoped to the asker is no answer",
-	"(*Store).NodeOutputKey": "the run ID is global, and the key only names an attempt the upload's own check binds",
+	"globalRunnerRefusal":               "the global concurrent runner cap counts live claims from every team",
+	"globalRunsPerHourRefusal":          "the global hourly cap counts runs from every team",
+	"(*Store).NodeClaimFenceNodeForRun": "the run ID is global, and the query matches its exact claimant and generation",
+	"runOwnerTx":                        "asks which team owns an id, so an answer scoped to the asker is no answer",
+	"(*Store).NodeOutputKey":            "the run ID is global, and the key only names an attempt the upload's own check binds",
 	"(*Store).RecordLocalOutput": "a laptop store records an output its own process wrote for a node it holds; " +
 		"the run ID is global and the row takes that node's team",
 	"(*Store).claimScope": "asks which team a claim credential belongs to, so an answer scoped to " +
@@ -65,8 +56,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).awardScannedNodeTx": "the award carries the same runtime predicate; the read that follows " +
 		"it is of the row the award just proved in team",
 	"(*Store).ClaimNamedNode": "shares the claim scan's runtime predicate and its refusal",
-	"refuseEventOverLimitsTx": "reads one run's event counters for a cap on that run; the run id " +
-		"names one team's row and the fence checked before it proves the caller holds that run",
 	"(*Store).runnerTeams": "asks which team each live runner's credential belongs to, so an " +
 		"answer scoped to the asker is no answer; it is how another team's runner is dropped",
 	"(*Store).ClaimNextTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
@@ -120,11 +109,9 @@ var reviewedUnscopedSQL = map[string]string{
 	"disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +
 		"another team is refused; a dispute id is unique across teams",
 
-	"(*Store).PruneEgressUsage": "drops every team's egress months past the window, which is a deployment-wide retention",
+	"(*Operator).PruneEgressUsage": "expires every team's egress reports under the maintenance lease",
 	"ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
 		"account deletion can tell sole ownership from shared",
-	"(*Store).ReconcileFreeEventBytes": "the storage pass recounts every slotted team's event bytes, each from its own " +
-		"team's runs",
 	"nodeChargeTx": "reads the team, pipeline and plan of the run a charge names by global id, so the charge lands in that " +
 		"run's team",
 	"(*Store).TriggerClaimFenceIsLive": "matches the trigger's live claim against the exact claimant credential and " +
@@ -157,19 +144,16 @@ var reviewedUnscopedSQL = map[string]string{
 		"the deployment's alarm; the route serves it to an admin only",
 	"(*Store).ComputeAlarmState": "the runner alarm is the deployment's, so the count it is checked against is every " +
 		"team's claimed cloud runners",
-	"(*Store).CountActiveRunners":     "an operational gauge of the deployment's live runners across every team",
-	"(*Store).CountNodesByQueueState": "an operational gauge of the deployment's node queue across every team",
-	"(*Store).CountPendingNodes":      "an operational gauge of the deployment's ready nodes across every team",
+	"(*Operator).CountActiveRunners":     "an operational gauge of the deployment's live runners across every team",
+	"(*Operator).CountNodesByQueueState": "an operational gauge of the deployment's node queue across every team",
+	"(*Operator).CountPendingNodes":      "an operational gauge of the deployment's ready nodes across every team",
 	"(*Store).creditLedgerTotalsWith": "the credit sampler reports the deployment's ledger totals, which sum every team's " +
 		"grants, charges and reservations and name none",
 	"(*Operator).ListStorageQuotas": "the operator's storage report lists every team's quota, each keyed by its team " +
 		"principal",
 	"(*Operator).TopStorageTeams": "the operator's storage report ranks every team's monthly bytes, each keyed by its team " +
 		"principal",
-	"(*Store).ListEgressUsage": "the controller restores the deployment's egress meter, which counts every principal, " +
-		"before it serves",
-	"(*Store).RecordEgressUsage": "the controller persists the deployment's egress meter for every principal it counted; " +
-		"each principal names its own team",
+	"(*Operator).EgressUsageAcrossTeams": "reloads team egress totals into the controller alarm before serving",
 	"(*Store).selectTokensByPrefix": "authenticates a presented token by its prefix before its team is known; a token " +
 		"prefix is unique across teams and the row it returns carries its team",
 	"selectTokensByPrefixTx": "reads the credential the operator's rotate names by its prefix, which is unique across " +
@@ -190,9 +174,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"every team's tokens",
 	"(*Store).CreateTokenIfNoneExist": "the bootstrap mints the deployment operator's first token only while no live token " +
 		"exists in any team, because an install with any credential already has an operator path",
-	"(*Store).chargeStorageTx": "storage usage rows are keyed by the charged principal, team:<slug> for every team but the " +
-		"default, so the principal names the team; no writer sets their team column yet, and scoping these reads before " +
-		"a backfill would read every quota as unlimited",
 }
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a

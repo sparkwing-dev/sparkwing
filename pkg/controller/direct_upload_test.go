@@ -328,7 +328,7 @@ func TestDirectCommitAdoptsVerifiedCopyAfterOldReservationExpires(t *testing.T) 
 	if _, err := f.store.CommittedObject(t.Context(), store.Team(olga.team), key); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("copied but uncommitted row = %v", err)
 	}
-	if _, err := f.store.ReleaseExpiredStorage(t.Context(), time.Now().Add(store.DirectUploadTTL+time.Hour)); err != nil {
+	if err := f.store.ReleaseStorage(t.Context(), store.Team(olga.team), answer.UploadID, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	var retry controller.DirectUploadResponse
@@ -421,9 +421,9 @@ func TestDirectCommitRefusesExistingObjectWithDifferentChecksum(t *testing.T) {
 }
 
 func TestDirectUploadRequiresTheRunsLiveClaim(t *testing.T) {
-	b := newPassBuckets(t)
+	bucket := directUploadBucket(t)
 	f := newAppFixture(t, func(s *controller.Server) *controller.Server {
-		return s.WithDirectUploads(b.raw, passBucket, "cache")
+		return s.WithDirectUploads(bucket, directUploadBucketName, "cache")
 	})
 	olga := f.ghUser(501, "olga")
 	rawRunner, prefix := f.runWork(olga, "run-direct", "https://github.com/acme/widgets.git")

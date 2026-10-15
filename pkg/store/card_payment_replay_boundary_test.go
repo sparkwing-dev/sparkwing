@@ -9,7 +9,7 @@ import (
 )
 
 func TestPaymentCardIdentityCannotFundTwoTeams(t *testing.T) {
-	for _, kinds := range [][2]string{{"card", "card"}, {"grant", "card"}, {"card", "grant"}, {"checkout", "card"}, {"card", "checkout"}, {"checkout", "grant"}, {"grant", "checkout"}} {
+	for _, kinds := range [][2]string{{"card", "card"}, {"checkout", "card"}, {"card", "checkout"}, {"checkout", "checkout"}} {
 		t.Run(kinds[0]+"_to_"+kinds[1], func(t *testing.T) {
 			s, event := paymentFixture(t, capability.PaymentTest)
 			now := s.now()
@@ -24,9 +24,6 @@ func TestPaymentCardIdentityCannotFundTwoTeams(t *testing.T) {
 				case "card":
 					created, _, err := s.SettleCardPayment(t.Context(), CardPayment{Team: team, ChargeID: "charge-" + string(team), AttemptID: "attempt-" + string(team), PaymentIntent: event.PaymentID, AmountCents: 100}, now)
 					return created, err
-				case "grant":
-					result, err := (&Tenant{s: s, team: team}).RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantPaid, AmountMicro: 1000000, Reference: event.PaymentID, CreatedBy: "console"})
-					return result.Created, err
 				default:
 					facts := event
 					if team == "b" {

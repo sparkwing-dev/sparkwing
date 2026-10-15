@@ -5,13 +5,12 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 )
 
-// StorageKind names the store a [TeamStorageUsage] row counts.
+// StorageKind names the storage inventory class.
 type StorageKind string
 
 const (
@@ -45,8 +44,6 @@ func (k StorageKind) limitName() string { return "free_" + string(k) + "_share" 
 // DefaultStorageReservationTTL is how long a reservation holds its bytes
 // when the writer that took it never commits or releases it.
 const DefaultStorageReservationTTL = time.Hour
-
-const storageCommitReceiptHorizon = 24 * time.Hour
 
 func execStatements(ctx context.Context, tx *storeTx, script string) error {
 	for _, stmt := range splitStatements(script) {
@@ -85,13 +82,6 @@ type StorageReservation struct {
 	ExpiresAt time.Time       `json:"expires_at"`
 }
 
-// TeamStorageUsage is what one team holds in one store.
-type TeamStorageUsage struct {
-	UsedBytes     int64     `json:"used_bytes"`
-	ReservedBytes int64     `json:"reserved_bytes"`
-	ReconciledAt  time.Time `json:"reconciled_at,omitzero"`
-}
-
 func checkStorageTeam(team Team, kind StorageKind) error {
 	if team == "" {
 		return fmt.Errorf("%w: a storage count needs a team", ErrInvalidInput)
@@ -110,12 +100,7 @@ func newReservationID() (string, error) {
 	return "sr_" + hex.EncodeToString(b[:]), nil
 }
 
-// ReserveStorage holds req.Bytes of the team's room in one store, or refuses
-// with a [*StorageQuotaError] past a free team's cache share and with
-// [ErrFreeStoragePaused] for a team with neither credits nor a slot while
-// every slot is taken. A free team's log writes are never refused for its
-// share; the hourly storage pass prunes its oldest finished runs back under
-// it. A funded team is granted what it asks for and counted all the same.
+// ReserveStorage holds the team's room in one store, subject to cache share and free-slot availability.
 func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ StorageReservation, err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -152,46 +137,6 @@ func takeStorageSlotTx(ctx context.Context, tx *storeTx, team Team, bytes int64,
 		return err
 	}
 	return freeStoragePaused(team)
-}
-
-// RenewStorage commits c and reserves next in one transaction, for a writer
-// that settles one block of bytes as it takes the next. The commit lands
-// whether or not next fits: a refusal of next returns its error after the
-// commit is kept. A retry with the same ID and bytes returns the prior
-// reservation or refusal while its receipt remains.
-func (s *Store) RenewStorage(ctx context.Context, c StorageCommit, next StorageReserve) (_ StorageReservation, err error) {
-	if NormalizeTeam(c.Team) != NormalizeTeam(next.Team) || c.Kind != next.Kind {
-		return StorageReservation{}, fmt.Errorf("%w: a storage renewal must stay in its team and store", ErrInvalidInput)
-	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return StorageReservation{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if err := takeStorageSlotTx(ctx, tx, c.Team, c.Bytes, c.Now); err != nil {
-		return StorageReservation{}, err
-	}
-	replayed, err := commitStorageTx(ctx, tx, c)
-	if err != nil {
-		return StorageReservation{}, err
-	}
-	if replayed {
-		return replayStorageRenewTx(ctx, tx, c, next)
-	}
-	out, rerr := reserveStorageTx(ctx, tx, next)
-	var quota *StorageQuotaError
-	if rerr != nil && !errors.As(rerr, &quota) && !errors.Is(rerr, ErrFreeStoragePaused) {
-		return StorageReservation{}, rerr
-	}
-	if c.ID != "" {
-		if err := recordStorageRenewTx(ctx, tx, c, next, out, rerr); err != nil {
-			return StorageReservation{}, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return StorageReservation{}, err
-	}
-	return out, rerr
 }
 
 // safety: a refusal returns before the first write, so a caller that keeps
@@ -432,105 +377,6 @@ UPDATE team_storage SET used_bytes = CASE WHEN used_bytes + ? > 0 THEN used_byte
 	return false, err
 }
 
-type storageRenewRequest struct {
-	Bytes int64         `json:"bytes"`
-	UpTo  bool          `json:"up_to"`
-	TTL   time.Duration `json:"ttl"`
-}
-
-func recordStorageRenewTx(ctx context.Context, tx *storeTx, c StorageCommit, next StorageReserve, out StorageReservation, rerr error) error {
-	request, err := json.Marshal(storageRenewRequest{Bytes: next.Bytes, UpTo: next.UpTo, TTL: next.TTL})
-	if err != nil {
-		return err
-	}
-	status := "reserved"
-	var result []byte
-	switch {
-	case rerr == nil:
-		result, err = json.Marshal(out)
-	case errors.Is(rerr, ErrFreeStoragePaused):
-		status = "paused"
-	default:
-		var quota *StorageQuotaError
-		if !errors.As(rerr, &quota) {
-			return rerr
-		}
-		status = "quota"
-		result, err = json.Marshal(quota)
-	}
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `UPDATE storage_commit_receipts
-        SET renew_request = ?, renew_status = ?, renew_result = ?
-        WHERE team = ? AND store = ? AND id = ?`,
-		request, status, result, string(NormalizeTeam(c.Team)), string(c.Kind), c.ID)
-	return err
-}
-
-func replayStorageRenewTx(ctx context.Context, tx *storeTx, c StorageCommit, next StorageReserve) (StorageReservation, error) {
-	team := NormalizeTeam(c.Team)
-	var request, result []byte
-	var status string
-	if err := tx.QueryRowContext(ctx, `SELECT renew_request, renew_status, renew_result
-        FROM storage_commit_receipts WHERE team = ? AND store = ? AND id = ?`,
-		string(team), string(c.Kind), c.ID).Scan(&request, &status, &result); err != nil {
-		return StorageReservation{}, err
-	}
-	want, err := json.Marshal(storageRenewRequest{Bytes: next.Bytes, UpTo: next.UpTo, TTL: next.TTL})
-	if err != nil {
-		return StorageReservation{}, err
-	}
-	if len(request) == 0 || string(request) != string(want) {
-		return StorageReservation{}, fmt.Errorf("%w: reservation %s was committed with a different renewal", ErrInvalidInput, c.ID)
-	}
-	switch status {
-	case "reserved":
-		var out StorageReservation
-		if err := json.Unmarshal(result, &out); err != nil {
-			return StorageReservation{}, err
-		}
-		now := c.Now
-		if now.IsZero() {
-			now = time.Now()
-		}
-		var expiresAt int64
-		err := tx.QueryRowContext(ctx, `SELECT expires_at FROM storage_reservations
-            WHERE id = ? AND team = ? AND store = ?`, out.ID, string(team), string(c.Kind)).Scan(&expiresAt)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return StorageReservation{}, err
-		}
-		if errors.Is(err, sql.ErrNoRows) || !out.ExpiresAt.After(now) || expiresAt <= now.UnixNano() {
-			return StorageReservation{}, fmt.Errorf("%w: renewed reservation %s is no longer active", ErrInvalidInput, out.ID)
-		}
-		return out, nil
-	case "quota":
-		var quota StorageQuotaError
-		if err := json.Unmarshal(result, &quota); err != nil {
-			return StorageReservation{}, err
-		}
-		return StorageReservation{}, &quota
-	case "paused":
-		return StorageReservation{}, freeStoragePaused(team)
-	default:
-		return StorageReservation{}, fmt.Errorf("%w: reservation %s was committed without renewal", ErrInvalidInput, c.ID)
-	}
-}
-
-// PruneStorageCommitReceipts bounds the receipt table after the retry window.
-// A commit replayed after that window counts again.
-func (s *Store) PruneStorageCommitReceipts(ctx context.Context, now time.Time) (int64, error) {
-	if now.IsZero() {
-		now = time.Now()
-	}
-	res, err := s.exec(ctx, `DELETE FROM storage_commit_receipts WHERE committed_at < ?`,
-		now.Add(-storageCommitReceiptHorizon).UnixNano())
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
-}
-
 // ReleaseStorage gives back team's reservation id, whose write stored
 // nothing. A reservation already committed, released or expired, or not
 // team's, is not an error.
@@ -557,47 +403,6 @@ func (s *Store) ReleaseStorage(ctx context.Context, team Team, id string, now ti
 	return tx.Commit()
 }
 
-// ReleaseExpiredStorage drops every reservation that expired by now and
-// reports how many rows it unblocked. A reserve drops its own team's expired
-// reservations as it goes; this catches the rows nobody reserves against.
-func (s *Store) ReleaseExpiredStorage(ctx context.Context, now time.Time) (int, error) {
-	keys, err := s.expiredReservationRows(ctx, now)
-	if err != nil {
-		return 0, err
-	}
-	for _, k := range keys {
-		if err := s.inTx(ctx, func(tx *storeTx) error {
-			_, _, err := lockTeamStorageTx(ctx, tx, k.team, k.kind, now)
-			return err
-		}); err != nil {
-			return 0, err
-		}
-	}
-	return len(keys), nil
-}
-
-type storageRow struct {
-	team Team
-	kind StorageKind
-}
-
-func (s *Store) expiredReservationRows(ctx context.Context, now time.Time) (_ []storageRow, err error) {
-	rows, err := s.query(ctx, `SELECT DISTINCT team, store FROM storage_reservations WHERE expires_at <= ?`, now.UnixNano())
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var out []storageRow
-	for rows.Next() {
-		var team, kind string
-		if err := rows.Scan(&team, &kind); err != nil {
-			return nil, err
-		}
-		out = append(out, storageRow{Team(team), StorageKind(kind)})
-	}
-	return out, rows.Err()
-}
-
 func (s *Store) inTx(ctx context.Context, fn func(*storeTx) error) (err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -608,295 +413,4 @@ func (s *Store) inTx(ctx context.Context, fn func(*storeTx) error) (err error) {
 		return err
 	}
 	return tx.Commit()
-}
-
-// TeamStorage reports what team holds in each store the controller counts.
-func (s *Store) TeamStorage(ctx context.Context, team Team) (_ map[StorageKind]TeamStorageUsage, err error) {
-	rows, err := s.query(ctx, `SELECT store, used_bytes, reserved_bytes, reconciled_at FROM team_storage WHERE team = ?`,
-		string(NormalizeTeam(team)))
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	out := map[StorageKind]TeamStorageUsage{}
-	for rows.Next() {
-		var kind string
-		var u TeamStorageUsage
-		var reconciled int64
-		if err := rows.Scan(&kind, &u.UsedBytes, &u.ReservedBytes, &reconciled); err != nil {
-			return nil, err
-		}
-		if reconciled > 0 {
-			u.ReconciledAt = time.Unix(0, reconciled).UTC()
-		}
-		out[StorageKind(kind)] = u
-	}
-	return out, rows.Err()
-}
-
-// StorageMarks reports every team's running total of committed bytes in
-// kind. The storage pass takes it before it lists the bucket and hands it to
-// [Store.ReconcileStorage], which keeps what was committed in between.
-func (s *Store) StorageMarks(ctx context.Context, kind StorageKind) (_ map[Team]int64, err error) {
-	rows, err := s.query(ctx, `SELECT team, committed_bytes FROM team_storage WHERE store = ?`, string(kind))
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	out := map[Team]int64{}
-	for rows.Next() {
-		var team string
-		var n int64
-		if err := rows.Scan(&team, &n); err != nil {
-			return nil, err
-		}
-		out[Team(team)] = n
-	}
-	return out, rows.Err()
-}
-
-// ReconcileStorage replaces every team's stored bytes in kind with what a
-// listing found plus what was committed since marks was taken. A team the
-// listing did not find holds only what it committed since. An object written
-// while its team was being listed can land in both and count twice, which
-// holds the team to less, never more, until the next pass. A listed team
-// the deployment does not know gets no row.
-func (s *Store) ReconcileStorage(ctx context.Context, kind StorageKind, listed, marks map[Team]int64, now time.Time) (err error) {
-	if !kind.Valid() {
-		return fmt.Errorf("%w: unknown store %q", ErrInvalidInput, kind)
-	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	for team := range listed {
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO team_storage (team, store, used_bytes, reserved_bytes, committed_bytes, reconciled_at, updated_at)
-SELECT ?, ?, 0, 0, 0, 0, ? WHERE EXISTS (SELECT 1 FROM teams WHERE name = ?)
-ON CONFLICT (team, store) DO NOTHING`, string(team), string(kind), now.UnixNano(), string(team)); err != nil {
-			return err
-		}
-	}
-	committed, err := lockCommittedTx(ctx, tx, kind)
-	if err != nil {
-		return err
-	}
-	for team, total := range committed {
-		used := max(listed[team]+max(total-marks[team], 0), 0)
-		if _, err := tx.ExecContext(ctx, `
-UPDATE team_storage SET used_bytes = ?, reconciled_at = ?, updated_at = ? WHERE team = ? AND store = ?`,
-			used, now.UnixNano(), now.UnixNano(), string(team), string(kind)); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-func lockCommittedTx(ctx context.Context, tx *storeTx, kind StorageKind) (_ map[Team]int64, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT team, committed_bytes FROM team_storage WHERE store = ? ORDER BY team`+tx.forUpdate(), string(kind))
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	out := map[Team]int64{}
-	for rows.Next() {
-		var team string
-		var n int64
-		if err := rows.Scan(&team, &n); err != nil {
-			return nil, err
-		}
-		out[Team(team)] = n
-	}
-	return out, rows.Err()
-}
-
-// DownloadCharge asks to serve a team's download.
-type DownloadCharge struct {
-	Team Team
-	// Bytes is what the download delivered, or for a signed URL the
-	// object's size. Zero checks that the team is not yet at its cap.
-	Bytes int64
-	// Record charges Bytes whatever the cap says, for bytes already sent.
-	Record bool
-	Now    time.Time
-	// FreeCapBytes and FundedCapBytes are what a team may download in a
-	// UTC day by whether it pays. Zero is no cap.
-	FreeCapBytes, FundedCapBytes int64
-}
-
-// DownloadCharged is a team's download day after a charge.
-type DownloadCharged struct {
-	Tier     TeamStorageTier `json:"tier"`
-	DayBytes int64           `json:"day_bytes"`
-	// CapBytes is the cap the charge was held to; zero is none.
-	CapBytes int64 `json:"cap_bytes"`
-}
-
-// ErrDownloadCap matches every [*DownloadCapError].
-var ErrDownloadCap = errors.New("daily download cap reached")
-
-// DownloadCapError refuses a download past a team's daily cap.
-type DownloadCapError struct {
-	Team           string
-	Day            string
-	UsedBytes      int64
-	CapBytes       int64
-	RequestedBytes int64
-	RetryAfter     time.Duration
-	Remedy         string
-}
-
-func (e *DownloadCapError) Error() string {
-	return fmt.Sprintf("%s: team %s downloaded %d of its %d bytes on %s and this download is %d; %s",
-		ErrDownloadCap, e.Team, e.UsedBytes, e.CapBytes, e.Day, e.RequestedBytes, e.Remedy)
-}
-
-// Unwrap reports [ErrDownloadCap].
-func (e *DownloadCapError) Unwrap() error { return ErrDownloadCap }
-
-// ChargeDownload charges c.Bytes to the team's UTC day, or refuses with a
-// [*DownloadCapError] when the team is already at its cap. The operator's
-// team has no cap. The row is locked for the charge, so a download started
-// after another's charge reached the cap sees it.
-func (s *Store) ChargeDownload(ctx context.Context, c DownloadCharge) (_ DownloadCharged, err error) {
-	team := NormalizeTeam(c.Team)
-	if team == "" || c.Bytes < 0 {
-		return DownloadCharged{}, fmt.Errorf("%w: a download charge needs a team and a size", ErrInvalidInput)
-	}
-	now := c.Now
-	if now.IsZero() {
-		now = time.Now()
-	}
-	now = now.UTC()
-	day := now.Format("2006-01-02")
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return DownloadCharged{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	out := DownloadCharged{Tier: TeamTierFunded}
-	if holdsFreeAllowance(team) {
-		funded, err := teamFundedTx(ctx, tx, team)
-		if err != nil {
-			return DownloadCharged{}, err
-		}
-		out.CapBytes = c.FundedCapBytes
-		if !funded {
-			out.Tier, out.CapBytes = TeamTierFree, c.FreeCapBytes
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO team_download_day (team, day, bytes, updated_at) VALUES (?, ?, 0, ?) ON CONFLICT (team, day) DO NOTHING`,
-		string(team), day, now.UnixNano()); err != nil {
-		return DownloadCharged{}, err
-	}
-	var used int64
-	if err := tx.QueryRowContext(ctx, `SELECT bytes FROM team_download_day WHERE team = ? AND day = ?`+tx.forUpdate(),
-		string(team), day).Scan(&used); err != nil {
-		return DownloadCharged{}, err
-	}
-	// safety: only a team already at its cap is refused, so the download that
-	// crosses the cap finishes and the next one waits for midnight UTC.
-	if !c.Record && out.CapBytes > 0 && used >= out.CapBytes {
-		remedy := "the cap resets at midnight UTC"
-		if out.Tier == TeamTierFree && c.FundedCapBytes > c.FreeCapBytes {
-			remedy = fmt.Sprintf("add credits to the team to raise it to %d bytes a day, or wait for midnight UTC",
-				c.FundedCapBytes)
-		}
-		return DownloadCharged{}, &DownloadCapError{
-			Team: string(team), Day: day, UsedBytes: used, CapBytes: out.CapBytes, RequestedBytes: c.Bytes,
-			RetryAfter: now.Truncate(24 * time.Hour).Add(24 * time.Hour).Sub(now), Remedy: remedy,
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE team_download_day SET bytes = bytes + ?, updated_at = ? WHERE team = ? AND day = ?`,
-		c.Bytes, now.UnixNano(), string(team), day); err != nil {
-		return DownloadCharged{}, err
-	}
-	out.DayBytes = used + c.Bytes
-	return out, tx.Commit()
-}
-
-// PruneDownloadDays deletes every team's download days before day, which is
-// spelled "2006-01-02".
-func (s *Store) PruneDownloadDays(ctx context.Context, day string) (int64, error) {
-	res, err := s.exec(ctx, `DELETE FROM team_download_day WHERE day < ?`, day)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
-}
-
-// TeamOverShare is a free team whose logs hold more than its share.
-type TeamOverShare struct {
-	Team      Team
-	OverBytes int64
-}
-
-// TeamsOverFreeLogShare reports every team without credits whose logs hold
-// more than its share of the free allowance, and by how much. A team with
-// neither credits nor a slot, and that never held credits, has a share of
-// zero; a team whose credits lapsed keeps its logs to retention.
-func (s *Store) TeamsOverFreeLogShare(ctx context.Context) (_ []TeamOverShare, err error) {
-	rows, err := s.query(ctx, `
-SELECT team, used_bytes FROM team_storage WHERE store = ? AND used_bytes > 0 ORDER BY team`, string(StorageLogs))
-	if err != nil {
-		return nil, err
-	}
-	used := map[Team]int64{}
-	var teams []Team
-	for rows.Next() {
-		var team string
-		var n int64
-		if err := rows.Scan(&team, &n); err != nil {
-			return nil, errors.Join(err, rows.Close())
-		}
-		used[Team(team)] = n
-		teams = append(teams, Team(team))
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return nil, err
-	}
-	// safety: the rows are closed before each team's standing is read, because
-	// SQLite's one connection deadlocks on a query under an open cursor.
-	var out []TeamOverShare
-	for _, team := range teams {
-		standing, err := s.StorageStandingFor(ctx, team)
-		if err != nil {
-			return nil, err
-		}
-		var share int64
-		switch standing.Tier {
-		case TeamTierFree:
-			share = FreeLogShare(standing.AllowanceBytes)
-		case TeamTierNone:
-			held, err := s.everHeldCredits(ctx, team)
-			if err != nil {
-				return nil, err
-			}
-			if held {
-				continue
-			}
-		default:
-			continue
-		}
-		if over := used[team] - share; over > 0 {
-			out = append(out, TeamOverShare{Team: team, OverBytes: over})
-		}
-	}
-	return out, nil
-}
-
-func (s *Store) everHeldCredits(ctx context.Context, team Team) (_ bool, err error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	held, err := rowPresentTx(ctx, tx, `SELECT 1 FROM credit_grants WHERE team = ? AND kind != ? AND amount_micro > 0 LIMIT 1`,
-		string(NormalizeTeam(team)), CreditGrantReversal)
-	if err != nil {
-		return false, err
-	}
-	return held, tx.Commit()
 }

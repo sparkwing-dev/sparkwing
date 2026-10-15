@@ -71,6 +71,81 @@ The primary inventory has 74 changed or added functions: 6 lifecycle, 6 state-ma
 
 ## Source snapshots
 
+`pkg/store/download_accounting_runtime_test.go` ports
+`TestChargeDownloadHoldsATeamToItsDailyCap` and
+`TestChargeDownloadRaceForTheLastBytesAdmitsExactlyOne` from the retired raw
+Store method. Final-schema tests preserve cap crossing, delivered-byte counting,
+funding changes, operator exemption and UTC-day reset. Independent SQLite
+connections race the last capacity and reopen the exhausted budget. A generated
+property varies byte counts and hostile replica strings while checking tenant
+isolation and conservation. Expired generic download holds release without
+double subtraction. Failed counter writes and overflow roll back admission.
+
+Event accounting ports the five charged-storage tests and seven event-cap tests
+from `pkg/store/storage_test.go` and `event_limits_test.go` to
+`event_accounting_runtime_test.go` and `event_policy_runtime_test.go`.
+The no-quota assertion now requires additive usage because final counters record
+all tenant writes. The ports retain byte/month/run/count caps, kind validation,
+kind byte cost, concurrent admission, uncharged event counters and failed-write
+rollback. They add shared upload capacity, reopening, month rollover, funding,
+free share and a generated tenant-isolation/conservation property.
+The replica SQLite acceptance cell now races the real event writer and verifies
+its remaining capacity after reopening. No native source row is marked complete.
+
+The existing `storage-replica-safe-accounting/store-data-sqlite` cell now includes
+real tenant download charges, their last-capacity race and exhausted-budget
+reopening. The controller proof exercises delivered-byte accounting, trusted
+replica identity, tenant isolation and log/live-log exemptions without a socket.
+No new native acceptance cell or archived source row is marked complete.
+
+`pkg/store/storage_standing_runtime_test.go` ports retained event-byte release
+after deletion and the funded/free/held storage-standing matrix to final rows.
+It checks unique blob/log inventory, commit/abort/expiry holds, corrupt totals
+and reopening. `FuzzStorageStandingTenantInventory` generates own and foreign
+inventory sizes and replica identities, with stale raw counters present. Reports
+must stay tenant-scoped and leave accounting unchanged. The controller proof uses
+the same final tenant snapshot. The existing upload crash/replay SQLite cell now
+checks live holds before commit and retained bytes after reopening. The raw
+standing/usage reads, event-byte repair API and duplicate event cache are removed.
+No archived source row or native acceptance cell is newly closed.
+
+The unused unleased `Store.ReleaseExpiredStorage` scan and its two legacy tests
+are removed. `TestBlobUploadExpiredReservationFreesCapacity` ports zero-byte
+expiry and capacity release to final tickets. Empty uploads reserve object
+capacity, expired tickets refuse late commits, and aborting an expired ticket
+cannot release its successor's hold. Committed replay remains covered separately.
+
+The raw paid-credit route and its handler tests are retired.
+`pkg/store/credit_grant_runtime_test.go` ports free-grant idempotency, team
+scoping, validation, balance/history accounting and payment-linked reversals
+to the final schema. Paid fixtures use committed checkout settlement facts.
+`payment_refunds_test.go` retains refund replay and ports pre-settlement fraud
+warning refusal. Generated properties exercise every raw store grant surface
+and the registered retired HTTP route. The existing ledger-retention SQLite
+cell also refuses raw paid grants. Native provider and controller adapters
+remain open. No archived source row or native acceptance cell is newly closed.
+
+The service-token storage and download counter handlers and their rolling-block
+tests are retired. `pkg/controller/store_data_retirement_internal_test.go` adds
+`FuzzLegacyStorageCountersAreGone` over generated credentials, tenant strings and
+byte counts. Every retired route returns 404. Final ticket tests retain scoped
+quota admission, immutable replay, concurrent-client and abort coverage.
+The two signup source tests use the final SQLite schema without a listener.
+They preserve full-tier and unreadable-source refusal and the server's own gate
+projection. Slot policy persistence and sealed-write refusal are covered in
+`pkg/store/credit_settings_runtime_test.go`. Native signup and data adapters
+remain open. No archived source row or native acceptance cell is newly closed.
+
+The independent bucket-listing storage pass and its tests are retired.
+`pkg/controller/storage_inventory_internal_test.go:TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage`
+checks the replacement maintenance path against the final SQLite schema. It
+requires a clean maintenance pass, billing from committed blob inventory despite
+stale raw counters, and unchanged replica usage. Existing retained-storage and
+replica-accounting proofs cover rollback, concurrent clients and reopening.
+Listing reconciliation, receipt replay after one-day pruning, and free-share
+log deletion tests are deleted with those mechanisms. Allowance-driven physical
+eviction and native transport remain open. No archived source row is newly closed.
+
 The unfenced node/trigger reapers and their dispatcher-expiry helpers are removed.
 `pkg/controller/reaper_test.go:TestReaperRecoversExpiredOwnerAndKeepsLiveOwner`
 replaces its private ticker-based reaper with the real elected controller pass.
@@ -482,3 +557,25 @@ The store checks port the persisted-dependency expectation from
 assertions and expects its original declaration to stay unchanged. Its complete
 runtime fixture still needs W3's final admission/lifecycle migration. No archived
 T1 source-function identity or native cell is newly claimed complete.
+## Egress persistence cutover
+
+The three tests in `pkg/store/egress_test.go` are replaced by final-schema proofs
+in `egress_accounting_runtime_test.go`. Round-trip, monotone usage and expiration
+now use additive tenant and replica rows, public day/month reports and the leased
+pruner. Invalid writer identity and negative increments fail through `AddUsage`.
+The controller's old flush/retry/restore tests are replaced by request delivery,
+tenant attribution, nil-meter persistence, short-write, restart-alarm and loud
+write-failure proofs in `egress_accounting_internal_test.go`. Timer-flush and
+closing-month backlog expectations retire with that implementation.
+The SQLite replica acceptance cell reads public egress totals after reopening.
+Native/platform cells remain unclaimed.
+
+The raw default-team `Store.GrantCredits`, `Store.ListCreditCharges` and
+`Store.AppendEventOnce` wrappers are retired. Remaining fixtures select the
+intended Tenant explicitly. The raw-paid-grant property now probes the retained
+tenant entry points. Deployment price and policy fixtures use Operator.
+Existing final-schema settings proofs retain defaults, validation, corruption,
+restart, atomic rollback and serialized table-update checks through that owner.
+`TestStoreDataUnmeteredSettlementNeedsNoCalculator` closes the shared settlement
+helper's dependency on a calculator for unmetered work. No native cell is newly
+marked complete by these caller migrations.

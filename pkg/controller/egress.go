@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -11,21 +12,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// WithEgressMeter counts the bytes this controller sends to clients.
-// The meter counts artifact downloads, log reads, the live log stream,
-// and git proxy fetches against the principal that asked for them, holds
-// each principal to its concurrency caps, and raises the daily alarm; it
-// refuses no byte. A nil meter leaves every download uncounted. A team's
-// daily download cap is charged whether or not a meter is set.
+// WithEgressMeter configures process-local egress counters, concurrency caps and daily alarms.
 func (s *Server) WithEgressMeter(m *egress.Meter) *Server {
 	if m != nil {
 		m = m.WithLogger(s.logger)
-		// safety: the sweep drains this meter whenever the server has a
-		// store, and the server's store is fixed at New, so marking it here
-		// does not depend on where in the builder chain this call lands.
-		if s.store != nil {
-			m = m.WithPersistence()
-		}
 	}
 	s.egress = m
 	publishedEgress.Store(m)
@@ -83,10 +73,6 @@ func (s *Server) meteredStream(class egress.Class, next http.Handler) http.Handl
 
 func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler) http.Handler {
 	counted := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.egress == nil {
-			next.ServeHTTP(w, r)
-			return
-		}
 		principal := egressPrincipal(r)
 		// safety: a response the server discards holds no slot and
 		// counts nothing.
@@ -94,7 +80,7 @@ func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler
 			next.ServeHTTP(w, r)
 			return
 		}
-		if slot != egress.SlotNone {
+		if s.egress != nil && slot != egress.SlotNone {
 			// safety: the slot keys on the authenticated principal alone,
 			// because a caller names its own pod and a named pod would buy
 			// another slot.
@@ -105,7 +91,27 @@ func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler
 			}
 			defer release()
 		}
-		s.egress.Handle(w, r, principal, class, next)
+		var tenant *store.Tenant
+		if s.store != nil {
+			team := store.DefaultTeam
+			if p, ok := PrincipalFromContext(r.Context()); ok && p != nil && p.Team != "" {
+				team = p.Team
+			}
+			var err error
+			tenant, err = s.store.ForTeam(r.Context(), team)
+			if err != nil {
+				s.writeInternalError(w, r, "resolve egress team", err)
+				return
+			}
+		}
+		delivered := s.egress.Handle(w, r, principal, class, next)
+		if tenant != nil && delivered > 0 {
+			ctx := context.WithoutCancel(r.Context())
+			err := tenant.AddUsage(ctx, store.UsageDelta{Period: time.Now().UTC().Format("2006-01-02"), ReplicaID: s.leaseHolder, Counter: "egress_bytes", Amount: delivered})
+			if err != nil {
+				s.logger.Error("record delivered egress failed", "team", tenant.Team(), "bytes", delivered, "err", err)
+			}
+		}
 	})
 	// safety: viewing a run's logs is never charged to its team, so a team
 	// past its download cap can still read why its run failed.
@@ -131,9 +137,14 @@ func (s *Server) chargeTeamDownload(w http.ResponseWriter, r *http.Request, next
 		next.ServeHTTP(w, r)
 		return
 	}
+	tenant, err := s.store.ForTeam(r.Context(), team)
+	if err != nil {
+		s.writeInternalError(w, r, "resolve download team", err)
+		return
+	}
 	charge := func(ctx context.Context, n int64, record bool) error {
-		_, err := s.store.ChargeDownload(ctx, store.DownloadCharge{
-			Team: team, Bytes: n, Record: record, Now: time.Now(),
+		_, err := tenant.ChargeDownload(ctx, store.DownloadCharge{
+			ReplicaID: s.leaseHolder, Bytes: n, Record: record,
 			FreeCapBytes: s.downloadFree, FundedCapBytes: s.downloadFunded,
 		})
 		return err
@@ -193,97 +204,40 @@ func (s *Server) egressHealth() (map[string]any, []string) {
 	return summary, []string{"egress: daily alarm threshold reached"}
 }
 
-// safety: A day-shaped period cannot collide with the same service's month-shaped row.
-const egressDayPrincipal = "(day)"
-
-// safety: a restarted controller that started the month or the day over
-// would hand every principal a fresh budget and reopen the daily cap, so
-// both come back from the store before the listener binds.
 func (s *Server) loadEgressUsage(ctx context.Context) {
 	if s.egress == nil || s.store == nil {
 		return
 	}
 	now := time.Now().UTC()
-	rows, err := s.store.ListEgressUsage(ctx, now.Format("2006-01"))
+	rows, err := s.store.AsOperator().EgressUsageAcrossTeams(ctx, now.Format("2006-01"))
 	if err != nil {
-		s.logger.Warn("egress usage reload failed", "err", err)
+		s.logger.Error("egress usage reload failed", "err", err)
 		return
 	}
 	usages := make([]egress.Usage, 0, len(rows))
+	var monthBytes int64
 	for _, row := range rows {
-		usages = append(usages, egress.Usage{Principal: row.Principal, Month: row.Month, Bytes: row.Bytes})
+		if row.Bytes > math.MaxInt64-monthBytes {
+			s.logger.Error("egress monthly usage overflow")
+			return
+		}
+		monthBytes += row.Bytes
+		usages = append(usages, egress.Usage{Principal: egress.TeamPrincipal(string(row.Team), ""), Month: row.Period, Bytes: row.Bytes})
 	}
 	s.egress.Restore(usages)
-
 	day := now.Format("2006-01-02")
-	rows, err = s.store.ListEgressUsage(ctx, day)
+	rows, err = s.store.AsOperator().EgressUsageAcrossTeams(ctx, day)
 	if err != nil {
-		s.logger.Warn("egress daily usage reload failed", "err", err)
+		s.logger.Error("egress daily usage reload failed", "err", err)
 		return
 	}
+	var bytes int64
 	for _, row := range rows {
-		if row.Principal == egressDayPrincipal {
-			s.egress.RestoreDay(egress.DayUsage{Day: day, Bytes: row.Bytes})
+		if row.Bytes > math.MaxInt64-bytes {
+			s.logger.Error("egress daily usage overflow")
+			return
 		}
+		bytes += row.Bytes
 	}
-}
-
-// perf: the reaper calls this on its own tick, so metering costs one
-// batch of writes per sweep rather than one write per response, and the
-// prune runs once a month rather than on every sweep.
-func (s *Server) sweepEgressUsage(ctx context.Context) {
-	if s.egress == nil || s.store == nil {
-		return
-	}
-	s.flushEgressUsage(ctx)
-	s.pruneEgressUsage(ctx)
-}
-
-func (s *Server) flushEgressUsage(ctx context.Context) {
-	principals := 0
-	err := s.egress.Flush(func(usages []egress.Usage) error {
-		principals = len(usages)
-		rows := make([]store.EgressUsage, 0, len(usages))
-		for _, usage := range usages {
-			rows = append(rows, store.EgressUsage{
-				Principal: usage.Principal,
-				Month:     usage.Month,
-				Bytes:     usage.Bytes,
-			})
-		}
-		return s.store.RecordEgressUsage(ctx, rows)
-	})
-	if err != nil {
-		s.logger.Warn("egress usage flush failed", "err", err, "principals", principals)
-	}
-	err = s.egress.FlushDay(func(usage egress.DayUsage) error {
-		return s.store.RecordEgressUsage(ctx, []store.EgressUsage{{
-			Principal: egressDayPrincipal,
-			Month:     usage.Day,
-			Bytes:     usage.Bytes,
-		}})
-	})
-	if err != nil {
-		s.logger.Warn("egress daily usage flush failed", "err", err)
-	}
-}
-
-// safety: the reaper goroutine is the only caller, so the once-a-month
-// gate needs no lock; the first sweep after a start prunes and the rest
-// of the month's sweeps do not.
-func (s *Server) pruneEgressUsage(ctx context.Context) {
-	month := time.Now().UTC().Format("2006-01")
-	if s.egressPrunedMonth == month {
-		return
-	}
-	s.egressPrunedMonth = month
-	cutoff := time.Now().UTC().AddDate(0, -store.EgressUsageRetentionMonths, 0).Format("2006-01")
-	n, err := s.store.PruneEgressUsage(ctx, cutoff)
-	if err != nil {
-		s.logger.Warn("egress usage prune failed", "err", err, "before", cutoff)
-		return
-	}
-	if n > 0 {
-		s.logger.Info("pruned egress usage", "rows", n, "before", cutoff)
-	}
+	s.egress.RestoreDay(egress.DayUsage{Day: day, Bytes: bytes, Month: now.Format("2006-01"), MonthBytes: monthBytes})
 }

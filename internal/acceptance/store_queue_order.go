@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -36,6 +37,9 @@ func checkStoreQueueOrder(ctx context.Context, path string, preferred bool) (err
 	if err != nil {
 		return err
 	}
+	if err := checkStoreQueueCounts(ctx, f.s, map[string]int{store.QueueStateReady: 3}); err != nil {
+		return err
+	}
 	claim, err := f.s.ClaimUnit(ctx, demand)
 	if err != nil || claim.RunID != "run" || claim.Kind != capability.UnitTrigger {
 		return fmt.Errorf("scoped trigger: %s/%s, %v", claim.Kind, claim.RunID, err)
@@ -55,6 +59,9 @@ func checkStoreQueueOrder(ctx context.Context, path string, preferred bool) (err
 			return fmt.Errorf("job order wants %s, got %s/%s: %v", id, claim.RunID, claim.NodeID, err)
 		}
 	}
+	if err := checkStoreQueueCounts(ctx, f.s, map[string]int{store.QueueStateReady: 1, store.QueueStateClaimed: 2}); err != nil {
+		return err
+	}
 	for range 2 {
 		if _, err := f.s.ClaimUnit(ctx, demand); !errors.Is(err, store.ErrNotFound) {
 			return fmt.Errorf("ineligible queue: %v", err)
@@ -71,6 +78,21 @@ func checkStoreQueueOrder(ctx context.Context, path string, preferred bool) (err
 	claim, err = f.s.ClaimUnit(ctx, demand)
 	if err != nil || claim.NodeID != "a-blocked" {
 		return fmt.Errorf("later eligible claimant: %s/%s, %v", claim.RunID, claim.NodeID, err)
+	}
+	return checkStoreQueueCounts(ctx, f.s, map[string]int{store.QueueStateClaimed: 3})
+}
+
+func checkStoreQueueCounts(ctx context.Context, s *store.Store, want map[string]int) error {
+	for _, state := range store.QueueStates() {
+		want[state] += 0
+	}
+	counts, err := s.AsOperator().CountNodesByQueueState(ctx)
+	if err != nil || !reflect.DeepEqual(counts, want) {
+		return fmt.Errorf("queue states: %v, %v; want %v", counts, err, want)
+	}
+	ready, err := s.AsOperator().CountPendingNodes(ctx)
+	if err != nil || ready != want[store.QueueStateReady] {
+		return fmt.Errorf("ready count: %d, %v; want %d", ready, err, want[store.QueueStateReady])
 	}
 	return nil
 }

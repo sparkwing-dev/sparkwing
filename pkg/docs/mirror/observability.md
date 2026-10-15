@@ -520,7 +520,7 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_signups_total` | Counter | `outcome`, `reason` | New accounts: `admitted` (reason `none`, or `invitation` for a waitlisted account that joined a team by invitation) or `waitlisted` with the reason (`deployment`, `operator`, `free_tier_closed`, `free_tier_unreadable`, `hourly_signups`, `daily_signups`, `github_account_age`) |
 | `sparkwing_signup_gate_closed_total` | Counter | `reason` | Times the sign-up gate closed itself because new accounts crossed the hourly or daily limit (`hourly_signups`, `daily_signups`) |
 | `sparkwing_signup_velocity_warnings_total` | Counter | (none) | Times the last hour's new accounts crossed the sign-up warn threshold, once per crossing; it closes nothing |
-| `sparkwing_queue_depth` | Gauge | `state` | Unfinished nodes of active runs: `waiting`, `ready`, `claimed`, `running`, `approval_pending`. Node rows retained by a finished run do not count. |
+| `sparkwing_queue_depth` | Gauge | `state` | Each unfinished job of an active run counts once: `waiting`, `ready`, `claimed`, `running`, `approval_pending`. A held job stays claimed until recovery commits, including after lease expiry. Jobs retained by a finished run do not count. |
 | `sparkwing_node_claim_wait_seconds` | Histogram | (none) | Seconds a node waited between becoming claimable and its first runner taking it |
 | `sparkwing_claim_unavailable_total` | Counter | (none) | Claim requests answered `503`, which a runner retries after the interval the response names |
 | `sparkwing_runners_live` | Gauge | `label_set` | Runners that polled for a claim inside the liveness window, by the label set they advertised |
@@ -880,8 +880,8 @@ Every service reads these budgets from its flags alone.
 The controller counts each team's UTC day in its database. A team is the
 one the caller's credential belongs to, never a token's name, which is free
 text two teams may share. The controller charges its own artifact and git
-proxy downloads there directly, and the cache charges every `GET` it serves
-a grant with `POST /internal/downloads/charge`.
+proxy downloads there directly. The cache service's download-charge endpoint
+is removed. Final usage accounting uses tenant, period and replica rows.
 
 A download is refused before its first byte only when the team is already at
 its cap. It is then charged the bytes it actually delivers, 8 MiB at a time as
@@ -889,11 +889,9 @@ it streams and the rest when it ends, so a range or a resumed download pays for
 what it served and a response with no length is counted as it goes. A download
 that started is never cut off part way: the cap refuses the team's next
 download, not the one under way. A signed URL is charged the object's whole
-size when it is minted and expires after 60 seconds. While the
-controller cannot answer the cache, a free team's download is refused with
-`503`, and a team the controller answered funded within five minutes
-proceeds. The operator's own team carries no cap, because every in-cluster
-runner shares it, and neither does the controller's operator grant.
+size when it is minted and expires after 60 seconds. The operator's own team
+carries no cap, because every in-cluster runner shares it, and neither does the
+controller's operator grant.
 
 Reading a run's logs, from the dashboard or the CLI, is never charged to
 the team, so a team past its cap can still read why its run failed.

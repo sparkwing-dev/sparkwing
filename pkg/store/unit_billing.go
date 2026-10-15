@@ -136,11 +136,6 @@ func accountUnitBillingTx(ctx context.Context, tx *storeTx, team Team, unit Unit
 	if calculate == nil {
 		calculate = capability.SettleBilling
 	}
-	if !a.provenance.Metered {
-		calculate = func(p capability.BillingProvenance, _ []capability.BillableInterval) (capability.BillingSettlement, error) {
-			return capability.BillingSettlement{ReservationID: p.ReservationID}, nil
-		}
-	}
 	_, err = accountBillingAwardTx(ctx, tx, team, a.provenance.ReservationID, through, final, calculate)
 	return err
 }

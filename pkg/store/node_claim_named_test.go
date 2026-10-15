@@ -104,14 +104,14 @@ func TestClaimNamedNodeReservesCreditsForAMeteredToken(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	seedClaimedNode(t, s, "run-billed", "build")
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 
 	if _, err := s.ClaimNamedNode(ctx, claimant, "run-billed", "build", "k8s-job:sw-1", time.Minute, store.NamedClaimOptions{}); err != nil {
 		t.Fatalf("ClaimNamedNode: %v", err)
 	}
-	charges, err := s.ListCreditCharges(ctx, 10)
+	charges, err := tenant(t, s, store.DefaultTeam).ListCreditCharges(ctx, 10)
 	if err != nil {
 		t.Fatalf("ListCreditCharges: %v", err)
 	}

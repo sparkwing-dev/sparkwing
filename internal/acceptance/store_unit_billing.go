@@ -36,7 +36,7 @@ func checkStoreUnitBillingStart(ctx context.Context, path string, cloud bool) (e
 		return err
 	}
 	table := store.CreditRateTable{{Cores: 1, MicroPerSecond: 2}, {Cores: 4, MicroPerSecond: 10}}
-	if _, err := f.s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &table}); err != nil {
+	if _, err := f.s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &table}); err != nil {
 		return err
 	}
 	until := time.Now().UTC().Add(time.Hour)
@@ -75,7 +75,7 @@ func checkStoreUnitBillingStart(ctx context.Context, path string, cloud bool) (e
 		return fmt.Errorf("pre-execution intervals=%d, %v", intervals, err)
 	}
 	table[0].MicroPerSecond, table[1].MicroPerSecond = 200, 1000
-	if _, err := f.s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &table}); err != nil {
+	if _, err := f.s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &table}); err != nil {
 		return err
 	}
 	actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: p.Capability.Prefix}, CapabilityPrefix: p.Capability.Prefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}

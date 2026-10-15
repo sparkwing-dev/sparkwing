@@ -52,7 +52,6 @@ var defaultTeamCallers = map[string]string{
 	"internal/orchestrator.(*HeldRunStore).IsRunTerminal":              defaultTeamStores,
 	"internal/orchestrator.(*HeldRunStore).finalizeRun":                defaultTeamStores,
 	"internal/orchestrator.(*StandaloneStores).Find":                   defaultTeamStores,
-	"internal/orchestrator.(consumerRuntime).shouldExit":               defaultTeamConsumer,
 	"internal/orchestrator.(localState).AcknowledgeNodeExecutionStart": defaultTeamState,
 	"internal/orchestrator.(localState).AddNodeMetricSample":           defaultTeamState,
 	"internal/orchestrator.(localState).AddNodeUsage":                  defaultTeamState,

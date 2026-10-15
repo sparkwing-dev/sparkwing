@@ -181,8 +181,6 @@ var tenantTables = []string{
 	"node_outputs",
 	"node_steps",
 	"nodes",
-	"output_runs",
-	"output_tombstones",
 	"pipeline_profiles",
 	"repos",
 	"run_definition_plans",

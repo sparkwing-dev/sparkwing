@@ -27,7 +27,7 @@ func meteredUnitFixture(t *testing.T, cloud bool) (*Store, UnitDemand, *time.Tim
 	demand.CapabilityPrefix = root.Prefix
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('fund','a','paid',1000000,1)`)
 	table := CreditRateTable{{Cores: 1, MicroPerSecond: 2}, {Cores: 4, MicroPerSecond: 10}}
-	if _, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
 		t.Fatal(err)
 	}
 	s.billing = unitBillingCalculation
@@ -86,6 +86,49 @@ func unitBillingTotal(t *testing.T, s *Store, want int64, settled bool) {
 	var pending int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM billing_awards WHERE settled_at IS NULL`).Scan(&pending); err != nil || (pending == 0) != settled {
 		t.Fatalf("pending=%d, %v; settled=%t", pending, err, settled)
+	}
+}
+
+func TestUnmeteredUnitLifecycleNeedsNoCalculator(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
+		for _, end := range []string{"release", "unstarted_lapse", "started_lapse"} {
+			t.Run(string(kind)+"/"+end, func(t *testing.T) {
+				s, _, claim, now := renewalFixture(t, kind)
+				s.billing = func(capability.BillingProvenance, []capability.BillableInterval) (capability.BillingSettlement, error) {
+					t.Error("unmetered lifecycle called the billing calculator")
+					return capability.BillingSettlement{}, errors.New("no unmetered calculator")
+				}
+				started := end == "started_lapse"
+				if started && kind == capability.UnitNode {
+					ordinal := int64(0)
+					actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+					if _, err := (&Tenant{s: s, team: claim.Team}).TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{claim.RunID, claim.NodeID}, Actor: actor, To: NodeRunning, Cause: CauseStart, SourceAttempt: &ordinal}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				beat, err := s.RenewUnit(t.Context(), claim.Award.CapabilityPrefix, started)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if end == "release" {
+					if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					*now = beat.ExpiresAt
+					lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
+					if err != nil {
+						t.Fatal(err)
+					}
+					units, err := s.ReapUnits(t.Context(), lease, 10)
+					if err != nil || len(units) != 1 || !units[0].Requeued {
+						t.Fatalf("unmetered recovery: %+v, %v", units, err)
+					}
+				}
+				unitBillingTotal(t, s, 0, true)
+				rewriteSchemaCount(t, s.db, "billable_intervals", 0)
+			})
+		}
 	}
 }
 
@@ -212,7 +255,7 @@ func TestMeteredUnitNodeLifecycleUsesImmutableAward(t *testing.T) {
 				t.Fatalf("compute start=%d, %v; want %d", began, err, wantStart)
 			}
 			table := CreditRateTable{{Cores: 1, MicroPerSecond: 200}, {Cores: 4, MicroPerSecond: 1000}}
-			if _, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
+			if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
 				t.Fatal(err)
 			}
 			*now = now.Add(10 * time.Second)

@@ -342,14 +342,18 @@ func (rt consumerRuntime) shouldExit(ctx context.Context, st *store.Store, logge
 	if rt.idle <= 0 || time.Since(lastWork) < rt.idle {
 		return false
 	}
-	if n, err := st.CountPendingTriggers(ctx); err != nil || n > 0 {
+	tenant, err := st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return false
+	}
+	if n, err := tenant.CountPendingTriggers(ctx); err != nil || n > 0 {
 		return false
 	}
 	if rt.unlock == nil {
 		return true
 	}
 	rt.unlock()
-	if n, err := st.CountPendingTriggers(ctx); err == nil && n == 0 {
+	if n, err := tenant.CountPendingTriggers(ctx); err == nil && n == 0 {
 		logger.Info("trigger consumer idle; exiting", "idle_for", rt.idle)
 		return true
 	}

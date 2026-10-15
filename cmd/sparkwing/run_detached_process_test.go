@@ -1205,7 +1205,11 @@ func TestRunsConsumerStop_RecordsTheInterruptedRun(t *testing.T) {
 	}
 
 	if trig.Status == "pending" {
-		n, cerr := st.CountPendingTriggers(context.Background())
+		tenant, err := st.ForTeam(context.Background(), store.DefaultTeam)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n, cerr := tenant.CountPendingTriggers(context.Background())
 		if cerr != nil || n == 0 {
 			t.Fatalf("trigger reads pending but the queue is empty (n=%d err=%v)", n, cerr)
 		}

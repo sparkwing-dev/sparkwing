@@ -30,6 +30,9 @@ func checkRecoveryUnstarted(ctx context.Context, root string) (err error) {
 		if err := f.expireHolder(ctx); err != nil {
 			return err
 		}
+		if err := checkStoreQueueCounts(ctx, f.s, map[string]int{store.QueueStateClaimed: 1}); err != nil {
+			return err
+		}
 		units, err := f.s.ReapUnits(ctx, f.lease, 10)
 		if err != nil {
 			return err
@@ -39,6 +42,9 @@ func checkRecoveryUnstarted(ctx context.Context, root string) (err error) {
 		}
 		kinds = append(kinds, "job_requeued")
 		if err := f.reopen(ctx, path); err != nil {
+			return err
+		}
+		if err := checkStoreQueueCounts(ctx, f.s, map[string]int{store.QueueStateWaiting: 1}); err != nil {
 			return err
 		}
 		pending, err := f.tenant.ReadNode(ctx, ref)

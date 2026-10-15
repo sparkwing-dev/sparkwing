@@ -187,21 +187,18 @@ raw readiness publication and other legacy lifecycle/claim/trigger APIs remain
 open, along with the earlier foreign contract gaps. W1b implementation files
 are unchanged. See `../w1-session22-progress.md` for evidence and shared files.
 
-W1's raw dependency writer cut is complete. `UpdateNodeDeps` on Store, Tenant
-and Client and its HTTP endpoint are removed. The old host computes generated
-waits from membership without rewriting declarations. The SQLite
-`lifecycle-generator-barrier/store-sqlite` cell checks two generated members,
-an empty group, reopening, terminal replay and dependent release. The generated
-property checks that arbitrary legacy dependency projections cannot change the
-accepted graph or its decisions. W1b implementation files are unchanged.
+## From bw-3095-w1b-store-data (unreviewed by lead)
 
-W1 now passes accepted plan-level concurrency to expansion validation through
-`ExistingConcurrency`, including replay. W3/W4's existing concurrency-definition
-handoff still needs implementation. An overlay of the existing W4 membership
-test that expects `plan_invalid` for capacity, scope and on_limit changes fails
-all six job/plan cases because ValidatePlan returns nil. Cost changes remain
-allowed. W1 tests its context handoff with a contract fake and does not claim
-the shared validator enforces the policy. No foreign contract shape changed.
-C2's ValidateDelegation is also a panic stub, so the SQLite expansion credential
-is seeded. Native issuance, HTTP transport and host execution remain integrations.
-See `../w1-session23-progress.md` for checks and remaining W1 work.
+W1b continuation: shared `accountBillingAwardTx` now bypasses the calculator
+for unmetered awards, including checkpoint, final settlement and replay. W1's
+`accountUnitBillingTx` can remove its duplicate unmetered calculator override
+after the branches join. This checkout still lacks W1's `unit_billing.go` and
+metered issuance changes. The real lifecycle join remains open here.
+
+W1b also moved `CreditSettings`, `SetCreditSettings`,
+`SetOperatorCreditSettings`, `CreditRateTable` and `WarmCPUClassCores` from
+Store to Operator without aliases. W1's pending callers use `AsOperator()`.
+The raw Store `GrantCredits`, `ListCreditCharges` and `AppendEventOnce` wrappers
+are removed. Select a Tenant explicitly for their retained methods. Caller
+migrations in this checkout are complete. W1 lifecycle files changed only at
+two price-read callsites in `store.go`.

@@ -2533,11 +2533,11 @@ func (s *Store) warmClassFilter(ctx context.Context, claimant ClaimIdentity) (wa
 	if err != nil || !metered {
 		return warmClassFilter{}, err
 	}
-	table, err := s.CreditRateTable(ctx)
+	table, err := s.AsOperator().CreditRateTable(ctx)
 	if err != nil {
 		return warmClassFilter{}, err
 	}
-	cores, err := s.WarmCPUClassCores(ctx)
+	cores, err := s.AsOperator().WarmCPUClassCores(ctx)
 	if err != nil {
 		return warmClassFilter{}, err
 	}
@@ -4253,11 +4253,6 @@ SELECT id FROM triggers
 	return ids, rows.Err()
 }
 
-// CountPendingTriggers returns how many triggers are waiting to be claimed.
-func (s *Store) CountPendingTriggers(ctx context.Context) (int, error) {
-	return s.defaultTenant().CountPendingTriggers(ctx)
-}
-
 // ClaimSpecificTrigger flips a known pending trigger to 'claimed'
 // without recording a claimant; ErrNotFound when not pending. Use it
 // only in-process, where the caller and the store share a lifetime and
@@ -4649,75 +4644,6 @@ var ErrLockHeld = errors.New("held by another holder")
 // ErrConcurrencySuperseded signals a concurrency holder was superseded.
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 
-// CountPendingNodes returns the count of unclaimed ready nodes.
-func (s *Store) CountPendingNodes(ctx context.Context) (int, error) {
-	var n int
-	err := s.queryRow(
-		ctx,
-		`SELECT COUNT(*) FROM nodes
-		  WHERE ready_at IS NOT NULL AND (claimed_by IS NULL OR claimed_by = '')
-		    AND `+nodeNotDone+` AND `+nodeRunActiveSQL("nodes."),
-	).Scan(&n)
-	return n, err
-}
-
-// Queue states a node occupies before it reaches a terminal outcome. The set
-// is closed, so a caller may use it as a metric label without growing the
-// series count.
-const (
-	// QueueStateWaiting is a node whose dependencies have not all finished.
-	QueueStateWaiting = "waiting"
-	// QueueStateReady is a node any eligible runner may claim.
-	QueueStateReady = "ready"
-	// QueueStateClaimed is a node a runner holds but has not started.
-	QueueStateClaimed = "claimed"
-	// QueueStateRunning is a node a runner is executing.
-	QueueStateRunning = "running"
-	// QueueStateApprovalPending is a node waiting on a human decision.
-	QueueStateApprovalPending = "approval_pending"
-)
-
-// QueueStates lists every state [Store.CountNodesByQueueState] reports, in the
-// order a node passes through them.
-func QueueStates() []string {
-	return []string{
-		QueueStateWaiting, QueueStateReady, QueueStateClaimed,
-		QueueStateRunning, QueueStateApprovalPending,
-	}
-}
-
-// CountNodesByQueueState counts the nodes sitting in each queue state, keyed
-// by the [QueueStates] names. Terminal nodes are absent: the answer is the
-// work still outstanding, which is what a queue-depth alert reads. The read is
-// bounded by the outstanding-node index rather than the table.
-func (s *Store) CountNodesByQueueState(ctx context.Context) (map[string]int, error) {
-	var waiting, ready, claimed, running, approval int
-	err := s.queryRow(ctx,
-		`SELECT
-                    COALESCE(SUM(CASE WHEN status = ? AND ready_at IS NULL THEN 1 ELSE 0 END), 0),
-                    COALESCE(SUM(CASE WHEN status = ? AND ready_at IS NOT NULL
-                                      AND (claimed_by IS NULL OR claimed_by = '') THEN 1 ELSE 0 END), 0),
-                    COALESCE(SUM(CASE WHEN status = ? AND claimed_by IS NOT NULL
-                                      AND claimed_by != '' THEN 1 ELSE 0 END), 0),
-                    COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
-                    COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0)
-                   FROM nodes
-                  WHERE `+nodeNotDone+` AND `+nodeRunActiveSQL("nodes."),
-		nodeStatusPending, nodeStatusPending, nodeStatusPending,
-		nodeStatusRunning, NodeStatusApprovalPending,
-	).Scan(&waiting, &ready, &claimed, &running, &approval)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]int{
-		QueueStateWaiting:         waiting,
-		QueueStateReady:           ready,
-		QueueStateClaimed:         claimed,
-		QueueStateRunning:         running,
-		QueueStateApprovalPending: approval,
-	}, nil
-}
-
 // NodeMetering says whether the credential that claimed a node was metered.
 type NodeMetering int
 
@@ -4777,20 +4703,6 @@ func (t *Tenant) NodeSettlement(ctx context.Context, runID, nodeID string) (Node
 		out.Seconds = time.Duration(finishedAt.Int64 - startedAt.Int64).Seconds()
 	}
 	return out, nil
-}
-
-// CountActiveRunners counts distinct claimed_by within `window`.
-func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (int, error) {
-	threshold := time.Now().Add(-window).UnixNano()
-	var n int
-	err := s.queryRow(
-		ctx,
-		`SELECT COUNT(DISTINCT claimed_by) FROM nodes
-		  WHERE claimed_by IS NOT NULL AND claimed_by != ''
-		    AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?`,
-		threshold,
-	).Scan(&n)
-	return n, err
 }
 
 // NodeStatusApprovalPending = nodes.status while waiting on a human.

@@ -49,7 +49,7 @@ func TestMeteredTriggerClaimNeedsTheMinimumReservation(t *testing.T) {
 		t.Fatalf("unmetered claim: %v", err)
 	}
 
-	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, shortfall.RequiredMicro, "", "operator"); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, shortfall.RequiredMicro, "", "operator"); err != nil {
 		t.Fatal(err)
 	}
 	tr, err := st.ClaimNextTriggerFor(ctx, pool, 0, nil, nil)
@@ -114,7 +114,7 @@ func TestMeteredTriggerClaimReservesItsMinute(t *testing.T) {
 	ctx := context.Background()
 	pool := meteredClaimant(t, st, "agent:cloud")
 	floor := triggerFloor(t, st, pool)
-	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, floor, "", "operator"); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, floor, "", "operator"); err != nil {
 		t.Fatal(err)
 	}
 	pendingTrigger(t, st, "run-a")
@@ -199,7 +199,7 @@ func TestMeteredTriggerHeartbeatStopsAnEmptyBalance(t *testing.T) {
 	ctx := context.Background()
 	pool := meteredClaimant(t, st, "agent:cloud")
 	floor := triggerFloor(t, st, pool)
-	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, floor, "", "operator"); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, floor, "", "operator"); err != nil {
 		t.Fatal(err)
 	}
 	pendingTrigger(t, st, "run-empty")
@@ -239,7 +239,7 @@ func TestMeteredTriggerHeartbeatKeepsChargingAnAdmittedFrozenTeam(t *testing.T) 
 	pool := meteredClaimant(t, st, "agent:cloud")
 	floor := triggerFloor(t, st, pool)
 	rate := floor / store.MinBillableSeconds
-	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 3*floor, "", "operator"); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 3*floor, "", "operator"); err != nil {
 		t.Fatal(err)
 	}
 	pendingTrigger(t, st, "run-frozen")
@@ -271,7 +271,7 @@ func TestMeteredTriggerHeartbeatLedgerFailureDoesNotRenew(t *testing.T) {
 	ctx := context.Background()
 	pool := meteredClaimant(t, st, "agent:cloud")
 	floor := triggerFloor(t, st, pool)
-	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 2*floor, "", "operator"); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 2*floor, "", "operator"); err != nil {
 		t.Fatal(err)
 	}
 	pendingTrigger(t, st, "run-ledger")
@@ -305,7 +305,7 @@ func TestMeteredTriggerHeartbeatRejectsSupersededGeneration(t *testing.T) {
 	ctx := context.Background()
 	pool := meteredClaimant(t, st, "agent:cloud")
 	floor := triggerFloor(t, st, pool)
-	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 2*floor, "", "operator"); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 2*floor, "", "operator"); err != nil {
 		t.Fatal(err)
 	}
 	pendingTrigger(t, st, "run-old")
@@ -333,7 +333,7 @@ func TestMeteredTriggerReapSettlesOnlyTheTailAfterHeartbeat(t *testing.T) {
 	pool := meteredClaimant(t, st, "agent:cloud")
 	floor := triggerFloor(t, st, pool)
 	rate := floor / store.MinBillableSeconds
-	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 3*floor, "", "operator"); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 3*floor, "", "operator"); err != nil {
 		t.Fatal(err)
 	}
 	pendingTrigger(t, st, "run-reap-tail")
@@ -374,7 +374,7 @@ func TestTriggerNewClaimRefusesAnUnsettledPriorCreditWindow(t *testing.T) {
 			if _, err := st.CancelPendingTrigger(ctx, "run-floor"); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 3*floor, "", "operator"); err != nil {
+			if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 3*floor, "", "operator"); err != nil {
 				t.Fatal(err)
 			}
 			pendingTrigger(t, st, "run-transition")
@@ -444,21 +444,21 @@ func TestDisabledMeteringDoesNotSettleAnEarlierTriggerReservation(t *testing.T) 
 	st := storetest.Open(t)
 	ctx := context.Background()
 	pool := meteredClaimant(t, st, "agent:cloud")
-	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 10*triggerFloor(t, st, pool), "", "operator"); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 10*triggerFloor(t, st, pool), "", "operator"); err != nil {
 		t.Fatal(err)
 	}
 	pendingTrigger(t, st, "run-licensed")
 	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-licensed", pool, 0); err != nil {
 		t.Fatal(err)
 	}
-	before, err := st.ListCreditCharges(ctx, 10)
+	before, err := tenant(t, st, store.DefaultTeam).ListCreditCharges(ctx, 10)
 	if err != nil || len(before) != 1 {
 		t.Fatalf("earlier reservation = %+v, %v", before, err)
 	}
 	if err := st.FinishTrigger(store.WithoutCreditMetering(ctx), "run-licensed"); err != nil {
 		t.Fatal(err)
 	}
-	after, err := st.ListCreditCharges(ctx, 10)
+	after, err := tenant(t, st, store.DefaultTeam).ListCreditCharges(ctx, 10)
 	if err != nil || len(after) != len(before) {
 		t.Fatalf("charges after unlicensed finish = %+v, %v", after, err)
 	}
@@ -472,7 +472,7 @@ func TestMeteredTriggerClaimsRaceForOneMinute(t *testing.T) {
 	ctx := context.Background()
 	pool := meteredClaimant(t, st, "agent:cloud")
 	floor := triggerFloor(t, st, pool)
-	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, floor, "", "operator"); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, floor, "", "operator"); err != nil {
 		t.Fatal(err)
 	}
 	const claimers = 8
@@ -519,7 +519,7 @@ func TestTriggerFinishSettlesItsReservation(t *testing.T) {
 	floor := triggerFloor(t, st, pool)
 	rate := floor / store.MinBillableSeconds
 	grant := 10 * floor
-	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, grant, "", "operator"); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, grant, "", "operator"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -568,7 +568,7 @@ func TestTriggerReapSettlesThroughLeaseEnd(t *testing.T) {
 	pool := meteredClaimant(t, st, "agent:cloud")
 	floor := triggerFloor(t, st, pool)
 	rate := floor / store.MinBillableSeconds
-	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 10*floor, "", "operator"); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 10*floor, "", "operator"); err != nil {
 		t.Fatal(err)
 	}
 

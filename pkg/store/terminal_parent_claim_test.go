@@ -20,7 +20,7 @@ func TestTerminalParentsCannotSupplyQueuedWorkOrReserveCredits(t *testing.T) {
 					claimant := store.ClaimIdentity{}
 					if metered {
 						claimant = meteredClaimant(t, s, "cloud")
-						if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "funds", "admin"); err != nil {
+						if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "funds", "admin"); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -31,11 +31,11 @@ func TestTerminalParentsCannotSupplyQueuedWorkOrReserveCredits(t *testing.T) {
 					if err := s.FinishRun(ctx, "terminal", status, ""); err != nil {
 						t.Fatal(err)
 					}
-					counts, err := s.CountNodesByQueueState(ctx)
+					counts, err := s.AsOperator().CountNodesByQueueState(ctx)
 					if err != nil || counts["ready"] != 0 || counts["waiting"] != 0 {
 						t.Fatalf("terminal queue = %v, %v", counts, err)
 					}
-					if count, err := s.CountPendingNodes(ctx); err != nil || count != 0 {
+					if count, err := s.AsOperator().CountPendingNodes(ctx); err != nil || count != 0 {
 						t.Fatalf("pending = %d, %v", count, err)
 					}
 					claim := func(run string) (*store.Node, error) {
@@ -48,12 +48,12 @@ func TestTerminalParentsCannotSupplyQueuedWorkOrReserveCredits(t *testing.T) {
 					if n != nil || !(errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld)) {
 						t.Fatalf("terminal claim = %+v, %v", n, err)
 					}
-					charges, err := s.ListCreditCharges(ctx, 10)
+					charges, err := tenant(t, s, store.DefaultTeam).ListCreditCharges(ctx, 10)
 					if err != nil || len(charges) != 0 {
 						t.Fatalf("terminal credit charges = %v, %v", charges, err)
 					}
 					readyNode(t, s, "active", "ready")
-					counts, err = s.CountNodesByQueueState(ctx)
+					counts, err = s.AsOperator().CountNodesByQueueState(ctx)
 					if err != nil || counts["ready"] != 1 {
 						t.Fatalf("active queue = %v, %v", counts, err)
 					}
