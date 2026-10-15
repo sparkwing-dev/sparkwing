@@ -1,22 +1,22 @@
-package acceptance
+package store_test
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"path/filepath"
+	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// CheckStoreCapabilityManagement verifies credential ownership and rotation across reopening.
-func CheckStoreCapabilityManagement(ctx context.Context, root string) (err error) {
-	path := filepath.Join(root, "capabilities.db")
-	s, err := store.Open(path)
+func checkStoreCapabilityManagement(t *testing.T) (err error) {
+	ctx := t.Context()
+	target := storetest.NewSQLite(t)
+	s, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -26,18 +26,15 @@ func CheckStoreCapabilityManagement(ctx context.Context, root string) (err error
 		return err
 	}
 	s.SetSessionKeyCipher(cipher)
-	for _, query := range []string{`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('default','member','editor',1)`} {
-		if _, err := s.DB().ExecContext(ctx, query); err != nil {
-			return err
-		}
-	}
-	raw, _, _, err := s.CreateAccountSession(ctx, store.Account{ID: "member"}, store.DefaultTeam, time.Hour)
+	member := signIn(t, s, "member", "member@example.test")
+	team := member.PersonalTeam
+	raw, _, _, err := s.CreateAccountSession(ctx, member.Account, team, time.Hour)
 	if err != nil {
 		return err
 	}
 	digest := sha256.Sum256([]byte(raw))
 	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
-	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: "default", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
+	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{Kind: capability.ProvisionMember, Authority: &authority, Team: string(team), Subject: capability.Subject{Kind: capability.SubjectAccount, ID: member.Account.ID}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
 	if err != nil {
 		return err
 	}
@@ -49,7 +46,7 @@ func CheckStoreCapabilityManagement(ctx context.Context, root string) (err error
 		if err := s.Close(); err != nil {
 			return err
 		}
-		opened, err := store.Open(path)
+		opened, err := target.TryOpen()
 		if err != nil {
 			return err
 		}
@@ -60,11 +57,11 @@ func CheckStoreCapabilityManagement(ctx context.Context, root string) (err error
 	if err := reopen(); err != nil {
 		return err
 	}
-	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
+	tenant, err := s.ForTeam(ctx, team)
 	if err != nil {
 		return err
 	}
-	a := capability.Authorized{Principal: capability.Principal{Authority: authority}, Target: capability.Target{Team: "default"}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{capability.RunsRead}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
+	a := capability.Authorized{Principal: capability.Principal{Authority: authority}, Target: capability.Target{Team: string(team)}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{capability.RunsRead}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
 	rows, err := tenant.ListCapabilities(ctx, a, capability.InventoryFilter{})
 	if err != nil {
 		return err
@@ -78,13 +75,13 @@ func CheckStoreCapabilityManagement(ctx context.Context, root string) (err error
 	if err != nil {
 		return err
 	}
-	if rotation.Issued.Raw == "" || rotation.Previous.CreatedBy != "member" || rotation.Issued.Capability.Parent != nil {
+	if rotation.Issued.Raw == "" || rotation.Previous.CreatedBy != member.Account.ID || rotation.Issued.Capability.Parent != nil {
 		return errors.New("rotation lost original ownership or ancestry")
 	}
 	if err := reopen(); err != nil {
 		return err
 	}
-	tenant, err = s.ForTeam(ctx, store.DefaultTeam)
+	tenant, err = s.ForTeam(ctx, team)
 	if err != nil {
 		return err
 	}
@@ -113,4 +110,10 @@ func CheckStoreCapabilityManagement(ctx context.Context, root string) (err error
 		return err
 	}
 	return nil
+}
+
+func TestStoreCapabilityManagement(t *testing.T) {
+	if err := checkStoreCapabilityManagement(t); err != nil {
+		t.Fatal(err)
+	}
 }

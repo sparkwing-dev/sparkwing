@@ -1,20 +1,16 @@
-package acceptance
+package store_test
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
+	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
-
-// StoreCredentialBoundaryScenarios lists SQLite credential proofs below transport and process execution.
-func StoreCredentialBoundaryScenarios() []string {
-	return []string{"credentials-operator-console-split", "credentials-session-digest-csrf"}
-}
 
 type storeProvisionPolicy struct{}
 
@@ -29,15 +25,10 @@ func (storeProvisionPolicy) AuthorizeProvision(ctx context.Context, resolver cap
 	return nil
 }
 
-// CheckStoreCredentialBoundary exercises root provisioning and deployment revocation against SQLite.
-func CheckStoreCredentialBoundary(ctx context.Context, root, id string) (err error) {
-	if id == "credentials-session-digest-csrf" {
-		return checkStoreSessions(ctx, root)
-	}
-	if id != "credentials-operator-console-split" {
-		return fmt.Errorf("unknown store credential boundary %q", id)
-	}
-	s, err := store.Open(filepath.Join(root, "credentials.db"))
+func checkStoreProvisioningOrigins(t *testing.T) (err error) {
+	ctx := t.Context()
+	target := storetest.NewSQLite(t)
+	s, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -90,4 +81,10 @@ func CheckStoreCredentialBoundary(ctx context.Context, root, id string) (err err
 		return errors.New("revoked service remains live")
 	}
 	return nil
+}
+
+func TestStoreProvisioningOrigins(t *testing.T) {
+	if err := checkStoreProvisioningOrigins(t); err != nil {
+		t.Fatal(err)
+	}
 }

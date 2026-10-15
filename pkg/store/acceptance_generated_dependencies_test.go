@@ -1,26 +1,25 @@
-package acceptance
+package store_test
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"reflect"
-	"time"
+	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// CheckStoreGeneratedDependencies checks sealed topology and expansion barriers through SQLite reopening.
-func CheckStoreGeneratedDependencies(ctx context.Context, root string) (err error) {
-	path := filepath.Join(root, "generated-dependencies.db")
-	s, err := store.Open(path)
+func checkStoreGeneratedDependencies(t *testing.T) (err error) {
+	ctx := t.Context()
+	target := storetest.NewSQLite(t)
+	s, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -46,15 +45,21 @@ func CheckStoreGeneratedDependencies(ctx context.Context, root string) (err erro
 			return errors.New("dependent released before expansion")
 		}
 	}
-	expires := before.StoreNow.Add(time.Hour)
-	expander := capability.Capability{
-		Prefix: "expander", Digest: sha256.Sum256([]byte("expander")), Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "host"}, Audience: capability.Controller, Grants: []capability.Grant{capability.ExpansionSubmit}, Parent: &plan.Actor.Authority, Issuance: capability.Delegate, IssuedAt: before.StoreNow, ExpiresAt: &expires,
-		Binding: capability.Binding{Kind: capability.BindingNode, RunID: plan.RunID, NodeID: "alpha", Generation: source.Generation, Expansion: &capability.LeaseRef{Kind: capability.UnitTrigger, ID: plan.RunID, Holder: plan.Actor.Owner.Holder, Generation: plan.Actor.Owner.Generation}},
-	}
-	if err := seedRecoveryCapability(ctx, s, expander); err != nil {
+	owner, err := s.ResolveAuthority(ctx, plan.Actor.Authority)
+	if err != nil {
 		return err
 	}
-	request := store.ExpansionSubmission{Source: source.Ref, SourceGeneration: source.Generation, Actor: store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: expander.Prefix}, CapabilityPrefix: expander.Prefix}, Body: []byte(`{"jobs":[{"id":"child","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]},{"id":"other","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]}]}`)}
+	binding := owner.Capability.Binding
+	binding.Kind, binding.NodeID, binding.Generation = capability.BindingNode, "alpha", source.Generation
+	binding.Expansion = &capability.LeaseRef{Kind: capability.UnitTrigger, ID: plan.RunID, Holder: plan.Actor.Owner.Holder, Generation: plan.Actor.Owner.Generation}
+	expander, err := s.DelegateCapability(ctx, capability.DelegateSpec{
+		Parent: plan.Actor.Authority, Audience: capability.Controller, Grants: []capability.Grant{capability.ExpansionSubmit},
+		Binding: binding, ExpiresAt: owner.Capability.ExpiresAt,
+	})
+	if err != nil {
+		return err
+	}
+	request := store.ExpansionSubmission{Source: source.Ref, SourceGeneration: source.Generation, Actor: store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: expander.Capability.Prefix}, CapabilityPrefix: expander.Capability.Prefix}, Body: []byte(`{"jobs":[{"id":"child","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]},{"id":"other","groups":["children"],"deps":["alpha"],"steps":[{"id":"body"}]}]}`)}
 	accepted, err := tenant.AcceptExpansion(ctx, request)
 	if err != nil || len(accepted.Nodes) != 2 {
 		return fmt.Errorf("accept expansion: %+v, %v", accepted, err)
@@ -62,17 +67,17 @@ func CheckStoreGeneratedDependencies(ctx context.Context, root string) (err erro
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err := store.Open(path)
+	reopened, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
 	s = reopened
-	s.SetClaimProfileResolver(recoveryEnrollment{})
+	s.SetClaimProfileResolver(acceptanceClaimProfile{})
 	return checkStoreGeneratedMembership(ctx, s, plan, before, request)
 }
 
 func checkStoreGeneratedMembership(ctx context.Context, s *store.Store, plan store.PlanAcceptance, before store.RunSnapshot, request store.ExpansionSubmission) error {
-	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
+	tenant, err := s.ForTeam(ctx, acceptanceTeam)
 	if err != nil {
 		return err
 	}
@@ -144,11 +149,11 @@ func finishGeneratedDependencyJob(ctx context.Context, s *store.Store, tenant *s
 		return store.NodeRow{}, err
 	}
 	holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-	start, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: recoverySourceAttempt(0)})
+	start, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(0)})
 	if err != nil {
 		return store.NodeRow{}, err
 	}
-	if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: recoverySourceAttempt(start.Attempt)}); err != nil {
+	if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(start.Attempt)}); err != nil {
 		return store.NodeRow{}, err
 	}
 	return tenant.ReadNode(ctx, ref)
@@ -175,4 +180,10 @@ func acceptStoreGeneratedPlan(ctx context.Context, s *store.Store) (*store.Tenan
 		return nil, store.PlanAcceptance{}, err
 	}
 	return tenant, plan, nil
+}
+
+func TestStoreGeneratedDependencies(t *testing.T) {
+	if err := checkStoreGeneratedDependencies(t); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -1,20 +1,22 @@
-package acceptance
+package store_test
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// CheckStoreScheduleBoundary checks tenant isolation and atomic schedule history through reopening.
-func CheckStoreScheduleBoundary(ctx context.Context, root string) (err error) {
-	path := filepath.Join(root, "schedules.db")
-	s, err := store.Open(path)
+func checkStoreScheduleBoundary(t *testing.T) (err error) {
+	ctx := t.Context()
+	root := t.TempDir()
+	target := storetest.NewSQLite(t)
+	s, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -77,7 +79,7 @@ func CheckStoreScheduleBoundary(ctx context.Context, root string) (err error) {
 	if err := s.Close(); err != nil {
 		return err
 	}
-	s, err = store.Open(path)
+	s, err = target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -107,4 +109,10 @@ func CheckStoreScheduleBoundary(ctx context.Context, root string) (err error) {
 		return fmt.Errorf("foreign schedule after deletion: %+v, %v", row, err)
 	}
 	return nil
+}
+
+func TestStoreScheduleBoundary(t *testing.T) {
+	if err := checkStoreScheduleBoundary(t); err != nil {
+		t.Fatal(err)
+	}
 }

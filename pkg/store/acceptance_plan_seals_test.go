@@ -1,22 +1,25 @@
-package acceptance
+package store_test
 
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"reflect"
+	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 type sealIntakePolicy struct{}
@@ -26,10 +29,10 @@ func (sealIntakePolicy) ResolveIntake(ctx context.Context, reader capability.Aut
 	return store.IntakePolicyFacts{Options: &request.Request.Options, LogRetentionClass: "r30", LogRetentionDays: 30}, err
 }
 
-// CheckStorePlanSeals checks atomic acceptance and immutable replay through SQLite reopening.
-func CheckStorePlanSeals(ctx context.Context, root string) (err error) {
-	path := filepath.Join(root, "plan-seals.db")
-	s, err := store.Open(path)
+func checkStorePlanSeals(t *testing.T) (err error) {
+	ctx := t.Context()
+	target := storetest.NewSQLite(t)
+	s, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -56,12 +59,12 @@ func CheckStorePlanSeals(ctx context.Context, root string) (err error) {
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err := store.Open(path)
+	reopened, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
 	s = reopened
-	tenant, err = s.ForTeam(ctx, store.DefaultTeam)
+	tenant, err = s.ForTeam(ctx, acceptanceTeam)
 	if err != nil {
 		return err
 	}
@@ -91,17 +94,40 @@ func CheckStorePlanSeals(ctx context.Context, root string) (err error) {
 
 func storePlanSealRequest(ctx context.Context, s *store.Store) (*store.Tenant, store.PlanAcceptance, error) {
 	s.SetIntakePolicy(sealIntakePolicy{})
-	s.SetClaimProfileResolver(recoveryEnrollment{})
-	until := time.Now().Add(time.Hour)
-	parent := capability.Capability{Prefix: "planner-root", Digest: sha256.Sum256([]byte("planner-root")), Team: string(store.DefaultTeam), Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "host"}, Audience: capability.Controller, Grants: []capability.Grant{capability.RunsWrite, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, Issuance: capability.Delegate, IssuedAt: time.Now(), ExpiresAt: &until}
-	if err := seedRecoveryCapability(ctx, s, parent); err != nil {
-		return nil, store.PlanAcceptance{}, err
-	}
-	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
+	s.SetClaimProfileResolver(acceptanceClaimProfile{})
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
-	input := store.IntakeRequest{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: parent.Prefix}, Request: runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: "fixture", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}, RequestedArgs: map[string]string{"message": "sealed"}, Options: runspec.Options{OwnerExecutionTimeout: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "owner_execution_timeout"}}}}}
+	s.SetSessionKeyCipher(cipher)
+	member, err := s.ResolveSignIn(ctx, googleProfile("planner", "planner@example.test"), store.SignUpConditions{}, time.Now())
+	if err != nil {
+		return nil, store.PlanAcceptance{}, err
+	}
+	if member.PersonalTeam != acceptanceTeam {
+		return nil, store.PlanAcceptance{}, fmt.Errorf("planner team: %s", member.PersonalTeam)
+	}
+	raw, _, _, err := s.CreateAccountSession(ctx, member.Account, acceptanceTeam, time.Hour)
+	if err != nil {
+		return nil, store.PlanAcceptance{}, err
+	}
+	digest := sha256.Sum256([]byte(raw))
+	authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}
+	issued, err := s.ProvisionCapability(ctx, capability.ProvisionSpec{
+		Kind: capability.ProvisionMachine, Authority: &authority, Team: string(acceptanceTeam),
+		RegistrationID: "runner:planner:host", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "host"},
+		Binding: capability.Binding{Kind: capability.BindingNone}, Repositories: []string{"github.com/acme/*"},
+		Grants: []capability.Grant{capability.TriggersClaim},
+	})
+	if err != nil {
+		return nil, store.PlanAcceptance{}, err
+	}
+	parent := issued.Capability
+	tenant, err := s.ForTeam(ctx, acceptanceTeam)
+	if err != nil {
+		return nil, store.PlanAcceptance{}, err
+	}
+	input := store.IntakeRequest{Authority: authority, Request: runspec.Request{Version: 1, Team: string(acceptanceTeam), Pipeline: "fixture", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, RequestedArgs: map[string]string{"message": "sealed"}, Options: runspec.Options{OwnerExecutionTimeout: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "owner_execution_timeout"}}}}}
 	admitted, err := tenant.AdmitRun(ctx, input)
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
@@ -148,3 +174,20 @@ func checkRejectedStorePlans(ctx context.Context, s *store.Store, tenant *store.
 	_, err = s.DB().ExecContext(ctx, `DROP TRIGGER refuse_second_job`)
 	return err
 }
+
+func TestStorePlanSeals(t *testing.T) {
+	if err := checkStorePlanSeals(t); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const acceptanceTeam store.Team = "planner"
+
+type acceptanceClaimProfile struct{}
+
+func (acceptanceClaimProfile) ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
+	capacity := match.Resources{Cores: 8}
+	return match.Profile{Capacity: capacity}, capacity, nil
+}
+
+func acceptanceAttempt(attempt int64) *int64 { return &attempt }

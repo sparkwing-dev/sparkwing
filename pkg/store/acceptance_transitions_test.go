@@ -1,21 +1,22 @@
-package acceptance
+package store_test
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"reflect"
+	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// CheckStoreTransitions checks withdrawal, holder fencing and terminal replay through SQLite reopening.
-func CheckStoreTransitions(ctx context.Context, root string) (err error) {
-	path := filepath.Join(root, "transitions.db")
-	s, err := store.Open(path)
+func checkStoreTransitions(t *testing.T) (err error) {
+	ctx := t.Context()
+	target := storetest.NewSQLite(t)
+	s, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -42,13 +43,13 @@ func CheckStoreTransitions(ctx context.Context, root string) (err error) {
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err := store.Open(path)
+	reopened, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
 	s = reopened
-	s.SetClaimProfileResolver(recoveryEnrollment{})
-	tenant, err = s.ForTeam(ctx, store.DefaultTeam)
+	s.SetClaimProfileResolver(acceptanceClaimProfile{})
+	tenant, err = s.ForTeam(ctx, acceptanceTeam)
 	if err != nil {
 		return err
 	}
@@ -81,18 +82,18 @@ func checkStoreHeldTransitions(ctx context.Context, tenant *store.Tenant, withdr
 	holder := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
 	stale := holder
 	stale.Generation++
-	if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: stale, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: recoverySourceAttempt(0)}); err == nil {
+	if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: stale, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(0)}); err == nil {
 		return errors.New("stale generation started a job")
 	}
 	after, err = tenant.ReadNode(ctx, ref)
 	if err != nil || !reflect.DeepEqual(before, after) {
 		return fmt.Errorf("refused start changed holder: %v", err)
 	}
-	start, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: recoverySourceAttempt(0)})
+	start, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(0)})
 	if err != nil || start.Attempt != 1 {
 		return fmt.Errorf("first start: %+v, %v", start, err)
 	}
-	finish := store.NodeTransition{Ref: ref, Actor: holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: recoverySourceAttempt(start.Attempt)}
+	finish := store.NodeTransition{Ref: ref, Actor: holder, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: acceptanceAttempt(start.Attempt)}
 	if _, err := tenant.TransitionNode(ctx, finish); err != nil {
 		return err
 	}
@@ -140,4 +141,10 @@ func checkStoreTerminalReplay(ctx context.Context, tenant *store.Tenant, finish,
 		return fmt.Errorf("transition events: %v", kinds)
 	}
 	return nil
+}
+
+func TestStoreTransitions(t *testing.T) {
+	if err := checkStoreTransitions(t); err != nil {
+		t.Fatal(err)
+	}
 }

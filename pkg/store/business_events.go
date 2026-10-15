@@ -74,7 +74,7 @@ func RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error {
 	}
 	_, err = tx.Exec(`
 		INSERT INTO business_events (id, ts, team, account, kind, subject_id, actor, attrs)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?)
 		ON CONFLICT (team, kind, subject_id) DO NOTHING`,
 		id, ev.At.UnixNano(), string(ev.Team), ev.Account, ev.Kind, ev.SubjectID,
 		truncate(ev.Actor, 200), string(attrs))

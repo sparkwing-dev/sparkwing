@@ -282,11 +282,6 @@ type CapacityHolder struct {
 	LeaseExpiresAt time.Time
 	Superseded     bool
 }
-func CapacityLiveness() []CapacityLivenessRule
-type CapacityLivenessRule struct {
-	Scope      string
-	Conditions []string
-}
 type CapacityWaiter struct {
 	Key            string
 	ID             string
@@ -454,7 +449,6 @@ type ClaimedRun struct {
 }
 const CloudStorageRateMicroPerGBDay = 10 * MicroCreditsPerCent / 30
 const CompileLogNode = "_compile"
-func CompletionEffects() []EffectPolicy
 const ComputeLimitConcurrentRunners = "max_concurrent_runners"
 const ComputeLimitCronSeconds = "min_cron_interval_seconds"
 type ComputeLimitError struct {
@@ -918,12 +912,6 @@ const EffectMetrics Effect = "metrics"
 const EffectNotifyParent Effect = "notify_parent"
 const EffectPending EffectPhase = "pending"
 type EffectPhase string
-func EffectPhaseRanks() map[EffectPhase]int
-type EffectPolicy struct {
-	Effect       Effect
-	TerminalOnly bool
-	Idempotency  string
-}
 const EffectProfileFold Effect = "profile_fold"
 const EffectRunning EffectPhase = "running"
 const EffectTerminal EffectPhase = "terminal"
@@ -1399,8 +1387,6 @@ type LeaseBeat struct {
 func LiveLogAttempt(attempt, generation int64) string
 const LiveLogAttemptHeader = "X-Sparkwing-Log-Attempt"
 const LiveLogOffsetHeader = "X-Sparkwing-Log-Offset"
-type LockClass string
-func LockOrder() []LockClass
 type LogSegmentGrant struct {
 	Attempt    int64
 	Generation int64
@@ -2094,15 +2080,6 @@ type RetentionResult struct {
 	PinnedRuns    int64
 	PinnedOutputs int64
 }
-type RetentionRule struct {
-	Data           string
-	Setting        string
-	CloudDays      *int
-	SelfHostedDays *int
-	Exception      string
-	Accounting     string
-}
-func RetentionRules() []RetentionRule
 const RetrySourceManual = "manual"
 type Role string
 func (r Role) AtLeast(other Role) bool
@@ -2570,7 +2547,6 @@ type SingletonLease struct {
 	Generation int64
 	ExpiresAt  time.Time
 }
-func SingletonWork() []string
 const SourceCoalesced SourcePolicy = "coalesced"
 type SourceCredential struct {
 	Kind      string

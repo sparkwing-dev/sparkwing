@@ -1,4 +1,4 @@
-package acceptance
+package store_test
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func checkStoreCredentialMutations(ctx context.Context, s *store.Store, owner store.Actor) error {
-	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
+func checkStoreCredentialMutations(ctx context.Context, s *store.Store, team store.Team, owner store.Actor) error {
+	tenant, err := s.ForTeam(ctx, team)
 	if err != nil {
 		return err
 	}
@@ -18,16 +18,16 @@ func checkStoreCredentialMutations(ctx context.Context, s *store.Store, owner st
 	if err != nil {
 		return err
 	}
-	a := capability.Authorized{Principal: p, Target: capability.Target{Team: string(store.DefaultTeam), SecretName: "CONFIG", Pipeline: "build"}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
+	a := capability.Authorized{Principal: p, Target: capability.Target{Team: string(team), SecretName: "CONFIG", Pipeline: "build"}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
 	if err := tenant.WriteSecret(ctx, a, store.Secret{Name: "CONFIG", Value: "stored-envelope", Pipeline: "build"}); err != nil {
 		return err
 	}
 	row, err := tenant.ReadSecret(ctx, a)
-	if err != nil || row == nil || row.Value != "stored-envelope" || row.Principal != "owner" || row.CreatedAt.IsZero() {
+	if err != nil || row == nil || row.Value != "stored-envelope" || row.Principal != p.Capability.Subject.ID || row.CreatedAt.IsZero() {
 		return fmt.Errorf("current session secret transaction: %+v, %v", row, err)
 	}
 	git, err := tenant.WriteGitCredential(ctx, a, store.GitCredential{Host: "git.example.test", Kind: store.GitCredentialHTTPS, Secret: "stored-envelope"})
-	if err != nil || git.Team != store.DefaultTeam || git.CreatedBy != "owner" || git.ConfirmedAt == nil {
+	if err != nil || git.Team != team || git.CreatedBy != p.Capability.Subject.ID || git.ConfirmedAt == nil {
 		return fmt.Errorf("current session git transaction: %+v, %v", git, err)
 	}
 	if err := tenant.RemoveSecret(ctx, a, "CONFIG", "build"); err != nil {

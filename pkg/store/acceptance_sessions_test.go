@@ -1,4 +1,4 @@
-package acceptance
+package store_test
 
 import (
 	"context"
@@ -6,19 +6,21 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-func checkStoreSessions(ctx context.Context, root string) (err error) {
-	path := filepath.Join(root, "sessions.db")
-	s, err := store.Open(path)
+func checkStoreSessions(t *testing.T) (err error) {
+	ctx := t.Context()
+	target := storetest.NewSQLite(t)
+	s, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -29,15 +31,21 @@ func checkStoreSessions(ctx context.Context, root string) (err error) {
 		return err
 	}
 	s.SetSessionKeyCipher(cipher)
-	for _, member := range []struct{ id, role string }{{"owner", "owner"}, {"member", "editor"}} {
-		if _, err := s.DB().ExecContext(ctx, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?,?,1,1)`, member.id, member.id+"@example.test"); err != nil {
-			return err
-		}
-		if _, err := s.DB().ExecContext(ctx, `INSERT INTO memberships(team,account_id,role,created_at) VALUES (?,?,?,1)`, store.DefaultTeam, member.id, member.role); err != nil {
-			return err
-		}
+	ownerAccount := signIn(t, s, "owner", "owner@example.test").Account
+	memberAccount := signIn(t, s, "member", "member@example.test").Account
+	team := ownerAccount.ActiveTeam
+	tenant, err := s.ForTeam(ctx, team)
+	if err != nil {
+		return err
 	}
-	raw, csrf, session, err := s.CreateAccountSession(ctx, store.Account{ID: "member", Email: "forged@example.test"}, store.DefaultTeam, time.Hour)
+	invitation, err := tenant.CreateInvitation(ctx, ownerAccount.ID, memberAccount.Email, store.RoleEditor, time.Now())
+	if err != nil {
+		return err
+	}
+	if _, err := s.AcceptInvitation(ctx, memberAccount.ID, invitation.ID, time.Now()); err != nil {
+		return err
+	}
+	raw, csrf, session, err := s.CreateAccountSession(ctx, store.Account{ID: memberAccount.ID, Email: "forged@example.test"}, team, time.Hour)
 	if err != nil {
 		return err
 	}
@@ -46,7 +54,7 @@ func checkStoreSessions(ctx context.Context, root string) (err error) {
 	if err != nil {
 		return err
 	}
-	if len(read.Authorities) != 1 || read.Authorities[0].Principal.Capability.Subject.ID != "member" || !slices.Contains(read.Authorities[0].Principal.Capability.Grants, capability.RunsWrite) || !read.Authorities[0].Principal.Capability.IssuedAt.Equal(session.CreatedAt) || session.Principal != "member@example.test" {
+	if len(read.Authorities) != 1 || read.Authorities[0].Principal.Capability.Subject.ID != memberAccount.ID || !slices.Contains(read.Authorities[0].Principal.Capability.Grants, capability.RunsWrite) || !read.Authorities[0].Principal.Capability.IssuedAt.Equal(session.CreatedAt) || session.Principal != "member@example.test" {
 		return errors.New("created session did not retain its account and nanosecond authority")
 	}
 	var reusable int
@@ -64,7 +72,7 @@ func checkStoreSessions(ctx context.Context, root string) (err error) {
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err := store.Open(path)
+	reopened, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -77,18 +85,18 @@ func checkStoreSessions(ctx context.Context, root string) (err error) {
 	if current.CSRFToken != csrf || !current.CreatedAt.Equal(session.CreatedAt) || !current.ExpiresAt.Equal(session.ExpiresAt) {
 		return errors.New("reopening changed session identity, csrf or timestamps")
 	}
-	ownerRaw, _, _, err := s.CreateAccountSession(ctx, store.Account{ID: "owner"}, store.DefaultTeam, time.Hour)
+	ownerRaw, _, _, err := s.CreateAccountSession(ctx, ownerAccount, team, time.Hour)
 	if err != nil {
 		return err
 	}
 	ownerDigest := sha256.Sum256([]byte(ownerRaw))
 	owner := store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(ownerDigest[:])}}
-	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
+	tenant, err = s.ForTeam(ctx, team)
 	if err != nil {
 		return err
 	}
 	role := store.RoleReader
-	if err := tenant.UpdateMembership(ctx, owner, store.MembershipUpdate{AccountID: "member", Role: &role}); err != nil {
+	if err := tenant.UpdateMembership(ctx, owner, store.MembershipUpdate{AccountID: memberAccount.ID, Role: &role}); err != nil {
 		return err
 	}
 	read, err = s.ReadAuthentication(ctx, lookup, capability.RequestEvidence{})
@@ -129,7 +137,7 @@ func checkStoreSessions(ctx context.Context, root string) (err error) {
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err = store.Open(path)
+	reopened, err = target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -142,22 +150,19 @@ func checkStoreSessions(ctx context.Context, root string) (err error) {
 	if retained != 0 {
 		return errors.New("expired session returned after reopening")
 	}
-	if err := checkStoreCredentialMutations(ctx, s, owner); err != nil {
+	if err := checkStoreCredentialMutations(ctx, s, team, owner); err != nil {
 		return err
 	}
-	return checkRolelessStoreSession(ctx, s)
+	return checkRolelessStoreSession(ctx, s, team)
 }
 
-func checkRolelessStoreSession(ctx context.Context, s *store.Store) error {
-	for _, query := range []string{
-		`INSERT INTO accounts(id,email,email_verified,created_at,updated_at,waitlist_reason) VALUES ('waitlisted','waitlisted@example.test',1,1,1,'signup_gate')`,
-		`INSERT INTO identities(provider,subject,account_id,email_verified,created_at) VALUES ('github','waitlisted','waitlisted',1,1)`,
-	} {
-		if _, err := s.DB().ExecContext(ctx, query); err != nil {
-			return err
-		}
+func checkRolelessStoreSession(ctx context.Context, s *store.Store, team store.Team) error {
+	profile := store.SignInProfile{Provider: "github", Subject: "waitlisted", Email: "waitlisted@example.test", EmailVerified: true}
+	member, err := s.ResolveSignIn(ctx, profile, store.SignUpConditions{ForceWaitlist: true}, time.Now())
+	if err != nil {
+		return err
 	}
-	raw, csrf, created, err := s.CreateIdentityAccountSession(ctx, store.Account{ID: "waitlisted"}, "", "github", "waitlisted", time.Hour)
+	raw, csrf, created, err := s.CreateIdentityAccountSession(ctx, member.Account, "", "github", "waitlisted", time.Hour)
 	if err != nil {
 		return err
 	}
@@ -169,7 +174,7 @@ func checkRolelessStoreSession(ctx context.Context, s *store.Store) error {
 		return errors.New("roleless renewal gained team authority or lost its identity")
 	}
 	lookup := capability.CredentialLookup{Class: capability.CredentialSession, Digest: sha256.Sum256([]byte(raw)), Audience: capability.Controller}
-	snapshot, err := s.ReadAuthentication(ctx, lookup, capability.RequestEvidence{Target: capability.Target{Team: string(store.DefaultTeam)}})
+	snapshot, err := s.ReadAuthentication(ctx, lookup, capability.RequestEvidence{Target: capability.Target{Team: string(team)}})
 	if err != nil {
 		return err
 	}
@@ -180,7 +185,7 @@ func checkRolelessStoreSession(ctx context.Context, s *store.Store) error {
 	if principal.Capability.Team != "" || len(principal.Capability.Grants) != 0 {
 		return errors.New("roleless authentication gained team authority")
 	}
-	if err := s.SwitchSessionTeam(ctx, raw, "waitlisted", "", store.DefaultTeam); !errors.Is(err, store.ErrNotFound) {
+	if err := s.SwitchSessionTeam(ctx, raw, member.Account.ID, "", team); !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("roleless switch bypassed membership: %v", err)
 	}
 	expires := time.Now().Add(time.Minute)
@@ -191,4 +196,10 @@ func checkRolelessStoreSession(ctx context.Context, s *store.Store) error {
 		return fmt.Errorf("link nonce replay: %v", err)
 	}
 	return nil
+}
+
+func TestStoreSessions(t *testing.T) {
+	if err := checkStoreSessions(t); err != nil {
+		t.Fatal(err)
+	}
 }

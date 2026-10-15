@@ -894,7 +894,7 @@ Internal Go and SQL identifiers use node; customer JSON uses job.
     remains live; plan holders renew while their run is nonterminal and its
     owner or any node claim remains live. Expired capacity cannot revive.
     A still-live waiter keeps arrival order; an expired waiter is a new arrival.
-14. `LockOrder` fixes acquisition order and lexical order within a class.
+14. Acquire transaction locks in the frozen class order and lexical order within a class.
     Implementers must review claim, cancellation and financial paths together
     before adding a lock; they must not silently acquire an earlier class late.
 
@@ -1621,7 +1621,7 @@ already pass. Each should run on SQLite and PostgreSQL where a store is involved
 | `PlanAcceptance`, `ExpansionSubmission`, `RunSnapshot` | C3 validates plan declarations. C1 projects a consistent snapshot and shares Decide between both owners. |
 | `AcceptedExpansion`, `NodeRow.SpecHash`, `AttemptIdentity` | C3 preserves source vs eval generations, exact node-wide attempt ordinal and persisted generated topology. |
 | `runspec.Setting`, `RunnerSelection`, `Ceilings`, `SealInput` | C4 applies the frozen precedence and refuses over-ceiling settings at the correct seal; the store supplies time, not the requester. |
-| `RetentionRules`, `SegmentCommit` | C4 owns numeric limits and log class settings; C3 emits immutable attributed segments and terminal completeness. |
+| `RetentionRequest`, `SegmentCommit` | C4 owns numeric limits and log class settings; C3 emits immutable attributed segments and terminal completeness. |
 | `blob.Authority`, upload identity, publication edge | C2 derives run/repo/ref/publisher scope; job receipts never transfer through possession of a digest or same-run membership. |
 | `billing_awards`, `billable_intervals` | C2 billing provenance and settlement use immutable award facts, exclude customer-runner wait and survive run/capability pruning. |
 | `StateStore`, `OperatorStore`, `blob.RecordStore` | C3 host seams consume these final interfaces; old implementation consumers are removed when ported, not adapted. |
@@ -1947,9 +1947,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 |---|---|
 | `Effect` | Effect identifies one revisioned desired-state row per team and run. |
 | `EffectPhase` | EffectPhase is ranked independently of the terminal outcome so a late pending write cannot regress it. |
-| `EffectPolicy` | EffectPolicy controls delivery phases and external idempotency keys. |
-| `CompletionEffects` | CompletionEffects is the entire effect registry consumed by the elected reconciler. |
-| `EffectPhaseRanks` | EffectPhaseRanks supplies the monotone desired-state order. |
 | `DesiredRunEffect` | DesiredRunEffect is a committed snapshot for delivery; Payload comes from the run, never an executor. |
 | `EffectDelivery` | EffectDelivery acknowledges only the revision actually sent, leaving a newer desired revision due. |
 | `Operator.DueRunEffects` | DueRunEffects reads revisions under the completion singleton lease; expiry stops further delivery acknowledgements. |
@@ -1965,8 +1962,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `CapacityWaiter` | CapacityWaiter keeps its arrival order only while its own lease remains live. |
 | `AdoptionKind` | AdoptionKind refuses to revive expired capacity; a new arrival goes through normal admission. |
 | `CapacityAdoption` | CapacityAdoption reports the store's liveness decision, never a caller-supplied original arrival time. |
-| `CapacityLivenessRule` | CapacityLivenessRule describes the conditions which renew the holder's continuity lease. |
-| `CapacityLiveness` | CapacityLiveness retains existing admission policy while changing who keeps capacity alive. |
 | `Tenant.AdoptCapacity` | AdoptCapacity checks continuity under the entry lock; expired holders and waiters are removed before a fresh request. |
 | `Tenant.SupersedeCapacity` | SupersedeCapacity marks the holder superseded and requests cancellation on its bound work in the same transaction. |
 
@@ -1975,13 +1970,10 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | Export | Purpose |
 |---|---|
 | `SingletonLease` | SingletonLease is fenced so a former replica cannot continue maintenance after another replica takes over. |
-| `SingletonWork` | SingletonWork lists every correctness-critical elected worker, including the local schedule worker. |
 | `Operator.AcquireSingletonLease` | AcquireSingletonLease refuses a live foreign holder and advances the fence after a lapse. |
 | `Operator.RenewSingletonLease` | RenewSingletonLease refuses an expired fence; owner recovery acquires a new lease instead of reviving one. |
 | `ReapedUnit` | ReapedUnit reports recovery in the same run; application retry budgets are never consumed by a lapse. |
 | `Store.ReapUnits` | ReapUnits uses the store clock and cancellation precedence, settling billing and effects with each transition. |
-| `RetentionRule` | RetentionRule separates operational expiration from pins and financial retention. |
-| `RetentionRules` | RetentionRules is the full leased-pass policy; nil means operator-defined or disabled, never an implicit zero default. |
 | `FinancialTables` | FinancialTables identifies records that never take a cascading run foreign key. |
 | `RetentionRequest` | RetentionRequest is executed only while the maintenance lease is live; settings are resolved inside the store. |
 | `RetentionResult` | RetentionResult reports committed removals and preserved pins; financial rows must always remain untouched. |
@@ -2048,8 +2040,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.RenewNodeClaim` | RenewNodeClaim renews the exact live claim and its bound concurrency holders using the store clock. |
 | `StateEventRule` | StateEventRule makes every lifecycle event name store-owned on customer surfaces. |
 | `NodeEvents` | NodeEvents matches requested To and RequestOnly; an empty cause matches every cause for that terminal outcome. Cancellation requests emit job_cancel_requested while preserving claimed/running state until the holder drains. |
-| `LockClass` | LockClass fixes transaction lock order across claims, state, capacity and the financial ledger. |
-| `LockOrder` | LockOrder is acquired left to right; keys within one class use lexical order. Operations starting later in the list must not acquire an earlier class afterward. |
 
 ### pkg/store/node_state.go
 

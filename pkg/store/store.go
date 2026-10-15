@@ -752,9 +752,6 @@ func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) erro
 	if err := s.createRunTx(ctx, tx, DefaultTeam, r); err != nil {
 		return err
 	}
-	if err := routeRunDispatchTx(ctx, tx, DefaultTeam, t, time.Now()); err != nil {
-		return err
-	}
 	return tx.Commit()
 }
 

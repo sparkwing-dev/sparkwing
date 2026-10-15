@@ -1058,3 +1058,35 @@ plan and job awards through those real store methods. The bootstrap-origin
 verifier and initial run rows are fixtures. Legacy controller HTTP scenarios
 still need their final wire migration. The SQLite placement, billing and
 lifecycle cells retain the final store evidence.
+
+## W1 acceptance tests move beside the store
+
+The lead's harness cleanup moves these checks from `internal/acceptance` into
+`pkg/store/acceptance_*_test.go`. Each is a plain package test. The old transport
+wrappers are removed, and the native scenario catalog is unchanged.
+
+| Former SQLite check | Package test |
+| --- | --- |
+| lifecycle-request-and-plan-seals | `TestStorePlanSeals` |
+| lifecycle-generator-barrier | `TestStoreGeneratedDependencies` |
+| lifecycle-transition-replay-and-fencing | `TestStoreTransitions` |
+| recovery-unstarted-lapse, owner portion | `TestStoreOwnerUnstartedRecovery` |
+| surface-schedules-and-managed-timers | `TestStoreScheduleBoundary` |
+| credentials-delegation-subset | `TestStoreCapabilityManagement` |
+| credentials-operator-console-split | `TestStoreProvisioningOrigins` |
+| credentials-session-digest-csrf | `TestStoreSessions` |
+
+The moved checks open through `pkg/store/internal/storetest`. Sign-in and
+invitation acceptance create accounts and membership. The planner enrolls a
+machine, admits the run with a member session and claims the owner through
+`ClaimUnit`. Expansion authority comes from `DelegateCapability`, including
+its parent's expiry and deadline. No hand-written row insertion remains in
+these moved files. Database triggers still inject failed writes, and UPDATEs
+still expire leases and sessions for recovery checks.
+
+`TestAccountAdmissionAuditRemainsOutsideTenantQueriesProperty` generates
+provider identities and checks account audit rows have no tenant and never
+appear in tenant event reads. It closes the signup foreign-key failure exposed
+by using real account admission in the moved checks. Existing shared recovery
+fixtures remain in `internal/acceptance` until their host, billing and remaining
+store consumers migrate. No native cell is newly claimed complete.

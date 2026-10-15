@@ -95,11 +95,6 @@ func (s *Store) EnqueueChildRun(ctx context.Context, tok ClaimToken, ordinal int
 		if err := s.createRunTx(ctx, tx, tok.Team, childRun(t)); err != nil {
 			return "", err
 		}
-		// safety: a child of an opted-in repository is planned by the
-		// controller like any other run of it, never claimed as a trigger.
-		if err := routeRunDispatchTx(ctx, tx, tok.Team, t, now); err != nil {
-			return "", err
-		}
 		childID, err = t.ID, nil
 	}
 	if err != nil {

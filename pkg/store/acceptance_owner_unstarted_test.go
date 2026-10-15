@@ -1,26 +1,31 @@
-package acceptance
+package store_test
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-func checkOwnerUnstartedRecovery(ctx context.Context, root string) (err error) {
-	path := filepath.Join(root, "unstarted-owner.db")
-	s, err := store.Open(path)
+func checkOwnerUnstartedRecovery(t *testing.T) (err error) {
+	ctx := t.Context()
+	target := storetest.NewSQLite(t)
+	s, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
 	tenant, plan, err := storePlanSealRequest(ctx, s)
 	if err != nil {
+		return err
+	}
+	var rootPrefix string
+	if err := s.DB().QueryRowContext(ctx, `SELECT parent_id FROM capabilities WHERE prefix=?`, plan.Actor.CapabilityPrefix).Scan(&rootPrefix); err != nil {
 		return err
 	}
 	initial, err := tenant.ReadRun(ctx, plan.RunID)
@@ -37,7 +42,7 @@ func checkOwnerUnstartedRecovery(ctx context.Context, root string) (err error) {
 			return err
 		}
 		var expiry int64
-		if err := s.DB().QueryRowContext(ctx, `SELECT lease_expires_at FROM triggers WHERE team=? AND id=?`, store.DefaultTeam, plan.RunID).Scan(&expiry); err != nil {
+		if err := s.DB().QueryRowContext(ctx, `SELECT lease_expires_at FROM triggers WHERE team=? AND id=?`, acceptanceTeam, plan.RunID).Scan(&expiry); err != nil {
 			return err
 		}
 		if expiry != beat.ExpiresAt.UnixNano() {
@@ -46,7 +51,7 @@ func checkOwnerUnstartedRecovery(ctx context.Context, root string) (err error) {
 		if reaped, err := s.ReapUnits(ctx, lease, 10); err != nil || len(reaped) != 0 {
 			return fmt.Errorf("live owner recovered: %+v: %v", reaped, err)
 		}
-		if _, err := s.DB().ExecContext(ctx, `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=?`, time.Now().UnixNano(), store.DefaultTeam, plan.RunID); err != nil {
+		if _, err := s.DB().ExecContext(ctx, `UPDATE triggers SET lease_expires_at=? WHERE team=? AND id=?`, time.Now().UnixNano(), acceptanceTeam, plan.RunID); err != nil {
 			return err
 		}
 		for replay := range 2 {
@@ -61,13 +66,13 @@ func checkOwnerUnstartedRecovery(ctx context.Context, root string) (err error) {
 		if err := s.Close(); err != nil {
 			return err
 		}
-		reopened, err := store.Open(path)
+		reopened, err := target.TryOpen()
 		if err != nil {
 			return err
 		}
 		s = reopened
-		s.SetClaimProfileResolver(recoveryEnrollment{})
-		tenant, err = s.ForTeam(ctx, store.DefaultTeam)
+		s.SetClaimProfileResolver(acceptanceClaimProfile{})
+		tenant, err = s.ForTeam(ctx, acceptanceTeam)
 		if err != nil {
 			return err
 		}
@@ -81,7 +86,7 @@ func checkOwnerUnstartedRecovery(ctx context.Context, root string) (err error) {
 		if _, err := s.RenewUnit(ctx, plan.Actor.CapabilityPrefix, false); err == nil {
 			return errors.New("former owner renewed after recovery")
 		}
-		claim, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: "planner-root", Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: plan.RunID}, Available: match.Resources{Cores: 8}})
+		claim, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: rootPrefix, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: plan.RunID}, Available: match.Resources{Cores: 8}})
 		if err != nil || claim.Award.Generation != plan.Actor.Owner.Generation+1 || len(claim.Bearer) == 0 || claim.RunID != plan.RunID {
 			return fmt.Errorf("owner reclaim: %+v: %v", claim, err)
 		}
@@ -101,4 +106,10 @@ func checkOwnerUnstartedRecovery(ctx context.Context, root string) (err error) {
 		return fmt.Errorf("unstarted owner recovery created runs=%d attempts=%d", runs, attempts)
 	}
 	return nil
+}
+
+func TestStoreOwnerUnstartedRecovery(t *testing.T) {
+	if err := checkOwnerUnstartedRecovery(t); err != nil {
+		t.Fatal(err)
+	}
 }

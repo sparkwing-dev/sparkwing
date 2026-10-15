@@ -11,9 +11,6 @@ import (
 )
 
 func checkRecoveryUnstarted(ctx context.Context, root string) (err error) {
-	if err := checkOwnerUnstartedRecovery(ctx, root); err != nil {
-		return err
-	}
 	path := filepath.Join(root, "unstarted.db")
 	f, err := newStoreRecoveryFixture(ctx, path, false)
 	if err != nil {
