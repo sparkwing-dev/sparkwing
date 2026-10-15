@@ -1,9 +1,111 @@
 # W1b handoff
 
-Continues `192217078` after integration merge `5697741c1`. W1b remains incomplete.
+Continues `440f2127f`. W1b remains incomplete.
 The lead owns commits, independent review, pipelines and native integration.
 
 ## Current continuation
+
+Reversed the legacy expectation that a later node finish extends an ended
+attempt's log tail. Removed
+TestAnEndedClaimsTailRunsFromTheNodesLaterEnd from the controller's old-schema
+fixture. Deleted **40 legacy test lines** and **0 runtime lines**. No API was
+removed, and no production caller needed migration.
+
+Invariant: a later node finish cannot extend an attempt's persisted log grace or
+delay maintenance sealing after that grace.
+
+Expanded TestLogPersistenceLaterNodeFinishCannotExtendAttemptGrace into three
+fixed boundary checks and 48 seeded generated cases. Each uses a fresh SQLite
+store, a live awarded writer and the injected store clock. The node finishes
+between one and 59 seconds after the attempt. At grace minus one nanosecond and
+at exact grace, the writer can read, replay segments and commit its final seal,
+and maintenance leaves the stream open. After grace, reads expose no segments,
+segment and final commits fail, and leased maintenance seals the stream with
+writer_lost. A historical reader keeps the original segment. Retained bytes,
+the successful job result and its later finish time remain unchanged.
+
+Strengthened storage-log-segments-and-fallback/store-data-sqlite with an expired
+attempt and a later node finish. Its historical-read and identical-final-replay
+checks still pass. The final store already enforces this behavior, so no runtime
+repair was needed. This reverses one retained legacy test. No archived T1
+inventory row is newly closed and no native acceptance cell is activated.
+
+## Verification for this continuation
+
+All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE=/tmp/sw-astra-W1b/cache, GOTMPDIR=/tmp/sw-astra-W1b/tmp and
+TMPDIR=/tmp/sw-astra-W1b/tmp. Use
+`go -C /home/bombuntu/.xwing/envs/1088/sparkwing`. Test and build commands use
+`-p 4`. Recreate cache and tmp directories before reproducing.
+
+- Whole-repository `go build -p 4 ./...` passed.
+- `go vet -p 4 ./pkg/store/... ./pkg/controller/... ./internal/acceptance/...
+  ./tests/acceptance/...` passed.
+- The store selection below passed **191 top-level tests / 460 cases**, without
+  skips. It excludes the known red record-publication property and both stale
+  W1 catalog guards. No full-store green is claimed.
+- `go test -json -p 4 ./internal/acceptance/... ./tests/acceptance/...
+  -run '^(TestStorage|TestBilling)$' -count=1` passed **2 top-level tests / 43
+  cases**, including all **12 SQLite data/billing proofs**. The native/platform
+  skeleton retains **562 skips**.
+- Required `go run ./internal/commentcheck -base main .` passed across
+  **920 files**. `go run ./internal/sleepcheck -base HEAD .` passed.
+
+The store command is `go test -json -p 4 ./pkg/store -count=1`, with
+`-skip '^TestBlobRecordsMutationCannotOutliveAuthority$'` and this run selection:
+
+```text
+^(TestStoreData|TestLogPersistence|TestResult|TestBlob|TestPayment|TestReversePaymentTakesBack|TestCreditSettings|TestSetCreditSettings|TestUnsetRateTable|TestSetRateTable|TestAStoredRateTable|TestATableWithoutAFourCore|TestStorage|TestBilling|TestGrantCredits|TestCreditGrant|TestCreditReversal|TestCreditHistory|TestCreditsBalanceIs|TestCreditsDefaultTenant)
+```
+
+## Remaining decisions and integration
+
+DESIGN: record mutation authorization remains pending the lead's two-strikes
+decision. Its six enabled expiry regressions remain in
+TestBlobRecordsMutationCannotOutliveAuthority. This continuation leaves that
+mechanism unchanged and does not rerun those known failures. The proposal and
+reproducer below still apply.
+
+No foreign contract shape changed. Amendment status remains:
+
+- A1-24 has the shared transaction-owned data checker and binding proof.
+- A1-27 needs W1's issuance/start/wait/renewal/finish/reaping joins to the existing
+  immutable billing helpers. The unstarted at_award refund and explicit customer
+  wait operation still need W1/W2 agreement. C2 SettleBilling is a panic stub.
+- A1-28 has committed-checkout settlement. W2 still owns verified provider
+  handoff and retirement of caller-selected paid grants.
+  VerifiedPaymentEvent.Event and provider verification are panic stubs.
+- A1-29 through A1-35 retain the owned upload, receipt, record, reference,
+  depcache, retention and tagged-log persistence. W7's RecordNamespace and
+  AuthorizeEdge remain panic stubs. Verified manifests, physical verification
+  and deletion, binary execution, W2/W9 data/log transports, trusted replica
+  identity and proxy egress remain real integrations. Materialization destination
+  identities and published owner-log identities still need their prior contracts.
+- A1-53 requires native acceptance. handoffs.md adds no W1b assignment.
+
+W1's stale tenantTables entries for output_runs/output_tombstones and its
+reviewedUnscopedSQL entry for ExpiredOutputRuns remain unchanged. The exact
+required deletions are recorded below. W1 files were not edited. Legacy claim
+credits, raw storage, output, direct-upload and log consumers still require
+their owners' cutover. Native placements, PostgreSQL, providers, physical
+backends, binary execution and race suites were not run.
+
+## Shared files and friction for this continuation
+
+The only other-package deletion is the obsolete test in
+pkg/controller/log_segments_internal_test.go. Shared proof/documentation edits
+are internal/acceptance/store_logs.go and design/rewrite/contracts/c1-data.md.
+Owned changes are log_persistence_test.go, STORE-DATA.md and this handoff.
+No adopter-facing behavior changed, so no changelog or generated API update is
+needed. No new mechanism, schema, setting, rate or limit was added.
+
+Friction remains the existing contract stubs, W1 catalog cleanup and pending
+publication decision. No Sparkwing binary ran after bootstrap discovery.
+No service, provider, deployment, release, Git write or harness-memory write ran.
+Scratch is deleted after final inspection. Git identity and core.worktree remain
+unchanged.
+
+## Previous continuation (committed in 440f2127f)
 
 Retired the legacy output-key retention sweep. Output lifetime now has the
 existing leased record-expiry and blob-reachability owners. Removed

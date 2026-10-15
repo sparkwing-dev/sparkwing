@@ -558,6 +558,11 @@ The `storage-log-segments-and-fallback/store-data-sqlite` proof exercises
 immutable job segments, transactional rollback of a gapped batch, reopening,
 offset reads, final incomplete seals, exact replay, retained-byte accounting,
 subject isolation, revocation and leased abandoned-stream sealing across reopening.
+Its terminal-read check uses an expired attempt and a later node finish. The node
+finish cannot extend the attempt's read grace. Generated store tests check reads,
+segment commits, final seals and maintenance at the nanosecond before grace,
+at its exact boundary and after it. Historical reads and stored bytes survive
+sealing, and log loss leaves the successful job result unchanged.
 Claim authority and segment digests are
 preseeded contract facts. Physical bytes, owner-unit transport, ring fallback,
 signing, lifecycle expiry and proxy egress remain cross-area integrations.

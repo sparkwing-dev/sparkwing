@@ -195,6 +195,9 @@ segments after the writer ends. Log incompleteness never changes the job result.
 Segment replay counts retained bytes once. Refused content and byte-limit
 violations preserve the committed inventory. Run deletion cascades streams and
 segments. A later job finish cannot extend an attempt's persisted tail grace.
+Generated tests check reads, segment commits, final seals and leased maintenance
+on both sides of that grace boundary. A historical reader keeps the same bytes,
+and maintenance preserves the job's successful result and finish time.
 The unused raw `Store.RunFinished` pruning query is removed. Leased retention
 and tagged-stream maintenance own log lifetime.
 
