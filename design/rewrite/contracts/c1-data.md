@@ -430,6 +430,26 @@ award facts. Plan/eval have no minimum, job and host minima remain separate, and
 customer-runner waiting is excluded. Verified payment events settle committed
 checkouts idempotently. No caller-selected team or credit amount reaches settlement.
 
+The unit lifecycle joins W1b's billing helpers in the claim, start, renewal,
+release, plan acceptance, expansion acceptance, finish and reaper transactions.
+Pricing comes from the sealed request or resolved job resources. The existing
+minute reservation is refundable. C2's calculator applies the separate final
+minimums, including zero for plan/eval. A here intake capability authorizes a
+future claim and opens no compute reservation at generation zero.
+
+Queued matching checks funding before ranking eligible work and repeats the
+reservation under the ledger lock when awarding. An unfunded team cannot block
+funded matches. Renewal starts Cloud job billing without consuming an execution
+attempt. Owner Executing reports current compute. False closes an interval and
+true resumes it with a fresh key. Application retries keep their reservation
+and open another interval. Reaping settles at the persisted lease lapse.
+The eval lease and billing generation come from persisted expansion authority.
+C2's production calculator and W3's current-activity reporting remain integration
+dependencies. The SQLite billing-start proof covers issuance, exchange, starts,
+immutable pricing and reopening. Lifecycle tests substitute C2's calculator with
+a contract fake. Awarding repeats the claim and eval-owner deadline checks after
+accounting. Expiry rolls back the reservation and unit binding together.
+
 
 
 This document specifies the rewrite target. Functions marked `unimplemented`

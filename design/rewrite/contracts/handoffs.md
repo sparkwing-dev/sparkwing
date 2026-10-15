@@ -115,3 +115,18 @@ surface-schedules-and-managed-timers/store-sqlite cell passes through rollback
 and reopening. W9/W6 still own old cron YAML fixtures and timer/HTTP integration.
 Unverified GitHub push callers must supply resolved repository identity before
 arming. W1 has not changed foreign contracts or W1b implementation files.
+
+**DESIGN approved (lead): W8 cancellation classification (third finding in the pending-claim mechanism).** Invariant: classifying a stop reason never panics and never confuses a caller's cancellation cause with a denial. Recognise cancellation only with `errors.Is(err, context.Canceled)` / `errors.Is(err, context.DeadlineExceeded)` (ctx.Err's comparable sentinels); never compare against `context.Cause(ctx)` with `==`. Run's joining defer returns the caller's arbitrary cause unchanged. Test nested wraps and joins, independent denials, and comparable and non-comparable custom causes, including a property test. Three bugs in one mechanism means it is too clever: while fixing this, cut the pending-claim stop logic to the smallest form that satisfies the approved outcome representation, and report the line count before and after.
+
+W1's A1-27 lifecycle join now uses W1b's billing helpers for issuance, starts,
+renewal, release, plan/expansion acceptance, finish and reaping. Pricing comes
+from sealed resources. Reservations keep the existing minute window, while C2
+applies each unit's final minimum. Queued matching passes over unfunded work and
+award issuance repeats its deadline check after accounting. Cloud job renewal
+can start billing without creating an execution attempt. The SQLite
+`billing-start-award-versus-start/store-sqlite` proof covers the real award,
+exchange and start transactions through reopening. W2 still owns the production
+calculator. W3 must report current owner compute with Executing, including false
+during customer-runner waits. W1b still owns spend-exhaustion/grace policy and
+legacy credit retirement. W1b implementation files are unchanged. The legacy
+store API cuts and the previously recorded foreign contract gaps remain open.

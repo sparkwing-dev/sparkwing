@@ -48,9 +48,14 @@ func (s *Store) renewUnit(ctx context.Context, prefix string, executing bool) (L
 			}
 		}
 		if executing && !beat.CancelRequested {
-			return startOwnerUnitTx(ctx, tx, tenant.team, unit, actor)
+			if err := startOwnerUnitTx(ctx, tx, tenant.team, unit, actor); err != nil {
+				return err
+			}
 		}
-		return nil
+		if beat.CancelRequested {
+			return nil
+		}
+		return computeUnitBillingTx(ctx, tx, tenant.team, unit, actor.Generation, 0, executing)
 	})
 	if err != nil {
 		return LeaseBeat{}, err
@@ -134,5 +139,5 @@ func renewEvalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, acto
 		return err
 	}
 	*beat = LeaseBeat{ExpiresAt: expiry, CancelRequested: run.CancelRequestedAt != nil, CancelReason: run.CancelReason}
-	return nil
+	return accountUnitBillingTx(ctx, tx, team, unit, actor.Generation, tx.now(), false)
 }

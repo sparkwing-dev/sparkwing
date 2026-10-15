@@ -1,5 +1,12 @@
 # Migrating to the next release
 
+## Unit claims reserve compute credit
+
+Metered `Store.ClaimUnit` awards commit a refundable compute reservation with
+the claim. The award retains its CPU class, rate and payer after settings change
+or bootstrap exchange. Unfunded queued work leaves funded matches eligible.
+The shared billing calculator is required for renewal and final settlement.
+
 ## Offer-round fallback is removed
 
 The warm dispatcher, its factory and the `finalize-ready` endpoint are removed.

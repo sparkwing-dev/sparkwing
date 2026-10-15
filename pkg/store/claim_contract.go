@@ -61,7 +61,7 @@ func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPref
 }
 
 // RenewUnit derives the unit's team, identity and fences from its live capability.
-// Executing records the first trigger, plan or eval execution; job starts use TransitionNode.
+// Executing reports current owner compute, pausing billing during customer-runner waits; job starts use TransitionNode.
 // Cancelled units renew to drain and return CancelRequested without recording a new start.
 func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error) {
 	return s.renewUnit(ctx, capabilityPrefix, executing)

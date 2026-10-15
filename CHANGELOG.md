@@ -76,6 +76,8 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
+
+- **store:** Unit claims reserve compute credit atomically, keep the awarded price through exchange, and pass over unfunded queued work. See [migration guide](docs/migrations/_unreleased.md#unit-claims-reserve-compute-credit).
 - **store + controller:** [(Breaking)](docs/migrations/_unreleased.md#offer-round-fallback-is-removed) removed offer-round finalization, the `finalize-ready` endpoint and the warm dispatcher. Claims use the shared matcher. Soft preferences rank work without a fallback timer, and mismatches preserve queue position.
 - **store:** [(Breaking)](docs/migrations/_unreleased.md#concurrency-maintenance-requires-the-operator-fence) concurrency maintenance moves to `Operator.MaintainConcurrency` under the elected reaper lease. Holder cleanup, waiter cleanup and promotion commit together. The unfenced maintenance registry and obsolete concurrency-cache sweeps are removed.
 - **store:** [(Breaking)](docs/migrations/_unreleased.md#unit-recovery-requires-the-elected-reaper-lease) removed the unfenced node and trigger reapers. `Store.ReapUnits` requires the current `controller.reaper` lease and returns tagged unit recovery results. Remote lease loss recovers within the same run. A started local owner fails in place.

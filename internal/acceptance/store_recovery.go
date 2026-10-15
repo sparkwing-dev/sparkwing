@@ -155,12 +155,12 @@ func seedRecoveryCapability(ctx context.Context, s *store.Store, c capability.Ca
 		repo, ref, sha = c.Binding.Push.RepositoryKey, c.Binding.Push.Ref, c.Binding.Push.SHA
 	}
 	_, err = s.DB().ExecContext(ctx, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,bind_run,bind_node,bind_holder,bind_generation,reserved_pools,created_at,created_by,expires_at,repo_scope,metered,repo_key,ref_scope,push_sha)
-VALUES (?,?,?,'machine',?,'controller',?,'delegate',1,?,?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),NULLIF(?,0),?,?,'fixture',?,?,?,?,?,?)`, c.Prefix, hex.EncodeToString(c.Digest[:]), c.Team, c.Subject.ID, grants, body, c.Binding.Kind, c.Binding.RunID, c.Binding.NodeID, c.Binding.Holder, c.Binding.Generation, pools, c.IssuedAt.UnixNano(), c.ExpiresAt.UnixNano(), repositories, c.RootMetered, repo, ref, sha)
+VALUES (?,?,NULLIF(?,''),?,?,'controller',?,'delegate',1,?,?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),NULLIF(?,0),?,?,'fixture',?,?,?,?,?,?)`, c.Prefix, hex.EncodeToString(c.Digest[:]), c.Team, c.Subject.Kind, c.Subject.ID, grants, body, c.Binding.Kind, c.Binding.RunID, c.Binding.NodeID, c.Binding.Holder, c.Binding.Generation, pools, c.IssuedAt.UnixNano(), c.ExpiresAt.UnixNano(), repositories, c.RootMetered, repo, ref, sha)
 	return err
 }
 
 func (f storeRecoveryFixture) expireHolder(ctx context.Context) error {
-	_, err := f.s.DB().ExecContext(ctx, `UPDATE nodes SET lease_expires_at=1 WHERE team=? AND run_id='run' AND node_id='job'`, store.DefaultTeam)
+	_, err := f.s.DB().ExecContext(ctx, `UPDATE nodes SET lease_expires_at=? WHERE team=? AND run_id='run' AND node_id='job'`, time.Now().UnixNano(), store.DefaultTeam)
 	return err
 }
 

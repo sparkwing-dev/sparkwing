@@ -462,6 +462,7 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 	if err := attachNodeResultRecordsTx(ctx, tx, team, row, change); err != nil {
 		return Applied{}, err
 	}
+	previous := row
 	if err := applyNodeEdgeTx(ctx, tx, team, &row, change, *edge, now); err != nil {
 		return Applied{}, err
 	}
@@ -501,6 +502,9 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 		return Applied{}, errors.New("job transition has no event")
 	}
 	if err := appendStateEventTx(ctx, tx, team, change.Ref, kind, row.StateSeq, change.Extra.Result, now); err != nil {
+		return Applied{}, err
+	}
+	if err := transitionNodeBillingTx(ctx, tx, team, previous, change, *edge, now); err != nil {
 		return Applied{}, err
 	}
 	return Applied{CancelRequested: edge.RequestOnly, StateSeq: row.StateSeq, Generation: row.Generation, Attempt: row.Attempt}, nil

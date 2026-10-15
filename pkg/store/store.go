@@ -101,6 +101,7 @@ type Store struct {
 	intake           intakeContracts
 	intakePolicy     IntakePolicy
 	plans            planContracts
+	billing          billingCalculator
 	planSecretOpener PlanSecretOpener
 	delegation       delegationContracts
 	provisions       ProvisionPolicy

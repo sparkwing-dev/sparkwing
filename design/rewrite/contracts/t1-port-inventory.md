@@ -1,3 +1,14 @@
+The final unit-billing suite in `pkg/store/unit_billing_test.go` ports the
+unfunded-claim, last-reservation race, unstarted-refund and consumed-minimum
+assertions from the retained `pkg/store/credits_test.go` tests. It uses final
+ClaimUnit, TransitionNode, RenewUnit, ReleaseUnit, FinishRunAndUnit and ReapUnits
+with W1b's real ledger helpers and a C2 calculator fake. Two properties cover
+stale reports against replacement awards and expiry during issuance. The new
+`TestBilling/billing-start-award-versus-start/store-sqlite` cell proves award,
+exchange, price and compute-start persistence through reopening. Native billing
+and provider cells remain pending. No additional archived source identity below
+is claimed closed by these retained-suite ports.
+
 The retained `pkg/store/crons_test.go` suite now uses Tenant for schedule
 operations and Operator for tick metadata. Fired history fixtures seed the final
 same-team run reference. Non-run entries store NULL. Existing cursor, override,

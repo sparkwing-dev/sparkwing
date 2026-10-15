@@ -202,6 +202,9 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 		} else if count != 1 {
 			return holderRefusal()
 		}
+		if err := finishExpansionBillingTx(ctx, tx, t.team, request); err != nil {
+			return err
+		}
 		return settleControllerTx(ctx, tx, t.team, request.Source.RunID, now)
 	})
 	return result, err

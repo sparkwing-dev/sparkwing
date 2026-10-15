@@ -78,7 +78,7 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 		}
 	}
 	if request.Award != nil {
-		if err := persistBillingAwardTx(ctx, tx, c); err != nil {
+		if err := persistUnitBillingTx(ctx, tx, c); err != nil {
 			return capability.Issued{}, err
 		}
 	}
@@ -215,9 +215,6 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if here {
 		parent = claimant
 	}
-	if parent.Capability.RootMetered {
-		return capability.Capability{}, authorityError(apierr.Unavailable, "metered award reservation is unavailable")
-	}
 	c := capability.Capability{Team: row.team, Subject: claimant.Capability.Subject, Audience: capability.Controller, Grants: slices.Clone(policy.Grants), Issuance: capability.Award, Unit: spec.Unit, UnitID: spec.UnitID, Purpose: spec.Purpose, Delivery: spec.Delivery, Parent: &parent.Authority, ReservedPools: slices.Clone(parent.Capability.ReservedPools), Repositories: []string{row.repo}, RootMetered: parent.Capability.RootMetered}
 	c.Binding = capability.Binding{Kind: policy.Bindings[0], RunID: row.run, NodeID: row.node, Generation: row.generation, Holder: row.holder, Attempt: 0}
 	if row.expiry.Valid {
@@ -256,13 +253,6 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if err != nil {
 		return capability.Capability{}, err
 	}
-	billingUnit := capability.BillingUnit(spec.Unit)
-	if spec.Unit == capability.UnitTrigger {
-		billingUnit = capability.BillingHost
-	}
-	if spec.Unit == capability.UnitNode {
-		billingUnit = capability.BillingJob
-	}
 	start := capability.BillingAtAward
 	executor := "runner"
 	if launcher {
@@ -275,7 +265,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if here || parent.Capability.Purpose == capability.PurposeHere {
 		executor = "here"
 	}
-	c.Billing = &capability.BillingProvenance{PayerTeam: row.team, Metered: false, ExecutorClass: executor, ReservationID: reservation, Start: start, Unit: billingUnit}
+	c.Billing = &capability.BillingProvenance{PayerTeam: row.team, Metered: parent.Capability.RootMetered, ExecutorClass: executor, ReservationID: reservation, Start: start, Unit: billingUnitKind(spec.Unit)}
 	return c, nil
 }
 
@@ -291,16 +281,6 @@ func awardDataScope(row awardRow, c capability.Capability) *capability.DataScope
 		scope.WriteRef = ""
 	}
 	return scope
-}
-
-func persistBillingAwardTx(ctx context.Context, tx *storeTx, c capability.Capability) error {
-	generation := c.Binding.Generation
-	if c.Binding.Expansion != nil {
-		generation = c.Binding.Expansion.Generation
-	}
-	b := c.Billing
-	_, err := tx.ExecContext(ctx, `INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,node_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at,reserved_amount_micro) VALUES (?,?,?,?,?,?,?,0,?,?,?,?,?,0)`, c.Team, b.ReservationID, c.Prefix, c.Binding.RunID, c.Binding.NodeID, generation, b.PayerTeam, b.ExecutorClass, string(b.Start), string(c.Unit), string(b.Unit), tx.now().UnixNano())
-	return err
 }
 
 func exchangeCapabilityTx(ctx context.Context, tx *storeTx, spec capability.ExchangeSpec) (capability.Capability, error) {
