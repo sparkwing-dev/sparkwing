@@ -2,60 +2,46 @@
 
 ## CLI client retirement
 
-The legacy controller client no longer exposes `ClaimLaunch`, `SourceCredential`,
-`WithClaimResources`, `BaseURL`, `AppendNodeLiveLog` or `DeleteRun`. Run deletion
-uses `NewRunPruner` and its acknowledged `RunDeletion` response. Launcher claims use
-`NewEngineClient` with `EngineOptions.Launcher` and the shared `ClaimRequest`.
-The controller's source-release route retains its capability policy and audited
-credential response. Log writers name their execution attempt and byte offset.
+The legacy `Client`, `New` and `NewWithToken` are removed. Construct the shared
+clients with `EngineOptions`. Its `HTTP` field supports the private api.sock
+transport, and `Bearer` supplies the credential without exposing it in a URL.
 
-`repos info` reads pipeline history through the local controller's public run
-projection. It follows controller pagination and reports history-read failures.
-Each pipeline shows the status of its latest admitted run. A queued run has no
-start time until execution starts.
+| Operation | Shared client |
+| --- | --- |
+| Intake, claim, renewal, plan acceptance, transitions, step reports and completion | `NewEngineClient` |
+| Public run history, steps and receipts | `NewRunReader` |
+| Persisted logs and lifecycle events | `NewLogReader` |
+| Job location and active pause | `NewDebugReader` |
+| Approvals and annotations | `NewRunReview` |
+| Secret values, metadata, writes, deletion and rotation | `NewSecretManager` |
+| Authorized object transfers and records | `NewDataClient` |
+| Run deletion with a persistence receipt | `NewRunPruner` |
 
-The old orchestrator run-list, status, log, summary and timeline readers are
-removed with their direct SQLite/profile backend factories and standalone-store
-merge paths. Use the shared controller projections through `NewRunReader` and
-`NewLogReader`. `Client.ListRuns` and `Client.ListApprovalsForRun` are removed.
-`storeurl.OpenStateStoreFromSpec` and `backend.ClientBackend` are removed.
-The unused warm-runner cache sweep is removed with its old listing dependency.
+Intake uses the sealed `CreateRunRequest`. Hosts accept plans and expansions
+atomically and report fenced job transitions and typed step observations. The old
+trigger requests, node setters, claim-token headers, direct output uploads,
+concurrency-slot client and log-segment uploader are removed. There is no raw
+execution reader or capability probe that falls back to those APIs. The shared
+transport decodes the common error envelope and follows the route table's replay
+policy. Controller redirects are refused.
 
-`Client.NodeLogs`, `ReadNodeLiveLog`, `StreamNodeLiveLog`, `ListEventsAfter`,
-`ListNodeSteps`, `ListDebugPauses` and `ListPendingApprovals` are removed.
-Use `NewLogReader.ReadLogs` for tagged log pages, `NewRunReader.ReadSteps`
-for steps, `NewDebugReader.ReadDebugPause` for a job's current pause, and
-`NewRunReview.ListApprovals` with an empty run selector for pending approvals.
-Lifecycle events share the log page's event projection. Follow logs by polling
-with the returned cursor until the page is complete. The unused
-`WithWatchObserver` callback and process-global watch bridge are removed.
-Segment writers still receive watch notifications through their uploader.
-`Client.KeepsLogSegments` and the unused bearer getter `Client.Token` are
-removed. Callers retain their own credential input. The final clients do not
-probe old controller capabilities before choosing an API.
+`repos info` reads each pipeline's latest admitted run through the local
+controller's public projection. It follows pagination and reports read failures.
+A queued run has no start time until execution starts. Follow persisted logs with
+the returned cursor until the page is complete.
 
-`Client.CreateSecret`, `CreateSecretForPipeline`, `DeleteSecret` and
-`DeleteSecretForPipeline` are removed. Use `NewSecretManager`, `WriteSecret`
-with an idempotency key, and `DeleteSecret` with a `SecretSelector`. Mutations
-return the persisted metadata or deletion receipt instead of an empty response.
+The old orchestrator readers, SQLite/profile factories, `HostTriggerRun`,
+`TriggerHost`, `RunNodeOnce`, `RunHosted`, `HostClaimedTrigger`,
+`RunLocalTriggerConsumer` and `ServeConsumer` are removed. Their state, logging,
+admission, submission-environment and child-dispatch backends and the old
+`pkg/localws` server are also removed. Captured environments use the shared host
+snapshot contract. W3's retained `StateStoreOld` scheduler still needs retirement.
 
-The unused orchestrator `HostTriggerRun`, `TriggerHost`, `RunNodeOnce`,
-`RunNodeOption`, claim options and global metrics hook are removed. The CLI
-already selects the shared run and node host contracts. `RunHosted`, `HostClaimedTrigger`, `RunLocalTriggerConsumer` and `ServeConsumer`
-are also removed, along with the legacy state, logging, admission and child-dispatch
-backends. The old `pkg/localws` server is removed. Local lifecycle uses
-`wingd.LocalRuntime` with the shared controller factory. The former consumer
-no longer selects a standalone store or propagates its environment to a child.
-
-The private submission-environment files and direct secret-store sources used by
-that consumer are removed. Captured environments use the shared host snapshot
-contract. The raw `Client` and W3's retained `StateStoreOld` scheduler still need
-retirement. Native controller and execution composition remain unfinished.
-
-Foreground runtime construction now receives its parsed `--home` before the
-runtime binds its store election. Lifecycle, managed units and log reads share
-that captured home. The elected shared-controller factory and detached startup
-still require native integration. This does not establish a runnable local host.
+Local lifecycle uses `wingd.LocalRuntime`. Foreground construction receives the
+parsed `--home` before election. Lifecycle, managed units and logs share that
+home. The elected controller factory, detached startup and native execution
+composition remain unfinished. Typed step reports also require the controller's
+matching request decoder and persistence acknowledgement.
 
 ## Sealed step selections
 

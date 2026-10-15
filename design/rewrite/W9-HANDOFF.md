@@ -1,5 +1,130 @@
 # W9 handoff
 
+## Continuation from caa62edf0
+
+This section supersedes conflicting status below. The worktree started clean.
+W9 remains incomplete because native controller/host integration and acceptance
+ports remain open. The lead owns commits, pipelines, review, native QA and release.
+No Git write or Sparkwing executable ran. Lead-owned handoffs and amendments are
+unchanged.
+
+### Raw client cut
+
+Deleted `Client`, `New`, `NewWithToken` and all raw trigger, claim, state,
+execution-secret, output, OIDC, concurrency-slot, metric/profile, live-log and
+log-segment transports. Their separate error, token-death, capability-probe,
+runner-identity and retry machinery is gone. The shared engine transport retains
+its existing retry behavior with private helpers. No compatibility API or fallback
+was added.
+
+There was no production caller outside the client package. Production callers
+already use `EngineOptions` and the final constructors. The nodehost event suite
+retains its store-only branch and drops the old controller-client branch.
+Removed raw-client fixture branches and orphan fixture files from controller tests.
+The obsolete reflection check against the removed type is gone. The retained
+unknown-route/method tests use HTTP recorders. The final run-reader example now
+uses an explicit positive limit, the complete shared page schema and a fake
+transport. The full client suite, including that example, passes.
+
+[W9-CLIENT-CUT-FILES.md](W9-CLIENT-CUT-FILES.md) lists every deleted production
+file and all **209 removed test entrypoints**, with their coverage obligations.
+Those fixtures used retired routes, token tables, request bodies or host adapters.
+They are removals, not completed ports. Their source identities remain available
+at the base revision. Final capability-backed OIDC subject, audience, trust,
+expiry, rotation and cross-team assertions particularly still need W2's ports.
+
+Production Go delta versus HEAD is **4 added, 2,877 removed, net -2,873**.
+All of that production change belongs to W9. W9 is **-8,872 versus main**, within
+the -2,900 budget. Tests, testdata, acceptance and contract declaration paths are
+excluded by the lead's budget convention.
+
+### Verification and acceptance
+
+All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache and TMPDIR/GOTMPDIR under /tmp/sw-astra-W9.
+Builds, vet and tests used -p 4 at most.
+
+- Whole-repository build passes after the raw client deletion.
+- Scoped vet passes for client, controller, nodehost, CLI, API generation,
+  runners, launcher and acceptance.
+- The full client, clisurface, controllerwire, runspec and doccheck suites pass.
+- TestSurface components pass. No native cell was unskipped.
+- Final controller cancellation/membership, job lifecycle/renewal/replay and
+  owner reconciliation/completion tests pass against the real store.
+- Retained EngineReporting, EngineStep, EngineAnnotation and EngineSummary HTTP
+  components pass with their existing request shapes and fake foreign boundaries.
+- Focused local, standalone, dashboard, doctor, here and foreground CLI tests
+  and captured-home fuzz seeds pass.
+- TestDoctorSweepSurvivesPrunedRun passes. TypeScript native-bridge assembly,
+  exact-package publication and publication fuzz seeds pass. Actual native Windows
+  execution and publication remain lead/CI evidence.
+- Controller, nodehost, acceptance, API generation, runner, launcher and storage
+  test packages compile after the final fixture deletions.
+- Commentcheck against main passes across 2,021 files after the final orphan
+  fixture cleanup. API snapshots and embedded docs match. Whitespace checks pass.
+
+No archived T1 source-function port is marked complete. Existing final-store and
+HTTP components do not replace the native placement matrix or real-repository QA.
+The old store-only event branch remains compile-checked, not claimed as a final
+runtime port.
+
+### Contract and native integration points
+
+No foreign signature was changed. W9's source/mirrored migration guide,
+controller-wire notes, changelog and client API snapshot describe the hard cut.
+The earlier assignment audit remains applicable. Lead decisions 07:40 items 1
+and 6, doctor and Windows packaging are already implemented and reverified.
+A1-51's raw-client retirement is now done. W3 still owns the retained
+StateStoreOld scheduler.
+
+**W2 step-report implementation gap.** The declared StepReportRequest carries
+state and positive source_attempt, optional times and masked error. RecordStep
+requires StepRecorded with recorded=true. EngineController's decoder still
+accepts the former step_id/status body and returns empty 204. A temporary overlay
+component sent the final client through the real EngineController with fake
+authentication and persistence. It failed with `invalid engine request` before a
+write. This failing probe is not committed or counted as passing evidence.
+W2 must implement the existing typed request and acknowledgement, including
+source-attempt fencing. W9 does not send the old body as a fallback.
+
+**W2/W3 native hosting.** NewNativeHost and the granted identity fields exist.
+The missing pieces are the elected wingd.LocalController factory and the remote
+private execution-state boundary. RemoteOwnerStore supplies scheduling,
+reconciliation and expansion. It does not implement NativeHostStore's private
+snapshots, acceptance, transitions, completion, step persistence and renewal.
+C3's ReadSnapshot transports scheduling state, not the private RunSnapshot.
+W2/W3 and the lead must resolve that transport contract before W9 can bind a
+remote native host. Public rows or a second cached state owner cannot substitute
+for it.
+
+Local/here composition still needs selected-engine/source/environment capture,
+process delegation, authorized data/log services, complete owner policies and
+joined cleanup. The CLI already calls the supplied controller/host contracts and
+tests those boundaries with fakes. No unused constructor wrapper was added around
+the missing factory. Detached lifecycle must leave a surviving process. Schedule
+checkout/proof/pinning/tick, persisted here reason, publication and debug release
+retain their earlier authority/transport gaps. A publication failure must preserve
+the completed local verdict.
+
+### Shared files and friction
+
+There are no foreign production changes. Shared test edits are the controller
+fixture paths listed in the deletion inventory, internal/nodehost/events_test.go,
+and the two acceptance files. Source/mirrored migration docs, CHANGELOG.md,
+controller-wire notes and .apidiff/pkg_controller_client.txt are also updated.
+No new mechanism, environment variable, dependency or user restriction was added.
+
+The first dependent compilation found raw calls nested under selectors and four
+log fixtures whose uploader helper had been retired. Their obsolete branches and
+orphan fixtures were removed, then dependent compilation passed. Running the full
+client suite exposed the pre-existing example's omitted query limit and incomplete
+page shape. Its corrected example passes. The typed-report overlay failure stays
+open with W2. Neither failed run is counted as passing evidence.
+
+Git still resolves Korey's identity and no core.worktree override. Session scratch
+is removed before the final report. The shared Go build cache is retained.
+
+
 ## Continuation from 2a3a0970a
 
 This section supersedes conflicting status below. The worktree started clean.

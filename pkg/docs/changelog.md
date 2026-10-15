@@ -23,10 +23,10 @@ unlock.
 ### Changed
 
 - **local execution (Breaking):** Remove the legacy local server and run-host backend graph
-  `pkg/localws`, `RunHosted`, `HostClaimedTrigger` and the separate trigger consumer are removed with their state, admission, logging and child-dispatch backends. Captured environments use the shared host contract. Native composition and raw client retirement remain unfinished. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
+  `pkg/localws`, `RunHosted`, `HostClaimedTrigger` and the separate trigger consumer are removed with their state, admission, logging and child-dispatch backends. Captured environments use the shared host contract. Native composition remains unfinished. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
 
-- **controller/client (Breaking):** Remove the unused secret mutation methods
-  Secret writes and deletes use `NewSecretManager` and the shared controller messages. The unreachable legacy remote run hosts are also removed. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
+- **controller/client (Breaking):** Remove the legacy raw client and its trigger, claim, state, output and log transports
+  Use `EngineOptions` with the shared engine, observation, secret and data clients. Controller errors and replay policy now have one transport owner. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
 
 - **local controller:** Foreground runtime construction uses the parsed home, and local service composition shares that home with lifecycle, managed units and logs. The elected controller factory remains an integration requirement.
 

@@ -726,16 +726,19 @@ capture. W9's legacy env/attach readers and claim-prefix pod guessing are delete
 Debug resume still needs W2's declared release route, authority and replay body.
 Native controller, Kubernetes, Windows and Darwin integration remains open.
 
-The unused legacy secret mutation methods are removed. `SecretManager` owns
-writes and deletes with typed persistence receipts. The raw execution secret reads remain for legacy controller fixtures. The unused
-local socket and direct-store secret sources are removed. There is no production
-caller of the raw Client after the legacy run-host cut.
+The legacy `Client`, `New` and `NewWithToken` and their raw trigger, claim,
+state, secret, output, concurrency and log transports are removed. All production
+callers already use the shared clients. The retained retry helpers now belong
+only to the shared transport. The old local socket and direct-store secret
+sources and the legacy orchestrator host/consumer/backend graph are also removed.
+W3's retained scheduler still uses `StateStoreOld`.
 
-The orchestrator RunHosted and HostClaimedTrigger entrypoints, separate trigger
-consumer, state/backends, admission, child dispatch, submission-environment files,
-old runner interface and pkg/localws server are removed. The source selectors,
-run-handle publisher, scope label reader and paths still used by the CLI remain.
-W3's retained scheduler still uses StateStoreOld. Its retirement, the raw Client's
-fixture migrations and native controller/host composition remain open.
+The controller's step handler does not yet consume `StepReportRequest` or return
+`StepRecorded`. It accepts the former body and returns an empty 204. A W9 overlay
+component passing the contracted report through the real EngineController with
+fake authentication and persistence fails with `invalid engine request` before a
+write. W2 must implement the existing declared contract. No old-body fallback is
+provided. Private execution snapshots, the elected controller factory and native
+host/data/log composition remain integration points.
 
 <!-- design:end -->
