@@ -21,6 +21,9 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+
+- **controller (Breaking):** Dashboard token sign-in uses account capabilities and parented sessions
+  Console access requires a configured operator account’s direct sign-in session, with session-bound CSRF on writes. Embedded controllers supply verified uid or SID subjects with `WithPeerIdentity`, replacing `WithPeerPrincipal`.
 - **controller (Breaking):** OAuth browser callbacks verify proof through the shared route policy
   Start and callback require the configured provider and redirect. Callback refuses ambiguous flow cookies or query selectors before provider access. Refusals return canonical errors without upstream diagnostics or credentials. See [migration guide](docs/migrations/_unreleased.md#oauth-browser-callbacks).
 - **controller (Breaking):** Machine enrollment and deployment service issuance use the capability issuer and shared route policy

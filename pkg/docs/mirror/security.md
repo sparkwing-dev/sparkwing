@@ -257,15 +257,14 @@ role only when it is a valid role. A secret name is recorded once the secret
 was found or written. No record carries the raw path, query, body, headers or a
 credential.
 
-## Login and hashing budgets
+## Login budgets
 
-The sign-in routes (`POST /login` and the Google and GitHub flows) are the
-controller's unauthenticated routes that can reach argon2, so they carry
-their own budgets. One client gets 30 attempts a minute; the listener as a
-whole gets 600 per concurrent argon2 slot, which bounds hashing work without
-throttling a fleet's real sign-ins. Both answer `429` with `Retry-After` once
-drained. An operator token posted to `POST /login` is then verified the way a
-bearer is, under the budget below.
+The sign-in routes (`POST /login` and the Google and GitHub flows) carry their
+own budgets. One client gets 30 attempts a minute. The listener's existing
+budget is 600 per configured hashing slot. Both answer `429` with
+`Retry-After` once drained. The account access token posted to `/login` uses
+SHA-256 capability lookup and fresh ancestry checks. It does not use the
+legacy token table, argon2 verifier or principal cache.
 
 Bearer verification carries the same protection, keyed on the client
 address and the 12-character token prefix, which is public

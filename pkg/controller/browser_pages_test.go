@@ -135,8 +135,10 @@ func TestBrowserLocalModeServesPagesWithoutSignIn(t *testing.T) {
 	}
 	login := httptest.NewRequest(http.MethodPost, dashOrigin+"/login", strings.NewReader("username=alice&password=correct-horse-battery"))
 	login.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if rec := f.serve(login); setCookie(rec, "__Host-sw_session") != nil || setCookie(rec, "sw_session") != nil {
-		t.Fatal("local mode signed a browser in")
+	for _, cookie := range f.serve(login).Result().Cookies() {
+		if cookie.Name == "__Host-sw_session" || cookie.Name == "sw_session" {
+			t.Fatal("local mode signed a browser in")
+		}
 	}
 }
 

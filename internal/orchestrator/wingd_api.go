@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -375,26 +376,17 @@ func (a *wingdAPI) controllerOn(st *store.Store, auth *controller.Authenticator,
 		WithArtifactStore(a.artifact).
 		WithSecretsCipher(cipher).
 		WithAuthenticator(auth).
-		WithPeerPrincipal(peerPrincipal).
+		WithPeerIdentity(peerIdentity).
 		WithLocalExecution().
 		Handler()
 }
 
-// safety: the daemon refuses a connection from another account before the
-// first byte is read, so a request that reached a handler is already from
-// this uid; the principal exists to label audit records and to satisfy the
-// handlers that read one, not to make a second authorization decision.
-func peerPrincipal(r *http.Request) *controller.Principal {
+func peerIdentity(r *http.Request) capability.Subject {
 	uid, ok := r.Context().Value(peerUIDKey{}).(int)
 	if !ok {
-		return nil
+		return capability.Subject{}
 	}
-	return &controller.Principal{
-		Name:   PeerPrincipalPrefix + strconv.Itoa(uid),
-		Kind:   "service",
-		Scopes: []string{controller.ScopeAdmin},
-		Authed: time.Now().UTC(),
-	}
+	return capability.Subject{Kind: capability.SubjectLocal, ID: PeerPrincipalPrefix + strconv.Itoa(uid)}
 }
 
 type refusingCipher struct{ err error }

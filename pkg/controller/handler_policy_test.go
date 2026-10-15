@@ -71,7 +71,7 @@ func handlerAuthorizationCall(name string) bool {
 		return true
 	}
 	switch name {
-	case "PrincipalFromContext", "accountPrincipal", "teamMember", "requireScope", "requireServiceScope", "requireOperator", "operatorSession", "triggerClaimRequest", "requestTenant", "requestTeam":
+	case "PrincipalFromContext", "accountPrincipal", "teamMember", "requireScope", "requireServiceScope", "requireOperator", "triggerClaimRequest", "requestTenant", "requestTeam":
 		return true
 	}
 	return false

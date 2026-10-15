@@ -489,7 +489,7 @@ func (s *Server) WithOIDCIssuer(iss *oidcissuer.Issuer) *Server
 func (s *Server) WithOperatorAccounts(ids []string) *Server
 func (s *Server) WithOutputSignKey(key []byte) *Server
 func (s *Server) WithPayments(verifier capability.PaymentAuthenticator, ledger PaymentSettler) *Server
-func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server
+func (s *Server) WithPeerIdentity(fn func(*http.Request) capability.Subject) *Server
 func (s *Server) WithQueueReader(resolve func(context.Context, store.Team) (QueueReader, error)) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
@@ -631,6 +631,8 @@ func (v *optionalCreditInt64) UnmarshalJSON(raw []byte) error
 func (t *optionalCreditRateTable) UnmarshalJSON(raw []byte) error
 func (pipeSink) Flush() error
 func (c planSecretCipher) OpenPlanSecret(ctx context.Context, team store.Team, secret store.Secret) (string, error)
+func (a policyStoreAuthenticator) Authenticate(ctx context.Context, presentation capability.Presentation, route capability.RoutePolicy) (capability.Authenticated, error)
+func (b policyStoreBindings) CheckBinding(ctx context.Context, p capability.Principal, rule capability.BindingRule, target capability.Target) error
 func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error)
 func (o s3LogObjects) Get(ctx context.Context, key string) (io.ReadCloser, error)
 func (o s3LogObjects) List(ctx context.Context, prefix string) ([]string, error)

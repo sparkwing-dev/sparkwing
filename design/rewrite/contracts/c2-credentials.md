@@ -4,6 +4,53 @@
 
 ## Amendment 1: selected routes and trusted adapters
 
+### Browser login and transport identity
+
+GET and POST `/login` use PolicyRouter with AuthBrowserFlow. The bounded form
+requires same-origin proof, one CSRF cookie and one matching form token. It
+accepts one token, optional next and csrf_token. Unknown or duplicate fields,
+Authorization headers and duplicate session cookies fail. Only a live, unbound
+controller account capability can open a session. The existing
+CreateCapabilitySession transaction rechecks that parent and preserves its
+ancestry. The response handler ends the prior session and sets private cookies.
+The old admin-token/argon2 login and its middleware registration are deleted.
+Errors use the common envelope. GET verifies existing sessions without renewal.
+
+The local C2 interpretation follows C1's account-capability session contract.
+The form accepts account capabilities without requiring the retired admin scope.
+Deployment operator, machine, service and executable credentials cannot sign in.
+Account-session licensing stays the same. Direct provider sessions are the
+operator's own sign-in. A capability-parented session cannot acquire console
+powers through an operator account ID.
+
+The default authenticator selects console proof only when the matched route
+contains CredentialOperator. It reads the same committed account-session
+snapshot, checks licensing, absolute lifetime, direct ancestry and the current
+WithOperatorAccounts configuration, then projects CredentialConsole with only
+OperatorConsole. Other routes retain CredentialSession and member grants. The
+session hash, active team, account ID and lifetime are preserved for CSRF.
+BindNone has no tenant relation for console authority, so deployment targets do
+not become limited to the account's active team. Other bindings still use C1.
+C1's authority-bearing console mutation transactions remain required. The
+controller's proof projection does not implement those committing rechecks.
+
+WithPeerIdentity replaces WithPeerPrincipal. Its callback returns only the
+transport-verified local subject. It cannot supply grants, tenancy, ancestry
+or a credential class. Explicit headers and session cookies take precedence
+and never fall back to the peer. The shared AuthenticationReader receives the
+verified subject through CredentialLookup.Peer. Its snapshot and relational
+checker derive authority. The api.sock caller now supplies its kernel-verified
+uid through this interface. C1 does not yet implement that peer snapshot or
+transactional local authority. Component tests use the existing interfaces and
+fakes. Native Windows still refuses api.sock without SID verification.
+
+Real SQLite login and console HTTP tests cover successful sessions, narrowed
+grants, revocation, failed browser proofs, private errors, safe redirects,
+unsupported methods, operator configuration changes, cross-team console reads
+and capability-parent refusal. Generated form, console and peer properties
+cover forged proofs and transport selectors. No native credential matrix cell
+is claimed complete.
+
 ### Runner administration and financial service hard cuts
 
 GET and POST `/api/v1/runners/github` and DELETE
@@ -1992,8 +2039,8 @@ installs the store's SessionKeyCipher alongside the plan-secret opener.
 W1 owns sealed key persistence. No second key or plaintext setting is added.
 The session renewal endpoint checks the configured absolute lifetime before
 renewing and removes a session that has exceeded it or has a future creation
-time. Console and local peer identity, roleless OAuth, and absolute-lifetime
-enforcement on other session consumers remain separate work.
+time. Default console-session proof and the verified peer transport adapter are implemented above.
+Roleless OAuth, C1 peer authority and remaining legacy session consumers stay open.
 
 `BindingState.CancelReason` is a local C2 snapshot addition. W1 must populate
 it from the committed cancellation intent, with an existing job-specific

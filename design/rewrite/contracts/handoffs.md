@@ -2,6 +2,33 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+**W2 login and transport identity continuation.** GET/POST /login now use
+PolicyRouter and the shared capability verifier. The old token-table sign-in
+and its replaced tests are removed. Real SQLite login, ancestry and console
+proof tests pass. WithPeerIdentity replaces WithPeerPrincipal and api.sock's
+caller supplies only its verified uid subject. The default controller projects
+configured direct account sessions to console identity on console routes.
+See [W2-login-peer-handoff.md](../W2-login-peer-handoff.md).
+
+**W1: local peer authentication for W2/W8.** W2 supplies the trusted local
+subject through the existing CredentialLookup.Peer and AuthenticationReader.
+Store.authenticationAuthorityTx still refuses CredentialPeer. Supply its
+one-authority, parentless local snapshot with server-derived team and grants,
+plus the local authority representation used by BindingChecker and committing
+actors. Store.CheckBinding currently resolves every principal through a
+persisted capability/session AuthorityRef. W2 adds no local SQL, alternate
+issuer, bearer or permissive store fallback. Component transport proofs use
+fakes. Real api.sock execution remains open.
+
+**W1: console transaction identity for W2.** W2's default reader now derives
+console identity from a committed direct account session and the current
+configured operator accounts. It preserves the hashed session AuthorityRef.
+Console writes still require C1's committing recheck of session liveness and
+trusted console origin. The existing legacy grant/trust/freeze/settings methods
+do not carry that authority. Root service provisioning still expects an
+operator/service capability rather than this verified console account. These
+are production integrations, not satisfied by the HTTP proof tests.
+
 **W2 runner administration and billing hard cut.** The three legacy GitHub
 runner permission routes, token-table metering route and eight credits.grant
 service routes are removed. The dashboard uses /api/v1/runners/github.

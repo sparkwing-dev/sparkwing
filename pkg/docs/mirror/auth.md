@@ -5,9 +5,12 @@ and binding checker by default. Each request reads current capability ancestry
 and account membership. Browser writes use the session-bound CSRF verifier by default. The header
 and cookie must match the token derived from the persisted encrypted key, and
 the request must come from the same origin. A forged or cross-session token
-returns `forbidden`. Session key failures return `unavailable`. Verified local-peer and operator-console presentations need
-their transport-specific adapters. Request headers and loopback addresses do
-not supply those identities.
+returns `forbidden`. Session key failures return `unavailable`. Configured operator
+accounts use the default console-session adapter. Verified local peers use
+`WithPeerIdentity`, whose callback returns only the transport-verified uid or SID
+as a local subject. Request headers and loopback addresses supply neither
+identity. The local store must implement peer authentication snapshots and
+transactional authority checks before those presentations can execute work.
 
 `GET /api/v1/queue` uses the shared capability policy. A member or verified
 local peer needs `runs.read` for its active team. Queue groups and advertised
@@ -1351,7 +1354,7 @@ route's scope against that session as it does for any caller. An account
 session carries the scopes of the account's role in its active team, so a
 viewer reads runs and gets `403` on cancel; the session belongs to one account
 and one active team, which keeps a browser inside its own team. An
-operator-token session carries the scopes of the token it was opened with.
+account-capability session keeps its parent’s live grant ceiling.
 
 Whenever the controller enforces token auth, because a token exists or a
 multi-team license is loaded, it sends a browser without a session to `/login`
@@ -1372,7 +1375,7 @@ scope` and nothing is removed.
 
 The controller's `/login` page offers "Sign in with Google" when its sign-in
 providers include `google` and "Sign in with GitHub" when they include
-`github`, above the operator-token form. Each flow runs on the controller's own
+`github`, above the account access-token form. Each flow runs on the controller's own
 origin: `GET /auth/<provider>/start` creates a state and a PKCE verifier,
 keeps the provider, state, verifier and return path in a ten-minute
 `__Host-sw_oauth` cookie (`Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`), and
@@ -1501,27 +1504,34 @@ cookie-authenticated writes. The chart passes it whenever the Ingress has
 
 ## Signing in
 
-Dashboard sign-in is Google or GitHub, where a multi-team license and an OAuth
-client offer them, or an operator token. Sparkwing keeps no passwords.
+Dashboard sign-in uses Google or GitHub, where a multi-team license and an OAuth
+client offer them, or an unbound account access token. Sparkwing keeps no passwords.
 
-An operator token is a user token holding the `admin` scope, such as the
-bootstrap admin token below or one minted with `sparkwing cluster tokens
-create --type user --principal NAME --scope admin`. Paste it into the `/login` form and the
-controller opens a browser session for its principal. The session stores no
-copy of the token's scopes: every request reads the token's scopes and team,
-so revoking or expiring the token signs its browsers out on their next
-request. A token without `admin`, and every runner or service token, answers
-`403` and opens no session. Failed attempts spend the same per-prefix and
-per-client budgets a bearer does.
+GET and POST `/login` use the shared policy router's browser proof. The form
+requires a same-origin request and one CSRF cookie matching one form token.
+It accepts one `token`, optional `next` and `csrf_token`. Duplicate or unknown
+fields fail. `next` remains on this controller's origin. HEAD and unsupported
+methods return the shared `405` error.
 
-Controller authentication is enabled at startup when the tokens table contains
-an active token. `--require-auth` makes startup fail when it does not, and
-the `bootstrap-admin-token` credential puts the first admin token in that table before the listener binds, so a provisioned
-controller starts with both satisfied; see the
-[security operator checklist](security.md#operator-checklist). That token is
-how the first operator signs in, by API or by the sign-in form. A controller
-with authentication disabled serves its pages without sign-in, and its
-`/login` sends the browser straight on to the page it asked for.
+The controller verifies the `swk_` account capability through the shared
+snapshot reader, then creates its browser session through the store. Machine,
+service, operator and bound work capabilities cannot open a session. Every
+session request rechecks membership, expiry and parent ancestry. The session
+cannot exceed its parent's grants, and revoking that parent ends the session.
+Account sign-in requires the same multi-team license as other account sessions.
+Successful sign-in ends the browser's previous session and sets private cookies.
+Refusals use the canonical error envelope and create no session.
+
+Console access requires a configured operator account's direct provider session.
+A capability-parented session cannot become console authority. On console
+routes the verified session carries only `operator.console`. Ordinary routes
+retain its account identity and member grants. Console mutations require the
+selected session's CSRF token, cookie and same-origin proof. Changing the
+configured operator accounts takes effect on the next request.
+
+A controller with authentication disabled serves its pages without sign-in,
+and `/login` redirects to the requested local page. Deployment bootstrap
+provisioning is separate from browser sign-in.
 
 ## CLI
 

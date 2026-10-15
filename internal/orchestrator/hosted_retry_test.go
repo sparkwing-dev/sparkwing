@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -123,7 +124,7 @@ func TestHostedRetry_SurvivesADaemonRestartBetweenWrites(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 
 	api := newRestartableAPI(t, controller.New(st, nil).
-		WithPeerPrincipal(testAdminPrincipal).
+		WithPeerIdentity(testAdminIdentity).
 		Handler())
 	backends, release := HostedBackends(paths, api.sock, nil)
 	t.Cleanup(release)
@@ -160,13 +161,8 @@ func TestHostedRetry_SurvivesADaemonRestartBetweenWrites(t *testing.T) {
 	}
 }
 
-func testAdminPrincipal(*http.Request) *controller.Principal {
-	return &controller.Principal{
-		Name:   "unix-peer:test",
-		Kind:   "service",
-		Scopes: []string{controller.ScopeAdmin},
-		Authed: time.Now().UTC(),
-	}
+func testAdminIdentity(*http.Request) capability.Subject {
+	return capability.Subject{Kind: capability.SubjectLocal, ID: "unix-peer:test"}
 }
 
 func TestHostedRetry_ConflictOnARetryIsTheFirstAttemptLanding(t *testing.T) {

@@ -59,7 +59,7 @@ type Server struct {
 	resolveSourceAuditReader   func(context.Context, store.Team) (SourceAuditReader, error)
 	resolveSecretReader        func(context.Context, store.Team) (SecretReader, error)
 
-	peerPrincipal func(*http.Request) *Principal
+	peerIdentity func(*http.Request) capability.Subject
 
 	loginLimit *loginLimiter
 
@@ -709,14 +709,20 @@ func (s *Server) WithAuthenticator(a *Authenticator) *Server {
 	return s
 }
 
-// WithPeerPrincipal authenticates a request that carries no Authorization
-// header by the transport it arrived on, which is how a controller served
-// over a unix socket treats the peer's uid as the identity. fn returns nil to
-// refuse the request with 401. A request that does carry a bearer token still
-// goes to the Authenticator, so a token keeps working on the same listener.
-func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
-	s.peerPrincipal = fn
+// WithPeerIdentity installs the transport's verified Unix uid or Windows SID identity.
+func (s *Server) WithPeerIdentity(fn func(*http.Request) capability.Subject) *Server {
+	s.peerIdentity = fn
 	return s
+}
+
+func (s *Server) identifyPeer(r *http.Request) (capability.Presentation, error) {
+	if s.peerIdentity != nil {
+		subject := s.peerIdentity(r)
+		if subject.Kind == capability.SubjectLocal && subject.ID != "" {
+			return capability.Presentation{Class: capability.CredentialPeer, Peer: subject}, nil
+		}
+	}
+	return capability.Presentation{}, sessionUnavailable()
 }
 
 // Handler returns the HTTP router. Exposed separately from Serve so
@@ -1015,18 +1021,19 @@ func (s *Server) authenticated(mux *http.ServeMux, next http.Handler) http.Handl
 			s.serveSession(w, r, raw, next)
 			return
 		}
-		if s.peerPrincipal == nil || r.Header.Get("Authorization") != "" {
+		if s.peerIdentity == nil || r.Header.Get("Authorization") != "" {
 			byToken.ServeHTTP(w, r)
 			return
 		}
-		p := s.peerPrincipal(r)
-		if p == nil {
+		peer, err := s.identifyPeer(r)
+		if err != nil {
 			writeAuthError(w, http.StatusUnauthorized, authErrorBody{
 				Code:    "unauthenticated",
 				Message: "the connection carries no identity this controller accepts",
 			})
 			return
 		}
+		p := &Principal{Name: peer.Peer.ID, Kind: "service", Scopes: []string{ScopeAdmin}, Authed: time.Now().UTC()}
 		observeRequestPrincipal(p.Kind)
 		ctx := contextWithPrincipal(r.Context(), p)
 		stampPrincipal(ctx, p)

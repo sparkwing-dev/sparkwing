@@ -16,9 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// WithOperatorAccounts names the accounts, by account id, whose signed-in
-// browser sessions may view the operator console page. API authorization
-// additionally requires the committed-fact adapters supplied by WithAuthorization.
+// WithOperatorAccounts names accounts whose direct sign-in sessions may use the console.
 func (s *Server) WithOperatorAccounts(ids []string) *Server {
 	set := map[string]bool{}
 	for _, id := range ids {
@@ -30,9 +28,9 @@ func (s *Server) WithOperatorAccounts(ids []string) *Server {
 	return s
 }
 
-func (s *Server) operatorSession(p *Principal) bool {
+func (s *Server) operatorAccount(id string) bool {
 	set := s.operators.Load()
-	return p != nil && p.session != "" && p.AccountID != "" && set != nil && (*set)[p.AccountID]
+	return id != "" && set != nil && (*set)[id]
 }
 
 type operatorTeamMatchJSON struct {

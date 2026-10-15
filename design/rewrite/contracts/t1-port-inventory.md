@@ -1,5 +1,19 @@
 # Acceptance test port inventory
 
+W2 browser-login ports: the ten tests in the deleted 271-line
+pkg/controller/browser_login_test.go move to TestLoginHTTPAccountCapabilitySession,
+TestLoginHTTPProofProperty, TestLoginHTTPPageAndMethods,
+TestLoginHTTPRefusesInvalidCredentialAndForm, TestLoginHTTPSafeReturnPath and
+TestLoginHTTPOpenController in tests/acceptance/login_http_test.go. These cover
+cookies, form proof, invalid credentials, safe next, stale sessions, replacement,
+open controllers, script escaping and audit attribution. The old admin-only
+form rule is replaced by C1's unbound account-capability contract. Machine,
+service, deployment and executable credentials still cannot open a session.
+The logout audit half retains the prior active browser-logout HTTP port.
+The local-mode caller in browser_pages_test.go no longer depends on the
+removed test helper. These are component proofs, not native matrix evidence.
+
+
 W2 route-cut ports: TestCredits_SetMeteredRouteMarksAnExistingToken moves to
 TestRunnerMeteringHTTPConsoleProperty and TestRunnerMeteringHTTPRefusals.
 The old admin-bearer expectation is reversed to console-only authority.

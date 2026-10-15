@@ -369,7 +369,7 @@
     {
       "route": "/login",
       "kind": "page",
-      "exempt": "Answers 404 unless the dashboard is configured to require a login, so this corpus cannot measure it. Baseline it from a listener started with that configuration and remove this exemption.",
+      "exempt": "Requires the remote dashboard and account-session configuration, absent from the local dashboard corpus. Login page latency, sign-in action, cold start and response bytes remain unmeasured. Baseline the authorized browser flow and remove this exemption.",
       "baselines": {}
     },
     {

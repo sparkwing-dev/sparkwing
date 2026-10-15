@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -93,9 +94,7 @@ func (s *Server) browserAPI(api http.Handler) http.Handler {
 }
 
 func (s *Server) signInRoutes(mux *http.ServeMux) {
-	signIn := func(h http.Handler) http.Handler { return s.loginLimit.middleware(h) }
-	mux.HandleFunc("GET /login", s.handleLoginPage)
-	mux.Handle("POST /login", signIn(s.formCSRF(s.handleLoginSubmit)))
+	s.registerPolicyEndpoints(mux, s.loginEndpoints())
 	s.registerPolicyEndpoints(mux, s.browserSessionEndpoints())
 	s.registerPolicyEndpoints(mux, s.oauthEndpoints())
 	mux.Handle("POST /auth/{provider}/link", s.formCSRF(s.handleIdentityLinkStart))
@@ -138,26 +137,26 @@ func (s *Server) pageGate(pages http.Handler) http.Handler {
 			return
 		}
 		secure := s.cookiesSecure()
-		var p *Principal
+		var session *store.Session
 		if raw := sessionCookie(r, secure); raw != "" {
-			sess, err := s.resolveBrowserSession(r.Context(), raw)
+			sess, err := s.readSessionFlow(r)
 			switch {
 			case err == nil:
-				p = sess.principal
-			case refusalIsBackend(err):
-				s.refuseBrowserSession(w, err, secure)
+				session = sess
+			case sessionFlowUnavailable(err):
+				writePolicyError(w, err)
 				return
 			default:
 				clearSessionCookies(w, secure)
 			}
 		}
-		if p == nil && s.AuthEnabled() {
+		if session == nil && s.AuthEnabled() {
 			w.Header().Set("Cache-Control", "no-store")
 			query := url.Values{"next": {safeNext(r.URL.RequestURI())}}
 			http.Redirect(w, r, "/login?"+query.Encode(), http.StatusSeeOther)
 			return
 		}
-		if operatorPage(r.URL.Path) && !s.operatorSession(p) {
+		if operatorPage(r.URL.Path) && (session == nil || session.CapabilityPrefix != "" || !s.operatorAccount(session.AccountID)) {
 			w.Header().Set("Cache-Control", "no-store")
 			http.Error(w, "the operator console needs the operator's own signed-in account", http.StatusForbidden)
 			return
@@ -172,4 +171,9 @@ func operatorPage(p string) bool {
 
 func refusalIsBackend(err error) bool {
 	return errors.Is(err, store.ErrSessionBackend)
+}
+
+func sessionFlowUnavailable(err error) bool {
+	var failure *apierr.Error
+	return errors.As(err, &failure) && failure.Code != apierr.Unauthenticated
 }

@@ -37,16 +37,6 @@ func newLoginLimiter() *loginLimiter {
 	}
 }
 
-func (l *loginLimiter) middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := l.admit(r); err != nil {
-			writePolicyError(w, err)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func (l *loginLimiter) admit(r *http.Request) error {
 	now := time.Now()
 	if !l.clients.Allow(l.client(r), now) {
