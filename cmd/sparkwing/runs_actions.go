@@ -46,10 +46,3 @@ func collectRunIDs(flagIDs []string, stdin io.Reader) ([]string, error) {
 	}
 	return out, nil
 }
-
-func profileSuffix(on string) string {
-	if on == "" {
-		return ""
-	}
-	return " --profile " + on
-}

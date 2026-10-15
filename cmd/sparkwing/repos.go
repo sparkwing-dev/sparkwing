@@ -14,16 +14,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func runRepos(args []string) error {
@@ -83,7 +82,10 @@ func buildFleet(latest string) ([]repos.Repo, error) {
 	if err != nil {
 		return nil, err
 	}
-	obs := observeRuns()
+	obs, err := observeRuns()
+	if err != nil {
+		return nil, err
+	}
 	gv := guideVersions()
 	fleet := repos.DeriveFleet(cands, obs, fleetGit, latest, func(pin, lt string) int {
 		return repos.GuidesBehind(gv, pin, lt)
@@ -91,33 +93,33 @@ func buildFleet(latest string) ([]repos.Repo, error) {
 	return fleet, nil
 }
 
-func observeRuns() []repos.RunObservation {
-	paths, err := orchestrator.DefaultPaths()
+func observeRuns() ([]repos.RunObservation, error) {
+	ctx := context.Background()
+	reader, closeTransport, err := resolveRunReader(ctx, "")
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	st, err := store.Open(paths.StateDB())
+	defer closeTransport()
+	return repoRunObservations(ctx, reader)
+}
+
+func repoRunObservations(ctx context.Context, reader controllerwire.RunReader) ([]repos.RunObservation, error) {
+	page, err := reader.ListRuns(ctx, controllerwire.RunQuery{Limit: 500})
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	defer func() { _ = st.Close() }()
-	runs, err := st.ListRuns(context.Background(), store.RunFilter{Limit: 500})
-	if err != nil {
-		return nil
-	}
-	out := make([]repos.RunObservation, 0, len(runs))
-	for _, r := range runs {
-		if r.DeclaredRepo == "" {
+	out := make([]repos.RunObservation, 0, len(page.Runs))
+	for _, run := range page.Runs {
+		if run.Inputs.Git.Repository.Display == "" {
 			continue
 		}
-		out = append(out, repos.RunObservation{
-			Repo:     r.DeclaredRepo,
-			RepoURL:  r.RepoURL,
-			Pipeline: r.Pipeline,
-			At:       r.StartedAt,
-		})
+		at := time.Time{}
+		if run.StartedAt != nil {
+			at = *run.StartedAt
+		}
+		out = append(out, repos.RunObservation{Repo: run.Inputs.Git.Repository.Display, Pipeline: run.Inputs.Pipeline, At: at})
 	}
-	return out
+	return out, nil
 }
 
 func runReposList(args []string) error {

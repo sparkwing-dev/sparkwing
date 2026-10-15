@@ -78,10 +78,14 @@ func FuzzEngineReportedFailureProjection(f *testing.F) {
 		if err := json.Unmarshal(raw, &report); err != nil {
 			return
 		}
-		authorized := engineOwnerAuthorization()
-		authorized.Target.NodeID = "job"
-		got, err := nodeTransitionForStore(authorized, report)
-		if err != nil || got.Extra.Result == nil || !reflect.DeepEqual(got.Extra.Result.Failure, report.Result.Failure) || got.Extra.Result.MaskedError != report.Result.Failure.Error.Message {
+		got, err := captureEngineTransition(t.Context(), report)
+		if err != nil {
+			if got.Extra.Result != nil {
+				t.Fatal("refused failure reached persistence")
+			}
+			return
+		}
+		if got.Extra.Result == nil || !reflect.DeepEqual(got.Extra.Result.Failure, report.Result.Failure) || got.Extra.Result.MaskedError != report.Result.Failure.Error.Message {
 			t.Fatalf("failure projection changed: %+v, %v", got, err)
 		}
 	})

@@ -305,7 +305,7 @@ func TestDataClientStructuredErrorsAndRetry(t *testing.T) {
 				}
 				want := 1
 				if code == apierr.Unavailable || code == apierr.RateLimited {
-					want += UnavailableRetries
+					want += unavailableRetries
 				}
 				if calls != want {
 					t.Fatalf("calls=%d want=%d", calls, want)

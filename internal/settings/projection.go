@@ -167,6 +167,18 @@ func ProjectRequest(values Values) (runspec.Options, error) {
 	if err != nil {
 		return runspec.Options{}, err
 	}
+	out.StartAt, err = projectValue(values.StartAt, values.Origins, "start_at")
+	if err != nil {
+		return runspec.Options{}, err
+	}
+	out.StopAt, err = projectValue(values.StopAt, values.Origins, "stop_at")
+	if err != nil {
+		return runspec.Options{}, err
+	}
+	out.Only, err = projectValue(values.Only, values.Origins, "only")
+	if err != nil {
+		return runspec.Options{}, err
+	}
 	out.DryRun, err = projectValue(values.DryRun, values.Origins, "dry_run")
 	if err != nil {
 		return runspec.Options{}, err

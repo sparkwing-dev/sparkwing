@@ -61,11 +61,11 @@ func TestSurfaceRunnerEnrollmentCredentialTransport(t *testing.T) {
 				}
 				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
 			})}
-			manager, err := client.NewTokenManager(client.EngineOptions{URL: endpoint, Bearer: func(context.Context) (string, error) { return "member-credential", nil }, HTTP: transport}, false)
+			manager, err := client.NewRunnerTokenManager(client.EngineOptions{URL: endpoint, Bearer: func(context.Context) (string, error) { return "member-credential", nil }, HTTP: transport})
 			if err != nil {
 				t.Fatal(err)
 			}
-			created, err := client.NewWithToken(endpoint, transport, "member-credential").EnrollRunner(t.Context(), enrollment)
+			created, err := manager.EnrollRunner(t.Context(), enrollment)
 			if err != nil || created.Capability != "swk_00000001_secret" || created.Prefix != metadata.Prefix || !reflect.DeepEqual(created.Grants, grants) {
 				t.Fatalf("created: %+v %v", created, err)
 			}

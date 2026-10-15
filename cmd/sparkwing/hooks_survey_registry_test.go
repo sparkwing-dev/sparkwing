@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
 func (f *chainFixture) corruptRegistry(t *testing.T) {
@@ -118,13 +116,4 @@ func TestDoctorDiagnose_CarriesTheReasonTheGateSurveyDidNotRun(t *testing.T) {
 	if report.GatesSurveyed != 0 {
 		t.Errorf("gates_surveyed = %d, want 0: nothing was surveyed", report.GatesSurveyed)
 	}
-}
-
-func mustHomePaths(t *testing.T, home string) paths.Paths {
-	t.Helper()
-	p, err := homePaths(home)
-	if err != nil {
-		t.Fatalf("homePaths: %v", err)
-	}
-	return p
 }

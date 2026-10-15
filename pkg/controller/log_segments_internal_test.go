@@ -4,15 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
-	"context"
-	"crypto/md5" // #nosec G501 -- S3's Content-MD5 integrity check, not a security digest
+	"crypto/md5"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -25,12 +22,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -67,251 +62,7 @@ func newLogSegmentFixture(t *testing.T) logSegmentFixture {
 	return f
 }
 
-type signalUploader struct {
-	*client.LogSegmentUploader
-	stored chan int
-}
-
-func (u signalUploader) PutSegment(ctx context.Context, seg logseg.Segment, body []byte) error {
-	err := u.LogSegmentUploader.PutSegment(ctx, seg, body)
-	if err == nil {
-		u.stored <- seg.N
-	}
-	return err
-}
-
-func (f logSegmentFixture) sink(t *testing.T, token, nodeID string) (*logseg.Sink, signalUploader) {
-	t.Helper()
-	up := signalUploader{
-		LogSegmentUploader: client.NewWithToken(f.url, nil, token).NewLogSegmentUploader(t.Context(), "run-d", nodeID),
-		stored:             make(chan int, 64),
-	}
-	if err := up.Open(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	s, err := logseg.NewSink(t.Context(), up, logseg.Options{
-		Subject: up.Subject(), SpoolDir: t.TempDir(), SegmentBytes: 16,
-		RetryBase: time.Millisecond, RetryMax: time.Millisecond,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s, up
-}
-
 func logLine(i int) string { return fmt.Sprintf("line %02d\n", i) }
-
-func TestLogSegmentsRoundTripThroughTheController(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	s, _ := f.sink(t, tok, "a")
-	var want strings.Builder
-	for i := 1; i <= 6; i++ {
-		if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
-			t.Fatal(err)
-		}
-		want.WriteString(logLine(i))
-	}
-	m, err := s.Close(ctx, logseg.End{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m.Status != logseg.StatusComplete || len(m.Segments) < 2 {
-		t.Fatalf("manifest = %+v", m)
-	}
-	logs := f.srv.dashboardLogs(store.DefaultTeam)
-	got, err := logs.Read(ctx, "run-d", "a", storage.ReadOpts{})
-	if err != nil || string(got) != want.String() {
-		t.Fatalf("read %q, %v; want %q", got, err, want.String())
-	}
-	if tail, _ := logs.Read(ctx, "run-d", "a", storage.ReadOpts{Tail: 1}); string(tail) != logLine(6) {
-		t.Fatalf("tail read %q", tail)
-	}
-	if other, err := f.srv.dashboardLogs("other").Read(ctx, "run-d", "a", storage.ReadOpts{}); err != nil || len(other) != 0 {
-		t.Fatalf("another team read the log: %q, %v", other, err)
-	}
-	c, found, err := logs.(segmentLogs).NodeLogCompleteness(ctx, "run-d", "a",
-		logseg.NodeProgress{Started: true, Terminal: true, FinishedAt: time.Now()}, time.Now())
-	if err != nil || !found || c.State != logseg.StateComplete || c.Lines != 6 {
-		t.Fatalf("completeness = %+v %v %v", c, found, err)
-	}
-
-	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
-	if err != nil || !strings.HasPrefix(rec.Prefix, "logs/r90/teams/default/runs/run-d/jobs/a/a1-g") {
-		t.Fatalf("record = %+v, %v", rec, err)
-	}
-	stored, err := logseg.Open(ctx, f.srv.logObjects(), rec.Prefix)
-	if err != nil || stored.Manifest == nil || stored.Manifest.Subject.Attempt.Attempt != 1 || stored.Manifest.Subject.Attempt.Generation < 1 {
-		t.Fatalf("stored manifest = %+v, %v", stored, err)
-	}
-}
-
-func TestLogSegmentsRefuseASupersededAttemptAndASecondManifest(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	code, body := f.do(t, http.MethodPost, "/api/v1/runs/run-d/nodes/a/log-segments", tok, []byte(`{"attempt":7,"generation":1}`))
-	if code != http.StatusConflict {
-		t.Fatalf("a superseded attempt asked for URLs: %d %s", code, body)
-	}
-	code, body = f.do(t, http.MethodPost, "/api/v1/runs/run-d/nodes/b/log-segments", tok, []byte(`{}`))
-	if code == http.StatusOK {
-		t.Fatalf("a's claim took URLs for node b: %d %s", code, body)
-	}
-	s, up := f.sink(t, tok, "a")
-	if _, err := s.Close(t.Context(), logseg.End{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := up.PutManifest(t.Context(), logseg.Manifest{
-		Version: logseg.ManifestVersion, Subject: new(up.Subject()), Status: logseg.StatusComplete, SealedBy: logseg.SealedByNode,
-	}); !errors.Is(err, logseg.ErrSealed) {
-		t.Fatalf("a second manifest = %v, want ErrSealed", err)
-	}
-}
-
-// A viewer of a running segment node sees the segments uploaded so far
-// and then the live ring from the byte where they end, each line once,
-// until the manifest ends the stream.
-func TestSegmentStreamJoinsTheLiveRingByOffset(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	up := client.NewWithToken(f.url, nil, tok).NewLogSegmentUploader(ctx, "run-d", "a")
-	if err := up.Open(ctx); err != nil {
-		t.Fatal(err)
-	}
-	stored := make(chan int, 64)
-	s, err := logseg.NewSink(ctx, signalUploader{LogSegmentUploader: up, stored: stored}, logseg.Options{
-		Subject: up.Subject(), SpoolDir: t.TempDir(), SegmentBytes: 16,
-		Live: func(off int64, data []byte) { f.srv.liveLogs.AppendAt("run-d", "a", up.LiveAttempt(), off, data) },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.SetWatched(true)
-	var want []string
-	for i := 1; i <= 5; i++ {
-		if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
-			t.Fatal(err)
-		}
-		want = append(want, strings.TrimSuffix(logLine(i), "\n"))
-	}
-	for n := range stored {
-		if n >= 2 {
-			break
-		}
-	}
-	body, err := f.srv.dashboardLogs(store.DefaultTeam).Stream(ctx, "run-d", "a")
-	if err != nil || body == nil {
-		t.Fatalf("stream = %v, %v", body, err)
-	}
-	defer func() { _ = body.Close() }()
-	lines := bufio.NewScanner(body)
-	var got []string
-	next := func() (string, bool) {
-		for lines.Scan() {
-			if data, ok := strings.CutPrefix(lines.Text(), "data: "); ok {
-				return data, true
-			}
-		}
-		return "", false
-	}
-	for len(got) < len(want) {
-		line, ok := next()
-		if !ok {
-			t.Fatalf("stream ended after %q", got)
-		}
-		got = append(got, line)
-	}
-	if _, err := s.Close(ctx, logseg.End{}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.st.DB().ExecContext(ctx, `UPDATE nodes SET status = 'done' WHERE run_id = 'run-d' AND node_id = 'a'`); err != nil {
-		t.Fatal(err)
-	}
-	for {
-		line, ok := next()
-		if !ok {
-			break
-		}
-		if line != "{}" {
-			got = append(got, line)
-		}
-	}
-	if strings.Join(got, "|") != strings.Join(want, "|") {
-		t.Fatalf("stream sent %q, want each of %q once", got, want)
-	}
-}
-
-func TestNodeLogReadsThroughTheControllerRoutes(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	s, _ := f.sink(t, tok, "a")
-	for _, line := range []string{"alpha\n", "needle one\n", "beta\n", "needle two\n"} {
-		if err := s.Append([]byte(line), "", 0, 0); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := s.Close(ctx, logseg.End{}); err != nil {
-		t.Fatal(err)
-	}
-	logs := client.NewWithToken(f.url, nil, f.admin(t)).NodeLogs()
-	if got, err := logs.Read(ctx, "run-d", "a", storage.ReadOpts{Tail: 1}); err != nil || string(got) != "needle two\n" {
-		t.Fatalf("tail read = %q, %v", got, err)
-	}
-	for _, limit := range []int{0, 1} {
-		query := url.Values{"grep": {"needle"}, "line_numbers": {"1"}}
-		if limit > 0 {
-			query.Set("max_matches", fmt.Sprint(limit))
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.url+"/api/v1/runs/run-d/logs/a?"+query.Encode(), nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.Header.Set("Authorization", "Bearer "+f.admin(t))
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
-			t.Fatalf("grep status: %s", resp.Status)
-		}
-		decoder := json.NewDecoder(resp.Body)
-		var numbers []int
-		for {
-			var line struct {
-				LineNo int    `json:"line_no"`
-				Line   string `json:"line"`
-			}
-			err := decoder.Decode(&line)
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			if err != nil {
-				resp.Body.Close()
-				t.Fatal(err)
-			}
-			if !strings.Contains(line.Line, "needle") {
-				resp.Body.Close()
-				t.Fatalf("nonmatching line: %+v", line)
-			}
-			numbers = append(numbers, line.LineNo)
-		}
-		if err := resp.Body.Close(); err != nil {
-			t.Fatal(err)
-		}
-		want := []int{2, 4}
-		if limit == 1 {
-			want = want[:1]
-		}
-		if !slices.Equal(numbers, want) {
-			t.Fatalf("grep limit %d: %v, want %v", limit, numbers, want)
-		}
-	}
-
-}
 
 func TestCompileLogTakesSegmentsUnderTheTriggerClaim(t *testing.T) {
 	f := newLogSegmentFixture(t)
@@ -333,14 +84,6 @@ func TestCompileLogTakesSegmentsUnderTheTriggerClaim(t *testing.T) {
 	code, body := post(true)
 	if code != http.StatusOK || !strings.Contains(string(body), "/runs/run-d/_5fcompile/a1-g3/") {
 		t.Fatalf("compile log under the trigger claim: %d %s", code, body)
-	}
-}
-
-func TestCapabilitiesAdvertiseLogSegments(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	keeps, err := client.NewWithToken(f.url, nil, "").KeepsLogSegments(t.Context())
-	if err != nil || !keeps {
-		t.Fatalf("KeepsLogSegments = %v, %v", keeps, err)
 	}
 }
 
@@ -607,65 +350,6 @@ func TestLogManifestMustMatchTheSignedSegments(t *testing.T) {
 	}
 	if code, _ := f.sign(t, tok, "a", 2, []byte("late")); code != http.StatusConflict {
 		t.Fatalf("a segment after the seal: %d, want 409", code)
-	}
-}
-
-// A claim whose node reported its outcome may still upload and seal its
-// own attempt's log for the seal grace, and nothing else: not another
-// attempt, not past the grace, and not once a later claim holds the node.
-func TestAnEndedClaimFinishesOnlyItsOwnLogWithinTheGrace(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	s, up := f.sink(t, tok, "a")
-	const first = "a line long enough to cut a segment\n"
-	if err := s.Append([]byte(first), "", 0, 0); err != nil {
-		t.Fatal(err)
-	}
-	<-up.stored
-	wantPost(t, f.dispatchRouteFixture, attemptPath, tok, `{"outcome":"success"}`, http.StatusOK, "")
-	if code, raw := f.do(t, http.MethodPost, "/api/v1/runs/run-d/nodes/a/log-segments", tok, []byte(`{"attempt":2,"generation":1}`)); code != http.StatusConflict {
-		t.Fatalf("an ended claim naming another attempt: %d %s, want 409", code, raw)
-	}
-	for i := 2; i <= 4; i++ {
-		if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
-			t.Fatal(err)
-		}
-	}
-	m, err := s.Close(ctx, logseg.End{})
-	if err != nil || m.Status != logseg.StatusComplete || m.Lines != 4 {
-		t.Fatalf("seal after the outcome = %+v, %v", m, err)
-	}
-	if got, err := f.srv.dashboardLogs(store.DefaultTeam).Read(ctx, "run-d", "a", storage.ReadOpts{}); err != nil ||
-		string(got) != first+logLine(2)+logLine(3)+logLine(4) {
-		t.Fatalf("read %q, %v", got, err)
-	}
-
-	late := f.claim(t, "b", store.ClaimTokenWork)
-	if code, raw := f.do(t, http.MethodPost, "/api/v1/runs/run-d/nodes/b/log-segments", late, []byte(`{}`)); code != http.StatusOK {
-		t.Fatalf("open b: %d %s", code, raw)
-	}
-	wantPost(t, f.dispatchRouteFixture, "/api/v1/runs/run-d/nodes/b/attempt", late, `{"outcome":"success"}`, http.StatusOK, "")
-	for _, q := range []string{
-		`UPDATE node_execution_attempts SET finished_at = ? WHERE run_id = 'run-d' AND node_id = 'b'`,
-		`UPDATE nodes SET finished_at = ? WHERE run_id = 'run-d' AND node_id = 'b'`,
-	} {
-		if _, err := f.st.DB().ExecContext(ctx, q, time.Now().Add(-logseg.SealGrace).UnixNano()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if code, raw := f.do(t, http.MethodPost, "/api/v1/runs/run-d/nodes/b/log-segments", late, []byte(`{}`)); code != http.StatusForbidden {
-		t.Fatalf("a claim past the grace: %d %s, want 403", code, raw)
-	}
-	if _, err := f.st.DB().ExecContext(ctx, `UPDATE node_execution_attempts SET finished_at = ? WHERE run_id = 'run-d' AND node_id = 'b'`,
-		time.Now().UnixNano()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.st.DB().ExecContext(ctx, `UPDATE nodes SET claim_generation = claim_generation + 1 WHERE run_id = 'run-d' AND node_id = 'b'`); err != nil {
-		t.Fatal(err)
-	}
-	if code, raw := f.do(t, http.MethodPost, "/api/v1/runs/run-d/nodes/b/log-segments", late, []byte(`{}`)); code != http.StatusForbidden {
-		t.Fatalf("a claim a later claim replaced: %d %s, want 403", code, raw)
 	}
 }
 

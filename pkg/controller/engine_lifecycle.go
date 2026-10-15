@@ -18,14 +18,22 @@ func (s *EngineController) TransitionJob(ctx context.Context, a capability.Autho
 	if err != nil {
 		return controllerwire.Applied{}, err
 	}
-	if body.Result != nil && body.Result.Failure != nil {
-		if _, err := engineMaskedError(body.Result.Failure.Error); err != nil {
+	change := store.NodeTransition{
+		Ref: store.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID},
+		To:  store.NodeState(body.To), Cause: store.TransitionCause(body.Cause), Actor: engineActor(a),
+		SourceAttempt: body.SourceAttempt, Extra: store.TransitionExtra{RetryAt: body.RetryAt},
+	}
+	if body.Result != nil {
+		var masked string
+		var err error
+		if body.Result.Failure != nil {
+			masked, err = engineMaskedError(body.Result.Failure.Error)
+		}
+		if err != nil {
 			return controllerwire.Applied{}, err
 		}
-	}
-	change, err := nodeTransitionForStore(a, body)
-	if err != nil {
-		return controllerwire.Applied{}, err
+		change.Extra.Result = &store.NodeResult{Outcome: store.NodeState(body.Result.Outcome), Reason: body.Result.Reason,
+			Failure: body.Result.Failure, MaskedError: masked, ExitCode: body.Result.ExitCode, OutputRecord: body.Result.Output, ManifestRecord: body.Result.Manifest}
 	}
 	applied, err := tenant.TransitionNode(ctx, change)
 	return appliedResponse(applied), engineLookupError(err)

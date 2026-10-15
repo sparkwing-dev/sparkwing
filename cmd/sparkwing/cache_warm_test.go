@@ -206,7 +206,7 @@ func TestCacheWarmUsesSelectedEngineAndCapturedEnvironment(t *testing.T) {
 				return selected, nil
 			}, func(ctx context.Context, got engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
 				called = true
-				if ctx.Err() != nil || got.Executable != selected.Executable || request.Directory != dir || request.SDK != sdk || !reflect.DeepEqual(request.Environment, environment) {
+				if ctx.Err() != nil || got.Executable != selected.Executable || request.Directory != filepath.Dir(dir) || request.PipelineDir != filepath.Base(dir) || request.SDK != sdk || !reflect.DeepEqual(request.Environment, environment) {
 					t.Fatal("installation changed selected engine or captured input")
 				}
 				return engine.SDKCommand{Directory: dir, Command: []string{filepath.Join(dir, "pipeline")}}, nil

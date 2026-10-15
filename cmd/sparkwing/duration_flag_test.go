@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	flag "github.com/spf13/pflag"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
 
 func TestLookbackDurationFlagAcceptsDocumentedSyntax(t *testing.T) {
@@ -17,14 +17,13 @@ func TestLookbackDurationFlagAcceptsDocumentedSyntax(t *testing.T) {
 		{raw: "90m", want: 90 * time.Minute},
 	} {
 		t.Run(tc.raw, func(t *testing.T) {
-			fs := flag.NewFlagSet("test", flag.ContinueOnError)
-			since := lookbackDuration(fs, "since", 0, "")
-
-			if err := fs.Parse([]string{"--since", tc.raw}); err != nil {
+			inv, err := clisurface.Parse("sparkwing", []string{"runs", "list", "--since", tc.raw})
+			if err != nil {
 				t.Fatalf("parse --since %s: %v", tc.raw, err)
 			}
-			if *since != tc.want {
-				t.Fatalf("--since %s = %s, want %s", tc.raw, *since, tc.want)
+			since, err := clisurface.ParseLookback(inv.Value("since"))
+			if err != nil || since != tc.want {
+				t.Fatalf("--since %s = %s, %v; want %s", tc.raw, since, err, tc.want)
 			}
 		})
 	}

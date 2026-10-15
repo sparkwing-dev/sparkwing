@@ -555,3 +555,7 @@ Resolution paths:
 For a local run that must survive closing the submitting terminal, use
 `sparkwing run <pipeline> --sw-detached`. The resident consumer owns the
 run while it waits for approval.
+
+Repository fleet history comes from the local controller's public run projection.
+A failed history read is an error. Repository commands do not open the runs store
+directly or treat an unavailable history source as an empty result.

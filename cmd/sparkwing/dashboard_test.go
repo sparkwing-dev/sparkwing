@@ -190,9 +190,11 @@ func TestDashboardPreservesFailuresWithoutSuccessReceipt(t *testing.T) {
 	}
 }
 
-func TestDashboardMissingRuntimeFailsWithoutLegacyServiceFallback(t *testing.T) {
+func TestDashboardMissingLifecycleFailsWithoutLegacyServiceFallback(t *testing.T) {
 	var output bytes.Buffer
-	err := runDashboardCommand(t.Context(), []string{"start"}, &output, "linux", resolveLocalServices)
+	err := runDashboardCommand(t.Context(), []string{"start"}, &output, "linux", func(context.Context) (dashboardServices, error) {
+		return dashboardServices{}, nil
+	})
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || output.Len() != 0 {
 		t.Fatalf("error=%v output=%s", err, &output)

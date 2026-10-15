@@ -3,6 +3,7 @@ package runners
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -12,6 +13,27 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
+
+func TestRunInputRetainsOriginalRetryRequest(t *testing.T) {
+	unit := hostingAward(capability.UnitTrigger)
+	unit.Request.RunID = "source-run"
+	unit.Accepted = &controllerwire.PlanAccepted{
+		Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash"},
+		Plan: json.RawMessage(`{"jobs":[]}`), PlanHash: "plan-hash",
+	}
+	input, err := runInputFor(unit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request runspec.Request
+	if err := json.Unmarshal(input.SealedRequest, &request); err != nil || !reflect.DeepEqual(request, unit.Request.Request) || input.RunID != unit.RunID || input.Accepted == nil || input.Accepted.RunID != unit.RunID {
+		t.Fatalf("retry input = %+v, error = %v", input, err)
+	}
+	var spec runspec.Spec
+	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil || spec.Request.RunID != "source-run" {
+		t.Fatalf("retry changed its source seal: %+v, %v", spec, err)
+	}
+}
 
 func FuzzHostingNodeInputKeepsAwardSeals(f *testing.F) {
 	f.Add("other-run", "other-hash", int64(999))
@@ -109,11 +131,11 @@ func FuzzHostingRunInputKeepsAwardSeals(f *testing.F) {
 				prepared := nodehost.RunInput{RunID: preparedRun, RequestHash: preparedHash, SealedRequest: json.RawMessage(`{"ambient":true}`), Accepted: &nodehost.AcceptedRun{RunID: preparedRun}}
 				return runHostFunc(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
 						executed = true
-						var request runspec.SealedRequest
+						var request runspec.Request
 						if err := json.Unmarshal(input.SealedRequest, &request); err != nil {
 							t.Fatal(err)
 						}
-						if input.RunID != "run" || input.RequestHash != "request-hash" || request.Hash != "request-hash" || request.Request.RequestedArgs["key"] != "sealed" {
+						if input.RunID != "run" || input.RequestHash != "request-hash" || request.RequestedArgs["key"] != "sealed" {
 							t.Fatal("run execution lost the awarded first seal")
 						}
 						if resume {
