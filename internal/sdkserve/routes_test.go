@@ -87,23 +87,29 @@ func TestHostRoutesUseBoundServices(t *testing.T) {
 
 func TestHostRoutesChildSubmissionAndAwait(t *testing.T) {
 	for _, outcome := range []string{"success", "memoized"} {
-		t.Run(outcome, func(t *testing.T) {
-			submit := fakeRoutes(t, "POST", "/node/v1/children",
-				`{"pipeline":"build","job":"image","args":{"version":"next"},"repo":"org/repo","branch":"release"}`, `{"run_id":"child/1"}`)
-			await := fakeRoutes(t, "GET", "/node/v1/children/child%2F1/await?job=image&wait_ms=60000", `null`, `{"status":"`+outcome+`","output":42}`)
-			calls := 0
-			s := &routeServices{binding: submit.binding, transport: routeTransport(func(r *http.Request) (*http.Response, error) {
-				calls++
-				if calls == 1 {
-					return submit.transport.RoundTrip(r)
+		for _, output := range []string{"42", "null", ""} {
+			t.Run(outcome+"/output="+output, func(t *testing.T) {
+				submit := fakeRoutes(t, "POST", "/node/v1/children",
+					`{"pipeline":"build","job":"image","args":{"version":"next"},"repo":"org/repo","branch":"release"}`, `{"run_id":"child/1"}`)
+				response := `{"status":"` + outcome + `"`
+				if output != "" {
+					response += `,"output":` + output
 				}
-				return await.transport.RoundTrip(r)
-			})}
-			got, err := s.RunPipeline(t.Context(), ChildRequest{Pipeline: "build", Job: "image", Args: map[string]string{"version": "next"}, Repo: "org/repo", Branch: "release"})
-			if err != nil || string(got) != "42" || calls != 2 {
-				t.Fatalf("child = %s, %v, calls = %d", got, err, calls)
-			}
-		})
+				await := fakeRoutes(t, "GET", "/node/v1/children/child%2F1/await?job=image&wait_ms=60000", `null`, response+`}`)
+				calls := 0
+				s := &routeServices{binding: submit.binding, transport: routeTransport(func(r *http.Request) (*http.Response, error) {
+					calls++
+					if calls == 1 {
+						return submit.transport.RoundTrip(r)
+					}
+					return await.transport.RoundTrip(r)
+				})}
+				got, err := s.RunPipeline(t.Context(), ChildRequest{Pipeline: "build", Job: "image", Args: map[string]string{"version": "next"}, Repo: "org/repo", Branch: "release"})
+				if (err == nil) != (output != "") || string(got) != output || calls != 2 {
+					t.Fatalf("child = %s, %v, calls = %d", got, err, calls)
+				}
+			})
+		}
 	}
 }
 
@@ -135,5 +141,66 @@ func TestHostRoutesCancellationReachesTransport(t *testing.T) {
 	}
 	if _, err := s.Output(ctx, "job"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("transport cancellation = %v", err)
+	}
+}
+
+func TestHostRoutesRejectIncompleteResponses(t *testing.T) {
+	for _, test := range []struct {
+		name, method, path, body string
+		invalid                  []string
+		call                     func(*routeServices) error
+	}{
+		{"secret", "GET", "/node/v1/secrets/TOKEN", `null`, []string{
+			`null`, `{}`, `{"value":"private"}`, `{"value":"private","masked":null}`, `{"value":null,"masked":true}`,
+		}, func(s *routeServices) error { _, _, err := s.Secret(t.Context(), "TOKEN"); return err }},
+		{
+			"output", "GET", "/node/v1/jobs/job/output", `null`,
+			[]string{`null`, `{}`},
+			func(s *routeServices) error { _, err := s.Output(t.Context(), "job"); return err },
+		},
+		{
+			"latest", "GET", "/node/v1/pipelines/p/latest?job=job&max_age_ms=0", `null`,
+			[]string{`null`, `{}`},
+			func(s *routeServices) error { _, err := s.Latest(t.Context(), "p", "job", 0); return err },
+		},
+		{
+			"oidc", "POST", "/node/v1/oidc-token", `{"audience":"deploy"}`,
+			[]string{`null`, `{}`, `{"token":null}`, `{"token":""}`},
+			func(s *routeServices) error { _, err := s.OIDC(t.Context(), "deploy"); return err },
+		},
+		{
+			"cleanup", "POST", "/node/v1/cleanups", `{"argv":["clean"],"description":"fixture"}`,
+			[]string{`null`, `{}`, `{"id":null}`, `{"id":""}`},
+			func(s *routeServices) error {
+				_, err := s.RegisterCleanup(t.Context(), []string{"clean"}, "fixture")
+				return err
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, response := range test.invalid {
+				t.Run(response, func(t *testing.T) {
+					service := fakeRoutes(t, test.method, test.path, test.body, response)
+					if err := test.call(service); err == nil {
+						t.Fatal("incomplete host response reported success")
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestHostRoutesPreserveExplicitEmptyValues(t *testing.T) {
+	service := fakeRoutes(t, "GET", "/node/v1/secrets/EMPTY", `null`, `{"value":"","masked":false,"future":true}`)
+	if value, masked, err := service.Secret(t.Context(), "EMPTY"); err != nil || value != "" || masked {
+		t.Fatalf("empty variable = %q, %t, %v", value, masked, err)
+	}
+	service = fakeRoutes(t, "GET", "/node/v1/jobs/job/output", `null`, `{"output":null,"future":true}`)
+	if output, err := service.Output(t.Context(), "job"); err != nil || string(output) != "null" {
+		t.Fatalf("explicit null output = %s, %v", output, err)
+	}
+	service = fakeRoutes(t, "GET", "/node/v1/pipelines/p/latest?job=job&max_age_ms=0", `null`, `{"output":null}`)
+	if output, err := service.Latest(t.Context(), "p", "job", 0); err != nil || string(output) != "null" {
+		t.Fatalf("explicit null latest output = %s, %v", output, err)
 	}
 }

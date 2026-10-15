@@ -80,11 +80,16 @@ func (s *routeServices) call(ctx context.Context, method, path string, body, out
 
 func (s *routeServices) Secret(ctx context.Context, name string) (string, bool, error) {
 	var out struct {
-		Value  string `json:"value"`
-		Masked bool   `json:"masked"`
+		Value  *string `json:"value"`
+		Masked *bool   `json:"masked"`
 	}
-	err := s.call(ctx, "GET", "/node/v1/secrets/"+url.PathEscape(name), nil, &out)
-	return out.Value, out.Masked, err
+	if err := s.call(ctx, "GET", "/node/v1/secrets/"+url.PathEscape(name), nil, &out); err != nil {
+		return "", false, err
+	}
+	if out.Value == nil || out.Masked == nil {
+		return "", false, fmt.Errorf("host secret response needs value and masking classification")
+	}
+	return *out.Value, *out.Masked, nil
 }
 
 func (s *routeServices) Output(ctx context.Context, job string) (json.RawMessage, error) {
@@ -92,6 +97,9 @@ func (s *routeServices) Output(ctx context.Context, job string) (json.RawMessage
 		Output json.RawMessage `json:"output"`
 	}
 	err := s.call(ctx, "GET", "/node/v1/jobs/"+url.PathEscape(job)+"/output", nil, &out)
+	if err == nil && out.Output == nil {
+		err = fmt.Errorf("host output response needs output")
+	}
 	return out.Output, err
 }
 
@@ -100,6 +108,9 @@ func (s *routeServices) Latest(ctx context.Context, pipeline, job string, age ti
 		Output json.RawMessage `json:"output"`
 	}
 	err := s.call(ctx, "GET", "/node/v1/pipelines/"+url.PathEscape(pipeline)+"/latest?job="+url.QueryEscape(job)+"&max_age_ms="+strconv.FormatInt(age.Milliseconds(), 10), nil, &out)
+	if err == nil && out.Output == nil {
+		err = fmt.Errorf("host reference response needs output")
+	}
 	return out.Output, err
 }
 
@@ -128,6 +139,9 @@ func (s *routeServices) RunPipeline(ctx context.Context, request ChildRequest) (
 		}
 		switch state.Status {
 		case "success", "memoized":
+			if state.Output == nil {
+				return nil, fmt.Errorf("child success response needs output")
+			}
 			return state.Output, nil
 		case "pending", "running", "queued":
 			continue
@@ -151,6 +165,9 @@ func (s *routeServices) OIDC(ctx context.Context, audience string) (string, erro
 		Token string `json:"token"`
 	}
 	err := s.call(ctx, "POST", "/node/v1/oidc-token", map[string]string{"audience": audience}, &out)
+	if err == nil && out.Token == "" {
+		err = fmt.Errorf("host OIDC response needs a token")
+	}
 	return out.Token, err
 }
 
@@ -164,6 +181,9 @@ func (s *routeServices) RegisterCleanup(ctx context.Context, argv []string, desc
 		ID string `json:"id"`
 	}
 	err := s.call(ctx, "POST", "/node/v1/cleanups", map[string]any{"argv": argv, "description": description}, &out)
+	if err == nil && out.ID == "" {
+		err = fmt.Errorf("host cleanup response needs an id")
+	}
 	return out.ID, err
 }
 
