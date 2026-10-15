@@ -45,6 +45,8 @@ type VerifiedUploadCommit struct {
 }
 
 // ReserveBlobUpload binds the exact uploader and quota reservation in one transaction.
+// It reserves monthly bytes and lifetime run bytes/objects. Authorized existing
+// content reserves zero; a new empty blob still reserves one object.
 // It rechecks tenant, live capability, owner/job generation and publication rules.
 // A ticket replay compares every immutable fact; an existing CAS object does not
 // replace the upload or manufacture a receipt for a caller lacking a read edge.
@@ -73,6 +75,7 @@ func (t *Tenant) CommitBlobUpload(ctx context.Context, request VerifiedUploadCom
 // AbortBlobUpload releases an uncommitted reservation after signing/transfer failure.
 // It is idempotent for the same authorized uploader and cannot remove a committed
 // blob or receipt. Retention releases expired reservations through its leased pass.
+// All byte and object holds are released together, including across month changes.
 // Physical staging cleanup belongs to the object backend after store settlement.
 func (t *Tenant) AbortBlobUpload(ctx context.Context, authority blob.Authority, ticketID string) error {
 	return t.abortBlobUpload(ctx, authority, ticketID)

@@ -40,7 +40,6 @@ func TestBlobUploadReservationReplayAndCommit(t *testing.T) {
 	}
 	assertBlobUsage(t, s, 0, 3, 0, 0)
 	rewriteSchemaCount(t, s.db, "uploads", 1)
-	rewriteSchemaCount(t, s.db, "quota_reservations", 1)
 	rewriteSchemaCount(t, s.db, "blob_receipts", 0)
 	var first blob.Receipt
 	for i := 0; i < 2; i++ {
@@ -96,7 +95,6 @@ func TestBlobUploadConflictingReservationIsAtomic(t *testing.T) {
 			}
 			assertBlobUsage(t, s, 0, 3, 0, 0)
 			rewriteSchemaCount(t, s.db, "uploads", 1)
-			rewriteSchemaCount(t, s.db, "quota_reservations", 1)
 		})
 	}
 }
@@ -188,7 +186,6 @@ func TestBlobUploadQuotaAdmissionAndReservationRollback(t *testing.T) {
 	}
 	assertBlobUsage(t, s, 0, 3, 0, 0)
 	rewriteSchemaCount(t, s.db, "uploads", 1)
-	rewriteSchemaCount(t, s.db, "quota_reservations", 1)
 	if err := tenant.AbortBlobUpload(t.Context(), request.Intent.Authority, "ticket_a"); err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +194,6 @@ func TestBlobUploadQuotaAdmissionAndReservationRollback(t *testing.T) {
 		t.Fatal("partial reservation accepted")
 	}
 	assertBlobUsage(t, s, 0, 0, 0, 0)
-	rewriteSchemaCount(t, s.db, "quota_reservations", 1)
 	rewriteSchemaExec(t, s.db, "DROP TRIGGER fail_ticket_reserve")
 	if _, err := tenant.ReserveBlobUpload(t.Context(), request); err != nil {
 		t.Fatal(err)

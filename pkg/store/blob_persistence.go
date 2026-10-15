@@ -17,14 +17,14 @@ import (
 )
 
 func commitVerifiedBlobTx(ctx context.Context, tx *storeTx, team Team, auth blobActor, intent blob.UploadIntent, accounting blobAccounting) (blob.Receipt, error) {
-	quota, err := lockBlobQuotaTx(ctx, tx, team, accounting)
+	quotas, err := lockBlobQuotaTx(ctx, tx, team, auth.source.RunID, accounting)
 	if err != nil {
 		return blob.Receipt{}, err
 	}
 	if err := advisoryLockTx(ctx, tx, "blob:"+string(team)+":"+string(intent.Digest)); err != nil {
 		return blob.Receipt{}, err
 	}
-	if quota.state == "committed" {
+	if quotas[0].state == "committed" {
 		receipt, err := readOwnBlobReceiptTx(ctx, tx, auth.source, intent.Digest)
 		if err != nil {
 			return blob.Receipt{}, err
@@ -49,7 +49,7 @@ func commitVerifiedBlobTx(ctx context.Context, tx *storeTx, team Team, auth blob
 	if err != nil {
 		return blob.Receipt{}, err
 	}
-	if quota.amount < intent.Size*objects {
+	if quotas[0].amount < intent.Size*objects {
 		return blob.Receipt{}, authorityError(apierr.Conflict, "upload exceeds its reservation")
 	}
 	var size int64
@@ -66,7 +66,7 @@ func commitVerifiedBlobTx(ctx context.Context, tx *storeTx, team Team, auth blob
 	if _, err := tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", team, intent.Digest); err != nil {
 		return blob.Receipt{}, err
 	}
-	if err := settleBlobQuotaTx(ctx, tx, team, auth.source.RunID, accounting, quota, intent.Size*objects, objects); err != nil {
+	if err := settleBlobQuotaTx(ctx, tx, team, auth.source.RunID, accounting, quotas, intent.Size*objects, objects); err != nil {
 		return blob.Receipt{}, err
 	}
 	return receipt, nil

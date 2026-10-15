@@ -477,6 +477,14 @@ Quotas belong to registered teams. Token principal labels do not select a
 quota. `default_tier` supplies limits only when a team has no explicit row.
 An empty default leaves those teams unlimited. A zero write limit is unbounded.
 
+Blob upload tickets reserve pending capacity against monthly bytes and per-run
+bytes and objects. Commit counts each new blob once. An authorized duplicate
+adds no bytes or objects, and a new empty blob counts as one object. Aborting or
+expiring a ticket releases its pending capacity. A month's boundary resets the
+monthly budget while the run's byte and object totals continue across months.
+Deployment default-tier changes apply to the next ticket for teams without an
+explicit quota.
+
 The free tier configures ten megabytes per run, a gigabyte per month and a
 thousand objects per run. The paid tier configures a gigabyte per run, a hundred
 gigabytes per month and a hundred thousand objects per run. Set an explicit

@@ -66,6 +66,23 @@ client-selected field. The ticket ID also binds the persisted quota reservation.
 Existing CAS bytes grant no receipt. Failed settlement grants no edge. Abort or
 leased retention releases uncommitted reservations without deleting a live blob.
 
+Upload tickets reserve monthly bytes, lifetime run bytes and lifetime run objects
+in the existing quota tables. Each dimension has its own durable reservation.
+The aggregate keys are `storage`, `storage.run.bytes:<run>` and
+`storage.run.objects:<run>`. All paths acquire them in that order. Run dimensions
+have no calendar reset. Commit charges only newly inserted tenant blobs, with
+one object even when its size is zero. Authorized existing bytes reserve zero
+in every dimension. Abort and leased expiry release all three holds, including
+holds whose upload row was removed by a run cascade. Effective default-tier
+policy is read for every new upload without creating an override row.
+
+The `storage-quota-settlement-crash-replay/store-data-sqlite` proof exercises
+upload admission, commit, abort and deduplication. Child processes exit without
+closing their store at before/after commit and abort checkpoints. The parent
+reopens and verifies the persisted state before replay. Publication authority
+is preseeded and verification evidence is a contract fake. Native controller
+checkpoints, signing and transfer integrity remain integration obligations.
+
 LookupRecord, LookupMemo, LookupDepcache, CommitRecord and CopyMemo remain the
 only record owners. W1 integrates receipt/read-set checks, members, unique-byte
 accounting, newest-success pins and reachability retention. Artifacts require

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"math"
 	"reflect"
 	"strings"
 	"time"
@@ -65,11 +64,11 @@ func (t *Tenant) reserveBlobUpload(ctx context.Context, request UploadReservatio
 	if !request.ExpiresAt.After(tx.now()) {
 		return UploadReservation{}, authorityError(apierr.BadRequest, "upload expiry must be in the future")
 	}
-	reserved, err := blobUploadReservationSizeTx(ctx, tx, t.team, a, request.Intent)
+	reserved, objects, err := blobUploadReservationSizeTx(ctx, tx, t.team, a, request.Intent)
 	if err != nil {
 		return UploadReservation{}, err
 	}
-	if err := reserveBlobUploadQuotaTx(ctx, tx, t.team, request.ID, reserved, request.ExpiresAt); err != nil {
+	if err := reserveBlobUploadQuotaTx(ctx, tx, t.team, request.ID, a.source.RunID, reserved, objects, request.ExpiresAt); err != nil {
 		return UploadReservation{}, err
 	}
 	u := UploadReservation{ID: request.ID, Blob: blob.Blob{Team: string(t.team), Digest: request.Intent.Digest, Size: request.Intent.Size}, Identity: a.source, Provenance: blobActorProvenance(a), RefFacts: a.authority.Ref, ExpiresAt: request.ExpiresAt.UTC()}
@@ -85,29 +84,29 @@ func (t *Tenant) reserveBlobUpload(ctx context.Context, request UploadReservatio
 	return u, tx.Commit()
 }
 
-func blobUploadReservationSizeTx(ctx context.Context, tx *storeTx, team Team, a blobActor, intent blob.UploadIntent) (int64, error) {
+func blobUploadReservationSizeTx(ctx context.Context, tx *storeTx, team Team, a blobActor, intent blob.UploadIntent) (bytes, objects int64, err error) {
 	own, err := readOwnBlobReceiptTx(ctx, tx, a.source, intent.Digest)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	set, err := blobReadSetTx(ctx, tx, a, intent.Digest)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if !own.Set && len(set.Edges) == 0 {
-		return intent.Size, nil
+		return intent.Size, 1, nil
 	}
 	size, err := requireBlobTx(ctx, tx, team, intent.Digest)
 	if errors.Is(err, blob.ErrNotFound) {
-		return intent.Size, nil
+		return intent.Size, 1, nil
 	}
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if size != intent.Size {
-		return 0, blob.ErrIntegrity
+		return 0, 0, blob.ErrIntegrity
 	}
-	return 0, nil
+	return 0, 0, nil
 }
 
 func (t *Tenant) lookupBlobUpload(ctx context.Context, authority blob.Authority, id string) (UploadReservation, error) {
@@ -281,63 +280,39 @@ func blobUploadColumns(source blob.UploadIdentity) (node, attempt, generation, u
 			unitSource, err = json.Marshal(u.Source.Value)
 		}
 	}
-	return
-}
-
-func reserveBlobUploadQuotaTx(ctx context.Context, tx *storeTx, team Team, id string, size int64, expires time.Time) error {
-	period, ceiling, err := quotaPolicyTx(ctx, tx, team, "storage", tx.now())
-	if err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO quota_admission(team,quota,period,updated_at) VALUES (?,'storage',?,?) ON CONFLICT(team,quota) DO NOTHING`, team, period, tx.now().UnixNano()); err != nil {
-		return err
-	}
-	var prior string
-	var used, reserved int64
-	if err := tx.QueryRowContext(ctx, "SELECT period,used FROM quota_admission WHERE team=? AND quota='storage'"+tx.forUpdate(), team).Scan(&prior, &used); err != nil {
-		return err
-	}
-	period = tx.now().Format("2006-01")
-	if prior != period {
-		used = 0
-	}
-	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(amount),0) FROM quota_reservations WHERE team=? AND quota='storage' AND period=? AND state='held' AND expires_at>?", team, period, tx.now().UnixNano()).Scan(&reserved); err != nil {
-		return err
-	}
-	if used > math.MaxInt64-reserved || size > math.MaxInt64-used-reserved {
-		return authorityError(apierr.Conflict, "upload quota overflow")
-	}
-	if ceiling > 0 && size > ceiling-used-reserved {
-		return &StorageQuotaError{Principal: string(team), Limit: "storage", Unit: "bytes", Used: used + reserved, Allowed: ceiling, Requested: size}
-	}
-	if _, err := tx.ExecContext(ctx, "UPDATE quota_reservations SET state='released' WHERE team=? AND quota='storage' AND state='held' AND expires_at<=?", team, tx.now().UnixNano()); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, "UPDATE quota_admission SET period=?,used=?,reserved=?,updated_at=? WHERE team=? AND quota='storage'", period, used, reserved+size, tx.now().UnixNano(), team); err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO quota_reservations(team,id,quota,period,amount,expires_at,state) VALUES (?,?,'storage',?,?,?,'held')`, team, blobUploadQuotaID(id), period, size, expires.UnixNano())
-	return err
+	return node, attempt, generation, unitKind, unitID, unitGeneration, unitSource, err
 }
 
 func releaseBlobUploadQuotaTx(ctx context.Context, tx *storeTx, team Team, id string) error {
-	return releaseBlobQuotaReservationTx(ctx, tx, team, blobUploadQuotaID(id))
+	return releaseBlobUploadQuotasTx(ctx, tx, team, blobUploadQuotaID(id))
+}
+
+func releaseBlobUploadQuotasTx(ctx context.Context, tx *storeTx, team Team, id string) error {
+	for _, dimension := range uploadQuotaDimensions(id, "", "", 0, 0) {
+		if err := releaseBlobQuotaReservationTx(ctx, tx, team, dimension.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func releaseBlobQuotaReservationTx(ctx context.Context, tx *storeTx, team Team, reservation string) error {
-	var current, period, state string
+	var current, period, state, quota string
 	var amount int64
-	if err := tx.QueryRowContext(ctx, "SELECT period FROM quota_admission WHERE team=? AND quota='storage'"+tx.forUpdate(), team).Scan(&current); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT quota FROM quota_reservations WHERE team=? AND id=?", team, reservation).Scan(&quota); err != nil {
 		return err
 	}
-	if err := tx.QueryRowContext(ctx, "SELECT period,state,amount FROM quota_reservations WHERE team=? AND id=? AND quota='storage'"+tx.forUpdate(), team, reservation).Scan(&period, &state, &amount); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT period FROM quota_admission WHERE team=? AND quota=?"+tx.forUpdate(), team, quota).Scan(&current); err != nil {
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, "SELECT period,state,amount FROM quota_reservations WHERE team=? AND id=? AND quota=?"+tx.forUpdate(), team, reservation, quota).Scan(&period, &state, &amount); err != nil {
 		return err
 	}
 	if state != "held" {
 		return nil
 	}
 	if period == current {
-		result, err := tx.ExecContext(ctx, "UPDATE quota_admission SET reserved=reserved-?,updated_at=? WHERE team=? AND quota='storage' AND reserved>=?", amount, tx.now().UnixNano(), team, amount)
+		result, err := tx.ExecContext(ctx, "UPDATE quota_admission SET reserved=reserved-?,updated_at=? WHERE team=? AND quota=? AND reserved>=?", amount, tx.now().UnixNano(), team, quota, amount)
 		if err != nil {
 			return err
 		}
@@ -350,7 +325,10 @@ func releaseBlobQuotaReservationTx(ctx context.Context, tx *storeTx, team Team, 
 }
 
 func releaseExpiredBlobUploadQuotasTx(ctx context.Context, tx *storeTx, limit int) error {
-	rows, err := tx.QueryContext(ctx, "SELECT team,id FROM quota_reservations WHERE quota='storage' AND id LIKE 'upload:%' AND state='held' AND expires_at<=? ORDER BY team,id LIMIT ?", tx.now().UnixNano(), limit)
+	rows, err := tx.QueryContext(ctx, `SELECT q.team,q.id FROM quota_reservations q
+WHERE q.quota='storage' AND q.id LIKE 'upload:%' AND q.expires_at<=?
+AND (q.state='held' OR EXISTS (SELECT 1 FROM quota_reservations child WHERE child.team=q.team AND child.id IN ('run-bytes:' || q.id,'run-objects:' || q.id) AND child.state='held'))
+ORDER BY q.team,q.id LIMIT ?`, tx.now().UnixNano(), limit)
 	if err != nil {
 		return err
 	}
@@ -370,7 +348,7 @@ func releaseExpiredBlobUploadQuotasTx(ctx context.Context, tx *storeTx, limit in
 		return err
 	}
 	for _, r := range reservations {
-		if err := releaseBlobQuotaReservationTx(ctx, tx, r.team, r.id); err != nil {
+		if err := releaseBlobUploadQuotasTx(ctx, tx, r.team, r.id); err != nil {
 			return err
 		}
 	}
