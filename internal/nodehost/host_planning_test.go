@@ -2,15 +2,14 @@ package nodehost
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -20,102 +19,109 @@ import (
 )
 
 func TestPlanningDefaults(t *testing.T) {
-	t.Helper()
 	for _, secret := range []string{"private-sdk-default", "42"} {
-		for _, field := range []string{"job", "group", "safe"} {
-			t.Run(secret+"/"+field, func(t *testing.T) {
-				identity := engine.Identity{Version: "v1.0.0", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}
-				resolved := engine.Resolved{Identity: identity}
-				job := nodeproto.JobSpec{ID: "safe-job"}
-				if field == "job" {
-					job.ID = "job-" + secret
-				}
-				if field == "group" {
-					job.Groups = []string{"group-" + secret}
-				}
-				var processes []*scriptedSDK
-				p := SDKPlanner{
-					Masker: secrets.NewMasker(), Log: func(context.Context, nodeproto.FrameLog) error { return nil },
-					EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
-						return resolved, nil
-					},
-					Start: func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
-						process := newPlanningSDK(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}, secret)
-						processes = append(processes, process)
-						return process, nil
-					},
-					CanonicalHash: func(any) (runspec.Hash, error) { return ownerPlanHash, nil },
-					ValidatePlan: func(raw json.RawMessage, validation nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-						var plan nodeproto.PlanDoc
-						if err := json.Unmarshal(raw, &plan); err != nil {
-							return plan, err
-						}
-						for _, job := range plan.Jobs {
-							for _, id := range append([]string{job.ID}, job.Groups...) {
-								if validation.Secrets.ContainsSecret(id) {
-									return nodeproto.PlanDoc{}, &apierr.Error{Code: apierr.PlanInvalid, Message: "identifier contains a secret"}
-								}
-							}
-						}
-						return plan, nil
-					},
-				}
-				prepared, err := p.Prepare(t.Context(), PlanningProcessInput{Entry: &source.Entry{Engine: resolved}, Run: nodeproto.RunContext{RunID: "run", Pipeline: "build"}}, PlanningInput{})
-				if err != nil {
-					t.Fatal(err)
-				}
-				if prepared.Args["token"] != secret || len(prepared.SecretArgs) != 1 || prepared.SecretArgs[0] != "token" {
-					t.Fatal("SDK default or classification missing from resolved inputs")
-				}
-				s, err := acceptPlanningDefaults(t, prepared, resolved)
-				if field == "safe" {
-					if err != nil || s.row.Spec == nil {
-						t.Fatalf("safe plan was not accepted: %v", err)
-					}
-					if s.row.Spec.Resolved.Args["token"] != secret || len(s.row.Spec.Resolved.SecretArgs) != 1 {
-						t.Fatal("accepted spec lost defaults or secret classification")
-					}
-				} else {
-					var failure *apierr.Error
-					if !errors.As(err, &failure) || failure.Code != apierr.PlanInvalid || strings.Contains(err.Error(), secret) || s.row.Spec != nil || len(s.row.Plan) != 0 {
-						t.Fatalf("refused plan was accepted or leaked its value: %v", err)
-					}
-				}
-				for _, process := range processes {
-					if !process.closed || !process.cleaned {
-						t.Fatal("planner leaked its process")
-					}
-				}
-			})
+		for _, field := range []string{"job", "group", "step", "concurrency", "safe"} {
+			t.Run(secret+"/"+field, func(t *testing.T) { checkPlanningDefaults(t, secret, field) })
 		}
 	}
 }
 
-func acceptPlanningDefaults(t *testing.T, prepared PreparedPlanning, engine engine.Resolved) (*ownerSealFixture, error) {
+func FuzzPlanningDefaultsRefuseSecretIdentifiers(f *testing.F) {
+	for field := uint8(0); field < 4; field++ {
+		for _, value := range []string{"", "\"\\\n", "λ☃", "\x00"} {
+			f.Add(field, value)
+		}
+	}
+	f.Fuzz(func(t *testing.T, field uint8, value string) {
+		if len(value) > 128 {
+			t.Skip()
+		}
+		secret := "private:" + strings.ToValidUTF8(value, "�")
+		checkPlanningDefaults(t, secret, []string{"job", "group", "step", "concurrency"}[field%4])
+	})
+}
+
+func checkPlanningDefaults(t *testing.T, secret, field string) {
 	t.Helper()
-	owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Name: "trigger", Holder: "owner", Generation: 1}
-	request := runspec.Request{Pipeline: "build"}
-	raw, err := json.Marshal(request)
-	if err != nil {
-		t.Fatal(err)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	job := nodeproto.JobSpec{ID: "safe-job", Steps: []nodeproto.StepSpec{{ID: "body"}}}
+	switch field {
+	case "job":
+		job.ID = "job-" + secret
+	case "group":
+		job.Groups = []string{"group-" + secret}
+	case "step":
+		job.Steps[0].ID = "step-" + secret
+	case "concurrency":
+		job.Concurrency = []nodeproto.ConcurrencySpec{{Group: "group-" + secret}}
 	}
-	s := newOwnerSealStore(store.RunRow{ID: "run", State: store.RunPending, Request: runspec.SealedRequest{Request: request, Hash: "request"}, Owner: &owner})
+	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
+	f := newStoreOwnerFixture(t, openStore(t), runspec.Request{
+		Version: 1, Team: string(store.DefaultTeam), Pipeline: "build", Mode: runspec.IntakeExecute,
+		Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost,
+		Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}},
+	})
+	resolved := engine.Resolved{Identity: engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}}
+	directory := t.TempDir()
+	f.Host.Acquire = func(context.Context, RunInput) (*source.Entry, error) {
+		return &source.Entry{Engine: resolved, Directory: directory}, nil
+	}
 	accepted := errors.New("stop at accepted plan")
-	host := OwnerHost{
-		Mask:  func(value string) string { return value },
-		Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
-		Acquire: func(context.Context, RunInput) (*source.Entry, error) {
-			return &source.Entry{Engine: engine}, nil
+	f.Host.Project = func(store.RunSnapshot) (store.ScheduleSnapshot, error) { return store.ScheduleSnapshot{}, accepted }
+	masks := secrets.NewMasker()
+	f.Host.Mask, f.Host.Masks = masks.Mask, NewMaskRegistry(masks)
+	f.Host.Planning.Validation.Placement = nodeproto.PlacementLocal
+	var processes []*scriptedSDK
+	f.Host.Planner = &SDKPlanner{
+		Masker: masks, Log: func(context.Context, nodeproto.FrameLog) error { return nil },
+		EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+			return resolved, nil
 		},
-		Prepare: func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error) {
-			return OwnerPlanning{Resolved: runspec.Resolved{Engine: engine.Identity, Args: prepared.Args, SecretArgs: prepared.SecretArgs}, Planning: prepared.Input, Functions: prepared.Functions}, nil
+		Start: func(context.Context, PlanningProcessInput, func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+			process := newPlanningSDK(plan, secret)
+			processes = append(processes, process)
+			return process, nil
 		},
-		Project: func(store.RunSnapshot) (store.ScheduleSnapshot, error) { return store.ScheduleSnapshot{}, accepted },
-		Wait:    func(context.Context, store.RunSnapshot) error { return errors.New("unexpected wait before planning") },
 	}
-	_, err = host.Run(t.Context(), RunInput{RunID: "run", SealedRequest: raw, RequestHash: "request", Owner: store.Actor{Kind: store.ActorRunHost, Owner: owner}})
-	if errors.Is(err, accepted) {
-		err = nil
+	f.Host.Prepare = func(ctx context.Context, input RunInput, entry *source.Entry) (OwnerPlanning, error) {
+		row, err := f.Tenant.ReadRun(ctx, input.RunID)
+		if err != nil {
+			return OwnerPlanning{}, err
+		}
+		return f.Host.Planner.PrepareCheckout(ctx, CheckoutPlanningInput{Request: row.Request, Entry: entry, Runner: input.GrantedRunner, Planning: f.Host.Planning})
 	}
-	return s, err
+	_, err := f.Host.Run(ctx, f.Input)
+	snapshot, readErr := f.Tenant.ReadSnapshot(ctx, f.Input.RunID)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if field == "safe" {
+		if !errors.Is(err, accepted) || snapshot.Run.Spec == nil || len(snapshot.Nodes) != 1 {
+			t.Fatalf("safe plan was not accepted: %v", err)
+		}
+		resolved := snapshot.Run.Spec.Resolved
+		if resolved.Args["token"] != secret || len(resolved.SecretArgs) != 1 || resolved.SecretArgs[0] != "token" {
+			t.Fatal("accepted spec lost SDK defaults or classification")
+		}
+	} else {
+		var failure *apierr.Error
+		if !errors.As(err, &failure) || failure.Code != apierr.SecretInIdentifier {
+			t.Fatalf("secret identifier was not refused by the shared validator: %v", err)
+		}
+		if strings.Contains(err.Error()+failure.Message+failure.Hint+fmt.Sprint(failure.Details), secret) {
+			t.Fatal("refusal exposed its secret default")
+		}
+		if snapshot.Run.State != store.RunFailed || snapshot.Run.Spec != nil || len(snapshot.Run.Plan) != 0 || len(snapshot.Nodes) != 0 {
+			t.Fatal("refused plan persisted declarations or failed to finish intake")
+		}
+	}
+	if len(processes) != 2 {
+		t.Fatalf("describe/plan processes = %d", len(processes))
+	}
+	for _, process := range processes {
+		if !process.closed || !process.cleaned {
+			t.Fatal("planner leaked its process")
+		}
+	}
 }

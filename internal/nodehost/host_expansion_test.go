@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -23,11 +24,15 @@ import (
 
 func strictExpansionJobs(mode, closure string) json.RawMessage {
 	fields := map[string]string{
-		"unknown":     `"unknown":true,`,
-		"duplicate":   `"id":"shadow",`,
-		"null":        `"needs":null,`,
-		"concurrency": `"concurrency":[{"group":"capacity","capacity":0,"cost":1}],`,
-		"cycle":       `"needs":["consumer"],`,
+		"unknown":           `"unknown":true,`,
+		"duplicate":         `"id":"shadow",`,
+		"null":              `"deps":null,`,
+		"concurrency":       `"concurrency":[{"group":"capacity","capacity":0,"cost":1}],`,
+		"mismatch_capacity": `"concurrency":[{"group":"capacity","capacity":4}],`,
+		"mismatch_scope":    `"concurrency":[{"group":"capacity","capacity":3,"scope":"run"}],`,
+		"mismatch_on_limit": `"concurrency":[{"group":"capacity","capacity":3,"on_limit":"fail"}],`,
+		"cost":              `"concurrency":[{"group":"capacity","capacity":3,"cost":2}],`,
+		"cycle":             `"deps":["consumer"],`,
 	}
 	if field, ok := fields[mode]; ok {
 		if closure == "second" {
@@ -60,13 +65,13 @@ func expansionHash(value any) (runspec.Hash, error) {
 
 func TestOwnerExpansion(t *testing.T) {
 	t.Helper()
-	for _, mode := range []string{"success", "memoized", "empty", "failure", "refused", "unknown", "duplicate", "null", "concurrency", "cycle", "fan256", "fan257"} {
+	for _, mode := range []string{"success", "memoized", "empty", "failure", "refused", "unknown", "duplicate", "null", "concurrency", "mismatch_capacity", "mismatch_scope", "mismatch_on_limit", "cost", "cycle", "fan256", "fan257"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Name: "trigger", Holder: "owner", Generation: 9}
 			job := nodeproto.JobSpec{ID: "source", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{Generate: []string{"first", "second"}}}
-			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}, Concurrency: []nodeproto.ConcurrencySpec{{Group: "capacity", Capacity: new(1)}}}
+			plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}, Concurrency: []nodeproto.ConcurrencySpec{{Group: "capacity", Capacity: new(3)}}}
 			if mode == "cycle" {
 				plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: "consumer", Steps: []nodeproto.StepSpec{{ID: "body"}}, NeedsGenerated: []string{"first"}})
 			}
@@ -96,12 +101,7 @@ func TestOwnerExpansion(t *testing.T) {
 			process := newExpansionSDK(plan, mode)
 			evaluator, err := NewOwnerEvaluator(EvaluationDependencies{Store: s, Start: func(context.Context, EvaluationInput) (ExecutorProcess, error) { return process, nil }, EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return resolved, nil
-			}, CanonicalHash: expansionHash, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}}, ValidatePlan: func(raw json.RawMessage, validation nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
-				if validation.Expansion && !reflect.DeepEqual(validation.ExistingConcurrency, plan.Concurrency) {
-					return nodeproto.PlanDoc{}, errors.New("expansion lost accepted plan concurrency")
-				}
-				return nodeproto.ValidatePlan(raw, validation)
-			}, ReadOutput: func(_ context.Context, ref store.NodeRef, generation int64) (json.RawMessage, error) {
+			}, CanonicalHash: expansionHash, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}}, ReadOutput: func(_ context.Context, ref store.NodeRef, generation int64) (json.RawMessage, error) {
 				if ref != s.node.Ref || generation != 4 {
 					t.Fatal("output read lost source fence")
 				}
@@ -136,9 +136,21 @@ func TestOwnerExpansion(t *testing.T) {
 			if !process.cleaned || len(process.calls) != 2 {
 				t.Fatalf("unjoined or incomplete evaluation: %+v", process)
 			}
-			if mode == "failure" || mode == "unknown" || mode == "duplicate" || mode == "null" || mode == "concurrency" || mode == "cycle" || mode == "fan257" {
+			mismatch := strings.TrimPrefix(mode, "mismatch_")
+			if mode == "failure" || mode == "unknown" || mode == "duplicate" || mode == "null" || mode == "concurrency" || mode == "cycle" || mode == "fan257" || mismatch != mode {
 				if result.Outcome != "failed" || s.submission.Failure == nil || len(s.submission.Body) != 0 || strings.Contains(s.submission.Failure.MaskedError, "private") {
 					t.Fatalf("failure = %+v", s.submission)
+				}
+				reason := map[string]string{
+					"unknown": "unknown field", "duplicate": "duplicate field", "null": "null is not a declaration",
+					"concurrency": "explicit capacity and cost must be positive", "cycle": "dependency cycle",
+					"fan257": "generator fan-out exceeds 256 jobs",
+				}[mode]
+				if reason != "" && (s.submission.Failure.Code != apierr.PlanInvalid || !strings.Contains(s.submission.Failure.MaskedError, reason)) {
+					t.Fatalf("expansion failed for a different reason: %+v", s.submission.Failure)
+				}
+				if mismatch != mode && !strings.Contains(s.submission.Failure.MaskedError, "jobs[0].concurrency[0]."+mismatch) {
+					t.Fatalf("mismatch lost its field path: %+v", s.submission.Failure)
 				}
 				return
 			}
@@ -151,6 +163,8 @@ func TestOwnerExpansion(t *testing.T) {
 				want = 0
 			} else if mode == "fan256" {
 				want = 256
+			} else if mode == "cost" {
+				want = 1
 			}
 			if result.Outcome != "success" || expanded.Jobs == nil || len(expanded.Jobs) != want || s.submission.Failure != nil {
 				t.Fatalf("result = %+v, submission = %+v", result, s.submission)
