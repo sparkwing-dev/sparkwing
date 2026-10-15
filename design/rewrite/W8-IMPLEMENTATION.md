@@ -186,6 +186,10 @@ Detached startup and dashboard commands still need CLI composition.
    accepted engine identity, admission and the real keeper. `nodehost.RunHost`,
    `NodeHost`, `source.Acquire`, `lease.Keeper.Run` and the W9 engine client remain
    interfaces/stubs in this checkout. `MainWithVersion` has no runtime factory.
+   W3 must also declare host construction, delegated node-route creation and
+   generator replay loading. `ClaimedUnit` alone cannot supply the `RouteBinding`
+   and replay required by `NodeInput`. Moving those responsibilities behind
+   another preparation callback would leave the same missing composition.
 2. **W6 config/environment.** Supply the final `userconfig.ReadConfig` and
    validation implementation. Native repository upgrade commands still need
    `procenv.Build`. Factories must consume metrics, warm-module, resource,
@@ -214,15 +218,33 @@ Detached startup and dashboard commands still need CLI composition.
    entrypoint; its `wingd run` child still needs the shared-controller factory.
    Implement native managed units once W9 specifies
    Home and foreground arguments for `dashboard start --stay` and `__tick`.
+   The registry declares `--state-db` for `wingd run` and `wingd supervise`,
+   while their runtime parsers and the admission spawner use `--home`.
+   W9 must reconcile those paths before W8 renders installed commands.
    Native runner replacement needs actual service registration hooks. Windows
    needs a native SID-authenticated transport; missing identity still refuses.
+   `APIConn` exposes only `PeerUID() int`. Its controller-facing identity needs
+   a platform-neutral UID/SID projection before a Windows transport can supply
+   authenticated local subjects.
 8. **Cloud deployment.** Supply real network probes and reservation-scoped node
    cleanup, then prove native sidecars, aggregate scratch accounting, Docker
    execution, network isolation and teardown. These remain deployment proofs.
+   The deployment must define required and denied probe destinations, the
+   policy-revision source, a probe executable and node-state cleanup. The chart
+   has no canary runner or node-reset mechanism. Deleting Kubernetes Pods cannot
+   establish that privileged DinD cleared the node. Probe/cleanup callbacks
+   remain required and have no success fallback.
 9. **W7/W9 follow-through.** Delete remaining cache service chart/templates/docs,
    preserve historical release matrices, and wire upgrade/policy notices to the
    actual CLI and dashboard. This continuation removes only runner callers of
    the old cache transports.
+10. **W3/W9 upgrade verification.** `UpgradeVerifier` takes a checkout and
+    verified engine, but the exact-engine build/typecheck and describe/plan
+    invocation is undeclared. W3/W9 must define its entrypoint, pipeline
+    selection and inputs. `pipeline describe` and `pipeline plan` require a
+    pipeline name. The old `PlanDocument` uses the superseded protocol and is
+    not a substitute. Once declared, W8 can exercise the verifier with fixture
+    executables without waiting for a real host implementation.
 
 ## Shared files and mechanisms
 
@@ -779,3 +801,25 @@ staleness notice. An initial installed `sparkwing info --for-agent` call precede
 loading the swarm brief's no-binary rule. No candidate or stateful Sparkwing
 command followed. No Git metadata was written. Worker scratch is deleted after
 the final checks and reviewer finish. The lead retains committing and landing.
+
+## Tenth session: remaining contract audit
+
+This continuation adds no runtime code. The remaining integration list above
+now names the missing host-construction inputs, daemon Home/foreground grammar,
+Windows peer-identity projection, deployment probe/cleanup mechanism and
+exact-engine upgrade-verification invocation. A separate read-only audit reached
+the same boundaries. Existing component tests already fake the declared ports.
+Additional callback wrappers would leave their executable contracts undefined.
+
+Whole-repository `go build -p 4 ./...` passes. Vet passes for cluster, runners,
+engine, wingd and their subpackages, plus both acceptance packages. Full runner,
+engine and component acceptance tests pass. Local lifecycle tests pass in wingd
+and its client. All commands use `GOWORK=off`, `GOFLAGS=-buildvcs=false` and
+private caches and temporary directories under `/tmp/sw-astra-W8/`.
+
+No native catalog cell was activated, no T1 test was ported, and no source
+caller changed. This session deletes **0 obsolete files / 0 legacy-code lines**.
+Only this handoff changes. Product behavior, contracts and release artifacts
+are unchanged. W8 remains incomplete until the listed contracts and native
+integrations are supplied. An initial installed discovery command preceded
+loading the no-binary rule. No stateful Sparkwing command or Git write ran.
