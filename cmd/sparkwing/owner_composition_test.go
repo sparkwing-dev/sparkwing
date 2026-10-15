@@ -108,7 +108,28 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 							return &source.Entry{}, nil
 						},
 					}
-					host := cliNativeOwner(t, state, owner)
+					transport := hostStateController{
+						renew: func(ctx context.Context, unit string, body controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error) {
+							if unit != award.UnitID || body.Executing {
+								t.Fatal("empty plan changed its award or reported compute")
+							}
+							_, err := state.RenewOwner(ctx, state.actor)
+							return controllerwire.RenewalResponse{}, err
+						},
+						finish: func(ctx context.Context, run string, body controllerwire.FinishRequest) (controllerwire.Applied, error) {
+							_, err := state.FinishRunAndUnit(ctx, store.FinishRunRequest{
+								Unit: state.actor.Owner, Transition: store.RunTransition{
+									RunID: run, To: store.RunState(body.Outcome), Actor: state.actor, Cause: store.RunFinish, Reason: body.Reason,
+								},
+							})
+							return controllerwire.Applied{}, err
+						},
+					}
+					adapter, err := newCLIHostState(transport, state, award.UnitID, func() bool { return false })
+					if err != nil {
+						t.Fatal(err)
+					}
+					host := cliNativeOwner(t, adapter, owner)
 					bind := func(context.Context, controllerwire.ClaimedUnit) (hereHostSession, error) {
 						return hereHostSession{host: host, input: nodehost.RunInput{Owner: store.Actor{Kind: store.ActorController, Owner: store.OwnerLeaseRef{RunID: "foreign-run"}}}, close: func() error { closed++; return nil }}, nil
 					}

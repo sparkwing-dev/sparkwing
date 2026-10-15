@@ -4,6 +4,16 @@
 
 ## Amendment 1: private execution and claim wire
 
+The CLI host-state adapter implements `nodehost.NativeHostStore` using the
+declared C3 plan, step, completion, reconciliation, expansion and renewal
+operations. Renewal reads current compute activity on each call. Actor authority
+and owner fences never enter these HTTP bodies. The accepted-plan response does
+not supply owner authority, so the adapter leaves that optional field absent.
+Private `ReadSnapshot`, `ReadNode`, `TransitionRun` and `TransitionNode` remain
+separate C1-shaped dependencies. The scheduling snapshot cannot replace them.
+Their authenticated remote transport and the elected local factory still need
+W2/W3 integration. Fake dependencies establish only the adapter boundary.
+
 The selected-engine CLI describe handoff reads the acquired SDK's protocol
 response for the configured entrypoint. The invoked alias, required pipeline/job
 argument metadata, risks and secret classifications survive that handoff.

@@ -1,5 +1,106 @@
 # W9 handoff
 
+## Continuation from 8b254e8fa
+
+This section supersedes conflicting status below. Contract-available W9 work is
+ready for lead review. Native execution still waits on the foreign integrations
+listed below. The worktree started clean. No Git writes or Sparkwing executions
+were performed after bootstrap discovery.
+
+### Implementation and deletion
+
+- `cliHostState` implements W3's `NativeHostStore`. It uses the declared controller
+  operations for plan acceptance, fenced step reports, completion and renewal,
+  and W3's existing reconciliation/expansion adapter. It accepts the four missing
+  private operations through a subset of W3's existing host interface. No new
+  route, wire type, authorization rule or successful stub was introduced.
+- Renewal requires a live compute-activity callback and reads it on every beat.
+  It retains cancellation reasons, watch state and lease expiry. Customer-runner
+  waits must report false through that callback.
+- Invariant: HTTP host writes cannot select actor authority or owner fences.
+  The generated HTTP property checks exact request bodies through the real engine
+  client. It varies actor material, generation, attempt and compute activity.
+  Step reports retain the source ordinal. Completion retains every Applied field
+  and exposes no success after a failed commit. Plan acceptance leaves Owner
+  absent because C3 supplies no owner authority.
+- The eight local/here, original/retry, committed/refused-completion cases now
+  pass through this production adapter into NewNativeHost and the common owner.
+  Private state, source acquisition and controller transactions remain fakes.
+- Deleted the unused compileOptions.AfterChild callback and its unreachable
+  invocation. The inspection compiler has no caller that sets this callback.
+  Production Go is **97 added, 10 removed, net +87** this session.
+  W9 totals **-8,243 versus main**, within the -2,900 budget. The count includes
+  the new untracked production file and excludes tests and contract declarations.
+
+### Verification
+
+Every Go command used GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache, GOMAXPROCS=4 and TMPDIR/GOTMPDIR under
+/tmp/sw-astra-W9. Tests used -p 4.
+
+- Repository go build ./... passes. Scoped CLI, clisurface, controllerwire and
+  controller/client vet passes.
+- TestCLIHostState* and TestCLIOwnerComposition* pass, including race. Both new
+  generated properties run 128 cases. Owner, here, local, standalone, upgrade,
+  SDK-install and doctor focused CLI tests pass under -short.
+- Full clisurface, controllerwire, controller/client and doccheck tests pass.
+  Existing TestSurface* and TestHere* acceptance components pass. No native
+  placement cell was unskipped, and no archived T1 test was newly ported.
+- Commentcheck against main passes. No sleep, new timeout, environment variable,
+  flag or retry was added.
+- The broad CLI -short run cannot complete here. Its existing
+  TestResolveSparks_WithManifest_WritesOverlay opens a TCP listener and panics
+  because the sandbox refuses sockets. The focused suites above avoid that test.
+
+### Contract changes needed and real integration points
+
+1. **W2/W3 private execution state.** Supply authenticated implementations of
+   ReadSnapshot, ReadNode, TransitionRun and TransitionNode with the exact C1
+   host signatures. C3's scheduling projection lacks the complete private rows.
+   The job-transition body cannot carry every owner-policy TransitionExtra.
+   Do not reconstruct either from public status or discard fields. The adapter
+   can now consume these implementations without replacing the shared hosts.
+2. **W2/W3 native assembly.** Bind the elected wingd.LocalController factory,
+   store/queue/reaper/reconciliation, captured environments, audited source
+   access, per-process delegation, bytes/records/logs, current compute activity,
+   owner policies and state following. Bind W2's typed step handler to the
+   existing StepReportRequest/StepRecorded contract. Local/here resolvers remain
+   explicit refusals until these bindings exist.
+3. **W8 upgrade pin location.** The prior real-resolver probe remains applicable.
+   UpgradeRequest has Checkout but no PipelineDir, and Upgrade reads pins from
+   Checkout. Preserve the repository root for staging and verification, and
+   carry the relative pipeline directory through pin reads and edit collection.
+   W9 can fill that field once W8 declares it. No foreign contract was changed.
+4. **W8 inspection compiler cut.** cmd/sparkwing/compile.go still serves plan,
+   named describe and run help. Its Go/TypeScript build paths duplicate the
+   selected-engine SDK installer. A hard cut needs SDKInstallRequest to retain
+   the existing no-update/no-binary-cache controls and sparks resolution.
+   The request has no such controls, and sdkinstall builds with go.mod rather
+   than the sparks resolver's overlay. W8 must declare the retained install
+   inputs and implementation before W9 can delete this path and port its tests.
+   Native toolchain/process-tree and local-cache behavior remain required ports.
+5. Here reasons, working-tree bundles, result/log publication, local schedule
+   source/environment/proof/pin/tick assembly and debug release retain their
+   previously recorded foreign-contract gaps. Publication failures must preserve
+   the local verdict. Native platform/backend/placement QA remains with T1/lead.
+
+### Scope and assumptions
+
+Only W9-owned files changed. No foreign callers were touched. Lead-owned
+handoffs.md and amendments remain unchanged. C3 documents the adapter boundary.
+The natural-writing skill was used for this report.
+
+The new privateHostState interface is only the four-method subset already
+required by W3's NativeHostStore. It exists because the public scheduling and
+job-transition transports cannot implement that subset. A smaller adapter that
+uses public projections would lose state or authority. Remove this seam once
+the complete shared remote store supplies NativeHostStore directly. No new
+customer capability or security policy was chosen.
+
+Scratch /tmp/sw-astra-W9 was removed after checks. The shared
+/tmp/sw-gocache is retained. Git still resolves Korey's configured identity and
+has no core.worktree override.
+
 ## Continuation from 261ae6289
 
 This section supersedes conflicting status below. W9 remains incomplete because
