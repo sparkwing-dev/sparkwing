@@ -24,7 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
-func TestDirectUploadS3ReservePutCommitAndSignedGet(t *testing.T) {
+func TestDirectUploadS3ReservePutCommit(t *testing.T) {
 	bucketName := os.Getenv("SPARKWING_S3_TEST_BUCKET")
 	if bucketName == "" || os.Getenv("AWS_ENDPOINT_URL_S3") == "" {
 		t.Skip("S3 integration bucket and endpoint required")
@@ -152,28 +152,4 @@ func TestDirectUploadS3ReservePutCommitAndSignedGet(t *testing.T) {
 		t.Fatalf("commit = %d: %s", response.Code, response.Body.String())
 	}
 	t.Logf("commit accepted: status %d", response.Code)
-	response = post("/api/v1/data/download", `{"kind":"artifact","key":"`+key+`"}`)
-	if response.Code != http.StatusOK {
-		t.Fatalf("sign GET = %d: %s", response.Code, response.Body.String())
-	}
-	var signed DataDownloadResponse
-	if err := json.Unmarshal(response.Body.Bytes(), &signed); err != nil {
-		t.Fatal(err)
-	}
-	if signed.SHA256 != digest || signed.Size != int64(len(body)) {
-		t.Fatalf("signed object = %+v", signed)
-	}
-	get, err := httpClient.Get(signed.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer get.Body.Close()
-	var got bytes.Buffer
-	if _, err := got.ReadFrom(get.Body); err != nil {
-		t.Fatal(err)
-	}
-	if get.StatusCode != http.StatusOK || !bytes.Equal(got.Bytes(), body) {
-		t.Fatalf("signed GET = %d %q", get.StatusCode, got.String())
-	}
-	t.Logf("signed GET returned verified bytes: status %d", get.StatusCode)
 }

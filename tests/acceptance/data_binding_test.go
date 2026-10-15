@@ -359,6 +359,7 @@ func dataControllerFixture(a capability.Authorized) (*controller.DataController,
 	o := &dataObjects{events: &events}
 	e := &dataEdges{events: &events}
 	s := &controller.DataController{Objects: o, Access: e,
+		ChargeDownload:   func(context.Context, blob.Authority, blob.Blob) error { return nil },
 		ResolveAuthority: func(context.Context, capability.Authorized) (blob.Authority, error) { return dataAuthority(a), nil },
 		ResolveTenant: func(_ context.Context, team store.Team) (controller.DataTransactions, error) {
 			if team != "team" {

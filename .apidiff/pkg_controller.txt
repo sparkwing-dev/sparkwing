@@ -102,12 +102,15 @@ type DataController struct {
 	ResolveAuthority func(context.Context, capability.Authorized) (blob.Authority, error)
 
 	ReadBlob func(context.Context, blob.Authority, blob.Digest) (blob.Blob, error)
-	Access   capability.DataAccessChecker
+
+	ChargeDownload func(context.Context, blob.Authority, blob.Blob) error
+	Access         capability.DataAccessChecker
 }
 func (s *DataController) BindData(ctx context.Context, authorized capability.Authorized) (DataBinding, error)
 func (s *DataController) DataAuthority(ctx context.Context, authorized capability.Authorized) (blob.Authority, error)
 type DataDownloadResponse struct {
 	URL     string
+	Headers map[string]string
 	SHA256  string
 	Size    int64
 	Expires time.Time
@@ -416,6 +419,7 @@ func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithCreditReader(resolve func(context.Context, store.Team) (CreditReader, error)) *Server
 func (s *Server) WithDashboard(d Dashboard) *Server
 func (s *Server) WithDashboardURL(url string) *Server
+func (s *Server) WithDataController(data *DataController) *Server
 func (s *Server) WithDirectUploads(client *s3.Client, bucket, prefix string) *Server
 func (s *Server) WithEgressMeter(m *egress.Meter) *Server
 func (s *Server) WithEngineController(engine *EngineController) *Server

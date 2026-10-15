@@ -64,6 +64,7 @@ type wingdAPI struct {
 // to milliseconds against a four-second foreign write. An allow-list, not
 // every GET, because several GET routes write.
 var apiReadRoutes = []string{
+	"POST /api/v1/data/has-many",
 	"GET /api/v1/runs/{run}/snapshot",
 	"GET /api/v1/runs/{id}/logs",
 	"GET /api/v1/runs/{id}/logs/search",

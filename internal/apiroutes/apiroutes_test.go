@@ -226,3 +226,23 @@ func TestParseCreditEndpointsUsesActualRegistrations(t *testing.T) {
 		t.Fatalf("credit registrations=%+v want %+v", got, want)
 	}
 }
+
+func TestParseDataEndpointsUsesActualRegistrations(t *testing.T) {
+	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.dataEndpoints())")
+	endpoints := `{Method: "POST", Pattern: "/api/v1/data/download", Authentication: capability.AuthCapability},
+ {Method: "POST", Pattern: "/api/v1/data/has-many", Authentication: capability.AuthCapability},`
+	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "data_routes.go"), []byte(endpoints), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Route{
+		{Method: "POST", Path: "/api/v1/data/download", Scope: "data.read` or `data.read` or `data.read"},
+		{Method: "POST", Path: "/api/v1/data/has-many", Scope: "data.read` or `data.read` or `data.read"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("data registration=%+v want=%+v", got, want)
+	}
+}

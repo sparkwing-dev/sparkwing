@@ -52,50 +52,35 @@ it for another team returns `409` and leaves both teams’ balances and grants u
 
 ## Data downloads
 
-`POST /api/v1/data/download` signs a short-lived download for an object. Send
-`{ "kind": "binary", "key": "bin/<input-hash>" }` for a committed binary,
-`{ "kind": "artifact", "key": "artifacts/blobs/<sha256>" }` for a committed
-artifact, or `bins/<hash>` for a legacy cache binary. Use a reader token or a
-run-scoped cache grant minted while its runner holds an exact trigger or node
-claim. The controller checks the grant's claim generation and holder against
-the live claim on each signing request. A grant from an earlier claimant or
-one minted without a claim cannot sign. The controller also checks the live
-run, team-owned key, committed object or legacy cache object, and team's daily download allowance
-before it returns `{ "url": "...", "sha256": "...", "size": 123,
-"expires": "..." }`. It charges the recorded object size when it signs the
-URL.
+`POST /api/v1/data/download` takes `{"digest":"<sha256>"}`. It requires a
+live data capability and a digest in that caller's read set. The controller
+resolves the team, repository and ref from authenticated authority. A digest,
+team query or object path grants no access by itself. Ordinary member and
+machine tokens cannot download bytes without the required data authority.
 
-Artifact downloads accept only committed keys under `artifacts/`. Other keys
-return `400`. Node outputs use their run's output routes, which check the claim's
-node dependencies.
+The response contains `url`, `headers`, `sha256`, `size` and `expires`.
+Send only the returned headers to the storage URL. The controller charges the
+stored object size against the team's daily download cap before signing.
+The URL names one immutable object and expires after 60 seconds. Revocation
+stops new signing requests. Issued URLs remain valid until their expiry.
+S3 and filesystem backends use the same authorization boundary.
 
-Node logs are not signed downloads; read them through the log routes below.
-Revoking a claimant's token stops its cache grant from signing new URLs.
+`POST /api/v1/data/has-many` takes `{"digests":["<sha256>"]}` and returns
+`{"present":["<sha256>"]}`. Missing and unreadable digests are omitted.
+An empty array returns an empty array. Duplicate digests appear once. An
+optional `deadline` is an RFC 3339 timestamp that bounds this query. Presence
+checks transfer no object bytes and consume no download allowance.
 
-A `source` download names the exact `sources/<sha256>/<submission-id>` key
-bound to the claim's run. User and raw runner bearers cannot sign it. A user
-token with `runs.write` may reserve and commit that source before triggering;
-the controller binds it to one run during trigger admission. See
-[Direct data uploads](data-uploads.md).
+Both routes use the common error envelope. Missing or dead authority returns
+`401`. Live authority without the required grant or read edge returns `403`.
+An authorized missing blob returns `404` with `blob_missing`. A spent download
+allowance returns `429` with `Retry-After`. Private backend errors return
+`internal` without object keys or diagnostic text.
 
-The URL expires after 60 seconds and names one exact object. A request that
-reaches the controller through the in-cluster Service gets a regional S3
-presigned URL; a request through the public ingress gets a CloudFront signed
-URL. The controller selects the path from the presence of `X-Forwarded-For`
-or `X-Forwarded-Host`. Configure the ingress to overwrite these headers. A
-local filesystem store continues serving bytes directly through its existing
-artifact route. Treat the returned URL as a temporary
-bearer credential.
-
-Binary clients discover this route through `GET /api/v1/services`. The controller
-omits it on public ingress if CloudFront signing is unavailable. An S3-backed
-controller also announces direct uploads through `direct_data` and
-`GET /api/v1/data/capabilities`. Runners use the cache service when an older
-controller has no direct route. Cloud runners read committed cloud binaries,
-or local binaries when the team enables `trust_local_builds`. They do not read
-legacy cache binaries when direct uploads are active. See
-[Direct data uploads](data-uploads.md), [Tenant limits](limits.md), and
-[Self-hosting](self-hosting.md).
+`GET /api/v1/services` announces the download route only when its authority,
+read-set, metadata, signing and charging adapters are configured. Signed
+URLs work through the backend selected by the controller. Cache grants and
+`{kind,key}` download requests are removed. Logs use the controller's log routes.
 
 ## Webhooks
 

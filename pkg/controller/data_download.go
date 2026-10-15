@@ -2,13 +2,10 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -17,7 +14,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -26,10 +22,11 @@ const downloadURLTTL = time.Minute
 
 // DataDownloadResponse describes one authorized object and its short-lived URL.
 type DataDownloadResponse struct {
-	URL     string    `json:"url"`
-	SHA256  string    `json:"sha256"`
-	Size    int64     `json:"size"`
-	Expires time.Time `json:"expires"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers"`
+	SHA256  string            `json:"sha256"`
+	Size    int64             `json:"size"`
+	Expires time.Time         `json:"expires"`
 }
 
 // WithSignedDownloads enables one-object download signing for the cache
@@ -64,7 +61,8 @@ func (s *Server) WithSignedDownloads(cache *teamblob.Store, client *s3.Client, d
 }
 
 func (s *Server) dataDownloadURL() string {
-	if s.downloadStores[store.StorageCache] == nil {
+	if s.dataController == nil || s.dataController.ResolveAuthority == nil || s.dataController.ReadBlob == nil ||
+		s.dataController.Access == nil || s.dataController.Objects == nil || s.dataController.ChargeDownload == nil {
 		return ""
 	}
 	return "/api/v1/data/download"
@@ -74,11 +72,6 @@ func downloadViaIngress(r *http.Request) bool {
 	_, forwardedFor := r.Header["X-Forwarded-For"]
 	_, forwardedHost := r.Header["X-Forwarded-Host"]
 	return forwardedFor || forwardedHost
-}
-
-type dataDownloadRequest struct {
-	Kind string `json:"kind"`
-	Key  string `json:"key"`
 }
 
 func (s *Server) verifyLiveDataGrant(ctx context.Context, grant authwire.CacheGrant, allowPendingTrigger bool) (bool, error) {
@@ -131,64 +124,6 @@ func (s *Server) verifyLiveDataGrant(ctx context.Context, grant authwire.CacheGr
 	return pendingTrigger, nil
 }
 
-func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind string) (store.Team, *authwire.CacheGrant, bool) {
-	scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
-	if !strings.EqualFold(scheme, "Bearer") || token == "" {
-		writeError(w, http.StatusUnauthorized, errors.New("download needs a bearer"))
-		return "", nil, false
-	}
-	if strings.HasPrefix(token, authwire.CacheGrantPrefix) {
-		grant, err := authwire.VerifyCacheGrant(s.cacheGrantKey, token, time.Now())
-		if err != nil {
-			writeError(w, http.StatusUnauthorized, err)
-			return "", nil, false
-		}
-		if !s.allowDataRequest(w, r, store.Team(grant.Team), grant.Claim.TokenPrefix) {
-			return "", nil, false
-		}
-		if _, err := s.verifyLiveDataGrant(r.Context(), grant, kind == "source" || kind == "binary"); err != nil {
-			writeError(w, http.StatusForbidden, err)
-			return "", nil, false
-		}
-		return store.Team(grant.Team), &grant, true
-	}
-	p, err := s.authMiddleware().Authenticate(token)
-	if err != nil || p == nil {
-		writeError(w, http.StatusUnauthorized, errors.New("invalid download bearer"))
-		return "", nil, false
-	}
-	if kind == "source" {
-		writeError(w, http.StatusForbidden, errors.New("source downloads need the run's live claim grant"))
-		return "", nil, false
-	}
-	if !p.HasScope(ScopeRunsRead) && !p.HasScope(ScopeAdmin) {
-		writeError(w, http.StatusForbidden, fmt.Errorf("download needs %s", ScopeRunsRead))
-		return "", nil, false
-	}
-	if p.Kind == store.TokenKindRunner && !p.HasScope(ScopeAdmin) {
-		writeError(w, http.StatusForbidden, errors.New("runner download needs a claim-bound cache grant"))
-		return "", nil, false
-	}
-	team := store.NormalizeTeam(p.Team)
-	if !teamblob.ValidTeam(string(team)) {
-		writeError(w, http.StatusForbidden, errors.New("credential names no team"))
-		return "", nil, false
-	}
-	if !s.allowDataRequest(w, r, team, p.TokenPrefix) {
-		return "", nil, false
-	}
-	return team, nil, true
-}
-
-func downloadKind(kind string) store.StorageKind {
-	switch kind {
-	case "binary", "artifact", "source":
-		return store.StorageCache
-	default:
-		return ""
-	}
-}
-
 var errSigningUnavailable = errors.New("download signing unavailable")
 
 func (s *Server) signObjectURL(r *http.Request, bucket *teamblob.Store, objectKey string) (string, time.Time, error) {
@@ -210,185 +145,4 @@ func (s *Server) signObjectURL(r *http.Request, bucket *teamblob.Store, objectKe
 		return "", time.Time{}, err
 	}
 	return out.URL, expires, nil
-}
-
-func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
-	if len(s.downloadStores) == 0 {
-		http.NotFound(w, r)
-		return
-	}
-	var req dataDownloadRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	team, grant, ok := s.downloadTeam(w, r, req.Kind)
-	if !ok {
-		return
-	}
-	kind := downloadKind(req.Kind)
-	bucket := s.downloadStores[kind]
-	if bucket == nil || strings.HasPrefix(req.Key, "teams/") ||
-		(req.Kind == "artifact" && !strings.HasPrefix(req.Key, "artifacts/")) {
-		writeError(w, http.StatusBadRequest, errors.New("invalid download kind or key"))
-		return
-	}
-	var err error
-	var cloudReader bool
-	if grant != nil {
-		cloudReader, err = s.store.TokenMetered(r.Context(), grant.Claim.TokenPrefix)
-		if err != nil {
-			s.writeInternalError(w, r, "read download provenance", err)
-			return
-		}
-		cloudReader = cloudReader || grant.Claim.Kind == authwire.CacheClaimToken
-	}
-	var objectSize int64
-	var digest string
-	var objectKey string
-	switch {
-	case req.Kind == "source":
-		if grant == nil {
-			writeError(w, http.StatusForbidden, errors.New("source downloads need a live claim grant"))
-			return
-		}
-		var trigger *store.Trigger
-		tenant, findErr := s.tenantForTeam(r.Context(), team)
-		if findErr == nil {
-			trigger, findErr = tenant.GetTrigger(r.Context(), grant.Run)
-		}
-		if findErr != nil || trigger.Team != team || !strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") ||
-			req.Key != trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey] {
-			writeError(w, http.StatusForbidden, errors.New("source bundle does not belong to this run"))
-			return
-		}
-		keyDigest, valid := store.SourceKeyDigest(req.Key)
-		if !valid {
-			writeError(w, http.StatusForbidden, errors.New("invalid source bundle key"))
-			return
-		}
-		bound, findErr := s.store.SourceBoundToRun(r.Context(), team, req.Key, grant.Run)
-		if findErr != nil || !bound {
-			writeError(w, http.StatusForbidden, errors.New("source bundle is not bound to this run"))
-			return
-		}
-		obj, findErr := s.store.CommittedObject(r.Context(), team, req.Key)
-		if errors.Is(findErr, store.ErrNotFound) {
-			http.NotFound(w, r)
-			return
-		}
-		if findErr != nil {
-			s.writeInternalError(w, r, "read committed source bundle", findErr)
-			return
-		}
-		if obj.Kind != store.StorageCache || obj.Provenance != "local" || obj.SHA256 != keyDigest {
-			writeError(w, http.StatusForbidden, errors.New("source bundle is not committed for this run"))
-			return
-		}
-		objectSize, digest = obj.Size, obj.SHA256
-		objectKey, err = bucket.Key(string(team), obj.Provenance+"/"+obj.Key)
-	case req.Kind == "binary" && strings.HasPrefix(req.Key, "bin/"):
-		repo, refs := "", []string{""}
-		if grant != nil {
-			if repo, _, refs, err = s.cacheScope(r.Context(), *grant); err != nil {
-				writeError(w, http.StatusForbidden, errors.New("the cache grant's run names no cache scope"))
-				return
-			}
-		}
-		obj, findErr := s.store.BinaryObject(r.Context(), team, strings.TrimPrefix(req.Key, "bin/"), cloudReader, repo, refs)
-		if errors.Is(findErr, store.ErrNotFound) {
-			http.NotFound(w, r)
-			return
-		}
-		if findErr != nil {
-			writeError(w, http.StatusBadRequest, findErr)
-			return
-		}
-		objectSize, digest = obj.Size, obj.SHA256
-		objectKey, err = bucket.Key(string(team), obj.Provenance+"/"+obj.Key)
-	case req.Kind == "artifact" && strings.HasPrefix(req.Key, "artifacts/"):
-		obj, findErr := s.store.CommittedObjectFor(r.Context(), team, req.Key, cloudReader)
-		if errors.Is(findErr, store.ErrNotFound) {
-			http.NotFound(w, r)
-			return
-		}
-		if findErr != nil {
-			s.writeInternalError(w, r, "read committed artifact", findErr)
-			return
-		}
-		if obj.Kind != store.StorageCache {
-			writeError(w, http.StatusBadRequest, errors.New("object kind does not match"))
-			return
-		}
-		objectSize, digest = obj.Size, obj.SHA256
-		objectKey, err = bucket.Key(string(team), obj.Provenance+"/"+obj.Key)
-	default:
-		if req.Kind == "binary" && (!strings.HasPrefix(req.Key, "bins/") || (cloudReader && s.directUploads != nil)) {
-			http.NotFound(w, r)
-			return
-		}
-		// safety: the cache writes a grant's binaries under its run's scope, so a
-		// grant reads the scopes it would read there, in the same order.
-		scopes := []string{""}
-		if grant != nil {
-			scopes = grant.ScopePrefixes()
-		}
-		var object teamblob.Object
-		headErr := teamblob.ErrNotFound
-		for _, scope := range scopes {
-			objectKey, err = bucket.Key(string(team), scope+req.Key)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, err)
-				return
-			}
-			if object, headErr = bucket.Head(r.Context(), string(team), scope+req.Key); !errors.Is(headErr, teamblob.ErrNotFound) {
-				break
-			}
-		}
-		if errors.Is(headErr, teamblob.ErrNotFound) {
-			http.NotFound(w, r)
-			return
-		}
-		if headErr != nil {
-			s.writeInternalError(w, r, "head download object", headErr)
-			return
-		}
-		objectSize, digest = object.Size, object.Metadata["sha256"]
-	}
-	if err != nil || objectSize < 0 {
-		writeError(w, http.StatusBadRequest, errors.New("invalid download object key or size"))
-		return
-	}
-	if req.Kind == "binary" {
-		b, derr := hex.DecodeString(digest)
-		if derr != nil || len(b) != sha256.Size {
-			s.writeInternalError(w, r, "head download digest", errors.New("binary digest unavailable"))
-			return
-		}
-	}
-	signed, expires, err := s.signObjectURL(r, bucket, objectKey)
-	if errors.Is(err, errSigningUnavailable) {
-		writeError(w, http.StatusServiceUnavailable, err)
-		return
-	}
-	if err != nil {
-		s.writeInternalError(w, r, "sign download", err)
-		return
-	}
-	// safety: log reads are never counted against a team's download cap, so
-	// a team at its cap can still read why its runs failed.
-	if req.Kind != "log" {
-		_, err = s.store.ChargeDownload(r.Context(), store.DownloadCharge{Team: team, Bytes: objectSize, Now: time.Now(), FreeCapBytes: s.downloadFree, FundedCapBytes: s.downloadFunded})
-	}
-	var capErr *store.DownloadCapError
-	switch {
-	case errors.As(err, &capErr):
-		w.Header().Set("Retry-After", strconv.FormatInt(retryAfterSeconds(capErr.RetryAfter), 10))
-		writeError(w, http.StatusTooManyRequests, err)
-		return
-	case err != nil:
-		s.writeInternalError(w, r, "charge signed download", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, DataDownloadResponse{URL: signed, SHA256: digest, Size: objectSize, Expires: expires})
 }

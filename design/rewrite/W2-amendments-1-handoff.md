@@ -550,4 +550,128 @@ assumption that equivalent path parameters have identical names. No new issuer,
 service, configuration setting, environment variable or credential cache was
 added. W2 remains incomplete.
 
+## Data read HTTP continuation
+
+Download and batched presence use PolicyRouter and the implemented DataController
+binding. Download accepts `{digest}` and returns `{url,headers,sha256,size,expires}`.
+HasMany accepts `{digests,deadline?}` and returns `{present}`. Team, repository,
+ref and physical keys come from authenticated persisted authority. Cache grants,
+legacy `{kind,key}` bodies and caller-supplied authority are refused. Session
+repository reads require CSRF. A verified local peer does not become an account
+repository reader.
+
+The invariant is that signing and presence reveal only live digests in the
+caller's read set. Each operation resolves authority again. Downloads validate
+metadata, charge its stored size and sign only `teams/<team>/cas/<digest>`.
+HasMany omits missing/unreadable bytes, deduplicates digests, honors an explicit
+deadline and does not charge object bytes. FuzzDataReadHTTPReadSet generates
+adversarial digest/readability combinations through both registered routes.
+Missing or invalid authority cannot probe metadata. Private errors cannot
+return diagnostics or partial presence answers.
+
+### Local contracts and production integration
+
+The local W2 additions are Server.WithDataController, the required
+DataController.ChargeDownload callback and signed response headers. The callback
+exists because download charging is separate from metadata reads and must
+succeed before signing. The smaller alternative of calling legacy Store.ChargeDownload
+automatically was tested and rejected because it fails against the final schema.
+Removing this callback is safe only when the complete C1 read transaction owns
+charging. There is no new quota policy, SQL owner, issuer, service, configuration
+key, environment variable or credential cache.
+
+The real-store probe returned:
+
+```text
+download ledger: SQL logic error: table team_download_day has no column named day (1)
+```
+
+C1's final table is keyed by team, period and replica_id. The legacy function
+queries day and omits replica_id. W1 must implement the aggregate byte-cap
+transaction against that schema and supply the charging callback. Its existing
+cap semantics remain W1's responsibility. The failing probe was not converted
+to a passing or skipped native acceptance cell. No W1 file or signature changed.
+
+W1 must also supply ResolveAuthority, DataAccessChecker and live ReadBlob.
+W7 must install ObjectBackend and filesystem transfer endpoints. W9's
+NewDataClient remains a stub and must implement the new digest request and
+signed-header response through the shared transport. Legacy binary/source
+consumers that still send `{kind,key}` require the same W9/W7 migration.
+Trusted binary provenance and source-binding integration remain in their
+existing T1 storage/placement cells. No new other-area contract change is
+required for these two routes.
+
+### Deletions and ports
+
+Removed 243 lines comprising the old download request, handler, cache-grant
+and member-token authorization, and key-kind dispatch. Removed another 803
+lines of old test assertions/imports across the download, direct-upload,
+source and cache-scope tests. The old arbitrary same-team artifact-read
+expectation is reversed by HTTP read-set refusal and the generative test.
+Missing/dead/revoked/former/wrong-audience/grant refusals and exact signing
+are replaced at the shared HTTP boundary. Legacy key fallback and ingress
+header-selected download signing have no replacement path.
+
+The old TestDataDownloadClaimUsesCloudProvenance and artifact-sharing tests
+are deleted. This is not a complete port of their T1 scenarios. Artifact
+reads follow C1 read edges. Trusted binary execution and bound source reads
+still need W1/W3/W7 integration. The direct S3 test retains reserve/PUT/commit
+and is renamed TestDirectUploadS3ReservePutCommit. Its retired key-based GET
+assertion is removed. Native S3/filesystem transfers remain a separate check.
+Legacy output signing and upload grant helpers remain because those surfaces
+still call them. No legacy credential subsystem is claimed fully removed.
+
+Seven new HTTP test functions plus one fuzz target cover claim, owner,
+account/session repository-reader access, peer refusal, discovery,
+authentication, ancestry, membership, cancellation, leases, fences, exact
+methods, malformed selectors, read-set omission, metadata scoping, charging
+and backend failures. The final focused HTTP selection and fuzz seeds pass.
+The generated-input run completed 1,893 executions with two workers. No full
+T1 topology cell is newly unskipped.
+
+### Shared files and verification
+
+Shared source edits are internal/apiroutes/apiroutes.go and its new data
+registration test, plus internal/orchestrator/wingd_api.go's read classification
+for HasMany. Download remains a write because it charges bytes. No removed Go
+API had a caller in another package. W2 caller/test changes are
+cache_grant_scope_internal_test.go, direct_source_test.go,
+direct_upload_test.go and direct_upload_s3_integration_test.go in pkg/controller.
+
+Other shared files are api/openapi.yaml, docs/api-reference.md, docs/api.md,
+docs/auth.md, docs/data-uploads.md, docs/migrations/_unreleased.md, CHANGELOG.md,
+perf/budgets.json, .apidiff/pkg_controller.txt and generated documentation mirrors.
+Performance entries name the missing authorized corpus. Latency, cold start
+and response bytes are unmeasured. Other API snapshots are unchanged.
+
+Whole-repository build, scoped vet, the full executable acceptance/capability/
+API-error suites, API generator/schema/reference suites, registration inventories,
+focused policy/signing/tenant checks, docs symbols/mirrors and git diff --check
+pass. The required commentcheck against main reports clean across 502 files.
+The lead retains independent review, pipelines, full legacy tests, native
+HTTP/api.sock, SQL races and object-transfer checks. The earlier claim,
+reconciliation, sync/exchange, plan/eval renewal, result-digest, source/secret/
+log, upload-idempotency and remaining route cutovers are still open.
+
+Commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE=/tmp/sw-astra-W2/cache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W2/tmp:
+
+```sh
+go build -p 4 ./...
+go vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./tests/acceptance ./internal/apiroutes ./internal/orchestrator
+go test -p 4 ./internal/capability ./internal/apierr ./tests/acceptance ./internal/acceptance ./internal/apiroutes
+go test -p 4 ./tests/acceptance -run '^TestDataReadHTTP|^FuzzDataReadHTTP' -count=1
+go test -p 4 ./tests/acceptance -run '^$' -fuzz '^FuzzDataReadHTTPReadSet$' -fuzztime=5s -parallel=2
+go test -p 4 ./internal/apispec ./internal/apiref ./internal/apiroutes
+go test -p 4 ./internal/orchestrator -run '^TestEveryControllerRouteIsClassified$|^TestReadRouteListCarriesNoDuplicates$'
+go test -p 4 ./pkg/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestTenantRoutes|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$|^TestEveryFrontendAPICallIsAControllerRoute$'
+go test -p 4 ./pkg/docs -run '^TestDocsNameOnlySymbolsThatExist$|^TestPkgDocsContentMatchesDocsRoot$|^TestEmbeddedChangelogMatchesRoot$'
+go run ./internal/commentcheck -base main .
+```
+
+Friction was the final-schema download ledger mismatch, the missing production
+data adapters and a cold fuzz-instrumented build. There are no new policy
+questions. No Git write, Sparkwing binary or pipeline ran. Scratch is removed
+after verification. W2 remains incomplete.
+
 <!-- design:end -->

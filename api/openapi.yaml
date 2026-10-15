@@ -6076,11 +6076,10 @@ paths:
 
   /api/v1/data/download:
     post:
-      x-sparkwing-scope: public
+      x-sparkwing-scope: data.read or data.read or data.read
       tags: [artifacts]
-      summary: Sign a short-lived URL for one team object.
-      description: >-
-        A cache grant signs binary, artifact and bound source downloads only while its exact issuing claim and claimant token remain active. A source key must belong to the grant's run. The object key is resolved under the credential's team. `binary` keys name `bin/<input-hash>` for committed builds or `bins/<hash>` for legacy cache data. The response includes the stored SHA-256 when present, size, and a URL that expires after 60 seconds. Ingress requests use a CloudFront signed URL; direct in-cluster requests use an S3 presigned URL. The controller charges the object size against the team's daily download cap before returning the URL.
+      summary: Sign a short-lived URL for one readable blob.
+      description: The controller resolves live capability authority, checks the digest's read edge and live metadata, and charges the object's stored size before signing one immutable object for 60 seconds. Cache grants and object-key selectors are refused.
       requestBody:
         required: true
         content:
@@ -6088,35 +6087,69 @@ paths:
             schema:
               x-sparkwing-go-type: pkg/controller.dataDownloadRequest
               type: object
-              required: [kind, key]
+              required: [digest]
               properties:
-                kind: {type: string, enum: [binary, artifact, source]}
-                key: {type: string, description: Team-relative object key.}
+                digest: {type: string, pattern: '^[a-f0-9]{64}$'}
       responses:
         "200":
-          description: The signed URL and the object metadata.
+          description: The signed URL, its required headers and verified object metadata.
           content:
             application/json:
               schema:
                 x-sparkwing-go-type: pkg/controller.DataDownloadResponse
                 type: object
-                required: [url, sha256, size, expires]
+                required: [url, headers, sha256, size, expires]
                 properties:
                   url: {type: string, format: uri}
-                  sha256: {type: string, description: Stored object digest; binary downloads always include a valid SHA-256 digest.}
-                  size: {type: integer, format: int64}
+                  headers: {type: object, nullable: true, additionalProperties: {type: string}}
+                  sha256: {type: string}
+                  size: {type: integer, format: int64, minimum: 0}
                   expires: {type: string, format: date-time}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
+        "404": {description: The authorized blob is absent or tombstoned.}
         "429":
-          description: The team's daily download cap was reached; `Retry-After` gives the delay before retrying.
+          description: The team's daily download cap was reached.
           headers:
             Retry-After:
               schema: {type: integer}
               description: Seconds until the cap resets.
-        "503": {description: No signer is configured for the selected request path.}
+        "500": {description: A required data adapter is absent or an internal read/signing operation failed.}
+
+  /api/v1/data/has-many:
+    post:
+      x-sparkwing-scope: data.read or data.read or data.read
+      tags: [artifacts]
+      summary: Return readable live digests from a batch.
+      description: Missing and unreadable digests are omitted. Duplicate digests appear once. The query transfers no object bytes and consumes no download allowance. An explicit deadline bounds this query.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.dataPresenceRequest
+              type: object
+              required: [digests]
+              properties:
+                digests: {type: array, items: {type: string, pattern: '^[a-f0-9]{64}$'}}
+                deadline: {type: string, format: date-time}
+      responses:
+        "200":
+          description: Readable live digests, including an explicit empty array on a miss.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.dataPresenceResponse
+                type: object
+                required: [present]
+                properties:
+                  present: {type: array, items: {type: string}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "408": {description: The explicit query deadline passed.}
+        "500": {description: A required data adapter is absent or an internal read operation failed.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/attempt:
     parameters:

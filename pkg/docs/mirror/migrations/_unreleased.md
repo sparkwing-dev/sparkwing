@@ -1,5 +1,17 @@
 # Migrating to the next release
 
+## Data reads
+
+`POST /api/v1/data/download` accepts `{"digest":"<sha256>"}` through the shared
+capability policy. Replace cache grants and `{kind,key}` requests with a live
+data capability and an authorized digest. Responses include signed `headers`
+alongside `url`, `sha256`, `size` and `expires`. Send those headers to storage.
+
+`POST /api/v1/data/has-many` returns only readable live digests from its
+`digests` array. Missing and unreadable objects are indistinguishable. This
+query does not consume the team's download allowance. Both routes return
+the common error envelope. Upload and commit use their separate contracts.
+
 ## Run detail
 
 `GET /api/v1/runs/{run}` returns `RunDetail` with display-safe `inputs`,

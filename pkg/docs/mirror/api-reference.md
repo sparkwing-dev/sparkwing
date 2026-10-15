@@ -51,7 +51,8 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/crons/{id}/run` | `runs.control` |
 | `GET` | `/api/v1/data/capabilities` | `authenticated` |
 | `POST` | `/api/v1/data/commit` | `public` |
-| `POST` | `/api/v1/data/download` | `public` |
+| `POST` | `/api/v1/data/download` | `data.read` or `data.read` or `data.read` |
+| `POST` | `/api/v1/data/has-many` | `data.read` or `data.read` or `data.read` |
 | `POST` | `/api/v1/data/upload` | `public` |
 | `POST` | `/api/v1/gitcache/git/register` | `admin` |
 | `GET` | `/api/v1/gitcache/git/{path...}` | `admin` |

@@ -44,6 +44,7 @@ type Server struct {
 
 	auth                *Authenticator
 	authorization       RouteAuthorization
+	dataController      *DataController
 	operatorSettings    operatorSettingsStore
 	engineController    *EngineController
 	resolveSizingStore  func(context.Context, store.Team) (SizingStore, error)
@@ -998,6 +999,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	s.registerPolicyEndpoints(router, s.sizingEndpoints())
 	s.registerPolicyEndpoints(router, s.creditEndpoints())
 	s.registerPolicyEndpoints(router, s.queueEndpoints())
+	s.registerPolicyEndpoints(router, s.dataEndpoints())
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	// safety: the cache proves itself with its storage.count service token,
 	// which these handlers check.
@@ -1011,7 +1013,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	router.HandleFunc("POST /internal/storage/commit", s.handleStorageCommit)
 	router.HandleFunc("POST /internal/storage/release", s.handleStorageRelease)
 	router.HandleFunc("POST /internal/downloads/charge", s.handleDownloadCharge)
-	router.Handle("POST /api/v1/data/download", noStore(http.HandlerFunc(s.handleDataDownload)))
 	router.HandleFunc("POST /internal/egress/totals", s.handleEgressTotals)
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", noStore(http.HandlerFunc(s.handleSession)))

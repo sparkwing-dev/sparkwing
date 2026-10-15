@@ -71,7 +71,7 @@ membership and liveness before deriving sealed facts, ReadBlob supplies live
 existence and size, and Access uses C1's DataAccessChecker. ResolveTenant exposes
 only C1's existing upload and record method signatures. Missing dependencies fail
 closed. These are local C2 contract additions, not implementations of W1's reads.
-The legacy HTTP data handlers have not switched to these bindings.
+Download and presence HTTP routes use these bindings. Upload, commit and record HTTP routes still need their cutover.
 
 
 
@@ -1347,6 +1347,34 @@ tenant/run binding, complete history, empty collections, missing dependencies,
 read failures and method refusal. Fuzz tests generate private seal fields and
 foreign nested status facts. These component proofs do not satisfy native
 transport, SQL consistency or the full T1 display-classification scenario.
+
+### Data read HTTP cutover
+
+`POST /api/v1/data/download` accepts a digest. `POST /api/v1/data/has-many`
+accepts a digest array and optional absolute deadline. Both use PolicyRouter,
+BindData and the existing bound signer. Body fields cannot supply authority,
+team, uploader or physical object keys. Signing returns URL, signed headers,
+digest, size and expiry. Presence returns unique readable live digests.
+
+The local W2 additions are Server.WithDataController and the required
+DataController.ChargeDownload callback. Download resolves authority, checks the
+read edge, validates live metadata and atomically charges its size before
+signing. The callback preserves C1's charging boundary. Missing charging refuses
+downloads. HasMany does not charge. This adds no C1 signature or quota owner.
+W1 must supply the transactional charging adapter. The legacy ChargeDownload
+implementation still queries a day column absent from the final schema.
+
+Discovery announces downloads only when their authority, edge, metadata,
+signing and charging dependencies are installed. S3 and filesystem backends
+share this availability rule. The old cache-grant/object-key download handler
+and its arbitrary artifact-read assumptions are removed. Upload and output
+helpers remain while those surfaces still use them.
+
+HTTP and fuzz tests cover live claim/owner/repository/session reads and peer refusal,
+missing/dead/wrong authority, exact methods, invalid selectors, metadata scope,
+backend errors, byte caps, read-set omission and unsigned presence queries.
+They are component evidence. Native topology, SQL read-edge races, persistent
+provenance and actual object transfers remain integration obligations.
 
 ## Contract interpretations
 

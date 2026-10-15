@@ -24,7 +24,9 @@ type DataController struct {
 	// ReadBlob returns live existence and size after CheckDataAccess grants a read edge.
 	// It returns blob.ErrNotFound for missing or tombstoned bytes and never creates an edge.
 	ReadBlob func(context.Context, blob.Authority, blob.Digest) (blob.Blob, error)
-	Access   capability.DataAccessChecker
+	// ChargeDownload atomically applies the configured daily byte cap before signing.
+	ChargeDownload func(context.Context, blob.Authority, blob.Blob) error
+	Access         capability.DataAccessChecker
 }
 
 // DataTransactions preserves C1's upload lifecycle and atomic record operations.

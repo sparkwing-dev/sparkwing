@@ -106,7 +106,7 @@ func TestSourceUploadUserBearerReservesBeforeRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.srv.WithCacheGrantKey("source-test-grant-key")
-	runnerRaw, runner, err := team.CreateToken(t.Context(), "source-runner", store.TokenKindRunner,
+	_, runner, err := team.CreateToken(t.Context(), "source-runner", store.TokenKindRunner,
 		[]string{controller.ScopeTriggersClaim, controller.ScopeNodesClaim}, time.Hour, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -124,38 +124,6 @@ func TestSourceUploadUserBearerReservesBeforeRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var download controller.DataDownloadResponse
-	if code := f.call(http.MethodPost, "/api/v1/data/download", "Bearer "+grant,
-		map[string]string{"kind": "source", "key": key}, &download); code != http.StatusOK ||
-		!strings.Contains(download.URL, "/cache/teams/"+user.team+"/local/"+key) {
-		t.Fatalf("claim source download = %d, URL %q", code, download.URL)
-	}
-	if code := f.call(http.MethodPost, "/api/v1/data/download", "Bearer "+grant,
-		map[string]string{"kind": "artifact", "key": "artifacts/blobs/" + digest}, nil); code != http.StatusForbidden {
-		t.Fatalf("pending run signed an artifact = %d, want 403", code)
-	}
-	if err := f.store.CreateNode(t.Context(), store.Node{RunID: started.RunID, NodeID: "compile", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	node, err := f.store.ClaimNamedNode(t.Context(), store.ClaimIdentity{Principal: runner.Principal, TokenPrefix: runner.Prefix},
-		started.RunID, "compile", "source-runner", time.Hour, store.NamedClaimOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	nodeGrant, err := authwire.MintClaimCacheGrant("source-test-grant-key", user.team, started.RunID,
-		time.Now(), time.Hour, &authwire.CacheClaim{
-			Kind: "node", NodeID: "compile",
-			HolderID: node.ClaimedBy, MembershipID: node.ClaimMembershipID,
-			ReservationID: node.ReservationID, Generation: node.ClaimGeneration,
-			Principal: runner.Principal, TokenPrefix: runner.Prefix,
-		}, testGrantScope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if code := f.call(http.MethodPost, "/api/v1/data/download", "Bearer "+nodeGrant,
-		map[string]string{"kind": "source", "key": key}, nil); code != http.StatusForbidden {
-		t.Fatalf("pending node claim signed source = %d, want 403", code)
-	}
 	if code := f.call(http.MethodPost, "/api/v1/triggers", "Bearer "+raw, map[string]any{
 		"pipeline": "build", "trigger": map[string]any{
 			"source": "pipeline-working-tree@test",
@@ -164,14 +132,6 @@ func TestSourceUploadUserBearerReservesBeforeRun(t *testing.T) {
 		"git": map[string]string{"sha": strings.Repeat("a", 40)},
 	}, nil); code != http.StatusConflict {
 		t.Fatalf("second run bound same source = %d, want 409", code)
-	}
-	if code := f.call(http.MethodPost, "/api/v1/data/download", "Bearer "+runnerRaw,
-		map[string]string{"kind": "source", "key": key}, nil); code != http.StatusForbidden {
-		t.Fatalf("raw runner bearer source download = %d, want 403", code)
-	}
-	if code := f.call(http.MethodPost, "/api/v1/data/download", "Bearer "+grant,
-		map[string]string{"kind": "source", "key": "sources/" + strings.Repeat("b", 64)}, nil); code != http.StatusForbidden {
-		t.Fatalf("claim signed another source = %d, want 403", code)
 	}
 	if code := f.call(http.MethodPost, "/api/v1/data/upload", "Bearer "+grant,
 		map[string]any{"kind": "source", "key": key, "size": len(bundle), "sha256": digest}, nil); code == http.StatusOK {
@@ -215,10 +175,6 @@ func TestSourceUploadUserBearerReservesBeforeRun(t *testing.T) {
 	if _, err := f.store.DB().ExecContext(t.Context(),
 		`UPDATE triggers SET lease_expires_at = ? WHERE id = ?`, time.Now().Add(-time.Minute).UnixNano(), started.RunID); err != nil {
 		t.Fatal(err)
-	}
-	if code := f.call(http.MethodPost, "/api/v1/data/download", "Bearer "+grant,
-		map[string]string{"kind": "source", "key": key}, nil); code != http.StatusForbidden {
-		t.Fatalf("expired trigger claim signed its source = %d, want 403", code)
 	}
 	if err := team.FinishRun(t.Context(), started.RunID, "failed", "test failure"); err != nil {
 		t.Fatal(err)

@@ -28,6 +28,18 @@
   },
   "routes": [
     {
+      "route": "/api/v1/data/download",
+      "kind": "api",
+      "exempt": "Requires live data authority, readable persisted bytes, daily byte charging and a configured object signer, absent from the dashboard corpus. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/data/has-many",
+      "kind": "api",
+      "exempt": "Requires live data authority and a tenant read-set corpus with readable, missing and unreadable digests, absent from the dashboard corpus. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
       "route": "/api/v1/runs/{run}",
       "kind": "api",
       "exempt": "Requires authorized run status with complete committed attempt history and log subjects, absent from the local dashboard corpus. The status-read adapter must be installed. A refusal does not measure the read. Authorized latency, cold start and response bytes remain unmeasured.",

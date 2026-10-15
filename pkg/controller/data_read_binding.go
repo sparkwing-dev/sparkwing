@@ -25,7 +25,7 @@ func (s *boundData) Download(ctx context.Context, request blob.GetRequest) (blob
 	if err := s.authorize(ctx, capability.DataDownload, authority, target); err != nil {
 		return blob.SignedTransfer{}, err
 	}
-	if s.controller.ReadBlob == nil || s.controller.Objects == nil {
+	if s.controller.ReadBlob == nil || s.controller.Objects == nil || s.controller.ChargeDownload == nil {
 		return blob.SignedTransfer{}, missingEndpointPolicy()
 	}
 	metadata, err := s.controller.ReadBlob(ctx, authority, request.Digest)
@@ -34,6 +34,9 @@ func (s *boundData) Download(ctx context.Context, request blob.GetRequest) (blob
 	}
 	if metadata.Team != s.authorized.Target.Team || metadata.Digest != request.Digest || metadata.Size < 0 {
 		return blob.SignedTransfer{}, dataProjectionError()
+	}
+	if err := s.controller.ChargeDownload(ctx, authority, metadata); err != nil {
+		return blob.SignedTransfer{}, err
 	}
 	object := capability.ObjectToSign{
 		Method: http.MethodGet, Key: "teams/" + metadata.Team + "/cas/" + string(metadata.Digest),

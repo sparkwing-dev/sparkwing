@@ -40,9 +40,6 @@ type ServicesResponse struct {
 func (s *Server) handleServices(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	multiTeam := s.MultiTeam()
 	downloadURL := s.dataDownloadURL()
-	if downloadViaIngress(r) && s.downloadCDN == nil {
-		downloadURL = ""
-	}
 	if s.cachePodURL == "" && s.dashboardURL == "" && !multiTeam && downloadURL == "" && s.directUploads == nil {
 		return &apierr.Error{Code: apierr.NotFound, Message: "no services announced"}
 	}
@@ -60,7 +57,7 @@ func (s *Server) handleDirectCapabilities(w http.ResponseWriter, r *http.Request
 	if s.directUploads == nil {
 		return &apierr.Error{Code: apierr.NotFound, Message: "data uploads are unavailable"}
 	}
-	download := s.dataDownloadURL() != "" && (!downloadViaIngress(r) || s.downloadCDN != nil)
+	download := s.dataDownloadURL() != ""
 	writeJSON(w, http.StatusOK, map[string]bool{"upload": true, "source": download, "download": download})
 	return nil
 }

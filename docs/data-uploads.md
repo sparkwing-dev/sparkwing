@@ -3,7 +3,7 @@
 When the controller has an S3 `--cache-blob-store`, runners can move binary
 and artifact bytes between themselves and the bucket. The controller handles
 small requests and the storage ledger. `GET /api/v1/services` announces
-`direct_data`; a runner with only a cache grant can probe
+`direct_data`. Authenticated callers can probe
 `GET /api/v1/data/capabilities`. An `fs://` artifact store uses its existing
 local byte path; it does not issue S3 or CloudFront URLs. This signing route
 serves claimed runners.
@@ -12,7 +12,7 @@ Source bundles have a separate pretrigger user-token path described below.
 The runner must hold a live claim on `run_id` for each request and send a
 cache grant minted for that claim. The runner's raw token cannot sign uploads.
 A signing grant carries the exact node or trigger claim, including its
-generation. Reserve, commit and download check that claim and its token again.
+generation. Reserve and commit check that claim and its token again.
 Revoking the token stops new signed URLs, even while the claim remains live.
 Signing requests share the team's controller request budget across grants and
 answer `429` with `Retry-After` when it is spent.
@@ -46,7 +46,7 @@ For `kind: source`, a user token with `runs.write` may reserve and commit
 `run_id: ""`. The source takes a free-team slot without incrementing the run
 count; the later trigger uses that same slot. The controller atomically binds
 the committed upload row to exactly one run from the same team, uploader and
-token. Only that run's live trigger or node claim can sign a source download.
+token. Source reads require the run's live capability and a permitted read edge.
 A retry must upload a new bundle. `runs retry` and Cloud
 `RunAndAwait` children cannot inherit an older run's one-run bundle; both
 are refused before admission. Submit a new Cloud run from the checkout
@@ -62,29 +62,17 @@ controller's hourly storage pass releases expired reservations and removes
 their upload rows. Uploads are limited to 500 MiB per object. Unknown-length
 artifacts spool to a temporary file before reserve.
 
-For a binary, the final key includes its content hash. `POST /api/v1/data/download`
-takes `{kind,key}` and returns `{url,sha256,size,expires}`. A binary read uses
-`bin/<input-hash>` as its key; an artifact read names the committed key. The
-route applies the team's daily download cap to both paths. In-cluster callers
-receive an S3 URL, and callers through the
-public ingress receive a CloudFront URL. Cloud runners receive only cloud-built
-binaries unless the team owner sets
-`trust_local_builds` with `PUT /api/v1/team/build-trust`. The default is
-false. `GET /api/v1/team/build-trust` reports the team's choice. Runners
-verify the committed digest while reading.
-
-Launcher claim tokens follow this cloud provenance policy for both binaries and
-artifacts. Their source bundle remains readable through its exact run binding.
+Downloads use the digest-based capability route described in
+[Data downloads](api.md#data-downloads). The upload cache grant cannot sign a
+download. Its old `{kind,key}` download request is removed. Storage reads
+require the caller's current read set. Artifact reads follow that authority.
+Cloud binary execution also requires trusted provenance unless the team
+owner enables `trust_local_builds`.
 
 A controller-dispatched node's claim token writes cache under its run's
 GitHub repository ID and git ref, which the controller reads from the run and
 never from the request, as GitHub Actions scopes caches: `GITHUB_REF` for a
-GitHub App trigger, otherwise the run's branch. Its binary reads take the
-first binary its repository holds under its own ref, then its pull request's
-base branch, then the repository's default branch, so another repository's
-binary, or a feature branch's, never reaches `main`. A repository's ref holds
+GitHub App trigger, otherwise the run's branch. A repository's ref holds
 one binary per input hash: the first committed wins, and a second is refused
 `409`. A claim whose run names no repository or ref writes no binary, and
-still writes artifacts. Every other caller
-writes and reads only binaries no claim wrote, and a claim never reads theirs.
-Artifact keys name their content hash exactly, so they are not scoped.
+still writes artifacts. Other upload callers write only binaries no claim wrote. Artifact upload keys name their content hash. Data read authority remains separate.

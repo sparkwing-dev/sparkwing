@@ -114,6 +114,17 @@ derives the attempt from the claim or the persisted job, and the store owns
 timestamps and stale-attempt refusal. Annotations and summaries accept at most
 128 KiB of masked text. The old `/nodes/` reporting paths are removed.
 
+## Data read authority
+
+Download signing and batched presence use the shared capability policy.
+A live claim needs its data grant and sealed run/repository/ref binding.
+A repository reader needs existing repository authority. Cache grants,
+ordinary member tokens and machine roots cannot substitute for either.
+Each operation resolves current authority again and checks the read set
+before reading metadata. Presence queries omit unreadable digests. Download
+signing applies the team's daily byte cap and returns a 60-second URL for
+one immutable object. The returned storage headers contain no controller bearer.
+
 ## Credential discovery
 
 `GET /api/v1/auth/whoami` uses the shared policy verifier. It returns the

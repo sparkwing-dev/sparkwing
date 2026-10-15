@@ -574,10 +574,6 @@ func (claimHead) HeadObject(context.Context, *s3.HeadObjectInput, ...func(*s3.Op
 	return &s3.HeadObjectOutput{ContentLength: aws.Int64(4), Metadata: map[string]string{"sha256": strings.Repeat("a", 64)}}, nil
 }
 
-// A claim token's binary upload is reserved under its run's git ref, a claim
-// whose run names no ref or repository writes no binary but still writes a
-// content-addressed artifact, and a claim's binary
-// download signs its own ref's binary, never a newer one of another branch.
 func TestClaimBinaryUploadIsReservedUnderTheRunsRef(t *testing.T) {
 	client, _ := directS3(t)
 	bucket, err := teamblob.New(teamblob.Options{Bucket: "bucket", Prefix: "cache", Client: claimHead{}})
@@ -621,19 +617,6 @@ func TestClaimBinaryUploadIsReservedUnderTheRunsRef(t *testing.T) {
 	if err := f.store.DB().QueryRowContext(t.Context(), `SELECT repo, ref FROM uploads WHERE id = ?`, id).Scan(&repo, &ref); err != nil ||
 		repo != "github:701" || ref != "refs/heads/main" {
 		t.Fatalf("the reservation's scope = %q %q %v, want github:701 refs/heads/main", repo, ref, err)
-	}
-	now := time.Now().UnixNano()
-	for ref, sha := range map[string]string{"refs/heads/main": strings.Repeat("a", 64), "refs/heads/feat": strings.Repeat("e", 64)} {
-		if _, err := f.store.DB().ExecContext(t.Context(), `INSERT INTO data_objects
- (team, key, store, size, sha256, principal, provenance, repo, ref, committed_at) VALUES (?, ?, 'cache', 4, ?, 'claim', 'cloud', 'github:701', ?, ?)`,
-			olga.team, "bin/76543210-fedcba98/"+sha, sha, ref, now); err != nil {
-			t.Fatal(err)
-		}
-		now++
-	}
-	var signed controller.DataDownloadResponse
-	if code := f.call("POST", "/api/v1/data/download", grants["run-main"], map[string]any{"kind": "binary", "key": "bin/76543210-fedcba98"}, &signed); code != http.StatusOK || signed.SHA256 != strings.Repeat("a", 64) {
-		t.Fatalf("main's binary download = %d %q, want its own ref's binary", code, signed.SHA256)
 	}
 	refless := f.launchedRun(olga, "run-refless", "acme", "widgets")
 	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE triggers SET git_branch = '' WHERE id = 'run-refless'`); err != nil {
