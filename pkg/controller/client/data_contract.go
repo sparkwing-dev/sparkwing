@@ -8,5 +8,10 @@ import "github.com/sparkwing-dev/sparkwing/internal/blob"
 // the server derives both from current authentication and persisted state.
 // Object transfer clients receive signed headers only, never the controller bearer.
 func NewDataClient(options EngineOptions) (blob.DataSigner, blob.RecordStore, error) {
-	panic("unimplemented: controller-data")
+	c, err := newEngineClient(options)
+	if err != nil {
+		return nil, nil, err
+	}
+	data := &dataClient{transport: c}
+	return data, data, nil
 }

@@ -6,36 +6,14 @@ Every `sparkwing completion` command, flag, and argument, generated from the CLI
 
 ## `sparkwing completion`
 
-Emit a shell completion script (bash|zsh|fish)
-
-Prints a completion script for the selected shell. Source it
-from your shell rc:
-
-  \# bash
-  source <(sparkwing completion --shell bash --output plain)
-
-  \# zsh (add 'autoload -U compinit; compinit' once above)
-  source <(sparkwing completion --shell zsh --output plain)
-
-  \# fish
-  sparkwing completion --shell fish --output plain | source
-
-zsh and fish get per-item descriptions; bash is name-only because
-compgen lacks the facility.
+Emit a shell completion script
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (pretty on a terminal, json when piped) |
-| `--shell NAME` | bash \| zsh \| fish (required) |
-
-### Examples
-
-```sh
-# Wire completion for the current zsh session
-source <(sparkwing completion --shell zsh --output plain)
-
-# Install persistent completion for fish
-sparkwing completion --shell fish --output plain > ~/.config/fish/completions/sparkwing.fish
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--shell NAME` | Shell for completion output. Values: bash, zsh, fish, powershell. |

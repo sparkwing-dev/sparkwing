@@ -5,26 +5,34 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 
-	flag "github.com/spf13/pflag"
 	"go.yaml.in/yaml/v3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/internal/runners/service"
+	runnerservice "github.com/sparkwing-dev/sparkwing/internal/runners/service"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// safety: the agent loop lives in this binary, not in `sparkwing`, so the service runs a second executable.
+// safety: the runner loop lives in this binary, so the service runs a second executable.
 const runnerBinaryName = "sparkwing-runner"
 
 // safety: the machine is reached only through these two, so a suite can substitute a host that touches nothing.
@@ -52,188 +60,317 @@ func runRunners(args []string) error {
 	}
 }
 
+type runnerEnrollment struct {
+	path        string
+	config      userconfig.RunnerConfig
+	force       bool
+	service     runnerServicePlan
+	profileName string
+	format      string
+}
+
 func runRunnersAdd(args []string) error {
-	fs := flag.NewFlagSet(cmdRunnersAdd.Path, flag.ContinueOnError)
-	on := addProfileFlag(fs)
-	name := fs.String("name", "", "runner name, shown in the dashboard")
-	maxConcurrent := fs.Int("max-concurrent", 2, "concurrent jobs this machine accepts")
-	contribution := fs.String("contribution", "50%,50%", "CPU and memory this machine contributes")
-	labels := fs.String("labels", "", "comma-separated self-asserted placement labels")
-	allowRepos := fs.StringArray("allow-repo", nil, "repository this machine may build and fetch directly (repeatable)")
-	configPath := fs.String("config", "", "config.yaml whose runner section to write (default: ~/.config/sparkwing/config.yaml)")
-	force := fs.Bool("force", false, "replace an existing runner section")
-	noService := fs.Bool("no-service", false, "write the config without installing or starting the service")
-	if err := parseAndCheck(cmdRunnersAdd, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if strings.TrimSpace(*name) == "" {
-		return errors.New("runners add: --name is required")
-	}
-	if *maxConcurrent < 1 {
-		return fmt.Errorf("runners add: --max-concurrent must be at least 1, got %d", *maxConcurrent)
-	}
-
-	prof, err := resolveProfile(*on)
-	if err != nil {
-		return err
-	}
-	if err := requireController(prof, "runners add"); err != nil {
-		return err
-	}
-	path, err := agentConfigPath(*configPath)
-	if err != nil {
-		return err
-	}
-	// safety: this refusal runs before the mint, so the common rerun strands no live credential.
-	if err := checkAgentConfigAbsent(path, *force); err != nil {
-		return err
-	}
-	cfg := agentFileConfig{
-		Controller:     strings.TrimRight(prof.ControllerURL(), "/"),
-		MaxConcurrent:  *maxConcurrent,
-		Labels:         splitCSV(*labels),
-		AllowRepos:     *allowRepos,
-		Contribution:   *contribution,
-		LocalAdmission: true,
-	}
-	if err := validateAgentFileConfig(cfg); err != nil {
-		return err
-	}
-	service, err := planRunnerService(path, *noService)
-	if err != nil {
-		return err
-	}
-
-	principal := "agent:" + *name
-	minted, err := mintRunnerToken(prof.ControllerURL(), prof.ControllerToken(), *name, *allowRepos)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("minted runner token %s for %s on profile %s\n", minted.Prefix, principal, prof.Name)
-	cfg.Token = minted.Raw
-
-	revoke := func() error {
-		if err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).RevokeToken(context.Background(), minted.Prefix); err != nil {
-			printRunnerRevokeHint(prof.Name, minted.Prefix)
-			return fmt.Errorf("revoke failed runner enrollment %s: %w", minted.Prefix, err)
-		}
-		fmt.Printf("revoked runner token %s after enrollment failed\n", minted.Prefix)
+	enrollment, prof, err := prepareRunnerEnrollment(args)
+	if errors.Is(err, errHelpRequested) {
 		return nil
 	}
-	if err := finishRunnerEnrollment(path, cfg, *force, service, revoke); err != nil {
+	if err != nil {
 		return err
 	}
-	fmt.Println()
-	fmt.Println("what this machine now accepts, and what it does not isolate: sparkwing docs read --topic threat-model")
-	fmt.Println()
-	fmt.Println("revoke this runner with:")
-	fmt.Printf("  sparkwing cluster runners remove --profile %s\n", prof.Name)
-	fmt.Println("or revoke the token alone with:")
-	fmt.Printf("  sparkwing cluster tokens revoke --profile %s --prefix %s\n", prof.Name, minted.Prefix)
+	manager, err := runnerTokenManager(prof)
+	if err != nil {
+		return err
+	}
+	return enrollRunner(context.Background(), manager, enrollment)
+}
+
+type runnerTokenOperations interface {
+	controllerwire.TokenManager
+	EnrollRunner(context.Context, client.EnrollRunnerRequest) (*client.CreatedToken, error)
+}
+
+type runnerController struct {
+	controllerwire.TokenManager
+	client *client.Client
+}
+
+func (c runnerController) EnrollRunner(ctx context.Context, request client.EnrollRunnerRequest) (*client.CreatedToken, error) {
+	return c.client.EnrollRunner(ctx, request)
+}
+
+func runnerTokenManager(prof *namedProfile) (runnerTokenOperations, error) {
+	manager, err := client.NewTokenManager(client.EngineOptions{URL: prof.ControllerURL(), Bearer: func(context.Context) (string, error) { return prof.ControllerToken(), nil }}, false)
+	if err != nil {
+		return nil, err
+	}
+	return runnerController{TokenManager: manager, client: client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())}, nil
+}
+
+func prepareRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, error) {
+	enrollment, prof, err := parseRunnerEnrollment(args)
+	if err != nil {
+		return enrollment, prof, err
+	}
+	if err := checkAgentConfigAbsent(enrollment.path, enrollment.force); err != nil {
+		return enrollment, prof, err
+	}
+	if err := validateRunnerEnrollment(enrollment.config); err != nil {
+		return enrollment, prof, err
+	}
+	enrollment.service, err = planRunnerService(enrollment.path, enrollment.service.skipped)
+	return enrollment, prof, err
+}
+
+func parseRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, error) {
+	var enrollment runnerEnrollment
+	inv, err := clisurface.Parse("sparkwing", append([]string{"runners", "add"}, args...))
+	if err != nil {
+		return enrollment, nil, err
+	}
+	enrollment.format = inv.Output(color.IsInteractiveStdout())
+	if inv.Help() {
+		if err := writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, enrollment.format); err != nil {
+			return enrollment, nil, err
+		}
+		return enrollment, nil, errHelpRequested
+	}
+	name := inv.Value("runner")
+	if strings.TrimSpace(name) == "" {
+		return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: "--runner is required"}
+	}
+	var maxConcurrent *int
+	if inv.Has("max-concurrent") {
+		value, parseErr := strconv.Atoi(inv.Value("max-concurrent"))
+		if parseErr != nil || value < 1 {
+			return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: "--max-concurrent requires a positive integer"}
+		}
+		maxConcurrent = &value
+	}
+	if inv.Has("reserved-for") {
+		return enrollment, nil, &apierr.Error{Code: apierr.PolicyMissing, Message: "runner pool enrollment is unavailable", Hint: "the controller must support team-admin runner registration"}
+	}
+	prof, err := resolveProfile(inv.Value("profile"))
+	if err != nil {
+		return enrollment, nil, err
+	}
+	if err := requireController(prof, "runners add"); err != nil {
+		return enrollment, nil, err
+	}
+	enrollment.path, err = agentConfigPath(inv.Value("config"))
+	if err != nil {
+		return enrollment, nil, err
+	}
+	enrollment.profileName, enrollment.force = prof.Name, inv.Bool("force")
+	enrollment.service.skipped = inv.Bool("no-service")
+	contribution := "50%,50%"
+	if inv.Has("contribution") {
+		contribution = inv.Value("contribution")
+	}
+	controller, localAdmission := strings.TrimRight(prof.ControllerURL(), "/"), true
+	enrollment.config = userconfig.RunnerConfig{Controller: &controller, MaxConcurrent: maxConcurrent, HolderPrefix: &name, Labels: inv.Flags["label"], Repos: inv.Flags["repos"], Contribution: &contribution, LocalAdmission: &localAdmission}
+	return enrollment, prof, nil
+}
+
+func enrollRunner(ctx context.Context, manager runnerTokenOperations, enrollment runnerEnrollment) error {
+	issued, err := manager.EnrollRunner(ctx, client.EnrollRunnerRequest{Name: *enrollment.config.HolderPrefix, Repos: enrollment.config.Repos})
+	if err != nil {
+		return err
+	}
+	if issued == nil || issued.Capability == "" || issued.Prefix == "" {
+		return errors.New("the controller returned no runner credential")
+	}
+	minted := controllerwire.TokenCreated{Token: issued.Capability, Metadata: controllerwire.TokenMetadata{Prefix: issued.Prefix, Kind: "runner", Principal: "runner:" + *enrollment.config.HolderPrefix}}
+	for _, grant := range issued.Grants {
+		minted.Metadata.Scopes = append(minted.Metadata.Scopes, capability.Grant(grant))
+	}
+	service, err := finishRunnerEnrollment(enrollment.path, enrollment.config, minted.Token, enrollment.force, enrollment.service, func() error {
+		_, revokeErr := manager.RevokeToken(context.WithoutCancel(ctx), minted.Metadata.Prefix)
+		if revokeErr != nil {
+			printRunnerRevokeHint(enrollment.profileName, minted.Metadata.Prefix)
+			return fmt.Errorf("revoke failed enrollment token %s: %w", minted.Metadata.Prefix, revokeErr)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return renderRunnerEnrollment(enrollment, minted.Metadata, service)
+}
+
+type runnerServiceResult struct {
+	Status  string   `json:"status"`
+	Detail  string   `json:"detail,omitempty"`
+	Path    string   `json:"path,omitempty"`
+	Command []string `json:"command,omitempty"`
+}
+
+type runnerEnrollmentResult struct {
+	Runner  string                       `json:"runner"`
+	Profile string                       `json:"profile"`
+	Config  string                       `json:"config"`
+	Token   controllerwire.TokenMetadata `json:"token"`
+	Service runnerServiceResult          `json:"service"`
+}
+
+func renderRunnerEnrollment(enrollment runnerEnrollment, token controllerwire.TokenMetadata, service runnerServiceResult) error {
+	result := runnerEnrollmentResult{Runner: *enrollment.config.HolderPrefix, Profile: enrollment.profileName, Config: enrollment.path, Token: token, Service: service}
+	switch enrollment.format {
+	case "json":
+		return json.NewEncoder(os.Stdout).Encode(result)
+	case "plain":
+		_, err := fmt.Fprintln(os.Stdout, result.Runner)
+		return err
+	}
+	fmt.Printf("minted runner token %s for %s on profile %s\n", token.Prefix, token.Principal, enrollment.profileName)
+	fmt.Printf("wrote the runner section of %s (mode 0600)\n", enrollment.path)
+	fmt.Printf("service: %s\n", service.Status)
+	if service.Detail != "" {
+		fmt.Println(service.Detail)
+	}
+	if service.Path != "" {
+		fmt.Printf("service file: %s\n", service.Path)
+	}
+	if len(service.Command) > 0 {
+		fmt.Printf("start the runner with argv: %q\n", service.Command)
+	}
+	fmt.Println("what this machine accepts and isolates: sparkwing docs read --topic threat-model")
+	fmt.Printf("revoke this runner with:\n  sparkwing runners remove --profile %s --config %s\n", enrollment.profileName, enrollment.path)
+	fmt.Printf("or revoke its token with:\n  sparkwing tokens revoke --profile %s --token %s\n", enrollment.profileName, token.Prefix)
 	return nil
 }
 
-func finishRunnerEnrollment(path string, cfg agentFileConfig, force bool, service runnerServicePlan, revoke func() error) (retErr error) {
-	var rollback func() error
+func finishRunnerEnrollment(path string, cfg userconfig.RunnerConfig, bearer string, force bool, service runnerServicePlan, revoke func() error) (result runnerServiceResult, err error) {
+	written, err := writeRunnerConfig(path, cfg, bearer, force)
 	defer func() {
-		if retErr != nil {
-			retErr = errors.Join(retErr, revoke())
-			if rollback != nil {
-				retErr = errors.Join(retErr, rollback())
-			}
+		if err != nil {
+			err = errors.Join(err, revoke(), written.rollback())
 		}
 	}()
-	var err error
-	rollback, err = writeAgentConfig(path, cfg, force)
 	if err != nil {
-		return err
+		return result, err
 	}
-	fmt.Printf("wrote the runner section of %s (mode 0600)\n", path)
 	return service.start(path)
 }
 
-// safety: failed revocation still needs an actionable credential prefix, never the bearer.
+// safety: a failed revocation leaves authority live even after its local file is removed.
 func printRunnerRevokeHint(profileName, prefix string) {
-	fmt.Println()
-	fmt.Printf("the token %s is live; revoke it with:\n", prefix)
-	fmt.Printf("  sparkwing cluster tokens revoke --profile %s --prefix %s\n", profileName, prefix)
+	fmt.Fprintf(os.Stderr, "the token %s is live; revoke it with:\n  sparkwing tokens revoke --profile %s --token %s\n", prefix, profileName, prefix)
+}
+
+type runnerRemoval struct {
+	path, profileName, tokenPrefix, name, format string
+	noService                                    bool
 }
 
 func runRunnersRemove(args []string) error {
-	fs := flag.NewFlagSet(cmdRunnersRemove.Path, flag.ContinueOnError)
-	on := addProfileFlag(fs)
-	configPath := fs.String("config", "", "config.yaml whose runner section references the credential (default: ~/.config/sparkwing/config.yaml)")
-	noService := fs.Bool("no-service", false, "revoke the token without touching the service")
-	if err := parseAndCheck(cmdRunnersRemove, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+	removal, prof, err := prepareRunnerRemoval(args)
+	if errors.Is(err, errHelpRequested) {
+		return nil
 	}
-	prof, err := resolveProfile(*on)
 	if err != nil {
 		return err
+	}
+	manager, err := runnerTokenManager(prof)
+	if err != nil {
+		return err
+	}
+	return removeRunner(context.Background(), manager, removal)
+}
+
+func prepareRunnerRemoval(args []string) (runnerRemoval, *namedProfile, error) {
+	var removal runnerRemoval
+	inv, err := clisurface.Parse("sparkwing", append([]string{"runners", "remove"}, args...))
+	if err != nil {
+		return removal, nil, err
+	}
+	format := inv.Output(color.IsInteractiveStdout())
+	if inv.Help() {
+		if err := writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, format); err != nil {
+			return removal, nil, err
+		}
+		return removal, nil, errHelpRequested
+	}
+	prof, err := resolveProfile(inv.Value("profile"))
+	if err != nil {
+		return removal, nil, err
 	}
 	if err := requireController(prof, "runners remove"); err != nil {
-		return err
+		return removal, nil, err
 	}
-	path, err := agentConfigPath(*configPath)
+	path, err := agentConfigPath(inv.Value("config"))
 	if err != nil {
-		return err
+		return removal, nil, err
 	}
-	raw, err := agentconfig.Load(path)
+	cfg, err := userconfig.ReadConfig(path)
 	if err != nil {
-		return err
+		return removal, nil, err
 	}
-	prefix, err := tokenPrefix(raw.Token)
+	if cfg.Runner == nil {
+		return removal, nil, fmt.Errorf("%s has no runner section; sparkwing runners add writes one: %w", path, os.ErrNotExist)
+	}
+	raw := cfg.Runner
+	name := ""
+	if raw.HolderPrefix != nil {
+		name = *raw.HolderPrefix
+	}
+	if selectedName := inv.Value("runner"); selectedName != "" && selectedName != name {
+		return removal, nil, fmt.Errorf("%s holds runner %q, which does not match --runner %q", path, name, selectedName)
+	}
+	// safety: a connection for another controller must not revoke a same-prefix credential there.
+	if raw.Controller == nil {
+		return removal, nil, fmt.Errorf("%s: runner controller is required", path)
+	}
+	configured, err := normalizeControllerURL(*raw.Controller)
 	if err != nil {
-		return fmt.Errorf("%s: %w", path, err)
+		return removal, nil, fmt.Errorf("%s: invalid runner controller URL", path)
 	}
-	// safety: the config names a prefix, not a promise about it; revoking the wrong kind
-	// would cut an operator or a service off its controller.
-	if err := requireRunnerToken(prof.ControllerURL(), prof.ControllerToken(), prefix, path); err != nil {
-		return err
+	selected, err := normalizeControllerURL(prof.ControllerURL())
+	if err != nil || configured != selected {
+		return removal, nil, fmt.Errorf("%s: runner controller differs from profile %q", path, prof.Name)
 	}
+	if raw.CredentialsDir == nil || strings.TrimSpace(*raw.CredentialsDir) == "" {
+		return removal, nil, fmt.Errorf("%s: runner.credentials_dir is required", path)
+	}
+	credential, err := fssecure.OpenPrivateConfig(filepath.Join(*raw.CredentialsDir, "agent-token"))
+	if err != nil {
+		return removal, nil, err
+	}
+	value, readErr := io.ReadAll(credential)
+	if err := errors.Join(readErr, credential.Close()); err != nil {
+		return removal, nil, err
+	}
+	prefix, err := tokenPrefix(strings.TrimSpace(string(value)))
+	if err != nil {
+		return removal, nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return runnerRemoval{path: path, profileName: prof.Name, tokenPrefix: prefix, noService: inv.Bool("no-service"), name: name, format: format}, prof, nil
+}
 
-	// safety: stop the runner before the credential dies so an in-flight claim
-	// finishes against a token that still authenticates.
-	if err := stopRunnerService(path, *noService); err != nil {
+func removeRunner(ctx context.Context, manager controllerwire.TokenManager, removal runnerRemoval) error {
+	if err := requireRunnerToken(ctx, manager, removal.tokenPrefix, removal.path); err != nil {
 		return err
 	}
-	if err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).RevokeToken(context.Background(), prefix); err != nil {
+	// safety: stop before revocation so supervised work can release its claims with a live root.
+	if _, err := stopRunnerService(removal.path, removal.noService); err != nil {
 		return err
 	}
-	fmt.Printf("revoked %s on profile %s\n", prefix, prof.Name)
-	fmt.Printf("the runner credential referenced by %s is revoked; `sparkwing cluster runners add --force` replaces it\n", path)
+	revoked, err := manager.RevokeToken(ctx, removal.tokenPrefix)
+	if err != nil {
+		return err
+	}
+	if removal.format == "json" {
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			Runner string                      `json:"runner"`
+			Token  controllerwire.TokenRevoked `json:"token"`
+		}{removal.name, revoked})
+	}
+	if removal.format == "plain" {
+		_, err := fmt.Fprintln(os.Stdout, removal.name)
+		return err
+	}
+	fmt.Printf("revoked %s on profile %s\n", removal.tokenPrefix, removal.profileName)
+	fmt.Printf("the runner section of %s retains the revoked credential file; sparkwing runners add --force replaces it\n", removal.path)
 	return nil
-}
-
-type mintedToken struct {
-	Raw    string
-	Prefix string
-}
-
-func mintRunnerToken(controller, adminToken, name string, repos []string) (mintedToken, error) {
-	out, err := client.NewWithToken(controller, nil, adminToken).EnrollRunner(context.Background(), client.EnrollRunnerRequest{Name: name, Repos: repos})
-	return mintedCredential(out, err)
-}
-
-func mintToken(controller, adminToken string, req client.CreateTokenRequest) (mintedToken, error) {
-	out, err := client.NewWithToken(controller, nil, adminToken).CreateToken(context.Background(), req)
-	return mintedCredential(out, err)
-}
-
-func mintedCredential(out *client.CreatedToken, err error) (mintedToken, error) {
-	if err != nil {
-		return mintedToken{}, err
-	}
-	if out == nil || out.Capability == "" || out.Prefix == "" {
-		return mintedToken{}, errors.New("the controller returned no token")
-	}
-	return mintedToken{Raw: out.Capability, Prefix: out.Prefix}, nil
 }
 
 func tokenPrefix(raw string) (string, error) {
@@ -243,41 +380,21 @@ func tokenPrefix(raw string) (string, error) {
 	return raw[:store.PrefixLen], nil
 }
 
-func requireRunnerToken(controller, adminToken, prefix, configPath string) error {
-	resp, err := client.NewWithToken(controller, nil, adminToken).LookupToken(context.Background(), prefix)
+func requireRunnerToken(ctx context.Context, manager controllerwire.TokenManager, prefix, configPath string) error {
+	found, err := manager.ReadToken(ctx, prefix)
 	if err != nil {
-		return fmt.Errorf("look up the token %s named by %s: %w", prefix, configPath, err)
+		return fmt.Errorf("look up token %s named by %s: %w", prefix, configPath, err)
 	}
-	var found client.TokenInfo
-	if err := json.Unmarshal(resp, &found); err != nil {
-		return fmt.Errorf("decode the token %s: %w", prefix, err)
-	}
-	if found.Subject.Kind != "machine" {
-		return fmt.Errorf("%s names the token %s, which is a %s token held by %q, not a runner token; "+
-			"revoke it with `sparkwing cluster tokens revoke` if that is what you meant",
-			configPath, prefix, found.Subject.Kind, found.Subject.ID)
+	// safety: principal spelling cannot grant runner identity or justify revoking a member.
+	if found.Kind != "runner" {
+		return fmt.Errorf("%s names token %s, which is a %s token held by %q, not a runner token; use sparkwing tokens revoke if required", configPath, prefix, found.Kind, found.Principal)
 	}
 	return nil
 }
 
-func validateAgentFileConfig(cfg agentFileConfig) error {
-	body, err := yaml.Marshal(map[string]agentFileConfig{userconfig.Runner: cfg})
-	if err != nil {
-		return err
-	}
-	_, err = userconfig.Decode("runner configuration", body)
+func validateRunnerEnrollment(cfg userconfig.RunnerConfig) error {
+	_, _, err := settings.RunnerPreferences(settings.Inputs{Flags: settings.Values{RunnerPreferences: &cfg}})
 	return err
-}
-
-type agentFileConfig struct {
-	Controller     string   `yaml:"controller"`
-	CredentialsDir string   `yaml:"credentials_dir,omitempty"`
-	Token          string   `yaml:"-"`
-	MaxConcurrent  int      `yaml:"max_concurrent"`
-	Labels         []string `yaml:"labels,omitempty"`
-	AllowRepos     []string `yaml:"repos,omitempty"`
-	Contribution   string   `yaml:"contribution,omitempty"`
-	LocalAdmission bool     `yaml:"local_admission"`
 }
 
 func agentConfigPath(override string) (string, error) {
@@ -303,18 +420,127 @@ func errAgentSectionExists(path string) error {
 	return fmt.Errorf("%s already has a runner section; pass --force to replace it (its token stays live until you revoke it)", path)
 }
 
-func firstNonBlank(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
+// safety: the absence check repeats under the settings lock, so a second
+// enrollment racing this one cannot overwrite the section it wrote.
+func writeRunnerConfig(path string, cfg userconfig.RunnerConfig, bearer string, force bool) (runnerConfigWrite, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return runnerConfigWrite{}, err
+	}
+	written := runnerConfigWrite{path: path}
+	if err := validateRunnerEnrollment(cfg); err != nil {
+		return written, err
+	}
+	if strings.TrimSpace(bearer) == "" {
+		return written, errors.New("runner credential is empty")
+	}
+	var section yaml.Node
+	err = userconfig.Update(path, userconfig.Runner, "the runner config", &section, func(found bool) error {
+		if found && !force {
+			return errAgentSectionExists(path)
+		}
+		if found {
+			written.previous = new(userconfig.RunnerConfig)
+			if err := section.Decode(written.previous); err != nil {
+				return err
+			}
+		}
+		// safety: a failed config replacement must leave the previous credential intact.
+		credentialDir, err := fssecure.MkdirPrivateTemp(filepath.Dir(path), "runner-credentials-")
+		if err != nil {
+			return err
+		}
+		written.credentialsDir = credentialDir
+		if err := fssecure.WriteFile(filepath.Join(credentialDir, "agent-token"), []byte(bearer)); err != nil {
+			return err
+		}
+		cfg.CredentialsDir = &credentialDir
+		section, err = runnerConfigNode(cfg)
+		if err != nil {
+			return err
+		}
+		return section.Decode(&written.current)
+	})
+	return written, err
+}
+
+func runnerConfigNode(cfg userconfig.RunnerConfig) (yaml.Node, error) {
+	var section yaml.Node
+	if err := section.Encode(cfg); err != nil {
+		return section, err
+	}
+	for _, name := range []string{"repos", "labels"} {
+		values := cfg.Repos
+		if name == "labels" {
+			values = cfg.Labels
+		}
+		if values != nil && len(values) == 0 {
+			section.Content = append(section.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: name}, &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"})
 		}
 	}
-	return ""
+	return section, nil
+}
+
+type runnerConfigWrite struct {
+	path, credentialsDir string
+	previous             *userconfig.RunnerConfig
+	current              userconfig.RunnerConfig
+}
+
+func (w runnerConfigWrite) rollback() error {
+	if w.credentialsDir == "" {
+		return nil
+	}
+	var section yaml.Node
+	unchanged := errors.New("runner configuration changed")
+	retained := false
+	err := userconfig.Update(w.path, userconfig.Runner, "the runner config", &section, func(found bool) error {
+		if !found {
+			return unchanged
+		}
+		var current userconfig.RunnerConfig
+		if err := section.Decode(&current); err != nil {
+			return err
+		}
+		// safety: another enrollment may have replaced ours while its service was starting.
+		if current.CredentialsDir == nil || *current.CredentialsDir != w.credentialsDir {
+			return unchanged
+		}
+		if !reflect.DeepEqual(current, w.current) {
+			retained = true
+			return unchanged
+		}
+		section = yaml.Node{}
+		if w.previous != nil {
+			var err error
+			section, err = runnerConfigNode(*w.previous)
+			return err
+		}
+		return nil
+	})
+	if errors.Is(err, unchanged) {
+		err = nil
+	}
+	if err != nil {
+		return fmt.Errorf("restore runner configuration before credential cleanup: %w", err)
+	}
+	if retained {
+		return fmt.Errorf("runner configuration changed; retained its credential file in %s", w.credentialsDir)
+	}
+	for _, path := range []string{filepath.Join(w.credentialsDir, "agent-token"), w.credentialsDir} {
+		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			err = errors.Join(err, removeErr)
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("clean failed runner enrollment: %w", err)
+	}
+	return nil
 }
 
 // safety: the decision about this machine's service manager, taken before anything irreversible happens.
 type runnerServicePlan struct {
-	host    service.Host
+	host    runnerservice.Host
 	skipped bool
 	manual  bool
 }
@@ -335,8 +561,8 @@ func planRunnerService(configPath string, skip bool) (runnerServicePlan, error) 
 	if host.Binary == "" {
 		return runnerServicePlan{}, errRunnerBinaryMissing()
 	}
-	if err := service.Preflight(context.Background(), host); err != nil {
-		if errors.Is(err, service.ErrUnsupported) {
+	if err := runnerservice.Preflight(context.Background(), host); err != nil {
+		if errors.Is(err, runnerservice.ErrUnsupported) {
 			return runnerServicePlan{manual: true}, nil
 		}
 		return runnerServicePlan{}, err
@@ -344,90 +570,51 @@ func planRunnerService(configPath string, skip bool) (runnerServicePlan, error) 
 	return runnerServicePlan{host: host}, nil
 }
 
-func (p runnerServicePlan) start(configPath string) error {
-	switch {
-	case p.skipped:
-		fmt.Printf("skipped the service install; start the runner with `%s start --config %s`\n", runnerBinaryName, configPath)
-		return nil
-	case p.manual:
-		printWindowsServiceSteps(configPath)
-		return nil
+func (p runnerServicePlan) start(configPath string) (runnerServiceResult, error) {
+	if p.skipped || p.manual {
+		status := "skipped"
+		if p.manual {
+			status = "manual"
+		}
+		return runnerServiceResult{Status: status, Command: []string{runnerBinaryName, "start", "--config", configPath}}, nil
 	}
-	before, err := service.Inspect(context.Background(), p.host)
+	before, err := runnerservice.Inspect(context.Background(), p.host)
 	if err != nil {
-		return err
+		return runnerServiceResult{}, err
 	}
-	state, err := service.Install(context.Background(), p.host)
+	state, err := runnerservice.Install(context.Background(), p.host)
 	if err != nil {
 		if !before.Installed && !before.Foreign {
-			// safety: a failed installation may have published a new unit before its manager refused it.
-			after, inspectErr := service.Inspect(context.Background(), p.host)
+			after, inspectErr := runnerservice.Inspect(context.Background(), p.host)
 			err = errors.Join(err, inspectErr)
 			if inspectErr == nil && after.Installed && !after.Foreign && !after.Mismatch {
 				err = errors.Join(err, cleanupNewRunnerService(p.host, after.Path))
 			}
 		}
-		return err
+		return runnerServiceResult{}, err
 	}
-	fmt.Printf("started the runner service: %s\n", state.Detail)
-	fmt.Printf("service file: %s\n", state.Path)
-	return nil
+	return runnerServiceResult{Status: "started", Detail: state.Detail, Path: state.Path}, nil
 }
 
-func cleanupNewRunnerService(host service.Host, path string) error {
-	published, statErr := os.Lstat(path)
-	_, err := service.Uninstall(context.Background(), host)
-	if err == nil {
-		return nil
-	}
-	if statErr != nil {
-		return errors.Join(err, statErr)
-	}
-	current, statErr := os.Lstat(path)
-	if errors.Is(statErr, os.ErrNotExist) {
-		return err
-	}
-	if statErr != nil {
-		return errors.Join(err, statErr)
-	}
-	// safety: manager failure must not strand a new file, but a replacement belongs to another writer.
-	if !current.Mode().IsRegular() || !os.SameFile(published, current) {
-		return errors.Join(err, fmt.Errorf("runner service file changed during failed enrollment cleanup: %s", path))
-	}
-	return errors.Join(err, os.Remove(path))
-}
-
-func stopRunnerService(configPath string, skip bool) error {
+func stopRunnerService(configPath string, skip bool) (string, error) {
 	if skip || runnerServiceGOOS == "windows" {
-		return nil
+		return "", nil
 	}
 	host, err := runnerServiceHost(configPath)
 	if err != nil {
-		return err
+		return "", err
 	}
-	state, err := service.Uninstall(context.Background(), host)
-	if err != nil {
-		if errors.Is(err, service.ErrUnsupported) {
-			return nil
-		}
-		return err
+	state, err := runnerservice.Uninstall(context.Background(), host)
+	if errors.Is(err, runnerservice.ErrUnsupported) {
+		return "", nil
 	}
-	fmt.Println(state.Detail)
-	return nil
+	return state.Detail, err
 }
 
-func printWindowsServiceSteps(configPath string) {
-	fmt.Println()
-	fmt.Println("this installer creates no Windows service. Supervise the runner yourself:")
-	fmt.Printf("  1. put %s.exe on PATH\n", runnerBinaryName)
-	fmt.Printf("  2. run `%s.exe start --config %s`\n", runnerBinaryName, configPath)
-	fmt.Println("  3. register that command with your service manager so it restarts at logon")
-}
-
-func defaultRunnerServiceHost(configPath string) (service.Host, error) {
+func defaultRunnerServiceHost(configPath string) (runnerservice.Host, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return service.Host{}, fmt.Errorf("resolve the home directory the service is installed under: %w", err)
+		return runnerservice.Host{}, fmt.Errorf("resolve the home directory the service is installed under: %w", err)
 	}
 	configHome := os.Getenv("XDG_CONFIG_HOME")
 	if configHome == "" {
@@ -435,9 +622,9 @@ func defaultRunnerServiceHost(configPath string) (service.Host, error) {
 	}
 	root, err := paths.DefaultPaths()
 	if err != nil {
-		return service.Host{}, err
+		return runnerservice.Host{}, err
 	}
-	return service.Host{
+	return runnerservice.Host{
 		GOOS:       runnerServiceGOOS,
 		Home:       home,
 		ConfigHome: configHome,
@@ -445,7 +632,7 @@ func defaultRunnerServiceHost(configPath string) (service.Host, error) {
 		ConfigPath: configPath,
 		LogPath:    filepath.Join(root.Root, "runner.log"),
 		UID:        os.Getuid(),
-		Exec:       service.DefaultExec,
+		Exec:       runnerservice.DefaultExec,
 	}, nil
 }
 
@@ -470,4 +657,27 @@ func errRunnerBinaryMissing() error {
 		"Install it with `go install github.com/sparkwing-dev/sparkwing/cmd/%s@latest` or from the release assets, "+
 		"then run this command again; `--no-service` writes the config without it",
 		runnerBinaryName, runnerBinaryName)
+}
+
+func cleanupNewRunnerService(host runnerservice.Host, path string) error {
+	published, statErr := os.Lstat(path)
+	_, err := runnerservice.Uninstall(context.Background(), host)
+	if err == nil {
+		return nil
+	}
+	if statErr != nil {
+		return errors.Join(err, statErr)
+	}
+	current, statErr := os.Lstat(path)
+	if errors.Is(statErr, os.ErrNotExist) {
+		return err
+	}
+	if statErr != nil {
+		return errors.Join(err, statErr)
+	}
+	// safety: manager failure must not strand a new file, but a replacement belongs to another writer.
+	if !current.Mode().IsRegular() || !os.SameFile(published, current) {
+		return errors.Join(err, fmt.Errorf("runner service file changed during failed enrollment cleanup: %s", path))
+	}
+	return errors.Join(err, os.Remove(path))
 }

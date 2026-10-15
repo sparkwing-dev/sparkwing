@@ -10,8 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -21,12 +19,11 @@ const hereHeartbeat = 5 * time.Second
 
 func checkHereFlags(flags triggerFlags) error {
 	switch {
-	case flags.runner == "" && flags.reason != "":
+	case flags.runner != hereRunnerFlag && flags.reason != "":
 		return errors.New("--reason is recorded only with --runner here")
-	case flags.runner == "":
-		return nil
 	case flags.runner != hereRunnerFlag:
-		return fmt.Errorf("--runner takes %q (start a one-shot runner on this machine); got %q", hereRunnerFlag, flags.runner)
+		return nil
+
 	case strings.TrimSpace(flags.reason) == "":
 		return errors.New("--runner here needs --reason TEXT, which the run records")
 	case flags.detach:
@@ -54,7 +51,7 @@ func refuseUncommittedCheckout() error {
 // safety: a pinned run no other runner may take would wait forever once this
 // process stops hosting it, so an interrupt first asks the controller to cancel
 // it and only a second one leaves it.
-func hostAndFollowHere(prof *profile.Profile, pipeline string, resp *client.TriggerResponse) error {
+func hostAndFollowHere(prof *namedProfile, pipeline string, resp *client.TriggerResponse) error {
 	if resp.RunnerToken == "" {
 		return fmt.Errorf("pipeline trigger: the controller queued %s without a runner credential", resp.RunID)
 	}
@@ -88,8 +85,10 @@ func hostAndFollowHere(prof *profile.Profile, pipeline string, resp *client.Trig
 		<-hosted
 		return err
 	}
-	followErr := orchestrator.JobLogsRemoteWithTokens(followCtx, prof.ControllerURL(), prof.ControllerToken(),
-		resp.RunID, orchestrator.LogsOpts{Follow: true, Format: format, JSON: format == "json"}, os.Stdout)
+	followErr := followControllerRunLogs(followCtx, client.EngineOptions{
+		URL:    prof.ControllerURL(),
+		Bearer: func(context.Context) (string, error) { return prof.ControllerToken(), nil },
+	}, resp.RunID, format, os.Stdout)
 	<-hosted
 	return remoteFollowExit(context.Background(), prof, resp.RunID, followErr)
 }
@@ -103,11 +102,11 @@ func hostHereRun(ctx context.Context, controllerURL string, resp *client.Trigger
 	return hostTrigger(ctx, cli, trigger, controllerURL, resp.RunnerToken, hereHeartbeat)
 }
 
-func profileClient(prof *profile.Profile) *client.Client {
+func profileClient(prof *namedProfile) *client.Client {
 	return client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 }
 
-func cancelRunOnInterrupt(ctx context.Context, stop context.CancelFunc, prof *profile.Profile, runID string) {
+func cancelRunOnInterrupt(ctx context.Context, stop context.CancelFunc, prof *namedProfile, runID string) {
 	sigs := make(chan os.Signal, 2)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigs)

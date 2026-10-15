@@ -84,7 +84,7 @@ func readDescribeFile(path string) []nodeproto.PipelineDescription {
 		return nil
 	}
 	var doc nodeproto.DescribeDoc
-	if err := json.Unmarshal(raw, &doc); err != nil || doc.Pipelines == nil {
+	if err := (nodeproto.Reply{ID: "cache", OK: true, Result: raw}).Decode(&doc); err != nil || doc.Pipelines == nil {
 		return nil
 	}
 	return doc.Pipelines
@@ -131,16 +131,16 @@ func storeDescribe(sparkwingDir, key string, doc nodeproto.DescribeDoc) error {
 }
 
 func pipelineFlagsFromCache(ctx context.Context, sparkwingDir, pipelineName string) ([]nodeproto.ArgumentDescription, error) {
+	identity, err := pipelineIdentityAt(sparkwingDir, pipelineName)
+	if err != nil {
+		return nil, err
+	}
 	schemas, err := readDescribeCache(ctx, sparkwingDir)
 	if err != nil {
 		return nil, err
 	}
-	for _, s := range schemas {
-		if s.Name == pipelineName {
-			return s.Args, nil
-		}
-	}
-	return nil, nil
+	schema, err := boundPipelineSchema(schemas, identity)
+	return schema.Args, err
 }
 
 func describeEntry(ctx context.Context, sparkwingDir string, entry pipelineentry.Command) (nodeproto.DescribeDoc, error) {

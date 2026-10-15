@@ -18,18 +18,14 @@ func (s *EngineController) TransitionJob(ctx context.Context, a capability.Autho
 	if err != nil {
 		return controllerwire.Applied{}, err
 	}
-	change := store.NodeTransition{
-		Ref: store.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID},
-		To:  store.NodeState(body.To), Cause: store.TransitionCause(body.Cause), Actor: engineActor(a),
-		Extra: store.TransitionExtra{RetryAt: body.RetryAt},
-	}
-	if body.Result != nil {
-		masked, err := engineMaskedError(body.Result.Error)
-		if err != nil {
+	if body.Result != nil && body.Result.Failure != nil {
+		if _, err := engineMaskedError(body.Result.Failure.Error); err != nil {
 			return controllerwire.Applied{}, err
 		}
-		change.Extra.Result = &store.NodeResult{Outcome: store.NodeState(body.Result.Outcome), Reason: body.Result.Reason,
-			MaskedError: masked, ExitCode: body.Result.ExitCode, OutputRecord: body.Result.Output, ManifestRecord: body.Result.Manifest}
+	}
+	change, err := nodeTransitionForStore(a, body)
+	if err != nil {
+		return controllerwire.Applied{}, err
 	}
 	applied, err := tenant.TransitionNode(ctx, change)
 	return appliedResponse(applied), engineLookupError(err)
@@ -38,7 +34,7 @@ func (s *EngineController) TransitionJob(ctx context.Context, a capability.Autho
 // Finish ends the run and executable owner in one transaction. Publication uses
 // its separate store edge and never supplies an executable owner lease.
 func (s *EngineController) Finish(ctx context.Context, a capability.Authorized, body controllerwire.FinishRequest) (controllerwire.Applied, error) {
-	masked, err := engineMaskedError(body.Error)
+	request, err := finishForStore(a, body)
 	if err != nil {
 		return controllerwire.Applied{}, err
 	}
@@ -46,14 +42,11 @@ func (s *EngineController) Finish(ctx context.Context, a capability.Authorized, 
 	if err != nil {
 		return controllerwire.Applied{}, err
 	}
-	change := store.RunTransition{RunID: a.Target.RunID, To: store.RunState(body.Outcome), Actor: engineActor(a),
-		Cause: store.RunFinish, Reason: body.Reason, MaskedError: masked}
 	var applied store.Applied
-	if a.Access.Credential == capability.CredentialPublisher {
-		change.Cause = store.RunPublish
-		applied, err = tenant.TransitionRun(ctx, change)
+	if request.Transition.Cause == store.RunPublish {
+		applied, err = tenant.TransitionRun(ctx, request.Transition)
 	} else {
-		applied, err = tenant.FinishRunAndUnit(ctx, store.FinishRunRequest{Transition: change, Unit: change.Actor.Owner})
+		applied, err = tenant.FinishRunAndUnit(ctx, request)
 	}
 	return appliedResponse(applied), engineLookupError(err)
 }
@@ -119,4 +112,39 @@ func engineMaskedError(failure *apierr.Error) (string, error) {
 		return "", invalidEngineBody("result error requires a code and bounded masked message")
 	}
 	return failure.Message, nil
+}
+
+func nodeTransitionForStore(a capability.Authorized, body controllerwire.JobTransitionRequest) (store.NodeTransition, error) {
+	if a.Target.RunID == "" || a.Target.NodeID == "" {
+		return store.NodeTransition{}, invalidEngineBody("transition requires a job")
+	}
+	change := store.NodeTransition{
+		Ref: store.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID},
+		To:  store.NodeState(body.To), Cause: store.TransitionCause(body.Cause), Actor: engineActor(a),
+		SourceAttempt: body.SourceAttempt, Extra: store.TransitionExtra{RetryAt: body.RetryAt},
+	}
+	if result := body.Result; result != nil {
+		change.Extra.Result = &store.NodeResult{Outcome: store.NodeState(result.Outcome), Reason: result.Reason,
+			ExitCode: result.ExitCode, OutputRecord: result.Output, ManifestRecord: result.Manifest, Failure: result.Failure}
+		if result.Failure != nil && result.Failure.Error != nil {
+			change.Extra.Result.MaskedError = result.Failure.Error.Message
+		}
+	}
+	return change, nil
+}
+
+func finishForStore(a capability.Authorized, body controllerwire.FinishRequest) (store.FinishRunRequest, error) {
+	masked, err := engineMaskedError(body.Error)
+	if err != nil {
+		return store.FinishRunRequest{}, err
+	}
+	if a.Target.RunID == "" {
+		return store.FinishRunRequest{}, invalidEngineBody("finish requires a run")
+	}
+	change := store.RunTransition{RunID: a.Target.RunID, To: store.RunState(body.Outcome), Actor: engineActor(a),
+		Cause: store.RunFinish, Reason: body.Reason, MaskedError: masked}
+	if a.Access.Credential == capability.CredentialPublisher {
+		change.Cause = store.RunPublish
+	}
+	return store.FinishRunRequest{Transition: change, Unit: change.Actor.Owner}, nil
 }

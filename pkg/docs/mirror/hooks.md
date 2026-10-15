@@ -51,7 +51,7 @@ pipelines:
       push:
         branches: [main] # documents the intended GitHub event
     guards:
-      require: [git:branch=main]
+      when: [git:branch=main]
 ```
 
 The literal name must match the checked-out head. For pull requests that is
@@ -131,9 +131,9 @@ sparkwing run build-deploy                                  # local execution
 sparkwing pipeline trigger build-deploy --profile prod      # remote dispatch
 ```
 
-`sparkwing cluster triggers list --profile prod` surfaces pending / claimed /
-done triggers on the controller; `sparkwing cluster triggers get --id ...`
-inspects one. To fire a fresh trigger (the sparkwing equivalent of
+`sparkwing runs list --profile prod` lists controller runs.
+`sparkwing runs status --run RUN --profile prod` reads one run's safe display
+projection, including its jobs and attempts. To fire a fresh trigger (the sparkwing equivalent of
 `gh workflow run`), use `sparkwing pipeline trigger <pipeline> --profile PROF`.
 
 ## Git hooks
@@ -154,7 +154,7 @@ Then install the hooks once per checkout:
 ```bash
 sparkwing pipeline hooks install     # writes .git/hooks/pre-commit, pre-push, post-commit
 sparkwing pipeline hooks status      # report declared, installed, and missing hooks
-sparkwing pipeline hooks status --all      # report which registered repos git gates at all
+sparkwing pipeline hooks status --all-repos      # report which registered repos git gates at all
 sparkwing pipeline hooks uninstall   # remove sparkwing-managed hooks only
 ```
 
@@ -207,7 +207,7 @@ through a forwarder in each repository's own hook directory, so `prepare-commit-
 and friends still fire, and a repository is never asked to choose between its
 gate and the machine's hooks.
 
-Two failures follow from breaking the rule, and `hooks status --all` names both:
+Two failures follow from breaking the rule, and `hooks status --all-repos` names both:
 a repository whose hooks are **shadowed** by the global path holds a full set of
 gates and runs none, and one whose `core.hooksPath` points at a **sibling
 repository** runs that repository's gates instead of its own.
@@ -259,13 +259,13 @@ to restore them.
 
 ### Which repositories are gated at all
 
-One repository at a time is how a repository gets forgotten. `hooks status --all`
+One repository at a time is how a repository gets forgotten. `hooks status --all-repos`
 answers for every checkout in the local registry at once:
 
 ```bash
-sparkwing pipeline hooks status --all            # every registered repo, classified
-sparkwing pipeline hooks status --all --ungated  # just the ones accepting ungated commits
-sparkwing pipeline hooks install --fleet   # arm all of them
+sparkwing pipeline hooks status --all-repos            # every registered repo, classified
+sparkwing pipeline hooks status --all-repos --ungated  # just the ones accepting ungated commits
+sparkwing pipeline hooks install --all-repos   # arm all of them
 ```
 
 Each repository gets one state:
@@ -330,7 +330,7 @@ nothing and refuses everything. Only a commit settles it.
 
 ```bash
 sparkwing pipeline hooks status --prove            # this repo: make the gate refuse a commit
-sparkwing pipeline hooks status --prove --fleet    # every registered repo
+sparkwing pipeline hooks status --prove --all-repos    # every registered repo
 ```
 
 `fire` stages a file and commits it with the gate told to refuse, then reports
@@ -342,7 +342,7 @@ HEAD are untouched whatever the gate does.
 
 `fire` settles the pre-commit gate only. A pre-push gate needs a remote to fire
 against, so it is left to the push that exercises it, and a repository that
-declares no pre-commit trigger has nothing for `fire` to prove -- `--fleet`
+declares no pre-commit trigger has nothing for `fire` to prove -- `--all-repos`
 counts it apart from the repositories whose gate refused rather than among
 them.
 
@@ -362,10 +362,10 @@ variable that skipped a gate would be a bypass with an environment variable for
 a key.
 
 Ungated means a hook that can refuse work does not fire. Only `pre-commit` and
-`pre-push` can, so those are the hooks `--ungated`, `doctor` and the `--fleet`
+`pre-push` can, so those are the hooks `--ungated`, `doctor` and the `--all-repos`
 summary count: a repository whose only missing hook is `post-commit` loses a
 notification rather than a gate, and one that declares no blocking hook has no
-gate to arm -- `--fleet` counts it apart from the repositories it armed rather
+gate to arm -- `--all-repos` counts it apart from the repositories it armed rather
 than among them, because a sweep that reports it as armed reports a gated
 fleet while every commit in that repository still goes unchecked.
 
@@ -374,7 +374,7 @@ The list is the machine's repo registry -- the `repos` section of
 writes to and which can name
 `fallback_paths` directories to scan for `*/.sparkwing/`. That is the whole
 extent of the survey: a checkout the registry does not reach is not surveyed,
-not swept by `--fleet`, and not reported by `doctor`. Register it, or add the
+not swept by `--all-repos`, and not reported by `doctor`. Register it, or add the
 directory it lives under to `fallback_paths`, before reading a clean survey as
 a clean machine.
 

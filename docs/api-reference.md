@@ -1,239 +1,256 @@
-<!-- GENERATED from the route registrations in pkg/controller/server.go by internal/apiref. Do not edit by hand; regenerate with `bash bin/gen-api-docs.sh`. -->
+<!-- GENERATED from internal/capability.Routes by internal/apiref. Do not edit by hand; regenerate with go run ./internal/apiref > docs/api-reference.md. -->
 # HTTP API reference
 
-Every route the controller registers, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` satisfies any scope check on legacy routes. `public` routes run with no bearer check (the GitHub and Stripe webhooks require their HMAC signatures); `authenticated` routes require live identity under their credential policy and no named grant. `claim` routes answer the claim token of one node claim, and only for that claim's own run and node. `operator` routes require an operator-console session through the shared route policy and CSRF proof for writes; no bearer reaches them.
+<!-- design:begin -->
 
-## Controller
+The shared capability policy defines the controller HTTP and local API socket contract. Each row retains its audience, ownership lookup, authentication, retry policy and complete access alternatives. See [Controller HTTP API](api.md) for request and response contracts and [Authentication](auth.md) for credential issuance. Native controller bindings require separate integration evidence.
 
-| Method | Path | Scope |
-|---|---|---|
-| `GET` | `/.well-known/jwks.json` | `public` |
-| `GET` | `/.well-known/openid-configuration` | `public` |
-| `GET` | `/api/v1/agents` | `runs.read` |
-| `GET` | `/api/v1/approvals/pending` | `runs.read` |
-| `POST` | `/api/v1/auth/logout` | `browser_flow_csrf_nonce` |
-| `GET` | `/api/v1/auth/session` | `browser_flow_csrf_nonce` |
-| `GET` | `/api/v1/auth/whoami` | `authenticated` |
-| `GET` | `/api/v1/capabilities` | `public` |
-| `GET` | `/api/v1/capacity/profiles` | `runs.read` |
-| `GET` | `/api/v1/capacity/profiles/explain` | `runs.read` |
-| `POST` | `/api/v1/claims/exchange` | `claim.exchange` |
-| `POST` | `/api/v1/claims/{claim}/heartbeat` | `node.report` or `expansion.submit` |
-| `POST` | `/api/v1/concurrency/{key}/acquire` | `claim` or `runs.state` |
-| `POST` | `/api/v1/concurrency/{key}/cancel-waiter` | `claim` or `runs.state` |
-| `POST` | `/api/v1/concurrency/{key}/force-release` | `admin` |
-| `POST` | `/api/v1/concurrency/{key}/heartbeat` | `claim` or `runs.state` |
-| `GET` | `/api/v1/concurrency/{key}/holder` | `claim` or `runs.state` |
-| `POST` | `/api/v1/concurrency/{key}/release` | `claim` or `runs.state` |
-| `GET` | `/api/v1/concurrency/{key}/resolve` | `claim` or `runs.state` |
-| `GET` | `/api/v1/concurrency/{key}/state` | `claim` or `runs.read` |
-| `GET` | `/api/v1/credits` | `runs.read` |
-| `GET` | `/api/v1/credits/history` | `runs.read` |
-| `GET` | `/api/v1/credits/settings` | `runs.read` |
-| `GET` | `/api/v1/crons` | `runs.read` |
-| `DELETE` | `/api/v1/crons/repos` | `runs.control` |
-| `PUT` | `/api/v1/crons/repos` | `runs.control` |
-| `GET` | `/api/v1/crons/{id}` | `runs.read` |
-| `POST` | `/api/v1/crons/{id}/disarm` | `runs.control` |
-| `DELETE` | `/api/v1/crons/{id}/override` | `runs.control` |
-| `PUT` | `/api/v1/crons/{id}/override` | `runs.control` |
-| `POST` | `/api/v1/crons/{id}/pause` | `runs.control` |
-| `POST` | `/api/v1/crons/{id}/resume` | `runs.control` |
-| `POST` | `/api/v1/crons/{id}/run` | `runs.control` |
-| `GET` | `/api/v1/data/capabilities` | `authenticated` |
-| `POST` | `/api/v1/data/commit` | `data.write` or `data.write` |
-| `POST` | `/api/v1/data/depcache/lookup` | `data.read` or `data.read` or `data.read` |
-| `POST` | `/api/v1/data/download` | `data.read` or `data.read` or `data.read` |
-| `POST` | `/api/v1/data/has-many` | `data.read` or `data.read` or `data.read` |
-| `POST` | `/api/v1/data/memo/copy` | `data.read + data.write` |
-| `POST` | `/api/v1/data/memo/lookup` | `data.read` or `data.read` or `data.read` |
-| `GET` | `/api/v1/data/objects/{key...}` | `public` |
-| `GET` | `/api/v1/data/records` | `data.read` or `data.read` or `data.read` |
-| `POST` | `/api/v1/data/records` | `data.write` or `data.write` |
-| `POST` | `/api/v1/data/upload` | `data.write` or `data.write` |
-| `PUT` | `/api/v1/data/uploads/{upload}` | `public` |
-| `GET` | `/api/v1/health` | `public` |
-| `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |
-| `POST` | `/api/v1/launcher/claim` | `claims.launch` |
-| `POST` | `/api/v1/launcher/sync` | `claims.launch` |
-| `PUT` | `/api/v1/log-segments/{key...}` | `public` |
-| `DELETE` | `/api/v1/me` | `authenticated` |
-| `GET` | `/api/v1/me` | `authenticated` |
-| `POST` | `/api/v1/me/active-team` | `authenticated` |
-| `GET` | `/api/v1/me/identities` | `authenticated` |
-| `DELETE` | `/api/v1/me/identities/{provider}` | `authenticated` |
-| `GET` | `/api/v1/me/team-deletions` | `authenticated` |
-| `DELETE` | `/api/v1/operator/accounts/{account}` | `operator` |
-| `PUT` | `/api/v1/operator/credits/settings` | `operator` |
-| `DELETE` | `/api/v1/operator/github-app/installations/{installation}` | `operator` |
-| `GET` | `/api/v1/operator/limits` | `operator.limits` or `operator` |
-| `PUT` | `/api/v1/operator/limits` | `operator.limits` or `operator` |
-| `GET` | `/api/v1/operator/object-store` | `operator.object_store` or `operator` |
-| `GET` | `/api/v1/operator/object-store/breaker` | `operator.object_store` or `operator` |
-| `PUT` | `/api/v1/operator/object-store/quotas/{team}` | `operator.object_store` or `operator` |
-| `PUT` | `/api/v1/operator/object-store/quotas/{team}/allowance` | `operator.object_store` or `operator` |
-| `POST` | `/api/v1/operator/object-store/reset-breaker` | `operator.object_store` or `operator` |
-| `PUT` | `/api/v1/operator/object-store/settings` | `operator.object_store` or `operator` |
-| `POST` | `/api/v1/operator/runners/{runner}/metered` | `operator` |
-| `GET` | `/api/v1/operator/signups` | `operator.limits` or `operator` |
-| `PUT` | `/api/v1/operator/signups` | `operator.limits` or `operator` |
-| `GET` | `/api/v1/operator/teams` | `operator` |
-| `DELETE` | `/api/v1/operator/teams/{team}` | `operator` |
-| `GET` | `/api/v1/operator/teams/{team}` | `operator` |
-| `POST` | `/api/v1/operator/teams/{team}/freeze` | `operator` |
-| `POST` | `/api/v1/operator/teams/{team}/grants` | `operator` |
-| `POST` | `/api/v1/operator/teams/{team}/trust` | `operator` |
-| `POST` | `/api/v1/operator/teams/{team}/unfreeze` | `operator` |
-| `GET` | `/api/v1/operator/tokens` | `operator.tokens` or `operator` |
-| `POST` | `/api/v1/operator/tokens` | `operator.tokens` or `operator` |
-| `DELETE` | `/api/v1/operator/tokens/{token}` | `operator.tokens` or `operator` |
-| `GET` | `/api/v1/operator/tokens/{token}` | `operator.tokens` or `operator` |
-| `POST` | `/api/v1/operator/tokens/{token}/rotate` | `operator.tokens` or `operator` |
-| `GET` | `/api/v1/operator/waitlist` | `operator` |
-| `POST` | `/api/v1/operator/waitlist/approve` | `operator` |
-| `GET` | `/api/v1/pipelines` | `runs.read` |
-| `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
-| `GET` | `/api/v1/pipelines/{name}/sizing` | `runs.read` or `source.read` |
-| `POST` | `/api/v1/pipelines/{name}/sizing/contention` | `node.report` |
-| `POST` | `/api/v1/pipelines/{name}/sizing/observations` | `node.report` |
-| `PUT` | `/api/v1/pipelines/{name}/sizing/pin` | `node.report` |
-| `POST` | `/api/v1/pipelines/{name}/sizing/waits` | `node.report` |
-| `GET` | `/api/v1/queue` | `runs.read` |
-| `POST` | `/api/v1/runners` | `team.admin` |
-| `POST` | `/api/v1/runners/claim` | `nodes.claim` or `triggers.claim` |
-| `GET` | `/api/v1/runners/github` | `runs.read` |
-| `POST` | `/api/v1/runners/github` | `team.admin` |
-| `POST` | `/api/v1/runners/github/exchange` | `github_actions_oidc` |
-| `DELETE` | `/api/v1/runners/github/{repository}` | `team.admin` |
-| `GET` | `/api/v1/runs` | `runs.read` |
-| `POST` | `/api/v1/runs` | `runs.write` or `children.start` |
-| `GET` | `/api/v1/runs/grep` | `logs.read` |
-| `DELETE` | `/api/v1/runs/{id}` | `admin` |
-| `GET` | `/api/v1/runs/{id}/approvals` | `runs.read` |
-| `GET` | `/api/v1/runs/{id}/approvals/{nodeID}` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/approvals/{nodeID}` | `approvals.write` |
-| `POST` | `/api/v1/runs/{id}/approvals/{nodeID}/request` | `admin` |
-| `GET` | `/api/v1/runs/{id}/attempts` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/children` | `claim` |
-| `GET` | `/api/v1/runs/{id}/children/{childID}` | `claim` |
-| `GET` | `/api/v1/runs/{id}/children/{childID}/nodes/{nodeID}/output` | `claim` |
-| `GET` | `/api/v1/runs/{id}/debug-pauses` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/debug-pauses` | `admin` |
-| `GET` | `/api/v1/runs/{id}/events` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/events` | `runs.state` |
-| `GET` | `/api/v1/runs/{id}/events/stream` | `runs.read` |
-| `GET` | `/api/v1/runs/{id}/logs` | `logs.read` |
-| `GET` | `/api/v1/runs/{id}/logs/search` | `logs.read` |
-| `GET` | `/api/v1/runs/{id}/logs/{node}` | `logs.read` |
-| `GET` | `/api/v1/runs/{id}/logs/{node}/completeness` | `logs.read` |
-| `GET` | `/api/v1/runs/{id}/logs/{node}/stream` | `logs.read` |
-| `POST` | `/api/v1/runs/{id}/nodes` | `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/activity` | `claim` or `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/attempt` | `claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim/input` | `claim` |
-| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/debug-pause` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/deps` | `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-finish` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-start` | `claim` or `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finish` | `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/heartbeat` | `claim` or `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/log-manifest` | `claim` or `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/log-segments` | `claim` or `runs.state` |
-| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | `runs.read` or `logs.read` or `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | `claim` or `runs.state` |
-| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/logs/stream` | `runs.read` or `logs.read` or `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/mark-ready` | `runs.state` |
-| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `runs.read` or `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `claim` or `nodes.claim` |
-| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/output` | `claim` or `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/output-commit` | `claim` or `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/output-upload` | `claim` or `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/release` | `runs.control` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/start` | `claim` or `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/usage` | `claim` or `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/oidc-token` | `claim` or `nodes.claim` or `triggers.claim` |
-| `GET` | `/api/v1/runs/{id}/paused` | `runs.read` |
-| `GET` | `/api/v1/runs/{id}/pending-triggers` | `triggers.read` or `nodes.claim` or `triggers.claim` |
-| `GET` | `/api/v1/runs/{id}/receipt` | `runs.read` |
-| `GET` | `/api/v1/runs/{id}/steps` | `runs.read` |
-| `GET` | `/api/v1/runs/{run}` | `runs.read` or `source.read` or `trigger.host` |
-| `POST` | `/api/v1/runs/{run}/cancel` | `runs.control` |
-| `POST` | `/api/v1/runs/{run}/claim` | `trigger.host` or `triggers.claim` |
-| `POST` | `/api/v1/runs/{run}/finish` | `runs.state` or `data.write` |
-| `POST` | `/api/v1/runs/{run}/heartbeat` | `trigger.host` |
-| `GET` | `/api/v1/runs/{run}/jobs` | `runs.read` or `trigger.host` |
-| `GET` | `/api/v1/runs/{run}/jobs/{job}` | `runs.read` or `data.read` or `trigger.host` |
-| `POST` | `/api/v1/runs/{run}/jobs/{job}/annotations` | `node.report` or `node.report` or `data.write` |
-| `POST` | `/api/v1/runs/{run}/jobs/{job}/cancel` | `runs.control` or `trigger.host` |
-| `POST` | `/api/v1/runs/{run}/jobs/{job}/expansion` | `expansion.submit` |
-| `GET` | `/api/v1/runs/{run}/jobs/{job}/failure` | `data.read` |
-| `POST` | `/api/v1/runs/{run}/jobs/{job}/heartbeat` | `node.report` or `node.report` |
-| `POST` | `/api/v1/runs/{run}/jobs/{job}/reconcile` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/annotations` | `node.report` or `node.report` or `data.write` |
-| `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/finish` | `node.report` or `node.report` or `data.write` |
-| `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/skip` | `node.report` or `node.report` or `data.write` |
-| `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/start` | `node.report` or `node.report` or `data.write` |
-| `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/summary` | `node.report` or `node.report` or `data.write` |
-| `POST` | `/api/v1/runs/{run}/jobs/{job}/summary` | `node.report` or `node.report` or `data.write` |
-| `POST` | `/api/v1/runs/{run}/jobs/{job}/transition` | `node.result` or `node.result` or `data.write` |
-| `POST` | `/api/v1/runs/{run}/plan` | `node.result` or `data.write` |
-| `POST` | `/api/v1/runs/{run}/retry` | `runs.control` |
-| `GET` | `/api/v1/runs/{run}/snapshot` | `trigger.host` |
-| `POST` | `/api/v1/runs/{run}/source-credential` | `source.read` |
-| `GET` | `/api/v1/secrets` | `runs.read` or `team.admin` |
-| `POST` | `/api/v1/secrets` | `team.admin` |
-| `POST` | `/api/v1/secrets/rotate` | `team.admin` |
-| `DELETE` | `/api/v1/secrets/{name}` | `team.admin` |
-| `GET` | `/api/v1/secrets/{name}` | `secrets.read` or `team.admin` or `secrets.release` |
-| `GET` | `/api/v1/services` | `authenticated` |
-| `GET` | `/api/v1/storage` | `runs.read` |
-| `DELETE` | `/api/v1/team` | `team.admin` |
-| `PATCH` | `/api/v1/team` | `team.admin` |
-| `GET` | `/api/v1/team/billing` | `runs.read` |
-| `PUT` | `/api/v1/team/billing/budget` | `team.admin` |
-| `POST` | `/api/v1/team/billing/card` | `team.admin` |
-| `POST` | `/api/v1/team/billing/checkout` | `team.admin` |
-| `POST` | `/api/v1/team/billing/pay` | `team.admin` |
-| `GET` | `/api/v1/team/build-trust` | `runs.read` |
-| `PUT` | `/api/v1/team/build-trust` | `team.admin` |
-| `GET` | `/api/v1/team/git-credentials` | `runs.read` |
-| `POST` | `/api/v1/team/git-credentials` | `team.admin` |
-| `GET` | `/api/v1/team/git-credentials/releases` | `team.admin` |
-| `DELETE` | `/api/v1/team/git-credentials/{host}` | `team.admin` |
-| `POST` | `/api/v1/team/git-credentials/{host}/confirm` | `team.admin` |
-| `GET` | `/api/v1/team/github-app` | `runs.read` |
-| `DELETE` | `/api/v1/team/github-app/automation` | `team.admin` |
-| `GET` | `/api/v1/team/github-app/automation` | `runs.read` |
-| `PUT` | `/api/v1/team/github-app/automation` | `team.admin` |
-| `GET` | `/api/v1/team/github-app/extra-repos` | `runs.read` |
-| `PUT` | `/api/v1/team/github-app/extra-repos` | `team.admin` |
-| `DELETE` | `/api/v1/team/github-app/installations/{installation_id}` | `team.admin` |
-| `GET` | `/api/v1/team/github-app/installations/{installation_id}/repositories` | `runs.read` |
-| `DELETE` | `/api/v1/team/github-app/triggers` | `team.admin` |
-| `GET` | `/api/v1/team/github-app/triggers` | `runs.read` |
-| `PUT` | `/api/v1/team/github-app/triggers` | `team.admin` |
-| `GET` | `/api/v1/team/invitations` | `team.admin` |
-| `POST` | `/api/v1/team/invitations` | `team.admin` |
-| `DELETE` | `/api/v1/team/invitations/{id}` | `team.admin` |
-| `GET` | `/api/v1/team/members` | `runs.read` |
-| `DELETE` | `/api/v1/team/members/{account}` | `runs.read` |
-| `PATCH` | `/api/v1/team/members/{account}` | `team.admin` |
-| `POST` | `/api/v1/teams` | `authenticated` |
-| `GET` | `/api/v1/tokens` | `runs.read` |
-| `POST` | `/api/v1/tokens` | `runs.read` |
-| `DELETE` | `/api/v1/tokens/{token}` | `runs.read` |
-| `GET` | `/api/v1/tokens/{token}` | `runs.read` |
-| `PUT` | `/api/v1/tokens/{token}/git-credentials` | `authenticated` |
-| `POST` | `/api/v1/tokens/{token}/rotate` | `runs.read` |
-| `GET` | `/api/v1/trends` | `runs.read` |
-| `GET` | `/api/v1/triggers` | `triggers.read` |
-| `POST` | `/api/v1/triggers` | `runs.write` |
-| `GET` | `/api/v1/triggers/spawned-child` | `triggers.read` |
-| `GET` | `/api/v1/triggers/{id}` | `triggers.read` or `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/triggers/{id}/done` | `triggers.claim` |
-| `POST` | `/api/v1/triggers/{id}/heartbeat` | `triggers.claim` |
-| `GET` | `/metrics` | `admin` |
-| `POST` | `/webhooks/github-app` | `public` |
-| `POST` | `/webhooks/stripe` | `public` |
+An access alternative is `credential / grants / binding / liveness`. Every grant joined with `+` is required. Alternatives separated by a line break stand alone. Grants, bindings and liveness exceptions cannot be combined across alternatives. External authentication has no capability alternative.
 
+The owner names the server lookup. Bindings and current authority constrain every caller, including deployment administrators and local peers. An operator-console session is separate from a deployment-admin capability. `safe`, `exact_body` and `idempotency_key` identify eligible transport retries. A client may further refuse replay when a response carries one-time authority. `never` forbids automatic replay.
+
+| Method | Path | Audience | Owner | Authentication | Retry | Access alternatives |
+|---|---|---|---|---|---|---|
+| `GET` | `/api/v1/runs/{run}/snapshot` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `sensitive` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/reconcile` | `controller` | `run` | `capability` | `never` | `awarded_or_delegated_claim` / `nodes.claim` / `runOfTrigger` / `sensitive` |
+| `POST` | `/api/v1/runs` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `runs.write` / `bodyNamesRun` / `credential`<br>`awarded_or_delegated_claim` / `children.start` / `bodyNamesRun` / `sensitive` |
+| `GET` | `/api/v1/runs` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/runs/grep` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `logs.read` / `none` / `credential` |
+| `GET` | `/api/v1/runs/{run}` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `source.read` / `run` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `run` / `sensitive` |
+| `DELETE` | `/api/v1/runs/{run}` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `POST` | `/api/v1/runs/{run}/cancel` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/cancel` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential`<br>`awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `reporting` |
+| `GET` | `/api/v1/runs/{run}/jobs/{job}/failure` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `data.read` / `readSet` / `sensitive` |
+| `POST` | `/api/v1/runs/{run}/retry` | `controller` | `run` | `capability` | `idempotency_key` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `GET` | `/api/v1/runs/{run}/receipt` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `source.read` / `run` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `run` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/attempts` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `source.read` / `run` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `run` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/steps` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `source.read` / `run` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `run` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/events` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `source.read` / `run` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `run` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/events/stream` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `source.read` / `run` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `run` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/approvals` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `source.read` / `run` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `run` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/debug-pauses` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `source.read` / `run` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `run` / `sensitive` |
+| `POST` | `/api/v1/runs/{run}/debug-pauses` | `controller` | `run` | `capability` | `idempotency_key` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `GET` | `/api/v1/runs/{run}/jobs` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `trigger.host` / `run` / `sensitive` |
+| `POST` | `/api/v1/runs/{run}/plan` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.result` / `planOwner` / `result`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/runs/{run}/finish` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `runs.state` / `runOfTrigger` / `result`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/runs/{run}/heartbeat` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `reporting` |
+| `POST` | `/api/v1/runs/{run}/claim` | `controller` | `run` | `capability` | `never` | `here_award` / `trigger.host` / `runOfTrigger` / `hereClaim`<br>`any_live` / `triggers.claim` / `claimSelection` / `credential` |
+| `POST` | `/api/v1/runs/{run}/source-credential` | `controller` | `run` | `capability` | `never` | `awarded_or_delegated_claim` / `source.read` / `source` / `sensitive` |
+| `POST` | `/api/v1/runs/{run}/oidc-token` | `controller` | `run` | `capability` | `never` | `awarded_or_delegated_claim` / `oidc.mint` / `run` / `sensitive` |
+| `POST` | `/api/v1/runs/{run}/children` | `controller` | `run` | `capability` | `idempotency_key` | `awarded_or_delegated_claim` / `children.start` / `bodyNamesRun` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/children/{child}` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `children.start` / `childOfBoundNode` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/children/{child}/jobs/{job}/output` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `refs.read` / `childOfBoundNode` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/logs` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `logs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `trigger.host` / `run` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/logs/search` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `logs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `trigger.host` / `run` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/jobs/{job}` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `data.read` / `ownNode` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/jobs/{job}/attempts` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `data.read` / `ownNode` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/jobs/{job}/steps` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `data.read` / `ownNode` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/jobs/{job}/metrics` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `data.read` / `ownNode` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/jobs/{job}/debug-pause` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `data.read` / `ownNode` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/jobs/{job}/logs` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `logs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `data.read` / `ownNode` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/jobs/{job}/logs/stream` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `logs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `data.read` / `ownNode` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/jobs/{job}/logs/completeness` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `logs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `data.read` / `ownNode` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `sensitive` |
+| `GET` | `/api/v1/runs/{run}/jobs/{job}/output` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `data.read` / `readSet` / `sensitive`<br>`awarded_or_delegated_claim` / `data.read` / `readSet` / `expansion`<br>`awarded_or_delegated_claim` / `refs.read` / `readSet` / `sensitive`<br>`unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/transition` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.result` / `ownNode` / `result`<br>`awarded_or_delegated_claim` / `node.result` / `runOfTrigger` / `result`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/claim` | `controller` | `run` | `capability` | `never` | `awarded_or_delegated_claim` / `nodes.claim` / `runOfTrigger` / `sensitive` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/claim/input` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `data.read` / `ownNode` / `sensitive` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/heartbeat` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `node.report` / `ownNode` / `reporting`<br>`awarded_or_delegated_claim` / `node.report` / `runOfTrigger` / `reporting` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/expansion` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `expansion.submit` / `expansion` / `expansion` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/logs` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `ownNode` / `reporting`<br>`awarded_or_delegated_claim` / `node.report` / `runOfTrigger` / `reporting`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/metrics` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `ownNode` / `reporting`<br>`awarded_or_delegated_claim` / `node.report` / `runOfTrigger` / `reporting`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/usage` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `ownNode` / `reporting`<br>`awarded_or_delegated_claim` / `node.report` / `runOfTrigger` / `reporting`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/activity` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `ownNode` / `reporting`<br>`awarded_or_delegated_claim` / `node.report` / `runOfTrigger` / `reporting`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/annotations` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `ownNode` / `reporting`<br>`awarded_or_delegated_claim` / `node.report` / `runOfTrigger` / `reporting`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/summary` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `ownNode` / `reporting`<br>`awarded_or_delegated_claim` / `node.report` / `runOfTrigger` / `reporting`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/start` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `ownNode` / `reporting`<br>`awarded_or_delegated_claim` / `node.report` / `runOfTrigger` / `reporting`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/finish` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `ownNode` / `reporting`<br>`awarded_or_delegated_claim` / `node.report` / `runOfTrigger` / `reporting`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/skip` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `ownNode` / `reporting`<br>`awarded_or_delegated_claim` / `node.report` / `runOfTrigger` / `reporting`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/annotations` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `ownNode` / `reporting`<br>`awarded_or_delegated_claim` / `node.report` / `runOfTrigger` / `reporting`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/summary` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `ownNode` / `reporting`<br>`awarded_or_delegated_claim` / `node.report` / `runOfTrigger` / `reporting`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/log-segments` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `log.tail` / `ownNode` / `logTail`<br>`awarded_or_delegated_claim` / `log.tail` / `runOfTrigger` / `logTail`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/log-manifest` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `log.tail` / `ownNode` / `logTail`<br>`awarded_or_delegated_claim` / `log.tail` / `runOfTrigger` / `logTail`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/resume` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `GET` | `/api/v1/runs/{run}/approvals/{job}` | `controller` | `run` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `data.read` / `ownNode` / `sensitive`<br>`awarded_or_delegated_claim` / `trigger.host` / `runOfTrigger` / `sensitive` |
+| `POST` | `/api/v1/runs/{run}/approvals/{job}` | `controller` | `run` | `capability` | `idempotency_key` | `unbound_member_or_local` / `approvals.write` / `none` / `credential` |
+| `GET` | `/api/v1/approvals` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/pipelines` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/pipelines/{name}/latest` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `refs.read` / `readSet` / `sensitive` |
+| `GET` | `/api/v1/pipelines/{name}/sizing` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `source.read` / `pipelineOfBoundRun` / `sensitive` |
+| `PUT` | `/api/v1/pipelines/{name}/sizing/pin` | `controller` | `team` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `pipelineOfBoundRun` / `reporting` |
+| `POST` | `/api/v1/pipelines/{name}/sizing/observations` | `controller` | `team` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `pipelineOfBoundRun` / `reporting` |
+| `POST` | `/api/v1/pipelines/{name}/sizing/contention` | `controller` | `team` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `pipelineOfBoundRun` / `reporting` |
+| `POST` | `/api/v1/pipelines/{name}/sizing/waits` | `controller` | `team` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `node.report` / `pipelineOfBoundRun` / `reporting` |
+| `GET` | `/api/v1/sizing` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/sizing/explain` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/runners` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/runners/github` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/pools` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/schedules` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/schedules/{schedule}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/queue` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/queue/groups/{group}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`awarded_or_delegated_claim` / `node.report` / `slotOfBoundNode` / `reporting`<br>`awarded_or_delegated_claim` / `runs.state` / `slotOfBoundNode` / `reporting` |
+| `GET` | `/api/v1/trends` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/storage` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/credits` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/credits/history` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/credits/settings` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/team/billing` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/team/build-trust` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/team/git-credentials` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/team/github-app` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/team/github-app/installations/{installation}/repositories` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/team/github-app/triggers` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/team/github-app/automation` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/team/github-app/extra-repos` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/team/members` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `POST` | `/api/v1/runners` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `DELETE` | `/api/v1/runners/{runner}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `POST` | `/api/v1/runners/github` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `DELETE` | `/api/v1/runners/github/{repository}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `POST` | `/api/v1/pools/{pool}/rules` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `DELETE` | `/api/v1/pools/{pool}/rules/{rule}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `PUT` | `/api/v1/schedules/repos` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `DELETE` | `/api/v1/schedules/repos` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `PUT` | `/api/v1/schedules/{schedule}/override` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `DELETE` | `/api/v1/schedules/{schedule}/override` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `DELETE` | `/api/v1/schedules/{schedule}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `POST` | `/api/v1/schedules/{schedule}/pause` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `POST` | `/api/v1/schedules/{schedule}/resume` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `POST` | `/api/v1/schedules/{schedule}/run` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `PUT` | `/api/v1/queue/groups/{group}/priority` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `POST` | `/api/v1/queue/groups/{group}/force-release` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.control` / `none` / `credential` |
+| `POST` | `/api/v1/queue/groups/{group}/acquire` | `controller` | `team` | `capability` | `idempotency_key` | `awarded_or_delegated_claim` / `node.report` / `slotOfBoundNode` / `sensitive`<br>`awarded_or_delegated_claim` / `runs.state` / `slotOfBoundNode` / `sensitive` |
+| `POST` | `/api/v1/queue/groups/{group}/heartbeat` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `node.report` / `slotOfBoundNode` / `reporting`<br>`awarded_or_delegated_claim` / `runs.state` / `slotOfBoundNode` / `reporting` |
+| `POST` | `/api/v1/queue/groups/{group}/release` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `node.report` / `slotOfBoundNode` / `reporting`<br>`awarded_or_delegated_claim` / `runs.state` / `slotOfBoundNode` / `reporting` |
+| `POST` | `/api/v1/queue/groups/{group}/cancel-waiter` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `node.report` / `slotOfBoundNode` / `reporting`<br>`awarded_or_delegated_claim` / `runs.state` / `slotOfBoundNode` / `reporting` |
+| `GET` | `/api/v1/queue/groups/{group}/holder` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `node.report` / `slotOfBoundNode` / `reporting`<br>`awarded_or_delegated_claim` / `runs.state` / `slotOfBoundNode` / `reporting` |
+| `GET` | `/api/v1/queue/groups/{group}/resolve` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `node.report` / `slotOfBoundNode` / `sensitive`<br>`awarded_or_delegated_claim` / `runs.state` / `slotOfBoundNode` / `sensitive` |
+| `GET` | `/api/v1/tokens` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `POST` | `/api/v1/tokens` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `GET` | `/api/v1/tokens/{token}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `ownToken` / `credential` |
+| `DELETE` | `/api/v1/tokens/{token}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `ownToken` / `credential` |
+| `POST` | `/api/v1/tokens/{token}/rotate` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `runs.read` / `ownToken` / `credential` |
+| `PUT` | `/api/v1/tokens/{token}/git-credentials` | `controller` | `team` | `capability` | `safe` | `account_session` / `` / `machineOwner` / `credential` |
+| `GET` | `/api/v1/secrets` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `POST` | `/api/v1/secrets` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `GET` | `/api/v1/secrets/{name}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `secrets.read` / `none` / `credential`<br>`unbound_member_or_local` / `team.admin` / `none` / `credential`<br>`awarded_or_delegated_claim` / `secrets.release` / `declaredSecret` / `sensitive` |
+| `DELETE` | `/api/v1/secrets/{name}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `POST` | `/api/v1/secrets/rotate` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `PATCH` | `/api/v1/team` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `DELETE` | `/api/v1/team` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `PATCH` | `/api/v1/team/members/{account}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `GET` | `/api/v1/team/invitations` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `POST` | `/api/v1/team/invitations` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `DELETE` | `/api/v1/team/invitations/{invitation}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `PUT` | `/api/v1/team/build-trust` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `POST` | `/api/v1/team/git-credentials` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `POST` | `/api/v1/team/git-credentials/{host}/confirm` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `DELETE` | `/api/v1/team/git-credentials/{host}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `GET` | `/api/v1/team/git-credentials/releases` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `DELETE` | `/api/v1/team/github-app/installations/{installation}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `PUT` | `/api/v1/team/github-app/triggers` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `DELETE` | `/api/v1/team/github-app/triggers` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `PUT` | `/api/v1/team/github-app/automation` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `DELETE` | `/api/v1/team/github-app/automation` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `PUT` | `/api/v1/team/github-app/extra-repos` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `POST` | `/api/v1/team/billing/checkout` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `POST` | `/api/v1/team/billing/card` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `POST` | `/api/v1/team/billing/pay` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `PUT` | `/api/v1/team/billing/budget` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `DELETE` | `/api/v1/team/members/{account}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `selfOrTeamAdmin` / `credential` |
+| `GET` | `/api/v1/me` | `controller` | `account` | `capability` | `safe` | `account_session` / `` / `none` / `credential` |
+| `GET` | `/api/v1/me/team-deletions` | `controller` | `account` | `capability` | `safe` | `account_session` / `` / `none` / `credential` |
+| `POST` | `/api/v1/me/active-team` | `controller` | `account` | `capability` | `idempotency_key` | `account_session` / `` / `none` / `credential` |
+| `GET` | `/api/v1/me/identities` | `controller` | `account` | `capability` | `safe` | `account_session` / `` / `none` / `credential` |
+| `DELETE` | `/api/v1/me/identities/{provider}` | `controller` | `account` | `capability` | `safe` | `account_session` / `` / `none` / `credential` |
+| `POST` | `/api/v1/teams` | `controller` | `account` | `capability` | `idempotency_key` | `account_session` / `` / `none` / `credential` |
+| `POST` | `/api/v1/invitations/{invitation}/accept` | `controller` | `account` | `capability` | `idempotency_key` | `account_session` / `` / `none` / `credential` |
+| `GET` | `/api/v1/auth/whoami` | `controller` | `none` | `capability` | `safe` | `discovery` / `` / `none` / `credential` |
+| `GET` | `/api/v1/services` | `controller` | `team` | `capability` | `safe` | `discovery` / `` / `none` / `credential` |
+| `POST` | `/api/v1/runners/claim` | `controller` | `team` | `capability` | `never` | `any_live` / `nodes.claim` / `claimSelection` / `credential`<br>`any_live` / `triggers.claim` / `claimSelection` / `credential` |
+| `POST` | `/api/v1/launcher/claim` | `controller` | `deployment` | `capability` | `never` | `launcher_service` / `claims.launch` / `claimSelection` / `credential` |
+| `POST` | `/api/v1/launcher/sync` | `controller` | `deployment` | `capability` | `safe` | `launcher_service` / `claims.launch` / `claimSelection` / `credential` |
+| `POST` | `/api/v1/claims/exchange` | `controller` | `run` | `capability` | `never` | `awarded_or_delegated_claim` / `claim.exchange` / `run` / `sensitive` |
+| `POST` | `/api/v1/claims/{claim}/heartbeat` | `controller` | `run` | `capability` | `safe` | `awarded_or_delegated_claim` / `node.report` / `ownClaim` / `reporting`<br>`eval_unit` / `expansion.submit` / `ownEval` / `expansion` |
+| `POST` | `/api/v1/claims/{claim}/logs` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `log.tail` / `ownClaim` / `logTail`<br>`eval_unit` / `expansion.submit` / `ownEval` / `expansion` |
+| `POST` | `/api/v1/claims/{claim}/log-segments` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `log.tail` / `ownClaim` / `logTail`<br>`eval_unit` / `expansion.submit` / `ownEval` / `expansion` |
+| `POST` | `/api/v1/claims/{claim}/log-manifest` | `controller` | `run` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `log.tail` / `ownClaim` / `logTail`<br>`eval_unit` / `expansion.submit` / `ownEval` / `expansion` |
+| `POST` | `/api/v1/data/download` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `data.read` / `data` / `sensitive`<br>`awarded_or_delegated_claim` / `data.read` / `data` / `expansion`<br>`repo_cache_reader` / `data.read` / `data` / `credential` |
+| `POST` | `/api/v1/data/upload` | `controller` | `team` | `capability` | `idempotency_key` | `awarded_or_delegated_claim` / `data.write` / `data` / `sensitive`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/data/commit` | `controller` | `team` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `data.write` / `data` / `sensitive`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/data/records` | `controller` | `team` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `data.write` / `data` / `sensitive`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
+| `POST` | `/api/v1/data/has-many` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `data.read` / `data` / `sensitive`<br>`awarded_or_delegated_claim` / `data.read` / `data` / `expansion`<br>`repo_cache_reader` / `data.read` / `data` / `credential` |
+| `GET` | `/api/v1/data/records` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `data.read` / `data` / `sensitive`<br>`awarded_or_delegated_claim` / `data.read` / `data` / `expansion`<br>`repo_cache_reader` / `data.read` / `data` / `credential` |
+| `POST` | `/api/v1/data/memo/lookup` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `data.read` / `data` / `sensitive`<br>`awarded_or_delegated_claim` / `data.read` / `data` / `expansion`<br>`repo_cache_reader` / `data.read` / `data` / `credential` |
+| `POST` | `/api/v1/data/depcache/lookup` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `data.read` / `data` / `sensitive`<br>`awarded_or_delegated_claim` / `data.read` / `data` / `expansion`<br>`repo_cache_reader` / `data.read` / `data` / `credential` |
+| `POST` | `/api/v1/data/memo/copy` | `controller` | `team` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `data.read + data.write` / `data` / `sensitive` |
+| `GET` | `/api/v1/data/capabilities` | `controller` | `team` | `capability` | `safe` | `discovery` / `` / `none` / `credential` |
+| `GET` | `/api/v1/operator/limits` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.limits` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `PUT` | `/api/v1/operator/limits` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.limits` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `GET` | `/api/v1/operator/signups` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.limits` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `PUT` | `/api/v1/operator/signups` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.limits` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `GET` | `/api/v1/operator/object-store` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.object_store` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `GET` | `/api/v1/operator/object-store/breaker` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.object_store` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `POST` | `/api/v1/operator/object-store/reset-breaker` | `controller` | `deployment` | `capability` | `idempotency_key` | `deployment_admin` / `operator.object_store` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `PUT` | `/api/v1/operator/object-store/settings` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.object_store` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `PUT` | `/api/v1/operator/object-store/quotas/{team}` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.object_store` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `PUT` | `/api/v1/operator/object-store/quotas/{team}/allowance` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.object_store` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `GET` | `/api/v1/operator/tokens` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.tokens` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `POST` | `/api/v1/operator/tokens` | `controller` | `deployment` | `capability` | `never` | `deployment_admin` / `operator.tokens` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `GET` | `/api/v1/operator/tokens/{token}` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.tokens` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `DELETE` | `/api/v1/operator/tokens/{token}` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.tokens` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `POST` | `/api/v1/operator/tokens/{token}/rotate` | `controller` | `deployment` | `capability` | `never` | `deployment_admin` / `operator.tokens` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `GET` | `/api/v1/operator/teams` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `GET` | `/api/v1/operator/teams/{team}` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `DELETE` | `/api/v1/operator/teams/{team}` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `POST` | `/api/v1/operator/teams/{team}/trust` | `controller` | `deployment` | `capability` | `idempotency_key` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `POST` | `/api/v1/operator/teams/{team}/grants` | `controller` | `deployment` | `capability` | `idempotency_key` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `POST` | `/api/v1/operator/teams/{team}/freeze` | `controller` | `deployment` | `capability` | `idempotency_key` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `POST` | `/api/v1/operator/teams/{team}/unfreeze` | `controller` | `deployment` | `capability` | `idempotency_key` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `POST` | `/api/v1/operator/teams/{team}/refunds` | `controller` | `deployment` | `capability` | `idempotency_key` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `DELETE` | `/api/v1/operator/accounts/{account}` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `GET` | `/api/v1/operator/waitlist` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `POST` | `/api/v1/operator/waitlist/approve` | `controller` | `deployment` | `capability` | `idempotency_key` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `DELETE` | `/api/v1/operator/github-app/installations/{installation}` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `PUT` | `/api/v1/operator/credits/settings` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `POST` | `/api/v1/operator/runners/{runner}/metered` | `controller` | `deployment` | `capability` | `idempotency_key` | `operator_console_session` / `operator.console` / `none` / `credential` |
+| `GET` | `/api/v1/health` | `controller` | `none` | `public` | `safe` |  |
+| `GET` | `/api/v1/capabilities` | `controller` | `none` | `public` | `safe` |  |
+| `POST` | `/webhooks/stripe` | `controller` | `team` | `payment_webhook_signature` | `exact_body` |  |
+| `POST` | `/webhooks/github-app` | `controller` | `team` | `github_webhook_hmac` | `exact_body` |  |
+| `POST` | `/api/v1/runners/github/exchange` | `controller` | `team` | `github_actions_oidc` | `never` |  |
+| `GET` | `/.well-known/openid-configuration` | `controller` | `none` | `public` | `safe` |  |
+| `GET` | `/.well-known/jwks.json` | `controller` | `none` | `public` | `safe` |  |
+| `PUT` | `/api/v1/data/uploads/{upload}` | `controller` | `team` | `signed_object_url` | `exact_body` |  |
+| `GET` | `/api/v1/data/objects/{key...}` | `controller` | `team` | `signed_object_url` | `safe` |  |
+| `PUT` | `/api/v1/log-segments/{key...}` | `controller` | `run` | `signed_object_url` | `exact_body` |  |
+| `GET` | `/api/v1/auth/session` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
+| `POST` | `/api/v1/auth/logout` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
+| `GET` | `/login` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
+| `POST` | `/login` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
+| `POST` | `/logout` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
+| `GET` | `/auth/{provider}/start` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
+| `GET` | `/auth/{provider}/callback` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
+| `POST` | `/auth/{provider}/link` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
+| `GET` | `/auth/{provider}/link/complete` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
+| `POST` | `/github/app/connect` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
+| `POST` | `/github/app/connect/existing` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
+| `GET` | `/github/app/setup` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
+| `GET` | `/github/app/callback` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
+| `GET` | `/github/app/complete` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
+| `GET` | `/github/app/available` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
+| `POST` | `/github/app/select` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
+| `GET` | `/metrics` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.limits` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `GET` | `/node/v1/secrets/{name}` | `nodehost` | `nodehost` | `capability` | `safe` | `nodehost_process` / `secrets.release` / `declaredSecret` / `process` |
+| `GET` | `/node/v1/jobs/{job}/output` | `nodehost` | `nodehost` | `capability` | `safe` | `nodehost_process` / `data.read` / `readSet` / `process` |
+| `GET` | `/node/v1/pipelines/{name}/latest` | `nodehost` | `nodehost` | `capability` | `safe` | `nodehost_process` / `refs.read` / `readSet` / `process` |
+| `POST` | `/node/v1/oidc-token` | `nodehost` | `nodehost` | `capability` | `never` | `nodehost_process` / `oidc.mint` / `ownNode` / `process` |
+| `POST` | `/node/v1/masks` | `nodehost` | `nodehost` | `capability` | `exact_body` | `nodehost_process` / `node.report` / `ownNode` / `process` |
+| `POST` | `/node/v1/annotations` | `nodehost` | `nodehost` | `capability` | `never` | `nodehost_process` / `node.report` / `ownNode` / `process` |
+| `POST` | `/node/v1/summary` | `nodehost` | `nodehost` | `capability` | `exact_body` | `nodehost_process` / `node.report` / `ownNode` / `process` |
+| `POST` | `/node/v1/children` | `nodehost` | `nodehost` | `capability` | `never` | `nodehost_process` / `children.start` / `bodyNamesRun` / `process` |
+| `GET` | `/node/v1/children/{run}/await` | `nodehost` | `nodehost` | `capability` | `safe` | `nodehost_process` / `children.start` / `childOfBoundNode` / `process` |
+| `POST` | `/node/v1/cleanups` | `nodehost` | `nodehost` | `capability` | `never` | `nodehost_process` / `node.report` / `ownCleanup` / `process` |
+| `DELETE` | `/node/v1/cleanups/{cleanup}` | `nodehost` | `nodehost` | `capability` | `never` | `nodehost_process` / `node.report` / `ownCleanup` / `process` |
+
+<!-- design:end -->

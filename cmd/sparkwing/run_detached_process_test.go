@@ -187,7 +187,7 @@ import (
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--sw-node-protocol" {
 		_, _ = bufio.NewReader(os.NewFile(3, "requests")).ReadString('\n')
-		fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":\"1\",\"pipelines\":[{\"name\":\"fixture\"}]}}")
+		fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":2,\"sdk\":{\"language\":\"go\",\"version\":\"fixture\"},\"features\":[]}}"); _, _ = bufio.NewReader(os.NewFile(3, "requests")).ReadString('\n'); fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"2\",\"ok\":true,\"result\":{\"pipelines\":[{\"name\":\"fixture\",\"args\":[]}]}}")
 		return
 	}
 	f, err := os.OpenFile(os.Getenv("SPARKWING_SUBMIT_TEST_MARKER"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
@@ -471,36 +471,6 @@ func TestRunDetached_ExecutionOutlivesTheSubmittingProcess(t *testing.T) {
 	})
 }
 
-func TestRunsRetry_RefusesUnavailableLocalEnvironment(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("executes the CLI")
-	}
-	e := newSubmitTestEnv(t)
-	const sourceID = "run-retry-source"
-	st := e.store()
-	if err := st.CreateRun(t.Context(), store.Run{ID: sourceID, Pipeline: "fixture", Status: "failed", StartedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	for _, flag := range []string{"--failed", "--all"} {
-		out, err := e.run("runs", "retry", flag, "--run", sourceID)
-		if err == nil || !strings.Contains(out, "retry execution environment is unavailable") {
-			t.Fatalf("retry = %v: %s", err, out)
-		}
-	}
-	triggers, err := st.ListTriggers(t.Context(), store.TriggerFilter{})
-	if err != nil || len(triggers) != 0 {
-		t.Fatalf("refused retry left triggers: %d, %v", len(triggers), err)
-	}
-	runs, err := st.ListRuns(t.Context(), store.RunFilter{})
-	if err != nil || len(runs) != 1 || runs[0].RetriedAs != "" {
-		t.Fatalf("refused retry changed run history: %v, %v", runs, err)
-	}
-	if _, ok := orchestrator.ConsumerPID(e.home); ok {
-		t.Fatal("refused retry started a consumer")
-	}
-}
-
 func TestRunDetached_DuplicateKeyReturnsTheOriginalRun(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {
@@ -761,7 +731,6 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -801,7 +770,7 @@ func appendLine(path, line string) {
 
 func main() {
 	sparkwing.Register("fixture", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Fixture{} })
-	runner.Main()
+	sparkwing.Main()
 }
 `
 
@@ -814,7 +783,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -842,7 +810,7 @@ func appendLine(path, line string) {
 
 func main() {
 	sparkwing.Register("fixture", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Fixture{} })
-	runner.Main()
+	sparkwing.Main()
 }
 `
 

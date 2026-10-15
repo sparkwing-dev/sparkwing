@@ -1,5 +1,162 @@
 # Migrating to the next release
 
+## Daemon event cursors
+
+Replace `daemon events --offset N` with the returned `--cursor`. Repeat the same
+run, kind, incarnation and since filters on continuation. `--limit` must be
+positive. The default remains 50. Follow cursors until the final page to read
+all matching retained events. Newer arrivals do not shift older pages. Removed or
+edited unread history fails with a hint to restart without the cursor.
+
+JSON emits event rows followed by a `kind: page` object containing `next_cursor`
+and `truncated`, including on empty and final pages. Consumers must distinguish
+that object from event rows. `--explain --run ID` still returns the complete
+related timeline without pagination or page metadata.
+
+## Daemon lifecycle reports
+
+Daemon status, stop and restart share the local controller lifecycle used by
+dashboard and doctor. JSON uses `kind: service`, `service: controller`, `action`
+and `state: running|stopped`. It also carries `version`, `pid` when present,
+`stay`, `installed` and `activity`. Mutation reports include `restarted`,
+`stopped` and the preceding `previous_version` when a controller was replaced
+or stopped. Plain output is the state.
+
+Consumers of `running`, `healthy`, `binary_version`, schema versions or socket
+paths must switch to this projection. Use doctor for controller diagnostics.
+No status command opens the runs database. These adapters need the native
+local-services binding before they can inspect a running controller.
+
+Restart leaves a stopped controller stopped. The same exact version stays
+running unless `--force` is selected. Replacement preserves the home, dashboard
+address and stay policy, waits for shutdown, and refuses an unready or
+wrong-version replacement.
+
+## Job failure reports
+
+Replace `JobResult.error` with `failure: {job, stage, error}`. The nested error
+uses the canonical code, message, hint and details shape. The job must match the
+report's job selector. Stage must be present. Recovery reads the persisted
+failure without inferring its stage from an outcome or reason.
+
+## Reconciliation sources and sealed guards
+
+Private reconciliation can identify a previously materialized result with
+`source.result` containing `run_id`, `job_id` and `state_seq`. This is separate
+from an execution attempt. The controller rechecks its persisted state and read
+authority before reuse. Do not invent an attempt for a memoized result.
+
+Private scheduling snapshots retain `guard_refusal` and `cancel_requested`.
+Owners must preserve both when reconstructing the scheduling decision.
+Cancellation retains precedence over the guard refusal.
+
+## Spark library inflation
+
+Use `sparkwing pipeline sparks inflate --library MODULE`. The module can be a
+sparks-core module name or a full Go module path. `--module` is removed.
+`pipeline sparks catalog` prints the selector for each available module.
+Plain output is the destination directory. JSON retains module, version,
+destination and replacement metadata.
+
+## Machine connection profiles
+
+Profiles contain only `controller.url` and an optional `controller.token`.
+Remove profile `state`, `secrets`, `rerun_image`, cache and log settings, and
+remove project-level profile definitions. Use `sparkwing profiles add`,
+`show`, `list`, `set` and `remove` to manage machine connections.
+
+Every profile command validates the whole machine file. An invalid setting
+in another section blocks reads and writes without exposing credential values.
+An explicitly empty `SPARKWING_CONFIG` fails. Unset it to use the default path.
+No reader imports old per-file settings.
+
+Adding and removing profiles preserves concurrent edits. If a connection
+changes during credential revocation, removal fails and retains that changed
+connection. Reload it before retrying. The removed `configure init` handler
+and its permission-repair behavior are gone.
+
+## Runner enrollment files
+
+Runner settings use the `runner:` section, `repos` and `credentials_dir`.
+The reusable credential is stored in a private file inside that directory.
+Remove inline runner tokens and the old `agent:` and `allow_repos` keys.
+Re-enroll with `sparkwing runners add --runner NAME --profile PROFILE --force`.
+Its JSON receipt contains credential metadata rather than the bearer.
+
+Enrollment previously wrote `max_concurrent: 2` when the flag was absent.
+It now leaves that preference unset, using the shared default of one.
+Pass `--max-concurrent 2` to retain two concurrent jobs. Existing explicit
+values remain unchanged.
+
+If writing the configuration or installing its service fails, enrollment
+revokes the new credential and removes the new credential files. A failed
+replacement restores the previous runner section. Concurrent configuration
+changes are preserved. A controller revocation failure prints the exact
+manual revocation command and returns nonzero.
+
+## Queue and concurrency views
+
+Replace bare `sparkwing queue` listings with `sparkwing queue list`.
+Replace `sparkwing cluster concurrency --namespace GROUP --profile P` with
+`sparkwing queue list --group GROUP --profile P`. Bare `queue` shows help.
+The client uses `/api/v1/queue` and `/api/v1/queue/groups/{group}`.
+Connection failures return nonzero without an empty queue record.
+
+Use `queue priority --group GROUP --profile P --run ID --set VALUE` for a
+group rank change. Local admission priority keeps its existing admission
+operation. See [Queue views](../diagnosing-admission.md#queue-views) for the
+unfinished native controller integrations.
+
+## Local cache warming
+
+Before, `sparkwing pipeline sparks warmup` compiled a pipeline and uploaded its
+binary to gitcache. Local execution could also download that binary.
+
+Use `sparkwing cache warm --checkout /path/to/repo` to prepare the local cache.
+Go pipelines build on this machine. TypeScript checkouts install dependencies.
+Compiled pipeline binaries stay local. Remove remote binary-upload steps from
+warming scripts. Explicit result publication and memo/artifact reads use their
+separate run options.
+
+JSON warming output is one preparation receipt. Plain output is the prepared
+path. Scripts that consumed progress from stdout must read stderr instead.
+See [Warmup](../sparks.md#warmup) for native process-policy integration status.
+
+## Controller diagnostics
+
+Before, `sparkwing doctor` opened the local store and repaired abandoned state.
+It returned repair-oriented fields such as `orphaned_runs` and
+`permission_repairs`.
+
+Doctor now gets controller findings through the lifecycle interface. Scripts
+consume `findings`, `controller_checked` and `controller_error`. A failed
+inspection returns nonzero and can still include partial findings. Treat an
+empty array as complete only when `controller_checked` is true.
+
+Doctor no longer repairs private-home permissions or reaps processes from the
+CLI. Remove automation that expects those side effects. See
+[Doctor reports](../diagnosing-admission.md#doctor-reports) for the unfinished
+native runtime and machine-reader integration.
+## Retry requests and receipts
+
+Use `runs retry --run RUN --failed` to reuse successful jobs or `--all-jobs`
+to execute the complete sealed plan again. Repeated `--run`, comma lists and
+`--run -` select multiple runs. The old `full=1` query and legacy retry client
+method are removed. Each source run gets an independent idempotency key.
+
+Local and remote retries use the controller API. JSON emits one safe receipt
+or structured failure per source run. Plain emits new run IDs. The CLI no longer
+opens local or standalone state files to retry runs. Native retry intake, reuse
+and here handoff still require integration. An incomplete here handoff exits 3
+and its JSON failure receipt identifies the created run without its credential.
+
+## Plan inspection
+
+Use `sparkwing pipeline plan --pipeline NAME -- <pipeline arguments>` to supply
+required inputs. The registered SDK entrypoint selects the code; the invoked
+project name remains in the run context. Secret inputs reach planning but are
+redacted in previews and structured diagnostics. The preview JSON uses `jobs`
+in place of `nodes`.
 ## Memo copies use transactional blob records
 
 `AttemptReport.OutputFrom`, its `output_from` payload and

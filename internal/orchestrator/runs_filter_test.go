@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"testing"
 	"time"
 
@@ -48,7 +49,7 @@ func TestParseLooseDate_RejectsGarbage(t *testing.T) {
 func TestParseLooseDurationRejectsScaledOverflow(t *testing.T) {
 	for _, raw := range []string{"106752d", "-106752d", "15251w", "-15251w"} {
 		t.Run(raw, func(t *testing.T) {
-			if got, err := ParseLooseDuration(raw); err == nil {
+			if got, err := clisurface.ParseLookback(raw); err == nil {
 				t.Fatalf("ParseLooseDuration(%q) = %s, want overflow error", raw, got)
 			}
 		})
@@ -156,7 +157,7 @@ func TestApplyClientFilters_EmptyFilterReturnsAll(t *testing.T) {
 
 func TestParseLooseDurationAcceptsUppercaseUnits(t *testing.T) {
 	for raw, want := range map[string]time.Duration{"7D": 7 * 24 * time.Hour, "2W": 14 * 24 * time.Hour, "3H": 3 * time.Hour, "5MS": 5 * time.Millisecond} {
-		got, err := ParseLooseDuration(raw)
+		got, err := clisurface.ParseLookback(raw)
 		if err != nil || got != want {
 			t.Errorf("%s: got %s, %v; want %s", raw, got, err, want)
 		}

@@ -2,25 +2,37 @@ package bincache
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
-	"os"
 	"os/exec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 )
 
-// RunGo runs a `go` subcommand in dir, streaming its output to the caller's
-// stdout and stderr, and stops the toolchain when ctx is cancelled.
-func RunGo(ctx context.Context, dir string, args, env []string) error {
-	env, err := gotoolchain.BuildEnv(ctx, dir, env, EffectiveOverlay(dir))
+// RunGo executes Go with captured inputs and cancellation of its child processes.
+func RunGo(ctx context.Context, dir string, args []string, options CompileOptions) error {
+	if options.Environment == nil || options.Diagnostics == nil {
+		return errors.New("Go execution requires a captured environment and diagnostic writer")
+	}
+	tool, err := gotoolchain.Executable(options.Environment)
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command("go", args...)
+	var noticeErr error
+	ctx = gotoolchain.WithSession(ctx, options.Environment, func(message string) {
+		_, err := fmt.Fprintln(options.Diagnostics, message)
+		noticeErr = errors.Join(noticeErr, err)
+	})
+	env, err := gotoolchain.BuildEnv(ctx, dir, options.Environment, EffectiveOverlay(dir, options.Environment))
+	if err := errors.Join(err, noticeErr); err != nil {
+		return err
+	}
+	cmd := exec.Command(tool, args...)
 	cmd.Dir = dir
-	cmd.Stdout = os.Stdout
 	var captured lockedBuffer
-	cmd.Stderr = io.MultiWriter(os.Stderr, &captured)
+	cmd.Stdout = io.MultiWriter(options.Diagnostics, &captured)
+	cmd.Stderr = cmd.Stdout
 	cmd.Env = env
 	err = gotoolchain.Run(ctx, cmd)
 	if err != nil {

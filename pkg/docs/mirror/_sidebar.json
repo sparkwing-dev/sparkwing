@@ -2,7 +2,15 @@
   "categories": [
     {
       "label": "Getting Started",
-      "slugs": ["getting-started", "architecture", "machine-config", "environment-variables", "cli", "cli-reference"]
+      "slugs": [
+        "getting-started",
+        "updates",
+        "architecture",
+        "machine-config",
+        "environment-variables",
+        "cli",
+        "cli-reference"
+      ]
     },
     {
       "label": "Pipelines",
@@ -16,8 +24,8 @@
         "sdk-docker",
         "sdk-git",
         "sdk-inputs",
-        "sdk-planguard",
         "sdk-services",
+        "sdk-sparkwingtest",
         "artifacts",
         "admission",
         "local-execution",
@@ -28,11 +36,20 @@
     },
     {
       "label": "Libraries",
-      "slugs": ["sparks", "sparks-core", "versioning"]
+      "slugs": [
+        "sparks",
+        "sparks-core",
+        "versioning"
+      ]
     },
     {
       "label": "Performance",
-      "slugs": ["fast-builds", "build-caching", "caching", "install-to-green"]
+      "slugs": [
+        "fast-builds",
+        "build-caching",
+        "caching",
+        "install-to-green"
+      ]
     },
     {
       "label": "Operations",
@@ -42,11 +59,12 @@
         "security",
         "hotfix-runner",
         "threat-model",
+        "credentials",
         "auth",
         "oidc",
         "limits",
         "hooks",
-        "crons",
+        "schedules",
         "api",
         "api-reference"
       ]
@@ -71,30 +89,35 @@
       "label": "CLI reference",
       "slugs": [
         "cli-cache",
-        "cli-cloud",
-        "cli-cluster",
         "cli-commands",
         "cli-completion",
-        "cli-configure",
-        "cli-crons",
         "cli-daemon",
-        "cli-serve",
+        "cli-dashboard",
         "cli-debug",
         "cli-docs",
         "cli-doctor",
         "cli-examples",
-        "cli-fleet",
         "cli-info",
+        "cli-operator",
         "cli-pipeline",
+        "cli-pools",
+        "cli-profiles",
         "cli-queue",
+        "cli-reference",
         "cli-repos",
         "cli-run",
+        "cli-runners",
         "cli-runs",
+        "cli-schedules",
         "cli-secrets",
+        "cli-tokens",
         "cli-update",
+        "cli-upgrade",
         "cli-version"
       ]
     }
   ],
-  "excluded": ["migrations/"]
+  "excluded": [
+    "migrations/"
+  ]
 }

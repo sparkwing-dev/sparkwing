@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -93,7 +94,7 @@ func runPipelineList(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineList.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
 	includeHidden := fs.Bool("all", false, "include hidden entries (hidden: true in yaml / # hidden: true in scripts)")
-	query := fs.String("query", "", "rank entries whose fields match every token; searches hidden entries too")
+	query := fs.String("search", "", "rank entries whose fields match every token; searches hidden entries too")
 	if err := parseAndCheck(cmdPipelineList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -101,15 +102,15 @@ func runPipelineList(args []string) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("pipeline list: unexpected positional %q (use --query)", fs.Arg(0))
+		return fmt.Errorf("pipeline list: unexpected positional %q (use --search)", fs.Arg(0))
 	}
 	format, err := resolveOutputFormat(*output, cmdPipelineList.Path)
 	if err != nil {
 		return err
 	}
-	if fs.Changed("query") {
+	if fs.Changed("search") {
 		if strings.TrimSpace(*query) == "" {
-			return errors.New("pipeline list: --query needs at least one token")
+			return errors.New("pipeline list: --search needs at least one token")
 		}
 		return searchPipelines(*query, format)
 	}
@@ -223,7 +224,7 @@ func plural(n int) string {
 func runPipelineDescribe(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineDescribe.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
-	pipelineName := fs.String("name", "", "pipeline name to describe")
+	pipelineName := fs.String("pipeline", "", "pipeline name to describe")
 	secretsOnly := fs.Bool("secrets", false, "print the declared secrets, required or optional")
 	if err := parseAndCheck(cmdPipelineDescribe, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -233,11 +234,11 @@ func runPipelineDescribe(args []string) error {
 	}
 	if fs.NArg() > 0 {
 		PrintHelp(cmdPipelineDescribe, os.Stderr)
-		return fmt.Errorf("describe: unexpected positional %q (use --name)", fs.Arg(0))
+		return fmt.Errorf("describe: unexpected positional %q (use --pipeline)", fs.Arg(0))
 	}
 	if *pipelineName == "" {
 		PrintHelp(cmdPipelineDescribe, os.Stderr)
-		return errors.New("describe: --name is required")
+		return errors.New("describe: --pipeline is required")
 	}
 	format, err := resolveOutputFormat(*output, cmdPipelineDescribe.Path)
 	if err != nil {
@@ -287,11 +288,15 @@ func runPipelineDescribe(args []string) error {
 func describePipelineSecrets(name, format string) error {
 	var secrets []nodeproto.SecretDeclaration
 	err := withPipelineEntry(name, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
+		identity, err := pipelineIdentityAt(filepath.Join(dir, ".sparkwing"), name)
+		if err != nil {
+			return err
+		}
 		doc, err := repos.Describe(ctx, entry, dir)
 		if err != nil {
 			return err
 		}
-		schema, err := findPipelineSchema(doc.Pipelines, name)
+		schema, err := boundPipelineSchema(doc.Pipelines, identity)
 		secrets = schema.Secrets
 		return err
 	})
@@ -342,7 +347,6 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 		}
 	}
 	var out []Pipeline
-	seen := map[string]struct{}{}
 	if cfg != nil {
 		for _, p := range cfg.Registry().Pipelines {
 			if p.Hidden && !includeHidden {
@@ -354,7 +358,7 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				PinnedProfile: p.Profile,
 				Triggers:      summarizeTriggerList(p.On),
 			}
-			if dp, ok := describeByName[p.Name]; ok {
+			if dp, ok := describeByName[p.Entrypoint]; ok {
 				a.Short = dp.Short
 				a.Help = dp.Help
 				a.Args = dp.Args
@@ -364,7 +368,6 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				a.RisksBySteps = dp.RisksByStep
 				a.Secrets = dp.Secrets
 			}
-			seen[p.Name] = struct{}{}
 			out = append(out, a)
 		}
 	}

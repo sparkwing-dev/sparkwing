@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,9 +14,10 @@ import (
 	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/modfile"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
@@ -43,7 +45,7 @@ func runSparks(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdSparks, os.Stderr)
-		return errors.New("spark: subcommand required (catalog|list|lint|resolve|update|add|remove|warmup|inflate)")
+		return errors.New("spark: subcommand required (catalog|list|lint|resolve|update|add|remove|inflate)")
 	}
 	switch args[0] {
 	case "catalog":
@@ -60,8 +62,6 @@ func runSparks(args []string) error {
 		return runSparksAdd(args[1:])
 	case "remove":
 		return runSparksRemove(args[1:])
-	case "warmup":
-		return runSparksWarmup(args[1:])
 	case "inflate":
 		return runSparksInflate(args[1:])
 	default:
@@ -578,64 +578,6 @@ func runSparksRemove(args []string) error {
 	return nil
 }
 
-func runSparksWarmup(args []string) error {
-	fs := flag.NewFlagSet(cmdSparksWarmup.Path, flag.ContinueOnError)
-	clearCache := fs.Bool("clear-cache", false, "delete the local pipeline binary cache before compiling")
-	if err := parseAndCheck(cmdSparksWarmup, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	sparkwingDir, err := defaultSparkwingDir()
-	if err != nil {
-		return err
-	}
-
-	ctx := gotoolchain.WithSession(context.Background(), nil, nil)
-	if _, err := sparksResolveAndWrite(ctx, sparkwingDir); err != nil {
-		return fmt.Errorf("spark warmup: resolve: %w", err)
-	}
-
-	if *clearCache {
-		result, err := bincache.PruneToLimits(ctx, 0, 0, true)
-		if err != nil {
-			return fmt.Errorf("spark warmup: clear cache: %w", err)
-		}
-		fmt.Fprintf(os.Stdout, "cache pruning removed %d bytes across %d entries\n",
-			result.LogicalRemovedBytes, result.ReclaimedEntries)
-	}
-
-	_, cfg, err := projectconfig.Discover(sparkwingDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warn: no pipelines discovered: %v\n", err)
-	} else {
-		fmt.Fprintf(os.Stdout, "warming up %d pipeline(s)\n", len(cfg.Registry().Pipelines))
-	}
-
-	key, err := bincache.PipelineCacheKey(sparkwingDir)
-	if err != nil {
-		return fmt.Errorf("spark warmup: hash pipeline: %w", err)
-	}
-	entry, err := bincache.PipelineEntry(key)
-	if err != nil {
-		return fmt.Errorf("spark warmup: cache entry: %w", err)
-	}
-	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		fmt.Fprintf(os.Stdout, "compiling %s\n", sparkwingDir)
-		return bincache.CompilePipeline(ctx, sparkwingDir, tempPath)
-	})
-	if err != nil {
-		return fmt.Errorf("spark warmup: %w", err)
-	}
-	defer func() { _ = lease.Release() }()
-	if !published {
-		fmt.Fprintf(os.Stdout, "binary already cached: %s\n", lease.Path())
-	}
-
-	return nil
-}
-
 const sparksCoreModulePrefix = "github.com/sparkwing-dev/sparks-core/"
 
 func resolveVendorModulePath(module string) string {
@@ -647,39 +589,44 @@ func resolveVendorModulePath(module string) string {
 }
 
 func runSparksInflate(args []string) error {
-	fs := flag.NewFlagSet(cmdSparksInflate.Path, flag.ContinueOnError)
-	moduleFlag := fs.String("module", "", "block module to vendor: a sparks-core name (e.g. templates) or a full module path")
-	outFmt := fs.StringP("output", "o", "", "output format: pretty|json (default: pretty)")
-	if err := parseAndCheck(cmdSparksInflate, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
+	return runSparksInflateCommand(context.Background(), args, os.Stdout, defaultSparkwingDir, sparks.Vendor)
+}
+
+func runSparksInflateCommand(ctx context.Context, args []string, out io.Writer,
+	locate func() (string, error), vendor func(context.Context, string, string) (*sparks.VendorResult, error),
+) error {
+	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "sparks", "inflate"}, args...))
+	if err != nil {
+		var usage *clisurface.UsageError
+		if errors.As(err, &usage) && usage.Message == "--library is required" {
+			return fmt.Errorf("%w; list choices with sparkwing pipeline sparks catalog", err)
 		}
 		return err
 	}
-	if rest := fs.Args(); len(rest) > 0 {
-		return fmt.Errorf("spark inflate: unexpected positional %q (use --module)", rest[0])
+	format := inv.Output(color.IsInteractiveStdout())
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), out, format)
 	}
-	module := strings.TrimSpace(*moduleFlag)
+	module := strings.TrimSpace(inv.Value("library"))
 	if module == "" {
-		return errors.New("spark inflate: --module is required (e.g. --module templates)")
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: "--library is required; list choices with sparkwing pipeline sparks catalog"}
 	}
-	format, err := resolveOutputFormat(*outFmt, "spark inflate")
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	sparkwingDir, err := defaultSparkwingDir()
+	sparkwingDir, err := locate()
 	if err != nil {
 		return err
 	}
 	modulePath := resolveVendorModulePath(module)
 
-	res, err := sparks.Vendor(context.Background(), sparkwingDir, modulePath)
+	res, err := vendor(ctx, sparkwingDir, modulePath)
 	if err != nil {
 		return err
 	}
 
 	if format == "json" {
-		enc := json.NewEncoder(os.Stdout)
+		enc := json.NewEncoder(out)
 		return enc.Encode(map[string]any{
 			"module":  res.ModulePath,
 			"version": res.Version,
@@ -687,16 +634,13 @@ func runSparksInflate(args []string) error {
 			"replace": res.RelReplace,
 		})
 	}
-
-	fmt.Printf("vendored %s@%s\n", res.ModulePath, res.Version)
-	fmt.Printf("  source copied to %s\n", res.Dest)
-	fmt.Printf("  added `replace %s => %s` to %s and ran go mod tidy\n",
-		res.ModulePath, res.RelReplace, filepath.Join(sparkwingDir, "go.mod"))
-	fmt.Println()
-	fmt.Println("your imports are unchanged -- the code now lives in your repo and is editable.")
-	fmt.Printf("to undo: delete %s and drop the replace directive from %s.\n",
-		res.Dest, filepath.Join(sparkwingDir, "go.mod"))
-	return nil
+	if format == "plain" {
+		_, err = fmt.Fprintln(out, res.Dest)
+		return err
+	}
+	_, err = fmt.Fprintf(out, "vendored %s@%s\n  source copied to %s\n  added `replace %s => %s` to %s and ran go mod tidy\n\nImports now resolve to the editable local source.\nTo undo, delete %s and drop its replace directive.\n",
+		res.ModulePath, res.Version, res.Dest, res.ModulePath, res.RelReplace, filepath.Join(sparkwingDir, "go.mod"), res.Dest)
+	return err
 }
 
 func loadManifestForWrite(sparkwingDir string) (*sparks.Manifest, string, error) {

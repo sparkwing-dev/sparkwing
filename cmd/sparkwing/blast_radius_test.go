@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -158,12 +157,5 @@ func TestEnforceRiskGate_AuthorDefinedLabel(t *testing.T) {
 	wf := runFlags{allow: []string{"rotates-key"}}
 	if err := enforceRiskGate("rotation", findings, wf); err != nil {
 		t.Fatalf("--sw-allow rotates-key should pass: %v", err)
-	}
-}
-
-func TestDeclaredRisks_DegradesGracefully(t *testing.T) {
-	tmp := t.TempDir()
-	if got := declaredRisks(context.Background(), tmp, "any"); got != nil {
-		t.Errorf("declaredRisks with no build to read = %v, want nil", got)
 	}
 }

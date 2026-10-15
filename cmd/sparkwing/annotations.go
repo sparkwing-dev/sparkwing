@@ -2,290 +2,118 @@ package main
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
 
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
-
-	flag "github.com/spf13/pflag"
-
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 type annotationEntry struct {
-	RunID   string `json:"run_id"`
-	NodeID  string `json:"node_id"`
-	StepID  string `json:"step_id,omitempty"`
-	Message string `json:"message"`
+	RunID  string `json:"run_id"`
+	JobID  string `json:"job_id"`
+	StepID string `json:"step_id,omitempty"`
+	controllerwire.Annotation
 }
 
-func runRunsAnnotations(ctx context.Context, paths orchestrator.Paths, args []string) error {
-	if handleParentHelp(cmdAnnotations, args) {
-		return nil
-	}
-	if len(args) == 0 {
-		PrintHelp(cmdAnnotations, os.Stdout)
-		return nil
-	}
-	switch args[0] {
-	case "list":
-		return runAnnotationsList(ctx, paths, args[1:])
-	case "add":
-		return runAnnotationsAdd(ctx, paths, args[1:])
-	default:
-		PrintHelp(cmdAnnotations, os.Stderr)
-		return fmt.Errorf("runs annotations: unknown subcommand %q", args[0])
-	}
+func runRunsAnnotations(ctx context.Context, args []string) error {
+	return runReviewCommand(ctx, append([]string{"runs", "annotations"}, args...), os.Stdout, resolveRunReview)
 }
 
-func runAnnotationsList(ctx context.Context, paths orchestrator.Paths, args []string) error {
-	fs := flag.NewFlagSet(cmdAnnotationsList.Path, flag.ContinueOnError)
-	runID := fs.String("run", "", "run identifier (required)")
-	nodeID := fs.String("node", "", "limit to one node id")
-	stepID := fs.String("step", "", "limit to one step id (implies node-scope or step-scope reads)")
-	includeSteps := fs.Bool("steps", false, "include per-step annotations as separate rows")
-	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	on := fs.String("profile", "", "profile name; omit for local-only")
-	if err := parseAndCheck(cmdAnnotationsList, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if *runID == "" {
-		return fmt.Errorf("%s: --run is required", cmdAnnotationsList.Path)
-	}
-	resolvedFmt, err := resolveOutputFormat(*outFmt, cmdAnnotationsList.Path)
+func listAnnotations(ctx context.Context, review controllerwire.RunReview, inv clisurface.Invocation) ([]annotationEntry, error) {
+	run, err := review.ReadRun(ctx, inv.Value("run"))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	rid := normalizeRunID(*runID)
-
+	if run.ID == "" {
+		return nil, invalidObservation("run observation is missing its identity")
+	}
 	var entries []annotationEntry
-	if *on == "" {
-		entries, err = listLocalAnnotations(ctx, paths, rid, *nodeID, *stepID, *includeSteps || *stepID != "")
-	} else {
-		entries, err = listRemoteAnnotations(ctx, *on, rid, *nodeID, *stepID, *includeSteps || *stepID != "")
+	jobFilter, stepFilter := inv.Value("job"), inv.Value("step")
+	if stepFilter == "" {
+		for _, job := range run.Jobs {
+			if jobFilter != "" && job.ID != jobFilter {
+				continue
+			}
+			for _, annotation := range job.Annotations {
+				entries = append(entries, annotationEntry{RunID: run.ID, JobID: job.ID, Annotation: annotation})
+			}
+		}
 	}
+	if !inv.Bool("steps") && stepFilter == "" {
+		return entries, nil
+	}
+	steps, err := review.ReadSteps(ctx, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, step := range steps.Steps {
+		if jobFilter != "" && step.JobID != jobFilter || stepFilter != "" && step.ID != stepFilter {
+			continue
+		}
+		for _, annotation := range step.Annotations {
+			entries = append(entries, annotationEntry{RunID: run.ID, JobID: step.JobID, StepID: step.ID, Annotation: annotation})
+		}
+	}
+	return entries, nil
+}
+
+func writeAnnotationList(ctx context.Context, review controllerwire.RunReview, inv clisurface.Invocation, out io.Writer, format string) error {
+	entries, err := listAnnotations(ctx, review, inv)
 	if err != nil {
 		return err
 	}
-
-	switch resolvedFmt {
-	case "json":
-		if entries == nil {
-			entries = []annotationEntry{}
-		}
-		return writeAnnotationsJSON(os.Stdout, entries)
-	case "plain":
-		for _, e := range entries {
-			if e.StepID != "" {
-				fmt.Fprintf(os.Stdout, "%s\t%s\t%s\n", e.NodeID, e.StepID, e.Message)
-			} else {
-				fmt.Fprintf(os.Stdout, "%s\t%s\n", e.NodeID, e.Message)
+	if format == "json" {
+		return ndjson.Write(out, entries)
+	}
+	if format == "plain" {
+		for _, entry := range entries {
+			if _, err := fmt.Fprintln(out, strings.NewReplacer("\r", " ", "\n", " ").Replace(entry.Message)); err != nil {
+				return err
 			}
 		}
 		return nil
-	default:
-		return renderAnnotationsTable(os.Stdout, entries)
 	}
-}
-
-func listLocalAnnotations(ctx context.Context, paths orchestrator.Paths, runID, nodeFilter, stepFilter string, includeSteps bool) ([]annotationEntry, error) {
-	if err := paths.EnsureRoot(); err != nil {
-		return nil, err
-	}
-	st, _, done, err := orchestrator.OpenStoreForRun(ctx, paths, runID)
-	if err != nil {
-		return nil, err
-	}
-	defer done()
-
-	if _, err := st.GetRun(ctx, runID); err != nil {
-		return nil, err
-	}
-
-	nodes, err := st.ListNodes(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	var out []annotationEntry
-	if stepFilter == "" {
-		for _, n := range nodes {
-			if nodeFilter != "" && n.NodeID != nodeFilter {
-				continue
-			}
-			for _, msg := range n.Annotations {
-				out = append(out, annotationEntry{RunID: runID, NodeID: n.NodeID, Message: msg})
-			}
-		}
-	}
-	if includeSteps {
-		steps, err := st.ListNodeSteps(ctx, runID)
-		if err != nil {
-			return nil, err
-		}
-		for _, s := range steps {
-			if nodeFilter != "" && s.NodeID != nodeFilter {
-				continue
-			}
-			if stepFilter != "" && s.StepID != stepFilter {
-				continue
-			}
-			for _, msg := range s.Annotations {
-				out = append(out, annotationEntry{
-					RunID: runID, NodeID: s.NodeID, StepID: s.StepID, Message: msg,
-				})
-			}
-		}
-	}
-	return out, nil
-}
-
-func listRemoteAnnotations(ctx context.Context, profileName, runID, nodeFilter, stepFilter string, includeSteps bool) ([]annotationEntry, error) {
-	prof, err := resolveProfile(profileName)
-	if err != nil {
-		return nil, err
-	}
-	if err := requireController(prof, cmdAnnotationsList.Path); err != nil {
-		return nil, err
-	}
-	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
-	if _, err := c.GetRun(ctx, runID); err != nil {
-		return nil, err
-	}
-
-	var out []annotationEntry
-	if stepFilter == "" {
-		nodes, err := c.ListNodes(ctx, runID)
-		if err != nil {
-			return nil, err
-		}
-		for _, n := range nodes {
-			if nodeFilter != "" && n.NodeID != nodeFilter {
-				continue
-			}
-			for _, msg := range n.Annotations {
-				out = append(out, annotationEntry{RunID: runID, NodeID: n.NodeID, Message: msg})
-			}
-		}
-	}
-	if includeSteps {
-		steps, err := c.ListNodeSteps(ctx, runID)
-		if err != nil {
-			return nil, err
-		}
-		for _, s := range steps {
-			if nodeFilter != "" && s.NodeID != nodeFilter {
-				continue
-			}
-			if stepFilter != "" && s.StepID != stepFilter {
-				continue
-			}
-			for _, msg := range s.Annotations {
-				out = append(out, annotationEntry{
-					RunID: runID, NodeID: s.NodeID, StepID: s.StepID, Message: msg,
-				})
-			}
-		}
-	}
-	return out, nil
-}
-
-func renderAnnotationsTable(w io.Writer, entries []annotationEntry) error {
 	if len(entries) == 0 {
-		fmt.Fprintln(w, "no annotations on this run")
-		return nil
+		_, err := fmt.Fprintln(out, "no annotations on this run")
+		return err
 	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NODE\tSTEP\tMESSAGE")
-	for _, e := range entries {
-		step := e.StepID
-		if step == "" {
-			step = "-"
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", e.NodeID, step, e.Message)
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "JOB\tSTEP\tLEVEL\tFILE\tLINE\tMESSAGE")
+	for _, entry := range entries {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", entry.JobID, orDashApproval(entry.StepID), entry.Level, orDashApproval(entry.File), entry.Line, entry.Message)
 	}
 	return tw.Flush()
 }
 
-func writeAnnotationsJSON(w io.Writer, entries []annotationEntry) error {
-	return ndjson.Write(w, entries)
-}
-
-func runAnnotationsAdd(ctx context.Context, paths orchestrator.Paths, args []string) error {
-	fs := flag.NewFlagSet(cmdAnnotationsAdd.Path, flag.ContinueOnError)
-	runID := fs.String("run", "", "run identifier (required)")
-	nodeID := fs.String("node", "", "node identifier (required)")
-	stepID := fs.String("step", "", "step identifier (optional; annotates the step instead of the node)")
-	msg := fs.StringP("message", "m", "", "annotation text (required)")
-	on := fs.String("profile", "", "profile name; omit for local-only")
-	if err := parseAndCheck(cmdAnnotationsAdd, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if *runID == "" || *nodeID == "" {
-		return fmt.Errorf("%s: --run and --node are required", cmdAnnotationsAdd.Path)
-	}
-	if *msg == "" {
-		return fmt.Errorf("%s: --message is required", cmdAnnotationsAdd.Path)
-	}
-	rid := normalizeRunID(*runID)
-
-	if *on == "" {
-		return addLocalAnnotation(ctx, paths, rid, *nodeID, *stepID, *msg)
-	}
-	return addRemoteAnnotation(ctx, *on, rid, *nodeID, *stepID, *msg)
-}
-
-func addLocalAnnotation(ctx context.Context, paths orchestrator.Paths, runID, nodeID, stepID, msg string) error {
-	if err := paths.EnsureRoot(); err != nil {
-		return err
-	}
-	st, _, done, err := orchestrator.OpenStoreForRunWrite(ctx, paths, runID, cmdAnnotationsAdd.Path)
+func writeAnnotation(ctx context.Context, review controllerwire.RunReview, inv clisurface.Invocation, out io.Writer, format string) error {
+	input := controllerwire.AnnotationWrite{Annotation: controllerwire.Annotation{Level: "info", Message: inv.Value("message")}, StepID: inv.Value("step")}
+	applied, err := review.AppendAnnotation(ctx, inv.Value("run"), inv.Value("job"), input)
 	if err != nil {
 		return err
 	}
-	defer done()
-	if stepID != "" {
-		if err := st.AppendStepAnnotation(ctx, runID, nodeID, stepID, msg); err != nil {
-			return err
-		}
-		fmt.Fprintf(os.Stdout, "annotated %s/%s/%s: %s\n", runID, nodeID, stepID, msg)
-		return nil
+	record := struct {
+		RunID   string                 `json:"run_id"`
+		JobID   string                 `json:"job_id"`
+		StepID  string                 `json:"step_id,omitempty"`
+		Applied controllerwire.Applied `json:"applied"`
+	}{inv.Value("run"), inv.Value("job"), input.StepID, applied}
+	if format == "json" {
+		return json.NewEncoder(out).Encode(record)
 	}
-	if err := st.AppendNodeAnnotation(ctx, runID, nodeID, msg); err != nil {
+	subject := record.RunID + "/" + record.JobID
+	if record.StepID != "" {
+		subject += "/" + record.StepID
+	}
+	if format == "plain" {
+		_, err = fmt.Fprintln(out, subject)
 		return err
 	}
-	fmt.Fprintf(os.Stdout, "annotated %s/%s: %s\n", runID, nodeID, msg)
-	return nil
-}
-
-func addRemoteAnnotation(ctx context.Context, profileName, runID, nodeID, stepID, msg string) error {
-	prof, err := resolveProfile(profileName)
-	if err != nil {
-		return err
-	}
-	if err := requireController(prof, cmdAnnotationsAdd.Path); err != nil {
-		return err
-	}
-	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
-	if stepID != "" {
-		if err := c.AppendStepAnnotation(ctx, runID, nodeID, stepID, msg); err != nil {
-			return err
-		}
-		fmt.Fprintf(os.Stdout, "annotated %s/%s/%s: %s\n", runID, nodeID, stepID, msg)
-		return nil
-	}
-	if err := c.AppendNodeAnnotation(ctx, runID, nodeID, msg); err != nil {
-		return err
-	}
-	fmt.Fprintf(os.Stdout, "annotated %s/%s: %s\n", runID, nodeID, msg)
-	return nil
+	_, err = fmt.Fprintf(out, "annotated %s\n", subject)
+	return err
 }

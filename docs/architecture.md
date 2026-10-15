@@ -1,331 +1,73 @@
 # Architecture
 
-**This page describes the production deployment** - the sparkwing stack
-running in a shared Kubernetes cluster, where webhooks arrive from GitHub,
-a team looks at a central dashboard, and runners are pooled for work.
-
-**For local dev, almost none of this applies.** On a laptop, `sparkwing`
-compiles and runs your pipeline as a host subprocess and records each
-run under `~/.sparkwing/`. `sparkwing serve start` spawns a detached
-local web server (`pkg/localws`, embedded in the CLI); it owns the
-SQLite store, the log files, and the dashboard on one port (default
-`http://127.0.0.1:4343`) - no controller pod, no cache, no runner
-pods. See [native-mode.md](native-mode.md).
-
-The rest of this page is about the in-cluster shape you deploy once per
-team, not once per developer.
-
----
-
-Sparkwing (prod deployment) is a self-hosted CI/CD platform that runs on
-Kubernetes. The stack has a controller, which also serves the dashboard and
-node logs, and runners. Building container images (Docker-in-Docker) and
-hosting an image registry, when a pipeline needs them, are external
-infrastructure the chart does not deploy.
-
-## Components
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                      Kubernetes Cluster                            │
-│                                                                    │
-│  ┌──────────────┐                                                 │
-│  │  Controller  │                                                 │
-│  │ (API + queue │                                                 │
-│  │  + webhooks  │                                                 │
-│  │  + dashboard)│                                                 │
-│  └──────┬───────┘                                                 │
-│         │                                                          │
-│  ┌──────┴───────┐                                                 │
-│  │  Runner      │                                                 │
-│  │  (warm pool, │                                                 │
-│  │   polls +    │                                                 │
-│  │   claims)    │                                                 │
-│  └──────────────┘                                                 │
-└──────────────────────────────────────────────────────────────────┘
-         ▲                    ▲
-         │                    │
-    ┌────┴────┐          ┌────┴────┐
-    │  sparkwing   │          │  git    │
-    │  (CLI)  │          │ (push)  │
-    └─────────┘          └─────────┘
-```
-
-The chart deploys sparkwing-controller and sparkwing-runner.
-
-### Controller
-
-The central coordinator. Receives job triggers, queues work, and
-serves it to runners that poll and claim.
-
-- **API server** (port 4344): HTTP endpoints for triggers, run status,
-  agent polling, secrets, and authorization
-- **Dashboard**: the dashboard pages, sign-in, and the browser flows for
-  OAuth and the GitHub App, on the same port as the API
-- **Job queue**: in-memory queue with SQLite persistence
-  (`/data/state.db`) for run state, metadata, secrets, and tokens
-- **Webhooks**: receives GitHub webhook payloads, verifies HMAC
-  signatures, and triggers matching pipelines
-- **Pool management**: maintains a pool of PVCs pre-loaded with Docker
-  build cache; handles checkout and return for runner jobs
-- **Run backend**: holds pending runs for runners to poll and claim; the
-  controller does not push work to runners
-- **Heartbeat monitor**: reclaims a node whose runner stops renewing its
-  lease (default 3-minute lease)
-- **Claim wait**: marks a run `needs_attention` while a ready node has no
-  agent able to claim it, and fails the node as unclaimable once its claim
-  wait passes (default 24 hours)
-- **Metrics collector**: stores the per-node CPU/memory samples runners
-  push as they execute (no cluster metrics-server involved)
-
-### Runner
-
-Executes pipeline binaries. A standing warm-pool Deployment runs the
-unified `sparkwing-runner` binary, which polls the controller and claims
-pending nodes. For per-node isolation it launches a Kubernetes Job that
-runs `sparkwing-runner run-node`. The runner fetches source directly from Git
-or an authorized source bundle, compiles the pipeline and hosts the node:
-the pipeline runs in its own
-processes over the node protocol, and the runner records the result.
-
-The trigger runner fetches and compiles with its shared source and build caches,
-then hosts the run itself: it plans the run in a short-lived process of the
-pipeline, runs the scheduler, and dispatches each node to a Kubernetes Job, a
-warm runner, or, with `--trigger-runner inprocess`, a process on the runner under
-a claim it takes for that node. Every node records the `spec_hash` the run's
-accepted plan gave it, and the host that runs a node refuses it with
-`plan_drift` when its own plan of the node hashes otherwise. Pipeline
-processes get the minimal environment; the runner's token never reaches them.
-A run the trigger runner hosts is stopped and fails after six hours, GitHub
-Actions' default job timeout, so a wedged run frees the runner's slot.
-
-Off-cluster runners (developer machines, workstations, and servers) connect to
-the controller and claim nodes through its claim API; the route set and scopes
-are in [api-reference.md](api-reference.md).
-
-### Storage
-
-The storage rewrite targets signed transfers for outputs, artifacts,
-dependency caches, pipeline binaries and source bundles. Its integration
-status is recorded in the [storage contract](storage.md). Runners fetch Git
-repositories directly and package managers use upstream registries. An operator can supply a
-registry mirror through `run.submit_env_allow`.
-
-See [Storage](storage.md) for the byte and record contracts.
-
-### Dashboard
-
-Next.js web app showing pipeline runs, logs, node status, and
-documentation. The controller embeds the bundle and serves it on its API
-port; `sparkwing serve` serves the same bundle locally. Log panes read
-through the controller, which serves a node from the log segments its
-runner uploaded.
-
-The Fleet page shows the team's runners and queue activity. Operators can
-check controller health through its service endpoint.
-
-### DinD (Docker-in-Docker)
-
-Optional, external infrastructure the chart does not deploy. When a
-pipeline builds container images, point runners at a shared Docker
-daemon; runner jobs connect to it, optionally with a warm PVC mounted for
-Docker cache.
-
-### Registry
-
-Optional, external infrastructure the chart does not deploy. Pipelines
-that build images push them to a registry you provide - an in-cluster one
-you run yourself, or an external service (ECR, GCR, Docker Hub, etc.).
-That is up to the pipeline author.
-
-### Node logs
-
-The controller stores node logs; there is no separate log service. A
-runner uploads each node's log as gzip segments through URLs the
-controller issues, into the controller's cache bucket or output
-directory, and pushes live lines to the controller while someone watches
-the node. The dashboard streams them via SSE. See
-[observability.md](observability.md#node-logs-kept-as-segments).
-
-## Component Communication
-
-All in-cluster communication uses Kubernetes service DNS names. Every
-component talks over HTTP - there are no custom protocols.
-
-### Who talks to whom
-
-```
-sparkwing CLI ──────► Controller   trigger a run; poll until terminal
-GitHub ────────► Controller        push webhook (HMAC verified)
-Runner ────────► k8s API           create / watch per-node Jobs
-Runner ────────► Controller        claim node; heartbeat; report finish; fetch details
-Runner ────────► Git host          clone repository at its sealed SHA
-Runner ────────► Package registry  download packages
-Runner ────────► Controller        node log segment URLs; live lines while watched
-Runner ────────► Object store      node log segments (presigned PUT)
-Runner ────────► DinD              Docker builds (tcp://localhost:2375)
-Runner ────────► Registry          docker push (localhost:30500)
-Dashboard ─────► Controller        pages, runs / agents / pipelines, log reads (SSE)
-
-sparkwing CLI ──────► Controller        create triggers; upload working-tree sources
-```
-
-### Network policies
-
-The charts deploy no NetworkPolicy. On a cluster that runs default-deny
-ingress, each component needs these allow rules:
-
-| Component | Accepts traffic from |
-|-----------|---------------------|
-| Controller | External (webhooks, dashboard, API), Runners |
-| DinD | Runners |
-| Registry | Runners, Nodes (image pulls) |
-
-### Internal service addresses
-
-All components discover each other via k8s DNS. No hardcoded IPs.
-
-| Service | Internal address | Port |
-|---------|-----------------|------|
-| Controller | `sparkwing-controller.sparkwing.svc.cluster.local` | 80 -> 4344 |
-| DinD | `dind.sparkwing.svc.cluster.local` | 2375 |
-| Registry | `registry.registry.svc.cluster.local` | 5000 (NodePort 30500) |
-
-### Environment variables set on runners
-
-These are set on every runner pod:
-
-| Variable | Purpose |
-|----------|---------|
-| `SPARKWING_CONTROLLER_URL` | Controller base URL |
-| `SPARKWING_RUN_ID` | The run this node belongs to |
-| `SPARKWING_NODE_ID` | The node being executed |
-| `SPARKWING_HOME` | State / cache / logs root |
-| `SPARKWING_AGENT_TOKEN` | Supervisor bearer for controller calls; job-body children receive a scoped loopback capability instead |
-
-### Environment variables set on a local node process
-
-`sparkwing run` hosts the run in its own process and runs each node in a
-`--sw-node-protocol` process of the pipeline binary. The CLI talks to the
-admission daemon over its `api.sock`; the node process does not. It gets
-the user's environment without the `SPARKWING_*` variables the engine
-owns, plus the variables the [node protocol](node-protocol.md#environment-contract)
-names:
-
-| Variable | Purpose |
-|----------|---------|
-| `SPARKWING_RUN_ID` | The run the node belongs to |
-| `SPARKWING_NODE_ID` | The node the process runs |
-| `SPARKWING_NODE_URL` | The loopback base URL of the node's `/node/v1` routes |
-| `SPARKWING_NODE_TOKEN` | The bearer for those routes; the Go SDK removes it before the `init` of any package that imports the SDK, though a package that does not import it can initialize first and read it |
-| `SPARKWING_DRY_RUN` | `1` in a dry run |
-| `SPARKWING_RUNNER_NAME` | `local`, or the runner a pod host's Job names -- the runner name `Runtime().Runner` reports |
-| `SPARKWING_RUNNER_TYPE` | `local`, or the pod host's runner type -- the runner type `Runtime().Runner` reports |
-| `SPARKWING_RUNNER_LABELS` | The labels the runner advertises, comma-separated; what `WhenRunner` matches against |
-
-A node reaches its run's state only through those routes, never through
-the daemon's socket or the runs store.
-
-### Service URLs and dev.env
-
-`sparkwing-runner run-node` reads `SPARKWING_CONTROLLER_URL` from its own
-environment; the runner that starts it sets that name. The local
-dashboard writes its address to `$SPARKWING_HOME/dev.env`, and only a CLI
-verb looking for that dashboard reads it.
-
-A suite running inside a node inherits the operator's home, so before
-every step that starts a product suite the repository gate pins
-`SPARKWING_HOME` to a directory of its own, which holds no `dev.env`, and
-clears the bindings the node injects: the controller URL, the
-agent token, the node route and its token, and the run and node ids.
-
-### Controller API endpoints
-
-The controller's full route set, methods, and required scopes are in
-[api-reference.md](api-reference.md).
-
-## Data Flow
-
-### Local Development
-
-```
-sparkwing run build-deploy
-  → compiles .sparkwing/ into a binary
-  → asks the binary for the plan over the node protocol
-  → runs each node in its own process of the binary
-  → each node does whatever its code says (build, test, deploy, etc.)
-```
-
-### Remote Execution (pipeline trigger)
-
-```
-sparkwing pipeline trigger build-deploy --profile <cluster>
-  1. sparkwing resolves the profile -> controller URL
-  2. sparkwing checks that the exact Git commit is on origin
-  3. sparkwing POSTs the trigger with that commit SHA
-  4. controller enqueues run
-  5. a runner polls the controller and claims the run
-  6. runner fetches the exact SHA from origin
-  7. runner compiles and runs the pipeline binary
-  8. runner uploads node log segments through the controller
-  9. runner sends periodic heartbeats to controller to hold its claim
-  10. runner reports completion to controller
-  11. sparkwing pipeline trigger follows controller state and displays result
-```
-
-`--working-tree` replaces steps 2 and 6 with a synthetic-commit bundle:
-the CLI reserves and uploads it directly to S3 before trigger admission, and
-the claimed runner requests a signed download for that run. A checkout needs
-no origin. The controller handles authorization and small control requests;
-it does not relay the source bytes.
-
-### Git Push Trigger
-
-```
-git push origin main
-  1. GitHub sends webhook to sparkwing-controller (external)
-  2. Controller verifies HMAC signature
-  3. Controller matches push against sparkwing.yaml triggers
-  4. Controller enqueues matching runs
-  5. Same execution flow as steps 5-11 above
-```
-
-## Storage
-
-| Component | Storage | Contents |
-|-----------|---------|----------|
-| Controller | SQLite at `/data/state.db` | Run state, metadata, secrets, tokens, audit log |
-| Controller | `--cache-blob-store` bucket, or its output directory | Node log segments and manifests |
-| DinD | PVC | Docker layers and build cache |
-| Registry | PVC | Container images |
-
-## Cluster Setup
-
-The Helm chart for the cluster topology lives in this repo under
-`charts/sparkwing-full`:
-
-```bash
-helm install sparkwing ./charts/sparkwing-full -n sparkwing --create-namespace \
-    --set controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin
-```
-
-The render refuses without a first admin token Secret, or an explicit
-`controller.allowOpenBootstrap=true` that serves the controller
-unauthenticated until a token exists; the
-[chart README](../charts/sparkwing-full/README.md) lists the other required
-values.
-
-Then add a profile pointing at the controller's URL:
-
-```yaml
-# ~/.config/sparkwing/config.yaml
-profiles:
-  prod:
-    controller:
-      url: https://sparkwing.example.com
-      token: <api-token>
-```
-
-Select it per command with `--profile prod`. The
-same pipelines run against any sparkwing controller without changes;
-only the profile and registries differ.
+Sparkwing's rewrite uses shared contracts for state, credentials, hosting, storage
+and controller transport. The CLI already uses typed controller clients for run
+observations, retries, schedules, credentials and data operations. Retry selection
+is explicit, and receipts exclude execution inputs and here credentials. Native controller,
+host, runner and storage composition still needs integration evidence. A passing
+transport test does not establish a working deployment.
+
+Retry intake and reuse still need the controller's transaction adapter. Here
+retry handoff also needs the shared host. An incomplete handoff exits 3 and
+identifies the new run instead of reporting that it started.
+
+See [local dashboard integration](native-mode.md), [controller connections](backends.md)
+and [self-hosting](self-hosting.md) for the related surfaces.
+
+<!-- design:begin -->
+## Execution model
+
+The final component kinds are CLI, controller, runner, launcher and SDK process.
+The host library is shared code. Local, triggered-local, runner, here, Actions
+and launcher placements use the same run and job lifecycle.
+
+The controller owns state, admission, the queue and the dashboard. A local
+controller owns one home and one state store. Local runs stay hosted in the CLI.
+Standalone CI uses the same runtime in process. A remote controller owns team
+history and authorizes claims and data access.
+
+A runner claims trigger and job units through one queue. A launcher turns
+awarded plan, eval and work units into Kubernetes Jobs. The store owns lifecycle
+transitions, claim fences, scheduling projections, billing and completion effects.
+A host never implements another transition engine.
+
+The SDK pin selects an exact verified engine before installation, describe,
+planning or execution. The first seal captures intake. Plan acceptance stores
+the second seal and validated plan together. Resume and retry consume persisted
+seals. They do not reinterpret the caller's current settings.
+
+## Storage and source
+
+Source comes directly from its authorized Git host at the sealed SHA. An
+optional source bundle can seed acquisition. Repository identity grants no fetch
+authority. There is no cache service, Git mirror service or package proxy.
+
+The controller authorizes logical records and short-lived signed `/data`
+transfers. Physical bytes use filesystem or object storage. Every reference edge
+is authorized. Pipeline binaries are built and cached on the executing machine.
+An explicit cache profile permits only authorized verified-default-branch memo,
+artifact and dependency-cache reads. Publication is a separate opt-in operation.
+
+## Process and deployment boundaries
+
+SDK processes negotiate protocol v2 once through hello. Engine identity, granted
+runner identity and the delegated node-host bearer travel through private
+protocol channels. Credentials and protocol handles do not travel in environment
+variables. Process environments come from the shared process policy.
+
+Cloud Jobs use root and privileged Docker-in-Docker on exclusive team-dedicated
+nodes. Default-deny network enforcement and complete teardown require deployment
+proof. Aggregate scratch includes DinD and remains bounded by the shared limit.
+
+The supported controller topology is one replica. Persistent state and singleton
+leases retain the planned replica-safe boundaries. Cross-replica live-log fan-out
+and coordinated request limiting remain separate work.
+
+## Version policy
+
+Verified engine releases come from GitHub Releases. A signed version index carries
+minimum and revocation policy. A cached verified index remains usable when a
+refresh fails, with a notice. Twelve months of controller API compatibility allow
+a fetched engine to keep using its matching node protocol. Age alone does not
+revoke a release. See [repository upgrades](cli-upgrade.md).
+<!-- design:end -->

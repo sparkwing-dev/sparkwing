@@ -32,7 +32,7 @@ func TestResolveProfileFlag_NotFound(t *testing.T) {
 	writeProfilesFixture(t, `
 profiles:
   prod: { controller: { url: https://api.example.dev } }
-  team: { state: { type: sqlite } }
+  team: { controller: { url: https://team.example.dev } }
 `)
 	_, err := resolveProfileFlag("bogus")
 	if err == nil {
@@ -71,7 +71,7 @@ func TestDispatchRun_RejectsRetiredSwProfile(t *testing.T) {
 	}
 }
 
-func TestResolveProfileChain_OnlyTheFlagSelects(t *testing.T) {
+func TestResolveProfileFlag_OnlyTheFlagSelects(t *testing.T) {
 	writeProfilesFixture(t, `
 profiles:
   prod: { controller: { url: https://api.example.dev } }
@@ -79,13 +79,13 @@ profiles:
 `)
 	t.Chdir(t.TempDir())
 	t.Setenv("SPARKWING_PROFILE", "dev")
-	p, chain, _, err := resolveProfileChain("prod")
-	if err != nil || p.Name != "prod" || chain.Source != "flag" {
-		t.Fatalf("flag: %v %+v %v", p, chain, err)
+	p, err := resolveProfileFlag("prod")
+	if err != nil || p.Name != "prod" {
+		t.Fatalf("flag: %v %v", p, err)
 	}
-	p, chain, _, err = resolveProfileChain("")
-	if err != nil || p != nil || chain.Source != "none" {
-		t.Fatalf("an exported SPARKWING_PROFILE selected %v %+v %v; only --profile may", p, chain, err)
+	p, err = resolveProfileFlag("")
+	if err != nil || p != nil {
+		t.Fatalf("an exported SPARKWING_PROFILE selected %v %v; only --profile may", p, err)
 	}
 }
 
@@ -93,7 +93,7 @@ func TestDispatchRun_RefusesAControllerProfileAndNamesTrigger(t *testing.T) {
 	writeProfilesFixture(t, `
 profiles:
   prod: { controller: { url: https://api.example.dev } }
-  lite: { state: { type: sqlite } }
+  lite: { controller: { url: https://lite.example.dev } }
 `)
 	for _, name := range []string{"prod", "lite"} {
 		err := dispatchRun([]string{"deploy", "--profile", name})

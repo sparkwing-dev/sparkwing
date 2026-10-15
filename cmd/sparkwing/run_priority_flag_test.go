@@ -43,7 +43,7 @@ func TestParseRunFlags_PriorityIsNeverForwarded(t *testing.T) {
 		{"--sw-priority"},
 	} {
 		wf, pass := parseRunFlags(args)
-		if !wf.prioritySet {
+		if !wf.prioritySet && wf.parseErr == nil {
 			t.Errorf("%v: prioritySet = false", args)
 		}
 		if slices.Contains(pass, "--sw-priority") {

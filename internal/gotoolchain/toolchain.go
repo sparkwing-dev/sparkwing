@@ -119,7 +119,7 @@ func BuildEnv(ctx context.Context, dir string, env []string, overlay string) ([]
 	}
 	if err != nil {
 		// safety: a failed probe only loses the override; go itself still reports a real floor mismatch.
-		slog.Default().Debug("go toolchain probe failed", "err", err)
+		slog.Default().Debug("go toolchain probe failed")
 		r = Report{}
 	}
 	result := effectiveEnv(env)
@@ -190,7 +190,7 @@ func probe(ctx context.Context, env []string) (Report, error) {
 			fmt.Fprintf(os.Stderr, "sparkwing: remove Go probe directory: %v\n", err)
 		}
 	}()
-	path, err := goPath(env)
+	path, err := Executable(env)
 	if err != nil {
 		return Report{}, err
 	}
@@ -207,7 +207,7 @@ func probe(ctx context.Context, env []string) (Report, error) {
 		return Report{}, fmt.Errorf("probe Go toolchain: unexpected go env output %q", out)
 	}
 	r := Report{Setting: strings.TrimSpace(lines[0]), Current: strings.TrimSpace(lines[1]), Source: "the Go toolchain default"}
-	if value, ok := envValue(env, "GOTOOLCHAIN"); ok && value != "" {
+	if value, ok := LookupEnv(env, "GOTOOLCHAIN"); ok && value != "" {
 		r.Source = envSource
 	} else if lines[2] != "off" {
 		data, readErr := os.ReadFile(strings.TrimSpace(lines[2]))
@@ -223,8 +223,9 @@ func probe(ctx context.Context, env []string) (Report, error) {
 	return r, nil
 }
 
-func goPath(env []string) (string, error) {
-	path, _ := envValue(env, "PATH")
+// Executable resolves Go from the captured build environment.
+func Executable(env []string) (string, error) {
+	path, _ := LookupEnv(env, "PATH")
 	for _, dir := range filepath.SplitList(path) {
 		name := "go"
 		if runtime.GOOS == "windows" {
@@ -239,9 +240,11 @@ func goPath(env []string) (string, error) {
 	return "", fmt.Errorf("probe Go toolchain: go executable not found in PATH")
 }
 
-func envValue(env []string, key string) (string, bool) {
+// LookupEnv reads the last captured value using the native environment name rules.
+func LookupEnv(env []string, key string) (string, bool) {
 	for i := len(env) - 1; i >= 0; i-- {
-		if value, ok := strings.CutPrefix(env[i], key+"="); ok {
+		name, value, ok := strings.Cut(env[i], "=")
+		if ok && (name == key || runtime.GOOS == "windows" && strings.EqualFold(name, key)) {
 			return value, true
 		}
 	}
@@ -271,7 +274,7 @@ func ExplainOutput(ctx context.Context, output string, env []string) error {
 	source := s.report.Source
 	if source == "" {
 		source = "the Go toolchain default"
-		if value, ok := envValue(effectiveEnv(env), "GOTOOLCHAIN"); ok && value != "" {
+		if value, ok := LookupEnv(effectiveEnv(env), "GOTOOLCHAIN"); ok && value != "" {
 			source = envSource
 		}
 	}

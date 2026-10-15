@@ -232,24 +232,6 @@ func resolveNpmCacheDir(workdir string) (string, error) {
 	return defaultNpmCacheDir(goruntime.GOOS)
 }
 
-// NpmCacheCommand queries npm through its native executable or Windows Node entrypoint.
-func NpmCacheCommand(ctx context.Context, goos string, lookPath func(string) (string, error)) (*exec.Cmd, error) {
-	npm, err := lookPath("npm")
-	if err != nil {
-		return nil, err
-	}
-	args := []string{"config", "get", "cache"}
-	if goos != "windows" || strings.EqualFold(filepath.Ext(npm), ".exe") {
-		return exec.CommandContext(ctx, npm, args...), nil
-	}
-	node, err := lookPath("node")
-	if err != nil {
-		return nil, err
-	}
-	cli := filepath.Join(filepath.Dir(npm), "node_modules", "npm", "bin", "npm-cli.js")
-	return exec.CommandContext(ctx, node, append([]string{cli}, args...)...), nil
-}
-
 func defaultNpmCacheDir(goos string) (string, error) {
 	if goos == "windows" {
 		if local := os.Getenv("LOCALAPPDATA"); local != "" {

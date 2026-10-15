@@ -2,7 +2,11 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
@@ -24,5 +28,32 @@ type EngineOptions struct {
 // Otherwise Launcher selects /launcher/claim and ordinary claims use /runners/claim.
 // Here intake is never transparently retried: replay cannot reproduce HereBearer.
 func NewEngineClient(options EngineOptions) (controllerwire.Controller, error) {
-	panic("unimplemented: controller-wire")
+	c, err := newEngineClient(options)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// NewRunReader uses the authenticated controller transport for public run views.
+func NewRunReader(options EngineOptions) (controllerwire.RunReader, error) {
+	c, err := newEngineClient(options)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func newEngineClient(options EngineOptions) (*engineClient, error) {
+	base, err := url.Parse(options.URL)
+	if err != nil || base == nil || base.Host == "" || (base.Scheme != "http" && base.Scheme != "https") || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+		return nil, fmt.Errorf("controller URL must be an HTTP(S) base URL without credentials, query or fragment")
+	}
+	hc := http.Client{Timeout: 30 * time.Second}
+	if options.HTTP != nil {
+		hc = *options.HTTP
+	}
+	// safety: credentials and private execution inputs must stay at the selected controller.
+	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &engineClient{base: strings.TrimRight(base.String(), "/"), http: &hc, bearer: options.Bearer, launcher: options.Launcher}, nil
 }

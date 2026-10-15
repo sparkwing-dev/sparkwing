@@ -3,8 +3,7 @@ package crons
 import (
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/api"
-
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -12,8 +11,8 @@ import (
 )
 
 // NewHealthView converts a [Health] for the wire.
-func NewHealthView(h Health) api.HealthView {
-	return api.HealthView{
+func NewHealthView(h Health) controllerwire.HealthView {
+	return controllerwire.HealthView{
 		Timer:         newTimerStateView(h.Timer),
 		LastTick:      newTickView(h),
 		TickStale:     h.TickStale,
@@ -31,8 +30,8 @@ func NewHealthView(h Health) api.HealthView {
 	}
 }
 
-func newTimerStateView(t crontimer.State) api.TimerStateView {
-	return api.TimerStateView{
+func newTimerStateView(t crontimer.State) controllerwire.TimerStateView {
+	return controllerwire.TimerStateView{
 		Installed: t.Installed,
 		Foreign:   t.Foreign,
 		Enabled:   t.Enabled,
@@ -43,8 +42,8 @@ func newTimerStateView(t crontimer.State) api.TimerStateView {
 	}
 }
 
-func newTickView(h Health) api.TickView {
-	return api.TickView{
+func newTickView(h Health) controllerwire.TickView {
+	return controllerwire.TickView{
 		At:      RFC3339(h.LastTick.At),
 		Host:    h.LastTick.Host,
 		Version: h.LastTick.Version,
@@ -53,8 +52,8 @@ func newTickView(h Health) api.TickView {
 }
 
 // NewScheduleView converts a [Row] for the wire.
-func NewScheduleView(row Row) api.ScheduleView {
-	override := api.OverrideView{Fields: row.OverrideFields, Stale: row.OverrideStale}
+func NewScheduleView(row Row) controllerwire.ScheduleView {
+	override := controllerwire.OverrideView{Fields: row.OverrideFields, Stale: row.OverrideStale}
 	if override.Fields == nil {
 		override.Fields = []string{}
 	}
@@ -71,7 +70,7 @@ func NewScheduleView(row Row) api.ScheduleView {
 	if override.Args == nil {
 		override.Args = map[string]string{}
 	}
-	return api.ScheduleView{
+	return controllerwire.ScheduleView{
 		ID:           row.ID,
 		Name:         row.Display,
 		ScheduleName: row.ScheduleName,
@@ -84,14 +83,14 @@ func NewScheduleView(row Row) api.ScheduleView {
 		Overlap:      row.Overlap,
 		CatchUpNS:    int64(row.CatchUp),
 		Args:         ViewArgs(row.Args),
-		Lock: api.LockView{
+		Lock: controllerwire.LockView{
 			Ref:    row.Lock.Ref,
 			Binary: row.Lock.Binary,
 			Digest: row.Lock.Digest,
 			State:  row.Lock.State,
 		},
 		Override: override,
-		Effective: api.EffectiveView{
+		Effective: controllerwire.EffectiveView{
 			Cron:      row.Effective.Cron,
 			TZ:        row.Effective.TZ,
 			Overlap:   row.Effective.Overlap,
@@ -113,8 +112,8 @@ func NewScheduleView(row Row) api.ScheduleView {
 
 // NewFireView converts one fire for the wire, joined with the current status of
 // the run it launched.
-func NewFireView(fire store.CronFire, runStatus string) api.FireView {
-	return api.FireView{
+func NewFireView(fire store.CronFire, runStatus string) controllerwire.FireView {
+	return controllerwire.FireView{
 		ID:         fire.ID,
 		ScheduleID: fire.ScheduleID,
 		DueAt:      RFC3339(fire.DueAt),
@@ -156,7 +155,7 @@ func rfc3339Ptr(t *time.Time) *string {
 // evaluator served, so one renderer answers for both sides. The fields the
 // wire does not carry -- who armed the schedule, and its cursor -- come back
 // zero.
-func RowFromView(v api.ScheduleView) Row {
+func RowFromView(v controllerwire.ScheduleView) Row {
 	row := Row{
 		CronSchedule: store.CronSchedule{
 			ID:           v.ID,
@@ -223,7 +222,7 @@ func RowFromView(v api.ScheduleView) Row {
 // safety: an override that replaces the declared arguments with none is a set
 // but empty map, which the wire cannot tell from an override that names no
 // arguments at all -- the field list can, so it decides.
-func overrideArgsFromView(v api.OverrideView) map[string]string {
+func overrideArgsFromView(v controllerwire.OverrideView) map[string]string {
 	for _, field := range v.Fields {
 		if field == "args" {
 			return ViewArgs(v.Args)
@@ -233,7 +232,7 @@ func overrideArgsFromView(v api.OverrideView) map[string]string {
 }
 
 // HealthFromView rebuilds the [Health] a renderer reads from the wire shape.
-func HealthFromView(v api.HealthView) Health {
+func HealthFromView(v controllerwire.HealthView) Health {
 	return Health{
 		Timer: crontimer.State{
 			Installed: v.Timer.Installed,
@@ -266,7 +265,7 @@ func HealthFromView(v api.HealthView) Health {
 }
 
 // FireFromView rebuilds one stored fire from the wire shape.
-func FireFromView(v api.FireView) store.CronFire {
+func FireFromView(v controllerwire.FireView) store.CronFire {
 	return store.CronFire{
 		ID:         v.ID,
 		ScheduleID: v.ScheduleID,
