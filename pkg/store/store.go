@@ -103,6 +103,7 @@ type Store struct {
 	plans            planContracts
 	planSecretOpener PlanSecretOpener
 	delegation       delegationContracts
+	sourcePolicy     sourceReleaseContracts
 	clock            func() time.Time
 	db               *sql.DB
 	dialect          Dialect
@@ -1099,9 +1100,8 @@ func (f RunFilter) HasBeforeCursor() bool { return f.BeforeID != "" }
 // ListRuns returns runs ordered newest-first, then by id descending, filtered
 // by f. The cursor clause depends on that order.
 //
-// Scope: this reads every team. A tenant caller wants [Tenant.ListRuns]
-// and a maintenance caller wants [Operator.ListRunsAcrossTeams]; this
-// twin exists because pkg/storage.StateStoreOld still names it.
+// Scope: this reads every team. Tenant callers use [Tenant.ListRuns].
+// The raw method remains part of pkg/storage.StateStoreOld.
 func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error) {
 	return s.listRuns(ctx, allTeams(), f)
 }

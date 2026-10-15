@@ -1,10 +1,68 @@
 # W1 amendment handoff
 
-Continuation of 3f1dbd480. W1 is incomplete. The lead owns the merge index,
+Continuation of b96641913. W1 is incomplete. The index is clean. The lead owns
 commits, independent review and delivery pipelines. W1b implementation files
 were left alone.
 
 ## Latest continuation
+
+Continues b96641913 with a clean index. Added the C1 team source-credential release
+transaction and current-owner consent mutation. Release reloads authority and
+enrollment, derives the host from the sealed source location, repeats the claim
+and deadline checks, and commits C2's complete audit before returning the sealed
+credential. The final clock check covers authority or lease expiry during policy
+work. The controller still owns decryption and HTTP authorization.
+
+Security invariants: a release returns a credential only for the live source
+award and its sealed repository after the matching audit commits. Only the
+machine's current owner can change consent. Two property tests generate forged
+principal and target fields, account identities and consent choices. Component
+tests cover node, trigger and cloud plan awards, unconfirmed SSH, revoked parent
+authority, changed holders/generations, execution start, cancellation, deadline,
+lost consent, enrollment changes, fake cloud placement, policy refusal, and an
+audit-write or commit failure. They use the real store and a fake for C2's declared
+AuthorizeSourceRelease policy, which remains a stub on this branch.
+
+Local C1 additions are Tenant.ReleaseSourceCredential and
+Tenant.SetSourceMachineConsent. The five added source-audit columns implement
+fields already required by SourceReleaseAudit. No other area's contract changed.
+The new private source-policy dependency delegates to the existing C2 owner.
+No setting, limit, environment variable, service or compatibility alias was added.
+
+Deleted the unused Operator.ListRunsAcrossTeams and CountRunsAcrossTeams APIs
+(10 production lines) and their obsolete assertions (10 test lines). Neither had
+a runtime caller. No package outside pkg/store was changed. The larger legacy
+runtime APIs still have callers and remain open. W1b files are untouched.
+
+Real integration still needs W2's policy, authenticated source route and decryptor,
+and enrollment that records the account owner in capabilities.created_by. The
+separate GitHub App mint/audit path remains open. The existing contract gaps below
+remain open. No native acceptance cell or inventory test port was claimed in this
+continuation.
+
+Verification uses the scratch/cache environment recorded below. Whole-repository
+go build and scoped go vet pass. The final W1 selection passes 238 top-level
+tests / 685 cases without skips or failures. Add source_release_test.go and
+run_view_test.go to the two prior handoffs' file lists to reproduce it. All
+TestEngine controller tests pass, 21 top-level tests / 31 cases. The final focused
+source selection passes eight top-level tests / 29 cases. Schema and SQL-scope
+checks pass against the stricter audit columns. Repository key, machine identity
+and a positive claim generation are required on new audits.
+
+Full match, controllerwire and acceptance package commands pass. Acceptance still
+contains 2,995 native skeleton skips. The OpenAPI drift check and diff whitespace
+check pass. No local user.name, user.email or core.worktree override is present.
+The changed source and schema have no new dependency outside the worktree.
+
+Shared files touched are pkg/store/store.go and schema.sql, the C1 contract
+document and this handoff. Other source changes stay in pkg/store. Native HTTP,
+PostgreSQL interleavings, operating-system placements, races and delivery pipelines
+remain lead checks. The only fixture correction was to pair terminal run status
+with finished_at as the final schema requires. Aggregate API snapshots and the
+rewrite changelog remain integration work. No Git writes or Sparkwing binaries
+were run. Scratch is removed before the final report.
+
+## Previous status-reader continuation
 
 Implemented the persisted status portion of EngineController.RunDetail. The new
 local C1 API Tenant.ReadRunView returns status, ordered node-wide attempts and

@@ -108,6 +108,32 @@ signing authority. This reader does not write log persistence. The controller's
 bearers and execution declarations. Version-policy notices still require the
 engine owner's integration.
 
+`Tenant.ReleaseSourceCredential` accepts C2's authorized authority reference and
+route target. In one write transaction it reloads ancestry, locks the owner, run
+and job, checks the live unstarted source binding and run deadline, and derives
+the credential host from the sealed source location. It resolves executor
+enrollment through `ClaimProfileResolver`. Repository permission requires the
+award's repository scope and the current enrollment filter. A cloud executor
+requires both the immutable cloud award class and enrolled cloud location.
+Other executors require the same team's machine root and its owner's persisted
+consent. Caller-supplied principal, binding and executor fields grant nothing.
+
+The transaction calls C2's `AuthorizeSourceRelease` through a private contract
+dependency, reads the confirmed team credential, and commits the complete
+`SourceReleaseAudit` before returning the sealed credential. The controller owns
+decryption. Audit or commit failure returns neither credential nor audit. A final
+clock check refuses a lease or authority that expires during policy work.
+`git_credential_releases` includes repository_key, node_id, generation, machine_id
+and owner_account_id so the C2 audit survives without consulting mutable claims.
+Release timestamps use store-clock nanoseconds.
+
+`Tenant.SetSourceMachineConsent` reloads current account and machine authority,
+requires the account to match the root's persisted created_by, and writes or
+removes the consent under the same root lock used by release. Team administration
+cannot replace machine ownership. Its timestamp uses the store clock.
+The production C2 policy, route/decryption adapter, trusted machine-owner
+enrollment and GitHub App issuance path remain separate integrations.
+
 ### Upload and record persistence
 
 `blob.Authority.Upload` contains C2's resolved tagged uploader. W1 rechecks it
@@ -725,6 +751,7 @@ schema version is added.
 | Create | `pkg/store/run_state.go` |
 | Create | `pkg/store/schema.sql` |
 | Create | `pkg/store/schema_contract.go` |
+| Create | `pkg/store/source_release.go` |
 | Create | `pkg/store/state_contract.go` |
 
 The existing host, orchestrator, storage and client edits are mechanical
@@ -984,6 +1011,13 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `SchemaOwner` | SchemaOwner makes deployment authority explicit even when an operator table carries an optional tenant for audit or binding checks. |
 | `SchemaTable` | SchemaTable classifies every baseline table so new state cannot evade the tenant-predicate guard by omission. |
 | `SchemaTables` | SchemaTables is the complete ownership inventory for schema.sql. Implementations must compare the created tables with this registry on both engines. |
+
+### pkg/store/source_release.go
+
+| Export | Purpose |
+|---|---|
+| `Tenant.ReleaseSourceCredential` | Rechecks live source authority, sealed repository, enrollment, host confirmation and machine-owner consent, then commits C2's audit before returning the sealed team credential. |
+| `Tenant.SetSourceMachineConsent` | Changes a machine root's source-credential consent only for its current account owner in the same tenant. |
 
 ### pkg/store/state_contract.go
 

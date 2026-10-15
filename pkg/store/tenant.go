@@ -174,16 +174,6 @@ type Operator struct{ s *Store }
 // AsOperator returns the unscoped handle.
 func (s *Store) AsOperator() *Operator { return &Operator{s: s} }
 
-// ListRunsAcrossTeams returns runs from every team, newest first.
-func (o *Operator) ListRunsAcrossTeams(ctx context.Context, f RunFilter) ([]*Run, error) {
-	return o.s.listRuns(ctx, allTeams(), f)
-}
-
-// CountRunsAcrossTeams counts runs from every team, ignoring f's Limit.
-func (o *Operator) CountRunsAcrossTeams(ctx context.Context, f RunFilter) (int, error) {
-	return o.s.countRuns(ctx, allTeams(), f)
-}
-
 // RunTeam reports which team owns the run runID, for a sweep that found the
 // id across teams and has to act on it through that team's handle.
 // [ErrNotFound] when no run carries the id.
