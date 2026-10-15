@@ -219,3 +219,53 @@ Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
 directory, cross-compiled test executables and check output were removed after
 verification. No Sparkwing binary ran and no Git write occurred. The lead still
 owns independent review, pipelines and the native release lanes.
+
+## Continuation: eval cancellation and retry output isolation
+
+This continues commit `dccdf3b24`. Two SDK failures were reproduced through the
+existing protocol test host before changing the implementation:
+
+- A cancelled `after_run` closure returned success when its callback completed
+  normally. It now checks cancellation after the callback, as the other closure
+  kinds already did. The regression exercises all six kinds and verifies one
+  reply for cancel and one failed eval result for the interrupted invocation.
+- An eval carrying attempt 2 could read step outputs from attempt 1 before the
+  next step request cleared them. Attempt validation and output reset now run
+  when either an eval or a step enters an attempt. Tests cover before/after
+  hooks, stale ordinals, overlap with a running earlier step, and continued
+  execution after that overlap is refused.
+
+No public API, contract, dependency, environment variable or runtime mechanism
+was added. The existing attempt check moved to the shared context construction
+path. W3 must send the existing `Request.Attempt` on attempt-scoped evals so
+retry hooks can identify their attempt before its first step. Evals without an
+attempt keep their existing behavior for owner-side conditions and replay.
+
+The SDK README now describes these behaviors, and the protocol regression tests
+exercise them. No shared files changed. No further legacy code or T1 inventory
+tests were removed or ported. The earlier 2,896-line legacy deletion stands.
+
+All 105 TypeScript tests passed, including six cancellation subtests. Strict
+typechecking and Prettier checks passed. `go vet -p 4` passed for the native SDK
+test host and both acceptance packages. `go test -p 4 ./internal/acceptance
+./tests/acceptance` passed, including the Linux native-pipe fixture against the
+compiled public package. The existing `typescript_sdk_boundary` children of
+`protocol-job-closures-and-skip` and `protocol-sdk-secrets-mask-annotations` now
+include the regressions. No additional placement or Windows cell was enabled.
+Repository-wide `go build -p 4 ./...` and `git diff --check` passed. The shared
+Git config has no `core.worktree` override.
+
+The package preflight still refuses the missing Windows x64 bridge. No Windows
+compiler or runtime tooling was found on PATH. Both native
+bridge builds and native x64/arm64 execution remain open. W3/W4 host and shared
+validation, W1/W2/W7 authorization and persistence, real DinD, and the placement
+lanes remain integration work. The existing route, job-only cancellation and
+concurrency-presence agreements above remain unresolved. No other area's
+contract was changed.
+
+Commands used the same Go flags as the previous continuation, with `GOCACHE`
+and `GOTMPDIR` under `/tmp/sw-astra-W5` and `TMPDIR=/tmp/sw-astra-W5/tmp`.
+Node tests used `--experimental-test-isolation=none`. No Sparkwing binary or
+Git write ran. The lead retains review, commits, pipelines and native lanes.
+The temporary cache and test directory `/tmp/sw-astra-W5` was removed after
+verification.

@@ -114,6 +114,85 @@ test("outputs are per attempt, all step outputs are returned, bad JSON fails lou
   }
 });
 
+test("eval starts the new attempt before hooks can read prior step outputs", async () => {
+  resetPipelines();
+  const observed: unknown[] = [];
+  let output = 0;
+  definePipeline({
+    name: "fixture",
+    plan(plan) {
+      const job = plan.job("build");
+      const step = job.step("produce", () => ++output);
+      job.beforeRun((ctx) => {
+        observed.push(ctx.stepOutput(step));
+      });
+      job.afterRun((ctx) => {
+        observed.push(ctx.stepOutput(step));
+      });
+    },
+  });
+  const host = await setup();
+  try {
+    const plan = await host.send(planRequest);
+    const closures = plan.result.jobs[0].closures;
+    const step = { op: "run_step", job: "build", step: "produce" };
+    assert.equal((await host.send({ ...step, id: "first", attempt: 1 })).result.output, 1);
+    assert.equal((await host.send({ id: "before", op: "eval", closure: closures.before_run[0], attempt: 2 })).result.error, undefined);
+    assert.deepEqual(observed, [undefined]);
+    assert.equal((await host.send({ ...step, id: "stale-step", attempt: 1 })).error.code, "bad_request");
+    assert.equal(
+      (await host.send({ id: "stale-eval", op: "eval", closure: closures.before_run[0], attempt: 1 })).error.code,
+      "bad_request",
+    );
+    assert.equal((await host.send({ ...step, id: "second", attempt: 2 })).result.output, 2);
+    const after = await host.send({ id: "after", op: "eval", closure: closures.after_run[0], attempt: 2, input: { outcome: "success" } });
+    assert.equal(after.result.error, undefined);
+    assert.deepEqual(observed, [undefined, 2]);
+  } finally {
+    await host.close();
+  }
+});
+
+test("an eval cannot advance the attempt while an earlier step is running", async () => {
+  resetPipelines();
+  let started!: () => void, proceed!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const release = new Promise<void>((resolve) => {
+    proceed = resolve;
+  });
+  definePipeline({
+    name: "fixture",
+    plan(plan) {
+      plan
+        .job("build", async () => {
+          started();
+          await release;
+          return "finished";
+        })
+        .beforeRun(() => {});
+    },
+  });
+  const host = await setup();
+  try {
+    const plan = await host.send(planRequest);
+    const job = plan.result.jobs[0];
+    const pending = host.send({ id: "body", op: "run_step", job: "build", step: job.steps[0].id, attempt: 1 });
+    await entered;
+    const overlap = await host.send({ id: "overlap", op: "eval", closure: job.closures.before_run[0], attempt: 2 });
+    assert.equal(overlap.error?.code, "bad_request");
+    proceed();
+    assert.equal((await pending).result.output, "finished");
+    const next = await host.send({ id: "next", op: "eval", closure: job.closures.before_run[0], attempt: 2 });
+    assert.equal(next.ok, true);
+    assert.equal(next.result.error, undefined);
+  } finally {
+    proceed();
+    await host.close();
+  }
+});
+
 test("cancel acknowledges separately and the in-flight body retains its reply", async () => {
   resetPipelines();
   let started!: () => void;
@@ -265,6 +344,77 @@ test("eval supports predicates, hooks, noMemo and generation from recorded outpu
     assert.equal(again.result.error.code, "bad_request");
   } finally {
     await host.close();
+  }
+});
+
+test("cancelled closures retain a failed eval reply even when author code returns normally", async (t) => {
+  for (const kind of ["skip_if", "before_run", "verify", "after_run", "memo_key", "generate"]) {
+    await t.test(kind, async () => {
+      resetPipelines();
+      let started!: () => void, proceed!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const release = new Promise<void>((resolve) => {
+        proceed = resolve;
+      });
+      const wait = async () => {
+        started();
+        await release;
+      };
+      definePipeline({
+        name: "fixture",
+        plan(plan) {
+          plan
+            .job("build", () => null)
+            .skipIf(async () => {
+              await wait();
+              return false;
+            })
+            .beforeRun(wait)
+            .verify(wait)
+            .afterRun(wait)
+            .memo(async () => {
+              await wait();
+              return "key";
+            })
+            .generate(async (generated) => {
+              generated.job("child", () => null);
+              await wait();
+            });
+        },
+      });
+      const host = await setup();
+      try {
+        const plan = await host.send(planRequest);
+        const value = plan.result.jobs[0].closures[kind];
+        const pending = host.send({
+          id: "eval",
+          op: "eval",
+          closure: Array.isArray(value) ? value[0] : value,
+          ...(kind === "after_run" ? { input: { outcome: "success" } } : kind === "generate" ? { input: null } : {}),
+        });
+        await entered;
+        const cancelled = await host.send({ id: "cancel", op: "cancel", job: "build" });
+        proceed();
+        const evaluated = await pending;
+        assert.equal(cancelled.ok, true);
+        assert.equal(evaluated.ok, true);
+        assert.equal(evaluated.result.value, null);
+        assert.equal(evaluated.result.error?.code, "sdk_error");
+        assert.match(evaluated.result.error.message, /cancelled by host/);
+        assert.deepEqual(
+          host.frames
+            .filter((frame) => ["cancel", "eval"].includes(frame.reply))
+            .map((frame) => frame.reply)
+            .sort(),
+          ["cancel", "eval"],
+        );
+      } finally {
+        proceed();
+        await host.close();
+      }
+    });
   }
 });
 

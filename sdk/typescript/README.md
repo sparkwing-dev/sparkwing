@@ -42,6 +42,10 @@ and cancellation signal. Plan callbacks declare work; helpers that perform I/O
 refuse calls during planning. Generated jobs reconstruct from recorded source
 output. The host validates the reconstructed declarations against accepted state.
 
+Step output reads stay within the current attempt, including retry hooks.
+Cancellation reaches bodies and every closure kind. A callback that finishes
+after cancellation still reports a failed invocation.
+
 The host starts `node <entry> --sw-node-protocol`. Protocol 2 begins with hello,
 which supplies granted runner identity and an optional in-memory service binding.
 Requests and frames use private pipes. Standard output and error remain author

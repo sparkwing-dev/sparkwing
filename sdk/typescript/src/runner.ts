@@ -220,6 +220,17 @@ class Session {
     } catch (error) {
       throw failure("invalid_args", messageOf(error));
     }
+    if (req.attempt !== undefined) {
+      const attempt = Number(req.attempt);
+      const prior = this.#attempts.get(spec.id);
+      if (prior !== undefined && attempt < prior) throw failure("bad_request", "attempt ordinal moved backwards");
+      if (prior !== attempt) {
+        if ([...this.#active.values()].some((active) => active.job === spec.id))
+          throw failure("bad_request", "previous attempt is still running");
+        this.#attempts.set(spec.id, attempt);
+        this.#outputs.delete(spec.id);
+      }
+    }
     const controller = new AbortController();
     this.#active.set(req.id, { job: spec.id, ...(step === undefined ? {} : { step }), controller });
     const outputs = this.#outputs.get(spec.id) ?? new Map<string, unknown>();
@@ -247,15 +258,6 @@ class Session {
     const spec = plan.toDoc().jobs.find((value) => value.id === job.id)!;
     if ([...this.#active.values()].some((active) => active.job === job.id && active.step === step.id))
       throw failure("bad_request", "step is already running");
-    const attempt = Number(req.attempt);
-    const prior = this.#attempts.get(job.id);
-    if (prior !== undefined && attempt < prior) throw failure("bad_request", "attempt ordinal moved backwards");
-    if (prior !== attempt) {
-      if ([...this.#active.values()].some((active) => active.job === job.id))
-        throw failure("bad_request", "previous attempt is still running");
-      this.#attempts.set(job.id, attempt);
-      this.#outputs.delete(job.id);
-    }
     const ctx = this.#context(req, spec, step.id);
     try {
       const body = run.dryRun && step.dryRunBody ? step.dryRunBody : step.body;
@@ -321,6 +323,7 @@ class Session {
         });
       }
       await closure.fn(ctx, finalResult);
+      ctx.signal.throwIfAborted();
       return null;
     }
     const result = await closure.fn(ctx);
