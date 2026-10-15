@@ -297,7 +297,7 @@ The host also sets variables that other tools already define, and the SDK needs 
 
 - the node's `env` from the plan;
 - `PATH`, with the node's `tools` in front;
-- the dependency-proxy variables `GOPROXY`, `npm_config_registry`, `PIP_INDEX_URL` and `PIP_TRUSTED_HOST`;
+- custom registry settings such as `GOPROXY` when listed in the operator's `run.submit_env_allow`;
 - the runner's proxy and CA settings `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` (and their lowercase forms), `NODE_EXTRA_CA_CERTS` and `SSL_CERT_FILE`. A proxy URL's credentials are masked in the node's logs.
 
 Run options are host state and never reach the SDK as variables. `start_at`, `stop_at`, `only`, `no_cache`, `profile`, `mode` and `workers` change what the host schedules. The two that plan code observes, `dry_run` and `no_cache`, travel in the `plan` request's run context.

@@ -28,13 +28,9 @@ type Config struct {
 	Contribution string `yaml:"contribution"`
 
 	Controller string `yaml:"controller"`
-	// Gitcache is the git cache source is fetched through. Empty means the
-	// controller's gitcache proxy, unless AllowRepos is set.
-	Gitcache string `yaml:"gitcache"`
 	// AllowRepos names the repositories this machine may build, as host/path
-	// patterns. Given without a gitcache, the agent fetches each run's source
-	// directly: with the credential the controller releases, else with the
-	// machine owner's own git credentials.
+	// patterns. Source uses the credential the controller releases, else the
+	// machine owner's credentials only for repositories on this list.
 	AllowRepos []string `yaml:"allow_repos"`
 	// AcceptWorkingTree lets an agent with AllowRepos build working-tree
 	// snapshots of the listed repositories. The controller supplies a
@@ -139,11 +135,6 @@ func Validate(in Config) (Config, error) {
 	}
 	if out.AcceptWorkingTree && allow.Empty() {
 		return out, errors.New("agent: accept_working_tree needs allow_repos; an agent without the list builds what the controller sends")
-	}
-	// safety: an agent with no list keeps the proxy, since without one it
-	// would fetch whatever a run names with its owner's credentials.
-	if out.Gitcache == "" && allow.Empty() {
-		out.Gitcache = strings.TrimRight(out.Controller, "/") + "/api/v1/gitcache"
 	}
 	if out.SpawnPolicy == "" {
 		out.SpawnPolicy = "return-to-queue"

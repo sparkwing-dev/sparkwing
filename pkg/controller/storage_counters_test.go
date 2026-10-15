@@ -18,9 +18,7 @@ import (
 func freeTierFixture(t *testing.T, slots int64) *identityFixture {
 	t.Helper()
 	raw, pub := multiTeamLicense(t)
-	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub, configure: func(s *controller.Server) {
-		s.WithCacheURL("http://cache.invalid")
-	}})
+	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub})
 	if err := f.store.SetFreeTeamSlots(context.Background(), slots); err != nil {
 		t.Fatal(err)
 	}
@@ -305,9 +303,7 @@ func TestTheDownloadChargeRouteHoldsTheDailyCap(t *testing.T) {
 // Negative control: a single-team controller has no free tier, so every
 // team reserves funded and nothing is refused.
 func TestASingleTeamControllerCountsNoShare(t *testing.T) {
-	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
-		s.WithCacheURL("http://cache.invalid")
-	}})
+	f := newIdentityFixtureWith(t, fixtureOpts{})
 	if err := f.store.AsOperator().CreateTeam(context.Background(), "acme"); err != nil {
 		t.Fatal(err)
 	}

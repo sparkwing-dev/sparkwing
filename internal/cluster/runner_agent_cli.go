@@ -27,9 +27,8 @@ func runAgentCLI(args []string) error {
 	fs.Var(&allowRepos, "allow-repo",
 		"repository this machine may build, as host/path with '*' matching within one path segment "+
 			"(repeatable, e.g. --allow-repo 'github.com/acme/*'; replaces the agent section's allow_repos). "+
-			"Without a gitcache in the agent section the agent then fetches each run's source directly, with the "+
-			"credential the controller releases or else this machine's own git credentials, instead of "+
-			"through the controller's gitcache proxy")
+			"Source is fetched directly with the credential the controller releases, or this machine's "+
+			"own git credentials for repositories on this list")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -82,7 +81,6 @@ func runAgentOnce(ctx context.Context, configPath string, allowRepos []string) e
 		"spawn_policy", cfg.SpawnPolicy,
 		"allow_repo", pool.AllowRepos.String(),
 		"accept_working_tree", pool.AllowRepos.AcceptsWorkingTree(),
-		"direct_source", pool.GitcacheURL == "",
 		"observed_platform", executorinfo.DetectObservedPlatform(),
 	)
 	return RunPoolLoop(ctx, pool, logger)
@@ -105,7 +103,7 @@ func agentPoolConfig(cfg agentconfig.Config) (PoolLoopConfig, error) {
 		}
 	}
 	return PoolLoopConfig{
-		ControllerURL: cfg.Controller, GitcacheURL: cfg.Gitcache, AllowRepos: allow,
+		ControllerURL: cfg.Controller, AllowRepos: allow,
 		Token: cfg.Token, HolderPrefix: prefix,
 		Labels: cfg.Labels, MaxConcurrent: cfg.MaxConcurrent, PollInterval: cfg.Poll,
 		Lease: cfg.Lease, HeartbeatInterval: cfg.Heartbeat, SourceName: "agent",

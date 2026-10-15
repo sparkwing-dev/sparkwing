@@ -26,13 +26,13 @@ fail() {
 }
 
 run_install() {
-  local home="$1"
+  local install_home="$1"
   shift
-  mkdir -p "$home"
+  mkdir -p "$install_home"
   env -i \
     PATH="$STUB:/usr/bin:/bin" \
-    HOME="$home" \
-    XDG_CONFIG_HOME="$home/.config" \
+    HOME="$install_home" \
+    XDG_CONFIG_HOME="$install_home/.config" \
     RUNNER_NAME=test-runner \
     MAX_CONCURRENT=2 \
     SPARKWING_CONTROLLER=https://ctrl.example.com \
@@ -42,15 +42,15 @@ run_install() {
 }
 
 home_bad="$CASE_ROOT/home-bad"
-if run_install "$home_bad" SPARKWING_GITCACHE_URL='x"
+if run_install "$home_bad" SPARKWING_CONTROLLER='x"
 labels:
   - "injected"' >"$CASE_ROOT/out-bad" 2>&1; then
-  fail "installer accepted a gitcache URL carrying a double quote and a newline" "$CASE_ROOT/out-bad"
+  fail "installer accepted a controller URL carrying a double quote and a newline" "$CASE_ROOT/out-bad"
 fi
-grep -q "Gitcache URL contains" "$CASE_ROOT/out-bad" \
-  || fail "rejection does not name the gitcache URL" "$CASE_ROOT/out-bad"
+grep -q "Controller URL contains" "$CASE_ROOT/out-bad" \
+  || fail "rejection does not name the controller URL" "$CASE_ROOT/out-bad"
 [ ! -e "$home_bad/.config/sparkwing/config.yaml" ] \
-  || fail "installer wrote a config despite rejecting the gitcache URL" "$CASE_ROOT/out-bad"
+  || fail "installer wrote a config despite rejecting the controller URL" "$CASE_ROOT/out-bad"
 
 home_name="$CASE_ROOT/home-name"
 if run_install "$home_name" RUNNER_NAME='box" spawn_policy: "always' \
@@ -61,14 +61,16 @@ grep -q "Runner name contains" "$CASE_ROOT/out-name" \
   || fail "rejection does not name the runner name" "$CASE_ROOT/out-name"
 
 home_ok="$CASE_ROOT/home-ok"
-if ! run_install "$home_ok" SPARKWING_CACHE_TOKEN=swc_good \
+if ! run_install "$home_ok" SPARKWING_CACHE_TOKEN=swc_good SPARKWING_GITCACHE_URL=https://removed.invalid \
   >"$CASE_ROOT/out-ok" 2>&1; then
   fail "installer refused a clean configuration" "$CASE_ROOT/out-ok"
 fi
 config="$home_ok/.config/sparkwing/config.yaml"
 [ -f "$config" ] || fail "clean install wrote no config at $config" "$CASE_ROOT/out-ok"
+! grep -q 'gitcache' "$config" \
+  || fail "clean install recorded a removed gitcache setting" "$config"
 ! grep -q 'cache_token' "$config" \
-  || fail "clean install recorded a cache token; the agent asks the controller for per-run grants" "$config"
+  || fail "clean install recorded a removed cache token" "$config"
 ! grep -q 'swc_good' "$config" \
   || fail "clean install copied SPARKWING_CACHE_TOKEN into the agent config" "$config"
 grep -qx 'agent:' "$config" \

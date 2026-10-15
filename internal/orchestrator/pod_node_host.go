@@ -42,8 +42,6 @@ type podNode struct {
 	// safety: a node a run host dispatched already ran its skip_if, memo and admission there, and its accepted
 	// spec_hash is the one the run host recorded on its row.
 	dispatched bool
-	// safety: a dispatched node's caches use its own run's grant, since its host may serve other runs.
-	cacheGrant string
 	state      storage.StateStoreOld
 	logger     *slog.Logger
 }
@@ -147,9 +145,9 @@ func podProcessEnv(masker *secrets.Masker, logger *slog.Logger) ([]string, error
 }
 
 // PodBaseEnv is what a runner gives every process of a pipeline it hosts, its
-// dependency installs included: the minimal environment plus the dependency
-// proxy settings the pod's Job or runner was given, so go, npm and pip use the
-// cache's proxy and no runner credential reaches pipeline code or its hooks.
+// dependency installs included: the minimal environment plus the network
+// proxy and CA settings needed to reach external services. Custom registry
+// settings use the operator's run.submit_env_allow list.
 func PodBaseEnv() []string {
 	return engineenv.Minimal(podEnvNames()...)
 }
@@ -194,7 +192,7 @@ func maskedInstallOutput(ctx context.Context, masker *secrets.Masker, dst io.Wri
 }
 
 func podEnvNames() []string {
-	return slices.Concat(k8srunner.DependencyProxyEnvNames, k8srunner.NetworkEnvNames)
+	return slices.Clone(k8srunner.NetworkEnvNames)
 }
 
 // safety: the operator's run.submit_env_allow names and prefixes reach the node from this runner's environment, as

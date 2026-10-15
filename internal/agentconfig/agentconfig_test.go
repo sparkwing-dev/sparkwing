@@ -11,7 +11,6 @@ import (
 
 func TestConfig_RoundTripFromYAML(t *testing.T) {
 	path := writePrivateConfig(t, `controller: http://localhost:4344
-gitcache: http://localhost:4344/api/v1/gitcache
 profile: dev
 token: tok-abc
 max_concurrent: 3
@@ -28,9 +27,6 @@ spawn_policy: return-to-queue
 	}
 	if cfg.Controller != "http://localhost:4344" {
 		t.Fatalf("controller: %q", cfg.Controller)
-	}
-	if cfg.Gitcache != "http://localhost:4344/api/v1/gitcache" {
-		t.Fatalf("gitcache url=%q", cfg.Gitcache)
 	}
 	if cfg.Token != "tok-abc" || cfg.MaxConcurrent != 3 {
 		t.Fatalf("unexpected cfg: %+v", cfg)
@@ -53,6 +49,7 @@ func TestConfig_RejectsUnknownFieldsAndAdditionalDocuments(t *testing.T) {
 	}{
 		{"unknown field", "agent:\n  controller: http://localhost:4344\n  admin: true\n", "field admin not found"},
 		{"removed logs key", "agent:\n  controller: http://localhost:4344\n  logs: http://localhost:4345\n", "field logs not found"},
+		{"removed gitcache key", "agent:\n  controller: http://localhost:4344\n  gitcache: http://cache\n", "field gitcache not found"},
 		{"second document", "agent:\n  controller: http://localhost:4344\n---\nagent:\n  token: hidden\n", "multiple YAML documents"},
 		{"no agent section", "profiles: {}\n", "has no agent section"},
 	} {
@@ -91,9 +88,6 @@ func TestConfig_DefaultsSpawnPolicy(t *testing.T) {
 	}
 	if norm.SpawnPolicy != "return-to-queue" {
 		t.Fatalf("default: %q", norm.SpawnPolicy)
-	}
-	if norm.Gitcache != "http://x/api/v1/gitcache" {
-		t.Fatalf("gitcache default = %q, want controller proxy", norm.Gitcache)
 	}
 	if norm.LocalAdmission == nil || *norm.LocalAdmission {
 		t.Fatal("legacy singular config did not preserve disabled local admission")
@@ -180,8 +174,7 @@ func writeRawConfig(t *testing.T, body string) string {
 	return path
 }
 
-// The agent asks the controller for a per-run cache grant, so a config that
-// still hands it the operator cache token is refused, naming the key to delete.
+// safety: cache service credentials have no owner in agent configuration.
 func TestConfig_RefusesACacheToken(t *testing.T) {
 	path := writePrivateConfig(t, "controller: http://localhost:4344\ncache_token: operator-token\n")
 	_, err := Load(path)
@@ -190,23 +183,13 @@ func TestConfig_RefusesACacheToken(t *testing.T) {
 	}
 }
 
-// An allow list without a gitcache is the direct mode: the agent fetches each
-// run's source itself instead of through the controller's proxy. With no list
-// the agent keeps the proxy, which is what a section written before allow_repos gets.
-func TestConfig_AllowReposSelectsDirectSource(t *testing.T) {
+func TestConfig_ValidatesAllowRepos(t *testing.T) {
 	norm, err := Validate(Config{Controller: "http://x", AllowRepos: []string{"GitHub.com/Acme/*"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if norm.Gitcache != "" {
-		t.Fatalf("gitcache = %q, want none so the agent fetches directly", norm.Gitcache)
-	}
 	if len(norm.AllowRepos) != 1 || norm.AllowRepos[0] != "github.com/acme/*" {
 		t.Fatalf("allow_repos = %v, want the canonical pattern", norm.AllowRepos)
-	}
-	explicit, err := Validate(Config{Controller: "http://x", Gitcache: "http://cache", AllowRepos: []string{"github.com/acme/*"}})
-	if err != nil || explicit.Gitcache != "http://cache" {
-		t.Fatalf("an explicit gitcache with a list = %q, %v; want the gitcache kept", explicit.Gitcache, err)
 	}
 	if _, err := Validate(Config{Controller: "http://x", AllowRepos: []string{"https://github.com/acme/*"}}); err == nil ||
 		!strings.Contains(err.Error(), "allow_repos") {

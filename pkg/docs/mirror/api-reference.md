@@ -16,8 +16,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/auth/logout` | `public` |
 | `GET` | `/api/v1/auth/session` | `public` |
 | `GET` | `/api/v1/auth/whoami` | `authenticated` |
-| `POST` | `/api/v1/cache/store-ceiling/measure` | `admin` |
-| `POST` | `/api/v1/cache/store-ceiling/thaw` | `admin` |
 | `GET` | `/api/v1/capabilities` | `public` |
 | `GET` | `/api/v1/capacity/profiles` | `runs.read` |
 | `GET` | `/api/v1/capacity/profiles/explain` | `runs.read` |
@@ -59,9 +57,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/data/commit` | `public` |
 | `POST` | `/api/v1/data/download` | `public` |
 | `POST` | `/api/v1/data/upload` | `public` |
-| `POST` | `/api/v1/gitcache/git/register` | `admin` |
-| `GET` | `/api/v1/gitcache/git/{path...}` | `admin` |
-| `POST` | `/api/v1/gitcache/git/{path...}` | `admin` |
 | `DELETE` | `/api/v1/github-app/installations/{installation_id}` | `admin` |
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |
@@ -118,9 +113,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{id}/events` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/events/stream` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/finish` | `runs.state` |
-| `POST` | `/api/v1/runs/{id}/gitcache/git/register` | `nodes.claim` |
-| `GET` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/heartbeat` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/logs` | `logs.read` |
 | `GET` | `/api/v1/runs/{id}/logs/search` | `logs.read` |

@@ -103,9 +103,24 @@ type DirectUploadResponse struct {
 const DisputeConflictCode = "dispute_conflict"
 const EgressDownloadLimitCode = "egress_download_limit"
 const EgressStreamLimitCode = "egress_stream_limit"
+type EngineController struct{ Store *store.Store }
+func (s *EngineController) AcceptExpansion(ctx context.Context, authorized capability.Authorized, body controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error)
+func (s *EngineController) AcceptPlan(ctx context.Context, authorized capability.Authorized, body controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error)
+func (s *EngineController) Cancel(ctx context.Context, authorized capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error)
+func (s *EngineController) Claim(ctx context.Context, authorized capability.Authorized, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
+func (s *EngineController) Compatibility(ctx context.Context, engineVersion string) (controllerwire.Compatibility, error)
+func (s *EngineController) CreateRun(ctx context.Context, authorized capability.Authorized, body controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error)
+func (s *EngineController) Finish(ctx context.Context, authorized capability.Authorized, body controllerwire.FinishRequest) (controllerwire.Applied, error)
+func (s *EngineController) ReconcileJob(ctx context.Context, authorized capability.Authorized, body controllerwire.ReconcileRequest) (controllerwire.ReconcileResponse, error)
+func (s *EngineController) Renew(ctx context.Context, authorized capability.Authorized, body controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error)
+func (s *EngineController) Retry(ctx context.Context, authorized capability.Authorized, body controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error)
+func (s *EngineController) RunDetail(ctx context.Context, authorized capability.Authorized) (controllerwire.RunDetail, error)
+func (s *EngineController) Snapshot(ctx context.Context, authorized capability.Authorized) (controllerwire.ScheduleSnapshot, error)
+func (s *EngineController) TransitionJob(ctx context.Context, authorized capability.Authorized, body controllerwire.JobTransitionRequest) (controllerwire.Applied, error)
 func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error)
 func EnsureCheckoutToken(ctx context.Context, st *store.Store, raw string, now time.Time) (bool, error)
 const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
+func ExpansionForStore(authorized capability.Authorized, body controllerwire.ExpansionSubmission) (store.ExpansionSubmission, error)
 type FloodPolicy struct {
 	RunsPerPrincipalHour int
 
@@ -146,6 +161,7 @@ type GitCredentialReleaseJSON struct {
 const GitHubActionsLabel = "github-actions"
 func GitHubRunnerWorkflow(controllerURL, team string) string
 const IdleClaimPollJitterFactor = 1.25
+func IntakeForStore(authorized capability.Authorized, body controllerwire.CreateRunRequest) (store.IntakeRequest, error)
 type LegacyCipher interface {
 	OpenLegacy(name, scope string, shared, masked bool, envelope string) (string, error)
 }
@@ -281,8 +297,6 @@ func (s *Server) WithAuthenticator(a *Authenticator) *Server
 func (s *Server) WithBillingCheckout(url, token string) *Server
 func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server
 func (s *Server) WithCacheGrantKey(key string) *Server
-func (s *Server) WithCachePodURL(url string) *Server
-func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDashboard(d Dashboard) *Server
 func (s *Server) WithDashboardURL(url string) *Server
@@ -319,13 +333,10 @@ func (s *Server) WithSignUpWaitlist(on bool) *Server
 func (s *Server) WithSignedDownloads(cache *teamblob.Store, client *s3.Client, domain, keyPairID, privateKey string) error
 func (s *Server) WithStoragePass(cache *teamblob.Store) *Server
 func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
-func (s *Server) WithTeamStorage(ts TeamStorage) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
 func (s *Server) WithTrustedProxyAddr(addr string) *Server
 type ServicesResponse struct {
 	DataDownloadURL string
-
-	CachePod string
 
 	Dashboard string
 
@@ -338,9 +349,6 @@ const StaleCardSetupCode = "stale_card_setup"
 const StorageMaintenanceInterval = time.Hour
 const StoragePassEvery = time.Hour
 const TeamDeletionInterval = time.Minute
-type TeamStorage struct {
-	CacheURL string
-}
 type TokenRequestBudget struct {
 	PerTokenMinute int
 

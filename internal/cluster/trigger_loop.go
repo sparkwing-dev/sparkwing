@@ -30,10 +30,6 @@ import (
 type TriggerLoopOptions struct {
 	ControllerURL string
 	LogsURL       string
-	// GitcacheURL is the operator's git cache. Empty means direct source: the
-	// runner fetches each trigger's repository itself with the credential the
-	// controller releases for the run, and so do the node executors it starts.
-	GitcacheURL string
 	// AllowRepos is the machine owner's list of repositories this runner may
 	// build. It binds only when given; a direct-source runner given one may
 	// also fetch with the machine's own git credentials when the controller
@@ -47,12 +43,9 @@ type TriggerLoopOptions struct {
 	K8sPullSecret   string
 	K8sCtrlURL      string
 	Kubeconfig      string
-	ArtifactStore   string
 	K8sLabels       []string
 	K8sNodeSelector []string
 	K8sTolerations  []string
-
-	DependencyProxy string
 
 	K8sImagePullPolicy string
 	K8sCPUCeiling      string
@@ -111,8 +104,6 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 	logger.Info(
 		"trigger loop started",
 		"controller", opts.ControllerURL,
-		"gitcache", opts.GitcacheURL,
-		"direct_source", opts.GitcacheURL == "",
 		"allow_repo", opts.AllowRepos.String(),
 		"poll", opts.Poll,
 		"work_root", opts.WorkRoot,
@@ -376,10 +367,10 @@ func triggerNodeRunner(opts TriggerLoopOptions) (func(orchestrator.Backends, *st
 		Kubeconfig: opts.Kubeconfig, Namespace: opts.K8sNamespace, Image: opts.K8sImage,
 		ServiceAccount: opts.K8sRunnerSA, ImagePullSecret: opts.K8sPullSecret,
 		ControllerURL: cmp.Or(opts.K8sCtrlURL, opts.ControllerURL), DispatcherURL: opts.ControllerURL,
-		ArtifactStoreURL: opts.ArtifactStore, GitcacheURL: opts.GitcacheURL, AgentToken: opts.Token,
-		Labels: opts.K8sLabels, TeamNodes: opts.K8sTeamNodes,
-		DependencyProxyURL: cmp.Or(opts.DependencyProxy, "off"), ImagePullPolicy: opts.K8sImagePullPolicy,
-		CPUCeiling: opts.K8sCPUCeiling, MemoryCeiling: opts.K8sMemoryCeiling, JobDeadline: deadline,
+		AgentToken: opts.Token,
+		Labels:     opts.K8sLabels, TeamNodes: opts.K8sTeamNodes,
+		ImagePullPolicy: opts.K8sImagePullPolicy,
+		CPUCeiling:      opts.K8sCPUCeiling, MemoryCeiling: opts.K8sMemoryCeiling, JobDeadline: deadline,
 	}, opts.K8sNodeSelector, opts.K8sTolerations)
 }
 

@@ -98,12 +98,12 @@ func (c *claimedCommand) start(t *testing.T, ctx context.Context) <-chan error {
 	t.Setenv("SPARKWING_NODE_CLAIM_RESERVATION", c.claimed.ReservationID)
 	t.Setenv("SPARKWING_NODE_CLAIM_LEASE_SECONDS", "600")
 	dir := t.TempDir()
-	host := withRemoteNodeHost(func(ctx context.Context, _ *store.Trigger, _ *store.Run, controllerURL, _, cacheGrant, runID, nodeID, token string,
+	host := withRemoteNodeHost(func(ctx context.Context, _ *store.Trigger, _ *store.Run, controllerURL, runID, nodeID, token string,
 		_ *sourceurl.RepoAllowlist, logger *slog.Logger,
 	) (runner.Result, error) {
 		return hostDispatchedNode(ctx, podNode{
 			entry: pipelineentry.Binary(c.h.bin), dir: dir, controllerURL: controllerURL, token: token,
-			runID: runID, nodeID: nodeID, cacheGrant: cacheGrant, logger: logger,
+			runID: runID, nodeID: nodeID, logger: logger,
 		})
 	})
 	ctx, cancel := context.WithCancel(ctx)

@@ -81,8 +81,6 @@ tags:
     description: Active runner heartbeats.
   - name: pipelines
     description: Cross-pipeline / cross-repo reads.
-  - name: gitcache
-    description: Controller-side proxy onto the Git cache.
   - name: trends
     description: Aggregate dashboard charts.
   - name: receipts
@@ -2637,79 +2635,11 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/gitcache/git/register:
-    post:
-      x-sparkwing-scope: admin
-      tags: [gitcache]
-      summary: Map a short cache name onto a repository URL.
-      parameters:
-        - in: query
-          name: name
-          required: true
-          schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}
-        - {$ref: "#/components/parameters/GitcacheRepo"}
-      responses:
-        "200": {description: "The cache's answer, forwarded verbatim."}
-        "400": {description: Rejected name or repo URL.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "502": {description: The cache is unreachable or answered badly.}
-        "503": {description: No cache is configured on this controller.}
-
-  /api/v1/gitcache/git/{path}:
-    parameters:
-      - in: path
-        name: path
-        required: true
-        schema: {type: string}
-        description: |
-          `<registered-name>/info/refs` or `<registered-name>/git-upload-pack`.
-          Registered by `POST /api/v1/gitcache/git/register`.
-    get:
-      x-sparkwing-scope: admin
-      tags: [gitcache]
-      summary: Advertise a mirror's refs to a Git client.
-      description: |
-        Forwards `info/refs?service=git-upload-pack` to the cache. Any other
-        suffix or service answers `405`, so the proxy carries reads only.
-        The controller drops the caller's bearer and presents its own cache
-        token, and caps how many Git streams one caller may hold open.
-      parameters:
-        - in: query
-          name: service
-          required: true
-          schema: {type: string, enum: [git-upload-pack]}
-      responses:
-        "200": {description: Git smart-protocol ref advertisement.}
-        "400": {description: The path does not name a registered mirror.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "405": {description: Anything but an upload-pack ref advertisement.}
-        "502": {description: The cache is unreachable or answered badly.}
-        "503": {description: No cache is configured on this controller.}
-    post:
-      x-sparkwing-scope: admin
-      tags: [gitcache]
-      summary: Serve a Git fetch negotiation from a mirror.
-      description: |
-        Forwards `git-upload-pack` to the cache. Any other suffix answers
-        `405`, so a caller cannot push through this proxy.
-      requestBody:
-        required: true
-        content:
-          application/x-git-upload-pack-request:
-            schema: {type: string, format: binary}
-      responses:
-        "200": {description: Git smart-protocol packfile response.}
-        "400": {description: The path does not name a registered mirror.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "405": {description: Anything but an upload-pack fetch.}
-        "502": {description: The cache is unreachable or answered badly.}
-        "503": {description: No cache is configured on this controller.}
-
   /api/v1/services:
     get:
       x-sparkwing-scope: authenticated
       tags: [health]
-      summary: Announce the data download, cache, and dashboard URLs a client should use.
+      summary: Announce the data download and dashboard URLs a client should use.
       description: |
         Any valid bearer satisfies this route, and every client that reads
         it already holds one. A field is absent when the controller was
@@ -2730,7 +2660,6 @@ paths:
                 type: object
                 properties:
                   data_download_url: {type: string, description: Controller endpoint for requesting signed team-object downloads.}
-                  cache_pod: {type: string}
                   dashboard: {type: string}
                   multi_team: {type: boolean}
                   direct_data: {type: boolean, description: Direct S3 uploads and committed-object reads are available.}
@@ -2772,88 +2701,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         "403":
           $ref: '#/components/responses/Forbidden'
-
-  /api/v1/runs/{id}/gitcache/git/register:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: nodes.claim
-      tags: [gitcache]
-      summary: Map the claimed run's source repository into the cache.
-      description: |
-        Run-scoped counterpart of `/api/v1/gitcache/git/register`. A
-        claim-only caller must hold this run, and `name` plus `repo` must
-        identify the run's recorded source. The controller forwards neither
-        the caller's bearer nor arbitrary repository credentials to the cache.
-      parameters:
-        - in: query
-          name: name
-          required: true
-          schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}
-        - {$ref: "#/components/parameters/GitcacheRepo"}
-      responses:
-        "200": {description: "The cache's answer, forwarded verbatim."}
-        "400": {description: Rejected name or repository URL.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {description: Caller does not hold the run or the repository is not its source.}
-        "502": {description: The cache is unreachable or answered badly.}
-        "503": {description: No cache is configured on this controller.}
-
-  /api/v1/runs/{id}/gitcache/git/{path}:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: {type: string}
-      - in: path
-        name: path
-        required: true
-        schema: {type: string}
-    get:
-      x-sparkwing-scope: nodes.claim
-      tags: [gitcache]
-      summary: Advertise the claimed run's cached source refs.
-      description: |
-        Forwards only `<registered-name>/info/refs?service=git-upload-pack`.
-        A claim-only caller must hold this run, and the registered name must
-        identify its recorded source repository.
-      parameters:
-        - in: query
-          name: service
-          required: true
-          schema: {type: string, enum: [git-upload-pack]}
-      responses:
-        "200": {description: Git smart-protocol ref advertisement.}
-        "400": {description: The path does not name a valid registered mirror.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {description: Caller does not hold the run or the mirror is not its source.}
-        "405": {description: Anything but an upload-pack ref advertisement.}
-        "502": {description: The cache is unreachable or answered badly.}
-        "503": {description: No cache is configured on this controller.}
-    post:
-      x-sparkwing-scope: nodes.claim
-      tags: [gitcache]
-      summary: Fetch from the claimed run's cached source mirror.
-      description: |
-        Forwards only `<registered-name>/git-upload-pack`. A claim-only caller
-        must hold this run, and the registered name must identify its recorded
-        source repository. Push requests cannot cross this proxy.
-      requestBody:
-        required: true
-        content:
-          application/x-git-upload-pack-request:
-            schema: {type: string, format: binary}
-      responses:
-        "200": {description: Git smart-protocol packfile response.}
-        "400": {description: The path does not name a valid registered mirror.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {description: Caller does not hold the run or the mirror is not its source.}
-        "405": {description: Anything but an upload-pack fetch.}
-        "502": {description: The cache is unreachable or answered badly.}
-        "503": {description: No cache is configured on this controller.}
 
   /api/v1/maintenance/reconcile-orphans:
     post:
@@ -6990,41 +6837,6 @@ paths:
         Streams the node's log in this run across all of its attempts, in the order they began: each attempt's segments, then the controller's in-memory live buffer from the byte where they end until that attempt's log is sealed, holding the node's 30-second live-view watch while open. Attempts of the run this one retries are not included. Each line carries as its event id the cursor just past it; send the last one back as Last-Event-ID, or as the cursor query parameter, to resume after it. Last-Event-ID wins when both are sent, and a cursor the controller did not issue for this run and node answers 400. The stream ends with a stream_end event once the node will write no more -- it is done with an outcome other than failed, or its run is over, since only a failure can be retried -- and its last attempt is sealed. A node the run neither records nor holds logs for falls back to the live buffer alone; with neither it answers 501.
       responses:
         default: {description: Undescribed.}
-
-  /api/v1/cache/store-ceiling/measure:
-    post:
-      x-sparkwing-scope: admin
-      tags: [gitcache]
-      summary: Walk the cache's stored trees now and replace its store-ceiling count.
-      description: |
-        Forwards to the cache's own store-ceiling measure route under the
-        operator grant the controller signs with its cache grant key, the only
-        bearer those cache routes take. The cache answers `202` and walks
-        off the request; freeing space on its volume and measuring is what
-        lifts a store-ceiling freeze.
-      responses:
-        "202": {description: "The cache's answer, forwarded verbatim."}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: No cache is configured on this controller.}
-        "502": {description: The cache is unreachable.}
-
-  /api/v1/cache/store-ceiling/thaw:
-    post:
-      x-sparkwing-scope: admin
-      tags: [gitcache]
-      summary: Accept cache uploads until the next store-ceiling measurement.
-      description: |
-        Forwards to the cache's own store-ceiling thaw route under the
-        operator grant the controller signs with its cache grant key. The
-        cache answers `409` when no measurement is scheduled.
-      responses:
-        "200": {description: "The cache's answer, forwarded verbatim."}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: No cache is configured on this controller.}
-        "409": {description: The cache has no measurement scheduled to end the thaw.}
-        "502": {description: The cache is unreachable.}
 
   /api/v1/log-segments/{key}:
     parameters:

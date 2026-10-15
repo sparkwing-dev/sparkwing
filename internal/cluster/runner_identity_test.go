@@ -97,7 +97,7 @@ func TestRunTriggerLoop_NamesItsRunnerOnEveryClaim(t *testing.T) {
 	defer ts.Close()
 	err := RunTriggerLoop(ctx, TriggerLoopOptions{
 		ControllerURL: ts.URL,
-		GitcacheURL:   ts.URL,
+
 		WorkRoot:      t.TempDir(),
 		Poll:          time.Millisecond,
 		MaxConcurrent: 1,

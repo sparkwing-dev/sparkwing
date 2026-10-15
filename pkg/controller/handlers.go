@@ -906,7 +906,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Git.RepoURL != "" {
-		// safety: the repo URL becomes a clone target on every runner, so hold it to the gitcache rules.
+		// safety: the repo URL becomes a clone target on every runner, so validate its transport before storing it.
 		validated, verr := sourceurl.ValidateCloneURL(body.Git.RepoURL)
 		if verr != nil {
 			writeError(w, http.StatusBadRequest, fmt.Errorf("git.repo_url: %w", verr))

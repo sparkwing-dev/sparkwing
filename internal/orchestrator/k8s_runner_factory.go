@@ -30,11 +30,7 @@ type K8sRunnerFactoryConfig struct {
 	// AgentToken; empty uses ControllerURL. A trigger child behind its
 	// runner's broker reaches the controller at a loopback address no pod
 	// can.
-	DispatcherURL    string
-	ArtifactStoreURL string
-	// GitcacheURL is handed to the pod as SPARKWING_GITCACHE_URL so run-node
-	// can compile a pipeline the image does not carry.
-	GitcacheURL string
+	DispatcherURL string
 	// AgentToken is the dispatcher's own credential for its controller
 	// calls. A Job never receives it; each Job carries its node's claim
 	// token instead.
@@ -43,10 +39,6 @@ type K8sRunnerFactoryConfig struct {
 	NodeSelector map[string]string
 	Tolerations  []corev1.Toleration
 	TeamNodes    bool
-
-	DependencyProxyURL string
-
-	DependencyProxyFallbackURL string
 
 	ImagePullPolicy string
 
@@ -109,9 +101,6 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 		ImagePullSecret:    cfg.ImagePullSecret,
 		ServiceAccountName: cfg.ServiceAccount,
 		ControllerURL:      cfg.ControllerURL,
-		ArtifactStoreURL:   cfg.ArtifactStoreURL,
-		GitcacheURL:        cfg.GitcacheURL,
-		DependencyProxyURL: k8srunner.ResolveDependencyProxy(cfg.DependencyProxyURL, cfg.DependencyProxyFallbackURL),
 		ImagePullPolicy:    pullPolicy,
 		Labels:             cfg.Labels,
 		NodeSelector:       cfg.NodeSelector,

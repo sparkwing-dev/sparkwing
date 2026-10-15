@@ -102,24 +102,15 @@ Off-cluster runners (developer machines, workstations, and servers) connect to
 the controller and claim nodes through its claim API; the route set and scopes
 are in [api-reference.md](api-reference.md).
 
-### Cache
+### Storage
 
-Git HTTP server, blob store, and package proxy. Mirrors bare repositories
-from GitHub, refreshing a mirror when a clone reads its refs and at most
-once per freshness window. Serves git clones over HTTP so runners do not
-need SSH keys.
+The storage rewrite targets signed transfers for outputs, artifacts,
+dependency caches, pipeline binaries and source bundles. Its integration
+status is recorded in the [storage contract](storage.md). Runners fetch Git
+repositories directly and package managers use upstream registries. An operator can supply a
+registry mirror through `run.submit_env_allow`.
 
-Also stores:
-
-- **Source snapshots**: SHA-scoped Git bundles for unpublished commits and
-  opt-in working-tree triggers
-- **Artifacts**: job output files
-- **Binary cache**: compiled pipeline binaries
-- **Dependency cache**: saved / restored by pipelines (gems, node_modules, etc.)
-- **Package proxy**: caching reverse proxy for npm, PyPI, Go modules,
-  RubyGems, and Alpine packages
-
-See [Cache](gitcache.md) for endpoints and configuration.
+See [Storage](storage.md) for the byte and record contracts.
 
 ### Dashboard
 

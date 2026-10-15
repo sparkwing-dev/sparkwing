@@ -93,7 +93,7 @@ func main(){body,err:=os.ReadFile("subject");if err!=nil{panic(err)};if err:=os.
 			}
 
 			trigger := &store.Trigger{ID: "source-run", Pipeline: "fixture", RepoURL: "https://example.test/team/repo.git", GitBranch: "feature"}
-			opts := TriggerLoopOptions{WorkRoot: t.TempDir(), ControllerURL: server.URL, GitcacheURL: server.URL + "/api/v1/gitcache", Token: "test-token"}
+			opts := TriggerLoopOptions{WorkRoot: t.TempDir(), ControllerURL: server.URL, Token: "test-token"}
 			if _, err := handleOneTrigger(t.Context(), client.NewWithToken(server.URL, nil, "test-token"), trigger, opts, logger); err != nil {
 				t.Fatal(err)
 			}

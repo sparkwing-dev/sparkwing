@@ -196,7 +196,6 @@ func TestRunRunnerCLI_K8sTriggerRunnerRequiresAServiceAccount(t *testing.T) {
 		"--controller=http://controller",
 		"--metrics-addr=",
 		"--also-claim-triggers",
-		"--gitcache=http://cache",
 		"--trigger-runner=k8s",
 		"--trigger-runner-image=img",
 	}, "")
@@ -211,7 +210,6 @@ func TestRunRunnerCLI_WarmKubernetesFallbackRequiresAServiceAccount(t *testing.T
 		"--metrics-addr=",
 		"--also-claim-triggers",
 		"--claim-nodes=false",
-		"--gitcache=http://cache",
 		"--trigger-runner=warm",
 		"--trigger-runner-image=img",
 	}, "")

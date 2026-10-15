@@ -372,10 +372,9 @@ func (h *claimedNodeHost) RunNode(ctx context.Context, req runner.Request) runne
 			req.RunID, req.NodeID, fence, store.MaxLeaseDuration, abandon, h.logger)
 	}()
 	defer func() { stopBeat(); wg.Wait() }()
-	grant := RequestRunCacheGrant(ctx, h.controllerURL, n.ClaimToken, req.RunID, h.logger)
 	res, err := hostDispatchedNode(ctx, podNode{
 		entry: h.entry, dir: h.dir, controllerURL: h.controllerURL, token: n.ClaimToken,
-		runID: req.RunID, nodeID: req.NodeID, cacheGrant: grant, logger: h.logger,
+		runID: req.RunID, nodeID: req.NodeID, logger: h.logger,
 	})
 	if err == nil {
 		return res

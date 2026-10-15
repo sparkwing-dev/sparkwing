@@ -135,7 +135,7 @@ func runnerClaimReaches(r *http.Request, tok store.ClaimToken) bool {
 		segment, _, _ := strings.Cut(node, "/")
 		return segment == url.PathEscape(tok.NodeID)
 	}
-	return runnerClaimRunWrites[rest] || strings.HasPrefix(rest, "/gitcache/")
+	return runnerClaimRunWrites[rest]
 }
 
 // safety: D-SEC-08. A node's Ref.Get and RunAndAwait reach these routes and

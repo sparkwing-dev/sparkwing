@@ -616,9 +616,6 @@ in-process counter, so they survive a controller restart.
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `sparkwing.gitcache.fetch_duration` | Histogram | Background fetch time |
-| `sparkwing.gitcache.cache_hits` | Counter | Binary and dependency-archive cache hits, distinguished by `type` attribute |
-| `sparkwing.gitcache.cache_misses` | Counter | Binary and dependency-archive cache misses, distinguished by `type` attribute |
 
 ## Object-store request budget
 
@@ -912,11 +909,6 @@ concurrency caps key on that caller's team and name: a header naming a pod
 is the caller's to write, so a cap keyed on it let one bearer open as many
 downloads as it invented pod names. Size `--egress-max-downloads` and
 `--egress-max-log-streams` for the whole pool behind a bearer.
-
-The gitcache proxy routes take no slot at all. They are the checkout path
-every node walks, so a cap there refuses the clone rather than the download
-it was meant to bound. Those routes are still counted and charged to the
-team.
 
 ### The alarm
 

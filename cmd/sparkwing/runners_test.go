@@ -508,9 +508,8 @@ func TestRunnersAddWritesTheAllowList(t *testing.T) {
 	if !slices.Equal(raw.AllowRepos, []string{"github.com/acme/*", "gitlab.example.com/acme/tools"}) {
 		t.Fatalf("allow_repos = %v", raw.AllowRepos)
 	}
-	cfg, err := agentconfig.Validate(*raw)
-	if err != nil || cfg.Gitcache != "" {
-		t.Fatalf("the written config = gitcache %q, %v; want direct source", cfg.Gitcache, err)
+	if _, err := agentconfig.Validate(*raw); err != nil {
+		t.Fatalf("validate written config: %v", err)
 	}
 	if len(f.runnerTokens(t)) != 1 {
 		t.Fatal("runners add minted no token")

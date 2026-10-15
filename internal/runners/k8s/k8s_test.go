@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,7 +30,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -97,119 +95,14 @@ func TestBuildJob_DefaultsToNoFallbackCapabilities(t *testing.T) {
 	}
 }
 
-func TestBuildJob_StampsArtifactStoreURLWhenSet(t *testing.T) {
-	env := jobEnv(t, Config{Image: "img", ArtifactStoreURL: "s3://bucket/prefix"})
-	if got := env["SPARKWING_CACHE_URL"]; got != "s3://bucket/prefix" {
-		t.Fatalf("SPARKWING_CACHE_URL = %q, want s3://bucket/prefix", got)
-	}
-}
-
-func TestBuildJob_OmitsArtifactStoreURLWhenEmpty(t *testing.T) {
+func TestBuildJob_OmitsCacheServiceEnvironment(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_GRANT", "swcg1.foreign-run")
+	t.Setenv("SPARKWING_CACHE_TOKEN", "operator-cache-token")
 	env := jobEnv(t, Config{Image: "img"})
-	if _, ok := env["SPARKWING_CACHE_URL"]; ok {
-		t.Fatalf("SPARKWING_CACHE_URL should be absent when ArtifactStoreURL is empty")
-	}
-}
-
-func TestBuildJob_PointsPackageManagersAtTheDependencyProxy(t *testing.T) {
-	env := jobEnv(t, Config{Image: "img", DependencyProxyURL: "http://cache.sparkwing.svc.cluster.local"})
-	for key, want := range map[string]string{
-		"GOPROXY":             "http://cache.sparkwing.svc.cluster.local/proxy/golang|https://proxy.golang.org,direct",
-		"npm_config_registry": "http://cache.sparkwing.svc.cluster.local/proxy/npm",
-		"PIP_INDEX_URL":       "http://cache.sparkwing.svc.cluster.local/proxy/pypi/simple/",
-		"PIP_TRUSTED_HOST":    "cache.sparkwing.svc.cluster.local",
-	} {
-		if got := env[key]; got != want {
-			t.Errorf("%s = %q, want %q", key, got, want)
-		}
-	}
-}
-
-func TestDependencyProxyEnv_NamesAreValidK8sEnvNames(t *testing.T) {
-	for _, e := range DependencyProxyEnv("http://cache") {
-		if errs := validation.IsEnvVarName(e.Name); len(errs) > 0 {
-			t.Errorf("env name %q rejected by K8s validation: %v", e.Name, errs)
-		}
-	}
-}
-
-func TestBuildJob_OmitsDependencyProxyEnvWhenUnset(t *testing.T) {
-	env := jobEnv(t, Config{Image: "img"})
-	for _, key := range []string{"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST"} {
+	for _, key := range []string{"SPARKWING_CACHE_URL", "SPARKWING_GITCACHE_URL", "SPARKWING_CACHE_GRANT", "SPARKWING_CACHE_TOKEN", "GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST"} {
 		if _, ok := env[key]; ok {
-			t.Errorf("%s should be absent when DependencyProxyURL is empty", key)
+			t.Errorf("%s must not be injected by the runner", key)
 		}
-	}
-}
-
-func TestDependencyProxyEnv_URLJoin(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		base        string
-		wantGoproxy string
-		wantHost    string
-	}{
-		{
-			name:        "trailing slash does not double up",
-			base:        "http://cache/",
-			wantGoproxy: "http://cache/proxy/golang|https://proxy.golang.org,direct",
-			wantHost:    "cache",
-		},
-		{
-			name:        "explicit port travels into the trusted host",
-			base:        "http://cache:8090",
-			wantGoproxy: "http://cache:8090/proxy/golang|https://proxy.golang.org,direct",
-			wantHost:    "cache:8090",
-		},
-		{
-			name:        "path prefix is preserved for an ingress-mounted cache",
-			base:        "https://sparkwing.example.com/cache",
-			wantGoproxy: "https://sparkwing.example.com/cache/proxy/golang|https://proxy.golang.org,direct",
-			wantHost:    "sparkwing.example.com",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := map[string]string{}
-			for _, e := range DependencyProxyEnv(tc.base) {
-				got[e.Name] = e.Value
-			}
-			if got["GOPROXY"] != tc.wantGoproxy {
-				t.Errorf("GOPROXY = %q, want %q", got["GOPROXY"], tc.wantGoproxy)
-			}
-			if got["PIP_TRUSTED_HOST"] != tc.wantHost {
-				t.Errorf("PIP_TRUSTED_HOST = %q, want %q", got["PIP_TRUSTED_HOST"], tc.wantHost)
-			}
-		})
-	}
-}
-
-func TestDependencyProxyEnv_RejectsUnusableBase(t *testing.T) {
-	for _, base := range []string{"", "cache.sparkwing.svc", "http://", "://cache"} {
-		if got := DependencyProxyEnv(base); got != nil {
-			t.Errorf("DependencyProxyEnv(%q) = %#v, want nil", base, got)
-		}
-	}
-}
-
-func TestResolveDependencyProxy(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		explicit string
-		cacheURL string
-		want     string
-	}{
-		{name: "explicit wins", explicit: "http://mirror", cacheURL: "http://cache", want: "http://mirror"},
-		{name: "off disables", explicit: "off", cacheURL: "http://cache", want: ""},
-		{name: "off is case-insensitive", explicit: "OFF", cacheURL: "http://cache", want: ""},
-		{name: "empty derives from the cache service", cacheURL: "http://cache", want: "http://cache"},
-		{name: "no cache service, no proxy", want: ""},
-		{name: "non-HTTP store is not a proxy", cacheURL: "s3://bucket/prefix", want: ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := ResolveDependencyProxy(tc.explicit, tc.cacheURL); got != tc.want {
-				t.Errorf("ResolveDependencyProxy(%q, %q) = %q, want %q", tc.explicit, tc.cacheURL, got, tc.want)
-			}
-		})
 	}
 }
 
@@ -956,52 +849,6 @@ func TestBuildJob_MountsNoServiceAccountToken(t *testing.T) {
 	}
 }
 
-// The pod runs the team's code, so it carries the run's grant and never the
-// operator cache token, even when the dispatcher's own environment holds one.
-func TestBuildJob_PassesTheRunGrantAndNeverTheCacheToken(t *testing.T) {
-	t.Setenv("SPARKWING_CACHE_TOKEN", "operator-cache-token")
-	t.Setenv("SPARKWING_CACHE_GRANT", "swcg1.run-grant")
-	env := jobEnv(t, Config{Image: "img"})
-	if got := env["SPARKWING_CACHE_GRANT"]; got != "swcg1.run-grant" {
-		t.Fatalf("SPARKWING_CACHE_GRANT = %q, want the run's grant", got)
-	}
-	if got, ok := env["SPARKWING_CACHE_TOKEN"]; ok {
-		t.Fatalf("SPARKWING_CACHE_TOKEN = %q reached the pod", got)
-	}
-	for name, value := range env {
-		if value == "operator-cache-token" {
-			t.Fatalf("%s carries the operator cache token into the pod", name)
-		}
-	}
-}
-
-func TestBuildJob_OmitsTheGrantWhenTheRunHasNone(t *testing.T) {
-	t.Setenv("SPARKWING_CACHE_GRANT", "")
-	if _, ok := jobEnv(t, Config{Image: "img"})["SPARKWING_CACHE_GRANT"]; ok {
-		t.Fatal("SPARKWING_CACHE_GRANT should be absent when the run has none")
-	}
-}
-
-func TestBuildJob_HandsThePodTheGitcacheURL(t *testing.T) {
-	r := &Runner{cfg: Config{Image: "img", GitcacheURL: "http://cache.local"}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{}, "")
-	var got string
-	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
-		if e.Name == "SPARKWING_GITCACHE_URL" {
-			got = e.Value
-		}
-	}
-	if got != "http://cache.local" {
-		t.Fatalf("SPARKWING_GITCACHE_URL = %q, want the configured gitcache", got)
-	}
-	bare := (&Runner{cfg: Config{Image: "img"}}).buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{}, "")
-	for _, e := range bare.Spec.Template.Spec.Containers[0].Env {
-		if e.Name == "SPARKWING_GITCACHE_URL" {
-			t.Fatalf("an unset gitcache must not reach the pod, got %q", e.Value)
-		}
-	}
-}
-
 func fenceJobEnv(t *testing.T, fence store.NodeClaimFence) map[string]string {
 	t.Helper()
 	r := &Runner{cfg: Config{Image: "img"}}
@@ -1551,16 +1398,4 @@ func TestBuildJob_OnlyABandJobRefusesDisruption(t *testing.T) {
 // node fails with.
 func (r *Runner) observeUnschedulable(ctx context.Context, jobName string) string {
 	return unschedulableMessage(r.unschedulablePod(ctx, jobName))
-}
-
-// safety: the node host passes exactly these names through to pipeline
-// processes, so the list and the Job's settings stay one set.
-func TestDependencyProxyEnvSetsExactlyItsNames(t *testing.T) {
-	var got []string
-	for _, e := range DependencyProxyEnv("http://cache.example") {
-		got = append(got, e.Name)
-	}
-	if !slices.Equal(got, DependencyProxyEnvNames) {
-		t.Fatalf("DependencyProxyEnv sets %v, want %v", got, DependencyProxyEnvNames)
-	}
 }

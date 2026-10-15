@@ -90,16 +90,13 @@ type Server struct {
 	// writer, which is what lets the once-a-month prune gate skip a lock.
 	egressPrunedMonth string
 
-	cachePodURL  string
 	dashboardURL string
 	externalURL  string
 	oidc         oidcState
 
-	cacheURL                     string
 	cacheGrantKey                string
 	downloadFree, downloadFunded int64
 
-	teamStorage        TeamStorage
 	mailer             mailer.Mailer
 	deletionHolderOnce sync.Once
 	deletionHolderID   string
@@ -257,28 +254,12 @@ func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server {
 	return s
 }
 
-// WithCachePodURL announces the externally-reachable sparkwing-cache
-// pod URL via GET /api/v1/services so the operator CLI can discover
-// it without configuring `gitcache:` in config.yaml. Empty disables
-// the announcement (clients fall back to "no cache pod").
-func (s *Server) WithCachePodURL(url string) *Server {
-	s.cachePodURL = url
-	return s
-}
-
 // WithDashboardURL announces the externally-reachable dashboard URL via
 // GET /api/v1/services, so a client that has just been given a token can
 // tell its operator where to watch the runs it dispatches. Empty disables
 // the announcement.
 func (s *Server) WithDashboardURL(url string) *Server {
 	s.dashboardURL = url
-	return s
-}
-
-// WithCacheURL configures the controller-to-cache proxy target used by the
-// gitcache registration and clone routes.
-func (s *Server) WithCacheURL(url string) *Server {
-	s.cacheURL = url
 	return s
 }
 

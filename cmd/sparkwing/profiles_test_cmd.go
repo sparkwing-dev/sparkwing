@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
-	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/health"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -154,40 +153,6 @@ func probeLogs(ctx context.Context, prof *profile.Profile) profileProbeResult {
 		r.Status = "ok"
 		r.Detail = "node logs reach the controller as segments"
 	}
-	return r
-}
-
-func probeGitcache(ctx context.Context, prof *profile.Profile) profileProbeResult {
-	r := profileProbeResult{Name: "gitcache"}
-	if !prof.HasController() {
-		r.Status = "warn"
-		r.Detail = "no controller on profile (gitcache URL is discovered via controller)"
-		return r
-	}
-	services, err := discovery.ServicesFor(ctx, prof.ControllerURL(), prof.ControllerToken())
-	if err != nil {
-		r.Status = "fail"
-		r.Detail = "discover services: " + err.Error()
-		return r
-	}
-	r.Target = services.CachePod
-	if services.CachePod == "" {
-		r.Status = "skip"
-		return r
-	}
-	start := time.Now()
-	resp, err := httpGetNoAuth(ctx, strings.TrimRight(services.CachePod, "/")+"/health")
-	r.LatencyMS = time.Since(start).Milliseconds()
-	if err != nil {
-		r.Status = "fail"
-		r.Detail = err.Error()
-		return r
-	}
-	defer resp.Body.Close()
-	if _, stop := interpretHealthBody(&r, resp); stop {
-		return r
-	}
-	r.Status = "ok"
 	return r
 }
 

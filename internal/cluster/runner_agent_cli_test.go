@@ -150,9 +150,7 @@ func TestRunAgentCLI_RefusesTheRemovedEnrolledKeysBeforePolling(t *testing.T) {
 	}
 }
 
-// An agent given an allow list claims only those repositories and fetches
-// their source directly; one without keeps the controller's gitcache proxy.
-func TestAgentPoolConfigFetchesDirectlyWithAnAllowList(t *testing.T) {
+func TestAgentPoolConfigPreservesTheRepoAllowList(t *testing.T) {
 	direct, err := agentconfig.Validate(agentconfig.Config{Controller: "http://c", AllowRepos: []string{"github.com/acme/*"}})
 	if err != nil {
 		t.Fatal(err)
@@ -161,18 +159,18 @@ func TestAgentPoolConfigFetchesDirectlyWithAnAllowList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pool.GitcacheURL != "" || !pool.AllowRepos.Admits("github.com/acme/app") || pool.AllowRepos.Admits("github.com/other/app") {
-		t.Fatalf("pool = gitcache %q allow %s; want direct source for github.com/acme/* only", pool.GitcacheURL, pool.AllowRepos)
+	if !pool.AllowRepos.Admits("github.com/acme/app") || pool.AllowRepos.Admits("github.com/other/app") {
+		t.Fatalf("allow %s; want github.com/acme/* only", pool.AllowRepos)
 	}
-	proxied, err := agentconfig.Validate(agentconfig.Config{Controller: "http://c"})
+	unrestricted, err := agentconfig.Validate(agentconfig.Config{Controller: "http://c"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	pool, err = agentPoolConfig(proxied)
+	pool, err = agentPoolConfig(unrestricted)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pool.GitcacheURL != "http://c/api/v1/gitcache" || !pool.AllowRepos.Empty() {
-		t.Fatalf("pool = gitcache %q allow %s; want the proxy and no list", pool.GitcacheURL, pool.AllowRepos)
+	if !pool.AllowRepos.Empty() {
+		t.Fatalf("allow %s; want no machine-owner allow list", pool.AllowRepos)
 	}
 }

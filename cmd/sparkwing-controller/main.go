@@ -62,10 +62,6 @@ func run(args []string) error {
 				credBillingToken, credCreditsToken, credCacheGrantKey,
 			}, ", ")+
 			". An absent file leaves its feature off; docs/self-hosting.md says what each one turns on.")
-	cachePodURL := fs.String("cache-pod-url", "",
-		"externally-reachable URL of the sparkwing-cache pod (gitcache + artifact store). "+
-			"Announced via GET /api/v1/services so operator CLIs can discover it without "+
-			"hardcoding it in config.yaml. Empty disables the announcement.")
 	dashboardURL := fs.String("dashboard-url", "",
 		"externally-reachable URL of the dashboard that watches this controller. "+
 			"Announced via GET /api/v1/services, so `sparkwing cloud connect` prints "+
@@ -77,8 +73,6 @@ func run(args []string) error {
 	operatorAccounts := fs.String("operator-accounts", "",
 		"comma-separated account ids whose signed-in dashboard sessions may use the "+
 			"operator console. No token reaches the console. Empty leaves it off.")
-	cacheURL := fs.String("cache-url", "",
-		"controller-reachable sparkwing-cache URL for gitcache proxy routes")
 	externalURL := fs.String("external-url", "",
 		"base URL this controller answers on from outside the cluster, which is "+
 			"where runners read signed filesystem outputs. "+
@@ -452,12 +446,10 @@ func run(args []string) error {
 
 	srv := controller.New(st, nil).
 		WithTrustedProxyAddr(*trustedProxyAddr).
-		WithCachePodURL(*cachePodURL).
 		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
 		WithDashboardURL(*dashboardURL).
 		WithBillingCheckout(*billingURL, creds.BillingToken).
 		WithOperatorAccounts(splitCSV(*operatorAccounts)).
-		WithCacheURL(*cacheURL).
 		WithCacheGrantKey(creds.CacheGrantKey).
 		WithExternalURL(*externalURL).
 		WithMetricsAddr(*metricsAddr).
@@ -494,9 +486,6 @@ func run(args []string) error {
 	if err := configureMailer(ctx, srv, *emailSender, *emailConfigSet); err != nil {
 		return err
 	}
-	srv.WithTeamStorage(controller.TeamStorage{
-		CacheURL: firstNonEmpty(*cacheURL, *cachePodURL),
-	})
 	if err := configureGitHubApp(srv, githubAppFlags{
 		AppID:         *githubAppID,
 		Slug:          *githubAppSlug,
@@ -512,9 +501,6 @@ func run(args []string) error {
 		return fmt.Errorf("oidc issuer: %w", oerr)
 	}
 	srv = srv.WithOIDCIssuer(oidcIssuer)
-	if err := checkCacheGrantKey(srv, *cacheURL, *cachePodURL, creds.CacheGrantKey); err != nil {
-		return err
-	}
 	if err := checkMultiTeamObjectStore(srv, *bucketStoreURL); err != nil {
 		return err
 	}
@@ -721,20 +707,6 @@ func checkRequireAuth(st *store.Store, requireAuth bool) error {
 		credBootstrapAdminToken + " credential, or " +
 		"mint one with the controller started unauthenticated and restart " +
 		"with --require-auth")
-}
-
-// safety: the grant is the only boundary between teams inside the cache; without a key
-// every run's grant request would fail at request time instead of at deploy.
-func checkCacheGrantKey(srv *controller.Server, cacheURL, cachePodURL, grantKey string) error {
-	if !srv.MultiTeam() || (cacheURL == "" && cachePodURL == "") {
-		return nil
-	}
-	if grantKey == "" {
-		return errors.New("the license allows more than one team and a cache is configured, so " +
-			"the " + credCacheGrantKey + " credential must hold the key the controller signs cache grants with " +
-			"and the cache verifies them with (generate one with `openssl rand -base64 32`)")
-	}
-	return nil
 }
 
 // safety: a free team is held to its allowance only by counters kept over the object

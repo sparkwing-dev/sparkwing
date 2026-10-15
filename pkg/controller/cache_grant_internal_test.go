@@ -35,7 +35,7 @@ func cacheGrantServer(t *testing.T, grantKey string) *Server {
 		poolRunner.Name, poolRunner.TokenPrefix, time.Now().Add(time.Hour).UnixNano(), "run-1"); err != nil {
 		t.Fatal(err)
 	}
-	return New(st, nil).WithCacheURL("http://cache.invalid").WithCacheGrantKey(grantKey)
+	return New(st, nil).WithCacheGrantKey(grantKey)
 }
 
 var poolRunner = Principal{Name: "pool", TokenPrefix: "swr_pool", Kind: store.TokenKindRunner, Team: "team-a", Scopes: store.MachineTokenScopes()}

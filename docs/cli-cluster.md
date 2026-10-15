@@ -346,10 +346,9 @@ missing sparkwing-runner, an unreachable service manager, or an unusable
 setting fails first. If a step after the mint fails, the output names the live
 token and the command that revokes it.
 
-With --allow-repo the agent fetches each run's source itself, from the
-repositories the list names, with the credential the controller releases or
-else this machine's own git credentials. Without it the agent fetches through
-the controller's gitcache proxy.
+The agent fetches source directly with the credential the controller releases.
+With --allow-repo it builds only the repositories the list names and may use
+this machine's own git credentials when the controller releases none.
 
 The command prints the token prefix and the revoke command. The raw token
 reaches only config.yaml.

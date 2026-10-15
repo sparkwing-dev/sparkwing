@@ -65,10 +65,6 @@ type Config struct {
 	MemoryCeiling int64
 	Deadline      time.Duration
 	ScratchLimit  string
-	// CacheURL, GitcacheURL and DependencyProxyURL are the caches a runner
-	// Job is handed. A pod opens a cache only with the grant its claim token
-	// asks the controller for, which reaches its own team's trees alone.
-	CacheURL, GitcacheURL, DependencyProxyURL string
 }
 
 // Validate refuses a Config that would let a Job run unpinned, uncapped or
@@ -126,15 +122,6 @@ func BuildJobOld(cfg Config, claim store.LaunchClaim) *batchv1.Job {
 		{Name: "SPARKWING_RUNNER_NAME", Value: name},
 		{Name: "SPARKWING_RUNNER_TYPE", Value: "kubernetes"},
 	}
-	for _, v := range []corev1.EnvVar{
-		{Name: "SPARKWING_CACHE_URL", Value: cfg.CacheURL},
-		{Name: "SPARKWING_GITCACHE_URL", Value: cfg.GitcacheURL},
-	} {
-		if v.Value != "" {
-			env = append(env, v)
-		}
-	}
-	env = append(env, k8s.DependencyProxyEnv(cfg.DependencyProxyURL)...)
 	// safety: the init container gets the same fixed env, and its command is
 	// the launcher's own; the pipeline's container adds only the module mode.
 	fetchEnv := slices.Clone(env)

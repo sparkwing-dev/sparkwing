@@ -9,13 +9,10 @@ import (
 	"log/slog"
 	"maps"
 	"math"
-	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
@@ -46,13 +43,6 @@ type Config struct {
 	ServiceAccountName string
 
 	ControllerURL string
-
-	ArtifactStoreURL string
-	// GitcacheURL is the cache the pod compiles a pipeline from when the
-	// image does not carry it; empty leaves run-node unable to fall back.
-	GitcacheURL string
-
-	DependencyProxyURL string
 
 	ImagePullPolicy corev1.PullPolicy
 
@@ -881,21 +871,9 @@ func (r *Runner) buildJob(
 	if len(r.cfg.Labels) > 0 {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_RUNNER_LABELS", Value: strings.Join(r.cfg.Labels, ",")})
 	}
-	if r.cfg.ArtifactStoreURL != "" {
-		env = append(env, corev1.EnvVar{Name: "SPARKWING_CACHE_URL", Value: r.cfg.ArtifactStoreURL})
-	}
-	if r.cfg.GitcacheURL != "" {
-		env = append(env, corev1.EnvVar{Name: "SPARKWING_GITCACHE_URL", Value: r.cfg.GitcacheURL})
-	}
 	if token != "" {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_AGENT_TOKEN", Value: token})
 	}
-	// safety: the pod runs the team's code, so of the cache credentials it gets only
-	// the run's grant, which opens that team's trees and no other's.
-	if grant := os.Getenv(authwire.CacheGrantEnv); grant != "" {
-		env = append(env, corev1.EnvVar{Name: authwire.CacheGrantEnv, Value: grant})
-	}
-	env = append(env, DependencyProxyEnv(r.cfg.DependencyProxyURL)...)
 	env = append(env, claimFenceEnv(fence)...)
 
 	container := HardenedContainer(corev1.Container{
@@ -1078,20 +1056,6 @@ func claimFenceEnv(fence store.NodeClaimFence) []corev1.EnvVar {
 
 func boolPtr(v bool) *bool { return &v }
 
-func ResolveDependencyProxy(explicit, cacheURL string) string {
-	explicit = strings.TrimSpace(explicit)
-	if strings.EqualFold(explicit, "off") {
-		return ""
-	}
-	if explicit != "" {
-		return explicit
-	}
-	if !strings.HasPrefix(cacheURL, "http://") && !strings.HasPrefix(cacheURL, "https://") {
-		return ""
-	}
-	return cacheURL
-}
-
 func ParsePullPolicy(s string) (corev1.PullPolicy, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "":
@@ -1113,32 +1077,12 @@ func pullPolicyOrDefault(p corev1.PullPolicy) corev1.PullPolicy {
 	return p
 }
 
-// DependencyProxyEnvNames are the variables [DependencyProxyEnv] sets, which
-// a pod's node host hands its pipeline processes.
-var DependencyProxyEnvNames = []string{"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST"}
-
 // NetworkEnvNames are the runner's own proxy and CA settings, which a pod's
 // node host also hands its pipeline processes and dependency installs, since
 // a runner behind a corporate proxy or a private CA reaches nothing without them.
 var NetworkEnvNames = []string{
 	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
 	"NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE",
-}
-
-// DependencyProxyEnv points a pod's go, npm and pip at the cache's public
-// dependency proxy at base; an unusable base gives nothing.
-func DependencyProxyEnv(base string) []corev1.EnvVar {
-	base = strings.TrimRight(strings.TrimSpace(base), "/")
-	u, err := url.Parse(base)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return nil
-	}
-	return []corev1.EnvVar{
-		{Name: "GOPROXY", Value: base + "/proxy/golang|https://proxy.golang.org,direct"},
-		{Name: "npm_config_registry", Value: base + "/proxy/npm"},
-		{Name: "PIP_INDEX_URL", Value: base + "/proxy/pypi/simple/"},
-		{Name: "PIP_TRUSTED_HOST", Value: u.Host},
-	}
 }
 
 // safety: cluster profiles use peak CPU because the resolved core value is a

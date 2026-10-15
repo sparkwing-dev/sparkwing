@@ -104,19 +104,12 @@ var apiReadRoutes = []string{
 }
 
 // safety: these routes hold a response open past any request bound: the live
-// log stream and the gitcache handlers that reset their own deadline through
-// http.ResponseController. A context deadline here truncates each into a clean
+// log and event streams. A context deadline here truncates each into a clean
 // EOF the client reads as completion.
 var apiStreamRoutes = []string{
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream",
 	"GET /api/v1/runs/{id}/logs/{node}/stream",
 	"GET /api/v1/runs/{id}/events/stream",
-	"POST /api/v1/gitcache/git/register",
-	"GET /api/v1/gitcache/git/{path...}",
-	"POST /api/v1/gitcache/git/{path...}",
-	"POST /api/v1/runs/{id}/gitcache/git/register",
-	"GET /api/v1/runs/{id}/gitcache/git/{path...}",
-	"POST /api/v1/runs/{id}/gitcache/git/{path...}",
 }
 
 // APIHealthRoute is answered by the daemon itself rather than by a controller,

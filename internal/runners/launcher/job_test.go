@@ -131,31 +131,15 @@ func TestConfigValidate_RefusesAnUnpinnedOrUncappedLauncher(t *testing.T) {
 	}
 }
 
-// A launcher Job is pointed at the same caches a runner Job is, and carries
-// no cache credential: its pod asks for a grant with its claim token.
-func TestBuildJob_HandsTheCachesButNoCacheCredential(t *testing.T) {
-	cfg := testConfig()
-	env := func(cfg Config) map[string]string {
-		out := map[string]string{}
-		for _, e := range BuildJobOld(cfg, testClaim()).Spec.Template.Spec.Containers[0].Env {
-			out[e.Name] = e.Value
+func TestBuildJob_OmitsCacheServiceEnvironment(t *testing.T) {
+	for _, container := range append(BuildJobOld(testConfig(), testClaim()).Spec.Template.Spec.InitContainers,
+		BuildJobOld(testConfig(), testClaim()).Spec.Template.Spec.Containers...) {
+		for _, variable := range container.Env {
+			switch variable.Name {
+			case "SPARKWING_CACHE_URL", "SPARKWING_GITCACHE_URL", "SPARKWING_CACHE_GRANT", "GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST":
+				t.Fatalf("container %s injects %s", container.Name, variable.Name)
+			}
 		}
-		return out
-	}
-	bare := env(cfg)
-	for _, name := range []string{"SPARKWING_CACHE_URL", "SPARKWING_GITCACHE_URL", "GOPROXY"} {
-		if _, ok := bare[name]; ok {
-			t.Fatalf("%s set with no cache configured", name)
-		}
-	}
-	cfg.CacheURL, cfg.GitcacheURL, cfg.DependencyProxyURL = "http://cache", "http://gitcache", "http://cache"
-	got := env(cfg)
-	if got["SPARKWING_CACHE_URL"] != "http://cache" || got["SPARKWING_GITCACHE_URL"] != "http://gitcache" ||
-		!strings.HasPrefix(got["GOPROXY"], "http://cache/proxy/golang") {
-		t.Fatalf("cache env = %v", got)
-	}
-	if _, ok := got["SPARKWING_CACHE_GRANT"]; ok {
-		t.Fatal("a launcher Job carries a cache grant")
 	}
 }
 

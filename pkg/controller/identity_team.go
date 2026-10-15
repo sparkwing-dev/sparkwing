@@ -298,10 +298,8 @@ func runnerTokenSetup(raw string) string {
 	return "(umask 077 && mkdir -p " + runnerCredentialsDir + " && rm -f " + file + " && printf '%s' " + raw + " > " + file + ")"
 }
 
-// hack: --metrics-addr= because a second runner on a machine would collide on its port; no
-// --gitcache since the git cache is the operator's. Patterns are single-quoted because '*' is
-// a shell glob. The claim flags follow the token's scopes, since a loop the token may not
-// claim for fails.
+// hack: --metrics-addr= avoids port collisions between runners on one machine.
+// Quote patterns because the shell expands wildcards before the runner sees them.
 func runnerConnectArgs(controllerURL, name string, allow sourceurl.RepoAllowlist, scopes []string) string {
 	cmd := "sparkwing-runner runner --credentials-dir " + runnerCredentialsDir + " --controller " + controllerURL
 	for _, p := range allow.Patterns() {

@@ -147,10 +147,10 @@ func TestPersistenceDoesNotDependOnBuilderOrder(t *testing.T) {
 		build func(*store.Store) *Server
 	}{
 		{"meter first", func(st *store.Store) *Server {
-			return New(st, nil).WithEgressMeter(egress.New(egress.Config{})).WithCacheURL("http://cache")
+			return New(st, nil).WithEgressMeter(egress.New(egress.Config{})).WithDashboardURL("https://dashboard.example")
 		}},
 		{"meter last", func(st *store.Store) *Server {
-			return New(st, nil).WithCacheURL("http://cache").WithEgressMeter(egress.New(egress.Config{}))
+			return New(st, nil).WithDashboardURL("https://dashboard.example").WithEgressMeter(egress.New(egress.Config{}))
 		}},
 		{"config carries it", func(st *store.Store) *Server {
 			return New(st, nil).WithEgressMeter(egress.New(egress.Config{Persisted: true}))

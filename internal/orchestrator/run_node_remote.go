@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/directdata"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -31,13 +30,10 @@ func runNodeRemote(
 	ctx context.Context,
 	trigger *store.Trigger,
 	run *store.Run,
-	controllerURL, gitcacheURL, cacheGrant, runID, nodeID, token string,
+	controllerURL, runID, nodeID, token string,
 	allow *sourceurl.RepoAllowlist,
 	logger *slog.Logger,
 ) (runner.Result, error) {
-	if cacheGrant == "" {
-		cacheGrant = os.Getenv(authwire.CacheGrantEnv)
-	}
 	repoURL, sourceErr := TriggerSourceURL(trigger)
 	if sourceErr != nil {
 		return runner.Result{}, sourceErr
@@ -75,6 +71,7 @@ func runNodeRemote(
 		return runner.Result{}, fmt.Errorf("create private work directory: %w", err)
 	}
 
+	cacheGrant := RequestRunCacheGrant(ctx, controllerURL, token, runID, logger)
 	var sparkwingDir string
 	var err error
 	switch {
@@ -105,7 +102,7 @@ func runNodeRemote(
 		"run_id", runID, "node_id", nodeID, "entry", binary.entry)
 	return hostDispatchedNode(ctx, podNode{
 		entry: binary.entry, dir: filepath.Dir(sparkwingDir), controllerURL: controllerURL, token: token,
-		runID: runID, nodeID: nodeID, cacheGrant: cacheGrant, logger: logger,
+		runID: runID, nodeID: nodeID, logger: logger,
 	})
 }
 

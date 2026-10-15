@@ -154,49 +154,17 @@ Restores require an exact key match.
 
 ### Storage
 
-- **Laptop:** archives under `$SPARKWING_HOME/depcache/`.
-- **Cluster:** the sparkwing-cache service's `/cache/<key>` blob
-  store, reached through `SPARKWING_CACHE_URL` (node pods) or
-  `SPARKWING_GITCACHE_URL` (warm runners), authenticated with the
-  runner's agent token. Every pod in the cluster shares one cache.
-
-Both use tar.gz archives.
-The cache service bounds one archive at
-`sparkwing-cache --max-cache-archive-bytes`, 500 MB by default and unbounded
-at `0`. A larger archive is refused with `413` naming the cap, and the
-node logs a warning and proceeds without the dependency cache. The cap
-is applied before the first byte reaches the volume, so one pipeline
-cannot spend a team's quota, or the store ceiling, on a single object.
-The SDK skips an upload over 500 MB client-side before it asks; that constant is the
-client's own, and the service's cap is what actually holds.
-
-`--max-store-bytes` and `--max-store-objects`
-bound the dependency-archive, team and git mirror trees
-together rather than one object. At or above either one the service refuses every upload
-with `507` naming the ceiling, while reads and deletes keep working, and
-a later measurement that finds the store back under the ceiling thaws
-it. `--warn-store-bytes` and `--warn-store-objects` mark the store as warning without
-refusing anything, and `--store-reconcile`
-(hourly by default, `0` measures once
-at startup) is how often the service walks its trees and replaces its
-running count with the measurement. All of
-them are off until set, and the chart carries them as `cache.limits.*`.
-`GET /health` reports the store under `store_ceiling` (frozen, warning,
-counted bytes and objects, and when it was last measured), and the same
-state is exported as `sparkwing.cache.store_*`.
-
-The cache serves no delete, so recovery runs through two admin routes,
-which take only the controller's operator grant. An operator calls them
-through the controller with an `admin` bearer: `POST
-/api/v1/cache/store-ceiling/measure` walks the trees immediately, which is
-how freeing space on the volume turns into uploads flowing again rather than
-a wait for the interval, and `POST /api/v1/cache/store-ceiling/thaw` accepts
-uploads until the next measurement (a `409` when none is scheduled). Both
-forward the cache's answer, which carries the ceiling state.
+Local dependency archives live under `$SPARKWING_HOME/depcache/`.
+The remote archive backend implements signed `/data` transfers and
+repository/ref-scoped `depcache` records, but production hosts do not yet
+bind it. Those hosts still select local archive storage. The remote backend
+verifies a download before extraction publishes files. See the
+[storage rewrite contract](storage.md) for the target authorization and
+restore order.
 
 ### Guarantees
 
-A missing lockfile, an unreachable cache service, an oversized archive,
+A missing lockfile, an unavailable data backend, an oversized archive,
 or a failed extract logs a warning and execution proceeds without the
 dependency cache. A failed node never saves.
 A restore is also skipped when the target directory already has

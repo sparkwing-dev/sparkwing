@@ -10,16 +10,8 @@ import (
 // (clients fall back to whatever explicit config they have).
 type ServicesResponse struct {
 	// DataDownloadURL is the controller route that signs one team object.
-	// Empty means clients keep reading from the cache service.
+	// Empty means signed data downloads are unavailable.
 	DataDownloadURL string `json:"data_download_url,omitempty"`
-	// CachePod is the externally-reachable URL of the sparkwing-cache
-	// pod (gitcache + artifact store + registry proxy + upload sync).
-	// An off-cluster runner holding a run's cache grant reads source, the
-	// binary cache and artifacts there directly, and the operator CLI
-	// refreshes and seeds mirrors there before a dispatch. Empty when the
-	// controller wasn't started with --cache-pod-url.
-	CachePod string `json:"cache_pod,omitempty"`
-
 	// Dashboard is the externally-reachable URL a human opens to watch
 	// this controller's runs. `sparkwing cloud connect` prints it, so an
 	// operator who has just connected reaches the web view without being
@@ -27,9 +19,7 @@ type ServicesResponse struct {
 	// started with --dashboard-url.
 	Dashboard string `json:"dashboard,omitempty"`
 
-	// MultiTeam reports a controller that may hold more than one team. The
-	// cache's refresh and seed routes take the cache's operator token, which
-	// no team member holds there, so a CLI skips them.
+	// MultiTeam reports a controller that may hold more than one team.
 	MultiTeam bool `json:"multi_team,omitempty"`
 	// DirectData advertises S3-backed signed data routes for claimed runs.
 	DirectData bool `json:"direct_data,omitempty"`
@@ -41,7 +31,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 	if downloadViaIngress(r) && s.downloadCDN == nil {
 		downloadURL = ""
 	}
-	if s.cachePodURL == "" && s.dashboardURL == "" && !multiTeam && downloadURL == "" && s.directUploads == nil {
+	if s.dashboardURL == "" && !multiTeam && downloadURL == "" && s.directUploads == nil {
 		http.Error(w, "no services announced", http.StatusNotFound)
 		return
 	}
@@ -49,7 +39,6 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(ServicesResponse{
 		DataDownloadURL: downloadURL,
 		DirectData:      s.directUploads != nil,
-		CachePod:        s.cachePodURL,
 		Dashboard:       s.dashboardURL,
 		MultiTeam:       multiTeam,
 	})

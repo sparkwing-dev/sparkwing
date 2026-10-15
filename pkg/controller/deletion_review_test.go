@@ -12,38 +12,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// A cache grant minted before the deletion keeps writing into the team's
-// tree until it expires, so the pass deletes the tree again once every such
-// grant has lapsed.
-func TestTeamDeletionDeletesTheCacheTreeAgainAfterGrantsLapse(t *testing.T) {
-	cache, ts := newStorageFakes(t)
-	f := newDeletionFixture(t, ts)
-	owner := f.user("o", "olga@example.com")
-	f.createTeam(&owner, "acme")
-	if code := f.call("DELETE", "/api/v1/team", owner.auth, map[string]string{"confirm_slug": "acme"}, nil); code != http.StatusAccepted {
-		t.Fatalf("delete = %d", code)
-	}
-	start := time.Now()
-	f.srv.ProcessTeamDeletions(context.Background(), start.Add(5*time.Minute))
-	f.srv.ProcessTeamDeletions(context.Background(), start.Add(time.Hour))
-	if got := cache.seen(); len(got) != 1 {
-		t.Fatalf("cache deletes before the grants lapse = %v, want one", got)
-	}
-	f.srv.ProcessTeamDeletions(context.Background(), start.Add(8*time.Hour))
-	if got := cache.seen(); len(got) != 2 {
-		t.Fatalf("cache deletes after the grants lapse = %v, want a second", got)
-	}
-	f.srv.ProcessTeamDeletions(context.Background(), start.Add(9*time.Hour))
-	if got := cache.seen(); len(got) != 2 {
-		t.Fatalf("cache deletes after the second pass = %v, want no third", got)
-	}
-}
-
 // A log upload URL issued before the deletion stays valid after the purge
 // and can write the team's logs again, so the recheck deletes them too.
 func TestTeamDeletionDeletesLogsAgainAfterUploadURLsLapse(t *testing.T) {
-	_, ts := newStorageFakes(t)
-	f := newDeletionFixture(t, ts)
+	f := newDeletionFixture(t)
 	f.store.SetOutputDir(t.TempDir())
 	objs, err := fs.NewArtifactStore(f.store.OutputDir())
 	if err != nil {
@@ -70,8 +42,7 @@ func TestTeamDeletionDeletesLogsAgainAfterUploadURLsLapse(t *testing.T) {
 // Another replica may still accept a revoked token from its cache, so the
 // purge waits out at least twice that cache's lifetime.
 func TestTeamPurgeWaitsOutTheTokenCache(t *testing.T) {
-	cache, ts := newStorageFakes(t)
-	f := newDeletionFixture(t, ts)
+	f := newDeletionFixture(t)
 	owner := f.user("o", "olga@example.com")
 	f.createTeam(&owner, "acme")
 	f.seedRun("acme", "run-acme")
@@ -79,12 +50,12 @@ func TestTeamPurgeWaitsOutTheTokenCache(t *testing.T) {
 		t.Fatalf("delete = %d", code)
 	}
 	f.srv.ProcessTeamDeletions(context.Background(), time.Now().Add(90*time.Second))
-	if got := cache.seen(); len(got) != 0 {
-		t.Fatalf("a pass 90s after the request purged: %v", got)
+	if _, err := f.store.TeamInfo(t.Context(), "acme"); err != nil {
+		t.Fatalf("a pass 90s after the request purged the team: %v", err)
 	}
 	f.srv.ProcessTeamDeletions(context.Background(), time.Now().Add(3*time.Minute))
-	if got := cache.seen(); len(got) != 1 {
-		t.Fatalf("a pass 3 minutes after the request = %v, want the purge", got)
+	if _, err := f.store.TeamInfo(t.Context(), "acme"); err == nil {
+		t.Fatal("a pass 3 minutes after the request left the team registered")
 	}
 }
 
@@ -119,8 +90,7 @@ func TestDeleteAccountOwningTheDefaultTeamIsABadRequest(t *testing.T) {
 // Deleting a team with money in flight answers 409 with the remedy, from the
 // owner's route and the operator's, and neither closes the team.
 func TestDeleteTeamRefusesAnOpenCheckoutOrADisputeHold(t *testing.T) {
-	_, ts := newStorageFakes(t)
-	f := newDeletionFixture(t, ts)
+	f := newDeletionFixture(t)
 	owner := f.user("o", "olga@example.com")
 	f.createTeam(&owner, "acme")
 	acme, err := f.store.ForTeam(context.Background(), "acme")

@@ -43,7 +43,6 @@ var (
 	resAnyInstallation    = tenantResource{"any team's github app installation", ownerDeployment}
 	resStorageQuota       = tenantResource{"storage quota", ownerDeployment}
 	resPayment            = tenantResource{"payment", ownerDeployment}
-	resGitCache           = tenantResource{"git cache repository", ownerDeployment}
 )
 
 // safety: teamBoundary refuses a route missing here, and a test fails while
@@ -103,10 +102,6 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/crons/{id}/run":        resCron,
 	"DELETE /api/v1/crons/repos":         resNone,
 	"PUT /api/v1/crons/repos":            resNone,
-
-	"GET /api/v1/gitcache/git/{path...}":  resGitCache,
-	"POST /api/v1/gitcache/git/{path...}": resGitCache,
-	"POST /api/v1/gitcache/git/register":  resNone,
 
 	"DELETE /api/v1/github-app/installations/{installation_id}": resAnyInstallation,
 
@@ -169,9 +164,6 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/runs/{id}/events":                                  resRun,
 	"GET /api/v1/runs/{id}/events/stream":                            resRun,
 	"POST /api/v1/runs/{id}/finish":                                  resRun,
-	"GET /api/v1/runs/{id}/gitcache/git/{path...}":                   resRun,
-	"POST /api/v1/runs/{id}/gitcache/git/{path...}":                  resRun,
-	"POST /api/v1/runs/{id}/gitcache/git/register":                   resRun,
 	"POST /api/v1/runs/{id}/heartbeat":                               resRun,
 	"GET /api/v1/runs/{id}/logs":                                     resRun,
 	"GET /api/v1/runs/{id}/logs/{node}":                              resRun,

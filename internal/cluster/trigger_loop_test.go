@@ -72,7 +72,7 @@ func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 
 	err := RunTriggerLoop(ctx, TriggerLoopOptions{
 		ControllerURL: srv.URL,
-		GitcacheURL:   srv.URL,
+
 		WorkRoot:      t.TempDir(),
 		Poll:          10 * time.Millisecond,
 		MaxConcurrent: 2,
@@ -122,7 +122,7 @@ func TestRunTriggerLoop_EarlyFailureFinishesWithClaimGeneration(t *testing.T) {
 	defer srv.Close()
 
 	if err := RunTriggerLoop(ctx, TriggerLoopOptions{
-		ControllerURL: srv.URL, GitcacheURL: srv.URL, WorkRoot: t.TempDir(),
+		ControllerURL: srv.URL, WorkRoot: t.TempDir(),
 		Poll: 5 * time.Millisecond, MaxConcurrent: 1,
 	}); err != nil {
 		t.Fatal(err)
@@ -162,7 +162,7 @@ func TestRunTriggerLoop_ReportsFailedTriggerFinish(t *testing.T) {
 	defer srv.Close()
 	var logs bytes.Buffer
 	if err := RunTriggerLoop(ctx, TriggerLoopOptions{
-		ControllerURL: srv.URL, GitcacheURL: srv.URL, WorkRoot: t.TempDir(),
+		ControllerURL: srv.URL, WorkRoot: t.TempDir(),
 		Poll: 5 * time.Millisecond, MaxConcurrent: 1,
 		Logger: slog.New(slog.NewTextHandler(&logs, nil)),
 	}); err != nil {
@@ -215,7 +215,7 @@ func TestRunTriggerLoop_ConfirmsRunAfterAmbiguousFinishResponse(t *testing.T) {
 			defer srv.Close()
 
 			if err := RunTriggerLoop(ctx, TriggerLoopOptions{
-				ControllerURL: srv.URL, GitcacheURL: srv.URL, WorkRoot: t.TempDir(),
+				ControllerURL: srv.URL, WorkRoot: t.TempDir(),
 				Poll: 5 * time.Millisecond, MaxConcurrent: 1,
 			}); err != nil {
 				t.Fatal(err)
@@ -251,7 +251,7 @@ func TestRunTriggerLoopStopsWhenMeteredInProcessClaimsAreRefused(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := RunTriggerLoop(ctx, TriggerLoopOptions{
-		ControllerURL: ts.URL, GitcacheURL: ts.URL, WorkRoot: t.TempDir(),
+		ControllerURL: ts.URL, WorkRoot: t.TempDir(),
 		Poll: time.Millisecond, MaxConcurrent: 1, Logger: discardLogger(),
 	})
 	if !errors.Is(err, store.ErrMeteredInProcessNodes) {
@@ -380,7 +380,7 @@ func TestRunTriggerLoop_CancelRequestFinishesTheRunCancelled(t *testing.T) {
 	defer srv.Close()
 
 	if err := RunTriggerLoop(ctx, TriggerLoopOptions{
-		ControllerURL: srv.URL, GitcacheURL: srv.URL, WorkRoot: t.TempDir(),
+		ControllerURL: srv.URL, WorkRoot: t.TempDir(),
 		Poll: 5 * time.Millisecond, MaxConcurrent: 1, Logger: discardSlog(),
 	}); err != nil {
 		t.Fatal(err)

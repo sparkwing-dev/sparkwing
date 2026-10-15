@@ -562,22 +562,15 @@ An off-cluster machine can claim only these triggers and compile them locally:
 ```bash
 sparkwing-runner runner --credentials-dir="$HOME/.config/sparkwing/runner-credentials" \
   --controller=https://sparkwing.example.com \
-  --gitcache=https://sparkwing.example.com/api/v1/gitcache \
   --also-claim-triggers --claim-nodes=false \
   --trigger-sources=pipeline-working-tree@laptop-hostname \
   --metrics-addr= --max-claims-before-restart=0
 ```
 
 The runner reads its token from the file `agent-token` in its
-`--credentials-dir`; create it with mode `0600`. The source proxy and trigger
-claim require the current admin-capable runner token. Login-enabled dashboard ingress passes this machine bearer directly to
-the controller without a browser session or CSRF token. The process opens no
-listener. A private direct cache URL can replace the controller proxy when the
-machines already share a LAN, VPN, or tailnet. Direct cache binary writes use
-only the run's cache grant (`SPARKWING_CACHE_GRANT`); the agent/controller
-token is never sent to that raw cache. Raw Git reads have no cache-level auth, so keep a direct cache on a
-trusted private network. Pack streams have a 30-minute server window, and the
-CLI gives a working-tree upload 15 minutes. Manual retries and same-repository
+`--credentials-dir`; create it with mode `0600`. The trigger claim and source download require an authorized run credential. Login-enabled dashboard ingress passes this machine bearer directly to
+the controller without a browser session or CSRF token. The process opens no listener. Source bundles use signed data transfers.
+The CLI gives a working-tree upload 15 minutes. Manual retries and same-repository
 `RunAndAwait` children retain the original `pipeline-working-tree@<host>`
 placement source.
 Do not leave an unrestricted cluster runner racing for the same trigger source
@@ -585,9 +578,7 @@ when testing deterministic placement.
 
 ### Team runners fetch source themselves
 
-The git cache and its controller proxy belong to the operator, so a runner that
-holds a team's runner token starts without `--gitcache`. Such a runner fetches
-each claimed run's source directly: it fetches the commit the trigger recorded
+A runner fetches each claimed run's source directly: it fetches the commit the trigger recorded
 from the remote the trigger recorded. It asks the controller for the run's
 credential first, with its claim's token: the team's GitHub App token when an
 installation covers the repository and the repository qualifies, else the git
@@ -631,7 +622,7 @@ team, decides what the machine builds:
   `github.com/acme/app` but not `github.com/acme/app/sub` or
   `github.com/other/app`. Quote a pattern that holds `*`, since the shell
   expands it.
-- Without `--gitcache` and without `--allow-repo`, the runner fetches only
+- Without `--allow-repo`, the runner fetches only
   with the credential the controller releases for each run, and a run it
   releases none for fails. That is how a cloud runner holds no credential of
   its own. `--allow-repo` is what lets the runner fall back to the machine's
@@ -702,10 +693,9 @@ resolves outside the checkout, is refused.
 
 ### An agent that fetches source itself
 
-`sparkwing-runner agent` fetches source through the controller's gitcache
-proxy unless the `agent` section of its `config.yaml` names `allow_repos` and
-no `gitcache`, or it starts with `--allow-repo`, which replaces the section's
-list:
+`sparkwing-runner agent` fetches source directly. The `allow_repos` list
+restricts which repositories it builds and permits the machine owner's
+credentials. `--allow-repo` replaces the configured list:
 
 ```yaml
 agent:

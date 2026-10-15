@@ -19,23 +19,6 @@ import (
 // and stored objects.
 const TeamDeletionInterval = time.Minute
 
-// TeamStorage names the services outside the database that hold a team's
-// data, and the operator credentials the controller deletes it with. A
-// service left empty holds nothing for this controller to delete.
-type TeamStorage struct {
-	// CacheURL reaches the cache service, which keeps each team's artifacts,
-	// binaries and build cache in a tree of its own. The controller deletes a
-	// tree with an operator grant signed by its cache grant key.
-	CacheURL string
-}
-
-// WithTeamStorage tells the controller where a team's stored objects live,
-// so deleting a team removes them along with its rows.
-func (s *Server) WithTeamStorage(ts TeamStorage) *Server {
-	s.teamStorage = ts
-	return s
-}
-
 type teamDeletionJSON struct {
 	Slug        string `json:"slug"`
 	State       string `json:"state"`
@@ -342,9 +325,6 @@ func (s *Server) purgeTeam(ctx context.Context, team store.Team, now time.Time) 
 	if err := s.holdDeletion(ctx, team, now); err != nil {
 		return err
 	}
-	if err := s.holdDeletion(ctx, team, now); err != nil {
-		return err
-	}
 	return op.PurgeTeam(ctx, team, s.deletionHolder(), now, teamRecheckDelay)
 }
 
@@ -353,9 +333,6 @@ func (s *Server) recheckTeam(ctx context.Context, team store.Team, now time.Time
 		return err
 	}
 	if err := s.purgeTeamLogs(ctx, team); err != nil {
-		return err
-	}
-	if err := s.holdDeletion(ctx, team, now); err != nil {
 		return err
 	}
 	if err := s.holdDeletion(ctx, team, now); err != nil {

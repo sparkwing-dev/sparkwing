@@ -92,7 +92,6 @@ if [ "$NON_INTERACTIVE" = false ]; then
 fi
 
 CONTROLLER_URL="${SPARKWING_CONTROLLER:-}"
-GITCACHE_URL="${SPARKWING_GITCACHE_URL:-}"
 API_TOKEN="${SPARKWING_API_TOKEN:-}"
 RUNNER_NAME="${RUNNER_NAME:-}"
 MAX_CONCURRENT="${MAX_CONCURRENT:-}"
@@ -104,9 +103,6 @@ if [ -z "$CONTROLLER_URL" ]; then
 fi
 if [ -z "$API_TOKEN" ]; then
   API_TOKEN="$(ask_secret 'API token (will not be echoed)')"
-fi
-if [ -z "$GITCACHE_URL" ]; then
-  GITCACHE_URL="${CONTROLLER_URL%/}/api/v1/gitcache"
 fi
 if [ -z "$API_TOKEN" ]; then
   err "API token is required. Get one from your team's sparkwing admin."
@@ -124,7 +120,6 @@ if [ -z "$MAX_CONCURRENT" ]; then
 fi
 
 reject_unsafe_value "Controller URL" "$CONTROLLER_URL"
-reject_unsafe_value "Gitcache URL" "$GITCACHE_URL"
 reject_unsafe_value "Runner name" "$RUNNER_NAME"
 reject_unsafe_value "Contribution ceiling" "$CONTRIBUTION"
 reject_unsafe_value "Local reserve" "$LOCAL_RESERVE"
@@ -133,7 +128,6 @@ log ""
 log "config summary:"
 log "  binary:         $BINARY_PATH"
 log "  controller:     $CONTROLLER_URL"
-log "  gitcache:       $GITCACHE_URL"
 log "  runner name:    $RUNNER_NAME"
 log "  max concurrent: $MAX_CONCURRENT"
 log "  contribution:   $CONTRIBUTION"
@@ -159,7 +153,6 @@ chmod 700 "$CONFIG_DIR"
 AGENT_SECTION="$(cat <<YAML
 agent:
   controller: "${CONTROLLER_URL}"
-  gitcache: "${GITCACHE_URL}"
   token: "${API_TOKEN}"
   max_concurrent: ${MAX_CONCURRENT}
   holder_prefix: "${RUNNER_NAME}"

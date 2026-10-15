@@ -287,11 +287,9 @@ and memory contribution ceiling is 50%. On macOS it installs a LaunchAgent under
 `~/Library/LaunchAgents/`. On Linux it installs a systemd user unit under
 `~/.config/systemd/user/`.
 
-The agent defaults `gitcache` to the controller's claim-scoped proxy. Set
-`SPARKWING_GITCACHE_URL` only for a direct cache on a trusted LAN, VPN, or
-tailnet; the value is stored in the mode-0600 agent configuration. The agent
-holds no cache token: for each claimed run it asks the controller for a cache
-grant, and runs without the binary cache when the controller mints none.
+The agent fetches source directly with the credential the controller releases.
+An `allow_repos` list restricts which repositories it builds and permits
+fallback to the machine owner's Git credentials.
 
 For unattended installation, supply the same values as environment variables:
 
@@ -326,8 +324,7 @@ reserve constrains local admission.
 The section carries claim-mode keys only. It has no `name` and no
 `coordinators`; a section that still sets either key fails to load and says
 enrolled mode has been removed. `allow_repos`, which `runners add --allow-repo`
-writes, makes the agent fetch source directly rather than through the
-controller's gitcache proxy; see
+writes, restricts source access and permits the machine owner's credentials. See
 [local-execution.md](local-execution.md#an-agent-that-fetches-source-itself).
 
 The native Windows runner uses the same YAML and `sparkwing-runner.exe agent

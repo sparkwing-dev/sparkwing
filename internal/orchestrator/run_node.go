@@ -70,7 +70,7 @@ func RunNodeOnce(
 		host = cfg.hostRemote
 	}
 	start := time.Now()
-	res, err := host(ctx, trigger, run, controllerURL, cfg.gitcacheURL, cfg.gitcacheGrant,
+	res, err := host(ctx, trigger, run, controllerURL,
 		runID, nodeID, token, cfg.repoAllowlist, logger)
 	if err != nil {
 		return res, err
