@@ -4,6 +4,32 @@
 
 ## Amendment 1: selected routes and trusted adapters
 
+### Session lifecycle transport
+
+GET `/api/v1/auth/session` and POST `/api/v1/auth/logout` register through
+PolicyRouter with the existing AuthBrowserFlow proof. One Session authorization
+header or one session cookie supplies the presentation. A header takes
+precedence. Bearers, duplicate headers/cookies and HEAD cannot reach renewal.
+The proof uses C1 LookupSession to check committed session ancestry and current
+membership, then checks the existing license and absolute lifetime. It does
+not renew. Logout additionally requires the session-bound CSRF header/cookie
+and same-origin proof before handler entry. It takes no body and deletes only
+the verified presentation. Query selectors confer no authority.
+
+The read verifier uses C1 LookupSessionAndRenew after checking proof, repeating
+its transaction checks and preserving parent grant ceilings. Both endpoints return no-store
+and canonical errors. The browser's generic middleware does not pre-renew
+these paths or replace their error envelope. No new persistence interface,
+clock, key, compatibility path or customer lifetime limit is added.
+
+The old session handlers and logout body type are removed. The local C2 wire
+correction replaces unauthenticated body-selected logout with session proof.
+Real SQLite HTTP properties cover presentation ambiguity, CSRF, cross-session
+selection, dead authority and absolute renewal ceilings. Roleless OAuth and
+console sessions still require C1's authority representation. LookupSession
+must mark every infrastructure failure with ErrSessionBackend so the boundary
+can distinguish unavailable storage from a dead session.
+
 [Amendments 1](amendments-1.md) resolves the provisioning and transport questions.
 `DecodeInner` is implemented. The remaining runtime work stays with W2 and the
 store/host adapters. Its inner object requires a nonempty string code and a
@@ -79,8 +105,9 @@ The independent T1 creation expectation follows this correction.
 
 `CredentialIssuer` preserves C1's existing provision and delegation signatures.
 `Server.New` uses its store. `WithCredentialIssuer` injects that same contract
-for embedded controllers and tests. The default session digest and CSRF path is integrated with C1. Browser
-renewal, roleless sessions and console identity still need their final adapters. Machine, service, bootstrap provisioning,
+for embedded controllers and tests. The default session digest, CSRF and account
+renewal paths are integrated with C1. Roleless sessions and console identity still
+need their final adapters. Machine, service, bootstrap provisioning,
 credential listing and rotation still require their final adapters.
 
 The old global token mint and old member-family mint are removed. The remaining
@@ -1725,8 +1752,10 @@ forbidden. Ended or changed sessions fail with unauthenticated. Key/backend
 failures return unavailable without private diagnostics. WithSecretsCipher
 installs the store's SessionKeyCipher alongside the plan-secret opener.
 W1 owns sealed key persistence. No second key or plaintext setting is added.
-Console and local peer identity adapters, browser renewal/absolute lifetime
-integration and roleless OAuth sessions remain separate work.
+The session renewal endpoint checks the configured absolute lifetime before
+renewing and removes a session that has exceeded it or has a future creation
+time. Console and local peer identity, roleless OAuth, and absolute-lifetime
+enforcement on other session consumers remain separate work.
 
 `BindingState.CancelReason` is a local C2 snapshot addition. W1 must populate
 it from the committed cancellation intent, with an existing job-specific

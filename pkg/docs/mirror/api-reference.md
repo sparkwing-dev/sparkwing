@@ -11,8 +11,8 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/.well-known/openid-configuration` | `public` |
 | `GET` | `/api/v1/agents` | `runs.read` |
 | `GET` | `/api/v1/approvals/pending` | `runs.read` |
-| `POST` | `/api/v1/auth/logout` | `public` |
-| `GET` | `/api/v1/auth/session` | `public` |
+| `POST` | `/api/v1/auth/logout` | `browser_flow_csrf_nonce` |
+| `GET` | `/api/v1/auth/session` | `browser_flow_csrf_nonce` |
 | `GET` | `/api/v1/auth/whoami` | `authenticated` |
 | `POST` | `/api/v1/cache/store-ceiling/measure` | `admin` |
 | `POST` | `/api/v1/cache/store-ceiling/thaw` | `admin` |

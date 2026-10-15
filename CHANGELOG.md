@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **controller (Breaking):** Session renewal and logout use the shared route policy and verified session proof
+  Logout takes no body and ends only the presented session. It requires session-bound CSRF and same-origin proof. Renewal refuses duplicate presentations and HEAD. Both routes return canonical errors. See [migration guide](docs/migrations/_unreleased.md#session-lifecycle).
 - **controller (Breaking):** Secret-by-name reads use the shared capability policy and a tenant transaction that rechecks authority
   Masked values require a live, declaring claim. Members read unmasked config within their own team. Embedded controllers supply `WithSecretReader`. Startup resealing and `Server.ResealStoredSecrets` are removed. See [migration guide](docs/migrations/_unreleased.md#secret-by-name-reads).
 - **controller (Breaking):** Credential rotation and source-audit reads use the shared team policy

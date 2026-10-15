@@ -1929,28 +1929,24 @@ paths:
 
   /api/v1/auth/logout:
     post:
-      x-sparkwing-scope: public
+      x-sparkwing-scope: browser_flow_csrf_nonce
       tags: [auth]
-      summary: Delete a session.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.logoutReq
-              type: object
-              required: [session_id]
-              properties:
-                session_id: {type: string}
+      summary: End the verified session.
+      description: Takes no body. Present a session cookie or Session authorization header, its session-bound CSRF header and cookie, and a matching Origin or Referer. Clears the browser session cookies after deletion.
+      security:
+        - sessionAuth: []
       responses:
         "204": {description: Logged out.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "503": {description: Session storage or its encryption key is unavailable.}
 
   /api/v1/auth/session:
     get:
-      x-sparkwing-scope: public
+      x-sparkwing-scope: browser_flow_csrf_nonce
       tags: [auth]
-      summary: "Resolve a session id (sent via `Authorization: Session <id>`) to the principal."
+      summary: Resolve and renew a live account session.
+      description: Present a session cookie or Session authorization header. Renewal keeps current membership and parent capability ceilings and cannot extend the absolute session lifetime. Duplicate presentations and HEAD are refused.
       security:
         - sessionAuth: []
       responses:
@@ -1972,7 +1968,7 @@ paths:
                   expires_at: {type: integer, format: int64, description: Unix seconds.}
                   team:
                     type: string
-                    description: Team the session acts for. `default` for a password session.
+                    description: Team the session acts for.
                   role:
                     type: string
                     enum: [owner, editor, reader]

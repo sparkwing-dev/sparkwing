@@ -962,6 +962,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	s.registerPolicyEndpoints(router, s.dataEndpoints())
 	s.registerPolicyEndpoints(router, s.sourceEndpoints())
 	s.registerPolicyEndpoints(router, s.actionsEndpoints())
+	s.registerPolicyEndpoints(router, s.sessionEndpoints())
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	// safety: the cache proves itself with its storage.count service token,
 	// which these handlers check.
@@ -973,8 +974,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	router.HandleFunc("POST /internal/storage/commit", s.handleStorageCommit)
 	router.HandleFunc("POST /internal/storage/release", s.handleStorageRelease)
 	router.HandleFunc("POST /internal/downloads/charge", s.handleDownloadCharge)
-	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
-	router.Handle("GET /api/v1/auth/session", noStore(http.HandlerFunc(s.handleSession)))
 	router.Handle("GET /api/v1/capabilities", http.HandlerFunc(s.handleCapabilities))
 	router.Handle("POST /webhooks/github-app", http.HandlerFunc(s.handleGitHubAppWebhook))
 	router.Handle("POST /webhooks/stripe", s.paymentHandler())

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 const sessionTTL = 7 * 24 * time.Hour
@@ -18,27 +16,6 @@ const DefaultSessionMaxLifetime = 30 * 24 * time.Hour
 
 var errSessionLifetimeExceeded = errors.New("session exceeded its maximum lifetime")
 
-type logoutReq struct {
-	SessionID string `json:"session_id"`
-}
-
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	var req logoutReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if req.SessionID == "" {
-		writeError(w, http.StatusBadRequest, errors.New("session_id required"))
-		return
-	}
-	if err := s.store.DeleteSession(req.SessionID); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 type sessionResp struct {
 	Principal string   `json:"principal"`
 	Scopes    []string `json:"scopes"`
@@ -47,52 +24,6 @@ type sessionResp struct {
 	Team      string   `json:"team,omitempty"`
 	Role      string   `json:"role,omitempty"`
 	UserID    string   `json:"user_id,omitempty"`
-}
-
-func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
-	// safety: Session header keeps session ids off the Bearer path so a session id never authenticates as a bearer token.
-	raw := extractSessionHeader(r)
-	if raw == "" {
-		writeError(w, http.StatusUnauthorized, errors.New("session header required"))
-		return
-	}
-	now := time.Now().UTC()
-	sess, err := s.store.LookupSessionAndRenew(r.Context(), raw, sessionTTL, s.sessionMaxLifetime)
-	if err != nil {
-		// safety: a backend fault answered 401 would read as expiry and clear the dashboard's session cookies.
-		if errors.Is(err, store.ErrSessionBackend) {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		writeError(w, http.StatusUnauthorized, err)
-		return
-	}
-	// safety: an absolute cap ends a session the sliding TTL would otherwise renew forever.
-	if s.sessionExpired(sess.CreatedAt, now) {
-		_ = s.store.DeleteSession(raw)
-		writeError(w, http.StatusUnauthorized, errSessionLifetimeExceeded)
-		return
-	}
-	resp := sessionResp{
-		Principal: sess.Principal,
-		Scopes:    sess.Scopes,
-		CSRFToken: sess.CSRFToken,
-		ExpiresAt: sess.ExpiresAt.Unix(),
-		Team:      string(sess.Team),
-	}
-	if sess.AccountID != "" {
-		if !s.MultiTeam() {
-			writeError(w, http.StatusUnauthorized, errAccountSessionsDisabled)
-			return
-		}
-		role, err := s.memberRole(r.Context(), sess.Team, sess.AccountID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		resp.Role, resp.UserID = string(role), sess.AccountID
-	}
-	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) sessionExpired(createdAt, now time.Time) bool {

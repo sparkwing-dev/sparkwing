@@ -15,10 +15,8 @@ import (
 
 func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 	want := map[string]bool{
-		"GET /api/v1/health":       true,
-		"POST /api/v1/auth/logout": true,
-		"GET /api/v1/auth/session": true,
-		"/":                        true,
+		"GET /api/v1/health": true,
+		"/":                  true,
 		// safety: a signed-out browser draws the sign-in page from it; it reports only teams and providers.
 		"GET /api/v1/capabilities": true,
 		// safety: a GitHub App delivery proves itself with its signature; it answers 404 without an App.

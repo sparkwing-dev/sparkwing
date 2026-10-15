@@ -78,6 +78,9 @@ func (s *Server) browserHandler(api http.Handler) http.Handler {
 	} else {
 		s.signInRoutes(browser)
 		browser.Handle("/", s.pageGate(pages))
+		for _, endpoint := range s.sessionEndpoints() {
+			top.Handle(endpoint.Pattern, api)
+		}
 		// safety: a page on another site can make a visitor's browser send a write that needs no credential, which an
 		// open controller would take as its operator's; no browser on another site has a reason to write here.
 		top.Handle("/api/", originguard.RefuseCrossSiteWrites(s.cookieSessions(api)))

@@ -2,6 +2,20 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+**W1/W2: session lifecycle continuation.** W2's renewal and API logout now use
+PolicyRouter's declared browser proof, real hashed sessions and the sealed CSRF
+key. Logout takes no body, verifies session-bound CSRF and same-origin proof,
+and deletes only the authenticated session. Renewal refuses ambiguous
+presentations and HEAD, keeps current membership/parent ceilings and enforces
+the configured absolute lifetime. Real SQLite HTTP properties pass. W1 still
+owns roleless and console session representation. Its LookupSession path must
+also classify every backend fault with ErrSessionBackend: the authority-chain
+error return and RowsAffected error return in pkg/store/auth.go currently
+propagate infrastructure errors without that tag. A temporary overlay probe
+dropping memberships before GET auth/session returned 401 instead of 503.
+W2 has not added SQL or error-message matching. Wider browser login, OAuth, peer and legacy route
+cutovers remain W2 work. See [W2-session-flow-handoff.md](../W2-session-flow-handoff.md).
+
 ## From W4 review fixes (2026-10-15)
 
 

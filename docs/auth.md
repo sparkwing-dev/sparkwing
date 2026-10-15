@@ -1352,15 +1352,10 @@ any increase in the closure counter, on the warning counter, on
 
 ## Unauthenticated endpoints
 
-Routes registered on the controller's outer router are matched before
-the auth middleware runs, so they are open regardless of auth config:
-the health probe (k8s httpGet probes can't carry `Authorization`), the
-service-discovery endpoint
-the runner uses to find the cache pod, the session endpoints a client
-uses to validate and end a session (`/api/v1/auth/session`,
-`/api/v1/auth/logout`), the capabilities report a
-signed-out dashboard draws its sign-in page from, and the GitHub webhook,
-which is HMAC-verified instead of bearer-authenticated. The sign-in pages
+The health probe and capabilities report need no credential. The GitHub
+webhook verifies its HMAC, and the Stripe webhook verifies its signed body.
+Session renewal and logout verify their own session proof through the shared
+route policy. Their outer-router placement grants no public access. The sign-in pages
 (`/login`, `/auth/{provider}/start` and `/auth/{provider}/callback`) and the
 dashboard bundle's static assets need no session either. The controller's
 `/metrics` is not among them: its run counters name every team's
@@ -1376,6 +1371,20 @@ principal and scopes as it does for an `Authorization: Session` credential.
 The cookie authenticates only a request that carries no `Authorization`
 header of its own. CLI and automation clients authenticate with a bearer
 through a profile.
+
+`GET /api/v1/auth/session` accepts a live account session from one session
+cookie or one `Authorization: Session <id>` header. An Authorization header
+takes precedence over cookies. Duplicate headers, duplicate session cookies,
+unknown or ended sessions and HEAD are refused. The response includes the
+current role, narrowed scopes, session-bound CSRF token and renewed expiry.
+Renewal cannot extend the absolute session lifetime. A disabled account-session
+license or failed proof cannot renew the session.
+
+`POST /api/v1/auth/logout` takes no body. It ends only the presented session,
+requires the session's CSRF header and cookie plus same-origin proof, and
+clears the browser cookies on success. A body or query parameter cannot select
+another session. Both endpoints return `Cache-Control: no-store` and the
+canonical error envelope. Session storage and key failures return `unavailable`.
 
 ## Dashboard authorization
 

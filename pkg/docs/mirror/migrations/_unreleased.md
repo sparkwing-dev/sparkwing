@@ -1,5 +1,18 @@
 # Migrating to the next release
 
+## Session lifecycle
+
+Session renewal and logout use the shared policy router with session proof.
+Present one session cookie or one `Authorization: Session <id>` header.
+Bearer credentials cannot substitute for a session. Renewal refuses HEAD and
+ambiguous presentations and retains current membership and parent grant ceilings.
+
+`POST /api/v1/auth/logout` takes no body. Remove `session_id` and supply the
+session-bound CSRF header and cookie plus a matching Origin or Referer. Logout
+ends only the verified session and clears its browser cookies. Both endpoints
+return the common error envelope and no-store. Storage and key failures return
+`unavailable`. Configure the bound secrets cipher before serving sessions.
+
 ## Browser capability requests
 
 Shared policy routes authenticate browser sessions through their committed
