@@ -3,7 +3,6 @@ package store_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -28,38 +27,6 @@ func seedRepoTrigger(t *testing.T, st *store.Store, id, repoURL string, at time.
 		ID: id, Pipeline: "demo", TriggerSource: "manual", RepoURL: repoURL, CreatedAt: at,
 	}, store.Run{ID: id, Pipeline: "demo", Status: "pending", RepoURL: repoURL, CreatedAt: at, StartedAt: at}); err != nil {
 		t.Fatalf("CreateTriggerWithRun(%s): %v", id, err)
-	}
-}
-
-// A laptop that allows repository A must never take repository B's run, even
-// when B's runs fill the head of the queue past one scan batch: the claim
-// passes over them and keeps scanning.
-func TestClaimNextTriggerForTakesOnlyAnAllowedRepositoryPastTheQueueHead(t *testing.T) {
-	st := storetest.Open(t)
-	base := time.Now().Add(-time.Hour)
-	for i := range 70 {
-		seedRepoTrigger(t, st, fmt.Sprintf("run-b-%02d", i), "https://github.com/acme/b.git", base.Add(time.Duration(i)*time.Millisecond))
-	}
-	seedRepoTrigger(t, st, "run-none", "", base.Add(80*time.Millisecond))
-	seedRepoTrigger(t, st, "run-a", "git@github.com:Acme/A.git", base.Add(90*time.Millisecond))
-
-	got, err := st.ClaimNextTriggerFor(allowRepos(t, "github.com/acme/a"), store.ClaimIdentity{}, time.Minute, nil, nil)
-	if err != nil {
-		t.Fatalf("filtered claim: %v", err)
-	}
-	if got.ID != "run-a" {
-		t.Fatalf("filtered claim took %s, want run-a", got.ID)
-	}
-	if _, err := st.ClaimNextTriggerFor(allowRepos(t, "github.com/acme/a"), store.ClaimIdentity{}, time.Minute, nil, nil); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("second filtered claim = %v, want an empty queue", err)
-	}
-	if _, err := st.ClaimNextTriggerFor(allowRepos(t), store.ClaimIdentity{}, time.Minute, nil, nil); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("an empty list = %v, want it to claim nothing", err)
-	}
-	// safety: a claimant that sends no list keeps today's order, so the passed-over runs are still there.
-	unfiltered, err := st.ClaimNextTriggerFor(context.Background(), store.ClaimIdentity{}, time.Minute, nil, nil)
-	if err != nil || unfiltered.ID != "run-b-00" {
-		t.Fatalf("unfiltered claim = %+v, %v; want run-b-00", unfiltered, err)
 	}
 }
 

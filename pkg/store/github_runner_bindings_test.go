@@ -95,13 +95,6 @@ func TestGitHubRunnerScopeRefusesOtherTriggerProvenance(t *testing.T) {
 				if n, err := st.ClaimNextReadyNode(ctx, id, "gh-1", time.Minute, nil); !errors.Is(err, store.ErrNotFound) {
 					t.Fatalf("node claim = %+v, %v", n, err)
 				}
-				if tr, err := st.ClaimNextTriggerFor(ctx, id, 0, nil, nil); !errors.Is(err, store.ErrNotFound) {
-					t.Fatalf("trigger claim = %+v, %v", tr, err)
-				}
-			} else {
-				if tr, err := st.ClaimNextTriggerFor(ctx, id, 0, nil, nil); err != nil || tr.ID != runID {
-					t.Fatalf("push trigger claim = %+v, %v", tr, err)
-				}
 			}
 		})
 	}
@@ -126,38 +119,6 @@ func TestGitHubRunnerScopeClaimsOnlyItsRepositorysNodes(t *testing.T) {
 	}
 	if n, err := st.ClaimNextReadyNode(context.Background(), id, "local", time.Minute, nil); err != nil || n.RunID == "run-widgets" {
 		t.Fatalf("unscoped claim = %+v, %v", n, err)
-	}
-}
-
-func TestGitHubRunnerScopeClaimsOnlyItsRepositorysTriggers(t *testing.T) {
-	st := storetest.Open(t)
-	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
-	githubWork(t, st, acme, "run-gadgets", "acme/gadgets", nil)
-	githubWork(t, st, other, "run-other-widgets", "acme/widgets", nil)
-	ctx := store.WithGitHubRunnerScope(context.Background(), widgetsScope())
-	id := githubClaimant(t, acme, "github:42:Acme/Widgets")
-	if tr, err := st.ClaimNextTriggerFor(ctx, id, 0, nil, nil); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("claim = %+v, %v; want nothing", tr, err)
-	}
-	githubWork(t, st, acme, "run-widgets", "acme/widgets", nil)
-	tr, err := st.ClaimNextTriggerFor(ctx, id, 0, nil, nil)
-	if err != nil || tr.ID != "run-widgets" {
-		t.Fatalf("claim = %+v, %v; want run-widgets", tr, err)
-	}
-}
-
-func TestGitHubRunnerScopeLeavesATriggerNamingAnotherRepositoryInItsEnv(t *testing.T) {
-	st := storetest.Open(t)
-	acme := teamHandle(t, st, "acme")
-	githubWork(t, st, acme, "run-forged-env", "acme/widgets", map[string]string{"GITHUB_REPOSITORY": "acme/gadgets"})
-	ctx := store.WithGitHubRunnerScope(context.Background(), widgetsScope())
-	id := githubClaimant(t, acme, "github:42:acme/widgets")
-	if tr, err := st.ClaimNextTriggerFor(ctx, id, 0, nil, nil); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("claim = %+v, %v; want nothing", tr, err)
-	}
-	got, err := acme.GetTrigger(context.Background(), "run-forged-env")
-	if err != nil || got.Status != "pending" {
-		t.Fatalf("trigger = %+v, %v; want it left pending", got, err)
 	}
 }
 
@@ -212,9 +173,6 @@ func TestGitHubRunnerScopeClaimsOnlyItsPush(t *testing.T) {
 		ctx := store.WithGitHubRunnerScope(context.Background(), scope)
 		if n, err := st.ClaimNextReadyNode(ctx, id, "gh-1", time.Minute, nil); !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("%s: node claim = %+v, %v; want nothing", name, n, err)
-		}
-		if tr, err := st.ClaimNextTriggerFor(ctx, id, 0, nil, nil); !errors.Is(err, store.ErrNotFound) {
-			t.Errorf("%s: trigger claim = %+v, %v; want nothing", name, tr, err)
 		}
 		if ok, err := st.GitHubRunnerAdmits(context.Background(), scope, "run-main"); err != nil || ok {
 			t.Errorf("%s: admits run-main = %v, %v; want false", name, ok, err)

@@ -19,8 +19,8 @@ func TestTriggerClaim_ReclaimDropsPreviousClaimant(t *testing.T) {
 	runnerA := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_aaaaaaaa"}
 
 	seedPending(t, s, "t1")
-	if _, err := s.ClaimNextTriggerFor(ctx, runnerA, time.Minute, nil, nil); err != nil {
-		t.Fatalf("ClaimNextTriggerFor: %v", err)
+	if _, err := s.ClaimSpecificTriggerFor(ctx, "t1", runnerA, time.Minute); err != nil {
+		t.Fatalf("ClaimSpecificTriggerFor: %v", err)
 	}
 	expireTriggerClaim(t, s, "t1")
 
@@ -53,8 +53,8 @@ func TestTriggerClaim_ClaimantOutlivesLeaseAndCompletion(t *testing.T) {
 	runnerA := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_aaaaaaaa"}
 
 	seedPending(t, s, "t1")
-	if _, err := s.ClaimNextTriggerFor(ctx, runnerA, time.Hour, nil, nil); err != nil {
-		t.Fatalf("ClaimNextTriggerFor: %v", err)
+	if _, err := s.ClaimSpecificTriggerFor(ctx, "t1", runnerA, time.Hour); err != nil {
+		t.Fatalf("ClaimSpecificTriggerFor: %v", err)
 	}
 	got, err := tenant(t, s, store.DefaultTeam).TriggerClaimant(ctx, "t1")
 	if err != nil {

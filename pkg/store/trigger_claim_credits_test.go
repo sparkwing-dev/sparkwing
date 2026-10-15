@@ -30,7 +30,7 @@ func TestMeteredTriggerClaimNeedsTheMinimumReservation(t *testing.T) {
 	pendingTrigger(t, st, "run-1")
 	pool := meteredClaimant(t, st, "agent:cloud")
 
-	_, err := st.ClaimNextTriggerFor(ctx, pool, 0, nil, nil)
+	_, err := st.ClaimSpecificTriggerFor(ctx, "run-1", pool, 0)
 	var shortfall *store.InsufficientCreditsError
 	if !errors.As(err, &shortfall) || shortfall.RunID != "run-1" || shortfall.RequiredMicro <= 0 {
 		t.Fatalf("metered claim on an empty balance = %v, want an insufficient-credits refusal naming run-1", err)
@@ -51,7 +51,7 @@ func TestMeteredTriggerClaimNeedsTheMinimumReservation(t *testing.T) {
 	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, shortfall.RequiredMicro, "", "operator"); err != nil {
 		t.Fatal(err)
 	}
-	tr, err := st.ClaimNextTriggerFor(ctx, pool, 0, nil, nil)
+	tr, err := st.ClaimSpecificTriggerFor(ctx, "run-1", pool, 0)
 	if err != nil || tr.ID != "run-1" {
 		t.Fatalf("metered claim once the balance covers the reservation = %+v, %v; want run-1", tr, err)
 	}
@@ -410,7 +410,7 @@ func TestMeteredTriggerClaimsRaceForOneMinute(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, errs[i] = st.ClaimNextTriggerFor(ctx, pool, 0, []string{"build"}, nil)
+			_, errs[i] = st.ClaimSpecificTriggerFor(ctx, fmt.Sprintf("run-%02d", i), pool, 0)
 		}()
 	}
 	close(start)

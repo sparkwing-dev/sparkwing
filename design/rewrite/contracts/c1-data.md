@@ -1,5 +1,18 @@
 # C1 data contract
 
+## Unified trigger queue
+
+`Store.ClaimNextTrigger` and `Store.ClaimNextTriggerFor` are removed with their
+separate scan, cursor and candidate decoder. Queue claims use `Store.ClaimUnit`
+with `UnitDemand.Kinds` containing `capability.UnitTrigger`. The live capability
+supplies tenant and repository authority. Named and queued claims share matching,
+issuance and billing in one transaction.
+
+`TestQueuedTriggerRepositoryScopeProperty` checks FIFO behind more than 64
+excluded runs and unchanged skipped owner rows and snapshots. It provisions and delegates real
+capabilities and admits every run through the store. The concurrent tenant
+property uses eight workers and two teams to check unique, tenant-bound awards.
+
 ## Explicit tenant readers and owner completion
 
 `FinishRunAtGeneration` is removed from Store and Tenant. Current completion
@@ -144,9 +157,9 @@ Controller requests continue to use their authenticated tenant.
 The unused `Store.NodeClaimFenceNodeForRun`, `NodeExecutionAttemptIsLive`,
 `TriggerExecutionAttemptIsLive` and `TriggerExecutionAttemptBelongsToLiveClaim`
 readers are removed. Current authentication snapshots and tagged log persistence
-retain the attempt, owner, ancestry and tail-grace checks. The separate legacy
-`NodeExecutionAttemptBelongsToLiveClaim` reader still has an execution-reporting
-caller and remains until that path migrates.
+retain the attempt, owner, ancestry and tail-grace checks.
+`NodeExecutionAttemptBelongsToLiveClaim` is removed after its execution-reporting
+caller migrated.
 
 ## Claim lifecycle and credential mutation cuts
 

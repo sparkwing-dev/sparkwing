@@ -2735,8 +2735,6 @@ func (s *Store) ClaimNamedNode(
 	lease time.Duration, opts NamedClaimOptions,
 ) (*Node, error)
 func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string) (*Node, error)
-func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Trigger, error)
-func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity, lease time.Duration, pipelines, sources []string) (*Trigger, error)
 func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*Trigger, error)
 func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant ClaimIdentity, lease time.Duration) (*Trigger, error)
 func (s *Store) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error)
@@ -2831,7 +2829,6 @@ func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) NewestWaitlisted(ctx context.Context, limit, offset int) ([]WaitlistedAccount, error)
 func (s *Store) NodeClaimFenceIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, now time.Time) (bool, error)
 func (s *Store) NodeClaimOrigin(ctx context.Context, runID, nodeID string) (principal, holder, runner string, metered bool, err error)
-func (s *Store) NodeExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeIsAncestor(ctx context.Context, team Team, runID, ancestor, node string) (_ bool, err error)
 func (s *Store) NodeLogSegments(ctx context.Context, l NodeLog) (_ []NodeLogSegment, err error)
 func (s *Store) NodeLogSettled(ctx context.Context, team Team, runID, nodeID string) (settled, found bool, err error)

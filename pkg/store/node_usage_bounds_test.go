@@ -189,7 +189,7 @@ func TestAddNodeUsagePreservesTriggerFence(t *testing.T) {
 	if err := st.CreateTrigger(ctx, store.Trigger{ID: "trigger", Pipeline: "test", Status: "pending", CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	trigger, err := st.ClaimNextTriggerFor(ctx, identity, time.Minute, nil, nil)
+	trigger, err := st.ClaimSpecificTriggerFor(ctx, "trigger", identity, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

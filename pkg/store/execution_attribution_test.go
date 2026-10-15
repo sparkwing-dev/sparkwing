@@ -18,7 +18,7 @@ func TestTriggerOwnedAttemptRecordsClaimant(t *testing.T) {
 	if err := s.CreateTrigger(ctx, store.Trigger{ID: "trigger-machine", Pipeline: "p", Status: "pending", CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	trigger, err := s.ClaimNextTriggerFor(ctx, identity, time.Minute, nil, nil)
+	trigger, err := s.ClaimSpecificTriggerFor(ctx, "trigger-machine", identity, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestMeteredTriggerOwnedAttemptRecordsCloudHost(t *testing.T) {
 	if err := s.CreateTrigger(ctx, store.Trigger{ID: "trigger-cloud", Pipeline: "p", Status: "pending", CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	trigger, err := s.ClaimNextTriggerFor(ctx, identity, time.Minute, nil, nil)
+	trigger, err := s.ClaimSpecificTriggerFor(ctx, "trigger-cloud", identity, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -138,9 +138,9 @@ func claimRunForRunner(t *testing.T, f egressFixture, runID string) {
 	}); err != nil {
 		t.Fatalf("CreateTrigger: %v", err)
 	}
-	claimed, err := f.store.ClaimNextTriggerFor(ctx, f.runnerID, time.Minute, nil, nil)
+	claimed, err := f.store.ClaimSpecificTriggerFor(ctx, runID, f.runnerID, time.Minute)
 	if err != nil {
-		t.Fatalf("ClaimNextTriggerFor: %v", err)
+		t.Fatalf("ClaimSpecificTriggerFor: %v", err)
 	}
 	if claimed == nil || claimed.ID != runID {
 		t.Fatalf("claimed trigger = %+v, want %s", claimed, runID)

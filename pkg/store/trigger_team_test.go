@@ -23,7 +23,7 @@ func TestTrigger_ClaimAndReadReturnTheOwningTeam(t *testing.T) {
 	if err := acme.CreateTrigger(ctx, store.Trigger{ID: "t-acme", Pipeline: "demo", CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("CreateTrigger: %v", err)
 	}
-	if tr, err := s.ClaimNextTriggerFor(ctx, store.ClaimIdentity{}, time.Minute, nil, nil); !errors.Is(err, store.ErrNotFound) {
+	if tr, err := s.ClaimSpecificTrigger(ctx, "t-acme", time.Minute); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("default-team claim = %+v, %v; want nothing", tr, err)
 	}
 
@@ -31,10 +31,10 @@ func TestTrigger_ClaimAndReadReturnTheOwningTeam(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
-	claimed, err := s.ClaimNextTriggerFor(ctx,
-		store.ClaimIdentity{Principal: "acme-runner", TokenPrefix: tok.Prefix}, time.Minute, nil, nil)
+	claimed, err := s.ClaimSpecificTriggerFor(ctx, "t-acme",
+		store.ClaimIdentity{Principal: "acme-runner", TokenPrefix: tok.Prefix}, time.Minute)
 	if err != nil {
-		t.Fatalf("ClaimNextTriggerFor: %v", err)
+		t.Fatalf("ClaimSpecificTriggerFor: %v", err)
 	}
 	if claimed.ID != "t-acme" || claimed.Team != "acme" {
 		t.Fatalf("claimed %s team = %q, want t-acme in acme", claimed.ID, claimed.Team)

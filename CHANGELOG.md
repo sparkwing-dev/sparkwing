@@ -32,6 +32,8 @@ unlock.
   The seven default-team secret methods on `Store` and four unused legacy fence readers are removed. Local readers select `DefaultTeam`. See [migration guide](docs/migrations/_unreleased.md#secret-store-calls-select-a-tenant).
 ### Changed
 
+- **store (Breaking):** Trigger queues use the shared unit claimant
+  Removed `ClaimNextTrigger`, `ClaimNextTriggerFor` and the unused `NodeExecutionAttemptBelongsToLiveClaim` reader. Trigger queues use `ClaimUnit` with current capability authority. See [migration guide](docs/migrations/_unreleased.md#unified-trigger-queue).
 - **store (Breaking):** Run completion requires the current owner
   Removed the legacy generation-based run and trigger completion, release and generation readers. Use `Tenant.FinishRunAndUnit` and `Store.ReleaseUnit` with current awarded authority. Nineteen default-team Store wrappers and three unused run-filter version probes are also removed. Select a tenant before reading or writing its rows. See [migration guide](docs/migrations/_unreleased.md#explicit-tenant-readers-and-owner-completion).
 - **store (Breaking):** Remove raw secret writers and launcher token issuance

@@ -64,8 +64,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).awardScannedNodeTx": "the award carries the same runtime predicate; the read that follows " +
 		"it is of the row the award just proved in team",
 	"(*Store).ClaimNamedNode": "shares the claim scan's runtime predicate and its refusal",
-	"(*Store).ClaimNextTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
-		"award and the read after it are of the row the scoped select just locked",
 	"(*Store).ClaimSpecificTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
 		"read after the award is of the row the scoped update just proved in team",
 	"(*Store).listRuns": "the team predicate comes from runFilterWhere at run time; " +
@@ -116,8 +114,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"generation, and a token prefix is unique across teams",
 	"(*Store).NodeClaimFenceIsLive": "matches the node's live claim against the exact holder, credential, reservation and " +
 		"generation, and a token prefix is unique across teams",
-	"(*Store).NodeExecutionAttemptBelongsToLiveClaim": "matches the node's live claim and its attempt against the exact " +
-		"holder, credential and generation, and a token prefix is unique across teams",
 	"(*Store).PrincipalHoldsRunClaim": "matches a live claim on the run's nodes against the exact claimant credential, and " +
 		"a token prefix is unique across teams",
 	"(*Store).PrincipalHoldsTriggerClaim": "matches the trigger's live claim against the exact claimant credential, and a " +

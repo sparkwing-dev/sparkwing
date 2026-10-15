@@ -58,7 +58,7 @@ func TestARetryNeverCopiesOverARowItsRunAlreadyHolds(t *testing.T) {
 				if err := st.CreateTrigger(ctx, store.Trigger{ID: testRunID, Pipeline: "p", Status: "pending"}); err != nil {
 					t.Fatal(err)
 				}
-				trig, err := st.ClaimNextTriggerFor(ctx, identity, store.MaxLeaseDuration, nil, nil)
+				trig, err := st.ClaimSpecificTriggerFor(ctx, testRunID, identity, store.MaxLeaseDuration)
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -27,9 +27,9 @@ func TestLease_ClaimSetsExpiry(t *testing.T) {
 	s := storetest.Open(t)
 	seedPending(t, s, "trig-a")
 
-	got, err := s.ClaimNextTrigger(context.Background(), 5*time.Second)
+	got, err := s.ClaimSpecificTrigger(context.Background(), "trig-a", 5*time.Second)
 	if err != nil {
-		t.Fatalf("ClaimNextTrigger: %v", err)
+		t.Fatalf("ClaimSpecificTrigger: %v", err)
 	}
 	if got.LeaseExpiresAt == nil {
 		t.Fatal("lease_expires_at should be set on claim")
@@ -44,7 +44,7 @@ func TestLease_HeartbeatExtends(t *testing.T) {
 	s := storetest.Open(t)
 	seedPending(t, s, "trig-b")
 
-	claimed, err := s.ClaimNextTrigger(context.Background(), 100*time.Millisecond)
+	claimed, err := s.ClaimSpecificTrigger(context.Background(), "trig-b", 100*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}

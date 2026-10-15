@@ -819,8 +819,8 @@ func TestConcurrentTriggerAdmissionLeavesNoOrphanTrigger(t *testing.T) {
 		}
 	}
 	claimed := 0
-	for {
-		trig, err := s.ClaimNextTrigger(ctx, time.Minute)
+	for _, pending := range triggers {
+		trig, err := s.ClaimSpecificTrigger(ctx, pending.ID, time.Minute)
 		if errors.Is(err, store.ErrNotFound) {
 			break
 		}

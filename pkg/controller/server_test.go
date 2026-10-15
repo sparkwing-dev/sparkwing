@@ -119,7 +119,7 @@ func TestController_HealthDoesNotExposeClaimedTriggers(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.ClaimNextTrigger(t.Context(), time.Hour); err != nil {
+	if _, err := st.ClaimSpecificTrigger(t.Context(), "stuck", time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	db, err := sql.Open("sqlite", path)

@@ -12,10 +12,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-func TestFinishedTriggerIsNeverReturnedToTheQueue(t *testing.T) {
+func TestFinishedTriggerCannotBeClaimedByName(t *testing.T) {
 	revivals := map[string]func(*store.Store, context.Context, string) error{
-		"ClaimNextTrigger": func(s *store.Store, ctx context.Context, id string) error {
-			_, err := s.ClaimNextTrigger(ctx, time.Minute)
+		"ClaimSpecificTrigger": func(s *store.Store, ctx context.Context, id string) error {
+			_, err := s.ClaimSpecificTrigger(ctx, id, time.Minute)
 			if errors.Is(err, store.ErrNotFound) {
 				return nil
 			}
@@ -60,8 +60,8 @@ func TestFinishingATriggerClearsItsLease(t *testing.T) {
 	if err := s.CreateTrigger(ctx, store.Trigger{ID: id, Pipeline: "p", CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("CreateTrigger: %v", err)
 	}
-	if _, err := s.ClaimNextTrigger(ctx, time.Minute); err != nil {
-		t.Fatalf("ClaimNextTrigger: %v", err)
+	if _, err := s.ClaimSpecificTrigger(ctx, id, time.Minute); err != nil {
+		t.Fatalf("ClaimSpecificTrigger: %v", err)
 	}
 	if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishTrigger(ctx, id); err != nil {
 		t.Fatalf("FinishTrigger: %v", err)

@@ -141,8 +141,8 @@ func TestClaimedRunFor_AcceptsTheTriggerClaim(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.ClaimNextTriggerFor(ctx, dispatcher, time.Minute, nil, nil); err != nil {
-		t.Fatalf("ClaimNextTriggerFor: %v", err)
+	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-web", dispatcher, time.Minute); err != nil {
+		t.Fatalf("ClaimSpecificTriggerFor: %v", err)
 	}
 
 	held, err := st.PrincipalHoldsTriggerClaim(ctx, "run-web", dispatcher, now)

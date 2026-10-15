@@ -194,10 +194,6 @@ func requireTriggerStatus(t *testing.T, st *store.Store, id, want string) {
 	}
 }
 
-// A claimed trigger is the run a runner executes and the secrets it reads,
-// so a laptop holding one team's runner token must not reach another team's
-// trigger by the queue or by naming its id. The other team's trigger is the
-// oldest, so a queue claim with no team predicate takes it first.
 func TestTriggerClaimRefusesAnotherTeamsTrigger(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t).Open(t)
@@ -216,15 +212,12 @@ func TestTriggerClaimRefusesAnotherTeamsTrigger(t *testing.T) {
 	}
 	laptop := mintTeamClaimant(t, alpha, "agent:alpha-laptop")
 
-	claimed, err := st.ClaimNextTriggerFor(ctx, laptop, time.Minute, nil, nil)
+	claimed, err := st.ClaimSpecificTriggerFor(ctx, "trg-alpha", laptop, time.Minute)
 	if err != nil {
 		t.Fatalf("claiming this team's own trigger: %v", err)
 	}
 	if claimed.ID != "trg-alpha" {
 		t.Fatalf("an alpha runner token claimed trigger %s, which belongs to bravo", claimed.ID)
-	}
-	if rest, err := st.ClaimNextTriggerFor(ctx, laptop, time.Minute, nil, nil); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("after its own queue drained the alpha runner claimed %+v (err %v), want not found", rest, err)
 	}
 
 	named, err := st.ClaimSpecificTriggerFor(ctx, "trg-bravo", laptop, time.Minute)
@@ -310,10 +303,7 @@ func TestMeteredTokenClaimsOnlyItsOwnTeam(t *testing.T) {
 	}
 }
 
-// Two teams' runners drain their queues at once. Every trigger and node goes
-// to a runner of its own team exactly once, which is the property a skip-locked
-// scan has to keep when the team predicate and the lock meet under contention.
-func TestConcurrentClaimsNeverCrossTeams(t *testing.T) {
+func TestConcurrentNodeClaimsNeverCrossTeams(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t).Open(t)
 	const perTeam = 6
@@ -325,12 +315,8 @@ func TestConcurrentClaimsNeverCrossTeams(t *testing.T) {
 	for team, tn := range teams {
 		for i := range perTeam {
 			id := fmt.Sprintf("%s-%d", team, i)
-			if err := tn.CreateTrigger(ctx, store.Trigger{ID: "trg-" + id, Pipeline: "demo", CreatedAt: time.Now()}); err != nil {
-				t.Fatalf("CreateTrigger(%s): %v", id, err)
-			}
 			seedTenantRun(t, tn, "run-"+id, "demo")
 			seedReadyNode(t, st, "run-"+id, "build")
-			owner["trg-"+id] = team
 			owner["run-"+id] = team
 		}
 	}
@@ -348,17 +334,6 @@ func TestConcurrentClaimsNeverCrossTeams(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				for {
-					trig, err := st.ClaimNextTriggerFor(ctx, runner, time.Minute, nil, nil)
-					if errors.Is(err, store.ErrNotFound) {
-						break
-					}
-					if err != nil {
-						errs <- err
-						return
-					}
-					results <- result{team, trig.ID}
-				}
 				for {
 					n, err := st.ClaimNextReadyNode(ctx, runner, runner.Principal, time.Minute, nil)
 					if errors.Is(err, store.ErrNotFound) {
@@ -390,6 +365,6 @@ func TestConcurrentClaimsNeverCrossTeams(t *testing.T) {
 		}
 	}
 	if len(seen) != len(owner) {
-		t.Errorf("claimed %d of %d triggers and nodes", len(seen), len(owner))
+		t.Errorf("claimed %d of %d nodes", len(seen), len(owner))
 	}
 }

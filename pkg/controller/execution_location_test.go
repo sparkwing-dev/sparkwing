@@ -47,7 +47,7 @@ func TestHistoricalTriggerAttemptUsesMatchingClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	identity := store.ClaimIdentity{Principal: "agent:moonborn", TokenPrefix: "runner-token"}
-	trigger, err := st.ClaimNextTriggerFor(ctx, identity, time.Minute, nil, nil)
+	trigger, err := st.ClaimSpecificTriggerFor(ctx, "old-trigger", identity, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

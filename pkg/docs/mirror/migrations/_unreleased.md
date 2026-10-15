@@ -1,5 +1,16 @@
 # Migrating to the next release
 
+## Unified trigger queue
+
+`Store.ClaimNextTrigger` and `Store.ClaimNextTriggerFor` are removed. Use
+`Store.ClaimUnit` with `UnitDemand.Kinds` containing `capability.UnitTrigger`
+and the live claimant's capability prefix. The store derives the tenant and
+repository scope and returns the awarded owner fence and one-time bearer.
+Use `RenewUnit` and `FinishRunAndUnit` for that owner.
+
+The unused `Store.NodeExecutionAttemptBelongsToLiveClaim` reader is removed.
+Authentication snapshots retain current attempt and log-tail authority.
+
 ## Explicit tenant readers and owner completion
 
 `Store.FinishRunAtGeneration` and `Tenant.FinishRunAtGeneration` are removed.

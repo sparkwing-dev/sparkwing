@@ -1280,7 +1280,7 @@ tenant selection fails the fixture instead of dropping an error.
 | Retired check | Retained evidence |
 | --- | --- |
 | Live/stale node lookup assertions in `TestClaimNamedNodeAwardsAnUnqueuedNode` | The lookup reader has no production caller and is removed. The retained `NodeClaimFenceIsLive` assertion still checks the award's fence. `TestStoreClaimMatching` and `TestStoreLauncherSync` cover current award selection and immutable launcher correlation. |
-| Open-attempt assertion in `TestNodeExecutionAttemptBelongsToLiveClaimOutlivesTheAttempt` | The unused open-attempt reader is removed. The rest of this legacy execution-reporting test remains with its still-used claim-ownership reader. `TestAuthenticationSnapshotRetainsFinalAttemptFenceAndLogState` covers final attempt state. |
+| `TestNodeExecutionAttemptBelongsToLiveClaimOutlivesTheAttempt` | Both unused node-attempt readers and the old fixture are removed. `TestAuthenticationSnapshotRetainsFinalAttemptFenceAndLogState` covers final attempt state. Tagged-log tests retain claim fencing and tail grace. |
 | `TestTriggerExecutionAttemptBelongsToLiveClaimOutlivesTheAttempt` | Both unused trigger-attempt readers are removed. Current tagged logs use `TestLogPersistenceOwnerUnitsHaveIndependentFences`, `TestLogPersistenceTriggerReadRechecksItsOwnerLease` and `TestLogPersistenceLaterNodeFinishCannotExtendAttemptGrace`. |
 
 The current authentication, secret authority and store acceptance checks pass.
@@ -1374,3 +1374,22 @@ Current award fences remain covered by
 renewal properties. The old six-hour launcher token maximum is removed with
 the legacy issuer. Legacy token transport tests seed presentation rows and
 still require their final-schema fixture migration.
+
+## W1 split trigger-queue retirement
+
+`Store.ClaimNextTrigger` and `Store.ClaimNextTriggerFor` are removed with their
+scan cursor and candidate decoder. Legacy fixtures that need a particular
+trigger claim select that known ID through the retained named path. No
+production fallback or forwarding method is added.
+
+| Retired assertion | Retained evidence |
+| --- | --- |
+| `pkg/controller/claim_test.go:TestClaim_FIFOOrdering` | `TestQueuedTriggerRepositoryScopeProperty` verifies FIFO through real admission and `ClaimUnit`, with generated excluded queues longer than 64 entries. |
+| `TestClaimNextTriggerForTakesOnlyAnAllowedRepositoryPastTheQueueHead` | The same property provisions a registered root, delegates its repository scope, finds eligible work past excluded runs, refuses the remaining queue and compares every excluded run snapshot. |
+| Trigger portion of `TestConcurrentClaimsNeverCrossTeams` | `TestQueuedTriggerClaimsNeverCrossTeamsProperty` races eight workers across two real tenants and checks every award's tenant and uniqueness. The old test retains its node portion as `TestConcurrentNodeClaimsNeverCrossTeams`. |
+| Legacy context-scoped GitHub trigger checks | `TestStoreActionsEnrollment`, `TestGitHubActionsRequiresCurrentEnrollmentProperty`, `TestStoreQueueOrder` and the push-ancestor properties use registered Actions authority and persisted seals. The legacy node assertions remain with that path's retirement. |
+| Finished-attempt ownership reader | `TestAuthenticationSnapshotRetainsFinalAttemptFenceAndLogState`, current holder properties and tagged log persistence retain the final-attempt and tail-grace requirements. The unused reader and its fixture are deleted. |
+
+The legacy financial fixture changes only replace queue selection with their
+known trigger IDs. Their assertions and the accounting implementation are
+unchanged. Those legacy fixtures are not new final-schema execution evidence.
