@@ -59,28 +59,3 @@ func TestQueueStateShowsOnlyTheCallersTeamsRunners(t *testing.T) {
 		t.Errorf("the operator's team sees runners %v, want only its own", got)
 	}
 }
-
-func TestComputeLimitsNameEveryTeamsPrincipalsOnlyToTheOperator(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	srv := New(st, nil)
-	show := func(scopes ...string) computeLimitsJSON {
-		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/compute-limits", nil)
-		req = req.WithContext(contextWithPrincipal(req.Context(), &Principal{Name: "p", Kind: "user", Scopes: scopes, Team: "team-b"}))
-		out, err := srv.computeLimitsView(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return out
-	}
-	if got := show(ScopeRunsRead).Usage.ByPrincipal; got != nil {
-		t.Errorf("a team reader reads the per-principal counts %v", got)
-	}
-	if got := show(ScopeAdmin).Usage.ByPrincipal; got == nil {
-		t.Error("the operator lost the per-principal counts")
-	}
-}

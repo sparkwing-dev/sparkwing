@@ -13,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-const storageAllowancePath = "/api/v1/storage/quotas/acme/allowance"
+const storageAllowancePath = "/api/v1/operator/object-store/quotas/acme/allowance"
 
 func licenseStorageMetering(t *testing.T, f storageFixture) {
 	t.Helper()
@@ -77,20 +77,17 @@ func TestStorageAllowanceRouteReadsAndSetsOnTheAdminToken(t *testing.T) {
 		t.Fatalf("quota = %+v, want the per-run limit left alone", quota)
 	}
 
-	code, body = f.request(t, http.MethodGet, "/api/v1/storage", f.admin, "", false)
+	code, body = f.request(t, http.MethodGet, "/api/v1/operator/object-store", f.admin, "", false)
 	if code != http.StatusOK {
 		t.Fatalf("storage show = %d %s, want 200", code, body)
 	}
 	if !strings.Contains(body, `"storage_allowance_bytes":53687091200`) {
 		t.Fatalf("storage show %q does not report the allowance", body)
 	}
-	if !strings.Contains(body, `"retained_bytes"`) {
-		t.Fatalf("storage show %q does not report the retained bytes", body)
-	}
 
 	// safety: the quota route is not a second writer of the allowance, so a
 	// quota rewrite keeps what the team asked to keep.
-	if code, body := f.request(t, http.MethodPut, "/api/v1/storage/quotas/acme", f.admin,
+	if code, body := f.request(t, http.MethodPut, "/api/v1/operator/object-store/quotas/acme", f.admin,
 		`{"tier":"paid"}`, false); code != http.StatusOK {
 		t.Fatalf("quota rewrite = %d %s, want 200", code, body)
 	}

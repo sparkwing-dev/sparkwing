@@ -3,8 +3,38 @@ package apiroutes
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
+
+func TestParseOperatorEndpointsUsesActualRegistrations(t *testing.T) {
+	src := writeFile(t, "server.go", "s.registerOperatorRoutes(router)")
+	endpoints := `{Method: "GET", Pattern: "/api/v1/operator/limits", Handle: s.limits},
+{Method: "GET", Pattern: "/api/v1/operator/teams", Handle: s.teams},
+{Method: "GET", Pattern: "/api/v1/operator/object-store", Handle: s.storage},`
+	path := filepath.Join(filepath.Dir(src), "operator_routes.go")
+	if err := os.WriteFile(path, []byte(endpoints), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Route{
+		{Method: "GET", Path: "/api/v1/operator/limits", Scope: "operator.limits` or `operator"},
+		{Method: "GET", Path: "/api/v1/operator/object-store", Scope: "operator.object_store` or `operator"},
+		{Method: "GET", Path: "/api/v1/operator/teams", Scope: Operator},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("operator registrations = %+v, want %+v", got, want)
+	}
+	if err := os.WriteFile(path, []byte(`{Method: "GET", Pattern: "/unclassified", Handle: s.unclassified},`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse(src, nil); err == nil {
+		t.Fatal("operator endpoint without policy was documented")
+	}
+}
 
 func writeFile(t *testing.T, name, body string) string {
 	t.Helper()

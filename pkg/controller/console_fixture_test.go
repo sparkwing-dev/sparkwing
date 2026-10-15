@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -18,10 +19,15 @@ func (f consoleFixtureAuthority) Authenticate(ctx context.Context, presentation 
 		Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone},
 	}}
 	if presentation.Class == capability.CredentialBearer {
-		if _, err := f.server.store.LookupToken(presentation.Raw, time.Now()); err != nil {
+		tok, err := f.server.store.LookupToken(presentation.Raw, time.Now())
+		if err != nil {
 			return capability.Authenticated{}, &apierr.Error{Code: apierr.Unauthenticated}
 		}
-		p.Capability.Subject = capability.Subject{Kind: capability.SubjectOperator, ID: "deployment"}
+		p.Capability.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: "fixture-member"}
+		if slices.Contains(tok.Scopes, ScopeAdmin) {
+			p.Capability.Subject = capability.Subject{Kind: capability.SubjectOperator, ID: tok.Principal}
+			p.Capability.Grants = []capability.Grant{capability.OperatorLimits, capability.OperatorObjectStore}
+		}
 	} else {
 		session, err := f.server.store.LookupSession(ctx, presentation.Raw, time.Now())
 		if err != nil {
@@ -35,7 +41,11 @@ func (f consoleFixtureAuthority) Authenticate(ctx context.Context, presentation 
 			p.Capability.Grants = []capability.Grant{capability.OperatorConsole}
 		}
 	}
-	return capability.Authenticated{Principal: p, Method: route.Method, Pattern: route.Path, Live: []capability.LiveAccess{{RuleIndex: 0}}}, nil
+	var live []capability.LiveAccess
+	for i := range route.Access {
+		live = append(live, capability.LiveAccess{RuleIndex: i})
+	}
+	return capability.Authenticated{Principal: p, Method: route.Method, Pattern: route.Path, Live: live}, nil
 }
 
 func (consoleFixtureAuthority) CheckBinding(_ context.Context, _ capability.Principal, rule capability.BindingRule, _ capability.Target) error {

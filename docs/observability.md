@@ -779,7 +779,7 @@ in place of the listing.
 whenever a ceiling is set or a bucket is measured, because that route
 answers without a token; the totals
 and the ceilings sit behind the admin-scoped
-`GET /api/v1/object-store/breaker` and on `sparkwing cluster
+`GET /api/v1/operator/object-store/breaker` and on `sparkwing cluster
 object-store status`, which also reports `counted_at` (when the running
 count last moved) and `reconciled_at` (when the bucket was last
 measured). Alarm on

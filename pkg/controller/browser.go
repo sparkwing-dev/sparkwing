@@ -68,8 +68,8 @@ func (s *Server) browserHandler(api http.Handler) http.Handler {
 	// credential rides this script.
 	browser.Handle("GET /sparkwing-runtime.js", web.RuntimeConfig(d.Version, !d.Local))
 	top := http.NewServeMux()
-	// safety: console identity and CSRF are verified by the route policy before handler entry.
-	for _, endpoint := range s.consoleEndpoints() {
+	// safety: operator identity and CSRF are verified by the route policy before handler entry.
+	for _, endpoint := range s.operatorEndpoints() {
 		top.Handle(endpoint.Method+" "+endpoint.Pattern, api)
 	}
 	if d.Local {

@@ -2959,7 +2959,7 @@ class has tripped, and whether it is refusing requests now, followed by
 the bucket ceiling: what the bucket holds, the ceilings it is held to,
 and whether object writes are frozen. Changes nothing.
 
-Hits GET /api/v1/object-store/breaker on the selected profile's
+Hits GET /api/v1/operator/object-store/breaker on the selected profile's
 controller, which needs an admin-scoped token.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile selecting the controller", Required: true, Group: "System"},
@@ -2986,7 +2986,7 @@ Reach for this after fixing what caused the trip. A budget that keeps
 tripping wants a larger limit or a caller that stops retrying, not a
 repeated reset.
 
-Hits POST /api/v1/object-store/reset-breaker on the selected
+Hits POST /api/v1/operator/object-store/reset-breaker on the selected
 profile's controller, which needs an admin-scoped token.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile selecting the controller", Required: true, Group: "System"},

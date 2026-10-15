@@ -39,7 +39,6 @@ var (
 	resOwnIdentity        = tenantResource{"sign-in identity", ownerAccount}
 	resToken              = tenantResource{"token", ownerDeployment}
 	resTeam               = tenantResource{"team", ownerDeployment}
-	resStorageQuota       = tenantResource{"storage quota", ownerDeployment}
 	resPayment            = tenantResource{"payment", ownerDeployment}
 	resGitCache           = tenantResource{"git cache repository", ownerDeployment}
 )
@@ -48,7 +47,6 @@ var (
 // server.go registers one this table lacks, so a new route is classified
 // before it serves anything.
 var tenantRoutes = map[string]tenantResource{
-	"GET /api/v1/admin/usage-metrics": resNone,
 
 	"GET /api/v1/agents": resNone,
 
@@ -61,9 +59,6 @@ var tenantRoutes = map[string]tenantResource{
 
 	"GET /api/v1/capacity/profiles":         resNone,
 	"GET /api/v1/capacity/profiles/explain": resNone,
-
-	"GET /api/v1/compute-limits": resNone,
-	"PUT /api/v1/compute-limits": resNone,
 
 	"POST /api/v1/concurrency/{key}/acquire":       resConcurrencyKey,
 	"POST /api/v1/concurrency/{key}/cancel-waiter": resConcurrencyKey,
@@ -115,9 +110,6 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/me/team-deletions":           resNone,
 
 	"POST /api/v1/nodes/claim": resNone,
-
-	"GET /api/v1/object-store/breaker":        resNone,
-	"POST /api/v1/object-store/reset-breaker": resNone,
 
 	"GET /api/v1/pipelines":                              resNone,
 	"GET /api/v1/pipelines/{name}/latest":                resPipeline,
@@ -222,13 +214,7 @@ var tenantRoutes = map[string]tenantResource{
 
 	"GET /api/v1/services": resNone,
 
-	"GET /api/v1/signups": resNone,
-	"PUT /api/v1/signups": resNone,
-
-	"GET /api/v1/storage":                              resNone,
-	"PUT /api/v1/storage/quotas/{principal}":           resStorageQuota,
-	"PUT /api/v1/storage/quotas/{principal}/allowance": resStorageQuota,
-	"PUT /api/v1/storage/settings":                     resNone,
+	"GET /api/v1/storage": resNone,
 
 	"DELETE /api/v1/team": resNone,
 	"PATCH /api/v1/team":  resNone,
@@ -273,7 +259,6 @@ var tenantRoutes = map[string]tenantResource{
 	"PATCH /api/v1/team/members/{user_id}":  resMember,
 
 	"POST /api/v1/teams": resNone,
-	"PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch": resTeam,
 
 	"GET /api/v1/team/tokens":                          resNone,
 	"POST /api/v1/team/tokens":                         resNone,

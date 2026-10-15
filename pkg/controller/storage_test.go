@@ -72,6 +72,7 @@ func newStorageFixture(t *testing.T, quotas ...store.StorageQuota) storageFixtur
 		t.Fatalf("mark ready: %v", err)
 	}
 	srv := controller.New(st, nil).EnableAuthFromStore()
+	controller.ConfigureConsoleFixture(srv)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	n, err := client.NewWithToken(ts.URL, nil, team).ClaimNode(ctx, "runner:acme:1", nil, time.Minute, nil)
@@ -247,7 +248,7 @@ func TestStorageWritesUnboundedWithoutAQuota(t *testing.T) {
 
 func TestStorageSettingsAndQuotaRoutes(t *testing.T) {
 	f := newStorageFixture(t)
-	code, body := f.request(t, http.MethodPut, "/api/v1/storage/settings", f.admin,
+	code, body := f.request(t, http.MethodPut, "/api/v1/operator/object-store/settings", f.admin,
 		`{"event_retention_days":30,"node_metric_retention_days":14,`+
 			`"database_alarm_bytes":1073741824,"default_tier":"free"}`, false)
 	if code != http.StatusOK {
@@ -261,7 +262,7 @@ func TestStorageSettingsAndQuotaRoutes(t *testing.T) {
 		t.Fatalf("stored settings = %+v, want retention on and the free tier", settings)
 	}
 
-	if code, body := f.request(t, http.MethodPut, "/api/v1/storage/quotas/acme", f.admin,
+	if code, body := f.request(t, http.MethodPut, "/api/v1/operator/object-store/quotas/acme", f.admin,
 		`{"tier":"paid"}`, false); code != http.StatusOK {
 		t.Fatalf("quota write = %d %s, want 200", code, body)
 	}
@@ -273,16 +274,16 @@ func TestStorageSettingsAndQuotaRoutes(t *testing.T) {
 		t.Fatalf("quota = %+v, want the paid tier limits", quota)
 	}
 
-	if code, body := f.request(t, http.MethodPut, "/api/v1/storage/quotas/acme%20corp", f.admin,
+	if code, body := f.request(t, http.MethodPut, "/api/v1/operator/object-store/quotas/acme%20corp", f.admin,
 		`{"tier":"paid"}`, false); code != http.StatusOK {
 		t.Fatalf("a principal a token may carry = %d %s, want 200", code, body)
 	}
 	if code, body := f.request(t, http.MethodPut,
-		"/api/v1/storage/quotas/"+strings.Repeat("x", store.StoragePrincipalMaxLen+1), f.admin,
+		"/api/v1/operator/object-store/quotas/"+strings.Repeat("x", store.StoragePrincipalMaxLen+1), f.admin,
 		`{"tier":"paid"}`, false); code != http.StatusBadRequest {
 		t.Fatalf("an over-long principal = %d %s, want 400", code, body)
 	}
-	if code, body := f.request(t, http.MethodPut, "/api/v1/storage/quotas/acme", f.admin,
+	if code, body := f.request(t, http.MethodPut, "/api/v1/operator/object-store/quotas/acme", f.admin,
 		`{"tier":"platinum"}`, false); code != http.StatusBadRequest {
 		t.Fatalf("an unknown tier = %d %s, want 400", code, body)
 	}
@@ -290,8 +291,8 @@ func TestStorageSettingsAndQuotaRoutes(t *testing.T) {
 	for _, refused := range []struct {
 		method, path, body string
 	}{
-		{http.MethodPut, "/api/v1/storage/settings", `{"event_retention_days":1}`},
-		{http.MethodPut, "/api/v1/storage/quotas/acme", `{"tier":"free"}`},
+		{http.MethodPut, "/api/v1/operator/object-store/settings", `{"event_retention_days":1}`},
+		{http.MethodPut, "/api/v1/operator/object-store/quotas/acme", `{"tier":"free"}`},
 	} {
 		code, body := f.request(t, refused.method, refused.path, f.team, refused.body, false)
 		if code != http.StatusForbidden {
@@ -330,7 +331,7 @@ func TestStorageShowSeparatesTheAdminViewFromTheTeamView(t *testing.T) {
 		t.Fatal("team view carries no month")
 	}
 
-	code, body = f.request(t, http.MethodGet, "/api/v1/storage", f.admin, "", false)
+	code, body = f.request(t, http.MethodGet, "/api/v1/operator/object-store", f.admin, "", false)
 	if code != http.StatusOK {
 		t.Fatalf("admin read = %d %s, want 200", code, body)
 	}

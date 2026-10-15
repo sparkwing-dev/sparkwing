@@ -2034,45 +2034,6 @@ paths:
               schema: {$ref: "#/components/schemas/CreateTokenResponse"}
         "403": {description: "The token is the checkout service's; replace the controller's `credits-token` credential instead."}
 
-  /api/v1/teams/{team}/repos/{owner}/{name}/dispatch:
-    parameters:
-      - {name: team, in: path, required: true, schema: {type: string}}
-      - {name: owner, in: path, required: true, schema: {type: string}, description: GitHub owner of the repository.}
-      - {name: name, in: path, required: true, schema: {type: string}, description: GitHub name of the repository.}
-    put:
-      x-sparkwing-scope: admin
-      tags: [teams]
-      summary: Choose the path a repository's new runs take.
-      description: >-
-        `trigger` is every repository's default path, where a runner claims the run's trigger, and setting it moves a repository back from controller dispatch. `controller` starts each new run with a planning node that the launcher runs in a Job it builds, and a child such a run starts takes the same path. Runs already started keep their path.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.repoDispatchReq
-              type: object
-              required: [dispatch]
-              properties:
-                dispatch: {type: string, enum: [trigger, controller]}
-      responses:
-        "200":
-          description: The repository's dispatch path.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                properties:
-                  team: {type: string}
-                  repo: {type: string, description: "owner/name, lowercased."}
-                  dispatch: {type: string}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: Controller dispatch cannot run a pipeline yet.}
-
   /api/v1/launcher/sync:
     post:
       x-sparkwing-scope: ScopeClaimsLaunch
@@ -3515,9 +3476,9 @@ paths:
                           description: Owning pipeline; absent on the unscoped row.
         "400": {$ref: "#/components/responses/BadRequest"}
 
-  /api/v1/object-store/breaker:
+  /api/v1/operator/object-store/breaker:
     get:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: operator.object_store or operator
       tags: [cluster]
       summary: Read the controller's object-store request budget.
       description: |
@@ -3534,9 +3495,9 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/object-store/reset-breaker:
+  /api/v1/operator/object-store/reset-breaker:
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: operator.object_store or operator
       tags: [cluster]
       summary: Clear a tripped object-store request budget.
       description: |
@@ -4034,14 +3995,14 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/StorageState"}
 
-  /api/v1/storage/quotas/{principal}:
+  /api/v1/operator/object-store/quotas/{team}:
     parameters:
       - in: path
-        name: principal
+        name: team
         required: true
         schema: {type: string}
     put:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: operator.object_store or operator
       tags: [storage]
       summary: Set one team's storage allowance.
       description: |
@@ -4070,14 +4031,14 @@ paths:
               schema: {$ref: "#/components/schemas/StorageQuota"}
         "400": {$ref: "#/components/responses/BadRequest"}
 
-  /api/v1/storage/quotas/{principal}/allowance:
+  /api/v1/operator/object-store/quotas/{team}/allowance:
     parameters:
       - in: path
-        name: principal
+        name: team
         required: true
         schema: {type: string}
     put:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: operator.object_store or operator
       tags: [storage]
       summary: Set how many retained bytes one team keeps.
       description: |
@@ -4099,13 +4060,13 @@ paths:
               schema: {$ref: "#/components/schemas/StorageQuota"}
         "400": {$ref: "#/components/responses/BadRequest"}
 
-  /api/v1/storage/settings:
+  /api/v1/operator/object-store/settings:
     put:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: operator.object_store or operator
       tags: [storage]
       summary: Set the retention windows, the alarm size, and the default tier.
       description: |
-        Writes every field, so a caller reads `GET /api/v1/storage` first,
+        Writes every field, so a caller reads `GET /api/v1/operator/object-store` first,
         changes what it means to change, and writes the result back. A
         retention window is a whole number of days and zero is unbounded; an
         hourly timer removes the events and per-node metric samples of
@@ -4130,41 +4091,9 @@ paths:
               schema: {$ref: "#/components/schemas/StorageSettings"}
         "400": {$ref: "#/components/responses/BadRequest"}
 
-  /api/v1/admin/usage-metrics:
+  /api/v1/operator/limits:
     get:
-      x-sparkwing-scope: admin
-      tags: [cluster]
-      summary: Read the deployment's weekly usage for its operator.
-      description: |
-        Counts, per Monday-to-Monday UTC week, the teams with at least one
-        run started, those runs split into cloud and connected-machine runs,
-        how many runs each active team started, and the accounts and teams
-        created. For teams created in the window it reports the time from
-        the team's creation to the finish of its first successful run. Every
-        figure comes from the controller's own tables and names no team,
-        account or source. The default team never counts.
-      parameters:
-        - in: query
-          name: weeks
-          schema: {type: integer, minimum: 1, maximum: 104, default: 12}
-          description: Whole weeks to report, ending with the week in progress.
-        - in: query
-          name: exclude_team
-          schema: {type: array, items: {type: string}}
-          style: form
-          explode: true
-          description: More teams to leave out, such as the operator's own test teams.
-      responses:
-        "200":
-          description: The weekly usage.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/UsageMetrics"}
-        "400": {description: weeks is outside 1 to 104.}
-
-  /api/v1/compute-limits:
-    get:
-      x-sparkwing-scope: runs.read
+      x-sparkwing-scope: operator.limits or operator
       tags: [credits]
       summary: Read every compute guard and the cloud runners in use.
       description: |
@@ -4187,7 +4116,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ComputeLimits"}
     put:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: operator.limits or operator
       tags: [credits]
       summary: Set one or more compute guards.
       description: |
@@ -5427,9 +5356,9 @@ paths:
         "422": {description: A run value cannot appear in the subject.}
         "429": {description: The claim spent its token budget for this run; see Retry-After.}
 
-  /api/v1/signups:
+  /api/v1/operator/signups:
     get:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: operator.limits or operator
       tags: [users]
       summary: Read the sign-up gate and the sign-up counts alerting keys on.
       description: >-
@@ -5478,7 +5407,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
     put:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: operator.limits or operator
       tags: [users]
       summary: Set the sign-up gate's mode, its limits, or both.
       description: >-
@@ -6567,7 +6496,7 @@ paths:
       tags: [operator]
       summary: Admit waitlisted users from the operator console.
       description: >-
-        Takes the body and answers the shape of POST /api/v1/signups/waitlist/approve. Each admission and its account.admitted business event, naming the operator, commit together.
+        Takes the body and answers the shape of POST /api/v1/operator/signups/waitlist/approve. Each admission and its account.admitted business event, naming the operator, commit together.
       requestBody:
         required: true
         content:
@@ -7290,6 +7219,19 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/PolicyError"}
+
+  /api/v1/operator/object-store:
+    get:
+      x-sparkwing-scope: operator.object_store or operator
+      summary: Read deployment storage settings, quotas and usage.
+      description: Includes sampled database size, configured team quotas and largest-team storage totals. Team reads use GET /api/v1/storage.
+      responses:
+        "200":
+          description: Deployment storage view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageState"
 
 components:
   securitySchemes:
@@ -8069,27 +8011,6 @@ components:
         last_status: {type: string}
         last_run_at: {type: string, format: date-time}
         last_finished_at: {type: string, format: date-time}
-    UsageMetrics:
-      x-sparkwing-go-type: pkg/controller.usageMetricsResponse
-      type: object
-      properties:
-        generated_at: {type: string, format: date-time}
-        excluded_teams: {type: array, items: {type: string}}
-        weeks: {type: array, description: Oldest first; the last entry is the week in progress., items: {$ref: "#/components/schemas/UsageWeek"}}
-        time_to_first_green: {$ref: "#/components/schemas/FirstGreenStats"}
-    UsageWeek:
-      x-sparkwing-go-type: pkg/store.UsageWeek
-      type: object
-      properties:
-        week_start: {type: string, format: date-time}
-        active_teams: {type: integer}
-        runs: {type: integer}
-        cloud_runs: {type: integer, description: Runs with at least one node on a cloud runner.}
-        connected_runs: {type: integer, description: Runs whose every node ran on a machine the team connected.}
-        teams_by_runs: {$ref: "#/components/schemas/RunsBands"}
-        median_runs_per_active_team: {type: number}
-        new_accounts: {type: integer}
-        new_teams: {type: integer}
     RunsBands:
       x-sparkwing-go-type: pkg/store.RunsBands
       type: object
@@ -8099,19 +8020,6 @@ components:
         runs_2_to_9: {type: integer}
         runs_10_to_49: {type: integer}
         runs_50_plus: {type: integer}
-    FirstGreenStats:
-      x-sparkwing-go-type: pkg/store.FirstGreenStats
-      type: object
-      description: Time from a team's creation to the finish of its first successful run, for teams created in the window.
-      properties:
-        teams_created: {type: integer}
-        teams_green: {type: integer}
-        median_seconds: {type: integer, format: int64}
-        p90_seconds: {type: integer, format: int64}
-        within_hour: {type: integer}
-        within_day: {type: integer}
-        within_week: {type: integer}
-        later: {type: integer}
     StorageState:
       x-sparkwing-go-type: pkg/controller.storageStateJSON
       type: object

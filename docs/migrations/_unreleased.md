@@ -684,3 +684,17 @@ Controller embedders must configure `Server.WithAuthorization` with the shared
 verifier, binding checker, verified transport identity and session-bound CSRF
 adapter before constructing the handler. Missing dependencies refuse requests.
 The operator account list alone does not configure API authentication.
+
+## Deployment authorization
+
+Use `/api/v1/operator/limits` and `/api/v1/operator/signups` with a deployment
+credential carrying `operator.limits`. Object-store administration uses
+`/api/v1/operator/object-store` and its `/breaker`, `/reset-breaker`, `/settings`,
+`/quotas/{team}` and `/quotas/{team}/allowance` routes, with
+`operator.object_store`. An operator-console session may use both groups;
+its mutations require CSRF proof. Quota selectors name the team.
+
+`GET /api/v1/storage` returns team data. Deployment totals are on
+`GET /api/v1/operator/object-store`. The former compute-limits, signups,
+object-store and storage-settings paths are removed, along with
+`GET /api/v1/admin/usage-metrics` and the repo-dispatch mutation route.

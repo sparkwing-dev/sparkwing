@@ -37,31 +37,3 @@ func (s *Server) handleLaunchClaim(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, claim)
 	}
 }
-
-type repoDispatchReq struct {
-	Dispatch store.RepoDispatch `json:"dispatch"`
-}
-
-func (s *Server) handleSetRepoDispatch(w http.ResponseWriter, r *http.Request) {
-	t, ok := s.namedTenant(w, r, r.PathValue("team"))
-	if !ok {
-		return
-	}
-	var req repoDispatchReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	owner, name := r.PathValue("owner"), r.PathValue("name")
-	err := t.SetRepoDispatch(r.Context(), owner, name, req.Dispatch, time.Now())
-	switch {
-	case errors.Is(err, store.ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, err)
-	case err != nil:
-		s.writeInternalError(w, r, "repository dispatch", err)
-	default:
-		writeJSON(w, http.StatusOK, map[string]string{
-			"team": string(t.Team()), "repo": store.RepoKey(owner, name), "dispatch": string(req.Dispatch),
-		})
-	}
-}

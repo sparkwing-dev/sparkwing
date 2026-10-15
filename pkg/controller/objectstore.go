@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
@@ -43,12 +45,13 @@ func objectStoreBreakerState(l *objectguard.Limiter) ObjectStoreBreakerResponse 
 	}
 }
 
-func (s *Server) handleObjectStoreBreaker(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleObjectStoreBreaker(w http.ResponseWriter, _ *http.Request, _ capability.Authorized) error {
 	limiter := objectguard.Shared()
 	writeJSON(w, http.StatusOK, objectStoreBreakerState(limiter))
+	return nil
 }
 
-func (s *Server) handleResetObjectStoreBreaker(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleResetObjectStoreBreaker(w http.ResponseWriter, _ *http.Request, _ capability.Authorized) error {
 	limiter := objectguard.Shared()
 	resp := objectStoreBreakerState(limiter)
 	for _, c := range limiter.Reset() {
@@ -56,12 +59,12 @@ func (s *Server) handleResetObjectStoreBreaker(w http.ResponseWriter, _ *http.Re
 	}
 	thawed, err := limiter.Ceiling().Thaw()
 	if err != nil {
-		writeError(w, http.StatusConflict, err)
-		return
+		return &apierr.Error{Code: apierr.Conflict, Message: "object-store ceiling still refuses writes"}
 	}
 	resp.Thawed = thawed
 	resp.Ceiling = limiter.Ceiling().State()
 	writeJSON(w, http.StatusOK, resp)
+	return nil
 }
 
 // safety: the health route answers without a token, so the summary says which

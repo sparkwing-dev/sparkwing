@@ -8,7 +8,7 @@ interfaces. The policy evaluator, authentication verifier, HTTP policy router,
 delegation validator, data/source checks, billing calculation, payment verifier
 and error codec are implemented. Filesystem and S3 object signers implement the
 signing boundary. Persistent issuance and authentication reads still need the
-store implementation. The Stripe callback and thirteen console endpoints use this table in the existing
+store implementation. The Stripe callback and twenty-three operator endpoints use this table in the existing
 controller. The remaining routes have not switched to it.
 
 ## Ownership
@@ -531,6 +531,54 @@ The existing store credit-summary/settings and session methods still query the r
 `sparkwing_meta` table. Their real integration remains open. Console refunds and runner
 metering also remain outside this cutover.
 
+Ten deployment endpoints now use the same router: limits and signups require
+`operator.limits`; object-store settings, quotas, usage and breaker controls
+require `operator.object_store`. Both groups also admit a console session.
+The ordinary storage view no longer includes deployment totals. Usage-metrics
+and repo-dispatch routes, handlers and obsolete response types are deleted.
+The deployment paths have no legacy aliases.
+
+`TestDeploymentHTTPAuthorization` covers 86 refusal cells on these actual
+registrations. The breaker positive cases use both credential alternatives.
+`TestOperatorSettingsHTTPRoundTrip` uses the real verifier with fake settings
+persistence to check successful reads/writes, quota and allowance preservation,
+path-derived team selection and authenticated signup attribution. Invalid bodies
+leave the fixture unchanged. Store failures remain private; a typed transaction
+refusal reaches HTTP unchanged. These fakes do not establish transaction safety.
+Seven breaker tests and two request-budget projection tests now exercise the
+policy router without sockets, preserving budget, ceiling, reset and thaw
+behavior. No additional full T1 port or
+cross-placement scenario is claimed complete.
+
+The private `operatorSettingsStore` interface lists existing store methods;
+production uses `*store.Store`, while tests supply fakes. This is the added
+mechanism: it isolates HTTP behavior from unfinished settings persistence
+without adding a second persistence implementation or changing C1 signatures.
+W1 still needs to replace `sparkwing_meta` queries, old compute-usage columns
+and principal-keyed storage SQL with the final schema. Quota route selectors
+now pass the team slug. W1 must also supply authority-bearing atomic settings
+mutations, including a single signup update for mode and limits, and derive
+audit identity inside that transaction. Those C1 contract changes remain open.
+
+This cut also updates shared callers in `pkg/controller/client/admin.go`,
+`pkg/controller/client/objectstore.go`, `cmd/sparkwing/help_registry.go` and
+`cmd/sparkwing-controller/main.go`. The old launcher test seeds its dispatch
+input through the store because the HTTP mutation is removed. API generators,
+OpenAPI, source docs and their embedded mirrors follow the actual endpoint
+registrations. The generator reads grants from the policy table after finding
+a handler registration; it does not generate registrations from that table.
+
+The legacy signup integration fixture fails before handler entry with
+`no such table: tokens`; it still creates the deleted credential type.
+It is unverified integration, not evidence against the fake-backed HTTP tests.
+The deployment cut's extra shared test edits are
+`internal/runners/launcher/launcher_test.go` and
+`internal/apiroutes/apiroutes_test.go`. Source documentation edits are
+`docs/api-reference.md`, `docs/auth.md`, `docs/cli-cluster.md`,
+`docs/observability.md`, `docs/self-hosting.md`,
+`docs/migrations/_unreleased.md`, `CHANGELOG.md` and `api/openapi.yaml`, with
+the matching `pkg/docs` copies. No persistent store contract was changed.
+
 The registered-route comparison must use actual rewritten router registrations,
 not a list generated from `Routes`. A separate handler-policy lint must reject
 authorization calls inside handlers. T1 owns runtime scenarios; C2's tests
@@ -567,7 +615,7 @@ exercise only available contract data and functions.
    audit transaction. C2 supplies no alternate SQL implementation. Persistent
    root, delegation, claim and exchange entry points must reach `Store.Issue`.
 5. **Controller cutover.** The running `Server` uses `PolicyRouter` for the
-   Stripe callback and thirteen console-only endpoints. Other routes retain legacy auth and
+   Stripe callback and twenty-three operator endpoints. Other routes retain legacy auth and
    registrations. Wire final handlers and decoders to `PolicyRouter`, provide
    account/console/verified-local identity and CSRF adapters, then delete the
    old auth stack and handler authorization. Final route-inventory and
@@ -583,7 +631,7 @@ exercise only available contract data and functions.
    callbacks to `/webhooks/stripe` and commit checkout mode/currency through C1.
 
 7. **Console mutation rechecks.** Existing grant, trust, hold, deletion,
-   waitlist and credit-settings store methods do not accept `AuthorityRef`.
+   waitlist, credit-settings and deployment-settings store methods do not accept `AuthorityRef`.
    C1 must replace those signatures with an authority-bearing transaction
    boundary that rechecks revocation and derives the audit actor. The HTTP
    policy gate is implemented, but it cannot establish that transaction

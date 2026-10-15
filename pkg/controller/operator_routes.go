@@ -18,8 +18,19 @@ func (s *Server) WithAuthorization(authorization RouteAuthorization) *Server {
 	return s
 }
 
-func (s *Server) consoleEndpoints() []Endpoint {
+func (s *Server) operatorEndpoints() []Endpoint {
 	endpoints := []Endpoint{
+		{Method: "GET", Pattern: "/api/v1/operator/limits", Handle: s.handleComputeLimitsShow},
+		{Method: "PUT", Pattern: "/api/v1/operator/limits", Handle: s.handleComputeLimitsSet},
+		{Method: "GET", Pattern: "/api/v1/operator/signups", Handle: s.handleSignUpStatus},
+		{Method: "PUT", Pattern: "/api/v1/operator/signups", Handle: s.handleSetSignUp},
+		{Method: "GET", Pattern: "/api/v1/operator/object-store", Handle: s.handleOperatorObjectStore},
+		{Method: "GET", Pattern: "/api/v1/operator/object-store/breaker", Handle: s.handleObjectStoreBreaker},
+		{Method: "POST", Pattern: "/api/v1/operator/object-store/reset-breaker", Handle: s.handleResetObjectStoreBreaker},
+		{Method: "PUT", Pattern: "/api/v1/operator/object-store/settings", Handle: s.handleSetStorageSettings},
+		{Method: "PUT", Pattern: "/api/v1/operator/object-store/quotas/{team}", Handle: s.handleSetStorageQuota},
+		{Method: "PUT", Pattern: "/api/v1/operator/object-store/quotas/{team}/allowance", Handle: s.handleSetStorageAllowance},
+
 		{Method: "GET", Pattern: "/api/v1/operator/teams", Handle: s.handleOperatorTeams},
 		{Method: "GET", Pattern: "/api/v1/operator/teams/{team}", Handle: s.handleOperatorTeam},
 		{Method: "DELETE", Pattern: "/api/v1/operator/teams/{team}", Handle: s.handleOperatorDeleteTeam},
@@ -43,9 +54,9 @@ func (s *Server) consoleEndpoints() []Endpoint {
 	return endpoints
 }
 
-func (s *Server) registerConsoleRoutes(mux *http.ServeMux) {
+func (s *Server) registerOperatorRoutes(mux *http.ServeMux) {
 	router := NewPolicyRouter(s.authorization)
-	endpoints := s.consoleEndpoints()
+	endpoints := s.operatorEndpoints()
 	var registrationError error
 	for _, endpoint := range endpoints {
 		if err := router.Register(endpoint); err != nil {

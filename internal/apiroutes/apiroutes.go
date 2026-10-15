@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // Public marks a route registered outside the authentication middleware, so
@@ -79,14 +81,30 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 		return nil, fmt.Errorf("read routes: %w", err)
 	}
 	var routes []Route
-	if strings.Contains(string(data), "s.registerConsoleRoutes(router)") {
+	if strings.Contains(string(data), "s.registerOperatorRoutes(router)") {
 		// safety: the reference follows actual endpoint declarations, independently of the policy table.
 		endpoints, err := os.ReadFile(filepath.Join(filepath.Dir(file), "operator_routes.go"))
 		if err != nil {
-			return nil, fmt.Errorf("read console endpoints: %w", err)
+			return nil, fmt.Errorf("read operator endpoints: %w", err)
 		}
 		for _, match := range endpointRE.FindAllStringSubmatch(string(endpoints), -1) {
-			routes = append(routes, Route{Method: match[1], Path: match[2], Scope: Operator})
+			policy, ok := capability.LookupRoute(match[1], match[2])
+			if !ok {
+				return nil, fmt.Errorf("operator endpoint lacks policy: %s %s", match[1], match[2])
+			}
+			var alternatives []string
+			for _, access := range policy.Access {
+				if access.Credential == capability.CredentialOperator {
+					alternatives = append(alternatives, Operator)
+					continue
+				}
+				var grants []string
+				for _, grant := range access.Grants {
+					grants = append(grants, string(grant))
+				}
+				alternatives = append(alternatives, strings.Join(grants, " + "))
+			}
+			routes = append(routes, Route{Method: match[1], Path: match[2], Scope: strings.Join(alternatives, "` or `")})
 		}
 	}
 	for line := range strings.SplitSeq(string(data), "\n") {

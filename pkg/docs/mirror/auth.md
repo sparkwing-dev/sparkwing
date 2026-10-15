@@ -595,7 +595,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 
 | Scope             | Unlocks                                                                                           |
 |-------------------|---------------------------------------------------------------------------------------------------|
-| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, `/credits`, `/credits/history`, `/compute-limits`, per-node metrics GETs, and similar team-scoped reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
+| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, `/credits`, `/credits/history`, per-node metrics GETs, and similar team-scoped reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `runs.write`      | POST `/api/v1/triggers`: starting new work |
 | `runs.control`    | POST `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, and the cron writes (`/crons/repos`, `pause`, `resume`, `run`, `disarm`, `override`): acting on a run or schedule somebody else started |
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
@@ -1190,12 +1190,12 @@ controller with none logs `signup.free_tier_unwired` once at startup and
 treats the free tier as open. Google states no account age, so the age
 check applies to GitHub alone.
 
-The gate's settings need the `admin` scope:
+The gate's settings require a deployment credential with `operator.limits` or an operator-console session. Console writes require CSRF proof:
 
 | Route | Does |
 |-------|------|
-| `GET /api/v1/signups` | the effective state (`open` or `waitlist`) and every reason holding it, the stored mode with its source, reason, setter and time, the free-tier state, the limits, and the counts of users created in the last hour and day and waiting on the list |
-| `PUT /api/v1/signups` | sets `mode` (`open` or `waitlist`, with an optional `reason`) and any of `hourly_limit`, `daily_limit`, `hourly_warn`, `github_min_account_days`, `free_team_members`; fields left out keep their values |
+| `GET /api/v1/operator/signups` | the effective state (`open` or `waitlist`) and every reason holding it, the stored mode with its source, reason, setter and time, the free-tier state, the limits, and the counts of users created in the last hour and day and waiting on the list |
+| `PUT /api/v1/operator/signups` | sets `mode` (`open` or `waitlist`, with an optional `reason`) and any of `hourly_limit`, `daily_limit`, `hourly_warn`, `github_min_account_days`, `free_team_members`; fields left out keep their values |
 
 The operator lists and admits waitlisted users from the
 [operator console](#operator-console)'s Waitlist tab, which no token reaches.
@@ -1220,7 +1220,7 @@ alert fires before anyone is waitlisted. It logs `signup.gate_closed` and counts
 `sparkwing_signups_total` counts every new user by outcome and reason, with
 waitlisted users admitted by invitation under `admitted`/`invitation`. Alert on
 any increase in the closure counter, on the warning counter, on
-`signup.free_tier_unreadable`, and on `GET /api/v1/signups` answering
+`signup.free_tier_unreadable`, and on `GET /api/v1/operator/signups` answering
 `"state": "waitlist"`.
 
 ## Unauthenticated endpoints

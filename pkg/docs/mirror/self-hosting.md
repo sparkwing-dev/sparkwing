@@ -448,11 +448,11 @@ A controller keeps every event and every per-node metric sample forever until
 an operator sets a window. Retention is off on an existing install and stays
 off after an upgrade; nothing in this release turns it on for you.
 
-Read the current policy with `GET /api/v1/storage` and write it with
-`PUT /api/v1/storage/settings` (scope `admin`):
+Read the deployment policy with `GET /api/v1/operator/object-store` and write it with
+`PUT /api/v1/operator/object-store/settings` (grant `operator.object_store`):
 
 ```bash
-curl -sS -X PUT "$CONTROLLER/api/v1/storage/settings" \
+curl -sS -X PUT "$CONTROLLER/api/v1/operator/object-store/settings" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"event_retention_days":30,"node_metric_retention_days":14,
@@ -497,10 +497,10 @@ publish. Counting artifact bytes needs the manifest to carry its entries'
 sizes, which it does not yet.
 
 Hold one team to a tier, or to limits of your own, with
-`PUT /api/v1/storage/quotas/{principal}` (scope `admin`):
+`PUT /api/v1/operator/object-store/quotas/{team}` (grant `operator.object_store`):
 
 ```bash
-curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme" \
+curl -sS -X PUT "$CONTROLLER/api/v1/operator/object-store/quotas/acme" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"tier":"paid"}'
@@ -513,7 +513,7 @@ and stores nothing. The team charged is the one the calling token's principal
 names, never a team named in the request. A signed-up team's writes are all
 charged to `team:<slug>`, whatever principal made them, because a team names
 its own principals and two teams can hold the same name; set its quota with
-`PUT /api/v1/storage/quotas/team:<slug>`. The charge is written inside the
+`PUT /api/v1/operator/object-store/quotas/<slug>`. The charge is written inside the
 same transaction as the write it pays for, so a write that fails is not billed
 and a retry pays once.
 
@@ -530,10 +530,10 @@ spent month.
 asked to keep. The hourly storage pass expires its oldest finished runs above
 the allowance, so the allowance is the ceiling; zero keeps everything, which is
 what every quota written before this release reads. Write one with
-`PUT /api/v1/storage/quotas/{principal}/allowance` (scope `admin`):
+`PUT /api/v1/operator/object-store/quotas/{team}/allowance` (grant `operator.object_store`):
 
 ```bash
-curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme/allowance" \
+curl -sS -X PUT "$CONTROLLER/api/v1/operator/object-store/quotas/acme/allowance" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"storage_allowance_bytes":53687091200}'

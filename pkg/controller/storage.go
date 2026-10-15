@@ -3,11 +3,12 @@ package controller
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -264,10 +265,6 @@ func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := chargedPrincipal(r)
-	admin := false
-	if p, ok := PrincipalFromContext(ctx); ok && p != nil {
-		admin = p.HasScope(ScopeAdmin)
-	}
 	quota, err := s.store.StorageQuotaFor(ctx, name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -284,7 +281,7 @@ func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	size, _, alarm, sampled := s.storage.read()
+	_, _, alarm, _ := s.storage.read()
 	out := storageStateJSON{
 		Settings: storageSettingsToJSON(settings),
 		Quota:    storageQuotaToJSON(quota),
@@ -298,27 +295,18 @@ func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if admin {
-		if sampled {
-			out.Database = &size
-		}
-		if err := s.appendAdminStorage(ctx, &out, month); err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) appendAdminStorage(ctx context.Context, out *storageStateJSON, month string) error {
-	quotas, err := s.store.ListStorageQuotas(ctx)
+	quotas, err := s.operatorSettings.ListStorageQuotas(ctx)
 	if err != nil {
 		return err
 	}
 	for _, q := range quotas {
 		out.Quotas = append(out.Quotas, storageQuotaToJSON(q))
 	}
-	teams, err := s.store.TopStorageTeams(ctx, month, storageReportTeams)
+	teams, err := s.operatorSettings.TopStorageTeams(ctx, month, storageReportTeams)
 	if err != nil {
 		return err
 	}
@@ -330,11 +318,10 @@ func (s *Server) appendAdminStorage(ctx context.Context, out *storageStateJSON, 
 	return nil
 }
 
-func (s *Server) handleSetStorageSettings(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSetStorageSettings(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	var body storageSettingsJSON
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid storage settings request"}
 	}
 	settings := store.StorageSettings{
 		EventRetentionDays:      body.EventRetentionDays,
@@ -342,9 +329,11 @@ func (s *Server) handleSetStorageSettings(w http.ResponseWriter, r *http.Request
 		DatabaseAlarmBytes:      body.DatabaseAlarmBytes,
 		DefaultTier:             body.DefaultTier,
 	}
-	if err := s.store.SetStorageSettings(r.Context(), settings); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if body.EventRetentionDays < 0 || body.NodeMetricRetentionDays < 0 || body.DatabaseAlarmBytes < 0 || !validStorageTier(body.DefaultTier) {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "storage settings require nonnegative limits and a known tier"}
+	}
+	if err := s.operatorSettings.SetStorageSettings(r.Context(), settings); err != nil {
+		return operatorSettingsError(err)
 	}
 	s.logger.Info("storage settings updated",
 		"event_retention_days", settings.EventRetentionDays,
@@ -352,19 +341,17 @@ func (s *Server) handleSetStorageSettings(w http.ResponseWriter, r *http.Request
 		"database_alarm_bytes", settings.DatabaseAlarmBytes,
 		"default_tier", settings.DefaultTier)
 	writeJSON(w, http.StatusOK, storageSettingsToJSON(settings))
+	return nil
 }
 
-func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request) {
-	principal := r.PathValue("principal")
-	if !store.ValidStoragePrincipal(principal) {
-		writeError(w, http.StatusBadRequest, fmt.Errorf(
-			"principal must be 1 to %d characters", store.StoragePrincipalMaxLen))
-		return
+func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	principal := authorized.Target.Team
+	if authorized.Target.Team == "" || !store.ValidStoragePrincipal(principal) {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid quota team"}
 	}
 	var body setStorageQuotaJSON
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid storage settings request"}
 	}
 	quota := store.StorageQuota{
 		Principal:        principal,
@@ -373,20 +360,22 @@ func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request) {
 		MaxBytesPerMonth: body.MaxBytesPerMonth,
 		MaxObjectsPerRun: body.MaxObjectsPerRun,
 	}
-	if err := s.store.SetStorageQuota(r.Context(), quota); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if body.MaxBytesPerRun < 0 || body.MaxBytesPerMonth < 0 || body.MaxObjectsPerRun < 0 || !validStorageTier(body.Tier) {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "storage quota requires nonnegative limits and a known tier"}
 	}
-	stored, err := s.store.StorageQuotaFor(r.Context(), principal)
+	if err := s.operatorSettings.SetStorageQuota(r.Context(), quota); err != nil {
+		return operatorSettingsError(err)
+	}
+	stored, err := s.operatorSettings.StorageQuotaFor(r.Context(), principal)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return err
 	}
 	s.logger.Info("storage quota updated", "principal", principal, "tier", stored.Tier,
 		"max_bytes_per_run", stored.MaxBytesPerRun, "max_bytes_per_month", stored.MaxBytesPerMonth,
 		"max_objects_per_run", stored.MaxObjectsPerRun,
 		"storage_allowance_bytes", stored.AllowanceBytes)
 	writeJSON(w, http.StatusOK, storageQuotaToJSON(stored))
+	return nil
 }
 
 func storageSettingsToJSON(in store.StorageSettings) storageSettingsJSON {
@@ -412,24 +401,32 @@ func storageQuotaToJSON(in store.StorageQuota) storageQuotaJSON {
 // safety: the allowance is the ceiling the sweep expires oldest-first down to,
 // so it is written on its own rather than through the quota route, which
 // replaces every limit the body leaves out.
-func (s *Server) handleSetStorageAllowance(w http.ResponseWriter, r *http.Request) {
-	principal := r.PathValue("principal")
-	if !store.ValidStoragePrincipal(principal) {
-		writeError(w, http.StatusBadRequest, fmt.Errorf(
-			"principal must be 1 to %d characters", store.StoragePrincipalMaxLen))
-		return
+func (s *Server) handleSetStorageAllowance(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	principal := authorized.Target.Team
+	if authorized.Target.Team == "" || !store.ValidStoragePrincipal(principal) {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid quota team"}
 	}
 	var body storageAllowanceJSON
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid storage settings request"}
 	}
-	stored, err := s.store.SetStorageAllowance(r.Context(), principal, body.StorageAllowanceBytes)
+	if body.StorageAllowanceBytes < 0 {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "storage allowance must not be negative"}
+	}
+	stored, err := s.operatorSettings.SetStorageAllowance(r.Context(), principal, body.StorageAllowanceBytes)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return operatorSettingsError(err)
 	}
 	s.logger.Info("storage allowance updated",
 		"principal", principal, "storage_allowance_bytes", stored.AllowanceBytes)
 	writeJSON(w, http.StatusOK, storageQuotaToJSON(stored))
+	return nil
+}
+
+func validStorageTier(tier string) bool {
+	if tier == "" {
+		return true
+	}
+	_, ok := store.TierQuota(tier)
+	return ok
 }

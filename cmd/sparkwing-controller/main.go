@@ -272,7 +272,7 @@ func run(args []string) error {
 	signUpGate := fs.String("signup-gate", string(store.SignUpOpen),
 		"open or waitlist. waitlist places every new account on the sign-up "+
 			"waitlist whatever the operator's stored setting says; open defers to "+
-			"that setting, which PUT /api/v1/signups changes. Existing accounts are "+
+			"that setting, which PUT /api/v1/operator/signups changes. Existing accounts are "+
 			"never affected.")
 	hsts := fs.Bool("hsts", false,
 		"assert that browsers reach this controller's dashboard over TLS: send "+

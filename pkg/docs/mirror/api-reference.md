@@ -9,7 +9,6 @@ Every route the controller registers, with the scope each requires, generated fr
 |---|---|---|
 | `GET` | `/.well-known/jwks.json` | `public` |
 | `GET` | `/.well-known/openid-configuration` | `public` |
-| `GET` | `/api/v1/admin/usage-metrics` | `admin` |
 | `GET` | `/api/v1/agents` | `runs.read` |
 | `GET` | `/api/v1/approvals/pending` | `runs.read` |
 | `POST` | `/api/v1/auth/logout` | `public` |
@@ -20,8 +19,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/capabilities` | `public` |
 | `GET` | `/api/v1/capacity/profiles` | `runs.read` |
 | `GET` | `/api/v1/capacity/profiles/explain` | `runs.read` |
-| `GET` | `/api/v1/compute-limits` | `runs.read` |
-| `PUT` | `/api/v1/compute-limits` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/acquire` | `claim` or `runs.state` |
 | `POST` | `/api/v1/concurrency/{key}/cancel-waiter` | `claim` or `runs.state` |
 | `POST` | `/api/v1/concurrency/{key}/force-release` | `admin` |
@@ -71,12 +68,20 @@ Every route the controller registers, with the scope each requires, generated fr
 | `DELETE` | `/api/v1/me/identities/{provider}` | `authenticated` |
 | `GET` | `/api/v1/me/team-deletions` | `authenticated` |
 | `POST` | `/api/v1/nodes/claim` | `nodes.claim` |
-| `GET` | `/api/v1/object-store/breaker` | `admin` |
-| `POST` | `/api/v1/object-store/reset-breaker` | `admin` |
 | `DELETE` | `/api/v1/operator/accounts/{account}` | `operator` |
 | `PUT` | `/api/v1/operator/credits/settings` | `operator` |
 | `DELETE` | `/api/v1/operator/github-app/installations/{installation}` | `operator` |
+| `GET` | `/api/v1/operator/limits` | `operator.limits` or `operator` |
+| `PUT` | `/api/v1/operator/limits` | `operator.limits` or `operator` |
 | `POST` | `/api/v1/operator/maintenance/reconcile-orphans` | `operator` |
+| `GET` | `/api/v1/operator/object-store` | `operator.object_store` or `operator` |
+| `GET` | `/api/v1/operator/object-store/breaker` | `operator.object_store` or `operator` |
+| `PUT` | `/api/v1/operator/object-store/quotas/{team}` | `operator.object_store` or `operator` |
+| `PUT` | `/api/v1/operator/object-store/quotas/{team}/allowance` | `operator.object_store` or `operator` |
+| `POST` | `/api/v1/operator/object-store/reset-breaker` | `operator.object_store` or `operator` |
+| `PUT` | `/api/v1/operator/object-store/settings` | `operator.object_store` or `operator` |
+| `GET` | `/api/v1/operator/signups` | `operator.limits` or `operator` |
+| `PUT` | `/api/v1/operator/signups` | `operator.limits` or `operator` |
 | `GET` | `/api/v1/operator/teams` | `operator` |
 | `DELETE` | `/api/v1/operator/teams/{team}` | `operator` |
 | `GET` | `/api/v1/operator/teams/{team}` | `operator` |
@@ -187,12 +192,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `DELETE` | `/api/v1/secrets/{name}` | `admin` or `team.admin` |
 | `GET` | `/api/v1/secrets/{name}` | `claim` or `secrets.read` or `team.admin` |
 | `GET` | `/api/v1/services` | `authenticated` |
-| `GET` | `/api/v1/signups` | `admin` |
-| `PUT` | `/api/v1/signups` | `admin` |
 | `GET` | `/api/v1/storage` | `runs.read` |
-| `PUT` | `/api/v1/storage/quotas/{principal}` | `admin` |
-| `PUT` | `/api/v1/storage/quotas/{principal}/allowance` | `admin` |
-| `PUT` | `/api/v1/storage/settings` | `admin` |
 | `DELETE` | `/api/v1/team` | `team.admin` |
 | `PATCH` | `/api/v1/team` | `team.admin` |
 | `GET` | `/api/v1/team/billing` | `runs.read` |
@@ -232,7 +232,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `DELETE` | `/api/v1/team/tokens/{prefix}` | `runs.read` |
 | `PUT` | `/api/v1/team/tokens/{prefix}/git-credentials` | `team.admin` |
 | `POST` | `/api/v1/teams` | `authenticated` |
-| `PUT` | `/api/v1/teams/{team}/repos/{owner}/{name}/dispatch` | `admin` |
 | `GET` | `/api/v1/tokens` | `admin` |
 | `POST` | `/api/v1/tokens` | `admin` |
 | `DELETE` | `/api/v1/tokens/{prefix}` | `admin` |
