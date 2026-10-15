@@ -254,15 +254,18 @@ func (r *envelopeRig) args(shape string, extra ...string) map[string]string {
 
 func (r *envelopeRig) start(runID, pipeline string, args map[string]string, tweak func(*nodehost.Config)) <-chan nodehost.RunResult {
 	r.t.Helper()
+	masker := secrets.NewMasker()
 	cfg := nodehost.Config{
 		Session: nodehost.SessionConfig{
 			Entry: pipelineentry.Binary(os.Args[0]), Dir: r.t.TempDir(), Grace: 2 * time.Second,
-			Env: append(engineenv.Strip(os.Environ()), nodeProtocolEntryEnv+"=1", "GORACE=atexit_sleep_ms=0"),
+			Env:    append(engineenv.Strip(os.Environ()), nodeProtocolEntryEnv+"=1", "GORACE=atexit_sleep_ms=0"),
+			Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
+			Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: masker},
 		},
 		Pipeline: pipeline, Args: args, Run: nodeproto.RunContext{RunID: runID},
 		State: r.st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
 		Attempts: &nodehost.Attempts{
-			Routes: r.routes, Resolver: noEnvelopeSecrets{}, Masker: secrets.NewMasker(),
+			Routes: r.routes, Resolver: noEnvelopeSecrets{}, Masker: masker,
 			OpenLog: func(context.Context, string, string) (nodehost.NodeLog, error) { return discardNodeLog{}, nil },
 		},
 		Admission: &nodehost.Admission{Slots: r.slots},

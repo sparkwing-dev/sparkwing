@@ -9,13 +9,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// safety: Secret preserves masking classification so tests cannot substitute plain variables for secrets.
+// Secret preserves masking classification so tests cannot substitute plain variables for secrets.
 type Secret struct {
 	Value  string
 	Masked bool
 }
 
-// safety: Options injects external results without exporting runtime plumbing from the author SDK.
+// Options injects external results without exporting runtime plumbing from the author SDK.
 type Options struct {
 	Runner      sparkwing.RunnerInfo
 	Run         sparkwing.RunContext
@@ -26,7 +26,7 @@ type Options struct {
 	RunPipeline func(context.Context, string, map[string]string) (json.RawMessage, error)
 }
 
-// safety: Host exercises author code through the same plan and operation contract as a real host.
+// Host exercises author code through the same plan and operation contract as a real host.
 type Host interface {
 	Context(context.Context) context.Context
 	Plan(context.Context, string, map[string]string) (nodeproto.PlanDoc, error)

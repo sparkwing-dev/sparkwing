@@ -1,11 +1,11 @@
 package nodeproto
 
-// safety: DescribeDoc is the sole source of secret declarations; plan JSON may never repeat them.
+// DescribeDoc is the sole source of secret declarations; plan JSON may never repeat them.
 type DescribeDoc struct {
 	Pipelines []PipelineDescription `json:"pipelines"`
 }
 
-// safety: PipelineDescription supports both SDKs without linking engine registration or YAML code.
+// PipelineDescription supports both SDKs without linking engine registration or YAML code.
 type PipelineDescription struct {
 	Name        string                   `json:"name"`
 	Short       string                   `json:"short,omitempty"`
@@ -19,13 +19,13 @@ type PipelineDescription struct {
 	Secrets     []SecretDeclaration      `json:"secrets,omitempty"`
 }
 
-// safety: SecretDeclaration names required authority without carrying a secret value.
+// SecretDeclaration names required authority without carrying a secret value.
 type SecretDeclaration struct {
 	Name     string `json:"name"`
 	Optional bool   `json:"optional,omitempty"`
 }
 
-// safety: ArgumentDescription omits language-specific field names from the shared wire schema.
+// ArgumentDescription omits language-specific field names from the shared wire schema.
 type ArgumentDescription struct {
 	Name        string   `json:"name"`
 	Short       string   `json:"short,omitempty"`
@@ -38,20 +38,20 @@ type ArgumentDescription struct {
 	JobID       string   `json:"job_id,omitempty"`
 }
 
-// safety: EnvironmentDescription documents user inputs rather than transport or credential variables.
+// EnvironmentDescription documents user inputs rather than transport or credential variables.
 type EnvironmentDescription struct {
 	Name        string  `json:"name"`
 	Description string  `json:"description,omitempty"`
 	Default     *string `json:"default,omitempty"`
 }
 
-// safety: UsageExample preserves author help without letting the SDK choose host command semantics.
+// UsageExample preserves author help without letting the SDK choose host command semantics.
 type UsageExample struct {
 	Comment string `json:"comment"`
 	Command string `json:"command"`
 }
 
-// safety: StepRisks attributes refusal diagnostics to a job and step on every placement.
+// StepRisks attributes refusal diagnostics to a job and step on every placement.
 type StepRisks struct {
 	JobID  string   `json:"job_id"`
 	StepID string   `json:"step_id"`
