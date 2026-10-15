@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestConcurrency_ReleaseAndNotifyIsAtomic(t *testing.T) {
@@ -73,12 +74,12 @@ func TestConcurrency_ReconcileRecoversOrphanedQueue(t *testing.T) {
 		t.Fatalf("setup: expected 0 holders + 1 waiter, got %+v", state)
 	}
 
-	promoted, err := store.Maintenance.ReconcileConcurrencyKeys(s, ctx, store.DefaultConcurrencyLease)
+	result, err := teststore.MaintainConcurrency(ctx, s, store.ConcurrencyMaintenanceOptions{})
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
-	if promoted != 1 {
-		t.Fatalf("expected 1 waiter promoted, got %d", promoted)
+	if result.Promoted != 1 {
+		t.Fatalf("expected 1 waiter promoted, got %d", result.Promoted)
 	}
 
 	state, _ = tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
@@ -567,12 +568,12 @@ func TestConcurrency_CoalesceFollowerSurvivesMaintenanceAfterCancelledLeaderRele
 	if len(followers) != 0 {
 		t.Fatalf("cancelled leader must not resolve cached followers, got %+v", followers)
 	}
-	dropped, err := store.Maintenance.ReapStaleConcurrencyWaiters(s, ctx, time.Hour)
+	result, err := teststore.MaintainConcurrency(ctx, s, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: time.Hour})
 	if err != nil {
 		t.Fatalf("reap: %v", err)
 	}
-	if len(dropped) != 0 {
-		t.Fatalf("live follower should survive maintenance, dropped %+v", dropped)
+	if len(result.StaleWaiters) != 0 {
+		t.Fatalf("live follower should survive maintenance, dropped %+v", result.StaleWaiters)
 	}
 
 	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "cache-cancelled-leader-maintenance", "follower", "node", "same-content", "leader", "node", false)
@@ -732,12 +733,12 @@ func TestConcurrency_WaiterReaperDropsOrphanFollowers(t *testing.T) {
 		t.Fatalf("manual drop: %v", err)
 	}
 
-	dropped, err := store.Maintenance.ReapStaleConcurrencyWaiters(s, ctx, time.Hour)
+	result, err := teststore.MaintainConcurrency(ctx, s, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: time.Hour})
 	if err != nil {
 		t.Fatalf("reap: %v", err)
 	}
-	if len(dropped) != 1 || dropped[0].RunID != "r1" {
-		t.Fatalf("expected r1 dropped, got %+v", dropped)
+	if len(result.StaleWaiters) != 1 || result.StaleWaiters[0].RunID != "r1" {
+		t.Fatalf("expected r1 dropped, got %+v", result.StaleWaiters)
 	}
 	state, _ := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
 	if len(state.Waiters) != 0 {
@@ -765,41 +766,24 @@ func TestConcurrency_WaiterReaperDropsOldWaiters(t *testing.T) {
 		t.Fatalf("rewrite arrived_at: %v", err)
 	}
 
-	dropped, err := store.Maintenance.ReapStaleConcurrencyWaiters(s, ctx, 10*time.Minute)
+	result, err := teststore.MaintainConcurrency(ctx, s, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: 10 * time.Minute})
 	if err != nil {
 		t.Fatalf("reap: %v", err)
 	}
-	if len(dropped) != 1 {
-		t.Fatalf("expected 1 reaped, got %d", len(dropped))
+	if len(result.StaleWaiters) != 1 {
+		t.Fatalf("expected 1 reaped, got %d", len(result.StaleWaiters))
 	}
 
 	acquireBareT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "w2", RunID: "r2", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	dropped, _ = store.Maintenance.ReapStaleConcurrencyWaiters(s, ctx, 10*time.Minute)
-	if len(dropped) != 0 {
-		t.Fatalf("fresh waiter should not be reaped: %+v", dropped)
-	}
-}
-
-func TestConcurrency_WaiterReaperZeroAgeIsNoop(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := ctxT(t)
-	acquireT(t, s, store.AcquireSlotRequest{
-		Key: "k", HolderID: "leader", RunID: "r0", NodeID: "n",
-		Capacity: 1, Policy: store.OnLimitQueue,
-	})
-	acquireT(t, s, store.AcquireSlotRequest{
-		Key: "k", HolderID: "w", RunID: "r1", NodeID: "n",
-		Capacity: 1, Policy: store.OnLimitQueue,
-	})
-	dropped, err := store.Maintenance.ReapStaleConcurrencyWaiters(s, ctx, 0)
+	result, err = teststore.MaintainConcurrency(ctx, s, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: 10 * time.Minute})
 	if err != nil {
-		t.Fatalf("reap: %v", err)
+		t.Fatal(err)
 	}
-	if len(dropped) != 0 {
-		t.Fatalf("zero-age reap should drop nothing, got %d", len(dropped))
+	if len(result.StaleWaiters) != 0 {
+		t.Fatalf("fresh waiter should not be reaped: %+v", result.StaleWaiters)
 	}
 }
 

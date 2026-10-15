@@ -514,21 +514,13 @@ type ConcurrencyHolder struct {
 	DeclaredCapacity int
 }
 type ConcurrencyMaintenanceOptions struct {
-	Lease time.Duration
-
+	Lease        time.Duration
 	WaiterMaxAge time.Duration
-
-	CacheCap int
 }
 type ConcurrencyMaintenanceResult struct {
-	Reconciled   int
 	StaleHolders []ConcurrencyHolder
 	Promoted     int
-	CacheExpired int64
 	StaleWaiters []ConcurrencyWaiter
-	CacheEvicted int64
-
-	CacheOrphaned int64
 }
 type ConcurrencyState struct {
 	Key               string
@@ -849,7 +841,6 @@ const DefaultArgon2AcquireTimeout = 250 * time.Millisecond
 const DefaultArgon2MemoryBudget = int64(256) << 20
 const DefaultBusyTimeoutMS = 30000
 const DefaultCancelTimeout = 60 * time.Second
-const DefaultConcurrencyCacheCap = 10_000
 const DefaultConcurrencyHeartbeatInterval = 3 * time.Second
 const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
 const DefaultConcurrencyLease = DefaultLeaseDuration
@@ -1487,14 +1478,6 @@ const LogWatchHeader = "X-Sparkwing-Log-Watch"
 func LooksLikeEmail(email string) bool
 func MachinePrincipal(name string) string
 func MachineTokenScopes() []string
-var Maintenance = storeMaintenanceFns{
-	ReapStaleConcurrencyHolders:   (*Store).reapStaleConcurrencyHolders,
-	ReapStaleConcurrencyWaiters:   (*Store).reapStaleConcurrencyWaiters,
-	SweepExpiredConcurrencyCache:  (*Store).sweepExpiredConcurrencyCache,
-	SweepOrphanedConcurrencyCache: (*Store).sweepOrphanedConcurrencyCache,
-	SweepLRUConcurrencyCache:      (*Store).sweepLRUConcurrencyCache,
-	ReconcileConcurrencyKeys:      (*Store).reconcileConcurrencyKeys,
-}
 const Materialize ReconcileKind = "materialize"
 type MaterializeSource struct {
 	Kind   SourcePolicy
@@ -1844,7 +1827,6 @@ func (o *Operator) AcquireSingletonLease(ctx context.Context, name, holder strin
 func (o *Operator) ChargeRetainedStorage(ctx context.Context, lease SingletonLease) (StorageChargeSweep, error)
 func (o *Operator) ClaimTeamDeletion(ctx context.Context, team Team, holder string, now time.Time, lease time.Duration) (bool, error)
 func (o *Operator) CollectBlobTombstones(ctx context.Context, lease SingletonLease, limit int, deleter BlobDeleter) (int64, error)
-func (o *Operator) CountConcurrencyCache(ctx context.Context) (int, error)
 func (o *Operator) CreateTeam(ctx context.Context, team Team) error
 func (o *Operator) DatabaseSize(ctx context.Context) (DatabaseSize, error)
 func (o *Operator) DueRunEffects(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error)
@@ -1854,6 +1836,7 @@ func (o *Operator) ListCronSchedulesAcrossTeams(ctx context.Context) ([]CronSche
 func (o *Operator) ListStorageQuotas(ctx context.Context) (_ []StorageQuota, err error)
 func (o *Operator) ListTeams(ctx context.Context) (_ []Team, err error)
 func (o *Operator) ListWaitingNodes(ctx context.Context, readyBefore time.Time, after [2]string, limit int) ([]WaitingNode, error)
+func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease, opts ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error)
 func (o *Operator) MaintainRetention(ctx context.Context, request RetentionRequest) (RetentionResult, error)
 func (o *Operator) MarkBlobTombstones(ctx context.Context, lease SingletonLease, limit int) (int64, error)
 func (o *Operator) PendingTeamDeletions(ctx context.Context) ([]TeamDeletion, error)
@@ -1884,6 +1867,7 @@ type OperatorStore interface {
 	ReconcileControllerRuns(context.Context, SingletonLease, string, int) ([]ControllerRun, error)
 	DueRunEffects(context.Context, SingletonLease, int) ([]DesiredRunEffect, error)
 	MaintainRetention(context.Context, RetentionRequest) (RetentionResult, error)
+	MaintainConcurrency(context.Context, SingletonLease, ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error)
 }
 func OutputKeyPrefix(runID, nodeID string) string
 func OutputPath(dir, key string) string
@@ -2888,7 +2872,6 @@ func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, 
 func (s *Store) ConsumeIdentityLinkState(ctx context.Context, nonce string, expires, now time.Time) (bool, error)
 func (s *Store) CoordinatorID(ctx context.Context) (string, error)
 func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (int, error)
-func (s *Store) CountDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) CountNodesByQueueState(ctx context.Context) (map[string]int, error)
 func (s *Store) CountPendingNodes(ctx context.Context) (int, error)
 func (s *Store) CountPendingTriggers(ctx context.Context) (int, error)
@@ -3016,7 +2999,6 @@ func (s *Store) LookupSession(ctx context.Context, rawSession string) (*Session,
 func (s *Store) LookupSessionAndRenew(ctx context.Context, rawSession string, ttl, maxLifetime time.Duration) (*Session, error)
 func (s *Store) LookupToken(raw string, now time.Time) (*Token, error)
 func (s *Store) LookupTokenByPrefix(prefix string) (*Token, error)
-func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error)
 func (s *Store) MarkCardRefundMade(
 	ctx context.Context, team Team, key, refundID, status string, now time.Time,
 ) error
@@ -3050,7 +3032,6 @@ func (s *Store) PrunableNodeLogs(ctx context.Context, team Team, limit int) (_ [
 func (s *Store) PruneDownloadDays(ctx context.Context, day string) (int64, error)
 func (s *Store) PruneEgressUsage(ctx context.Context, before string) (int, error)
 func (s *Store) PruneStorageCommitReceipts(ctx context.Context, now time.Time) (int64, error)
-func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error)
 func (s *Store) ReadClaimProfile(ctx context.Context, authority capability.AuthorityRef) (match.Profile, match.Resources, error)
 func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) ([]ReapedUnit, error)

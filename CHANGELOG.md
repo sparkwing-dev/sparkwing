@@ -76,6 +76,7 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
+- **store:** [(Breaking)](docs/migrations/_unreleased.md#concurrency-maintenance-requires-the-operator-fence) concurrency maintenance moves to `Operator.MaintainConcurrency` under the elected reaper lease. Holder cleanup, waiter cleanup and promotion commit together. The unfenced maintenance registry and obsolete concurrency-cache sweeps are removed.
 - **store:** [(Breaking)](docs/migrations/_unreleased.md#unit-recovery-requires-the-elected-reaper-lease) removed the unfenced node and trigger reapers. `Store.ReapUnits` requires the current `controller.reaper` lease and returns tagged unit recovery results. Remote lease loss recovers within the same run. A started local owner fails in place.
 - **store (Breaking):** Remove the unused `Store.CreditRateTableSet` getter. Read rate-table presence through `CreditSettings.RateTableSet` with the prices from the same snapshot. See [migration guide](docs/migrations/_unreleased.md#rate-table-presence-uses-the-settings-snapshot).
 - **store:** Data authorization can run inside the transaction that owns a write. Receipt, reference, revocation and holder changes in that transaction govern access before commit.

@@ -76,6 +76,24 @@ requeues without consuming a disruption. Terminal owner timestamps stay recorded
 The old dispatcher-expiry path and its application-retry accounting are removed.
 Metered recovery still needs W1b's final transactional settlement integration.
 
+`Operator.MaintainConcurrency(ctx, lease, options)` runs under that same
+`controller.reaper` fence. It locks affected capacity entries in tenant/key order,
+removes expired or terminal holders and abandoned waiters, and promotes live queued work in
+one transaction. The fence is checked before work and before commit. Any failure
+returns zero counters and rolls back the whole pass. Expired waiter leases never
+retain arrival order. Waiters bound to terminal or missing jobs cannot promote.
+Live blocked waiters retain their arrival and lease. Options retain the existing
+promotion lease and abandoned-waiter age defaults.
+
+`Store.MaintainConcurrency`, the `Maintenance` function registry and its six
+unfenced operations are removed. `OperatorStore` includes the leased pass. The
+obsolete concurrency memo sweep, cache-count API and cache-cap fields are removed
+because the final schema stores memo records through C1's blob-record contract.
+Record expiry remains in `Operator.MaintainRetention`.
+`Store.PurgeDeadLocalConcurrency` and `Store.CountDeadLocalConcurrency` are removed.
+The elected pass cleans terminal work in every scope. Doctor no longer runs an
+independent local-key repair or exposes its two repair counters.
+
 Cancellation intent persists in `runs.cancel_reason` and `nodes.cancel_reason`,
 separately from terminal result fields. The first request owns that intent.
 `RunRow.CancelReason` and `NodeRow.CancelReason` retain it after draining and
@@ -179,7 +197,7 @@ The raw Store twins and unused deployment-wide ListConcurrencyStates are removed
 The local adapter selects the registered DefaultTeam and propagates handle errors.
 Acquisition and promotion persist the work's current generation. Queued arrivals
 also persist their lease. Expired waiters cannot keep arrival order or promote.
-Admission, polling, renewal and cache expiry use the store clock. Promotion and
+Admission, polling, renewal and capacity maintenance use the store clock. Promotion and
 waiter maintenance use the owner lease or a live run job claim instead of the
 removed run heartbeat. Run queries carry the selected tenant key.
 

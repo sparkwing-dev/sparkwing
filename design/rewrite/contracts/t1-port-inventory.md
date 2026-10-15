@@ -1,5 +1,19 @@
 # Acceptance test port inventory
 
+`pkg/store/concurrency_maintenance_fence_test.go` ports expired-holder promotion,
+aged-waiter liveness, abandoned-work cleanup and repeated-pass assertions from the
+old maintenance suite. The fence property generates forged names, holders and
+generations. Rollback tests cover statement failure and lease expiry during the
+pass. The SQLite `recovery-concurrency-no-revival/store-sqlite` cell also checks
+reopening and returning-owner queue order. Obsolete concurrency-cache sweeps are
+removed because blob records own memo retention. Missing-run capacity is prevented
+by cascading run foreign keys. The isolated zero-age no-op helper is removed with
+the unfenced API. A zero age on the final pass retains its existing default.
+`TestLeasedConcurrencyMaintenanceRemovesTerminalWorkInEveryScope` ports the old
+local-repair liveness and idempotency assertions. Terminal global holders now
+release with local holders. The separate repair-count API is removed.
+
+
 This repository-owned inventory records every parked source function and its required port. Acceptance destinations name existing skeletons; package destinations name required focused proofs to implement with their owning area. A scenario is complete only when every mapped case is implemented. Product skeletons remain skipped until their required areas exist; a wrong result must fail once activated.
 
 Branch labels below retain the descriptive suffix of each source branch. Tracker prefixes are omitted because repository files cannot contain tracker identifiers. The full Git revision identifies the exact branch snapshot independently of ref movement. Resolve source files with `git show <revision>:<file>`; removed predecessors are present before the branch comparison range. This inventory requires no personal filesystem path or live branch ref.

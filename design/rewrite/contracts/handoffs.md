@@ -64,3 +64,24 @@ must remain explicit. W1 has not changed the foreign wire shape. The reproducer
 and command are in `../w1-session12-progress.md`.
 
 **DESIGN: W9 Windows release packaging for the TypeScript SDK (from W5 review finding 6).** Invariant: every published TypeScript SDK package contains working protocol bridges for win32-x64 and win32-arm64. The release workflow builds both `native/win32-*/protocol.node` artifacts on native Windows runners, runs TestNativeProtocol and TestNativeConformance on each, stamps the SDK version, and makes publication depend on package assembly. W5's proposal is in `sdk/typescript/IMPLEMENTATION.md`.
+
+W1's concurrency-maintenance cut is complete. `Operator.MaintainConcurrency`
+requires the elected `controller.reaper` fence and commits holder cleanup, waiter
+cleanup and promotion atomically. The raw Store method, `Maintenance` registry,
+six unfenced operations and obsolete concurrency-memo sweep are removed. Controller
+startup and periodic work use the leased pass. The local daemon acquires its own
+reaper fence. The SQLite `recovery-concurrency-no-revival/store-sqlite` cell proves
+promotion, reopening and returning-owner queue order. See
+`../w1-session14-progress.md` for caller migrations and evidence. W1b's record
+retention remains separate and unchanged. The independent doctor repair,
+PurgeDeadLocalConcurrency and CountDeadLocalConcurrency are also removed. Terminal
+capacity is cleaned in every scope by the same elected pass.
+
+**Contract gap confirmed, W8/W9 launcher synchronization (A1-38).**
+`LauncherObservation` carries UnitID, JobName and NodeUID, but not claim generation.
+Store UnitID is stable across re-awards: plan/trigger use RunID, and work/eval
+encode UnitRef without claim generation. NodeUID identifies a Kubernetes node,
+not the Job instance. A sync adapter cannot distinguish a former award's Job from
+its replacement using these fields. W8/W9 must supply the immutable award fence
+and Kubernetes instance correlation before W1 can implement safe cleanup.
+`EngineController.SyncLauncher` remains a stub. No foreign wire type was changed.

@@ -87,9 +87,6 @@ type DoctorReport struct {
 
 	StrayStepSessions []DoctorStraySession `json:"stray_step_sessions,omitempty"`
 
-	DeadConcurrencyHolders int `json:"dead_concurrency_holders"`
-	DeadConcurrencyWaiters int `json:"dead_concurrency_waiters"`
-
 	DanglingRunDirs []string `json:"dangling_run_dirs,omitempty"`
 
 	UnknownRunDirs []string `json:"unknown_run_dirs,omitempty"`
@@ -287,8 +284,6 @@ func (r DoctorReport) Clean() bool {
 		!r.PermissionAuditUnverified &&
 		len(r.OrphanedRuns) == 0 &&
 		len(r.StrayStepSessions) == 0 &&
-		r.DeadConcurrencyHolders == 0 &&
-		r.DeadConcurrencyWaiters == 0 &&
 		len(r.DanglingRunDirs) == 0 &&
 		len(r.StaleRefWorktrees) == 0 &&
 		len(r.AdmissionRejections) == 0 &&
@@ -373,9 +368,6 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 	}
 	if st != nil {
 		if err := diagnoseOrphanRuns(ctx, st, daemonLive, report.Daemon.Blind(), dryRun, &report); err != nil {
-			return report, err
-		}
-		if err := diagnoseDeadConcurrency(ctx, st, dryRun, &report); err != nil {
 			return report, err
 		}
 		if err := diagnoseDanglingRunDirs(ctx, st, runsRoot, localStoreOwnsRunRows(ctx, p, st), dryRun, &report); err != nil {
@@ -1157,23 +1149,6 @@ func diagnoseOrphanRuns(ctx context.Context, st *store.Store, daemonLive map[str
 	return nil
 }
 
-func diagnoseDeadConcurrency(ctx context.Context, st *store.Store, dryRun bool, report *DoctorReport) error {
-	if dryRun {
-		h, w, err := st.CountDeadLocalConcurrency(ctx)
-		if err != nil {
-			return err
-		}
-		report.DeadConcurrencyHolders, report.DeadConcurrencyWaiters = h, w
-		return nil
-	}
-	h, w, err := st.PurgeDeadLocalConcurrency(ctx)
-	if err != nil {
-		return err
-	}
-	report.DeadConcurrencyHolders, report.DeadConcurrencyWaiters = h, w
-	return nil
-}
-
 // safety: a run directory with no row in this store is evidence the run is
 // gone only when this store is where the row would have been written. A
 // profile that keeps run state off this machine, and a store that has never
@@ -1423,8 +1398,6 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	fmt.Fprintf(w, "permission_audit_unverified\t%d\n", permissionUnverified)
 	fmt.Fprintf(w, "orphaned_runs\t%d\n", len(r.OrphanedRuns))
 	fmt.Fprintf(w, "stray_step_sessions\t%d\n", len(r.StrayStepSessions))
-	fmt.Fprintf(w, "dead_concurrency_holders\t%d\n", r.DeadConcurrencyHolders)
-	fmt.Fprintf(w, "dead_concurrency_waiters\t%d\n", r.DeadConcurrencyWaiters)
 	fmt.Fprintf(w, "dangling_run_dirs\t%d\n", len(r.DanglingRunDirs))
 	fmt.Fprintf(w, "unknown_run_dirs\t%d\n", len(r.UnknownRunDirs))
 	fmt.Fprintf(w, "stale_ref_worktrees\t%d\n", len(r.StaleRefWorktrees))
@@ -1540,10 +1513,6 @@ func renderDoctorPretty(w io.Writer, r DoctorReport) error {
 			}
 			fmt.Fprintf(tw, "%s\n", line)
 		}
-	}
-	if r.DeadConcurrencyHolders > 0 || r.DeadConcurrencyWaiters > 0 {
-		fmt.Fprintf(tw, "dead local concurrency rows %s\t%d holders, %d waiters\n",
-			verb, r.DeadConcurrencyHolders, r.DeadConcurrencyWaiters)
 	}
 	if n := len(r.DanglingRunDirs); n > 0 {
 		fmt.Fprintf(tw, "dangling run directories %s\t%d\n", verb, n)

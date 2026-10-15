@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestConcurrency_GrantClearsOwnStaleWaiterRow(t *testing.T) {
@@ -223,32 +224,13 @@ func concurrencyFuzzOp(t *testing.T, ctx context.Context, s *store.Store, rng *r
 				return fmt.Errorf("force-release %s: %w", key, err)
 			}
 		}
-	case 9:
-		if _, err := store.Maintenance.ReapStaleConcurrencyHolders(s, ctx); err != nil {
-			return fmt.Errorf("reap holders: %w", err)
-		}
-	case 10:
+	case 9, 10, 11:
 		maxAge := time.Hour
 		if rng.Intn(3) == 0 {
 			maxAge = time.Nanosecond
 		}
-		if _, err := store.Maintenance.ReapStaleConcurrencyWaiters(s, ctx, maxAge); err != nil {
-			return fmt.Errorf("reap waiters: %w", err)
-		}
-	case 11:
-		switch rng.Intn(3) {
-		case 0:
-			if _, err := store.Maintenance.SweepExpiredConcurrencyCache(s, ctx); err != nil {
-				return fmt.Errorf("sweep expired cache: %w", err)
-			}
-		case 1:
-			if _, err := store.Maintenance.SweepLRUConcurrencyCache(s, ctx, 1); err != nil {
-				return fmt.Errorf("sweep lru cache: %w", err)
-			}
-		default:
-			if _, err := store.Maintenance.ReconcileConcurrencyKeys(s, ctx, 0); err != nil {
-				return fmt.Errorf("reconcile: %w", err)
-			}
+		if _, err := teststore.MaintainConcurrency(ctx, s, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: maxAge}); err != nil {
+			return fmt.Errorf("maintain concurrency: %w", err)
 		}
 	}
 

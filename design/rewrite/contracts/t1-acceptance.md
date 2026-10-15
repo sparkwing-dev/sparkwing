@@ -4,6 +4,12 @@
 
 ## Amendment 1 integration evidence
 
+`TestRecovery/recovery-concurrency-no-revival/store-sqlite` runs the elected
+capacity maintenance pass. A forged fence cannot promote work. After expiry, the
+queued competitor takes capacity exactly once. Reopening preserves that holder,
+and the former owner queues as a new arrival. Native host and platform cells
+remain required.
+
 `TestRecovery/recovery-local-orphans/store-sqlite` proves the local store boundary.
 It runs the elected reaper, repeats the pass and reopens the database. Unstarted
 owners requeue without a disruption. Started owners fail in place. Each case has

@@ -304,7 +304,10 @@ func TestHeldRunStoreReadsWhileTheReaperWaitsOnAForeignWriter(t *testing.T) {
 	reaped := make(chan struct{})
 	go func() {
 		defer close(reaped)
-		_, _ = rw.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{})
+		lease, err := rw.AsOperator().AcquireSingletonLease(ctx, "controller.reaper", "test-reaper", time.Minute)
+		if err == nil {
+			_, _ = rw.AsOperator().MaintainConcurrency(ctx, lease, store.ConcurrencyMaintenanceOptions{})
+		}
 	}()
 	time.Sleep(250 * time.Millisecond)
 

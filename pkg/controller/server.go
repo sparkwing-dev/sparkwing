@@ -62,8 +62,6 @@ type Server struct {
 
 	sessionMaxLifetime time.Duration
 
-	concurrencyCacheCap int
-
 	secretsCipher Cipher
 
 	costPerRunnerHour float64
@@ -171,23 +169,22 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		logger = slog.Default()
 	}
 	srv := &Server{
-		store:               st,
-		outputSigner:        newOutputSigner(),
-		logger:              logger,
-		loginLimit:          newLoginLimiter(),
-		queueTimeout:        15 * time.Minute,
-		sessionMaxLifetime:  DefaultSessionMaxLifetime,
-		concurrencyCacheCap: store.DefaultConcurrencyCacheCap,
-		runnerHeadroom:      newRunnerHeadroomRegistry(),
-		liveLogs:            newLiveLogs(),
-		runnerPresence:      newRunnerPresenceRegistry(),
-		runnerHeartbeats:    newRunnerHeartbeatRegistry(),
-		cronHolder:          defaultCronHolder(),
-		leaseHolder:         rand.Text(),
-		requestBudget:       newPrincipalBudget(RequestBudget{}),
-		idleClaimPoll:       DefaultMaxIdleClaimPoll,
-		downloadFree:        DefaultTeamDailyDownloadFreeBytes,
-		downloadFunded:      DefaultTeamDailyDownloadFundedBytes,
+		store:              st,
+		outputSigner:       newOutputSigner(),
+		logger:             logger,
+		loginLimit:         newLoginLimiter(),
+		queueTimeout:       15 * time.Minute,
+		sessionMaxLifetime: DefaultSessionMaxLifetime,
+		runnerHeadroom:     newRunnerHeadroomRegistry(),
+		liveLogs:           newLiveLogs(),
+		runnerPresence:     newRunnerPresenceRegistry(),
+		runnerHeartbeats:   newRunnerHeartbeatRegistry(),
+		cronHolder:         defaultCronHolder(),
+		leaseHolder:        rand.Text(),
+		requestBudget:      newPrincipalBudget(RequestBudget{}),
+		idleClaimPoll:      DefaultMaxIdleClaimPoll,
+		downloadFree:       DefaultTeamDailyDownloadFreeBytes,
+		downloadFunded:     DefaultTeamDailyDownloadFundedBytes,
 	}
 	srv.recordQueueActivity(time.Now())
 	return srv
@@ -1232,11 +1229,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 		servers = append(servers, listener(s.trustedProxyAddr, ratelimit.TrustedListener(srv.Handler)))
 	}
 
-	if n, err := store.Maintenance.ReconcileConcurrencyKeys(s.store, ctx, store.DefaultConcurrencyLease); err != nil {
-		s.logger.Warn("concurrency reconcile on startup failed", "err", err)
-	} else if n > 0 {
-		s.logger.Info("concurrency reconcile promoted stranded waiters", "count", n)
-	}
+	s.reapLeased(ctx)
 
 	s.loadEgressUsage(ctx)
 	s.reconcileOwnedRuns(ctx)
@@ -1389,9 +1382,7 @@ func (s *Server) reapLeased(ctx context.Context) bool {
 }
 
 func (s *Server) reap(ctx context.Context, lease store.SingletonLease) {
-	concurrency, err := s.store.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{
-		CacheCap: s.concurrencyCacheCap,
-	})
+	concurrency, err := s.store.AsOperator().MaintainConcurrency(ctx, lease, store.ConcurrencyMaintenanceOptions{})
 	if err != nil {
 		s.logger.Error("concurrency maintenance failed", "err", err)
 	}
@@ -1405,12 +1396,6 @@ func (s *Server) reap(ctx context.Context, lease store.SingletonLease) {
 			"key", w.Key, "run_id", w.RunID,
 			"node_id", w.NodeID, "policy", w.Policy,
 			"arrived_at", w.ArrivedAt.Format(time.RFC3339))
-	}
-	if concurrency.CacheExpired > 0 {
-		s.logger.Info("swept expired concurrency cache entries", "count", concurrency.CacheExpired)
-	}
-	if concurrency.CacheEvicted > 0 {
-		s.logger.Info("evicted LRU concurrency cache entries", "count", concurrency.CacheEvicted)
 	}
 	if recoveries, err := s.store.ReapUnits(ctx, lease, 500); err != nil {
 		s.logger.Error("work recovery sweep failed", "err", err)

@@ -1,5 +1,18 @@
 # Migrating to the next release
 
+## Concurrency maintenance requires the operator fence
+
+`Store.MaintainConcurrency` and the `store.Maintenance` registry are removed.
+Acquire `controller.reaper` through `Operator.AcquireSingletonLease` and pass that
+fence to `Operator.MaintainConcurrency(ctx, lease, options)`. The pass commits
+holder cleanup, waiter cleanup and promotion together. An error returns no
+committed counts. The old concurrency-cache sweep and count APIs are removed.
+Memo-record retention uses `Operator.MaintainRetention` under its maintenance
+lease. `Store.PurgeDeadLocalConcurrency` and `Store.CountDeadLocalConcurrency`
+are removed. The elected pass cleans terminal capacity in every scope. Doctor's
+`dead_concurrency_holders` and `dead_concurrency_waiters` fields are removed with
+its independent repair path.
+
 ## Unit recovery requires the elected reaper lease
 
 `Store.ReapExpiredNodeClaims`, `Maintenance.RecoverExpiredNodeClaims`,
