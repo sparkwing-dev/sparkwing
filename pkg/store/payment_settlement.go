@@ -21,8 +21,7 @@ type PaymentSettlement struct {
 	Replayed    bool
 }
 
-// SettlePayment accepts only authenticated provider events for a committed checkout.
-// The settings payment_mode value is a required JSON string, "test" or "live".
+// SettlePayment settles verified provider events against a committed checkout.
 func (s *Store) SettlePayment(ctx context.Context, proof capability.VerifiedPaymentEvent) (PaymentSettlement, error) {
 	if proof == (capability.VerifiedPaymentEvent{}) {
 		return PaymentSettlement{}, authorityError(apierr.Unauthenticated, "payment verification is required")

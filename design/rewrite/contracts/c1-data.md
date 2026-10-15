@@ -483,13 +483,16 @@ facts. Setting the flag false cannot weaken DataRemoteCache authority. Returned
 `RecordLookupResult.Members` includes committed path/size/mode metadata after
 read-edge checks. Internal member reads confer no client read authority.
 
-`upload_contract.go` defines ReserveBlobUpload, LookupBlobUpload, CommitBlobUpload
+`blob_upload.go` defines upload tickets and verified evidence.
+`upload_runtime.go` implements ReserveBlobUpload, LookupBlobUpload, CommitBlobUpload
 and AbortBlobUpload using the existing uploads table. Reservation binds tenant,
 uploader, digest, size, expiry, provenance and ref facts before signing. The
 physical backend verifies size/digest before W1 commits existence and the exact
 receipt with quota settlement. Commit repeats live authority and fence checks.
 `VerifiedUploadCommit.ReplicaID` is trusted controller configuration, never a
 client-selected field. The ticket ID also binds the persisted quota reservation.
+It is one ASCII letter/digit/underscore/hyphen path segment selected by the
+trusted adapter within its tenant/principal idempotency scope.
 Existing CAS bytes grant no receipt. Failed settlement grants no edge. Abort or
 leased retention releases uncommitted reservations without deleting a live blob.
 
@@ -1056,6 +1059,9 @@ match. An unset payment ID binds once from the signed event for that checkout.
 checkout records at most one credit grant, even when multiple paid event IDs arrive.
 Failures and expiry cannot undo paid credit. Financial rows have no run cascade.
 Human grants, refunds and freezes remain console-only operations.
+
+`payment_settlement.go` owns settlement and receipt deduplication. The
+`settings.payment_mode` value is a required JSON string, `"test"` or `"live"`.
 
 Payment lookups and console refunds follow the checkout's persisted `grant_id`.
 The grant's ledger reference is not a provider payment ID. Refunds retain that

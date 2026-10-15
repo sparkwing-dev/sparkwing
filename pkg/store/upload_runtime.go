@@ -29,7 +29,8 @@ func validUploadTicket(id string) bool {
 
 func blobUploadQuotaID(id string) string { return "upload:" + id }
 
-func (t *Tenant) reserveBlobUpload(ctx context.Context, request UploadReservationRequest) (UploadReservation, error) {
+// ReserveBlobUpload atomically reserves quota and an immutable ticket for the authorized uploader.
+func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservationRequest) (UploadReservation, error) {
 	if !validUploadTicket(request.ID) || !validBlobDigest(request.Intent.Digest) || request.Intent.Size < 0 {
 		return UploadReservation{}, authorityError(apierr.BadRequest, "invalid upload reservation")
 	}
@@ -109,7 +110,8 @@ func blobUploadReservationSizeTx(ctx context.Context, tx *storeTx, team Team, a 
 	return 0, 0, nil
 }
 
-func (t *Tenant) lookupBlobUpload(ctx context.Context, authority blob.Authority, id string) (UploadReservation, error) {
+// LookupBlobUpload rechecks the authenticated uploader before returning its ticket.
+func (t *Tenant) LookupBlobUpload(ctx context.Context, authority blob.Authority, id string) (UploadReservation, error) {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return UploadReservation{}, err
@@ -129,7 +131,8 @@ func (t *Tenant) lookupBlobUpload(ctx context.Context, authority blob.Authority,
 	return u, tx.Commit()
 }
 
-func (t *Tenant) commitBlobUpload(ctx context.Context, request VerifiedUploadCommit) (blob.Receipt, error) {
+// CommitBlobUpload atomically settles verified bytes, quota and the exact uploader receipt.
+func (t *Tenant) CommitBlobUpload(ctx context.Context, request VerifiedUploadCommit) (blob.Receipt, error) {
 	if !validUploadTicket(request.TicketID) || request.ReplicaID == "" || request.Verified.Team != string(t.team) || !validBlobDigest(request.Verified.Digest) || request.Verified.Size < 0 {
 		return blob.Receipt{}, authorityError(apierr.BadRequest, "verified upload and replica are required")
 	}
@@ -172,7 +175,8 @@ func (t *Tenant) commitBlobUpload(ctx context.Context, request VerifiedUploadCom
 	return receipt, tx.Commit()
 }
 
-func (t *Tenant) abortBlobUpload(ctx context.Context, authority blob.Authority, id string) error {
+// AbortBlobUpload releases an uncommitted ticket and quota under current uploader authority.
+func (t *Tenant) AbortBlobUpload(ctx context.Context, authority blob.Authority, id string) error {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
