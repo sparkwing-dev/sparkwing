@@ -57,6 +57,16 @@ func startWingdCfg(t *testing.T, cfg wingd.Config) {
 	if cfg.Runs == nil {
 		_, st, _ := openWingdBackends(t, cfg.Home)
 		ctx := context.WithoutCancel(t.Context())
+		finalize := func(id, reason string) error {
+			run, err := st.GetRun(ctx, id)
+			if err != nil {
+				return err
+			}
+			if isTerminalStatus(run.Status) {
+				return nil
+			}
+			return st.FinishRun(ctx, id, "cancelled", reason)
+		}
 		cfg.Runs = &wingd.FuncRunStore{
 			IsTerminal: func(id string) (bool, error) {
 				run, err := st.GetRun(ctx, id)
@@ -69,12 +79,17 @@ func startWingdCfg(t *testing.T, cfg wingd.Config) {
 				return isTerminalStatus(run.Status), nil
 			},
 			Finalize: func(id string) {
-				if err := st.FinishRunsIfActive(ctx, []string{id}, "cancelled", "admission connection lost"); err != nil {
+				if err := finalize(id, "admission connection lost"); err != nil {
 					t.Errorf("finalize run: %v", err)
 				}
 			},
 			FinalizeCancelled: func(ids []string, reason string) error {
-				return st.FinishRunsIfActive(ctx, ids, "cancelled", reason)
+				for _, id := range ids {
+					if err := finalize(id, reason); err != nil {
+						return err
+					}
+				}
+				return nil
 			},
 		}
 	}

@@ -131,18 +131,12 @@ func TestFinishedPendingRowCannotBeReopenedOrRewritten(t *testing.T) {
 	if err := s.FinishRun(ctx, run.ID, "failed", "late claimant"); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("single finish = %v, want invalid input", err)
 	}
-	if err := s.FinishRunsIfActive(ctx, []string{run.ID}, "failed", "late claimant"); err != nil {
-		t.Fatal(err)
-	}
 	tn, err := s.ForTeam(ctx, store.DefaultTeam)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := tn.FinishRun(ctx, run.ID, "failed", "late claimant"); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("team single finish = %v, want invalid input", err)
-	}
-	if err := tn.FinishRunsIfActive(ctx, []string{run.ID}, "failed", "late claimant"); err != nil {
-		t.Fatal(err)
 	}
 	run, err = s.GetRun(ctx, run.ID)
 	if err != nil || run.Status != "pending" || run.FinishedAt == nil || !run.FinishedAt.Equal(ended) {

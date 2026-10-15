@@ -1,94 +1,148 @@
 package store_test
 
 import (
-	"context"
-	"errors"
+	"math/rand/v2"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-func TestFinishRunIfActiveHasOneCommittedWinner(t *testing.T) {
-	target := storetest.New(t)
-	first, second := target.Open(t), target.Open(t)
-	if err := first.CreateRun(t.Context(), store.Run{ID: "run", Pipeline: "finish", Status: "running", StartedAt: time.Now()}); err != nil {
+func runCompletionFixture(t *testing.T, s *store.Store) (*store.Tenant, store.FinishRunRequest) {
+	t.Helper()
+	tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(_ *store.IntakeRequest, doc *nodeproto.PlanDoc) { doc.Jobs = []nodeproto.JobSpec{} })
+	if err != nil {
 		t.Fatal(err)
 	}
-	for _, status := range []string{"", "running", "pending", "invalid"} {
-		won, err := first.FinishRunIfActive(t.Context(), "run", status, "")
-		if err == nil || won {
-			t.Fatalf("nonterminal %q accepted: won=%t error=%v", status, won, err)
-		}
+	if _, err := tenant.AcceptPlan(t.Context(), plan); err != nil {
+		t.Fatal(err)
 	}
-	before, err := first.GetRun(t.Context(), "run")
-	if err != nil || before == nil || before.Status != "running" || before.FinishedAt != nil {
-		t.Fatalf("invalid status changed run=%+v error=%v", before, err)
+	if _, err := tenant.TransitionRun(t.Context(), store.RunTransition{RunID: plan.RunID, Actor: plan.Actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
+		t.Fatal(err)
+	}
+	return tenant, store.FinishRunRequest{Unit: plan.Actor.Owner, Transition: store.RunTransition{RunID: plan.RunID, To: store.RunSuccess, Cause: store.RunFinish, Actor: plan.Actor}}
+}
+
+func TestRunCompletionHasOneCommittedWinner(t *testing.T) {
+	target := storetest.NewSQLite(t)
+	first, second := target.Open(t), target.Open(t)
+	tenant, finish := runCompletionFixture(t, first)
+	other, err := second.ForTeam(t.Context(), tenant.Team())
+	if err != nil {
+		t.Fatal(err)
 	}
 	var wins atomic.Int32
 	var wg sync.WaitGroup
 	ready := make(chan struct{})
 	for i := range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-ready
-			st := []*store.Store{first, second}[i%2]
-			won, err := st.FinishRunIfActive(t.Context(), "run", "success", "")
+			applied, err := []*store.Tenant{tenant, other}[i%2].FinishRunAndUnit(t.Context(), finish)
 			if err != nil {
 				t.Error(err)
+				return
 			}
-			if won {
+			if !applied.Replayed {
 				wins.Add(1)
 			}
-		}()
+		})
 	}
 	close(ready)
 	wg.Wait()
 	if wins.Load() != 1 {
 		t.Fatalf("committed winners=%d, want one", wins.Load())
 	}
-	before, err = first.GetRun(t.Context(), "run")
-	if err != nil || before == nil || before.FinishedAt == nil {
-		t.Fatalf("winning run=%+v error=%v", before, err)
+	before, err := tenant.ReadRun(t.Context(), finish.Unit.RunID)
+	if err != nil || before.FinishedAt == nil || before.State != store.RunSuccess {
+		t.Fatalf("winning run: %+v, %v", before, err)
 	}
-	for _, status := range []string{"success", "failed", "cancelled"} {
-		won, err := second.FinishRunIfActive(t.Context(), "run", status, "retry")
-		if err != nil || won {
-			t.Fatalf("terminal retry won=%t error=%v", won, err)
+	for _, state := range []store.RunState{store.RunSuccess, store.RunFailed, store.RunCancelled} {
+		retry := finish
+		retry.Transition.To, retry.Transition.MaskedError = state, "late report"
+		if _, err := other.FinishRunAndUnit(t.Context(), retry); err == nil {
+			t.Fatalf("different terminal report %s accepted", state)
 		}
 	}
-	after, err := second.GetRun(t.Context(), "run")
-	if err != nil || after == nil || after.FinishedAt == nil || after.Status != "success" || after.Error != "" || !after.FinishedAt.Equal(*before.FinishedAt) {
-		t.Fatalf("retry changed terminal state: before=%+v after=%+v error=%v", before, after, err)
+	after, err := tenant.ReadRun(t.Context(), finish.Unit.RunID)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("late report rewrote terminal run: %+v, %v", after, err)
 	}
 }
 
-func TestFinishRunIfActivePreservesMutationFences(t *testing.T) {
-	st := storetest.Open(t)
-	identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "token"}
-	if err := st.CreateTrigger(t.Context(), store.Trigger{ID: "run", Pipeline: "finish", Status: "pending", CreatedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	claim, err := st.ClaimNextTriggerFor(t.Context(), identity, time.Minute, nil, nil)
-	if err != nil || claim == nil {
-		t.Fatalf("claim=%+v error=%v", claim, err)
-	}
-	if err := st.CreateRun(t.Context(), store.Run{ID: "run", Pipeline: "finish", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	fence := store.TriggerClaimFence{Claimant: identity, ClaimGeneration: claim.ClaimSeq + 1}
-	for _, ctx := range []context.Context{store.WithTriggerClaimFence(t.Context(), fence), store.WithNodeClaimFence(t.Context(), store.NodeClaimFence{})} {
-		won, err := st.FinishRunIfActive(ctx, "run", "success", "")
-		if won || !errors.Is(err, store.ErrLockHeld) {
-			t.Fatalf("unauthorized finish won=%t error=%v", won, err)
+func TestRunCompletionAuthorityProperty(t *testing.T) {
+	s := storetest.OpenSQLite(t)
+	tenant, finish := runCompletionFixture(t, s)
+	foreign := tenantFor(t, s, "foreign")
+	before := readMutationSnapshot(t, tenant, s, finish.Unit.RunID)
+	for _, state := range []store.RunState{"", store.RunPending, store.RunRunning, "invalid"} {
+		invalid := finish
+		invalid.Transition.To = state
+		if _, err := tenant.FinishRunAndUnit(t.Context(), invalid); err == nil {
+			t.Fatalf("nonterminal finish %q accepted", state)
+		}
+		if after := readMutationSnapshot(t, tenant, s, finish.Unit.RunID); !reflect.DeepEqual(before, after) {
+			t.Fatal("invalid finish changed persisted state")
 		}
 	}
-	fence.ClaimGeneration = claim.ClaimSeq
-	if won, err := st.FinishRunIfActive(store.WithTriggerClaimFence(t.Context(), fence), "run", "success", ""); err != nil || !won {
-		t.Fatalf("authorized finish won=%t error=%v", won, err)
+
+	rng := rand.New(rand.NewPCG(83, 29))
+	for i := range 40 {
+		forged := finish
+		target := tenant
+		suffix := string(rune('a' + rng.IntN(26)))
+		switch i % 8 {
+		case 0:
+			forged.Transition.Actor.CapabilityPrefix += suffix
+		case 1:
+			forged.Transition.Actor.Authority.ID += suffix
+		case 2:
+			forged.Transition.Actor.Owner.Generation += 1 + rng.Int64N(100)
+		case 3:
+			forged.Unit.Generation += 1 + rng.Int64N(100)
+		case 4:
+			forged.Unit.Holder += suffix
+			forged.Transition.Actor.Owner = forged.Unit
+		case 5:
+			forged.Unit.RunID += suffix
+			forged.Transition.Actor.Owner = forged.Unit
+		case 6:
+			target = foreign
+		case 7:
+			forged.Transition.Actor.Kind = store.ActorHolder
+		}
+		if _, err := target.FinishRunAndUnit(t.Context(), forged); err == nil {
+			t.Fatalf("forged owner accepted: %+v", forged)
+		}
+		if after := readMutationSnapshot(t, tenant, s, finish.Unit.RunID); !reflect.DeepEqual(before, after) {
+			t.Fatal("refused owner changed persisted state")
+		}
+	}
+	if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunCompletionFailureRollsBackOwnerAndVerdict(t *testing.T) {
+	s := storetest.OpenSQLite(t)
+	tenant, finish := runCompletionFixture(t, s)
+	before := readMutationSnapshot(t, tenant, s, finish.Unit.RunID)
+	if _, err := s.DB().ExecContext(t.Context(), `CREATE TRIGGER refuse_completion_event BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT,'event refused'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err == nil {
+		t.Fatal("completion ignored failed event")
+	}
+	if after := readMutationSnapshot(t, tenant, s, finish.Unit.RunID); !reflect.DeepEqual(before, after) {
+		t.Fatal("failed completion committed partial state")
+	}
+	if _, err := s.DB().ExecContext(t.Context(), `DROP TRIGGER refuse_completion_event`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err != nil {
+		t.Fatal(err)
 	}
 }

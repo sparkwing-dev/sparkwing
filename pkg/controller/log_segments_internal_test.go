@@ -54,9 +54,6 @@ func newLogSegmentFixture(t *testing.T) logSegmentFixture {
 	if err := st.CreateRun(t.Context(), store.Run{ID: "run-d", Pipeline: "demo", Status: "pending", StartedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreatePlanNode(t.Context(), store.DefaultTeam, "run-d", now); err != nil {
-		t.Fatal(err)
-	}
 	srv := New(st, nil).EnableAuthFromStore()
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)

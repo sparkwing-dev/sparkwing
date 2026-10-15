@@ -36,9 +36,6 @@ func newDispatchRouteFixture(t *testing.T) dispatchRouteFixture {
 	if err := st.CreateRun(ctx, store.Run{ID: "run-d", Pipeline: "demo", Status: "pending", StartedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreatePlanNode(ctx, store.DefaultTeam, "run-d", now); err != nil {
-		t.Fatal(err)
-	}
 	reader, _, err := st.CreateToken("reader", store.TokenKindRunner, []string{ScopeRunsRead}, 0, now)
 	if err != nil {
 		t.Fatal(err)

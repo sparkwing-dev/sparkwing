@@ -2,6 +2,23 @@
 
 <!-- design:begin -->
 
+## Planning units and terminal run completion
+
+The unused legacy `Store.CreatePlanNode` writer is removed. Admission creates
+an operational planning or trigger unit, separate from the job graph.
+`FinishRunIfActive` and `FinishRunsIfActive` are removed from Store and Tenant.
+`Tenant.FinishRunAndUnit` owns terminal verdicts, owner closure, events and
+completion intents in one transaction. Exact replay retains the finish time.
+Conflicting terminal reports fail. Completion checks include concurrent real
+SQLite connections, generated owner and tenant fences, and event-write rollback.
+
+Queue ordering and matching checks now live in `pkg/store` tests. They seed
+accounts, enrolled machines, Actions registration, intake, plans and readiness
+through store APIs. Named and queued claims retain the same matcher refusals.
+The queue check preserves the blocked job's complete row across unsuccessful
+scans and proves that current push authority excludes another repository.
+The native scenario catalog is unchanged.
+
 ## Shared launcher claim queue
 
 `Store.ClaimLaunch`, `LaunchClaim`, `LaunchClaimRequest`, the launcher-only

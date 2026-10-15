@@ -93,6 +93,10 @@ func checkStorePlanSeals(t *testing.T) (err error) {
 }
 
 func storePlanSealRequest(ctx context.Context, s *store.Store) (*store.Tenant, store.PlanAcceptance, error) {
+	return storePlanSealRequestWith(ctx, s, nil)
+}
+
+func storePlanSealRequestWith(ctx context.Context, s *store.Store, configure func(*store.IntakeRequest, *nodeproto.PlanDoc)) (*store.Tenant, store.PlanAcceptance, error) {
 	s.SetIntakePolicy(sealIntakePolicy{})
 	s.SetClaimProfileResolver(acceptanceClaimProfile{})
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
@@ -128,6 +132,10 @@ func storePlanSealRequest(ctx context.Context, s *store.Store) (*store.Tenant, s
 		return nil, store.PlanAcceptance{}, err
 	}
 	input := store.IntakeRequest{Authority: authority, Request: runspec.Request{Version: 1, Team: string(acceptanceTeam), Pipeline: "fixture", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1", Display: "https://github.com/acme/repo"}}, RequestedArgs: map[string]string{"message": "sealed"}, Options: runspec.Options{OwnerExecutionTimeout: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Hour}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "owner_execution_timeout"}}}}}
+	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "alpha", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "beta", Needs: []string{"alpha"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
+	if configure != nil {
+		configure(&input, &plan)
+	}
 	admitted, err := tenant.AdmitRun(ctx, input)
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
@@ -136,7 +144,6 @@ func storePlanSealRequest(ctx context.Context, s *store.Store) (*store.Tenant, s
 	if err != nil {
 		return nil, store.PlanAcceptance{}, err
 	}
-	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "alpha", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "beta", Needs: []string{"alpha"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
 	declarations := runspec.CheckoutDeclarations{Version: 1}
 	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan})
 	if err != nil {

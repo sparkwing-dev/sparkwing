@@ -1124,3 +1124,24 @@ appear in tenant event reads. It closes the signup foreign-key failure exposed
 by using real account admission in the moved checks. Existing shared recovery
 fixtures remain in `internal/acceptance` until their host, billing and remaining
 store consumers migrate. No native cell is newly claimed complete.
+
+## W1 planning-node and raw run-completion retirement
+
+`Store.CreatePlanNode`, `Store.FinishRunIfActive`, `Tenant.FinishRunIfActive`,
+`Store.FinishRunsIfActive` and `Tenant.FinishRunsIfActive` are removed.
+Admission owns planning units. Completion uses `FinishRunAndUnit`.
+
+| Removed check | Final evidence |
+| --- | --- |
+| `TestFinishRunIfActiveHasOneCommittedWinner` | `TestRunCompletionHasOneCommittedWinner` races eight completions across two SQLite handles. It observes one new commit and seven exact replays, then refuses changed terminal reports and preserves the original finish time. |
+| `TestFinishRunIfActivePreservesMutationFences` | `TestRunCompletionAuthorityProperty` generates forty authority, owner, holder, run and tenant mutations. Invalid terminal states and all forged owners leave run, owner, billing, events and completion intents unchanged. |
+| `TestFinishRunsIfActiveRollsBackEveryMemberWhenOneUpdateFails` | The cross-run batch API is removed. `TestRunCompletionFailureRollsBackOwnerAndVerdict` injects an event failure and proves the run and owner roll back together. Existing `TestFinishRunAndUnitCommitsTogetherAndReplays` also refuses failed owner and outbox writes. |
+| `placement-ordered-matching/store-sqlite` | `TestStoreQueueOrder` covers FIFO and preference order, registered Actions scope, an unchanged blocked job and later eligible acquisition through real admission and plan acceptance. |
+| `placement-granted-identity-and-capacity/store-sqlite` | `TestStoreClaimMatching` retains sixteen named/queued cases. Setup provisions actual machine and deployment-authorized metered roots. Refused claims preserve the snapshot, events, billing and completion intents. |
+
+The two moved harness files and their placement wrappers are deleted.
+The queue-count helper remains beside its recovery caller until that check moves.
+The shared recovery fixture is still used by other store, host and billing tests.
+The two controller fixtures lose their obsolete planning-node insertion.
+Their legacy routes and log transport still require their owners' cutovers.
+No native placement is newly unskipped.

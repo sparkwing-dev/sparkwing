@@ -1,5 +1,18 @@
 # Migrating to the next release
 
+## Run completion and planning units
+
+`Store.CreatePlanNode` is removed. `Tenant.AdmitRun` creates the operational
+planning or trigger unit. Claim it with `Store.ClaimUnit` before submitting
+`Tenant.AcceptPlan`. A planning unit is separate from execution jobs.
+
+`FinishRunIfActive` and `FinishRunsIfActive` on Store and Tenant are removed.
+Use `Tenant.FinishRunAndUnit` with the current owner fence. It commits the run
+verdict, owner closure, event and completion intents together. An exact replay
+retains its original finish time. A different report against a terminal run
+is refused. Cancellation uses the authority-bearing cancellation transaction
+and lets held work drain before completion.
+
 ## GitHub runner enrollment uses current administration authority
 
 `Tenant.AddGitHubRunnerBinding` and `RemoveGitHubRunnerBinding` are removed.

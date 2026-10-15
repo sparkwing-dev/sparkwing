@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -82,4 +83,19 @@ func checkRecoveryUnstarted(ctx context.Context, root string) (err error) {
 		return fmt.Errorf("unstarted lapses created attempts=%d runs=%d", attempts, runs)
 	}
 	return checkRecoveryEvents(ctx, f, append(kinds, "job_started"))
+}
+
+func checkStoreQueueCounts(ctx context.Context, s *store.Store, want map[string]int) error {
+	for _, state := range store.QueueStates() {
+		want[state] += 0
+	}
+	counts, err := s.AsOperator().CountNodesByQueueState(ctx)
+	if err != nil || !reflect.DeepEqual(counts, want) {
+		return fmt.Errorf("queue states: %v, %v; want %v", counts, err, want)
+	}
+	ready, err := s.AsOperator().CountPendingNodes(ctx)
+	if err != nil || ready != want[store.QueueStateReady] {
+		return fmt.Errorf("ready count: %d, %v; want %d", ready, err, want[store.QueueStateReady])
+	}
+	return nil
 }

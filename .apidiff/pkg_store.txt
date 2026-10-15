@@ -2811,7 +2811,6 @@ func (s *Store) CreateDebugPause(ctx context.Context, p DebugPause) error
 func (s *Store) CreateIdentityAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error)
 func (s *Store) CreateNode(ctx context.Context, n Node) error
 func (s *Store) CreateOrReplaceSecret(sec Secret, now time.Time) error
-func (s *Store) CreatePlanNode(ctx context.Context, team Team, runID string, now time.Time) (err error)
 func (s *Store) CreateRun(ctx context.Context, r Run) error
 func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
@@ -2850,8 +2849,6 @@ func (s *Store) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outc
 func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error
 func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error
 func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int64, status, errMsg string) (bool, error)
-func (s *Store) FinishRunIfActive(ctx context.Context, runID, status, errMsg string) (changed bool, err error)
-func (s *Store) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error
 func (s *Store) FinishTrigger(ctx context.Context, id string) error
 func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error)
@@ -3150,8 +3147,6 @@ func (t *Tenant) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, out
 func (t *Tenant) FinishRun(ctx context.Context, runID, status, errMsg string) error
 func (t *Tenant) FinishRunAndUnit(ctx context.Context, finish FinishRunRequest) (Applied, error)
 func (t *Tenant) FinishRunAtGeneration(ctx context.Context, runID string, seq int64, status, errMsg string) (bool, error)
-func (t *Tenant) FinishRunIfActive(ctx context.Context, runID, status, errMsg string) (changed bool, err error)
-func (t *Tenant) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error
 func (t *Tenant) FinishTrigger(ctx context.Context, id string) error
 func (t *Tenant) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (t *Tenant) ForceReleaseSupersededHolders(ctx context.Context, key string) ([]ConcurrencyHolder, error)

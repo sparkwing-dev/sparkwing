@@ -929,19 +929,6 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) err
 	return tx.Commit()
 }
 
-// FinishRunIfActive records a terminal outcome once and reports whether it
-// committed the transition. See [Tenant.FinishRunIfActive].
-func (s *Store) FinishRunIfActive(ctx context.Context, runID, status, errMsg string) (changed bool, err error) {
-	return s.defaultTenant().FinishRunIfActive(ctx, runID, status, errMsg)
-}
-
-// FinishRunsIfActive atomically finalizes the named non-terminal default-team runs. A
-// failure rolls back every member, so one shared lease cannot be partly
-// cancelled.
-func (s *Store) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error {
-	return s.defaultTenant().FinishRunsIfActive(ctx, runIDs, status, errMsg)
-}
-
 // UpdatePlanSnapshot replaces the stored plan JSON for a run.
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
 	return s.updatePlanSnapshot(ctx, DefaultTeam, runID, snapshot)
