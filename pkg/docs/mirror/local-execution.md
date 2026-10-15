@@ -173,6 +173,12 @@ Detached output includes the stable run ID, team number and replay flag. Prepara
 failures submit nothing. The old trigger request and separate here-host loop are
 removed.
 
+`--ref` selects the execution commit. `--pipeline-ref` selects the pipeline
+commit, subject to any configured source pin. That pipeline commit's
+`package.json` determines Go versus TypeScript before source acquisition and
+engine selection. A different SDK in the working tree or execution commit
+cannot change the selection. A malformed selected manifest fails preparation.
+
 GitHub numeric-ID lookup, private source access and captured environment delivery
 still need their native bindings. Initial here intake refuses before submission
 until its reason can survive the sealed request and replay.
@@ -201,6 +207,10 @@ The named claim supplies the original request and accepted plan. The first
 interrupt asks the controller to cancel while the host keeps renewing and
 draining. A second interrupt stops hosting and observation, then joins both.
 Incomplete hosting or observation exits 3. See [here execution](hotfix-runner.md).
+
+Hosting closes returned session resources before exiting, including when a
+binding fails after allocating them. A cleanup failure remains an incomplete
+handoff and preserves the binding or execution error.
 
 ### Team runners fetch source themselves
 

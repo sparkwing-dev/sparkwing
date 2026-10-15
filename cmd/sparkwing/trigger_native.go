@@ -9,7 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
@@ -54,17 +53,9 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (controllerwi
 	if err := selected.checkReachable(ctx); err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
-	dir, err := findSparkwingDirFrom(checkout)
+	sdk, err := selected.sdk(ctx)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
-	}
-	ts, err := pipelineentry.IsTypeScript(dir)
-	if err != nil {
-		return controllerwire.CreateRunRequest{}, err
-	}
-	sdk := engine.GoSDK
-	if ts {
-		sdk = engine.TypeScriptSDK
 	}
 	mode, err := toolchain.ParseMode(os.Getenv(toolchainModeEnv))
 	if err != nil {

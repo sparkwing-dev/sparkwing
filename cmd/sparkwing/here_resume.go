@@ -148,9 +148,6 @@ func runHereAward(ctx context.Context, options client.EngineOptions, run string,
 	}
 	options.Bearer = func(context.Context) (string, error) { return award.Capability, nil }
 	session, err := bind(ctx, options, award)
-	if err != nil {
-		return completion, incompleteHereHandoff(run, err)
-	}
 	defer func() {
 		if session.close != nil {
 			if err := session.close(); err != nil {
@@ -158,6 +155,9 @@ func runHereAward(ctx context.Context, options client.EngineOptions, run string,
 			}
 		}
 	}()
+	if err != nil {
+		return completion, incompleteHereHandoff(run, err)
+	}
 	if session.host == nil || session.close == nil {
 		return completion, incompleteHereHandoff(run, &apierr.Error{Code: apierr.Unavailable, Message: "here runtime returned no host or cleanup binding"})
 	}

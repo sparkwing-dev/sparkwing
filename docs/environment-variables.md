@@ -26,22 +26,10 @@ The services (`sparkwing-controller` and
 the files in `--credentials-dir`, so no service configuration appears here.
 
 
-## Runtime: the Jobs and children a runner starts
-
-These inputs still have consumers in execution paths being replaced by the
-rewrite. Final credentials travel through private files or protocol hello. See
-[node protocol](node-protocol.md) and [runner setup](cli-runners.md).
-
-| Variable | Described in |
-|---|---|
-| `SPARKWING_GITCACHE_URL` | [cache storage](caching.md#storage) |
-| `SPARKWING_CACHE_URL` | [architecture](architecture.md), [caching](caching.md) |
-
 ## Configuration: the `sparkwing` CLI and local runs
 
 | Variable | Described in |
 |---|---|
-| `SPARKWING_ADMISSION_CLASS` | [admission](admission.md) |
 | `SPARKWING_CONFIG` | [ci-embedded](ci-embedded.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [profiles](cli-profiles.md) |
 | `SPARKWING_HOME` | [architecture](architecture.md), [backup-restore](backup-restore.md), [caching](caching.md), [schedules](schedules.md), [deployment-modes](deployment-modes.md), [diagnosing-admission](diagnosing-admission.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [native-mode](native-mode.md), [sdk](sdk.md), [security](security.md), [versioning](versioning.md), [cli-cache](cli-cache.md), [runners](cli-runners.md), [profiles](cli-profiles.md), [cli-doctor](cli-doctor.md), [cli-queue](cli-queue.md), [cli-runs](cli-runs.md), [cli-secrets](cli-secrets.md), [dashboard](cli-dashboard.md), [cli-version](cli-version.md) |
 | `SPARKWING_LOG_FORMAT` | [hooks](hooks.md), [cli-run](cli-run.md) |
@@ -59,30 +47,14 @@ rewrite. Final credentials travel through private files or protocol hello. See
 
 ## Runtime
 
-Read by pipeline code and execution paths. The job protocol defines final runtime
-identity. Entries for unported hosts remain here while their consumers exist.
+The job protocol supplies runtime identity. These names also have consumers in
+Sparkwing code. See [node protocol](node-protocol.md).
 
 | Variable | Described in |
 |---|---|
-| `SPARKWING_CACHE_GRANT` | [cache storage](caching.md#storage) |
 | `SPARKWING_JOB_ID` | [node protocol](node-protocol.md) |
 | `SPARKWING_RUN_ID` | [architecture](architecture.md) |
-| `SPARKWING_NODE_ID` | [architecture](architecture.md) |
-| `SPARKWING_DRY_RUN` | [sparks-core](sparks-core.md) |
-| `SPARKWING_STANDALONE_REASON` | [local-execution](local-execution.md) |
-| `SPARKWING_STATE_DB` | [local-execution](local-execution.md) |
 | `SPARKWING_GATE_INDEX` | [hooks](hooks.md) |
-
-## Plumbing
-
-These names still have consumers in hosts being replaced by the rewrite. Protocol v2 passes its delegated route bearer in hello and Windows pipe handles in argv. Its final transport is described in [node-protocol](node-protocol.md). This inventory does not make the old environment transport part of v2.
-
-| Variable | Why it stays |
-|---|---|
-| `SPARKWING_DEBUG_PAUSE_BEFORE` | The retained host reads it to pause before a job. |
-| `SPARKWING_DEBUG_PAUSE_AFTER` | The retained host reads it to pause after a job. |
-| `SPARKWING_DEBUG_PAUSE_ON_FAILURE` | The retained host reads it to pause after a job failure. |
-| `SPARKWING_WORKERS` | Legacy dispatcher concurrency input. Final run worker selection uses shared settings and `--sw-workers`. |
 
 ## Test
 
@@ -116,14 +88,11 @@ These names still have consumers in hosts being replaced by the rewrite. Protoco
 | `GOPATH` | Go toolchain |
 | `GOPRIVATE` | Go toolchain |
 | `GOPROXY` | Go toolchain |
-| `PIP_INDEX_URL` | pip; a runner's dependency proxy setting, which a node process receives |
-| `PIP_TRUSTED_HOST` | pip; a runner's dependency proxy setting, which a node process receives |
 | `npm_config_registry` | npm; a runner's dependency proxy setting, which a node process receives |
 | `GOWORK` | Go toolchain |
 | `PATH` | the operating system |
 | `SHELL` | the operating system |
 | `LOCALAPPDATA` | Windows |
-| `MSYSTEM` | MSYS2 and Git for Windows |
 | `WSL_DISTRO_NAME` | Windows Subsystem for Linux |
 | `WSL_INTEROP` | Windows Subsystem for Linux |
 | `XDG_CACHE_HOME` | XDG Base Directory specification |
@@ -132,8 +101,6 @@ These names still have consumers in hosts being replaced by the rewrite. Protoco
 | `CI` | CI providers |
 | `CLICOLOR_FORCE` | terminal convention |
 | `NO_COLOR` | terminal convention |
-| `TERM` | terminal convention |
-| `TERM_PROGRAM` | terminal convention |
 
 ## Undecided
 

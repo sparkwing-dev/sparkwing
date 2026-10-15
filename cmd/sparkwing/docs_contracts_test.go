@@ -80,17 +80,15 @@ func TestDocsMentionEnvVarRequiresWholeIdentifierToken(t *testing.T) {
 }
 
 var userNamedEnvReads = map[string]string{
-	`internal/orchestrator/local_repo_resolver.go: "SPARKWING_REPO_" + envKeyForName(name)`: "one variable per repo, named after the repo",
-	"pkg/backends/backends.go: s.TokenEnv":                                                  "the backend config says which variable holds its token",
-	"sparkwing/inputs/memo_contract.go: name":                                               "a pipeline declares which variables its inputs read",
-	"internal/secretsource/secretsource.go: key":                                            "a secret source's configured prefix plus the secret's name",
+	"pkg/backends/backends.go: s.TokenEnv":       "the backend config says which variable holds its token",
+	"sparkwing/inputs/memo_contract.go: name":    "a pipeline declares which variables its inputs read",
+	"internal/secretsource/secretsource.go: key": "a secret source's configured prefix plus the secret's name",
 }
 
 // safety: a computed read hides the names it produces, so each one is listed
 // here and the page check covers them like any other read.
 var constructedEnvReads = map[string][]string{
-	"internal/executorinfo/platform.go: key":       {"WSL_INTEROP", "WSL_DISTRO_NAME"},
-	"internal/orchestrator/pod_node_host.go: name": {"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST"},
+	"internal/executorinfo/platform.go: key": {"WSL_INTEROP", "WSL_DISTRO_NAME"},
 }
 
 var envPageRow = regexp.MustCompile("(?m)^\\| `([A-Z][A-Z0-9_]*)` \\|")

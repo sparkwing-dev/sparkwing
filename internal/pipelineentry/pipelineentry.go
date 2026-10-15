@@ -63,15 +63,27 @@ func readPackage(path string, into any) error {
 // IsTypeScript reports whether sparkwingDir holds a TypeScript pipeline: a
 // package.json that depends on [SDKPackage].
 func IsTypeScript(sparkwingDir string) (bool, error) {
-	var pkg struct {
-		Dependencies    map[string]json.RawMessage `json:"dependencies"`
-		DevDependencies map[string]json.RawMessage `json:"devDependencies"`
-	}
-	err := readPackage(filepath.Join(sparkwingDir, "package.json"), &pkg)
+	raw, err := os.ReadFile(filepath.Join(sparkwingDir, "package.json"))
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
 	if err != nil {
+		return false, err
+	}
+	typescript, err := IsTypeScriptManifest(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", filepath.Join(sparkwingDir, "package.json"), err)
+	}
+	return typescript, nil
+}
+
+// IsTypeScriptManifest classifies package.json bytes without reading the working tree.
+func IsTypeScriptManifest(raw []byte) (bool, error) {
+	var pkg struct {
+		Dependencies    map[string]json.RawMessage `json:"dependencies"`
+		DevDependencies map[string]json.RawMessage `json:"devDependencies"`
+	}
+	if err := json.Unmarshal(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), &pkg); err != nil {
 		return false, err
 	}
 	_, dep := pkg.Dependencies[SDKPackage]

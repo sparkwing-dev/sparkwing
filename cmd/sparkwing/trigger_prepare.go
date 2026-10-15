@@ -7,14 +7,17 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -40,6 +43,26 @@ type preparedTriggerSource struct {
 type triggerCheckout struct {
 	directory   string
 	environment []string
+}
+
+func (s preparedTriggerSource) sdk(ctx context.Context) (engine.SDKKind, error) {
+	manifest := path.Join(s.source.Location.PipelineDir, "package.json")
+	listed, err := s.checkout.read(ctx, "ls-tree", "--name-only", s.source.Ref, "--", manifest)
+	if err != nil || listed == "" {
+		return engine.GoSDK, err
+	}
+	raw, err := s.checkout.read(ctx, "show", s.source.Ref+":"+manifest)
+	if err != nil {
+		return "", err
+	}
+	typescript, err := pipelineentry.IsTypeScriptManifest([]byte(raw))
+	if err != nil {
+		return "", fmt.Errorf("selected pipeline package.json: %w", err)
+	}
+	if typescript {
+		return engine.TypeScriptSDK, nil
+	}
+	return engine.GoSDK, nil
 }
 
 func (c triggerCheckout) read(ctx context.Context, args ...string) (string, error) {

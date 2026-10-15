@@ -515,6 +515,53 @@ func TestHereHostCleanupFailureIsIncomplete(t *testing.T) {
 	}
 }
 
+func TestHereHostAlwaysJoinsReturnedSessionProperty(t *testing.T) {
+	award := hereAward(t)
+	bindingFailure, hostFailure, cleanupFailure := errors.New("binding failed"), errors.New("host failed"), errors.New("cleanup failed")
+	property := func(bindFails, hostFails, closeFails, cancelBinding, missingHost bool) bool {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		closed, hosted := 0, false
+		completion, err := runHereAward(ctx, client.EngineOptions{}, award.RunID, award,
+			func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error) {
+				session := hereHostSession{close: func() error {
+					closed++
+					if closeFails {
+						return cleanupFailure
+					}
+					return nil
+				}}
+				if !missingHost {
+					session.host = hereTestHost(func(context.Context, nodehost.RunInput) (nodehost.RunCompletion, error) {
+						hosted = true
+						if hostFails {
+							return nodehost.RunCompletion{}, hostFailure
+						}
+						return nodehost.RunCompletion{Outcome: "success"}, nil
+					})
+				}
+				if cancelBinding {
+					cancel()
+				}
+				if bindFails {
+					return session, bindingFailure
+				}
+				return session, nil
+			})
+		shouldHost := !bindFails && !cancelBinding && !missingHost
+		if closed != 1 || hosted != shouldHost || errors.Is(err, cleanupFailure) != closeFails || errors.Is(err, bindingFailure) != bindFails || errors.Is(err, hostFailure) != (shouldHost && hostFails) {
+			return false
+		}
+		if bindFails || hostFails || closeFails || cancelBinding || missingHost {
+			return exitCodeFor(err) == 3
+		}
+		return err == nil && completion.Outcome == "success"
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func FuzzHereAwardsCannotChangeRunBinding(f *testing.F) {
 	f.Add("retry-run", "retry-run", "granted-holder", int64(7))
 	f.Add("foreign-run", "retry-run", "granted-holder", int64(7))

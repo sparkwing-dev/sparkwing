@@ -15,7 +15,7 @@ type bannedPattern struct {
 
 var bannedGuideRecipes = []bannedPattern{
 	{
-		regexp.MustCompile(`\bsparkwing-cache\b|\bgitcache\b|\bcache-grant-key\b`),
+		regexp.MustCompile(`\bsparkwing-cache\b|\bgitcache\b|\bcache-grant-key\b|\bSPARKWING_(?:GITCACHE_URL|CACHE_URL|CACHE_GRANT)\b`),
 		"removed; use controller-authorized data records and signed transfers, direct Git and standard package registries",
 	},
 }

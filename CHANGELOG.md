@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **pipeline trigger:** Select Go or TypeScript from the selected pipeline commit's manifest before engine resolution. Working-tree changes and a different execution commit cannot select another SDK.
+- **here hosting:** Close partially returned session resources when host binding fails, and preserve cleanup failures alongside the original error.
+
 ### Changed
 
 - **local execution (Breaking):** Remove the legacy local server and run-host backend graph

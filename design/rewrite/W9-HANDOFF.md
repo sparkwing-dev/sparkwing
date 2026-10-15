@@ -1,5 +1,105 @@
 # W9 handoff
 
+## Continuation from fad836987
+
+This section supersedes earlier status. The worktree started clean. W9 remains
+incomplete because the native factories, private remote execution-state transport
+and placement acceptance are unfinished. No Git write or Sparkwing executable ran.
+Lead-owned handoffs and amendments are unchanged.
+
+### Changes
+
+- Trigger preparation now chooses Go versus TypeScript from package.json at the
+  selected pipeline commit, before source acquisition and engine resolution. The
+  execution commit and dirty working tree cannot select another SDK. A malformed
+  selected manifest fails. The shared pipelineentry classifier accepts bytes so
+  the CLI does not duplicate its dependency rules or materialize another checkout.
+- Here hosting closes a partially returned session even when the binder fails.
+  Cleanup happens exactly once before return, and cleanup errors stay joined with
+  binding/execution errors under incomplete-handoff exit 3.
+- Removed 17 stale environment-inventory rows and two retired-host annotations
+  from the environment-read checker. Removed the unused plumbing category.
+  Deployment/artifact guides now describe the local blob store and explicit
+  read-only remote-cache profile. The guide checker refuses the three removed
+  cache transport variables. Migration history and protocol deny lists remain.
+- Source docs and the changelog describe SDK selection and partial cleanup.
+  Embedded docs were regenerated with bin/sync-docs.sh.
+
+Production Go versus HEAD: **45 added, 19 removed, net +26**. W9-owned paths
+account for **+14**. Shared pipelineentry is +12 and doccheck is net zero.
+W9 versus main is **-8,858**, within the -2,900 budget. Tests, testdata,
+acceptance and contract declaration paths are excluded. No legacy production
+file was deleted in this continuation. The committed host/raw-client cuts and
+[their coverage obligations](W9-CLIENT-CUT-FILES.md) remain applicable.
+
+### Verification
+
+All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache and TMPDIR/GOTMPDIR=/tmp/sw-astra-W9. Tests use -p 4.
+
+- Whole-repository build passes. Scoped vet passes for CLI, pipelineentry and
+  doccheck. Complete pipelineentry, doccheck, clisurface, controllerwire,
+  runspec and controller/client suites pass.
+- Focused local/standalone/here/source/selected-engine CLI tests pass. New native
+  Git regressions cover selected pipeline versus execution commits, absent,
+  regular and dev SDK dependencies, malformed manifests and dirty checkouts.
+  FuzzTriggerSDKIgnoresWorkingTree passes 99 generated executions with four
+  workers and three requested seconds. The existing Git-environment contract
+  fake is explicit. Engine resolution/acquisition remains a foreign boundary.
+- The new here cleanup property passes 128 generated combinations of binding,
+  host, cancellation, missing-host and cleanup outcomes. It reproduced missing
+  cleanup before the fix. Here identity and credential properties still pass.
+- TestSurface components, sealed-window tests, doctor-pruned-run regression and
+  TypeScript native-bridge assembly/publication checks pass. Native Windows
+  execution and publication remain lead/CI evidence. No native cell was unskipped
+  and no archived T1 source-function port is newly claimed complete.
+- The environment-read inventory check failed on the stale entries before their
+  removal and passes afterwards. Its AST-walker and command-reference checks
+  pass. Embedded-doc and whitespace checks pass. Commentcheck against main passes.
+- Sleepcheck against main fails at the unchanged
+  tests/acceptance/session_flow_http_test.go:102 wall-clock deadline comparison.
+  This continuation adds no sleeps or waits. The lead owns that cross-area gate.
+
+### Remaining contracts and native integration
+
+The prior assignment audit applies to every W9 amendment/handoff. Lead decisions
+07:40 items 1 and 6, the doctor handoff and Windows packaging remain implemented.
+No foreign contract was changed or new user restriction introduced.
+
+W2 must supply the elected wingd.LocalController factory with the owned store,
+queue, reconciliation, maintenance and authorized HTTP/dashboard handlers.
+W3's NewNativeHost exists, but RemoteOwnerStore still lacks NativeHostStore's
+private RunSnapshot, acceptance, transitions, completion, step persistence and
+renewal. A scheduling/public projection cannot substitute for those snapshots.
+W2's step decoder still accepts step_id/status and an empty 204 rather than the
+existing typed StepReportRequest and StepRecorded acknowledgement. The earlier
+real-controller probe remains failing evidence, not a passing integration.
+
+Local/here composition also needs private captured-environment delivery, process
+delegation, authorized data/log bindings and joined owner policies. On-demand
+startup must leave a surviving process when the CLI returns. Native GitHub
+numeric-ID/source authority, pre-intake source bundles, persisted here reason,
+schedule checkout/proof/pin/tick, publication result-copy and debug release
+remain open. A publication failure must preserve the completed local verdict.
+No unused factory wrapper or alternative authority transport was added.
+
+### Shared files and friction
+
+Shared production edits are internal/pipelineentry/pipelineentry.go (one byte
+classifier, retained directory API) and internal/doccheck/bannedtokens.go (one
+pattern). Their callers keep their existing API. CLI caller migration is
+cmd/sparkwing/trigger_native.go. Other code/tests are W9-owned. Docs,
+CHANGELOG.md and their generated pkg/docs mirrors are updated.
+
+The new SDK regression first failed to compile because the selected-commit
+selector did not exist. The cleanup property failed before the defer moved.
+The environment inventory failed on stale deleted-host facts. All three causes
+were fixed in place. The unrelated sleepcheck failure remains visible.
+No new flag, environment variable, dependency, cache or retry mechanism was added.
+Git resolves Korey's identity with no core.worktree override. Session scratch
+is removed before the final report. The shared Go cache is retained.
+
+
 ## Continuation from caa62edf0
 
 This section supersedes conflicting status below. The worktree started clean.
