@@ -24,16 +24,48 @@ import (
 )
 
 type triggerSourceInput struct {
-	checkout, ref, pipeline string
-	environment             []string
-	githubID                func(context.Context, string) (int64, error)
-	buildEnv                func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error)
+	checkout, ref, pipeline, pipelineRef string
+	environment                          []string
+	githubID                             func(context.Context, string) (int64, error)
+	buildEnv                             func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error)
 }
 
 type preparedTriggerSource struct {
 	pipeline string
 	git      runspec.Git
 	source   runspec.Source
+	checkout triggerCheckout
+}
+
+type triggerCheckout struct {
+	directory   string
+	environment []string
+}
+
+func (c triggerCheckout) read(ctx context.Context, args ...string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", c.directory}, args...)...)
+	cmd.Env = c.environment
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("inspect trigger checkout: %w", errors.Join(ctx.Err(), err))
+	}
+	return strings.TrimSuffix(string(out), "\n"), nil
+}
+
+func (s preparedTriggerSource) checkReachable(ctx context.Context) error {
+	for _, sha := range []string{s.git.SHA, s.source.Ref} {
+		refs, err := s.checkout.read(ctx, "for-each-ref", "--count=1", "--contains="+sha, "--format=%(refname)", "refs/remotes/origin/")
+		if err != nil {
+			return err
+		}
+		if refs == "" {
+			return &apierr.Error{Code: apierr.InvalidArgs, Message: "selected source commit is not on origin", Hint: "push both selected commits or trigger with --working-tree"}
+		}
+	}
+	return nil
 }
 
 func prepareTriggerSource(ctx context.Context, input triggerSourceInput) (preparedTriggerSource, error) {
@@ -56,19 +88,13 @@ func prepareTriggerSource(ctx context.Context, input triggerSourceInput) (prepar
 	if err != nil {
 		return result, err
 	}
-	read := func(args ...string) (string, error) {
-		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", checkout}, args...)...)
-		cmd.Env = env
-		out, err := cmd.Output()
-		if err != nil {
-			return "", fmt.Errorf("inspect trigger checkout: %w", errors.Join(ctx.Err(), err))
-		}
-		return strings.TrimSuffix(string(out), "\n"), nil
-	}
+	reader := triggerCheckout{directory: checkout, environment: env}
+	read := func(args ...string) (string, error) { return reader.read(ctx, args...) }
 	checkout, err = read("rev-parse", "--show-toplevel")
 	if err != nil {
 		return result, err
 	}
+	reader.directory = checkout
 	ref := input.ref
 	if ref == "" {
 		ref = "HEAD"
@@ -119,10 +145,47 @@ func prepareTriggerSource(ctx context.Context, input triggerSourceInput) (prepar
 	if err != nil {
 		return result, err
 	}
+	pipelineSHA, err := triggerPipelineRevision(ctx, reader, cfg, input.pipeline, input.pipelineRef, sha)
+	if err != nil {
+		return result, err
+	}
 	return preparedTriggerSource{pipeline: identity.Name, git: git, source: runspec.Source{
-		Ref: sha, Entrypoint: identity.Entrypoint,
+		Ref: pipelineSHA, Entrypoint: identity.Entrypoint,
 		Location: runspec.SourceLocation{RemoteURL: remote, PipelineDir: ".sparkwing"},
-	}}, nil
+	}, checkout: reader}, nil
+}
+
+func triggerPipelineRevision(ctx context.Context, checkout triggerCheckout, cfg *projectconfig.Config, pipeline, explicit, execution string) (string, error) {
+	declared := ""
+	if cfg != nil {
+		for _, entry := range cfg.Pipelines {
+			if entry.Name == pipeline && entry.Source != nil {
+				declared = strings.TrimSpace(*entry.Source)
+			}
+		}
+	}
+	explicit = strings.TrimSpace(explicit)
+	ref := declared
+	if ref == "" {
+		ref = explicit
+	}
+	if ref == "" {
+		return execution, nil
+	}
+	sha, err := checkout.read(ctx, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	if declared != "" && explicit != "" && explicit != declared {
+		override, err := checkout.read(ctx, "rev-parse", "--verify", "--end-of-options", explicit+"^{commit}")
+		if err != nil {
+			return "", err
+		}
+		if override != sha {
+			return "", &apierr.Error{Code: apierr.InvalidArgs, Message: "pipeline revision disagrees with the configured source pin"}
+		}
+	}
+	return sha, nil
 }
 
 func gitExitCode(err error, code int) bool {

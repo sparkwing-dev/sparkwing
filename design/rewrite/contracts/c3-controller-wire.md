@@ -54,9 +54,12 @@ authority reaches the retaining handoff even if cancellation arrived during
 intake. Detached submission does not observe the run. An unfinished or failed
 observation exits 3 independently of any recorded outcome.
 
-Committed-source preparation reads the selected commit's project configuration
-without changing the checkout. The resolved commit supplies `Git.SHA` and
-`Source.Ref`. `Source.Entrypoint` retains the configured SDK entrypoint, while
+Committed-source preparation reads the execution commit's project configuration
+without changing the checkout. `Git.SHA` retains that execution commit.
+`Source.Ref` retains the pipeline commit selected by the configured source or
+explicit pipeline revision. Both selections resolve to exact commits. A configured
+source pin and explicit pipeline revision must agree. `Source.Entrypoint` retains
+the execution configuration's SDK entrypoint, while
 the invoked alias supplies `Request.Pipeline`. GitHub repository identity requires
 a resolved positive numeric ID. Typed repository identity and origin HEAD supply
 no App trust or authority. Clone URLs cannot carry credentials.
@@ -67,12 +70,25 @@ environment through `EnvironmentDigest`. Environment values stay with the privat
 capture owner. Validation diagnostics mask supplied argument tokens through the
 shared CLI sanitizer. Supplied idempotency keys survive preparation and intake.
 
-These components have native Git fixture, fake-controller and HTTP/api.sock
-transport evidence. The Git tests inject the declared process-environment boundary.
+Committed-source preflight checks that origin's remote-tracking refs contain both
+selected commits. Another remote cannot satisfy it. Inspection acquires the exact
+pipeline commit through `source.Acquire`, carrying the captured process base,
+repository identity and acquisition location. The selected engine runs its
+`pipeline describe` command in the acquired directory. The returned alias and
+entrypoint must match the captured pair before its argument metadata is accepted.
+Acquisition resources close after success, failure or cancellation. Policy notices
+pass through the existing masked writer after environment registration, and a
+failed write fails preparation. The shared
+process builder and sanitizer own credential filtering and diagnostic masking.
+
+These components have native Git fixtures, a selected-engine shell fixture,
+fake acquisition/controller and HTTP/api.sock transport evidence. The Git tests
+inject the declared process-environment boundary.
 W6 must implement `procenv.Build(procenv.Git, ...)`, which rejects the kind in this
-checkout. Native numeric-ID lookup, selected-engine describe, private environment
-retention, separate execution/pipeline revisions and authorized working-tree bundle
-upload remain bindings. The public command still uses its preceding preparation
+checkout. Native numeric-ID lookup, W3 source acquisition, W8 engine resolution,
+private environment retention and authorized working-tree bundle upload remain
+bindings. Native selected-engine process-tree cancellation remains unverified.
+The public command still uses its preceding preparation
 and intake path. Its cutover also requires a contract for persisting the required
 here reason. Neither `CreateRunRequest` nor C1 `IntakeRequest` carries
 that reason. It must survive intake and replay before the CLI can replace the old

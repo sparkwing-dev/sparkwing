@@ -91,6 +91,110 @@ func TestPrepareTriggerSourceDefaultBranchIsUnverified(t *testing.T) {
 	}
 }
 
+func TestPrepareTriggerSourceSeparatesExecutionAndPipelineRevisions(t *testing.T) {
+	repo, pipelineSHA := triggerPreparationRepo(t)
+	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: deploy-prod\n    entrypoint: Deploy\n    source: release\n", 0o600)
+	runSnapshotGit(t, repo, "commit", "--quiet", "-am", "execution configuration")
+	executionSHA := strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD"))
+	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: deploy-prod\n    entrypoint: Dirty\n    source: absent\n", 0o600)
+	before := runSnapshotGit(t, repo, "status", "--porcelain=v1")
+	for _, pipelineRef := range []string{"", "release", pipelineSHA} {
+		input := triggerPreparationInput(repo)
+		input.pipelineRef = pipelineRef
+		got, err := prepareTriggerSource(t.Context(), input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.git.SHA != executionSHA || got.source.Ref != pipelineSHA || got.pipeline != "deploy-prod" || got.source.Entrypoint != "Deploy" {
+			t.Fatalf("revision identities changed: %+v", got)
+		}
+	}
+	input := triggerPreparationInput(repo)
+	input.pipelineRef = executionSHA
+	if _, err := prepareTriggerSource(t.Context(), input); err == nil {
+		t.Fatal("pipeline revision bypassed the configured source pin")
+	}
+	if after := runSnapshotGit(t, repo, "status", "--porcelain=v1"); after != before {
+		t.Fatalf("revision selection changed checkout: before=%q after=%q", before, after)
+	}
+}
+
+func TestPrepareTriggerSourceExplicitPipelineRevisionKeepsExecutionBinding(t *testing.T) {
+	repo, pipelineSHA := triggerPreparationRepo(t)
+	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: deploy-prod\n    entrypoint: ReleaseDeploy\n", 0o600)
+	runSnapshotGit(t, repo, "commit", "--quiet", "-am", "execution binding")
+	executionSHA := strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD"))
+	input := triggerPreparationInput(repo)
+	input.pipelineRef = "release"
+	got, err := prepareTriggerSource(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.git.SHA != executionSHA || got.source.Ref != pipelineSHA || got.source.Entrypoint != "ReleaseDeploy" {
+		t.Fatalf("pipeline checkout replaced execution binding: %+v", got)
+	}
+	input.ref, input.pipelineRef = "release", "HEAD"
+	got, err = prepareTriggerSource(t.Context(), input)
+	if err != nil || got.git.SHA != pipelineSHA || got.source.Ref != executionSHA || got.source.Entrypoint != "Deploy" {
+		t.Fatalf("execution ref changed pipeline binding: %+v %v", got, err)
+	}
+	for _, invalid := range []string{"absent", "--output=/tmp/forged"} {
+		input.pipelineRef = invalid
+		if _, err := prepareTriggerSource(t.Context(), input); err == nil {
+			t.Fatal("invalid pipeline revision was accepted")
+		}
+	}
+}
+
+func TestPreparedTriggerSourceRequiresBothCommitsOnOrigin(t *testing.T) {
+	repo, baseSHA := triggerPreparationRepo(t)
+	runSnapshotGit(t, repo, "checkout", "--quiet", "-b", "pipeline")
+	writeSnapshotFile(t, repo, "pipeline.txt", "pipeline checkout", 0o600)
+	runSnapshotGit(t, repo, "add", ".")
+	runSnapshotGit(t, repo, "commit", "--quiet", "-m", "pipeline source")
+	pipelineSHA := strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD"))
+	runSnapshotGit(t, repo, "tag", "--force", "release", pipelineSHA)
+	runSnapshotGit(t, repo, "checkout", "--quiet", "--detach", baseSHA)
+	writeSnapshotFile(t, repo, "execution.txt", "execution checkout", 0o600)
+	runSnapshotGit(t, repo, "add", ".")
+	runSnapshotGit(t, repo, "commit", "--quiet", "-m", "execution")
+	executionSHA := strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD"))
+	input := triggerPreparationInput(repo)
+	input.pipelineRef = "release"
+	got, err := prepareTriggerSource(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"neither", "pipeline only", "execution only", "other remote", "both"} {
+		switch mode {
+		case "pipeline only":
+			runSnapshotGit(t, repo, "update-ref", "refs/remotes/origin/pipeline", pipelineSHA)
+		case "execution only":
+			runSnapshotGit(t, repo, "update-ref", "-d", "refs/remotes/origin/pipeline")
+			runSnapshotGit(t, repo, "update-ref", "refs/remotes/origin/main", executionSHA)
+		case "other remote":
+			runSnapshotGit(t, repo, "update-ref", "refs/remotes/upstream/pipeline", pipelineSHA)
+		case "both":
+			runSnapshotGit(t, repo, "update-ref", "refs/remotes/origin/pipeline", pipelineSHA)
+		}
+		err := got.checkReachable(t.Context())
+		if (err == nil) != (mode == "both") {
+			t.Fatalf("%s: reachability = %v", mode, err)
+		}
+		if err != nil {
+			var canonical *apierr.Error
+			if !errors.As(err, &canonical) || !strings.Contains(canonical.Hint, "--working-tree") {
+				t.Fatalf("missing source recovery guidance: %v", err)
+			}
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := got.checkReachable(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("reachability cancellation lost: %v", err)
+	}
+}
+
 func TestPrepareTriggerSourceRejectsUnresolvedIdentityAndRefs(t *testing.T) {
 	repo, _ := triggerPreparationRepo(t)
 	for _, mode := range []string{"missing resolver", "lookup failure", "invalid ID", "missing ref", "option ref", "missing pipeline"} {
