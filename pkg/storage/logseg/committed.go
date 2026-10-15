@@ -67,9 +67,12 @@ func (r CommittedReader) Read(ctx context.Context, actor store.Actor, request bl
 		if seg.Offset+seg.Size <= request.Offset {
 			continue
 		}
-		stored, err := readObject(ctx, r.Objects, seg.ObjectKey, limits.LogSegmentUploadBytes)
+		stored, err := readObject(ctx, r.Objects, seg.ObjectKey, seg.StoredBytes)
 		if err != nil {
 			return result, err
+		}
+		if int64(len(stored)) != seg.StoredBytes {
+			return result, blob.ErrIntegrity
 		}
 		body, err := decodeSegment(stored, Segment{N: int(seg.Index), SHA256: seg.Digest})
 		if err != nil || int64(len(body)) != seg.Size {
@@ -109,7 +112,7 @@ func validateRanges(request blob.LogReadRequest, view store.LogSegments) error {
 			return blob.ErrIntegrity
 		}
 		expected, err := blob.LogSubjectPrefix(parts[1], request.Subject)
-		if err != nil || seg.Index < 1 || seg.Index > int64(limits.MaxLogSegmentNumber) || seg.Offset < 0 || seg.Size <= 0 || seg.Size > math.MaxInt64-seg.Offset ||
+		if err != nil || seg.Index < 1 || seg.Index > int64(limits.MaxLogSegmentNumber) || seg.Offset < 0 || seg.Size <= 0 || seg.Size > math.MaxInt64-seg.Offset || seg.StoredBytes <= 0 || seg.StoredBytes > limits.LogSegmentUploadBytes ||
 			seg.ObjectKey != blob.LogSegmentKey(expected, int(seg.Index)) || (i > 0 && (seg.Offset != end || seg.Index != index+1 || prefix != expected)) ||
 			(i == 0 && seg.Offset > request.Offset) {
 			return blob.ErrIntegrity

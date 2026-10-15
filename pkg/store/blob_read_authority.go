@@ -14,19 +14,19 @@ import (
 )
 
 type blobReadCandidate struct {
-	kind                                 blob.Kind
-	name, pipeline, repo, ref, run, node string
-	attempt, generation                  int64
-	source                               blob.UploadIdentity
-	facts                                blob.RefFacts
+	kind                                        blob.Kind
+	name, pipeline, repo, ref, run, node, scope string
+	attempt, generation                         int64
+	source                                      blob.UploadIdentity
+	facts                                       blob.RefFacts
 }
 
-const blobReadCandidateColumns = `b.kind,b.name,b.pipeline,b.repo_key,b.ref_scope,COALESCE(b.run_id,''),COALESCE(b.node_id,''),COALESCE(b.attempt,0),COALESCE(b.generation,0),b.source_identity_json,b.ref_facts_json`
+const blobReadCandidateColumns = `b.kind,b.name,b.pipeline,b.repo_key,b.ref_scope,COALESCE(b.run_id,''),COALESCE(b.node_id,''),COALESCE(b.attempt,0),COALESCE(b.generation,0),b.source_identity_json,b.ref_facts_json,b.scope`
 
 func scanBlobReadCandidate(row rowScanner) (blobReadCandidate, error) {
 	var c blobReadCandidate
 	var source, facts []byte
-	if err := row.Scan(&c.kind, &c.name, &c.pipeline, &c.repo, &c.ref, &c.run, &c.node, &c.attempt, &c.generation, &source, &facts); err != nil {
+	if err := row.Scan(&c.kind, &c.name, &c.pipeline, &c.repo, &c.ref, &c.run, &c.node, &c.attempt, &c.generation, &source, &facts, &c.scope); err != nil {
 		return c, err
 	}
 	if err := json.Unmarshal(source, &c.source); err != nil {
@@ -46,7 +46,7 @@ func blobRecordReadableTx(ctx context.Context, tx *storeTx, a blobActor, key blo
 	if err != nil {
 		return err
 	}
-	if c.repo != string(key.Scope.Repo) || c.ref != blobRefScope(key.Scope.Ref) || c.pipeline != key.Scope.Pipeline {
+	if c.repo != string(key.Scope.Repo) || c.ref != key.Scope.Ref.CapabilityScope() || c.pipeline != key.Scope.Pipeline {
 		return blob.ErrDigestNotReadable
 	}
 	if key.Kind == blob.KindMemo && (!c.source.Attempt.Set || c.source.Attempt.Value.NodeID != key.Scope.Job) {
@@ -117,7 +117,7 @@ func blobReadSetTx(ctx context.Context, tx *storeTx, a blobActor, digest blob.Di
 
 func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobReadCandidate) (blob.ReadEdge, bool, error) {
 	edge := blob.ReadEdge{}
-	if ((c.kind != blob.KindOutput && c.kind != blob.KindManifest) && c.ref != blobRefScope(c.facts.Scope)) || (c.facts.Scope.Verified && (c.facts.AppDeliveryKey == "" || c.facts.SHA == "")) || (c.facts.DefaultBranchVerified && (!c.facts.Scope.Verified || c.facts.Scope.Ref != c.facts.DefaultBranch)) {
+	if ((c.kind != blob.KindOutput && c.kind != blob.KindManifest) && c.ref != c.facts.Scope.CapabilityScope()) || (c.facts.Scope.Verified && (c.facts.AppDeliveryKey == "" || c.facts.SHA == "")) || (c.facts.DefaultBranchVerified && (!c.facts.Scope.Verified || c.facts.Scope.Ref != c.facts.DefaultBranch)) {
 		return edge, false, nil
 	}
 	scope := a.capability.Data
@@ -132,7 +132,7 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 	}
 	if c.kind == blob.KindMemo || c.kind == blob.KindDepcache {
 		allowed := slices.Contains(scope.ReadRefs, c.ref)
-		if c.ref != blobRefScope(a.authority.Ref.Scope) {
+		if c.ref != a.authority.Ref.Scope.CapabilityScope() {
 			verifiedDefault := c.facts.DefaultBranchVerified && c.facts.Scope.Ref == a.authority.Ref.DefaultBranch
 			verifiedBase := c.kind == blob.KindDepcache && a.authority.Ref.PullRequestBase.Set && c.facts.Scope.Ref == a.authority.Ref.PullRequestBase.Value
 			allowed = allowed && c.facts.Scope.Verified && (verifiedDefault || verifiedBase)
@@ -150,6 +150,14 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 		edge.Kind = blob.EdgeMemoScope
 		return edge, allowed, nil
 	}
+	if a.source.Kind == blob.UploadOwnerUnit && (a.capability.Unit == capability.UnitTrigger || a.capability.Unit == capability.UnitPlan) {
+		if c.run != a.source.RunID {
+			return edge, false, nil
+		}
+		selected, err := blobCandidateSelectedTx(ctx, tx, a.capability.Team, c)
+		edge.Kind = blob.EdgeDependency
+		return edge, selected, err
+	}
 	if !a.authority.Attempt.Set {
 		return edge, false, nil
 	}
@@ -161,12 +169,9 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 	if c.run == "" || c.node == "" {
 		return edge, false, nil
 	}
-	var current int
-	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM nodes WHERE team=? AND run_id=? AND node_id=? AND attempt=? AND generation=? AND status='done'", a.capability.Team, c.run, c.node, c.attempt, c.generation).Scan(&current); err != nil {
+	selected, err := blobCandidateSelectedTx(ctx, tx, a.capability.Team, c)
+	if err != nil || !selected {
 		return edge, false, err
-	}
-	if current != 1 {
-		return edge, false, nil
 	}
 	if c.run == reader.RunID {
 		deps, _, err := blobDependenciesTx(ctx, tx, Team(a.capability.Team), reader.RunID, reader.NodeID)
@@ -308,4 +313,27 @@ func readableBlobsTx(ctx context.Context, tx *storeTx, team Team, request blob.H
 		return blob.Presence{}, blob.ErrBudget
 	}
 	return result, nil
+}
+
+func blobCandidateSelectedTx(ctx context.Context, tx *storeTx, team string, c blobReadCandidate) (bool, error) {
+	row, err := readNodeTx(ctx, tx, Team(team), NodeRef{RunID: c.run, NodeID: c.node})
+	if err != nil {
+		return false, err
+	}
+	if row.Status != StatusDone {
+		return false, nil
+	}
+	for _, key := range []*blob.RecordKey{row.OutputRecord, row.ManifestRecord} {
+		if key == nil || key.Team != team || key.Kind != c.kind || key.Name != c.name {
+			continue
+		}
+		namespace, err := blob.RecordNamespace(*key)
+		if err != nil {
+			return false, err
+		}
+		if namespace == c.scope {
+			return true, nil
+		}
+	}
+	return false, nil
 }

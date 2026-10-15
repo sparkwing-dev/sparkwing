@@ -258,6 +258,7 @@ func ownerEvaluation(input RunInput, accepted AcceptedRun, entry *source.Entry, 
 	return EvaluationInput{
 		Engine: entry.Engine, Accepted: accepted, Entry: entry, GrantedRunner: input.GrantedRunner,
 		NodeID: row.Ref.NodeID, Generation: row.Generation, SpecHash: row.SpecHash,
+		Storage:      input.Storage,
 		RouteBinding: nodeproto.ProcessBinding{RunID: accepted.RunID, JobID: row.Ref.NodeID},
 	}
 }

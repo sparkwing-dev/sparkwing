@@ -9,19 +9,11 @@ import (
 	"sort"
 )
 
-// Cloud runner seconds are priced by cpu class. A class is a whole number of
-// cores with a price, and a node is billed at the smallest class that covers
-// its resolved cpu request, the way GitHub Actions prices a 2-core or an
-// 8-core runner rather than the cpu a job happened to use.
 const (
-	// CreditRateBaseClassCores is the class credit_rate_micro_per_second
-	// prices. That single setting predates the table and every binary reads
-	// it, so it holds the price a four-core node pays and the two settings
-	// move together.
+	// CreditRateBaseClassCores is the class credit_rate_micro_per_second prices.
 	CreditRateBaseClassCores = 4
 
-	// MaxCreditRateTableEntries bounds the table an operator may store, which
-	// keeps the settings row small enough to read on every claim.
+	// MaxCreditRateTableEntries bounds the table an operator may store, which keeps the settings row small enough to read on every claim.
 	MaxCreditRateTableEntries = 32
 
 	// safety: an N-core class is a machine of N vCPU and 4N GiB, matching the hosted runners customers
@@ -31,22 +23,17 @@ const (
 	cpuClassMachineBytesPerCore = 4 << 30
 	cpuClassSystemBytes         = 2 << 30
 
-	// DefaultWarmCPUClassCores is the class a warm runner pool serves when no
-	// operator set one. A node above it is executed on a node of its own.
+	// DefaultWarmCPUClassCores is the class a warm runner pool serves when no operator set one.
 	DefaultWarmCPUClassCores = 2
 )
 
-// CPUClass is one rung of the billing ladder: a whole number of cores and the
-// memory a Job gets on the machine they name. It prices a node independently of the pod's
-// resource request.
+// CPUClass is one rung of the billing ladder: a whole number of cores and the memory a Job gets on the machine they name.
 type CPUClass struct {
 	Cores       int64 `json:"cores"`
 	MemoryBytes int64 `json:"memory_bytes"`
 }
 
-// CPUClassMemoryBytes returns the memory a Job of a class with this many cores
-// may use, which is both what selects the class for a memory pin and what the
-// Job is given, whole mebibytes.
+// CPUClassMemoryBytes returns the memory a Job of a class with this many cores may use, which is both what selects the class for a memory pin and what the Job is given, whole mebibytes.
 func CPUClassMemoryBytes(cores int64) int64 {
 	usable := cores*cpuClassMachineBytesPerCore*37/40 - cpuClassSystemBytes
 	return max(usable&^(1<<20-1), 0)
@@ -70,27 +57,19 @@ type CreditRate struct {
 	MicroPerSecond int64 `json:"micro_per_second"`
 }
 
-// CreditRateTable prices every cpu class a cluster offers, ordered from the
-// smallest class to the largest. A node is billed at the first class whose
-// cores cover its request, so a table names the sizes on offer rather than
-// every core count a node might ask for.
+// CreditRateTable prices every cpu class a cluster offers, ordered from the smallest class to the largest.
 type CreditRateTable []CreditRate
 
-// ErrUnpricedCPUClass reports a cpu request larger than the biggest class the
-// rate table prices. The claim path returns an [UnpricedCPUClassError], which
-// wraps it and names both sides.
+// ErrUnpricedCPUClass reports a cpu request larger than the biggest class the rate table prices.
 var ErrUnpricedCPUClass = errors.New("credits: cpu request above the largest priced class")
 
-// UnpricedCPUClassError refuses a claim for a node asking for more cores than
-// the rate table prices, and names the request and the largest class, so the
-// operator knows which class to add.
+// UnpricedCPUClassError refuses a claim for a node asking for more cores than the rate table prices, and names the request and the largest class, so the operator knows which class to add.
 type UnpricedCPUClassError struct {
 	RunID    string
 	NodeID   string
 	Cores    int64
 	MaxCores int64
-	// MemoryBytes is what the node asked for when memory, not cpu, is what no
-	// class covers. Zero when the cpu request alone is above every class.
+	// MemoryBytes is what the node asked for when memory, not cpu, is what no class covers.
 	MemoryBytes int64
 }
 
@@ -107,14 +86,10 @@ func (e *UnpricedCPUClassError) Error() string {
 			"add a class for it to the credit rate table", e.Cores, e.MaxCores)
 }
 
-// Unwrap reports [ErrUnpricedCPUClass], so a caller matches the condition with
-// errors.Is without knowing this type.
+// Unwrap reports [ErrUnpricedCPUClass], so a caller matches the condition with errors.Is without knowing this type.
 func (e *UnpricedCPUClassError) Unwrap() error { return ErrUnpricedCPUClass }
 
-// ClassForResource returns the class that covers both halves of a node's
-// request: the smallest class whose cores cover the cpu rounded up to a whole
-// core and whose [CPUClassMemoryBytes] covers the memory asked for. It returns an [UnpricedCPUClassError] when no class is
-// large enough.
+// ClassForResource returns the class that covers both halves of a node's request: the smallest class whose cores cover the cpu rounded up to a whole core and whose [CPUClassMemoryBytes] covers the memory asked for.
 func (t CreditRateTable) ClassForResource(res ExecutorResource) (CreditRate, error) {
 	if len(t) == 0 {
 		return CreditRate{}, fmt.Errorf("%w: the rate table prices no cpu class", ErrInvalidCreditSetting)
@@ -151,10 +126,7 @@ func memoryClassCores(bytes int64) int64 {
 	return cores
 }
 
-// RateFor returns the micro-credits a second costs at the recorded class,
-// rounding up to the next class the table still prices and falling back to the
-// largest one. A node keeps running at a price when its class leaves the
-// table, because a refusal belongs at the claim and not mid-run.
+// RateFor returns the micro-credits a second costs at the recorded class, rounding up to the next class the table still prices and falling back to the largest one.
 func (t CreditRateTable) RateFor(cores int64) int64 {
 	if len(t) == 0 {
 		return 0
@@ -167,9 +139,7 @@ func (t CreditRateTable) RateFor(cores int64) int64 {
 	return t[len(t)-1].MicroPerSecond
 }
 
-// BaseRate returns the price a node of [CreditRateBaseClassCores] cores pays,
-// which is what credit_rate_micro_per_second carries for binaries that read
-// only that setting.
+// BaseRate returns the price a node of [CreditRateBaseClassCores] cores pays, which is what credit_rate_micro_per_second carries for binaries that read only that setting.
 func (t CreditRateTable) BaseRate() int64 {
 	return t.RateFor(CreditRateBaseClassCores)
 }
@@ -185,9 +155,7 @@ func (t CreditRateTable) baseClassRate() (int64, bool) {
 	return 0, false
 }
 
-// Validate reports whether every entry prices a whole number of cores above
-// zero, at a rate inside the bound the single rate setting is held to, with no
-// class priced twice.
+// Validate reports whether every entry prices a whole number of cores above zero, at a rate inside the bound the single rate setting is held to, with no class priced twice.
 func (t CreditRateTable) Validate() error {
 	if len(t) == 0 {
 		return fmt.Errorf("%w: the rate table must price at least one cpu class", ErrInvalidCreditSetting)
@@ -213,17 +181,14 @@ func (t CreditRateTable) Validate() error {
 	return nil
 }
 
-// Sorted returns the table ordered from the smallest class to the largest,
-// which is the order [CreditRateTable.ClassFor] reads it in.
+// Sorted returns the table ordered from the smallest class to the largest, which is the order [CreditRateTable.ClassFor] reads it in.
 func (t CreditRateTable) Sorted() CreditRateTable {
 	out := append(CreditRateTable(nil), t...)
 	sort.Slice(out, func(i, j int) bool { return out[i].Cores < out[j].Cores })
 	return out
 }
 
-// DefaultCreditRateTable is the ladder an installation that never set a table
-// bills, with the four-core class priced at rate because the single rate
-// setting is that class under another name.
+// DefaultCreditRateTable is the ladder an installation that never set a table bills, with the four-core class priced at rate because the single rate setting is that class under another name.
 func DefaultCreditRateTable(rate int64) CreditRateTable {
 	out := make(CreditRateTable, 0, len(defaultCreditRates))
 	for _, entry := range defaultCreditRates {
@@ -261,15 +226,7 @@ func creditRateTable(raw string, rate int64) (CreditRateTable, error) {
 	if err := stored.Validate(); err != nil {
 		return nil, fmt.Errorf("stored rate table prices nothing usable: %w", err)
 	}
-	out := stored.Sorted()
-	// safety: the two settings name one price, so the scalar an operator or an
-	// older binary set wins for the class it prices.
-	for i := range out {
-		if out[i].Cores == CreditRateBaseClassCores {
-			out[i].MicroPerSecond = rate
-		}
-	}
-	return out, nil
+	return stored.Sorted(), nil
 }
 
 func addCreditRateTableWrites(writes map[string]string, table CreditRateTable) error {

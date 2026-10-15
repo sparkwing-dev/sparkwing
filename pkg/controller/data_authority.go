@@ -1,11 +1,35 @@
 package controller
 
 import (
+	"context"
+	"slices"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func (s *DataController) persistedDataAuthority(ctx context.Context, a capability.Authorized) (blob.Authority, error) {
+	c := a.Principal.Capability
+	if s.Store == nil || a.Principal.Authority.Kind != capability.AuthorityCapability || c.Prefix == "" || a.Principal.Authority.ID != c.Prefix || c.Team == "" {
+		return blob.Authority{}, missingEndpointPolicy()
+	}
+	tenant, err := s.Store.ForTeam(ctx, store.Team(c.Team))
+	if err != nil {
+		return blob.Authority{}, err
+	}
+	selector := blob.Authority{CapabilityRef: c.Prefix}
+	if target := a.Target.Data; c.Data != nil && c.Data.Use == capability.DataPublish && target != nil && target.NodeID != "" && target.Attempt > 0 && target.Generation > 0 {
+		selector.Attempt = runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: c.Team, RunID: target.RunID, NodeID: target.NodeID, Attempt: target.Attempt, Generation: target.Generation}}
+	}
+	grant := capability.DataRead
+	if slices.Contains(a.Access.Grants, capability.DataWrite) {
+		grant = capability.DataWrite
+	}
+	return tenant.ResolveBlobAuthority(ctx, selector, grant)
+}
 
 func dataForbidden() *apierr.Error {
 	return &apierr.Error{Code: apierr.Forbidden, Message: "data authority does not match the authenticated scope", Details: map[string]any{"reason": "binding"}}
@@ -31,7 +55,7 @@ func validateDataAuthority(a capability.Authorized, authority blob.Authority) er
 	i := authority.Upload.Value
 	if scope.Use == capability.DataRemoteCache || scope.Use == capability.DataExpansion || i.Team != c.Team || i.RunID == "" ||
 		i.RunID != scope.RunID || i.Principal != authority.Principal || i.CapabilityRef != authority.CapabilityRef ||
-		scope.WriteRef == "" || authority.Ref.Scope.Ref != scope.WriteRef || c.Delivery == capability.DeliveryBootstrap {
+		scope.WriteRef == "" || authority.Ref.Scope.CapabilityScope() != scope.WriteRef || c.Delivery == capability.DeliveryBootstrap {
 		return dataForbidden()
 	}
 	switch i.Kind {

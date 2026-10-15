@@ -24,13 +24,13 @@ func (s *RemoteOwnerStore) ReconcileNode(ctx context.Context, request store.Reco
 	}
 	body := controllerwire.ReconcileRequest{Policy: string(request.Policy), MaterializeOnly: request.MaterializeOnly}
 	if request.Source != nil {
-		if request.Source.Result != nil {
-			return store.ReconciledNode{}, errors.New("controller wire cannot represent a terminal result source")
-		}
 		if request.Policy != request.Source.Kind {
 			return store.ReconciledNode{}, errors.New("reconciliation source policy differs from its read edge")
 		}
 		body.Source = &controllerwire.ReuseSource{Policy: string(request.Source.Kind), Attempt: request.Source.Source, Record: request.Source.Record}
+		if source := request.Source.Result; source != nil {
+			body.Source.Result = &controllerwire.MaterializedResultSource{RunID: source.Ref.RunID, JobID: source.Ref.NodeID, StateSeq: source.StateSeq}
+		}
 	}
 	wire, err := s.Controller.ReconcileJob(ctx, request.Ref.RunID, request.Ref.NodeID, body)
 	if err != nil {
@@ -43,6 +43,9 @@ func (s *RemoteOwnerStore) ReconcileNode(ctx context.Context, request store.Reco
 	result := store.ReconciledNode{Kind: store.ReconcileKind(wire.Kind), Node: row}
 	if wire.Source != nil {
 		result.Source = &store.MaterializeSource{Kind: store.SourcePolicy(wire.Source.Policy), Source: wire.Source.Attempt, Record: wire.Source.Record}
+		if source := wire.Source.Result; source != nil {
+			result.Source.Result = &store.MaterializedResultSource{Ref: store.NodeRef{RunID: source.RunID, NodeID: source.JobID}, StateSeq: source.StateSeq}
+		}
 	}
 	if result.Kind == store.Execute {
 		claim := wire.Claim
@@ -114,6 +117,7 @@ func executionRow(runID string, job controllerwire.ExecutionJob) (store.NodeRow,
 		Ref: store.NodeRef{RunID: runID, NodeID: job.ID}, Status: store.NodeStatus(job.Status), Outcome: store.NodeState(job.Outcome), StatusDetail: job.StatusDetail,
 		ClaimedBy: job.ClaimedBy, CapabilityPrefix: job.CapabilityPrefix, Generation: job.Generation, Attempt: job.Attempt, ApplicationRetries: job.ApplicationRetries, Disruptions: job.Disruptions,
 		ReadyAt: job.ReadyAt, LeaseExpiresAt: job.LeaseExpiresAt, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt, CancelRequestedAt: job.CancelRequestedAt,
+		OutputRecord: job.OutputRecord, ManifestRecord: job.ManifestRecord,
 		StateSeq: job.StateSeq, Expansion: store.ExpansionState(job.Expansion), ExpansionDigest: job.ExpansionDigest, Spec: slices.Clone(job.Spec), SpecHash: job.SpecHash, Execution: job.Execution,
 	}, nil
 }

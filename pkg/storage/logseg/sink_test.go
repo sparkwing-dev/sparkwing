@@ -1,6 +1,7 @@
 package logseg_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 const testPrefix = "logs/r90/teams/acme/runs/run-1/jobs/build/a1-g1/"
@@ -65,17 +67,25 @@ func newSink(t *testing.T, up logseg.Uploader, opts logseg.Options) *logseg.Sink
 
 func line(i int) string { return fmt.Sprintf(`{"msg":"line %03d"}`+"\n", i) }
 
-func readAll(t *testing.T, objs *memObjects, opts storage.ReadOpts) (*logseg.Log, string) {
+func readLog(t *testing.T, objs *memObjects, opts storage.ReadOpts) (logseg.ReadResult, []byte, error) {
 	t.Helper()
-	l, err := logseg.Open(context.Background(), objs, testPrefix)
+	var out bytes.Buffer
+	reader := logseg.CommittedReader{Records: objs, Objects: objs}
+	result, err := reader.Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: objs.view.Subject}, &out)
+	if err != nil {
+		return result, out.Bytes(), err
+	}
+	body, err := opts.Apply(out.Bytes())
+	return result, body, err
+}
+
+func readAll(t *testing.T, objs *memObjects, opts storage.ReadOpts) (logseg.ReadResult, string) {
+	t.Helper()
+	result, body, err := readLog(t, objs, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := l.Read(context.Background(), objs, opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return l, string(body)
+	return result, string(body)
 }
 
 func waitStored(t *testing.T, up *memUploader, n int) {
@@ -86,8 +96,6 @@ func waitStored(t *testing.T, up *memUploader, n int) {
 		}
 	}
 }
-
-var finished = logseg.NodeProgress{Started: true, Terminal: true}
 
 func TestSinkCutsBySizeAndSealsComplete(t *testing.T) {
 	objs := newMemObjects()
@@ -112,8 +120,8 @@ func TestSinkCutsBySizeAndSealsComplete(t *testing.T) {
 	if got != want.String() {
 		t.Fatalf("read %q, want %q", got, want.String())
 	}
-	if c := l.Completeness(finished, time.Now()); c.State != logseg.StateComplete || c.Lines != 20 {
-		t.Fatalf("completeness = %+v", c)
+	if !l.Complete || l.Bytes != m.Bytes {
+		t.Fatalf("committed read = %+v", l)
 	}
 }
 
@@ -143,54 +151,24 @@ func TestSinkCutsOnIntervalOnlyWithBytesPending(t *testing.T) {
 	}
 }
 
-// A runner killed mid-node uploads nothing more: the segment it was
-// filling never lands and it writes no manifest. The controller's seal
-// keeps every segment that did land and the reader marks the log
-// incomplete, so at most one segment is lost and never silently.
-func TestRunnerKilledMidNodeLosesAtMostOneSegment(t *testing.T) {
+func TestKilledRunnerRetainsOnlyCommittedSegments(t *testing.T) {
 	objs := newMemObjects()
 	up := newMemUploader(objs, testPrefix)
-	const segBytes = 100
-	s := newSink(t, up, logseg.Options{SegmentBytes: segBytes})
-	var written []string
-	for i := 1; i <= 30; i++ {
-		if err := s.Append([]byte(line(i)), "st", int64(i), int64(i)); err != nil {
-			t.Fatal(err)
-		}
-		written = append(written, line(i))
-	}
-	waitStored(t, up, 5)
-	up.kill()
-	for i := 31; i <= 33; i++ {
-		if err := s.Append([]byte(line(i)), "st", int64(i), int64(i)); err != nil {
-			t.Fatal(err)
-		}
-		written = append(written, line(i))
-	}
-	if _, err := s.Close(context.Background(), logseg.End{}); err == nil {
-		t.Fatal("a dead runner wrote its manifest")
-	}
-
-	m, err := logseg.SealAbandoned(context.Background(), objs, testPrefix,
-		logseg.Manifest{Subject: new(keySubject("acme", "run-1", "build", 1, 1))},
-		logseg.ReasonRunnerLost, objs.putIfAbsent)
-	if err != nil {
+	s := newSink(t, up, logseg.Options{SegmentBytes: 1})
+	if err := s.Append([]byte(line(1)), "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
-	if m.Status != logseg.StatusIncomplete || m.Reason != logseg.ReasonRunnerLost || m.SealedBy != logseg.SealedByController {
-		t.Fatalf("controller seal = %+v", m)
+	waitStored(t, up, 1)
+	up.kill()
+	if err := s.Append([]byte(line(2)), "", 0, 0); err != nil {
+		t.Fatal(err)
 	}
-	l, got := readAll(t, objs, storage.ReadOpts{})
-	all := strings.Join(written, "")
-	if !strings.HasPrefix(all, got) {
-		t.Fatalf("read %q is not a prefix of what the node wrote", got)
+	if _, err := s.Close(t.Context(), logseg.End{}); err == nil {
+		t.Fatal("dead runner sealed")
 	}
-	if lost := len(all) - len(got); lost > segBytes+len(line(0)) {
-		t.Fatalf("lost %d bytes, more than one %d-byte segment", lost, segBytes)
-	}
-	c := l.Completeness(finished, time.Now())
-	if c.State != logseg.StateIncomplete || !strings.Contains(c.Message, logseg.ReasonRunnerLost) {
-		t.Fatalf("completeness = %+v", c)
+	result, got := readAll(t, objs, storage.ReadOpts{})
+	if result.Complete || got != line(1) {
+		t.Fatalf("read=%+v, %q", result, got)
 	}
 }
 
@@ -212,9 +190,6 @@ func TestSinkRecordsWriterGapsAndIgnoresRetries(t *testing.T) {
 	}
 	if len(m.Gaps) != 2 || m.Gaps[0] != (logseg.Gap{From: 3, To: 4}) || m.Gaps[1] != (logseg.Gap{From: 6, To: 6}) {
 		t.Fatalf("gaps = %+v", m.Gaps)
-	}
-	if c := logseg.Assess(&m, finished, time.Now()); c.MissingLines != 3 {
-		t.Fatalf("completeness = %+v", c)
 	}
 }
 
@@ -301,33 +276,9 @@ func TestReaderStopsAtASegmentFailingItsDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 	objs.put(blob.LogSegmentKey(testPrefix, 2), []byte("tampered"))
-	l, got := readAll(t, objs, storage.ReadOpts{})
-	if got != line(1) || l.Broken != 2 {
-		t.Fatalf("read %q, broken %d", got, l.Broken)
-	}
-	if c := l.Completeness(finished, time.Now()); c.State != logseg.StateIncomplete {
-		t.Fatalf("completeness = %+v", c)
-	}
-}
-
-func TestTailReadFetchesOnlyTheSegmentsItNeeds(t *testing.T) {
-	objs := newMemObjects()
-	s := newSink(t, newMemUploader(objs, testPrefix), logseg.Options{SegmentBytes: int64(len(line(0)))})
-	for i := 1; i <= 10; i++ {
-		if err := s.Append([]byte(line(i)), "", 0, 0); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := s.Close(context.Background(), logseg.End{}); err != nil {
-		t.Fatal(err)
-	}
-	objs.resetGets()
-	_, got := readAll(t, objs, storage.ReadOpts{Tail: 2})
-	if got != line(9)+line(10) {
-		t.Fatalf("tail read %q", got)
-	}
-	if n := objs.getCount(); n != 3 {
-		t.Fatalf("tail read made %d GETs, want the manifest and two segments", n)
+	result, got, err := readLog(t, objs, storage.ReadOpts{})
+	if !errors.Is(err, blob.ErrIntegrity) || string(got) != line(1) || result.Complete {
+		t.Fatalf("read=%+v, %q, %v", result, got, err)
 	}
 }
 
@@ -361,49 +312,8 @@ func TestSegmentReadsApplyFiltersAcrossCuts(t *testing.T) {
 			}
 		})
 	}
-	log, err := logseg.Open(t.Context(), objs, testPrefix)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := log.Read(t.Context(), objs, storage.ReadOpts{Lines: "invalid"}); err == nil {
+	if _, _, err := readLog(t, objs, storage.ReadOpts{Lines: "invalid"}); err == nil {
 		t.Fatal("invalid line range succeeded")
-	}
-}
-
-func TestNodeSealLosesToControllerSeal(t *testing.T) {
-	objs := newMemObjects()
-	up := newMemUploader(objs, testPrefix)
-	s := newSink(t, up, logseg.Options{SegmentBytes: 1})
-	if err := s.Append([]byte(line(1)), "", 0, 0); err != nil {
-		t.Fatal(err)
-	}
-	waitStored(t, up, 1)
-	if _, err := logseg.SealAbandoned(context.Background(), objs, testPrefix, logseg.Manifest{Subject: new(keySubject("acme", "run-1", "build", 1, 1))},
-		logseg.ReasonRunnerLost, objs.putIfAbsent); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Close(context.Background(), logseg.End{}); !errors.Is(err, logseg.ErrSealed) {
-		t.Fatalf("Close after the controller sealed = %v, want ErrSealed", err)
-	}
-	l, _ := readAll(t, objs, storage.ReadOpts{})
-	if l.Manifest.SealedBy != logseg.SealedByController {
-		t.Fatalf("manifest = %+v", l.Manifest)
-	}
-}
-
-func TestUnsealedLogStreamsUntilTheGraceEnds(t *testing.T) {
-	now := time.Now()
-	running := logseg.NodeProgress{Started: true}
-	if c := logseg.Assess(nil, running, now); c.State != logseg.StateStreaming {
-		t.Fatalf("running = %+v", c)
-	}
-	recent := logseg.NodeProgress{Started: true, Terminal: true, FinishedAt: now.Add(-time.Second)}
-	if c := logseg.Assess(nil, recent, now); c.State != logseg.StateStreaming {
-		t.Fatalf("just finished = %+v", c)
-	}
-	old := logseg.NodeProgress{Started: true, Terminal: true, FinishedAt: now.Add(-2 * logseg.SealGrace)}
-	if c := logseg.Assess(nil, old, now); c.State != logseg.StateIncomplete {
-		t.Fatalf("abandoned = %+v", c)
 	}
 }
 

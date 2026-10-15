@@ -2,6 +2,12 @@
 
 <!-- design:begin -->
 
+`ExecutionJob.output_record` and `manifest_record` carry C1's exact committed
+record keys on private reconciliation and expansion responses. Terminal results
+may carry selectors with attempt zero. `ReuseSource.result` carries their run,
+job and state sequence independently of an execution attempt. Hosts preserve
+both identities and use the committed keys for output reads.
+
 ## Amendment 1: private execution and claim wire
 
 The CLI host-state adapter implements `nodehost.NativeHostStore` using the

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // ManifestVersion is the manifest format this package writes and reads.
@@ -23,7 +22,6 @@ const (
 
 // Reasons a manifest gives for any status but complete.
 const (
-	ReasonRunnerLost   = "runner lost"
 	ReasonUploadFailed = "upload failed"
 	ReasonByteCap      = "byte cap"
 	ReasonSequenceGap  = "sequence gap"
@@ -32,11 +30,8 @@ const (
 	ReasonStopped      = "node stopped before its log was finished"
 )
 
-// Who sealed a log.
-const (
-	SealedByNode       = "node"
-	SealedByController = "controller"
-)
+// SealedByNode identifies the writer of a physical manifest.
+const SealedByNode = "node"
 
 // Manifest seals one subject's log: which segments it holds, what
 // each one covers and its digest, and whether the log is whole.
@@ -127,8 +122,7 @@ func ParseManifest(raw []byte) (*Manifest, error) {
 
 // Completeness states a reader reports for one node's log.
 const (
-	// StateStreaming: the node is still running, or finished less than
-	// [SealGrace] ago and its manifest has not landed yet.
+	// StateStreaming identifies a log that can still receive bytes.
 	StateStreaming = "streaming"
 	// StateComplete: the manifest says every line arrived and every
 	// segment it lists verified.
@@ -143,11 +137,6 @@ const (
 	StateUnknown = "unknown"
 )
 
-// SealGrace is how long after a node finishes a reader waits for its
-// manifest before the controller seals the attempt as abandoned. A
-// writer whose claim ended may upload and seal for as long.
-const SealGrace = limits.LogSealGrace
-
 // Completeness is a reader's verdict on one node's log. Message is the
 // synthetic line a reader renders after the log; it is empty when there
 // is nothing to say.
@@ -158,50 +147,6 @@ type Completeness struct {
 	Message      string `json:"message,omitempty"`
 }
 
-// NodeProgress is what the controller knows about a node that a
-// completeness verdict needs.
-type NodeProgress struct {
-	Started    bool
-	Terminal   bool
-	FinishedAt time.Time
-}
-
-// Assess turns a manifest, or its absence, into a verdict. A nil
-// manifest reads as streaming until the node has been finished for
-// [SealGrace]; past it, the attempt is abandoned and reads incomplete.
-func Assess(m *Manifest, node NodeProgress, now time.Time) Completeness {
-	if m == nil {
-		if !node.Terminal || now.Sub(node.FinishedAt) < SealGrace {
-			return Completeness{State: StateStreaming}
-		}
-		return Completeness{
-			State:   StateIncomplete,
-			Message: "logs incomplete: the runner never sealed this log",
-		}
-	}
-	c := Completeness{Lines: m.Lines}
-	missing := m.DroppedLines
-	for _, g := range m.Gaps {
-		missing += g.To - g.From + 1
-	}
-	switch m.Status {
-	case StatusComplete:
-		c.State = StateComplete
-	case StatusCutOff:
-		c.State = StateCutOff
-		c.Message = fmt.Sprintf("logs cut off after line %d: %s", m.Lines, m.Reason)
-	default:
-		c.State = StateIncomplete
-		c.MissingLines = missing
-		if missing > 0 {
-			c.Message = fmt.Sprintf("logs incomplete: %d %s missing (%s)", missing, plural(missing, "line", "lines"), m.Reason)
-		} else {
-			c.Message = "logs incomplete: " + m.Reason
-		}
-	}
-	return c
-}
-
 // SyntheticLine renders c's message as the line a reader shows after the
 // log, or "" when there is nothing to show. It is never stored.
 func (c Completeness) SyntheticLine() string {
@@ -209,11 +154,4 @@ func (c Completeness) SyntheticLine() string {
 		return ""
 	}
 	return "[" + c.Message + "]"
-}
-
-func plural(n int64, one, many string) string {
-	if n == 1 {
-		return one
-	}
-	return many
 }

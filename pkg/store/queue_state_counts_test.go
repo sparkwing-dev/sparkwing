@@ -81,10 +81,10 @@ func TestCreditLedgerTotals_SplitsGrantsAndCharges(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 5_000_000, "trial", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 5_000_000, Reference: "trial", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("free grant: %v", err)
 	}
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid, 20_000_000, "invoice-1", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 20_000_000, Reference: "invoice-1", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("paid grant: %v", err)
 	}
 
@@ -94,7 +94,7 @@ func TestCreditLedgerTotals_SplitsGrantsAndCharges(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 
-	totals, err := s.CreditLedgerTotals(ctx)
+	totals, err := s.AsOperator().CreditLedgerTotals(ctx)
 	if err != nil {
 		t.Fatalf("CreditLedgerTotals: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestCreditLedgerTotals_SplitsGrantsAndCharges(t *testing.T) {
 	if _, err := s.FinalizeNodeCredits(ctx, "run-ledger", "node-a", claimant.TokenPrefix, time.Now()); err != nil {
 		t.Fatalf("FinalizeNodeCredits: %v", err)
 	}
-	settled, err := s.CreditLedgerTotals(ctx)
+	settled, err := s.AsOperator().CreditLedgerTotals(ctx)
 	if err != nil {
 		t.Fatalf("CreditLedgerTotals after settle: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestCreditLedgerTotals_SettledSecondsNeverFallUnderConcurrentClaimsOnPostgr
 	s := storetest.OpenPostgres(t)
 	ctx := context.Background()
 
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 100_000_000_000, "invoice", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100_000_000_000, Reference: "invoice", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	claimant := meteredClaimant(t, s, "pool")
@@ -224,7 +224,7 @@ func TestCreditLedgerTotals_SettledSecondsNeverFallUnderConcurrentClaimsOnPostgr
 			t.Fatalf("claim worker stopped while sampling: %v", workerErr)
 		default:
 		}
-		totals, err := s.CreditLedgerTotals(churn)
+		totals, err := s.AsOperator().CreditLedgerTotals(churn)
 		if err != nil {
 			t.Fatalf("CreditLedgerTotals: %v", err)
 		}
@@ -241,7 +241,7 @@ func TestCreditLedgerTotals_SettledSecondsNeverFallUnderConcurrentClaimsOnPostgr
 func assertSettledSecondsNeverFall(t *testing.T, s *store.Store) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid, 200_000_000, "invoice", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 200_000_000, Reference: "invoice", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	claimant := meteredClaimant(t, s, "pool")
@@ -249,7 +249,7 @@ func assertSettledSecondsNeverFall(t *testing.T, s *store.Store) {
 	high := int64(-1)
 	sample := func(stage string) int64 {
 		t.Helper()
-		totals, err := s.CreditLedgerTotals(ctx)
+		totals, err := s.AsOperator().CreditLedgerTotals(ctx)
 		if err != nil {
 			t.Fatalf("CreditLedgerTotals at %s: %v", stage, err)
 		}
@@ -294,7 +294,7 @@ func assertSettledSecondsNeverFall(t *testing.T, s *store.Store) {
 	}
 	atFinish := sample("finish and refund")
 
-	totals, err := s.CreditLedgerTotals(ctx)
+	totals, err := s.AsOperator().CreditLedgerTotals(ctx)
 	if err != nil {
 		t.Fatalf("CreditLedgerTotals: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestNodeSettlement_ReadsTheNodesOwnClaimCredential(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid, 20_000_000, "invoice", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 20_000_000, Reference: "invoice", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	claimant := meteredClaimant(t, s, "pool")

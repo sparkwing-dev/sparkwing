@@ -219,6 +219,8 @@ type ReconcileResponse struct {
 // ExecutionJob carries private persisted state for a live owner or awarded executor.
 type ExecutionJob struct {
 	JobDetail
+	OutputRecord       *blob.RecordKey              `json:"output_record,omitempty"`
+	ManifestRecord     *blob.RecordKey              `json:"manifest_record,omitempty"`
 	Spec               json.RawMessage              `json:"spec"`
 	SpecHash           string                       `json:"spec_hash"`
 	Execution          runspec.JobExecutionSettings `json:"execution"`

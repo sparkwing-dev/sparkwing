@@ -134,7 +134,6 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 	resp.Auth.Providers = s.signInProviders()
 	resp.Claims.AllowRepos = true
 	resp.Claims.Profile = true
-	resp.Logs.Segments = s.logObjects() != nil
 	if s.githubApp != nil {
 		resp.GitHubApp = &capabilitiesGitHubApp{Slug: s.githubApp.client.Slug()}
 	}

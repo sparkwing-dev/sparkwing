@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -88,10 +89,12 @@ func (f *ownerOperationWire) ReconcileJob(_ context.Context, run, job string, re
 	f.run, f.job, f.request = run, job, request
 	return f.reconcile, f.err
 }
+
 func (f *ownerOperationWire) AcceptExpansion(_ context.Context, run, job string, request controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error) {
 	f.run, f.job, f.submission = run, job, request
 	return f.expansion, f.err
 }
+
 func executionWireFixture() controllerwire.ExecutionJob {
 	now := time.Unix(1234, 0)
 	declaration := nodeproto.JobSpec{ID: "job", Steps: []nodeproto.StepSpec{{ID: "body"}}}
@@ -102,11 +105,16 @@ func executionWireFixture() controllerwire.ExecutionJob {
 		ApplicationRetries: 2, Disruptions: 1, ReadyAt: &now, LeaseExpiresAt: &now, ClaimedBy: "holder", CapabilityPrefix: "claim-prefix", ExpansionDigest: "accepted-body",
 	}
 }
+
 func TestRemoteReconciliationRetainsPrivateAwardAndExecutionState(t *testing.T) {
 	job := executionWireFixture()
-	f := &ownerOperationWire{reconcile: controllerwire.ReconcileResponse{Kind: string(store.Execute), Job: job,
-		Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, RunID: "run", JobID: "job", Capability: "private-award", LeaseExpiresAt: *job.LeaseExpiresAt,
-			Binding: capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "holder", Generation: 4}}}}
+	f := &ownerOperationWire{reconcile: controllerwire.ReconcileResponse{
+		Kind: string(store.Execute), Job: job,
+		Claim: &controllerwire.ClaimedUnit{
+			Unit: capability.UnitNode, RunID: "run", JobID: "job", Capability: "private-award", LeaseExpiresAt: *job.LeaseExpiresAt,
+			Binding: capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "holder", Generation: 4},
+		},
+	}}
 	source := &store.MaterializeSource{Kind: store.SourceMemo, Source: runspec.AttemptIdentity{RunID: "previous", NodeID: "source", Attempt: 7, Generation: 2}}
 	request := store.ReconcileRequest{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Policy: store.SourceMemo, Source: source}
 	got, err := (&RemoteOwnerStore{Controller: f}).ReconcileNode(t.Context(), request)
@@ -147,6 +155,7 @@ func TestRemoteReconciliationRetainsPrivateAwardAndExecutionState(t *testing.T) 
 		})
 	}
 }
+
 func TestRemoteReconciliationPreservesNonexecutingResults(t *testing.T) {
 	for _, kind := range []store.ReconcileKind{store.KeepTerminal, store.Materialize, store.WaitHolder, store.Dispatch} {
 		t.Run(string(kind), func(t *testing.T) {
@@ -167,6 +176,7 @@ func TestRemoteReconciliationPreservesNonexecutingResults(t *testing.T) {
 		})
 	}
 }
+
 func TestRemoteExpansionReplayRetainsCurrentJobStateAndEmptyBody(t *testing.T) {
 	job := executionWireFixture()
 	job.Status, job.Outcome = "done", "success"
@@ -174,8 +184,10 @@ func TestRemoteExpansionReplayRetainsCurrentJobStateAndEmptyBody(t *testing.T) {
 	if err := json.Unmarshal(job.Spec, &declaration); err != nil {
 		t.Fatal(err)
 	}
-	f := &ownerOperationWire{expansion: controllerwire.ExpansionAccepted{SourceGeneration: 2, State: "accepted", BodyHash: "hash", Replayed: true,
-		Jobs: []controllerwire.ExpandedJob{{Job: declaration, SpecHash: job.SpecHash, Execution: job.Execution, Current: job}}}}
+	f := &ownerOperationWire{expansion: controllerwire.ExpansionAccepted{
+		SourceGeneration: 2, State: "accepted", BodyHash: "hash", Replayed: true,
+		Jobs: []controllerwire.ExpandedJob{{Job: declaration, SpecHash: job.SpecHash, Execution: job.Execution, Current: job}},
+	}}
 	submission := store.ExpansionSubmission{Source: store.NodeRef{RunID: "run", NodeID: "source"}, SourceGeneration: 2, Body: json.RawMessage(`{"jobs":[]}`)}
 	got, err := (&RemoteOwnerStore{Controller: f}).AcceptExpansion(t.Context(), submission)
 	if err != nil || !got.Replayed || len(got.Nodes) != 1 || got.Nodes[0].Status != store.StatusDone || got.Nodes[0].Outcome != store.NodeSuccess || got.Nodes[0].StateSeq != 11 || !bytes.Equal(f.submission.Body, submission.Body) {
@@ -191,6 +203,7 @@ func TestRemoteExpansionReplayRetainsCurrentJobStateAndEmptyBody(t *testing.T) {
 		t.Fatal("accepted changed source fence")
 	}
 }
+
 func TestRemoteOperationsPreserveTransportErrors(t *testing.T) {
 	sentinel := errors.New("controller unavailable")
 	f := &ownerOperationWire{err: sentinel}
@@ -206,13 +219,18 @@ func TestRemoteOperationsPreserveTransportErrors(t *testing.T) {
 	}
 }
 
-func TestRemoteReconciliationRefusesUnrepresentableResultSource(t *testing.T) {
-	f := &ownerOperationWire{}
-	_, err := (&RemoteOwnerStore{Controller: f}).ReconcileNode(t.Context(), store.ReconcileRequest{
+func TestRemoteReconciliationPreservesResultSource(t *testing.T) {
+	job := executionWireFixture()
+	job.Status, job.Outcome = "done", "success"
+	source := &controllerwire.MaterializedResultSource{RunID: "previous", JobID: "job", StateSeq: 9}
+	key := blob.MaterializedRecordKey("a", "run", "job", 11, "gh:1", blob.RefScope{}, "ci", blob.KindOutput)
+	job.OutputRecord = &key
+	f := &ownerOperationWire{reconcile: controllerwire.ReconcileResponse{Kind: "materialize", Job: job, Source: &controllerwire.ReuseSource{Policy: "manual_retry", Result: source}}}
+	got, err := (&RemoteOwnerStore{Controller: f}).ReconcileNode(t.Context(), store.ReconcileRequest{
 		Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Policy: store.SourceManualRetry,
 		Source: &store.MaterializeSource{Kind: store.SourceManualRetry, Result: &store.MaterializedResultSource{Ref: store.NodeRef{RunID: "previous", NodeID: "job"}, StateSeq: 9}},
 	})
-	if err == nil || f.run != "" {
-		t.Fatal("sent a result source after silently dropping its identity")
+	if err != nil || !reflect.DeepEqual(f.request.Source.Result, source) || got.Source == nil || got.Source.Result == nil || got.Source.Result.StateSeq != 9 || got.Node.OutputRecord == nil || *got.Node.OutputRecord != key {
+		t.Fatalf("result identity lost: %+v: %v", got, err)
 	}
 }

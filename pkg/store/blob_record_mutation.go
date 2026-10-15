@@ -16,9 +16,15 @@ type blobRecordMutation struct {
 	members []blob.Member
 }
 
-func (r *blobRecords) mutateRecordsTx(ctx context.Context, tx *storeTx, a blobActor, batch []blobRecordMutation, copied bool) ([]blob.Record, error) {
+func (r *blobRecords) mutateRecordsTx(ctx context.Context, tx *storeTx, a blobActor, batch []blobRecordMutation, copied bool, target *NodeRow) ([]blob.Record, error) {
 	var digests []blob.Digest
+	seen := map[blob.RecordKey]blob.Record{}
 	for _, change := range batch {
+		key := change.record.Key
+		if prior, ok := seen[key]; ok && (prior.Digest != change.record.Digest || prior.ManifestDigest != change.record.ManifestDigest) {
+			return nil, blob.ErrIntegrity
+		}
+		seen[key] = change.record
 		digests = append(digests, change.record.Digest)
 		if change.record.ManifestDigest.Set {
 			digests = append(digests, change.record.ManifestDigest.Value)
@@ -41,7 +47,7 @@ func (r *blobRecords) mutateRecordsTx(ctx context.Context, tx *storeTx, a blobAc
 	replayed := make([]bool, len(batch))
 	for i, change := range batch {
 		record := change.record
-		if err := checkBlobWriteKey(a, record.Key); err != nil {
+		if err := checkRecordMutationKey(a, record.Key, target); err != nil {
 			return nil, err
 		}
 		if !copied {
@@ -76,7 +82,7 @@ func (r *blobRecords) mutateRecordsTx(ctx context.Context, tx *storeTx, a blobAc
 			continue
 		}
 		result[i].CreatedAt = tx.now()
-		if err := persistBlobRecordTx(ctx, tx, result[i], change.scope, current.source); err != nil {
+		if err := persistBlobRecordTx(ctx, tx, result[i], change.scope, current.source, target); err != nil {
 			return nil, err
 		}
 		if err := persistBlobMembersTx(ctx, tx, r.tenant.team, result[i], change.members); err != nil {
@@ -89,4 +95,14 @@ func (r *blobRecords) mutateRecordsTx(ctx context.Context, tx *storeTx, a blobAc
 		}
 	}
 	return result, nil
+}
+
+func checkRecordMutationKey(a blobActor, key blob.RecordKey, target *NodeRow) error {
+	if target == nil {
+		return checkBlobWriteKey(a, key)
+	}
+	if a.source.Kind != blob.UploadOwnerUnit || a.source.RunID != target.Ref.RunID || (key.Kind != blob.KindOutput && key.Kind != blob.KindManifest) || key != materializedKey(Team(a.capability.Team), a, *target, key.Kind) || a.capability.Data.WriteRef != key.Scope.Ref.CapabilityScope() {
+		return blob.ErrDigestNotReadable
+	}
+	return nil
 }

@@ -108,6 +108,7 @@ func executionJob(node store.NodeRow) controllerwire.ExecutionJob {
 		JobDetail: snapshotJob(node), Spec: node.Spec, SpecHash: node.SpecHash, Execution: node.Execution,
 		ClaimedBy: node.ClaimedBy, CapabilityPrefix: node.CapabilityPrefix, ReadyAt: node.ReadyAt, LeaseExpiresAt: node.LeaseExpiresAt,
 		ApplicationRetries: node.ApplicationRetries, Disruptions: node.Disruptions, ExpansionDigest: node.ExpansionDigest,
+		OutputRecord: node.OutputRecord, ManifestRecord: node.ManifestRecord,
 	}
 }
 

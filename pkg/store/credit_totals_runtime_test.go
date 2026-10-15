@@ -24,7 +24,7 @@ func TestStoreDataLedgerTotalsUseFinancialRows(t *testing.T) {
 	 ('storage','b','','','','storage',86400,20,1)`)
 	want := CreditLedgerTotals{BalanceMicro: 955, GrantedFreeMicro: 100, GrantedPaidMicro: 1000, ReversedMicro: 25, ReservedMicro: 600, ChargedMicro: 70, RefundedMicro: 570, StorageMicro: 20, SettledSeconds: 10}
 	for range 2 {
-		got, err := s.CreditLedgerTotals(t.Context())
+		got, err := s.AsOperator().CreditLedgerTotals(t.Context())
 		if err != nil || got != want {
 			t.Fatalf("financial totals=%+v, %v; want %+v", got, err, want)
 		}
@@ -32,17 +32,27 @@ func TestStoreDataLedgerTotalsUseFinancialRows(t *testing.T) {
 }
 
 func TestStoreDataLedgerTotalsExcludeUnstartedReservation(t *testing.T) {
-	s, c := meteringFixture(t, capability.UnitNode, capability.BillingAtStart)
-	reserveMetering(t, s, c)
-	calculate := func(p capability.BillingProvenance, intervals []capability.BillableInterval) (capability.BillingSettlement, error) {
-		if p != *c.Billing || len(intervals) != 0 {
+	s, demand, _ := meteredUnitFixture(t, true)
+	claim, _ := meteredUnitClaim(t, s, demand)
+	calculate := capability.SettleBilling
+	calls := 0
+	s.billing = func(p capability.BillingProvenance, intervals []capability.BillableInterval) (capability.BillingSettlement, error) {
+		calls++
+		if p.ReservationID == "" || p.Unit != capability.BillingJob || len(intervals) != 0 {
 			t.Fatalf("unstarted inputs=%+v, %+v", p, intervals)
 		}
-		return capability.BillingSettlement{ReservationID: p.ReservationID, RefundUnstarted: true}, nil
+		return calculate(p, intervals)
 	}
-	got, err := s.creditLedgerTotalsWith(t.Context(), calculate)
-	if err != nil || got.SettledSeconds != 0 || got.ReservedMicro != 600 || got.BalanceMicro != 999400 {
-		t.Fatalf("unstarted totals=%+v, %v", got, err)
+	got, err := s.AsOperator().CreditLedgerTotals(t.Context())
+	if err != nil || calls != 1 || got.SettledSeconds != 0 || got.ReservedMicro != 600 || got.BalanceMicro != 999400 {
+		t.Fatalf("unstarted totals=%+v, calls=%d, %v", got, calls, err)
+	}
+	if err := s.ReleaseUnit(t.Context(), claim, claim.Award.CapabilityPrefix); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.AsOperator().CreditLedgerTotals(t.Context())
+	if err != nil || calls != 2 || got.SettledSeconds != 0 || got.ReservedMicro != 600 || got.RefundedMicro != 600 || got.BalanceMicro != 1000000 {
+		t.Fatalf("released totals=%+v, calls=%d, %v", got, calls, err)
 	}
 }
 
@@ -237,12 +247,12 @@ func TestStoreDataLedgerTotalsObserveOnlyConfirmedCompute(t *testing.T) {
 	}
 	confirmed = 75
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := settleBillingAwardWithTx(t.Context(), tx, "a", "reservation", at.Add(75*time.Second), calculate)
+		_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", at.Add(75*time.Second), true, calculate)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.CreditLedgerTotals(t.Context())
+	got, err := s.AsOperator().CreditLedgerTotals(t.Context())
 	if err != nil || got.SettledSeconds != confirmed || got.ChargedMicro != 150 {
 		t.Fatalf("disrupted totals=%+v, %v", got, err)
 	}
@@ -252,7 +262,7 @@ func TestStoreDataLedgerTotalsSkipUnmeteredAwards(t *testing.T) {
 	s, c := meteringFixture(t, capability.UnitNode, capability.BillingAtAward)
 	c.Billing.Metered = false
 	reserveMetering(t, s, c)
-	if got, err := s.CreditLedgerTotals(t.Context()); err != nil || got != (CreditLedgerTotals{GrantedPaidMicro: 1000000, BalanceMicro: 1000000}) {
+	if got, err := s.AsOperator().CreditLedgerTotals(t.Context()); err != nil || got != (CreditLedgerTotals{GrantedPaidMicro: 1000000, BalanceMicro: 1000000}) {
 		t.Fatalf("unmetered totals=%+v, %v", got, err)
 	}
 }

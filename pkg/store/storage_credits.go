@@ -7,27 +7,17 @@ import (
 	"time"
 )
 
-// Retained storage is billed from the same ledger as cloud runner time. A team
-// keeps bytes after its runs end, so the charge is a rent on what is still
-// stored rather than a price on work: every pass bills the bytes above the free
-// allowance for the interval since the previous pass, pro rata.
 const (
-	// StorageBytesPerGB is the gigabyte the storage rate prices, which is the
-	// gibibyte every other byte figure in this store is written in.
+	// StorageBytesPerGB is the gigabyte the storage rate prices, which is the gibibyte every other byte figure in this store is written in.
 	StorageBytesPerGB = 1 << 30
 
 	// StorageChargeDaySeconds is the day the storage rate prices.
 	StorageChargeDaySeconds = 86_400
 
-	// CloudStorageRateMicroPerGBDay prices a gibibyte-day at the published
-	// 0.10 dollars a GB-month over a thirty-day month, which is 100 credits
-	// a month and about 3.33 credits a day. Nothing sets it on its own: an
-	// installation bills storage only once an operator writes the rate.
+	// CloudStorageRateMicroPerGBDay prices a gibibyte-day at the published 0.10 dollars a GB-month over a thirty-day month, which is 100 credits a month and about 3.33 credits a day.
 	CloudStorageRateMicroPerGBDay = 10 * MicroCreditsPerCent / 30
 
-	// MaxStorageRateMicroPerGBDay is the highest price an operator may put on
-	// a gibibyte-day, ten thousand dollars, which is the ceiling that keeps the
-	// charge arithmetic inside int64 for any byte count a database can hold.
+	// MaxStorageRateMicroPerGBDay is the highest price an operator may put on a gibibyte-day, ten thousand dollars, which is the ceiling that keeps the charge arithmetic inside int64 for any byte count a database can hold.
 	MaxStorageRateMicroPerGBDay = 1_000_000_000_000
 )
 

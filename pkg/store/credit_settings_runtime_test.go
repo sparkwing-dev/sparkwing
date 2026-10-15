@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"math/rand"
 	"reflect"
 	"testing"
+	"testing/quick"
 	"time"
 )
 
@@ -51,7 +53,7 @@ func TestStoreDataCreditSettingsUseFinalSchemaAndSurviveRestart(t *testing.T) {
 	}
 	table := CreditRateTable{{Cores: 8, MicroPerSecond: 40000}, {Cores: 4, MicroPerSecond: 20000}, {Cores: 2, MicroPerSecond: 10000}}
 	warm, grace, capSeconds, rent, free := int64(4), int64(0), int64(45), int64(123), int64(1<<30)
-	want, err := s.AsOperator().SetOperatorCreditSettings(t.Context(), CreditSettingsUpdate{
+	want, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{
 		RateTable: &table, WarmCPUClassCores: &warm, GraceSeconds: &grace,
 		MaxChargeSeconds: &capSeconds, StorageRateMicroPerGBDay: &rent, StorageFreeAllowanceBytes: &free,
 	})
@@ -178,7 +180,7 @@ func TestStoreDataCreditSettingsIndependentWritersPreserveRateAuthority(t *testi
 	}()
 	go func() {
 		<-start
-		_, err := other.AsOperator().SetOperatorCreditSettings(t.Context(), CreditSettingsUpdate{RateMicroPerSecond: &scalar})
+		_, err := other.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateMicroPerSecond: &scalar})
 		results <- err
 	}()
 	close(start)
@@ -190,5 +192,31 @@ func TestStoreDataCreditSettingsIndependentWritersPreserveRateAuthority(t *testi
 	got, err := s.AsOperator().CreditSettings(t.Context())
 	if err != nil || !got.RateTableSet || got.RateMicroPerSecond != 20000 {
 		t.Fatalf("concurrent settings=%+v: %v", got, err)
+	}
+}
+
+func TestStoreDataCreditSettingsScalarCannotRewriteInstalledTableProperty(t *testing.T) {
+	property := func(price, delta uint16, hasBase bool) bool {
+		s := authorityStore(t)
+		rate, scalar, grace := int64(price)+1, int64(price)+int64(delta)+2, int64(0)
+		cores := int64(8)
+		if hasBase {
+			cores = CreditRateBaseClassCores
+		}
+		table := CreditRateTable{{Cores: cores, MicroPerSecond: rate}}
+		before, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateMicroPerSecond: &scalar, GraceSeconds: &grace})
+		if !errors.Is(err, ErrInvalidCreditSetting) {
+			t.Logf("installed table accepted scalar price: %v", err)
+			return false
+		}
+		after, err := s.AsOperator().CreditSettings(t.Context())
+		return err == nil && reflect.DeepEqual(before, after)
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 32, Rand: rand.New(rand.NewSource(83291))}); err != nil {
+		t.Fatal(err)
 	}
 }

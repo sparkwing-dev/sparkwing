@@ -9,9 +9,17 @@ the immutable source generation.
 `Options.Subject` is required. The sink copies it before opening its spool,
 so changes to the caller's value cannot retag the log. Every stored manifest
 requires a valid subject. Flat run, node, attempt and generation fields are
-removed. `Open` checks that the manifest's subject produces the requested
-`blob.LogSubjectPrefix`. `SealAbandoned` checks that binding before reading or writing
-objects. `AttemptPrefix` is removed.
+removed. `CommittedReader` checks the store-selected subject and object keys
+before opening bytes. Physical manifests and object listings grant no read
+authority. The object-side reader and abandoned-log sealer are removed.
+`Operator.SealAbandonedLogStreams` owns abandoned seals under the maintenance
+lease and preserves every committed segment. `AttemptPrefix` is removed.
+
+Dashboard completeness uses the selected attempt's persisted finish time and
+`RunSnapshot.StoreNow`. A later job finish or an unrelated attempt cannot extend
+that stream's final tail grace. `NodeProgress` and `SealGrace` are removed.
+`NodeLogs.NodeLogCompleteness` takes only context, run and job IDs. The shared
+grace constant remains `limits.LogSealGrace`.
 
 `SubjectUploader` verifies compressed bytes, raw size and line coverage before
 signing. Batches contain up to `limits.LogUploadBatch` segment slots and one

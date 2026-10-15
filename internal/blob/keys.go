@@ -142,3 +142,8 @@ func resolveWriteKey(a Authority, intent WriteScopeIntent) (RecordKey, error) {
 	}
 	return key, nil
 }
+
+// MaterializedRecordKey identifies a committed result without inventing an execution attempt.
+func MaterializedRecordKey(team, run, job string, seq int64, repo runspec.RepoKey, ref RefScope, pipeline string, kind Kind) RecordKey {
+	return RecordKey{Team: team, Kind: kind, Scope: Scope{Repo: repo, Ref: ref, Pipeline: pipeline, Job: job, Key: fmt.Sprintf("%s/result/%d", run, seq)}, Name: "result"}
+}
