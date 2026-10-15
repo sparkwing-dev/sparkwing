@@ -1,5 +1,17 @@
 # Migrating to the next release
 
+## Source bundles use record reachability
+
+`Store.ClaimExpiredSourceBundles`, `Store.DeleteSourceBundleRows`,
+`Store.PruneExpiredUploads`, `store.DirectCacheMaxAge` and
+`controller.CacheObjectMaxAge` are removed. Cache listings no longer expire bytes
+by object age. Keep source bytes through blob records. Run
+`Operator.MaintainRetention` under the maintenance lease to expire records and
+release upload-ticket quota holds. Use `Operator.MarkBlobTombstones` and
+`Operator.CollectBlobTombstones` with the verified object backend for physical
+collection after the 24-hour grace. Rebuild pre-launch stores from the final
+schema. There is no old-row migration or compatibility adapter.
+
 ## Node logs reach the controller as segments
 
 - **Before:** a Kubernetes Job, warm runner, self-hosted agent, GitHub

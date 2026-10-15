@@ -331,9 +331,6 @@ func TestDirectCommitAdoptsVerifiedCopyAfterOldReservationExpires(t *testing.T) 
 	if _, err := f.store.ReleaseExpiredStorage(t.Context(), time.Now().Add(store.DirectUploadTTL+time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.store.PruneExpiredUploads(t.Context(), time.Now().Add(store.DirectUploadTTL+time.Hour)); err != nil {
-		t.Fatal(err)
-	}
 	var retry controller.DirectUploadResponse
 	if code := f.call("POST", "/api/v1/data/upload", runner, map[string]any{
 		"kind": "artifact", "key": key, "size": len(body), "sha256": digest, "run_id": "run-retry",

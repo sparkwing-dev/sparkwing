@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -63,6 +64,15 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 	}
 	if err := r.authorizeDigestTx(ctx, tx, a, key.Kind, record.Digest); err != nil {
 		return result, err
+	}
+	if key.Kind == blob.KindOutput || (key.Kind == blob.KindMemo && key.Name == "output") {
+		size, err := requireBlobTx(ctx, tx, r.tenant.team, record.Digest)
+		if err != nil {
+			return result, err
+		}
+		if size > limits.NodeOutputBytes {
+			return result, blob.ErrIntegrity
+		}
 	}
 	if record.ManifestDigest.Set {
 		if err := r.authorizeDigestTx(ctx, tx, a, key.Kind, record.ManifestDigest.Value); err != nil {

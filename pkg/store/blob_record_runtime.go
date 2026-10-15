@@ -114,7 +114,7 @@ func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecor
 	if request.ExpiresAt.Set && !request.ExpiresAt.Value.After(tx.now()) {
 		return blob.Record{}, authorityError(apierr.BadRequest, "record expiry is not in the future")
 	}
-	if request.Key.Kind == blob.KindOutput {
+	if request.Key.Kind == blob.KindOutput || (request.Key.Kind == blob.KindMemo && request.Key.Name == "output") {
 		size, err := requireBlobTx(ctx, tx, r.tenant.team, request.Digest)
 		if err != nil {
 			return blob.Record{}, err

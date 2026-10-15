@@ -76,7 +76,7 @@ func checkStoreReachabilityBoundary(ctx context.Context, root string) (err error
 	if _, err := operator.CollectBlobTombstones(ctx, lease, 100, deleter); !errors.Is(err, refusal) || calls != 1 {
 		return fmt.Errorf("failed deletion lost its error: calls=%d: %v", calls, err)
 	}
-	if err := checkStoreGCRows(ctx, s.DB(), 6, 2); err != nil {
+	if err := checkStoreGCRows(ctx, s.DB(), 7, 2); err != nil {
 		return err
 	}
 	// safety: a committed graph added after marking must win the collector's reachability recheck.
@@ -92,7 +92,7 @@ func checkStoreReachabilityBoundary(ctx context.Context, root string) (err error
 	if n, err := operator.CollectBlobTombstones(ctx, lease, 100, deleter); err != nil || n != 1 {
 		return fmt.Errorf("rechecked collection=%d, want 1: %v", n, err)
 	}
-	if err := checkStoreGCRows(ctx, s.DB(), 5, 0); err != nil {
+	if err := checkStoreGCRows(ctx, s.DB(), 6, 0); err != nil {
 		return err
 	}
 	// safety: deleting the seeded uploader also drops its last operational reference and receipt.
@@ -111,6 +111,40 @@ func checkStoreReachabilityBoundary(ctx context.Context, root string) (err error
 	deleter = storeBoundaryDeleter(func(context.Context, blob.Blob) error { return nil })
 	if n, err := operator.CollectBlobTombstones(ctx, lease, 100, deleter); err != nil || n != 5 {
 		return fmt.Errorf("unreferenced tail collection=%d, want 5: %v", n, err)
+	}
+	if err := checkStoreGCRows(ctx, s.DB(), 1, 0); err != nil {
+		return err
+	}
+	return expireStoreSourceBoundary(ctx, s, lease, old)
+}
+
+func expireStoreSourceBoundary(ctx context.Context, s *store.Store, lease store.SingletonLease, old int64) error {
+	// safety: source records retain bytes independently of the originating run and object age.
+	if _, err := s.DB().ExecContext(ctx, "UPDATE blob_records SET expires_at=? WHERE team=? AND kind='source_bundle'", old, store.DefaultTeam); err != nil {
+		return err
+	}
+	op := s.AsOperator()
+	retained, err := op.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 100})
+	if err != nil || retained.Records != 1 {
+		return fmt.Errorf("source record expiry=%+v: %v", retained, err)
+	}
+	if n, err := op.MarkBlobTombstones(ctx, lease, 100); err != nil || n != 1 {
+		return fmt.Errorf("expired source marks=%d, want 1: %v", n, err)
+	}
+	deleter := storeBoundaryDeleter(func(_ context.Context, b blob.Blob) error {
+		if b.Team != string(store.DefaultTeam) || b.Digest != blob.Digest(strings.Repeat("1", 64)) || b.Size != 19 {
+			return fmt.Errorf("wrong source deletion: %+v", b)
+		}
+		return nil
+	})
+	if n, err := op.CollectBlobTombstones(ctx, lease, 100, deleter); err != nil || n != 0 {
+		return fmt.Errorf("source deleted before grace: %d: %v", n, err)
+	}
+	if _, err := s.DB().ExecContext(ctx, "UPDATE blob_tombstones SET marked_at=? WHERE team=?", old, store.DefaultTeam); err != nil {
+		return err
+	}
+	if n, err := op.CollectBlobTombstones(ctx, lease, 100, deleter); err != nil || n != 1 {
+		return fmt.Errorf("expired source collection=%d, want 1: %v", n, err)
 	}
 	return checkStoreGCRows(ctx, s.DB(), 0, 0)
 }
@@ -134,8 +168,8 @@ func checkStoreGCRows(ctx context.Context, db *sql.DB, blobs, tombstones int) er
 // safety: graph seeds isolate persistence and retention from manifest verification and the byte backend.
 func seedStoreReachabilityBoundary(ctx context.Context, db *sql.DB) error {
 	old := time.Now().Add(-120 * 24 * time.Hour).UnixNano()
-	for i, letter := range []string{"b", "c", "d", "e", "f"} {
-		if _, err := db.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?)", store.DefaultTeam, strings.Repeat(letter, 64), []int64{5, 7, 11, 13, 17}[i], old); err != nil {
+	for i, letter := range []string{"b", "c", "d", "e", "f", "1"} {
+		if _, err := db.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?)", store.DefaultTeam, strings.Repeat(letter, 64), []int64{5, 7, 11, 13, 17, 19}[i], old); err != nil {
 			return err
 		}
 	}
@@ -148,6 +182,7 @@ func seedStoreReachabilityBoundary(ctx context.Context, db *sql.DB) error {
 		{"INSERT INTO pipeline_success_pins(team,pipeline,run_id,finished_at) VALUES (?,'fixture','upload',?)", []any{store.DefaultTeam, old}},
 		{`INSERT INTO blob_records(team,kind,scope,name,digest,manifest_digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,created_at,expires_at) VALUES (?,'output','pinned','result',?,?,'upload','gh:1','manual:','publisher','local',?,'publication','upload',0,0,?,?,?)`, []any{store.DefaultTeam, strings.Repeat("b", 64), strings.Repeat("c", 64), []byte(`{}`), []byte(`{}`), old, old}},
 		{`INSERT INTO blob_records(team,kind,scope,name,digest,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,created_at,expires_at) VALUES (?,'depcache','expired','modules',?,'gh:1','manual:','publisher','local',?,'publication','upload',0,0,?,?,?)`, []any{store.DefaultTeam, strings.Repeat("e", 64), []byte(`{}`), []byte(`{}`), old, old}},
+		{`INSERT INTO blob_records(team,kind,scope,name,digest,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,created_at,expires_at) VALUES (?,'source_bundle','source','working-tree',?,'gh:1','manual:','publisher','local',?,'publication','upload',0,0,?,?,?)`, []any{store.DefaultTeam, strings.Repeat("1", 64), []byte(`{}`), []byte(`{}`), old, time.Now().Add(time.Hour).UnixNano()}},
 		{"INSERT INTO blob_members(team,manifest_digest,member_digest) VALUES (?,?,?)", []any{store.DefaultTeam, strings.Repeat("c", 64), strings.Repeat("d", 64)}},
 	}
 	for _, statement := range statements {

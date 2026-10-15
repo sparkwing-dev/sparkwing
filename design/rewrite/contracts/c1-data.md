@@ -414,6 +414,12 @@ counter owner.
 The legacy `PruneExpiredCacheObjects` row sweep is removed with its controller
 call. Record expiry and reachability GC govern final blob lifetime. Old creation
 time alone cannot delete a live record's bytes, including the default tenant's.
+`ClaimExpiredSourceBundles`, `DeleteSourceBundleRows`, `PruneExpiredUploads`,
+`DirectCacheMaxAge` and the controller's `CacheObjectMaxAge` are removed.
+The controller's cache listing has no age-expiry callback. Source records retain
+bytes independently of their originating run. Upload-ticket expiry releases
+quota through the leased final retention pass. Physical GC wiring remains with
+the storage adapter.
 
 Usage rows are additive per team, period and replica. Reporting sums rows.
 Admission takes a shared team/quota lock and records each reservation durably;
@@ -527,9 +533,16 @@ The `storage-reachability-and-retention-tails/store-data-sqlite` proof exercises
 leased record expiry, newest-success output pins, receipt roots, transitive
 members, persisted tombstones, grace and failed physical deletion. Collection
 rechecks references added after marking, then removes tails after their last
-root disappears. Graphs and the deletion backend are contract fixtures. Native
+root disappears. An old source bundle survives its originating run and becomes
+collectible only after its record expires and the tombstone grace passes.
+Graphs and the deletion backend are contract fixtures. Native
 placement, manifest verification and physical object deletion remain integration
 obligations.
+
+The 16 MiB output cap applies to memo records named `output` at commit and lookup.
+An oversized persisted memo is corrupt cache data: memo lookup and copying miss,
+while a required record lookup fails. Manifest-only memo records retain their
+separate artifact contract.
 
 ## Publication and retry interpretation
 

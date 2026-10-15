@@ -822,11 +822,12 @@ itself.
 
 `pipeline trigger --working-tree` uploads one immutable source object per
 submission. The controller binds it to one run and signs reads only for that
-run's live claim. An unused upload expires 24 hours after commit; a bound
-upload stays through a queued or running run and expires 24 hours after that
-run finishes. A retry uploads a new bundle. Source bytes count against the
-team's cache storage share. The hourly storage pass deletes the S3 object
-before releasing its database row and quota.
+run's live claim. Source bundle lifetime follows its blob record. A live record
+keeps its bytes regardless of object age or deletion of the originating run.
+After record expiry, reachability collection marks unreferenced bytes and
+waits 24 hours before rechecking references and deleting them. Source bytes
+count once against the team's stored bytes. Uncommitted upload tickets release
+their quota holds through leased retention.
 
 The cache's unauthenticated `/metrics` carries no per-repository label, so
 scraping it does not enumerate or confirm the mirror set.

@@ -35,7 +35,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"globalRunnerRefusal":                 "the global concurrent runner cap counts live claims from every team",
 	"globalRunsPerHourRefusal":            "the global hourly cap counts runs from every team",
 	"(*Store).NodeClaimFenceNodeForRun":   "the run ID is global, and the query matches its exact claimant and generation",
-	"(*Store).PruneExpiredUploads":        "the hourly storage pass releases expired pending uploads for every team",
 	"(*Store).PruneStorageCommitReceipts": "the hourly storage pass drops receipt rows past the retry window for every team",
 	"(*Store).expiredReservationRows": "the sweep finds which teams hold expired reservations; each release " +
 		"then runs under that team's own row lock",

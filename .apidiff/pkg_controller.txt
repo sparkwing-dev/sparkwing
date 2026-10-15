@@ -41,7 +41,6 @@ type CacheGrantResponse struct {
 	Team      string
 	ExpiresAt time.Time
 }
-func CacheObjectMaxAge(team string) time.Duration
 const CardBillingCapability = "card-billing-v1"
 const CardBillingInterval = 30 * time.Second
 const CardNotTrustedCode = "card_not_trusted"

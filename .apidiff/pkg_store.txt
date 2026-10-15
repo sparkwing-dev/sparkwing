@@ -737,7 +737,6 @@ type Dialect int
 func (d Dialect) String() string
 const DialectPostgres
 const DialectSQLite Dialect = iota
-const DirectCacheMaxAge = 30 * 24 * time.Hour
 const DirectUploadMaxPending = 100
 const DirectUploadMaxSize int64 = 500 << 20
 const DirectUploadTTL = 24 * time.Hour
@@ -2207,7 +2206,6 @@ func (s *Store) CheckClaimKey(ctx context.Context, tok ClaimToken, key string) e
 func (s *Store) CheckClaimSensitive(ctx context.Context, tok ClaimToken, now time.Time) (ClaimToken, error)
 func (s *Store) CheckClaimSlot(ctx context.Context, tok ClaimToken, key, policy string, capacity, cost int) error
 func (s *Store) ClaimAttemptOrdinal(ctx context.Context, tok ClaimToken) (int, error)
-func (s *Store) ClaimExpiredSourceBundles(ctx context.Context, now time.Time) (out []Upload, err error)
 func (s *Store) ClaimInvitationEmail(ctx context.Context, invitationID string, now time.Time) (bool, error)
 func (s *Store) ClaimLaunch(ctx context.Context, launcher ClaimIdentity, req LaunchClaimRequest, now time.Time) (*LaunchClaim, error)
 func (s *Store) ClaimNamedNode(
@@ -2281,7 +2279,6 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteRunNodeLogs(ctx context.Context, team Team, runID string) error
 func (s *Store) DeleteSecret(name, pipeline string) error
 func (s *Store) DeleteSession(rawSession string) error
-func (s *Store) DeleteSourceBundleRows(ctx context.Context, u Upload) (err error)
 func (s *Store) Dialect() Dialect
 func (s *Store) DropCardAttempt(ctx context.Context, attemptID string, now time.Time) error
 func (s *Store) DueCardCharges(ctx context.Context, now time.Time) (_ []CardChargeWork, _ []BudgetAlert, err error)
@@ -2421,7 +2418,6 @@ func (s *Store) PrunableNodeLogs(ctx context.Context, team Team, limit int) (_ [
 func (s *Store) PruneDownloadDays(ctx context.Context, day string) (int64, error)
 func (s *Store) PruneEgressUsage(ctx context.Context, before string) (int, error)
 func (s *Store) PruneExpiredCacheObjects(ctx context.Context, now time.Time) (int64, error)
-func (s *Store) PruneExpiredUploads(ctx context.Context, now time.Time) (int64, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
 func (s *Store) PruneSpentIdentity(ctx context.Context, now time.Time) (IdentityPrune, error)
 func (s *Store) PruneStorageCommitReceipts(ctx context.Context, now time.Time) (int64, error)
