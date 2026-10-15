@@ -17,25 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
-type hostProcessParent struct {
-	snapshot capability.AuthenticationSnapshot
-}
-
-func (p *hostProcessParent) ReadAuthentication(context.Context, capability.CredentialLookup, capability.RequestEvidence) (capability.AuthenticationSnapshot, error) {
-	return p.snapshot, nil
-}
-
-type hostProcessRelations struct {
-	parent capability.AuthorityRef
-}
-
-func (b hostProcessRelations) CheckBinding(_ context.Context, principal capability.Principal, _ capability.BindingRule, target capability.Target) error {
-	if principal.Capability.Parent == nil || *principal.Capability.Parent != b.parent || principal.Capability.Audience != capability.NodeHost || target.RunID != "run" || target.Team != "team" {
-		return errors.New("persisted relation lost narrowed process authority")
-	}
-	return nil
-}
-
 func TestProcessAuthority(t *testing.T) {
 	t.Helper()
 	now := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
@@ -43,10 +24,15 @@ func TestProcessAuthority(t *testing.T) {
 	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}
 	binding := capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "holder", Generation: 3, Attempt: 2}
 	parentPrincipal := capability.Principal{Authority: ref, Class: capability.CredentialBearer, Capability: capability.Capability{Prefix: ref.ID, Digest: sha256.Sum256([]byte("controller-parent")), Audience: capability.Controller, Team: "team", Binding: binding, Grants: []capability.Grant{capability.NodeReport}, ExpiresAt: &expires}}
-	parent := &hostProcessParent{snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: parentPrincipal, MembershipValid: true}}, Binding: capability.BindingState{Current: binding, LeaseExpiresAt: expires}}}
+	parent := &processParent{snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: parentPrincipal, MembershipValid: true}}, Binding: capability.BindingState{Current: binding, LeaseExpiresAt: expires}}}
 	validateCalls := 0
 	authorities, err := NewProcessAuthorities(ProcessAuthorityDependencies{
-		Parent: parent, Bindings: hostProcessRelations{parent: ref},
+		Parent: parent, Bindings: processBindingFunc(func(_ context.Context, principal capability.Principal, _ capability.BindingRule, target capability.Target) error {
+			if principal.Authority != ref || principal.Capability.Audience != capability.Controller || target.RunID != "run" || target.Team != "team" {
+				return errors.New("persisted relation lost its parent or process target")
+			}
+			return nil
+		}),
 		ValidateAuthority: func(chain []capability.AuthorityState, _ time.Time) (capability.Principal, error) {
 			for _, state := range chain {
 				if !state.MembershipValid {

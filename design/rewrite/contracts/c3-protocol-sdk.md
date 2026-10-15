@@ -8,6 +8,14 @@ transport and local admission remain test adapters. Production placement
 factories, private execution snapshots and complete owner-policy edges remain
 open. Legacy Session, Server, scheduler and hosting callers are deleted.
 
+[Persisted process relations](../w3-persisted-process-relations-progress.md)
+connects the process binding checker to its fresh persisted controller parent.
+Process ownership stays in the memory registry. The native owner/claimed
+composition uses the real policy router and SQLite relation checker for mask
+registration. A generated property refuses changed run, job, team and attempt
+selectors. Process revocation precedes terminal reporting and subsequent service
+requests fail authentication.
+
 [The consumer and intake cut](../w3-consumer-cut-progress.md) removes the raw
 local trigger consumer, run-ID environment snapshots and orphan hosting adapters.
 Detached intake uses sealed controller requests and retained environment identities.

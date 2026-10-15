@@ -17,7 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
-// ProcessAuthorityDependencies connects process facts to shared credential validation.
+// ProcessAuthorityDependencies supplies fresh parent snapshots and persisted parent relation checks.
 type ProcessAuthorityDependencies struct {
 	Parent             capability.AuthenticationReader
 	Bindings           capability.BindingChecker
@@ -263,7 +263,7 @@ func (a *ProcessAuthorities) CheckBinding(ctx context.Context, principal capabil
 	if rule == capability.BindOwnNode && target.NodeID == "" {
 		target.NodeID = binding.NodeID
 	}
-	return a.deps.Bindings.CheckBinding(ctx, principal, rule, target)
+	return a.deps.Bindings.CheckBinding(ctx, snapshot.Authorities[1].Principal, rule, target)
 }
 
 func processBindingDenied() error {

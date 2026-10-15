@@ -1096,6 +1096,15 @@ DataSigner connects the real tenant and object operations. Engine resolution,
 installation, admission and the in-process HTTP transport remain test adapters.
 Full placement cells remain blocked.
 
+The owner/claimed composition now registers masks through the actual PolicyRouter,
+shared authenticator and SQLite parent relations instead of a registrar fake.
+`TestProcessAuthorityRoutesUsePersistedParentRelations` reproduces the former
+401 and verifies registration, generated selector/fence refusals and revocation
+before terminal reporting. Two duplicate authority-test fakes are removed in
+favor of the existing scripted parent and binding callback. This adds component
+evidence without activating a native placement cell or claiming another archived
+test port.
+
 Scope-label tests and their tuple-injectivity property move beside the shared
 codec in nodehost. The CLI queue fixture uses that codec. The state-path test
 moves to paths when the orchestrator aliases are deleted. These preserve

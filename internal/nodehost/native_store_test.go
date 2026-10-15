@@ -87,6 +87,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 			return nil
 		},
 	}
+	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
 	var award store.ReconciledNode
 	f.Host.AdoptClaim = func(_ context.Context, claim store.ReconciledNode) error { award = claim; return nil }
 	f.Host.Layer = nil
@@ -102,14 +103,25 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 		principal := parent.Authorities[0].Principal
 		binding := principal.Capability.Binding
 		binding.Attempt = input.Attempt
-		return processes.Delegate(ctx, lookup, capability.DelegateSpec{
+		grant, err := processes.Delegate(ctx, lookup, capability.DelegateSpec{
 			Parent: principal.Authority, Audience: capability.NodeHost, Grants: []capability.Grant{capability.NodeReport},
 			Binding: binding, ExpiresAt: principal.Capability.ExpiresAt,
 		}, ProcessServices{RunID: input.Accepted.RunID, Job: input.Accepted.Plan.Jobs[0]})
+		if err != nil {
+			return grant, err
+		}
+		request := httptest.NewRequest(http.MethodPost, "/node/v1/masks", strings.NewReader(`{"value":"native-route-secret"}`)).WithContext(ctx)
+		request.Header.Set("Authorization", "Bearer "+grant.Binding.Routes.Bearer)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || processes.Masks.mask("native-route-secret") != "***" {
+			return grant, errors.New("native process could not register its mask through persisted authorization")
+		}
+		return grant, nil
 	}
 	config := NativeHostConfig{
 		Store: f.State, Lease: f.Host.Lease, Snapshots: snapshots, Owner: f.Host,
-		Masks: NewMaskRegistry(secrets.NewMasker()), Processes: processes, Router: &serviceRegistrar{},
+		Masks: NewMaskRegistry(secrets.NewMasker()), Processes: processes, Router: router,
 		Admission:  &LocalAdmission{Daemon: newFakeDaemon()},
 		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal},
 		Source: source.Options{
