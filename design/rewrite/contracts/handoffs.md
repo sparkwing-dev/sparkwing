@@ -4,6 +4,15 @@ Each worker acts on every entry naming its area. Entries come from area reviews 
 
 ## From W4 review fixes (2026-10-15)
 
+**W6/W9: implement the declared Git process environment boundary.**
+`procenv.Git` is declared, but `procenv.Build` rejects every kind above
+`HostChild` as `unknown process environment kind`. W9's committed-source
+preparer calls this owner and tests with an injected fixture environment.
+A direct test overlay reproduced the failure using
+`procenv.Build(procenv.Git, procenv.Base{Local: true}, procenv.Runtime{})`.
+W6 must implement A1-12's declared filtering before native CLI discovery or
+source acquisition can use that boundary. W9 adds no alternate filter.
+
 **Contract change needed, W6/W1/W2/W9: preserve the required here reason.**
 Invariant: a `pipeline trigger --runner here --reason TEXT` request records the
 reason with its immutable intake, and replay cannot replace or lose it. C3

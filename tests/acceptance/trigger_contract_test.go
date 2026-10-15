@@ -17,11 +17,16 @@ import (
 func TestSurfaceInitialTriggerIntakeTransport(t *testing.T) {
 	for _, endpoint := range []string{"http://api.sock", "https://controller.example"} {
 		for _, here := range []bool{false, true} {
+			env, err := runspec.EnvironmentDigest(map[string]string{"DEPLOY_REGION": "private-environment-value"})
+			if err != nil {
+				t.Fatal(err)
+			}
 			request := controllerwire.CreateRunRequest{IdempotencyKey: "one-intake", Request: runspec.Request{
 				Version: 1, Pipeline: "deploy-prod", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost,
+				SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{"password"}}, Env: env,
 				RequestedArgs: map[string]string{"rollout.image": "release", "region": "us-east"},
 				Git:           runspec.Git{Repository: runspec.Repository{Key: "gh:17", Display: "acme/app"}, Ref: "main", SHA: "exact-commit"},
-				Source:        runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app.git", PipelineDir: ".sparkwing"}},
+				Source:        runspec.Source{Ref: "exact-commit", Entrypoint: "Deploy", Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app.git", PipelineDir: ".sparkwing"}},
 			}}
 			if here {
 				request.Request.Options.Runner = runspec.Setting[runspec.RunnerSelection]{Optional: runspec.Optional[runspec.RunnerSelection]{Set: true, Value: runspec.RunnerSelection{Kind: runspec.RunnerHere}}}

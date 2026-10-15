@@ -1,3 +1,133 @@
+# W9 committed-source preparation continuation
+
+Started clean at 378e7352a. W9 remains incomplete. No Git write, Sparkwing
+executable, service, pipeline or release ran. Writes stayed in this worktree and
+/tmp/sw-astra-W9, removed before reporting. The lead owns commits and native
+integration.
+
+## Implemented component
+
+`prepareTriggerSource` resolves a selected commit and reads that commit's project
+configuration through native Git. It works from nested checkout paths, leaves
+the index and working tree unchanged, and keeps detached HEAD distinct from a
+branch. The configured alias resolves once. The captured invoked name and SDK
+entrypoint reach final request preparation together. A dirty configuration or
+later HEAD cannot substitute another entrypoint for the selected commit.
+
+Repository normalization uses C1's canonical identity owner. GitHub requires a
+positive numeric ID from an injected provider. Generic Git identity follows the
+shared provider rules. Credential-bearing clone URLs fail before ID lookup,
+including encoded query/fragment parameters and malformed parameters. Origin
+HEAD can supply an unverified default-branch hint. Neither repository spelling
+nor that hint creates App evidence, team identity or actor authority.
+
+`prepareTriggerRequest` binds the selected entrypoint's describe schema, parses
+pipeline and job arguments with the existing parser, and retains its explicit
+secret classification. C4 resolves request settings, including explicit zero
+priority and typed runner selection. C1 hashes captured environment values into
+names and a digest. Values stay with the private capture owner. Supplied keys
+survive preparation and submission. Absent keys are generated before intake.
+Argument-validation failures use the existing CLI masker and canonical errors.
+
+The existing final intake component consumes the prepared result unchanged in a
+fake-controller test. The transport acceptance fixture now retains source SHA,
+entrypoint, secret classification and environment identity on HTTP and api.sock.
+These are preparation components. The public command remains on its preceding
+preparation/intake path. No public surface or foreign Go contract changed.
+
+## Remaining bindings and contract changes
+
+- W6 must implement its declared Git environment boundary. `procenv.Git` exists,
+  but Build rejects every kind above HostChild. A direct Go test overlay failed
+  with `unknown process environment kind`. The Git fixtures inject this boundary
+  and assert the Git process kind and captured input. W9 adds no alternate filter.
+- Native numeric-ID lookup and selected-engine describe still need composition.
+  The new request component consumes the supplied describe projection. It does
+  not prove that a native acquired SDK produced it.
+- Private submission-environment retention, reachable-source preflight, separate
+  execution/pipeline revisions and authorized working-tree bundle upload remain
+  preparation work. The committed-source component covers one selected revision.
+- The required here-reason persistence contract remains absent from C3 intake,
+  C1 IntakeRequest and runspec.Request. Source-attempt fencing remains absent
+  from the foreign transition contract. The prior handoffs still apply.
+- Native W3 host/W8 lifecycle construction, public initial-trigger cutover,
+  local/detached-host retirement, publication/cache composition, schedules,
+  effective endpoints and launch QA remain open as recorded below.
+
+No old code was deleted: **0 lines**. Its connected callers remain until public
+cutover. No production file outside W9 ownership changed. No foreign API caller
+migration was needed. No new human decision is requested.
+
+## Tests and evidence
+
+Invariants: source discovery cannot turn a human repository spelling into App
+trust or carry source credentials into intake. Captured environment values and
+supplied argument values cannot appear in preparation diagnostics or the public
+environment projection.
+
+Ten new tests cover committed versus dirty/later configuration, nested paths,
+detached HEAD, unverified default branch, numeric/generic identity, invalid refs,
+invalid config, aliases, argument classification, typed settings, captured
+environment identity, final submission and environment/cancellation failures.
+Git fixtures use the real Git executable and files. Environment construction and
+GitHub identity are injected. Controller intake is a fake. No archived T1 source
+function was ported and no native scenario was unskipped in this continuation.
+
+Three fuzz properties passed generated runs with four workers and three requested
+seconds each: source credentials 3,239 executions, environment privacy 4,223 and
+argument diagnostics 3,643. The argument property retains equals-sign and control-
+character seeds. Its control-character regression failed before the boundary
+registered the parser's Go-quoted spelling alongside the supplied values. It now
+passes, including quoted enum failures. The shared sanitizer can replace a
+colliding canonical code with internal. The property checks that canonical errors
+remain safe in that case.
+
+Go used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE=/tmp/sw-astra-W9/cache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W9/tmp.
+Tests used -p 4 or less. Passed on the final production source:
+
+- Whole-repository go build -p 4 ./....
+- Vet on cmd/sparkwing, clisurface, controllerwire, controller/client and
+  tests/acceptance.
+- TestPrepareTrigger, TestInitialTrigger, their fuzz seeds, TestSurface and
+  TestProtocolSchema. The four initial-intake transport cells pass.
+- Full clisurface and controllerwire tests.
+- commentcheck -base main, sleepcheck -base HEAD, gofmt and git diff --check.
+
+Full CLI/client suites, native hosts, sockets, services, platform execution,
+pipelines and launch QA remain unverified. No generated public reference changed
+because no public command, flag or wire field changed. The C3 source contract
+documents the new components and their integration limits.
+
+## Assignment audit and handoff
+
+All amendments-1 rows naming W9 and every W9 handoff were checked against the
+preceding ledger. Completed work was retained.
+
+| Rows / handoff | Continuation and remaining integration |
+| --- | --- |
+| A1-03/08/09/13/14/15/16/17/18/20/22/38/55 | Final errors, claims, reconciliation, failures, expansion and cloud wire retained. Native composition and source-attempt fencing remain. |
+| A1-10/11/19; execution and alias identity | Committed-source and request components now preserve selected SHA, acquisition URL and the resolved alias pair. Native selected-engine acquisition/describe and execution identity remain. |
+| A1-29/30/34/37 | Signed-data transport retained. Native read-only cache, publication copying and legacy storage consumers remain. |
+| A1-39/40/41/49/50 | Prepared intake is exercised with the new source/request components. Public cutover, remaining preparation, native hosts/lifecycle/runner construction and schedule seams remain. |
+| A1-43/45/47 | Notices, upgrade, settings and guards retained. Request preparation consumes the shared resolver. Native version/index and scheduled intake remain. |
+| A1-51 | C3 and intake transport fixtures updated. Public runtime retirement and future regenerated surface references remain. |
+| A1-52; Windows packaging | Prior packaging retained. Native Windows publication evidence remains unverified. |
+| A1-53 | New native Git and fake boundary evidence only. T1/lead still own native topology/backend/platform drivers and real-repository QA. |
+
+Shared files touched: tests/acceptance/trigger_contract_test.go,
+contracts/c3-controller-wire.md, contracts/handoffs.md and this report.
+The new production component is 236 lines. It reuses canonical repository,
+configuration, argument, settings, digest and masking owners. The injected Git
+environment/identity boundaries add no service, persistent cache, timeout,
+environment variable, flag, retry loop or authority rule.
+
+Friction is the reproduced native Git environment gap and the remaining owner
+bindings. Overwing discovery worked with its stale-binary notice. The lead owns
+independent review, commits and native integration.
+
+---
+
 # W9 prepared initial-trigger intake continuation
 
 Started clean at 868e22d62. W9 remains incomplete. No Git write, Sparkwing
