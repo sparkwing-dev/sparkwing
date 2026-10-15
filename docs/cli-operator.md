@@ -145,6 +145,8 @@ Issue a deployment service credential
 
 Only deployment service credentials; never console trust, grants, freezes, refunds or account deletion powers. Licensed self-hosters have no deployment-admin token path.
 
+Use the deployment /operator/tokens routes. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry.
+
 ### Flags
 
 | Flag | Description |
@@ -163,6 +165,8 @@ Only deployment service credentials; never console trust, grants, freezes, refun
 
 List deployment service credentials
 
+Read deployment credential metadata. JSON emits one record per token, with exact scopes and no bearer. Plain emits prefixes. --token selects one prefix.
+
 ### Flags
 
 | Flag | Description |
@@ -180,6 +184,8 @@ List deployment service credentials
 
 Revoke a deployment service credential
 
+Revoke through the deployment token route. JSON retains the confirmed revocation; plain emits the prefix.
+
 ### Flags
 
 | Flag | Description |
@@ -194,6 +200,8 @@ Revoke a deployment service credential
 ## `sparkwing operator tokens rotate`
 
 Rotate a deployment service credential
+
+Rotate through the deployment token route. JSON includes the new bearer, metadata and old revocation time; plain emits the new bearer. Grace defaults to 24h. Zero TTL preserves the old remaining lifetime. Durations use nonnegative whole seconds.
 
 ### Flags
 

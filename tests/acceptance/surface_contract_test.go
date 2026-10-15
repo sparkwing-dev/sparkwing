@@ -82,6 +82,70 @@ func TestSurfaceRunQueryAndPruneTransport(t *testing.T) {
 	}
 }
 
+func TestSurfaceManagementTransportsKeepAuthorityNamespaces(t *testing.T) {
+	for _, endpoint := range []string{"http://api.sock", "https://controller.example"} {
+		var calls []string
+		options := client.EngineOptions{URL: endpoint, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
+			calls = append(calls, req.Method+" "+req.URL.Path)
+			body := ""
+			switch req.URL.Path {
+			case "/api/v1/pools":
+				body = `{"pools":[{"name":"prod","runners":["desktop"],"rules":[{"id":"rule-1","repos":["acme/api"],"branches":["main"],"source":"github","route":true}]}]}`
+			case "/api/v1/tokens":
+				body = `{"tokens":[{"prefix":"swk_member","kind":"member","principal":"build","scopes":["runs.read"]}]}`
+			case "/api/v1/operator/tokens":
+				body = `{"tokens":[{"prefix":"swk_deployment","kind":"service","principal":"deploy","scopes":["operator.tokens"]}]}`
+			case "/api/v1/sizing":
+				encoded, err := json.Marshal(controllerwire.SizingPage{Sizing: []controllerwire.SizingDetail{{Pipeline: "check", Repo: "acme/api", Source: "floor", MemoExcluded: 5, Rollup: controllerwire.SizingMeasurements{FloorCores: 6.5, FloorMemoryBytes: 7 << 30}, Jobs: []controllerwire.JobSizing{}}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				body = string(encoded)
+			default:
+				t.Fatalf("unexpected management request: %s", req.URL)
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+		})}}
+		pools, err := client.NewPoolManager(options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		listed, err := pools.ListPools(t.Context())
+		if err != nil || len(listed.Pools) != 1 || len(listed.Pools[0].Rules) != 1 || !listed.Pools[0].Rules[0].Route {
+			t.Fatalf("pools: %+v %v", listed, err)
+		}
+		for _, deployment := range []bool{false, true} {
+			tokens, err := client.NewTokenManager(options, deployment)
+			if err != nil {
+				t.Fatal(err)
+			}
+			listed, err := tokens.ListTokens(t.Context(), controllerwire.TokenQuery{})
+			if err != nil || len(listed.Tokens) != 1 {
+				t.Fatalf("tokens: %+v %v", listed, err)
+			}
+			kind := "member"
+			if deployment {
+				kind = "service"
+			}
+			if listed.Tokens[0].Kind != kind {
+				t.Fatalf("credential namespace crossed: %+v", listed)
+			}
+		}
+		sizing, err := client.NewSizingManager(options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		measurements, err := sizing.ListSizing(t.Context(), controllerwire.SizingQuery{Limit: 20})
+		if err != nil || len(measurements.Sizing) != 1 || measurements.Sizing[0].Rollup.FloorCores != 6.5 || measurements.Sizing[0].MemoExcluded != 5 {
+			t.Fatalf("sizing: %+v %v", measurements, err)
+		}
+		want := []string{"GET /api/v1/pools", "GET /api/v1/tokens", "GET /api/v1/operator/tokens", "GET /api/v1/sizing"}
+		if !reflect.DeepEqual(calls, want) {
+			t.Fatalf("routes: %v", calls)
+		}
+	}
+}
+
 type surfaceTransport func(*http.Request) (*http.Response, error)
 
 func (f surfaceTransport) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }

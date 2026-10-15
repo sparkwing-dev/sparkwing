@@ -413,6 +413,8 @@ func dispatchCommand(args []string) error {
 		return runRunners(args[1:])
 	case "tokens":
 		return runTokens(args[1:])
+	case "pools":
+		return runPools(context.Background(), args[1:])
 	case "profiles":
 		return runProfiles(args[1:])
 	case "operator":
@@ -422,7 +424,7 @@ func dispatchCommand(args []string) error {
 		case "object-store":
 			return runClusterObjectStore(args[2:])
 		case "tokens":
-			return runTokens(args[2:])
+			return runTokenCommand(context.Background(), args[2:], true)
 		}
 	case "doctor":
 		return runDoctor(args[1:])
@@ -468,10 +470,6 @@ func runJobs(args []string) error {
 		PrintHelp(cmdJobs, os.Stderr)
 		return errors.New("jobs: subcommand required")
 	}
-	paths, err := orchestrator.DefaultPaths()
-	if err != nil {
-		return err
-	}
 	contextValue := context.Background()
 
 	switch args[0] {
@@ -498,7 +496,7 @@ func runJobs(args []string) error {
 		return runRunsPrune(contextValue, args[1:])
 
 	case "stats":
-		return runJobsStats(contextValue, paths, args[1:])
+		return runJobsStats(contextValue, args[1:])
 	default:
 		return fmt.Errorf("runs: unknown command %q", args[0])
 	}

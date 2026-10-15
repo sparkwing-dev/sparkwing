@@ -163,24 +163,24 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing operator tokens", Authority: DeploymentAdmin, Flags: []Flag{}},
-		{Path: "sparkwing operator tokens create", Authority: DeploymentAdmin, Rules: []string{"Only deployment service credentials; never console trust, grants, freezes, refunds or account deletion powers. Licensed self-hosters have no deployment-admin token path."}, Flags: []Flag{
+		{Path: "sparkwing operator tokens create", Authority: DeploymentAdmin, Rules: []string{"Only deployment service credentials; never console trust, grants, freezes, refunds or account deletion powers. Licensed self-hosters have no deployment-admin token path.", "Use the deployment /operator/tokens routes. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry."}, Flags: []Flag{
 			{Name: "type", Argument: "KIND", Values: []string{"service", "deployment"}},
 			{Name: "principal", Argument: "NAME"},
 			{Name: "scope", Argument: "SCOPE", Repeatable: true, CommaList: true},
 			{Name: "ttl", Argument: "DURATION"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing operator tokens list", Authority: DeploymentAdmin, Flags: []Flag{
+		{Path: "sparkwing operator tokens list", Authority: DeploymentAdmin, Rules: []string{"Read deployment credential metadata. JSON emits one record per token, with exact scopes and no bearer. Plain emits prefixes. --token selects one prefix."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX"},
 			{Name: "type", Argument: "KIND", Values: []string{"service", "deployment"}},
 			{Name: "include-revoked"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing operator tokens revoke", Authority: DeploymentAdmin, Flags: []Flag{
+		{Path: "sparkwing operator tokens revoke", Authority: DeploymentAdmin, Rules: []string{"Revoke through the deployment token route. JSON retains the confirmed revocation; plain emits the prefix."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX", Required: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing operator tokens rotate", Authority: DeploymentAdmin, Flags: []Flag{
+		{Path: "sparkwing operator tokens rotate", Authority: DeploymentAdmin, Rules: []string{"Rotate through the deployment token route. JSON includes the new bearer, metadata and old revocation time; plain emits the new bearer. Grace defaults to 24h. Zero TTL preserves the old remaining lifetime. Durations use nonnegative whole seconds."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX", Required: true},
 			{Name: "grace", Argument: "DURATION"},
 			{Name: "ttl", Argument: "DURATION"},
@@ -257,7 +257,7 @@ func Registry() []Command {
 			{Name: "pipeline-ref", Argument: "REF"},
 		}},
 		{Path: "sparkwing pools", Flags: []Flag{}},
-		{Path: "sparkwing pools allow", Authority: TeamCredential, Rules: []string{"Require independently verified repository authority; a typed repository or branch grants no trust."}, Flags: []Flag{
+		{Path: "sparkwing pools allow", Authority: TeamCredential, Rules: []string{"Require independently verified repository authority; a typed repository or branch grants no trust.", "Create a rule through the team-admin route with an idempotency key. JSON preserves the rule and replay result; plain emits its ID."}, Flags: []Flag{
 			{Name: "pool", Argument: "POOL", Required: true},
 			{Name: "repo", Argument: "REPO", Repeatable: true, CommaList: true, Required: true},
 			{Name: "branch", Argument: "BRANCH", Repeatable: true, CommaList: true},
@@ -265,12 +265,12 @@ func Registry() []Command {
 			{Name: "route"},
 			{Name: "profile", Argument: "PROFILE"},
 		}},
-		{Path: "sparkwing pools disallow", Authority: TeamCredential, Flags: []Flag{
+		{Path: "sparkwing pools disallow", Authority: TeamCredential, Rules: []string{"Delete the selected pool rule through the team-admin route. JSON retains whether it was deleted or already absent; plain emits the rule ID."}, Flags: []Flag{
 			{Name: "pool", Argument: "POOL", Required: true},
 			{Name: "rule", Argument: "RULE", Required: true},
 			{Name: "profile", Argument: "PROFILE"},
 		}},
-		{Path: "sparkwing pools list", Authority: TeamCredential, Flags: []Flag{
+		{Path: "sparkwing pools list", Authority: TeamCredential, Rules: []string{"Read controller-granted reservations and access rules. JSON emits each pool with its runners and rules; plain emits pool names."}, Flags: []Flag{
 			{Name: "profile", Argument: "PROFILE"},
 		}},
 		{Path: "sparkwing profiles", Flags: []Flag{}},
@@ -515,13 +515,17 @@ func Registry() []Command {
 			{Name: "all-jobs", Conflicts: []string{"failed"}},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing runs stats", Flags: []Flag{
+		{Path: "sparkwing runs stats", Rules: []string{
+			"Read every matching root-run page through the selected controller. --since accepts days and weeks. JSON emits pipeline counts, success percentage, mean duration and nearest-rank P95. Plain emits pipeline names.",
+			"--sizing reads controller measurements, job rows, source, drift, memo exclusions and demand floors. --reset selects one --pipeline or --all-pipelines --yes and preserves resource pins. --since applies to run statistics only.",
+			"Sizing reset requires an authorized controller route. Until that contract exists the adapter returns policy_missing without changing state.",
+		}, Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME"},
-			{Name: "since", Argument: "DURATION"},
+			{Name: "since", Argument: "DURATION", Conflicts: []string{"sizing", "reset"}},
 			{Name: "sizing"},
 			{Name: "reset"},
-			{Name: "all-pipelines"},
-			{Name: "yes"},
+			{Name: "all-pipelines", Requires: []string{"reset"}, Conflicts: []string{"pipeline"}},
+			{Name: "yes", Requires: []string{"reset"}},
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing runs status", Rules: []string{
@@ -619,24 +623,24 @@ func Registry() []Command {
 			{Name: "only-on", Argument: "POOL"},
 		}},
 		{Path: "sparkwing tokens", Flags: []Flag{}},
-		{Path: "sparkwing tokens create", Authority: TeamCredential, Flags: []Flag{
+		{Path: "sparkwing tokens create", Authority: TeamCredential, Rules: []string{"Create a member or runner credential through the team token route. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry."}, Flags: []Flag{
 			{Name: "type", Argument: "KIND", Values: []string{"member", "runner"}},
 			{Name: "principal", Argument: "NAME"},
 			{Name: "scope", Argument: "SCOPE", Repeatable: true, CommaList: true},
 			{Name: "ttl", Argument: "DURATION"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing tokens list", Authority: TeamCredential, Flags: []Flag{
+		{Path: "sparkwing tokens list", Authority: TeamCredential, Rules: []string{"JSON emits one metadata record per token with exact scopes and no bearer. Plain emits prefixes. --token selects one prefix. Deployment credentials use operator tokens."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX"},
 			{Name: "type", Argument: "KIND", Values: []string{"member", "runner"}},
 			{Name: "include-revoked"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing tokens revoke", Authority: TeamCredential, Flags: []Flag{
+		{Path: "sparkwing tokens revoke", Authority: TeamCredential, Rules: []string{"JSON retains the confirmed revocation; plain emits the prefix. A failed or unconfirmed revocation returns an error."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX", Required: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing tokens rotate", Authority: TeamCredential, Flags: []Flag{
+		{Path: "sparkwing tokens rotate", Authority: TeamCredential, Rules: []string{"JSON includes the new bearer, metadata and old revocation time; plain emits the new bearer. Grace defaults to 24h. Zero TTL preserves the old remaining lifetime. Durations use nonnegative whole seconds."}, Flags: []Flag{
 			{Name: "token", Argument: "PREFIX", Required: true},
 			{Name: "grace", Argument: "DURATION"},
 			{Name: "ttl", Argument: "DURATION"},

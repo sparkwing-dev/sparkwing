@@ -28,6 +28,8 @@ Manage team credentials
 
 Mint a new API token
 
+Create a member or runner credential through the team token route. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry.
+
 ### Flags
 
 | Flag | Description |
@@ -46,6 +48,8 @@ Mint a new API token
 
 List token prefixes + metadata
 
+JSON emits one metadata record per token with exact scopes and no bearer. Plain emits prefixes. --token selects one prefix. Deployment credentials use operator tokens.
+
 ### Flags
 
 | Flag | Description |
@@ -63,6 +67,8 @@ List token prefixes + metadata
 
 Mark a token revoked
 
+JSON retains the confirmed revocation; plain emits the prefix. A failed or unconfirmed revocation returns an error.
+
 ### Flags
 
 | Flag | Description |
@@ -77,6 +83,8 @@ Mark a token revoked
 ## `sparkwing tokens rotate`
 
 Mint a replacement token with a grace window
+
+JSON includes the new bearer, metadata and old revocation time; plain emits the new bearer. Grace defaults to 24h. Zero TTL preserves the old remaining lifetime. Durations use nonnegative whole seconds.
 
 ### Flags
 

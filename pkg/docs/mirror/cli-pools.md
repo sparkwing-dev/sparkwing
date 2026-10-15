@@ -29,6 +29,8 @@ Allow a repository and branch to use a pool
 
 Require independently verified repository authority; a typed repository or branch grants no trust.
 
+Create a rule through the team-admin route with an idempotency key. JSON preserves the rule and replay result; plain emits its ID.
+
 ### Flags
 
 | Flag | Description |
@@ -48,6 +50,8 @@ Require independently verified repository authority; a typed repository or branc
 
 Remove a pool access rule
 
+Delete the selected pool rule through the team-admin route. JSON retains whether it was deleted or already absent; plain emits the rule ID.
+
 ### Flags
 
 | Flag | Description |
@@ -63,6 +67,8 @@ Remove a pool access rule
 ## `sparkwing pools list`
 
 List runner pools
+
+Read controller-granted reservations and access rules. JSON emits each pool with its runners and rules; plain emits pool names.
 
 ### Flags
 

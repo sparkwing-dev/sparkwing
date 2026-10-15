@@ -1,246 +1,183 @@
 # W9 continuation handoff
 
-W9 remains incomplete. This session continues committed base `6ffb10ca4`.
-The worktree builds. The completed CLI adapters use frozen interfaces and fake
-controllers where their owners still have stubs. They are not evidence of a
-working deployment or full surface acceptance.
+W9 remains incomplete. This continuation starts at `9c52db74d`. The worktree
+builds. No git writes or Sparkwing executables ran. The lead owns commits,
+review, pipelines and native acceptance.
 
-## Completed before this session
+## Completed before this continuation
 
-- Final grammar validation precedes command side effects. Help, completion and
-  discovery derive structure from `clisurface.Registry`.
-- Run/trigger/plan/lint parsing preserves pipeline arguments after `--`, explicit
-  output and pause settings. Removed command and flag vocabulary is rejected.
-- Profiles are machine-only, redact tokens, and retain a connection on failed
-  revocation. Cloud dispatch and project credential fallback are deleted.
-- Cancellation uses `controllerwire.Controller.Cancel` through one transport.
-  Applied state, replay markers and structured failures survive batch output.
-- Engine HTTP transport, response validation, retry policy, API compatibility
-  windows and shared CLI error formatting are implemented.
+- Final grammar validation runs before side effects. Help, completion and
+  command discovery derive structure from `clisurface.Registry`.
+- Local run, trigger, plan and lint parsing preserves arguments after `--`,
+  explicit output and pause controls. Removed vocabulary is rejected.
+- Profiles are machine-only and redact credentials. Failed revocation retains
+  the connection. Project credentials and Cloud dispatch are deleted.
+- The authenticated engine transport preserves typed results, structured
+  errors, API compatibility and route-owned retry policies.
+- Cancellation, status, run listing, prune, logs/search, annotations and
+  approvals use public controller interfaces for local and remote connections.
+  Numeric selectors reach the controller unchanged. Follow preserves delayed
+  matches, drains pages and waits for persisted final logs. Prune completes
+  selection before deleting. No CLI SQLite handle remains in these adapters.
+- Dashboard commands use W8 lifecycle/unit interfaces. The separate supervisor,
+  PID records, locks, platform implementations and restart command are deleted.
+- Upgrade uses W8 engine contracts and staged verification. Native npm command
+  policy is shared with depcache and TypeScript installation. Engine staging,
+  software policy and process-environment implementations still need integration.
 
-## Completed in the preceding session
+## Implemented in this continuation
 
-### Run observations
+### Statistics and sizing
 
-`runs status` now calls the shared public controller reader for local and remote
-connections. It no longer opens SQLite or calls the old orchestrator status,
-summary, timeline, receipt, tree or error renderers. Numeric selectors reach the
-controller unchanged. Status and its exit code come from the same observation.
+Run statistics use `RunReader` and consume every matching root-run page. Filters
+apply before pagination. The former 500-row cap and direct SQLite reads are
+removed. Output separates successful, failed, cancelled and active runs.
+Success percentage counts all terminal runs. Timed runs use an integer mean
+that cannot overflow its sum and nearest-rank P95. A failed selection emits no
+partial totals. Plain emits pipeline names.
 
-The summary, timeline, errors, receipt and tree views preserve public job and
-attempt data. `--steps` fetches step history. Tree traversal reads every child
-page and rejects repeated identities and cursors. It refreshes descendants on
-every follow poll, even if the parent has not changed. Policy notices are part
-of the observed detail, so a read-time notice can appear without a state change.
-Receipts preserve the controller's hash, costs and settlement facts.
+Sizing uses the new W9 `SizingManager` interface on existing `GET /api/v1/sizing`.
+The public view keeps separate repository/pipeline identity, job rows, CPU and
+memory distributions, sustained charge, waits, memo exclusions, floors, pins,
+previous measurements, controller-selected source and drift. The CLI does not
+recompute admission source or decode legacy profile-key formats. It consumes all
+pages and rejects repeated identities and cursors before printing.
 
-Follow emits changed observations. Incomplete observations, interrupted waits,
-lookup failures and receipt identity mismatches exit 3. Invalid usage exits 2.
-Terminal failure exits 1, unless `--exit-zero` is set. Plain output is a status
-word, failed job IDs, tree run IDs, or a receipt hash. Explicit steps add job/step
-IDs. Pretty output retains the detailed tables and timeline.
+The CLI validates reset selection and renders `SizingResetSummary` through the
+interface. C2 has no authorized reset route. The production adapter returns
+`policy_missing` without a request. Real reset, floor clearing and pin retention
+remain W1/W2 integration work. Fake summary tests are not evidence of mutation.
 
-The local W9 wire repair adds `RunReader`, `RunQuery`, `RunPage`, `RunSteps`,
-`StepDetail`, the typed receipt records, and optional `RunDetail.Steps`.
-`NewRunReader` shares the authenticated engine HTTP implementation. Existing
-C2 routes carry these reads. The contract document names pagination, parent
-filter and display-only fields. W2 still needs to serve those shapes.
+### Pools
 
-The unused `client.GetRunReceipt` API is deleted. Its remaining controller tests
-now call the server handler through a response recorder. The other legacy client
-APIs still have callers and remain part of the unfinished migration.
+Pool commands now have a dispatch path and typed `PoolManager`. Lists retain
+runner reservations and full rules. Allow preserves repository/branch selectors,
+GitHub source, route bit, server rule ID and replay marker. Disallow preserves
+whether a rule was deleted or already absent. Mutations use existing team-admin
+routes. An allow request has a stable header key across transport retries.
+Typed repository strings never substitute for verified repository authority.
 
-### Dashboard
+### Credentials
 
-Dashboard commands delegate to `wingd.LocalLifecycle` and
-`wingd.ManagedUnitManager`. Tests exercise start/stay, stop, status, installation,
-uninstallation, Windows service refusal and failure propagation. Logs retain
-bounded tailing, complete-line streaming, JSON framing and truncation markers.
+Team and deployment commands use `TokenManager` with separate route namespaces.
+`operator tokens` no longer calls the team handler. Member/runner kinds stay on
+team routes and service/deployment kinds stay on deployment routes. The issuer
+still owns grants, membership, metering and root provisioning.
 
-The separate supervisor, PID records, locks, process identity machinery,
-platform implementations, restart command and associated tests are deleted.
-Consumer process helpers remain in `consumer_process.go` because the old detached
-run consumer still calls them. The obsolete PID-based dashboard info tip is gone.
+Creation and rotation preserve typed metadata and return the new bearer once in
+plain output or in their JSON result. Metadata reads never contain a bearer.
+Exact scope names survive all formats, without an admin-to-wildcard expansion.
+Revocation requires a confirmed result. Mutations retain structured refusals and
+use stable header keys and bodies across retries. Omitted TTL remains absent,
+explicit zero survives, and fractional or negative seconds fail before connection
+resolution instead of being truncated. No maximum lifetime was added.
 
-Production dashboard composition returns a structured unavailable error because
-W8 provides no runtime/unit constructors or canonical log source yet. Nondefault
-access-policy options and install-force also fail explicitly because their frozen
-interfaces have no fields to receive those settings. These are integration gaps,
-not completed feature restrictions.
+W9-owned wire additions are documented in `contracts/c3-controller-wire.md`.
+W2 must serve those shapes on the existing routes. No C2 contract was edited.
 
-### Upgrade
+## Deleted
 
-The new upgrade command detects the repository SDK and calls the engine upgrade
-contract. It prints previews, selected pins, changed files, verification results
-and notices. Plain output is one target-version line. Policy and verification
-failures retain their structured errors. It does not claim success for an
-unverified or unapplied result.
+This continuation removes 1,151 tracked Go lines, counted as gross deletions in
+`git diff --numstat -- '*.go'`, not net reduction. Deleted files are
+`cmd/sparkwing/jobs_verbs.go` (231), `runs_capacity.go` (296) and
+`runs_capacity_test.go` (304). Shared display helpers moved to
+`display_helpers.go`; their moved lines are part of the gross count.
 
-Its verifier operates in the staged checkout, resolves dependencies, builds Go
-or type-checks TypeScript, then runs describe and plan with the selected engine.
-It never executes job bodies. Native npm invocation is shared through
-`pipelineentry.NPMCommand`, extracted from depcache's existing Windows policy.
-Windows batch shims run through Node and npm-cli.js without a shell. Depcache,
-TypeScript installation and upgrade now use that same helper.
+The old statistics/sizing parsers, local store reads/resets, profile grouping,
+source derivation and legacy-key matching are gone. Token pflag handlers and
+formatting are replaced. Unused `Client.ListTokens`, `Client.RotateToken` and
+`RotatedToken` are deleted. `CreateToken`, `LookupToken`, `RevokeToken` and
+`TokenInfo` still have runner/profile callers and remain until those migrate.
+The client API snapshot was regenerated, including earlier W9 removals.
 
-Engine resolution/staging/policy and `procenv.Build` remain owner stubs. The
-verifier is fake-tested. Real engine execution and real Windows execution remain
-open. Pipelines that require arguments unavailable from their defaults fail
-verification under the final upgrade grammar, leaving original pins unchanged.
+## Acceptance and tests
 
-## Completed in this continuation
+New supplemental acceptance test
+`TestSurfaceManagementTransportsKeepAuthorityNamespaces` passes for api.sock and
+remote URL fixtures. It checks pool details, distinct token namespaces and
+sizing fields through the real HTTP client with a fake transport. Earlier W9
+transport and grammar slices also pass. Full product surface cells remain
+skipped because the runtime driver and owner implementations are incomplete.
+No native or launch-QA cell was activated on fake evidence.
 
-- Run listing uses `RunReader` for local and remote connections. Every filter
-  reaches the controller before pagination. JSON emits compact selection rows
-  plus explicit continuation, and plain emits IDs. Failure groups use jobs or
-  job/step identities. Pipeline totals consume every matching page.
-- List follow drains all newer pages, keeps the initial number boundary and
-  deduplicates emitted IDs. A run that fails after a later run remains visible.
-  Wait/follow interruptions during either a request or a poll return exit 3.
-- Prune uses `RunPruner`. Age selection finishes every page before the first
-  delete, excludes live runs and preserves structured refusals. Dry-run never
-  deletes. No local store handle or hard-coded 10,000-row selection remains.
-- Logs and grep use `LogReader`. Tagged job attempts and trigger/plan/eval
-  subjects survive output, pagination and search. Follow waits for persisted
-  final logs and drains truncated pages without sleeping. Both trigger follow
-  callers use the same typed transport. No implicit tail limit was introduced.
-- Annotations and approvals use `RunReview`. Annotation levels and source
-  locations survive reads. Approval actors come from authentication, and
-  decisions retain idempotency keys and replay results. Local SQLite handlers,
-  environment-derived actors and the replaced pflag parsers are deleted.
-- The existing day/week duration parser moved into clisurface. The final grammar
-  and old duration callers now agree on values such as 7d. Debug parser tests now
-  use the final --job selector.
-- C3 records these W9-owned read and mutation shapes. Command references,
-  observability guidance and embedded mirrors describe the new adapters.
+Ported token tests retain exact scope arrays, metadata columns, revocation
+visibility and empty NDJSON behavior. Sizing tests retain CPU/memory/wait
+measurements, job rows, source, drift, floors and reset-summary counts. Legacy
+profile-key migration tests were deleted with the removed compatibility path.
+Actual reset mutation tests await the missing W1/W2 contract.
 
-The continuation removes 2,290 tracked Go lines, including obsolete list/group
-handlers, prune, local annotation/approval handlers, grep clients and their old
-fixtures. This is a gross deletion count, not net size or complete legacy removal.
-New contract clients and behavioral tests account for the added code.
+New regressions cover statistics beyond one page, atomic failure, cancellation
+counts, nearest-rank P95, invalid modes, pool authorization failure and replay,
+credential route separation, explicit TTL presence, exact retry bodies/keys,
+malformed metadata and plain/JSON mutation output. T1's parked-test inventory
+assigns no source test directly to W9.
+
+All Go commands use GOWORK=off and GOFLAGS=-buildvcs=false, with GOCACHE,
+GOTMPDIR and TMPDIR under `/tmp/sw-astra-W9/` and at most `-p 4`.
+
+Passed after code changes:
+
+- Whole-repository `go build -p 4 ./...`.
+- Vet for cmd/sparkwing, clisurface, controllerwire, controller/client and
+  tests/acceptance.
+- Focused cmd/client tests matching `TestRunStatistics|TestPoolManagement|
+  TestPools|TestSizing|TestToken|TestCredential|TestRenderTokens|TestRunListing|
+  TestRunPrun|TestRunLogs|TestRunReview|TestRunStatus|TestEngine|
+  TestCommandReferenceMatchesRegistry`.
+- Full clisurface, controllerwire and tests/acceptance package tests. The last
+  package still has skipped product scenarios.
+- Embedded-doc and changelog file drift tests, `sync-docs.sh --check`, the command
+  reference drift test, commentcheck against HEAD and `git diff --check`.
+
+The full pkg/docs test run could not complete because
+`TestWebClient_Versions_HappyPath` uses httptest.NewServer and the sandbox refuses
+TCP listeners. The two file drift tests pass separately. Full legacy cmd/client
+suites, real HTTP/socket, native Windows, daemon/service and engine integrations
+were not run. Prior sessions recorded old-schema orchestrator failures.
 
 ## Work still required
 
-1. Migrate retry and statistics/sizing, plus the remaining management handlers
-   and old typed clients. Retry --failed/--all-jobs still needs the W1/W2 contract
-   decision recorded below. Other handlers retain old pflag execution paths.
-2. Wire W3 run hosting and W6 sealed requests/settings. Publication, cache-from,
-   target selection, here-resume and pipeline-ref selection remain unfinished.
-   Detached execution still launches the removed consumer entrypoint and must
-   move to the local controller queue. Then delete the consumer and its helpers.
+1. Retry selection needs a W1/W2 contract for failed versus all jobs. Migrate its
+   old CLI/client code after that decision. Finish profile/runner credential
+   callers, restricted secrets, queue, cache warm and other management commands.
+2. Wire W3 hosting and W6 sealed requests/settings. Publication, cache-from,
+   target selection, here resume and pipeline-ref acquisition are unfinished.
+   Detached execution still launches the removed consumer entrypoint. Move it
+   to the local controller queue, then delete the consumer/process helpers.
 3. Compose W8 lifecycle/runtime/managed units/logs. Finish hidden wingd arguments,
-   update refresh/restart, doctor integration, schedules selectors/pause/resume
-   and stable timer startup through __tick.
-4. Implement pools, cache warm, deployment tokens and remaining management reads
-   and writes. Team-member credentials, reserved pools and restricted secrets
-   need the authoritative typed clients.
-5. Replace profile.Load/Save with W6 final machine parsing/persistence and W2
-   credential metadata. Shared connection selection needs the final W6 resolver.
-6. Finish source-guide and executable-caller migration. Older guides, scripts,
-   examples and runtime tests still contain removed vocabulary and old schemas.
-7. Run real HTTP/api.sock, daemon/service, Windows, engine-upgrade and complete
-   acceptance integrations after the owning implementations land.
+   update refresh/restart, doctor, schedule selectors/pause/resume and __tick.
+4. Replace profile.Load/Save and connection selection with W6 final machine
+   parsing/persistence and W2 credential metadata.
+5. Finish older guides, scripts, examples and runtime tests that still contain
+   removed vocabulary and schemas. Full auth-guide migration remains open.
+6. Run every native surface cell and launch QA after owner implementations land.
 
 ## Contract changes needed in other areas
 
-- W2: one ordered mixed trigger/job claim route. Separate queue scans cannot
-  substitute for a mixed award.
-- W2: credential enrollment for `profiles add --scope` and restricted secret
-  writes for `secrets set --only-on`.
-- W1/W2: retry request selection for failed/all jobs, or an explicit rule deriving
-  the CLI selections from intake.
-- W8: dashboard runtime/unit composition, canonical log source, access-policy
-  values in LocalStartOptions, install-force semantics and effective endpoint
-  reporting. No W8 contract was edited in this session.
+- W1/W2: retry failed/all selection and an authorized sizing-reset operation that
+  clears learned samples/floors while preserving explicit pins.
+- W2: serve C3 public run/query/deletion/log/review, sizing, pool and token
+  projections, including token mutation replay and confirmed revocation. Implement
+  apierr.DecodeInner. Client error tests still require decoder fakes.
+- W2: a single ordered mixed trigger/job claim route, profile scope enrollment,
+  restricted secret writes, run-scoped annotations and ordinary-member annotation
+  authorization. These are gaps, not approved product restrictions.
+- W7: persisted tagged logs, cursor continuity and final completeness.
+- W8: runtime/unit construction, canonical log source, access-policy and
+  install-force fields, and effective endpoints. No W8 contract was changed.
 
-The new public read models are W9-owned additions, recorded in
-`contracts/c3-controller-wire.md`. W2 implementation must consume them. No new
-route or authorization grant was introduced.
+## Shared files and friction
 
-## Verification for this continuation
+Shared files touched are `tests/acceptance/surface_contract_test.go`,
+`.apidiff/pkg_controller_client.txt`, `CHANGELOG.md`,
+`design/rewrite/contracts/c3-controller-wire.md`, this handoff,
+`pkg/docs/changelog.md` and generated mirrors for cli-operator, cli-pools,
+cli-runs, cli-tokens and observability. No production caller in another owner's
+package needed editing. `cmd/sparkwing/main.go` routes the changed W9 handlers.
 
-All Go commands used GOWORK=off and GOFLAGS=-buildvcs=false, with GOCACHE,
-GOTMPDIR and TMPDIR under /tmp/sw-astra-W9/main. Parallelism was at most -p 4.
-
-Passed after the source changes:
-
-- Whole-repository `go build -p 4 ./...`.
-- Vet for cmd/sparkwing, clisurface, controllerwire, controller/client,
-  orchestrator and tests/acceptance.
-- Full clisurface, controllerwire and tests/acceptance package tests. Product
-  scenario skeletons remain skipped; that package result is not runtime proof.
-- Focused listing, prune, logs/search, annotations/approvals, query transport,
-  engine client, status, stdin-ID and final debug-parser tests.
-- Focused orchestrator date/duration regressions after extracting the parser.
-- Generated command-reference and embedded-doc/changelog drift checks.
-- Default-team caller inventory and git diff --check.
-
-The new supplemental acceptance test is TestSurfaceRunQueryAndPruneTransport.
-The previous grammar, detail and observation transport slices still pass. No
-full W9 product acceptance cell was unskipped. Full CLI/API parity, runtime
-lifecycle, version-policy and real log completion remain open.
-
-Ported regressions cover repository/root filtering, filtered pages, trimmed SHA,
-quiet output, grouping, missing versus empty observations, annotation ordering
-and locations, logs bounds/search/follow, and approval decisions. New cases cover
-bursts across pages, delayed mutable-filter matches, interrupted controller reads,
-repeated pagination, prune selection failure and preserved structured errors.
-No source test in the T1 parked-test inventory is assigned directly to W9.
-
-An independent read-only review found the delayed-match follow bug and the wait
-request exit-code mismatch. Both were fixed, covered by regression tests and
-rechecked. Code volume review retained the new wire interfaces because the CLI
-must use controller-owned state; no new package, service, env variable or retry
-framework was added.
-
-A broad test expression also selected legacy orchestrator tests
-TestRunStatus_ResolvesAStandaloneRun, TestRunStatus_ReadsThroughProfileNotLocalStore
-and TestRunStatus_FailedRunKeepsItsStatus. They fail on the missing old
-sparkwing_meta schema and are not reported as passing. Earlier broad selections
-also hit old debug --node fixtures and a legacy CLI JobLogs fixture. The debug
-fixtures were migrated and the replaced JobLogs test was ported and deleted.
-
-Real error responses still depend on W2's apierr.DecodeInner stub. Client error
-regressions inject a decoder fake, as the earlier engine tests do. Production
-clients call the shared decoder. W7's storage and final-segment completeness
-implementation also remain real-integration requirements. Display-log validation
-checks tagged wire shapes without treating those checks as storage authority.
-
-The installed sparkwing info command ran once for initial repository orientation
-before the swarm brief was loaded. No candidate executable, daemon or pipeline
-was run. No git writes were made. The effective Git identity remains Korey
-Gambill and core.worktree is unset. Scratch and the temporary docs-generation
-test were removed at handoff.
-
-## Additional contract changes needed
-
-- W2 must implement the query/deletion/log/review projections documented in C3
-  and its shared error decoder. These are W9-owned wire additions on existing
-  routes; no C2 route or grant changed.
-- The frozen annotations add grammar permits a run-scoped write, but C2 only
-  supplies job/step writes with NodeReport or publisher authority. W2 needs a
-  run-scoped route and a decision for ordinary member annotation grants. The
-  adapter returns PolicyMissing for the missing run-scoped route and preserves
-  authorization refusals for existing routes. This is unfinished support, not
-  an approved customer restriction.
-- W7 must supply persisted tagged logs, cursor continuity and final completeness.
-
-## Shared files touched in this continuation
-
-- internal/orchestrator/runs_filter.go and runs_filter_test.go: moved duration
-  parsing to clisurface and migrated the remaining callers/tests.
-- internal/orchestrator/runs_grep.go and runs_grep_test.go: deleted after the CLI
-  became their last production caller. No interleaved W3 log backend was changed.
-- pkg/store/default_team_callers_test.go: removed five deleted caller entries.
-- tests/acceptance/surface_contract_test.go: added query/delete transport coverage.
-- pkg/docs/mirror/cli-runs.md, mirror/observability.md and changelog.md: regenerated
-  embedded copies of their source documentation.
-- design/rewrite/contracts/c3-controller-wire.md, this handoff and CHANGELOG.md.
-
-Within W9, pipeline_trigger.go and pipeline_trigger_here.go now use the typed log
-follower. Legacy Client annotation/approval APIs remain required by the old
-storage.StateStoreOld interface and W3 callers; deleting them needs that migration.
-
-Friction: concurrent source edits briefly interrupted shared-tree compilation.
-Final checks ran after the workers finished. Socket-based integrations remain
-outside the swarm sandbox. No unresolved test failure was hidden as a pass.
+Command docs were generated through their existing Go renderer in a temporary
+test, because the swarm forbids running Sparkwing executables. The temporary test
+was removed. The socket restriction prevented the full docs suite. No pipelines,
+installed binaries, services, git metadata or external files were changed.
+Scratch is deleted before the final report. Git identity remains Korey Gambill
+and core.worktree is unset. The lead still needs to review this uncommitted work.

@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Added
+- **cli rewrite:** (Breaking) statistics read every matching controller page. Sizing reads preserve job measurements and demand floors. Pool rules use typed team-admin routes, and token management separates team credentials from deployment credentials. JSON retains mutation results and token metadata. The replaced Client.ListTokens, Client.RotateToken and RotatedToken APIs are removed. Server projections and the missing sizing-reset route remain integration requirements.
 - **cli rewrite:** run listing, logs/search, annotations, approvals and prune use typed controller adapters. Listing filters and pagination reach the controller, follow retains runs that match later, and prune completes selection before deleting. Final server adapters, annotation policy and persisted log completeness remain integration requirements.
 - **cli rewrite:** repository upgrade now has an adapter for staged dependency checks, compilation or type checking, and describe/plan verification with the selected engine. The engine resolver and process-environment implementations are still required for end-to-end upgrades.
 - **cli rewrite:** run status reads the shared controller display model, including attempts and version notices. Receipt, step and paginated child-tree views use typed controller reads. Incomplete observations exit 3, and numeric run selectors reach the controller unchanged. Final controller read adapters remain an integration requirement.

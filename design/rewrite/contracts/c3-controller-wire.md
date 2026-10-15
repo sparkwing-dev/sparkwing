@@ -181,4 +181,68 @@ selected route. Other clients use the named run/job routes or the separate
 runner run/job queues. A mixed trigger/job queue request needs a shared C2 route
 before that combination can be transported in one claim.
 
+### Sizing, pool rules and credential management
+
+These W9 wire projections complete existing C2 routes. W2 must implement the
+server projections and apply C1/C2 authority in its transactions. No route,
+authorization grant or root-provisioning rule changed here.
+
+`SizingManager.ListSizing` reads `GET /api/v1/sizing` with optional `pipeline`,
+positive `limit` and opaque `cursor`. The controller applies the pipeline filter
+before pagination. `SizingPage` contains `sizing`, `next_cursor` and `truncated`.
+Each `SizingDetail` has separate repository and pipeline identities, the
+controller-selected source and drift, memo exclusions, rollup measurements and
+job-named rows. CPU/memory distributions, sustained charges, waits, pins, floors,
+plan identity and prior measurements survive JSON. Clients do not choose the
+admission source or reconstruct legacy profile-key encodings.
+
+The CLI uses `RunReader` to calculate ordinary run statistics from every matching
+root-run page. Counts distinguish success, failure, cancellation and active work.
+Success percentage includes all terminal runs. Durations use both timestamps,
+nearest-rank P95 and an overflow-safe integer mean. Selection must finish before
+any totals are emitted. No fixed history-row cap remains.
+
+`SizingReset` and `SizingResetSummary` allow the CLI to consume a controller
+reset without opening its database. The summary retains deleted/cleared row,
+sample and floor counts. Explicit resource pins survive reset. C2 has no reset
+route. The HTTP adapter returns `policy_missing` before any request. W2 must
+specify the route and authority, and W1 must implement the reset, before this
+feature is integrated. Fakes establish selection and rendering only.
+
+`PoolManager` uses `GET /api/v1/pools`,
+`POST /api/v1/pools/{pool}/rules` and
+`DELETE /api/v1/pools/{pool}/rules/{rule}`. Lists retain server-granted runner
+reservations and rule IDs, repository selectors, branch selectors, optional
+`github` source and the route bit. An allow request sends the complete selectors
+and an idempotency key in the header. The result returns the same rule plus its
+server ID and replay marker. Deletion returns pool, rule ID and whether it was
+removed or already absent. Repository strings are proposals, never proof of
+repository authority. The controller verifies that authority independently.
+
+`TokenManager` binds all operations to one namespace. Team commands use
+`/api/v1/tokens` and member/runner types. Operator commands use
+`/api/v1/operator/tokens` and service/deployment types. List reads accept `kind`
+and `include_revoked=true`. Single-prefix reads and revocation use `/{token}`.
+Creation and `/{token}/rotate` carry idempotency keys in the header. Retried
+requests preserve their bodies and keys.
+
+`TokenMetadata` has prefix, kind, principal and exact scopes, with optional team,
+subject, repository/pool grants, metering and Unix-second lifetime fields. Raw
+bearers appear only in creation and rotation results. Those results include
+metadata, and rotation also returns the old prefix and its revocation time.
+Revocation returns the prefix and confirmed revoked state. Metadata reads never
+include a raw bearer. The issuer derives grants, membership and billing facts.
+The client does not expand any scope to a wildcard or grant console authority.
+
+Creation TTL omission selects the server default. Explicit zero requests no
+expiry, subject to issuer policy. Rotation zero or omitted TTL preserves the old
+remaining lifetime. Grace defaults to 24 hours in the CLI. The wire stores whole
+seconds, so fractional seconds are refused rather than rounded. Negative TTL or
+grace fails before connection resolution. No maximum lifetime was introduced.
+
+Lists use NDJSON and plain prefixes. Creation and rotation JSON retain the raw
+bearer and metadata in one document. Plain emits the new bearer once. Revocation
+JSON retains its result and plain emits the prefix. Structured controller errors
+pass through without replacement envelopes.
+
 <!-- design:end -->

@@ -31,6 +31,25 @@ The rewrite's CLI adapters are implemented against the shared controller
 contract. Final server read adapters, annotation policy and persisted log
 completion remain integration requirements.
 
+## Run statistics and sizing
+
+`sparkwing runs stats --pipeline check --since 7d` reads every matching root-run
+page. JSON contains separate successful, failed, cancelled and active counts.
+Success percentage counts terminal runs, including cancellations. Mean duration
+and nearest-rank P95 use runs with both timestamps. Plain output emits pipeline
+names. A failed page read produces no partial totals.
+
+`sparkwing runs stats --sizing` reads the controller's resource measurements,
+including job rows, CPU and memory distributions, wait times, memo exclusions,
+demand floors, resource pins and drift. Add `--profile NAME` to select a
+controller. JSON preserves the measurements and controller-selected source.
+Plain output emits repository/pipeline names.
+
+Sizing reset selects `--reset --pipeline NAME` or
+`--reset --all-pipelines --yes`. The reset contract preserves resource pins.
+Its HTTP adapter returns `policy_missing` because the route contract has no
+authorized reset operation. It changes no state.
+
 ## Observational state-write failures
 
 The node log emits a `state_write_failed` warning when a step lifecycle,
