@@ -10,9 +10,60 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
+
+func TestPlanInitialRetainsAuthorityLossAtEveryBoundary(t *testing.T) {
+	for _, stage := range []string{"before", "lookup", "validate-hit", "invalidate", "plan", "validate-fresh", "hash", "put"} {
+		t.Run(stage, func(t *testing.T) {
+			f := newPlanningFixture(t)
+			if stage == "validate-hit" || stage == "invalidate" {
+				if _, err := PlanInitial(t.Context(), f.input, f.functions()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(nil)
+			functions := f.functions()
+			loseAuthority := func() { cancel(lease.ErrLeaseLost) }
+			switch stage {
+			case "before":
+				loseAuthority()
+			case "lookup":
+				f.cache.onLookup = loseAuthority
+			case "put":
+				f.cache.onPut = loseAuthority
+			case "plan":
+				plan := functions.Plan
+				functions.Plan = func(ctx context.Context) (json.RawMessage, error) {
+					cancel(lease.ErrLeaseLost)
+					return plan(ctx)
+				}
+			case "validate-hit", "validate-fresh":
+				validate := functions.Validate
+				functions.Validate = func(raw json.RawMessage, validation nodeproto.ValidationContext) (nodeproto.PlanDoc, error) {
+					cancel(lease.ErrLeaseLost)
+					return validate(raw, validation)
+				}
+			case "invalidate":
+				f.cache.entry.PlanHash = runspec.Hash(strings.Repeat("f", 64))
+				f.cache.onInvalidate = loseAuthority
+			case "hash":
+				hash := functions.Hash
+				functions.Hash = func(value any) (runspec.Hash, error) {
+					cancel(lease.ErrLeaseLost)
+					return hash(value)
+				}
+			}
+			result, err := PlanInitial(ctx, f.input, functions)
+			if !errors.Is(err, lease.ErrLeaseLost) || len(result.CanonicalPlan) != 0 || result.CacheHit {
+				t.Fatalf("planning lost its authority cause at %s: result=%+v error=%v", stage, result, err)
+			}
+		})
+	}
+}
 
 func TestPlanInitialCacheHitSkipsPlanningAndRevalidates(t *testing.T) {
 	f := newPlanningFixture(t)
@@ -270,7 +321,7 @@ type planningCacheFake struct {
 	calls                            []string
 	missReason                       string
 	lookupErr, putErr, invalidateErr error
-	onLookup, onPut                  func()
+	onLookup, onPut, onInvalidate    func()
 }
 
 func (c *planningCacheFake) Lookup(context.Context, PlanCacheKey) (PlanCacheLookup, error) {
@@ -299,6 +350,9 @@ func (c *planningCacheFake) Put(_ context.Context, entry PlanCacheEntry) error {
 
 func (c *planningCacheFake) Invalidate(_ context.Context, key PlanCacheKey, _ string) error {
 	c.calls = append(c.calls, "invalidate")
+	if c.onInvalidate != nil {
+		c.onInvalidate()
+	}
 	c.invalidated = append(c.invalidated, key)
 	if c.invalidateErr != nil {
 		return c.invalidateErr

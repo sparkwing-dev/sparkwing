@@ -131,6 +131,7 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 	f := &ownerFixture{changed: make(chan struct{}, 1), snapshot: store.RunSnapshot{Run: store.RunRow{ID: "run", State: store.RunPending, Request: runspec.SealedRequest{Request: request, Hash: "request"}, Owner: &unit}}}
 	in := RunInput{RunID: "run", SealedRequest: raw, RequestHash: "request", Owner: store.Actor{Kind: store.ActorRunHost, Owner: unit}}
 	h := OwnerHost{
+		Mask:  func(value string) string { return value },
 		Store: f, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 		Acquire: func(context.Context, RunInput) (*source.Entry, error) {
 			f.record("acquire")

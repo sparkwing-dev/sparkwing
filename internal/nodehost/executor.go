@@ -97,18 +97,7 @@ func NewNodeExecutor(deps ExecutorDependencies) (NodeHost, error) {
 
 func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error) {
 	defer func() {
-		if err != nil {
-			masked := maskedRunError{err: err, text: boundedNodeErrText(h.deps.Mask(err.Error()))}
-			var canonical *apierr.Error
-			if errors.As(err, &canonical) {
-				// safety: structured renderers must not unwrap SDK errors back into unmasked source bytes.
-				masked.canonical = &apierr.Error{Code: canonical.Code, Message: masked.text}
-				if canonical.Hint != "" {
-					masked.canonical.Hint = boundedNodeErrText(h.deps.Mask(canonical.Hint))
-				}
-			}
-			err = masked
-		}
+		err = maskHostError(err, h.deps.Mask)
 	}()
 	if err := executorLostAuthority(ctx); err != nil {
 		return err

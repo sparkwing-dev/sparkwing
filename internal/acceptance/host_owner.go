@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,8 +73,10 @@ func (s *ownerSealStore) FinishRunAndUnit(_ context.Context, input store.FinishR
 // store. Store atomicity and native placement drivers remain separate cells.
 func CheckOwnerSeals(t *testing.T) {
 	t.Helper()
-	for _, mode := range []string{"new", "resume", "refused", "setup_failure", "rejected_owner"} {
+	for _, mode := range []string{"new", "resume", "refused", "setup_failure", "rejected_owner", "secret_setup_failure", "secret_accept_failure", "cancelled_acquire_success", "lost_acquire_success"} {
 		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(nil)
 			owner := store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Name: "trigger", Holder: "host", Generation: 3}
 			request := runspec.Request{Pipeline: "build", PullRequest: runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: 42}}}
 			sealed, err := json.Marshal(request)
@@ -86,13 +89,19 @@ func CheckOwnerSeals(t *testing.T) {
 				s.row.Plan, s.row.PlanHash = json.RawMessage(`{"jobs":[]}`), ownerPlanHash
 			}
 			refused := errors.New("acceptance refused")
+			secret := "private-owner-credential"
+			secretFailure := &apierr.Error{Code: apierr.Unavailable, Message: secret, Hint: "retry " + secret, Details: map[string]any{"credential": secret}}
 			if mode == "refused" {
 				s.refused = refused
 			}
 			if mode == "rejected_owner" {
 				s.renewError = &apierr.Error{Code: apierr.LockHeld}
 			}
+			if mode == "secret_accept_failure" {
+				s.refused = secretFailure
+			}
 			host := nodehost.OwnerHost{
+				Mask:  func(value string) string { return strings.ReplaceAll(value, secret, "***") },
 				Store: s, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 				Acquire: func(_ context.Context, in nodehost.RunInput) (*source.Entry, error) {
 					s.trace = append(s.trace, "acquire")
@@ -101,6 +110,15 @@ func CheckOwnerSeals(t *testing.T) {
 					}
 					if mode == "setup_failure" {
 						return nil, errors.New("source unavailable")
+					}
+					if mode == "secret_setup_failure" {
+						return nil, secretFailure
+					}
+					if mode == "cancelled_acquire_success" {
+						cancel(&lease.CancelError{Reason: "cancel_requested"})
+					}
+					if mode == "lost_acquire_success" {
+						cancel(lease.ErrLeaseLost)
 					}
 					return &source.Entry{}, nil
 				},
@@ -126,17 +144,17 @@ func CheckOwnerSeals(t *testing.T) {
 					return errors.New("unexpected wait")
 				},
 			}
-			result, err := host.Run(t.Context(), nodehost.RunInput{RunID: "run", SealedRequest: sealed, RequestHash: "request", Owner: store.Actor{Kind: store.ActorRunHost, Owner: owner}})
+			result, err := host.Run(ctx, nodehost.RunInput{RunID: "run", SealedRequest: sealed, RequestHash: "request", Owner: store.Actor{Kind: store.ActorRunHost, Owner: owner}})
 			want := []string{"acquire", "prepare", "plan", "accept", "start", "finish"}
 			switch mode {
 			case "resume":
 				want = []string{"acquire", "start", "finish"}
-			case "refused":
+			case "refused", "secret_accept_failure":
 				want = []string{"acquire", "prepare", "plan", "accept"}
-				if !errors.Is(err, refused) {
+				if mode == "refused" && !errors.Is(err, refused) {
 					t.Fatalf("error = %v", err)
 				}
-			case "setup_failure":
+			case "setup_failure", "secret_setup_failure":
 				want = []string{"acquire", "finish"}
 				if err == nil || s.finished.Transition.To != store.RunFailed {
 					t.Fatalf("finish = %+v error = %v", s.finished, err)
@@ -145,6 +163,23 @@ func CheckOwnerSeals(t *testing.T) {
 				want = nil
 				if !errors.Is(err, lease.ErrLeaseLost) {
 					t.Fatalf("error = %v", err)
+				}
+			case "lost_acquire_success":
+				want = []string{"acquire"}
+				if !errors.Is(err, lease.ErrLeaseLost) || s.finished.Transition.RunID != "" {
+					t.Fatalf("lost owner finished: %+v error=%v", s.finished, err)
+				}
+			case "cancelled_acquire_success":
+				want = []string{"acquire", "finish"}
+				var cancelled *lease.CancelError
+				if !errors.As(err, &cancelled) || s.finished.Transition.To != store.RunCancelled || s.finished.Unit != owner {
+					t.Fatalf("unaccepted cancellation left its owner unfinished: %+v error=%v", s.finished, err)
+				}
+			}
+			if strings.HasPrefix(mode, "secret_") {
+				var rendered *apierr.Error
+				if !errors.Is(err, secretFailure) || !errors.As(err, &rendered) || rendered.Code != secretFailure.Code || strings.Contains(err.Error()+rendered.Message+rendered.Hint, secret) || rendered.Details != nil {
+					t.Fatalf("owner error lost its cause or exposed credentials: %v", err)
 				}
 			}
 			if !reflect.DeepEqual(s.trace, want) {

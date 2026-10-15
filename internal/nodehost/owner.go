@@ -65,6 +65,8 @@ type OwnerHost struct {
 	Bind     func(context.Context, AcceptedRun, store.ReconciledNode, *source.Entry) (NodeInput, error)
 	Executor NodeHost
 	Expand   func(context.Context, AcceptedRun, store.NodeRow) (json.RawMessage, *store.ExpansionFailure, error)
+	// Mask shares the source and SDK secret registry and protects returned errors.
+	Mask func(string) string
 }
 
 var (
@@ -75,9 +77,10 @@ var (
 // Run requires an initial successful renewal before acquiring source or resuming work.
 // It joins every executor and renewal before returning, including error paths.
 func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunCompletion, err error) {
-	if h.Store == nil || h.Wait == nil {
-		return completion, errors.New("run host requires store and state follower")
+	if h.Store == nil || h.Wait == nil || h.Mask == nil {
+		return completion, errors.New("run host requires store, state follower and masking adapters")
 	}
+	defer func() { err = maskHostError(err, h.Mask) }()
 	if input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost || input.Owner.Owner.RunID != input.RunID {
 		return completion, errors.New("run host requires a bound owner and sealed request")
 	}
@@ -111,6 +114,9 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 	entry, err := h.acquire(ctx, input, snapshot.Run)
 	if entry != nil {
 		defer func() { err = errors.Join(err, entry.Close()) }()
+	}
+	if cause := context.Cause(ctx); cause != nil {
+		err = errors.Join(err, cause)
 	}
 	if err != nil {
 		return completion, h.preparationFailure(ctx, input, snapshot.Run, err)
@@ -180,7 +186,7 @@ func ownerRequestMatches(input RunInput, row store.RunRow) error {
 
 func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow, entry *source.Entry) (AcceptedRun, error) {
 	if err := context.Cause(ctx); err != nil {
-		return AcceptedRun{}, err
+		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
 	if row.Spec != nil {
 		accepted, err := ownerAccepted(row)

@@ -23,6 +23,35 @@ type acquiredClaimStore struct {
 	renew func(context.Context) (store.LeaseBeat, error)
 }
 
+type refusedClaimSnapshot struct {
+	ClaimStore
+	failure error
+}
+
+func (s refusedClaimSnapshot) ReadSnapshot(context.Context, string) (store.RunSnapshot, error) {
+	return store.RunSnapshot{}, s.failure
+}
+
+func TestClaimedNodeHostMasksReadFailuresBeforeRenewal(t *testing.T) {
+	input, state, host, processes := claimedNodeFixture(t)
+	secret := "private-claim-read-credential"
+	failure := &apierr.Error{Code: apierr.Unavailable, Message: secret, Hint: secret, Details: map[string]any{"credential": secret}}
+	host.Store = refusedClaimSnapshot{ClaimStore: state, failure: failure}
+	host.Mask = func(value string) string { return strings.ReplaceAll(value, secret, "***") }
+	state.renew = func(context.Context) (store.LeaseBeat, error) {
+		t.Error("renewed after the acceptance read failed")
+		return store.LeaseBeat{}, nil
+	}
+	err := host.Execute(t.Context(), input)
+	var rendered *apierr.Error
+	if !errors.Is(err, failure) || !errors.As(err, &rendered) || strings.Contains(err.Error()+rendered.Message+rendered.Hint, secret) || rendered.Details != nil {
+		t.Fatalf("claim read exposed credentials or lost its cause: %v", err)
+	}
+	if len(*processes) != 0 || len(state.changes) != 0 {
+		t.Fatal("failed acceptance read started execution or reported a result")
+	}
+}
+
 func (s *acquiredClaimStore) RenewNodeClaim(ctx context.Context, ref store.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
 	if ref != s.row.Ref || actor.Kind != store.ActorHolder || actor.Holder != s.row.ClaimedBy || actor.Generation != s.row.Generation || actor.CapabilityPrefix != s.row.CapabilityPrefix {
 		return store.LeaseBeat{}, errors.New("renewal changed the award")

@@ -255,6 +255,21 @@ so lease-loss handling and refused-transaction detection retain their meaning.
 Structured error rendering receives the same masked message and hint with its
 original code. Untrusted SDK details are withheld from that rendered error.
 
+`OwnerHost.Mask` is required before renewal. Owner and claimed-node hosts use
+the executor's error wrapper for every returned error, including persistence
+reads and cleanup. Error matching retains the original cause. Rendered canonical
+errors retain their code and masked hint but omit untrusted details. The mask
+must share the source and SDK secret registry because these errors may contain
+credentials before ordinary job logging starts.
+
+An acquisition adapter that returns success after cancellation cannot continue
+to acceptance or scheduling. Requested cancellation before acceptance finishes
+the run and owner unit atomically. Lease loss and failed resume setup leave the
+work to recovery. Initial planning retains the cancellation cause across cache
+lookup, hit validation, invalidation, fresh planning, hashing and publication.
+The owner seal acceptance check covers masked setup/acceptance errors and late
+acquisition success after cancellation with fake store and acquisition adapters.
+
 Setup failures report through `TransitionNode` with the awarded holder, capability
 prefix and generation. Requested cancellation reports a cancelled job. Lost
 authority or shutdown leaves reporting to recovery. Returned source errors are

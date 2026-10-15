@@ -40,6 +40,7 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 	if h.Store == nil || h.Executor == nil || h.Mask == nil {
 		return errors.New("claimed node host requires store, executor and masking adapters")
 	}
+	defer func() { err = maskHostError(err, h.Mask) }()
 	if input.Entry != nil || input.Accepted.RunID == "" || input.NodeID == "" || input.Authority.CapabilityPrefix == "" || input.Authority.Holder == "" || input.Generation < 1 || input.Attempt < 1 {
 		return errors.New("claimed node host requires an unacquired, accepted award")
 	}
@@ -73,7 +74,7 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 	if entry != nil {
 		defer func() {
 			if closeErr := entry.Close(); closeErr != nil {
-				err = errors.Join(err, errors.New(h.Mask(closeErr.Error())))
+				err = errors.Join(err, closeErr)
 			}
 		}()
 	}

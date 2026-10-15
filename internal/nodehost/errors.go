@@ -1,6 +1,7 @@
 package nodehost
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -32,6 +33,22 @@ func (e maskedRunError) As(target any) bool {
 	}
 	*canonical = e.canonical
 	return true
+}
+
+func maskHostError(err error, mask func(string) string) error {
+	if err == nil {
+		return nil
+	}
+	masked := maskedRunError{err: err, text: boundedNodeErrText(mask(err.Error()))}
+	var canonical *apierr.Error
+	if errors.As(err, &canonical) {
+		// safety: structured renderers must not expose the original SDK error or its details.
+		masked.canonical = &apierr.Error{Code: canonical.Code, Message: masked.text}
+		if canonical.Hint != "" {
+			masked.canonical.Hint = boundedNodeErrText(mask(canonical.Hint))
+		}
+	}
+	return masked
 }
 
 func errText(err error) string {

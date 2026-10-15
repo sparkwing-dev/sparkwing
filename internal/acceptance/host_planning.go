@@ -125,6 +125,7 @@ func acceptPlanningDefaults(t *testing.T, prepared nodehost.PreparedPlanning, en
 	s := &ownerSealStore{row: store.RunRow{ID: "run", State: store.RunPending, Request: runspec.SealedRequest{Request: request, Hash: "request"}, Owner: &owner}}
 	accepted := errors.New("stop at accepted plan")
 	host := nodehost.OwnerHost{
+		Mask:  func(value string) string { return value },
 		Store: s, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 		Acquire: func(context.Context, nodehost.RunInput) (*source.Entry, error) {
 			return &source.Entry{Engine: engine}, nil

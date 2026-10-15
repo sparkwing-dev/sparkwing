@@ -37,7 +37,7 @@ type PlannedInitial struct {
 // Cache storage failures warn and fall back to planning; cancellation stops both.
 // Expansions belong to their own transaction and cannot enter this lifecycle.
 func PlanInitial(ctx context.Context, input PlanningInput, functions PlanningFunctions) (PlannedInitial, error) {
-	if err := ctx.Err(); err != nil {
+	if err := context.Cause(ctx); err != nil {
 		return PlannedInitial{}, err
 	}
 	if err := initialPlanningContext(input.Validation); err != nil {
@@ -56,7 +56,7 @@ func PlanInitial(ctx context.Context, input PlanningInput, functions PlanningFun
 	case eligible.Eligible:
 		result = lookupInitialPlan(ctx, input, key, functions)
 	}
-	if err := ctx.Err(); err != nil {
+	if err := context.Cause(ctx); err != nil {
 		return PlannedInitial{}, err
 	}
 	if result.CacheHit {
@@ -67,7 +67,7 @@ func PlanInitial(ctx context.Context, input PlanningInput, functions PlanningFun
 
 func lookupInitialPlan(ctx context.Context, input PlanningInput, key PlanCacheKey, functions PlanningFunctions) PlannedInitial {
 	lookup, err := input.Cache.Lookup(ctx, key)
-	if ctx.Err() != nil {
+	if context.Cause(ctx) != nil {
 		return PlannedInitial{}
 	}
 	if err != nil {
@@ -81,7 +81,7 @@ func lookupInitialPlan(ctx context.Context, input PlanningInput, key PlanCacheKe
 		return PlannedInitial{MissReason: "cache entry unavailable"}
 	}
 	hit, err := validatePlanCacheHit(*lookup.Entry, input.Inputs, input.Validation, functions)
-	if ctx.Err() != nil {
+	if context.Cause(ctx) != nil {
 		return PlannedInitial{}
 	}
 	if err == nil {
@@ -89,7 +89,7 @@ func lookupInitialPlan(ctx context.Context, input PlanningInput, key PlanCacheKe
 	}
 	// safety: cache errors may contain secret declarations or private input hashes.
 	functions.Warn("plan cache entry failed current validation; planning normally")
-	if err := input.Cache.Invalidate(ctx, key, "entry failed current validation"); err != nil && ctx.Err() == nil {
+	if err := input.Cache.Invalidate(ctx, key, "entry failed current validation"); err != nil && context.Cause(ctx) == nil {
 		functions.Warn("plan cache invalidation failed; ignoring the entry")
 	}
 	return PlannedInitial{MissReason: "cache entry failed current validation"}
@@ -100,33 +100,33 @@ func planFresh(ctx context.Context, input PlanningInput, key PlanCacheKey, eligi
 		return PlannedInitial{}, errors.New("initial planning requires an SDK planner")
 	}
 	raw, err := functions.Plan(ctx)
-	if ctx.Err() != nil {
-		return PlannedInitial{}, ctx.Err()
+	if context.Cause(ctx) != nil {
+		return PlannedInitial{}, context.Cause(ctx)
 	}
 	if err != nil {
 		return PlannedInitial{}, err
 	}
 	plan, err := functions.Validate(raw, input.Validation)
-	if ctx.Err() != nil {
-		return PlannedInitial{}, ctx.Err()
+	if context.Cause(ctx) != nil {
+		return PlannedInitial{}, context.Cause(ctx)
 	}
 	if err != nil {
 		return PlannedInitial{}, err
 	}
 	canonical, hash, err := canonicalPlanningDocument(raw, functions.Hash)
-	if ctx.Err() != nil {
-		return PlannedInitial{}, ctx.Err()
+	if context.Cause(ctx) != nil {
+		return PlannedInitial{}, context.Cause(ctx)
 	}
 	if err != nil {
 		return PlannedInitial{}, err
 	}
 	if input.Cache != nil && eligible {
 		entry := PlanCacheEntry{Key: key, Inputs: input.Inputs, Plan: canonical, PlanHash: hash}
-		if err := input.Cache.Put(ctx, entry); err != nil && ctx.Err() == nil {
+		if err := input.Cache.Put(ctx, entry); err != nil && context.Cause(ctx) == nil {
 			functions.Warn("plan cache write failed; using the validated plan")
 		}
 	}
-	if err := ctx.Err(); err != nil {
+	if err := context.Cause(ctx); err != nil {
 		return PlannedInitial{}, err
 	}
 	return PlannedInitial{Plan: plan, CanonicalPlan: canonical, PlanHash: hash, MissReason: missReason}, nil

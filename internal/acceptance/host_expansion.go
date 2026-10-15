@@ -147,7 +147,7 @@ func CheckOwnerExpansion(t *testing.T) {
 				t.Fatal(err)
 			}
 			entry := &source.Entry{Engine: resolved}
-			host := nodehost.OwnerHost{Store: s, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, nodehost.RunInput) (*source.Entry, error) { return entry, nil }, Project: func(snapshot store.RunSnapshot) (store.ScheduleSnapshot, error) {
+			host := nodehost.OwnerHost{Mask: func(value string) string { return value }, Store: s, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, nodehost.RunInput) (*source.Entry, error) { return entry, nil }, Project: func(snapshot store.RunSnapshot) (store.ScheduleSnapshot, error) {
 				return store.ScheduleSnapshot{Nodes: []store.ScheduleNode{{ID: "source", Generation: 4, Expansion: string(snapshot.Nodes[0].Expansion)}}}, nil
 			}, Decide: func(snapshot store.ScheduleSnapshot) store.ScheduleDecision {
 				if snapshot.Nodes[0].Expansion == string(store.ExpansionExpected) {
