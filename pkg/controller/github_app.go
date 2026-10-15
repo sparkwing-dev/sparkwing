@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -544,25 +546,24 @@ func (s *Server) handleGitHubAppUnbind(w http.ResponseWriter, r *http.Request) {
 
 // safety: the operator's route is how a binding moves between teams: an
 // owner of the new team connects once the old binding is gone.
-func (s *Server) handleOperatorGitHubAppUnbind(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handleOperatorGitHubAppUnbind(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	id, ok := installationIDFrom(w, r)
-	if !ok {
-		return
+	id, err := strconv.ParseInt(r.PathValue("installation"), 10, 64)
+	if err != nil || id <= 0 {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "installation must be a positive integer"}
 	}
 	team, err := s.store.AsOperator().UnbindGitHubAppInstallation(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, errors.New("no team holds that installation"))
-		return
+		return &apierr.Error{Code: apierr.NotFound, Message: "no team holds that installation"}
 	}
 	if err != nil {
-		s.writeInternalError(w, r, "operator unbind github app installation", err)
-		return
+		return err
 	}
-	s.logger.Info("github app installation disconnected by the operator", "team", string(team), "installation_id", id)
+	s.logger.Info("github app installation disconnected by the operator", "team", string(team), "installation_id", id, "by", authorized.Principal.Capability.Subject.ID)
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 type githubAppRepositoryJSON struct {

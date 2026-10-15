@@ -8,47 +8,89 @@ import (
 	"time"
 )
 
-// CreateTokenRequest is the body of POST /api/v1/tokens. TTLSecs of zero mints
-// a token that never expires.
+// CreateTokenRequest narrows a member credential's grants and optional expiry.
 type CreateTokenRequest struct {
-	Kind      string   `json:"kind"`
-	Principal string   `json:"principal"`
-	Scopes    []string `json:"scopes"`
-	TTLSecs   int64    `json:"ttl_secs,omitempty"`
+	Grants    []string   `json:"grants"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
-// CreatedToken is a newly minted token. Token is the raw bearer, returned only
-// this once; Metadata is the controller's record of it, as sent.
+// CreatedToken contains the one-time bearer and its public issuance metadata.
 type CreatedToken struct {
-	Token    string          `json:"token"`
-	Metadata json.RawMessage `json:"metadata"`
+	Capability string     `json:"capability"`
+	Prefix     string     `json:"prefix"`
+	Team       string     `json:"team"`
+	Grants     []string   `json:"grants"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 }
 
-// TokenInfo is one token as GET /api/v1/tokens lists it. Times are Unix
-// seconds.
+// EnrollRunnerRequest selects a machine name, repository patterns and authorized pools.
+type EnrollRunnerRequest struct {
+	Name          string     `json:"name"`
+	Repos         []string   `json:"repos"`
+	ReservedPools []string   `json:"reserved_pools,omitempty"`
+	Grants        []string   `json:"grants,omitempty"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+}
+
+// CreateServiceTokenRequest selects deployment service grants without console authority.
+type CreateServiceTokenRequest struct {
+	Name      string     `json:"name"`
+	Grants    []string   `json:"grants"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
+// TokenSubject identifies the account, machine, service or operator holding a credential.
+type TokenSubject struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+}
+
+// TokenInfo is public capability metadata returned by the token resource.
 type TokenInfo struct {
-	Prefix     string   `json:"prefix"`
-	Kind       string   `json:"kind"`
-	Principal  string   `json:"principal"`
-	Scopes     []string `json:"scopes"`
-	Metered    bool     `json:"metered,omitempty"`
-	LastUsedAt *int64   `json:"last_used_at,omitempty"`
-	RevokedAt  *int64   `json:"revoked_at,omitempty"`
+	Prefix         string       `json:"prefix"`
+	Team           string       `json:"team"`
+	Subject        TokenSubject `json:"subject"`
+	Audience       string       `json:"audience"`
+	Grants         []string     `json:"grants"`
+	CreatedBy      string       `json:"created_by"`
+	IssuedAt       time.Time    `json:"issued_at"`
+	ExpiresAt      *time.Time   `json:"expires_at,omitempty"`
+	LastUsedAt     *time.Time   `json:"last_used_at,omitempty"`
+	RevokedAt      *time.Time   `json:"revoked_at,omitempty"`
+	GitCredentials bool         `json:"git_credentials"`
+	Metered        bool         `json:"metered"`
 }
 
-// RotatedToken is the replacement POST /api/v1/tokens/{prefix}/rotate mints.
-// The old token keeps authenticating until OldRevokedAt (Unix seconds).
+// RotatedToken contains the one-time replacement and the old credential's grace deadline.
 type RotatedToken struct {
-	Token         string          `json:"token"`
-	New           json.RawMessage `json:"new"`
-	OldRevokedAt  int64           `json:"old_revoked_at"`
-	OldReplacedBy string          `json:"old_replaced_by"`
+	Capability   string    `json:"capability"`
+	New          TokenInfo `json:"new"`
+	OldPrefix    string    `json:"old_prefix"`
+	OldRevokedAt time.Time `json:"old_revoked_at"`
 }
 
-// CreateToken mints a token. It needs the admin scope.
+// CreateToken provisions or delegates the authenticated account's member credential once.
 func (c *Client) CreateToken(ctx context.Context, req CreateTokenRequest) (*CreatedToken, error) {
 	var out CreatedToken
 	if err := c.post(ctx, "/api/v1/tokens", req, http.StatusCreated, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// EnrollRunner provisions a team machine root once under current team administration.
+func (c *Client) EnrollRunner(ctx context.Context, req EnrollRunnerRequest) (*CreatedToken, error) {
+	var out CreatedToken
+	if err := c.post(ctx, "/api/v1/runners", req, http.StatusCreated, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CreateServiceToken provisions a deployment service root once under operator.tokens.
+func (c *Client) CreateServiceToken(ctx context.Context, req CreateServiceTokenRequest) (*CreatedToken, error) {
+	var out CreatedToken
+	if err := c.post(ctx, "/api/v1/operator/tokens", req, http.StatusCreated, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -87,22 +129,17 @@ func (c *Client) LookupToken(ctx context.Context, prefix string) (json.RawMessag
 	return out, nil
 }
 
-// RevokeToken revokes the token with prefix at once.
+// RevokeToken revokes a deployment service or operator capability by prefix.
 func (c *Client) RevokeToken(ctx context.Context, prefix string) error {
-	return c.deleteJSON(ctx, "/api/v1/tokens/"+url.PathEscape(prefix), http.StatusNoContent, nil)
+	return c.deleteJSON(ctx, "/api/v1/operator/tokens/"+url.PathEscape(prefix), http.StatusNoContent, nil)
 }
 
-// RotateToken mints a replacement for the token with prefix. The old token
-// keeps working for grace; a zero ttl keeps the old token's remaining
-// lifetime.
-func (c *Client) RotateToken(ctx context.Context, prefix string, grace, ttl time.Duration) (*RotatedToken, error) {
+// RotateToken replaces an owned capability once; a nil expiry preserves its original expiry.
+func (c *Client) RotateToken(ctx context.Context, prefix string, grace time.Duration, expires *time.Time) (*RotatedToken, error) {
 	body := struct {
-		GraceSecs int64 `json:"grace_secs"`
-		TTLSecs   int64 `json:"ttl_secs,omitempty"`
-	}{GraceSecs: int64(grace.Seconds())}
-	if ttl > 0 {
-		body.TTLSecs = int64(ttl.Seconds())
-	}
+		GraceSecs int64      `json:"grace_secs"`
+		ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	}{GraceSecs: int64(grace / time.Second), ExpiresAt: expires}
 	var out RotatedToken
 	if err := c.post(ctx, "/api/v1/tokens/"+url.PathEscape(prefix)+"/rotate", body, http.StatusOK, &out); err != nil {
 		return nil, err
@@ -110,10 +147,10 @@ func (c *Client) RotateToken(ctx context.Context, prefix string, grace, ttl time
 	return &out, nil
 }
 
-// ComputeLimits returns the team's compute ceilings document, as sent.
+// ComputeLimits returns the deployment's compute ceilings document, as sent.
 func (c *Client) ComputeLimits(ctx context.Context) (json.RawMessage, error) {
 	var out json.RawMessage
-	if err := c.getJSON(ctx, c.baseURL+"/api/v1/compute-limits", &out); err != nil {
+	if err := c.getJSON(ctx, c.baseURL+"/api/v1/operator/limits", &out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -126,7 +163,7 @@ func (c *Client) SetComputeLimits(ctx context.Context, limits map[string]int64) 
 		Limits map[string]int64 `json:"limits"`
 	}{Limits: limits}
 	var out json.RawMessage
-	if err := c.put(ctx, "/api/v1/compute-limits", body, http.StatusOK, &out); err != nil {
+	if err := c.put(ctx, "/api/v1/operator/limits", body, http.StatusOK, &out); err != nil {
 		return nil, err
 	}
 	return out, nil

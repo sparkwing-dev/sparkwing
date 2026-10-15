@@ -108,9 +108,9 @@ type waitObservationBody struct {
 }
 
 func (c *Client) postProfile(ctx context.Context, pipeline, nodeID, leaf string, body any) error {
-	path := fmt.Sprintf("/api/v1/pipelines/%s/profile/%s", url.PathEscape(pipeline), leaf)
+	path := fmt.Sprintf("/api/v1/pipelines/%s/sizing/%s", url.PathEscape(pipeline), leaf)
 	if nodeID != "" {
-		path += "?node=" + url.QueryEscape(nodeID)
+		path += "?job=" + url.QueryEscape(nodeID)
 	}
 	return c.post(ctx, path, body, http.StatusNoContent, nil)
 }

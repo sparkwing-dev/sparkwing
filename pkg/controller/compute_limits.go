@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -65,68 +67,49 @@ func (r *setComputeLimitsReq) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-func (s *Server) handleComputeLimitsShow(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.requestTenant(w, r); !ok {
-		return
-	}
-	out, err := s.computeLimitsView(r)
+func (s *Server) handleComputeLimitsShow(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
+	limits, err := s.operatorSettings.ComputeLimits(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return err
+	}
+	out, err := s.computeLimitsViewWith(r, limits)
+	if err != nil {
+		return err
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
-func (s *Server) handleComputeLimitsSet(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.requestTenant(w, r); !ok {
-		return
-	}
+func (s *Server) handleComputeLimitsSet(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	var req setComputeLimitsReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid limits request"}
 	}
-	limits, err := s.store.SetComputeLimits(r.Context(), req.Limits)
+	limits, err := s.operatorSettings.SetComputeLimits(r.Context(), req.Limits)
+	if errors.Is(err, store.ErrInvalidComputeLimitSetting) {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "limits must name valid guards with nonnegative values"}
+	}
 	if err != nil {
-		if errors.Is(err, store.ErrInvalidComputeLimitSetting) {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return err
 	}
 	s.logger.Info("compute guards set", "count", len(req.Limits))
 	out, err := s.computeLimitsViewWith(r, limits)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *Server) computeLimitsView(r *http.Request) (computeLimitsJSON, error) {
-	limits, err := s.store.ComputeLimits(r.Context())
-	if err != nil {
-		return computeLimitsJSON{}, err
-	}
-	return s.computeLimitsViewWith(r, limits)
+	return nil
 }
 
 func (s *Server) computeLimitsViewWith(r *http.Request, limits store.ComputeLimits) (computeLimitsJSON, error) {
+	usage, err := s.operatorSettings.ComputeUsage(r.Context())
+	if err != nil {
+		return computeLimitsJSON{}, err
+	}
 	out := computeLimitsJSON{
 		Limits:  make(map[string]int64, len(store.ComputeLimitNames())),
 		Budgets: s.requestBudgetsView(),
-	}
-	// safety: global runner activity and per-principal counts reveal other
-	// teams' work, so only the operator reads them.
-	if isAdmin(r) {
-		usage, err := s.store.ComputeUsage(r.Context())
-		if err != nil {
-			return computeLimitsJSON{}, err
-		}
-		out.Usage.Runners = &usage.Runners
-		out.Usage.ByPrincipal = usage.ByPrincipal
-		out.Usage.AlarmReached = &usage.AlarmReached
+		Usage:   computeUsageJSON{Runners: &usage.Runners, ByPrincipal: usage.ByPrincipal, AlarmReached: &usage.AlarmReached},
 	}
 	for _, name := range store.ComputeLimitNames() {
 		v, _ := limits.Value(name)

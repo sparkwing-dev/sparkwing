@@ -39,8 +39,9 @@ is installed or a worker has run. Other team runners retain their placement poli
 The equivalent owner-session request is:
 
 ```bash
-curl -X POST "$CONTROLLER/api/v1/team/github-runners" \
+curl -X POST "$CONTROLLER/api/v1/runners/github" \
   -H "Authorization: Session $SESSION" -H 'Content-Type: application/json' \
+  -H "Origin: $CONTROLLER" -H "X-CSRF-Token: $CSRF" -b "__Host-sw_csrf=$CSRF" \
   -d '{"repository":"acme/widgets"}'
 ```
 
@@ -55,12 +56,13 @@ When the controller has no GitHub App configured, supply both numeric IDs:
 2. As a team owner, bind the repository:
 
    ```bash
-   curl -X POST "$CONTROLLER/api/v1/team/github-runners" \
+   curl -X POST "$CONTROLLER/api/v1/runners/github" \
      -H "Authorization: Session $SESSION" -H 'Content-Type: application/json' \
+     -H "Origin: $CONTROLLER" -H "X-CSRF-Token: $CSRF" -b "__Host-sw_csrf=$CSRF" \
      -d '{"repository":"acme/widgets","repository_id":123456,"repository_owner_id":7890}'
    ```
 
-   The answer and `GET /api/v1/team/github-runners` carry the workflow with the controller URL and team filled in.
+   The answer and `GET /api/v1/runners/github` carry the workflow with the controller URL and team filled in.
 
 3. Commit it as `.github/workflows/sparkwing.yaml`:
 
@@ -97,25 +99,27 @@ jobs:
             --idle-exit 2m
 ```
 
-`DELETE /api/v1/team/github-runners/{repository_id}` removes a binding and revokes every live credential minted under it. Credential exchange checks the binding again while minting, so an unbind racing with an exchange either stops the mint or revokes the credential.
+`DELETE /api/v1/runners/github/{repository}` removes a binding and revokes every live credential minted under it. Credential exchange checks the binding again while minting, so an unbind racing with an exchange either stops the mint or revokes the credential.
 
 ## What the credential can do
 
-The exchange mints a runner-kind token for the team with the runner scope bundle, principal `github:<repository_id>:<owner>/<name>`, and a one-hour lifetime, and records the push and workflow run ID from the verified ID token. Execution history shows the repository and workflow run ID for nodes that job runs. A team holds at most 20 live GitHub Actions credentials; the 21st exchange answers 429, counted and minted under one lock so a burst of exchanges cannot pass the limit together. Each exchange first deletes the team's expired and revoked GitHub Actions credentials. The token appears in the team's runner-token list, where an owner can revoke it.
+The exchange issues a controller capability with `nodes.claim` and
+`triggers.claim`, a one-hour lifetime, and the verified repository, ref, commit
+and workflow run binding. Repository identity uses GitHub's numeric ID, so a
+rename preserves that identity. An owner transfer requires a matching new
+binding.
 
-The credential gets no cache grant: `POST /api/v1/runs/{id}/cache-grant` answers 403, because a grant opens the team's whole cache tree and the credential is confined to one repository's push. The job builds without the shared binary and dependency caches.
+The request takes `id_token` and `team`. The controller derives grants, push
+facts, expiry and runner identity. Its response carries `token`, `team`,
+`repository`, `expires_at` and `labels`. The token is returned once. The exchange
+has no automatic retry because a repeated request cannot recover a lost bearer.
 
-Every request the credential makes passes a fence that lists the routes it may use:
-
-| Route | Rule |
-| --- | --- |
-| `POST /api/v1/nodes/claim` | the queue scan sees only the team's nodes of runs from signed GitHub push deliveries for the repository at the job's branch and commit |
-| `POST /api/v1/triggers/claim` | the same repository, branch and commit filter, restricted to signed GitHub push deliveries with no retry or parent run |
-| `/api/v1/runs/{id}/...`, `/api/v1/triggers/{id}/...` | the run's trigger must belong to the team, name the repository, carry the job's branch and commit, and come from a signed GitHub push delivery; the cache grant route answers 403 |
-| `POST /api/v1/runs`, concurrency slots, pipeline profile writes, secrets | already bound to a live claim, which the rules above confine |
-| anything else | 403 |
-
-The work the credential claims runs on the claim token each claim returns, which acts as the credential confined to that one claim, so the same fence applies to it.
+`POST /api/v1/runners/claim` accepts the requested trigger and job kinds. Each
+kind requires its own claim grant, and the store checks repository and push
+authority before awarding work. Source, secrets, data and execution reporting
+use the separate capability awarded for that unit. A runner root cannot read
+them or a pipeline's sizing records by itself. Discovery routes remain
+available to live roots.
 
 ## Runner behavior
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -196,8 +197,28 @@ func TestV2RetryBudgetCountsAdditionalAttempts(t *testing.T) {
 }
 
 func TestV2AttemptEnvironmentSeparatesStartupAndBody(t *testing.T) {
-	got := attemptEnv([]string{"PATH=/bin", "SPARKWING_NODE_TOKEN=old", "SPARKWING_NODE_URL=old"}, map[string]nodeproto.EnvValue{"NODE_OPTIONS": {Value: "--max-old-space-size=2048", Startup: true}, "BODY": {Value: "later"}})
-	if strings.Join(got, "\n") != "PATH=/bin\nNODE_OPTIONS=--max-old-space-size=2048" {
-		t.Fatalf("attempt environment: %v", got)
+	base := SessionConfig{Env: []string{"PATH=/bin", "SPARKWING_NODE_TOKEN=old", "SPARKWING_NODE_URL=old", "DOCKER_HOST=tcp://captured:2375", "SPARKWING_RUNNER_NAME=forged"}, Runner: nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}}
+	node := &NodeRun{Run: &Run{ID: "run"}, Plan: nodeproto.JobSpec{ID: "build", Env: map[string]nodeproto.EnvValue{"NODE_OPTIONS": {Value: "--max-old-space-size=2048"}, "GOMAXPROCS": {Value: "2"}, "BODY": {Value: "later"}, "DOCKER_HOST": {Value: "tcp://declared:2375"}}}}
+	startup, cleanup, err := attemptEnvironments(base, node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range []string{"PATH=/bin", "NODE_OPTIONS=--max-old-space-size=2048", "GOMAXPROCS=2", "DOCKER_HOST=tcp://captured:2375", "SPARKWING_RUNNER_NAME=granted"} {
+		if !slices.Contains(startup, entry) {
+			t.Fatalf("startup omitted %s: %v", entry, startup)
+		}
+	}
+	for _, entry := range []string{"NODE_OPTIONS=--max-old-space-size=2048", "GOMAXPROCS=2", "DOCKER_HOST=tcp://declared:2375", "BODY=later", "SPARKWING_RUNNER_NAME=granted"} {
+		if !slices.Contains(cleanup, entry) {
+			t.Fatalf("cleanup omitted %s: %v", entry, cleanup)
+		}
+	}
+	all := strings.Join(slices.Concat(startup, cleanup), "\n")
+	if slices.Contains(startup, "BODY=later") || slices.Contains(cleanup, "DOCKER_HOST=tcp://captured:2375") || strings.Contains(all, "=old") || strings.Contains(all, "=forged") {
+		t.Fatal("environment mixed startup/body values or inherited host authority")
+	}
+	node.Plan.Env["SPARKWING_RUNNER_NAME"] = nodeproto.EnvValue{Value: "forged"}
+	if startup, cleanup, err := attemptEnvironments(base, node); err == nil || startup != nil || cleanup != nil {
+		t.Fatal("invalid declaration produced a partial environment")
 	}
 }

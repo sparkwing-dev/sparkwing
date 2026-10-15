@@ -775,7 +775,7 @@ in place of the listing.
 whenever a ceiling is set or a bucket is measured, because that route
 answers without a token; the totals
 and the ceilings sit behind the admin-scoped
-`GET /api/v1/object-store/breaker` and on `sparkwing cluster
+`GET /api/v1/operator/object-store/breaker` and on `sparkwing cluster
 object-store status`, which also reports `counted_at` (when the running
 count last moved) and `reconciled_at` (when the bucket was last
 measured). Alarm on
@@ -880,8 +880,8 @@ Every service reads these budgets from its flags alone.
 The controller counts each team's UTC day in its database. A team is the
 one the caller's credential belongs to, never a token's name, which is free
 text two teams may share. The controller charges its own artifact and git
-proxy downloads there directly, and the cache charges every `GET` it serves
-a grant with `POST /internal/downloads/charge`.
+proxy downloads there directly. The cache service's download-charge endpoint
+is removed. Final usage accounting uses tenant, period and replica rows.
 
 A download is refused before its first byte only when the team is already at
 its cap. It is then charged the bytes it actually delivers, 8 MiB at a time as
@@ -889,11 +889,9 @@ it streams and the rest when it ends, so a range or a resumed download pays for
 what it served and a response with no length is counted as it goes. A download
 that started is never cut off part way: the cap refuses the team's next
 download, not the one under way. A signed URL is charged the object's whole
-size when it is minted and expires after 60 seconds. While the
-controller cannot answer the cache, a free team's download is refused with
-`503`, and a team the controller answered funded within five minutes
-proceeds. The operator's own team carries no cap, because every in-cluster
-runner shares it, and neither does the controller's operator grant.
+size when it is minted and expires after 60 seconds. The operator's own team
+carries no cap, because every in-cluster runner shares it, and neither does the
+controller's operator grant.
 
 Reading a run's logs, from the dashboard or the CLI, is never charged to
 the team, so a team past its cap can still read why its run failed.

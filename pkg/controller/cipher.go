@@ -6,66 +6,23 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// Cipher encrypts and decrypts secret values stored alongside runs.
-// pkg/controller does not own the cipher implementation; it consumes
-// one through this interface so external integrations can supply
-// custom ciphers without depending on sparkwing's secrets package.
-//
-// The default implementation lives in internal/secrets and is used by
-// cmd/sparkwing-controller. The laptop's controllers (the admission
-// daemon's API and pkg/localws) use a wrapper around it that creates the
-// machine's key on the first seal.
-// External consumers building their own Server can pass nil to
-// WithSecretsCipher (cipher-backed routes accept plaintext only) or
-// supply any type whose method set matches this interface.
+// Cipher supplies envelope encryption for controller integrations.
 type Cipher interface {
-	// Seal encrypts plain and returns a self-describing envelope
-	// string suitable for round-tripping through Open. Implementations
-	// must produce a different envelope per call (fresh nonce) even
-	// for identical inputs.
+	// Seal encrypts plaintext with a fresh nonce.
 	Seal(plain string) (string, error)
-	// Open decrypts an envelope produced by Seal and returns the
-	// original plaintext. Errors on truncated, tampered, or
-	// wrong-key inputs.
+	// Open decrypts an envelope and refuses invalid bytes or keys.
 	Open(envelope string) (string, error)
 }
 
-// BoundCipher is an optional extension of [Cipher] that binds a
-// sealed value to the row fields that decide who may read the secret
-// and how it is handled -- the team that owns it, its name, its owning
-// pipeline, whether an unscoped row answers every run, and whether it is
-// redacted in run output -- so an envelope copied onto another row,
-// including the same row in another team, or a row edited to widen its
-// own access, no longer opens. A [Cipher] that also implements
-// BoundCipher is used through these methods for every secret the
-// controller seals and reads; one that does not keeps the unbound
-// [Cipher.Seal] and [Cipher.Open] path.
-//
-// The implementation in internal/secrets satisfies it, and
-// [github.com/sparkwing-dev/sparkwing/pkg/controller/ciphertest.TestBoundCipher]
-// checks an implementation against this contract.
+// BoundCipher authenticates a secret envelope against its tenant and row access fields.
 type BoundCipher interface {
 	Cipher
-	// SealBound encrypts plain with team, name, scope, shared and masked
-	// as additional authenticated data; scope is the owning pipeline, and
-	// empty for an unscoped secret. Same nonce requirement as [Cipher.Seal].
+	// SealBound encrypts plaintext with a fresh nonce and the complete row binding.
 	SealBound(team, name, scope string, shared, masked bool, plain string) (string, error)
-	// OpenBound decrypts an envelope sealed for this combination of team,
-	// name, scope, shared and masked, and errors when the envelope was
-	// sealed for a different one.
+	// OpenBound decrypts only an envelope sealed for the complete row binding.
 	OpenBound(team, name, scope string, shared, masked bool, envelope string) (string, error)
 }
 
-// LegacyCipher is implemented by a [BoundCipher] that can still open
-// envelopes it sealed before the owning team joined the binding. The
-// controller calls it only to reseal such a row under [BoundCipher.SealBound].
-type LegacyCipher interface {
-	OpenLegacy(name, scope string, shared, masked bool, envelope string) (string, error)
-}
-
-// safety: Scope is whatever the row is owned by, because one binding serves
-// two tables: the pipeline for a secrets row, the repository for a webhook
-// signing secret.
 type secretBinding struct {
 	Team   store.Team
 	Name   string
@@ -78,40 +35,30 @@ func bindingForRow(team store.Team, sec *store.Secret) secretBinding {
 	return secretBinding{Team: team, Name: sec.Name, Scope: sec.Pipeline, Shared: sec.Shared, Masked: sec.Masked}
 }
 
-// SealSecretValue seals plain for the secrets row sec in team exactly as the
-// secrets routes do, so a caller writing rows around the routes, such as an
-// import, stores envelopes the routes open. sec.Value is ignored.
+// SealSecretValue encrypts a secret using its complete tenant and row binding.
 func SealSecretValue(c Cipher, team store.Team, sec *store.Secret, plain string) (string, error) {
 	return sealSecret(c, bindingForRow(team, sec), plain)
 }
 
-// OpenSecretValue opens the stored value of the secrets row sec in team as
-// the secrets routes do, for a reader that holds the store and the key
-// without a controller in front of them.
+// OpenSecretValue decrypts a secret using its complete tenant and row binding.
 func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, error) {
 	return openSecret(c, bindingForRow(team, sec), sec.Value)
 }
 
+var errBoundCipherRequired = errors.New("row-bound encryption is required")
+
 func sealSecret(c Cipher, b secretBinding, plain string) (string, error) {
-	if bc, ok := c.(BoundCipher); ok {
-		return bc.SealBound(string(b.Team), b.Name, b.Scope, b.Shared, b.Masked, plain)
+	bc, ok := c.(BoundCipher)
+	if !ok {
+		return "", errBoundCipherRequired
 	}
-	return c.Seal(plain)
+	return bc.SealBound(string(b.Team), b.Name, b.Scope, b.Shared, b.Masked, plain)
 }
 
 func openSecret(c Cipher, b secretBinding, envelope string) (string, error) {
-	if bc, ok := c.(BoundCipher); ok {
-		return bc.OpenBound(string(b.Team), b.Name, b.Scope, b.Shared, b.Masked, envelope)
-	}
-	return c.Open(envelope)
-}
-
-// safety: an envelope opened here can have been moved between teams, so its
-// callers reseal it to its team or read a row that holds no team's secret.
-func openLegacySecret(c Cipher, b secretBinding, envelope string) (string, error) {
-	lc, ok := c.(LegacyCipher)
+	bc, ok := c.(BoundCipher)
 	if !ok {
-		return "", errors.New("secrets cipher: this cipher cannot open an envelope sealed before team binding")
+		return "", errBoundCipherRequired
 	}
-	return lc.OpenLegacy(b.Name, b.Scope, b.Shared, b.Masked, envelope)
+	return bc.OpenBound(string(b.Team), b.Name, b.Scope, b.Shared, b.Masked, envelope)
 }

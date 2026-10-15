@@ -106,6 +106,22 @@ func hostingInput(unit controllerwire.ClaimedUnit) nodehost.NodeInput {
 	return nodehost.NodeInput{Entry: &source.Entry{Engine: engine.Resolved{Identity: *unit.Engine, Executable: "/selected/engine", Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}}}
 }
 
+func TestHostingPreservesCancellationReasonBeforeAcquisition(t *testing.T) {
+	host := Hosting{ControllerURL: "https://controller.example", Lease: time.Minute, Interval: time.Second,
+		NewController: hostingClient(func(context.Context) (lease.Beat, error) {
+			return lease.Beat{CancelRequested: true, CancelReason: "requested by owner"}, nil
+		}),
+		PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
+			t.Fatal("cancelled award reached source acquisition")
+			return nil, nodehost.NodeInput{}, nil, nil
+		},
+	}
+	var cancelled *lease.CancelError
+	if err := host.Host(t.Context(), hostingAward(capability.UnitNode)); !errors.As(err, &cancelled) || cancelled.Reason != "requested by owner" {
+		t.Fatalf("cancellation reason was lost: %v", err)
+	}
+}
+
 func TestHostingCapturesExecutionIdentityBeforePreparation(t *testing.T) {
 	unit := hostingAward(capability.UnitNode)
 	unit.Runner.Labels = []string{"pool=granted"}
@@ -211,7 +227,7 @@ type hostingRenewalClient struct {
 
 func (c *hostingRenewalClient) Renew(ctx context.Context, _ string, _ controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error) {
 	beat, err := c.renew(ctx)
-	return controllerwire.RenewalResponse{CancelRequested: beat.CancelRequested, Watched: beat.Watched, WatchedJobs: beat.WatchedNodes}, err
+	return controllerwire.RenewalResponse{CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedJobs: beat.WatchedNodes}, err
 }
 
 func hostingClient(renew func(context.Context) (lease.Beat, error)) func(client.EngineOptions) (controllerwire.Controller, error) {

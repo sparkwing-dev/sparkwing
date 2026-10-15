@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -81,10 +83,6 @@ func (s *Server) maintainStorage(ctx context.Context) {
 		s.logger.Error("storage settings read failed", "err", err)
 		return
 	}
-	now := time.Now().UTC()
-	if _, err := s.store.PruneStorageCommitReceipts(ctx, now); err != nil {
-		s.logger.Error("prune storage commit receipts failed", "err", err)
-	}
 	s.maintainRetainedData(ctx)
 	size, err := s.store.AsOperator().DatabaseSize(ctx)
 	if err != nil {
@@ -108,6 +106,10 @@ func (s *Server) maintainRetainedData(ctx context.Context) {
 	}
 	if err != nil {
 		s.logger.Error("storage maintenance lease failed", "err", err)
+		return
+	}
+	if _, err := operator.PruneEgressUsage(ctx, lease); err != nil {
+		s.logger.Error("egress usage prune failed", "err", err)
 		return
 	}
 	retained, err := operator.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 5000})
@@ -260,10 +262,6 @@ func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	admin := false
-	if p, ok := PrincipalFromContext(ctx); ok && p != nil {
-		admin = p.HasScope(ScopeAdmin)
-	}
 	quota, err := tenant.StorageQuota(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -280,7 +278,7 @@ func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	size, _, alarm, sampled := s.storage.read()
+	_, _, alarm, _ := s.storage.read()
 	out := storageStateJSON{
 		Settings: storageSettingsToJSON(settings),
 		Quota:    storageQuotaToJSON(quota),
@@ -294,27 +292,18 @@ func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if admin {
-		if sampled {
-			out.Database = &size
-		}
-		if err := s.appendAdminStorage(ctx, &out, month); err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) appendAdminStorage(ctx context.Context, out *storageStateJSON, month string) error {
-	quotas, err := s.store.AsOperator().ListStorageQuotas(ctx)
+	quotas, err := s.operatorSettings.ListStorageQuotas(ctx)
 	if err != nil {
 		return err
 	}
 	for _, q := range quotas {
 		out.Quotas = append(out.Quotas, storageQuotaToJSON(q))
 	}
-	teams, err := s.store.AsOperator().TopStorageTeams(ctx, month, storageReportTeams)
+	teams, err := s.operatorSettings.TopStorageTeams(ctx, month, storageReportTeams)
 	if err != nil {
 		return err
 	}
@@ -326,11 +315,10 @@ func (s *Server) appendAdminStorage(ctx context.Context, out *storageStateJSON, 
 	return nil
 }
 
-func (s *Server) handleSetStorageSettings(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSetStorageSettings(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	var body storageSettingsJSON
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid storage settings request"}
 	}
 	settings := store.StorageSettings{
 		RunRetentionDays:        body.RunRetentionDays,
@@ -338,9 +326,11 @@ func (s *Server) handleSetStorageSettings(w http.ResponseWriter, r *http.Request
 		DatabaseAlarmBytes:      body.DatabaseAlarmBytes,
 		DefaultTier:             body.DefaultTier,
 	}
-	if err := s.store.AsOperator().SetStorageSettings(r.Context(), settings); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if body.RunRetentionDays < 0 || body.NodeMetricRetentionDays < 0 || body.DatabaseAlarmBytes < 0 || !validStorageTier(body.DefaultTier) {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "storage settings require nonnegative limits and a known tier"}
+	}
+	if err := s.operatorSettings.SetStorageSettings(r.Context(), settings); err != nil {
+		return operatorSettingsError(err)
 	}
 	s.logger.Info("storage settings updated",
 		"run_retention_days", settings.RunRetentionDays,
@@ -348,17 +338,21 @@ func (s *Server) handleSetStorageSettings(w http.ResponseWriter, r *http.Request
 		"database_alarm_bytes", settings.DatabaseAlarmBytes,
 		"default_tier", settings.DefaultTier)
 	writeJSON(w, http.StatusOK, storageSettingsToJSON(settings))
+	return nil
 }
 
-func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.namedTenant(w, r, r.PathValue("team"))
-	if !ok {
-		return
+func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	team := store.Team(authorized.Target.Team)
+	if team == "" {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid quota team"}
+	}
+	tenant, err := s.operatorSettings.StorageTenant(r.Context(), team)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	var body setStorageQuotaJSON
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid storage settings request"}
 	}
 	quota := store.StorageQuota{
 		Tier:             body.Tier,
@@ -366,20 +360,22 @@ func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request) {
 		MaxBytesPerMonth: body.MaxBytesPerMonth,
 		MaxObjectsPerRun: body.MaxObjectsPerRun,
 	}
+	if body.MaxBytesPerRun < 0 || body.MaxBytesPerMonth < 0 || body.MaxObjectsPerRun < 0 || !validStorageTier(body.Tier) {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "storage quota requires nonnegative limits and a known tier"}
+	}
 	if err := tenant.SetStorageQuota(r.Context(), quota); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return operatorSettingsError(err)
 	}
 	stored, err := tenant.StorageQuota(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return err
 	}
-	s.logger.Info("storage quota updated", "team", tenant.Team(), "tier", stored.Tier,
+	s.logger.Info("storage quota updated", "team", team, "tier", stored.Tier,
 		"max_bytes_per_run", stored.MaxBytesPerRun, "max_bytes_per_month", stored.MaxBytesPerMonth,
 		"max_objects_per_run", stored.MaxObjectsPerRun,
 		"storage_allowance_bytes", stored.AllowanceBytes)
 	writeJSON(w, http.StatusOK, storageQuotaToJSON(stored))
+	return nil
 }
 
 func storageSettingsToJSON(in store.StorageSettings) storageSettingsJSON {
@@ -402,23 +398,36 @@ func storageQuotaToJSON(in store.StorageQuota) storageQuotaJSON {
 	}
 }
 
-// safety: independent writes keep quota replacements from discarding the retained allowance.
-func (s *Server) handleSetStorageAllowance(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.namedTenant(w, r, r.PathValue("team"))
-	if !ok {
-		return
+func (s *Server) handleSetStorageAllowance(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	team := store.Team(authorized.Target.Team)
+	if team == "" {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid quota team"}
+	}
+	tenant, err := s.operatorSettings.StorageTenant(r.Context(), team)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	var body storageAllowanceJSON
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid storage settings request"}
+	}
+	if body.StorageAllowanceBytes < 0 {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "storage allowance must not be negative"}
 	}
 	stored, err := tenant.SetStorageAllowance(r.Context(), body.StorageAllowanceBytes)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return operatorSettingsError(err)
 	}
 	s.logger.Info("storage allowance updated",
-		"team", tenant.Team(), "storage_allowance_bytes", stored.AllowanceBytes)
+		"team", team, "storage_allowance_bytes", stored.AllowanceBytes)
 	writeJSON(w, http.StatusOK, storageQuotaToJSON(stored))
+	return nil
+}
+
+func validStorageTier(tier string) bool {
+	if tier == "" {
+		return true
+	}
+	_, ok := store.TierQuota(tier)
+	return ok
 }

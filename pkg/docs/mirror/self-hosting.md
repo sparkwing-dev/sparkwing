@@ -119,7 +119,8 @@ these file names, mounted whole.
 | `github-app-key`, `github-app-webhook-secret` | GitHub App private key and webhook secret | no GitHub App |
 | `cloudfront-key` | CloudFront signing key | no signed CloudFront downloads |
 | `billing-token` | Bearer for the hosted checkout service | `--billing-url` refuses to start |
-| `credits-token` | The checkout service's own token (`sws_`), seeded as a `credits.grant` service token; see [Buying credits](auth.md#buying-credits) | the checkout service has no token |
+| `stripe-api-key` | Stripe API credential matching `--payment-mode test` or `live` | a configured payment callback refuses to start |
+| `stripe-webhook-secret` | Signature key for `/webhooks/stripe` | a configured payment callback refuses to start |
 | `cache-grant-key` | Key cache grants are signed with, the same value as the cache's | no cache grants |
 
 Keep the directory readable by the controller's user alone (`0700`, files
@@ -361,24 +362,11 @@ partial object is ever readable. Every read is served through the pod, never
 redirected to the bucket, so the egress meter and the request budget see every
 byte.
 
-The cache does not count what each team holds in its bucket: the controller
-does, in its database, and the cache asks it for room before a team's
-write and charges each team's download to its day there
-([Tenant limits](limits.md)). The cache's store ceiling covers its
-volume alone; the controller's `--bucket-store` measurement covers the
-bucket. On a multi-team deployment give the cache `--controller` and a
-`service` token holding only the `storage.count` scope, minted with
-`sparkwing cluster tokens create --type service --principal cache --scope storage.count`
-and mounted as the file `controller-token` in its `--credentials-dir`; a cache
-with a `cache-grant-key` and `--blob-store` refuses to start without
-`--controller`, and one with `--controller` refuses to start without the
-token. Give the controller `--cache-blob-store`, the same URL the cache uses,
-and its hourly storage pass lists it to reconcile the counts, cache objects
-and log segments alike, and expires a team's cache objects 30 days after
-their last write. The controller's role then needs `s3:ListBucket`,
-`s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` and
-`s3:GetLifecycleConfiguration` on the cache's prefix.
-`GET /api/v1/storage` shows a team what it holds.
+The controller's service-token storage and download counter routes are removed.
+Remove cache `controller-token` credentials. Final upload accounting uses verified
+tickets, and deployment reports sum tenant, period and replica rows. The leased
+maintenance pass bills committed inventory. It does not reconcile counters from
+bucket listings. See [Tenant limits](limits.md).
 
 Deleting a team removes its namespace: `DELETE /admin/teams/{team}` on the
 cache, and the controller deletes the team's log segments, both idempotent. A
@@ -404,11 +392,11 @@ Run retention is disabled by default on a self-hosted controller. A multi-team
 controller defaults to 90 days. An explicit operator value, including zero,
 survives restarts. Node metrics have their own retention window.
 
-Read policy with `GET /api/v1/storage` and replace it with
-`PUT /api/v1/storage/settings` (scope `admin`):
+Read the deployment policy with `GET /api/v1/operator/object-store` and write it with
+`PUT /api/v1/operator/object-store/settings` (grant `operator.object_store`):
 
 ```bash
-curl -sS -X PUT "$CONTROLLER/api/v1/storage/settings" \
+curl -sS -X PUT "$CONTROLLER/api/v1/operator/object-store/settings" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"run_retention_days":90,"node_metric_retention_days":14,
@@ -423,7 +411,7 @@ usage survive run deletion. Metrics expire under their independent window.
 
 `database_alarm_bytes` sets a warning threshold. Passing it logs a warning and
 sets `database.alarm` on `GET /api/v1/health`. Sizes and table names appear only
-in the `admin` view of `GET /api/v1/storage`.
+on `GET /api/v1/operator/object-store` with `operator.object_store`.
 
 SQLite samples allocated pages minus its free pages. Removing data can lower
 the sample while the file keeps its size until `VACUUM`. PostgreSQL samples
@@ -443,21 +431,15 @@ monthly budget while the run's byte and object totals continue across months.
 Deployment default-tier changes apply to the next ticket for teams without an
 explicit quota.
 
-The free tier configures ten megabytes per run, a gigabyte per month and a
-thousand objects per run. The paid tier configures a gigabyte per run, a hundred
-gigabytes per month and a hundred thousand objects per run. Set an explicit
-team policy with `PUT /api/v1/storage/quotas/{team}` (scope `admin`):
+Hold one team to a tier, or to limits of your own, with
+`PUT /api/v1/operator/object-store/quotas/{team}` (grant `operator.object_store`):
 
 ```bash
-curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme" \
+curl -sS -X PUT "$CONTROLLER/api/v1/operator/object-store/quotas/acme" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"tier":"paid"}'
 ```
-
-Naming a tier with zero write limits selects that tier's limits. Unknown teams
-return `404`. Reads report the authenticated caller's team. An operator also
-receives the explicit quotas and the largest teams for the month.
 
 Monthly reports sum each team's replica counters. They are historical usage,
 so deleting a run does not lower them. `retained_bytes` measures the team's
@@ -471,10 +453,10 @@ consume bytes and objects when a verified upload first commits them.
 
 `storage_allowance_bytes` caps the retained byte count used for billing. Zero
 leaves that count uncapped. Set it independently of write limits with
-`PUT /api/v1/storage/quotas/{team}/allowance` (scope `admin`):
+`PUT /api/v1/operator/object-store/quotas/{team}/allowance` (grant `operator.object_store`):
 
 ```bash
-curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme/allowance" \
+curl -sS -X PUT "$CONTROLLER/api/v1/operator/object-store/quotas/acme/allowance" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"storage_allowance_bytes":53687091200}'

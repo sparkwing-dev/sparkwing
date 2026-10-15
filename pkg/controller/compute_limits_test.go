@@ -17,7 +17,7 @@ import (
 
 func setComputeLimit(t *testing.T, f creditsFixture, name string, value int64) {
 	t.Helper()
-	status, body := creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.admin,
+	status, body := creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
 		map[string]any{"limits": map[string]int64{name: value}})
 	if status != http.StatusOK {
 		t.Fatalf("set %s: status = %d: %s", name, status, body)
@@ -63,7 +63,7 @@ func TestComputeLimits_ShowAndSet(t *testing.T) {
 	}
 	f := newCreditsFixture(t, true)
 
-	status, body := creditsRequest(t, http.MethodGet, f.url+"/api/v1/compute-limits", f.readonly, nil)
+	status, body := creditsRequest(t, http.MethodGet, f.url+"/api/v1/operator/limits", f.admin, nil)
 	if status != http.StatusOK {
 		t.Fatalf("show: status = %d: %s", status, body)
 	}
@@ -87,7 +87,7 @@ func TestComputeLimits_ShowAndSet(t *testing.T) {
 	}
 
 	setComputeLimit(t, f, store.ComputeLimitGlobalRunners, 12)
-	status, body = creditsRequest(t, http.MethodGet, f.url+"/api/v1/compute-limits", f.readonly, nil)
+	status, body = creditsRequest(t, http.MethodGet, f.url+"/api/v1/operator/limits", f.admin, nil)
 	if status != http.StatusOK {
 		t.Fatalf("show after set: status = %d: %s", status, body)
 	}
@@ -98,11 +98,11 @@ func TestComputeLimits_ShowAndSet(t *testing.T) {
 		t.Fatalf("global runners = %d, want 12", view.Limits[store.ComputeLimitGlobalRunners])
 	}
 
-	if status, _ := creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.admin,
+	if status, _ := creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
 		map[string]any{"limits": map[string]int64{"max_dollars": 1}}); status != http.StatusBadRequest {
 		t.Fatalf("an unknown guard = %d, want 400", status)
 	}
-	if status, _ := creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.readonly,
+	if status, _ := creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.readonly,
 		map[string]any{"limits": map[string]int64{store.ComputeLimitGlobalRunners: 1}}); status != http.StatusForbidden {
 		t.Fatalf("a reader setting a guard = %d, want 403", status)
 	}
@@ -111,7 +111,7 @@ func TestComputeLimits_ShowAndSet(t *testing.T) {
 func TestComputeLimits_RefusesBadSiblingWithoutChangingGuards(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	for range 20 {
-		status, body := creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.admin,
+		status, body := creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
 			map[string]any{"limits": map[string]int64{
 				store.ComputeLimitGlobalRunners: 7,
 				store.ComputeLimitRunSeconds:    -1,
@@ -120,7 +120,7 @@ func TestComputeLimits_RefusesBadSiblingWithoutChangingGuards(t *testing.T) {
 			t.Fatalf("mixed write = %d: %s", status, body)
 		}
 	}
-	status, body := creditsRequest(t, http.MethodGet, f.url+"/api/v1/compute-limits", f.readonly, nil)
+	status, body := creditsRequest(t, http.MethodGet, f.url+"/api/v1/operator/limits", f.admin, nil)
 	if status != http.StatusOK {
 		t.Fatalf("show = %d: %s", status, body)
 	}
@@ -139,27 +139,27 @@ func TestComputeLimits_RefusesExplicitNullWithoutChangingGuards(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	setComputeLimit(t, f, store.ComputeLimitGlobalRunners, 7)
 
-	status, body := creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.admin,
+	status, body := creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
 		map[string]any{"limits": map[string]any{store.ComputeLimitGlobalRunners: nil}})
 	if status != http.StatusBadRequest {
 		t.Fatalf("null write = %d: %s", status, body)
 	}
-	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.admin,
+	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
 		map[string]any{"limits": nil})
 	if status != http.StatusBadRequest {
 		t.Fatalf("null limits = %d: %s", status, body)
 	}
-	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.admin,
+	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
 		map[string]any{"LIMITS": map[string]any{store.ComputeLimitGlobalRunners: nil}})
 	if status != http.StatusBadRequest {
 		t.Fatalf("case-folded null write = %d: %s", status, body)
 	}
-	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.admin,
+	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
 		json.RawMessage(`{"limits":{"max_global_runners":null},"limits":{"runner_alarm":3}}`))
 	if status != http.StatusBadRequest {
 		t.Fatalf("duplicate null write = %d: %s", status, body)
 	}
-	status, body = creditsRequest(t, http.MethodGet, f.url+"/api/v1/compute-limits", f.readonly, nil)
+	status, body = creditsRequest(t, http.MethodGet, f.url+"/api/v1/operator/limits", f.admin, nil)
 	if status != http.StatusOK {
 		t.Fatalf("show = %d: %s", status, body)
 	}
@@ -172,12 +172,12 @@ func TestComputeLimits_RefusesExplicitNullWithoutChangingGuards(t *testing.T) {
 	if got := view.Limits[store.ComputeLimitGlobalRunners]; got != 7 {
 		t.Fatalf("explicit null reset the global runner cap to %d", got)
 	}
-	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.admin,
+	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
 		map[string]any{"LIMITS": map[string]any{store.ComputeLimitGlobalRunners: 8}})
 	if status != http.StatusOK {
 		t.Fatalf("case-folded valid write = %d: %s", status, body)
 	}
-	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.admin,
+	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/operator/limits", f.admin,
 		json.RawMessage(`{"limits":{"max_global_runners":9},"LIMITS":{"runner_alarm":3}}`))
 	if status != http.StatusOK {
 		t.Fatalf("duplicate valid write = %d: %s", status, body)
@@ -194,7 +194,7 @@ func TestComputeLimits_RefusesExplicitNullWithoutChangingGuards(t *testing.T) {
 func TestComputeLimits_ClaimRefusedByTheRunnerGuard(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
 		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestComputeLimits_HeartbeatCancelsANodePastTheWallClockGuard(t *testing.T) 
 	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
 		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestComputeLimits_CronBelowTheMinimumIntervalIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admin token: %v", err)
 	}
-	f.call(http.MethodPut, "/api/v1/compute-limits", admin,
+	f.call(http.MethodPut, "/api/v1/operator/limits", admin,
 		map[string]any{"limits": map[string]int64{store.ComputeLimitCronSeconds: 900}},
 		http.StatusOK, nil)
 
@@ -367,7 +367,7 @@ func TestComputeLimits_RefusalStaysInsideTheRefusedPrincipal(t *testing.T) {
 	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
 		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestComputeLimits_GlobalRunnerGuardRefusesAnUnownedClaim(t *testing.T) {
 	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
 		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}

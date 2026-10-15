@@ -135,46 +135,6 @@ func TestStoreDataMeteredIntervalsExcludeWaitAndSettleAfterAuthorityPruning(t *t
 	}
 }
 
-func TestStoreDataMeteredDisruptionBillsThroughLapseAndRollsBack(t *testing.T) {
-	s, c := meteringFixture(t, capability.UnitPlan, capability.BillingAtStart)
-	reserveMetering(t, s, c)
-	at := s.now()
-	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return startBillableIntervalTx(t.Context(), tx, "a", "reservation", "execute", 0, at)
-	}); err != nil {
-		t.Fatal(err)
-	}
-	lapse := at.Add(3 * time.Second)
-	s.clock = func() time.Time { return at.Add(time.Hour) }
-	calculate := func(p capability.BillingProvenance, intervals []capability.BillableInterval) (capability.BillingSettlement, error) {
-		if len(intervals) != 1 || !intervals[0].End.Equal(lapse) {
-			t.Fatalf("billed past lapse: %+v", intervals)
-		}
-		return capability.BillingSettlement{ReservationID: p.ReservationID, BillableSeconds: 3}, nil
-	}
-	boom := errors.New("terminal write failed")
-	err := s.inTx(t.Context(), func(tx *storeTx) error {
-		if _, err := settleBillingAwardWithTx(t.Context(), tx, "a", "reservation", lapse, calculate); err != nil {
-			return err
-		}
-		return boom
-	})
-	if !errors.Is(err, boom) {
-		t.Fatal(err)
-	}
-	rewriteSchemaCount(t, s.db, "credit_charges", 1)
-	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := settleBillingAwardWithTx(t.Context(), tx, "a", "reservation", lapse, calculate)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	var cost int64
-	if err := s.db.QueryRow("SELECT SUM(amount_micro) FROM credit_charges").Scan(&cost); err != nil || cost != 30 {
-		t.Fatalf("plan cost=%d,%v", cost, err)
-	}
-}
-
 func TestStoreDataMeteredIntervalFencesAndOverlap(t *testing.T) {
 	s, c := meteringFixture(t, capability.UnitNode, capability.BillingAtStart)
 	reserveMetering(t, s, c)
@@ -310,5 +270,47 @@ func TestStoreDataMeteredPauseCannotUndoRenewedCompute(t *testing.T) {
 		return finishBillableIntervalTx(t.Context(), tx, "a", "reservation", "award", start.Add(75*time.Second))
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStoreDataUnmeteredSettlementNeedsNoCalculator(t *testing.T) {
+	for _, unit := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
+		for _, start := range []capability.BillingStart{capability.BillingAtAward, capability.BillingAtStart} {
+			t.Run(string(unit)+"/"+string(start), func(t *testing.T) {
+				s, award := meteringFixture(t, unit, start)
+				award.RootMetered, award.Billing.Metered = false, false
+				reserveMetering(t, s, award)
+				want := capability.BillingSettlement{ReservationID: award.Billing.ReservationID}
+				unavailable := func(capability.BillingProvenance, []capability.BillableInterval) (capability.BillingSettlement, error) {
+					return capability.BillingSettlement{}, errors.New("unmetered settlement called calculator")
+				}
+				if err := s.inTx(t.Context(), func(tx *storeTx) error {
+					got, err := accountBillingAwardTx(t.Context(), tx, "a", want.ReservationID, s.now(), false, unavailable)
+					if err == nil && got != want {
+						t.Fatalf("checkpoint=%+v, want %+v", got, want)
+					}
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				rewriteSchemaExec(t, s.db, "DELETE FROM capabilities")
+				for range 2 {
+					if err := s.inTx(t.Context(), func(tx *storeTx) error {
+						got, err := settleBillingAwardTx(t.Context(), tx, "a", want.ReservationID, s.now())
+						if err == nil && got != want {
+							t.Fatalf("settlement=%+v, want %+v", got, want)
+						}
+						return err
+					}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				rewriteSchemaCount(t, s.db, "billing_awards WHERE settled_at IS NOT NULL", 1)
+				rewriteSchemaCount(t, s.db, "credit_charges", 0)
+				rewriteSchemaCount(t, s.db, "billable_intervals", 0)
+				rewriteSchemaCount(t, s.db, "team_spend_days", 0)
+				rewriteSchemaCount(t, s.db, "card_spend_days", 0)
+			})
+		}
 	}
 }

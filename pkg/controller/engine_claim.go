@@ -39,15 +39,15 @@ func (p SignedRunnerAdmission) CheckRunner(ctx context.Context, version string) 
 
 func (s *EngineController) claim(ctx context.Context, authorized capability.Authorized, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 	if authorized.Principal.Authority.Kind != capability.AuthorityCapability || authorized.Principal.Authority.ID == "" || authorized.Principal.Authority.ID != authorized.Principal.Capability.Prefix {
-		return controllerwire.ClaimResponse{}, engineBadRequest("claim requires capability authority")
+		return controllerwire.ClaimResponse{}, invalidEngineBody("claim requires capability authority")
 	}
 	if body.RunnerVersion == "" {
-		return controllerwire.ClaimResponse{}, engineBadRequest("claim requires a runner version")
+		return controllerwire.ClaimResponse{}, invalidEngineBody("claim requires a runner version")
 	}
 	if len(body.Kinds) == 0 {
-		return controllerwire.ClaimResponse{}, engineBadRequest("claim requires unit kinds")
+		return controllerwire.ClaimResponse{}, invalidEngineBody("claim requires unit kinds")
 	}
-	if s.RunnerPolicy == nil {
+	if s.Store == nil || s.RunnerPolicy == nil {
 		return controllerwire.ClaimResponse{}, &apierr.Error{Code: apierr.Unavailable, Message: "claim enrollment and runner policy are not configured"}
 	}
 	principal, err := s.Store.ResolveAuthority(ctx, authorized.Principal.Authority)
@@ -82,7 +82,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 func engineClaimTarget(body controllerwire.ClaimRequest) (*store.UnitRef, error) {
 	if body.RunID == "" {
 		if body.JobID != "" {
-			return nil, engineBadRequest("named job requires a run")
+			return nil, invalidEngineBody("named job requires a run")
 		}
 		return nil, nil
 	}
@@ -95,7 +95,7 @@ func engineClaimTarget(body controllerwire.ClaimRequest) (*store.UnitRef, error)
 	case slices.Contains(body.Kinds, capability.UnitPlan) && !slices.Contains(body.Kinds, capability.UnitTrigger):
 		target.Kind = capability.UnitPlan
 	default:
-		return nil, engineBadRequest("named owner claim requires a trigger or plan kind")
+		return nil, invalidEngineBody("named owner claim requires a trigger or plan kind")
 	}
 	return target, nil
 }
@@ -136,9 +136,12 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 }
 
 func (s *EngineController) exchange(ctx context.Context, authorized capability.Authorized) (controllerwire.ExchangeResponse, error) {
+	if s.Store == nil {
+		return controllerwire.ExchangeResponse{}, missingEndpointPolicy()
+	}
 	ref := authorized.Principal.Authority
 	if ref.Kind != capability.AuthorityCapability || ref.ID == "" || ref.ID != authorized.Principal.Capability.Prefix {
-		return controllerwire.ExchangeResponse{}, engineBadRequest("exchange requires bootstrap authority")
+		return controllerwire.ExchangeResponse{}, invalidEngineBody("exchange requires bootstrap authority")
 	}
 	issued, err := s.Store.ExchangeCapability(ctx, capability.ExchangeSpec{BootstrapPrefix: ref.ID})
 	if err != nil {
@@ -152,7 +155,7 @@ func (s *EngineController) exchange(ctx context.Context, authorized capability.A
 	claim := store.UnitClaim{Team: store.Team(c.Team), Kind: c.Unit, RunID: c.Binding.RunID, NodeID: c.Binding.NodeID, Bearer: []byte(issued.Raw), Award: store.ClaimAward{CapabilityPrefix: c.Prefix, Holder: c.Binding.Holder, Generation: c.Binding.Generation, LeaseExpiresAt: snapshot.Binding.LeaseExpiresAt}}
 	if c.Unit == capability.UnitEval {
 		if snapshot.Binding.Expansion == nil {
-			return controllerwire.ExchangeResponse{}, engineBadRequest("exchanged evaluation has no lease")
+			return controllerwire.ExchangeResponse{}, invalidEngineBody("exchanged evaluation has no lease")
 		}
 		claim.SourceGeneration = c.Binding.Generation
 		claim.Award.Generation = snapshot.Binding.Expansion.Lease.Generation

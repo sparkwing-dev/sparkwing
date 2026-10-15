@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -221,22 +223,6 @@ type creditHistoryJSON struct {
 	Charges []creditChargeJSON `json:"charges"`
 }
 
-type createGrantReq struct {
-	Kind        string `json:"kind"`
-	AmountMicro int64  `json:"amount_micro"`
-	Reference   string `json:"reference,omitempty"`
-	// safety: The checkout service names the team its checkout session was for.
-	Team string `json:"team,omitempty"`
-}
-
-func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	s.writeCreditState(w, r, tenant)
-}
-
 // safety: An unregistered team must read as not found, never as an empty operator balance.
 func (s *Server) namedTenant(w http.ResponseWriter, r *http.Request, slug string) (*store.Tenant, bool) {
 	t, err := s.tenantForTeam(r.Context(), store.Team(slug))
@@ -251,11 +237,14 @@ func (s *Server) namedTenant(w http.ResponseWriter, r *http.Request, slug string
 	return t, true
 }
 
-func (s *Server) writeCreditState(w http.ResponseWriter, r *http.Request, tenant *store.Tenant) {
+func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	tenant, err := s.creditReader(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
+	}
 	state, err := tenant.CreditState(r.Context(), creditsBurnWindow)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	out := creditStateJSON{
 		BalanceMicro:       state.BalanceMicro,
@@ -283,10 +272,11 @@ func (s *Server) writeCreditState(w http.ResponseWriter, r *http.Request, tenant
 		out.ExhaustedAt = &v
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.store.CreditSettings(r.Context())
+	settings, err := s.store.AsOperator().CreditSettings(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -294,20 +284,17 @@ func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, creditSettingsToJSON(settings))
 }
 
-func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	var body setCreditSettingsReq
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	}
-	settings, err := s.store.SetOperatorCreditSettings(r.Context(), body.update())
+	settings, err := s.store.AsOperator().SetOperatorCreditSettings(r.Context(), body.update())
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidCreditSetting) {
-			writeError(w, http.StatusBadRequest, err)
-			return
+			return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return err
 	}
 	s.logger.Info("credit settings set",
 		"rate_micro_per_second", settings.RateMicroPerSecond,
@@ -316,6 +303,7 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 		"storage_rate_micro_per_gb_day", settings.StorageRateMicroPerGBDay,
 		"storage_free_allowance_bytes", settings.StorageFreeAllowanceBytes)
 	writeJSON(w, http.StatusOK, creditSettingsToJSON(settings))
+	return nil
 }
 
 func creditSettingsToJSON(settings store.CreditSettings) creditSettingsJSON {
@@ -341,103 +329,32 @@ func creditRateTableToJSON(table store.CreditRateTable) []creditRateJSON {
 	return out
 }
 
-func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
-	var req createGrantReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	// safety: this route records a verified payment and nothing else; an
-	// operator's free grant goes through the console, and a refund through
-	// /api/v1/credits/reversals.
-	if req.Kind != store.CreditGrantPaid {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("kind must be %s", store.CreditGrantPaid))
-		return
-	}
-	if req.AmountMicro <= 0 {
-		writeError(w, http.StatusBadRequest, errors.New("amount_micro must be positive"))
-		return
-	}
-	// safety: on a controller serving several teams an unnamed grant would fund
-	// whichever team the caller's token acts for, which is never the team a
-	// payment was for, so the team is required there.
-	if req.Team == "" && s.MultiTeam() {
-		writeError(w, http.StatusBadRequest, errors.New("team is required: name the team whose balance the grant funds"))
-		return
-	}
-	if req.Team == "" {
-		req.Team = string(store.DefaultTeam)
-	}
-	tenant, ok := s.namedTenant(w, r, req.Team)
-	if !ok {
-		return
-	}
-	who := principalName(r)
-	res, err := tenant.RecordCreditGrant(r.Context(), store.CreditGrantRequest{
-		Kind: req.Kind, AmountMicro: req.AmountMicro,
-		Reference: req.Reference, CreatedBy: who,
-	})
-	if errors.Is(err, store.ErrCreditGrantConflict) {
-		writeError(w, http.StatusConflict, err)
-		return
-	}
-	if errors.Is(err, store.ErrPaymentWarned) {
-		s.logger.Warn("billing alert: a warned payment was not granted", "alert", "payment_warned",
-			"team", string(tenant.Team()), "reference", req.Reference)
-		writeJSON(w, http.StatusConflict, codedErrorJSON{Error: err.Error(), Code: PaymentWarnedCode})
-		return
-	}
-	if s.writeBalanceCapRefusal(w, err) {
-		s.logger.Warn("credit grant refused at the team balance cap", "team", string(tenant.Team()),
-			"kind", req.Kind, "amount_micro", req.AmountMicro, "reference", req.Reference, "err", err)
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if !res.Created {
-		// safety: a payment webhook redelivers until it sees a 2xx, so the
-		// reference it already granted answers with the row it wrote.
-		s.logger.Info("credits already granted for this reference",
-			"kind", res.Grant.Kind, "reference", res.Grant.Reference, "grant_id", res.Grant.ID)
-		writeJSON(w, http.StatusOK, creditGrantToJSON(res.Grant))
-		return
-	}
-	s.logger.Info("credits granted", "team", string(tenant.Team()),
-		"kind", res.Grant.Kind, "amount_micro", res.Grant.AmountMicro,
-		"reference", res.Grant.Reference, "reverses", res.Grant.Reverses, "by", who)
-	writeJSON(w, http.StatusCreated, creditGrantToJSON(res.Grant))
-}
-
-func (s *Server) handleCreditsHistory(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreditsHistory(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	limit := 0
+	if len(r.URL.Query()["limit"]) > 1 {
+		return invalidEngineBody("limit must appear once")
+	}
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		v, err := strconv.Atoi(raw)
 		if err != nil || v < 0 {
-			writeError(w, http.StatusBadRequest, errors.New("limit must be a non-negative integer"))
-			return
+			return invalidEngineBody("limit must be a non-negative integer")
 		}
 		if v > store.CreditHistoryMaxLimit {
-			writeError(w, http.StatusBadRequest, fmt.Errorf(
-				"limit must not exceed %d rows of each kind", store.CreditHistoryMaxLimit))
-			return
+			return invalidEngineBody(fmt.Sprintf("limit must not exceed %d rows of each kind", store.CreditHistoryMaxLimit))
 		}
 		limit = v
 	}
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+	tenant, err := s.creditReader(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
 	grants, err := tenant.ListCreditGrants(r.Context(), limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	charges, err := tenant.ListCreditCharges(r.Context(), limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	out := creditHistoryJSON{
 		Grants:  make([]creditGrantJSON, 0, len(grants)),
@@ -456,6 +373,7 @@ func (s *Server) handleCreditsHistory(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 func creditGrantToJSON(g store.CreditGrant) creditGrantJSON {

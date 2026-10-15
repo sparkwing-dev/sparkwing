@@ -1,0 +1,88 @@
+package controller
+
+import (
+	"context"
+	"net/http"
+	"slices"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+// CredentialIssuer commits root provisioning and narrowing through Store.Issue.
+type CredentialIssuer interface {
+	ProvisionCapability(context.Context, capability.ProvisionSpec) (capability.Issued, error)
+	DelegateCapability(context.Context, capability.DelegateSpec) (capability.Issued, error)
+}
+
+type credentialRequest struct {
+	Grants    []capability.Grant `json:"grants"`
+	ExpiresAt *time.Time         `json:"expires_at,omitempty"`
+}
+
+type credentialResponse struct {
+	Capability string             `json:"capability"`
+	Prefix     string             `json:"prefix"`
+	Team       string             `json:"team"`
+	Grants     []capability.Grant `json:"grants"`
+	ExpiresAt  *time.Time         `json:"expires_at,omitempty"`
+}
+
+// WithCredentialIssuer supplies the transactional issuer for embedded controllers and tests.
+func (s *Server) WithCredentialIssuer(issuer CredentialIssuer) *Server {
+	s.credentialIssuer = issuer
+	return s
+}
+
+func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	var request credentialRequest
+	if err := decodeEngineRequest(r, &request); err != nil {
+		return err
+	}
+	if err := validateCredentialRequest(request); err != nil {
+		return err
+	}
+	if s.credentialIssuer == nil {
+		return missingEndpointPolicy()
+	}
+	p := a.Principal
+	var issued capability.Issued
+	var err error
+	if p.Class == capability.CredentialSession {
+		issued, err = s.credentialIssuer.ProvisionCapability(r.Context(), capability.ProvisionSpec{
+			Kind: capability.ProvisionMember, Authority: &p.Authority, Subject: p.Capability.Subject,
+			Team: a.Target.Team, Grants: request.Grants, Binding: capability.Binding{Kind: capability.BindingNone}, ExpiresAt: request.ExpiresAt,
+		})
+	} else {
+		if request.ExpiresAt == nil {
+			request.ExpiresAt = p.Capability.ExpiresAt
+		}
+		issued, err = s.credentialIssuer.DelegateCapability(r.Context(), capability.DelegateSpec{
+			Parent: p.Authority, Audience: capability.Controller, Grants: request.Grants,
+			Binding: p.Capability.Binding, ExpiresAt: request.ExpiresAt,
+		})
+	}
+	if err != nil {
+		return engineLookupError(err)
+	}
+	writeJSON(w, http.StatusCreated, credentialResponse{Capability: issued.Raw, Prefix: issued.Capability.Prefix,
+		Team: issued.Capability.Team, Grants: append([]capability.Grant{}, issued.Capability.Grants...), ExpiresAt: issued.Capability.ExpiresAt})
+	return nil
+}
+
+func validateCredentialRequest(request credentialRequest) error {
+	if request.Grants == nil || request.ExpiresAt != nil && request.ExpiresAt.IsZero() {
+		return invalidEngineBody("grants must be an array and expiry must be a timestamp")
+	}
+	seen := make(map[capability.Grant]bool, len(request.Grants))
+	for _, grant := range request.Grants {
+		if seen[grant] || !slices.Contains(capability.Grants, grant) {
+			return invalidEngineBody("grants must contain unique known permissions")
+		}
+		seen[grant] = true
+	}
+	return nil
+}
+
+var _ CredentialIssuer = (*store.Store)(nil)

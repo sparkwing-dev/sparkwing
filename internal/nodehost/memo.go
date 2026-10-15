@@ -1,13 +1,13 @@
 package nodehost
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -23,15 +23,11 @@ type Memo struct {
 	Slots ConcurrencySlots
 	// Source reads the output and artifact manifest a hit or a coalesced
 	// follower copies from the node runID/nodeID, in one read so both come
-	// from the same node. A claimed node cannot read another run, so it names
-	// the entry with in and the controller picks the node.
+	// from the same node.
 	Source func(ctx context.Context, in store.ClaimInputRequest, runID, nodeID string) (MemoSource, error)
 	// NoCache runs every memoized node without reading an earlier result, as
 	// --sw-no-cache does; a success still records its output.
 	NoCache bool
-	// Claimed keys each entry under the run's repository, pipeline and node,
-	// the only memo keys the controller lets a claim take.
-	Claimed bool
 }
 
 // MemoSource is the finished node a hit or a coalesced follower copies.
@@ -90,11 +86,7 @@ func memoLayer(cfg *Config, next Executor) Executor {
 		case m.Slots == nil || m.Source == nil:
 			return Result{Outcome: sparkwing.Failed, Err: errors.New("memo: no coordination store")}
 		}
-		key, err := m.key(ctx, n, hash)
-		if err != nil {
-			return Result{Outcome: sparkwing.Failed, Err: err}
-		}
-		g := group{key: key, policy: store.OnLimitCoalesce, capacity: 1, cost: 1, memoHash: hash}
+		g := group{key: memoKeyPrefix + hash, policy: store.OnLimitCoalesce, capacity: 1, cost: 1, memoHash: hash}
 		if memo := n.Plan.Memo; memo != nil {
 			g.memoTTL = millis(value(memo.TTLMS))
 		}
@@ -124,15 +116,16 @@ func memoHash(ctx context.Context, cfg *Config, n *NodeRun) (string, Result) {
 		if err := ask(kctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: id}, &er); err != nil {
 			return keyFailed(err)
 		}
-		if err := er.ValidateValue("memo_key"); err != nil {
+		value, err := evalValue(er, "memo_key")
+		if err != nil {
 			return keyFailed(err)
 		}
-		if len(er.Value) == 0 || string(er.Value) == "null" {
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
 			closureNote(log, LevelInfo, fmt.Sprintf("Memoize(%s) returned NoCache; memoization skipped", n.Plan.ID))
 			return Result{Outcome: sparkwing.Success}
 		}
-		if err := json.Unmarshal(er.Value, &hash); err != nil {
-			return keyFailed(hostError(apierr.ProtocolError, "cache_key %s returned %s, not a string or null", id, er.Value))
+		if err := json.Unmarshal(value, &hash); err != nil {
+			return keyFailed(err)
 		}
 		if hash == "" {
 			return keyFailed(errors.New("empty key"))
@@ -140,20 +133,6 @@ func memoHash(ctx context.Context, cfg *Config, n *NodeRun) (string, Result) {
 		return Result{Outcome: sparkwing.Success}
 	})
 	return hash, res
-}
-
-// safety: a claimed node memoizes under its own repository, pipeline and node,
-// read from the run row as the controller reads it; elsewhere a key is shared
-// across pipelines, as in the dispatcher.
-func (m *Memo) key(ctx context.Context, n *NodeRun, hash string) (string, error) {
-	if !m.Claimed {
-		return memoKeyPrefix + hash, nil
-	}
-	run, err := n.Run.State.GetRun(ctx, n.Run.ID)
-	if err != nil {
-		return "", fmt.Errorf("read the run to name its memo key: %w", err)
-	}
-	return store.ClaimMemoKey(store.ClaimRepoSlug(run.GithubOwner, run.GithubRepo), run.Pipeline, n.Plan.ID, hash), nil
 }
 
 type memoRun struct {
@@ -285,12 +264,11 @@ func (r *memoRun) hit(ctx context.Context, srcRun, srcNode string, bypass bool) 
 func (r *memoRun) follow(ctx context.Context, leaderRun, leaderNode string) (Result, bool) {
 	in := store.ClaimInputRequest{Kind: store.ClaimInputCoalesced, Key: r.g.key, CacheKeyHash: r.g.memoHash}
 	src, err := r.m.Source(ctx, in, leaderRun, leaderNode)
-	if errors.Is(err, store.ErrNotFound) && r.m.Claimed {
-		// safety: a claim finds no output once the entry expired after its leader released, so the node runs
-		// rather than succeed with nothing.
+	if errors.Is(err, store.ErrNotFound) {
+		// safety: a leader may lose its output before a follower reads it; missing bytes must run as a miss.
 		return r.run(ctx, true)
 	}
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
+	if err != nil {
 		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("fetch leader output: %w", err)}, false
 	}
 	switch ready, err := r.artifactsReady(ctx, src.ArtifactManifest); {
@@ -329,7 +307,7 @@ func (r *memoRun) copied(ctx context.Context, manifest string, outcome sparkwing
 	}
 	hostEventJSON(wctx, run, id, kind, event)
 	if manifest != "" {
-		if err := run.State.SetNodeArtifactManifest(wctx, run.ID, id, manifest); err != nil {
+		if err := recordArtifactManifest(wctx, run.State, run.ID, id, manifest); err != nil {
 			run.Logger.Warn("nodehost: copy artifact manifest", "node", id, "err", err)
 		}
 	}

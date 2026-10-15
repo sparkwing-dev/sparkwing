@@ -250,7 +250,7 @@ func dispatchRun(args []string) error {
 	if err != nil {
 		return run.finish(fmt.Errorf("%s: %w", pipelineName, err))
 	}
-	findings := declaredRisks(run.ctx, dir, pipelineName)
+	findings := declaredRisks(run.ctx, dir, run.pipeline.Entrypoint)
 	if err := enforceRiskGate(pipelineName, findings, flags); err != nil {
 		return run.finish(err)
 	}

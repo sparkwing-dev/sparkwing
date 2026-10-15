@@ -12,7 +12,7 @@ func TestNPMCommandUsesWindowsNodeCLI(t *testing.T) {
 	directory := filepath.Join("tool directory with spaces", "node")
 	npm := filepath.Join(directory, "npm.cmd")
 	node := filepath.Join(directory, "node.exe")
-	command, err := npmCommand("windows", func(name string) (string, error) {
+	command, err := ForPlatform("windows", func(name string) (string, error) {
 		switch name {
 		case "npm":
 			return npm, nil
@@ -34,7 +34,7 @@ func TestNPMCommandPreservesNativeInvocation(t *testing.T) {
 	for _, tc := range []struct{ goos, name string }{{"linux", "npm"}, {"darwin", "npm"}, {"windows", "npm.EXE"}} {
 		t.Run(tc.goos+tc.name, func(t *testing.T) {
 			npm := filepath.Join("npm directory with spaces", tc.name)
-			command, err := npmCommand(tc.goos, func(name string) (string, error) {
+			command, err := ForPlatform(tc.goos, func(name string) (string, error) {
 				if name != "npm" {
 					t.Fatalf("unexpected %s lookup", name)
 				}
@@ -53,7 +53,7 @@ func TestNPMCommandPreservesNativeInvocation(t *testing.T) {
 func TestNPMCommandPropagatesMissingTools(t *testing.T) {
 	for _, missing := range []string{"npm", "node"} {
 		t.Run(missing, func(t *testing.T) {
-			command, err := npmCommand("windows", func(name string) (string, error) {
+			command, err := ForPlatform("windows", func(name string) (string, error) {
 				if name == missing {
 					return "", exec.ErrNotFound
 				}
@@ -75,7 +75,7 @@ func FuzzNPMCommandArguments(f *testing.F) {
 			npm := filepath.Join("tool directory", "npm.cmd")
 			node := filepath.Join("tool directory", "node.exe")
 			arguments := []string{first, second}
-			command, err := npmCommand(goos, func(name string) (string, error) {
+			command, err := ForPlatform(goos, func(name string) (string, error) {
 				if name == "node" {
 					return node, nil
 				}

@@ -35,7 +35,7 @@ func TestAHostedRetryCopiesOnlyWhenItPlannedItsSourcesPlan(t *testing.T) {
 	}
 }
 
-func TestHostedRetryRehydratesOnlyPartialManualRuns(t *testing.T) {
+func TestHostedRehydrationUsesOnlyManualRetrySource(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		opts Options
@@ -43,14 +43,11 @@ func TestHostedRetryRehydratesOnlyPartialManualRuns(t *testing.T) {
 	}{
 		{"not a retry", Options{}, true},
 		{"full", Options{RetryOf: "source", Full: true}, true},
-		{"manual", Options{RetryOf: "source", RetrySource: store.RetrySourceManual}, false},
+		{"manual", Options{RetryOf: "source"}, false},
 	} {
 		r := hostedRehydration(tc.opts)
-		if tc.none != (r == nil) {
-			t.Errorf("%s: rehydration %+v, want none=%t", tc.name, r, tc.none)
-		}
-		if r != nil && r.SourceRunID != "source" {
-			t.Errorf("%s: rehydration %+v, want source run", tc.name, r)
+		if tc.none != (r == nil) || r != nil && r.SourceRunID != "source" {
+			t.Errorf("%s: rehydration %+v, want none=%v", tc.name, r, tc.none)
 		}
 	}
 }

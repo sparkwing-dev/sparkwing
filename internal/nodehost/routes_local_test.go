@@ -49,7 +49,7 @@ func localRuns() *localStore {
 			"run-1/build":   node("build", "done", "success"),
 			"run-1/test":    node("test", "done", "success", "build"),
 			"run-1/deploy":  node("deploy", "running", "", "absent", "test", "lint", "flaky", "slow", "memo"),
-			"run-1/memo":    node("memo", "done", "cached"),
+			"run-1/memo":    node("memo", "done", "memoized"),
 			"run-1/lint":    node("lint", "done", "success"),
 			"run-1/flaky":   node("flaky", "done", "failed"),
 			"run-1/slow":    node("slow", "running", ""),
@@ -69,10 +69,10 @@ func TestLocalOutputsServeADependencysOutputWithoutAController(t *testing.T) {
 		{name: "transitive dependency", path: outputPath("build"), status: http.StatusOK, output: map[string]any{"tag": "v1"}},
 		{name: "memo hit", path: outputPath("memo"), status: http.StatusOK, output: "reused"},
 		{name: "no output recorded", path: outputPath("lint"), status: http.StatusOK, output: nil},
-		{name: "not a dependency", path: outputPath("sibling"), status: http.StatusForbidden, code: "not_dependency"},
-		{name: "unknown", path: outputPath("nope"), status: http.StatusNotFound, code: "unknown_node"},
-		{name: "running", path: outputPath("slow"), status: http.StatusConflict, code: "not_ready"},
-		{name: "failed", path: outputPath("flaky"), status: http.StatusNotFound, code: "no_output"},
+		{name: "not a dependency", path: outputPath("sibling"), status: http.StatusForbidden, code: "forbidden"},
+		{name: "unknown", path: outputPath("nope"), status: http.StatusNotFound, code: "unknown_job"},
+		{name: "running", path: outputPath("slow"), status: http.StatusConflict, code: "conflict"},
+		{name: "failed", path: outputPath("flaky"), status: http.StatusNotFound, code: "not_found"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -81,7 +81,7 @@ func TestLocalOutputsServeADependencysOutputWithoutAController(t *testing.T) {
 				RunID: "run-1", NodeID: "deploy", Resolver: &fakeResolver{}, Masker: secrets.NewMasker(), Local: localRuns(),
 			})
 			got := ask(t, s, http.MethodGet, tc.path, bearer, "")
-			if got.status != tc.status || (tc.code != "" && got.body["code"] != tc.code) {
+			if got.status != tc.status || (tc.code != "" && failureCode(got) != tc.code) {
 				t.Fatalf("status %d body %v", got.status, got.body)
 			}
 			if tc.code == "" {
@@ -101,11 +101,11 @@ func TestLocalPipelineLatestReadsTheNewestSuccessfulRun(t *testing.T) {
 		RunID: "run-1", NodeID: "deploy", Resolver: &fakeResolver{}, Masker: secrets.NewMasker(), Local: st,
 		Refs: []nodeproto.PipelineReference{{Pipeline: "other", Job: "build"}},
 	})
-	if got := ask(t, s, http.MethodGet, "/node/v1/pipelines/other/latest?node=build", bearer, ""); got.status != http.StatusNotFound || got.body["code"] != "no_run" {
+	if got := ask(t, s, http.MethodGet, "/node/v1/pipelines/other/latest?job=build", bearer, ""); got.status != http.StatusNotFound || failureCode(got) != "not_found" {
 		t.Fatalf("status %d body %v", got.status, got.body)
 	}
 	st.latest = &store.Run{ID: "run-0"}
-	got := ask(t, s, http.MethodGet, "/node/v1/pipelines/other/latest?node=build", bearer, "")
+	got := ask(t, s, http.MethodGet, "/node/v1/pipelines/other/latest?job=build", bearer, "")
 	if got.status != http.StatusOK || got.body["run_id"] != "run-0" || got.body["output"] != "old" {
 		t.Fatalf("status %d body %v", got.status, got.body)
 	}
@@ -119,16 +119,16 @@ func TestLocalPipelineLatestRefusesAnUndeclaredReference(t *testing.T) {
 		RunID: "run-1", NodeID: "deploy", Resolver: &fakeResolver{}, Masker: secrets.NewMasker(), Local: st,
 		Refs: []nodeproto.PipelineReference{{Pipeline: "other", Job: "test"}, {Pipeline: "another", Job: "build"}},
 	})
-	for _, path := range []string{"/node/v1/pipelines/other/latest?node=build", "/node/v1/pipelines/third/latest?node=build"} {
+	for _, path := range []string{"/node/v1/pipelines/other/latest?job=build", "/node/v1/pipelines/third/latest?job=build"} {
 		got := ask(t, s, http.MethodGet, path, bearer, "")
-		if got.status != http.StatusForbidden || got.body["code"] != "reference_undeclared" {
+		if got.status != http.StatusForbidden || failureCode(got) != "forbidden" {
 			t.Fatalf("%s: status %d body %v", path, got.status, got.body)
 		}
 		if _, ok := got.body["output"]; ok {
 			t.Fatalf("%s: refusal carries an output: %v", path, got.body)
 		}
 	}
-	if !strings.Contains(logs.String(), "reference_undeclared") {
+	if !strings.Contains(logs.String(), "forbidden") {
 		t.Fatalf("no audit record of the refusal:\n%s", logs.String())
 	}
 }

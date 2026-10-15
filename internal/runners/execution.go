@@ -18,9 +18,10 @@ func runInputFor(unit controllerwire.ClaimedUnit) (nodehost.RunInput, error) {
 	if request.RunID != unit.RunID || request.Request.Team == "" || request.Hash == "" {
 		return nodehost.RunInput{}, errors.New("runner award is missing its sealed request")
 	}
-	input := nodehost.RunInput{RunID: unit.RunID, RequestHash: string(request.Hash)}
+	input := nodehost.RunInput{RunID: unit.RunID, RequestHash: string(request.Hash), GrantedRunner: unit.Runner}
+	input.GrantedRunner.Labels = slices.Clone(unit.Runner.Labels)
 	var err error
-	input.SealedRequest, err = json.Marshal(request)
+	input.SealedRequest, err = json.Marshal(request.Request)
 	if err != nil {
 		return nodehost.RunInput{}, err
 	}

@@ -174,30 +174,6 @@ func TestBrowserLoginEndsTheBrowsersEarlierSession(t *testing.T) {
 	}
 }
 
-func TestBrowserLogoutNeedsTheSessionsTokenAndEndsIt(t *testing.T) {
-	f := newBrowserFixture(t, &controller.Dashboard{})
-	cookies := []*http.Cookie{
-		{Name: "__Host-sw_session", Value: f.sessID},
-		{Name: "__Host-sw_csrf", Value: "planted"},
-	}
-	if rec := f.postForm("/logout", url.Values{"csrf_token": {"planted"}}, cookies...); rec.Code != http.StatusForbidden {
-		t.Fatalf("logout with a token the session never issued = %d, want 403", rec.Code)
-	}
-	var live int
-	if err := f.st.DB().QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&live); err != nil || live != 1 {
-		t.Fatalf("sessions after a refused logout = %d (%v), want 1", live, err)
-	}
-	cookies[1].Value = f.csrf
-	rec := f.postForm("/logout", url.Values{"csrf_token": {f.csrf}}, cookies...)
-	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/login" ||
-		!clearsCookie(rec, "__Host-sw_session") || !clearsCookie(rec, "__Host-sw_csrf") {
-		t.Fatalf("logout = %d %q %v", rec.Code, rec.Header().Get("Location"), rec.Header().Values("Set-Cookie"))
-	}
-	if err := f.st.DB().QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&live); err != nil || live != 0 {
-		t.Fatalf("sessions after logout = %d (%v), want 0", live, err)
-	}
-}
-
 func TestBrowserLoginRefusesATokenWithoutTheAdminScope(t *testing.T) {
 	f := newBrowserFixture(t, &controller.Dashboard{})
 	now := time.Now().UTC()

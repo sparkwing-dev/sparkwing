@@ -2,13 +2,14 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -194,11 +195,11 @@ type signUpStatusJSON struct {
 }
 
 func (s *Server) signUpStatus(ctx context.Context, now time.Time) (signUpStatusJSON, error) {
-	g, err := s.store.SignUpGate(ctx)
+	g, err := s.operatorSettings.SignUpGate(ctx)
 	if err != nil {
 		return signUpStatusJSON{}, err
 	}
-	counts, err := s.store.SignUpCounts(ctx, now)
+	counts, err := s.operatorSettings.SignUpCounts(ctx, now)
 	if err != nil {
 		return signUpStatusJSON{}, err
 	}
@@ -233,13 +234,13 @@ func (s *Server) signUpStatus(ctx context.Context, now time.Time) (signUpStatusJ
 	return out, nil
 }
 
-func (s *Server) handleSignUpStatus(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSignUpStatus(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	out, err := s.signUpStatus(r.Context(), time.Now().UTC())
 	if err != nil {
-		s.writeInternalError(w, r, "sign-up status", err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 type signUpSetReq struct {
@@ -257,31 +258,27 @@ func (req signUpSetReq) limitsChanged() bool {
 		req.FreeTeamMembers != nil
 }
 
-func (s *Server) handleSetSignUp(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSetSignUp(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	var req signUpSetReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid signup settings"}
 	}
 	if req.Mode == nil && !req.limitsChanged() {
-		writeError(w, http.StatusBadRequest, errors.New("name a mode or at least one limit to change"))
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: "name a mode or at least one limit to change"}
 	}
 	ctx, now := r.Context(), time.Now().UTC()
 	var mode store.SignUpMode
 	if req.Mode != nil {
 		m, err := store.ParseSignUpMode(*req.Mode)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
+			return &apierr.Error{Code: apierr.BadRequest, Message: "invalid signup mode"}
 		}
 		mode = m
 	}
 	if req.limitsChanged() {
-		g, err := s.store.SignUpGate(ctx)
+		g, err := s.operatorSettings.SignUpGate(ctx)
 		if err != nil {
-			s.writeInternalError(w, r, "sign-up limits", err)
-			return
+			return err
 		}
 		limits := g.Limits
 		for _, f := range []struct {
@@ -298,25 +295,23 @@ func (s *Server) handleSetSignUp(w http.ResponseWriter, r *http.Request) {
 				*f.out = *f.in
 			}
 		}
-		if _, err := s.store.SetSignUpLimits(ctx, limits); err != nil {
-			writeIdentityError(w, s, r, "sign-up limits", err)
-			return
+		if _, err := s.operatorSettings.SetSignUpLimits(ctx, limits); err != nil {
+			return operatorSettingsError(err)
 		}
 	}
-	p, _ := PrincipalFromContext(ctx)
+	actor := authorized.Principal.Capability.Subject.ID
 	if mode != "" {
-		if _, err := s.store.SetSignUpMode(ctx, mode, req.Reason, p.label(), now); err != nil {
-			writeIdentityError(w, s, r, "sign-up mode", err)
-			return
+		if _, err := s.operatorSettings.SetSignUpMode(ctx, mode, req.Reason, actor, now); err != nil {
+			return operatorSettingsError(err)
 		}
-		s.logger.Info("signup.mode_set", "mode", string(mode), "by", p.label(), "reason", req.Reason)
+		s.logger.Info("signup.mode_set", "mode", string(mode), "by", actor, "reason", req.Reason)
 	}
 	out, err := s.signUpStatus(ctx, now)
 	if err != nil {
-		s.writeInternalError(w, r, "sign-up status", err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 type waitlistedJSON struct {
@@ -354,40 +349,37 @@ type approvedJSON struct {
 	ActiveTeam string `json:"active_team"`
 }
 
-func (s *Server) handleApproveWaitlist(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleApproveWaitlist(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	var req approveWaitlistReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	}
 	if (len(req.AccountIDs) > 0) == (req.Oldest > 0) {
-		writeError(w, http.StatusBadRequest, errors.New("name either account_ids or oldest"))
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: "name either account_ids or oldest"}
 	}
 	if len(req.AccountIDs) > maxWaitlistPage || req.Oldest > maxWaitlistPage {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("approve at most %d accounts at a time", maxWaitlistPage))
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("approve at most %d accounts at a time", maxWaitlistPage)}
 	}
 	ctx, now := r.Context(), time.Now().UTC()
-	p, _ := PrincipalFromContext(ctx)
+	actor := authorized.Principal.Capability.Subject.ID
 	var approved []store.Account
 	var err error
 	if req.Oldest > 0 {
-		approved, err = s.store.ApproveOldestWaitlisted(ctx, req.Oldest, p.Name, now)
+		approved, err = s.store.ApproveOldestWaitlisted(ctx, req.Oldest, actor, now)
 	} else {
-		approved, err = s.store.ApproveWaitlisted(ctx, req.AccountIDs, p.Name, now)
+		approved, err = s.store.ApproveWaitlisted(ctx, req.AccountIDs, actor, now)
 	}
 	out := make([]approvedJSON, 0, len(approved))
 	for _, a := range approved {
-		s.logger.Info("signup.approved", "account", a.ID, "by", p.label(), "team", string(a.ActiveTeam))
+		s.logger.Info("signup.approved", "account", a.ID, "by", actor, "team", string(a.ActiveTeam))
 		s.notifyApproved(ctx, a)
 		out = append(out, approvedJSON{ID: a.ID, Email: a.Email, ActiveTeam: string(a.ActiveTeam)})
 	}
 	if err != nil {
-		s.writeInternalError(w, r, "waitlist approve", err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"approved": out})
+	return nil
 }
 
 func (s *Server) notifyApproved(ctx context.Context, a store.Account) {

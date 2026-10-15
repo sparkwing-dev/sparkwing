@@ -176,7 +176,7 @@ func TestRunnerStoreLifecycleW8Components(t *testing.T) {
 			transport, clients := &http.Client{}, 0
 			var held controllerwire.ClaimedUnit
 			host := runners.Hosting{
-				ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
+				ControllerURL: "https://controller.example", HTTP: transport, Lease: time.Minute, Interval: 10 * time.Second,
 				NewController: func(options client.EngineOptions) (controllerwire.Controller, error) {
 					bearer, err := options.Bearer(t.Context())
 					if err != nil {
@@ -206,12 +206,12 @@ func TestRunnerStoreLifecycleW8Components(t *testing.T) {
 				held = unit
 				return identityRunW8(func(input nodehost.RunInput) {
 					executed = true
-					var request runspec.SealedRequest
+					var request runspec.Request
 					if err := json.Unmarshal(input.SealedRequest, &request); err != nil {
 						t.Error(err)
 						return
 					}
-					if input.RunID != unit.RunID || input.RequestHash != string(unit.Request.Hash) || request.Hash != unit.Request.Hash || input.Accepted == nil || input.Accepted.SpecHash != string(unit.Accepted.Spec.Hash) || input.Accepted.PlanHash != string(unit.Accepted.PlanHash) {
+					if input.RunID != unit.RunID || input.RequestHash != string(unit.Request.Hash) || !reflect.DeepEqual(request, unit.Request.Request) || input.Accepted == nil || input.Accepted.SpecHash != string(unit.Accepted.Spec.Hash) || input.Accepted.PlanHash != string(unit.Accepted.PlanHash) {
 						t.Error("run host input lost the awarded first or second seal")
 						return
 					}
@@ -250,7 +250,7 @@ func TestRunnerStoreLifecycleW8Components(t *testing.T) {
 			}
 			runner, err := runners.NewManagedRunner(t.Context(), runners.RuntimeConfig{
 				Controller: client.EngineOptions{URL: host.ControllerURL, HTTP: transport, Bearer: func(context.Context) (string, error) { return root.Raw, nil }},
-				Loop:       runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1, MaxClaims: 1}, Hosting: host,
+				Loop:       runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1, MaxClaims: 1}, Hosting: host, NewController: host.NewController,
 				Versions: runnerVersionPolicyW8(t, "v0.71.0"), Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner},
 				RequestCapacity: func() (float64, int64) { return 2, 1 << 30 },
 			})

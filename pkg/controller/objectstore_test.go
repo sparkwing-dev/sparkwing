@@ -4,18 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
 func TestObjectStoreBreaker_RouteReportsEveryClass(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
 
-	resp := mustGet(t, base+"/api/v1/object-store/breaker")
+	resp := breakerRequest(t, http.MethodGet, true)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("breaker status=%d want 200", resp.StatusCode)
@@ -48,13 +49,8 @@ func TestObjectStoreBreaker_RouteReportsEveryClass(t *testing.T) {
 }
 
 func TestObjectStoreResetBreaker_ClearsNothingWhenNothingTripped(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
 
-	resp, err := http.Post(base+"/api/v1/object-store/reset-breaker", "application/json", nil)
-	if err != nil {
-		t.Fatalf("post reset-breaker: %v", err)
-	}
+	resp := breakerRequest(t, http.MethodPost, true)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("reset-breaker status=%d want 200", resp.StatusCode)
@@ -74,14 +70,9 @@ func TestObjectStoreResetBreaker_ClearsNothingWhenNothingTripped(t *testing.T) {
 	}
 }
 
-func TestObjectStoreResetBreaker_NeedsAdminScope(t *testing.T) {
-	base, _, _, cleanup := newAuthedTestServer(t)
-	defer cleanup()
+func TestObjectStoreResetBreaker_NeedsOperatorAuthority(t *testing.T) {
 
-	resp, err := http.Post(base+"/api/v1/object-store/reset-breaker", "application/json", nil)
-	if err != nil {
-		t.Fatalf("post reset-breaker: %v", err)
-	}
+	resp := breakerRequest(t, http.MethodPost, false)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("an unauthenticated reset got %d, want 401", resp.StatusCode)
@@ -142,10 +133,8 @@ func freezeBucket(t *testing.T, limit objectguard.CeilingLimit, bytes, objects i
 }
 
 func TestObjectStoreBreaker_ReportsAnUnlimitedCeilingByDefault(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
 
-	resp := mustGet(t, base+"/api/v1/object-store/breaker")
+	resp := breakerRequest(t, http.MethodGet, true)
 	defer resp.Body.Close()
 	var body struct {
 		Ceiling struct {
@@ -163,11 +152,9 @@ func TestObjectStoreBreaker_ReportsAnUnlimitedCeilingByDefault(t *testing.T) {
 }
 
 func TestObjectStoreBreaker_ReportsAFrozenCeilingWithItsTotals(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
 	freezeBucket(t, objectguard.CeilingLimit{MaxBytes: 1000}, 4096, 12)
 
-	resp := mustGet(t, base+"/api/v1/object-store/breaker")
+	resp := breakerRequest(t, http.MethodGet, true)
 	defer resp.Body.Close()
 	var body struct {
 		Ceiling struct {
@@ -194,14 +181,9 @@ func TestObjectStoreBreaker_ReportsAFrozenCeilingWithItsTotals(t *testing.T) {
 }
 
 func TestObjectStoreResetBreaker_ThawsAFrozenCeiling(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
 	ceiling := freezeBucket(t, objectguard.CeilingLimit{MaxObjects: 2}, 10, 9)
 
-	resp, err := http.Post(base+"/api/v1/object-store/reset-breaker", "application/json", nil)
-	if err != nil {
-		t.Fatalf("post reset-breaker: %v", err)
-	}
+	resp := breakerRequest(t, http.MethodPost, true)
 	defer resp.Body.Close()
 	var body struct {
 		Thawed  bool `json:"thawed"`
@@ -229,8 +211,6 @@ func TestObjectStoreResetBreaker_ThawsAFrozenCeiling(t *testing.T) {
 }
 
 func TestObjectStoreResetBreaker_RefusesAThawNothingWouldEnd(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
 
 	limiter := objectguard.Shared()
 	ceiling := limiter.Ceiling()
@@ -238,10 +218,7 @@ func TestObjectStoreResetBreaker_RefusesAThawNothingWouldEnd(t *testing.T) {
 	ceiling.Configure(objectguard.CeilingConfig{Limit: objectguard.CeilingLimit{MaxBytes: 1000}})
 	ceiling.Observe(objectguard.Usage{Bytes: 4096, Objects: 3})
 
-	resp, err := http.Post(base+"/api/v1/object-store/reset-breaker", "application/json", nil)
-	if err != nil {
-		t.Fatalf("post reset-breaker: %v", err)
-	}
+	resp := breakerRequest(t, http.MethodPost, true)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("reset with no measurement scheduled got %d, want 409", resp.StatusCode)
@@ -323,4 +300,27 @@ func TestMetrics_BucketCeilingReportsAnIncompleteMeasurement(t *testing.T) {
 	if !strings.Contains(scrape(t, base), "sparkwing_object_store_bucket_ceiling_measurement_incomplete 1") {
 		t.Error("metrics do not report the discarded measurement")
 	}
+}
+
+func breakerRequest(t *testing.T, method string, authenticated bool) *http.Response {
+	t.Helper()
+	var order []string
+	principal := capability.Principal{Class: capability.CredentialBearer, Capability: capability.Capability{
+		Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"},
+		Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorObjectStore},
+	}}
+	s := controller.New(nil, nil).WithAuthorization(controller.RouteAuthorization{
+		Authenticator: policyAuth{principal: principal, order: &order}, Bindings: policyBindings{order: &order},
+	})
+	path := "/api/v1/operator/object-store/breaker"
+	if method == http.MethodPost {
+		path = "/api/v1/operator/object-store/reset-breaker"
+	}
+	r := httptest.NewRequest(method, path, nil)
+	if authenticated {
+		r.Header.Set("Authorization", "Bearer fixture")
+	}
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	return w.Result()
 }

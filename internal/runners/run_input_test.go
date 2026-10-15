@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -81,6 +82,7 @@ func FuzzHostingRunInputKeepsAwardSeals(f *testing.F) {
 	f.Add("run", "request-hash", true, true)
 	f.Fuzz(func(t *testing.T, preparedRun, preparedHash string, resume, here bool) {
 		unit := hostingAward(capability.UnitTrigger)
+		unit.Runner = nodeproto.RunnerIdentity{Name: "granted", Type: "runner", Labels: []string{"awarded"}}
 		if here {
 			unit.Purpose = capability.PurposeHere
 		}
@@ -97,6 +99,7 @@ func FuzzHostingRunInputKeepsAwardSeals(f *testing.F) {
 			ControllerURL: "http://controller", Lease: time.Minute, Interval: time.Second,
 			NewController: hostingClient(func(context.Context) (lease.Beat, error) {
 				unit.Request.Request.RequestedArgs["key"] = "changed-after-award"
+				unit.Runner.Labels[0] = "ambient"
 				if unit.Accepted != nil {
 					unit.Accepted.Plan[0] = '!'
 				}
@@ -109,12 +112,15 @@ func FuzzHostingRunInputKeepsAwardSeals(f *testing.F) {
 				prepared := nodehost.RunInput{RunID: preparedRun, RequestHash: preparedHash, SealedRequest: json.RawMessage(`{"ambient":true}`), Accepted: &nodehost.AcceptedRun{RunID: preparedRun}}
 				return runHostFunc(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
 						executed = true
-						var request runspec.SealedRequest
+						var request runspec.Request
 						if err := json.Unmarshal(input.SealedRequest, &request); err != nil {
 							t.Fatal(err)
 						}
-						if input.RunID != "run" || input.RequestHash != "request-hash" || request.Hash != "request-hash" || request.Request.RequestedArgs["key"] != "sealed" {
+						if input.RunID != "run" || input.RequestHash != "request-hash" || request.RequestedArgs["key"] != "sealed" {
 							t.Fatal("run execution lost the awarded first seal")
+						}
+						if input.GrantedRunner.Name != "granted" || input.GrantedRunner.Type != "runner" || len(input.GrantedRunner.Labels) != 1 || input.GrantedRunner.Labels[0] != "awarded" {
+							t.Fatal("run execution replaced the awarded runner identity")
 						}
 						if resume {
 							accepted := input.Accepted

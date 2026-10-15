@@ -71,6 +71,7 @@ func CheckStoreDataBoundary(ctx context.Context, root, id string, crash StoreUpl
 	defer func() { err = errors.Join(err, db.Close()) }()
 	clients := []*store.Store{first, second}
 	tenants := make([]*store.Tenant, 2)
+	egressPeriod := time.Now().UTC().Format("2006-01-02")
 	for i, client := range clients {
 		tenants[i], err = client.ForTeam(ctx, store.DefaultTeam)
 		if err != nil {
@@ -80,6 +81,9 @@ func CheckStoreDataBoundary(ctx context.Context, root, id string, crash StoreUpl
 			if err := tenants[i].AddUsage(ctx, store.UsageDelta{Period: "fixture-period", ReplicaID: []string{"a", "b"}[i], Counter: counter, Amount: []int64{7, 11}[i]}); err != nil {
 				return err
 			}
+		}
+		if err := tenants[i].AddUsage(ctx, store.UsageDelta{Period: egressPeriod, ReplicaID: []string{"a", "b"}[i], Counter: "egress_bytes", Amount: []int64{7, 11}[i]}); err != nil {
+			return err
 		}
 	}
 	if err := second.Close(); err != nil {
@@ -111,6 +115,15 @@ func CheckStoreDataBoundary(ctx context.Context, root, id string, crash StoreUpl
 		}
 	}
 	for _, tenant := range tenants {
+		for _, period := range []string{egressPeriod, egressPeriod[:7]} {
+			usage, err := tenant.EgressUsage(ctx, period)
+			if err != nil {
+				return err
+			}
+			if usage.Team != store.DefaultTeam || usage.Bytes != 18 {
+				return fmt.Errorf("public egress replica report=%+v, want the durable sum 18", usage)
+			}
+		}
 		usage, err := tenant.StorageUsageFor(ctx, "", "fixture-period")
 		if err != nil {
 			return err
@@ -179,7 +192,13 @@ func CheckStoreDataBoundary(ctx context.Context, root, id string, crash StoreUpl
 	if _, err := tenants[1].ReserveQuota(ctx, "storage", 8); err != nil {
 		return fmt.Errorf("release did not restore capacity: %w", err)
 	}
-	return storeDataSingletonRace(ctx, clients)
+	if err := storeDataSingletonRace(ctx, clients); err != nil {
+		return err
+	}
+	if err := checkStoreDownloadBoundary(ctx, root); err != nil {
+		return err
+	}
+	return checkStoreEventBoundary(ctx, root)
 }
 
 func storeDataSingletonRace(ctx context.Context, clients []*store.Store) error {

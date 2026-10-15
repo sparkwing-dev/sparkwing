@@ -142,7 +142,7 @@ func TestOperatorConsole_FindsATeamAndActsOnItWithAReason(t *testing.T) {
 	}
 	if team.Team != owner.team || len(team.Owners) != 1 || team.Owners[0] != "olga@example.com" ||
 		team.BalanceMicro != 2_000*store.MicroCreditsPerCent || !team.Frozen || len(team.Holds) != 1 ||
-		team.Billing.Trust != "granted" || team.Billing.TrustBy != "korey@example.com" ||
+		team.Billing.Trust != "granted" || team.Billing.TrustBy != operator.id ||
 		team.Billing.TrustReason != "known customer" || team.Billing.PurchaseLimitCents != 250_000 {
 		t.Errorf("after the actions = %+v", team)
 	}
@@ -159,10 +159,10 @@ func TestOperatorConsole_FindsATeamAndActsOnItWithAReason(t *testing.T) {
 		history = append(history, ev.Kind+" by "+ev.Actor+": "+fmt.Sprint(ev.Attrs["reason"]))
 	}
 	want := []string{
-		"team.unfrozen by korey@example.com: resolved",
-		"team.frozen by korey@example.com: abuse report",
-		"credit.granted by korey@example.com: launch promo",
-		"billing.trust_changed by korey@example.com: known customer",
+		"team.unfrozen by " + operator.id + ": resolved",
+		"team.frozen by " + operator.id + ": abuse report",
+		"credit.granted by " + operator.id + ": launch promo",
+		"billing.trust_changed by " + operator.id + ": known customer",
 		"team.created by " + owner.id + ": <nil>",
 	}
 	if !slices.Equal(history, want) {
@@ -210,7 +210,7 @@ func TestOperatorConsole_KeepsARevocationAndDisputeHolds(t *testing.T) {
 		t.Errorf("releasing the dispute hold = %d %+v, want the team released", code, team)
 	}
 	if f.call("GET", base, operator.auth, nil, &team); team.Events[0].Kind != store.BusinessEventTeamUnfrozen ||
-		team.Events[0].Actor != "korey@example.com" || team.Events[0].Attrs["reason"] != "dispute won" {
+		team.Events[0].Actor != operator.id || team.Events[0].Attrs["reason"] != "dispute won" {
 		t.Errorf("the dispute release's event = %+v", team.Events[0])
 	}
 }
@@ -248,7 +248,6 @@ func TestAdminTokenReachesNoOperatorPower(t *testing.T) {
 	admin := "Bearer " + f.admin
 	cent := int64(store.MicroCreditsPerCent)
 	for _, route := range [][2]string{
-		{"POST", "/api/v1/credits/grants"},
 		{"POST", "/api/v1/credits/reversals"},
 		{"POST", "/api/v1/credits/freezes"},
 		{"POST", "/api/v1/credits/cards"},
@@ -379,8 +378,8 @@ func TestOperatorConsole_ListsTheWaitlistNewestFirstAndApprovesByID(t *testing.T
 		admitted[account] = actor + " via " + fmt.Sprint(attrs["via"])
 	}
 	want := map[string]string{
-		ids["ann"]: "korey@example.com via waitlist",
-		ids["cat"]: "korey@example.com via waitlist",
+		ids["ann"]: operator.id + " via waitlist",
+		ids["cat"]: operator.id + " via waitlist",
 	}
 	for name, id := range ids {
 		if admitted[id] != want[id] {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
@@ -32,35 +33,31 @@ func TestFormatScopes(t *testing.T) {
 }
 
 func fixedTokens() []client.TokenInfo {
-	last := int64(1714867200)
-	revoked := int64(1714953600)
+	last := time.Unix(1714867200, 0).UTC()
+	revoked := time.Unix(1714953600, 0).UTC()
 	return []client.TokenInfo{
 		{
 			Prefix:     "swu_abcd",
-			Kind:       "runner",
-			Principal:  "agent:sparkwing-warm-runner",
-			Scopes:     []string{"nodes.claim", "triggers.claim", "logs.write"},
+			Subject:    client.TokenSubject{Kind: "machine", ID: "agent:sparkwing-warm-runner"},
+			Grants:     []string{"nodes.claim", "triggers.claim", "logs.write"},
 			LastUsedAt: &last,
 		},
 		{
-			Prefix:    "swu_admn",
-			Kind:      "user",
-			Principal: "user:admin",
-			Scopes:    []string{"admin"},
+			Prefix:  "swu_admn",
+			Subject: client.TokenSubject{Kind: "account", ID: "user:admin"},
+			Grants:  []string{"admin"},
 		},
 		{
 			Prefix:     "swu_dead",
-			Kind:       "service",
-			Principal:  "deploy-bot",
-			Scopes:     []string{"runs.write"},
+			Subject:    client.TokenSubject{Kind: "service", ID: "deploy-bot"},
+			Grants:     []string{"runs.write"},
 			LastUsedAt: &last,
 			RevokedAt:  &revoked,
 		},
 		{
-			Prefix:    "swu_void",
-			Kind:      "service",
-			Principal: "scopeless-bot",
-			Scopes:    nil,
+			Prefix:  "swu_void",
+			Subject: client.TokenSubject{Kind: "service", ID: "scopeless-bot"},
+			Grants:  nil,
 		},
 	}
 }
@@ -74,7 +71,7 @@ func TestRenderTokensTable_IncludesScopesColumn(t *testing.T) {
 	out := buf.String()
 
 	header := strings.SplitN(out, "\n", 2)[0]
-	for _, want := range []string{"PREFIX", "TYPE", "PRINCIPAL", "SCOPES", "LAST_USED"} {
+	for _, want := range []string{"PREFIX", "TYPE", "PRINCIPAL", "GRANTS", "LAST_USED"} {
 		if !strings.Contains(header, want) {
 			t.Errorf("header %q missing column %q", header, want)
 		}
@@ -132,9 +129,9 @@ func TestRenderTokensJSON_ExposesScopesArray(t *testing.T) {
 	}
 
 	warm := got[0]
-	scopes, ok := warm["scopes"].([]any)
+	scopes, ok := warm["grants"].([]any)
 	if !ok {
-		t.Fatalf("scopes field is not an array: %T (%v)", warm["scopes"], warm["scopes"])
+		t.Fatalf("scopes field is not an array: %T (%v)", warm["grants"], warm["grants"])
 	}
 	if len(scopes) != 3 {
 		t.Errorf("warm-runner scopes length = %d, want 3", len(scopes))
@@ -147,7 +144,7 @@ func TestRenderTokensJSON_ExposesScopesArray(t *testing.T) {
 	}
 
 	admin := got[1]
-	adminScopes, _ := admin["scopes"].([]any)
+	adminScopes, _ := admin["grants"].([]any)
 	if len(adminScopes) != 1 || adminScopes[0] != "admin" {
 		t.Errorf("admin scopes = %v, want [admin] (JSON should not collapse)", adminScopes)
 	}

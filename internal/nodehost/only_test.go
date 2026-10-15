@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -71,63 +71,20 @@ func TestOnlyRefusesWhatTheDispatcherRefused(t *testing.T) {
 	}
 }
 
-func TestWorkersCapsTheNodesRunningAtOnce(t *testing.T) {
-	st := openStore(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	var mu sync.Mutex
-	running, peak := 0, 0
-	two, inlineRan, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	var reachedTwo sync.Once
-	go func() {
-		<-two
-		<-inlineRan
-		close(release)
-	}()
-	body := func(ctx context.Context, n *NodeRun) Result {
-		if m := n.Plan; m.Inline {
-			close(inlineRan)
-			return Result{Outcome: sparkwing.Success}
-		}
-		mu.Lock()
-		running++
-		peak = max(peak, running)
-		if running == 2 {
-			reachedTwo.Do(func() { close(two) })
-		}
-		mu.Unlock()
-		select {
-		case <-release:
-		case <-ctx.Done():
-		}
-		mu.Lock()
-		running--
-		mu.Unlock()
-		return Result{Outcome: sparkwing.Success}
-	}
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "b", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "c", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "d", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "e", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "inline", Inline: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-	}}
-
-	res := hostWith(t, ctx, st, Config{Execute: body, Workers: 2}, doc)
-	if res.Status != "success" {
-		t.Fatalf("status=%s err=%v, want success: an inline node waited behind full workers", res.Status, res.Err)
-	}
-	if peak != 2 {
-		t.Errorf("peak running = %d, want the cap of 2", peak)
-	}
-}
-
 func TestDryRunEnvHandsTheSwitchToTheNode(t *testing.T) {
-	if got := dryRunEnv(&NodeRun{Run: &Run{Context: nodeproto.RunContext{DryRun: true}, validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}}); !slices.Equal(got, []string{"SPARKWING_DRY_RUN=1"}) {
-		t.Errorf("env = %v, want the dry-run switch", got)
-	}
-	if got := dryRunEnv(&NodeRun{Run: &Run{validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}}); got != nil {
-		t.Errorf("env = %v, want nothing for a real run", got)
+	for _, dryRun := range []bool{true, false} {
+		cfg := Config{Session: SessionConfig{Env: []string{}}, Run: nodeproto.RunContext{DryRun: dryRun}}
+		planned, err := planSession(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		attempt, _, err := attemptEnvironments(cfg.Session, &NodeRun{Run: &Run{Context: cfg.Run}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "SPARKWING_DRY_RUN=" + strconv.FormatBool(dryRun)
+		if !slices.Contains(planned.Env, want) || !slices.Contains(attempt, want) {
+			t.Fatalf("plan=%v attempt=%v, want %s", planned.Env, attempt, want)
+		}
 	}
 }

@@ -7,16 +7,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -76,8 +74,6 @@ func NewClaim(controllerURL, token string) (*Claim, error) {
 	}, nil
 }
 
-var quote = strconv.Quote
-
 var errUpstream = errors.New("controller unreachable")
 
 // safety: a refusal comes back as its status and error code only; the
@@ -99,7 +95,6 @@ func (c *Claim) call(ctx context.Context, method, path string, body, out any) (s
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return 0, "", errUpstream
@@ -141,7 +136,6 @@ func (c *Claim) fetchOutput(ctx context.Context, grant store.OutputReadGrant) (j
 	}
 	// safety: a signed URL carries its own authority, so the claim token is
 	// never sent with it.
-	req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, errUpstream
@@ -201,28 +195,16 @@ func validName(name string) bool {
 	return name != "" && len(name) <= 256 && name != "." && name != ".." && !strings.ContainsAny(name, "/\\")
 }
 
-// safety: the slot is taken before the body is read, and a node past its
-// limit is refused at once, so waiting requests hold nothing; revoking the
-// grant ends the forward too.
-func (s *Server) forward(w http.ResponseWriter, r *http.Request, g *grant) (*Claim, context.Context, func(), bool) {
-	if g.Claim == nil {
-		s.writeError(w, http.StatusBadGateway, "upstream_unavailable", "this node has no controller to forward to")
-		return nil, nil, nil, false
+func claimSlot(ctx context.Context, slots chan struct{}) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	return s.admit(w, r, g, g.Claim.slots, "controller requests")
-}
-
-func (s *Server) admit(w http.ResponseWriter, r *http.Request, g *grant, slots chan struct{}, what string) (*Claim, context.Context, func(), bool) {
 	select {
 	case slots <- struct{}{}:
+		return func() { <-slots }, nil
 	default:
-		s.writeError(w, http.StatusTooManyRequests, "too_many_requests",
-			fmt.Sprintf("a node has at most %d %s open at once; retry after one ends", cap(slots), what))
-		return nil, nil, nil, false
+		return nil, executorError(apierr.RateLimited, "process has too many open service requests")
 	}
-	ctx, cancel := context.WithCancel(r.Context())
-	stop := context.AfterFunc(g.ctx, cancel)
-	return g.Claim, ctx, func() { stop(); cancel(); <-slots }, true
 }
 
 func acquire(ctx context.Context, slot chan struct{}) bool {
@@ -234,32 +216,14 @@ func acquire(ctx context.Context, slot chan struct{}) bool {
 	}
 }
 
-func (s *Server) writeOutput(ctx context.Context, w http.ResponseWriter, g *grant, route string, grant store.OutputReadGrant, reply map[string]any) {
-	if !acquire(ctx, g.Claim.outputSlot) {
-		s.upstreamFailed(w, g, route, 0, ctx.Err())
-		return
+func (c *Claim) output(ctx context.Context, grant store.OutputReadGrant) (json.RawMessage, error) {
+	if !acquire(ctx, c.outputSlot) {
+		return nil, ctx.Err()
 	}
-	defer func() { <-g.Claim.outputSlot }()
-	output, err := g.Claim.fetchOutput(ctx, grant)
+	defer func() { <-c.outputSlot }()
+	raw, err := c.fetchOutput(ctx, grant)
 	if err != nil {
-		s.upstreamFailed(w, g, route, 0, err)
-		return
+		return nil, serviceUnavailable()
 	}
-	reply["output"] = output
-	s.writeJSON(w, http.StatusOK, reply)
-}
-
-// safety: a controller reply can quote URLs and credentials, so only the
-// route and status are logged and the node gets a fixed message.
-func (s *Server) upstreamFailed(w http.ResponseWriter, g *grant, route string, status int, err error) {
-	attrs := []any{"run", g.RunID, "node", g.NodeID, "route", route, "status", status}
-	if err != nil {
-		attrs = append(attrs, "err_type", fmt.Sprintf("%T", err))
-	}
-	s.logger.Warn("node route forward failed", attrs...)
-	s.writeError(w, http.StatusBadGateway, "upstream_unavailable", "the controller could not be reached; retry after a delay")
-}
-
-func decodeBody(r *http.Request, limit int64, into any) bool {
-	return json.NewDecoder(io.LimitReader(r.Body, limit)).Decode(into) == nil
+	return raw, nil
 }

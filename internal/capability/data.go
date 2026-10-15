@@ -2,7 +2,10 @@ package capability
 
 import (
 	"context"
+	"slices"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // DataUse constrains an opt-in separately from an executable claim's data authority.
@@ -83,7 +86,91 @@ type DataAccessChecker interface {
 // AuthorizeData requires route authority, the sealed data scope and C1's edge checks before signing.
 // Commit and record writes repeat these checks in the transaction that creates the receipt or edge.
 func AuthorizeData(ctx context.Context, edges DataAccessChecker, authorized Authorized, target DataTarget) error {
-	panic("unimplemented: c2-credentials")
+	if edges == nil {
+		return policyFailure()
+	}
+	var policy *DataPolicy
+	for i := range DataPolicies {
+		if DataPolicies[i].Operation == target.Operation {
+			policy = &DataPolicies[i]
+			break
+		}
+	}
+	if policy == nil {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "unknown data operation"}
+	}
+	if target.RecordKind == "log" {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "log reads use the controller log routes"}
+	}
+	c := authorized.Principal.Capability
+	if c.Audience != Controller {
+		return forbidden(apierr.ReasonAudience)
+	}
+	if !slices.Contains(c.Grants, policy.Grant) || !slices.Contains(authorized.Access.Grants, policy.Grant) {
+		return forbidden(apierr.ReasonMissingGrant)
+	}
+	if c.Team == "" || authorized.Target.Team != c.Team {
+		return forbidden(apierr.ReasonTeam)
+	}
+	scope := c.Data
+	if scope == nil || scope.RepositoryKey == "" {
+		return forbidden(apierr.ReasonRepositoryUnauthorized)
+	}
+	if authorized.ResultReplay || authorized.LogTailAttempt != 0 || authorized.Access.Binding != BindData {
+		return forbidden(apierr.ReasonBinding)
+	}
+	if authorized.Access.Liveness != LiveSensitive && authorized.Access.Liveness != LiveExpansion &&
+		!(authorized.Access.Liveness == LiveCredential && (scope.Use == DataRemoteCache || scope.Use == DataPublish)) {
+		return forbidden(apierr.ReasonBinding)
+	}
+	if err := dataUse(authorized.Principal, *scope, policy.Grant); err != nil {
+		return err
+	}
+	if policy.Grant == DataWrite && !dataWriter(*scope, target) {
+		return forbidden(apierr.ReasonBinding)
+	}
+	return edges.CheckDataAccess(ctx, authorized, target)
+}
+
+func dataUse(p Principal, scope DataScope, grant Grant) error {
+	switch scope.Use {
+	case DataRemoteCache:
+		if grant != DataRead {
+			return forbidden(apierr.ReasonReadOnly)
+		}
+		if !scope.VerifiedDefaultOnly || !matchesCredential(p, CredentialRepoReader) {
+			return forbidden(apierr.ReasonBinding)
+		}
+	case DataPublish:
+		if !matchesCredential(p, CredentialPublisher) {
+			return forbidden(apierr.ReasonBinding)
+		}
+	case DataClaim:
+		if !isClaim(p) || p.Capability.Delivery == DeliveryBootstrap || scope.RunID != p.Capability.Binding.RunID {
+			return forbidden(apierr.ReasonBinding)
+		}
+		if b := p.Capability.Binding; b.Kind == BindingNode && (scope.NodeID != b.NodeID || scope.Generation != b.Generation || scope.Attempt != b.Attempt) {
+			return forbidden(apierr.ReasonBinding)
+		}
+	case DataExpansion:
+		if grant != DataRead {
+			return forbidden(apierr.ReasonReadOnly)
+		}
+		if !isClaim(p) || p.Capability.Binding.Expansion == nil || scope.RunID != p.Capability.Binding.RunID ||
+			scope.NodeID != p.Capability.Binding.NodeID || scope.Generation != p.Capability.Binding.Generation {
+			return forbidden(apierr.ReasonBinding)
+		}
+	default:
+		return forbidden(apierr.ReasonBinding)
+	}
+	return nil
+}
+
+func dataWriter(scope DataScope, target DataTarget) bool {
+	return scope.RunID != "" && target.RunID == scope.RunID &&
+		(scope.NodeID == "" || target.NodeID == scope.NodeID) &&
+		(scope.Attempt == 0 || target.Attempt == scope.Attempt) &&
+		(scope.Generation == 0 || target.Generation == scope.Generation)
 }
 
 // ObjectToSign is constructed after authorization and quota reservation, with a server-derived key.

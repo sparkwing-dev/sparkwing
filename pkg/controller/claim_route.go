@@ -18,6 +18,8 @@ import (
 // safety: a claim principal carries no scopes, so no scope-gated route admits it.
 const principalKindClaim = "claim"
 
+var claimSourceKinds = []store.ClaimTokenKind{store.ClaimTokenPlan, store.ClaimTokenWork}
+
 // safety: a token whose kind is not in kinds is refused, so an empty list admits none.
 type claimRouteSpec struct {
 	class store.ClaimRouteClass

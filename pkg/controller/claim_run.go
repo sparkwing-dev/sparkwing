@@ -18,7 +18,6 @@ var claimLogKinds = []store.ClaimTokenKind{store.ClaimTokenWork, store.ClaimToke
 
 // safety: every claim that runs a node's code reads that node's secrets
 // through its own claim, under the plan's declaration and with an event.
-var claimSecretKinds = []store.ClaimTokenKind{store.ClaimTokenWork, store.ClaimTokenNode, store.ClaimTokenTrigger}
 
 type claimHeartbeatReq struct {
 	LeaseSecs int `json:"lease_secs"`
@@ -211,81 +210,11 @@ func (s *Server) handleClaimInput(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-const maxLauncherSyncJobs = 1000
-
-type launcherSyncReq struct {
-	Jobs []store.LaunchJob `json:"jobs"`
-}
-
-type launcherSyncResp struct {
-	Jobs []store.LaunchJobResult `json:"jobs"`
-}
-
-func (s *Server) handleLauncherSync(w http.ResponseWriter, r *http.Request) {
-	var req launcherSyncReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if len(req.Jobs) > maxLauncherSyncJobs {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("at most %d jobs", maxLauncherSyncJobs))
-		return
-	}
-	jobs, err := s.store.SyncLaunchJobs(r.Context(), claimIdentity(r), req.Jobs, time.Now())
-	if err != nil {
-		s.writeInternalError(w, r, "launcher sync", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, launcherSyncResp{Jobs: jobs})
-}
-
 // safety: binds a route whose run is named in its body or by a holder, so the
 // handler behind it must check that run against the claim's own.
 func ownClaimBinding(r *http.Request) (string, string) {
 	tok, _ := claimTokenFromContext(r.Context())
 	return tok.RunID, tok.NodeID
-}
-
-func secretRunBinding(r *http.Request) (string, string) {
-	return r.URL.Query().Get("run"), ""
-}
-
-// safety: a work claim reads only a secret its run's plan declares, each read
-// is recorded on its node, and the value is masked in the node's logs by the
-// pipeline that asked for it.
-func (s *Server) handleClaimSecret(w http.ResponseWriter, r *http.Request) {
-	tok, _ := claimTokenFromContext(r.Context())
-	tn, err := s.tenantForTeam(r.Context(), tok.Team)
-	if err != nil {
-		writeError(w, http.StatusNotFound, runNotFound(tok.RunID))
-		return
-	}
-	sec, err := tn.ReleaseClaimSecret(r.Context(), tok, r.PathValue("name"), time.Now())
-	switch {
-	case errors.Is(err, store.ErrSecretUndeclared):
-		// safety: a read of a name the plan never declared is a probe, so it
-		// is recorded with the claim that made it.
-		s.logger.WarnContext(r.Context(), "audit", append(requestLogAttrs(r), "event", "secret_undeclared",
-			"principal_kind", "claim", "principal_id", tok.Prefix, "team", string(tok.Team),
-			"run_id", tok.RunID, "node_id", tok.NodeID)...)
-		writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "secret_undeclared", Message: err.Error()})
-		return
-	case errors.Is(err, store.ErrNotFound):
-		writeError(w, http.StatusNotFound, err)
-		return
-	case err != nil:
-		writeClaimRefusal(w, r, s, err)
-		return
-	}
-	plain, err := s.openStoredSecret(tn.Team(), sec)
-	if err != nil {
-		s.writeInternalError(w, r, "open a claim's secret", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, secretJSON{
-		Name: sec.Name, Value: plain, Pipeline: sec.Pipeline, Masked: sec.Masked, Shared: sec.Shared,
-		CreatedAt: sec.CreatedAt.Unix(), UpdatedAt: sec.UpdatedAt.Unix(),
-	})
 }
 
 var errClaimOIDCUnavailable = errors.New(

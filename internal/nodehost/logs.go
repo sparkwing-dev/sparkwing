@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -149,7 +149,7 @@ func (s *LogSink) persist(rec sparkwing.LogRecord) error {
 	}
 	switch rec.Event {
 	case "job_annotation":
-		message := boundedRecord(attrString(rec.Attrs, "message", rec.Msg), "annotation")
+		message := limits.Record(attrString(rec.Attrs, "message", rec.Msg))
 		switch {
 		case message == "":
 			return nil
@@ -159,27 +159,13 @@ func (s *LogSink) persist(rec sparkwing.LogRecord) error {
 			return c.State.AppendNodeAnnotation(s.ctx, run, node, message)
 		}
 	case "job_summary":
-		markdown := boundedRecord(attrString(rec.Attrs, "markdown", rec.Msg), "summary")
+		markdown := limits.Record(attrString(rec.Attrs, "markdown", rec.Msg))
 		if rec.Step != "" {
 			return c.State.SetStepSummary(s.ctx, run, node, rec.Step, markdown)
 		}
 		return c.State.SetNodeSummary(s.ctx, run, node, markdown)
 	}
 	return nil
-}
-
-// safety: the controller refuses a JSON body over 1 MiB and escaping can grow
-// text up to sixfold, so a stored summary or annotation is bounded well below that.
-const maxRecordBytes = 128 << 10
-
-// safety: the record is masked before this cut, so no secret is split; the
-// text keeps its start, where its headline is, and says what it dropped.
-func boundedRecord(text, kind string) string {
-	if len(text) <= maxRecordBytes {
-		return text
-	}
-	kept := strings.ToValidUTF8(text[:maxRecordBytes-128], "")
-	return fmt.Sprintf("%s\n\n… (%s truncated: %d bytes elided)\n", kept, kind, len(text)-len(kept))
 }
 
 func attrString(attrs map[string]any, key, fallback string) string {

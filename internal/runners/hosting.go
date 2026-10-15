@@ -78,7 +78,7 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 		if err != nil {
 			return lease.Beat{}, err
 		}
-		return lease.Beat{CancelRequested: response.CancelRequested, Watched: response.Watched, WatchedNodes: slices.Clone(response.WatchedJobs)}, nil
+		return lease.Beat{CancelRequested: response.CancelRequested, CancelReason: response.CancelReason, Watched: response.Watched, WatchedNodes: slices.Clone(response.WatchedJobs)}, nil
 	}
 	// safety: A delayed award must prove its lease is still live before source acquisition.
 	beat, err := renew(ctx)
@@ -86,7 +86,7 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 		return fmt.Errorf("confirm runner award: %w", err)
 	}
 	if beat.CancelRequested {
-		return &lease.CancelError{Reason: "controller requested cancellation"}
+		return &lease.CancelError{Reason: beat.CancelReason}
 	}
 	observe := func(beat lease.Beat) {
 		if h.Observe != nil {
@@ -133,6 +133,7 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 		}
 		input.RunID, input.RequestHash = sealedRun.RunID, sealedRun.RequestHash
 		input.SealedRequest, input.Accepted = sealedRun.SealedRequest, sealedRun.Accepted
+		input.GrantedRunner = sealedRun.GrantedRunner
 		_, err = host.Run(unitCtx, input)
 		return err
 	}

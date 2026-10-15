@@ -9,10 +9,11 @@ import (
 
 // Command resolves npm without a shell; the caller supplies its environment and cancellation.
 func Command(args ...string) (*exec.Cmd, error) {
-	return npmCommand(runtime.GOOS, exec.LookPath, args...)
+	return ForPlatform(runtime.GOOS, exec.LookPath, args...)
 }
 
-func npmCommand(goos string, lookPath func(string) (string, error), args ...string) (*exec.Cmd, error) {
+// ForPlatform uses the caller's executable lookup without invoking a command shell.
+func ForPlatform(goos string, lookPath func(string) (string, error), args ...string) (*exec.Cmd, error) {
 	npm, err := lookPath("npm")
 	if err != nil {
 		return nil, err

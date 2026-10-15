@@ -203,20 +203,6 @@ func (s *Store) NodeLogSegments(ctx context.Context, l NodeLog) (_ []NodeLogSegm
 	return out, rows.Err()
 }
 
-// PrunableNodeLogs lists a team's log records of finished runs, least
-// recently written first, which is the order a team past its storage
-// share loses them in.
-func (s *Store) PrunableNodeLogs(ctx context.Context, team Team, limit int) (_ []NodeLog, err error) {
-	rows, err := s.query(ctx, `SELECT `+nodeLogColumnsOf("l")+` FROM node_logs l
-  JOIN runs r ON r.team = l.team AND r.id = l.run_id
- WHERE l.team = ? AND r.status IN (?, ?, ?)
- ORDER BY l.updated_at LIMIT ?`, string(team), "success", runStatusFailed, runStatusCancelled, limit)
-	if err != nil {
-		return nil, err
-	}
-	return collectNodeLogs(rows)
-}
-
 // MarkNodeLogSealed records that the attempt's manifest exists, with
 // the bytes its segments hold.
 func (s *Store) MarkNodeLogSealed(ctx context.Context, l NodeLog, storedBytes int64, now time.Time) error {

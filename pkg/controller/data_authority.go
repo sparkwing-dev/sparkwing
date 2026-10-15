@@ -1,0 +1,71 @@
+package controller
+
+import (
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+)
+
+func dataForbidden() *apierr.Error {
+	return &apierr.Error{Code: apierr.Forbidden, Message: "data authority does not match the authenticated scope", Details: map[string]any{"reason": "binding"}}
+}
+
+func validateDataAuthority(a capability.Authorized, authority blob.Authority) error {
+	c := a.Principal.Capability
+	scope := c.Data
+	if scope == nil || scope.RepositoryKey == "" || c.Audience != capability.Controller || c.Team == "" || a.Target.Team != c.Team ||
+		a.Principal.Authority.ID == "" || authority.CapabilityRef == "" || authority.Principal == "" ||
+		string(authority.Repo) != scope.RepositoryKey || a.Access.Binding != capability.BindData || a.ResultReplay || a.LogTailAttempt != 0 {
+		return dataForbidden()
+	}
+	if authority.Attempt.Set && !dataAttemptMatches(authority.Attempt.Value, c.Team, scope) {
+		return dataForbidden()
+	}
+	if scope.Use == capability.DataRemoteCache && authority.Attempt.Set {
+		return dataForbidden()
+	}
+	if !authority.Upload.Set {
+		return nil
+	}
+	i := authority.Upload.Value
+	if scope.Use == capability.DataRemoteCache || scope.Use == capability.DataExpansion || i.Team != c.Team || i.RunID == "" ||
+		i.RunID != scope.RunID || i.Principal != authority.Principal || i.CapabilityRef != authority.CapabilityRef ||
+		scope.WriteRef == "" || authority.Ref.Scope.Ref != scope.WriteRef || c.Delivery == capability.DeliveryBootstrap {
+		return dataForbidden()
+	}
+	switch i.Kind {
+	case blob.UploadJob:
+		if scope.Use != capability.DataClaim || c.Unit != capability.UnitNode || !i.Attempt.Set || i.Unit.Set || i.Attempt != authority.Attempt ||
+			!dataAttemptMatches(i.Attempt.Value, c.Team, scope) || a.Binding.Kind != capability.BindingNode ||
+			a.Binding.RunID != i.RunID || a.Binding.NodeID != i.Attempt.Value.NodeID || a.Binding.Attempt != i.Attempt.Value.Attempt || a.Binding.Generation != i.Attempt.Value.Generation {
+			return dataForbidden()
+		}
+	case blob.UploadOwnerUnit:
+		unit := i.Unit.Value
+		if scope.Use != capability.DataClaim || i.Attempt.Set || authority.Attempt.Set || !i.Unit.Set || unit.ID == "" ||
+			unit.ID != c.UnitID || unit.Generation <= 0 || unit.Generation != a.Binding.Generation || a.Binding.RunID != i.RunID ||
+			!dataOwnerKind(c.Unit, unit.Kind) {
+			return dataForbidden()
+		}
+	case blob.UploadPublication:
+		if scope.Use != capability.DataPublish || i.Unit.Set || i.Attempt != authority.Attempt || c.Binding.Kind != capability.BindingRun || c.Binding.RunID != i.RunID ||
+			i.Attempt.Set && !dataAttemptMatches(i.Attempt.Value, c.Team, scope) {
+			return dataForbidden()
+		}
+	default:
+		return dataForbidden()
+	}
+	return nil
+}
+
+func dataAttemptMatches(attempt runspec.AttemptIdentity, team string, scope *capability.DataScope) bool {
+	return attempt.Team == team && attempt.RunID != "" && attempt.RunID == scope.RunID && attempt.NodeID != "" && attempt.Attempt > 0 && attempt.Generation > 0 &&
+		(scope.NodeID == "" || attempt.NodeID == scope.NodeID) && (scope.Attempt == 0 || attempt.Attempt == scope.Attempt) &&
+		(scope.Generation == 0 || attempt.Generation == scope.Generation)
+}
+
+func dataOwnerKind(unit capability.UnitKind, upload blob.UploadUnitKind) bool {
+	return unit == capability.UnitTrigger && upload == blob.UploadTriggerUnit || unit == capability.UnitPlan && upload == blob.UploadPlanUnit ||
+		unit == capability.UnitEval && upload == blob.UploadEvalUnit
+}

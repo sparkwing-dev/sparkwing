@@ -48,7 +48,7 @@ func TestManagedRunnerCompositionSeparatesClaimantAndHeldTransport(t *testing.T)
 		Controller: client.EngineOptions{URL: "http://private", HTTP: transport, Bearer: func(context.Context) (string, error) { return "root", nil }},
 		Loop:       LoopConfig{Version: "v0.10.0", MaxConcurrent: 1, MaxClaims: 1}, Versions: runtimePolicy{index: index}, Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner},
 		Hosting: Hosting{
-			Lease: time.Minute, Interval: time.Second,
+			ControllerURL: "http://private", HTTP: transport, Lease: time.Minute, Interval: time.Second,
 			NewController: func(options client.EngineOptions) (controllerwire.Controller, error) {
 				bearer, err := options.Bearer(t.Context())
 				want := "root"
@@ -74,6 +74,7 @@ func TestManagedRunnerCompositionSeparatesClaimantAndHeldTransport(t *testing.T)
 			},
 		},
 	}
+	config.NewController = config.Hosting.(Hosting).NewController
 	runner, err := NewManagedRunner(t.Context(), config)
 	if err != nil {
 		t.Fatal(err)
