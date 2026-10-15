@@ -916,15 +916,22 @@ public key compiled into the binary and verifies the detached
 network beyond fetching the asset, its detached signature, `SHA256SUMS`,
 and `SHA256SUMS.sig`. It
 then checks the download against the signed digest. A signature covers
-bytes, not a tag, so it also runs the staged binary's
-`version -o json --offline` and refuses one that reports a version other
-than the requested release. It then installs atomically,
+bytes, not a tag, so it also reads the staged binary's embedded build
+identity without executing it and refuses a version other than the requested
+release. It then installs atomically,
 and re-hashes the installed file, requiring it to equal the verified
 digest. macOS binaries are ad-hoc-codesigned by the release *before* the
 manifest is hashed, so the verified bytes install unchanged -- nothing is
 mutated after verification. A signature, digest, download, or install
 failure is terminal: the updater never falls back to `go install`, and a
 post-install mismatch restores the prior binary and fails loudly.
+
+The command refreshes managed schedule units and the installed local-controller
+service after installation. A success receipt confirms both steps. If the
+refresh fails, the diagnostic names the installed CLI version and the retry
+command. A build without managed-unit integration refuses before replacement.
+`sparkwing update --dry-run` reads release metadata without installing software
+or touching services.
 
 The signing key is release machinery, not per-user configuration:
 

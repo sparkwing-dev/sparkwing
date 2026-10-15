@@ -32,6 +32,7 @@ func TestSurfaceGrammarContract(t *testing.T) {
 	}
 	for _, command := range []string{
 		"cluster", "cloud", "configure", "serve", "crons", "runs bounce", "runs consumer", "debug rerun",
+		"update --cli", "update --check", "update --sdk",
 		"runs list --limit 0", "runs list --node build", "runs status r1", "run check --unknown", "run check --profile prod",
 	} {
 		if _, err := clisurface.Parse("sparkwing", strings.Fields(command)); err == nil {
@@ -42,6 +43,19 @@ func TestSurfaceGrammarContract(t *testing.T) {
 		inv, err := clisurface.Parse("sparkwing", append(strings.Fields(command), "--", "--profile", "argument"))
 		if err != nil || inv.Value("profile") != "prod" || inv.Pipeline != "check" || !reflect.DeepEqual(inv.Args, []string{"--profile", "argument"}) {
 			t.Fatalf("trigger profile position: %#v %v", inv, err)
+		}
+	}
+}
+
+func TestSurfaceRemovedClientRecoveryAPIs(t *testing.T) {
+	clientType := reflect.TypeFor[*client.Client]()
+	for _, name := range []string{
+		"PendingNodeBounce", "ConsumeNodeBounce", "ResetNodeForAutoRetry",
+		"ListCrons", "GetCron", "PutCronRepo", "DeleteCronRepo", "PauseCron", "ResumeCron",
+		"DisarmCron", "RunCronNow", "SetCronOverride", "ClearCronOverride",
+	} {
+		if _, found := clientType.MethodByName(name); found {
+			t.Errorf("removed client API remains: %s", name)
 		}
 	}
 }

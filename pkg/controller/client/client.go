@@ -1261,12 +1261,6 @@ func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error 
 	return c.post(ctx, path, nil, http.StatusNoContent, nil)
 }
 
-func (c *Client) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/auto-retry/reset",
-		url.PathEscape(runID), url.PathEscape(nodeID))
-	return c.post(ctx, path, nil, http.StatusNoContent, nil)
-}
-
 // RevokeNodeReady atomically clears ready_at IFF the node is not
 // currently claimed. Returns true on success; false means a warm
 // runner claimed the node in the meantime.
@@ -1615,10 +1609,6 @@ func (c *Client) post(ctx context.Context, path string, body any, wantStatus int
 
 func (c *Client) put(ctx context.Context, path string, body any, wantStatus int, out any) error {
 	return c.sendJSON(ctx, http.MethodPut, path, body, wantStatus, out)
-}
-
-func (c *Client) deleteJSON(ctx context.Context, path string, wantStatus int, out any) error {
-	return c.sendJSON(ctx, http.MethodDelete, path, nil, wantStatus, out)
 }
 
 func (c *Client) sendJSON(ctx context.Context, method, path string, body any, wantStatus int, out any) error {

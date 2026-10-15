@@ -22,7 +22,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -263,8 +262,6 @@ func hostedBounces(state StateBackend) nodehost.Bounces {
 	switch s := state.(type) {
 	case localState:
 		return s.st
-	case *client.Client:
-		return s
 	}
 	return nil
 }

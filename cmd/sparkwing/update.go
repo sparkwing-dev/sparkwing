@@ -14,7 +14,6 @@ import (
 	"runtime"
 	"time"
 
-	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
@@ -36,43 +35,6 @@ var (
 	updateBaseURL         = defaultUpdateAssetBase
 	updateVerifyKey       ed25519.PublicKey
 )
-
-func runUpdate(args []string) error {
-	fs := flag.NewFlagSet(cmdUpdate.Path, flag.ContinueOnError)
-	cli := fs.Bool("cli", false, "update the CLI binary (the only target; the flag is optional)")
-	check := fs.Bool("check", false, "compare the selected target without changing it")
-	force := fs.Bool("force", false, "allow CLI downgrades")
-	version := fs.String("version", "", "target release tag; omit for latest published release")
-	overrideHold := fs.Bool("override-hold", false, "cross an operator CLI version hold")
-	output := fs.StringP("output", "o", "", "pretty | json | plain")
-	if err := parseAndCheck(cmdUpdate, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("update: unexpected positional %q", fs.Arg(0))
-	}
-	if fs.Changed("cli") && !*cli {
-		return errors.New("update: --cli=false selects nothing; to bump this project's SDK pin use `sparkwing repos update --in-place`")
-	}
-	if fs.Changed("version") && !validUpdateVersion(*version) {
-		return errors.New("update: --version must be a canonical release tag such as v0.48.1; omit it for latest")
-	}
-	mode, err := resolveOutputFormat(*output, cmdUpdate.Path)
-	if err != nil {
-		return err
-	}
-	if *check {
-		return runUpdateCheck("cli", *version, *force, *overrideHold, mode)
-	}
-	result, err := updateBinary(*version, *force, *overrideHold)
-	if err != nil {
-		return err
-	}
-	return writeUpdateReceipt(os.Stdout, result, mode)
-}
 
 func validUpdateVersion(version string) bool {
 	return semver.IsValid(version) && semver.Canonical(version) == version
@@ -96,11 +58,6 @@ func classifyDowngrade(current, resolved string) downgradeKind {
 		return downgradeNeedsForce
 	}
 	return downgradeRebaseline
-}
-
-func runUpdateBinary(version string, force, overrideHold bool) error {
-	_, err := updateBinary(version, force, overrideHold)
-	return err
 }
 
 func updateBinary(version string, force, overrideHold bool) (updateReceipt, error) {

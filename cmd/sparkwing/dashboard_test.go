@@ -26,10 +26,12 @@ func (f *dashboardLifecycleFake) StartDashboard(_ context.Context, options wingd
 	f.options = options
 	return f.status, f.err
 }
+
 func (f *dashboardLifecycleFake) Stop(context.Context) error {
 	f.calls = append(f.calls, "stop")
 	return f.err
 }
+
 func (f *dashboardLifecycleFake) Status(context.Context) (wingd.LocalStatus, error) {
 	f.calls = append(f.calls, "status")
 	return f.status, f.err
@@ -47,6 +49,7 @@ func (f *dashboardUnitsFake) InstallController(_ context.Context, options wingd.
 	f.options = options
 	return f.err
 }
+
 func (f *dashboardUnitsFake) UninstallController(context.Context) error {
 	f.calls = append(f.calls, "uninstall")
 	return f.err
@@ -181,7 +184,7 @@ func TestDashboardPreservesFailuresWithoutSuccessReceipt(t *testing.T) {
 
 func TestDashboardMissingRuntimeFailsWithoutLegacyServiceFallback(t *testing.T) {
 	var output bytes.Buffer
-	err := runDashboardCommand(t.Context(), []string{"start"}, &output, "linux", resolveDashboardServices)
+	err := runDashboardCommand(t.Context(), []string{"start"}, &output, "linux", resolveLocalServices)
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || output.Len() != 0 {
 		t.Fatalf("error=%v output=%s", err, &output)

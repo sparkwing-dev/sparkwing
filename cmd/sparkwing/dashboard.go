@@ -28,11 +28,11 @@ type dashboardServices struct {
 func runDashboard(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return runDashboardCommand(ctx, args, os.Stdout, runtime.GOOS, resolveDashboardServices)
+	return runDashboardCommand(ctx, args, os.Stdout, runtime.GOOS, resolveLocalServices)
 }
 
-func resolveDashboardServices(context.Context) (dashboardServices, error) {
-	return dashboardServices{}, dashboardUnavailable("local controller runtime, managed units and log source")
+func resolveLocalServices(context.Context) (dashboardServices, error) {
+	return dashboardServices{}, &apierr.Error{Code: apierr.Unavailable, Message: "local controller integration is unavailable in this build", Hint: "local runtime, managed units and log source are required"}
 }
 
 func dashboardUnavailable(dependency string) error {
