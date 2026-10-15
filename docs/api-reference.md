@@ -19,6 +19,8 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/capabilities` | `public` |
 | `GET` | `/api/v1/capacity/profiles` | `runs.read` |
 | `GET` | `/api/v1/capacity/profiles/explain` | `runs.read` |
+| `POST` | `/api/v1/claims/exchange` | `claim.exchange` |
+| `POST` | `/api/v1/claims/{claim}/heartbeat` | `node.report` or `expansion.submit` |
 | `POST` | `/api/v1/concurrency/{key}/acquire` | `claim` or `runs.state` |
 | `POST` | `/api/v1/concurrency/{key}/cancel-waiter` | `claim` or `runs.state` |
 | `POST` | `/api/v1/concurrency/{key}/force-release` | `admin` |
@@ -31,7 +33,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/credits/card-payments` | `credits.grant` |
 | `POST` | `/api/v1/credits/card-refunds` | `credits.grant` |
 | `POST` | `/api/v1/credits/cards` | `credits.grant` |
-| `POST` | `/api/v1/credits/checkouts/closed` | `credits.grant` |
 | `POST` | `/api/v1/credits/freezes` | `credits.grant` |
 | `GET` | `/api/v1/credits/history` | `runs.read` |
 | `GET` | `/api/v1/credits/payments/{reference}` | `credits.grant` |
@@ -59,8 +60,8 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/gitcache/git/{path...}` | `admin` |
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |
-| `POST` | `/api/v1/launcher/claim` | `ScopeClaimsLaunch` |
-| `POST` | `/api/v1/launcher/sync` | `ScopeClaimsLaunch` |
+| `POST` | `/api/v1/launcher/claim` | `claims.launch` |
+| `POST` | `/api/v1/launcher/sync` | `claims.launch` |
 | `PUT` | `/api/v1/log-segments/{key...}` | `public` |
 | `DELETE` | `/api/v1/me` | `authenticated` |
 | `GET` | `/api/v1/me` | `authenticated` |
@@ -68,7 +69,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/me/identities` | `authenticated` |
 | `DELETE` | `/api/v1/me/identities/{provider}` | `authenticated` |
 | `GET` | `/api/v1/me/team-deletions` | `authenticated` |
-| `POST` | `/api/v1/nodes/claim` | `nodes.claim` |
 | `DELETE` | `/api/v1/operator/accounts/{account}` | `operator` |
 | `PUT` | `/api/v1/operator/credits/settings` | `operator` |
 | `DELETE` | `/api/v1/operator/github-app/installations/{installation}` | `operator` |
@@ -102,6 +102,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `PUT` | `/api/v1/pipelines/{name}/sizing/pin` | `node.report` |
 | `POST` | `/api/v1/pipelines/{name}/sizing/waits` | `node.report` |
 | `GET` | `/api/v1/queue` | `runs.read` |
+| `POST` | `/api/v1/runners/claim` | `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runners/github/exchange` | `public` |
 | `GET` | `/api/v1/runs` | `runs.read` |
 | `POST` | `/api/v1/runs` | `runs.write` or `children.start` |
@@ -131,7 +132,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/runs/{id}/logs/{node}/stream` | `logs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/activity` | `claim` or `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/attempt` | `claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim/input` | `claim` |
@@ -167,6 +167,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/runs/{id}/steps` | `runs.read` |
 | `GET` | `/api/v1/runs/{run}` | `runs.read` or `source.read` or `trigger.host` |
 | `POST` | `/api/v1/runs/{run}/cancel` | `runs.control` |
+| `POST` | `/api/v1/runs/{run}/claim` | `trigger.host` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{run}/finish` | `runs.state` or `data.write` |
 | `POST` | `/api/v1/runs/{run}/heartbeat` | `trigger.host` |
 | `GET` | `/api/v1/runs/{run}/jobs` | `runs.read` or `trigger.host` |
@@ -176,6 +177,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{run}/jobs/{job}/expansion` | `expansion.submit` |
 | `GET` | `/api/v1/runs/{run}/jobs/{job}/failure` | `data.read` |
 | `POST` | `/api/v1/runs/{run}/jobs/{job}/heartbeat` | `node.report` or `node.report` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/reconcile` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/annotations` | `node.report` or `node.report` or `data.write` |
 | `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/finish` | `node.report` or `node.report` or `data.write` |
 | `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/skip` | `node.report` or `node.report` or `data.write` |
@@ -240,14 +242,11 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/trends` | `runs.read` |
 | `GET` | `/api/v1/triggers` | `triggers.read` |
 | `POST` | `/api/v1/triggers` | `runs.write` |
-| `POST` | `/api/v1/triggers/claim` | `triggers.claim` |
 | `GET` | `/api/v1/triggers/spawned-child` | `triggers.read` |
 | `GET` | `/api/v1/triggers/{id}` | `triggers.read` or `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/triggers/{id}/claim` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/done` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/heartbeat` | `triggers.claim` |
 | `POST` | `/internal/downloads/charge` | `public` |
-| `POST` | `/internal/egress/totals` | `public` |
 | `POST` | `/internal/storage/commit` | `public` |
 | `POST` | `/internal/storage/release` | `public` |
 | `POST` | `/internal/storage/reserve` | `public` |

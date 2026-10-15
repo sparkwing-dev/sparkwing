@@ -149,7 +149,7 @@ func (s *scheduler) sourceOutput(ctx context.Context, prior *store.Node) (json.R
 func (s *scheduler) copyRetried(ctx context.Context, prior *store.Node, output json.RawMessage) error {
 	ctx, source, id := context.WithoutCancel(ctx), s.rehydrate.SourceRunID, prior.NodeID
 	if prior.ArtifactManifest != "" {
-		if err := s.run.State.SetNodeArtifactManifest(ctx, s.run.ID, id, prior.ArtifactManifest); err != nil {
+		if err := recordArtifactManifest(ctx, s.run.State, s.run.ID, id, prior.ArtifactManifest); err != nil {
 			return fmt.Errorf("copy source node %s artifact: %w", id, err)
 		}
 	}

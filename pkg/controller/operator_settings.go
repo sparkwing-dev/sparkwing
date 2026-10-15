@@ -23,9 +23,22 @@ type operatorSettingsStore interface {
 	SetStorageSettings(context.Context, store.StorageSettings) error
 	ListStorageQuotas(context.Context) ([]store.StorageQuota, error)
 	TopStorageTeams(context.Context, string, int) ([]store.StorageTeamUsage, error)
+	StorageTenant(context.Context, store.Team) (storageQuotaStore, error)
+}
+
+type storageQuotaStore interface {
 	SetStorageQuota(context.Context, store.StorageQuota) error
-	StorageQuotaFor(context.Context, string) (store.StorageQuota, error)
-	SetStorageAllowance(context.Context, string, int64) (store.StorageQuota, error)
+	StorageQuota(context.Context) (store.StorageQuota, error)
+	SetStorageAllowance(context.Context, int64) (store.StorageQuota, error)
+}
+
+type storeOperatorSettings struct {
+	*store.Store
+	*store.Operator
+}
+
+func (s storeOperatorSettings) StorageTenant(ctx context.Context, team store.Team) (storageQuotaStore, error) {
+	return s.ForTeam(ctx, team)
 }
 
 func (s *Server) handleOperatorObjectStore(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
@@ -45,7 +58,7 @@ func (s *Server) handleOperatorObjectStore(w http.ResponseWriter, r *http.Reques
 	return nil
 }
 
-var _ operatorSettingsStore = (*store.Store)(nil)
+var _ operatorSettingsStore = storeOperatorSettings{}
 
 func operatorSettingsError(err error) error {
 	if errors.Is(err, store.ErrInvalidInput) {

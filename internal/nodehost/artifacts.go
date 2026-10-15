@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -49,7 +50,7 @@ func artifactsLayer(cfg *Config, next Executor) Executor {
 		if err == nil {
 			// safety: an unrecorded manifest would leave consumers staging nothing
 			// without error, so failing to record it fails the producer.
-			err = n.Run.State.SetNodeArtifactManifest(context.WithoutCancel(ctx), n.Run.ID, n.Plan.ID, digest)
+			err = recordArtifactManifest(context.WithoutCancel(ctx), n.Run.State, n.Run.ID, n.Plan.ID, digest)
 		}
 		if err != nil {
 			return artifactFailure("publish artifacts", err)
@@ -59,6 +60,16 @@ func artifactsLayer(cfg *Config, next Executor) Executor {
 		}
 		return res
 	}
+}
+
+func recordArtifactManifest(ctx context.Context, state storage.StateStoreOld, run, node, digest string) error {
+	writer, ok := baseState(state).(interface {
+		SetNodeArtifactManifest(context.Context, string, string, string) error
+	})
+	if !ok {
+		return errors.New("artifact manifests require the job result transaction")
+	}
+	return writer.SetNodeArtifactManifest(ctx, run, node, digest)
 }
 
 func artifactFailure(what string, err error) Result {

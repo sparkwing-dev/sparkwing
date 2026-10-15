@@ -44,7 +44,6 @@ type CacheGrantResponse struct {
 	Team      string
 	ExpiresAt time.Time
 }
-func CacheObjectMaxAge(team string) time.Duration
 const CardBillingCapability = "card-billing-v1"
 const CardBillingInterval = 30 * time.Second
 const CardNotTrustedCode = "card_not_trusted"
@@ -60,7 +59,7 @@ type Cipher interface {
 }
 const ClaimCacheGrantTTL = 5 * time.Minute
 const ClaimPollInterval = 500 * time.Millisecond
-const CloudRetentionDays = 30
+const CloudRetentionDays = 90
 func CompliantClaimPollsPerMinute() int
 const ComputeLimitRefusedCode = "compute_limit"
 const ComputeLimitRetryAfterSeconds = 5
@@ -145,13 +144,16 @@ type Endpoint struct {
 	Pattern        string
 	Authentication capability.Authentication
 	Decode         func(*http.Request) (capability.RequestEvidence, error)
-	Verify         func(*http.Request) error
-	Handle         func(http.ResponseWriter, *http.Request, capability.Authorized) error
+
+	ResolveTarget func(capability.Principal, capability.Target) (capability.Target, error)
+	Verify        func(*http.Request) error
+	Handle        func(http.ResponseWriter, *http.Request, capability.Authorized) error
 }
 type EngineController struct {
 	Store        *store.Store
 	RunnerPolicy RunnerAdmissionPolicy
 	Units        UnitRenewer
+	Launcher     LauncherSyncReader
 
 	ResolveTenant func(context.Context, store.Team) (RunTransactions, error)
 
@@ -229,6 +231,9 @@ const GitHubActionsLabel = "github-actions"
 func GitHubRunnerWorkflow(controllerURL, team string) string
 const IdleClaimPollJitterFactor = 1.25
 func IntakeForStore(a capability.Authorized, body controllerwire.CreateRunRequest) (store.IntakeRequest, error)
+type LauncherSyncReader interface {
+	ReadLauncherSync(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
+}
 type LegacyCipher interface {
 	OpenLegacy(name, scope string, shared, masked bool, envelope string) (string, error)
 }
@@ -513,7 +518,6 @@ type TrendPoint struct {
 type UnitRenewer interface {
 	RenewUnit(context.Context, string, bool) (store.LeaseBeat, error)
 }
-const UnknownCheckoutCode = "unknown_checkout"
 const UnknownPaymentCode = "unknown_payment"
 const UnpricedCPUClassCode = "unpriced_cpu_class"
 const UnsupportedRouteError = "unsupported"
@@ -575,3 +579,4 @@ func (r *setComputeLimitsReq) UnmarshalJSON(raw []byte) error
 func (r *setCreditSettingsReq) UnmarshalJSON(raw []byte) error
 func (r *statusRecorder) Unwrap() http.ResponseWriter
 func (r *statusRecorder) WriteHeader(code int)
+func (s storeOperatorSettings) StorageTenant(ctx context.Context, team store.Team) (storageQuotaStore, error)

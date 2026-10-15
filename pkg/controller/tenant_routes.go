@@ -69,7 +69,6 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/credits/card-payments":       resNone,
 	"POST /api/v1/credits/card-refunds":        resNone,
 	"POST /api/v1/credits/cards":               resNone,
-	"POST /api/v1/credits/checkouts/closed":    resNone,
 	"POST /api/v1/credits/freezes":             resNone,
 	"GET /api/v1/credits/payments/{reference}": resPayment,
 	"POST /api/v1/credits/reversals":           resNone,
@@ -94,17 +93,12 @@ var tenantRoutes = map[string]tenantResource{
 
 	"POST /api/v1/invitations/{id}/accept": resOwnInvitation,
 
-	"POST /api/v1/launcher/claim": resNone,
-	"POST /api/v1/launcher/sync":  resNone,
-
 	"DELETE /api/v1/me":                       resNone,
 	"GET /api/v1/me":                          resNone,
 	"POST /api/v1/me/active-team":             resNone,
 	"GET /api/v1/me/identities":               resNone,
 	"DELETE /api/v1/me/identities/{provider}": resOwnIdentity,
 	"GET /api/v1/me/team-deletions":           resNone,
-
-	"POST /api/v1/nodes/claim": resNone,
 
 	"GET /api/v1/pipelines":               resNone,
 	"GET /api/v1/pipelines/{name}/latest": resPipeline,
@@ -136,7 +130,6 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/runs/{id}/logs/search":                              resRun,
 	"POST /api/v1/runs/{id}/nodes":                                   resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/activity":                 resRun,
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest":        resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/attempt":                  resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/claim":                    resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input":              resRun,
@@ -233,9 +226,7 @@ var tenantRoutes = map[string]tenantResource{
 
 	"GET /api/v1/triggers":                 resNone,
 	"POST /api/v1/triggers":                resNone,
-	"POST /api/v1/triggers/claim":          resNone,
 	"GET /api/v1/triggers/{id}":            resTrigger,
-	"POST /api/v1/triggers/{id}/claim":     resTrigger,
 	"POST /api/v1/triggers/{id}/done":      resTrigger,
 	"POST /api/v1/triggers/{id}/heartbeat": resTrigger,
 	"GET /api/v1/triggers/spawned-child":   resNone,

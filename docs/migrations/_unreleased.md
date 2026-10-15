@@ -1,5 +1,37 @@
 # Migrating to the next release
 
+## Work claims
+
+Use `POST /api/v1/runners/claim` with the shared claim request instead of the
+separate trigger and job queue endpoints. Every requested kind needs its own
+grant. The response contains a private `claim`, or an empty object when no work
+matches. Enrollment supplies the runner identity, repository scope and pools.
+The body supplies labels, current availability and the runner version.
+
+`POST /api/v1/runs/{run}/claim` acquires the named trigger, including a reserved
+here run. It requires the single `trigger` kind. `POST /api/v1/launcher/claim`
+requires launcher authority and accepts plan, eval and job kinds. Configure the
+engine controller's verified runner policy and the store's enrollment resolver
+before accepting claims. Existing holders may renew while software policy
+blocks new awards.
+
+Send a pod bootstrap to `POST /api/v1/claims/exchange` with an empty JSON object.
+It yields the original award's full in-memory capability once and consumes the
+bootstrap. Renew through `POST /api/v1/claims/{claim}/heartbeat`, where `claim`
+is the award's unit ID. Renewal cannot start a job without its start transition.
+
+Claim, exchange and reconciliation responses carry bearer material once. Do not
+retry a lost response automatically. The unused award recovers through its lease.
+Launcher sync uses `{observed:[{unit_id,job_name,node_uid}]}` and returns awards
+with empty capabilities plus job names to remove. Embedded controllers must
+supply `EngineController.Launcher`. Missing snapshot wiring returns
+`policy_missing` and exposes no award.
+
+The standalone artifact-manifest write is removed. Publish manifests through
+record and result commits. Legacy remote state clients cannot publish a manifest
+separately. Local state writers retain their existing direct persistence while
+the host moves to result transactions.
+
 ## Data reads
 
 `POST /api/v1/data/download` accepts `{"digest":"<sha256>"}` through the shared
@@ -124,6 +156,32 @@ the run's local publication authority. Caller-supplied holder and generation
 headers grant no authority. Step finish accepts `passed`, `failed` and
 `cancelled`, plus an optional inner error with a code and masked message.
 Annotations and summaries accept at most 128 KiB of masked text.
+
+## Rate-table presence uses the settings snapshot
+
+`Store.CreditRateTableSet` is removed. Read `CreditSettings.RateTableSet` so the
+presence flag and prices come from the same settings snapshot.
+
+## Abandoned logs use tagged streams
+
+`Store.AbandonedNodeLogs` and the controller's old periodic node-log sweep are
+removed. `Operator.SealAbandonedLogStreams` closes existing execution streams as
+incomplete under the maintenance lease. Job attempts keep their 60-second final
+tail grace. Trigger, plan and eval streams use their own persisted unit fences.
+Sealing preserves committed segments and job outcomes. Published logs still
+require the publisher's final commit because they have no execution lease.
+
+## Source bundles use record reachability
+
+`Store.ClaimExpiredSourceBundles`, `Store.DeleteSourceBundleRows`,
+`Store.PruneExpiredUploads`, `store.DirectCacheMaxAge` and
+`controller.CacheObjectMaxAge` are removed. Cache listings no longer expire bytes
+by object age. Keep source bytes through blob records. Run
+`Operator.MaintainRetention` under the maintenance lease to expire records and
+release upload-ticket quota holds. Use `Operator.MarkBlobTombstones` and
+`Operator.CollectBlobTombstones` with the verified object backend for physical
+collection after the 24-hour grace. Rebuild pre-launch stores from the final
+schema. There is no old-row migration or compatibility adapter.
 
 ## Node logs reach the controller as segments
 

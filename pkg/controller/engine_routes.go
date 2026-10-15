@@ -286,7 +286,7 @@ func engineLookupError(err error) error {
 		}
 		return &apierr.Error{Code: code, Message: "state transition refused", Details: map[string]any{"reason": string(transition.Reason)}}
 	}
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
 		return &apierr.Error{Code: apierr.NotFound, Message: "resource not found"}
 	}
 	return err

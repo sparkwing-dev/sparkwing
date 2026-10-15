@@ -678,27 +678,6 @@ paths:
         "409": {description: The authority or reporting attempt changed.}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest:
-    parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
-    post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [nodes]
-      summary: Record the node's published-artifact manifest digest.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleSetNodeArtifactManifest.body
-              type: object
-              required: [manifest_digest]
-              properties:
-                manifest_digest: {type: string}
-      responses:
-        "204": {description: Stored.}
-
   /api/v1/runs/{id}/nodes/{nodeID}/metrics:
     parameters:
       - {$ref: "#/components/parameters/RunID"}
@@ -1288,47 +1267,6 @@ paths:
                     type: array
                     items: {$ref: "#/components/schemas/Trigger"}
 
-  /api/v1/triggers/claim:
-    post:
-      x-sparkwing-scope: triggers.claim
-      tags: [triggers]
-      summary: Atomically claim the oldest pending trigger.
-      description: |
-        Empty body claims any pending trigger. 204 when the queue is
-        empty.
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.claimTriggerReq
-              type: object
-              properties:
-                pipelines:
-                  type: array
-                  items: {type: string}
-                trigger_sources:
-                  type: array
-                  items: {type: string}
-                node_runner:
-                  type: string
-                  enum: [inprocess, k8s, warm]
-                  description: How the claimant runs the trigger's nodes; empty means inprocess. A metered credential claiming for inprocess nodes is refused with 403.
-                allow_repos:
-                  type: array
-                  items: {type: string}
-                  description: >-
-                    Repositories this runner's owner allows it to build, as host/path patterns where '*' matches within one path segment. A list that is present, even empty, confines the claim to runs from matching repositories; an absent list claims as before.
-                platform: {$ref: "#/components/schemas/ClaimPlatform"}
-                resources: {$ref: "#/components/schemas/ClaimResources"}
-      responses:
-        "200":
-          description: Claimed trigger.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/Trigger"}
-        "204": {description: Queue empty.}
-
   /api/v1/triggers/{id}:
     parameters: [{$ref: "#/components/parameters/TriggerID"}]
     get:
@@ -1830,80 +1768,6 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/nodes/claim:
-    post:
-      x-sparkwing-scope: nodes.claim
-      tags: [nodes]
-      summary: Claim the oldest ready, unclaimed node matching labels.
-      description: |
-        The claim binds to the claiming token -- its prefix segment and
-        principal name -- as well as to `holder_id`. The per-node write
-        routes and the execution view then admit that token alone while
-        the lease is unexpired; another runner token gets `403` with
-        `"error": "claim_required"`, even one carrying the same principal
-        name. `lease_secs` is clamped to the server cap of 10 minutes.
-        A node sealed under an execution policy is never claimed here.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.claimNodeReq
-              type: object
-              required: [holder_id]
-              properties:
-                holder_id: {type: string}
-                lease_secs: {type: integer}
-                labels:
-                  type: array
-                  items: {type: string}
-                headroom:
-                  allOf: [{$ref: "#/components/schemas/AgentHeadroom"}]
-                  nullable: true
-                  description: >-
-                    The runner's free capacity at claim time, which the agents view reports back. Omit it when the runner engages no local admission daemon.
-                capacity:
-                  allOf: [{$ref: "#/components/schemas/ClaimCapacity"}]
-                  nullable: true
-                  description: >-
-                    The runner's own slot ceiling and in-flight claim count, which local-first placement reads to tell a saturated runner from an idle one. Omit it to advertise no ceiling, which counts as having room.
-                allow_repos:
-                  type: array
-                  items: {type: string}
-                  description: >-
-                    Repositories this runner's owner allows it to build, as host/path patterns where '*' matches within one path segment. A list that is present, even empty, confines the claim to runs from matching repositories; an absent list claims as before.
-                platform: {$ref: "#/components/schemas/ClaimPlatform"}
-                resources: {$ref: "#/components/schemas/ClaimResources"}
-      responses:
-        "200":
-          description: Claimed node.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - {$ref: "#/components/schemas/Node"}
-                  - x-sparkwing-go-partial: pkg/store.Node
-                    type: object
-                    description: >-
-                      Exact claim fence returned only to the authenticated runner that won this claim.
-                    properties:
-                      claimed_by: {type: string}
-                      claim_generation: {type: integer, format: int64}
-                      claim_membership_id: {type: string}
-                      reservation_id: {type: string}
-                      claim_token:
-                        type: string
-                        description: >-
-                          The claim's token, returned once. The node's process authenticates with it in place of the claiming credential; it reaches only the claim's run, writes only to this node, and stops working when the claim ends.
-        "204": {description: Nothing to claim.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "402":
-          description: >-
-            The claiming token is metered and the credit balance or a spend limit does not cover a minute of its time. The node stays ready and the waiting run records why.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CreditsRefused"}
-
   /api/v1/tokens:
     post:
       x-sparkwing-scope: admin
@@ -1988,49 +1852,6 @@ paths:
               schema: {$ref: "#/components/schemas/CreateTokenResponse"}
         "403": {description: "The token is the checkout service's; replace the controller's `credits-token` credential instead."}
 
-  /api/v1/launcher/sync:
-    post:
-      x-sparkwing-scope: ScopeClaimsLaunch
-      tags: [nodes]
-      summary: Reconcile a launcher's Jobs with their claims.
-      description: >-
-        The launcher names the claim each of its Jobs was built for and hears `delete` for a claim that ended or whose run is being cancelled, and `keep` otherwise. A job with `release` set hands back a claim whose pod never renewed it: the node returns to the queue with no attempt spent and its reservation refunded, and is claimable again 5 minutes later, showing `waiting for Cloud capacity` with a `capacity_wait` event.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.launcherSyncReq
-              type: object
-              required: [jobs]
-              properties:
-                jobs:
-                  type: array
-                  maxItems: 1000
-                  items: {$ref: "#/components/schemas/LaunchJob"}
-      responses:
-        "200":
-          description: What to do with each Job.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.launcherSyncResp
-                type: object
-                properties:
-                  jobs:
-                    type: array
-                    items:
-                      x-sparkwing-go-type: pkg/store.LaunchJobResult
-                      type: object
-                      properties:
-                        run_id: {type: string}
-                        node_id: {type: string}
-                        generation: {type: integer, format: int64}
-                        state: {type: string, enum: [keep, delete]}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
   /api/v1/runs/{id}/children:
     parameters: [{$ref: "#/components/parameters/RunID"}]
     post:
@@ -2108,53 +1929,6 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {description: The node has not finished.}
-
-  /api/v1/launcher/claim:
-    post:
-      x-sparkwing-scope: ScopeClaimsLaunch
-      tags: [nodes]
-      summary: Claim a ready node of a controller-dispatched run for a launcher Job.
-      description: >-
-        Claims a ready node of any team's controller-dispatched run whose runner selector the Cloud runner image satisfies (its declared tools, the cloud class and location), reserves its credits, and mints the claim token the node's Job carries, in one transaction. Each call reads a bounded number of candidates in ready order, passing over nodes whose team cannot pay, and a call that finds none resumes the next call where it stopped, wrapping at the end of the queue; so the node claimed is not always the oldest ready one. The token lives `lifetime_secs` from the claim: `deadline_secs`, or less when the node declares a shorter timeout.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.launchClaimReq
-              type: object
-              required: [holder_id, deadline_secs]
-              properties:
-                holder_id: {type: string}
-                lease_secs: {type: integer}
-                deadline_secs: {type: integer, description: From 90 to 21600.}
-      responses:
-        "200":
-          description: The claim and its token.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/store.LaunchClaim
-                type: object
-                properties:
-                  team: {type: string}
-                  run_id: {type: string}
-                  node_id: {type: string}
-                  generation: {type: integer, format: int64}
-                  kind: {type: string, enum: [plan, work]}
-                  dispatch: {type: string, enum: [controller]}
-                  class:
-                    x-sparkwing-go-type: pkg/store.CPUClass
-                    type: object
-                    properties:
-                      cores: {type: integer, format: int64}
-                      memory_bytes: {type: integer, format: int64}
-                  token: {type: string}
-                  lifetime_secs: {type: integer, format: int64, description: "How long the token lives from the claim; the Job's deadline derives from this, not from a clock."}
-        "204": {description: No node is ready.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/auth/logout:
     post:
@@ -2822,41 +2596,6 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-
-  /api/v1/triggers/{id}/claim:
-    parameters: [{$ref: "#/components/parameters/TriggerID"}]
-    post:
-      x-sparkwing-scope: triggers.claim
-      tags: [triggers]
-      summary: Claim one named trigger.
-      description: |
-        Takes the lease on a trigger the caller already chose, unlike
-        `/api/v1/triggers/claim` which picks the next queued one. The
-        caller is recorded as the claimant, so the claim proves ownership of
-        the run the trigger creates. 404 means the trigger is gone or another
-        consumer holds it, so the caller moves on to its next candidate.
-      requestBody:
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.claimSpecificTriggerReq
-              type: object
-              properties:
-                lease_nanos: {type: integer, format: int64}
-                node_runner:
-                  type: string
-                  enum: [inprocess, k8s, warm]
-                  description: How the claimant runs the trigger's nodes; empty means inprocess. A metered credential claiming for inprocess nodes is refused with 403.
-      responses:
-        "200":
-          description: The claimed trigger.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/Trigger"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/claim/input:
@@ -3550,48 +3289,6 @@ paths:
         "404": {description: "No paid grant carries the payment id, or the team is not registered."}
         "409": {description: "The dispute is already held for another payment or team (`dispute_conflict`)."}
 
-  /api/v1/credits/checkouts/closed:
-    post:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Record a checkout session that ended unpaid.
-      description: |
-        The checkout service reports a session whose delayed payment failed
-        (`failed`) or that expired unpaid (`expired`). An operator credential
-        without the route's scope is refused. The report closes the
-        open, unpaid checkout `team` holds for the session, records a
-        `checkout.failed` or `checkout.expired` business event and stops the
-        checkout counting against the balance cap. A paid or already closed
-        checkout is left as it is and answers `closed: false`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.checkoutClosedReq
-              type: object
-              required: [team, session_id, outcome]
-              properties:
-                team: {type: string, description: The team the session was opened for.}
-                session_id: {type: string, description: The payment processor's session id.}
-                outcome: {type: string, enum: [failed, expired]}
-      responses:
-        "200":
-          description: The recorded outcome.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.checkoutClosedJSON
-                type: object
-                properties:
-                  team: {type: string}
-                  session_id: {type: string}
-                  outcome: {type: string}
-                  closed: {type: boolean, description: Whether this report closed the checkout.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: "The team is not registered, or holds no checkout for the session (`unknown_checkout`)."}
-
   /api/v1/credits/units:
     get:
       x-sparkwing-scope: credits.grant
@@ -3931,18 +3628,13 @@ paths:
       tags: [storage]
       summary: Set one team's storage allowance.
       description: |
-        `principal` is the token principal the quota is filed under, 1 to 128
-        characters of letters, digits, or `-_.:@`; anything else is refused.
+        `team` names a registered team. An unknown team returns 404.
         Naming a `tier` and leaving every limit zero takes that tier's
         limits, so a team moves between tiers without restating three
         numbers. A limit of zero is unbounded, so a quota may cap bytes
         without capping objects. This route does not take the retained-storage
         allowance and never changes it; its own route writes that. The answer
         is the stored quota.
-
-        Run events are charged their payload bytes and a published artifact
-        manifest is charged one object, each inside the transaction that
-        writes it, so a refused write is never stored and never billed.
       requestBody:
         required: true
         content:
@@ -3967,11 +3659,10 @@ paths:
       tags: [storage]
       summary: Set how many retained bytes one team keeps.
       description: |
-        The allowance is how many retained bytes the team asked to keep. The
-        hourly storage pass expires its oldest finished runs above the
-        allowance, so the allowance is both what the team keeps and the most
-        it pays for, and zero keeps everything. The other quota limits are
-        left where they stand. The answer is the stored quota.
+        The allowance caps the retained byte count priced by storage billing.
+        Zero leaves it uncapped. Other quota limits are preserved, including
+        default-tier limits when this creates the team's first quota row.
+        The answer is the stored quota.
       requestBody:
         required: true
         content:
@@ -3994,9 +3685,10 @@ paths:
         Writes every field, so a caller reads `GET /api/v1/operator/object-store` first,
         changes what it means to change, and writes the result back. A
         retention window is a whole number of days and zero is unbounded; an
-        hourly timer removes the events and per-node metric samples of
-        finished runs once they pass their window, in bounded batches, and
-        leaves a run that is still going untouched however old its rows.
+        leased hourly pass removes expired runs and their operational children
+        in bounded batches while preserving each pipeline's newest success.
+        Metrics have their own window. Financial evidence and recorded usage
+        survive run retention.
 
         `database_alarm_bytes` of zero raises no alarm. Passing it logs a
         warning and sets `database.alarm` on `GET /api/v1/health`, which
@@ -5543,32 +5235,6 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "429": {description: "The team's day is spent; Retry-After names the seconds until midnight UTC."}
-
-  /internal/egress/totals:
-    post:
-      x-sparkwing-scope: public
-      tags: [storage]
-      summary: Keep a service's day and month egress totals.
-      description: |
-        Only the cache's `storage.count` service token reaches it. Each
-        stored total keeps the larger of itself and what the call reports, and the answer is
-        the stored totals, so a restarted cache reports zeros to read back
-        where its day and month stood.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EgressTotals"
-      responses:
-        "200":
-          description: The stored totals.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/EgressTotals"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/team/billing:
     get:
@@ -7376,6 +7042,186 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/CapabilityFailure"}
 
+  /api/v1/runners/claim:
+    post:
+      x-sparkwing-scope: nodes.claim or triggers.claim
+      tags: [runs]
+      summary: Claim the next eligible trigger or job.
+      description: Enrollment supplies identity and scope. Every requested kind needs its grant. Awards carry a bearer once. No match returns an empty object. Do not retry a lost response automatically.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineClaimRequest"}
+      responses:
+        "200":
+          description: Claim the next eligible trigger or job.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineClaimResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or work fence changed before commit.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/launcher/claim:
+    post:
+      x-sparkwing-scope: claims.launch
+      tags: [runs]
+      summary: Claim eligible plan, eval or job work for a launcher.
+      description: Enrollment supplies identity and scope. Every requested kind needs its grant. Awards carry a bearer once. No match returns an empty object. Do not retry a lost response automatically.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineClaimRequest"}
+      responses:
+        "200":
+          description: Claim eligible plan, eval or job work for a launcher.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineClaimResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or work fence changed before commit.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{run}/claim:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: trigger.host or triggers.claim
+      tags: [runs]
+      summary: Claim the named trigger.
+      description: Enrollment supplies identity and scope. Every requested kind needs its grant. Awards carry a bearer once. No match returns an empty object. Do not retry a lost response automatically.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineClaimRequest"}
+      responses:
+        "200":
+          description: Claim the named trigger.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineClaimResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or work fence changed before commit.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/launcher/sync:
+    post:
+      x-sparkwing-scope: claims.launch
+      tags: [runs]
+      summary: Reconcile observed launcher Jobs.
+      description: The transactional snapshot supplies current awards and cleanup names. Returned awards have empty capabilities. Missing snapshot wiring returns policy_missing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineLauncherSyncRequest"}
+      responses:
+        "200":
+          description: Reconcile observed launcher Jobs.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineLauncherSyncResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or work fence changed before commit.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/claims/exchange:
+    post:
+      x-sparkwing-scope: claim.exchange
+      tags: [runs]
+      summary: Consume a bootstrap and return its original award.
+      description: The authenticated bootstrap selects the run, unit and fence. The replacement capability is delivered once. A consumed bootstrap cannot be reused.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        "200":
+          description: Consume a bootstrap and return its original award.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineExchangeResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or work fence changed before commit.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/claims/{claim}/heartbeat:
+    parameters:
+      - in: path
+        name: claim
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: node.report or expansion.submit
+      tags: [runs]
+      summary: Renew the authenticated unit.
+      description: The path claim is the award unit ID. Executing records owner or eval execution. Job starts require the start transition.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineRenewalRequest"}
+      responses:
+        "200":
+          description: Renew the authenticated unit.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineRenewalResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or work fence changed before commit.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{run}/jobs/{job}/reconcile:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: nodes.claim
+      tags: [runs]
+      summary: Resolve the current scheduling decision for a job.
+      description: The store rechecks owner authority, source edges and persisted fences. Only a fresh execution award returns a bearer. Materialize-only misses return dispatch without claiming.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineReconcileRequest"}
+      responses:
+        "200":
+          description: Resolve the current scheduling decision for a job.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineReconcileResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or work fence changed before commit.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
 components:
   securitySchemes:
     bearerToken:
@@ -8033,7 +7879,7 @@ components:
       type: object
       description: Controller-wide storage policy. Zero is unbounded everywhere.
       properties:
-        event_retention_days: {type: integer, format: int64, description: Days a finished run's events are kept; 0 keeps them forever.}
+        run_retention_days: {type: integer, format: int64, description: Days a finished run and operational children are kept; 0 disables run expiration.}
         node_metric_retention_days: {type: integer, format: int64, description: Days a finished run's metric samples are kept; 0 keeps them forever.}
         database_alarm_bytes: {type: integer, format: int64, description: Size past which the controller warns; 0 raises no alarm.}
         default_tier: {type: string, description: free or paid; empty leaves a team without a quota row unlimited.}
@@ -8042,12 +7888,12 @@ components:
       type: object
       description: One team's storage allowance. A zero limit is unbounded.
       properties:
-        principal: {type: string, description: The token principal this quota is filed under.}
+        team: {type: string, description: The registered team this quota belongs to.}
         tier: {type: string, description: free or paid; supplies the limits when they are all zero.}
         max_bytes_per_run: {type: integer, format: int64}
         max_bytes_per_month: {type: integer, format: int64}
         max_objects_per_run: {type: integer, format: int64}
-        storage_allowance_bytes: {type: integer, format: int64, description: "Retained bytes the team asked to keep and the most it is billed for; the sweep expires its oldest finished runs above this, and 0 keeps everything. Written only by the allowance route."}
+        storage_allowance_bytes: {type: integer, format: int64, description: "Retained-byte billing ceiling; 0 is uncapped. Written independently of write limits by the allowance route."}
     SetStorageQuota:
       x-sparkwing-go-type: pkg/controller.setStorageQuotaJSON
       type: object
@@ -8071,13 +7917,13 @@ components:
         month: {type: string, description: Calendar month as YYYY-MM in UTC.}
         month_bytes: {type: integer, format: int64}
         month_objects: {type: integer, format: int64}
-        retained_bytes: {type: integer, format: int64, description: "What the team still has stored, which is what the storage charge and the allowance sweep both measure."}
+        retained_bytes: {type: integer, format: int64, description: "Unique committed blob and persisted log bytes counted by storage billing."}
     StorageTeamUsage:
       x-sparkwing-go-type: pkg/controller.storageTeamJSON
       type: object
       description: One row of the month's heaviest teams.
       properties:
-        principal: {type: string}
+        team: {type: string}
         bytes: {type: integer, format: int64}
         objects: {type: integer, format: int64}
     DatabaseSize:
@@ -8147,17 +7993,6 @@ components:
         event_bytes: {type: integer, format: int64, description: "What the team's retained run events hold."}
         cache_bytes: {type: integer, format: int64, description: "What the team stores and holds reserved in the cache, as the controller counts it."}
         log_bytes: {type: integer, format: int64, description: "What the team stores in log segments and holds reserved, as the controller counts it."}
-    EgressTotals:
-      x-sparkwing-go-type: pkg/store.EgressTotals
-      type: object
-      description: What one service sent in a UTC day and in that day's month.
-      required: [service, day, month]
-      properties:
-        service: {type: string}
-        day: {type: string, description: "2006-01-02"}
-        day_bytes: {type: integer, format: int64}
-        month: {type: string, description: "2006-01"}
-        month_bytes: {type: integer, format: int64}
     ComputeLimits:
       x-sparkwing-go-type: pkg/controller.computeLimitsJSON
       type: object
@@ -9213,3 +9048,79 @@ components:
         source_job: {type: string}
         state: {type: string}
         members: {type: array, items: {type: string}}
+    EngineClaimRequest:
+      x-sparkwing-go-type: internal/controllerwire.ClaimRequest
+      type: object
+      properties:
+        runner_version: {type: string}
+        kinds: {type: array, items: {type: string}}
+        labels: {type: array, items: {type: string}}
+        available_cores: {type: number}
+        available_memory_bytes: {type: integer}
+        run_id: {type: string}
+        job_id: {type: string}
+    EngineClaimResponse:
+      x-sparkwing-go-type: internal/controllerwire.ClaimResponse
+      type: object
+      properties:
+        claim: {$ref: "#/components/schemas/EngineClaimedUnit"}
+    EngineClaimedUnit:
+      x-sparkwing-go-type: internal/controllerwire.ClaimedUnit
+      type: object
+      properties:
+        unit: {type: string}
+        purpose: {type: string}
+        delivery: {type: string}
+        unit_id: {type: string}
+        run_id: {type: string}
+        job_id: {type: string}
+        binding: {type: object}
+        capability: {type: string}
+        runner: {type: object}
+        request: {type: object}
+        accepted: {type: object}
+        execution: {type: object}
+        lease_expires_at: {type: string, format: date-time}
+        owner_deadline: {type: string, format: date-time}
+        attempt_deadline: {type: string, format: date-time}
+        parent_capability_expiry: {type: string, format: date-time}
+        source_generation: {type: integer}
+        engine: {type: object}
+    EngineLauncherSyncRequest:
+      x-sparkwing-go-type: internal/controllerwire.LauncherSyncRequest
+      type: object
+      properties:
+        observed: {type: array, items: {$ref: "#/components/schemas/EngineLauncherObservation"}}
+    EngineLauncherSyncResponse:
+      x-sparkwing-go-type: internal/controllerwire.LauncherSyncResponse
+      type: object
+      properties:
+        awards: {type: array, items: {$ref: "#/components/schemas/EngineClaimedUnit"}}
+        remove: {type: array, items: {type: string}}
+    EngineLauncherObservation:
+      x-sparkwing-go-type: internal/controllerwire.LauncherObservation
+      type: object
+      properties:
+        unit_id: {type: string}
+        job_name: {type: string}
+        node_uid: {type: string}
+    EngineExchangeResponse:
+      x-sparkwing-go-type: internal/controllerwire.ExchangeResponse
+      type: object
+      properties:
+        claim: {$ref: "#/components/schemas/EngineClaimedUnit"}
+    EngineReconcileRequest:
+      x-sparkwing-go-type: internal/controllerwire.ReconcileRequest
+      type: object
+      properties:
+        policy: {type: string}
+        source: {type: object}
+        materialize_only: {type: boolean}
+    EngineReconcileResponse:
+      x-sparkwing-go-type: internal/controllerwire.ReconcileResponse
+      type: object
+      properties:
+        kind: {type: string}
+        job: {type: object}
+        claim: {$ref: "#/components/schemas/EngineClaimedUnit"}
+        source: {type: object}

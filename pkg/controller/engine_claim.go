@@ -47,7 +47,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	if len(body.Kinds) == 0 {
 		return controllerwire.ClaimResponse{}, invalidEngineBody("claim requires unit kinds")
 	}
-	if s.RunnerPolicy == nil {
+	if s.Store == nil || s.RunnerPolicy == nil {
 		return controllerwire.ClaimResponse{}, &apierr.Error{Code: apierr.Unavailable, Message: "claim enrollment and runner policy are not configured"}
 	}
 	principal, err := s.Store.ResolveAuthority(ctx, authorized.Principal.Authority)
@@ -136,6 +136,9 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 }
 
 func (s *EngineController) exchange(ctx context.Context, authorized capability.Authorized) (controllerwire.ExchangeResponse, error) {
+	if s.Store == nil {
+		return controllerwire.ExchangeResponse{}, missingEndpointPolicy()
+	}
 	ref := authorized.Principal.Authority
 	if ref.Kind != capability.AuthorityCapability || ref.ID == "" || ref.ID != authorized.Principal.Capability.Prefix {
 		return controllerwire.ExchangeResponse{}, invalidEngineBody("exchange requires bootstrap authority")

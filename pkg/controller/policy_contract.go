@@ -26,8 +26,10 @@ type Endpoint struct {
 	Pattern        string
 	Authentication capability.Authentication
 	Decode         func(*http.Request) (capability.RequestEvidence, error)
-	Verify         func(*http.Request) error
-	Handle         func(http.ResponseWriter, *http.Request, capability.Authorized) error
+	// ResolveTarget derives implicit resource selectors from the authenticated principal.
+	ResolveTarget func(capability.Principal, capability.Target) (capability.Target, error)
+	Verify        func(*http.Request) error
+	Handle        func(http.ResponseWriter, *http.Request, capability.Authorized) error
 }
 
 // PolicyRouter matches a route before authentication and enforces its complete policy.

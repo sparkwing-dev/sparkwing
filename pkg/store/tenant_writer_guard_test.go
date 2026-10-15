@@ -11,13 +11,10 @@ import (
 // table cannot be added without a reviewer seeing the number move.
 var tablesWithNoTeamWriter = []string{
 	"egress_usage",
-	"storage_month_usage",
-	"storage_quotas",
-	"storage_run_usage",
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const tablesWithNoTeamWriterSize = 4
+const tablesWithNoTeamWriterSize = 1
 
 // A predicate is only as real as the data under it. The scope guard beside
 // this one reads statement text, so it can prove a team predicate exists

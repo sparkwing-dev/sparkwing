@@ -1030,43 +1030,6 @@ func (s *Server) handleListPendingTriggersForParent(w http.ResponseWriter, r *ht
 	writeJSON(w, http.StatusOK, map[string]any{"trigger_ids": ids})
 }
 
-type claimSpecificTriggerReq struct {
-	LeaseNanos int64  `json:"lease_nanos,omitempty"`
-	NodeRunner string `json:"node_runner,omitempty"`
-}
-
-func (s *Server) handleClaimSpecificTrigger(w http.ResponseWriter, r *http.Request) {
-	var body claimSpecificTriggerReq
-	if err := decodeOptionalJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	lease := time.Duration(body.LeaseNanos)
-	if lease <= 0 {
-		lease = store.DefaultLeaseDuration
-	}
-	if s.refuseMeteredInProcessNodes(w, r, body.NodeRunner) {
-		return
-	}
-	t, err := s.store.ClaimSpecificTriggerFor(r.Context(), r.PathValue("id"), claimIdentity(r), lease)
-	if writeClaimTeamRefusal(w, err) || s.writeCreditsRefusal(w, r, err) {
-		return
-	}
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		if errors.Is(err, store.ErrLockHeld) {
-			writeError(w, http.StatusConflict, err)
-			return
-		}
-		s.writeInternalError(w, r, "claim trigger", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, t)
-}
-
 func (s *Server) handleGetTrigger(w http.ResponseWriter, r *http.Request) {
 	tenant, ok := s.requestTenant(w, r)
 	if !ok {
@@ -1134,15 +1097,6 @@ func removeLocalRunDir(runsDir, runID string) error {
 	return errors.Join(root.RemoveAll(runID), root.Close())
 }
 
-type claimTriggerReq struct {
-	Pipelines      []string        `json:"pipelines,omitempty"`
-	TriggerSources []string        `json:"trigger_sources,omitempty"`
-	NodeRunner     string          `json:"node_runner,omitempty"`
-	AllowRepos     []string        `json:"allow_repos,omitempty"`
-	Platform       *claimPlatform  `json:"platform,omitempty"`
-	Resources      *claimResources `json:"resources,omitempty"`
-}
-
 type claimPlatform struct {
 	OS   string `json:"os"`
 	Arch string `json:"arch"`
@@ -1175,41 +1129,6 @@ func claimProfileContext(ctx context.Context, allowRepos []string, platform *cla
 		profile.Capacity = r.Capacity
 	}
 	return store.WithClaimProfile(ctx, profile), profile, nil
-}
-
-func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
-	var body claimTriggerReq
-	if err := decodeOptionalJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if s.refuseMeteredInProcessNodes(w, r, body.NodeRunner) {
-		return
-	}
-	ctx, _, err := claimProfileContext(r.Context(), body.AllowRepos, body.Platform, body.Resources)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	t, err := s.store.ClaimNextTriggerFor(ctx, claimIdentity(r), 0, body.Pipelines, body.TriggerSources)
-	if writeClaimTeamRefusal(w, err) || s.writeCreditsRefusal(w, r, err) {
-		return
-	}
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			s.writeClaimPollAdvice(w)
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if errors.Is(err, store.ErrLockHeld) {
-			writeError(w, http.StatusConflict, err)
-			return
-		}
-		s.writeInternalError(w, r, "claim next trigger", err)
-		return
-	}
-	s.recordQueueActivity(time.Now())
-	writeJSON(w, http.StatusOK, t)
 }
 
 func newRunID() string {
@@ -1369,72 +1288,6 @@ func (s *Server) placementContext(ctx context.Context, claimer presenceKey) cont
 		Hold:           s.placement.hold,
 		Live:           s.runnerPresence.live(time.Now(), s.placement.liveness, claimer),
 	})
-}
-
-func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
-	var body claimNodeReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if body.HolderID == "" {
-		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
-		return
-	}
-	lease := time.Duration(body.LeaseSecs) * time.Second
-	if body.Capacity != nil && (body.Capacity.MaxConcurrent < 0 || body.Capacity.ActiveClaims < 0) {
-		writeError(w, http.StatusBadRequest, errors.New("capacity must carry non-negative max_concurrent and active_claims"))
-		return
-	}
-	claimCtx, profile, err := claimProfileContext(r.Context(), body.AllowRepos, body.Platform, body.Resources)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	s.recordAdvertisedHeadroom(r, body.HolderID, body.Headroom)
-	claimer := presenceKey{tokenPrefix: claimIdentity(r).TokenPrefix, name: presenceName(body.HolderID)}
-	profile.Name = presenceName(body.HolderID)
-	if name, ok := strings.CutPrefix(claimIdentity(r).Principal, runnerPrincipalPrefix); ok {
-		profile.Name = name
-	}
-	// safety: the machine's admission daemon sees load the runner's own
-	// bookkeeping does not, so its free capacity lowers what the runner claims.
-	resources := body.Resources
-	if resources != nil && body.Headroom != nil {
-		lowered := *resources
-		lowered.Availability.Cores = min(lowered.Availability.Cores, body.Headroom.Cores)
-		lowered.Availability.MemoryBytes = min(lowered.Availability.MemoryBytes, body.Headroom.MemoryBytes)
-		resources = &lowered
-	}
-	if s.runnerPresence.record(claimer, body.Labels, body.Capacity, profile, resources, time.Now()) && claimer.tokenPrefix != "" {
-		s.recordAgentLabels(r.Context(), claimer.tokenPrefix, body.Labels, profile)
-	}
-	n, err := s.store.ClaimNextReadyNode(s.placementContext(claimCtx, claimer),
-		claimIdentity(r), body.HolderID, lease, body.Labels)
-	if writeClaimTeamRefusal(w, err) {
-		return
-	}
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			s.writeClaimPollAdvice(w)
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if s.writeCreditsRefusal(w, r, err) {
-			return
-		}
-		if s.writeUnpricedClassRefusal(w, r, err) {
-			return
-		}
-		if s.writeClaimComputeLimitRefusal(w, r, err) {
-			return
-		}
-		s.writeInternalError(w, r, "claim node", err)
-		return
-	}
-	s.runnerPresence.awarded(claimer)
-	s.noteRunnerAlarm(r)
-	writeClaimedNode(w, r, s, n)
 }
 
 type claimNamedNodeReq struct {
@@ -1788,35 +1641,6 @@ func (s *Server) handleUpdateNodeActivity(w http.ResponseWriter, r *http.Request
 	}
 	_ = decodeJSON(r, &body)
 	if err := tenant.UpdateNodeActivity(r.Context(), runID, nodeID, body.Detail); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) handleSetNodeArtifactManifest(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	var body struct {
-		ManifestDigest string `json:"manifest_digest"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if err := tenant.SetNodeArtifactManifestCharged(r.Context(), chargedPrincipal(r),
-		runID, nodeID, body.ManifestDigest); err != nil {
-		if writeStorageWriteRefusal(w, s.logger, err) {
-			return
-		}
-		if errors.Is(err, store.ErrLockHeld) {
-			writeError(w, http.StatusConflict, err)
-			return
-		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

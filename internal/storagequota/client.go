@@ -91,15 +91,6 @@ type Reservation struct {
 	Unlimited bool   `json:"unlimited,omitempty"`
 }
 
-// EgressTotals is what one service sent in a UTC day and in its month.
-type EgressTotals struct {
-	Service    string `json:"service"`
-	Day        string `json:"day"`
-	DayBytes   int64  `json:"day_bytes"`
-	Month      string `json:"month"`
-	MonthBytes int64  `json:"month_bytes"`
-}
-
 // Client calls one controller's counter routes. Every call takes the
 // Authorization header value to send: the cache's own bearer, or the
 // credential a logs append arrived with.
@@ -222,14 +213,6 @@ func (c *Client) ChargeDownload(ctx context.Context, auth, team string, bytes in
 		c.observe(team, out.Tier)
 	}
 	return err
-}
-
-// RecordEgress keeps the larger of each stored total and t's, and returns
-// the stored totals.
-func (c *Client) RecordEgress(ctx context.Context, auth string, t EgressTotals) (EgressTotals, error) {
-	var out EgressTotals
-	err := c.post(ctx, auth, "/internal/egress/totals", t, &out)
-	return out, err
 }
 
 type errorBody struct {

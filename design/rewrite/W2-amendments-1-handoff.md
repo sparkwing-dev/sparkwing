@@ -806,4 +806,151 @@ session/CSRF projections and the missing cancellation-intent field. No new
 issuer, setting, credential store or service was added. Scratch is removed
 after verification. No Git write or Sparkwing binary ran. W2 remains incomplete.
 
+## Credential claims and W1b merge continuation
+
+All 19 original conflict paths have resolved contents. The amended store shapes
+win. W2's capability policy, final operator paths and verified-payment path stay.
+The incoming retention, log maintenance and final storage policy stay. Retired
+node-report handlers and paid-grant request bodies are not restored. The Git
+index still lists conflicts because this worker cannot stage or commit. The lead
+must stage the resolved files. No Git write ran.
+
+### Implementation and invariants
+
+The controller now serves mixed runner claims, launcher claims, named trigger
+claims, bootstrap exchange, own-unit renewal, reconciliation and launcher sync
+through PolicyRouter. Every requested kind requires its grant before a claim.
+Enrollment supplies identity, pools, repository scope and capacity. C1 repeats
+authority checks while awarding. Claims and exchange deliver a bearer once.
+Revocation during the runner-policy call prevents the subsequent award.
+
+Named claims preserve the path run and accept only the trigger kind. Missing
+and malformed target errors follow authentication. Exchange derives its run
+from the authenticated bootstrap. Renewal derives its unit facts from current
+authentication while retaining the caller's claim ID for comparison. Plan
+bootstrap exchange and renewal execute against the real SQLite store.
+
+The security invariants are that no invalid kind selection can persist an award,
+and no launcher sync response contains an award bearer. Fuzz tests generate kind
+selections and arbitrary bearer strings against these invariants. The first
+completed 6 executions and the second 5,047 executions. These short runs provide
+bounded evidence, not exhaustive coverage.
+
+Endpoint.ResolveTarget is a local W2 contract addition. PolicyRouter invokes it
+after authentication and before authorization. It supplies implicit selectors
+for exchange and unit renewal. LauncherSyncReader and EngineController.Launcher
+are local W2 adapter additions. Sync passes only the authenticated authority ref
+and copied observations to the adapter. It copies the response and clears every
+award Capability. A missing adapter returns policy_missing. No W1 method or
+schema changed.
+
+Storage settings and reports now use Operator. Quota and allowance handlers
+resolve Tenant from the policy-authorized team. The wire uses team and
+run_retention_days. A missing team returns canonical not_found. Tests cover
+actual policy dispatch, tenant isolation, counters and the separate operator
+report. The old admin paths are absent.
+
+Removed 255 legacy implementation/interface lines across handlers.go (176),
+launcher.go (39), claim_run.go (28), controller/client/client.go (11) and
+storage/state.go (1). This count excludes incoming W1 deletions, tests, generated
+references and route registrations. The standalone manifest client method is
+removed. Three nodehost callers now require a concrete local manifest writer
+and fail when the state backend cannot supply one. Remote publication must use
+record/result transactions. The remaining legacy host and claim loops still
+need retirement by W3/W8/W9.
+
+### Amendment dispositions
+
+Earlier row-by-row actions remain recorded above. These are the new results and
+remaining dependencies for every W2 group.
+
+| Rows | Result and remaining work |
+| --- | --- |
+| A1-01/05, 03 | Mask/report policy rows and the implemented inner decoder remain intact. W3 must register node-process services through the verifier. |
+| A1-08/09/19/26/55 | Final claim HTTP routes are connected to C1 claim/enrollment and W8 software-policy interfaces. Real-store HTTP tests cover mixed grants, named claims, enrollment identity, revocation and one-time delivery. Production profile/version-policy wiring, here transport and W9 clients remain. |
+| A1-11, 16/17 | Private awards and reconciliation retain the existing sealed request, source, execution, engine and replay projections. W3/W8/W9 must consume them through the shared controller client. |
+| A1-14/15 | Existing real failure reads and holder-preserving cancellation remain. Cancellation-reason persistence still fails because C1 lacks an intent field. |
+| A1-20/21/22/23 | Root-only issuance validation and store-backed verification remain. New claim/renewal routes use them. Session digest/CSRF, console/peer facts, remaining root-origin adapters, full controller cutover and node-host inventory remain. |
+| A1-24/25/27/28 | Incoming W1 billing/retention work is retained without new W2 SQL. Plan-secret opening, source-release audit, transactional console rechecks and payment configuration still need their production adapters. No paid-grant route was restored. |
+| A1-29/30/31/32/33/34/35 | Existing signed-byte/record bindings remain. Authority/metadata/charging and physical-backend production wiring, upload/commit/record HTTP cutover and remote clients remain. |
+| A1-38 | Bootstrap exchange and renewal work over real HTTP handlers and SQLite. Sync uses the final wire and a fakeable transaction adapter. Its real C1 snapshot remains unavailable. |
+| A1-39/40/49/53 | W8/W9 still need final runner/local-controller/credential-file transport. Native topology and complete acceptance evidence remain with T1/lead. No native cell is unskipped. |
+
+### Contract changes needed and open integration
+
+C1 must provide a transactional launcher snapshot that rechecks the launcher
+root, selects only its current plan/eval/job awards and derives cleanup names.
+The old SyncLaunchJobs contract uses retired ClaimIdentity/LaunchJob types and
+cannot provide final awards. LauncherSyncReader is the W2 injection boundary for
+that adapter. Its HTTP behavior is tested with fakes. The default refuses.
+
+C1 must add a cancellation-intent reason field without overwriting result data.
+TestEngineCancelJobKeepsLiveHolderAndRechecksOwner still fails because the event
+has no user_cancelled reason. No result-field workaround was added.
+
+C1's operator storage writes still lack an authority-bearing committing boundary.
+The HTTP grant and team checks pass, but revocation after authorization needs the
+same transaction recheck as the other console mutations recorded above.
+
+W3/W8/W9 must remove the remaining legacy split-claim clients and loops rather
+than adapt their old payloads. They still occur in controller/client/client.go,
+controller/client/claim.go, controller/client/coordination.go and
+controller/client/launcher.go, plus legacy orchestrator/runner callers. The
+shared NewEngineClient remains a W9 stub in this branch. No alias or alternate
+HTTP registration was added. Their callers still compile. They cannot run
+against the removed split endpoints. W3 must finish artifact publication through
+record/result commits before using a legacy remote state backend for artifacts.
+
+Other session/CSRF, source, data, payment and topology dependencies listed above
+remain open. There is no new product-policy question.
+
+### Evidence and shared files
+
+Whole-repository build, scoped vet, capability/API-error tests, executable
+acceptance tests, focused engine/policy/operator/storage/signer tests, API route
+and schema/reference tests, daemon route/retry inventories, focused docs symbol
+and mirror checks and diff whitespace checks pass. The regenerated controller,
+client and storage API snapshots cover this continuation's surface cuts.
+
+The required commentcheck still fails only on incoming W1 comments at
+pkg/store/state_materialize.go:15 and pkg/store/state_result_records.go:9.
+Those files are outside W2 and were not edited. Broad legacy credential tests
+still fail while creating the deleted tokens table. The targeted cancellation
+reason test remains red as described above. No complete T1 parked test port or
+native acceptance cell is claimed.
+
+Use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE=/tmp/sw-astra-W2/cache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W2/tmp.
+
+```sh
+go build -p 4 ./...
+go vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./pkg/controller/client ./internal/acceptance ./tests/acceptance ./internal/apiroutes
+go test -p 4 ./internal/capability ./internal/apierr ./internal/acceptance ./tests/acceptance ./internal/apiroutes ./internal/apispec ./internal/apiref
+go test -p 4 ./pkg/controller -run '^TestEngine|^TestServerPolicy|^TestPolicyRouter|^TestOperatorSettings|^TestStoreDataStorage|^TestLegacy(CreditGrant|Manifest|Egress)|^FuzzEngine|^TestAuthorizedHandlersDoNotAuthorize$|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$' -skip '^TestEngineCancelJobKeepsLiveHolderAndRechecksOwner$'
+go test -p 4 ./pkg/controller -run '^$' -fuzz '^FuzzEngineClaimHTTPKindsNeverWidenGrants$' -fuzztime=3s -parallel=2
+go test -p 4 ./pkg/controller -run '^$' -fuzz '^FuzzEngineLauncherSyncOmitsBearer$' -fuzztime=3s -parallel=2
+go test -p 4 ./pkg/controller -run '^TestEngineCancelJobKeepsLiveHolderAndRechecksOwner$'
+go run ./internal/commentcheck -base main .
+```
+
+Shared edits outside W2 are internal/apiroutes/apiroutes.go,
+internal/orchestrator/wingd_api_routes_test.go, internal/nodehost/artifacts.go,
+internal/nodehost/memo.go, internal/nodehost/rehydrate.go, pkg/storage/state.go,
+pkg/controller/client/client.go, api/openapi.yaml, docs/api-reference.md,
+docs/auth.md, docs/self-hosting.md, docs/migrations/_unreleased.md, CHANGELOG.md,
+their generated mirrors and .apidiff/pkg_controller{,_client}.txt and
+.apidiff/pkg_storage.txt. Other staged integration changes are not claimed as
+this worker's edits. The incoming W1 storage tests were migrated to the final
+operator policy paths. team_billing_test.go drops the removed Checkout field to
+compile. That legacy test is not a completed payment port.
+
+Friction was the read-only merge index, retired request structs in OpenAPI,
+the absent C1 sync snapshot and cancellation-intent field, and remaining legacy
+credential fixtures. Full regen-all would run the Sparkwing product binary,
+which the brief prohibits, so only the API/reference/snapshot generators and
+doc mirror sync ran. The bootstrap-required sparkwing info discovery ran twice
+before the brief's binary prohibition was applied. No candidate, daemon,
+pipeline or release ran. Git config still resolves Korey's normal identity and
+has no core.worktree override. Scratch is deleted after final checks.
+
 <!-- design:end -->

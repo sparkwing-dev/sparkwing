@@ -15,6 +15,7 @@ type EngineController struct {
 	Store        *store.Store
 	RunnerPolicy RunnerAdmissionPolicy
 	Units        UnitRenewer
+	Launcher     LauncherSyncReader
 	// ResolveTenant supplies the same transaction contract to embedded controllers and tests.
 	// A nil resolver uses Store.ForTeam.
 	ResolveTenant func(context.Context, store.Team) (RunTransactions, error)
@@ -74,7 +75,7 @@ func (s *EngineController) Claim(ctx context.Context, authorized capability.Auth
 
 // SyncLauncher returns only this launcher's held awards, with bearer material omitted.
 func (s *EngineController) SyncLauncher(ctx context.Context, authorized capability.Authorized, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
-	panic("unimplemented: controller-wire")
+	return s.syncLauncher(ctx, authorized, body)
 }
 
 // Exchange consumes the authenticated bootstrap once and returns its original unit policy.

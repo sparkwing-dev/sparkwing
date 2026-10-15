@@ -85,26 +85,33 @@ func (f *operatorSettingsFixture) ListStorageQuotas(context.Context) ([]store.St
 	return []store.StorageQuota{f.quota}, f.failure
 }
 func (f *operatorSettingsFixture) TopStorageTeams(context.Context, string, int) ([]store.StorageTeamUsage, error) {
-	return []store.StorageTeamUsage{{Principal: "customer", Bytes: 100, Objects: 2}}, f.failure
+	return []store.StorageTeamUsage{{Team: "customer", Bytes: 100, Objects: 2}}, f.failure
+}
+func (f *operatorSettingsFixture) StorageTenant(_ context.Context, team store.Team) (storageQuotaStore, error) {
+	if f.failure != nil {
+		return nil, f.failure
+	}
+	f.quota.Team = team
+	return f, nil
 }
 func (f *operatorSettingsFixture) SetStorageQuota(_ context.Context, quota store.StorageQuota) error {
 	if f.failure != nil {
 		return f.failure
 	}
 	f.writes++
-	quota.AllowanceBytes = f.quota.AllowanceBytes
+	quota.Team, quota.AllowanceBytes = f.quota.Team, f.quota.AllowanceBytes
 	f.quota = quota
 	return nil
 }
-func (f *operatorSettingsFixture) StorageQuotaFor(context.Context, string) (store.StorageQuota, error) {
+func (f *operatorSettingsFixture) StorageQuota(context.Context) (store.StorageQuota, error) {
 	return f.quota, f.failure
 }
-func (f *operatorSettingsFixture) SetStorageAllowance(_ context.Context, team string, size int64) (store.StorageQuota, error) {
+func (f *operatorSettingsFixture) SetStorageAllowance(_ context.Context, size int64) (store.StorageQuota, error) {
 	if f.failure != nil {
 		return store.StorageQuota{}, f.failure
 	}
 	f.writes++
-	f.quota.Principal, f.quota.AllowanceBytes = team, size
+	f.quota.AllowanceBytes = size
 	return f.quota, nil
 }
 
@@ -133,7 +140,7 @@ func newOperatorSettingsFixture(t *testing.T) (*Server, *operatorSettingsFixture
 			Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator-account"}, Binding: capability.Binding{Kind: capability.BindingNone},
 			Grants: []capability.Grant{capability.OperatorLimits, capability.OperatorObjectStore}},
 	}}
-	f := &operatorSettingsFixture{gate: store.SignUpGate{Mode: store.SignUpOpen}, quota: store.StorageQuota{Principal: "customer", AllowanceBytes: 32}}
+	f := &operatorSettingsFixture{gate: store.SignUpGate{Mode: store.SignUpOpen}, quota: store.StorageQuota{Team: "customer", AllowanceBytes: 32}}
 	s := New(nil, nil).WithAuthorization(RouteAuthorization{Authenticator: capability.NewAuthenticator(a), Bindings: a})
 	s.operatorSettings = f
 	return s, f, a
@@ -177,9 +184,9 @@ func TestOperatorSettingsHTTPRoundTrip(t *testing.T) {
 	if signup.SetBy != "operator-account" || signup.Mode != "waitlist" || signup.Limits.HourlyLimit != 12 || signup.Counts.LastDay != 3 {
 		t.Fatalf("signup = %+v", signup)
 	}
-	call("PUT", "object-store/settings", `{"event_retention_days":7,"node_metric_retention_days":3,"database_alarm_bytes":123}`)
+	call("PUT", "object-store/settings", `{"run_retention_days":7,"node_metric_retention_days":3,"database_alarm_bytes":123}`)
 	call("PUT", "object-store/quotas/customer", `{"max_bytes_per_run":22}`)
-	if f.quota.Principal != "customer" || f.quota.AllowanceBytes != 32 {
+	if f.quota.Team != "customer" || f.quota.AllowanceBytes != 32 {
 		t.Fatalf("quota = %+v", f.quota)
 	}
 	call("PUT", "object-store/quotas/customer/allowance", `{"storage_allowance_bytes":45}`)
@@ -187,7 +194,7 @@ func TestOperatorSettingsHTTPRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(call("GET", "object-store", "").Body.Bytes(), &storage); err != nil {
 		t.Fatal(err)
 	}
-	if storage.Settings.EventRetentionDays != 7 || len(storage.Quotas) != 1 || storage.Quotas[0].StorageAllowanceBytes != 45 || storage.Quotas[0].MaxBytesPerRun != 22 || len(storage.Teams) != 1 {
+	if storage.Settings.RunRetentionDays != 7 || len(storage.Quotas) != 1 || storage.Quotas[0].StorageAllowanceBytes != 45 || storage.Quotas[0].MaxBytesPerRun != 22 || len(storage.Teams) != 1 {
 		t.Fatalf("storage = %+v", storage)
 	}
 	if f.writes != 6 {
@@ -205,7 +212,7 @@ func TestOperatorSettingsHTTPInvalidBodiesDoNotWrite(t *testing.T) {
 		{"limits", `{"limits":{"max_global_runners":7,"max_run_seconds":-1}}`},
 		{"limits", `{"limits":{"unknown":1}}`},
 		{"signups", `{}`}, {"signups", `{"mode":"invalid"}`}, {"signups", `{"mode":"waitlist","actor":"forged"}`},
-		{"object-store/settings", `{"event_retention_days":-1}`},
+		{"object-store/settings", `{"run_retention_days":-1}`},
 		{"object-store/settings", `{"default_tier":"unknown"}`},
 		{"object-store/quotas/customer", `{"principal":"other-team"}`},
 		{"object-store/quotas/customer", `{"max_bytes_per_run":-1}`},

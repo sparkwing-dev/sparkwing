@@ -558,69 +558,37 @@ grants and the waitlist wait for the console.
 
 ## Retained storage
 
-Runner time stops costing when a node ends; retained bytes keep costing while
-they are kept, so they are billed from the same ledger. An installation bills
-storage only once an operator prices it: `storage_rate_micro_per_gb_day` is
-what one gibibyte kept for one day costs and `storage_free_allowance_bytes` is
-what every team keeps unbilled, and both are zero until written, so an
-installation that sets neither writes no storage charge.
+Storage uses the credit ledger. `storage_rate_micro_per_gb_day` prices one
+retained gibibyte-day. `storage_free_allowance_bytes` is the amount each team
+keeps unbilled. Both default to zero. A zero price disables storage billing.
 
-What the storage charge bills is run-event payload bytes, which is the one
-thing the controller durably stores and already measures per team. Artifact
-content, cache entries and hosted logs are not metered on this release, because
-the controller never sees their sizes: a runner writes artifact blobs straight
-to the object store and the controller holds only the manifest digest. A
-published manifest counts one object against the team's quota and carries no
-bytes, so it costs nothing here.
+The inventory is unique committed blobs plus persisted log-segment bytes.
+Reference counts and historical replica usage cannot multiply that inventory.
+A team's optional retained allowance caps it before the free allowance comes
+off. Teams without quota rows receive no retained ceiling.
 
-Each storage pass bills every team holding bytes for the interval since it was
-last billed. The pass runs on the controller's hourly storage timer, so the
-meter's error is one pass interval of bytes held and released between two
-passes, not a whole day of them. A team the ledger has never billed is stamped
-with the current instant and billed from the next pass, so pricing storage
-never bills for the past, and so a team's first bytes cost one pass before the
-meter reaches them. A team that drops to nothing keeps no watermark, and an
-interval is never billed for longer than the bytes in it have been held, so an
-idle stretch is not charged against whatever a team stores next. A pass bills
-one team's bytes under one token principal, so two teams that both label a
-token `ci` are metered apart. A team whose retained runs all carry no creation
-date bills nothing for that interval. Each
-team's watermark moves by compare-and-set, so two controllers on one database
-bill an interval once whatever either clock says, and a clock that steps
-backwards bills nothing rather than billing twice.
+Each team's first sample establishes billing time. Later passes bill the
+elapsed whole seconds, leaving fractional seconds for the next pass. The
+maintenance lease, ledger debit and watermark update commit together, so
+concurrent replicas cannot charge an interval twice. Failed ledger writes
+advance no watermark. A backward clock charges nothing until it catches up.
+Disabling the price resets the watermark, so resumed billing starts fresh.
 
 The amount is `bytes x rate x seconds` divided by a gibibyte-day, truncated
-toward zero, so a fraction of a micro-credit is never billed and truncation
-forgives at most one micro-credit per team per pass. Three gibibytes retained
-against a one-gibibyte free allowance for one day is two gibibyte-days, which
-at 333,333 micro-credits a gibibyte-day is 666,666 micro-credits, and that rate
-is 2,000 credits a gibibyte-month, the published $0.10.
+toward zero. Three gibibytes against a one-gibibyte free allowance for one day
+cost two gibibyte-days. At 333,333 micro-credits per gibibyte-day, that is
+666,666 micro-credits.
 
-The charge is a `storage` row naming the team, the bytes it billed and the
-interval it covered, so the private `sparkwing-ops` credit views separate
-retained bytes from runner time. It carries no cpu class and no
-per-second rate, because neither priced it.
+Billing samples retained bytes on the hourly maintenance pass. Bytes removed
+between samples are absent from the next sample. An idle gap is bounded by
+the oldest surviving bytes' creation time. This is a sampled inventory rather
+than an exact history of every byte's lifetime. Invalid inventory or policy
+returns an error.
 
-Each team's allowance is how many retained bytes it asked to keep. The pass
-expires its oldest finished runs above the allowance before it bills, and it
-never bills for more than the allowance, so the allowance is both what a team
-keeps and the most it pays for; an allowance of zero keeps everything and caps
-nothing. Sparkwing Cloud operators read and write one through the private
-`sparkwing-ops` tool. Rewriting a team's quota leaves the allowance where it
-stands.
-
-An empty balance is a hard cut, the same as it is for runner time: a write that
-would grow a team's retained bytes is refused with `402` and a reason naming
-the team and the balance, and the pass drains retained bytes down to the free
-allowance. That drain takes only runs whose retention window has already
-elapsed, so non-payment never removes anything inside the window, and an
-installation with no retention window drains nothing.
-
-The cut is late by up to one storage pass, at most an hour: a balance that
-reaches zero between passes keeps accepting writes until the next one, and the
-team's storage quota is what bounds how much can land in the meantime. For a
-team that held nothing before, the stamp pass comes first, so the cut can take
-two passes to engage.
+Storage charges name the team, bytes and interval. They carry no run, CPU
+class or runner price. Run retention preserves the financial ledger and
+recorded usage, so deleting a run never restores spent credit. Quota and
+allowance configuration is described in [self-hosting](self-hosting.md#storage-allowances).
 
 ## Runner classes
 
@@ -777,8 +745,8 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `secrets.read`    | Releases no secret. A bearer holding it without `admin` or `team.admin` is answered `403 claim_required` on GET `/api/v1/secrets/{name}`; a node reads its run's secrets with its claim token. Tokens minted with it keep authenticating, and no team token or runner token is minted with it |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its machine tokens. A team owner holds it; it reaches no other team |
-| `credits.grant`   | The card and dispute service's scope: POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, POST `/api/v1/credits/checkouts/closed`, the card routes under `/api/v1/credits/`, GET `/api/v1/credits/units`, and GET `/api/v1/credits/payments/{reference}`. It reaches no other route. Only the controller's `credits-token` credential provisions it; no API call mints or rotates it, and no team's token may carry it. These routes answer only a service token carrying it; `admin` does not stand in |
-| `storage.count`   | The cache service's scope: POST `/internal/storage/reserve`, `/internal/storage/commit` and `/internal/storage/release` for any team's cache or logs, POST `/internal/downloads/charge`, and POST `/internal/egress/totals`. It reaches no other route, and only the operator mints it, with `sparkwing cluster tokens create --type service --principal cache --scope storage.count`; no team's token may carry it. The cache reads it from the file `controller-token` in its `--credentials-dir` |
+| `credits.grant`   | The card and dispute service's scope: POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, the card routes under `/api/v1/credits/`, GET `/api/v1/credits/units`, and GET `/api/v1/credits/payments/{reference}`. It reaches no other route. Only the controller's `credits-token` credential provisions it; no API call mints or rotates it, and no team's token may carry it. These routes answer only a service token carrying it; `admin` does not stand in |
+| `storage.count`   | The cache service's scope: POST `/internal/storage/reserve`, `/internal/storage/commit` and `/internal/storage/release` for any team's cache or logs, POST `/internal/downloads/charge`. It reaches no other route, and only the operator mints it, with `sparkwing cluster tokens create --type service --principal cache --scope storage.count`; no team's token may carry it. The cache reads it from the file `controller-token` in its `--credentials-dir` |
 | `admin`           | tokens / users / secrets CRUD, the token metering marker, credit pricing, the sign-up gate's mode and limits, the compute guards, run delete, gitcache registration, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's

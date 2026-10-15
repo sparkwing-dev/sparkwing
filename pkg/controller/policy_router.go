@@ -159,6 +159,12 @@ func (router *PolicyRouter) serveEndpoint(w http.ResponseWriter, r *http.Request
 	if route.Owner == capability.OwnerTeam && presentation.Evidence.Target.Team == "" {
 		presentation.Evidence.Target.Team = authenticated.Principal.Capability.Team
 	}
+	if endpoint.ResolveTarget != nil {
+		presentation.Evidence.Target, err = endpoint.ResolveTarget(authenticated.Principal, presentation.Evidence.Target)
+		if err != nil {
+			return err
+		}
+	}
 	if requiresCSRF(r.Method, authenticated.Principal.Class) {
 		if router.authorization.CheckCSRF == nil {
 			return missingEndpointPolicy()

@@ -313,7 +313,7 @@ func TestTeamBillingCheckout_RefusesAPurchaseAboveTheBalanceCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{
-		Kind: store.CreditGrantPaid, AmountMicro: 1_000 * store.MicroCreditsPerCent, Reference: "pi_open", Checkout: "cs_test_1", CreatedBy: "test",
+		Kind: store.CreditGrantPaid, AmountMicro: 1_000 * store.MicroCreditsPerCent, Reference: "pi_open", CreatedBy: "test",
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -211,34 +211,6 @@ func (s *Server) handleClaimInput(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-const maxLauncherSyncJobs = 1000
-
-type launcherSyncReq struct {
-	Jobs []store.LaunchJob `json:"jobs"`
-}
-
-type launcherSyncResp struct {
-	Jobs []store.LaunchJobResult `json:"jobs"`
-}
-
-func (s *Server) handleLauncherSync(w http.ResponseWriter, r *http.Request) {
-	var req launcherSyncReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if len(req.Jobs) > maxLauncherSyncJobs {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("at most %d jobs", maxLauncherSyncJobs))
-		return
-	}
-	jobs, err := s.store.SyncLaunchJobs(r.Context(), claimIdentity(r), req.Jobs, time.Now())
-	if err != nil {
-		s.writeInternalError(w, r, "launcher sync", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, launcherSyncResp{Jobs: jobs})
-}
-
 // safety: binds a route whose run is named in its body or by a holder, so the
 // handler behind it must check that run against the claim's own.
 func ownClaimBinding(r *http.Request) (string, string) {

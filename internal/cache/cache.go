@@ -274,13 +274,6 @@ func New(cfg Config) (*Server, error) {
 	egressCfg := egress.Config{GlobalDailyAlarmBytes: cfg.EgressDailyAlarmBytes}
 	setEgressMeter(egressCfg)
 	logEgressBudgets(egressCfg)
-	if counter != nil {
-		rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		if err := restoreEgressDay(rctx); err != nil {
-			log.Printf("warning: read the day's saved egress total: %v", err)
-		}
-		cancel()
-	}
 
 	loadRepoNames()
 	initProxy()
@@ -358,13 +351,7 @@ func (s *Server) MetricsHandler() http.Handler { return s.metrics }
 func (s *Server) Run(ctx context.Context) error {
 	setMeasureContext(ctx)
 	measureStore(ctx)
-	if counter != nil {
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-			egressDayLoop(ctx)
-		}()
-	}
+
 	s.wg.Add(3)
 	go func() {
 		defer s.wg.Done()

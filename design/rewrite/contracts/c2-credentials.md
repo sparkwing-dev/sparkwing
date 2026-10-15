@@ -102,6 +102,31 @@ Snapshot and expansion replay responses retain the amended execution fields.
 [The amendment handoff](../W2-amendments-1-handoff.md) records every W2 action
 row, remaining contract and runtime work, shared files and verification limits.
 
+### Claim HTTP integration
+
+The controller registers mixed runner claims, launcher claims, named trigger
+claims, bootstrap exchange, own-unit renewal and job reconciliation through
+PolicyRouter. Their decoders preserve kind selectors. Enrollment and software
+policy stay trusted dependencies. The store repeats authority and grant checks
+when awarding. No claim response is replayed to recover a lost bearer.
+
+Endpoint.ResolveTarget is a local C2 contract addition. It derives implicit
+selectors from the already authenticated principal before authorization.
+Exchange and own-unit heartbeat use it because their paths have no run selector.
+The heartbeat's claim ID stays caller-selected and must match the unit ID.
+
+LauncherSyncReader is a local C2 adapter contract for a transactional launcher
+snapshot. It receives the authenticated authority reference and observations.
+The adapter must recheck ancestry and current award ownership. Sync copies the
+response and clears every Capability before returning it. Missing wiring returns
+policy_missing. C1 still needs the final snapshot operation. Its old
+SyncLaunchJobs accepts retired claim identities and cannot serve this adapter.
+
+Storage settings and reports use Operator. Quota and allowance writes resolve a
+Tenant for the policy-authorized team. They retain the operator.object_store
+grant and final operator routes. These calls still need C1's authority-bearing
+mutation signatures to repeat the operator recheck under the write lock.
+
 ## Ownership
 
 `internal/capability` owns the credential vocabulary, issuance rules, route

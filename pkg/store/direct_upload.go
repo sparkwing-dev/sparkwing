@@ -19,12 +19,8 @@ const DirectUploadTTL = 24 * time.Hour
 // DirectUploadMaxPending bounds a team's uncommitted, unexpired uploads.
 const DirectUploadMaxPending = 100
 
-// safety: a source stays readable through a queued or active run, then one
-// day after it finishes; an unused upload starts its day at commit.
+// safety: source binding measures its window from commit so upload time cannot consume it.
 const sourceBundleRetention = 24 * time.Hour
-
-// DirectCacheMaxAge is the controller's retention window for cache keys.
-const DirectCacheMaxAge = 30 * 24 * time.Hour
 
 // UploadRequest declares an exact object before the client sends its bytes.
 type UploadRequest struct {
@@ -222,63 +218,6 @@ func (s *Store) SourceBoundToRun(ctx context.Context, team Team, key, runID stri
 	return found == 1, err
 }
 
-// ClaimExpiredSourceBundles marks eligible source rows before their S3 delete.
-// A binder cannot take an orphan after this claim; an unremoved mark is returned
-// on the next pass so a failed S3 deletion can be retried.
-func (s *Store) ClaimExpiredSourceBundles(ctx context.Context, now time.Time) (out []Upload, err error) {
-	rows, err := s.query(ctx, `UPDATE uploads AS u SET expires_at = 0
-        WHERE u.key LIKE 'sources/%' AND u.committed_at > 0
-          AND (u.expires_at = 0
-            OR (u.run_id = '' AND u.committed_at <= ?)
-            OR (u.run_id != '' AND EXISTS (
-                SELECT 1 FROM runs r WHERE r.team = u.team AND r.id = u.run_id
-                  AND r.status IN ('success','failed','cancelled')
-                  AND r.finished_at IS NOT NULL AND r.finished_at <= ?))
-            OR (u.run_id != '' AND NOT EXISTS (
-                SELECT 1 FROM runs r WHERE r.team = u.team AND r.id = u.run_id)
-                AND u.committed_at <= ?))
-        RETURNING id, team, key`,
-		now.Add(-sourceBundleRetention).UnixNano(), now.Add(-sourceBundleRetention).UnixNano(), now.Add(-sourceBundleRetention).UnixNano())
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			err = errors.Join(err, closeErr)
-		}
-	}()
-	for rows.Next() {
-		var u Upload
-		var team string
-		if err := rows.Scan(&u.ID, &team, &u.Key); err != nil {
-			return nil, err
-		}
-		u.Team = Team(team)
-		out = append(out, u)
-	}
-	return out, rows.Err()
-}
-
-// DeleteSourceBundleRows releases a source's durable rows only after S3
-// confirmed deletion. The next storage listing reconciles its byte count.
-func (s *Store) DeleteSourceBundleRows(ctx context.Context, u Upload) (err error) {
-	if _, ok := SourceKeyDigest(u.Key); !ok || u.ID == "" {
-		return ErrInvalidInput
-	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if _, err = tx.ExecContext(ctx, `DELETE FROM data_objects WHERE team = ? AND key = ? AND provenance = 'local'`, string(u.Team), u.Key); err != nil {
-		return err
-	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM uploads WHERE id = ? AND team = ? AND key = ?`, u.ID, string(u.Team), u.Key); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 // CommittedObject reports the digest and uploader only after the object was
 // copied to its immutable key and its storage transaction committed.
 func (s *Store) CommittedObject(ctx context.Context, team Team, key string) (Upload, error) {
@@ -463,29 +402,6 @@ func smallOutputWithoutSlotTx(ctx context.Context, tx *storeTx, team Team, u Upl
 		return false, err
 	}
 	return used+u.Size <= MaxSmallOutputOverage, nil
-}
-
-// PruneExpiredUploads removes upload records after the pending lifecycle
-// window; committed objects remain in data_objects.
-func (s *Store) PruneExpiredUploads(ctx context.Context, now time.Time) (int64, error) {
-	res, err := s.exec(ctx, `DELETE FROM uploads WHERE expires_at <= ? AND (key NOT LIKE 'sources/%' OR committed_at = 0)`, now.UnixNano())
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
-}
-
-// PruneExpiredCacheObjects removes direct cache rows only after the cache
-// bucket's successful retention listing has removed their bytes. Outputs
-// expire with their run instead; see [Store.ExpiredOutputRuns].
-func (s *Store) PruneExpiredCacheObjects(ctx context.Context, now time.Time) (int64, error) {
-	cutoff := now.Add(-DirectCacheMaxAge).UnixNano()
-	res, err := s.exec(ctx, `DELETE FROM data_objects WHERE store = ? AND key NOT LIKE 'sources/%' AND key NOT LIKE 'outputs/%' AND committed_at <= ?`,
-		string(StorageCache), cutoff)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
 }
 
 // TrustLocalBuilds reports whether the team permits cloud runners to execute
