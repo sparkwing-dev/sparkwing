@@ -131,11 +131,6 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 			errs = append(errs, fmt.Errorf("reconcile %s: %w", kind, err))
 			continue
 		}
-		if kind == store.StorageCache {
-			if _, err := s.store.PruneExpiredCacheObjects(ctx, now); err != nil {
-				errs = append(errs, fmt.Errorf("prune expired cache object rows: %w", err))
-			}
-		}
 		if kind == store.StorageLogs {
 			if err := s.pruneLogsOverShare(ctx, segments, now); err != nil {
 				errs = append(errs, fmt.Errorf("prune logs over a free share: %w", err))

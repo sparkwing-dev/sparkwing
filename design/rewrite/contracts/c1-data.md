@@ -265,6 +265,20 @@ subject isolation and revocation. Claim authority and segment digests are
 preseeded contract facts. Physical bytes, owner-unit transport, ring fallback,
 signing, lifecycle expiry and proxy egress remain cross-area integrations.
 
+Persisted reads recheck a trigger's current owner lease even when its award has
+`runs.read`. Job-scoped readers retain their exact writer, attempt and generation
+fence and cannot reuse sealed-write replay to read past `limits.LogSealGrace`.
+Unbound run/log readers can still read historical subjects. Identical final
+write replay keeps its existing ancestry checks and separate replay exception.
+
+The `storage-reference-edge-laundering/store-data-sqlite` proof reopens a seeded
+output/manifest/member graph and checks presence plus download/reference
+authorization. Direct, optional, transitive, artifact-input, generated-group and
+failure-handler dependencies grant edges. Unrelated, foreign-team and missing
+digests stay hidden. These metadata checks consume no egress or download budget.
+Accepted-plan intake, manifest byte verification, record commits and native
+routes remain separate integration obligations.
+
 | Export | Purpose |
 |---|---|
 | `AcceptedExpansionRow` | Keeps accepted expansion bytes, source fence and body hash in a consistent snapshot. |
@@ -384,6 +398,10 @@ keys are configuration, so test-key and live-key deployments use the same schema
 The cache service's egress-total endpoint, its high-water-mark store methods,
 client bridge and fake route are removed. Tenant usage has no service-selected
 counter owner.
+
+The legacy `PruneExpiredCacheObjects` row sweep is removed with its controller
+call. Record expiry and reachability GC govern final blob lifetime. Old creation
+time alone cannot delete a live record's bytes, including the default tenant's.
 
 Usage rows are additive per team, period and replica. Reporting sums rows.
 Admission takes a shared team/quota lock and records each reservation durably;

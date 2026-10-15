@@ -475,19 +475,6 @@ func (s *Store) PruneExpiredUploads(ctx context.Context, now time.Time) (int64, 
 	return res.RowsAffected()
 }
 
-// PruneExpiredCacheObjects removes direct cache rows only after the cache
-// bucket's successful retention listing has removed their bytes. Outputs
-// expire with their run instead; see [Store.ExpiredOutputRuns].
-func (s *Store) PruneExpiredCacheObjects(ctx context.Context, now time.Time) (int64, error) {
-	cutoff := now.Add(-DirectCacheMaxAge).UnixNano()
-	res, err := s.exec(ctx, `DELETE FROM data_objects WHERE store = ? AND key NOT LIKE 'sources/%' AND key NOT LIKE 'outputs/%' AND committed_at <= ?`,
-		string(StorageCache), cutoff)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
-}
-
 // TrustLocalBuilds reports whether the team permits cloud runners to execute
 // a locally uploaded binary. The default is false.
 func (s *Store) TrustLocalBuilds(ctx context.Context, team Team) (bool, error) {

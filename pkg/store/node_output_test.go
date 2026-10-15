@@ -214,9 +214,6 @@ func TestExpiredOutputRuns_KeepsTheNewestSuccessPerPipeline(t *testing.T) {
 	if _, err := s.NodeOutputObject(ctx, store.DefaultTeam, "run-old-success", "n"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("a deleted run's output still resolves: %v", err)
 	}
-	if n, err := s.PruneExpiredCacheObjects(ctx, time.Now().Add(store.DirectCacheMaxAge+time.Hour)); err != nil || n != 0 {
-		t.Fatalf("the cache age rule deleted %d output rows: %v", n, err)
-	}
 }
 
 func TestExpiredOutputRuns_ListsADeletedRunWithinRetention(t *testing.T) {

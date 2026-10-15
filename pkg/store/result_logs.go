@@ -334,19 +334,15 @@ func (t *Tenant) readLogSegments(ctx context.Context, actor Actor, request blob.
 	if c.Binding.Kind != capability.BindingNone && c.Binding.RunID != request.Subject.RunID {
 		return result, holderRefusal()
 	}
-	if !slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead) {
-		if err := checkLogWriterTx(ctx, tx, t.team, request.Subject, actor, true); err != nil {
+	if c.Unit == capability.UnitTrigger {
+		owner := actor
+		owner.Owner = OwnerLeaseRef{Kind: OwnerTrigger, RunID: c.Binding.RunID, Holder: actor.Holder, Generation: actor.Generation}
+		if err := checkOwnerTx(ctx, tx, t.team, owner, request.Subject.RunID, tx.now()); err != nil {
 			return result, err
 		}
-	}
-	if c.Binding.Kind == capability.BindingNode {
-		if request.Subject.Kind == blob.LogJobAttempt {
-			a := request.Subject.Attempt
-			if a.NodeID != c.Binding.NodeID || a.Generation != c.Binding.Generation || (c.Binding.Attempt > 0 && c.Binding.Attempt != a.Attempt) {
-				return result, holderRefusal()
-			}
-		} else if request.Subject.Unit == nil || request.Subject.Unit.Kind != blob.LogEval || request.Subject.Unit.Source == nil || c.Unit != capability.UnitEval || request.Subject.Unit.Source.NodeID != c.Binding.NodeID || request.Subject.Unit.Source.Generation != c.Binding.Generation || c.Binding.Expansion == nil || request.Subject.Unit.Generation != c.Binding.Expansion.Generation {
-			return result, holderRefusal()
+	} else if c.Binding.Kind == capability.BindingNode || c.Unit != "" || (!slices.Contains(c.Grants, capability.RunsRead) && !slices.Contains(c.Grants, capability.LogsRead)) {
+		if err := checkLogWriterTx(ctx, tx, t.team, request.Subject, actor, false); err != nil {
+			return result, err
 		}
 	}
 	var completeness string

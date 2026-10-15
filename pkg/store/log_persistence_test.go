@@ -6,6 +6,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestLogPersistenceRejectsMalformedSubjects(t *testing.T) {
@@ -139,6 +141,73 @@ func TestLogPersistenceOwnerUnitsHaveIndependentFences(t *testing.T) {
 			reader := authorityMember(t, s, "owner-log-reader", RoleReader)
 			if got, err := tenant.ReadLogSegments(t.Context(), reader, blob.LogReadRequest{Subject: subject}); err != nil || !got.Complete {
 				t.Fatalf("historical unit log=%+v,%v", got, err)
+			}
+		})
+	}
+}
+
+func TestLogPersistenceReadDoesNotBorrowSealedReplayGrace(t *testing.T) {
+	for _, final := range []bool{false, true} {
+		t.Run(map[bool]string{false: "open", true: "sealed"}[final], func(t *testing.T) {
+			s, tenant, actor, attempt := resultFixture(t)
+			commit := logCommit(actor, attempt)
+			commit.Final = final
+			if err := tenant.RecordSegments(t.Context(), commit); err != nil {
+				t.Fatal(err)
+			}
+			finished := s.now()
+			rewriteSchemaExec(t, s.db, "UPDATE nodes SET status='done',outcome='success',finished_at=?,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE run_id='run'", finished.UnixNano())
+			rewriteSchemaExec(t, s.db, "UPDATE node_attempts SET finished_at=?,outcome='success' WHERE run_id='run'", finished.UnixNano())
+			reader := authorityMember(t, s, "historical-log-reader", RoleReader)
+			request := blob.LogReadRequest{Subject: commit.Subject}
+			if _, err := tenant.ReadLogSegments(t.Context(), actor, request); err != nil {
+				t.Fatalf("final attempt grace: %v", err)
+			}
+			s.clock = func() time.Time { return finished.Add(limits.LogSealGrace + time.Nanosecond) }
+			if _, err := tenant.ReadLogSegments(t.Context(), actor, request); err == nil {
+				t.Fatal("ended writer read after final-attempt grace")
+			}
+			if got, err := tenant.ReadLogSegments(t.Context(), reader, request); err != nil || len(got.Segments) != 1 {
+				t.Fatalf("historical member read=%+v: %v", got, err)
+			}
+			if final {
+				if err := tenant.RecordSegments(t.Context(), commit); err != nil {
+					t.Fatalf("identical sealed replay: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestLogPersistenceTriggerReadRechecksItsOwnerLease(t *testing.T) {
+	for _, stale := range []string{"expired", "generation", "holder", "prefix", "ended"} {
+		t.Run(stale, func(t *testing.T) {
+			s, claim := releaseFixture(t, capability.UnitTrigger)
+			tenant := &Tenant{s: s, team: "a"}
+			actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+			subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "a", RunID: "run", Unit: &blob.LogUnit{Kind: blob.LogTrigger, Generation: claim.Award.Generation}}
+			if err := tenant.RecordSegments(t.Context(), SegmentCommit{Subject: subject, Actor: actor, RetentionClass: "r30", Final: true}); err != nil {
+				t.Fatal(err)
+			}
+			jobSubject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "a", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 1, Generation: 2}}
+			identity, err := logIdentity(jobSubject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rewriteSchemaExec(t, s.db, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome) VALUES ('a','run','job',1,2,'prior-writer','prior-award','runner','machine','remote',1,2,'success')`)
+			rewriteSchemaExec(t, s.db, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,prefix,retention_class,created_at,updated_at) VALUES ('a','run',?,'job_attempt','job',1,2,?,'r30',1,1)`, identity.id, identity.id)
+			requests := []blob.LogReadRequest{{Subject: subject}, {Subject: jobSubject}}
+			for _, request := range requests {
+				if _, err := tenant.ReadLogSegments(t.Context(), actor, request); err != nil {
+					t.Fatalf("live trigger read of %s: %v", request.Subject.Kind, err)
+				}
+			}
+			changes := map[string]string{"expired": "lease_expires_at=1", "generation": "generation=generation+1", "holder": "claimed_by='other'", "prefix": "capability_prefix='other'", "ended": "status='done',claimed_by=NULL,lease_expires_at=NULL"}
+			rewriteSchemaExec(t, s.db, "UPDATE triggers SET "+changes[stale]+" WHERE id='run'")
+			for _, request := range requests {
+				if _, err := tenant.ReadLogSegments(t.Context(), actor, request); err == nil {
+					t.Fatalf("stale trigger borrowed runs.read for %s logs", request.Subject.Kind)
+				}
 			}
 		})
 	}

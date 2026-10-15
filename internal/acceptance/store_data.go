@@ -14,12 +14,15 @@ import (
 // StoreDataBoundaryScenarios identifies SQLite persistence proofs. Native targets
 // still require their placement driver, PostgreSQL and authenticated routes.
 func StoreDataBoundaryScenarios() []string {
-	return []string{"storage-replica-safe-accounting", "storage-quota-settlement-crash-replay", "storage-log-segments-and-fallback", "storage-hasmany-read-set", "storage-reachability-and-retention-tails", "storage-memo-and-depcache-scope"}
+	return []string{"storage-replica-safe-accounting", "storage-quota-settlement-crash-replay", "storage-log-segments-and-fallback", "storage-hasmany-read-set", "storage-reachability-and-retention-tails", "storage-memo-and-depcache-scope", "storage-reference-edge-laundering"}
 }
 
 // CheckStoreDataBoundary checks accounting with independent clients and process restarts.
 // The caller owns root and its cleanup. No fixture uses the user's configuration.
 func CheckStoreDataBoundary(ctx context.Context, root, id string, crash StoreUploadCrashDriver) (err error) {
+	if id == "storage-reference-edge-laundering" {
+		return checkStoreReferenceBoundary(ctx, root)
+	}
 	if id == "storage-memo-and-depcache-scope" {
 		return checkStoreCacheScopeBoundary(ctx, root)
 	}
