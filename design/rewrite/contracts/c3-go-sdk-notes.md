@@ -44,6 +44,11 @@ shared node-host service routes. Each write waits for an object acknowledgement.
 A record write error fails its body or evaluation with the canonical error.
 Ordinary logs continue over the frame pipe.
 
+Host-service identifiers travel as opaque URL path segments. The SDK escapes
+dots as well as separators so `.` and `..` cannot trigger path cleaning.
+Receivers match the escaped segments and unescape each identifier once.
+An encoded slash remains one identifier, including when the whole value is `/`.
+
 Annotations require an execution context. The fake host refuses annotation and summary
 writes after fixture cancellation, including writes from retained detached contexts.
 Refused writes add no records. Eval records remain in run logs without a job.

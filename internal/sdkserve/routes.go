@@ -25,6 +25,11 @@ type routeServices struct {
 	transport http.RoundTripper
 }
 
+func routeSegment(id string) string {
+	// safety: escaped dots keep opaque identifiers out of the router's path cleaning.
+	return strings.ReplaceAll(url.PathEscape(id), ".", "%2E")
+}
+
 func (s *routeServices) call(ctx context.Context, method, path string, body, out any) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -87,7 +92,7 @@ func (s *routeServices) Secret(ctx context.Context, name string) (string, bool, 
 		Value  *string `json:"value"`
 		Masked *bool   `json:"masked"`
 	}
-	if err := s.call(ctx, "GET", "/node/v1/secrets/"+url.PathEscape(name), nil, &out); err != nil {
+	if err := s.call(ctx, "GET", "/node/v1/secrets/"+routeSegment(name), nil, &out); err != nil {
 		return "", false, err
 	}
 	if out.Value == nil || out.Masked == nil {
@@ -100,7 +105,7 @@ func (s *routeServices) Output(ctx context.Context, job string) (json.RawMessage
 	var out struct {
 		Output json.RawMessage `json:"output"`
 	}
-	err := s.call(ctx, "GET", "/node/v1/jobs/"+url.PathEscape(job)+"/output", nil, &out)
+	err := s.call(ctx, "GET", "/node/v1/jobs/"+routeSegment(job)+"/output", nil, &out)
 	if err == nil && out.Output == nil {
 		err = fmt.Errorf("host output response needs output")
 	}
@@ -111,7 +116,7 @@ func (s *routeServices) Latest(ctx context.Context, pipeline, job string, age ti
 	var out struct {
 		Output json.RawMessage `json:"output"`
 	}
-	err := s.call(ctx, "GET", "/node/v1/pipelines/"+url.PathEscape(pipeline)+"/latest?job="+url.QueryEscape(job)+"&max_age_ms="+strconv.FormatInt(age.Milliseconds(), 10), nil, &out)
+	err := s.call(ctx, "GET", "/node/v1/pipelines/"+routeSegment(pipeline)+"/latest?job="+url.QueryEscape(job)+"&max_age_ms="+strconv.FormatInt(age.Milliseconds(), 10), nil, &out)
 	if err == nil && out.Output == nil {
 		err = fmt.Errorf("host reference response needs output")
 	}
@@ -137,7 +142,7 @@ func (s *routeServices) RunPipeline(ctx context.Context, request ChildRequest) (
 			Output json.RawMessage `json:"output"`
 			Error  json.RawMessage `json:"error"`
 		}
-		path := "/node/v1/children/" + url.PathEscape(started.RunID) + "/await?job=" + url.QueryEscape(request.Job) + "&wait_ms=" + strconv.FormatInt(limits.ChildAwait.Milliseconds(), 10)
+		path := "/node/v1/children/" + routeSegment(started.RunID) + "/await?job=" + url.QueryEscape(request.Job) + "&wait_ms=" + strconv.FormatInt(limits.ChildAwait.Milliseconds(), 10)
 		if err := s.call(ctx, "GET", path, nil, &state); err != nil {
 			return nil, err
 		}
@@ -189,6 +194,7 @@ func (s *routeServices) acknowledge(ctx context.Context, path string, request an
 func (s *routeServices) Mask(ctx context.Context, value string) error {
 	return s.acknowledge(ctx, "/node/v1/masks", nodeproto.MaskRequest{Value: value})
 }
+
 func (s *routeServices) Emit(r nodeproto.FrameLog) {
 	var err error
 	switch r.Event {
@@ -222,5 +228,5 @@ func (s *routeServices) RegisterCleanup(ctx context.Context, argv []string, desc
 }
 
 func (s *routeServices) ReleaseCleanup(ctx context.Context, id string) error {
-	return s.call(ctx, "DELETE", "/node/v1/cleanups/"+url.PathEscape(id), nil, nil)
+	return s.call(ctx, "DELETE", "/node/v1/cleanups/"+routeSegment(id), nil, nil)
 }
