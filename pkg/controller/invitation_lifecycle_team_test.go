@@ -38,7 +38,7 @@ func TestTeamBoundary_InvitationsGoWithTheirInvitersAuthority(t *testing.T) {
 					t.Fatal(err)
 				}
 				erin, _ := signUp(t, f.st, "erin")
-				inv, err := f.teamA.CreateInvitation(ctx, alice.ID, erin.Email, store.RoleOwner, time.Now().UTC())
+				inv, err := fixtureInvitation(t, f.st, f.teamA, alice.ID, erin.Email, store.RoleOwner)
 				if err != nil {
 					t.Fatal(err)
 				}

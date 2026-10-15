@@ -2525,3 +2525,28 @@ Reporting and legacy claim fixtures use explicit `teststore.SeedNode` and
 `TestJobReportingSeedUsesCurrentSchemaAndRejectsMissingRun` checks their schema,
 nanosecond timestamps and failure when no target exists. New lifecycle and
 acceptance probes use `AdmitRun`, `AcceptPlan` and `TransitionNode` instead.
+
+## W1 authorized team mutation ports
+
+The identity invitation limits, email normalization, expiry, withdrawal and role
+checks now invoke `CreateAuthorizedInvitation` and `DeleteAuthorizedInvitation`
+through fresh account-session fixtures. Native generated authorization checks
+cover membership loss, role loss, revoked/missing session ancestry, delegated
+credentials and foreign tenants. Concurrent replay writes one invitation. A
+failed insertion rolls back the row and returns no result.
+
+`TestTeamWritesUseNativeTenantTransactions` exercises all six team mutation
+routes through the concrete store adapter. CSRF transport is a fixture, while
+credential snapshots, authorization and committing writes use SQLite.
+`TestTeamDeletionRetainsCheckoutAndHoldGuardsOnStoreClock` ports the deletion
+admission guards to the final checkout and hold contracts.
+`TestAuthorizedRunDeletionPreservesBillingAndAllowsCleanupReplay` completes a
+sealed run before removing it and verifies current authority, ownership,
+financial retention and direct-store replay. It replaces the raw run-control
+fixture. The obsolete `TestDeleteRun_DropsMemoEntriesFromDeletedRun` is removed
+because `concurrency_cache` and its writers were already deleted. Blob memo
+selection and retention remain covered by W1b's current record tests.
+
+The broader legacy deletion fixtures still need final run/trigger seeding and
+checkout amounts. Their pre-mutation failures are recorded in W1's session 57
+report. No native placement acceptance cell is enabled by these ports.

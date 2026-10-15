@@ -212,7 +212,7 @@ func TestRunnerChargesKeepTheRunPrincipalAfterRunDeletion(t *testing.T) {
 	}
 
 	for _, runID := range []string{"run-a", "run-b"} {
-		if err := teststore.ForTeam(t, s, store.DefaultTeam).DeleteRun(ctx, runID); err != nil {
+		if err := teststore.ForTeam(t, s, store.DefaultTeam).RemoveRunForTest(ctx, runID); err != nil {
 			t.Fatalf("delete %s: %v", runID, err)
 		}
 	}

@@ -987,40 +987,6 @@ func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []s
 	return t.s.getLatestRun(ctx, oneTeam(t.team), pipeline, statuses, maxAge)
 }
 
-// DeleteRun removes one tenant run and its retained operational data.
-func (t *Tenant) DeleteRun(ctx context.Context, runID string) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	var owned int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM runs WHERE team = ? AND id = ?
-UNION ALL SELECT 1 FROM triggers WHERE team = ? AND id = ? LIMIT 1`,
-		string(t.team), runID, string(t.team), runID).Scan(&owned)
-	if errors.Is(err, sql.ErrNoRows) {
-		return notFound("run", runID)
-	}
-	if err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE team = ? AND id = ?`, string(t.team), runID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM triggers WHERE team = ? AND id = ? AND parent_node_id = ''`, string(t.team), runID); err != nil {
-		return err
-	}
-	// safety: concurrency_cache carries no foreign key, so a memo
-	// entry left here keeps pointing at output this delete removes,
-	// and every later hit on that key fails to fetch it.
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM concurrency_cache WHERE team = ? AND origin_run_id = ?`, string(t.team), runID); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 type rowScanner interface {
 	Scan(dest ...any) error
 }

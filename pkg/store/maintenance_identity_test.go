@@ -127,7 +127,7 @@ func TestInvitationPersistenceUsesNanoseconds(t *testing.T) {
 	s, tenant, now := maintenanceStore(t)
 	*now = now.Add(123456789 * time.Nanosecond)
 	authorityMember(t, s, "owner", RoleOwner)
-	invitation, err := tenant.CreateInvitation(t.Context(), "owner", "invited@example.test", RoleReader, *now)
+	invitation, err := tenant.InviteForTest(t, t.Context(), "owner", "invited@example.test", RoleReader, *now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,11 +160,11 @@ func TestInvitationPersistenceUsesNanoseconds(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT accepted_at FROM invitations WHERE id=?`, invitation.ID).Scan(&at); err != nil || at != created {
 		t.Fatalf("acceptance timestamp: %d %v", at, err)
 	}
-	withdrawn, err := tenant.CreateInvitation(t.Context(), "owner", "withdrawn@example.test", RoleReader, *now)
+	withdrawn, err := tenant.InviteForTest(t, t.Context(), "owner", "withdrawn@example.test", RoleReader, *now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.DeleteInvitation(t.Context(), withdrawn.ID, *now); err != nil {
+	if err := tenant.WithdrawInvitationForTest(t, t.Context(), withdrawn.ID, *now); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.db.QueryRow(`SELECT withdrawn_at FROM invitations WHERE id=?`, withdrawn.ID).Scan(&at); err != nil || at != created {

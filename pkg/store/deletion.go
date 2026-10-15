@@ -92,51 +92,6 @@ type AccountDeletion struct {
 	RevokedPrefixes []string
 }
 
-// RequestDeletion queues t's team for deletion on behalf of an owner. The
-// owner must belong to another team, because every signed-in session lands
-// in a team and an account left with none would sign in to a team it cannot
-// use; deleting the account removes a last team instead. See
-// [Tenant.markForDeletionTx] for what the request does at once. It returns
-// the revoked token prefixes.
-func (t *Tenant) RequestDeletion(ctx context.Context, actorID string, now time.Time) (TeamDeletion, []string, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	defer rollbackOrLog(tx)
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	if err := t.lockTeamTx(ctx, tx); err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	role, err := t.roleTx(ctx, tx, actorID)
-	if err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	if role != RoleOwner {
-		return TeamDeletion{}, nil, ErrRoleAboveOwn
-	}
-	var others int
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM memberships WHERE account_id = ? AND team <> ?`,
-		actorID, string(t.team)).Scan(&others); err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	if others == 0 {
-		return TeamDeletion{}, nil, ErrOnlyTeam
-	}
-	revoked, err := t.markForDeletionTx(ctx, tx, actorID, now)
-	if err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	del, err := teamDeletionTx(ctx, tx, t.team)
-	if err != nil {
-		return TeamDeletion{}, nil, err
-	}
-	return del, revoked, tx.Commit()
-}
-
 // RequestTeamDeletion queues a team for deletion on the operator's word,
 // with no membership check, for a deletion request that arrived by mail.
 func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.Time) (TeamDeletion, []string, error) {

@@ -1008,19 +1008,6 @@ func (t *Tenant) Info(ctx context.Context) (TeamInfo, error) {
 	return t.s.TeamInfo(ctx, t.team)
 }
 
-// Rename changes t's display name. The slug is the tenant key and stays.
-func (t *Tenant) Rename(ctx context.Context, displayName string, now time.Time) (TeamInfo, error) {
-	displayName = strings.TrimSpace(displayName)
-	if displayName == "" || len(displayName) > maxDisplayNameLen {
-		return TeamInfo{}, fmt.Errorf("%w: a display name is 1 to %d characters", ErrInvalidInput, maxDisplayNameLen)
-	}
-	if _, err := t.s.exec(ctx, `UPDATE teams SET display_name = ?, updated_at = ? WHERE name = ?`,
-		displayName, now.UnixNano(), string(t.team)); err != nil {
-		return TeamInfo{}, err
-	}
-	return t.Info(ctx)
-}
-
 // Members lists t's members.
 func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error) {
 	rows, err := t.s.query(ctx, `
@@ -1116,23 +1103,7 @@ func (t *Tenant) requireAnotherOwnerTx(ctx context.Context, tx *storeTx, exceptI
 	return nil
 }
 
-// CreateInvitation offers an email address a role within the actor's current authority.
-func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, role Role, now time.Time) (Invitation, error) {
-	email = NormalizeEmail(email)
-	if !LooksLikeEmail(email) {
-		return Invitation{}, fmt.Errorf("%w: that is not an email address", ErrInvalidInput)
-	}
-	if !role.Valid() {
-		return Invitation{}, fmt.Errorf("%w: unknown role %q", ErrInvalidInput, role)
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return Invitation{}, err
-	}
-	defer rollbackOrLog(tx)
-	if err := t.lockTeamTx(ctx, tx); err != nil {
-		return Invitation{}, err
-	}
+func (t *Tenant) createInvitationTx(ctx context.Context, tx *storeTx, actorID, email string, role Role, id string, now time.Time) (Invitation, error) {
 	actor, err := t.roleTx(ctx, tx, actorID)
 	if err != nil {
 		return Invitation{}, err
@@ -1172,10 +1143,6 @@ func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, ro
 		at, string(t.team), email, at); err != nil {
 		return Invitation{}, err
 	}
-	id, err := newIdentityID()
-	if err != nil {
-		return Invitation{}, err
-	}
 	inv := Invitation{
 		ID: id, Team: t.team, Email: email, Role: role, InvitedBy: actorID,
 		CreatedAt: now.UTC(), ExpiresAt: now.UTC().Add(invitationTTL),
@@ -1189,7 +1156,7 @@ func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, ro
 		}
 		return Invitation{}, err
 	}
-	return inv, tx.Commit()
+	return inv, nil
 }
 
 // Invitations lists t's open invitations.
@@ -1206,23 +1173,6 @@ func (t *Tenant) Invitations(ctx context.Context, now time.Time) (_ []Invitation
 		}
 	}()
 	return scanInvitations(rows)
-}
-
-// DeleteInvitation withdraws one of t's open invitations. An id that is
-// another team's, already accepted, or already withdrawn is ErrNotFound. The
-// row stays, so a withdrawn invitation still counts toward the daily cap.
-func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time) error {
-	res, err := t.s.exec(ctx, `
-		UPDATE invitations SET withdrawn_at = ?
-		WHERE team = ? AND id = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`,
-		now.UTC().UnixNano(), string(t.team), id)
-	if err != nil {
-		return err
-	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return ErrNotFound
-	}
-	return nil
 }
 
 // CLITokenLifetime bounds a legacy member credential.

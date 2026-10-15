@@ -2570,8 +2570,8 @@ func (t *Tenant) ConfirmGitCredentialFor(ctx context.Context, a capability.Autho
 func (t *Tenant) CopyMemo(ctx context.Context, request blob.CopyMemoRequest) (blob.MemoHit, error)
 func (t *Tenant) CountPendingTriggers(ctx context.Context) (int, error)
 func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
+func (t *Tenant) CreateAuthorizedInvitation(ctx context.Context, a capability.Authorized, email string, role Role, key string) (Invitation, error)
 func (t *Tenant) CreateGitHubAutomationTriggerWithRun(ctx context.Context, trig Trigger, run Run, grant GitHubAppAutomation) error
-func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, role Role, now time.Time) (Invitation, error)
 func (t *Tenant) CreateRun(ctx context.Context, r Run) error
 func (t *Tenant) CreateToken(
 	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time,
@@ -2585,13 +2585,14 @@ func (t *Tenant) CreditBalanceMicro(ctx context.Context) (int64, error)
 func (t *Tenant) CreditFreeze(ctx context.Context) (_ TeamCreditFreeze, err error)
 func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
 func (t *Tenant) CreditUsageByRun(ctx context.Context, limit int) (_ []RunCreditUsage, err error)
+func (t *Tenant) DeleteAuthorizedInvitation(ctx context.Context, a capability.Authorized, id string) error
+func (t *Tenant) DeleteAuthorizedRun(ctx context.Context, a capability.Authorized) error
+func (t *Tenant) DeleteAuthorizedTeam(ctx context.Context, a capability.Authorized) (TeamDeletion, error)
 func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error)
 func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)
 func (t *Tenant) DeleteGitHubAppAutomation(ctx context.Context, repository int64) error
 func (t *Tenant) DeleteGitHubAppTrigger(ctx context.Context, repositoryID int64, pipeline string) error
-func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time) error
 func (t *Tenant) DeletePoolAccess(ctx context.Context, actor Actor, pool, id string) (bool, error)
-func (t *Tenant) DeleteRun(ctx context.Context, runID string) error
 func (t *Tenant) DeleteRunner(ctx context.Context, actor Actor, name string) (bool, error)
 func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) (err error)
 func (t *Tenant) EgressUsage(ctx context.Context, period string) (EgressUsage, error)
@@ -2694,14 +2695,13 @@ func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string,
 func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capability.Authorized) (GitCredential, capability.SourceReleaseAudit, error)
 func (t *Tenant) RemoveGitCredential(ctx context.Context, a capability.Authorized, host string) error
 func (t *Tenant) RemoveSecret(ctx context.Context, a capability.Authorized, name, pipeline string) error
-func (t *Tenant) Rename(ctx context.Context, displayName string, now time.Time) (TeamInfo, error)
+func (t *Tenant) RenameAuthorizedTeam(ctx context.Context, a capability.Authorized, name string) (TeamInfo, error)
 func (t *Tenant) RenameGitHubAppAutomation(ctx context.Context, installation, repository int64, name string) error
 func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installation, repositoryID int64, name string) error
 func (t *Tenant) RenameGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, repoURL string, now time.Time) error
 func (t *Tenant) RenewNodeClaim(ctx context.Context, ref NodeRef, actor Actor) (LeaseBeat, error)
 func (t *Tenant) RenewOwner(ctx context.Context, actor Actor) (LeaseBeat, error)
 func (t *Tenant) ReportGitHubCheck(ctx context.Context, runID string, fn func(ctx context.Context, checkRun int64) (int64, error)) error
-func (t *Tenant) RequestDeletion(ctx context.Context, actorID string, now time.Time) (TeamDeletion, []string, error)
 func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservationRequest) (UploadReservation, error)
 func (t *Tenant) ReserveQuota(ctx context.Context, quota string, amount int64) (QuotaReservation, error)
 func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
@@ -2716,6 +2716,7 @@ func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capabi
 func (t *Tenant) RevokeGitHubRunner(ctx context.Context, a capability.Authorized, repositoryID int64) error
 func (t *Tenant) RotateCapability(ctx context.Context, a capability.Authorized, grace time.Duration, expires *time.Time) (capability.Rotation, error)
 func (t *Tenant) RotateCredentials(ctx context.Context, a capability.Authorized, secret func(Secret) (string, error), git func(GitCredential) (string, error)) (int, int, error)
+func (t *Tenant) SetAuthorizedBuildTrust(ctx context.Context, a capability.Authorized, trust bool) error
 func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now time.Time) (before, after BillingStanding, err error)
 func (t *Tenant) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
 func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
@@ -2729,7 +2730,6 @@ func (t *Tenant) SetSourceMachineConsent(ctx context.Context, authority capabili
 func (t *Tenant) SetSpendBudget(ctx context.Context, cents int64) error
 func (t *Tenant) SetStorageAllowance(ctx context.Context, bytes int64) (StorageQuota, error)
 func (t *Tenant) SetStorageQuota(ctx context.Context, q StorageQuota) error
-func (t *Tenant) SetTrustLocalBuilds(ctx context.Context, trust bool) error
 func (t *Tenant) SettleQuota(ctx context.Context, reservationID string, used int64) error
 func (t *Tenant) SourceReleaseAudits(ctx context.Context, limit int) (_ []capability.SourceReleaseAudit, err error)
 func (t *Tenant) SpendStanding(ctx context.Context, now time.Time) (SpendStanding, error)

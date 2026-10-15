@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Replace raw team rename, deletion, invitation, build-trust and run-deletion APIs with transactions that recheck current authority and membership. Invitation retries preserve the first result and reject changed requests. See [migration guide](docs/migrations/_unreleased.md#authorized-team-mutations).
+
 - **store (Breaking):** Remove raw job creation and queue publication APIs and the legacy invocation redactors. Plan and expansion acceptance enforce job-count guards atomically. Reports and receipts use sealed display inputs, and GitHub commit reports follow numeric repository identity through renames. See [migration guide](docs/migrations/_unreleased.md#job-creation-queue-publication-and-sealed-display).
 
 - **store (Breaking):** Remove raw job finish APIs. Job results commit through fenced tenant transitions. Run and trigger reports read sealed inputs, mask secret arguments, and query the final schema. Pending runs page correctly before execution starts. See [migration guide](docs/migrations/_unreleased.md#sealed-reporting-and-job-completion).

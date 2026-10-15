@@ -1,5 +1,23 @@
 # Migrating to the next release
 
+## Authorized team mutations
+
+`Tenant.Rename`, `RequestDeletion`, `CreateInvitation`, `DeleteInvitation`,
+`SetTrustLocalBuilds` and `DeleteRun` are removed. Use `RenameAuthorizedTeam`,
+`DeleteAuthorizedTeam`, `CreateAuthorizedInvitation`,
+`DeleteAuthorizedInvitation`, `SetAuthorizedBuildTrust` and
+`DeleteAuthorizedRun` with the selected tenant and current `Authorized` value.
+The store rechecks live authority, ancestry and membership in the committing
+transaction. Actors and timestamps come from that transaction.
+
+Invitation creation requires a nonempty request key. The same actor, tenant and
+key retain the first invitation and its expiry. A different email or role
+conflicts. Withdrawal retains the original replay result and daily count.
+Team deletion preserves owner, last-team, checkout, debt and hold guards.
+Run deletion requires terminal state and drained claims, removes operational rows and success pins,
+and preserves financial records. A repeated store call checks current authority
+before accepting an already-removed run.
+
 ## Owner completion and retired store helpers
 
 `Tenant.FinishRun` and its unfenced terminal writer are removed. Use

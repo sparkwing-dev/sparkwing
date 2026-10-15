@@ -61,3 +61,5 @@ func (s *Server) teamWriteEndpoints() []Endpoint {
 		{Method: "DELETE", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.handleDeleteRun},
 	}
 }
+
+var _ TeamWriter = (*store.Tenant)(nil)

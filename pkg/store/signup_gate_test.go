@@ -111,7 +111,7 @@ func TestAWaitlistedAccountMayAcceptAnInvitation(t *testing.T) {
 	waiting := signIn(t, st, "s-w", "w@example.com")
 	requireWaitlisted(t, waiting, store.WaitlistReasonOperator)
 
-	inv, err := tenant(t, st, owner.Account.ActiveTeam).CreateInvitation(ctx, owner.Account.ID, "w@example.com", store.RoleEditor, time.Now())
+	inv, err := tenant(t, st, owner.Account.ActiveTeam).InviteForTest(t, ctx, owner.Account.ID, "w@example.com", store.RoleEditor, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +400,7 @@ func TestConcurrentSignUpsAdmitExactlyTheLimit(t *testing.T) {
 
 func invite(t *testing.T, st *store.Store, owner store.SignInResult, email string) store.Invitation {
 	t.Helper()
-	inv, err := tenant(t, st, owner.Account.ActiveTeam).CreateInvitation(
+	inv, err := tenant(t, st, owner.Account.ActiveTeam).InviteForTest(t,
 		context.Background(), owner.Account.ID, email, store.RoleEditor, time.Now())
 	if err != nil {
 		t.Fatal(err)

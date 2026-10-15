@@ -101,13 +101,14 @@ func TestMembershipCredentialFailureRollsBackEveryEffect(t *testing.T) {
 func TestMembershipDowngradeWithdrawsHigherInvitations(t *testing.T) {
 	s := authorityStore(t)
 	owner := authorityMember(t, s, "owner", RoleOwner)
-	_ = authorityMember(t, s, "member", RoleEditor)
+	_ = authorityMember(t, s, "member", RoleOwner)
 	tenant := &Tenant{s: s, team: "a"}
 	for _, role := range []Role{RoleReader, RoleEditor} {
-		if _, err := tenant.CreateInvitation(t.Context(), "member", string(role)+"@example.com", role, time.Now()); err != nil {
+		if _, err := tenant.InviteForTest(t, t.Context(), "member", string(role)+"@example.com", role, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
+	owner.Authority = tenant.mutationFixtureAuthority(t, "owner", capability.TeamAdmin, time.Now()).Principal.Authority
 	role := RoleReader
 	if err := tenant.UpdateMembership(t.Context(), owner, MembershipUpdate{AccountID: "member", Role: &role}); err != nil {
 		t.Fatal(err)

@@ -34,7 +34,7 @@ func seedTeam(t *testing.T, st *store.Store, tn *store.Tenant, ownerID, runID st
 	if err := teststore.SeedSecret(st, tn.Team(), store.Secret{Name: "API_KEY", Value: "v-" + runID}, now); err != nil {
 		t.Fatalf("seed secret: %v", err)
 	}
-	if _, err := tn.CreateInvitation(ctx, ownerID, "guest-"+runID+"@example.com", store.RoleReader, now); err != nil {
+	if _, err := tn.InviteForTest(t, ctx, ownerID, "guest-"+runID+"@example.com", store.RoleReader, now); err != nil {
 		t.Fatalf("seed invitation: %v", err)
 	}
 	_, tok, err := tn.CreateTokenWith(ctx, "agent:"+runID, store.TokenKindTeam, []string{"nodes.claim"}, store.RunnerTokenLifetime, now, store.TokenOptions{CreatedBy: ownerID})
@@ -57,7 +57,7 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	acme := tenant(t, st, "acme")
-	inv, err := acme.CreateInvitation(ctx, owner.Account.ID, "member@example.com", store.RoleEditor, now)
+	inv, err := acme.InviteForTest(t, ctx, owner.Account.ID, "member@example.com", store.RoleEditor, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,10 +88,10 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 		}
 	}
 
-	if _, _, err := acme.RequestDeletion(ctx, member.Account.ID, now); !errors.Is(err, store.ErrRoleAboveOwn) {
-		t.Fatalf("editor deleting the team = %v, want ErrRoleAboveOwn", err)
+	if _, _, err := acme.DeleteTeamForTest(t, ctx, member.Account.ID, now); err == nil {
+		t.Fatalf("editor deleting the team = %v, want refusal", err)
 	}
-	del, revoked, err := acme.RequestDeletion(ctx, owner.Account.ID, now)
+	del, revoked, err := acme.DeleteTeamForTest(t, ctx, owner.Account.ID, now)
 	if err != nil {
 		t.Fatalf("RequestDeletion: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestTeamDeletionRefusesTheOwnersOnlyTeam(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	owner := signIn(t, st, "o", "owner@example.com")
-	if _, _, err := tenant(t, st, owner.PersonalTeam).RequestDeletion(ctx, owner.Account.ID, time.Now()); !errors.Is(err, store.ErrOnlyTeam) {
+	if _, _, err := tenant(t, st, owner.PersonalTeam).DeleteTeamForTest(t, ctx, owner.Account.ID, time.Now()); !errors.Is(err, store.ErrOnlyTeam) {
 		t.Fatalf("deleting the only team = %v, want ErrOnlyTeam", err)
 	}
 	if _, err := st.ForTeam(ctx, owner.PersonalTeam); err != nil {
@@ -192,7 +192,7 @@ func TestAccountDeletionRefusesALastOwnerWithMembersAndNamesTheTeams(t *testing.
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
 	member := signIn(t, st, "m", "member@example.com")
-	inv, err := tenant(t, st, owner.PersonalTeam).CreateInvitation(ctx, owner.Account.ID, "member@example.com", store.RoleReader, now)
+	inv, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "member@example.com", store.RoleReader, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 	owner := signIn(t, st, "o", "owner@example.com")
 	leaver := signIn(t, st, "l", "leaver@example.com")
 	shared := tenant(t, st, owner.PersonalTeam)
-	inv, err := shared.CreateInvitation(ctx, owner.Account.ID, "leaver@example.com", store.RoleEditor, now)
+	inv, err := shared.InviteForTest(t, ctx, owner.Account.ID, "leaver@example.com", store.RoleEditor, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestInvitationEmailsToOneAddressAreCappedAcrossTeams(t *testing.T) {
 	var claimed int
 	for i := range store.MaxInvitationEmailsPerDay + 1 {
 		owner := signIn(t, st, fmt.Sprintf("o%d", i), fmt.Sprintf("owner%d@example.com", i))
-		inv, err := tenant(t, st, owner.PersonalTeam).CreateInvitation(ctx, owner.Account.ID, "target@example.com", store.RoleReader, now)
+		inv, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "target@example.com", store.RoleReader, now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -309,14 +309,14 @@ func TestInvitationEmailsToOneAddressAreCappedAcrossTeams(t *testing.T) {
 		t.Fatalf("claimed %d emails to one address, want %d", claimed, store.MaxInvitationEmailsPerDay)
 	}
 	owner := signIn(t, st, "x", "other-owner@example.com")
-	other, err := tenant(t, st, owner.PersonalTeam).CreateInvitation(ctx, owner.Account.ID, "someone@example.com", store.RoleReader, now)
+	other, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "someone@example.com", store.RoleReader, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ok, err := st.ClaimInvitationEmail(ctx, other.ID, now); err != nil || !ok {
 		t.Fatalf("another address = %v, %v; want claimed", ok, err)
 	}
-	later, err := tenant(t, st, owner.PersonalTeam).CreateInvitation(ctx, owner.Account.ID, "target@example.com", store.RoleReader, now)
+	later, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "target@example.com", store.RoleReader, now)
 	if err != nil {
 		t.Fatal(err)
 	}

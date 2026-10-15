@@ -197,7 +197,7 @@ func (f *tenancyFixture) member(owner store.Account, name string, role store.Rol
 	f.t.Helper()
 	ctx := context.Background()
 	acct, _ := signUp(f.t, f.st, name)
-	inv, err := f.teamA.CreateInvitation(ctx, owner.ID, acct.Email, role, time.Now().UTC())
+	inv, err := fixtureInvitation(f.t, f.st, f.teamA, owner.ID, acct.Email, role)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -744,4 +744,24 @@ func TestTeamBoundary_SecretsStayWithTheirTeam(t *testing.T) {
 			t.Errorf("team B's delete removed team A's secret: %d %s", code, body)
 		}
 	})
+}
+
+func fixtureInvitation(t *testing.T, st *store.Store, tenant *store.Tenant, actor, email string, role store.Role) (store.Invitation, error) {
+	t.Helper()
+	account, err := st.Account(t.Context(), actor)
+	if err != nil {
+		return store.Invitation{}, err
+	}
+	raw := strings.TrimPrefix(session(t, st, account, tenant.Team()), "Session ")
+	route, _ := capability.LookupRoute("POST", "/api/v1/team/invitations")
+	target := capability.Target{Team: string(tenant.Team())}
+	auth, err := capability.NewAuthenticator(st).Authenticate(t.Context(), capability.Presentation{Raw: raw, Class: capability.CredentialSession, Evidence: capability.RequestEvidence{Target: target}}, route)
+	if err != nil {
+		return store.Invitation{}, err
+	}
+	a, err := capability.Authorize(t.Context(), st, route, auth, target)
+	if err != nil {
+		return store.Invitation{}, err
+	}
+	return tenant.CreateAuthorizedInvitation(t.Context(), a, email, role, email)
 }

@@ -160,7 +160,7 @@ func TestExpiryAndDeletionLowerAFreeTeamsEventBytes(t *testing.T) {
 	if got := standing(t, st, "acme"); got.EventBytes != 200 {
 		t.Fatalf("after expiry = %d, want the two live runs' 200", got.EventBytes)
 	}
-	if err := acme.DeleteRun(ctx, "gone"); err != nil {
+	if err := acme.RemoveRunForTest(ctx, "gone"); err != nil {
 		t.Fatal(err)
 	}
 	if got := standing(t, st, "acme"); got.EventBytes != 100 {

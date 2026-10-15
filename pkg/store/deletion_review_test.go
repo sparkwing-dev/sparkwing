@@ -56,7 +56,7 @@ func TestConcurrentCoOwnerDeletionsLeaveTheTeamAnOwner(t *testing.T) {
 					t.Fatal(err)
 				}
 				shared := tenant(t, st, "shared")
-				inv, err := shared.CreateInvitation(ctx, a.Account.ID, "b@example.com", store.RoleOwner, now)
+				inv, err := shared.InviteForTest(t, ctx, a.Account.ID, "b@example.com", store.RoleOwner, now)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -65,7 +65,7 @@ func TestConcurrentCoOwnerDeletionsLeaveTheTeamAnOwner(t *testing.T) {
 				}
 				if withEditor {
 					e := signIn(t, st, fmt.Sprintf("e%d", i), "e@example.com")
-					inv, err := shared.CreateInvitation(ctx, a.Account.ID, "e@example.com", store.RoleEditor, now)
+					inv, err := shared.InviteForTest(t, ctx, a.Account.ID, "e@example.com", store.RoleEditor, now)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -114,7 +114,7 @@ func TestInvitationEmailCapSurvivesTeamDeletion(t *testing.T) {
 		if _, err := st.CreateTeam(ctx, owner.Account.ID, slug, "", now); err != nil {
 			t.Fatal(err)
 		}
-		inv, err := tenant(t, st, slug).CreateInvitation(ctx, owner.Account.ID, to, store.RoleReader, now)
+		inv, err := tenant(t, st, slug).InviteForTest(t, ctx, owner.Account.ID, to, store.RoleReader, now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -272,7 +272,7 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 	owner := signIn(t, st, "o", "owner@example.com")
 	leaver := signIn(t, st, "l", "leaver@example.com")
 	shared := tenant(t, st, owner.PersonalTeam)
-	inv, err := shared.CreateInvitation(ctx, owner.Account.ID, "leaver@example.com", store.RoleEditor, now)
+	inv, err := shared.InviteForTest(t, ctx, owner.Account.ID, "leaver@example.com", store.RoleEditor, now)
 	if err != nil {
 		t.Fatal(err)
 	}

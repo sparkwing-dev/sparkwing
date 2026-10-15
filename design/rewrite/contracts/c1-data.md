@@ -87,6 +87,26 @@ fence on each lifecycle request. Tenant checks remain in metric and metadata
 writes. Metric insertion uses `(team, run_id, node_id, ts)`, accepts identical
 retries and refuses conflicting readings without changing the stored sample.
 
+## Authorized team mutations
+
+C2's `TeamWriter` is implemented on `Tenant`. Rename, invitations and build trust
+hold the team lock and recheck current administration. Invitations derive their
+identity from the tenant, committed account and request key. The existing row
+stores the immutable normalized email, role, actor and timestamps. Exact replay
+returns that row, including after withdrawal. Changed input conflicts.
+
+Owner deletion rechecks complete ancestry, current membership and deletion
+guards under the store clock before closing the team. Run deletion checks current
+`runs.control`, requires drained claims, removes a terminal run and its success pin, and preserves billing
+facts. A repeated direct store call still requires live authority. The HTTP
+run-target resolver still needs a deletion-cleanup retry contract because it
+cannot resolve a run after its row has gone.
+
+The six raw tenant mutation APIs are removed. Test-only fixture helpers invoke
+the new transactions with current account sessions. The obsolete concurrency
+memo deletion test is removed with its retired table. Native run completion and
+removal cover ownership, active refusal, financial retention and cleanup replay.
+
 ## Fenced metadata and legacy settlement retirement
 
 The raw Store/Tenant plan, step, annotation, summary, activity and approval

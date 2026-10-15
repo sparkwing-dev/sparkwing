@@ -27,7 +27,7 @@ func TestCapabilityMintWaitsOnAnUncommittedMembershipDrop(t *testing.T) {
 			owner := signIn(t, st, "owner-"+name, "owner-"+name+"@example.com")
 			member := signIn(t, st, "member-"+name, "member-"+name+"@example.com")
 			tn := tenant(t, st, owner.PersonalTeam)
-			inv, err := tn.CreateInvitation(ctx, owner.Account.ID, member.Account.Email, store.RoleOwner, time.Now())
+			inv, err := tn.InviteForTest(t, ctx, owner.Account.ID, member.Account.Email, store.RoleOwner, time.Now())
 			if err != nil {
 				t.Fatal(err)
 			}

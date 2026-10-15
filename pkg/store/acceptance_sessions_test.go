@@ -38,7 +38,7 @@ func checkStoreSessions(t *testing.T) (err error) {
 	if err != nil {
 		return err
 	}
-	invitation, err := tenant.CreateInvitation(ctx, ownerAccount.ID, memberAccount.Email, store.RoleEditor, time.Now())
+	invitation, err := tenant.InviteForTest(t, ctx, ownerAccount.ID, memberAccount.Email, store.RoleEditor, time.Now())
 	if err != nil {
 		return err
 	}

@@ -61,36 +61,6 @@ func TestTenantEventsStayInTheRunsTeam(t *testing.T) {
 	}
 }
 
-// Run control belongs to the run's team: another team's handle can neither
-// cancel, retry-link, delete nor read the run, and leaves it as it was.
-func TestTenantRunControlStaysInTheRunsTeam(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	acme := tenantFor(t, st, "acme")
-	globex := tenantFor(t, st, "globex")
-	seedTenantRun(t, acme, "run-a", "deploy")
-
-	if _, err := globex.GetRun(ctx, "run-a"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("globex.GetRun = %v, want ErrNotFound", err)
-	}
-	if err := globex.DeleteRun(ctx, "run-a"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("globex.DeleteRun = %v, want ErrNotFound", err)
-	}
-	run, err := acme.GetRun(ctx, "run-a")
-	if err != nil {
-		t.Fatalf("another team's delete removed the run: %v", err)
-	}
-	if run.RetriedAs != "" || run.FinishedAt != nil {
-		t.Fatalf("another team's writes changed the run: %+v", run)
-	}
-	if err := acme.DeleteRun(ctx, "run-a"); err != nil {
-		t.Fatalf("acme.DeleteRun: %v", err)
-	}
-	if _, err := acme.GetRun(ctx, "run-a"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("acme.GetRun after delete = %v, want ErrNotFound", err)
-	}
-}
-
 func TestTenantMetricsStayInTheRunsTeam(t *testing.T) {
 	ctx := t.Context()
 	f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
