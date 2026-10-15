@@ -68,7 +68,7 @@ func checkCancellationAndWatch(t *testing.T) {
 			Interval: 10 * time.Second,
 			Lease:    time.Minute,
 			Renew: func(context.Context) (lease.Beat, error) {
-				return lease.Beat{CancelRequested: true, Watched: true, WatchedNodes: []string{"job"}}, nil
+				return lease.Beat{CancelRequested: true, CancelReason: "operator requested stop", Watched: true, WatchedNodes: []string{"job"}}, nil
 			},
 			Observe: func(beat lease.Beat) { observed <- beat },
 		}
@@ -76,7 +76,7 @@ func checkCancellationAndWatch(t *testing.T) {
 		defer stop()
 		synctest.Wait()
 		var cause *lease.CancelError
-		if !errors.As(context.Cause(unit), &cause) {
+		if !errors.As(context.Cause(unit), &cause) || cause.Reason != "operator requested stop" {
 			t.Fatalf("cause = %v, want requested cancellation", context.Cause(unit))
 		}
 		if cause.Error() == "" {

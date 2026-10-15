@@ -1,5 +1,13 @@
 # Cross-area handoffs
 
+W3's [native grant continuation](w3-native-grant-continuation.md) connects the
+validated revoker to native attempt/evaluation startup. The real Go SDK owner
+failure acceptance component replaces the legacy eval regression test. The
+separate host-trigger heartbeat API and loop are removed. Its CLI caller and
+legacy host fixture use `lease.Keeper`. Owner/job renewal preserves C1's
+cancellation reason. Full native placement, foreign contract
+fields and the remaining legacy runtime cut stay open.
+
 W3's [process grant continuation](w3-grant-continuation.md) makes executors and
 owner evaluators retain revocation before binding validation or startup.
 The credential component now covers actual delegation through execution,

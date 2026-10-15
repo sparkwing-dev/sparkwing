@@ -26,6 +26,7 @@ type ownerSealStore struct {
 	trace      []string
 	refused    error
 	renewError error
+	beat       store.LeaseBeat
 	finished   store.FinishRunRequest
 }
 
@@ -34,7 +35,7 @@ type ownerSealSecrets struct{}
 func (ownerSealSecrets) ContainsSecret(string) bool { return false }
 
 func (s *ownerSealStore) RenewOwner(context.Context, store.Actor) (store.LeaseBeat, error) {
-	return store.LeaseBeat{}, s.renewError
+	return s.beat, s.renewError
 }
 
 func (s *ownerSealStore) ReadSnapshot(context.Context, string) (store.RunSnapshot, error) {
@@ -73,7 +74,7 @@ func (s *ownerSealStore) FinishRunAndUnit(_ context.Context, input store.FinishR
 // store. Store atomicity and native placement drivers remain separate cells.
 func CheckOwnerSeals(t *testing.T) {
 	t.Helper()
-	for _, mode := range []string{"new", "resume", "refused", "setup_failure", "rejected_owner", "secret_setup_failure", "secret_accept_failure", "cancelled_acquire_success", "lost_acquire_success"} {
+	for _, mode := range []string{"new", "resume", "refused", "setup_failure", "rejected_owner", "cancelled_owner", "secret_setup_failure", "secret_accept_failure", "cancelled_acquire_success", "lost_acquire_success"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(nil)
@@ -96,6 +97,9 @@ func CheckOwnerSeals(t *testing.T) {
 			}
 			if mode == "rejected_owner" {
 				s.renewError = &apierr.Error{Code: apierr.LockHeld}
+			}
+			if mode == "cancelled_owner" {
+				s.beat = store.LeaseBeat{CancelRequested: true, CancelReason: "operator requested stop"}
 			}
 			if mode == "secret_accept_failure" {
 				s.refused = secretFailure
@@ -163,6 +167,12 @@ func CheckOwnerSeals(t *testing.T) {
 				want = nil
 				if !errors.Is(err, lease.ErrLeaseLost) {
 					t.Fatalf("error = %v", err)
+				}
+			case "cancelled_owner":
+				want = nil
+				var cancelled *lease.CancelError
+				if !errors.As(err, &cancelled) || cancelled.Reason != "operator requested stop" {
+					t.Fatalf("owner cancellation lost its reason: %v", err)
 				}
 			case "lost_acquire_success":
 				want = []string{"acquire"}

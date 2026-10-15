@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
@@ -29,42 +30,19 @@ func CheckNativeExecutorSteps(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
-	bin := filepath.Join(t.TempDir(), "steps")
-	if runtime.GOOS == "windows" {
-		bin += ".exe"
-	}
-	if out, err := exec.CommandContext(ctx, "go", "build", "-o", bin, "github.com/sparkwing-dev/sparkwing/internal/nodehost/testdata/stepsfixture").CombinedOutput(); err != nil {
-		t.Fatalf("build SDK fixture: %v: %s", err, out)
-	}
+	bin := buildNativeSDKFixture(t, ctx, "stepsfixture")
 	cfg := nodehost.ProtocolSessionConfig{Command: []string{bin}, Environment: []string{"PATH=" + os.Getenv("PATH")}, Revoke: func() error { return nil }}
 	runner := nodeproto.RunnerIdentity{Name: "granted", Type: "local", Labels: []string{}}
 	var hello nodeproto.HelloResult
 	plans := map[bool]nodeproto.PlanDoc{}
 	for _, dry := range []bool{false, true} {
-		process, err := nodehost.StartProtocolSession(ctx, cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if err := process.Close(); err != nil {
-				t.Error(err)
-			}
-		})
-		if err := nativeStepCall(ctx, process, nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: "fixture"}, Runner: &runner}, &hello); err != nil {
-			t.Fatal(err)
-		}
 		args := map[string]string{}
 		if dry {
 			args["set"] = "dry"
 		}
 		var plan nodeproto.PlanDoc
-		if err := nativeStepCall(ctx, process, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: "steps", Args: args, Run: &nodeproto.RunContext{RunID: "run", Pipeline: "steps", DryRun: dry}}, &plan); err != nil {
-			t.Fatal(err)
-		}
+		hello, plan = planNativeSDKFixture(t, ctx, bin, "steps", args, nodeproto.RunContext{RunID: "run", Pipeline: "steps", DryRun: dry}, runner)
 		plans[dry] = plan
-		if err := process.Close(); err != nil {
-			t.Fatal(err)
-		}
 	}
 	for _, id := range []string{"order", "parallel", "failfast", "finally-chain", "collect", "continue", "optional", "skips", "skippanic", "panics", "dry"} {
 		t.Run(id, func(t *testing.T) {
@@ -101,6 +79,10 @@ func CheckNativeExecutorSteps(t *testing.T) {
 				t.Fatal(err)
 			}
 			spec.PlanHash, spec.Resolved.Engine = hash, input.Engine.Identity
+			spec.Request.Request.Env, err = runspec.EnvironmentDigest(map[string]string{"PATH": os.Getenv("PATH")})
+			if err != nil {
+				t.Fatal(err)
+			}
 			spec.Request.Request.Pipeline, spec.Resolved.Entrypoint = "steps", "steps"
 			spec.Resolved.Settings.Jobs = map[string]runspec.JobExecutionSettings{id: input.Execution}
 			if id == "dry" {
@@ -127,10 +109,11 @@ func CheckNativeExecutorSteps(t *testing.T) {
 			}
 			deps.ValidatePlan = nil
 			deps.Validation = nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}}
+			revoked := false
 			deps.Bind = func(_ context.Context, in nodehost.NodeInput) (nodehost.ProcessGrant, error) {
 				binding := in.RouteBinding
 				binding.Routes = nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "process-fixture"}
-				return nodehost.ProcessGrant{Binding: binding, Revoke: func() error { return nil }}, nil
+				return nodehost.ProcessGrant{Binding: binding, Revoke: func() error { revoked = true; return nil }}, nil
 			}
 			deps.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return input.Engine, nil
@@ -152,9 +135,12 @@ func CheckNativeExecutorSteps(t *testing.T) {
 				messages = append(messages, frame.Message)
 				return nil
 			}
-			deps.Start = func(ctx context.Context, _ nodehost.NodeInput, activity nodehost.ExecutorActivity) (nodehost.ExecutorProcess, error) {
-				cfg.Activity = activity
-				process, err := nodehost.StartProtocolSession(ctx, cfg)
+			attemptConfig := cfg
+			attemptConfig.Revoke = nil
+			attemptConfig.Environments = nodehost.SDKEnvironment{Store: records, Base: procenv.Base{Local: true, Captured: []string{"PATH=" + os.Getenv("PATH")}}}
+			input.Entry.Command, input.Entry.Directory = cfg.Command, t.TempDir()
+			deps.Start = func(ctx context.Context, in nodehost.NodeInput, activity nodehost.ExecutorActivity) (nodehost.ExecutorProcess, error) {
+				process, err := attemptConfig.Start(ctx, in, activity)
 				if process == nil {
 					return nil, err
 				}
@@ -187,7 +173,7 @@ func CheckNativeExecutorSteps(t *testing.T) {
 			if text := wantError[id]; text != "" && (final.Extra.Result == nil || !strings.Contains(final.Extra.Result.MaskedError, text)) {
 				t.Fatalf("native failure lost its SDK error: %+v", final.Extra.Result)
 			}
-			if child == nil || !child.closed || !child.cleaned {
+			if child == nil || !child.closed || !child.cleaned || !revoked {
 				t.Fatal("SDK process was not joined")
 			}
 			states := map[string]string{}
@@ -278,6 +264,40 @@ func CheckNativeExecutorSteps(t *testing.T) {
 			}
 		})
 	}
+}
+
+func buildNativeSDKFixture(t *testing.T, ctx context.Context, name string) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), name)
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	if out, err := exec.CommandContext(ctx, "go", "build", "-o", bin, "github.com/sparkwing-dev/sparkwing/internal/nodehost/testdata/"+name).CombinedOutput(); err != nil {
+		t.Fatalf("build SDK fixture: %v: %s", err, out)
+	}
+	return bin
+}
+
+func planNativeSDKFixture(t *testing.T, ctx context.Context, bin, pipeline string, args map[string]string, run nodeproto.RunContext, runner nodeproto.RunnerIdentity) (nodeproto.HelloResult, nodeproto.PlanDoc) {
+	t.Helper()
+	process, err := nodehost.StartProtocolSession(ctx, nodehost.ProtocolSessionConfig{Command: []string{bin}, Environment: []string{"PATH=" + os.Getenv("PATH")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := process.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	var hello nodeproto.HelloResult
+	if err := nativeStepCall(ctx, process, nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: "fixture"}, Runner: &runner}, &hello); err != nil {
+		t.Fatal(err)
+	}
+	var plan nodeproto.PlanDoc
+	if err := nativeStepCall(ctx, process, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: pipeline, Args: args, Run: &run}, &plan); err != nil {
+		t.Fatal(err)
+	}
+	return hello, plan
 }
 
 type nativeStepStore struct {

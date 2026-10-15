@@ -1,5 +1,10 @@
 # C3 protocol and SDK contract
 
+[Native grant handoff](w3-native-grant-continuation.md) passes the validated
+revoker into native attempt and owner-evaluation startup. It ports real Go SDK
+closure failures, carries persisted cancellation reasons and removes the separate
+host-trigger heartbeat loop.
+
 [Process authority](w3-authority-continuation.md) adds digest-based in-memory
 delegation, fresh parent snapshots, bound service resolution and process
 revocation. C2 router and native placement assembly remain open.
@@ -580,6 +585,17 @@ It revokes before joining the process and running cleanup on every exit,
 including a factory that returns both a grant and an error. Revocation errors
 prevent successful execution or policy acknowledgement. SDK hello receives only
 the process binding. Unbound transports may omit the factory.
+
+Native `ProtocolSessionConfig.Start` and `StartEvaluation` receive that validated
+revoker through the host's private input. It replaces any revoker in reusable
+session configuration before environment construction or spawn. Callers do not
+mutate shared configuration to connect a new grant. Direct session users still
+supply their own revoker.
+
+`lease.Beat.CancelReason` carries the cancellation reason from C1's renewal.
+The owner and claimed-node adapters preserve it. A successful cancellation reply
+uses that reason in `lease.CancelError`. An absent reason keeps `cancel_requested`.
+Failed renewal replies cannot request cancellation or replace the first cause.
 
 `OwnerEvaluator.SkipIf` evaluates predicates in declaration order and stops at
 the first true result. Each predicate reconstructs and checks the accepted code

@@ -14,6 +14,7 @@ import (
 // Beat carries cancellation and watch demand on the existing renewal cadence.
 type Beat struct {
 	CancelRequested bool     `json:"cancel_requested"`
+	CancelReason    string   `json:"cancel_reason,omitempty"`
 	Watched         bool     `json:"watched"`
 	WatchedNodes    []string `json:"watched_jobs,omitempty"`
 }
@@ -83,7 +84,11 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 			next := time.Now().Add(max(k.Interval, retryAfter(err)))
 			if err == nil {
 				if beat.CancelRequested {
-					cancel(&CancelError{Reason: "cancel_requested"})
+					reason := beat.CancelReason
+					if reason == "" {
+						reason = "cancel_requested"
+					}
+					cancel(&CancelError{Reason: reason})
 				} else {
 					expires = time.Now().Add(k.Lease)
 					select {

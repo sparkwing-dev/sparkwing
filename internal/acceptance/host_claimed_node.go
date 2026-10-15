@@ -52,7 +52,7 @@ func (s *claimedHostStore) RenewNodeClaim(_ context.Context, ref store.NodeRef, 
 	case s.mode == "rejected" || s.mode == "lost_during_work" && beats > 1:
 		return store.LeaseBeat{}, &apierr.Error{Code: apierr.LockHeld}
 	case s.mode == "cancelled":
-		return store.LeaseBeat{CancelRequested: true}, nil
+		return store.LeaseBeat{CancelRequested: true, CancelReason: "operator requested stop"}, nil
 	case s.mode == "silent":
 		return store.LeaseBeat{}, errors.New("unavailable")
 	default:
@@ -127,7 +127,7 @@ func CheckClaimedNodeLifecycle(t *testing.T) {
 					}
 				case "cancelled":
 					var cancelled *lease.CancelError
-					if !errors.As(err, &cancelled) || acquired || len(s.reports) != 1 || s.reports[0].To != store.NodeCancelled {
+					if !errors.As(err, &cancelled) || cancelled.Reason != "operator requested stop" || acquired || len(s.reports) != 1 || s.reports[0].To != store.NodeCancelled {
 						t.Fatalf("cancellation: acquired=%t reports=%+v error=%v", acquired, s.reports, err)
 					}
 				default:

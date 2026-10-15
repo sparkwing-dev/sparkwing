@@ -85,6 +85,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 			return h.failure(err), err
 		}
 		input.RouteBinding = grant.Binding
+		input.processRevoke = grant.Revoke
 	} else if input.RouteBinding.Routes.Bearer != "" {
 		err = errors.New("SDK execution requires a fresh process binding factory")
 		return h.failure(err), err

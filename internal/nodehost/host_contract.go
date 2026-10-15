@@ -76,6 +76,7 @@ type ClaimAuthority struct {
 // GrantedRunner and RouteBinding come from the award and delegated node bearer;
 // SDK processes receive them in hello, never through process environment.
 type NodeInput struct {
+	processRevoke func() error
 	Storage       StorageBinding
 	Engine        engine.Resolved
 	Accepted      AcceptedRun

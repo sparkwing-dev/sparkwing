@@ -63,7 +63,7 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 	keeper := h.Lease
 	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {
 		beat, err := h.Store.RenewNodeClaim(ctx, ref, actor)
-		return lease.Beat{CancelRequested: beat.CancelRequested, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err
+		return lease.Beat{CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err
 	}
 	ctx, stop := startHostKeeper(parent, keeper)
 	defer stop()

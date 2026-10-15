@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -86,13 +87,14 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 					return engine.SDKCommand{Directory: directory, Command: []string{exe, "-test.run=^TestProtocolSessionChild$", "--", mode}}, nil
 				},
 			}
-			ctx, cancel := context.WithCancelCause(t.Context())
+			testCtx, deadline := context.WithTimeout(t.Context(), 10*time.Second)
+			defer deadline()
+			ctx, cancel := context.WithCancelCause(testCtx)
 			defer cancel(nil)
 			var session *ProtocolSession
 			revoked, cleaned := false, false
 			cfg := ProtocolSessionConfig{
 				Environments: sdkTestEnvironment(s), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil },
-				Revoke:      func() error { revoked = true; return nil },
 				RunCleanups: func(context.Context, CleanupScope) error { cleaned = true; return nil },
 				Log: func(_ context.Context, log nodeproto.FrameLog) error {
 					if log.Message == "entered" && lost {
@@ -115,7 +117,6 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 					return ProcessGrant{}, err
 				}
 				issuedLookup = processLookup(issued)
-				cfg.Revoke = revoke
 				cfg.RunCleanups = func(ctx context.Context, scope CleanupScope) error {
 					if _, err := authorities.ReadAuthentication(ctx, issuedLookup, capability.RequestEvidence{}); err == nil {
 						t.Error("cleanup began with live process authority")

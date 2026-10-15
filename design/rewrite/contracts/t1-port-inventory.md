@@ -573,6 +573,33 @@ rejection before renewal, source acquisition, SDK startup or result writes.
 
 ## W3 process authority component
 
+The [native grant continuation](w3-native-grant-continuation.md) adds
+`lifecycle-approval-decisions-and-owner-rights/hermetic-native-owner-failures`.
+Four cases use the real Go SDK, shared evaluator/validator/hash/environment
+builder and native pipes. Throwing generator, predicate and memo closures
+cannot become topology, skip decisions or memo misses. `NoMemo` keeps the same
+error. Every process revokes before cleanup and invokes no job body. The
+95-line legacy eval regression file is removed after this port.
+
+The native step-policy component's eleven cases now use native `Start` with
+the sealed local environment and validated grant. The direct Git/native
+claim-host test also uses the host's grant handoff, without changing session
+configuration to install its revoker. `FuzzNativeStartupGrantIsolation` generates
+changed bindings and failed delegation, requiring only validated grants to reach
+environment construction and refusing stale configuration revokers.
+
+Owner-seal and claimed-node cancellation cases preserve the reason supplied by
+the store before source acquisition. The keeper's cancellation/watch case checks
+the same reason, and `FuzzKeeperCancellationReason` generates arbitrary reasons
+plus the absent-reason fallback.
+
+The old host-trigger heartbeat loop and its 163-line HTTP regression file are
+removed. `recovery-keeper-causes-and-backoff/hermetic-library` covers their
+rejected-claim, full-lease-silence and operator-cancellation invariants through
+`lease.Keeper`, without mutable timing globals. The CLI caller and retained
+legacy host fixture consume that keeper. They still use the old HTTP renewal
+shape until their W8/W9 lifecycle cut. This does not close a native placement cell.
+
 The [process authority continuation](w3-authority-continuation.md) adds
 `credentials-delegation-subset/hermetic-process-authority` using the real memory
 adapter and registered summary handler. C2 validators, parent persistence and

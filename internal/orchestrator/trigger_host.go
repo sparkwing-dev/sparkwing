@@ -13,10 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/lease"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -53,20 +50,7 @@ type TriggerHost struct {
 	Logger   *slog.Logger
 }
 
-var errTriggerClaimEnded = errors.New("the trigger claim ended, so the run stopped")
-
-// HostTriggerRun plans h's run in a short-lived process of its pipeline,
-// runs the scheduler, dispatches each node, and finishes the trigger once
-// the run row is terminal. An error means no run row was recorded. The caller
-// renews the trigger claim, as [HeartbeatTrigger] does, and cancels ctx with a
-// [lease.CancelError] for an operator's cancel; a ctx cancelled with no
-// cause, as a runner shutting down is, leaves the run and trigger to the
-// claim's lease.
-//
-// safety: plan code and every closure run in processes with the minimal
-// environment and only their node's route bearer; the runner's token stays in
-// this process, and a node's code reaches the controller only under the
-// claim of the host that runs it.
+// HostTriggerRun plans and schedules a claimed run under the caller's owner lease.
 func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	logger := cmp.Or(h.Logger, slog.Default())
 	trig := h.Trigger
@@ -298,29 +282,6 @@ const (
 	runReadAttempts = 4
 	runReadBackoff  = 250 * time.Millisecond
 )
-
-// HeartbeatTrigger renews triggerID's claim every interval until stop is
-// called, and cancels the returned context when the claim ends: with a
-// [lease.CancelError] for an operator's cancel, which the run records as
-// cancelled, and with an error that fails the run when the claim ended any
-// other way.
-func HeartbeatTrigger(ctx context.Context, c *client.Client, triggerID string, interval time.Duration, logger *slog.Logger) (context.Context, func()) {
-	ctx, cancel := context.WithCancelCause(ctx)
-	var cancelled atomic.Bool
-	beatCtx, stopBeat := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runHeartbeat(beatCtx, c, triggerID, interval, func() {
-			if cancelled.Load() {
-				cancel(&lease.CancelError{Reason: "cancelled by operator"})
-				return
-			}
-			cancel(errTriggerClaimEnded)
-		}, &cancelled, logger)
-	}()
-	return ctx, func() { stopBeat(); <-done; cancel(nil) }
-}
 
 func dispatchThrough(r runner.Runner, pipeline string) nodehost.Executor {
 	return func(ctx context.Context, n *nodehost.NodeRun) nodehost.Result {

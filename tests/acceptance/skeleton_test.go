@@ -62,6 +62,7 @@ func pendingScenarios(t *testing.T, group string) {
 				t.Run("hermetic-planning-defaults", acceptance.CheckPlanningDefaults)
 			case "lifecycle-approval-decisions-and-owner-rights":
 				t.Run("hermetic-policy-evaluation", acceptance.CheckOwnerApprovalPolicies)
+				t.Run("hermetic-native-owner-failures", acceptance.CheckNativeOwnerFailures)
 			case "lifecycle-generator-barrier":
 				t.Run("hermetic-library", acceptance.CheckOwnerExpansion)
 			case "lifecycle-request-and-plan-seals":

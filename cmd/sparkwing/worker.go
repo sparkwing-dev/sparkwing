@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 
 	flag "github.com/spf13/pflag"
@@ -131,7 +132,17 @@ type checkoutBuild func(ctx context.Context) (entry pipelineentry.Command, dir s
 func hostTriggerWith(ctx context.Context, cli *client.Client, trigger *store.Trigger, controllerURL, token string,
 	heartbeat time.Duration, build checkoutBuild, host func(context.Context, orchestrator.TriggerHost) error,
 ) error {
-	runCtx, stop := orchestrator.HeartbeatTrigger(orchestrator.DispatchContext(ctx, trigger), cli, trigger.ID, heartbeat, slog.Default())
+	keeper := lease.Keeper{Interval: heartbeat, Lease: store.DefaultLeaseDuration, Renew: func(ctx context.Context) (lease.Beat, error) {
+		status, err := cli.HeartbeatTrigger(ctx, trigger.ID)
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) || client.IsTokenDead(err) {
+			return lease.Beat{}, &apierr.Error{Code: apierr.LockHeld, Message: "trigger claim ended"}
+		}
+		if err != nil {
+			return lease.Beat{}, err
+		}
+		return lease.Beat{CancelRequested: status != nil && status.CancelRequested}, nil
+	}}
+	runCtx, stop := keeper.Run(orchestrator.DispatchContext(ctx, trigger))
 	defer stop()
 	err := hostTriggerFromCheckout(runCtx, trigger, controllerURL, token, build, host)
 	cause := context.Cause(runCtx)

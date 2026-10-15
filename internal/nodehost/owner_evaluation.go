@@ -27,6 +27,7 @@ type EvaluationStore interface {
 // must be delegated from the live owner or eval unit, never an ended source claim.
 // Replay contains recorded ancestor outputs when this job was itself generated.
 type EvaluationInput struct {
+	processRevoke func() error
 	Engine        engine.Resolved
 	Accepted      AcceptedRun
 	NodeID        string

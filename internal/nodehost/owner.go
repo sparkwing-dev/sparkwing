@@ -194,7 +194,7 @@ func (h *OwnerHost) keepOwner(parent context.Context, actor store.Actor) (contex
 	keeper := h.Lease
 	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {
 		beat, err := h.Store.RenewOwner(ctx, actor)
-		return lease.Beat{CancelRequested: beat.CancelRequested, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err
+		return lease.Beat{CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err
 	}
 	return startHostKeeper(parent, keeper)
 }

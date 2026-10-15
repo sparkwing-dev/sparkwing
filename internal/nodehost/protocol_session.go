@@ -41,9 +41,11 @@ type ProtocolSessionConfig struct {
 	cleanupEnv      []string
 }
 
-// Start implements ExecutorDependencies.Start. The executor sends hello after
-// start, so the delegated bearer never enters argv or the process environment.
+// Start launches an attempt with its validated grant and shared environment.
 func (cfg ProtocolSessionConfig) Start(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+	if input.processRevoke != nil {
+		cfg.Revoke = input.processRevoke
+	}
 	if input.Entry == nil {
 		return nil, cfg.failedStartup(errors.New("SDK process requires a source entry"))
 	}
@@ -57,9 +59,11 @@ func (cfg ProtocolSessionConfig) Start(ctx context.Context, input NodeInput, act
 	return cfg.start(ctx)
 }
 
-// StartEvaluation launches owner closures using the same private transport as
-// execution. Configure Log for run logs and Revoke for the delegated eval route.
+// StartEvaluation launches owner closures with their validated grant and shared environment.
 func (cfg ProtocolSessionConfig) StartEvaluation(ctx context.Context, input EvaluationInput) (ExecutorProcess, error) {
+	if input.processRevoke != nil {
+		cfg.Revoke = input.processRevoke
+	}
 	if input.Entry == nil {
 		return nil, cfg.failedStartup(errors.New("SDK evaluation requires a source entry"))
 	}

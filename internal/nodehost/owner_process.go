@@ -41,6 +41,7 @@ func (h *OwnerEvaluator) withProcess(ctx context.Context, input EvaluationInput,
 			return err
 		}
 		input.RouteBinding = grant.Binding
+		input.processRevoke = grant.Revoke
 	} else if input.RouteBinding.Routes.Bearer != "" {
 		return errors.New("SDK evaluation requires a fresh process binding factory")
 	}

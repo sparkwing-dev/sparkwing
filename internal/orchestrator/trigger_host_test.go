@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
@@ -112,8 +114,19 @@ func (h *hostedTrigger) host(t *testing.T, ctx context.Context, r runner.Runner,
 	t.Helper()
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	if heartbeat > 0 {
+		c := client.NewWithToken(h.url, nil, h.token)
+		keeper := lease.Keeper{Interval: heartbeat, Lease: store.DefaultLeaseDuration, Renew: func(ctx context.Context) (lease.Beat, error) {
+			status, err := c.HeartbeatTrigger(ctx, h.trig.ID)
+			if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) || client.IsTokenDead(err) {
+				return lease.Beat{}, &apierr.Error{Code: apierr.LockHeld, Message: "test trigger claim ended"}
+			}
+			if err != nil {
+				return lease.Beat{}, err
+			}
+			return lease.Beat{CancelRequested: status != nil && status.CancelRequested}, nil
+		}}
 		var stop func()
-		ctx, stop = HeartbeatTrigger(DispatchContext(ctx, h.trig), client.NewWithToken(h.url, nil, h.token), h.trig.ID, heartbeat, quiet)
+		ctx, stop = keeper.Run(DispatchContext(ctx, h.trig))
 		defer stop()
 	}
 	return HostTriggerRun(ctx, TriggerHost{
