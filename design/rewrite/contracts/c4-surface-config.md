@@ -67,6 +67,12 @@ The acceptance suite runs each configuration boundary under its scenario's
 
 ## Ownership
 
+W9 fills the library-inflation selector omitted from the initial registry.
+`pipeline sparks inflate --library MODULE` takes a required sparks-core name or
+full Go module path, matching the library selector used by catalog. There is no
+`--module` alias. Plain output is the destination. JSON retains module, version,
+destination and replacement. The shared parser governs help and execution.
+
 C4 owns process environment construction, shared limits and deadline arithmetic,
 configuration precedence, both YAML file shapes, command grammar, local controller
 lifecycle and the common Cloud Job builder. The store owns sealing and authority;

@@ -236,7 +236,9 @@ func Registry() []Command {
 			{Name: "library", Argument: "MODULE"},
 			{Name: "path", Argument: "DIR"},
 		}},
-		{Path: "sparkwing pipeline sparks inflate", Flags: []Flag{}},
+		{Path: "sparkwing pipeline sparks inflate", Rules: []string{"Copy one library module into the project and replace its dependency with that local source. JSON emits the module, version, destination and replacement; plain emits the destination."}, Flags: []Flag{
+			{Name: "library", Argument: "MODULE", Required: true, Meaning: "A sparks-core module name or full Go module path; list choices with pipeline sparks catalog."},
+		}},
 		{Path: "sparkwing pipeline sparks lint", Flags: []Flag{
 			{Name: "path", Argument: "PATH"},
 		}},

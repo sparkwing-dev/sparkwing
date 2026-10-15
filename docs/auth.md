@@ -76,7 +76,7 @@ A runner enrollment requests `nodes.claim`, `triggers.claim` and `runs.state`.
 The issuer validates provisioning authority. Granted repository access, reserved
 pools and metering are server facts. A runner's free labels and a proposed
 repository name grant no authority. `triggers.claim` remains a permission name.
-Its public work queue is `/api/v1/runners/runs/claim`.
+Its public work queue is `/api/v1/runners/claim`.
 
 Operational deployment credentials carry `operator.limits`,
 `operator.object_store` or `operator.tokens` for their selected operations.

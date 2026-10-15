@@ -1,1615 +1,263 @@
-# Local Execution
+# Local execution
 
-Sparkwing pipelines run anywhere -- on a Kubernetes cluster, on your
-laptop, or both. This is a core design advantage: your CI/CD is not a
-black box in the cloud, it is a portable program you can run yourself.
+`sparkwing run` hosts a pipeline on the invoking machine. `pipeline trigger`
+submits it to a controller. Both placements use the shared run and job hosts,
+sealed inputs and matching SDK engine.
 
-## Why local execution matters
+This guide describes the rewrite contract. The CLI's local and initial-trigger
+paths still need their final host, source, storage and lifecycle bindings.
+Native execution, detachment and standalone behavior require acceptance evidence.
+See [rewrite integration](architecture.md) for that boundary.
 
-Most CI systems only run inside their own infrastructure. If GitHub
-Actions is down you can't deploy; if your Jenkins server crashes,
-builds stop. Your ability to ship depends on their uptime.
-
-Sparkwing pipelines are Go programs. You can run them on any machine
-with a Go toolchain; Docker only matters when a pipeline step builds
-container images. This means:
-
-- **Deploys don't stop when services go down.** GitHub down? Your
-  laptop can still build, push images, and update your cluster.
-- **Fast iteration.** Local Docker cache, local Go module cache, no
-  upload round-trips. Edit -> build -> deploy in seconds.
-- **Debuggable.** When a pipeline fails, run it locally with the same
-  code and see what happens. No "push and pray."
-
-## How it works
-
-### Windows with Git Bash
-
-Use the native Windows Go toolchain and Sparkwing executable from Git Bash;
-WSL is not required. The website's install command is the same on each OS:
-
-```sh
-curl -fsSL https://sparkwing.dev/install.sh | sh
-```
-
-The installer selects a Windows `.exe` in Git Bash. In WSL it selects the
-Linux binary, and on macOS it selects the macOS binary.
-Git for Windows supplies `bash` and the Unix shell utilities;
-its `bin` and `usr/bin` directories must be visible to child processes through
-`PATH`. `sparkwing.Bash` continues to execute Bash, including on Windows.
-
-The Windows local node runner uses kill-on-close Job Objects. It starts each
-node suspended, assigns it to its job, and then resumes it, so descendants
-inherit ownership. Cancellation terminates that job immediately. Normal node
-exit also cleans up remaining descendants, and dispatcher exit closes the
-handle and terminates the job. Windows does not use the Unix fd 3 liveness
-pipe or the Unix termination grace period.
-
-The pipeline executable contains the SDK version selected by `.sparkwing/go.mod`.
-Installing a newer CLI alone does not update that SDK. Windows local execution
-needs the Windows-capable runner in both the CLI and the pipeline SDK. When
-testing SDK changes from source, use an untracked Go workspace that includes
-both the SDK checkout and the pipeline's `.sparkwing` module.
-
-The source installer accepts native Windows paths and writes `.exe` files.
-`SPARKWING_INSTALL_NAME=sparkwing-<name>` installs a candidate alongside the
-normal executable. Pipeline commands still need their own Windows support:
-invoke JavaScript CLI entrypoints through `node.exe` instead of executing
-`.cmd` files with `sparkwing.Exec`. Go race tests also need a native C compiler,
-such as LLVM MinGW, on `PATH`; `CC` can select its compiler explicitly.
-
-From the Sparkwing source checkout, run `sparkwing run windows-verify` to check
-native process cleanup, SDK command execution, npm cache configuration,
-daemon discovery, and run-handle publication with the race detector. It also
-checks template executable paths, file locking, disk space, and both Git Bash
-installers. Every check reports its result, and any failure fails the pipeline.
-
-Pipeline code still has to compile for Windows: Git Bash does not supply Unix
-Go system calls or turn Windows into Linux. A pipeline that requires Linux
-tools or services can instead run in WSL or through `pipeline trigger` on a
-Linux runner. Install and authenticate any tools the particular pipeline uses
-before attempting a release.
-
-### Execution commands
+## Execution commands
 
 ```bash
-# Run locally -- uses your Docker, your caches, your machine
 sparkwing run build-deploy
-
-# Trigger remote execution -- the cluster runs it via the controller
+sparkwing run deploy -- --environment staging
 sparkwing pipeline trigger build-deploy --profile prod
 ```
 
-`sparkwing run` always executes on the machine you invoke it from, records
-to this machine's SQLite store, logs, and cache, and reads its local
-secrets. It takes no `--profile`, and refuses one with a message naming
-the trigger command. To hand execution to a cluster, use `sparkwing
-pipeline trigger <pipeline> --profile NAME` (covered below). Both run the
-same pipeline code -- the difference is where the work happens and where
-its records land.
-
-### Local execution
-
-```
-Your laptop:
-  1. sparkwing run compiles the pipeline from .sparkwing/
-  2. sparkwing run plans the run in the pipeline binary and runs each
-     node in its own process of it (test, build, deploy, etc.)
-  3. sparkwing run records the run through the admission daemon,
-     which owns ~/.sparkwing/state.db; log files stay per-run on disk
-```
-
-Your laptop runs the pipeline directly. No sparkwing controller is
-involved. Each invocation's outcome lands in the SQLite store under
-`~/.sparkwing/`, which is what `sparkwing dashboard start` reads.
-Run `sparkwing dashboard start` once and leave it up to watch
-concurrent runs in a browser without needing any remote service.
-
-The run does not open that store. `sparkwing run` hosts the run: it
-sends its run, node, event, and concurrency calls to the admission daemon
-over the daemon's `api.sock`, and starts each node as a
-`--sw-node-protocol` process of the pipeline binary that reaches the run
-only through the CLI's loopback node routes (see [node
-protocol](node-protocol.md)). A child run a node starts is hosted the same
-way, by the `sparkwing` that claims it from the local queue. No process in a hosted run holds the file
-open, so the store's schema is out of a pipeline binary's contract. The CLI verbs that read the file -- `sparkwing
-runs`, `sparkwing doctor`, the dashboard -- are the
-installed build or a peer of it and still open it directly.
-
-A run the daemon cannot serve opens a store of its own instead, which is
-why a machine with no sparkwing installed still runs pipelines. It is not
-the shared file: see [running with no daemon
-available](#running-with-no-daemon-available).
-
-The daemon is restartable under a run. A state write the daemon can be
-shown not to have applied -- one it answered `503`, or one on a
-connection it never accepted -- is retried for up to 20 seconds, which
-covers a supervisor restart and the successor rebinding the socket. A
-write whose fate the client cannot establish is not repeated, and a
-daemon still unreachable past that window fails the run naming it.
-
-Local pipelines share a small admission daemon named wingd. It starts on
-demand and normally needs no operator attention. `sparkwing daemon status`
-reports whether it is running; JSON output includes the serving binary, its
-source revision, the runs-store schema that binary understands, and the schema
-this home's store holds. A daemon behind the store cannot read it and refuses
-every run, so status reports it unhealthy and names both schemas; a run that
-hits the same skew fails with that comparison rather than a capacity error. The
-remedy is a sparkwing whose schema matches: install one, or point
-`SPARKWING_WINGD_BIN` at a binary that has it and stop the daemon. Restarting
-does not help when the installed build is the daemon's own build, and status
-says so. A store that exists but cannot be read is reported the same way rather
-than as an absent store.
-`sparkwing daemon restart` replaces only an answering daemon
-when its build differs from the installed Sparkwing build. Add `--force` to
-replace an answering daemon that already serves the installed build. Existing
-holders reconnect and reattach to their durable leases, while a deliberately
-stopped daemon stays stopped. A
-release-pinned pipeline can use that refreshed daemon without replacing it
-with the older release build.
-
-See [native-mode.md](native-mode.md) for the full local-mode design.
-
-### Detaching a run so it outlives the terminal
-
-`sparkwing run` executes in your terminal: close it and the run dies
-with it. When the work outlasts the session you are willing to hold
-open -- a long deploy over ssh, a nightly job kicked off by hand, an
-agent that must not block -- add `--sw-detached`:
-
-```bash
-$ sparkwing run nightly-report --sw-detached
-run run-20260811-140322-1f2e3d4a submitted (nightly-report)
-  logs:   ~/.sparkwing/runs/run-20260811-140322-1f2e3d4a
-  follow: sparkwing runs logs --run run-20260811-140322-1f2e3d4a --follow
-  cancel: sparkwing runs cancel --run run-20260811-140322-1f2e3d4a
-```
-
-The command returns immediately. By the time it prints, the run is
-persisted and a resident consumer process on this machine owns it. Close
-the terminal, drop the ssh connection, log out: the run keeps going, and
-`sparkwing runs status --run <id>` answers from any shell afterward.
-
-`log_path` is the directory the run's node logs land in. It follows the
-same rule as the `run_start` receipt: present only when the directory
-exists, never a plausible-looking path to nothing.
-
-For scripting, `--sw-output json` gives `{run_id, log_path, ...}` and
-`--sw-output plain` gives the bare id:
-
-```bash
-RUN=$(sparkwing run build --sw-detached --sw-output plain)
-sparkwing runs status "$RUN" --follow --timeout 10m
-```
-
-Sparkwing's own flags all carry the `--sw-` prefix and all sit after the
-pipeline name, exactly as they do for a foreground run. Anything else
-after the pipeline name is the pipeline's own argument list, so the two
-never collide:
-
-```bash
-sparkwing run deploy --sw-detached --sw-idempotency-key k --env staging
-```
-
-The following flags are read only by a detached launch and are refused without
-`--sw-detached` rather than silently ignored: `--sw-idempotency-key`,
-`--sw-request-id`, `--sw-consumer-idle`, and `--sw-consumer-claim-lease`.
-`--sw-output` selects the acknowledgment's format and is likewise
-detached-only.
-
-A pipeline may declare `source: origin/main` in its `sparkwing.yaml` entry.
-Foreground runs, detached submissions, and triggers compile that source and
-execute jobs in the submitting checkout. An explicit `--sw-pipeline-ref` must
-resolve to the same commit. Source declarations cannot be combined with
-`--sw-ref`; source-backed schedules must use `--follow`.
-
-`--sw-pipeline-ref <ref>` works in foreground and detached runs. It compiles the pipeline from a separate revision while
-executing it in the submitting checkout. The ref resolves to a commit at submission;
-a later branch update does not change the queued pipeline. It cannot be combined
-with `--sw-ref`, which changes the execution checkout too.
-The execution checkout must retain `.sparkwing/sparkwing.yaml`; its pipeline
-source may be missing or unbuildable.
-Retries preserve the selected pipeline commit and recreate its compile worktree.
-They execute in a snapshot of the original execution revision, following the
-same checkout rules as other retries.
-Sparkwing records the selected commit as `pipeline_revision` in the run
-invocation.
-
-#### Making a retry safe
-
-If a submission fails ambiguously -- the connection dropped, the process
-was killed after the command left your keyboard -- you cannot tell
-whether the run was created. Pass `--idempotency-key` and stop caring:
-
-```bash
-sparkwing run deploy --sw-detached --sw-idempotency-key deploy-2026-08-11-a
-```
-
-A second launch carrying a key an earlier one used returns the
-*original* run id, marked `already submitted`, and creates nothing. The
-constraint is enforced by the runs store, not by a check-then-write in
-the CLI, so two callers racing with one key still produce one run.
-
-`--sw-request-id` is a separate field with a separate job: it is recorded
-on the run for tracing and **never** affects deduplication. Use a fresh
-request id per attempt and a stable idempotency key per intent.
-
-#### What a detached run cannot do
-
-Flags that change what a run *does* but cannot survive detachment are
-refused with the reason rather than silently ignored: `--sw-index`
-(the index binding is a live path the launching process holds open),
-`--sw-dry-run`, `--sw-start-at`, `--sw-stop-at`, `--sw-only`,
-`--sw-no-cache`, `--sw-mode`, `--sw-workers`, `--sw-allow`,
-`--sw-no-update`, and `--profile`. Run those in the
-foreground with
-`sparkwing run`. Everything else after the pipeline name is passed to the
-pipeline as its own arguments.
-
-Because the trigger carries no allow, a launch of a pipeline whose step declares
-a risk is refused before the run is persisted, naming the step and its labels.
-The declarations are read from the selected pipeline source, so a launch
-that names a ref is weighed at that ref rather than at your working tree, and a
-schedule is weighed the same way. Submission also refuses a pipeline name
-absent from that source before queuing work. Run a risk-declaring pipeline in
-the foreground with `--sw-allow`.
-
-`sparkwing runs retry` uses the selected controller, including the local
-controller when no profile is supplied. Select `--failed` or `--all-jobs`.
-The CLI does not open the local store or substitute its current environment.
-Retry intake, reuse and here handoff still need shared runtime integration.
-See [rewrite integration](architecture.md). Job retries within a live run keep
-that run's environment.
-
-`--sw-ref` and `--sw-priority` are the exceptions, because both ride on
-the trigger. A detached launch resolves the ref to a commit, builds the
-worktree, and records it as the run's checkout, so the run executes that
-commit even if the ref moves before a consumer claims it, and the tree
-belongs to the consumer rather than to the launching shell. The consumer
-removes it when the run reaches a terminal state, and a consumer reclaims
-any tree an earlier one died holding as it starts. `--sw-priority` stays
-unresolved on the trigger, so `front` and `back` are measured against the
-queue the run actually joins when the consumer launches it.
-
-Detaching is local-only. To hand a run to a cluster, use
-`sparkwing pipeline trigger <pipeline> --profile <p> --detach`.
-
-#### Publishing a foreground run handle
-
-`sparkwing run PIPELINE --sw-run-handle-file PATH` atomically writes a JSON
-handle after the run row is durable and before planning or node execution.
-The handle carries `schema_version`, `run_id`, `pipeline`, `log_path`, and
-`status`. Sparkwing exits before executing work when publication fails.
-The file is mode `0600` and replaces its destination atomically.
-
-#### A detached run uses an allow-listed submission environment
-
-A foreground run inherits the whole environment of the shell that starts
-it. A detached run carries a filtered snapshot of it: every `SPARKWING_*`
-and `GITHUB_*` variable, plus `PATH`, `HOME`, `HOSTNAME`,
-`KUBERNETES_SERVICE_HOST`, `XDG_CONFIG_HOME` (so the run reads the same
-config.yaml), and the S3 endpoint names `AWS_ENDPOINT_URL` and
-`AWS_ENDPOINT_URL_S3`. Sparkwing drops the credential-shaped part of
-that set -- names carrying `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `AUTH`,
-`PAT` and similar, bearer headers, PEM blocks, JSON documents with a
-credential field, and URLs whose userinfo, query, or path names a
-credential -- so a queued run never writes one to disk. A submission never
-inherits values from the shell that started the consumer or from another
-submission.
-
-List more names under `run.submit_env_allow` in
-[config.yaml](machine-config.md) to widen the snapshot; an entry ending in
-`*` matches a prefix, and a bare `*` is refused rather than silently
-allowing nothing. The credential filter still applies to what the list
-names, and logs at warn the names it drops, so a pipeline that needs a
-credential takes it from the secret store rather than the submitting shell.
-
-```yaml
-run:
-  submit_env_allow: [AWS_PROFILE, AWS_REGION, KUBECONFIG, DOCKER_HOST, SSH_AUTH_SOCK]
-```
-
-Sparkwing stores the snapshot outside the runs database with mode `0600`,
-names it by a hash of the run id, and deletes it when the consumer starts
-the run. A run that a consumer shutdown returns to the queue no longer has
-a snapshot, so its next dispatch fails rather than running with the
-consumer's environment; submit it again.
-
-Prefer pipeline configuration, secret stores, and pipeline arguments for
-values that should remain independent of a caller's ambient environment.
-
-#### Which checkout runs
-
-The checkout you are standing in wins, and `sparkwing -C PATH run` points at a
-different one. Only if neither declares the pipeline does the repo
-registry get consulted. The chosen directory is recorded on the run, so
-the consumer executes the tree you launched from even when a second
-checkout of the same project declares the same pipeline name.
-
-#### Cancelling a detached run
-
-`sparkwing runs cancel --run <id>` works at both stages. Before a
-consumer claims it, cancellation is a store transaction that marks the
-run cancelled and takes it off the queue -- no dashboard and no profile
-required. Once it is running, the admission daemon holding the run's
-process cancels it the same way it cancels any local run. Either way the
-cancellation names one run id. Cancelling a child also cancels runs
-attached through it, while its parent and siblings continue. Cancelling
-the lease's root run cancels every attached member. A resubmission is a
-different run with a different id.
-
-If a parent exits while another member keeps the lease alive, a later child
-attaches under the nearest live ancestor while a live descendant retains its
-lineage. Otherwise it attaches under the lease root and the daemon logs the
-requested and resolved parents. Clients that send only the inherited lease
-token also attach under the root.
-
-#### The local controller queue
-
-Detached execution belongs to the local controller's queue. There is no separate
-public consumer process. Its runtime owns queue consumption, admission and state
-for one home. Controller startup and detached host composition still need native
-integration in this rewrite build. See [Local dashboard](native-mode.md).
-
-### Reading recent local logs
-
-Use `sparkwing runs logs --run RUN_ID --tail 40` for a short excerpt.
-Unfiltered local node and envelope tails read only the suffix needed for those
-lines. Adding grep, line ranges, or event-only selection still scans the input
-before selecting the tail, so matches earlier in the log remain discoverable.
-Tree merging and follow behavior are unchanged.
-
-### Stopping jobs
-
-Cancelling a run stops its jobs and the commands their steps started. Each
-step command runs in its own session. The job ends those sessions before it
-exits, so an interrupted `go build` or `go test` does not keep compiling on
-its own.
-
-A node that dies without running any code -- SIGKILL, the OOM killer, a
-crash -- cannot clean up after itself, so the node also leaves a record
-of every step session it starts in `<home>/sessions/`, removed when the
-command is reaped. The run host and local controller read that ledger and end sessions
-whose jobs are gone. `sparkwing doctor` reads controller findings through
-the lifecycle interface and never reaps sessions from the CLI. Each session ended this way appends a
-`stray_session_reaped` event to its node, carrying the step's command line
-with the run's secret values masked as they were when the step started. The sweep is keyed on the
-session and the node's process incarnation, never on a process name, so
-a live run's work is never touched and a reused pid is never signalled.
-Steps do not get to daemonize by accident: a process that leaves its step
-session with `setsid` is outside the ledger's view, and that is the one
-unsupported way to outlive a run.
-
-An interrupted job is stopped, not unwound. The commands its steps started do
-end, because the job kills their sessions as described above, but nothing
-inside the step's own Go code runs: the signal does not arrive there as a
-cancelled context, so a `defer` does not fire and neither does a `select` on
-`ctx.Done()`. Teardown therefore belongs in the ledger rather than in a
-`defer`: start a resource as a
-step command so its session is reaped, or register a cleanup command for
-anything that lives outside that tree.
-
-Resources a step starts *outside* its process tree -- a container, a Kind
-cluster, a Helm release -- are core's blind spot: they live in another daemon,
-not in the session the sweep kills. A sparks library that starts one registers
-a cleanup command with `sparkwing/cleanup`.`Register`, and the same three
-sweeps run that command once, best-effort, when the owning node is gone. Core
-stays out of it -- it reaps processes and knows nothing about docker, helm, or
-kind; the library owns the cleanup. `docker.Run` uses this to register `docker
-rm -f`, so a one-shot container does not outlive a node killed mid-run. A
-resource a step means to keep must not be registered, the same discipline as a
-`setsid` process leaving its session.
-
-### Remote execution
-
-```
-Your laptop:
-  1. sparkwing resolves the origin, branch, and commit
-  2. sparkwing requires a pushed commit, then POSTs the trigger
-
-Remote runner:
-  3. Controller records the trigger; a polling runner claims it
-  4. Runner clones the exact commit, compiles, and runs the pipeline
-  5. Runner uploads node logs to the controller as segments
-```
-
-The controller is the gatekeeper for prod-side execution: only the
-cluster can push to ECR, update gitops, and dispatch warm runners.
-
-`sparkwing pipeline trigger <pipeline> --profile prod` submits the trigger
-to the profile's controller for remote execution. `--profile` is required,
-and the chosen profile must have a `controller:` set; passing a
-controller-less profile errors with a clear message. A pipeline pinned to
-a profile in `.sparkwing/sparkwing.yaml` accepts only that profile; see
-[pinning a pipeline to a profile](backends.md#pinning-a-pipeline-to-a-profile). By default the command follows the remote run until it
-reaches a terminal state, streaming the run's node logs through the
-controller. Pass
-`--detach` to return as soon as the trigger is registered without
-following.
-
-If the checked-out code does not define the requested pipeline, the trigger
-and run fail with an error that lists the defined pipelines. The error includes
-the repository and revision when both are known. A dispatch rejected by a
-pipeline guard leaves no run row.
-
-Add `--working-tree` to run current tracked edits and untracked non-ignored
-files remotely without committing or pushing them. Sparkwing freezes those
-bytes as a synthetic Git commit, requires the bundle upload to finish before it
-admits the trigger, and prints the base SHA, snapshot SHA, file count, and
-bundle size. The source checkout's HEAD, refs, index, and object database stay
-unchanged. The bundle limit is 500 MiB.
-Direct clones and source bundles require `.sparkwing` to be a directory inside
-the materialized checkout. A symlink at `.sparkwing` is refused before compilation.
-The remote checkout is clean and detached at the synthetic SHA; file contents
-match the laptop, but staged-versus-unstaged state is intentionally flattened.
-Capture requires a complete SHA-1 repository; shallow and SHA-256 repositories
-fail before upload.
-
-Before the upload, Sparkwing reads the snapshot manifest for secret-shaped
-files and refuses the trigger when it finds any, because the snapshot travels
-to a machine the file was never meant to reach. A file is secret-shaped by
-name when it is a dotenv (`.env`, `.env.production`, `staging.env`), a key,
-keystore or certificate file (`.pem`, `.key`, `.crt`, `.cer`, `.der`, `.p12`,
-`.pfx`, `.jks`, `id_rsa` and its siblings, `.netrc`, `.pgpass`), or a
-configuration file whose name ends in a credential word (`credentials.json`,
-`token.yaml`). A name ending in `.example`, `.sample`, `.template`, `.tmpl` or
-`.dist` is a committed template and is never secret-shaped.
-
-It is secret-shaped by content when its bytes carry a private key or
-certificate block, a bearer header, or a credential-named setting that holds a
-value. A key block counts in any text file that is not source: a key pasted
-into a `.go`, `.ts`, `.py`, `.rs`, `.sh` or other source file is not detected,
-because the block markers there are test fixtures and parser literals. The
-bearer header and the credential-named setting are looked for only in settings
-and manifest files (`.env`, `.ini`, `.conf`, `.cfg`, `.properties`, `.json`,
-`.yaml`, `.yml`, `.toml`, and a name with no extension such as `credentials`
-or `.envrc`), because an API dump or a source file carries
-camel-case identifiers no value rule can tell from a token. Outside a settings
-file the value itself must look like a credential -- a key block, or a long
-unbroken mixed-case token -- so a Kubernetes manifest that names a secret it
-does not hold (`secretKey: api-token`) passes while one that embeds the secret
-does not. The same name and value vocabulary the detached-run environment
-filter uses decides both.
-
-The refusal lists every offending path and says whether it is tracked:
-`git rm --cached PATH` for a tracked file, `.gitignore` for an untracked one,
-or `--allow-secret-file PATH` once per file to send it anyway. The override
-admits only the paths it names and refuses a path that matches nothing in the snapshot, so
-what travelled stays visible in the command that sent it. Gitignored files
-never enter the manifest and so are never named. Sparkwing judges the first
-64 KiB of a settings or manifest file, searches the whole file for a key or
-certificate block, and never reads a file whose bytes are binary.
-
-An off-cluster machine can claim only these triggers and compile them locally:
-
-```bash
-sparkwing-runner runner --credentials-dir="$HOME/.config/sparkwing/runner-credentials" \
-  --controller=https://sparkwing.example.com \
-  --gitcache=https://sparkwing.example.com/api/v1/gitcache \
-  --also-claim-triggers --claim-nodes=false \
-  --trigger-sources=pipeline-working-tree@laptop-hostname \
-  --metrics-addr= --max-claims-before-restart=0
-```
-
-The runner reads its token from the file `agent-token` in its
-`--credentials-dir`; create it with mode `0600`. The source proxy and trigger
-claim require the current admin-capable runner token. Login-enabled dashboard ingress passes this machine bearer directly to
-the controller without a browser session or CSRF token. The process opens no
-listener. A private direct cache URL can replace the controller proxy when the
-machines already share a LAN, VPN, or tailnet. Direct cache binary writes use
-only the run's cache grant (`SPARKWING_CACHE_GRANT`); the agent/controller
-token is never sent to that raw cache. Raw Git reads have no cache-level auth, so keep a direct cache on a
-trusted private network. Pack streams have a 30-minute server window, and the
-CLI gives a working-tree upload 15 minutes. Manual retries and same-repository
-`RunAndAwait` children retain the original `pipeline-working-tree@<host>`
-placement source.
-Do not leave an unrestricted cluster runner racing for the same trigger source
-when testing deterministic placement.
-
-### Team runners fetch source themselves
-
-The git cache and its controller proxy belong to the operator, so a runner that
-holds a team's runner token starts without `--gitcache`. Such a runner fetches
-each claimed run's source directly: it fetches the commit the trigger recorded
-from the remote the trigger recorded. It asks the controller for the run's
-credential first, with its claim's token: the team's GitHub App token when an
-installation covers the repository and the repository qualifies, else the git
-credential the team stored for the host and opted this machine into (see
-[Team git credentials](git-credentials.md)). When the
-controller releases none, a runner given `--allow-repo` fetches with the
-machine's own git config and credentials. The dashboard's machines page asks
-which repositories the machine may build and prints this command:
-
-```bash
-(umask 077 && mkdir -p "$HOME/.config/sparkwing/runner-credentials" &&
-  rm -f "$HOME/.config/sparkwing/runner-credentials/agent-token" &&
-  printf '%s' swr_... > "$HOME/.config/sparkwing/runner-credentials/agent-token") &&
-sparkwing-runner runner --credentials-dir "$HOME/.config/sparkwing/runner-credentials" \
-  --controller https://sparkwing.example.com \
-  --allow-repo 'github.com/acme/*' \
-  --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= \
-  --holder-prefix my-laptop
-```
-
-#### What a laptop runner trusts
-
-**Run a runner as a dedicated OS user, or in a container or VM.** Pipeline
-code runs as the runner's user and reads everything that user can, the runner
-token in the agent's `config.yaml` included; no Sparkwing setting stops a
-process from reading its own user's files.
-
-A runner compiles the pipeline code it fetches and runs it as the user who
-started the runner. The pipeline process reaches the controller only through
-the node routes the runner serves on loopback, bound to its own run and node,
-so the runner token is not in its environment. That does not stop code running as the
-same OS user: it reads what that user can read, including ssh keys, `~/.aws`,
-other tokens in the home directory, and the runner token in the agent's
-`config.yaml`. Any team member who can trigger a run
-chooses which repository and commit that is. So the machine's owner, not the
-team, decides what the machine builds:
-
-- `--allow-repo` names the repositories the machine may build, as host and
-  path with no scheme. It repeats, matches without regard to case, and `*`
-  matches within one path segment: `github.com/acme/*` admits
-  `github.com/acme/app` but not `github.com/acme/app/sub` or
-  `github.com/other/app`. Quote a pattern that holds `*`, since the shell
-  expands it.
-- Without `--gitcache` and without `--allow-repo`, the runner fetches only
-  with the credential the controller releases for each run, and a run it
-  releases none for fails. That is how a cloud runner holds no credential of
-  its own. `--allow-repo` is what lets the runner fall back to the machine's
-  own credentials. A list binds only when given. A `--github-actions` runner
-  given no list builds only the repository whose job started it.
-- The runner sends its list with every trigger and node claim to a controller
-  that advertises `claims.allow_repos` in `GET /api/v1/capabilities`, and the
-  controller hands it only runs whose repository the list admits, passing over
-  the rest so another runner can take them. A trigger that names no repository
-  is never handed to a runner with a list; a node whose run names none is,
-  since it fetches nothing. A runner whose list refuses a node's repository
-  does not count toward the local-first hold, so the cloud is not kept waiting
-  for a runner that could never take the node.
-- The runner checks again before fetching: the remote it would fetch, after it
-  rewrites a GitHub ssh remote to https, and the repository the trigger's GitHub
-  fields name. A run outside the list that reaches it anyway, from a controller
-  older than the claim filter, fails before anything is fetched, and the
-  failure names the repository and the list.
-- The controller refuses a trigger whose `git.repo_url`, `GITHUB_REPOSITORY`
-  and `github_owner`/`github_repo` name different repositories, so the run page
-  always shows the repository the runner fetched.
-- A runner with a list refuses a run that names no repository, since the
-  list has nothing to check, and a `--working-tree` snapshot. A snapshot's
-  code comes from the controller's copy of someone's uncommitted edits, not
-  from a listed repository, so a controller that is compromised or
-  misconfigured could hand the runner any code under a listed name. Pass
-  `--accept-working-tree`, or set `accept_working_tree: true` in the agent
-  section, to build snapshots of the listed repositories anyway; a snapshot
-  still has to name a listed repository.
-
-Allow only repositories whose every committer you would trust to run code under
-your account. Only an allowlist stands between a run and your files: the
-pipeline is not sandboxed. On a machine that holds credentials you would not
-hand to those committers, run the runner as a separate user or in a container
-or VM.
-
-Nodes the run dispatches to a pool runner fetch the same commit the same way,
-and a pool runner holds each node to its own `--allow-repo` list. A Kubernetes
-Job that the run's trigger runner created builds that runner's repository and
-carries no list of its own. A cloud pod holds no git credential, so it fetches
-only with the one the controller releases, fitting the remote to it: a GitHub
-App token or an HTTPS token fetches the https form of an ssh remote, and an SSH
-deploy key the ssh form of an https remote. The
-runner keeps one bare mirror per remote under `$SPARKWING_HOME/source-direct`
-and checks out each run in its own worktree. It refuses any remote that is not
-https or ssh, a remote that carries a credential, and a commit that is not a
-full hex object id. A normal `sparkwing pipeline trigger` therefore needs a commit already pushed.
-`--working-tree` uploads its exact source bundle to S3 before admission and
-needs no cloud-reachable Git origin.
-
-Only a fetch with the machine's own credentials reads the machine's git
-config, for its credential helpers, `insteadOf` rules and ssh command; a fetch
-with a released credential reads none of it. Every other git step, the checkout
-included, runs with no system or global config and with LFS smudging off, so a
-filter driver, hook or fsmonitor that the fetched tree's `.gitattributes`
-names cannot run. The fetch refuses http redirects, and ssh runs with
-`BatchMode=yes`, `StrictHostKeyChecking=yes`, `ForwardAgent=no` and
-`ClearAllForwardings=yes` appended to the machine's own ssh command. Before
-fetching, the runner resolves the host and refuses one that resolves to a
-loopback, private, link-local, CGNAT, NAT64 or other special-purpose address,
-and it refuses cluster names such as `kubernetes` and `*.svc`. git resolves
-the name again when it connects, so a name whose answer changes in between
-(DNS rebinding) is only narrowed, not stopped. A fetch gives up after ten
-minutes. The runner keeps at most 20 mirrors and 10 GiB of them, evicting the
-least recently used, and deletes a mirror that alone exceeds the size cap
-after its fetch, failing the run. A `.sparkwing` that is a symlink, or that
-resolves outside the checkout, is refused.
-
-### An agent that fetches source itself
-
-`sparkwing-runner agent` fetches source through the controller's gitcache
-proxy unless the `agent` section of its `config.yaml` names `allow_repos` and
-no `gitcache`, or it starts with `--allow-repo`, which replaces the section's
-list:
-
-```yaml
-agent:
-  controller: https://sparkwing.example.com
-  token: swr_...
-  allow_repos:
-    - github.com/acme/*
-```
-
-Such an agent claims only runs of those repositories, sending the list with
-every claim, and fetches each one's source directly: with the credential the
-controller releases for the run, else with the machine owner's own git
-credentials. It refuses `--working-tree` snapshots unless the section
-also sets `accept_working_tree: true`, which you want when you send your own
-`sparkwing pipeline trigger --working-tree` runs to this machine. The list follows the rules in
-[What a laptop runner trusts](#what-a-laptop-runner-trusts).
-`sparkwing runners add --repos 'github.com/acme/*'` writes it.
-An agent section without `allow_repos` keeps the proxy, as before.
-
-### Remote machine capacity
-
-`sparkwing-runner agent` runs claim mode, the mode that executes work. Its
-agent section carries no `name` and no `coordinators`; a section that still
-sets either key fails to load and says enrolled mode has been removed.
-
-The configuration uses the outbound FIFO `/api/v1/nodes/claim` loop. Its
-`labels` are self-asserted placement terms, not administrator-trusted
-capabilities. `sparkwing runners add` and the bundled service installer
-both write this format. Existing sections keep their `local_admission` setting,
-including an explicit `false`; when enabled, local admission happens after a
-claim.
-
-The controller owns retries after a runner disappears. When a runner stops
-renewing a node's claim, the source node becomes terminal `agent_lost` and is
-never resumed. Loss before the job-body start acknowledgement creates a fresh
-linked run without spending `.Retry(n)`; loss after acknowledgement spends the persisted invocation count.
-The same total budget covers local retry loops, `RetryAuto` dispatches, and
-fresh runs. A replacement keeps the captured source/plan and the original
-coordinator and location, rehydrates unrelated terminal work, and reruns only
-the lost work and its descendants after durable backoff. Another runner is
-preferred briefly, but the original may reclaim when it is the only eligible
-capacity. Coordinator fallback cannot relax the required placement. External
-effects remain at-least-once within the configured budget.
-
-With the Helm values `runner.triggerRunner.kind: warm` and
-`runner.automountServiceAccountToken: true`, a trigger worker opens each node
-to remote runners first. If no runner claims an unlabeled node within the
-five-second claim round, the worker atomically takes it back and creates a
-Kubernetes Job with the chart's existing image, namespace, service account,
-pull policy, and cache settings. The Job runs `sparkwing-runner run-node`, the
-executable the runner image installs. A concurrent runner claim defeats the
-take-back, so fallback cannot double-execute the node. Labeled nodes stay
-runner-only by default. `runner.triggerRunner.labels` may name static
-capabilities every fallback Job can honor; a labeled node then falls back only
-when those labels satisfy all of its requirements. These labels do not inherit
-the outer pool's `runner.labels`, and the Job reports the configured set as its
-runtime runner metadata. Saturated or offline runners therefore spill eligible
-work to Kubernetes without weakening placement requirements.
-
-The published runner image uses Debian slim, so downloaded Linux Go and Node
-toolchains can use glibc. It supplies bash, coreutils, git, OpenSSH client,
-CA certificates, curl, tar, gzip, xz, make, jq, and unzip for pipeline steps.
-It also carries the Go version needed to compile Sparkwing pipelines on a
-cache miss. Pipeline steps install other language toolchains at the version
-their project needs; `.Cache(...)` can retain downloaded dependencies
-between runs. The chart can persist `GOCACHE` and `GOMODCACHE` on a PVC with
-`runner.goCache.persistence.enabled`. The image runs as UID/GID 65534 and
-keeps the runner entrypoint for credential setup.
-
-Before it creates the Job the dispatcher claims that one node for itself with
-its own token, through `POST /api/v1/runs/{id}/nodes/{nodeID}/claim`, and hands
-the awarded claim to the pod as `SPARKWING_NODE_CLAIM_HOLDER`,
-`SPARKWING_NODE_CLAIM_GENERATION`, `SPARKWING_NODE_CLAIM_MEMBERSHIP`,
-`SPARKWING_NODE_CLAIM_RESERVATION`, and `SPARKWING_NODE_CLAIM_LEASE_SECONDS`.
-`run-node` sends that fence on every state write and log append. The claim is
-what the controller's node-mutation fence admits, and on a metered token it
-reserves the 60-second minimum at the node's class for concurrent spend
-safety. Billing begins at the pod's first claim renewal, which it sends as its
-process starts, or at its execution start if that comes first, so the source
-fetch and pipeline compile are billed and Kubernetes provisioning and image
-pulls are not. See [Metered runners](auth.md#metered-runners). The plain `--trigger-runner k8s` path takes the same claim,
-because it builds the same Job.
-
-The route awards an unlabelled node the queue has already opened to any
-`nodes.claim` token. A node the queue has not opened, and a node that declares
-`.Requires()` labels, go only to a caller holding the run's live trigger claim,
-which is the dispatcher: a named claim advertises no labels, so nothing else
-could match the requirement. A node body's token therefore cannot take work
-whose dependencies have not run or work its box cannot do. The route refuses a
-node another claim holds and a node of a run that has finished.
-
-The pod is the only renewer: it extends the lease every five seconds from the
-moment its process starts, and the dispatcher renews nothing, so a pod that
-never runs releases the node when the ten-minute lease lapses rather than
-holding a reservation for as long as the dispatcher watches an
-`ImagePullBackOff`. The same ten minutes is the cost of a dispatcher that dies
-mid-node: nothing releases a claim, so the node waits out the lease before the
-reaper requeues it. Each Job also carries an `activeDeadlineSeconds`, ten
-minutes past the node's own `.Timeout()` where it declared one and six hours
-otherwise, so a wedged pod cannot outlive the run that wanted it.
-`sparkwing-runner runner --deadline` (a Go duration of at least a minute,
-which the Helm value `runner.jobDeadline` sets) moves that six hours for
-every Job the runner's trigger hosts start. A no-progress timeout measures silence
-rather than elapsed time, so it deliberately does not bound the Job. A node
-Kubernetes kills at the deadline fails with `timeout` and an error naming the
-deadline, which is how an operator tells it from a pod that crashed.
-
-The full-chart path is
-`sparkwing-runner-bundle.runner.triggerRunner.kind: warm`, together with
-`sparkwing-runner-bundle.runner.automountServiceAccountToken: true`. The
-default remains `inprocess` and renders an empty Role. Warm mode adds only the
-Job lifecycle and pod-read permissions the Kubernetes fallback calls.
-`sparkwing-runner-bundle.runner.triggerRunner.labels` declares fallback Job
-capabilities; a manually launched trigger worker repeats
-`--trigger-runner-label` for the same values.
-For a manually launched runner, `--trigger-runner-sa` names the service
-account used by `--trigger-runner k8s` and warm fallback Jobs.
-
-On Kubernetes a pipeline's `.Resources()` pin becomes the Job pod's requests
-and limits, so an operator bounds it: `sparkwing-runner runner
---cpu-ceiling` and `--memory-ceiling`, which the Helm values
-`runner.jobCeiling.cpu` and `runner.jobCeiling.memory` set, take Kubernetes
-quantities such as `8` and `16Gi`. A pin or a measured charge above the
-ceiling is clamped to it, burst limit included, and the runner logs the pin,
-the ceiling, and the size it settled on, and writes the same line to the run
-as a `resource_clamped` event. Both default to empty, which means no ceiling
-and a pin that becomes the pod size verbatim. A value that is not a positive
-Kubernetes quantity fails at startup rather than at pod creation. The
-namespace-wide backstop is the chart's `limitRange` and `resourceQuota`; see
-the `sparkwing-runner-bundle` README.
-
-Running a runner on a workstation authorizes repository pipeline code to run
-as the runner service's OS user. The runner starts every job body in a child
-process. The node host keeps the runner token and claim identity, and records
-execution start, finish and logs itself; the child receives a process-lifetime
-bearer for the host's loopback node routes, limited to its claimed run and
-node. That bearer cannot claim or renew work, manage runners, or call
-administrative routes. The child inherits only the minimum runtime environment,
-the runner's dependency proxy settings, and non-credential variables named by
-`run.submit_env_allow` in the agent machine's config.yaml, whose values of 12
-characters or more are masked in the node's logs, not the agent service's cloud, cache, or service
-credentials. A credential inside a
-dependency proxy URL is the exception: it reaches pipeline code, and masking
-only keeps it out of the logs.
-
-This is credential isolation, not an OS sandbox. Pipeline code can still read
-files, use the network, and start processes with every permission the agent OS
-user has. Run a runner under a dedicated account and let it claim only
-repositories whose code that account may execute. Give each device its own
-short-lived runner token and revoke it when the device leaves the pool.
-Native Windows runners bind a suspended body to a non-breakaway Job Object
-before its code can run, then wait for the Job to reach zero active processes
-after exit or cancellation. Linux, macOS, and WSL runners terminate and empty
-the body's dedicated process session. Unix code can leave that session with
-`setsid`, so pipeline bodies must not daemonize out of it. Sparkwing treats
-deliberate escape as trusted OS-user code, not as a containment failure.
-Sparkwing never joins a tailnet or changes host networking; configure the
-controller connection outside Sparkwing. Do not expose a raw unauthenticated
-cache outside a trusted private network. Source snapshots remain immutable,
-and cached source or binary objects do not contain credentials. The compiled
-pipeline binary interprets `warm`; protocol and named-capability negotiation,
-not exact release equality, decides compatibility.
-
-The bundled service installer supports Linux and macOS. Native Windows agents
-run under an operator-managed service; WSL can use the Linux installer when
-systemd user services are enabled.
-
-A follow exits on the run's outcome, the same way a local `sparkwing run`
-does: 0 when the run succeeded, 1 when it failed or was cancelled, with the
-run's status block and failing-node errors printed to stderr so a
-`> run.log` redirect still shows why. If the follow ends without a readable
-terminal status -- a dropped connection, a controller restarting mid-run --
-the command exits 3 rather than guessing an outcome, and names the run to
-re-check with `sparkwing runs status --run <id> --profile <p>`. `--detach`
-always exits 0: it reports that the trigger was queued, not how the run
-ended.
-
-## Authorization model
-
-Sparkwing intentionally does **not** try to be a permissions boundary
-between developers and infrastructure. Authorization is enforced where
-it actually lives: the registry, the gitops repo, kubectl. A
-developer with ECR push and gitops write access can deploy with or
-without sparkwing.
-
-A foreground `sparkwing run` executes with the operator's own authority.
-The pipeline process is a child of your shell, holding your kubeconfig,
-your cloud profile, your ssh agent, and your git credentials, and it can do
-anything you can do from that terminal. A detached run is narrower: it
-carries only the allow-listed snapshot described above. Read a pipeline before you run it, and run
-untrusted pipeline code under an account whose reach you accept.
-
-Sparkwing does protect its laptop-local persistence from other OS users. On
-POSIX systems it creates `$SPARKWING_HOME`, run directories, and private cache
-directories as `0700`, and local state databases, SQLite sidecars, logs, PID
-files, and materialized run values as `0600`. `sparkwing doctor` is a
-diagnostic command. It does not repair private-home permissions.
-Portable Go file modes do not describe Windows DACLs. Private-file handling
-uses the platform-specific owner policy.
-
-SQLite creates local databases with private permissions on POSIX systems and
-coordinates concurrent opens through its own file locking. Creation works without
-hard-link support. The filesystem must support SQLite locking and shared memory
-for WAL mode. Keep the local database on one host rather than a network share.
-
-### The laptop boundary
-
-Laptop mode trusts the user account on the machine, and nothing narrower.
-
-`sparkwing dashboard start` serves the controller API and the dashboard from
-one process. Loopback is not a user boundary, because every account on the
-machine can connect to `127.0.0.1`, so the listener requires the token in
-`serve-token` under the Sparkwing home. The file is created `0600` on first
-start and stays the same across restarts. The CLI reads it and sends it as a
-bearer. A browser signs in once through the dashboard link that
-`sparkwing dashboard start` and `sparkwing dashboard status` print: its `#code=`
-fragment is a single-use code, valid for five minutes, which never reaches a
-server or its logs. The page trades it for a session credential derived from
-the token and keeps that in its origin's `localStorage`, which is scoped to
-the port, and sends it as a bearer. No credential rides a cookie, because
-cookies are shared by every port on `127.0.0.1`, including another
-account's. `GET /api/v1/version` and `POST /webhooks/`, which checks the
-sender's signature, need no token. Deleting the file and restarting the
-dashboard signs every browser out.
-
-The listener binds `127.0.0.1:4343` and refuses a non-loopback `--addr`
-unless you pass `--allow-remote`; a browser request whose `Origin` is
-neither the served loopback port nor named in `--allow-origin` is refused
-too. A `pnpm dev` server on port 3100 needs
-`--allow-origin http://localhost:3100`. Passing
-`--allow-remote` hands every host that holds the token the authority of your
-account.
-
-The admission daemon draws the same line. `wingd` listens on a unix socket
-whose path is a function of `SPARKWING_HOME`, and everything running as your
-account shares that daemon and can queue, inspect, cancel, and drain its
-runs. The socket carries no token, because a token your account can read is
-a token anything running as your account can read. Give each user of a
-shared host their own `SPARKWING_HOME`; see
-[security.md](security.md#local-daemon-socket) for the ownership, mode, and
-peer-credential checks that keep other accounts out.
-
-Cluster mode is where authentication lives. A controller reached over a
-network authenticates every request and scopes it per principal; see
-[auth.md](auth.md).
-
-**What sparkwing controls:**
-
-- Which clusters a pipeline can dispatch to (via the `--profile` target's
-  controller and its bearer token / scope).
-- Audit trail of who ran what, when, from where (in the runs store).
-- Consistent workflow (tests always run before deploy, declared once
-  in the Plan).
-
-**What infrastructure controls:**
-
-- Who can push images to ECR (IAM roles).
-- Who can push to the gitops repo (GitHub permissions).
-- Who can `kubectl` into the cluster (RBAC).
-- Who can call the controller API (bearer tokens scoped per principal;
-  see [auth.md](auth.md)).
-
-If you want to prevent a developer from deploying to production, the
-right approach is to not give them the credentials -- not to rely on
-sparkwing to block them.
-
-## When to choose which mode
-
-| Mode | Where it runs | Speed | When to use |
-|------|--------------|-------|-------------|
-| `sparkwing run <pipeline>` | Your laptop | Fast (local caches) | Day-to-day development, fast iteration, local-only deploys |
-| `sparkwing run <pipeline> --sw-detached` | Your laptop, detached | Fast | Work that must outlive the terminal: long deploys over ssh, hand-kicked jobs, agents that must not block |
-| `sparkwing pipeline trigger <pipeline> --profile prof` | Cluster | Medium (remote build) | Production deploys, deploys requiring cluster credentials, parity with webhook flow |
-| Git push -> webhook | Cluster | Medium | Automated CI/CD on every commit |
-
-## More than one sparkwing on one machine
-
-A machine can end up with more than one sparkwing binary. `go install`
-drops one in `$GOBIN`, the source installer builds one into
-`~/.local/bin`, a package manager may leave a third in `/usr/local/bin`.
-Each is a complete sparkwing.
-
-That only matters when they disagree, and they eventually do. PATH is
-not one list: an interactive shell orders it from your shell profile,
-while a launchd job, a systemd unit, or a cron entry carries whatever
-PATH its own configuration sets. The two can resolve `sparkwing` to
-different builds, so the same command resolves to a different program
-depending on how it was launched.
-
-Sparkwing handles this by keeping the copies from corrupting each
-other's state and by telling you they exist -- it never picks a winner
-or touches a binary it did not install.
-
-### Version memory is per install
-
-Each install records the version it last ran as in its own file under
-`~/.sparkwing/last-version.d/`, keyed by a digest of the binary's
-resolved path (so a symlink or a `/tmp` vs `/private/tmp` alias is one
-install, not two). The upgrade notice -- the one-line changelog pointer
-printed after a binary changes -- compares each install only against
-what it, itself, last ran as. Two copies taking turns can no longer
-rewrite a shared record into upgrades and downgrades that never
-happened. A separate `SPARKWING_HOME` keeps separate stamps.
-
-### Finding a split install
-
-Every surface that knows about installs reports them, read-only:
-
-- `sparkwing doctor` scans your PATH *and* the well-known install
-  directories (`~/.local/bin`, `$GOBIN`, `$GOPATH/bin`,
-  `/usr/local/bin`, `/opt/homebrew/bin`) -- a scan that trusted only the
-  caller's PATH would report a clean machine from the very shell whose
-  neighbor is the conflict. Copies reachable through a symlink collapse
-  into one entry. The finding makes a sweep unclean, and each copy is
-  printed with the exact reversible `mv` that retires it.
-- `sparkwing info` reports the running binary's resolved path and any
-  other installs (`executable.path` / `executable.other_installs` in
-  `-o json`), and `sparkwing info --for-agent` includes the same
-  identity so an agent knows which build its evidence came from.
-- `sparkwing update` names any other copies after installing. Release lookup,
-  signature, digest, or installation failure is terminal; it never selects an
-  unsigned `go install` fallback.
-- `bin/install.sh` (the source installer) reports copies outside its
-  destination and never modifies anything outside `$DEST`.
-
-### Fixing it
-
-Pick one:
-
-- **Keep one copy.** On Unix, retire the others with the printed guarded
-  `mv -n`; it refuses when `<path>.superseded` already exists, and its printed
-  undo likewise refuses if the original path has been recreated. Paths with
-  whitespace or shell metacharacters are quoted as one shell word. On Windows,
-  Sparkwing prints both exact paths and asks you to rename with File Explorer
-  or a command quoted for the shell you chose. It does not pretend one command
-  can safely quote every legal filename in both cmd.exe and PowerShell. Nothing
-  in Sparkwing runs the remedy for you, because it cannot know which copy you
-  meant to keep.
-- **Keep both, fix the caller.** Point the launchd plist, systemd unit,
-  or cron entry at an absolute path rather than at a bare `sparkwing`
-  on a PATH you do not control. This is the right fix when the two
-  copies are deliberate.
-
-Nothing here ever deletes or renames a binary.
-
-## Per-host concurrency
-
-Two `sparkwing run` invocations on the same machine compete for the same
-CPU. Local runs are arbitrated by a per-host admission daemon
-(`wingd`) -- invisible infrastructure you never install, start, or
-tune. The first run that needs admission brings one up: a lock file under
-the sparkwing home makes the race safe, so one process wins and the rest
-connect to the winner. The daemon exits on its own once the machine has
-been idle for a while, coming back the next time a run needs it.
+Engine flags precede `--`. Pipeline and job arguments follow it. Local `run`
+uses this machine's controller and accepts no connection profile. A profile
+selects the controller for `pipeline trigger`, run observations and management.
+
+| Invocation | Execution and records |
+| --- | --- |
+| `sparkwing run build` | The CLI hosts the run. The local controller owns its records. |
+| `sparkwing run build --sw-detached` | The local controller queues and hosts work independently of the submitting terminal. |
+| `sparkwing pipeline trigger build --profile prod` | The selected controller queues the run for an eligible runner or launcher. |
+| `sparkwing pipeline trigger build --profile prod --runner here --reason repair` | This CLI hosts the controller's named here run. |
+
+## Local execution
+
+The local controller owns one home, its SQLite store, admission, queue and
+browser dashboard. It starts on demand. The CLI hosts a foreground run and
+sends state operations through the controller API. SDK processes declare and
+execute work through protocol v2. They do not open the controller's database.
+
+The controller is the only writer of the shared store. Reads, cancellation,
+retry and doctor use its API too. The controller's route policy and wire
+contract also apply to `api.sock`. A transport retries only operations the
+registered route marks safe to replay. A lost one-time award is never replayed
+automatically.
 
 ### Who hosts the daemon
 
-**The installed Sparkwing distribution owns daemon lifecycle. Pipeline
-clients declare required capabilities and use the running daemon; they
-never host, replace, or upgrade it.**
+The local controller is wingd. These commands inspect or hold its lifecycle:
 
-The daemon is always an installed sparkwing build -- the CLI, or
-`sparkwing-runner` on a runner box -- and never a per-repo pipeline
-binary. `sparkwing run` hands each run the exact CLI that launched it as
-the daemon host, through `SPARKWING_WINGD_BIN`; a pipeline binary invoked
-directly falls back to the `sparkwing` on PATH. You can export
-`SPARKWING_WINGD_BIN` yourself to point a directly-invoked pipeline
-binary (a systemd unit, a deploy box) at a sparkwing that is not on PATH,
-and `sparkwing run` will not overwrite a value you set.
+```bash
+sparkwing daemon status -o json
+sparkwing dashboard start --stay
+sparkwing dashboard status
+sparkwing doctor -o json
+```
 
-A newer *installed* sparkwing transparently replaces a running older
-daemon. Pipeline binaries never do, so one repo bumping its `.sparkwing/`
-SDK pin cannot churn the daemon every other repo on the box shares.
-
-`SPARKWING_HOME=DIR` points one command's state and config at DIR, and the
-daemon a run reaches is whichever one lives in its home. That is deliberate
-isolation for work that must not touch the operational runs store, a release
-preview being the standing example, and it costs what isolation costs: the run
-sits outside the machine's admission ledger, is absent from `sparkwing queue`
-and the dashboard, and contends on the operating system with every run the
-machine's daemon is arbitrating. Reach for it when a separate home is the
-point, not when the queue is full.
-
-The daemon serves two sockets in the private directory it owns, both mode
-0600, and refuses any connection whose peer uid is not its own. `d.sock`
-carries admission. `api.sock` serves the controller HTTP API over the
-runs-store handle the daemon holds, so a run it hosts can read and write
-run, node, event, and concurrency state without opening the store file
-itself; that is what removes the store's schema from a pipeline binary's
-contract. Only the process holding the election lock binds either socket,
-and a daemon being replaced closes `api.sock` before it acknowledges the
-drain, so the successor binds it with no overlap.
-
-`api.sock` can fail to bind while `d.sock` is serving: the socket path is
-too long for the OS, the private directory is not owned by this user or is
-not mode 0700, or the filesystem refuses the socket. The daemon keeps
-arbitrating admission in that state rather than leaving the machine with no
-daemon, and says so: `sparkwing daemon status` reports `api_ready: false`
-with the bind failure in `api_error`, `sparkwing doctor` warns, and both
-name the path as `api_socket`. A cache URL the daemon cannot open is the
-same shape of fault: the daemon serves without artifact routes and reports
-`artifact_store_error`.
-
-On `api.sock` the peer uid *is* the identity. A request with no
-`Authorization` header is served as an admin principal named
-`unix-peer:<uid>`, which is every route: every run's state regardless of
-which process claimed it, every stored secret, and the ability to mint
-bearer tokens that outlive the process. That is the same authority a
-same-uid process already had by opening `state.db` directly, and it is why
-the socket is 0600 with a peer-credential check on accept and why the
-daemon serves exactly one account. A local run sends no token and is
-served as that peer principal; that is also the faster path, because a
-bearer token is looked up on the writing handle and waits behind whatever
-it is doing. A request that does carry a bearer token is authenticated
-against the store's tokens instead, so a stale token fails closed rather
-than falling back to the uid.
-
-`GET /api/v1/health` is answered by the daemon rather than by a controller,
-so it reports on a home that has no runs store. Alongside the usual
-`status` and `auth` it carries `store`: `absent` when this home has no
-state file (a machine that only triggers remote runs, which is healthy
-and stays that way, because a probe never creates the file), `ready` when
-the daemon can read it, and `error: <reason>` with a 503 when a store that
-exists will not open.
+Active runs, queued triggers, held leases and open dashboard connections keep
+it alive. Health checks alone do not. `--stay` keeps it up until stopped.
+Linux and macOS support an installed login service through `dashboard install`.
+Windows supports stay mode. Machine updates refresh managed controller and
+schedule units together. See [local dashboard](native-mode.md).
 
 ### Running with no daemon available
 
-A run the admission daemon cannot serve runs **standalone**: against its
-own runs store, saying so once on stderr before its first node, with the
-exit code it would have had. Five cases reach it.
+Standalone CI runs the same controller runtime in process with its own home.
+It must not open a home another controller owns. An unavailable or incompatible
+shared controller is an error, rather than permission to open its database in a
+second process. Startup reconciliation and shutdown draining belong to the
+runtime in both modes.
 
-The block prints once admission has answered, not when the store is
-chosen, so a run that is refused never reads a paragraph ending
-"everything else works" immediately above its own failure. A run refused
-by admission also leaves no standalone store behind: if it was the run
-that created the file, the file is removed again. That is the only ending
-that discards anything -- a run that fails later, while shaping its plan
-or resolving a secret, has already written its row and keeps both the row
-and the block. Every standalone run holds a shared lock on
-`standalone/state.lock` for the life of its handle, and a discard runs
-only when it can take that lock exclusively, so two runs starting together
-cannot delete each other's store.
+A local run has no default execution deadline. Queue wait, job execution,
+approval wait and owner liveness have separate meanings. See [limits](limits.md).
 
-**No daemon is running and none can be started** -- no sparkwing
-installed to host one. The run says:
+## Detaching a run so it outlives the terminal
 
-```
-sparkwing: no admission daemon is running and no sparkwing is installed to host one, so this run is standalone. It cannot see other runs on this machine and they cannot see it, so together they may oversubscribe it. Everything else works.
-
-  to host one
-    curl -fsSL https://sparkwing.dev/install.sh | sh
+```bash
+sparkwing run nightly-report --sw-detached --sw-output json
+sparkwing runs status --run RUN_ID
+sparkwing runs logs --run RUN_ID --follow
+sparkwing runs cancel --run RUN_ID
 ```
 
-**The daemon predates something the run needs** -- it never advertised an
-`api.sock` at all, it answers 404 on a route this pipeline's SDK uses, or
-it reports a runs store its own binary is too old to open, which is what
-an installed daemon behind a newer pin that already migrated the file
-looks like. Pipeline binaries never replace a daemon, so the remedy is to
-update the daemon, and the block names `sparkwing update`. A daemon that
-is behind *and* reported a reason of its own -- an `api.sock` it could not
-bind, say -- carries that reason on its own line in the block, because
-updating is not what fixes a socket path over the OS limit. Only a
-release-to-release gap counts as behind: a local build of the same release
-carries a describe suffix that sorts below the tag and is not treated as
-older.
+Detachment queues the sealed request with the local controller. The controller
+owns consumption and process cleanup. A separate user-managed consumer is not
+part of the model. A successful submission receipt identifies the allocated run.
+It does not prove that execution has started.
 
-**The daemon's protocol floor is above this pipeline** -- a release
-declared a cut and this repo's pin predates it. The block names
-`sparkwing repos update --apply`, which ends the warning period.
+`--sw-idempotency-key` gives repeated detached submissions one durable identity.
+`--sw-request-id` is a tracing field and does not deduplicate work. JSON receipts
+exclude raw arguments, captured environment values, private bearers and seal
+hashes. A log path is reported only when it exists.
 
-**The daemon cannot serve this run's state** -- it advertised `api.sock`
-and the socket did not bind, or it will not answer. This is a fault of a
-daemon that is not behind this pipeline, so the block carries the
-daemon's own reason and points at `sparkwing daemon status` rather than
-at an upgrade.
+### Making a retry safe
 
-**`--sw-allow-unadmitted` is set** -- the operator asked for the direct
-path, for a box whose other work they know. The block says so and names
-the run without the flag as the way back. The flag is run state the host
-holds; no environment variable turns the check off.
+```bash
+sparkwing run deploy --sw-detached --sw-idempotency-key deploy-2026-10-15
+sparkwing runs retry --run RUN_ID --failed
+sparkwing runs retry --run RUN_ID --all-jobs
+```
 
-A pipeline that reserves host capacity with a plan-level or node-level
-`.Resources()` pin is not an exception. It runs standalone rather than
-failing, because a commit hook is not the place to fail for a reservation
-nothing else on the box is honoring either. What every standalone run
-loses is the same thing: host CPU and memory are not arbitrated, so a
-standalone run and a hosted one may oversubscribe the box. The read verbs
-still find it. `sparkwing runs list`, including `--wait` and
-`--group-by`, merges this home's own `state.db` with every standalone
-store and marks each row with the store it came from; `runs status` and
-each of its `--view` renderings look an id up in the shared store first
-and then in each standalone store. The
-dashboard reads `state.db` alone and does not see the run.
+Submission idempotency belongs to intake's transaction. The same key and body
+return the original receipt. A conflicting body fails. An ambiguous submission
+does not authorize the caller to invent another run's authority.
 
-Some failures are still failures. A daemon whose runs store is unreadable
--- a disk error, a file that is not a database, a store from another
-schema baseline -- fails the run, because the file is what the operator
-must fix and running standalone would hide it behind a run that looked
-like it worked. So does a daemon that is present but never
-answers, one whose build does not match this pipeline's, and a version
-conflict that repeated takeover could not settle: each is a machine to
-look at rather than a version gap to route around.
+A retry keeps the original request, source, captured environment and accepted
+plan. It records the retrier separately. `--failed` reuses authorized successful
+work. `--all-jobs` executes the complete plan. Application retries within a job
+keep the same claim and increase the attempt ordinal. Lease loss follows the
+separate recovery rule in [scheduling](scheduling.md).
 
-A degrade that happens after the store is already chosen -- a lease frame
-the daemon does not serve, on a run whose state is already with that
-daemon -- cannot move stores, so it prints a single line naming the cause
-and saying where the run's state stays, instead of one of the blocks
-above.
+### Publishing a foreground run handle
 
-Dry runs (`--sw-dry-run`) mutate nothing, so a dry run that would go
-standalone writes to a throwaway store that is removed when it ends: it
-never creates this home's standalone store and never adds rows doctor
-counts against it.
+```bash
+sparkwing run build --sw-run-handle-file /tmp/build-run.json
+```
 
-#### Where standalone runs live
+The run handle identifies the run for observations and cancellation. It carries
+no credential. `--sw-output` chooses pretty, JSON or plain output for foreground
+and detached commands. List commands emit one JSON record per line.
 
-`~/.sparkwing/standalone/state.db`. Every pipeline binary shares that one
-file, and a binary built at another store schema refuses it and fails the
-run, naming the file to delete. Releases before the store baseline kept a
-refused binary's runs in `~/.sparkwing/standalone/schema-<N>/state.db`;
-nothing writes there now. The shared `~/.sparkwing/state.db` is not opened
-by a pipeline binary at all.
+## Which checkout runs
 
-Sharing one file is what keeps the block's "everything else works" true
-across repos: box- and run-scoped `.Concurrency()` groups are enforced
-through the store, so two standalone runs from different repos still
-serialize against each other.
+Intake seals source identity and the exact commit before execution. Acquisition
+uses that identity, rather than looking up a branch head again. Repository
+identity identifies the namespace. It does not grant permission to clone it.
 
-A child run a standalone run dispatches, and a node replayed from one,
-land in the store their parent chose rather than deriving one of their
-own: the parent names the file in `SPARKWING_STATE_DB` and its reason in
-`SPARKWING_STANDALONE_REASON`, and the child prints no second block. A
-child that does reach the daemon ignores both and records nothing about
-being standalone.
+`--sw-ref` selects the local execution revision. `--sw-pipeline-ref` selects the
+pipeline's source revision. A declared pipeline source and an explicit pipeline
+ref must agree. Resume and retry use the persisted selection. They do not replace
+it with the caller's working tree or current machine settings.
 
-Only a parent may set those two. They are denied from a detached run's
-captured environment and stripped from what the dashboard's trigger
-consumer hands a child, so a value left in a submitting or dashboard shell
-cannot send an unrelated run into someone else's store. The consumer
-claims from the shared store and passes neither, so a child it dispatches
-opens the shared store, which is where its trigger row lives.
+The pinned Go or TypeScript SDK selects its matching verified engine before SDK
+installation, describe, planning or execution. Each machine fetches that release
+once from GitHub Releases and verifies it. Pipeline binaries are built and
+cached on the executing machine. Local execution does not fetch prebuilt
+pipeline binaries from a controller. See [repository upgrades](cli-upgrade.md).
 
-`sparkwing doctor` lists each standalone store that exists with its run
-count and the oldest run's age. Nothing prunes them: delete a file once
-you no longer want the runs in it.
+## Remote execution
 
-A read verb opens every standalone store read-only, so reporting on one
-never migrates it, and lists what it finds newest first. An id that is in
-both the shared store and a standalone one lists once, from the shared
-store, whatever the two copies say about when they started, which is the
-store the single-id verbs resolve first.
+```bash
+sparkwing pipeline trigger deploy --profile prod --detach -- --environment staging
+sparkwing runs status --run RUN_ID --profile prod
+sparkwing runs logs --run RUN_ID --profile prod --follow
+```
 
-A standalone store this build cannot read is named on stderr after the
-table instead of listed. One written at an older store schema, which is
-what the `schema-<N>` directories hold, is named with its run count
-(`standalone/schema-20/state.db holds 3 runs written by an older
-sparkwing; read them with that release`), because this build's queries
-ask for columns that store does not have. One that is busy is named as
-busy and read again next time, and one that is not a runs store this
-build can read is named as that. No note carries a database error.
+The selected controller owns the run's records. Its intake derives the caller's
+authority. A runner claims trigger and job units through one ordered queue. The
+launcher creates Jobs for awarded plan, eval and work units. Both use the shared
+matcher and hosts. Inline jobs stay with the run host.
 
-A verb that writes prints the same notes when the id it was given is in
-no store it could read, so a run in a skipped store is not reported
-simply missing.
+The working-tree option submits an immutable source snapshot. Secret-shaped
+files require explicit review through the allowed-file option. Keep credentials
+in ignored files or outside the repository and inspect `git status` before
+submission. Final signed source-bundle upload and initial-trigger intake still
+need their controller and storage bindings. The option's presence in help is not
+native integration evidence.
 
-`sparkwing runs annotations add`, `runs approvals approve`, and
-`runs approvals deny` write to the
-store that holds the run, so they act on a standalone run in its own
-store.
+Here execution retains its one-time authority in an owner-only controller/run
+record before hosting. Resume takes only the run selector and connection:
 
-`runs cancel` and `runs retry` use the selected controller API. They do not
-search or mutate old standalone store files. An unavailable controller fails
-before any intake. See [rewrite integration](architecture.md) for the remaining
-local-runtime and retry bindings.
+```bash
+sparkwing pipeline trigger deploy --profile prod --runner here --reason repair
+sparkwing pipeline trigger --resume RUN_ID --profile prod
+```
 
-The start record of a standalone run carries `standalone: true` and
-`standalone_reason` (`no-daemon`, `daemon-older`, `daemon-fault`,
-`floor`, or `forced`), and `sparkwing runs status` shows both along with
-the store the run was read from. To end the standalone state, fix what the
-block names -- install or update sparkwing, raise the repo's pin, or
-unset the variable -- and the next run is hosted again. Runs already
-written to a standalone store stay there.
+The named claim supplies the original request and accepted plan. The first
+interrupt asks the controller to cancel while the host keeps renewing and
+draining. A second interrupt stops hosting and observation, then joins both.
+Incomplete hosting or observation exits 3. See [here execution](hotfix-runner.md).
 
-These rules are evaluated once, at run start. A daemon that dies
-*during* a run is a different path: the run's client reconnects and
-reattaches its lease, spawning a replacement through the resolved host
-binary if one exists, and if none does the next admission the run needs
-fails loudly rather than silently continuing unarbitrated.
+### Team runners fetch source themselves
 
-The process connects when it needs admission. Explicit run resources and
-plan-level `.Concurrency()` groups are admitted at run start and held by
-the open connection for the run's lifetime. Unpinned host CPU and memory
-are admitted per node as the DAG dispatches, so a fast early node can run
-while a later heavy node waits for capacity. A wait first prints the machine
-state: running pipelines and their charges, queued count and the run's place,
-its requested capacity and source, free/held/external capacity, and expected
-clear time when the daemon can estimate one. Reporting checks back off through
-30 seconds, one minute, two minutes, and five minutes, and print again only
-when a holder, position, blocking dimension, or estimate availability changes.
-Ctrl-C cancels the wait cleanly. When a run process dies -- crash, kill, or
-power event -- the kernel closes the connection and the daemon releases the
-lease immediately, finalizes the orphaned run record, and admits the next
-waiter. There are no lease heartbeats to tune. Nested runs never double-charge the
-host: a child run (started by `RunAndAwait`, or by a step that shells out to
-`sparkwing run`) names its parent run and node, and the daemon attaches it to
-what that node holds instead of re-admitting it. The child joins the lease
-that holds the node's cores, or the run's lease when the run pins the host,
-and it holds every concurrency group held by the node, its run, and each run
-above them, so a grandchild that shares a group with its grandparent never
-waits on it. A sibling node's groups are not passed down. This holds whichever
-process claims the child: the parent's own run or the resident consumer. A
-child whose named parent holds no lease, because the node has finished or the
-parent ran without the daemon, fails with that reason instead of queueing on
-its own. A node of the child that declares one of the groups it was handed runs
-under it rather than queueing. A child lives inside what its ancestors hold:
-when a lease it was attached under ends, is cancelled or is evicted by a
-`CancelOthers` arrival, the daemon cancels the child and everything attached
-below it. The daemon
-refuses a process of another user, but any process of the same user may name
-any parent: a Sparkwing home is not a security boundary, since that user can
-read every home's files and tokens.
+Source acquisition clones the sealed SHA directly from the authorized Git host.
+An optional source bundle seeds acquisition. No cache mirror or package proxy
+sits between the runner and origin. Source credentials require live claim
+authority. A repository name alone grants no source access.
 
-The ledger survives daemon restarts the same way runs survive daemon
-handoffs: every transition is persisted, and a restarting daemon
-restores the ledger and holds a short window for clients to reclaim
-their leases before releasing the unclaimed rest. Restored grants the
-current budget cannot hold are shed. A file that cannot be parsed may
-describe runs that still hold host capacity, so the daemon refuses to
-start instead of guessing it is safe to release them. The startup error
-names the file and the explicit recovery command. After verifying those
-runs have stopped, `sparkwing daemon recover-state --yes` preserves
-the bytes as `state.json.corrupt-<time>` for `sparkwing doctor` to report
-and allows the next daemon to start cleanly.
+### What a laptop runner trusts
 
-While it serves, the daemon holds one open handle on the runs store
-instead of reopening `state.db` for every check, and it reaps that store
-through the same handle: lapsed concurrency holders and the waiters
-behind them every 10 seconds, and runs whose process died without
-finishing them once at start. It opens the store it finds and never
-creates one, so a machine whose runs all keep their state in an object
-store still has no local database. A store the daemon cannot open does
-not stop admission. The run is evicted naming the store's own reason, as
-before, `sparkwing daemon status` reports `daemon_store_ready` false with
-that reason and a remedy, and the open is retried: immediately while no
-store file exists, and every 30 seconds once one does, so a store that
-appears or becomes readable is picked up without a restart. A store file
-that is deleted or replaced is noticed and reopened rather than read as a
-vanished inode. Reads on the admission path use a second, read-only handle
-on the same file, so a reaper pass or a finalize cannot hold up the
-terminal check, and every store call the daemon makes carries a deadline.
-The handles close when the daemon exits or idles out.
+A runner executes accepted repository code as its OS user. Its private
+credential file keeps accidental disclosure out of configuration and output.
+Code running as that same user may still read it and other files in the account.
+Use a dedicated OS account, container or VM and enroll only repositories whose
+code may use that account's permissions.
 
-### Declare nothing; sparkwing measures
+Runner repository restrictions, granted reservations and resource capacity
+filter claims before preferences order eligible work. Labels grant no pool
+membership or repository permission. See [scheduling](scheduling.md),
+[Git credentials](git-credentials.md) and the [threat model](threat-model.md).
 
-The daemon measures the machine's real cores and memory and admits into
-the headroom that is actually free, counting non-sparkwing load against
-capacity. It also measures each pipeline and node over their first few
-runs. Explicit run resources use the pipeline profile. Unpinned local
-work uses the node profile at dispatch, so "one heavy build at a time"
-emerges from measurement with no configuration. Declare nothing and it
-works.
+## Environment and secrets
 
-`sparkwing runs stats --capacity` shows what was learned: duration
-percentiles, CPU and memory distributions (p50/p95/peak across recent
-runs), and queue-wait p50/p99. The distributions tell you whether work
-is steady or spiky and whether the box is too small. Admission charges
-cores from the p95 across recent runs of each run's *sustained* demand
--- the level that covers four sampling ticks in five, never below its
-average draw, and not the peak it touched once -- while memory still
-charges the p95 of the per-run peaks. The dimensions differ because the
-resources do: cores are compressible, so the kernel time-slices two
-runs that collide for a tick and reserving a burst peak for a whole
-hold only refuses work the box could have run, while an oversubscribed
-box does not time-slice memory, it OOMs. It is the split admission
-already makes when it gates: CPU pressure is backpressure, memory is
-strict. Either way the charge takes p95 rather than the maximum, so one
-freak run cannot pin the price until it ages out of the window. The
-`CPU CHARGE` column reports the resulting core figure, and a blocked
-waiter names its provenance, as in `needs 5.0 cores (measured sustained
-p95 over 12 runs); 2.1 available`.
+A local run captures its environment once. Children inherit that snapshot, and
+schedules capture theirs at installation. The daemon's ambient environment never
+replaces accepted values. The sealed spec records names and a digest. Values
+remain in private host storage.
 
-The dashboard's **Capacity** page is the same accounting with its work
-shown: the live host ledger with the subtraction behind each available
-figure, the priced table above, and, per pipeline, the stored sample
-window with the run each percentile charge was ranked out of marked. It
-is where to look when a charge seems wrong, because it puts the price and
-the evidence for it on one screen -- see
-[observability.md](observability.md#dashboard).
+Shared process policy filters every spawn. Remote submission passes only the
+minimal base, network/CA settings and explicitly allowed names. Credential-shaped
+names remain excluded even when allowed. Proxy credentials are the passed and
+masked exception. Capabilities, bootstrap values and protocol handles travel in
+private files, memory, pipes or argv as specified by their contracts, never env.
 
-A pipeline may pass a cold-start hint with
-`.Resources(sparkwing.Cores(n), sparkwing.MemoryGB(n))`, and may pin an
-explicit cost when it must -- but a pin is policed, not trusted blindly:
-when it drifts from what the pipeline actually uses, `sparkwing queue`
-flags the gap so the pin can be corrected or dropped. The posture is
-declare nothing and let sparkwing measure; pin sparingly, and sparkwing
-polices the pin.
+Job startup settings are projected before process creation. Body and cleanup
+receive the same complete attempt environment. A changed replan fails as
+`plan_drift`. Secret arguments stay available to execution but are redacted from
+previews, receipts and diagnostics. See [environment variables](environment-variables.md).
 
-The same measurements answer the murkiest recurring question on a shared
-box: is sparkwing slow, or is the machine busy? A holder is flagged
-`(contended)` only when three things line up at once -- its elapsed time
-has run well past its own measured p99, the host has been saturated by
-non-sparkwing load for a sustained share of the run, and it has enough
-duration samples to have a trustworthy baseline. An unprofiled run, a run
-that is merely at the slow end of its own distribution, and a run on an
-idle host are all left unflagged. When a contended run finishes it prints
-a one-line attribution (`took 12m vs p50 8m30s; host saturated 62% of the
-run`), and `sparkwing runs stats --capacity` shows each pipeline's
-contended share, so "the tool is slow" becomes a measurement instead of a
-guess. Detection is observability only; it never changes an admission
-decision.
+## Authorization model
 
-`.Concurrency(group)` is for *logical* mutual exclusion only -- a deploy
-lock, a shared fixture -- never host sizing. A run- or box-scoped group
-is local to the machine; a global-scoped group pools across the whole
-fleet through the controller's shared state (see [sdk.md](sdk.md)).
+Local and remote controllers enforce the same route policy. Team authority,
+repository access, job bindings and claim liveness come from authenticated server
+facts. A management credential cannot substitute for the current execution
+holder. Public run details are redacted projections, not executable inputs.
 
-### Recovering from bad measurements
+### The laptop boundary
 
-Measurement drives admission, so a wrong reading needs an escape hatch
-that does not mean "wait for the window to age out." There are two:
+The local controller authenticates its OS account. Unix sockets require private
+ownership and kernel peer credentials. Windows uses the account SID. An
+unauthenticated or foreign peer is refused. Browser sessions and CSRF checks
+belong to the controller's authentication policy. There is no separate dashboard
+store or dashboard-only credential model. Root and same-account code remain
+inside the machine trust boundary. See [security](security.md#local-daemon-socket).
 
-- **A host sensor that cannot read.** The `EXTERNAL` column carries the
-  reading the availability math ran on, and the view prints how old that
-  effective reading is and how recently the host sensor successfully read
-  at least one pressure dimension. The deadband absorbs small wiggles, but
-  reapplies its newest effective value within 30 seconds, so a recovered
-  reading near an admission threshold cannot strand a waiter indefinitely.
-  A failed sample updates neither timestamp and cannot apply its returned values.
-  On macOS, memory availability is the sum of free and inactive pages from
-  `vm_stat`, multiplied by its reported page size. Purgeable, speculative,
-  and compressor counters add no capacity. A failed command or invalid counters
-  return a sample error with memory unmeasured; refresh retains the previous
-  admission limits. This does not guarantee safe admission during a prolonged
-  sensor outage, and startup without a valid sample still uses configured capacity.
-  When a dimension cannot be read at all on a platform without a host sensor, the
-  cell prints `unmeasured` rather than a figure, an `external: unmeasured on
-  <dimension> (host sensor unavailable); no external load subtracted from
-  available` line says what admission did about it, and the JSON row carries
-  `"external_source": "unmeasured"`. A sampler response with no measured
-  pressure dimension does not refresh the measurement age. Nothing is
-  subtracted for a dimension nobody read, because a substituted figure in a
-  measurement's format is what pinned memory headroom at zero on every box.
-- **A misreading host sensor.** If the external-load reading is wrong and
-  admission is queuing runs against phantom pressure, add `ignore-external`
-  to the machine budget. Admission then plans against total capacity minus
-  the reserve, subtracting no external load. The `EXTERNAL` column in
-  `sparkwing queue` still shows the real reading -- observability stays
-  truthful -- with an `external: ignored (operator setting, ...)` line that
-  names which setting turned it on, and contention detection keeps using
-  the real saturation. Use it alone (`ignore-external`) or alongside a cap
-  (`50%,ignore-external`). Put it in `admission.budget` in `config.yaml` rather than the
-  environment when you want it to outlive the daemon running now: the
-  daemon is started on demand by whichever run needs it first and inherits
-  that process's environment, so an exported variable lasts only as long as
-  that one daemon. `sparkwing doctor` reports a machine admitting with
-  external load ignored, so the state is findable without suspecting it
-  first.
-- **A poisoned learned profile.** One freak run can record an absurd peak
-  that inflates a pipeline's charge for the rest of the window, and
-  sustained external load can ratchet a still-measuring pipeline's demand
-  floor upward. The floor self-corrects: each contended run that measures
-  below it halves it, mirroring the ceiling-hit doubling that raised it.
-  That correction only works if the run is admitted, so two rules keep it
-  reachable. A charge resolved from measurement is capped at the machine's
-  grantable ceiling on **both** cores and memory, and the run says so,
-  naming the profile; `sparkwing doctor` flags the same state. And with
-  nothing admitted, the queue head is granted on either dimension no matter
-  what external load is reading, so a pipeline can always measure its way
-  back down instead of being locked out by a floor it can never disprove.
-  To clear a floor immediately anyway, reset with
-  `sparkwing runs stats --reset --pipeline <name>` (profiles are scoped by the
-  repository's canonical identity for runs launched inside a git repo and
-  shown as `repo/pipeline`, exactly as `runs stats --capacity` prints them; a
-  bare pipeline name reaches every repo-scoped key that carries it and the
-  summary names each one): the
-  learned samples, peaks, floors, waits, and contention tally are dropped
-  so the pipeline re-learns from a cold start, and the command prints what
-  it removed -- including a floor with no measured samples behind it, which
-  is the state a pipeline that never finished a clean run is priced off. An
-  explicit `.Resources()` pin is preserved -- admission keeps charging the
-  pin while the profile re-learns. To reset every pipeline at once, use
-  `sparkwing runs stats --reset --all --yes`.
+## Per-host concurrency
 
-A request that no release could ever satisfy -- a pin larger than the
-machine -- is refused at submit with the arithmetic (`needs 12GiB of
-memory, this machine has 8GiB`) rather than queued to a timeout. A box
-that is merely busy still queues, because a holder finishing fixes that.
+Admission arbitrates local CPU and memory. Concurrency groups coordinate declared
+work through the controller. Neither is a credential boundary. Inline placement
+keeps work on its run host without a reserved-label alias.
 
-### Operating it
+```bash
+sparkwing queue list -o json
+sparkwing queue priority --run RUN_ID --set front
+sparkwing runs stats --sizing
+```
 
-Inspect admission and change queued priority with these commands:
-
-- `sparkwing queue list` reads the local controller's admission snapshot.
-  It retains resource holders, connected runs, ordered waiters, pressure,
-  estimates and runner headroom. Add `--profile P` for a remote controller,
-  or `--group GROUP` for concurrency-group capacity, holder leases and waiters.
-  An unavailable controller returns an error without an empty success snapshot.
-  Bare `sparkwing queue` shows help.
-- `sparkwing queue priority --run ID --set VALUE` changes local admission
-  priority. VALUE is an integer, including zero, or `front`/`back`. The run's
-  existing holders keep their leases. Add `--group GROUP --profile P` for a
-  remote concurrency group. JSON retains prior and new ranks and positions.
-  See [Queue views](diagnosing-admission.md#queue-views) for native integration
-  requirements in the rewrite build.
-- `sparkwing doctor` -- the one repair verb. It tightens permissive local-home
-  paths and removes only provably-dead state (an interrupted run's leftover
-  row, an orphaned lock file whose owner is gone), then reports what it found
-  and did. Every report
-  opens with the daemon's state -- serving with its version and protocol,
-  none running, or unreachable -- because the checks below it only run
-  when the daemon answered, so their emptiness means nothing on its own.
-  An unreachable daemon is never a clean bill, and the run-row repair is
-  skipped there rather than risk finalizing a run that daemon is holding.
-  A daemon that accepts connections and answers nothing is reported as
-  wedged, with the socket it holds. Such a daemon arbitrates nothing and no
-  successor can bind that socket. `sparkwing daemon restart` cannot replace
-  it, because the drain needs a handshake it will not answer, so the report
-  names the commands that do: `lsof` on the socket finds the process,
-  `SIGUSR1` makes it dump its goroutines to `wingd/d.log`, and then it is
-  stopped. `--timeout` bounds the daemon and local-state checks and each
-  takes a slice of it, so an unanswering daemon leaves the rest of the
-  report its budget. It defaults to 10 seconds; a sweep that runs out
-  prints what it reached alongside the error.
-  Standing problems it cannot safely repair -- repeated admission
-  rejections, a daemon version skew, a contention-poisoned capacity
-  profile, a daemon serving another sparkwing home at a version no
-  release carries -- are reported with the exact fix instead. It never
-  kills a process and never touches live admission, so it is safe to run
-  at any time; on a healthy machine it finds nothing and says so.
-
-Each sparkwing home keeps its own daemon, so a daemon for one home is
-invisible from another even though both show up side by side in a process
-listing. That makes a scratch daemon -- one a build with a local `replace`
-directive left running, which reports version `v0.0.0` -- easy to mistake
-for the machine's resident one and read its log as production state.
-`sparkwing doctor` names any it finds, with the socket it answers on, so
-the mistake is caught before it explains an unrelated failure.
-
-The daemon writes an operational log to `wingd/d.log` under the sparkwing
-home (`~/.sparkwing/wingd/d.log` by default) for when you want to see
-what it did.
-
-If a daemon is ever busy in a way its log does not explain -- burning CPU
-with nothing queued, or answering nothing -- send it `SIGUSR1`
-(`kill -USR1 <pid>`, POSIX only). It appends a line counting its
-connections, holders, waiters, leases, and guards, followed by a stack
-for every goroutine, to that same log. The daemon keeps running, so you
-can capture the state before deciding whether to stop it, and the dump is
-what a bug report about a stuck or spinning daemon should carry. Each
-dump adds up to 2MB to `d.log`. The log is rotated once to `d.log.1`
-when it passes 1MB -- both when a daemon starts and before a dump is
-written -- so a long-lived daemon you ask for many dumps keeps the pair
-bounded rather than growing one file forever. The rotation copies the
-log aside and empties it in place rather than renaming it, so the
-daemon, the supervisor watching it, and anything else already writing
-to `d.log` all keep writing to `d.log`. Only the previous stretch is
-kept. A manual dump is also saved to `d.log.stacks` with its timestamp
-and daemon summary. That file is replaced atomically by the next dump;
-operational log rotation leaves it intact. Copy it before requesting
-another dump if you need to keep both. During supervised replacement,
-the supervisor also saves a numbered dump in the daemon directory and keeps
-the newest ten numbered copies.
+Missing observations remain missing. They are never rendered as zero capacity.
+An unavailable controller returns an error. See [admission](admission.md) and
+[diagnosing admission](diagnosing-admission.md) for measurements and queue views.
 
 ### Capping sparkwing's share of the machine
 
-Measured admission is the primary mechanism, and for most machines it is
-the only one you need. When you want a hard ceiling -- "CI may use at most
-half my laptop" -- set one machine budget. It takes a core count, a
-percentage, or both a core and a memory term, plus optional `enforce` and
-`ignore-external` terms:
-
-```
-6               # at most 6 cores
-50%             # at most half the machine's cores
-6,8gb           # 6 cores and 8 GiB
-50%,enforce     # half the cores, hardened at the OS level
-ignore-external # admit against total capacity, ignoring external load
-```
-
-#### Where to set it
-
-The budget is read from two settings, and the more specific one wins:
-
-| Setting | Reaches | Lives until |
-|---|---|---|
-| Internal daemon `--budget` argument (not a public CLI command) | that daemon process | that daemon exits |
-| `admission.budget` in `~/.config/sparkwing/config.yaml` (see [Machine settings](machine-config.md)) | every daemon on the machine | you edit or delete the key |
-
-The config.yaml key is the setting to reach for. The admission daemon is
-started on demand by whichever run needs it first, and it reads the file at
-startup, so a budget written there is in force again the moment a daemon
-respawns.
-
-The key holds one setting in the grammar above, and a YAML comment keeps
-the reason a budget is in force next to the budget:
+Set the machine budget in the private machine file:
 
 ```yaml
 admission:
-  # host sensor over-reads external load on this box
-  budget: 50%,ignore-external
+  budget: 50%,enforce
 ```
 
-A value that will not parse fails daemon startup rather than being
-dropped, whichever setting it came from. A budget that silently does
-nothing is worse than one that says it is wrong.
+Admission charges against that host's capacity. On Linux, an available writable
+cgroup can enforce the machine budget. macOS scheduling controls are advisory.
+The contribution preference controls advertised runner headroom, rather than an
+OS resource sandbox. Operator ceilings refuse excessive author values instead
+of silently clamping them. See [machine settings](machine-config.md).
 
-#### Seeing which one is in force
+## Windows with Git Bash
 
-The budget caps the admission ledger below the machine total, so it holds
-everywhere admission already runs, with no other change to how runs are
-scheduled. `sparkwing queue` shows it as its own row in the headroom
-arithmetic, naming the setting behind it
-(`budget 6.0 cores (machine 10.0) (from config ~/.config/sparkwing/config.yaml admission.budget)`),
-so an operator can revoke a cap they did not set themselves. With no
-budget set anywhere the row says so rather than staying silent, because a
-machine admitting against everything it has looks exactly like a
-deliberate whole-machine budget from the outside. `sparkwing doctor`
-reports a non-default budget too, and says out loud when the one in force
-came from an environment that the next respawn may not carry.
+Go and TypeScript are supported on native Windows. Git Bash supplies Bash and
+shell utilities, while pipelines still need native tools for the commands they
+execute. Use `node.exe` to invoke JavaScript command entrypoints.
 
-A requested cap above the machine total is clamped to the machine, and the
-daemon logs a one-line note when it does.
-
-### Containers: the daemon respects its own cgroup
-
-You do not have to set a budget to keep sparkwing inside a container. On
-Linux the daemon reads its own cgroup v2 limits at startup (`cpu.max` and
-`memory.max`, with a cgroup v1 fallback) and clamps capacity to them, so a
-6 GiB container on a 24 GiB host plans against 6 GiB, never the host it
-sits on. External-load sensing follows suit, measuring the container's own
-CPU and memory usage rather than the machine's. `sparkwing queue` shows the
-clamp as a `container limit: 6.0 cores (host 24.0), 6.0 GiB memory (host 24.0 GiB)`
-row, and a machine budget still caps below the detected limit. macOS has
-no cgroups and so no container path -- capacity there is always the host.
-
-Add `enforce` to harden the cap at the operating-system level as well as
-in admission:
-
-- **Linux** places admitted run processes in a daemon-managed cgroup v2
-  with `cpu.max` and `memory.max` matching the budget, a kernel wall. When
-  the cgroup filesystem is absent or unwritable (an unprivileged laptop),
-  the daemon logs a note and the admission cap still applies.
-- **macOS** has no cgroups, so it demotes admitted runs to background QoS
-  (the `taskpolicy -b` equivalent: efficiency-core scheduling and
-  throttled I/O) and raises their scheduler nice. This is advisory
-  scheduling that yields to foreground work, not a hard cap.
-
-This is the one machine-level knob. It complements measured admission; it
-does not replace it.
-
-### Whoever owns the machine owns admission
-
-The gate is host-local by design: two laptops pointed at the same shared
-backend (a bucket, Postgres, or a controller) each run their own daemon,
-and nothing coordinates raw CPU across machines. On a Kubernetes runner
-the pod's CPU is already bounded by the kube scheduler and the
-warm-runner pool's own budget, so admission there belongs to the cluster,
-not to a sparkwing daemon -- runner pods do not start one. Cross-machine
-coordination is the job of global-scope `.Concurrency()` groups, which
-pool through the controller's shared state.
-
-## Pipeline configuration
-
-Local vs remote is decided at invocation time (`sparkwing run` for here,
-`sparkwing pipeline trigger` for the cluster), not declared per-pipeline.
-Pipelines themselves only declare *triggers*:
-
-```yaml
-# .sparkwing/sparkwing.yaml
-pipelines:
-  - name: build-test-deploy
-    entrypoint: BuildTestDeploy
-    description: Build, test, and deploy
-    on:
-      push:
-        branches: [main]
-```
-
-If a pipeline is locally-runnable (most are), `sparkwing run build-test-deploy`
-just works. If a step needs cluster credentials it cannot reach from a
-laptop, the pipeline author either dispatches the whole run remotely with
-`sparkwing pipeline trigger`, or splits the deploy into a sub-pipeline that
-runs on the cluster (`RunAndAwait`, reading typed output via `Ref[T]`; see
-[sdk.md](sdk.md)).
+Windows process cleanup uses kill-on-close Job Objects. Unix uses owned process
+sessions. Native Windows handle inheritance, cleanup and SDK execution require
+Windows acceptance runs. Linux fixtures and cross-compilation do not establish
+those behaviors. See [node protocol](node-protocol.md).

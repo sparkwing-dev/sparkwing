@@ -122,3 +122,57 @@ func TestCheckCLIVerbsRejectsRemovedCommands(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckCLIVerbsValidatesFencedGrammar(t *testing.T) {
+	for _, command := range []string{
+		"run deploy --sw-no-cache",
+		"run deploy --region us-east",
+		"runs status run-123",
+		"--profile prod run deploy",
+		"runs logs --run run-123 --limit 0",
+	} {
+		t.Run(command, func(t *testing.T) {
+			content := t.TempDir()
+			writeDoc(t, content, "guide.md", "```bash\nsparkwing "+command+"\n```\n")
+			if checkCLIVerbs(content) {
+				t.Fatalf("invalid grammar accepted: %s", command)
+			}
+		})
+	}
+}
+
+func TestCheckCLIVerbsShellExamples(t *testing.T) {
+	content := t.TempDir()
+	writeDoc(t, content, "guide.md", "```bash\n"+
+		"sparkwing pipeline trigger deploy --profile prod \\\n"+
+		"  --runner here --reason \"deploy from this machine\" -- --region us-east\n"+
+		"$ sparkwing runs status --run <id> -o json | jq .status\n"+
+		"sparkwing run deploy -- --arbitrary='two words' # author flags\n"+
+		"sparkwing profiles add --profile prod --controller https://example.com --token-stdin < token\n"+
+		"sparkwing runs logs --run <id> --grep '|' >/tmp/result\n"+
+		"sparkwing runs logs --run <id> --grep '>' 2>/tmp/errors\n"+
+		"# sparkwing run deploy --obsolete is a shell comment\n"+
+		"```\nInline fragments remain valid: `sparkwing runs status`.\n")
+	if !checkCLIVerbs(content) {
+		t.Fatal("valid shell examples rejected")
+	}
+}
+
+func TestCheckCLIVerbsRejectsMalformedShellExamples(t *testing.T) {
+	for _, command := range []string{
+		"sparkwing pipeline trigger deploy --profile prod --runner here --reason 'unfinished",
+		"sparkwing run deploy \\",
+	} {
+		content := t.TempDir()
+		writeDoc(t, content, "guide.md", "```sh\n"+command+"\n```\n")
+		if checkCLIVerbs(content) {
+			t.Fatalf("malformed shell example accepted: %q", command)
+		}
+	}
+}
+
+func TestCheckCLIVerbsReportsReadFailures(t *testing.T) {
+	if checkCLIVerbs(filepath.Join(t.TempDir(), "missing")) {
+		t.Fatal("missing documentation reported as a passing check")
+	}
+}

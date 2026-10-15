@@ -371,7 +371,6 @@ var (
 	cmdSparksRemove                   = surfaceCommand("sparkwing pipeline sparks remove")
 	cmdCacheWarm                      = surfaceCommand("sparkwing cache warm")
 	cmdSparksCatalog                  = surfaceCommand("sparkwing pipeline sparks catalog")
-	cmdSparksInflate                  = surfaceCommand("sparkwing pipeline sparks inflate")
 	cmdApprove                        = surfaceCommand("sparkwing runs approvals approve")
 	cmdDeny                           = surfaceCommand("sparkwing runs approvals deny")
 	cmdApprovals                      = surfaceCommand("sparkwing runs approvals")

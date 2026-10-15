@@ -158,10 +158,10 @@ Inspect and reclaim on demand:
 
 ```bash
 sparkwing cache info                      # size, ceilings, recent entries
-sparkwing cache info --all -o json        # every entry, machine-readable
+sparkwing cache info --all-entries -o json        # every entry, machine-readable
 sparkwing cache prune                     # trim to the configured ceilings
 sparkwing cache prune --max-bytes 512MiB  # trim to a smaller budget
-sparkwing cache prune --all               # reclaim everything
+sparkwing cache prune --all-entries               # reclaim everything
 ```
 
 ### Seeing what an entry is

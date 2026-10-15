@@ -8,9 +8,8 @@ command group (offline: `sparkwing docs read --topic cli-reference`,
 or `--topic cli-<group>` for one group). Treat that generated
 reference as authoritative -- when this page and it disagree, it wins.
 
-The CLI compiles pipelines, manages local state, and coordinates admission.
-A compiled pipeline binary can also execute on its own; see
-[Headless hosts](#headless-hosts).
+The CLI inspects pipelines and uses controller APIs for state and admission.
+The shared host executes SDK processes. See [Headless hosts](#headless-hosts).
 
 ## Output
 
@@ -40,40 +39,28 @@ the key for `cache explain`, and the reclaimed entry count for `cache prune`.
 
 ## sparkwing run
 
+`sparkwing run <pipeline> [flags...]`
+
+Runs a pipeline from the nearest pipeline directory. Engine controls precede
+`--`. All pipeline and job arguments follow it:
+
+```bash
+sparkwing run deploy --sw-output json -- --environment staging
 ```
-sparkwing run <pipeline> [flags...]
-```
 
-Compiles and runs a pipeline from the nearest pipeline directory.
-Runner controls use `--sw-*`; an unknown option with that prefix fails before
-execution setup. Other arguments pass to the pipeline. Put `--` before
-pipeline arguments that resemble runner controls. Every argument after the
-separator passes through unchanged.
+Unknown engine flags fail before execution setup. Local `run` accepts no
+connection profile. Use `pipeline trigger --profile NAME` to submit to a remote
+controller. `--target` is an engine control, rather than an author argument.
 
-The runner also consumes `--profile`, `-C`, `-v`, and the explicit
-`--dry-run=true` and `--dry-run=false` forms before the separator.
-`--target` passes to the pipeline.
+The CLI resolves the configured pipeline name and SDK entrypoint separately.
+The invoked alias remains visible to author code. `--sw-allow-risk` authorizes
+declared risk labels. The accepted request retains those permissions, including
+through retry. Raw secret arguments never enter previews or public receipts.
 
-`--sw-allow` is enforced by the CLI before it dispatches a foreground run. A
-step declares its labels in Go, so the CLI builds the `.sparkwing/` binary
-first and weighs the declarations that build emits, on every invocation. The
-labels you authorize are recorded among the run's invocation flags, so the
-run's own record shows what was authorized.
-
-A queued run of a pipeline that declares a risk is refused. The trigger carries
-no allow, so the launch weighs the declarations before it persists the run, and
-weighs what the run will execute: the `--sw-ref` worktree when the launch names
-a ref, the binary an armed schedule pinned, the working tree otherwise. A
-scheduled run goes through the same submission and is refused the same way.
-`sparkwing runs retry` submits an explicit failed/all-jobs selection to the
-controller. The CLI never replaces the source run's sealed risk permissions
-with its caller's environment. Retry intake and reuse still need the shared
-controller transaction adapter. See [rewrite integration](architecture.md).
-
-`--profile NAME` selects the store a read verb reads (this machine's
-state or a controller, and any controller auth). Execution still happens
-locally; to hand a run to a cluster, use `sparkwing pipeline trigger`
-for remote execution.
+`runs retry` requires `--failed` or `--all-jobs` and uses persisted seals. The
+caller cannot replace the original source, risk permissions or captured
+environment. Local, detached and initial-trigger execution still need their
+final native bindings. See [rewrite integration](architecture.md).
 
 ## Command groups
 
@@ -85,25 +72,28 @@ indexed in [cli-reference.md](cli-reference.md):
 | `info` | Agent entrypoint card: what sparkwing is, what's in this repo, what to run next |
 | `pipeline` | This repo's pipelines: list / describe / new / lint / plan / trigger / hooks / sparks |
 | `run` | Run a pipeline locally: `sparkwing run <pipeline>` |
-| `crons` | This host's pipeline schedules: install / uninstall / list / show / set / run |
+| `schedules` | Arm and manage local or controller schedules |
 | `runs` | Inspect and manage runs: list / status / logs / stats / retry / cancel / prune, plus `approvals` and `annotations` |
 | `repos` | The machine's fleet of sparkwing repos and their SDK pins: list / info / update / add / remove / prune |
 | `queue` | `list` reads admission or a selected concurrency group. `priority` changes a queued run's rank. See [Queue views](diagnosing-admission.md#queue-views). |
-| `cache` | The compiled pipeline binary cache and the docs cache: info / prune / explain |
-| `daemon` | The local admission daemon: status / events / restart / stop / recover-state |
-| `version` | Composite CLI + SDK + sparks version card; `repos update --in-place` bumps the pinned SDK |
-| `update` | Self-update the `sparkwing` CLI binary |
-| `serve` | Detached local dashboard server: start / stop / restart / status / logs |
+| `cache` | The compiled pipeline binary cache and the docs cache: info / prune / explain / warm |
+| `daemon` | The local controller: status / events / restart / stop / recover-state |
+| `version` | Composite CLI + SDK + sparks version card; `upgrade` changes the pinned SDK |
+| `update` | Self-update the machine CLI and refresh managed units |
+| `upgrade` | Upgrade and verify a repository's pinned SDK with its matching engine |
+| `dashboard` | Local controller lifecycle and UI: start / stop / status / logs / install / uninstall |
 | `doctor` | Inspect local controller findings, project toolchains, hooks and competing installs |
-| `cloud` | Connect this machine to a controller: connect / status (`--cluster` for fleet and queue health) / disconnect |
-| `cluster` | Cluster ops against a profile's controller: agents / runners / worker / triggers / users / tokens / limits / concurrency / object-store |
+| `profiles` | Private machine controller connections and credential files |
+| `operator` | Deployment operational limits, object storage and service credentials |
+| `tokens` | Team credential metadata, issuance, rotation and revocation |
+| `runners` | Runner observations, enrollment and removal |
+| `pools` | Team-admin reserved-pool access rules |
 | `secrets` | Secrets in the local store, or controller-stored with `--profile`: set / get / list / delete / rotate |
-| `configure` | Laptop-local config: init / profiles |
-| `debug` | Interactive run debugging: run / release / attach / env / rerun / replay |
+| `debug` | Interactive run debugging: run / release / attach / env / replay |
 | `docs` | The embedded copy of this doc tree: list / read / search / migrations |
-| `examples` | The worked-pipeline registry; `--name <example> --body` prints the source |
+| `examples` | The worked-pipeline registry; `--example <example> --body` prints the source |
 | `commands` | The full CLI surface as JSON (agent self-discovery) |
-| `completion` | Shell completion script (`--shell bash\|zsh\|fish`) |
+| `completion` | Shell completion script (`--shell bash\|zsh\|fish\|powershell`) |
 
 ## Conventions
 
@@ -118,10 +108,9 @@ indexed in [cli-reference.md](cli-reference.md):
   line`, and similar readers). An empty listing is an empty stream. Describe, get, and status verbs return
   one compact JSON object.
 - **Root flags.** `-C DIR`, `--profile NAME` and `-o FORMAT` may go before
-  the verb, as in `sparkwing -C ~/code/other runs list`. `-C` works only
-  there; it moves the working directory before anything else is read.
-- **Profile addressing.** `--profile NAME` picks the storage/dispatch
-  profile. Without it, every verb acts on local state (SQLite under
+  the verb, as in `sparkwing -C ~/code/other runs list`. It selects a local checkout before project discovery.
+- **Profile addressing.** `--profile NAME` picks a private controller
+  connection. Without it, every verb acts on local state (SQLite under
   `~/.sparkwing/`); neither the environment nor the project config selects
   a profile, so a command reaches a controller only when its own command
   line names one. Every verb that can reach a controller accepts
@@ -140,16 +129,16 @@ indexed in [cli-reference.md](cli-reference.md):
 Use the command index to find a command, then read its help:
 
 ```bash
-sparkwing commands --query status
+sparkwing commands --search status
 sparkwing runs status --help
 sparkwing pipeline list -o json
-sparkwing pipeline describe --name fictional-build -o json
-sparkwing pipeline list --query fictional-build -o json
+sparkwing pipeline describe --pipeline fictional-build -o json
+sparkwing pipeline list --search fictional-build -o json
 ```
 
 Command records carry `path`, `synopsis`, and `subcommand_count`.
 Help supplies descriptions, flags, and examples. Hidden commands require
-`--include-hidden`. See [Bounded discovery](#bounded-discovery) for pagination.
+`--all`. See [Bounded discovery](#bounded-discovery) for pagination.
 
 The describe schema uses the shared protocol v2 pipeline description. Project
 metadata comes from the `pipelines:` block in `.sparkwing/sparkwing.yaml`.
@@ -161,45 +150,29 @@ Previews redact secret arguments while the SDK receives their execution values.
 
 ## Headless hosts
 
-The compiled pipeline binary answers only `--sw-node-protocol`: it never
-runs, plans or inspects a pipeline by itself. A host that runs pipelines
-needs the `sparkwing` CLI (`sparkwing run`, `sparkwing queue`,
-`sparkwing doctor`) or `sparkwing-runner`.
+SDK programs speak node protocol v2 to a host. They do not run or inspect a
+pipeline independently. The host resolves the pinned SDK's verified engine before
+installation and planning. A matching node protocol is part of that engine.
 
-Neither the pipeline binary nor a run hosts the admission
-daemon. **The installed Sparkwing distribution owns daemon lifecycle.
-Pipeline clients declare required capabilities and use the running
-daemon; they never host, replace, or upgrade it.** A run's client spawns
-the binary named by `SPARKWING_WINGD_BIN` -- which `sparkwing run` sets
-to its own path -- else the `sparkwing` found on PATH. A child run that a
-run or the resident consumer claims from the local queue is hosted by the
-`sparkwing` that claimed it, which starts the admission daemon first; the
-host itself never starts one. On Linux that host runs under a shepherd that
-inherits, as a child subreaper, every process the host leaves and kills
-them once the host exits, so a host killed mid-run leaves no node running.
-On other systems each node process still leads its own session, so a host
-killed before it ends them leaves them running.
+The local controller owns daemon lifecycle, state, queue and admission. A
+foreground CLI hosts its run. The controller owns detached consumption.
+Standalone CI runs the same controller runtime in process with its own home.
+An unavailable shared controller does not authorize a second writer to its home.
 
-With neither present, a run says so once and proceeds without host
-arbitration -- fine for a host that runs one pipeline at a time.
-`.Concurrency()` groups still hold, through the shared store instead of
-the daemon. The exception is a pipeline that reserves host capacity with
-`.Resources()`: that run fails instead, naming the fix, because CPU and
-memory have no fallback arbiter (`sparkwing run --sw-allow-unadmitted`
-overrides it if you know what else runs on the box). Put the CLI on the box when
-concurrent runs there should queue against each other -- see
-[local-execution.md](local-execution.md#who-hosts-the-daemon).
+The controller's four activity holds and explicit stay mode govern idle exit.
+Machine updates refresh installed controller and timer units together.
+See [local execution](local-execution.md#who-hosts-the-daemon).
 
 ## Bounded discovery
 
-Use `sparkwing commands --query status` to find a command by path or
+Use `sparkwing commands --search status` to find a command by path or
 synopsis, then read that command's `--help`. The index sorts command paths
 lexically and returns at most 40 command records. `--path` restricts a
 subtree before query filtering and pagination. Child counts describe the
 full visible registry, even when a child is outside the current page.
 
-`docs list --query <topic>` returns at most 40 topic metadata records.
-`docs search --query <question>` ranks matching sections before choosing
+`docs list --search <topic>` returns at most 40 topic metadata records.
+`docs search --search <question>` ranks matching sections before choosing
 its 20-result page. Search records include a short snippet, without body
 content. Read a selected hit with `docs read --topic <slug> --section
 <start_line>`. Section selectors refer to the embedded docs in this binary;
@@ -215,9 +188,9 @@ last lexical path/slug; search cursors name the last ranked section as
 Metadata records retain their existing selection fields; readers must
 recognize the final page record separately from command and topic records.
 
-`--limit 0` explicitly returns every remaining match. Plain mode prints
+`--limit` requires a positive count. Use `--cursor` to read the next page. Plain mode prints
 paths or selectors only; continuation information goes to stderr. Pretty
 mode includes a short page footer. Explicit `commands --format markdown`
-exports the exhaustive reference and rejects query/pagination flags; a
+exports the exhaustive reference and rejects search/pagination flags; a
 `--path` export still selects the requested subtree. Use `--output plain`
 when redirecting the Markdown artifact to a file.

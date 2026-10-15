@@ -230,6 +230,8 @@ List the blocks a spark library offers
 
 Copy a spark library's source into this repo so you can edit it
 
+Copy one library module into the project and replace its dependency with that local source. JSON emits the module, version, destination and replacement; plain emits the destination.
+
 ### Flags
 
 | Flag | Description |
@@ -238,6 +240,7 @@ Copy a spark library's source into this repo so you can edit it
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+| `--library MODULE` | A sparks-core module name or full Go module path; list choices with pipeline sparks catalog. (required) |
 
 ## `sparkwing pipeline sparks lint`
 

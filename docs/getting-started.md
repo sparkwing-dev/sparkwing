@@ -132,7 +132,7 @@ installer inside WSL when systemd user services are enabled.
 ```bash
 # 1. Set up your repo
 cd your-project
-sparkwing pipeline new --name release   # single-node minimal template by default
+sparkwing pipeline new --pipeline release   # single-node minimal template by default
 
 # 2. Run your first pipeline
 sparkwing run release
@@ -153,14 +153,14 @@ For a build/test/deploy DAG instead of a single node, pass
 `--template build-test-deploy`:
 
 ```bash
-sparkwing pipeline new --name release --template build-test-deploy
+sparkwing pipeline new --pipeline release --template build-test-deploy
 ```
 
 The five shapes are structure only -- they run green in any repo, and
 you replace the echo bodies with real work. For how a real pipeline is
 written, read a finished one: `sparkwing examples` lists the registry
 (static-site deploys, containerized deploys to Kubernetes,
-migrate+deploy, CI-hygiene gates, and more), and `--name <example>
+migrate+deploy, CI-hygiene gates, and more), and `--example <example>
 --body` prints the source. Usually `sparkwing docs search -q "<task>"`
 gets you there in one step, since it ranks examples alongside the docs.
 
@@ -169,7 +169,7 @@ not an example name. See the
 [template catalog](sparks.md#the-template-catalog) for the full picture.
 
 If you want to own and edit a spark library's helper code directly rather
-than importing it, `sparkwing pipeline sparks inflate --module <name>`
+than importing it, `sparkwing pipeline sparks inflate --library <name>`
 copies its source into your repo. See
 [inflating a spark library](sparks.md#inflating-a-spark-library).
 
@@ -388,7 +388,7 @@ To run work on this machine for that controller, add it as a runner with
 
 On a controller with teams, a team's runners fetch each run's source from
 GitHub themselves, so every run names a repository. A runner claims only
-runs whose repository matches one of its `--allow-repo` patterns, and a run
+runs whose repository matches one of its `--repos` patterns, and a run
 nothing may build stays pending. Start one from the dashboard or a terminal.
 
 **From the dashboard.** On the Runs page, **+ Start a run** opens a form that

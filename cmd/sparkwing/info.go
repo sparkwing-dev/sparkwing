@@ -262,7 +262,7 @@ const agentBlockDurable = "This repo uses **sparkwing** for CI/CD (https://spark
 
 const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"\n" +
-	"- `sparkwing pipeline new --name <n> --template <shape> [--on <event>]` --\n" +
+	"- `sparkwing pipeline new --pipeline <n> --template <shape> [--on <event>]` --\n" +
 	"  scaffold. It compiles, lints, and explains as generated, so you edit from\n" +
 	"  something green. --template picks the DAG, --on picks what fires it:\n" +
 	"    shapes: minimal (1 node) | build-test-deploy (3, linear) |\n" +
@@ -273,13 +273,13 @@ const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"    ci-pr-check defaults to pull_request and scheduled-report to schedule;\n" +
 	"    the rest to manual. Any shape takes any --on, so a PR-triggered single\n" +
 	"    check is `--template minimal --on pull_request`\n" +
-	"- `sparkwing docs search -q <what you are doing>` -- bounded snippets of the sections that\n" +
+	"- `sparkwing docs search --search <task>` -- bounded snippets of the sections that\n" +
 	"  answer it, plus any worked pipeline that already does it\n" +
 	"- `sparkwing docs read --guide authoring` -- the DAG model, the idioms the linter\n" +
 	"  enforces, how a pipeline fires, and the config schema, in one call\n" +
 	"- `sparkwing pipeline lint` then `sparkwing run <n>` -- check it without guessing\n"
 
-const agentBlockBody = "- `sparkwing commands --query <task>` -- bounded command index; `--path <prefix>` to\n" +
+const agentBlockBody = "- `sparkwing commands --search <task>` -- bounded command index; `--path <prefix>` to\n" +
 	"  narrow, `<path> --help` for one verb, `-o json` for structured metadata\n" +
 	"- `sparkwing pipeline list -o json` -- this repo's pipelines\n" +
 	"- `sparkwing run <name>` -- run a pipeline. The machine's admission daemon serializes you\n" +
@@ -288,7 +288,7 @@ const agentBlockBody = "- `sparkwing commands --query <task>` -- bounded command
 	"  load the daemon cannot see and every queued run pays for\n" +
 	"- `sparkwing queue list` -- running and queued work with expected start and finish;\n" +
 	"  `sparkwing queue priority --run <id> --set front` re-ranks a queued run\n" +
-	"- `sparkwing docs search -q <symbol-or-key>` -- 20 ranked snippets; read a hit with\n" +
+	"- `sparkwing docs search --search <symbol-or-key>` -- 20 ranked snippets; read a hit with\n" +
 	"  `sparkwing docs read --topic <slug> --section <start_line>`\n" +
 	"- `sparkwing docs read --topic <slug>` -- offline docs; full corpus: https://sparkwing.dev/llms-full.txt\n" +
 	"- `sparkwing info -o json` -- this same context as JSON, when you want to parse it\n"
@@ -370,16 +370,16 @@ func printFirstTimeCard(w io.Writer) {
 
 	fmt.Fprintln(w, color.Bold("NEXT STEPS"))
 	fmt.Fprintln(w, "  1. cd into a code repo")
-	fmt.Fprintln(w, "  2. "+tip("sparkwing pipeline new --name release", "      ", "bootstrap .sparkwing/ + a minimal pipeline"))
+	fmt.Fprintln(w, "  2. "+tip("sparkwing pipeline new --pipeline release", "      ", "bootstrap .sparkwing/ + a minimal pipeline"))
 	fmt.Fprintln(w, "  3. "+tip("sparkwing run release", "                      ", "run it - first time downloads dependencies"))
 	fmt.Fprintln(w, "  4. "+tip("sparkwing docs read --topic sdk", "            ", "or https://sparkwing.dev/sdk"))
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  For a build/test/deploy DAG instead:")
-	fmt.Fprintln(w, "    "+color.Cyan("sparkwing pipeline new --name release --template build-test-deploy"))
+	fmt.Fprintln(w, "    "+color.Cyan("sparkwing pipeline new --pipeline release --template build-test-deploy"))
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, color.Bold("TIPS"))
 	tips := []InfoNextStep{
-		{Command: "sparkwing serve start", Purpose: "run the dashboard locally to watch runs in a browser"},
+		{Command: "sparkwing dashboard start", Purpose: "run the dashboard locally to watch runs in a browser"},
 		{Command: "sparkwing info", Purpose: "surveys the current repo + suggests next commands"},
 	}
 	cmpCmd, cmpNote := firstTimeCompletionHint()
@@ -455,7 +455,7 @@ func gatherInfo() Info {
 		Version:         parseInfoVersion(installedVersion()),
 		Binary:          binary,
 		Docs: InfoDocs{
-			CLI:                     "sparkwing docs list --query <topic> / search -q <task> / read --topic <slug>",
+			CLI:                     "sparkwing docs list --search <topic> / search --search <task> / read --topic <slug>",
 			WebURL:                  "https://sparkwing.dev/docs/",
 			LLMsFullURL:             "https://sparkwing.dev/llms-full.txt",
 			LLMsTXTURL:              "https://sparkwing.dev/llms.txt",
@@ -490,7 +490,7 @@ func gatherInfo() Info {
 		}
 	}
 	if !info.Project.Found {
-		info.Project.HowToScaffold = "sparkwing pipeline new --name release"
+		info.Project.HowToScaffold = "sparkwing pipeline new --pipeline release"
 	}
 
 	info.UpgradeNotice = pendingUpgradeNotice
@@ -687,19 +687,19 @@ func nextStepsFor(info Info) []InfoNextStep {
 	if !info.Project.Found {
 		return []InfoNextStep{
 			{Command: "sparkwing info --first-time", Purpose: "post-install onboarding card: full numbered scaffold steps + tips"},
-			{Command: "sparkwing pipeline new --name release", Purpose: "auto-bootstrap .sparkwing/ + scaffold a single-node pipeline"},
+			{Command: "sparkwing pipeline new --pipeline release", Purpose: "auto-bootstrap .sparkwing/ + scaffold a single-node pipeline"},
 			{Command: "sparkwing run release", Purpose: "run the scaffolded pipeline"},
 		}
 	}
 	steps := []InfoNextStep{
 		{Command: "sparkwing pipeline list", Purpose: "see every pipeline this repo defines"},
-		{Command: "sparkwing pipeline describe --name <name>", Purpose: "full metadata for one pipeline"},
+		{Command: "sparkwing pipeline describe --pipeline <name>", Purpose: "full metadata for one pipeline"},
 		{Command: "sparkwing run <name>", Purpose: "run a pipeline"},
 		{Command: "sparkwing examples", Purpose: "browse curated starter templates for `pipeline new --template`"},
-		{Command: "sparkwing pipeline new --name <name>", Purpose: "scaffold a new pipeline"},
+		{Command: "sparkwing pipeline new --pipeline <name>", Purpose: "scaffold a new pipeline"},
 		{Command: "sparkwing docs read --guide authoring", Purpose: "everything needed to write a pipeline, in one call"},
 		{Command: "sparkwing docs list", Purpose: "browse embedded docs (offline)"},
-		{Command: "sparkwing serve start", Purpose: "start the local dashboard at http://127.0.0.1:4343"},
+		{Command: "sparkwing dashboard start", Purpose: "start the local dashboard at http://127.0.0.1:4343"},
 	}
 	if step, ok := missingHooksStep(info); ok {
 		steps = append([]InfoNextStep{step}, steps...)
@@ -730,12 +730,12 @@ func missingHooksStep(info Info) (InfoNextStep, bool) {
 
 var infoForAgents = []InfoNextStep{
 	{Command: "sparkwing commands", Purpose: "one-line index of every verb (-o json for the same index, parseable)"},
-	{Command: "sparkwing info --json", Purpose: "machine-readable copy of this card (alias: -o json)"},
+	{Command: "sparkwing info -o json", Purpose: "machine-readable copy of this card (one compact JSON document)"},
 	{Command: "sparkwing info --for-agent", Purpose: "current discovery context for one agent wake"},
-	{Command: "sparkwing pipeline list --json", Purpose: "this repo's pipelines as JSON"},
-	{Command: "sparkwing examples -o json", Purpose: "curated starter templates (filter --category/--cloud, detail --name --body)"},
-	{Command: "sparkwing pipeline sparks inflate --module <name>", Purpose: "eject a spark library's source into your repo to own and edit it"},
-	{Command: "sparkwing <verb> --help --json", Purpose: "any verb's spec as JSON"},
+	{Command: "sparkwing pipeline list -o json", Purpose: "this repo's pipelines as JSON"},
+	{Command: "sparkwing examples -o json", Purpose: "curated starter templates (filter --category/--cloud, detail --example --body)"},
+	{Command: "sparkwing pipeline sparks inflate --library <name>", Purpose: "eject a spark library's source into your repo to own and edit it"},
+	{Command: "sparkwing pipeline list --help -o json", Purpose: "any verb's spec as JSON"},
 }
 
 func printInfoTable(info Info) {

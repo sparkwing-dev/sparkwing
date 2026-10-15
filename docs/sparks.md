@@ -392,7 +392,7 @@ and the overlay. What each subcommand does:
 
 - **catalog** -- list the blocks a library offers, read from its `spark.json`,
   with each block's stability and what it does. For a `modules[]` library each
-  row's name is what `inflate --module` takes; a `packages[]` library is one Go
+  row's name is what `inflate --library` takes; a `packages[]` library is one Go
   module, so inflate it by its own module path. `-o plain` prints one row per
   line -- a `modules[]` row as its module path, a `packages[]` row as its
   package name. Without `--library` it reads sparks-core; `--path` reads a
@@ -459,13 +459,13 @@ upstream. `sparkwing pipeline sparks inflate` does that.
 
 ```bash
 # inflate the sparks-core templates module
-sparkwing pipeline sparks inflate --module templates
+sparkwing pipeline sparks inflate --library templates
 
 # inflate any other spark library by full module path
-sparkwing pipeline sparks inflate --module github.com/example/my-sparks
+sparkwing pipeline sparks inflate --library github.com/example/my-sparks
 ```
 
-A bare `--module` name resolves to a sparks-core block module
+A bare `--library` name resolves to a sparks-core block module
 (`templates` -> `github.com/sparkwing-dev/sparks-core/templates`); a value
 containing a slash is treated as a complete module path.
 
@@ -528,10 +528,10 @@ sparkwing examples --category ci-hygiene
 
 # full detail for one template: description, parameters table,
 # applicability, and its README
-sparkwing examples --name lint-test-go
+sparkwing examples --example lint-test-go
 
 # ... plus the pipeline body rendered with default / <placeholder> params
-sparkwing examples --name lint-test-go --body
+sparkwing examples --example lint-test-go --body
 ```
 
 Filters are advisory metadata on each template. A template that declares
@@ -544,12 +544,12 @@ the manifests, and a `--name` detail view emits the manifest, README, and
 Once you have read one, start your own from the shape it uses:
 
 ```bash
-sparkwing pipeline new --name deploy --template build-test-deploy
+sparkwing pipeline new --pipeline deploy --template build-test-deploy
 ```
 
 `--template` takes a shape -- `minimal`, `build-test-deploy`,
 `ci-pr-check`, `release`, or `scheduled-report` -- and passing an
-example name is an error, with the `sparkwing examples --name <name>
+example name is an error, with the `sparkwing examples --example <name>
 --body` command to read it instead. To own and modify the catalog
 itself, inflate it (see
 [Inflating a spark library](#inflating-a-spark-library)).

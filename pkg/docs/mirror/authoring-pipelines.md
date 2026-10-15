@@ -16,7 +16,7 @@ Start with the scaffold so the Go registration and YAML catalog entry are
 created together:
 
 ```sh
-sparkwing pipeline new --name deploy --template minimal
+sparkwing pipeline new --pipeline deploy --template minimal
 ```
 
 `sparkwing.Register` connects a name to its Go implementation in the
@@ -389,8 +389,8 @@ pipelines:
 ## Running the linter
 
 ```
-sparkwing pipeline lint --all            # every pipeline in the repo
-sparkwing pipeline lint --name deploy    # one pipeline by name
+sparkwing pipeline lint            # every pipeline in the repo
+sparkwing pipeline lint --pipeline deploy    # one pipeline by name
 sparkwing pipeline lint --rules          # print the rule charters
 ```
 

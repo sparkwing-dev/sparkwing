@@ -1,3 +1,133 @@
+# W9 documentation grammar and library inflation continuation
+
+This continuation started clean at fe2071f89. W9 remains incomplete. No Git
+writes, Sparkwing executable, candidate, service or pipeline ran. Writes stayed
+inside this worktree and /tmp/sw-astra-W9, which is removed before reporting.
+
+## Delivered
+
+- Fenced shell examples, including unlabeled command fences, now pass their
+  complete invocation to clisurface.Parse. The existing checker still handles
+  inline fragments by command name. Quotes, continued lines, prompts, comments,
+  pipes and ordinary redirections are tokenized without executing a shell.
+  Directory/read errors fail the check instead of producing a clean empty scan.
+- The initial negative controls reproduced five kinds of invalid grammar passing
+  the checker. Its first corpus run exposed 25 stale examples. Fixed removed
+  selectors, output flags, fleet flags and pipeline argument separators across
+  the authoring, CLI, hooks, cache, admission, sparks and getting-started guides.
+- Restored an invocable library inflater through the shared command grammar.
+  Required --library matches the catalog selector and accepts a sparks-core
+  module name or full Go module path. Removed the old --module parser and its
+  unused help binding. The command validates before project lookup or vendoring,
+  honors cancellation, returns output errors, emits one JSON receipt and emits
+  only the destination in plain mode. Catalog, info, generated help/reference,
+  migration guide and tests use the same selector. No compatibility alias remains.
+- Corrected info's suggestions and authoring/discovery snippets: --pipeline,
+  --search, explicit -o json and dashboard start. A new test parses every
+  structured next-step and agent suggestion with the real command registry.
+  Its negative control failed on seven stale suggestions before the correction.
+- Replaced old local execution, scheduling, security and workstation threat prose
+  with the frozen contracts. Removed descriptions of environment credentials,
+  typed legacy tokens/argon2 capability lookup, open bootstrap, standalone
+  second-store fallback, RetryAuto/replacement runs, five-second warm overflow,
+  same-team Job node sharing, per-request protocol negotiation and cache mirrors.
+  Corrected the CLI map, mixed claim-route spelling and related guide examples.
+  These guides explicitly identify their native integration boundary.
+- Regenerated the changed CLI reference through its unit-test renderer and
+  synchronized embedded mirrors. The temporary renderer test was removed.
+
+The sole local contract correction is the missing inflater selector and output
+rule, recorded in c4-surface-config.md. No foreign contract was changed.
+
+## Verification
+
+All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W9. Tests used -p 4.
+
+- Whole-repository go build -p 4 ./... passes.
+- Focused CLI tests pass for sparks inflation/catalog, command references,
+  command discovery, info, authoring quickstart and durable discovery output.
+- Full internal/clisurface, internal/controllerwire, internal/doccheck and
+  tests/acceptance suites pass. internal/acceptance has no test files.
+- TestSurfaceGrammarContract now covers inflater output formats and refuses the
+  removed selector/missing selector. No native placement cell was unskipped.
+- Focused pkg/docs section/search/read/guide/catalog/mirror/symbol tests pass.
+  WebClient socket tests and the broad legacy CLI runtime suite were not run.
+- Vet passes for cmd/sparkwing, clisurface, controllerwire, doccheck,
+  tests/acceptance and pkg/docs. Commentcheck -base main and diff --check pass.
+- Full doccheck passes: 322 CLI invocations, no unresolved commands, valid YAML,
+  no broken file links, no stale banned tokens or auxiliary/sidebar drift.
+  Its 72 Go blocks are partial/non-self-contained with no SDK API drift. This
+  is not a claim that those examples compile as complete programs.
+- Embedded mirror check passes. No new test sleeps or runtime limits were added.
+
+Added five CLI test functions and four doccheck test functions. Ported catalog
+selector tests and the info configuration diagnostic to the strict W6 reader.
+The latter now asserts file/line context instead of the retired parser's wording.
+No parked T1 port-inventory row names a W9-owned test source.
+
+Against this continuation's starting HEAD, tracked edits remove 53 production
+Go lines, 8 old test lines and 2,924 source-document lines gross. Mirrors are
+excluded from the documentation count. No entire production Go file was deleted.
+The new inflater test file has 99 lines. These are gross deletion counts, not a
+net code-reduction claim.
+
+## Remaining amendments and handoffs
+
+Every amendments-1.md row naming W9 and both W9 handoffs were rechecked against
+the prior ledger. Completed transport/enrollment/here work was retained.
+
+| Rows | Remaining integration |
+| --- | --- |
+| A1-03/08/09/13-18/22/29/30/34/38/55 | Existing adapters remain. Native controller/store authorization, claim/reconcile, data and persisted-log completeness remain with their owners. The auth guide now names the mixed /runners/claim route. |
+| A1-10/11/19; handoff findings 3/7 | Final initial/local/detached source and selected-engine composition, one granted-identity execution constructor and old-host retirement remain. W9 inspection alias evidence does not establish native execution. |
+| A1-20/39/40/41/43/49 | Issuance, unified runner, native local lifecycle/services/timers, exact-engine upgrade and final startup/service consumption remain. Enrollment/removal's final schema and private files were already completed. |
+| A1-37/45/47/50 | Final host cache/publication binding, schedule intake/captured settings, source intake and legacy consumer/client retirement remain unfinished. This continuation removes obsolete guide claims, not these runtime consumers. |
+| A1-51 | Command/example drift and the four legacy runtime/security guides advanced. Other guides, schema parity and native consumer retirement still need the final composition audit. |
+| A1-52/53 | Windows packaging/native bridge proof and real platform/placement/repository QA remain unclaimed. |
+
+## Contract changes needed / owner guidance
+
+- W6/W1/W2: initial here submission requires --reason, but runspec.Request and
+  CreateRunRequest have no agreed field that persists and audits that reason.
+  Do not put it in actor, source or environment fields. Agree the typed intake
+  projection and persistence, then W9 can replace the initial legacy path.
+- W2/W6/source intake: CanonicalRepository requires a numeric ID for GitHub.
+  The current wire has no declared URL-to-ID resolution call. Agree where that
+  lookup occurs before final request construction; W9 must not synthesize a
+  git:github.com key or treat a display name as authority.
+- Existing open contracts remain: source-bundle upload ownership, publication
+  result-copy operations, sizing reset, schedule installation/tick ownership and
+  runner pool registration. No contract was invented around these gaps.
+
+source.Acquire/ForRequest/ForExecution, blob.OpenRemoteCache and the local
+lifecycle constructor remain declared stubs. resolveHereRuntime still lacks a
+native shared-host binding. The old initial trigger, local host and detached
+consumer remain and are not claimed retired. Fake evidence does not satisfy them.
+
+## Shared files, mechanisms and friction
+
+Shared edits are internal/doccheck/cliverbs.go and cliverbs_test.go,
+tests/acceptance/surface_contract_test.go, CHANGELOG.md, the W9 C4 contract note,
+this handoff and generated pkg/docs content. No production caller in another
+area was migrated or removed. W9's catalog and info callers were migrated.
+
+Mechanism added: the existing doc checker gains a bounded shell-example lexer
+and calls the shared CLI parser. It adds no shell execution, runtime package,
+service, environment variable, cache or retry. Private locator/vendor callbacks
+make the existing inflater testable without network or project mutations. They
+add no public interface. Undo is to revert the inflater/selector and checker
+changes with their docs/tests together.
+
+Friction: the standard documentation generator executes the Sparkwing CLI,
+which this worker is forbidden to run, so its existing renderer was called from
+an ephemeral unit test instead. The old info test expected a superseded parser
+word. Overwing reports its installed binary is stale but discovery/show work.
+Git identity remains Korey Gambill and local core.worktree is unset. The lead
+retains review, commits, native gates and landing.
+
+---
+
 # W9 runner schema and here attachment continuation
 
 This continuation started clean at 89f4556e0. W9 remains incomplete. No Git

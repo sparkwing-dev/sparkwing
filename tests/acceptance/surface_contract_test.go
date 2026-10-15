@@ -20,6 +20,7 @@ func TestSurfaceGrammarContract(t *testing.T) {
 		"pipeline list", "runs list", "schedules list", "runners list", "pools list",
 		"tokens list", "secrets list", "profiles list", "queue list", "daemon status",
 		"dashboard status", "cache info", "repos list", "debug env --run r1 --job j1",
+		"pipeline sparks inflate --library templates",
 		"cache warm", "wingd run --stay --home private-home", "__tick --home private-home", "operator limits show", "doctor", "info", "version", "update", "docs list", "examples", "commands", "completion",
 	} {
 		for _, format := range []string{"pretty", "json", "plain"} {
@@ -33,6 +34,7 @@ func TestSurfaceGrammarContract(t *testing.T) {
 	for _, command := range []string{
 		"cluster", "cloud", "configure", "serve", "crons", "runs bounce", "runs consumer", "debug rerun",
 		"update --cli", "update --check", "update --sdk", "pipeline sparks warmup",
+		"pipeline sparks inflate --module templates", "pipeline sparks inflate",
 		"runs list --limit 0", "runs list --node build", "runs status r1", "run check --unknown", "run check --profile prod",
 	} {
 		if _, err := clisurface.Parse("sparkwing", strings.Fields(command)); err == nil {

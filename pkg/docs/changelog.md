@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **sparks:** (Breaking) `pipeline sparks inflate --library MODULE` copies a library into the project through the shared command grammar. Plain output reports its destination. Catalog and agent guidance use the same selector. See [migration](docs/migrations/_unreleased.md#spark-library-inflation).
+- **documentation:** fenced CLI examples are checked against the shared parser, including flags, selectors and pipeline argument separators. Local execution, scheduling and security guides describe sealed inputs, capabilities and the exclusive Cloud Job boundary, with native integration gaps stated.
+
 - **here runs:** sealed resume and retry follow public logs through their final persisted segments. The first interrupt requests controller cancellation while hosting continues. A second interrupt stops and joins hosting and log following. Incomplete observation exits 3.
 - **runner enrollment:** (Breaking) uses the complete machine runner schema and keeps the bearer in its private credential file. Omitted concurrency stays unset and uses the shared default of one. Explicit empty preferences survive writes and rollback. See [migration](docs/migrations/_unreleased.md#runner-enrollment-files).
 

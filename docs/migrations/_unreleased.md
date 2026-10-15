@@ -1,5 +1,13 @@
 # Migrating to the next release
 
+## Spark library inflation
+
+Use `sparkwing pipeline sparks inflate --library MODULE`. The module can be a
+sparks-core module name or a full Go module path. `--module` is removed.
+`pipeline sparks catalog` prints the selector for each available module.
+Plain output is the destination directory. JSON retains module, version,
+destination and replacement metadata.
+
 ## Machine connection profiles
 
 Profiles contain only `controller.url` and an optional `controller.token`.
