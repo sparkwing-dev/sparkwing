@@ -33,6 +33,10 @@ func TestProtocol(t *testing.T) {
 					continue
 				}
 				t.Run(target.ID, func(t *testing.T) {
+					if scenario.ID == "protocol-additive-fields-and-child-handles" && target.ID == "local-go-"+runtime.GOOS {
+						testGoSDKAdditiveFieldsAndChildHandles(t)
+						return
+					}
 					if scenario.ID == "protocol-envelope-transcripts" && target.ID == "local-go-"+runtime.GOOS {
 						testGoSDKEnvelopeTranscripts(t)
 						return

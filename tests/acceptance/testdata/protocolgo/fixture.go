@@ -96,5 +96,6 @@ func Register() {
 		sparkwing.Register[ReplayEnvInputs](ReplayEnvName, func() sparkwing.Pipeline[ReplayEnvInputs] { return ReplayEnvPipeline{} })
 		sparkwing.Register[PlanErrorInputs](PlanErrorName, func() sparkwing.Pipeline[PlanErrorInputs] { return PlanErrorPipeline{} })
 		sparkwing.Register[Inputs](EnvelopeName, func() sparkwing.Pipeline[Inputs] { return EnvelopePipeline{} })
+		sparkwing.Register[Inputs](ChildHandlesName, func() sparkwing.Pipeline[Inputs] { return ChildHandlesPipeline{} })
 	})
 }
