@@ -314,15 +314,24 @@ func (g *gauge) exec(ctx context.Context, n *NodeRun) Result {
 	}
 }
 
-func recv(t *testing.T, ctx context.Context, c <-chan string) string {
+func afterAdmissionEvent(t *testing.T, parent context.Context, event <-chan string, action func(context.Context) error) {
 	t.Helper()
-	select {
-	case v := <-c:
-		return v
-	case <-ctx.Done():
-		t.Error("timed out waiting")
-		return ""
-	}
+	ctx, cancel := context.WithCancel(parent)
+	done := make(chan error, 1)
+	go func() {
+		select {
+		case <-event:
+			done <- action(ctx)
+		case <-ctx.Done():
+			done <- nil
+		}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
 }
 
 func awaitHostedEvent(t *testing.T, ctx context.Context, event <-chan string, done <-chan RunResult) string {
@@ -508,7 +517,8 @@ func TestAdmissionCancelWhileQueuedInStore(t *testing.T) {
 	holdSlotOutside(t, st, "global:db")
 	slots := storeSlots{st: st, queued: make(chan string, 1)}
 	runCtx, cancelRun := context.WithCancel(ctx)
-	go func() { recv(t, ctx, slots.queued); cancelRun() }()
+	defer cancelRun()
+	afterAdmissionEvent(t, ctx, slots.queued, func(context.Context) error { cancelRun(); return nil })
 	ran := false
 	res := runAdmitted(t, runCtx, st, nodeproto.PlanDoc{Jobs: grouped("global", "queue", 1, 0, "b")}, &Admission{Slots: slots},
 		func(context.Context, *NodeRun) Result { ran = true; return Result{Outcome: sparkwing.Success} })
@@ -574,7 +584,7 @@ func TestAdmissionDaemonQueueCancelTimeoutAndPolicies(t *testing.T) {
 			runCtx, cancelRun := context.WithCancel(ctx)
 			defer cancelRun()
 			if c.cancel {
-				go func() { recv(t, ctx, d.queued); cancelRun() }()
+				afterAdmissionEvent(t, ctx, d.queued, func(context.Context) error { cancelRun(); return nil })
 			}
 			res := runAdmitted(t, runCtx, st, nodeproto.PlanDoc{Jobs: grouped("box", c.onLimit, 1, c.timeoutMS, "b")}, &Admission{Daemon: d},
 				func(context.Context, *NodeRun) Result {
@@ -597,7 +607,8 @@ func TestAdmissionCancelWhileWaitingForHost(t *testing.T) {
 	d := newFakeDaemon()
 	d.hostGate = make(chan struct{})
 	runCtx, cancelRun := context.WithCancel(ctx)
-	go func() { recv(t, ctx, d.queued); cancelRun() }()
+	defer cancelRun()
+	afterAdmissionEvent(t, ctx, d.queued, func(context.Context) error { cancelRun(); return nil })
 	res := runAdmitted(t, runCtx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, &Admission{Daemon: d},
 		func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} })
 	if got := res.Nodes["a"]; got.Outcome != sparkwing.Cancelled {
@@ -661,12 +672,12 @@ func TestAdmissionLeaseEndings(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 			d, g := newFakeDaemon(), newGauge()
-			go func() {
-				recv(t, ctx, g.entered)
+			afterAdmissionEvent(t, ctx, g.entered, func(context.Context) error {
 				if l := d.only(t); l != nil {
 					c.send(l)
 				}
-			}()
+				return nil
+			})
 			nodes := []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}
 			if c.grouped {
 				nodes = grouped("box", "cancel_others", 1, 0, "a")
@@ -731,12 +742,11 @@ func TestAdmissionStoreOutageToleranceMatchesTheDispatcher(t *testing.T) {
 			t.Cleanup(func() { outageClock = time.Now })
 			holdSlotOutside(t, st, "global:db")
 			slots := resolveFlaky{storeSlots: storeSlots{st: st, queued: make(chan string, 1)}, clock: clock, outage: c.outage}
-			go func() {
-				recv(t, ctx, slots.queued)
-				if _, _, _, err := teststore.ForTeam(t, st, store.DefaultTeam).ReleaseAndNotify(ctx, "global:db", "other/x", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
-					t.Error(err)
-				}
-			}()
+			tenant := teststore.ForTeam(t, st, store.DefaultTeam)
+			afterAdmissionEvent(t, ctx, slots.queued, func(ctx context.Context) error {
+				_, _, _, err := tenant.ReleaseAndNotify(ctx, "global:db", "other/x", "success", "", "", 0, store.DefaultConcurrencyLease)
+				return err
+			})
 			res := runAdmitted(t, ctx, st, nodeproto.PlanDoc{Jobs: grouped("", "queue", 1, 0, "b")}, &Admission{Slots: slots},
 				func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} })
 			if got := res.Nodes["b"]; got.Outcome != c.want {

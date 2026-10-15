@@ -274,7 +274,10 @@ func TestPlanGroupReleasedOnEveryExit(t *testing.T) {
 			if c.cancel {
 				g := newGauge()
 				exec = g.exec
-				go func() { recv(t, ctx, g.entered); cancelRun(&lease.CancelError{Reason: "interrupted by SIGINT"}) }()
+				afterAdmissionEvent(t, ctx, g.entered, func(context.Context) error {
+					cancelRun(&lease.CancelError{Reason: "interrupted by SIGINT"})
+					return nil
+				})
 			}
 			res, release := hostPlanned(t, runCtx, st, testRunID, doc, adm, exec)
 			if res.Status != c.status {

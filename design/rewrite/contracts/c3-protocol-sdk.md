@@ -1,5 +1,10 @@
 # C3 protocol and SDK contract
 
+[Shared steps and alias callers](w3-ingress-lease-continuation.md#shared-steps-and-alias-caller-continuation)
+replaces the retained step scheduler with the common graph driver and carries
+alias selection through CLI parsing and the retained placement callers.
+Native owner-policy and placement cutovers remain open.
+
 [Runtime ingress and lease continuation](w3-ingress-lease-continuation.md)
 connects the retained scheduler to raw-byte validation and common environment
 projection and removes another claim-heartbeat loop. Native caller migration

@@ -17,13 +17,37 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type stepsHost struct {
-	*attemptHarness
-	runID string
-	res   RunResult
+	logs *memLogs
+	res  RunResult
+}
+
+type stepWindowState struct {
+	storage.StateStoreOld
+	states   map[string]string
+	startErr error
+}
+
+func (s *stepWindowState) StartNodeStep(_ context.Context, _, _, id string) error {
+	if s.startErr != nil {
+		return s.startErr
+	}
+	s.states[id] = "running"
+	return nil
+}
+
+func (s *stepWindowState) SkipNodeStep(_ context.Context, _, _, id string) error {
+	s.states[id] = "skipped"
+	return nil
+}
+
+func (s *stepWindowState) FinishNodeStep(_ context.Context, _, _, id, state string) error {
+	s.states[id] = state
+	return nil
 }
 
 func (h *stepsHost) records(node, event string) map[string]sparkwing.LogRecord {
@@ -69,39 +93,62 @@ func TestHostStepWindows(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", bin, "./testdata/stepsfixture").CombinedOutput(); err != nil {
 		t.Fatalf("build the fixture: %v\n%s", err, out)
 	}
-	host := func(t *testing.T, runID, set string, edit func(*Config)) *stepsHost {
+	host := func(t *testing.T, runID, jobID string, edit func(*Config)) *stepsHost {
 		t.Helper()
-		srv, err := Start(nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = srv.Close() })
-		h := &stepsHost{attemptHarness: &attemptHarness{st: openStore(t), logs: &memLogs{records: map[string][]sparkwing.LogRecord{}}}, runID: runID}
-		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+		h := &stepsHost{logs: &memLogs{records: map[string][]sparkwing.LogRecord{}}}
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		defer cancel()
+		state := &stepWindowState{states: map[string]string{}}
 		cfg := Config{
-			Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
-			Pipeline: "steps", Args: map[string]string{"set": set},
-			Run:   nodeproto.RunContext{RunID: runID},
-			State: h.st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
-			Attempts: &Attempts{
-				Routes: srv, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(),
-				OpenLog: func(_ context.Context, _, node string) (NodeLog, error) {
-					return memLog{logs: h.logs, node: node}, nil
-				},
+			Session: SessionConfig{
+				Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second,
+				Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
+				Engine:     nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 			},
+			Pipeline: "steps", Args: map[string]string{"set": "main"},
+			Run: nodeproto.RunContext{RunID: runID, Pipeline: "steps"}, State: state, Logger: slog.New(slog.DiscardHandler),
 		}
 		if edit != nil {
 			edit(&cfg)
 		}
-		if h.res, err = Execute(ctx, cfg); err != nil {
-			t.Fatal(err)
+		planned, err := PlanDocument(ctx, cfg.Session, PlanRequest{Pipeline: cfg.Pipeline, Args: cfg.Args, Run: cfg.Run, StartAt: cfg.StartAt, StopAt: cfg.StopAt})
+		h.res = RunResult{RunID: runID, Status: "failed", Nodes: map[string]Result{}, Err: err}
+		if err != nil {
+			return h
+		}
+		run := newRun(&cfg, planned.Doc, planned.Args, nil)
+		for _, job := range planned.Doc.Jobs {
+			if job.ID != jobID {
+				continue
+			}
+			masker := secrets.NewMasker()
+			sink, err := NewLogSink(ctx, LogSinkConfig{RunID: runID, NodeID: job.ID, Log: memLog{logs: h.logs, node: job.ID}, Masker: masker})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sessionConfig := cfg.Session
+			sessionConfig.Sink, sessionConfig.Masker = sink, masker
+			sessionConfig.Binding = &nodeproto.ProcessBinding{RunID: runID, JobID: job.ID, Routes: nodeproto.ProcessRoutes{URL: "http://unused", Bearer: "step-window-fixture"}}
+			session, err := StartSession(ctx, sessionConfig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.res.Order = append(h.res.Order, job.ID)
+			result := drive(ctx, session, sink, &NodeRun{Run: run, Plan: job, Attempt: 1})
+			_, closeErr := session.Close()
+			if closeErr != nil {
+				t.Fatal(closeErr)
+			}
+			h.res.Nodes[job.ID], h.res.Err = result, result.Err
+			if result.Outcome == sparkwing.Success {
+				h.res.Status = "success"
+			}
 		}
 		return h
 	}
 
 	t.Run("Main", func(t *testing.T) {
-		h := host(t, "run-steps", "main", func(c *Config) { c.StartAt = "r-b" })
+		h := host(t, "run-steps", "range", func(c *Config) { c.StartAt = "r-b" })
 
 		t.Run("StartAtSkipsUpstreamSteps", func(t *testing.T) {
 			h.wantNode(t, "range", sparkwing.Success, "")
@@ -113,13 +160,33 @@ func TestHostStepWindows(t *testing.T) {
 	})
 
 	t.Run("AnUnknownBoundFailsTheRun", func(t *testing.T) {
-		h := host(t, "run-badrange", "main", func(c *Config) { c.StopAt = "r-bb" })
+		h := host(t, "run-badrange", "range", func(c *Config) { c.StopAt = "r-bb" })
 		if h.res.Status != "failed" || !strings.Contains(errText(h.res.Err), `--sw-stop-at "r-bb" references unknown step "r-bb"; did you mean "r-b"?`) {
 			t.Errorf("status=%s err=%v, want failed naming the closest step", h.res.Status, h.res.Err)
 		}
 		if len(h.res.Order) != 0 {
 			t.Errorf("nodes %v started under an unknown bound", h.res.Order)
 		}
+	})
+	t.Run("ARefusedStepWritePreventsBodiesAndRetries", func(t *testing.T) {
+		refused := errors.New("step write refused")
+		h := host(t, "run-refused-step", "range", func(c *Config) {
+			c.State = &stepWindowState{states: map[string]string{}, startErr: refused}
+		})
+		result := h.res.Nodes["range"]
+		if result.Outcome != sparkwing.Failed || !result.Final || !errors.Is(result.Err, refused) || strings.Contains(h.logs.text("range"), "ran ") {
+			t.Fatalf("result=%+v log=%s", result, h.logs.text("range"))
+		}
+	})
+	t.Run("StepPredicatesUseTheSameTerminalSnapshotAsBodies", func(t *testing.T) {
+		h := host(t, "run-skips", "skips", nil)
+		h.wantNode(t, "skips", sparkwing.Success, "")
+		h.wantLog(t, "skips", []string{"ran b"}, []string{"ran a"})
+	})
+	t.Run("ThrowingPredicateNeverRunsItsBody", func(t *testing.T) {
+		h := host(t, "run-guard-failed", "skippanic", nil)
+		h.wantNode(t, "skippanic", sparkwing.Failed, "guard blew up")
+		h.wantLog(t, "skippanic", nil, []string{"guarded ran"})
 	})
 }
 

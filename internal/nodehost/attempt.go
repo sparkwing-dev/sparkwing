@@ -160,7 +160,7 @@ func nodeReplan(ctx context.Context, sess *Session, n *NodeRun) error {
 	}
 	rc := run.Context
 	var raw json.RawMessage
-	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: run.Pipeline, Args: args, Run: &rc}, &raw)
+	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: cmp.Or(run.Entrypoint, run.Pipeline), Args: args, Run: &rc}, &raw)
 	switch {
 	case err != nil:
 		return err

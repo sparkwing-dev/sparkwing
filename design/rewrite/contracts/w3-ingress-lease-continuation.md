@@ -190,4 +190,100 @@ inventory. No production CLI, runner or pod caller is claimed migrated. There
 are no Git writes, Sparkwing executable runs or pipeline runs. Scratch is removed
 after all checks join.
 
+## Shared steps and alias caller continuation
+
+W3 remains incomplete. The retained executor now uses the common step graph.
+The separate 166-line scheduler and its `stepRun`/`stepDone` state are removed.
+The shared driver owns readiness, terminal snapshots, cancellation, failure
+policy and Finally ordering. Native execution retains its fenced step writer.
+The retained writer now fails the job on a refused write and suppresses retries.
+Its terminal writes use the existing heartbeat bound.
+
+`ResolvePipeline` owns project-name to SDK-entrypoint selection. CLI describe
+selects the registered entry before parsing pipeline and job flags. Help keeps
+the invoked alias, and risk discovery uses the registered entry. The CLI passes
+the pair to local hosting, which refuses a changed checkout selection. Trigger
+and pod callers carry the same pair through describe, initial planning and
+attempt replan. Native checkout planning uses the same resolver. The invoked
+name stays in the SDK run context and persisted pipeline identity.
+
+The CLI regression builds and describes a real Go SDK fixture for project alias
+`deploy-prod` targeting `Deploy`, with required `target` and job-owned `image`
+arguments. It parses both flags and calls the real planning path. Author code
+records the invoked alias and target in its returned declarations. The existing
+native planning and replan tests retain their request/context assertions. The
+retained step-window test uses its real Go SDK process, the shared graph and a fake step writer.
+It covers the start boundary, unknown-bound refusal and refused persistence
+before any body, plus strict v2 predicates and failure-before-body behavior.
+Its hello uses an explicit fixture binding. It does not exercise
+production authorization, a store transaction or sealed native step windows.
+
+Admission, run-admission and event-test workers now cancel and join at cleanup.
+The old helper could call `t.Error` after its test had completed when the host
+failed before emitting an event. The full nodehost run passes that point and
+reaches its remaining schema and socket failures. They are failures, not a
+passing suite.
+
+The production Go change adds 407 lines and removes 476, including the extracted
+common driver and identity resolver, for a net reduction of 69 lines. The old
+run scheduler, Session, Config, Execute and hosting entry points remain. No
+acceptance cell is added, unskipped or marked complete in this continuation.
+
+### Verification
+
+Checks use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, at most four Go
+test packages and the worker scratch cache/temp directory.
+
+- Whole-repository build and scoped vet pass.
+- Core host, native process, owner policy, alias, shared step, window and
+  reconstruction tests pass. The focused host run takes 3.85 seconds.
+- Race checks for executor, owner, native host, alias and retained windows pass.
+- The existing `protocol-step-failure-policies/hermetic-native-go-steps` cell
+  passes, as do the existing hermetic lifecycle, recovery, environment and
+  credential component selections. These do not complete native placement cells.
+- Full source and lease package tests pass.
+- The existing step-fence/masking property passes 1,029 generated cases.
+- The full nodehost run still fails on removed-schema fixtures and listening
+  sockets denied by the sandbox. An overbroad focused selector also selected
+  three socket tests. The final core selector excludes those tests.
+- A broad docs-package run hit a forbidden httptest listener. The focused
+  content-mirror check passes, as does the repository's docs-sync drift check.
+- Commentcheck against main and sleepcheck against HEAD pass.
+
+### Remaining contracts and integration
+
+The existing assignment audit still applies. C1 lacks the owner policy-failure
+and approval-SkipIf success edges and typed debug operations. C4 lacks sealed
+step-window inputs. C3 `Controller.ReadSnapshot` returns only scheduling facts,
+and its interface has no fenced step writer. `NodeTransition` and
+`JobTransitionRequest` still lack the source attempt fence. Terminal execution
+rows omit the output/manifest record references needed by native owner reuse.
+The matched engine has no typed run/node/eval-host invocation contract.
+
+C2's authenticator, authority validator and delegation validator remain panic
+stubs. C4's `ResolveConcurrency` remains a panic stub, and `procenv.Build` rejects
+the Git kind. Existing tests continue to use their declared adapters and fakes.
+Those stub implementations do not justify a second host policy. Missing foreign
+shapes remain contract changes for their owners. No foreign contract is changed.
+
+Local W3 API additions are `PipelineIdentity`, `ResolvePipeline`, the retained
+Config/Run/PlanRequest entrypoint field and `HostedEntry.Pipeline`. The graph
+driver is private. Its adapters use the existing transports and writers.
+
+W3 still owns complete native owner policy composition, production placement
+caller migration, the cross-process mask-namespace design and removal of the
+remaining legacy runtime and store fixtures. Local, trigger and pod callers in
+this continuation migrate alias handling only. They still invoke the old host.
+Native HTTP/api.sock, controller credentials, storage backends, matched-engine
+handoff and the placement matrix remain unverified integration points.
+
+Shared caller edits are `cmd/sparkwing/compile.go`, `main.go`, `pipeline_args.go`,
+`pipeline_args_test.go` and `run_host.go`. W3 hosting callers changed in
+`internal/orchestrator/hosted_run.go`, `trigger_host.go`, `pod_node_host.go` and
+`project_config_test.go`. Source protocol docs and their generated mirror change
+together. This continuation, handoffs, the C3 contract and the port inventory
+record the boundary. There are no Git writes, installed candidates, pipeline
+runs, releases, new environment variables or customer limits. Scratch is removed
+after all checks join.
+
 <!-- design:end -->

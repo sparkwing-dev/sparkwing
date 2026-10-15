@@ -1,5 +1,12 @@
 # Cross-area handoffs
 
+W3's [shared steps and alias caller continuation](w3-ingress-lease-continuation.md#shared-steps-and-alias-caller-continuation)
+removes the separate retained step scheduler. The retained and common executors
+now use one graph driver. CLI argument parsing and local, trigger and pod planning
+carry the invoked alias separately from the registered SDK entrypoint. Admission
+test workers stop and join before cleanup. Owner policy composition, full native
+placement migration and the remaining legacy hosting deletion stay open.
+
 W3's [concurrency and self-claim continuation](w3-ingress-lease-continuation.md#concurrency-and-self-claim-continuation)
 closes the settled expansion-concurrency refusal through the shared validator and
 the scheduler's raw-byte ingress. Owner self-claims now use `NewNodeInput`.

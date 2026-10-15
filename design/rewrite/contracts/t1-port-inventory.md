@@ -545,6 +545,15 @@ The source reports describe residual failures that their committed tests do not 
 
 ## W3 recovery port after amendment integration
 
+The [shared steps continuation](w3-ingress-lease-continuation.md#shared-steps-and-alias-caller-continuation)
+removes the retained executor's separate step scheduler. Both executors use the
+common graph driver. `TestHostStepWindows` now drives the real Go SDK fixture
+with a fake step writer, preserving the start-boundary and unknown-bound checks
+and covering refused persistence before a body. It does not prove sealed native
+step-window intake, store writes or placement. Those inventory obligations remain
+open. Existing native step-policy and hermetic lifecycle components pass, and no
+acceptance cell is added or activated by this port.
+
 The [execution continuation](w3-execution-continuation.md) adds
 `lifecycle-transition-replay-and-fencing/hermetic-store-executor-events`.
 Five cases run the common claimed host and executor against real SQLite

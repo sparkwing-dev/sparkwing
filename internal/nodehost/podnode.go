@@ -17,7 +17,8 @@ import (
 
 // PlanRequest is what [PlanDocument] asks a pipeline process to plan.
 type PlanRequest struct {
-	Pipeline string
+	Pipeline   string
+	Entrypoint string
 	// Args are the run's flag values; describe's defaults fill in the rest.
 	Args map[string]string
 	Run  nodeproto.RunContext
@@ -48,6 +49,9 @@ type PlannedRun struct {
 // PlanDocument plans a pipeline in a short-lived SDK process, as a hosted
 // run's plan process does, and validates the plan the same way.
 func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (PlannedRun, error) {
+	if req.Entrypoint == "" {
+		req.Entrypoint = req.Pipeline
+	}
 	if cfg.Sink == nil {
 		cfg.Sink = discardSink{}
 	}
@@ -65,7 +69,7 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 	}
 	var out PlannedRun
 	var known bool
-	out.Args, known, err = describeArgs(ctx, sess, req.Pipeline, req.Args, req.Masker)
+	out.Args, known, err = describeArgs(ctx, sess, req.Entrypoint, req.Args, req.Masker)
 	out.Secrets = slices.Clone(sess.secrets)
 	out.Requires = slices.Clone(req.Requires)
 	if err == nil && req.CheckArgs != nil {
@@ -76,7 +80,7 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 	}
 	err = releaseDescribed(sess, known, err)
 	if err == nil {
-		out.Doc, out.JSON, err = planRun(ctx, sess, req.Pipeline, out.Args, req.Run)
+		out.Doc, out.JSON, err = planRun(ctx, sess, req.Entrypoint, out.Args, req.Run)
 	}
 	if err == nil {
 		err = validateStepRange(out.Doc, req.StartAt, req.StopAt)
@@ -125,7 +129,7 @@ func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash
 		return failed(errors.New("nodehost: no attempt executor"))
 	}
 	planned, err := PlanDocument(ctx, cfg.Session, PlanRequest{
-		Pipeline: cfg.Pipeline, Args: cfg.Args, Run: cfg.Run, Requires: cfg.Requires, Masker: cfg.Attempts.Masker,
+		Pipeline: cfg.Pipeline, Entrypoint: cfg.Entrypoint, Args: cfg.Args, Run: cfg.Run, Requires: cfg.Requires, Masker: cfg.Attempts.Masker,
 	})
 	if err != nil {
 		return failed(fmt.Errorf("plan: %w", err))

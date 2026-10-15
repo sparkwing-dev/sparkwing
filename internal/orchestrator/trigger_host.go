@@ -62,7 +62,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	if err != nil {
 		return err
 	}
-	args, guards, err := checkoutRunArgs(h.Dir, trig.Pipeline, triggerHostArgs(ctx, c, trig, logger))
+	args, guards, selection, err := checkoutRunArgs(h.Dir, trig.Pipeline, triggerHostArgs(ctx, c, trig, logger))
 	if err != nil {
 		return err
 	}
@@ -102,7 +102,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	rehydrate := hostedRehydration(Options{RetryOf: trig.RetryOf, Full: trig.Full})
 	res, err := nodehost.Execute(ctx, nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: h.Entry, Dir: h.Dir, Sink: planSink, Env: env, Engine: h.Engine, Runner: h.Identity, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementRunnerHosted, Secrets: masker}},
-		Pipeline: trig.Pipeline, Args: args, CheckArgs: checkArgs,
+		Pipeline: trig.Pipeline, Entrypoint: selection.Entrypoint, Args: args, CheckArgs: checkArgs,
 		Run: rc, Requires: requires, Invocation: flags.Invocation(),
 		StartAt: flags.StartAt, StopAt: flags.StopAt, Only: flags.Only,
 		ParentRunID: trig.ParentRunID, RetryOf: trig.RetryOf, RetrySource: trig.RetrySource,
@@ -147,13 +147,14 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 // safety: the checkout's sparkwing.yaml fills the arguments a run left out, its pipeline entry's over the project
 // defaults, as a local run's do. Layering them again under a run row's arguments, which already hold them, changes
 // nothing, so every planner of a run calls this and their plans agree.
-func checkoutRunArgs(dir, pipeline string, args map[string]string) (map[string]string, pipelines.Guards, error) {
+func checkoutRunArgs(dir, pipeline string, args map[string]string) (map[string]string, pipelines.Guards, nodehost.PipelineIdentity, error) {
 	_, cfg, err := projectconfig.Discover(dir)
+	selection := nodehost.ResolvePipeline(cfg, pipeline)
 	if err != nil {
-		return nil, pipelines.Guards{}, &projectConfigError{err: err}
+		return nil, pipelines.Guards{}, selection, &projectConfigError{err: err}
 	}
 	if cfg == nil {
-		return args, pipelines.Guards{}, nil
+		return args, pipelines.Guards{}, selection, nil
 	}
 	opts := Options{Pipeline: pipeline, Args: args}
 	if cfg.Defaults != nil {
@@ -166,7 +167,7 @@ func checkoutRunArgs(dir, pipeline string, args map[string]string) (map[string]s
 	} else if cfg.Defaults != nil && cfg.Defaults.Guards != nil {
 		rules = pipelines.Guards{Require: cfg.Defaults.Guards.When, Reject: cfg.Defaults.Guards.Unless}
 	}
-	return mergeInvokeArgs(opts), rules, nil
+	return mergeInvokeArgs(opts), rules, selection, nil
 }
 
 // safety: the host checks a run's guards once describe has filled in the SDK's defaults, against the arguments the

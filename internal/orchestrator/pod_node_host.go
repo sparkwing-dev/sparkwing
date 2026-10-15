@@ -88,13 +88,13 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 		return nodehost.Result{}, err
 	}
 	flags := runflags.FromInvocation(run.Invocation)
-	args, _, err := checkoutRunArgs(p.dir, run.Pipeline, run.Args)
+	args, _, selection, err := checkoutRunArgs(p.dir, run.Pipeline, run.Args)
 	if err != nil {
 		return nodehost.Result{}, err
 	}
 	cfg := nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: p.entry, Dir: p.dir, Sink: planSink, Env: env, Engine: p.engine, Runner: p.identity, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLauncher, Secrets: masker}},
-		Pipeline: run.Pipeline, Args: args, Run: podRunContext(run),
+		Pipeline: run.Pipeline, Entrypoint: selection.Entrypoint, Args: args, Run: podRunContext(run),
 		StartAt: flags.StartAt, StopAt: flags.StopAt,
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
 		Attempts: &nodehost.Attempts{

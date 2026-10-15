@@ -238,12 +238,11 @@ func TestHostedRunEmitsConcurrencyEvents(t *testing.T) {
 		defer cancel()
 		holdSlotOutside(t, st, "global:db")
 		slots := storeSlots{st: st, queued: make(chan string, 1)}
-		go func() {
-			recv(t, ctx, slots.queued)
-			if _, _, _, err := teststore.ForTeam(t, st, store.DefaultTeam).ReleaseAndNotify(ctx, "global:db", "other/x", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
-				t.Errorf("release outside hold: %v", err)
-			}
-		}()
+		tenant := teststore.ForTeam(t, st, store.DefaultTeam)
+		afterAdmissionEvent(t, ctx, slots.queued, func(ctx context.Context) error {
+			_, _, _, err := tenant.ReleaseAndNotify(ctx, "global:db", "other/x", "success", "", "", 0, store.DefaultConcurrencyLease)
+			return err
+		})
 		res := hostEvents(t, ctx, state, Config{
 			Execute:   func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} },
 			Admission: &Admission{Slots: slots},

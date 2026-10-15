@@ -21,8 +21,9 @@ import (
 // Config says how to host one run.
 type Config struct {
 	// Session starts the short-lived plan process.
-	Session  SessionConfig
-	Pipeline string
+	Session    SessionConfig
+	Pipeline   string
+	Entrypoint string
 	// Args are the invocation's flag values; describe's defaults fill in
 	// the flags it leaves out.
 	Args map[string]string
@@ -158,13 +159,14 @@ type Run struct {
 	Requires []string
 	// Pipeline, Args and Context are the accepted plan's request; every
 	// later process of the run plans with the same.
-	Pipeline string
-	Args     map[string]string
-	Context  nodeproto.RunContext
-	StartAt  string
-	StopAt   string
-	State    storage.StateStoreOld
-	Logger   *slog.Logger
+	Pipeline   string
+	Entrypoint string
+	Args       map[string]string
+	Context    nodeproto.RunContext
+	StartAt    string
+	StopAt     string
+	State      storage.StateStoreOld
+	Logger     *slog.Logger
 	// Masker is the run's; a node's result is masked with it where it is recorded.
 	Masker    *secrets.Masker
 	adds      chan addRequest
@@ -222,6 +224,9 @@ var layers = []Layer{
 // its nodes, and runs the nodes in dependency order. An error means no run
 // row was written; once one exists, every failure is in the result.
 func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
+	if cfg.Entrypoint == "" {
+		cfg.Entrypoint = cfg.Pipeline
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -259,7 +264,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 			cfg.Logger.Warn("nodehost: plan process", "err", err)
 		}
 	}
-	args, known, err := describeArgs(ctx, sess, cfg.Pipeline, cfg.Args, masker)
+	args, known, err := describeArgs(ctx, sess, cfg.Entrypoint, cfg.Args, masker)
 	if err == nil && cfg.CheckArgs != nil {
 		err = cfg.CheckArgs(args)
 	}
@@ -297,7 +302,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	stopHeartbeat := heartbeat(ctx, cfg, res.RunID)
 	defer stopHeartbeat()
 
-	doc, raw, err := planRun(ctx, sess, cfg.Pipeline, args, cfg.Run)
+	doc, raw, err := planRun(ctx, sess, cfg.Entrypoint, args, cfg.Run)
 	closeSession()
 	if err == nil {
 		err = validateStepRange(doc, cfg.StartAt, cfg.StopAt)
@@ -364,8 +369,11 @@ func runPlanned(ctx context.Context, cfg *Config, run *Run, res *RunResult) (rel
 }
 
 func newRun(cfg *Config, doc nodeproto.PlanDoc, args, skips map[string]string) *Run {
+	if cfg.Entrypoint == "" {
+		cfg.Entrypoint = cfg.Pipeline
+	}
 	run := &Run{
-		ID: cfg.Run.RunID, Doc: doc, validation: cfg.Session.Validation, Requires: slices.Clone(cfg.Requires), Pipeline: cfg.Pipeline, Args: args, Context: cfg.Run,
+		ID: cfg.Run.RunID, Doc: doc, validation: cfg.Session.Validation, Requires: slices.Clone(cfg.Requires), Pipeline: cfg.Pipeline, Entrypoint: cfg.Entrypoint, Args: args, Context: cfg.Run,
 		StartAt: cfg.StartAt, StopAt: cfg.StopAt, State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest),
 		onlySkips: skips,
 	}

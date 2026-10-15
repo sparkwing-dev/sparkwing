@@ -34,6 +34,7 @@ import (
 // HostedEntry is the pipeline program a hosted run starts each SDK process
 // from, and what the CLI knows about the invocation that the run records.
 type HostedEntry struct {
+	Pipeline nodehost.PipelineIdentity
 	// Command is run with --sw-node-protocol appended in Dir, the repository
 	// root, with Env, the user's environment.
 	Command pipelineentry.Command
@@ -56,9 +57,14 @@ type HostedEntry struct {
 func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry) (res *Result, err error) {
 	// safety: a sparkwing run started inside a dry-run node is a dry run too, as the dispatcher read it.
 	opts.DryRun = opts.DryRun || dryRunFromEnv()
-	if err := applyHostedProjectConfig(&opts, entry.Dir); err != nil {
+	selection, err := applyHostedProjectConfig(&opts, entry.Dir)
+	if err != nil {
 		return nil, err
 	}
+	if entry.Pipeline.Invoked != "" && entry.Pipeline != selection {
+		return nil, errors.New("hosted pipeline selection differs from its invocation")
+	}
+	entry.Pipeline = selection
 	backends, closeBackends, err := localRunBackends(ctx, paths, &opts)
 	if err != nil {
 		return nil, err
@@ -172,7 +178,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	}
 	cfg := nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: entry.Command, Dir: entry.Dir, Env: engineenv.Strip(entry.Env), Sink: planSink, Engine: entry.Engine, Runner: entry.Runner, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: masker}},
-		Pipeline: opts.Pipeline, Args: invokeArgs, CheckArgs: checkArgs, CheckSecrets: checkSecrets, Run: hostedRunContext(opts, runID),
+		Pipeline: opts.Pipeline, Entrypoint: entry.Pipeline.Entrypoint, Args: invokeArgs, CheckArgs: checkArgs, CheckSecrets: checkSecrets, Run: hostedRunContext(opts, runID),
 		StartAt: opts.StartAt, StopAt: opts.StopAt, Only: opts.Only,
 		State: state, Artifacts: backends.Artifact, Attempts: attempts, Admission: admission,
 		Debug: nodehost.Debug{
@@ -230,13 +236,14 @@ func hostedInterruptCancel(parent context.Context) (context.Context, func()) {
 // safety: the execution checkout's config is the one the old binary read from
 // its own working directory, so a --sw-ref or declared-source run gets that
 // checkout's defaults and guards rather than the caller's.
-func applyHostedProjectConfig(opts *Options, dir string) error {
+func applyHostedProjectConfig(opts *Options, dir string) (nodehost.PipelineIdentity, error) {
 	_, cfg, err := projectconfig.Discover(dir)
+	selection := nodehost.ResolvePipeline(cfg, opts.Pipeline)
 	if err != nil {
-		return &projectConfigError{err: err}
+		return selection, &projectConfigError{err: err}
 	}
 	if cfg == nil {
-		return nil
+		return selection, nil
 	}
 	opts.PipelineYAML = cfg.Registry().Find(opts.Pipeline)
 	if cfg.Defaults != nil {
@@ -245,7 +252,7 @@ func applyHostedProjectConfig(opts *Options, dir string) error {
 			opts.PipelineYAML = &pipelines.Pipeline{Name: opts.Pipeline, Guards: pipelines.Guards{Require: cfg.Defaults.Guards.When, Reject: cfg.Defaults.Guards.Unless}}
 		}
 	}
-	return RefusePinnedLocalRun(opts.PipelineYAML)
+	return selection, RefusePinnedLocalRun(opts.PipelineYAML)
 }
 
 func hostedRunContext(opts Options, runID string) nodeproto.RunContext {
