@@ -2,6 +2,36 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+## From W7 whole-branch verification
+
+**W6/W4 test timing.** `go run ./internal/sleepcheck -base main .` reports
+three violations outside W7's changed files: `internal/limits/deadline_test.go`
+at lines 58 and 66, and `sparkwing/sparkwingtest/host_test.go` at line 214.
+W6 owns the deadline fixture. W4 owns the host fixture. Port their timing to
+signals or `testing/synctest`. Whole-repository build and compile-only tests
+pass. This checker result does not establish a product runtime failure.
+
+## From W7 materialization and measurement
+
+**W1/W2/W3/W8 integration remains open.** The new
+`storage-memo-materialization-failures/filesystem-components` and
+`s3-components` cells join W7's output, capture, memo and staging implementations
+through real signed byte transfers. Their record transactions are contract
+fakes because W1's result layout and W2's authenticated binding remain open.
+They preserve the failure assertions behind the follower-output,
+manifest-commit and retry-artifact tests. They do not close the native host
+ports or prove a store-owned terminal transition. The existing W7 physical-log,
+manifest-admission and host-binding handoffs below still apply.
+
+**Raw factory cut completed.** `storeurl.OpenArtifactStore`,
+`storage.Usage` and the unused `Server.WithArtifactStore` fallback are deleted.
+`OpenMeasurementStore` and `Server.WithBucketUsage` now take the read-only
+`storage.UsageReporter` contract. The controller's configured measurement path
+still uses the shared S3 client constructor, retains its page cap and bypasses
+the serving request budget. The repository builds without the removed APIs.
+Remaining raw backends serve the old log routes and still need deletion at
+the final tagged-log cutover.
+
 ## From W7 physical log integration
 
 **W1 log slot contract.** W7 now provides `blob.LogObjectKey(subject, class, index)`

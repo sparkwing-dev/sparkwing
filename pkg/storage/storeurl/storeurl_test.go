@@ -2,6 +2,8 @@ package storeurl
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -55,25 +57,33 @@ func TestFsPath(t *testing.T) {
 	}
 }
 
-func TestOpenArtifactStore_FS(t *testing.T) {
+func TestOpenMeasurementStoreFilesystem(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	s, err := OpenArtifactStore(context.Background(), "fs://"+dir)
+	path := filepath.Join(dir, "stored")
+	if err := os.WriteFile(path, []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := OpenMeasurementStore(t.Context(), "fs://"+dir, 0)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if s == nil {
-		t.Fatal("nil store")
+	usage, err := s.Usage(t.Context())
+	if err != nil || usage.Bytes != 7 || usage.Objects != 1 || usage.Partial || usage.ObservedAt.IsZero() {
+		t.Fatalf("measurement = %+v, %v", usage, err)
+	}
+	if body, err := os.ReadFile(path); err != nil || string(body) != "payload" {
+		t.Fatalf("measurement changed bytes: %q, %v", body, err)
 	}
 }
 
 func TestOpen_BadScheme(t *testing.T) {
 	t.Parallel()
-	if _, err := OpenArtifactStore(context.Background(), "no-scheme"); err == nil {
+	if _, err := OpenMeasurementStore(context.Background(), "no-scheme", 0); err == nil {
 		t.Error("expected err for missing scheme")
 	}
 	for _, scheme := range []string{"ftp", "http", "https"} {
-		_, err := OpenArtifactStore(t.Context(), scheme+"://objects.invalid")
+		_, err := OpenMeasurementStore(t.Context(), scheme+"://objects.invalid", 0)
 		if err == nil || !strings.Contains(err.Error(), scheme) {
 			t.Errorf("%s: err = %v, want an unsupported scheme", scheme, err)
 		}

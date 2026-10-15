@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"errors"
-	"io"
 	"strings"
 	"testing"
 	"time"
@@ -17,11 +16,6 @@ type measuredStore struct {
 	err   error
 	calls int
 }
-
-func (m *measuredStore) Get(context.Context, string) (io.ReadCloser, error)   { return nil, nil }
-func (m *measuredStore) PutIfAbsent(context.Context, string, io.Reader) error { return nil }
-func (m *measuredStore) Delete(context.Context, string) error                 { return nil }
-func (m *measuredStore) List(context.Context, string) ([]string, error)       { return nil, nil }
 
 func (m *measuredStore) Usage(context.Context) (storage.StoreUsage, error) {
 	m.calls++

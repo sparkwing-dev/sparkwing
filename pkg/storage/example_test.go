@@ -4,46 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
-
-func ExampleOpenArtifactStore() {
-	dir, err := os.MkdirTemp("", "sparkwing-example-")
-	if err != nil {
-		fmt.Println("mkdir:", err)
-		return
-	}
-	defer os.RemoveAll(dir)
-
-	ctx := context.Background()
-	store, err := storeurl.OpenArtifactStore(ctx, "fs://"+dir)
-	if err != nil {
-		fmt.Println("open:", err)
-		return
-	}
-
-	if err := store.PutIfAbsent(ctx, "build/abc123/manifest.json", strings.NewReader(`{"image":"app:dev"}`)); err != nil {
-		fmt.Println("put:", err)
-		return
-	}
-
-	r, err := store.Get(ctx, "build/abc123/manifest.json")
-	if err != nil {
-		fmt.Println("get:", err)
-		return
-	}
-	defer r.Close()
-
-	body, _ := io.ReadAll(r)
-	fmt.Println(string(body))
-	// Output: {"image":"app:dev"}
-}
 
 func ExampleLogStore_Read() {
 	dir, _ := os.MkdirTemp("", "sparkwing-example-logs-")

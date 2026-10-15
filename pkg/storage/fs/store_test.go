@@ -127,9 +127,9 @@ func TestArtifactStore_UsageTotalsStoredBytesAndObjects(t *testing.T) {
 		t.Fatalf("NewArtifactStore: %v", err)
 	}
 	ctx := context.Background()
-	usage, ok, err := storage.Usage(ctx, s)
-	if err != nil || !ok {
-		t.Fatalf("Usage on an empty store = ok %t, err %v", ok, err)
+	usage, err := s.Usage(ctx)
+	if err != nil {
+		t.Fatalf("Usage on an empty store: %v", err)
 	}
 	if usage.Bytes != 0 || usage.Objects != 0 || usage.Partial || usage.ObservedAt.IsZero() {
 		t.Fatalf("empty store usage = %+v", usage)
@@ -140,7 +140,7 @@ func TestArtifactStore_UsageTotalsStoredBytesAndObjects(t *testing.T) {
 			t.Fatalf("Put %s: %v", key, err)
 		}
 	}
-	usage, _, err = storage.Usage(ctx, s)
+	usage, err = s.Usage(ctx)
 	if err != nil {
 		t.Fatalf("Usage: %v", err)
 	}

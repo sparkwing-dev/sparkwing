@@ -32,7 +32,7 @@ func (s storageCacheRecords) LookupRecord(_ context.Context, q blob.RecordLookup
 
 type storageCacheSigner struct {
 	blob.DataSigner
-	objects *blob.Filesystem
+	objects blob.ObjectBackend
 	team    string
 	bodies  map[blob.Digest][]byte
 }
@@ -44,7 +44,7 @@ func (s storageCacheSigner) Download(ctx context.Context, q blob.GetRequest) (bl
 	}
 	object, err := s.objects.Sign(ctx, capability.ObjectToSign{Method: http.MethodGet, Key: key,
 		Size: int64(len(s.bodies[q.Digest])), SHA256: string(q.Digest), ExpiresAt: time.Now().Add(time.Minute)})
-	return blob.SignedTransfer{URL: object.URL, Digest: q.Digest, Size: object.Size, ExpiresAt: object.ExpiresAt}, err
+	return blob.SignedTransfer{URL: object.URL, Headers: object.Headers, Digest: q.Digest, Size: object.Size, ExpiresAt: object.ExpiresAt}, err
 }
 
 func checkStorageRemoteCache(t *testing.T) {

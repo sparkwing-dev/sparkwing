@@ -72,9 +72,7 @@ type Server struct {
 	computeAlarmMu sync.Mutex
 	computeAlarmOn bool
 
-	artifactStore storage.ArtifactStore
-
-	bucketUsageStore storage.ArtifactStore
+	bucketUsageStore storage.UsageReporter
 	storagePass      *storagePass
 	downloadStores   map[store.StorageKind]*teamblob.Store
 	downloadS3       *s3.PresignClient
@@ -234,21 +232,9 @@ func (s *Server) WithCostRate(rate float64, source string) *Server {
 	return s
 }
 
-// WithBucketUsage names the object store the bucket ceiling measures.
-// The store is read on the reconciliation interval and never served, so
-// pointing the controller at the bucket its runners write to gives the
-// ceiling a measured total without exposing those objects on any route.
-// Without one the ceiling counts only the writes this process made.
-func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server {
+// WithBucketUsage supplies read-only reporting for the bucket ceiling.
+func (s *Server) WithBucketUsage(a storage.UsageReporter) *Server {
 	s.bucketUsageStore = a
-	return s
-}
-
-// WithArtifactStore names the artifact store the bucket ceiling measures
-// when no bucket usage store is set (laptop mode). Cluster mode leaves it
-// nil.
-func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server {
-	s.artifactStore = a
 	return s
 }
 

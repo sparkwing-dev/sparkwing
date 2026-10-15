@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
 // ObjectStoreBreakerResponse reports the process-wide object-store
@@ -119,17 +118,11 @@ func objectStoreHealth(bucket bool) (map[string]any, []string) {
 func (s *Server) bucketUsage(ctx context.Context) (objectguard.Usage, error) {
 	measured := s.bucketUsageStore
 	if measured == nil {
-		measured = s.artifactStore
-	}
-	if measured == nil {
 		return objectguard.Usage{Partial: true}, nil
 	}
-	u, ok, err := storage.Usage(ctx, measured)
+	u, err := measured.Usage(ctx)
 	if err != nil {
 		return objectguard.Usage{}, err
-	}
-	if !ok {
-		return objectguard.Usage{Partial: true}, nil
 	}
 	return objectguard.Usage{
 		Bytes:      u.Bytes,
@@ -164,7 +157,7 @@ func (s *Server) measureHolder() string {
 }
 
 func (s *Server) bucketMeasured() bool {
-	return s.bucketUsageStore != nil || s.artifactStore != nil
+	return s.bucketUsageStore != nil
 }
 
 // perf: an install with neither a bucket nor a ceiling returns before the

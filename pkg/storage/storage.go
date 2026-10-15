@@ -77,28 +77,9 @@ type StoreUsage struct {
 	Partial bool
 }
 
-// UsageReporter is the optional capability an [ArtifactStore] exposes
-// when it can total its own contents. Measuring means enumerating the
-// store, which object stores bill per thousand keys, so a caller
-// measures on a schedule and never per request.
-//
-// Reach it through [Usage], which reports false for a store that
-// cannot total itself.
+// UsageReporter exposes read-only stored-byte and object totals.
 type UsageReporter interface {
-	// Usage totals everything the store holds under its configured
-	// prefix.
 	Usage(ctx context.Context) (StoreUsage, error)
-}
-
-// Usage totals what store holds, and reports false for a backend that
-// cannot measure itself.
-func Usage(ctx context.Context, store ArtifactStore) (StoreUsage, bool, error) {
-	r, ok := store.(UsageReporter)
-	if !ok {
-		return StoreUsage{}, false, nil
-	}
-	u, err := r.Usage(ctx)
-	return u, true, err
 }
 
 // ReadOpts narrows a log read server-side. Zero values disable

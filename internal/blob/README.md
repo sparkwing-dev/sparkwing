@@ -279,3 +279,19 @@ legacy log storage. It has no mutable `Put` or unscoped `Has` operation. The
 filesystem log route accepts an exact retry after reading and closing the
 existing bytes, and refuses any replacement. Signed-data clients keep their
 separate authenticated presence API.
+
+`storeurl.OpenArtifactStore`, `storage.Usage` and the controller's unused
+`WithArtifactStore` fallback are removed. `OpenMeasurementStore` and
+`WithBucketUsage` expose `storage.UsageReporter`. Measurement retains its page
+cap and stays outside the serving request budget. The S3 retry test uses a
+simulated clock and an injected HTTP client. It opens no listener and needs no
+global limiter override or leak exclusions.
+
+The materialization properties join output writes, artifact capture, signed
+transfers, memo verification and artifact staging against filesystem and S3
+objects. Each backend receives 128 generated payloads. Missing output records,
+missing or corrupt bytes and refused copy transactions produce memo misses.
+Required artifact reads fail before replacing the affected file. Record
+transactions and controller authorization are fakes. Separate generated capture
+and staging properties check symlink and path containment on Unix. Native
+Windows filesystem evidence remains required.
