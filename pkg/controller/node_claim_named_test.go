@@ -170,7 +170,7 @@ func TestClaimNodeByID_MeteredTokenReservesAndSettles(t *testing.T) {
 	f := newNamedClaimFixture(t, store.TokenOptions{Metered: true})
 	f.readyNode(t, "run-1", "build")
 	ctx := context.Background()
-	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
 		100*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("GrantCredits: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestClaimNodeByID_MeteredTokenReservesAndSettles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClaimNodeByID: %v", err)
 	}
-	charges, err := f.store.ListCreditCharges(ctx, 10)
+	charges, err := teamTenant(t, f.store, store.DefaultTeam).ListCreditCharges(ctx, 10)
 	if err != nil {
 		t.Fatalf("ListCreditCharges: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestClaimNodeByID_MeteredTokenReservesAndSettles(t *testing.T) {
 	if err := c.FinishNode(fenced, "run-1", "build", "success", "", nil); err != nil {
 		t.Fatalf("FinishNode under the claim fence: %v", err)
 	}
-	charges, err = f.store.ListCreditCharges(ctx, 10)
+	charges, err = teamTenant(t, f.store, store.DefaultTeam).ListCreditCharges(ctx, 10)
 	if err != nil {
 		t.Fatalf("ListCreditCharges: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestClaimNodeByID_FinishBeforeExecutionRefundsTheReservation(t *testing.T) 
 			f.readyNode(t, "run-1", "build")
 			ctx := context.Background()
 			granted := int64(100 * store.MicroCreditsPerCent)
-			if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+			if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
 				granted, "pay_"+outcome, "admin"); err != nil {
 				t.Fatalf("GrantCredits: %v", err)
 			}
@@ -240,7 +240,7 @@ func TestClaimNodeByID_FinishBeforeExecutionRefundsTheReservation(t *testing.T) 
 			if balance != granted {
 				t.Fatalf("balance = %d, want the full grant %d restored", balance, granted)
 			}
-			charges, err := f.store.ListCreditCharges(ctx, 10)
+			charges, err := teamTenant(t, f.store, store.DefaultTeam).ListCreditCharges(ctx, 10)
 			if err != nil {
 				t.Fatalf("ListCreditCharges: %v", err)
 			}

@@ -548,7 +548,6 @@ func run(args []string) error {
 		if err != nil {
 			return fmt.Errorf("--cache-blob-store: %w", err)
 		}
-		srv = srv.WithStoragePass(cache)
 		privateKey := creds.CloudFrontKey
 		domain, keyPairID := *cloudFrontDomain, *cloudFrontKeyPairID
 		client, _, _, err := s3store.Open(ctx, *cacheBlobStore)

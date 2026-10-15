@@ -65,17 +65,39 @@ func TestTeamLogReadsAreNotRefusedPastTheDownloadCap(t *testing.T) {
 	f := newTeamDownloadFixture(t, 150)
 	a := freeTeamToken(t, f.store, "team-a")
 	teamRun(t, f.store, "team-a", "ra")
-	if _, err := f.store.ChargeDownload(context.Background(), store.DownloadCharge{
-		Team: "team-a", Bytes: 150, Record: true, Now: time.Now(), FreeCapBytes: 150,
+	tenant, err := f.store.ForTeam(t.Context(), "team-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.ChargeDownload(context.Background(), store.DownloadCharge{
+		ReplicaID: "fixture", Bytes: 150, Record: true, FreeCapBytes: 150,
 	}); err != nil {
 		t.Fatalf("spend team-a's day: %v", err)
 	}
-	if _, err := f.store.ChargeDownload(context.Background(), store.DownloadCharge{
-		Team: "team-a", Now: time.Now(), FreeCapBytes: 150,
+	if _, err := tenant.ChargeDownload(context.Background(), store.DownloadCharge{
+		ReplicaID: "fixture", FreeCapBytes: 150,
 	}); !errors.Is(err, store.ErrDownloadCap) {
 		t.Fatalf("team-a after spending its day = %v, want the cap", err)
 	}
 	if code, _ := f.download(t, a, "/api/v1/runs/ra/nodes/n1/logs"); code == http.StatusTooManyRequests {
 		t.Fatal("team-a's log read past its download cap was refused")
 	}
+}
+
+func freeTeamToken(t *testing.T, st *store.Store, team store.Team) string {
+	t.Helper()
+	ctx := context.Background()
+	if err := st.AsOperator().CreateTeam(ctx, team); err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := st.ForTeam(ctx, team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := tenant.CreateToken(ctx, "ci", store.TokenKindUser,
+		[]string{controller.ScopeRunsWrite, controller.ScopeRunsRead}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return "Bearer " + raw
 }

@@ -186,3 +186,19 @@ W4/W9's SDK symbol-doc drift remains separate. StateStoreOld, CreatePlanNode,
 raw readiness publication and other legacy lifecycle/claim/trigger APIs remain
 open, along with the earlier foreign contract gaps. W1b implementation files
 are unchanged. See `../w1-session22-progress.md` for evidence and shared files.
+
+## From bw-3095-w1b-store-data (unreviewed by lead)
+
+W1b continuation: shared `accountBillingAwardTx` now bypasses the calculator
+for unmetered awards, including checkpoint, final settlement and replay. W1's
+`accountUnitBillingTx` can remove its duplicate unmetered calculator override
+after the branches join. This checkout still lacks W1's `unit_billing.go` and
+metered issuance changes. The real lifecycle join remains open here.
+
+W1b also moved `CreditSettings`, `SetCreditSettings`,
+`SetOperatorCreditSettings`, `CreditRateTable` and `WarmCPUClassCores` from
+Store to Operator without aliases. W1's pending callers use `AsOperator()`.
+The raw Store `GrantCredits`, `ListCreditCharges` and `AppendEventOnce` wrappers
+are removed. Select a Tenant explicitly for their retained methods. Caller
+migrations in this checkout are complete. W1 lifecycle files changed only at
+two price-read callsites in `store.go`.

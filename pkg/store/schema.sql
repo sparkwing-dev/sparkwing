@@ -622,8 +622,7 @@ CREATE TABLE invitation_email_log (
 
 CREATE TABLE free_slots (
     team TEXT NOT NULL REFERENCES teams(name) PRIMARY KEY,
-    taken_at BIGINT NOT NULL,
-    event_bytes BIGINT NOT NULL DEFAULT 0
+    taken_at BIGINT NOT NULL
 );
 
 CREATE TABLE signup_gate (

@@ -27,7 +27,7 @@ func meteredUnitFixture(t *testing.T, cloud bool) (*Store, UnitDemand, *time.Tim
 	demand.CapabilityPrefix = root.Prefix
 	rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('fund','a','paid',1000000,1)`)
 	table := CreditRateTable{{Cores: 1, MicroPerSecond: 2}, {Cores: 4, MicroPerSecond: 10}}
-	if _, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
 		t.Fatal(err)
 	}
 	s.billing = unitBillingCalculation
@@ -212,7 +212,7 @@ func TestMeteredUnitNodeLifecycleUsesImmutableAward(t *testing.T) {
 				t.Fatalf("compute start=%d, %v; want %d", began, err, wantStart)
 			}
 			table := CreditRateTable{{Cores: 1, MicroPerSecond: 200}, {Cores: 4, MicroPerSecond: 1000}}
-			if _, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
+			if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
 				t.Fatal(err)
 			}
 			*now = now.Add(10 * time.Second)

@@ -3,8 +3,7 @@
 These free-tier shares, funded tiers, credit checks, and storage charges apply
 to controllers with a signed metering license. A signed `multi-team` license
 also grants metering. On an unlicensed self-hosted controller, teams have no
-credit balance and storage counter routes report unlimited room. Ordinary
-storage quotas set by its operator still apply.
+metered compute charges. Ordinary storage quotas set by its operator still apply.
 
 A multi-team controller hosts teams that pay nothing. This page lists what such
 a team can consume that costs the operator money or grows with time, and what
@@ -38,18 +37,11 @@ still write logs and events, and a team that stores only artifacts gets 768
 MiB rather than the whole gibibyte. The operator's own team and a team with
 credits are never held to a share.
 
-A write reserves its size with `POST /internal/storage/reserve`, commits what
-it stored with `POST /internal/storage/commit`, and gives the room back with
-`POST /internal/storage/release` when it stored nothing. The reserve locks
-the team's row, so writers on any number of cache replicas see each
-other's reservations, and two writers racing for the last bytes of a share
-cannot both win. A reservation a crashed writer never settled expires after an
-hour. A commit with a reservation ID counts once for 24 hours; hourly
-storage maintenance prunes older receipts, after which a replay counts
-again. A renewal retry returns the same next reservation while it is
-active. The cache calls these routes with its `storage.count` service token and makes one
-reserve and one commit or release per object. The cache's service token can
-commit a negative overwrite delta when an object shrinks.
+The service-token storage counter routes are removed. Upload tickets reserve
+quota for an authenticated uploader. A verified commit records immutable bytes,
+the exact uploader receipt and quota settlement in one transaction. An abort
+releases the ticket's holds. Exact ticket replay never increments usage twice.
+Deployment reports sum usage by tenant, period and replica.
 
 The controller charges node log segments itself. When a runner asks for a
 node's first upload URLs, the controller reads the team's standing, which
@@ -57,17 +49,10 @@ picks the attempt's retention class, and each later request reports the bytes
 the runner has stored; the controller commits the growth once, so a retried
 request never charges twice.
 
-A log write is never refused for the log share, so a run always keeps its
-logs. The hourly storage pass holds a free team to the share instead: after it
-recounts the segments, it deletes the segments of the team's least recently
-written finished runs until the team is back under its share. It never prunes
-a run still going; bucket lifecycle rules remove the rest. Only the bytes
-charged for the deleted segments come off the team's count, so a failed
-deletion frees nothing. A team with
-neither credits nor a slot, and that never held credits, has a log share of
-zero, so the pass prunes the finished runs a refused commit left behind. A
-team whose credits lapsed keeps its logs until retention removes them. A team can therefore sit past
-its log share by about an hour of log growth.
+Log retention follows the run's persisted class. The elected maintenance pass
+seals abandoned tagged log streams and bills committed blob and log inventory.
+Bucket listing reconciliation and free-share log pruning are removed.
+Allowance-driven physical eviction still needs the final storage adapter.
 
 A cache write past its share is refused with `413` and a reason that names the share,
 what the team holds and what the write needs. The cache judges a declared
@@ -188,7 +173,7 @@ second run over the same data removes nothing more.
 | API, CLI and runner tokens | revoked or expired more than 30 days ago | controller, hourly storage pass | none |
 | Browser sessions, GitHub runner credentials | expired | controller, hourly storage pass | none |
 | Cron fire history | beyond 200 per schedule | controller, on each fire | none |
-| Egress usage rows | older than 13 months | controller, monthly | none |
+| Egress usage rows | older than 13 months | leased controller maintenance | none |
 | Team download days | older than 7 days | controller, hourly storage pass | none |
 | Storage reservations | an hour after a writer took one it never committed or released | controller, on the team's next write and in the hourly storage pass | none |
 
@@ -236,7 +221,7 @@ bounds it. The last column is where the bound is enforced or defaulted.
 | Invitations | 50 open and 100 sent per day per team, each expiring after 7 days | `pkg/store/identity.go` |
 | Browser sessions | seven days after last use, 30 days at most; deleted once expired | `pkg/controller/auth_handlers.go` |
 | Bytes the controller serves | the team's daily download cap for artifacts and git fetches, never for log reads; a daily alarm on a limits profile that refuses nothing | `pkg/controller/egress.go`, `pkg/controller/limits_profile.go` |
-| Egress usage rows | 13 months | `pkg/store/egress.go` |
+| Egress usage rows | 13 months | `pkg/store/egress_accounting.go` |
 | Controller requests | per-token request budget, per-runner claim and heartbeat budgets, and the sign-in limiter, on a limits profile | `pkg/controller/limits_profile.go` |
 
 A controller started without `--limits-profile` sets no request, flood or

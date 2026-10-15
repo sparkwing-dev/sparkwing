@@ -523,7 +523,7 @@ every one; these are the ones a deployment usually sets.
 
 | Flag | Description |
 |------|-------------|
-| `--credentials-dir` | Directory holding `cache-grant-key`, the key that verifies cache grants, the only bearer every route outside `/health`, `/metrics`, `/stats`, and `/proxy/` accepts, and `controller-token`, the `storage.count` service token the cache presents to `--controller`. Without `cache-grant-key` the cache refuses to start unless `--allow-unauthenticated` is set; with `--controller` and no `controller-token` it refuses to start |
+| `--credentials-dir` | Directory holding `cache-grant-key`, the key that verifies cache grants. The controller no longer accepts storage or download counter calls. Remove the old `controller-token` credential. |
 | `--allow-unauthenticated` | Start without a grant key, leaving those routes open |
 | `--auto-register-repos` | Comma-separated `name=url` pairs for auto-registration |
 | `--fetch-interval` | Cadence of the keep-warm pass over mirrors a request touched in the last hour (default: `0`, the pass is off) |

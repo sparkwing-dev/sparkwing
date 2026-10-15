@@ -758,20 +758,6 @@ func relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error
 			return fmt.Errorf("relabel %s.%s: %w", col.table, col.column, err)
 		}
 	}
-	// safety: egress rows carry no team, so a token principal another team
-	// may share is left alone rather than merged into the label.
-	if n.team == "" {
-		if _, err := tx.ExecContext(ctx, `
-		INSERT INTO egress_usage (principal, month, bytes, updated_at)
-		SELECT ?, month, bytes, updated_at FROM egress_usage WHERE principal = ?
-		ON CONFLICT (principal, month) DO UPDATE SET
-		    bytes = egress_usage.bytes + excluded.bytes, updated_at = excluded.updated_at`, label, n.name); err != nil {
-			return fmt.Errorf("relabel egress usage: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM egress_usage WHERE principal = ?`, n.name); err != nil {
-			return err
-		}
-	}
 	eventsSQL := `UPDATE events SET payload = CAST(REPLACE(CAST(payload AS TEXT), ?, ?) AS BLOB)
 		WHERE payload IS NOT NULL AND instr(CAST(payload AS TEXT), ?) > 0`
 	if tx.dialect == DialectPostgres {

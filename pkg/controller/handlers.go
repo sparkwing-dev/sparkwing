@@ -50,8 +50,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	objectStore, objectStoreProblems := objectStoreHealth(s.bucketMeasured())
 	problems = append(problems, objectStoreProblems...)
-	storagePass, storagePassProblems := s.storagePassHealth()
-	problems = append(problems, storagePassProblems...)
 
 	egressState, egressProblems := s.egressHealth()
 	problems = append(problems, egressProblems...)
@@ -60,9 +58,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status": "ok", "auth": authState,
 		"object_store": objectStore, "database": s.storageHealth(),
 		"egress": egressState,
-	}
-	if storagePass != nil {
-		resp["storage_pass"] = storagePass
 	}
 	if len(problems) > 0 {
 		resp["status"] = "degraded"
@@ -688,7 +683,11 @@ func (s *Server) handleAppendEvent(w http.ResponseWriter, r *http.Request) {
 			}))
 		}
 	}
-	seq, err := s.store.AppendEventCharged(r.Context(), chargedPrincipal(r),
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	seq, err := tenant.AppendEventCharged(r.Context(), s.leaseHolder,
 		runID, body.NodeID, body.Kind, body.Payload)
 	if writeStorageWriteRefusal(w, s.logger, err) {
 		return
