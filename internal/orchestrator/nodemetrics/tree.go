@@ -26,24 +26,19 @@ type SessionProcess struct {
 	RSS    int64
 }
 
-// SessionProcesses snapshots every process whose session id is sid, keyed by
-// pid. It reports false when the platform cannot enumerate sessions or any
-// member could not be read.
+// SessionProcesses reads surviving session members, returning false on unreadable members.
 func SessionProcesses(sid int) (map[int]SessionProcess, bool) {
 	if sid <= 0 {
 		return nil, false
 	}
-	var selected map[int]processSample
 	processes, ok := snapshotProcesses(func(processes map[int]processSample) map[int]processSample {
-		selected = sessionMembers(sid, processes)
-		return selected
+		return sessionMembers(sid, processes)
 	})
 	if !ok {
 		return nil, false
 	}
-	members := make(map[int]SessionProcess, len(selected))
-	for pid := range selected {
-		p := processes[pid]
+	members := make(map[int]SessionProcess, len(processes))
+	for pid, p := range processes {
 		if !p.valid {
 			return nil, false
 		}

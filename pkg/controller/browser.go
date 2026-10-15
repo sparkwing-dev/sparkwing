@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
@@ -63,7 +63,7 @@ func (s *Server) WithDashboard(d Dashboard) *Server {
 func (s *Server) browserHandler(api http.Handler) http.Handler {
 	d := s.dashboard
 	pages := web.Pages(d.Bundle)
-	browser := http.NewServeMux()
+	browser := newRegisteredMux()
 	// safety: the page reaches the API on its own origin with its session cookie or the local serve token, so no
 	// credential rides this script.
 	browser.Handle("GET /sparkwing-runtime.js", web.RuntimeConfig(d.Version, !d.Local))
@@ -74,39 +74,18 @@ func (s *Server) browserHandler(api http.Handler) http.Handler {
 	} else {
 		s.signInRoutes(browser)
 		browser.Handle("/", s.pageGate(pages))
-		top.Handle("/api/", s.browserAPI(api))
+		top.Handle("/api/", api)
 	}
-	top.Handle("/", s.pageOrAPI(api, s.logged(browser)))
+	top.Handle("/", s.pageOrAPI(api, s.logged(browser.ServeMux)))
 	return web.SecurityHeaders(d.HSTS, top)
 }
 
-func (s *Server) browserAPI(api http.Handler) http.Handler {
-	legacy := originguard.RefuseCrossSiteWrites(s.cookieSessions(api))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, router := s.routeProbe()
-		if routeRegistered(router, r) {
-			api.ServeHTTP(w, r)
-			return
-		}
-		legacy.ServeHTTP(w, r)
-	})
-}
-
-func (s *Server) signInRoutes(mux *http.ServeMux) {
-	signIn := func(h http.Handler) http.Handler { return s.loginLimit.middleware(h) }
-	mux.HandleFunc("GET /login", s.handleLoginPage)
-	mux.Handle("POST /login", signIn(s.formCSRF(s.handleLoginSubmit)))
+func (s *Server) signInRoutes(mux *registeredMux) {
+	s.registerPolicyEndpoints(mux, s.loginEndpoints())
 	s.registerPolicyEndpoints(mux, s.browserSessionEndpoints())
 	s.registerPolicyEndpoints(mux, s.oauthEndpoints())
-	mux.Handle("POST /auth/{provider}/link", s.formCSRF(s.handleIdentityLinkStart))
-	mux.HandleFunc("GET /auth/{provider}/link/complete", s.handleIdentityLinkComplete)
-	mux.Handle("POST /github/app/connect", s.formCSRF(s.handleGitHubAppConnect(false)))
-	mux.Handle("POST /github/app/connect/existing", s.formCSRF(s.handleGitHubAppConnect(true)))
-	mux.HandleFunc("GET /github/app/setup", s.handleGitHubAppSetup)
-	mux.HandleFunc("GET "+githubAppCallbackPath, s.handleGitHubAppCallback)
-	mux.HandleFunc("GET "+githubAppCompletePath, s.handleGitHubAppComplete)
-	mux.HandleFunc("GET "+githubAppAvailablePath, s.handleGitHubAppAvailable)
-	mux.Handle("POST /github/app/select", s.formCSRF(s.handleGitHubAppSelect))
+	s.registerPolicyEndpoints(mux, s.identityLinkEndpoints())
+	s.registerPolicyEndpoints(mux, s.githubBrowserEndpoints())
 }
 
 // safety: the browser's own routes write the same request log, audit record and X-Request-Id the API does, so a
@@ -137,27 +116,31 @@ func (s *Server) pageGate(pages http.Handler) http.Handler {
 			pages.ServeHTTP(w, r)
 			return
 		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			writePolicyError(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "page method is not registered"})
+			return
+		}
 		secure := s.cookiesSecure()
-		var p *Principal
+		var session *store.Session
 		if raw := sessionCookie(r, secure); raw != "" {
-			sess, err := s.resolveBrowserSession(r.Context(), raw)
+			sess, err := s.readSessionFlow(r)
 			switch {
 			case err == nil:
-				p = sess.principal
-			case refusalIsBackend(err):
-				s.refuseBrowserSession(w, err, secure)
+				session = sess
+			case sessionFlowUnavailable(err):
+				writePolicyError(w, err)
 				return
 			default:
 				clearSessionCookies(w, secure)
 			}
 		}
-		if p == nil && s.AuthEnabled() {
+		if session == nil {
 			w.Header().Set("Cache-Control", "no-store")
 			query := url.Values{"next": {safeNext(r.URL.RequestURI())}}
 			http.Redirect(w, r, "/login?"+query.Encode(), http.StatusSeeOther)
 			return
 		}
-		if operatorPage(r.URL.Path) && !s.operatorSession(p) {
+		if operatorPage(r.URL.Path) && (session == nil || session.CapabilityPrefix != "" || !s.operatorAccount(session.AccountID)) {
 			w.Header().Set("Cache-Control", "no-store")
 			http.Error(w, "the operator console needs the operator's own signed-in account", http.StatusForbidden)
 			return
@@ -170,6 +153,7 @@ func operatorPage(p string) bool {
 	return p == "/operator" || strings.HasPrefix(p, "/operator/") || strings.HasPrefix(p, "/operator.")
 }
 
-func refusalIsBackend(err error) bool {
-	return errors.Is(err, store.ErrSessionBackend)
+func sessionFlowUnavailable(err error) bool {
+	var failure *apierr.Error
+	return errors.As(err, &failure) && failure.Code != apierr.Unauthenticated
 }

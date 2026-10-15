@@ -65,6 +65,11 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 	if err != nil {
 		return controllerwire.ClaimResponse{}, err
 	}
+	if principal.Capability.Subject.Kind == capability.SubjectMachine && principal.Capability.Binding.Kind == capability.BindingNone {
+		if err := s.Store.RecordAgentLabels(ctx, principal.Capability.Prefix, body.Labels); err != nil {
+			return controllerwire.ClaimResponse{}, err
+		}
+	}
 	claim, err := s.Store.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), Target: target, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}})
 	if target == nil && errors.Is(err, store.ErrNotFound) {
 		return controllerwire.ClaimResponse{}, nil

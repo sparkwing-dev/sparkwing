@@ -54,11 +54,7 @@ func (s *Server) operatorEndpoints() []Endpoint {
 	return endpoints
 }
 
-func (s *Server) registerOperatorRoutes(mux *http.ServeMux) {
-	s.registerPolicyEndpoints(mux, s.operatorEndpoints())
-}
-
-func (s *Server) registerPolicyEndpoints(mux *http.ServeMux, endpoints []Endpoint) {
+func (s *Server) registerPolicyEndpoints(mux *registeredMux, endpoints []Endpoint) {
 	router := NewPolicyRouter(s.authorization)
 	var registrationError error
 	for _, endpoint := range endpoints {
@@ -73,12 +69,13 @@ func (s *Server) registerPolicyEndpoints(mux *http.ServeMux, endpoints []Endpoin
 	}
 	paths := make(map[string]bool)
 	for _, endpoint := range endpoints {
+		pathHandler := handler
+		if endpoint.Authentication != capability.AuthPublic {
+			pathHandler = noStore(handler)
+		}
+		mux.Handle(endpoint.Method+" "+endpoint.Pattern, pathHandler)
 		if !paths[endpoint.Pattern] {
 			// safety: unsupported methods must reach the policy router's JSON 405, not legacy fallback.
-			pathHandler := handler
-			if endpoint.Authentication != capability.AuthPublic {
-				pathHandler = noStore(handler)
-			}
 			mux.Handle(endpoint.Pattern, pathHandler)
 			paths[endpoint.Pattern] = true
 		}

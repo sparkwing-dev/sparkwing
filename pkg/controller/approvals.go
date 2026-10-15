@@ -1,180 +1,67 @@
 package controller
 
 import (
-	"encoding/json"
-	"errors"
-	"fmt"
 	"net/http"
-	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-type requestApprovalReq struct {
-	Message   string `json:"message,omitempty"`
-	TimeoutMS int64  `json:"timeout_ms,omitempty"`
-	OnTimeout string `json:"on_timeout,omitempty"`
-}
-
-func (s *Server) handleRequestApproval(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	var body requestApprovalReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if runID == "" || nodeID == "" {
-		writeError(w, http.StatusBadRequest, errors.New("run id and node id required"))
-		return
-	}
-	onTimeout := body.OnTimeout
-	switch onTimeout {
-	case "", store.ApprovalOnTimeoutFail, store.ApprovalOnTimeoutDeny, store.ApprovalOnTimeoutApprove:
-	default:
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid on_timeout: %q", onTimeout))
-		return
-	}
-	if onTimeout == "" {
-		onTimeout = store.ApprovalOnTimeoutFail
-	}
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	if err := tenant.CreateApproval(r.Context(), store.Approval{
-		RunID:       runID,
-		NodeID:      nodeID,
-		RequestedAt: time.Now(),
-		Message:     body.Message,
-		TimeoutMS:   body.TimeoutMS,
-		OnTimeout:   onTimeout,
-	}); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	payload, _ := json.Marshal(map[string]any{
-		"message":    body.Message,
-		"timeout_ms": body.TimeoutMS,
-	})
-	if err := s.store.AppendEvent(r.Context(), runID, nodeID, "approval_requested", payload); err != nil {
-		s.logger.Warn("append run event", "kind", "approval_requested", "run_id", runID, "node_id", nodeID, "err", err)
-	}
-	w.WriteHeader(http.StatusCreated)
-}
-
-type resolveApprovalReq struct {
-	Resolution string `json:"resolution"`
-	Comment    string `json:"comment,omitempty"`
-	// safety: authenticated requests derive the approver from the principal.
-	Approver string `json:"approver,omitempty"`
-}
-
-func (s *Server) handleResolveApproval(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	var body resolveApprovalReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	switch body.Resolution {
-	case store.ApprovalResolutionApproved,
-		store.ApprovalResolutionDenied,
-		store.ApprovalResolutionTimedOut:
-	default:
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid resolution: %q", body.Resolution))
-		return
-	}
-	approver := body.Approver
-	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
-		approver = p.Name
-	}
-	if approver == "" {
-		approver = "unknown"
-	}
-
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	got, err := tenant.ResolveApproval(r.Context(), runID, nodeID,
-		body.Resolution, approver, body.Comment)
+func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	runID := authorized.Target.RunID
+	nodeID := authorized.Target.NodeID
+	tenant, err := s.reportingTenant(r, authorized)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		if errors.Is(err, store.ErrLockHeld) {
-			writeError(w, http.StatusConflict, errors.New("approval already resolved"))
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	payload, _ := json.Marshal(map[string]any{
-		"resolution": got.Resolution,
-		"approver":   got.Approver,
-		"comment":    got.Comment,
-	})
-	if err := s.store.AppendEvent(r.Context(), runID, nodeID, "approval_resolved", payload); err != nil {
-		s.logger.Warn("append run event", "kind", "approval_resolved", "run_id", runID, "node_id", nodeID, "err", err)
-	}
-	writeJSON(w, http.StatusOK, got)
-}
-
-func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+		return engineLookupError(err)
 	}
 	a, err := tenant.GetApproval(r.Context(), runID, nodeID)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
-	writeJSON(w, http.StatusOK, a)
+	writeJSON(w, http.StatusOK, approvalView(*a))
+	return nil
 }
 
-func (s *Server) handleListApprovalsForRun(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleListApprovalsForRun(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	runID := authorized.Target.RunID
+	tenant, err := s.reportingTenant(r, authorized)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	rows, err := tenant.ListApprovalsForRun(r.Context(), runID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
-	if rows == nil {
-		rows = []*store.Approval{}
+	out := controllerwire.Approvals{Approvals: make([]controllerwire.Approval, 0, len(rows))}
+	for _, row := range rows {
+		out.Approvals = append(out.Approvals, approvalView(*row))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"approvals": rows})
+	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
-func (s *Server) handleListPendingApprovals(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleListPendingApprovals(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	tenant, err := s.reportingTenant(r, authorized)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	rows, err := tenant.ListPendingApprovals(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
-	if rows == nil {
-		rows = []*store.Approval{}
+	out := controllerwire.Approvals{Approvals: make([]controllerwire.Approval, 0, len(rows))}
+	for _, row := range rows {
+		out.Approvals = append(out.Approvals, approvalView(*row))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"approvals": rows})
+	writeJSON(w, http.StatusOK, out)
+	return nil
+}
+
+func approvalView(a store.Approval) controllerwire.Approval {
+	return controllerwire.Approval{
+		RunID: a.RunID, JobID: a.NodeID, RequestedAt: a.RequestedAt,
+		Message: a.Message, TimeoutMS: a.TimeoutMS, OnTimeout: a.OnTimeout, Approver: a.Approver,
+		ResolvedAt: a.ResolvedAt, Resolution: a.Resolution, Comment: a.Comment,
+	}
 }

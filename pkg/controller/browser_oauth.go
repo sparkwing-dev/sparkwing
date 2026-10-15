@@ -3,7 +3,6 @@ package controller
 import (
 	"html/template"
 	"net/http"
-	"net/url"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -86,84 +85,6 @@ var signedInTmpl = template.Must(template.New("signed-in").Parse(`<!doctype html
 </html>
 `))
 
-// safety: the settings page shows fixed text for each of these codes and nothing the URL carries, so a crafted
-// link cannot put words on the page.
-var identityLinkRefusals = map[string]bool{
-	"identity_linked_elsewhere": true,
-	"identity_already_linked":   true,
-	"provider_already_linked":   true,
-	"reauth_required":           true,
-	"rate_limited":              true,
-	"link_state_invalid":        true,
-	"provider_unverified":       true,
-	"provider_rejected":         true,
-	"provider_unreachable":      true,
-}
-
-const identityLinkFailed = "link_failed"
-
-func (s *Server) refuseIdentityLink(w http.ResponseWriter, r *http.Request, provider string, err error) {
-	code := identityLinkFailed
-	if refused, ok := refusalOf(err); ok && identityLinkRefusals[refused.code] {
-		code = refused.code
-	} else if !ok {
-		s.logger.Error("identity link", "provider", provider, "error", err.Error())
-	}
-	redirectToSignIns(w, r, url.Values{"refused": {code}, "provider": {provider}})
-}
-
-func redirectToSignIns(w http.ResponseWriter, r *http.Request, query url.Values) {
-	http.Redirect(w, r, (&url.URL{Path: signInsSettingsPath, RawQuery: query.Encode()}).String(), http.StatusSeeOther)
-}
-
-func (s *Server) linkingBrowser(w http.ResponseWriter, r *http.Request) (*browserSession, bool) {
-	sess, err := s.signedInBrowser(r.Context(), r)
-	if err == nil {
-		return sess, true
-	}
-	if refusalIsBackend(err) {
-		s.refuseBrowserSession(w, err, s.cookiesSecure())
-		return nil, false
-	}
-	http.Redirect(w, r, "/login?next="+url.QueryEscape(signInsSettingsPath), http.StatusSeeOther)
-	return nil, false
-}
-
-func (s *Server) handleIdentityLinkStart(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("provider")
-	label, known := providerLabels[name]
-	if !known {
-		http.NotFound(w, r)
-		return
-	}
-	sess, ok := s.linkingBrowser(w, r)
-	if !ok {
-		return
-	}
-	if !constantTimeEqual(r.PostForm.Get("csrf_token"), sess.csrfToken) {
-		csrfError(w)
-		return
-	}
-	grant, err := s.identityLinkBegin(r.Context(), sess.principal, name, browserURL(r, oauthCallbackPath(name)))
-	if err != nil {
-		s.refuseIdentityLink(w, r, name, err)
-		return
-	}
-	if !setFlowCookie(w, oauthFlowCookieName, oauthFlow{Provider: name, State: grant.State, Verifier: grant.Verifier, Mode: oauthFlowLink}, s.cookiesSecure()) {
-		http.Error(w, "could not start linking", http.StatusInternalServerError)
-		return
-	}
-	// safety: the page's form-action 'self' stops a browser following a form's redirect to the provider, and a page
-	// on this origin that moves on by itself is a navigation.
-	renderFlowPage(w, http.StatusOK, flowPage{
-		Title:       "Linking " + label,
-		Message:     "Continuing to " + label + " to confirm the account.",
-		Refresh:     grant.AuthorizeURL,
-		ActionHref:  grant.AuthorizeURL,
-		ActionLabel: "Continue to " + label,
-	})
-}
-
 func (s *Server) continueIdentityLink(w http.ResponseWriter, r *http.Request, flow oauthFlow) error {
 	if !setFlowCookie(w, oauthFlowCookieName, flow, s.cookiesSecure()) {
 		return &apierr.Error{Code: apierr.Internal, Message: "could not continue linking"}
@@ -177,31 +98,4 @@ func (s *Server) continueIdentityLink(w http.ResponseWriter, r *http.Request, fl
 		ActionLabel: "Continue",
 	})
 	return nil
-}
-
-func (s *Server) handleIdentityLinkComplete(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	name := r.PathValue("provider")
-	if _, known := providerLabels[name]; !known {
-		http.NotFound(w, r)
-		return
-	}
-	sess, ok := s.linkingBrowser(w, r)
-	if !ok {
-		return
-	}
-	flow, started := s.readOAuthFlow(r)
-	if !started || flow.Mode != oauthFlowLink || flow.Provider != name || flow.Code == "" {
-		redirectToSignIns(w, r, url.Values{"refused": {"link_state_invalid"}, "provider": {name}})
-		return
-	}
-	clearFlowCookie(w, oauthFlowCookieName, s.cookiesSecure())
-	err := s.identityLinkFinish(r.Context(), sess.principal, name,
-		oauthFlowProof{State: flow.State, Verifier: flow.Verifier, Code: flow.Code}, browserURL(r, oauthCallbackPath(name)))
-	if err != nil {
-		s.refuseIdentityLink(w, r, name, err)
-		return
-	}
-	noteAuditWrite(r.Context())
-	redirectToSignIns(w, r, url.Values{"linked": {name}})
 }

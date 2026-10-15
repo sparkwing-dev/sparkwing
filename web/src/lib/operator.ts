@@ -253,8 +253,8 @@ async function readJSON<T>(res: Response): Promise<T> {
   if (res.ok) return (await res.json()) as T;
   let message = `${res.status} ${res.statusText}`;
   try {
-    const body = (await res.json()) as { message?: string; error?: string };
-    message = body.message || body.error || message;
+    const body = (await res.json()) as { error?: { message?: string } };
+    message = body.error?.message || message;
   } catch {}
   throw new Error(message);
 }
@@ -333,7 +333,7 @@ export async function approveWaitlisted(ids: string[]): Promise<string[]> {
     "/api/v1/operator/waitlist/approve",
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
       body: JSON.stringify({ account_ids: ids }),
     },
     quiet,

@@ -4,6 +4,208 @@
 
 ## Amendment 1: selected routes and trusted adapters
 
+### Lead decisions: payment and bootstrap boundaries
+
+C2 extends PaymentEvent with verified non-checkout facts. The accepted provider
+inventory is:
+
+| Provider type | Kind | Required facts |
+| --- | --- | --- |
+| setup_intent.succeeded | card_setup | succeeded setup ID, customer, payment method, event creation time, fetched card fingerprint/brand/last4 |
+| payment_intent.succeeded | card_paid | succeeded intent, positive amount equal to received amount, currency, latest charge and fetched fingerprint |
+| payment_intent.payment_failed | card_failed | failed intent in requires_payment_method, positive amount, currency and optional decline code |
+| refund.created / refund.updated / refund.failed | refund | individual refund ID, payment, charge, positive amount, currency and explicit pending/requires_action/succeeded/failed/canceled status |
+| radar.early_fraud_warning.created / updated | warning | warning ID, payment, charge, explicit actionable and fetched fingerprint |
+| charge.dispute.created | dispute_opened | dispute ID, payment, charge, positive amount, currency, reason and open status |
+| charge.dispute.closed | dispute_closed | same identities and amount, with won/lost/warning_closed status |
+
+The existing four checkout policies and their projection remain unchanged.
+PaymentEvent stays comparable. ObjectID carries the setup, intent, refund,
+warning or dispute ID. PaymentID is the payment intent. CustomerID and MethodID
+identify the card setup. ChargeID selects the verified charge. Status, Reason,
+DeclineCode, Fingerprint, Brand, Last4, Created (provider event Unix seconds)
+and Actionable retain only provider facts. No team, credit value, local charge
+ID, attempt ID, or metadata field is accepted as authority.
+
+Signature, timestamp and configured event mode precede object decoding and
+provider access. Every non-checkout object must match the configured mode and
+carry a positive event creation time. Required references accept provider IDs
+or expanded objects. Card setup reads the payment method using the configured
+private API key and checks the exact method, customer, mode and card shape.
+Paid-card and warning events read the charge and check its exact payment-intent
+relation and mode before taking a fingerprint. Reads use fixed HTTPS Stripe
+collections, path-safe IDs, no redirects and the existing one-MiB JSON budget.
+Provider failure returns a safe unavailable error. No proof reaches settlement
+after a failed read. The provider has no SQL, ledger write or retry policy.
+The object forms follow Stripe's [setup](https://docs.stripe.com/api/setup_intents/object),
+[refund](https://docs.stripe.com/api/refunds/object),
+[warning](https://docs.stripe.com/api/radar/early_fraud_warnings/object) and
+[dispute](https://docs.stripe.com/api/disputes/object) contracts.
+
+W1b owns SettlePayment for these kinds. It must derive the team and local
+charge/attempt from committed provider identities, retain event-ID deduplication
+by payment mode, distinguish pending/failed refunds from completed reversals,
+and prevent several events for one refund from reversing twice. Card setup
+must retain stale-setup refusal. Warning-before-payment, refund-before-payment,
+dispute holds and closed-dispute outcomes keep the existing ledger rules.
+Unknown payments must never become metadata-selected grants. Checkout and
+payment-intent events for one payment must not credit it twice. W2's shared
+HTTP route forwards VerifiedPaymentEvent and acknowledges only after commit.
+The existing Store implementation refuses non-checkout kinds. No fallback to
+raw financial methods is added.
+
+ProvisionSpec gains Seed, excluded from JSON in both directions.
+ValidateProvisionSeed permits a supplied presentation only for
+ProvisionBootstrap and only in the strict swk_ reference encoding. W1 must call
+it in Issue and reject a supplied seed on every other origin.
+controller.BootstrapAdminIssuer declares
+EnsureBootstrapCapability(ctx, ProvisionSpec) (created bool, error).
+EnsureBootstrapAdminToken now accepts context, CredentialIssuer and raw seed.
+It fixes the unbound operator subject bootstrap:admin and grants only
+operator.tokens, operator.limits and operator.object_store. It forwards no
+caller clock and never calls the legacy token table. Empty input is a no-op.
+Missing BootstrapAdminIssuer returns policy_missing before any issuance.
+
+W1 must implement that interface as one gated Store.Issue transaction. Lock
+the deployment bootstrap gate, refuse a second admin credential, and store
+only the seeded presentation's digest under its indexed prefix. An existing
+seed is a no-op while live and must never be revived after revocation.
+Race and restart checks belong to that transaction. A configured seed refuses
+startup until this adapter exists. W2's tests use a fake transaction and do
+not claim durable once-only bootstrap evidence.
+
+EnableAuthFromStore always installs credential verification. It no longer
+consults ListTokens or opens legacy private routes when that read is empty or
+fails. The remaining legacy credential verifier still needs its final route
+cut. The controller's --require-auth readiness check consumes
+HasDeploymentAdministrator(ctx) (bool, error), refusing a missing reader.
+W1 must implement that read under its store clock with complete live ancestry.
+A deployment administrator is an unbound controller operator/service capability
+in the deployment scope with operator.tokens. The public health handler pings the opened
+database rather than calling the legacy run-list query. License-before,
+license-after and single-team HTTP properties all refuse anonymous private
+requests and report enabled authentication before any seed exists.
+
+Server.HTTP and EngineController.SyncLauncher were already implemented before
+this continuation. Their in-process tests pass. Local HTTP supplies shared
+API/dashboard handlers and consumes Wingd's verified peer context. Sync passes
+the authenticated authority and cloned observations to LauncherSyncReader,
+then strips bearer material from a copied response. W1 still must supply
+ReadLauncherSync and the local authority snapshot and mutation transactions.
+No native launcher or peer matrix cell is inferred from those component tests.
+
+### Legacy execution credential cut
+
+The legacy trigger and node execution route families, raw POST run events,
+claim-token router, runner-claim principal conversion, here-token issuance,
+direct node output transport and claim-specific log mutation handlers are
+removed. Final intake, plan, transitions, renewals and data operations keep
+their existing policy/transaction interfaces. No legacy credential fallback
+exists on these execution paths.
+
+The remaining business-route fallback matches a registered method before
+authentication. Missing paths and methods use PolicyRouter's shared error
+writer. Browser middleware likewise bypasses session lookup for missing
+methods and paths. The removed raw event method answers 405 because GET
+events still exists. PostgreSQL contention states 40001, 40P01 and 55P03
+map to the shared unavailable envelope with one-second retry advice on final
+engine operations. Database diagnostics remain private.
+
+Final child transport, claim-input/read-set transport, job log operations,
+debug resume and the old clients that still call retired paths remain
+integration work. Their policy rows stay declared. This cut does not supply
+their missing wire/transaction adapters or count them as acceptance evidence.
+See [the execution cut report](../W2-execution-cut-handoff.md).
+
+### OIDC claim hard cut
+
+POST `/api/v1/runs/{run}/oidc-token` now registers through PolicyRouter with
+OIDCMint/BindRun/LiveSensitive and RetryNever. It accepts only audience and
+returns OIDCTokenResponse. Machine roots, account credentials and bootstraps
+cannot mint. Missing/dead authority answers unauthenticated. Live authority
+without the grant or run binding answers forbidden. Minting has no legacy
+scope or claimed-run lookup fallback. Both old handlers are deleted.
+
+The local C2 `controller.OIDCReader` interface is Team() store.Team and
+ReadOIDCFacts(ctx, Authorized) (capability.OIDCFacts, error).
+WithOIDCReader supplies its resolver. The default requires Tenant to implement
+it and refuses missing adapters with policy_missing. No C1 signature changes.
+
+ReadOIDCFacts must use one store-clock transaction to recheck the complete
+live ancestry, awarded/delegated claim, oidc.mint grant, exact team/run binding,
+current holder/generation, cancellation and unit liveness. Derive the pipeline,
+ref, exact SHA, repository identity and original trigger from immutable intake
+and accepted seals, preserving them on retry/child lineage. Only verified App
+delivery facts may yield push, pull_request, release, create or delete and a
+positive repository ID. A PR ref is refs/pull/<number>/head even when its branch
+is main. A tag push keeps refs/tags/<tag>. Only a committed controller schedule
+may yield cron. Unverified/manual origins never gain an App event or repository
+ID. RunnerKind comes from persisted award/enrollment provenance, never request
+headers or the current runner process. The historical OIDC subject spellings
+remain runner, github-actions, user and service.
+
+Return Now and a finite NotAfter no later than every authority ancestor's
+expiry/revocation or binding deadline. Refuse an ended claim with a typed
+unauthenticated error, and leave backend diagnostics private. The HTTP adapter
+also checks the returned team/run and caps expiry by its authenticated leaf
+and binding. It passes only the requested audience to the signer. The existing
+RS256 subject grammar, key rotation, ten-minute default and per-claim 30-token,
+five-minute refill budget remain. The budget is replica-local overload control.
+Already issued provider tokens retain the accepted expiry residual.
+
+C1's production reader remains an integration requirement. Reading legacy
+Trigger/ClaimedRun rows would bypass the final capability boundary. Reading
+RunRow alone cannot supply the transactional live-authority ceiling and all
+verified original event/provenance facts. Those paths are not fallbacks.
+HTTP tests use committed-fact fakes and the real signer/verifier/client.
+
+### Browser login and transport identity
+
+GET and POST `/login` use PolicyRouter with AuthBrowserFlow. The bounded form
+requires same-origin proof, one CSRF cookie and one matching form token. It
+accepts one token, optional next and csrf_token. Unknown or duplicate fields,
+Authorization headers and duplicate session cookies fail. Only a live, unbound
+controller account capability can open a session. The existing
+CreateCapabilitySession transaction rechecks that parent and preserves its
+ancestry. The response handler ends the prior session and sets private cookies.
+The old admin-token/argon2 login and its middleware registration are deleted.
+Errors use the common envelope. GET verifies existing sessions without renewal.
+
+The local C2 interpretation follows C1's account-capability session contract.
+The form accepts account capabilities without requiring the retired admin scope.
+Deployment operator, machine, service and executable credentials cannot sign in.
+Account-session licensing stays the same. Direct provider sessions are the
+operator's own sign-in. A capability-parented session cannot acquire console
+powers through an operator account ID.
+
+The default authenticator selects console proof only when the matched route
+contains CredentialOperator. It reads the same committed account-session
+snapshot, checks licensing, absolute lifetime, direct ancestry and the current
+WithOperatorAccounts configuration, then projects CredentialConsole with only
+OperatorConsole. Other routes retain CredentialSession and member grants. The
+session hash, active team, account ID and lifetime are preserved for CSRF.
+BindNone has no tenant relation for console authority, so deployment targets do
+not become limited to the account's active team. Other bindings still use C1.
+C1's authority-bearing console mutation transactions remain required. The
+controller's proof projection does not implement those committing rechecks.
+
+WithPeerIdentity replaces WithPeerPrincipal. Its callback returns only the
+transport-verified local subject. It cannot supply grants, tenancy, ancestry
+or a credential class. Explicit headers and session cookies take precedence
+and never fall back to the peer. The shared AuthenticationReader receives the
+verified subject through CredentialLookup.Peer. Its snapshot and relational
+checker derive authority. The api.sock caller now supplies its kernel-verified
+uid through this interface. C1 does not yet implement that peer snapshot or
+transactional local authority. Component tests use the existing interfaces and
+fakes. Native Windows still refuses api.sock without SID verification.
+
+Real SQLite login and console HTTP tests cover successful sessions, narrowed
+grants, revocation, failed browser proofs, private errors, safe redirects,
+unsupported methods, operator configuration changes, cross-team console reads
+and capability-parent refusal. Generated form, console and peer properties
+cover forged proofs and transport selectors. No native credential matrix cell
+is claimed complete.
+
 ### Runner administration and financial service hard cuts
 
 GET and POST `/api/v1/runners/github` and DELETE
@@ -53,9 +255,9 @@ The eight credits.grant service routes for reversals, freezes, cards, card
 payments, warnings, card refunds, units and payment lookup are deleted, along
 with their handlers and wire types. EnsureCheckoutToken, ScopeCreditsGrant,
 requireServiceScope and credits-token startup loading/seeding are removed.
-The signed checkout callback remains the only automated HTTP settlement
-boundary. Card, refund, warning and dispute provider events still require a
-joint verified-event contract with C1. No legacy bearer callback survives as
+The signed provider callback remains the only automated HTTP settlement
+boundary. Its verified card, refund, warning and dispute contract is declared
+above. Their ledger settlement remains C1 integration work. No legacy bearer callback survives as
 an interim implementation. Existing store regressions retain their financial
 invariants. Their final provider-HTTP ports remain open.
 
@@ -81,10 +283,9 @@ rate limits retain Retry-After through the canonical error envelope. HEAD and
 unsupported methods return the shared 405.
 
 The link callback carries a verified code/state flow to its same-site completion
-page. It redeems no code and creates no session. Link start and completion still
-need their policy cutover and C1's durable nonce consumption. The final schema
-has no identity_link_states table although ConsumeIdentityLinkState uses it.
-No schema or nonce fallback is added here.
+page. It redeems no code and creates no session. Link start and completion use
+the named browser proof below. Durable nonce consumption and the final identity
+transaction remain C1 integration requirements.
 
 Eight HTTP tests use the real GitHub client, a fake provider transport and real
 SQLite session persistence. Properties generate invalid browser proofs and PKCE
@@ -182,7 +383,7 @@ Every nonempty registered value participates, including short values. Annotation
 and summary writes validate step membership, mask before limits.Record, and
 propagate delivery errors. No secret crosses a log frame as a registration message.
 
-`authentication_contract.go` declares AuthenticationReader and the authority,
+`authentication_types.go` declares AuthenticationReader and the authority,
 binding, expansion and result snapshots used by NewAuthenticator. Persistence
 receives the SHA-256 presentation digest, never the raw bearer. Presentation.Evidence
 carries decoded selectors and the exact body digest. Route matching supplies the
@@ -694,6 +895,60 @@ contract before their runtime can be restored. W2 retains no unaudited App
 mint path. The source Access consumer in W3 and client projection in W9 must
 consume the new credential response with their existing sealed source facts.
 
+### Identity linking and local HTTP composition
+
+POST `/auth/{provider}/link` and GET `/auth/{provider}/link/complete` use
+PolicyRouter's AuthBrowserFlow proof. Both select exactly one live session
+cookie without renewal. Authorization headers are refused. Only a direct
+provider session can link identities. Capability-parented sessions cannot.
+The existing ten-minute sign-in window and ten attempts per account per minute
+remain. Start requires one bounded form containing only csrf_token, matching
+the sole CSRF cookie and the selected session, with same-origin proof.
+
+State is MAC-bound to the selected account, session, provider, nonce, expiry
+and PKCE verifier digest. Completion checks the flow and state before entering
+the writer or provider. It consumes the nonce before redeeming the provider
+code, then commits only that provider's verified profile to the selected account.
+Success clears the flow and redirects to the sign-in settings page. Refusals
+return the canonical envelope. Provider diagnostics and private flow values
+enter neither responses nor logs.
+
+C2 declares capability.IdentityLink with Authority, AccountID, Provider, Nonce
+and ExpiresAt. Authority is the committed session digest, never its presentation.
+controller.IdentityLinkWriter has these methods:
+
+```go
+ConsumeIdentityLink(context.Context, capability.IdentityLink) error
+LinkAccountIdentity(context.Context, capability.IdentityLink, store.SignInProfile) (store.Identity, error)
+```
+
+WithIdentityLinkWriter supplies them. The default requires Store to implement
+the interface. Missing adapters return policy_missing. C1 must use its store
+clock and recheck direct session ancestry, account, provider, recent sign-in, expiry and authority inside both transactions.
+Consumption atomically records the unique nonce and its complete binding.
+Attachment locks that consumed binding, rejects completed or mismatched claims,
+requires the matching verified provider profile and preserves account email.
+It commits identity uniqueness checks and nonce completion together. A session
+revoked during provider exchange cannot attach an identity. Reopening and
+multiple replicas must preserve both consumption and completion. The old
+ConsumeIdentityLinkState and LinkIdentity calls are not production adapters.
+No C1 signature, schema or implementation changes in this cut.
+
+Server.HTTP() supplies wingd.LocalHTTP's API and dashboard handlers. It builds
+the final controller registrations once and excludes the legacy router fallback.
+The API's transport adapter reads only wingd.LocalPeer's verified connection
+identity, derives a local subject with LocalSubject and passes it through the
+shared authentication and binding interfaces. Explicit credential headers and
+session cookies retain precedence. Browser requests do not inherit socket
+identity. Nonlocal dashboard pages require their own live session independently
+of legacy bearer-auth configuration. Dashboard.Local selects the local pages.
+
+The runtime still owns election, store recovery, hosting, worker shutdown and
+request drain. C1 peer authentication snapshots and authority-bearing mutations
+remain required. Net-pipe HTTP tests use the real Wingd serving/drain path and
+fake committed peer facts. They establish handler composition and identity
+precedence, not native UID/SID or full local-runtime acceptance.
+
 ## Ownership
 
 `internal/capability` owns the credential vocabulary, issuance rules, route
@@ -799,8 +1054,9 @@ All capability names below are in `internal/capability`.
 | `apierr.Status` | Select the registry's HTTP status. |
 | `apierr.WriteHTTP` | Write the error envelope and Retry-After without plain-text fallbacks. |
 | `apierr.WriteJSON` | Write one JSON error line for CLI stderr. |
-| `controller.NewFilesystemDataSigner`, `FilesystemDataSigner.Sign`, `FilesystemDataSigner.Verify` | Sign and verify exact filesystem transfer constraints. The blob owner verifies uploaded bytes before recording a receipt. |
-| `controller.NewS3DataSigner`, `S3DataSigner.Sign` | Sign one configured bucket's GET or checksum/size-bound PUT without making a storage request. |
+| `blob.NewFilesystem`, `blob.NewS3` | Physical backends own object validation, transfer signing and byte verification. |
+| `controller.NewCloudFrontDataBackend` | Wrap S3 downloads with CloudFront for public-ingress requests. Direct requests and uploads retain the backend signer. Physical operations and log deletion remain on S3. |
+| `Server.WithS3Logs` | Configure the S3 bucket and namespace for retained log readers. |
 | `controller.PaymentSettler`, `Server.WithPayments` | Supply C1 settlement to the signed Stripe callback. The server registers `/webhooks/stripe` through `PolicyRouter` and passes only verified events to the store. |
 | `controller.Server.WithAuthorization` | Configure the shared verifier, bindings, transport identity and CSRF adapters before constructing the server handler. Missing adapters fail closed. |
 | `controller.RouteAuthorization`, `controller.Endpoint`, `controller.PolicyRouter` | Wire identity, decoding, CSRF, external proof and authorized handlers into the matched route. |
@@ -810,6 +1066,7 @@ All capability names below are in `internal/capability`.
 | `controller.SizingReader`, `controller.SizingStore`, `Server.WithSizingStore` | Supply tenant sizing reads and authority-bearing measurement transactions. Default reads use `Tenant.GetPipelineProfile`. Writes require the explicit adapter and fail closed when it is absent. |
 | `controller.CredentialInventoryReader`, `Server.WithCredentialInventoryReader` | Supply the existing tenant secret/git inventory reads with an authenticated-team check. |
 | `controller.CredentialRotator`, `Server.WithCredentialRotator` | Supply one tenant's authority-bearing atomic secret/git rotation. |
+| `capability.OIDCFacts`, `controller.OIDCReader`, `Server.WithOIDCReader` | Supply authority-rechecked sealed OIDC identity and its complete ancestry expiry ceiling. |
 | `controller.SourceAuditReader`, `Server.WithSourceAuditReader` | Supply one tenant's final committed source-release audit projection. |
 | `controller.CredentialWriter`, `Server.WithCredentialWriter` | Supply tenant credential mutations with committing authority rechecks and actor attribution. Missing adapters refuse writes. |
 | `controller.RunStatusFacts`, `EngineController.ReadRunStatus` | Supply one committed snapshot, complete attempt history and validated log subjects for the authorized team/run. Verified engine policy supplies notices. The default uses Tenant.ReadRunView. No C1 signature changes. |
@@ -1173,7 +1430,7 @@ controller integration. None of those parked findings is declared closed by
 these boundary tests.
 
 The filesystem transfer URL signs method, key, size, SHA-256 and expiry with
-HMAC-SHA256. Its upload path contains an opaque encoding of the staging key.
+HMAC-SHA256. Its upload path names the server-issued ticket. W7 owns the signer and transfer verifier. Controller-local duplicate signer types are removed.
 The blob owner retains the separate upload/receipt identity and commits only
 after checking the bytes. S3 uses the same constraints with SigV4. Data GETs
 are bounded by `limits.DataDownloadURLTTL`, and PUTs by
@@ -1344,7 +1601,7 @@ The expansion cut touches shared `internal/apiroutes` code/tests so generated
 references discover the actual engine endpoint declaration. It updates
 `api/openapi.yaml`, `docs/api-reference.md`, `docs/auth.md`, `CHANGELOG.md`
 and their embedded copies. The five replaced adapter stub bodies and their
-comments remove 31 lines from `engine_contract.go`. No legacy credential
+comments remove 31 lines from `engine.go`. No legacy credential
 subsystem was deleted in this slice.
 
 Expansion/delegation verification passes the whole-repository build, scoped
@@ -1456,16 +1713,18 @@ controller suite, native transports and Sparkwing pipelines were not run.
 Seven reporting endpoints use `PolicyRouter`: job and step annotations and
 summaries, plus step start, finish and skip. Their paths use `/jobs/{job}`.
 The old `/nodes/{nodeID}` registrations and seven handler bodies are deleted.
-The existing Go client methods use the new paths. Bodies retain `step_id`,
-`message`, `markdown` and step-finish `status`. Annotations also accept the
-C1 level, file and line fields. Finish accepts an optional shared inner error.
+Annotation and summary bodies retain `step_id`, `message` and `markdown`.
+Annotations also accept the C1 level, file and line fields. Step lifecycle
+uses the shared StepReportRequest and StepRecorded contracts described below.
 
 The adapter passes tagged authority and holder/generation fences to C1's
 existing `WriteAnnotation`, `WriteSummary` and `RecordStep` signatures through
 `RunTransactions`. Job claims supply their bound attempt. Trigger owners and
 publishers load the persisted job attempt without replacing their own actor
-or owner fence. An unstarted job has no reportable step attempt and returns
-`illegal_transition`. The store owns timestamps, replay and the final recheck.
+or owner fence. The captured source_attempt must match that attempt before
+RecordStep runs. An unstarted job returns illegal_transition. Optional reported
+timestamps retain nanoseconds. The store owns timestamp defaults, replay and
+the final recheck.
 Annotations and summaries enforce `limits.AnnotationBytes` without truncation.
 
 The HTTP tests cover all three allowed authority alternatives, cancellation,
@@ -1474,8 +1733,8 @@ transaction refusals, malformed requests, exact text bounds, method refusals
 and removed paths. A request-body checkpoint changes the fixture generation
 after authentication. The original fence reaches the transaction and its
 refusal reaches HTTP. This is a fake-backed boundary proof, not a database
-race proof. The seven existing client methods also reach these handlers over
-an in-memory HTTP transport. The old standalone cancellation test is replaced
+race proof. Annotation/summary clients and the typed engine step writer reach
+these handlers over an in-memory HTTP transport. The old standalone cancellation test is replaced
 by the new step-finish case. No additional full T1 scenario or native placement
 cell is claimed complete.
 
@@ -1992,8 +2251,8 @@ installs the store's SessionKeyCipher alongside the plan-secret opener.
 W1 owns sealed key persistence. No second key or plaintext setting is added.
 The session renewal endpoint checks the configured absolute lifetime before
 renewing and removes a session that has exceeded it or has a future creation
-time. Console and local peer identity, roleless OAuth, and absolute-lifetime
-enforcement on other session consumers remain separate work.
+time. Default console-session proof and the verified peer transport adapter are implemented above.
+Roleless OAuth, C1 peer authority and remaining legacy session consumers stay open.
 
 `BindingState.CancelReason` is a local C2 snapshot addition. W1 must populate
 it from the committed cancellation intent, with an existing job-specific
@@ -2052,27 +2311,25 @@ Amendment 1 ratifies the interpretations below. They are not approval gates.
    audit transaction. C2 supplies no alternate SQL implementation. Persistent
    root, delegation, claim and exchange entry points must reach `Store.Issue`.
 5. **Controller cutover.** The running `Server` uses `PolicyRouter` for the
-   Stripe callback and migrated engine, ledger-read and operator endpoints. Other routes retain legacy auth and
-   registrations. Wire final handlers and decoders to `PolicyRouter`, provide
+   Stripe callback and migrated engine, ledger-read and operator endpoints. All business routes now register through PolicyRouter. The legacy token-table verifier, caches, route fences and private mux are removed. Wire final handlers and decoders to `PolicyRouter`, provide
    account/console/verified-local identity and CSRF adapters, then delete the
    old auth stack and handler authorization. Final route-inventory and
    handler-policy lint checks must cover those actual registrations. W3/W4
    must provide node-host process facts through the same verifier boundary.
 
-6. **Card and dispute events.** The existing card setup, off-session charge,
-   refund, fraud warning and dispute callback routes are outside the four
-   checkout-only `PaymentEventPolicies`. C1 has no verified-event contract for
-   those outcomes. Extend that contract before replacing those remaining
-   service-bearer routes. No new event kinds or settlement semantics were
-   inferred here. The old external checkout service also needs to send paid
-   callbacks to `/webhooks/stripe` and commit checkout mode/currency through C1.
+6. **Card and dispute settlement.** C2 verifies the non-checkout provider
+   kinds listed above. C1 must settle them through SettlePayment against
+   committed billing records. The old service-bearer routes are deleted.
+   The external checkout service must use `/webhooks/stripe` and commit
+   checkout mode/currency through C1.
 
-7. **Console mutation rechecks.** Existing grant, trust, hold, deletion,
-   waitlist, credit-settings and deployment-settings store methods do not accept `AuthorityRef`.
-   C1 must replace those signatures with an authority-bearing transaction
-   boundary that rechecks revocation and derives the audit actor. The HTTP
-   policy gate is implemented, but it cannot establish that transaction
-   guarantee. No C1 signature was changed in this cutover.
+7. **Console mutation rechecks.** The console's nine business mutations now use
+   `controller.ConsoleWriter`, receiving the verified `Authorized` value. A
+   missing adapter returns `policy_missing`. C1 must implement the direct-session,
+   revocation and actor checks inside each committing transaction. The prior
+   raw store methods are no longer HTTP fallbacks. Deployment-settings writes
+   still need their separate authority-bearing contract. No C1 signature was
+   changed in this cutover.
 
 8. **Local recovery.** The retired orphan-reconciliation HTTP endpoint and its
    client are deleted. Local maintenance uses the internal store boundary.
@@ -2097,4 +2354,542 @@ C1's schema stores node identifiers internally while wire JSON uses job_id.
 Public node-host output paths likewise use `/node/v1/jobs/{job}/output`.
 There are no compatibility aliases or runtime migrations.
 
+### Account discovery read cutover
+
+The three account discovery reads under `/api/v1/me` use PolicyRouter and the
+existing account-session policy. The account subject comes from Authorized.
+The read-only AccountReader is a subset of existing Store reads and defaults
+to that store. It cannot renew or switch sessions. GET /me reports the team in
+the authenticated session and no longer changes it from Account.ActiveTeam.
+The legacy registrations and handler identity checks are removed.
+
+Credit-settings reads use the existing member runs.read row. Billing
+availability follows authentication and authorization. No foreign contract
+signature or persistence implementation changed. Roleless account authority
+remains a C1 integration gap. The new HTTP tests use both fake readers and
+real SQLite account sessions. Native credential matrix cells remain open.
+
+Self-service DELETE /api/v1/me and its confirmation/freshness gate are removed.
+Account deletion is console-only under the existing operator account path.
+A generated retired-route property checks that the old presentation cannot
+mutate state. The last-owner conflict is ported through the real console route.
+C1 DeleteAccount still needs the final-schema transaction and authority-bearing
+commit check. No legacy token-table fallback is provided.
+
+### Account mutation cutover
+
+POST `/api/v1/me/active-team`, POST `/api/v1/teams`, POST
+`/api/v1/invitations/{invitation}/accept` and DELETE
+`/api/v1/me/identities/{provider}` use PolicyRouter's account-session policy.
+Cookie and Session-header mutations require the selected session's CSRF proof.
+They neither renew the session nor use the legacy Principal. Account, session
+and current team come from Authorized. Query and header selectors grant nothing.
+Creation normalizes and validates its slug. Team selection permits existing
+team names, including default, and requires membership at commit.
+
+C2 declares controller.AccountWriter and Server.WithAccountWriter. Its methods
+are SelectAccountTeam(ctx, Authorized, Team) error,
+CreateAccountTeam(ctx, Authorized, TeamInfo) (TeamInfo, error),
+AcceptAccountInvitation(ctx, Authorized, invitationID)
+(InvitationAcceptance, error), and UnlinkAccountIdentity(ctx, Authorized, provider)
+(sessionsEnded, error). Each transaction must reread the hashed session,
+its complete ancestry and account under the store clock. It must refuse changed
+or ended authority and derive the account from that session. Team creation and
+invitation acceptance commit the existing account/membership/admission changes,
+active team and selected session's team together. Selection checks membership
+and commits both active-team records together. Retain the existing creation
+limits, invitation email/expiry/use rules and audit facts. Unlinking retains the
+ten-minute recent-sign-in rule, protects the last sign-in method and ends the
+account's other sessions while preserving the selected session and
+GitHub App installations. Its freshness check belongs inside that transaction.
+
+The default uses Store only if it implements AccountWriter. Existing raw
+account methods do not satisfy it. Missing adapters return policy_missing.
+No old method fallback, SQL copy, new clock or schema is added. C1 must provide
+these transactions before successful production mutations are enabled. HTTP
+properties exercise real SQLite authentication and CSRF with fake transactions.
+They prove transport behavior and private errors, not atomic persistence or
+native credential matrix cells. Closed invitations use canonical conflict.
+
+### Concurrency route cutover
+
+The eight `/api/v1/concurrency/{key}` registrations are removed. Their C2
+replacements are `/api/v1/queue/groups/{group}` and its `acquire`, `heartbeat`,
+`release`, `cancel-waiter`, `holder`, `resolve` and `force-release` operations.
+They use PolicyRouter and the existing access alternatives. Acquire and resolve
+use sensitive liveness. Heartbeat, release, cancellation and holder reads use
+reporting liveness. Group reads allow members or a claim bound to its declared
+group. Force release requires member `runs.control`. Local and deployment
+administrators cannot bypass a claim's binding.
+
+The wire uses `job_id`, `leader_job_id` and `origin_job_id`. Group reads use
+controllerwire.QueueGroup, including one-based waiter positions and numeric
+cancel_timeout_ns. The existing Go client sends the final paths and shapes. Its duplicate
+ConcurrencyState and StateWaiter wire types and duration parser are removed.
+The group read returns the validated shared QueueGroup.
+The orchestrator converts group positions to its store's zero-based form.
+The legacy runner, here and Actions slot-route permissions are removed. Hosted
+transport retries use the final paths and refuse automatic acquire replay.
+Client domain errors retain the canonical apierr.Error alongside the existing
+store sentinel. A canonical rate-limit error is never an admission result.
+
+C2 adds Target.SlotKey and Target.SlotHolderID. The decoder preserves the exact
+selected group, holder and body/query run and job. ResolveTarget supplies the
+authenticated generation. Holder-only calls and group reads use the bound run
+and job as the proposed identity. This does not establish that a stored holder
+belongs to that identity. BindingChecker must resolve the selected holder and
+declared group from persistence before granting access. Duplicate query values,
+retired node_id selectors, unknown JSON fields, trailing JSON and invalid or
+overflowing durations are refused. The existing one-MiB request budget remains.
+
+C2 declares controller.ConcurrencyStore and Server.WithConcurrencyStore. Each
+resolved adapter must report the authorized team. Its methods are:
+
+- AcquireAuthorizedSlot(ctx, Authorized, store.AcquireSlotRequest)
+  (store.AcquireSlotResponse, error).
+- HeartbeatAuthorizedSlot(ctx, Authorized, group, holder, lease)
+  (time.Time, superseded bool, error).
+- ReadAuthorizedHolder(ctx, Authorized, group, holder)
+  (store.ConcurrencyHolder, error).
+- ReleaseAuthorizedSlot(ctx, Authorized, group, holder, outcome, outputRef,
+  cacheKeyHash, cacheTTL) error.
+- ReadAuthorizedGroup(ctx, Authorized, group) (*store.ConcurrencyState, error).
+- ResolveAuthorizedWaiter(ctx, Authorized, group, run, job, cacheKeyHash,
+  leaderRun, leaderJob, bypassRead) (store.WaiterResolution, error).
+- CancelAuthorizedWaiter(ctx, Authorized, group, store.NodeRef) (bool, error).
+- ForceReleaseAuthorizedSlots(ctx, Authorized, group)
+  ([]store.ConcurrencyHolder, error).
+
+These transactions own the store clock and must recheck full live authority,
+tenancy, holder and generation, the sealed group or memo namespace and policy,
+and every referenced output or leader edge. Inheritance cannot join another
+job's holder. Supplied capacity and cost cannot replace the accepted declaration.
+Leases cannot exceed effective authority or work deadlines. Release and force
+release include notification and waiter promotion in their committing transaction.
+A cancelled claim keeps reporting rights without reacquiring capacity. Holder
+continuity and capacity accounting follow C1's existing frozen contract.
+The default uses Tenant only if it implements this interface. There is no call
+to the old unfenced methods when it does not.
+
+C1's current BindSlotOfBoundNode checker still refuses missing resolved selectors.
+W1 must consume SlotKey/SlotHolderID and implement the transaction interface.
+The HTTP properties use committed-fact and transaction fakes. They prove target
+transport, policy selection, cancellation classes and safe failure. They do not
+close native group/memo declaration, cross-team leader, lease-continuity or
+transaction-race acceptance cells. Those integration obligations remain open.
+
+### Typed step handoff integration
+
+The controller consumes controllerwire.StepReportRequest on start/finish/skip.
+State selects the path through the shared Action validator. source_attempt
+must be positive and must equal the authenticated job attempt or the current
+persisted attempt selected for an owner or publisher. A mismatch returns
+lock_held before writing. C1 repeats the derived AttemptIdentity and authority
+checks when committing RecordStep. An error contains masked text, bounded by
+the existing ErrorBytes limit. Optional timestamps retain nanoseconds.
+Success returns HTTP 200 and StepRecorded{Recorded:true} only after persistence.
+The two old private request structs and their separate decoder are deleted.
+
+TestEngineTypedStepHTTP connects W9's actual typed client to W2's actual
+registrations with a fake transaction adapter. The generated
+TestEngineTypedStepAttemptProperty varies job/owner ordinals and timestamps.
+A delayed report cannot be attached to a newer attempt and does not reach the
+writer. Existing reporting authority, cancellation, body-race and malformed-body
+tests now use the shared contract. The earlier untyped start/status/error-object
+bodies are rejected.
+
+The retained StateStoreOld runtime still requires Client.StartNodeStep,
+FinishNodeStep and SkipNodeStep. Their signatures carry no captured ordinal.
+They remain an unfinished legacy caller cut, not a fallback accepted by these
+HTTP routes. W3 must retire that runtime or move those callers to the typed
+Controller.RecordStep boundary. No ordinal is inferred by reading a later row.
+No W1, W3 or W9 contract signature changes in this integration.
+
+
+### Schedule and review credential cut
+
+The ten schedule routes register under `/api/v1/schedules`. The crons family
+and POST disarm route are removed. Existing controllerwire ScheduleRepoRequest,
+ScheduleOverride, ScheduleOverview, DetailView, ScheduleEnvelope, ScheduleRun
+and ScheduleDeletion are the transport types. List reads honor all and next;
+detail reads honor fires and next, including explicit zero. Override pointers
+preserve empty zones, zero catch-up and empty arguments.
+
+C2 declares ScheduleWriter with these exact methods:
+
+- Team() store.Team
+- ReplaceAuthorizedSchedules(context.Context, capability.Authorized, controllerwire.ScheduleRepoRequest) ([]string, []string, error)
+- DeleteAuthorizedSchedules(context.Context, capability.Authorized, string) (int, error)
+- PauseAuthorizedSchedule(context.Context, capability.Authorized, string, bool) (string, error)
+- OverrideAuthorizedSchedule(context.Context, capability.Authorized, string, *controllerwire.ScheduleOverride) (string, error)
+- RunAuthorizedSchedule(context.Context, capability.Authorized, string, string) (string, string, bool, error)
+- DeleteAuthorizedSchedule(context.Context, capability.Authorized, string) (string, bool, error)
+
+Replace returns stored IDs and withdrawn names. Pause/override return the
+resolved ID. A nil override resets the edit. Run returns schedule ID, run ID
+and replayed; its final argument is the request key. Delete returns the resolved
+ID and whether it was deleted. Team is checked before any writer call.
+
+W1's adapter must use the store clock, recheck complete authority ancestry,
+current membership, runs.control, exact tenant and repository authority in the
+committing transaction. Resolve names within that tenant. Derive all row IDs,
+team, armed-by, verified GitHub identity, cursor and timestamps. Retain the
+existing interval, per-repository and per-team schedule limits. Replace the
+whole declared set atomically, preserving existing state and overrides and
+withdrawing omitted declarations. Validate effective override cadence and
+compute its next due instant in that same transaction. Run-now uses final
+intake, immutable original source facts, current admission/billing guards and
+transactional idempotency. The HTTP adapter never calls legacy admitTrigger,
+ArmPushed, Pause, RunNow or the old unguarded write methods.
+
+C2 declares RunControlWriter with these exact methods:
+
+- Team() store.Team
+- CreateAuthorizedDebugPause(context.Context, capability.Authorized, string, string, time.Time, string) error
+- ResolveAuthorizedApproval(context.Context, capability.Authorized, controllerwire.ApprovalDecision) (controllerwire.ApprovalResult, error)
+
+Debug arguments after Authorized are job ID, reason, optional expiry and replay
+key. W1 rechecks live member/local runs.control, exact run/job ownership and
+current lifecycle; it derives pause timestamps and release fields. Approval
+resolution rechecks approvals.write and derives the approver from the committed
+actor. Human decisions accept approved or denied; owner timeout is not a public
+caller-selected decision. Both operations commit masked text, state/events and
+request replay together, refusing a changed body under an old key.
+
+W2 registers both writes through PolicyRouter. Debug accepts job_id, reason and
+expires_at. Approval accepts resolution and comment and returns ApprovalResult.
+Both need one nonempty replay header. The raw approval-request route and its
+handler are deleted. Gate creation belongs to the run owner. Approval read
+projections use the public controllerwire Approval with job_id.
+
+WithScheduleWriter and WithRunControlWriter supply the local C2 adapters. The
+default requires Tenant to implement them and refuses missing or wrong-team
+adapters with policy_missing. W2 has no new SQL or substitute issuer. Tests use
+transaction fakes; no real schedule intake or review-transaction integration is
+claimed. Existing unfenced Store/Tenant APIs are not production adapters.
+
+Ten team/schedule reads and API metrics also moved off the legacy verifier.
+They select tenants from Authorized, with private infrastructure errors.
+Billing availability follows authentication. Metrics uses operator.limits or
+console policy, while the dedicated listener retains its network boundary.
+Controller endpoint groups register together once, so one shared PolicyRouter
+owns every method on a path. Discovery follows those actual endpoint calls.
+
+See the [business continuation](../W2-business-cut-handoff.md) for older test ports and the [final-route continuation](../W2-final-routes-handoff.md) for transaction integration and retired verifier callers.
+
+
+### Final team, App and billing route cut
+
+All seventeen formerly legacy registrations use PolicyRouter. Team and App
+configuration keep their declared member grants. DELETE /runs/{run} resolves
+the persisted team and requires runs.control. Billing availability is checked
+after authentication. Invitation creation and all three billing-page POSTs
+require exactly one nonempty Idempotency-Key. Unknown body fields are refused.
+
+C2 declares TeamWriter, GitHubAppWriter and BillingWriter in their real route
+files. WithTeamWriter, WithGitHubAppWriter and WithBillingWriter resolve them
+for the selected team. Their Team must match Authorized.Target.Team. The
+default requires Tenant to implement the corresponding interface and refuses
+missing adapters. There is no call to an unfenced legacy method.
+
+Every mutation below must recheck complete live authority and membership using
+the store clock in its committing transaction, deriving the team and audit
+actor. Keep current product limits and refusal semantics. The exact interfaces
+are:
+
+```go
+type TeamWriter interface {
+	Team() store.Team
+	RenameAuthorizedTeam(context.Context, capability.Authorized, string) (store.TeamInfo, error)
+	DeleteAuthorizedTeam(context.Context, capability.Authorized) (store.TeamDeletion, error)
+	CreateAuthorizedInvitation(context.Context, capability.Authorized, string, store.Role, string) (store.Invitation, error)
+	DeleteAuthorizedInvitation(context.Context, capability.Authorized, string) error
+	SetAuthorizedBuildTrust(context.Context, capability.Authorized, bool) error
+	DeleteAuthorizedRun(context.Context, capability.Authorized) error
+}
+```
+
+```go
+type GitHubAppWriter interface {
+	Team() store.Team
+	UnbindAuthorizedGitHubInstallation(context.Context, capability.Authorized, int64) error
+	PutAuthorizedGitHubTrigger(context.Context, capability.Authorized, store.GitHubAppTrigger) (store.GitHubAppTrigger, error)
+	DeleteAuthorizedGitHubTrigger(context.Context, capability.Authorized, int64, string) error
+	PutAuthorizedGitHubAutomation(context.Context, capability.Authorized, store.GitHubAppAutomation) error
+	DeleteAuthorizedGitHubAutomation(context.Context, capability.Authorized, int64) error
+	SetAuthorizedGitHubExtraRepos(context.Context, capability.Authorized, string, []string, map[string]int64) ([]string, error)
+}
+```
+
+```go
+type BillingWriter interface {
+	Team() store.Team
+	PrepareAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPageKind, int64, string) (capability.BillingPage, error)
+	CompleteAuthorizedBillingPage(context.Context, capability.Authorized, capability.BillingPage) error
+	RecordAuthorizedBillingPageFailure(context.Context, capability.Authorized, capability.BillingPage) error
+	SetAuthorizedSpendBudget(context.Context, capability.Authorized, int64) error
+}
+```
+
+Team rename preserves slug identity. Deletion retains last-team, held-team,
+debt and checkout guards. Invitation creation owns role/email/expiry/use rules,
+existing email budgets and durable request replay. Build trust never comes
+from repository code. Run deletion verifies exact ownership and lifecycle,
+commits deletion before external cleanup, and permits cleanup retry. Physical
+log cleanup addresses the run prefix rather than relying on removed row indexes.
+
+App writes must recheck installation ownership, suspension and verified numeric
+repository identities. The controller resolves GitHub facts before mutation.
+Actor fields are not caller-controlled. Extra repository slugs and numeric IDs
+commit together through SetAuthorizedGitHubExtraRepos. The former two separate
+raw writes are removed. Automation consent is checked again at commit after
+provider discovery. Unbind and deletion are tenant-scoped.
+
+BillingPageKind and BillingPage live in internal/capability/billing_pages.go
+so persistence can consume them without importing controller. The three kinds
+are credits, card and recovery. PrepareAuthorizedBillingPage locks current
+billing standing, checks card/trust/budget/purchase/balance and deletion guards,
+and derives reservation ID, customer, email, charge/attempt, amount and expiry.
+Its amount argument is the requested cents only for credits; zero for the
+other two. It commits one immutable reservation and replay identity for the
+exact caller, team, kind and request. A changed request under a key conflicts.
+A completed replay returns its recorded URL after rechecking live authority.
+
+The provider runs outside the transaction and receives ReservationID as key.
+Card setup also receives it as setup_id. CompleteAuthorizedBillingPage rechecks
+live authority and the exact committed reservation and saves the provider ID,
+URL and bounded expiry. It cannot replace another operation's facts or extend
+a reservation. RecordAuthorizedBillingPageFailure records the failed delivery
+without erasing its key or permitting a second financial reservation after an
+ambiguous provider failure. Settlement uses the verified provider callback and
+committed billing record. SetAuthorizedSpendBudget retains current budget
+validation. The checkout service must make key/setup_id durable and idempotent.
+W1/W1b and that service supply these integrations. W2's fake-backed properties
+establish HTTP, authority forwarding and provider order, not ledger persistence.
+
+The legacy controller Authenticator, its caches and enable/configuration APIs,
+requireScope, here/Actions route fences, tenant route table and browser API
+cookie middleware are deleted. Remaining Principal consumers belong to browser
+page/provider flows and old unregistered runtime helpers. Their remaining cut
+is listed in W2's report. No native credential-matrix cell is closed here.
+
+
+## Browser App connection and console committing adapters
+
+The seven browser App routes register through PolicyRouter. Start, picker,
+selection and completion verify the selected live session, current active-team
+`team.admin`, exact session account/team and form CSRF before reaching a handler.
+They reuse the canonical team-administration access alternative. Setup and
+callback verify signed state, its expiry, the browser verifier and exact state
+return. Duplicate flow/session/CSRF cookies and repeated form fields are refused.
+The retired browser Principal lookup and standalone form middleware are deleted.
+
+C2 declares the following local interface in browser_github_app_routes.go.
+
+```go
+type GitHubConnectWriter interface {
+    Team() store.Team
+    LinkedGitHubSubject(context.Context, capability.Authorized) (string, error)
+    ConsumeGitHubConnect(context.Context, capability.Authorized, string, time.Time) error
+    BindAuthorizedGitHubInstallation(context.Context, capability.Authorized, store.GitHubAppInstallation) (store.GitHubAppInstallation, error)
+}
+```
+
+`WithGitHubConnectWriter` resolves it for exactly the authorized team. Missing or
+wrong-team writers fail before provider access. C1 rechecks live session ancestry,
+current owner membership, exact team and account at each transaction. The linked
+subject read is authority-bearing. Consume uses the store clock, refuses expired
+or consumed nonces, commits consumption before code redemption/provider requests,
+and leaves failed provider attempts consumed. Bind rechecks that the linked
+GitHub subject still equals GitHubUserID, derives ConnectedBy from authority,
+validates provider installation facts and atomically refuses foreign ownership.
+The server performs the provider user/admin check and passes verified facts.
+No raw AccountIdentity, nonce-consumer or installation-bind fallback remains.
+
+C2 declares ConsoleWriter in console_writes.go. All methods receive context and
+Authorized before their operation fields. Its exact methods are ConsoleGrantCredit
+(CreditGrantRequest to CreditGrantResult), ConsoleSetBillingTrust
+(BillingTrustChange to BillingStanding), ConsoleFreeze (reason to TeamCreditFreeze),
+ConsoleUnfreeze (hold and reason to TeamCreditFreeze), ConsoleDeleteAccount
+(to AccountDeletion), ConsoleDeleteTeam (to TeamDeletion), ConsoleApproveWaitlist
+(account IDs, oldest and replay key to []Account), ConsoleSetCreditSettings
+(CreditSettingsUpdate to CreditSettings), and ConsoleUnbindGitHubInstallation
+(installation ID to Team). Each also returns error. WithConsoleWriter injects it.
+The default discovers it only on Store.AsOperator and refuses its absence.
+
+C1 rechecks the hashed direct account-session authority with no capability parent,
+current configured console authorization and operator.console inside every write.
+The committing adapter owns the trusted configured-operator gate. Derive all audit
+actors from that authority, use the store clock, select the target from Authorized,
+and preserve the existing business validation, ledger deduplication and audit effects.
+DeleteAccount resolves an ID or unique email selector inside its transaction,
+retaining ambiguous-email, last-owner and money-in-flight conflicts. Unfreeze with
+an empty hold releases only operator holds. An unknown explicit hold is not_found.
+Freeze and unfreeze return the committed freeze projection. Credit settings update
+atomically. App unbind resolves installation ownership inside its transaction.
+Waitlist approval commits one selected batch and its replay record together,
+rejects a changed body under the same key, and returns only newly admitted accounts
+for notification. A repeated completed request never selects the next oldest batch.
+Errors produce no approval notification. W1 supplies these transactions. C2 tests
+use fakes and do not prove the persistence rechecks.
+
+TestGitHubBrowserConnectionAuthorityProperty and StateProperty generate hostile
+selectors, authority, cookie, form and signed-state cases. ProviderAndReplay runs
+start, setup, callback, picker, selection and completion through actual Server HTTP
+with a fake provider and transaction writer. CommitRefusal and RequiresTransaction
+cover authority races, safe errors and missing adapters. ConsoleWriteHTTPAuthorityProperty
+covers all nine actual writes, forwarding the authority and target, refusal before
+a writer, committing conflicts, private failures and missing transactions. Existing
+console executable acceptance now injects an explicit store-backed transaction fake.
+The old TestSettleFinishedNodeClearsTheWindowForAnUnmeteredFinisher is retired with
+its dead helper. Store's TestMeteredUnitNodeLifecycleUsesImmutableAward,
+SettlementFailureRollsBackResult and StaleReportCannotSettleReplacementProperty
+retain the immutable-billing, atomic-finalization and stale-holder invariants.
+
+## Final credential helper and reporting cut
+
+The legacy controller Principal, context accessor, HasScope and Scope constants
+are deleted. No production handler reads the old context. Tenant, egress and
+runner-budget wrappers that depended on it are removed. Policy-authorized
+handlers receive Authorized, and internal lifecycle reads select their team
+explicitly. Live-log append/read HTTP handlers and LiveLogRead are deleted.
+Dashboard log streaming retains its in-memory reader.
+
+The final metrics GET and POST routes and usage POST route are registered.
+MetricWriter declares Team, WriteMetric(ctx, Authorized, MetricSample) and
+WriteUsage(ctx, Authorized, NodeUsage). W1 implements it on Tenant. Each write
+rechecks ancestry, current membership, exact tenant/job and the selected route
+alternative inside its transaction. Claim and owner reports must retain their
+current holder/generation and attempt fences. Publication cannot write to another
+run. Metric kinds, nonnegative resource values, interval CPU-time constraints,
+timestamps and bounded usage values are validated before calling the writer.
+Metric-limit errors return the canonical rate_limited code. Missing or foreign
+writer adapters return policy_missing. The raw metric and usage writers are not
+HTTP fallbacks. The handler and client tests use explicit transaction/transport
+fakes. The production transaction and replay integration remain W1 work.
+
+The usage report contract still needs W9/W1 coordination: the retained client
+sends one additive observation per completed process, but the body has no process
+report identity. Two legitimate identical observations cannot be distinguished
+from exact-body retries by the WriteUsage inputs. W2 has not changed that foreign
+wire shape or claimed durable replay safety. W9 and W1 must settle the identity
+contract before connecting a production usage writer. Omitted metric timestamps
+also need a persisted receipt-time/replay rule. The default path refuses missing
+writers rather than using the legacy additive writes.
+
+OperatorSettingsWriter declares WriteComputeLimits, WriteSignUpSettings,
+WriteStorageSettings, WriteStorageQuota and WriteStorageAllowance. Every method
+receives Authorized. W1 supplies these methods on Operator. Recheck current
+ancestry, deployment grants or the configured direct-console-session gate inside
+the committing transaction. Never accept an actor from the body. Derive target
+teams from Authorized and resolve team existence inside quota transactions.
+WriteSignUpSettings takes SignUpSettingsChange, preserving omitted patch fields.
+It validates and commits all supplied mode/limit changes and their audit together,
+using the store clock. Quota writes preserve allowance and return the committed
+projection. Allowance writes preserve other quota fields. Any failed validation,
+authority check or write rolls back the whole request. Missing adapters return
+policy_missing. The raw settings methods are no longer HTTP fallbacks.
+
+Request budgets wrap actual policy handlers after authorization. Their keys use
+the verified team/authority and holder. Only the initial root request may supply
+a runner identity header. A bound holder cannot multiply its heartbeat budget by
+changing headers. Empty final claim responses spend the polling budget, and an
+award clears idle advice without spending it. No new limit or default was added.
+Egress concurrency failures use the canonical rate_limited envelope and a named
+reason in error.details. Audit identifiers use the final run/job path names, and
+successful empty claims are skipped without the retired offer header.
+
+TestServerPolicyConsoleUsesDirectSessionAndConfiguredGate exercises the default
+console adapter with a real hashed SQLite account session, encrypted CSRF key,
+current reader membership, configured operator account and a fake committing
+writer. Its property varies selectors, operator configuration, CSRF, explicit
+presentation and origin. Roleless console sessions and the production commit gate
+remain W1 integrations. Existing peer transport properties remain fake-backed.
+ReadAuthentication still refuses CredentialPeer, and C1 has no trusted local
+mutation-authority representation. W2 has not fabricated a persisted credential
+or a permissive local fallback.
+
+The implemented declarations now live in capability/authentication_types.go,
+capability/management.go and controller/policy.go, engine.go and data.go. Their
+former *_contract.go files are deleted. W9's client declarations are unchanged.
+
 <!-- design:end -->
+
+## Signing implementation ownership
+
+The physical ObjectBackend owns filesystem/S3 validation and signing. The
+controller's CloudFront adapter embeds S3 and delegates to its Sign method before
+replacing an ingress GET URL. It uses the same validated key, digest, size and
+expiry. PUTs and direct requests retain the S3 signature. Ingress selection travels
+in a private request context and grants no object authority. No foreign interface
+changed. W1 data-authority, metadata and charging composition remains required.
+
+
+## Runner observation cutover
+
+`Server.WithRunnerInventory` supplies the tenant-scoped `RunnerInventoryReader`:
+`Team() store.Team` and `ReadRunners(context.Context) (capability.RunnerSnapshot, error)`.
+The snapshot types live in `internal/capability/runners.go` so persistence can
+implement the reader without importing the controller.
+`RunnerSnapshot.Now` is the store clock for the same snapshot as its `Runners`.
+Each `RunnerObservation` carries its `Team`, granted `nodeproto.RunnerIdentity`,
+location, last accepted observation time, active job references, enrolled maximum
+concurrency and optional `RunnerHeadroom`. Headroom carries cores, memory bytes,
+queue depth and the store's accepted `ObservedAt` time.
+
+W1 implements this read on Tenant. Resolve live enrollment and complete ancestry,
+then join accepted polls, renewals and current awards by their stored authority.
+Use the award's immutable runner identity for cloud/here activity. A display name,
+holder string or caller label cannot select or merge authority. Keep distinct
+roots distinct even if their names match. Return only this tenant's rows and
+current same-team job references. Exclude expired, revoked or replaced authority.
+Neither a lease deadline nor a caller-supplied clock is an observation time.
+An accepted renewal updates liveness without advertising free capacity or changing
+headroom. LastSeen and headroom observation times remain separate. Unknown
+headroom stays absent. The shared claim wire exposes available cores/memory but
+has no queue-depth observation field. W8/W9 must supply that contract before
+real queue-depth ingestion can be connected.
+
+GET /api/v1/runners and GET /api/v1/queue use this snapshot. The former retains
+its `agents` response field, with granted name/type/location and copied labels,
+activity and capacity. Duplicate names remain separate rows. No live jobs and
+an observation older than the existing two-minute window yields `offline`.
+Headroom older than the existing one-hour window is omitted. Foreign readers,
+foreign rows, absent snapshot clocks and corrupt numeric/timestamp facts refuse
+before any partial response. The default uses Store.ForTeam only when Tenant
+implements RunnerInventoryReader. Missing adapters return `policy_missing`.
+There is no ListAgentClaims or process-local observation fallback.
+
+Operational runner gauges use the same tenant snapshots through the existing
+Operator.ListTeams enumeration. A failed read preserves the previous sample and
+logs the failure. Claim-attention uses Tenant.ListRegisteredAgents and its
+committed profile/LastSeen. It does not overwrite enrollment from an in-memory
+poll. Successful authenticated machine claim polls call C1 RecordAgentLabels,
+which rechecks live authority and persists filtered labels with the store clock.
+Here and launcher credentials do not enter that machine-only transaction.
+
+The old holder parser, claim-token-prefix projection caller, runner presence,
+headroom and heartbeat registries, and their obsolete claim-body structs are
+deleted. The port inventory records the test mappings. W2's snapshot tests use
+real member credential issuance/authentication and a fake reader. Claim attention
+and accepted-poll observations use real SQLite. No native cell or production
+ReadRunners adapter is claimed by these component checks.
+
+## Account-session origin and effective lifetime
+
+`Principal.DirectAccountSession()` identifies an authenticated account session
+whose committed ancestry has no capability parent. `CredentialAccount` uses
+this predicate for owner consent and account-authentication operations. Changing
+a bearer into a session preserves its capability parent. That session may
+continue using its grants but cannot establish independent account consent.
+
+`POST /api/v1/tokens` provisions a member root only for a direct account
+session. Bearers and capability-derived sessions delegate from their current
+tagged authority. `ValidateAuthority` returns the shortest expiry, revocation
+grace deadline or binding deadline in the complete live ancestry as the leaf's
+effective expiry. Omitted delegation expiry inherits that ceiling.
+
+W1 must use the same origin predicate in `checkMemberProvision` and
+`SetSourceMachineConsent` after resolving authority inside the committing
+transaction. The controller checks do not replace those store gates. The
+native bypass reproduction is preserved in `W2-review-reproductions.patch`.

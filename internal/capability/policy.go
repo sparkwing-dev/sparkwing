@@ -173,6 +173,8 @@ type Target struct {
 	BodyRunID            string
 	Pipeline             string
 	ChildRunID           string
+	SlotKey              string
+	SlotHolderID         string
 	SlotRunID            string
 	SlotNodeID           string
 	SlotGeneration       int64
@@ -392,7 +394,7 @@ func matchesCredential(p Principal, rule CredentialRule) bool {
 	case CredentialMember:
 		return isMember(p)
 	case CredentialAccount:
-		return p.Class == CredentialSession && c.Subject.Kind == SubjectAccount && c.Subject.ID != "" && c.Unit == ""
+		return p.DirectAccountSession()
 	case CredentialClaim:
 		return isClaim(p)
 	case CredentialEval:

@@ -1,0 +1,37 @@
+package controller
+
+import (
+	"net/http"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+)
+
+// HTTP supplies shared policy handlers for the elected local runtime.
+func (s *Server) HTTP() wingd.LocalHTTP {
+	s.localHTTPOnce.Do(func() {
+		s.WithPeerIdentity(func(r *http.Request) capability.Subject {
+			peer, ok := wingd.LocalPeer(r.Context())
+			if !ok {
+				return capability.Subject{}
+			}
+			subject, err := wingd.LocalSubject(peer, peer)
+			if err != nil {
+				return capability.Subject{}
+			}
+			return capability.Subject{Kind: capability.SubjectLocal, ID: subject}
+		})
+		router := s.routers()
+		router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			policy := s.routeProbe()
+			writeRouteMiss(w, allowedRouteMethods(policy, r, routeProbeMethods))
+		})
+		api := s.observedHandler(router)
+		dashboard := api
+		if s.dashboard != nil {
+			dashboard = s.browserHandler(api)
+		}
+		s.localHTTP = wingd.LocalHTTP{API: api, Dashboard: dashboard}
+	})
+	return s.localHTTP
+}

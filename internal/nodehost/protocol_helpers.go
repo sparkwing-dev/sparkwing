@@ -25,11 +25,3 @@ type sessionProcess interface {
 func invalid(format string, args ...any) error {
 	return &apierr.Error{Code: apierr.PlanInvalid, Message: fmt.Sprintf(format, args...)}
 }
-
-func routeFailure(code apierr.Code, reason apierr.Reason, message string) error {
-	failure := &apierr.Error{Code: code, Message: message}
-	if reason != "" {
-		failure.Details = map[string]any{"reason": reason}
-	}
-	return failure
-}

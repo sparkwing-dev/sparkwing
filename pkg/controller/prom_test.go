@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -39,11 +40,11 @@ func newAuthedTestServer(t *testing.T) (baseURL, admin string, st *store.Store, 
 		t.Fatalf("open store: %v", err)
 	}
 	admin, _, err = s.CreateToken("test-admin", store.TokenKindUser,
-		[]string{controller.ScopeAdmin}, 0, time.Now().UTC())
+		[]string{"admin"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("seed token: %v", err)
 	}
-	ctrl := controller.New(s, nil).EnableAuthFromStore().WithDashboard(controller.Dashboard{})
+	ctrl := controller.New(s, nil).WithDashboard(controller.Dashboard{})
 	srv := httptest.NewServer(ctrl.Handler())
 	return srv.URL, admin, s, func() {
 		srv.Close()
@@ -253,7 +254,7 @@ func TestMetrics_RequiresAdminWithAuthEnabled(t *testing.T) {
 	base, admin, st, cleanup := newAuthedTestServer(t)
 	defer cleanup()
 	member, _, err := st.CreateToken("member", store.TokenKindUser,
-		[]string{controller.ScopeRunsRead}, 0, time.Now().UTC())
+		[]string{"runs.read"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
@@ -293,7 +294,14 @@ func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = metricsLn.Close() })
 	metricsAddr := metricsLn.Addr().String()
-	srv := controller.New(st, nil).WithMetricsListener(metricsLn)
+	var order []string
+	principal := capability.Principal{Class: capability.CredentialBearer, Capability: capability.Capability{
+		Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"},
+		Grants: []capability.Grant{capability.OperatorLimits}, Binding: capability.Binding{Kind: capability.BindingNone},
+	}}
+	srv := controller.New(st, nil).WithMetricsListener(metricsLn).WithAuthorization(controller.RouteAuthorization{
+		Authenticator: policyAuth{principal: principal, order: &order}, Bindings: policyBindings{order: &order},
+	})
 
 	api := httptest.NewServer(srv.Handler())
 	t.Cleanup(api.Close)
@@ -321,6 +329,7 @@ func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 	if rerr != nil {
 		t.Fatal(rerr)
 	}
+	req.Header.Set("Authorization", "Bearer operator")
 	metrics, gerr := http.DefaultClient.Do(req)
 	if gerr != nil {
 		t.Fatalf("metrics listener never answered: %v", gerr)
@@ -421,45 +430,5 @@ func TestMetrics_HTTPMethodLabelClampsInventedMethods(t *testing.T) {
 		if strings.Contains(body, method) {
 			t.Errorf("invented method %q leaked into a metric label", method)
 		}
-	}
-}
-
-func TestMetrics_AuthTokenCacheAndHashingBudget(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	base, admin, st, cleanup := newAuthedTestServer(t)
-	defer cleanup()
-
-	raw, _, err := st.CreateToken("pool", store.TokenKindRunner,
-		[]string{controller.ScopeNodesClaim}, 0, time.Now().UTC())
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-
-	const hits = `sparkwing_auth_token_cache_total{result="hit"}`
-	before := metricSampleValue(t, scrapeAs(t, base, admin), hits)
-	for range 3 {
-		req, err := http.NewRequest(http.MethodGet, base+"/api/v1/auth/whoami", nil)
-		if err != nil {
-			t.Fatalf("new request: %v", err)
-		}
-		req.Header.Set("Authorization", "Bearer "+raw)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatalf("whoami: %v", err)
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("whoami status = %d, want 200", resp.StatusCode)
-		}
-	}
-
-	body := scrapeAs(t, base, admin)
-	if got := metricSampleValue(t, body, hits); got < before+2 {
-		t.Errorf("cache hits = %v, want at least %v: only the first of three polls verifies", got, before+2)
-	}
-	if !strings.Contains(body, "sparkwing_auth_hashing_rejected_total") {
-		t.Errorf("/metrics does not report the argon2 budget's rejections:\n%s", body)
 	}
 }

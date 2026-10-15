@@ -21,10 +21,6 @@ type ChildRequest struct {
 	Branch   string            `json:"branch,omitempty"`
 }
 
-func terminalRun(status string) bool {
-	return status == "success" || status == "failed" || status == "cancelled"
-}
-
 func waitParam(raw string) (time.Duration, bool) {
 	if raw == "" {
 		return defaultAwait, true

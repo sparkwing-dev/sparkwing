@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -43,59 +44,48 @@ type deleteTeamReq struct {
 	ConfirmSlug string `json:"confirm_slug"`
 }
 
-// safety: the slug is typed back rather than implied by the session, so a
-// stale tab open on another team cannot delete the team it no longer shows.
-func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
-	}
+func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var req deleteTeamReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &req); err != nil {
+		return err
 	}
-	if store.NormalizeTeam(store.Team(req.ConfirmSlug)) != p.Team {
-		writeError(w, http.StatusBadRequest, errors.New("confirm_slug does not match the active team's slug"))
-		return
+	if strings.TrimSpace(req.ConfirmSlug) == "" || store.NormalizeTeam(store.Team(req.ConfirmSlug)) != store.Team(a.Target.Team) {
+		return invalidEngineBody("confirm_slug does not match the active team's slug")
 	}
-	del, revoked, err := t.RequestDeletion(r.Context(), p.AccountID, time.Now())
-	if errors.Is(err, store.ErrOnlyTeam) || moneyInFlight(err) {
-		writeError(w, http.StatusConflict, err)
-		return
-	}
+	writer, err := s.teamWriter(r, a)
 	if err != nil {
-		writeIdentityError(w, s, r, "delete team", err)
-		return
+		return err
 	}
-	s.invalidateRevokedTokens(revoked)
-	s.logger.Info("team deletion requested", "team", string(del.Team), "by", p.AccountID)
+	del, err := writer.DeleteAuthorizedTeam(r.Context(), a)
+	if err != nil {
+		if errors.Is(err, store.ErrOnlyTeam) || moneyInFlight(err) {
+			return &apierr.Error{Code: apierr.Conflict, Message: err.Error()}
+		}
+		return accountMutationError(err)
+	}
+	if del.Team != store.Team(a.Target.Team) {
+		return missingEndpointPolicy()
+	}
+	s.logger.Info("team deletion requested", "team", string(del.Team), "by", a.Principal.Capability.Subject.ID)
 	writeJSON(w, http.StatusAccepted, teamDeletionBody(del))
+	return nil
 }
 
-func (s *Server) handleMyTeamDeletions(w http.ResponseWriter, r *http.Request) {
-	p, ok := accountPrincipal(w, r)
-	if !ok {
-		return
-	}
-	dels, err := s.store.TeamDeletionsRequestedBy(r.Context(), p.AccountID)
+func (s *Server) handleMyTeamDeletions(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	reader, err := s.accountReader()
 	if err != nil {
-		s.writeInternalError(w, r, "list team deletions", err)
-		return
+		return err
+	}
+	dels, err := reader.TeamDeletionsRequestedBy(r.Context(), a.Principal.Capability.Subject.ID)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	out := make([]teamDeletionJSON, 0, len(dels))
 	for _, d := range dels {
 		out = append(out, teamDeletionBody(d))
 	}
 	writeJSON(w, http.StatusOK, out)
-}
-
-// safety: a session left open on a shared machine must not be able to delete
-// the account behind it, so deletion asks for a fresh sign-in.
-const accountDeletionSignInWindow = 10 * time.Minute
-
-type deleteAccountReq struct {
-	ConfirmEmail string `json:"confirm_email"`
+	return nil
 }
 
 type deletedAccountJSON struct {
@@ -103,57 +93,12 @@ type deletedAccountJSON struct {
 	DeletedTeams []string `json:"deleted_teams"`
 }
 
-func (s *Server) handleDeleteMe(w http.ResponseWriter, r *http.Request) {
-	p, ok := accountPrincipal(w, r)
-	if !ok {
-		return
-	}
-	if time.Since(p.signedInAt) > accountDeletionSignInWindow {
-		writeAuthError(w, http.StatusForbidden, authErrorBody{
-			Code: "reauth_required", Principal: p.label(),
-			Message: "deleting an account needs a sign-in from the last 10 minutes; sign out, sign in again and retry",
-		})
-		return
-	}
-	var req deleteAccountReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	acct, err := s.store.Account(r.Context(), p.AccountID)
-	if err != nil {
-		s.writeInternalError(w, r, "delete account", err)
-		return
-	}
-	if store.NormalizeEmail(req.ConfirmEmail) != acct.Email {
-		writeError(w, http.StatusBadRequest, errors.New("confirm_email does not match the account's email"))
-		return
-	}
-	if err := s.deleteAccount(w, r, acct.ID, p.AccountID); err != nil {
-		writePolicyError(w, err)
-	}
-}
-
 func (s *Server) handleOperatorDeleteAccount(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
-	ref := strings.TrimSpace(authorized.Target.AccountID)
-	id := ref
-	if strings.Contains(ref, "@") {
-		acct, err := s.store.AccountByEmail(r.Context(), ref)
-		switch {
-		case errors.Is(err, store.ErrNotFound):
-			return &apierr.Error{Code: apierr.NotFound, Message: "account not found"}
-		case errors.Is(err, store.ErrAmbiguousAccount):
-			return &apierr.Error{Code: apierr.Conflict, Message: err.Error()}
-		case err != nil:
-			return err
-		}
-		id = acct.ID
+	writer, err := s.consoleWriter()
+	if err != nil {
+		return err
 	}
-	return s.deleteAccount(w, r, id, authorized.Principal.Capability.Subject.ID)
-}
-
-func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, accountID, by string) error {
-	res, err := s.store.DeleteAccount(r.Context(), accountID, time.Now())
+	res, err := writer.ConsoleDeleteAccount(r.Context(), authorized)
 	var lastOwner *store.LastOwnerError
 	switch {
 	case moneyInFlight(err):
@@ -164,6 +109,8 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, accountID
 			teams = append(teams, teamRefJSON{Slug: string(t.Slug), DisplayName: t.Label(), Role: string(store.RoleOwner)})
 		}
 		return &apierr.Error{Code: apierr.Conflict, Message: "hand ownership of these teams to another member, or delete them, first", Details: map[string]any{"teams": teams}}
+	case errors.Is(err, store.ErrAmbiguousAccount):
+		return &apierr.Error{Code: apierr.Conflict, Message: "account email matches more than one account"}
 	case errors.Is(err, store.ErrNotFound):
 		return &apierr.Error{Code: apierr.NotFound, Message: "account not found"}
 	case errors.Is(err, store.ErrInvalidInput):
@@ -171,18 +118,21 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, accountID
 	case err != nil:
 		return err
 	}
-	s.invalidateRevokedTokens(res.RevokedPrefixes)
 	out := deletedAccountJSON{AccountID: res.AccountID, DeletedTeams: make([]string, 0, len(res.DeletedTeams))}
 	for _, t := range res.DeletedTeams {
 		out.DeletedTeams = append(out.DeletedTeams, string(t))
 	}
-	s.logger.Info("account deleted", "account", res.AccountID, "by", by, "teams_deleted", len(res.DeletedTeams))
+	s.logger.Info("account deleted", "account", res.AccountID, "by", authorized.Principal.Capability.Subject.ID, "teams_deleted", len(res.DeletedTeams))
 	writeJSON(w, http.StatusOK, out)
 	return nil
 }
 
 func (s *Server) handleOperatorDeleteTeam(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
-	del, revoked, err := s.store.AsOperator().RequestTeamDeletion(r.Context(), store.Team(authorized.Target.Team), time.Now())
+	writer, err := s.consoleWriter()
+	if err != nil {
+		return err
+	}
+	del, err := writer.ConsoleDeleteTeam(r.Context(), authorized)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		return &apierr.Error{Code: apierr.NotFound, Message: "team is not registered"}
@@ -193,7 +143,6 @@ func (s *Server) handleOperatorDeleteTeam(w http.ResponseWriter, r *http.Request
 	case err != nil:
 		return err
 	}
-	s.invalidateRevokedTokens(revoked)
 	s.logger.Info("team deletion requested", "team", string(del.Team), "by", authorized.Principal.Capability.Subject.ID)
 	writeJSON(w, http.StatusAccepted, teamDeletionBody(del))
 	return nil
@@ -212,17 +161,13 @@ func (s *Server) runTeamDeletions(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// safety: another replica may still accept a revoked token from its cache,
-// or write through a tenant handle it cached, until those caches lapse; the
-// purge waits out twice the longer of them, so nothing written through a
-// stale cache lands after the rows are gone.
-var teamPurgeDelay = 2 * max(tokenCacheTTL, tenantCacheTTL)
+var teamPurgeDelay = 2 * tenantCacheTTL
 
 // safety: a cache grant or log upload URL issued before the deletion is
 // verified by its signature alone and writes into the team's storage until it
 // expires, so the cache tree and logs are deleted once more after the
 // longest-lived of them has lapsed.
-const teamRecheckDelay = logSegmentURLTTL + time.Hour
+const teamRecheckDelay = limits.LogUploadURLTTL + time.Hour
 
 // safety: A stopped replica keeps a deletion lease only until another can resume it.
 const teamDeletionLease = 5 * time.Minute

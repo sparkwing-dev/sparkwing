@@ -6,38 +6,46 @@ import (
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// safety: the run-scoped reads sit behind the team boundary, which answers another team's run as missing; the
-// run list behind them is the request's own team's, so a grep never reaches another team's logs.
-func (s *Server) dashboardRead(read func(backend.Backend) http.HandlerFunc) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tenant, ok := s.requestTenant(w, r)
-		if !ok {
-			return
+func (s *Server) dashboardRead(read func(backend.Backend) http.HandlerFunc, class egress.Class, slot egress.Slot) func(http.ResponseWriter, *http.Request, capability.Authorized) error {
+	return func(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+		tenant, err := s.reportingTenant(r, a)
+		if err != nil {
+			return engineLookupError(err)
 		}
-		b := backend.NewStoreBackend(s.store, s.dashboardPaths(), s.dashboardLogs(tenant.Team())).
-			Scoped(tenant, liveLogReader{s.liveLogs})
-		read(b).ServeHTTP(w, r)
-	})
+		b := backend.NewStoreBackend(s.store, s.dashboardPaths(), s.dashboardLogs(tenant.Team())).Scoped(tenant, liveLogReader{s.liveLogs})
+		r.SetPathValue("id", a.Target.RunID)
+		r.SetPathValue("node", a.Target.NodeID)
+		handler := read(b)
+		if class == "" {
+			handler.ServeHTTP(w, r)
+		} else {
+			s.meterResponse(w, r, class, slot, handler, egress.TeamPrincipal(a.Target.Team, a.Principal.Capability.Subject.ID), tenant.Team())
+		}
+		return nil
+	}
 }
 
-func (s *Server) capacityRead(read func(web.ProfileReader) http.HandlerFunc) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func (s *Server) capacityRead(read func(web.ProfileReader) http.HandlerFunc) func(http.ResponseWriter, *http.Request, capability.Authorized) error {
+	return func(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 		var reader web.ProfileReader
 		if s.dashboard != nil && s.dashboard.Local {
-			tenant, ok := s.requestTenant(w, r)
-			if !ok {
-				return
+			tenant, err := s.reportingTenant(r, a)
+			if err != nil {
+				return engineLookupError(err)
 			}
 			reader = tenant
 		}
 		read(reader).ServeHTTP(w, r)
-	})
+		return nil
+	}
 }
 
 func (s *Server) dashboardPaths() paths.Paths {

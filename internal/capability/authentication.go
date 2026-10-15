@@ -87,7 +87,16 @@ func ValidateAuthority(chain []AuthorityState, now time.Time) (Principal, error)
 			}
 		}
 	}
-	return chain[0].Principal, nil
+	principal := chain[0].Principal
+	for _, state := range chain {
+		c := state.Principal.Capability
+		for _, ceiling := range []*time.Time{c.ExpiresAt, c.RevokedAt, c.Binding.Deadline} {
+			if ceiling != nil && (principal.Capability.ExpiresAt == nil || ceiling.Before(*principal.Capability.ExpiresAt)) {
+				principal.Capability.ExpiresAt = ceiling
+			}
+		}
+	}
+	return principal, nil
 }
 
 func validIdentity(p Principal) bool {

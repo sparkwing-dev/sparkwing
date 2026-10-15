@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -31,23 +32,15 @@ const cronTickLeaseTTL = 90 * time.Second
 // suffix, because pipelines branch on it.
 const cronTriggerSource = "schedule"
 
-// safety: the store prunes a schedule's history to 200, so serving that many is
-// serving all of it; `crons show --fires N` truncates the page it is given, and
-// a smaller number here would silently cap N.
 const cronDetailFires = 200
 
 const cronDetailUpcoming = 5
 
-// safety: a scheduled launch writes what an HTTP submission writes, so the
-// cluster claims, clones and executes it by exactly the same machinery.
 type cronLauncher struct {
 	server *Server
 }
 
-// Launch records the trigger, the pending run and the dispatch for one due
-// instant, in the team that armed the schedule. The idempotency key is the
-// schedule and the instant, so a second tick that resolves the same minute
-// reaches the first run instead of starting a second.
+// Launch records one run for a due schedule instant.
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error) {
 	repoURL, err := sourceurl.ValidateCloneURL(s.RepoPath)
 	if err != nil {
@@ -109,18 +102,9 @@ func (l cronLauncher) Active(ctx context.Context, sched store.CronSchedule, runI
 	case "running":
 		return true, nil
 	case "pending":
-		return time.Since(cronRunQueuedAt(run)) <= staleAfter, nil
+		return time.Since(run.CreatedAt) <= staleAfter, nil
 	}
 	return false, nil
-}
-
-// safety: CreatedAt is the intake stamp; StartedAt is all a row written before
-// that column has.
-func cronRunQueuedAt(run *store.Run) time.Time {
-	if !run.CreatedAt.IsZero() {
-		return run.CreatedAt
-	}
-	return run.StartedAt
 }
 
 // CronIdempotencyKey is the deduplication token a scheduled launch carries: the
@@ -213,16 +197,6 @@ func (s *Server) cronTickOnce(ctx context.Context) {
 	}
 }
 
-// safety: the body is the whole set, so a schedule it does not carry is
-// withdrawn; Follow ignores SHA and clones the tip of Branch at each fire.
-type cronRepoRequest struct {
-	RepoURL   string             `json:"repo_url"`
-	Branch    string             `json:"branch,omitempty"`
-	SHA       string             `json:"sha,omitempty"`
-	Follow    bool               `json:"follow,omitempty"`
-	Schedules []cronRepoSchedule `json:"schedules"`
-}
-
 // safety: spelled the way the repository declares an entry, so CatchUp is a Go
 // duration such as "6h" rather than a nanosecond count.
 type cronRepoSchedule struct {
@@ -235,76 +209,88 @@ type cronRepoSchedule struct {
 	Args     map[string]string `json:"args,omitempty"`
 }
 
-type cronReposResponse struct {
-	Schedules []controllerwire.ScheduleView `json:"schedules"`
-	Withdrawn []string                      `json:"withdrawn,omitempty"`
-}
-
-type cronRepoDeleteResponse struct {
-	RepoURL string `json:"repo_url"`
-	Removed int    `json:"removed"`
-}
-
-// safety: a member left empty keeps the declared value; Args replaces the
-// declared argument set whole, so a set but empty map -- an override to launch
-// with no arguments -- has to survive the round trip rather than be omitted.
-type cronOverrideRequest struct {
-	Cron    string            `json:"cron,omitempty"`
-	TZ      string            `json:"tz,omitempty"`
-	Overlap string            `json:"overlap,omitempty"`
-	CatchUp string            `json:"catch_up,omitempty"`
-	Args    map[string]string `json:"args"`
-}
-
-func (s *Server) handleListCrons(w http.ResponseWriter, r *http.Request) {
-	svc, ok := s.requestCronService(w, r, "")
-	if !ok {
-		return
+func (s *Server) handleListCrons(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	next, err := scheduleCount(r, "next", 0)
+	if err != nil {
+		return err
 	}
+	all := false
+	if values, exists := r.URL.Query()["all"]; exists {
+		if len(values) != 1 || values[0] != "true" && values[0] != "false" {
+			return invalidEngineBody("all must be true or false")
+		}
+		all = values[0] == "true"
+	}
+	tenant, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
+	}
+	svc := s.cronServiceFor(tenant, "")
 	health, err := svc.ControllerHealth(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("read cron health: %w", err))
-		return
+		return engineLookupError(err)
 	}
 	rows, err := svc.List(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("list cron schedules: %w", err))
-		return
+		return engineLookupError(err)
 	}
 	out := controllerwire.ScheduleOverview{
 		Health:    crons.NewHealthView(health),
 		Schedules: make([]controllerwire.ScheduleView, 0, len(rows)),
+		Upcoming:  []controllerwire.ScheduleUpcoming{},
 	}
 	for _, row := range rows {
+		if !all && !row.Declared {
+			continue
+		}
 		out.Schedules = append(out.Schedules, crons.NewScheduleView(row))
+		if next > 0 {
+			instants, err := svc.Upcoming(r.Context(), row.ID, next)
+			if err != nil {
+				return engineLookupError(err)
+			}
+			for _, at := range instants {
+				out.Upcoming = append(out.Upcoming, controllerwire.ScheduleUpcoming{Schedule: row.ID, Name: row.Display, At: crons.RFC3339(at)})
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
-func (s *Server) handleGetCron(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleGetCron(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	firesCount, err := scheduleCount(r, "fires", cronDetailFires)
+	if err != nil {
+		return err
+	}
+	next, err := scheduleCount(r, "next", cronDetailUpcoming)
+	if err != nil {
+		return err
+	}
+	tenant, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	svc := s.cronServiceFor(tenant, "")
-	sched, ok := s.resolveCron(w, r, svc)
-	if !ok {
-		return
-	}
-	row, fires, err := svc.Show(r.Context(), sched.ID, cronDetailFires)
+	sched, err := svc.Resolve(r.Context(), r.PathValue("schedule"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("read cron schedule: %w", err))
-		return
+		return engineLookupError(err)
 	}
-	upcoming, err := svc.Upcoming(r.Context(), sched.ID, cronDetailUpcoming)
+	row, fires, err := svc.Show(r.Context(), sched.ID, firesCount)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("read upcoming instants: %w", err))
-		return
+		return engineLookupError(err)
+	}
+	upcoming, err := svc.Upcoming(r.Context(), sched.ID, next)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	out := controllerwire.DetailView{
 		Schedule: crons.NewScheduleView(row),
 		Fires:    make([]controllerwire.FireView, 0, len(fires)),
 		Upcoming: make([]string, 0, len(upcoming)),
+	}
+	if firesCount == 0 {
+		fires = nil
 	}
 	for _, fire := range fires {
 		out.Fires = append(out.Fires, crons.NewFireView(fire, cronRunStatus(r.Context(), tenant, fire.RunID)))
@@ -313,81 +299,7 @@ func (s *Server) handleGetCron(w http.ResponseWriter, r *http.Request) {
 		out.Upcoming = append(out.Upcoming, crons.RFC3339(at))
 	}
 	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request) {
-	var body cronRepoRequest
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	repoURL, err := sourceurl.ValidateCloneURL(body.RepoURL)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("repo_url: %w", err))
-		return
-	}
-	if err := validateGitBranchName(body.Branch); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("branch: %w", err))
-		return
-	}
-	sha := body.SHA
-	if body.Follow {
-		sha = ""
-	}
-	if sha != "" {
-		if err := validateGitSHA(sha); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-	}
-	entries, err := declaredFromRequest(body.Schedules)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	for _, entry := range entries {
-		if refusal := s.cronIntervalRefusal(r, entry.Trigger.Cron); refusal != nil {
-			if s.writeComputeLimitRefusal(w, r, "", "", refusal) {
-				return
-			}
-			writeError(w, http.StatusInternalServerError, refusal)
-			return
-		}
-	}
-	svc, ok := s.requestCronService(w, r, claimIdentity(r).Principal)
-	if !ok {
-		return
-	}
-	if !s.cronRepoWithinCaps(w, r, svc, repoURL, len(entries)) {
-		return
-	}
-	report, err := svc.ArmPushed(r.Context(), crons.ArmPush{
-		RepoURL: repoURL,
-		Branch:  body.Branch,
-		SHA:     sha,
-		Entries: entries,
-	})
-	if errors.Is(err, store.ErrCronScheduleTaken) {
-		writeError(w, http.StatusConflict, err)
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	out := cronReposResponse{
-		Schedules: make([]controllerwire.ScheduleView, 0, len(report.Schedules)),
-		Withdrawn: report.Withdrawals,
-	}
-	for _, sched := range report.Schedules {
-		row, _, rerr := svc.Show(r.Context(), sched.ID, 1)
-		if rerr != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Errorf("read cron schedule: %w", rerr))
-			return
-		}
-		out.Schedules = append(out.Schedules, crons.NewScheduleView(row))
-	}
-	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 // safety: the branch reaches git as the ref a fire clones, so it is held to
@@ -455,203 +367,6 @@ func declaredFromRequest(schedules []cronRepoSchedule) ([]crons.Declared, error)
 	return entries, nil
 }
 
-func (s *Server) handleDeleteCronRepo(w http.ResponseWriter, r *http.Request) {
-	repoURL, err := sourceurl.ValidateCloneURL(r.URL.Query().Get("repo_url"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("repo_url: %w", err))
-		return
-	}
-	svc, ok := s.requestCronService(w, r, "")
-	if !ok {
-		return
-	}
-	removed, err := svc.DisarmRepoURL(r.Context(), repoURL)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, cronRepoDeleteResponse{RepoURL: repoURL, Removed: removed})
-}
-
-func (s *Server) handlePauseCron(w http.ResponseWriter, r *http.Request) {
-	s.setCronPaused(w, r, true)
-}
-
-func (s *Server) handleResumeCron(w http.ResponseWriter, r *http.Request) {
-	s.setCronPaused(w, r, false)
-}
-
-func (s *Server) setCronPaused(w http.ResponseWriter, r *http.Request, paused bool) {
-	svc, ok := s.requestCronService(w, r, "")
-	if !ok {
-		return
-	}
-	sched, ok := s.resolveCron(w, r, svc)
-	if !ok {
-		return
-	}
-	var err error
-	if paused {
-		err = svc.Pause(r.Context(), sched.ID)
-	} else {
-		err = svc.Resume(r.Context(), sched.ID)
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("update cron schedule: %w", err))
-		return
-	}
-	s.writeCronSchedule(w, r, svc, sched.ID)
-}
-
-func (s *Server) handleRunCronNow(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	svc := s.cronServiceFor(tenant, "")
-	sched, ok := s.resolveCron(w, r, svc)
-	if !ok {
-		return
-	}
-	if !s.admitTriggerSubmission(w, r, tenant, s.floodKey(r, "cron:"+sched.ID), cronTriggerSource) {
-		return
-	}
-	runID, err := svc.RunNow(r.Context(), sched.ID)
-	if err != nil {
-		if s.writeComputeLimitRefusal(w, r, "", "", err) {
-			return
-		}
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("launch cron schedule: %w", err))
-		return
-	}
-	row, _, err := svc.Show(r.Context(), sched.ID, 1)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("read cron schedule: %w", err))
-		return
-	}
-	writeJSON(w, http.StatusOK, controllerwire.ScheduleRun{RunID: runID, Schedule: crons.NewScheduleView(row)})
-}
-
-func (s *Server) handleDisarmCron(w http.ResponseWriter, r *http.Request) {
-	svc, ok := s.requestCronService(w, r, "")
-	if !ok {
-		return
-	}
-	sched, ok := s.resolveCron(w, r, svc)
-	if !ok {
-		return
-	}
-	row, _, err := svc.Show(r.Context(), sched.ID, 1)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("read cron schedule: %w", err))
-		return
-	}
-	if err := svc.Disarm(r.Context(), sched.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("disarm cron schedule: %w", err))
-		return
-	}
-	writeJSON(w, http.StatusOK, controllerwire.ScheduleEnvelope{Schedule: crons.NewScheduleView(row)})
-}
-
-func (s *Server) handleSetCronOverride(w http.ResponseWriter, r *http.Request) {
-	var body cronOverrideRequest
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	fields := crons.Override{}
-	if body.Cron != "" {
-		fields.Cron = &body.Cron
-	}
-	if body.TZ != "" {
-		fields.TZ = &body.TZ
-	}
-	if body.Overlap != "" {
-		fields.Overlap = &body.Overlap
-	}
-	if body.CatchUp != "" {
-		d, perr := time.ParseDuration(body.CatchUp)
-		if perr != nil {
-			writeError(w, http.StatusBadRequest,
-				fmt.Errorf("catch_up %q: expected a duration such as 6h", body.CatchUp))
-			return
-		}
-		fields.CatchUp = &d
-	}
-	if body.Args != nil {
-		fields.Args = body.Args
-	}
-	if fields.Empty() {
-		writeError(w, http.StatusBadRequest,
-			errors.New("name at least one of cron, tz, overlap, catch_up or args"))
-		return
-	}
-	if refusal := s.cronIntervalRefusal(r, body.Cron); refusal != nil {
-		if s.writeComputeLimitRefusal(w, r, "", "", refusal) {
-			return
-		}
-		writeError(w, http.StatusInternalServerError, refusal)
-		return
-	}
-	svc, ok := s.requestCronService(w, r, "")
-	if !ok {
-		return
-	}
-	sched, ok := s.resolveCron(w, r, svc)
-	if !ok {
-		return
-	}
-	row, err := svc.SetOverride(r.Context(), sched.ID, fields)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, controllerwire.ScheduleEnvelope{Schedule: crons.NewScheduleView(row)})
-}
-
-func (s *Server) handleClearCronOverride(w http.ResponseWriter, r *http.Request) {
-	svc, ok := s.requestCronService(w, r, "")
-	if !ok {
-		return
-	}
-	sched, ok := s.resolveCron(w, r, svc)
-	if !ok {
-		return
-	}
-	row, err := svc.ClearOverride(r.Context(), sched.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, controllerwire.ScheduleEnvelope{Schedule: crons.NewScheduleView(row)})
-}
-
-func (s *Server) resolveCron(w http.ResponseWriter, r *http.Request, svc *crons.Service) (store.CronSchedule, bool) {
-	sched, err := svc.Resolve(r.Context(), r.PathValue("id"))
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return store.CronSchedule{}, false
-	}
-	return sched, true
-}
-
-func (s *Server) writeCronSchedule(w http.ResponseWriter, r *http.Request, svc *crons.Service, id string) {
-	row, _, err := svc.Show(r.Context(), id, 1)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("read cron schedule: %w", err))
-		return
-	}
-	writeJSON(w, http.StatusOK, controllerwire.ScheduleEnvelope{Schedule: crons.NewScheduleView(row)})
-}
-
-func (s *Server) requestCronService(w http.ResponseWriter, r *http.Request, principal string) (*crons.Service, bool) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return nil, false
-	}
-	return s.cronServiceFor(tenant, principal), true
-}
-
 // safety: a run the store no longer holds reads as no status, not an error; the
 // fire is still history.
 func cronRunStatus(ctx context.Context, tenant *store.Tenant, runID string) string {
@@ -673,15 +388,6 @@ const (
 	maxCronSchedulesPerRepo = 20
 	maxCronReposPerTeam     = 10
 )
-
-func (s *Server) cronRepoWithinCaps(w http.ResponseWriter, r *http.Request, svc *crons.Service, repoURL string, entries int) bool {
-	status, err := s.cronRepoCapRefusal(r.Context(), svc, repoURL, 0, entries)
-	if err != nil {
-		writeError(w, status, err)
-		return false
-	}
-	return true
-}
 
 func (s *Server) cronRepoCapRefusal(ctx context.Context, svc *crons.Service, repoURL string, githubRepoID int64, entries int) (int, error) {
 	if entries > maxCronSchedulesPerRepo {
