@@ -109,31 +109,6 @@ func lockLiveOutputTx(ctx context.Context, tx *storeTx, team Team, key string) (
 	return size, sha, nil
 }
 
-func sourceOutputRefTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) (*OutputRef, error) {
-	var ref OutputRef
-	err := tx.QueryRowContext(ctx, `SELECT key, size, sha256 FROM node_outputs WHERE team = ? AND run_id = ? AND node_id = ?`,
-		string(team), runID, nodeID).Scan(&ref.Key, &ref.Size, &ref.SHA256)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if _, _, err := lockLiveOutputTx(ctx, tx, team, ref.Key); err != nil {
-		return nil, err
-	}
-	return &ref, nil
-}
-
-// FinishNodeCopyingOutput finishes a node whose output is the one srcRun's
-// srcNode already stored, such as a cache hit's origin: the node's ref names
-// that object instead of a second copy of its bytes.
-func (s *Store) FinishNodeCopyingOutput(ctx context.Context, runID, nodeID, outcome, reason, srcRun, srcNode string) error {
-	return s.defaultTenant().finishNode(ctx, runID, nodeID, outcome, "", nil, &copySource{run: srcRun, node: srcNode}, reason, nil)
-}
-
-type copySource struct{ run, node string }
-
 func writeNodeOutputTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string, attempt int64, ref *OutputRef) error {
 	if ref == nil {
 		return clearNodeOutputTx(ctx, tx, team, runID, nodeID)

@@ -7,8 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/apiroutes"
 )
 
 // The route table is the boundary's only source, so it must name exactly the
@@ -46,36 +44,11 @@ func TestTenantRoutes_WildcardsNameTheirResource(t *testing.T) {
 	}
 }
 
-// safety: the boundary lets a deployment-owned route through for any team's
-// row, so the route itself has to demand authority that crosses teams.
-func TestTenantRoutes_DeploymentRoutesNeedDeploymentAuthority(t *testing.T) {
-	crossTeam := map[string]bool{
-		ScopeAdmin: true, ScopeClaimsLaunch: true, ScopeStorageCount: true,
-		apiroutes.Operator: true,
-	}
-	routes, err := apiroutes.Parse("server.go", map[string]string{
-		"ScopeAdmin":        ScopeAdmin,
-		"ScopeClaimsLaunch": ScopeClaimsLaunch, "ScopeStorageCount": ScopeStorageCount,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	checked := 0
-	for _, route := range routes {
-		pattern := route.Method + " " + route.Path
-		if tenantRoutes[pattern].owner != ownerDeployment {
-			continue
+func TestTenantRoutes_DeploymentRoutesUsePolicyRouter(t *testing.T) {
+	for pattern, resource := range tenantRoutes {
+		if resource.owner == ownerDeployment {
+			t.Errorf("%s must use the deployment policy router", pattern)
 		}
-		checked++
-		for scope := range strings.SplitSeq(route.Scope, "` or `") {
-			if !crossTeam[scope] {
-				t.Errorf("%s names any team's %s and accepts %s, which is not deployment or service authority",
-					pattern, tenantRoutes[pattern].name, scope)
-			}
-		}
-	}
-	if checked == 0 {
-		t.Errorf("checked %d deployment routes; the parse is not reading server.go", checked)
 	}
 }
 

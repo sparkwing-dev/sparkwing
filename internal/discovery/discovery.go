@@ -11,9 +11,6 @@ import (
 )
 
 type Services struct {
-	CachePod        string `json:"cache_pod,omitempty"`
-	DataDownloadURL string `json:"data_download_url,omitempty"`
-
 	Dashboard string `json:"dashboard,omitempty"`
 
 	MultiTeam bool `json:"multi_team,omitempty"`

@@ -46,8 +46,6 @@ type cacheInfoReport struct {
 	Entries       int              `json:"entries"`
 	ActiveEntries int              `json:"active_entries"`
 	BusyEntries   int              `json:"busy_entries"`
-	LegacyEntries int              `json:"legacy_entries"`
-	LegacyBytes   int64            `json:"legacy_bytes"`
 	Shared        int              `json:"shared_entries"`
 	TotalBytes    int64            `json:"total_bytes"`
 	MaxBytes      int64            `json:"max_bytes"`
@@ -108,12 +106,10 @@ func runCacheInfo(args []string) error {
 
 	report := cacheInfoReport{
 		Dir:           bincache.CacheRoot(),
-		Entries:       len(entries) + status.LegacyEntries,
+		Entries:       len(entries),
 		ActiveEntries: status.ActiveEntries,
 		BusyEntries:   status.BusyEntries,
-		LegacyEntries: status.LegacyEntries,
-		LegacyBytes:   status.LegacyBytes,
-		TotalBytes:    status.ObservedBytes + status.LegacyBytes,
+		TotalBytes:    status.ObservedBytes,
 		MaxBytes:      limits.MaxBytes,
 		MaxEntries:    limits.MaxEntries,
 	}
@@ -157,9 +153,6 @@ func runCacheInfo(args []string) error {
 		fmt.Printf("  total:    %s\n", humanBytes(report.TotalBytes))
 		if report.ActiveEntries > 0 || report.BusyEntries > 0 {
 			fmt.Printf("  in use:   %d active, %d busy\n", report.ActiveEntries, report.BusyEntries)
-		}
-		if report.LegacyEntries > 0 {
-			fmt.Printf("  legacy:   %s across %d entries\n", humanBytes(report.LegacyBytes), report.LegacyEntries)
 		}
 		fmt.Printf("  ceiling:  %s / %s\n", limitLabel(report.MaxBytes), entryLimitLabel(report.MaxEntries))
 		if report.OverLimit {

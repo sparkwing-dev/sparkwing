@@ -16,6 +16,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
@@ -59,13 +60,9 @@ func run(args []string) error {
 				credPGURL, credSecretsKey, credSecretsPreviousKey, credBootstrapAdminToken,
 				credLicense, credOIDCKey, credOIDCPublishedKey, credGitHubClientSecret, credGoogleClientSecret,
 				credGitHubAppKey, credGitHubAppWebhookSecret, credCloudFrontKey,
-				credBillingToken, credCacheGrantKey, credStripeAPIKey, credStripeWebhookSecret,
+				credBillingToken, credStripeAPIKey, credStripeWebhookSecret,
 			}, ", ")+
 			". An absent file leaves its feature off; docs/self-hosting.md says what each one turns on.")
-	cachePodURL := fs.String("cache-pod-url", "",
-		"externally-reachable URL of the sparkwing-cache pod (gitcache + artifact store). "+
-			"Announced via GET /api/v1/services so operator CLIs can discover it without "+
-			"hardcoding it in config.yaml. Empty disables the announcement.")
 	dashboardURL := fs.String("dashboard-url", "",
 		"externally-reachable URL of the dashboard that watches this controller. "+
 			"Announced via GET /api/v1/services, so `sparkwing cloud connect` prints "+
@@ -78,12 +75,10 @@ func run(args []string) error {
 	operatorAccounts := fs.String("operator-accounts", "",
 		"comma-separated account ids whose signed-in dashboard sessions may use the "+
 			"operator console. No token reaches the console. Empty leaves it off.")
-	cacheURL := fs.String("cache-url", "",
-		"controller-reachable sparkwing-cache URL for gitcache proxy routes")
 	externalURL := fs.String("external-url", "",
 		"base URL this controller answers on from outside the cluster, which is "+
-			"where runners read signed filesystem outputs. "+
-			"Empty uses the URL each request arrived at.")
+			"where runners transfer signed filesystem data and logs. "+
+			"Empty uses --addr, with localhost for a wildcard listener.")
 	oidcTokenTTL := fs.Duration("oidc-token-ttl", oidcissuer.DefaultTTL,
 		"lifetime of an OIDC ID token, from 1m to 1h")
 	trustedProxyAddr := fs.String("trusted-proxy-addr", "",
@@ -241,7 +236,7 @@ func run(args []string) error {
 			"count with the measurement. Writes are counted as they happen, so this "+
 			"listing is the only enumeration the ceiling costs; 0 measures once at "+
 			"startup and never again")
-	readEgress := egress.Bind(fs, egress.ControllerSurfaces)
+	readEgress := egress.Bind(fs)
 	readLog := logutil.Bind(fs)
 	googleClientID := fs.String("google-client-id", "",
 		"Google OAuth client id for dashboard sign-in; the secret is the "+
@@ -444,14 +439,11 @@ func run(args []string) error {
 
 	srv := controller.New(st, nil).
 		WithTrustedProxyAddr(*trustedProxyAddr).
-		WithCachePodURL(*cachePodURL).
 		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
 		WithDashboardURL(*dashboardURL).
 		WithBillingCheckout(*billingURL, creds.BillingToken).
 		WithPayments(paymentVerifier, st).
 		WithOperatorAccounts(splitCSV(*operatorAccounts)).
-		WithCacheURL(*cacheURL).
-		WithCacheGrantKey(creds.CacheGrantKey).
 		WithExternalURL(*externalURL).
 		WithMetricsAddr(*metricsAddr).
 		WithLiveLogLimits(*liveLogNodeKB<<10, int64(*liveLogTotalMB)<<20, *liveLogMaxNodes, *liveLogIdle).
@@ -487,9 +479,6 @@ func run(args []string) error {
 	if err := configureMailer(ctx, srv, *emailSender, *emailConfigSet); err != nil {
 		return err
 	}
-	srv.WithTeamStorage(controller.TeamStorage{
-		CacheURL: firstNonEmpty(*cacheURL, *cachePodURL),
-	})
 	if err := configureGitHubApp(srv, githubAppFlags{
 		AppID:         *githubAppID,
 		Slug:          *githubAppSlug,
@@ -505,9 +494,6 @@ func run(args []string) error {
 		return fmt.Errorf("oidc issuer: %w", oerr)
 	}
 	srv = srv.WithOIDCIssuer(oidcIssuer)
-	if err := checkCacheGrantKey(srv, *cacheURL, *cachePodURL, creds.CacheGrantKey); err != nil {
-		return err
-	}
 	if err := checkMultiTeamObjectStore(srv, *bucketStoreURL); err != nil {
 		return err
 	}
@@ -561,11 +547,22 @@ func run(args []string) error {
 		if err != nil {
 			return fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
 		}
-		srv = srv.WithDirectUploads(client, bucket, prefix)
-	} else if st.OutputDir() == "" {
-		// safety: without the cache bucket, node outputs live on this
-		// replica's disk, which the filesystem output store serves alone.
-		st.SetOutputDir(p.Root)
+		objects, err := blob.NewS3(client, bucket)
+		if err != nil {
+			return err
+		}
+		srv = srv.WithDataObjects(objects).WithDirectUploads(client, bucket, prefix)
+	} else {
+		objects, err := openFilesystemData(p.Root, *externalURL, *addr)
+		if err != nil {
+			return fmt.Errorf("filesystem data: %w", err)
+		}
+		defer func() {
+			if err := objects.Close(); err != nil {
+				slog.Error("close filesystem data", "err", err)
+			}
+		}()
+		srv = srv.WithDataObjects(objects)
 	}
 	if err := checkRequireAuth(st, *requireAuth); err != nil {
 		return err
@@ -715,20 +712,6 @@ func checkRequireAuth(st *store.Store, requireAuth bool) error {
 		"with --require-auth")
 }
 
-// safety: the grant is the only boundary between teams inside the cache; without a key
-// every run's grant request would fail at request time instead of at deploy.
-func checkCacheGrantKey(srv *controller.Server, cacheURL, cachePodURL, grantKey string) error {
-	if !srv.MultiTeam() || (cacheURL == "" && cachePodURL == "") {
-		return nil
-	}
-	if grantKey == "" {
-		return errors.New("the license allows more than one team and a cache is configured, so " +
-			"the " + credCacheGrantKey + " credential must hold the key the controller signs cache grants with " +
-			"and the cache verifies them with (generate one with `openssl rand -base64 32`)")
-	}
-	return nil
-}
-
 // safety: a free team is held to its allowance only by counters kept over the object
 // store; the disk-backed cache and log volume enforce no allowance at all.
 func checkMultiTeamObjectStore(srv *controller.Server, bucketStoreURL string) error {
@@ -813,11 +796,11 @@ func openTeamStore(ctx context.Context, raw string) (*teamblob.Store, error) {
 	if raw == "" {
 		return nil, nil
 	}
-	client, bucket, prefix, err := s3store.Open(ctx, raw)
+	_, bucket, prefix, err := s3store.Open(ctx, raw)
 	if err != nil {
 		return nil, err
 	}
-	return teamblob.New(teamblob.Options{Bucket: bucket, Prefix: prefix, Client: client})
+	return teamblob.New(teamblob.Options{Bucket: bucket, Prefix: prefix})
 }
 
 // safety: a negative bound would silently remove the ceiling it names, so it stops the controller instead.

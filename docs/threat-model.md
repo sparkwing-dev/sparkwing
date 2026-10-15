@@ -70,7 +70,7 @@ for the host goes only to a machine its owner opted in. See
 settings the runner was given, the variables the operator lists in
 `run.submit_env_allow` from the runner's own environment, the node protocol's
 own handles, and the run facts the host sets (dry run, runner identity,
-admission lease). The agent token, cache grant, artifact store, claim
+admission lease). The agent token, artifact store, claim
 variables and every other engine variable stay in the host, and an
 allow-listed name that is an engine variable or reads as a credential is
 dropped; an allow-listed value of 12 characters or more is masked in the node's

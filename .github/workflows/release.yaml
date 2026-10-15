@@ -272,7 +272,6 @@ jobs:
           binaries=(
             sparkwing-controller
             sparkwing-runner
-            sparkwing-cache
           )
           for binary in "${binaries[@]}"; do
             digest="$(tr -d '\r\n' <"scanned-image-digests/$binary")"

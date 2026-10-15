@@ -108,11 +108,11 @@ func TestResultAnnotationsSummariesAndStaleWrites(t *testing.T) {
 
 func logCommit(actor Actor, attempt runspec.AttemptIdentity) SegmentCommit {
 	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: attempt.Team, RunID: attempt.RunID, Attempt: &attempt}
-	key, err := LogSegmentObjectKey(subject, "r30", 0)
+	key, err := blob.LogObjectKey(subject, "r30", 1)
 	if err != nil {
 		panic(err)
 	}
-	return SegmentCommit{Subject: subject, Actor: actor, RetentionClass: "r30", Segments: []Segment{{Index: 0, Offset: 0, Size: 3, Digest: strings.Repeat("a", 64), ObjectKey: key}}}
+	return SegmentCommit{Subject: subject, Actor: actor, RetentionClass: "r30", Segments: []Segment{{Index: 1, Offset: 0, Size: 3, Digest: strings.Repeat("a", 64), ObjectKey: key}}}
 }
 
 func TestResultSegmentsRoundTripContiguityAndSeal(t *testing.T) {
@@ -124,11 +124,11 @@ func TestResultSegmentsRoundTripContiguityAndSeal(t *testing.T) {
 	if err := tenant.RecordSegments(t.Context(), commit); err != nil {
 		t.Fatal(err)
 	}
-	key, err := LogSegmentObjectKey(commit.Subject, "r30", 1)
+	key, err := blob.LogObjectKey(commit.Subject, "r30", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	commit.Segments = []Segment{{Index: 1, Offset: 4, Size: 2, Digest: strings.Repeat("b", 64), ObjectKey: key}}
+	commit.Segments = []Segment{{Index: 2, Offset: 4, Size: 2, Digest: strings.Repeat("b", 64), ObjectKey: key}}
 	if err := tenant.RecordSegments(t.Context(), commit); err == nil {
 		t.Fatal("non-contiguous offset accepted")
 	}

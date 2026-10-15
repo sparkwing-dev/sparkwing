@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -140,8 +139,7 @@ func TestDeclaredRepo_ForgedTriggerEnvReadsNoCachedSource(t *testing.T) {
 		t.Fatalf("ClaimNode = %+v, %v", claimed, err)
 	}
 
-	name := sourceurl.ClaimedRepoNameFromURL("git@github.com:victim/private.git")
-	path := "/api/v1/runs/run-attacker/gitcache/git/" + name + "/info/refs?service=git-upload-pack"
+	path := "/api/v1/runs/run-attacker/gitcache/git/repo-victim/info/refs?service=git-upload-pack"
 	if got := f.do(t, raw, http.MethodGet, path, ""); got != http.StatusForbidden {
 		t.Errorf("forged GITHUB_REPOSITORY cache read = %d, want 403", got)
 	}

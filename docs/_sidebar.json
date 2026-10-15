@@ -63,7 +63,7 @@
         "scheduling",
         "github-actions-runners",
         "github-app",
-        "gitcache",
+        "storage",
         "git-credentials"
       ]
     },

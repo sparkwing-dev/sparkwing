@@ -160,13 +160,13 @@ func TestDiscoveryHTTPAnnouncesMultiTeamWithoutURLs(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if !body.MultiTeam || body.Dashboard != "" || body.CachePod != "" {
+	if !body.MultiTeam || body.Dashboard != "" || body.DataDownloadURL != "" || body.DirectData {
 		t.Fatalf("services = %+v", body)
 	}
 }
 
 func TestDiscoveryHTTPAnnouncesIndividualServices(t *testing.T) {
-	for _, service := range []string{"dashboard", "cache", "uploads"} {
+	for _, service := range []string{"dashboard", "uploads"} {
 		t.Run(service, func(t *testing.T) {
 			b := authorityMember()
 			s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithAuthorization(consoleAuthorization(b))
@@ -175,9 +175,6 @@ func TestDiscoveryHTTPAnnouncesIndividualServices(t *testing.T) {
 			case "dashboard":
 				s.WithDashboardURL("https://dashboard.example")
 				want.Dashboard = "https://dashboard.example"
-			case "cache":
-				s.WithCachePodURL("https://cache.example")
-				want.CachePod = "https://cache.example"
 			case "uploads":
 				data, _, _, _, _ := dataControllerFixture(dataAuthorized())
 				s.WithDataController(data)

@@ -117,10 +117,7 @@ fields they cannot report.
 
 api_socket names the controller API socket. api_ready reports whether it is
 bound, and api_error explains a binding failure. A daemon that supports the
-API but cannot bind its socket is unhealthy. Older daemons omit api_ready.
-
-artifact_store_error reports failure to open the configured cache. The daemon
-continues serving with artifact routes disabled.`,
+API but cannot bind its socket is unhealthy. Older daemons omit api_ready.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
 	},
@@ -260,16 +257,15 @@ var cmdCloudStatus = Command{
 	Synopsis:          "Report the connection, its principal, and the probes",
 	Description: `Prints the selected profile, its controller, the principal
 and scopes the controller reports for its token, the announced dashboard URL,
-and the controller, auth, logs and gitcache probes. A profile with no
+and the controller, auth and logs probes. A profile with no
 controller reports its storage probes alone. Exits non-zero when a probe
-fails; a controller that keeps no node logs warns without failing, and a controller
-that announces no cache pod URL omits the gitcache probe.
+fails. A controller that keeps no node logs warns without failing.
 
 --cluster answers "is this cluster alive?" for an operator. It adds the probes
 that read /api/v1/agents, /api/v1/triggers (status=claimed) and
 /api/v1/runs?since=24h, in three sections:
 
-  CONNECTIVITY  controller / auth / logs / gitcache
+  CONNECTIVITY  controller / auth / logs
   FLEET         agents (connected vs stale)
   QUEUE         stuck triggers + recent-run success rate
 
@@ -2758,10 +2754,9 @@ missing sparkwing-runner, an unreachable service manager, or an unusable
 setting fails first. If a step after the mint fails, the output names the live
 token and the command that revokes it.
 
-With --allow-repo the agent fetches each run's source itself, from the
-repositories the list names, with the credential the controller releases or
-else this machine's own git credentials. Without it the agent fetches through
-the controller's gitcache proxy.
+The agent fetches source directly with the credential the controller releases.
+With --allow-repo it builds only the repositories the list names and may use
+this machine's own git credentials when the controller releases none.
 
 The command prints the token prefix and the revoke command. The raw token
 reaches only config.yaml.`,
@@ -3078,8 +3073,8 @@ var cmdSparksRemove = Command{
 var cmdSparksWarmup = Command{
 	Path:     "sparkwing pipeline sparks warmup",
 	Synopsis: "Pre-compile pipeline binaries after a sparks release",
-	Description: `Resolves libraries, compiles the pipeline binary, and uploads it to the
-binary cache. Subsequent runs with matching build inputs can reuse it.
+	Description: `Resolves libraries, compiles the pipeline binary, and stores it in the
+local binary cache. Subsequent runs with matching build inputs can reuse it.
 Warmup uses the same compilation path and cache key as 'sparkwing run'.`,
 	Flags: []FlagSpec{
 		{Name: "clear-cache", Desc: "Delete the local pipeline binary cache before compiling", Group: "Input"},

@@ -114,7 +114,7 @@ func TestLogPersistencePublishedAttemptsRecheckAuthority(t *testing.T) {
 				commit.Actor.Authority.ID, commit.Actor.CapabilityPrefix = c.Prefix, c.Prefix
 				authorityPersist(t, s, c)
 			}
-			key, err := LogSegmentObjectKey(commit.Subject, commit.RetentionClass, 0)
+			key, err := blob.LogObjectKey(commit.Subject, commit.RetentionClass, 1)
 			if err != nil {
 				t.Fatal(err)
 			}

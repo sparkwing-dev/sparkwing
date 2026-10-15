@@ -98,12 +98,6 @@ const (
 	// no secret or source. Only the operator mints it; no team's token may
 	// carry it.
 	ScopeClaimsLaunch = store.LaunchScope
-	// ScopeStorageCount is the cache service's scope. It reserves, commits
-	// and releases any team's storage, charges any team's downloads and
-	// records the cache's egress totals on the /internal counter routes, and
-	// reaches nothing else. Only the operator mints it; no team's token may
-	// carry it.
-	ScopeStorageCount = store.StorageCountScope
 )
 
 var allScopes = []string{
@@ -120,7 +114,6 @@ var allScopes = []string{
 	ScopeTeamAdmin,
 	ScopeAdmin,
 	ScopeClaimsLaunch,
-	ScopeStorageCount,
 }
 
 // ScopesForRole returns the scopes a membership at role carries, or none for

@@ -84,11 +84,6 @@ type HelloAck struct {
 	// will not bind keeps arbitrating admission, so this is the only place
 	// the reason surfaces.
 	APIError string `json:"api_error,omitempty"`
-	// ArtifactStoreError is why the daemon serves no artifact routes, empty
-	// when the cache resolved or none is configured. A cache URL the daemon
-	// cannot open does not stop it serving, so this is the only place the
-	// reason surfaces.
-	ArtifactStoreError string `json:"artifact_store_error,omitempty"`
 }
 
 // HostResources is an amount of machine capacity: CPU cores and

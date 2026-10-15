@@ -64,6 +64,114 @@ unlock.
 - **controller:** Job cancellation and persisted recovery failures use the shared capability policy. Cancellation preserves a live holder's result rights. Failure reads require the declared recovery edge and source generation.
 - **controller:** A run owner can read `/api/v1/runs/{run}/snapshot` through the shared capability policy. One committed read supplies job state, accepted declarations and generator membership, including empty groups.
 - **controller:** The generator expansion endpoint accepts success or a structured failure under live owner or eval authority. It binds submission to the source job and generation and passes both outcomes to the same store transaction.
+- **controller:** Remove unused cache-service egress flag selection and proxy
+  usage classification.
+
+- **storage (Breaking):** Removed `AttemptReport.OutputFrom`, the `output_from`
+  attempt payload, `Store.FinishNodeCopyingOutput` and the unused backend
+  output-read methods. Memo materialization uses transactional blob records.
+  See [migration steps](docs/migrations/_unreleased.md#memo-copies-use-transactional-blob-records).
+
+- **storage (Breaking):** Configuring the controller's data backend also installs
+  transactional result verification against its physical manifests. Corrupt
+  manifests refuse completion without changing the job. Removed unused
+  `storage.SafeArtifactKey`, `storage.SafeRelPath`, `Store.PrunableNodeLogs`
+  and `Store.DeleteRunNodeLogs`. See
+  [migration steps](docs/migrations/_unreleased.md#storage-uses-record-backed-maintenance).
+
+- **storage (Breaking):** Run and team log cleanup uses the shared filesystem
+  or S3 backend, including retired retention classes and late signed uploads.
+  Removed `fs.ArtifactStore` and its sharded reader, writer and locks.
+  Deployment measurement uses `fs.NewUsageReporter`.
+  See [migration steps](docs/migrations/_unreleased.md#filesystem-object-writes-use-signed-transfers).
+
+- **storage (Breaking):** Standalone controllers configure the shared filesystem
+  data backend and signed transfer routes. Removed the older filesystem output
+  signer, output routes, raw log adapter and `Server.WithOutputSignKey`. See
+  [migration steps](docs/migrations/_unreleased.md#filesystem-transfers-use-the-shared-data-backend).
+
+- **storage (Breaking):** The controller's leased maintenance pass collects
+  unreachable CAS objects through the configured backend. Removed bucket-listing
+  accounting, the free-log-share pruner, `WithStoragePass`, `RunStoragePass`,
+  `StoragePassEvery` and the `storage_pass` health field. See
+  [migration steps](docs/migrations/_unreleased.md#storage-uses-record-backed-maintenance).
+
+- **storage:** Opted-in remote memo and dependency-cache lookups let the server
+  select the verified default ref. Local archive readers can restore without a
+  caller-selected ref. Local saves stay local after remote misses.
+
+- **storage (Breaking):** Log readers expose only reads and streams. Removed
+  `LogStore.Append`, `LogStore.DeleteRun`, `NodeLogs.Append`,
+  `NodeLogs.DeleteRun` and the unused `storage.SafeLogIDs` helper. See
+  [migration steps](docs/migrations/_unreleased.md#log-readers-expose-only-reads).
+
+- **storage (Breaking):** Removed the unused filesystem append-log backend
+  and append/delete `conformance.TestLogStore` suite, plus the cache-specific
+  `artifact_store_error` daemon status field.
+  Tagged sinks write immutable log segments. See
+  [migration steps](docs/migrations/_unreleased.md#filesystem-logs-use-tagged-segments).
+
+- **storage:** (Breaking) Physical log key helpers move from `logseg` to
+  `internal/blob`. Signed log slots reserve zero for the final manifest and use
+  positive segment indexes. Store and authenticated transport binding remain pending.
+
+- **storage:** SDK and host dependency-cache keys share workspace-contained
+  lockfile reads. Go module caches use the protocol resolver. Signed-data cache
+  saves refresh the upload binding after retries. Refused bindings run cold.
+
+- **storage:** Filesystem and S3 manifest readers verify stored length, digest
+  and successful close before returning file metadata. Authenticated controller
+  binding remains pending.
+
+- **storage:** Filesystem and S3 CAS backends support the leased reachability
+  collector. Removed age-based output pruning and bucket-measurement expiry.
+  Referenced bytes survive regardless of object age.
+
+- **storage:** Blob commits require the upload ticket's verified staging bytes
+  even when identical final content exists. A digest alone cannot mint another
+  uploader's receipt. Committed receipt replay remains a store operation.
+- **storage:** Repo-bound remote-cache readers can use verified cache read edges
+  without a job attempt. Binary, source and owner-upload edges remain excluded.
+
+- **storage (Breaking):** Removed the raw `storage.ArtifactStore` interface,
+  `storage.ErrListNotSupported`, `conformance.TestArtifactStore` and unused
+  `s3.ArtifactStore.Delete`. Shared signed-data bytes and records own storage.
+  See [migration steps](docs/migrations/_unreleased.md#raw-artifact-plug-ins-are-removed).
+
+- **storage (Breaking):** Direct source fetches keep Git objects in each run's
+  checkout. Removed persistent Git mirrors, shared worktrees and mirror eviction.
+  See [migration steps](docs/migrations/_unreleased.md#direct-source-fetches-own-their-git-objects).
+- **storage (Breaking):** Local binary-cache status and pruning use only the
+  current entry layout. Removed old-layout discovery, quarantine and retirement,
+  and the `legacy_entries` and `legacy_bytes` fields from `cache info -o json`.
+  See [migration steps](docs/migrations/_unreleased.md#local-binary-caches-use-one-layout).
+- **storage:** Artifact staging and dependency-cache restore now check download
+  close errors before publishing files. Failed downloads preserve the destination
+  for that object.
+
+### Removed
+- **storage (Breaking):** removed cache-grant issuance, verification, the controller credential and the grant-authenticated data routes
+  Services no longer announce those routes. Authenticated byte/record adapter wiring remains incomplete. See [migration steps](docs/migrations/_unreleased.md#cache-grants-are-removed).
+- **logs (Breaking):** removed `logseg.AttemptPrefix` and flat manifest identity fields
+  Sinks require a tagged subject. Manifest reads and abandoned seals check the
+  subject against the object prefix. See [migration steps](docs/migrations/_unreleased.md#log-identities-use-tagged-subjects).
+- **storage (Breaking):** removed the cache-service accounting client, its five internal counter routes and the `storage.count` service scope
+  Storage and download accounting remains in the controller's database. See [migration steps](docs/migrations/_unreleased.md#cache-service-accounting-is-removed).
+- **logs (Breaking):** moved retention-class parsing from `logseg.ClassDays` into the internal byte-storage owner
+  Log keys, expiry and controller cleanup use the same canonical class check.
+- **logs (Breaking):** removed reads of unrecorded exported log objects
+  The controller reads logs indexed by the store. Object listings no longer make an unrecorded log readable.
+- **storage (Breaking):** removed runner and launcher gitcache/package-proxy options, agent `gitcache`, controller cache URL announcements, and the CLI cache-health probe. Runners fetch source directly. Custom registry settings use `run.submit_env_allow`.
+- **runner (Breaking):** removed legacy shared binary transfers and cache-grant environment renewal
+  Runners build into their machine's binary cache while the new record-backed storage client awaits host binding.
+- **storage (Breaking):** removed the cache-grant source client and pretrigger object-key uploads
+  Source bundles use verified blob transfers and exact uploader records. Working-tree triggers fail before upload or submission until intake and host storage bindings are connected.
+
+### Added
+- **logs:** added filesystem expiry and S3 lifecycle checks and segment reads
+  Storage components expire files by their stored class and verify S3 segments through committed records. Controller maintenance and tagged-log routes remain pending.
+- **logs:** Added batch signing and filesystem transfer support for tagged logs
+  The storage components issue fifteen-minute PUT-only URLs and preserve the first payload at each segment or manifest key. Controller and host bindings remain pending.
 - **cli + controller:** `sparkwing pipeline trigger --runner here --reason TEXT` hosts a hotfix run on the caller's machine under a one-shot runner credential bound to that run
   `POST /api/v1/triggers` takes `runner: here` and a one-line `reason`, mints a runner credential with the trigger, pins the trigger to it and returns it once as `runner_token` with `runner_token_expires_at` (six hours, the hosted-run limit). Only that credential may claim the pinned trigger, once and within 10 minutes; its requests are fenced to the run's own routes; secrets reach the run through its claims as on any runner. The audit line and a `runner_here` run event record the caller, the credential prefix and the reason. See [Hotfix runner](docs/hotfix-runner.md).
 - **cli:** a `.sparkwing/package.json` that depends on `@sparkwing/sdk` is a TypeScript pipeline. `sparkwing run`, `pipeline plan`, help, describe and the pod node host start its `main` file as `node --import <the SDK's ./bootstrap> <main> --sw-node-protocol`, after `npm ci` when `node_modules` lacks the SDK. The preload removes `SPARKWING_NODE_TOKEN` and `SPARKWING_PROTOCOL_HANDLES` before any entry module evaluates, and the TypeScript SDK refuses a process started without it. `sparkwing cache explain` reports it as not cached. Launcher Jobs, dispatched Jobs and warm runners start it the same way and install with their node processes' environment. Node processes and installs on a runner also receive its `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` (either case), `NODE_EXTRA_CA_CERTS` and `SSL_CERT_FILE`
@@ -262,6 +370,9 @@ unlock.
   The retry trigger was written with an empty `trigger_user` and only retry provenance in `trigger_env`, so a retried pull-request run planned as an anonymous push. It now copies the source trigger's user and the `GITHUB_EVENT_NAME` and `GITHUB_PR_*`/`GITHUB_BASE_*`/`GITHUB_HEAD_*` keys `PullRequestFromEnv` reads.
 
 ### Removed
+- **runner (Breaking):** Removed cache-server source fetching; source and working-tree baselines use upstream Git
+- **engine (Breaking):** Removed the legacy artifact transport; publication and staging require authorized blob records
+- **SDK + storage:** remove the gitcache clone probe and the lint-cache HTTP helpers. Git clones use their upstream directly. Binary transfers use signed controller data routes without cache-service fallbacks.
 - **store + controller (Breaking):** Removed `SetNodeStatus`, `RevokeNodeReady` and their legacy HTTP handlers. Debug pauses use activity detail. Queue withdrawal uses the owner-fenced node transition. See [migration guide](docs/migrations/_unreleased.md#node-state-writes-use-transitions).
 - **store + controller + doctor (Breaking):** Removed `TouchRunHeartbeat`, `TouchNodeHeartbeat`, `Run.LastHeartbeatAt`, the independent timestamp heartbeat loops and their legacy HTTP handlers. Run liveness follows the owner lease. Doctor no longer finalizes runs from heartbeat age or reports `orphaned_runs`. The elected unit reaper owns expired-owner recovery.
 - **store + controller (Breaking):** Remove `POST /api/v1/credits/grants` and caller-selected paid grants. Paid credit uses verified provider events matched to committed checkouts. Free operator grants and payment-linked reversals keep their existing paths. See the [migration guide](docs/migrations/_unreleased.md#paid-credit-requires-verified-checkout-settlement).

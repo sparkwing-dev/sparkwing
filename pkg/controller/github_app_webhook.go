@@ -26,6 +26,9 @@ import (
 
 const webhookBodyLimit = 1 << 20
 
+// EnvDefaultBranch carries the verified GitHub repository default branch.
+const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
+
 var defaultPullRequestActions = map[string]struct{}{
 	"opened":      {},
 	"synchronize": {},

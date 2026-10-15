@@ -25,8 +25,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
@@ -87,7 +89,7 @@ func (f logSegmentFixture) sink(t *testing.T, token, nodeID string) (*logseg.Sin
 		t.Fatal(err)
 	}
 	s, err := logseg.NewSink(t.Context(), up, logseg.Options{
-		Run: "run-d", Node: nodeID, SpoolDir: t.TempDir(), SegmentBytes: 16,
+		Subject: up.Subject(), SpoolDir: t.TempDir(), SegmentBytes: 16,
 		RetryBase: time.Millisecond, RetryMax: time.Millisecond,
 	})
 	if err != nil {
@@ -135,11 +137,11 @@ func TestLogSegmentsRoundTripThroughTheController(t *testing.T) {
 	}
 
 	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
-	if err != nil || !strings.HasPrefix(rec.Prefix, "logs/r90/teams/default/runs/run-d/a/a1-g") {
+	if err != nil || !strings.HasPrefix(rec.Prefix, "logs/r90/teams/default/runs/run-d/jobs/a/a1-g") {
 		t.Fatalf("record = %+v, %v", rec, err)
 	}
 	stored, err := logseg.Open(ctx, f.srv.logObjects(), rec.Prefix)
-	if err != nil || stored.Manifest == nil || stored.Manifest.Attempt != 1 || stored.Manifest.Generation < 1 {
+	if err != nil || stored.Manifest == nil || stored.Manifest.Subject.Attempt.Attempt != 1 || stored.Manifest.Subject.Attempt.Generation < 1 {
 		t.Fatalf("stored manifest = %+v, %v", stored, err)
 	}
 }
@@ -160,7 +162,7 @@ func TestLogSegmentsRefuseASupersededAttemptAndASecondManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := up.PutManifest(t.Context(), logseg.Manifest{
-		Version: logseg.ManifestVersion, Run: "run-d", Node: "a", Status: logseg.StatusComplete, SealedBy: logseg.SealedByNode,
+		Version: logseg.ManifestVersion, Subject: new(up.Subject()), Status: logseg.StatusComplete, SealedBy: logseg.SealedByNode,
 	}); !errors.Is(err, logseg.ErrSealed) {
 		t.Fatalf("a second manifest = %v, want ErrSealed", err)
 	}
@@ -179,7 +181,7 @@ func TestSegmentStreamJoinsTheLiveRingByOffset(t *testing.T) {
 	}
 	stored := make(chan int, 64)
 	s, err := logseg.NewSink(ctx, signalUploader{LogSegmentUploader: up, stored: stored}, logseg.Options{
-		Run: "run-d", Node: "a", SpoolDir: t.TempDir(), SegmentBytes: 16,
+		Subject: up.Subject(), SpoolDir: t.TempDir(), SegmentBytes: 16,
 		Live: func(off int64, data []byte) { f.srv.liveLogs.AppendAt("run-d", "a", up.LiveAttempt(), off, data) },
 	})
 	if err != nil {
@@ -319,13 +321,14 @@ func TestHeartbeatsReportWhatAViewerWatches(t *testing.T) {
 	}
 }
 
-// A log the run store does not record reads and deletes like one a runner
-// wrote.
-func TestUnrecordedLogsReadAndDelete(t *testing.T) {
+func TestUnrecordedLogObjectsAreNotReadable(t *testing.T) {
 	f := newLogSegmentFixture(t)
 	ctx := t.Context()
 	objs := f.srv.logObjects()
-	prefix, err := logseg.AttemptPrefix(logseg.ClassFree, string(store.DefaultTeam), "run-d", "b", 1, 0)
+	prefix, err := blob.LogSubjectPrefix(logseg.ClassFree, blob.LogSubject{
+		Kind: blob.LogJobAttempt, Team: string(store.DefaultTeam), RunID: "run-d",
+		Attempt: &runspec.AttemptIdentity{Team: string(store.DefaultTeam), RunID: "run-d", NodeID: "b", Attempt: 1, Generation: 1},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,21 +337,21 @@ func TestUnrecordedLogsReadAndDelete(t *testing.T) {
 	_, _ = zw.Write([]byte("exported line\n"))
 	_ = zw.Close()
 	sum := sha256.Sum256(gz.Bytes())
-	if err := objs.putIfAbsent(ctx, logseg.SegmentKey(prefix, 1), gz.Bytes()); err != nil {
+	if err := objs.putIfAbsent(ctx, blob.LogSegmentKey(prefix, 1), gz.Bytes()); err != nil {
 		t.Fatal(err)
 	}
 	manifest, _ := logseg.Manifest{
-		Version: logseg.ManifestVersion, Run: "run-d", Node: "b", Attempt: 1, Status: logseg.StatusComplete,
+		Version: logseg.ManifestVersion, Subject: new(nodeLogSubject(store.NodeLog{Team: store.DefaultTeam, RunID: "run-d", NodeID: "b", Attempt: 1, Generation: 1})), Status: logseg.StatusComplete,
 		Lines: 1, Segments: []logseg.Segment{{N: 1, FirstSeq: 1, LastSeq: 1, Lines: 1, SHA256: hex.EncodeToString(sum[:])}},
 	}.Marshal()
-	if err := objs.putIfAbsent(ctx, logseg.ManifestKey(prefix), manifest); err != nil {
+	if err := objs.putIfAbsent(ctx, blob.LogManifestKey(prefix), manifest); err != nil {
 		t.Fatal(err)
 	}
 	logs := f.srv.dashboardLogs(store.DefaultTeam)
-	if got, err := logs.Read(ctx, "run-d", "b", storage.ReadOpts{}); err != nil || string(got) != "exported line\n" {
+	if got, err := logs.Read(ctx, "run-d", "b", storage.ReadOpts{}); err != nil || len(got) != 0 {
 		t.Fatalf("read = %q, %v", got, err)
 	}
-	if run, err := logs.ReadRun(ctx, "run-d"); err != nil || !strings.Contains(string(run), "=== b ===\nexported line\n") {
+	if run, err := logs.ReadRun(ctx, "run-d"); err != nil || len(run) != 0 {
 		t.Fatalf("read run = %q, %v", run, err)
 	}
 	if code, raw := f.do(t, http.MethodDelete, "/api/v1/runs/run-d", f.admin(t), nil); code != http.StatusNoContent {
@@ -495,7 +498,7 @@ func TestS3LogSegmentURLsSignTheSizeAndMD5(t *testing.T) {
 	md := md5.Sum([]byte("segment"))
 	digest := base64.StdEncoding.EncodeToString(md[:])
 	raw, headers, err := srv.logObjects().presignPut(t.Context(), httptest.NewRequest(http.MethodPost, "/", nil),
-		store.DefaultTeam, "logs/r90/teams/default/runs/r/n/a1-g1/seg-000001.ndjson.gz", 7, digest)
+		store.DefaultTeam, "logs/r90/teams/default/runs/r/jobs/n/a1-g1/seg-000001.ndjson.gz", 7, digest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,7 +529,7 @@ func TestLogManifestMustMatchTheSignedSegments(t *testing.T) {
 	seal := func(segs ...logseg.Segment) int {
 		t.Helper()
 		raw, err := logseg.Manifest{
-			Version: logseg.ManifestVersion, Run: "run-d", Node: "a", Attempt: grant.Attempt, Generation: grant.Generation,
+			Version: logseg.ManifestVersion, Subject: new(nodeLogSubject(store.NodeLog{Team: store.DefaultTeam, RunID: "run-d", NodeID: "a", Attempt: grant.Attempt, Generation: grant.Generation})),
 			Status: logseg.StatusComplete, SealedBy: logseg.SealedByNode, Segments: segs,
 		}.Marshal()
 		if err != nil {
@@ -621,57 +624,6 @@ func TestAnEndedClaimFinishesOnlyItsOwnLogWithinTheGrace(t *testing.T) {
 	}
 }
 
-// A sealed log that lost a segment, or holds other bytes under its key,
-// must not read, or report, as whole: the reader gets the lines before
-// the gap and a loss marker, and completeness says incomplete.
-func TestALostSegmentReadsAndReportsAsIncomplete(t *testing.T) {
-	for name, damage := range map[string]func(context.Context, fsLogObjects, string) error{
-		"deleted": func(ctx context.Context, objs fsLogObjects, key string) error {
-			_, err := objs.deletePrefix(ctx, key)
-			return err
-		},
-		"replaced": func(ctx context.Context, objs fsLogObjects, key string) error {
-			return objs.objs.Put(ctx, key, strings.NewReader("not the segment the manifest names"))
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			f := newLogSegmentFixture(t)
-			ctx := t.Context()
-			tok := f.claim(t, "a", store.ClaimTokenWork)
-			s, _ := f.sink(t, tok, "a")
-			for i := 1; i <= 4; i++ {
-				if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if _, err := s.Close(ctx, logseg.End{}); err != nil {
-				t.Fatal(err)
-			}
-			rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
-			if err != nil {
-				t.Fatal(err)
-			}
-			objs := f.srv.logObjects()
-			if err := damage(ctx, objs.(fsLogObjects), logseg.SegmentKey(rec.Prefix, 2)); err != nil {
-				t.Fatal(err)
-			}
-			logs := segmentLogs{s: f.srv, team: store.DefaultTeam, objs: objs}
-			body, err := logs.Read(ctx, "run-d", "a", storage.ReadOpts{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(string(body), logLine(1)) || strings.Contains(string(body), logLine(4)) ||
-				!strings.Contains(string(body), "segment 2 is missing") {
-				t.Fatalf("read of a log with segment 2 %s = %q, want line 1 then a loss marker", name, body)
-			}
-			c, found, err := logs.NodeLogCompleteness(ctx, "run-d", "a", logseg.NodeProgress{Started: true}, time.Now())
-			if err != nil || !found || c.State != logseg.StateIncomplete {
-				t.Fatalf("completeness of a log with segment 2 %s = %+v, %v, %v; want incomplete", name, c, found, err)
-			}
-		})
-	}
-}
-
 // A charge the team's storage refuses signs nothing, so the writer's retry
 // is refused again rather than granted on a charge that never reached the
 // team's count.
@@ -679,7 +631,7 @@ func TestARefusedLogChargeStaysRefusedOnRetry(t *testing.T) {
 	f := newLogSegmentFixture(t)
 	ctx := t.Context()
 	now := time.Now()
-	rec, err := f.st.OpenNodeLog(ctx, store.NodeLog{Team: "slotless", RunID: "run-x", NodeID: "a", Attempt: 1, Generation: 1, Prefix: "logs/r30/teams/slotless/runs/run-x/a/a1-g1/"}, now)
+	rec, err := f.st.OpenNodeLog(ctx, store.NodeLog{Team: "slotless", RunID: "run-x", NodeID: "a", Attempt: 1, Generation: 1, Prefix: "logs/r30/teams/slotless/runs/run-x/jobs/a/a1-g1/"}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -698,37 +650,6 @@ func TestARefusedLogChargeStaysRefusedOnRetry(t *testing.T) {
 	}
 	if segs, err := f.st.NodeLogSegments(ctx, rec); err != nil || len(segs) != 0 {
 		t.Fatalf("a refused charge signed %+v, %v", segs, err)
-	}
-}
-
-// A team's logs written under a retention class the controller no longer
-// configures still go when the team is deleted, and at its recheck, after
-// the purge removed the records that named the class.
-func TestTeamDeletionReachesARetiredRetentionClass(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	f.srv.WithLogRetention(map[store.Team]int{store.DefaultTeam: 365})
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	s, _ := f.sink(t, tok, "a")
-	if err := s.Append([]byte(logLine(1)), "", 0, 0); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Close(ctx, logseg.End{}); err != nil {
-		t.Fatal(err)
-	}
-	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
-	if err != nil || !strings.HasPrefix(rec.Prefix, "logs/r365/") {
-		t.Fatalf("record = %+v, %v; want the r365 class", rec, err)
-	}
-	f.srv.WithLogRetention(nil)
-	if err := f.st.DeleteRunNodeLogs(ctx, store.DefaultTeam, "run-d"); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.srv.purgeTeamLogs(ctx, store.DefaultTeam); err != nil {
-		t.Fatal(err)
-	}
-	if left, err := f.srv.logObjects().List(ctx, rec.Prefix); err != nil || len(left) != 0 {
-		t.Fatalf("after the purge the retired class still holds %v, %v", left, err)
 	}
 }
 
@@ -763,7 +684,10 @@ func sealedAttempt(t *testing.T, f logSegmentFixture, runID string, attempt, gen
 	t.Helper()
 	ctx := t.Context()
 	objs := f.srv.logObjects()
-	prefix, err := logseg.AttemptPrefix(logseg.ClassStandard, string(store.DefaultTeam), runID, "a", attempt, generation)
+	prefix, err := blob.LogSubjectPrefix(logseg.ClassStandard, blob.LogSubject{
+		Kind: blob.LogJobAttempt, Team: string(store.DefaultTeam), RunID: runID,
+		Attempt: &runspec.AttemptIdentity{Team: string(store.DefaultTeam), RunID: runID, NodeID: "a", Attempt: attempt, Generation: generation},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -775,10 +699,10 @@ func sealedAttempt(t *testing.T, f logSegmentFixture, runID string, attempt, gen
 	if err := zw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := objs.putIfAbsent(ctx, logseg.SegmentKey(prefix, 1), gz.Bytes()); err != nil {
+	if err := objs.putIfAbsent(ctx, blob.LogSegmentKey(prefix, 1), gz.Bytes()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := logseg.SealAbandoned(ctx, objs, prefix, logseg.Manifest{Run: runID, Node: "a", Attempt: attempt, Generation: generation},
+	if _, err := logseg.SealAbandoned(ctx, objs, prefix, logseg.Manifest{Subject: new(nodeLogSubject(store.NodeLog{Team: store.DefaultTeam, RunID: runID, NodeID: "a", Attempt: attempt, Generation: generation}))},
 		logseg.ReasonRunnerLost, objs.putIfAbsent); err != nil {
 		t.Fatal(err)
 	}

@@ -6,17 +6,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func (f dispatchRouteFixture) admin(t *testing.T) string {
@@ -194,57 +190,5 @@ func TestFinishRoute_RefusesInlineOutputBytes(t *testing.T) {
 	}
 	if code, data := f.readOutput(t, "/api/v1/runs/run-d/nodes/x/output", admin); code != http.StatusOK || string(data) != `{"v":1}` {
 		t.Fatalf("read back: %d %s", code, data)
-	}
-}
-
-// A filesystem commit refused a slot leaves the file it moved into place,
-// and a retry once the team has room finds that file and commits it.
-func TestFsOutputCommitRefusedASlotCommitsOnRetry(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	ctx := t.Context()
-	if err := st.SetFreeTeamSlots(ctx, 1); err != nil {
-		t.Fatal(err)
-	}
-	for _, team := range []store.Team{"team-a", "team-b"} {
-		if err := st.AsOperator().CreateTeam(ctx, team); err != nil {
-			t.Fatal(err)
-		}
-	}
-	data := bytes.Repeat([]byte("x"), int(store.MaxUnpaidOutputBytes)+1)
-	sum := sha256.Sum256(data)
-	key := store.OutputKeyPrefix("run-a", "n") + "a1-g0-" + strings.Repeat("0", 32)
-	u, err := st.ReserveUpload(ctx, store.UploadRequest{
-		Team: "team-a", RunID: "run-a", Kind: store.StorageCache, Key: key, Size: int64(len(data)),
-		SHA256: hex.EncodeToString(sum[:]), Principal: "run-a/n", Provenance: "cloud",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.GrantFreeSlot(ctx, "team-b", time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	o := fsOutputs{s: New(st, nil), dir: t.TempDir()}
-	pending := o.pendingPath(u.ID)
-	if err := os.MkdirAll(filepath.Dir(pending), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(pending, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := o.commit(ctx, u); !errors.Is(err, store.ErrFreeStoragePaused) {
-		t.Fatalf("commit without a slot = %v, want free storage paused", err)
-	}
-	if err := st.SetFreeTeamSlots(ctx, 2); err != nil {
-		t.Fatal(err)
-	}
-	if err := o.commit(ctx, u); err != nil {
-		t.Fatalf("the retry once a slot opened: %v", err)
-	}
-	if _, err := st.CommittedObject(ctx, "team-a", key); err != nil {
-		t.Fatalf("the retried commit recorded nothing: %v", err)
 	}
 }

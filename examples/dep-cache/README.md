@@ -53,8 +53,7 @@ Nothing touches your real caches: the demo uses an isolated
 - `sparkwing.Dir(path, sparkwing.KeyFromFile("Gemfile.lock"))` -- any
   directory, keyed on any file.
 
-On a laptop the archives live under `$SPARKWING_HOME/depcache`; on a
-cluster they go to the sparkwing-cache service's blob store, so every
-runner pod shares one cache. See `docs/caching.md` ("Dependency
-caches") for key semantics, size limits, and the best-effort
-guarantee.
+On a laptop the archives live under `$SPARKWING_HOME/depcache`. Cluster hosts
+with an authenticated storage binding use `depcache` records and signed `/data`
+transfers. See `docs/caching.md` ("Dependency caches") for key semantics,
+size limits and the best-effort guarantee.

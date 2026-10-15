@@ -29,8 +29,8 @@ func checkStoreAbandonedLogBoundary(ctx context.Context, root string) (err error
 	if err != nil {
 		return err
 	}
-	segment := store.Segment{Index: 0, Size: 3, Digest: strings.Repeat("a", 64)}
-	segment.ObjectKey, err = store.LogSegmentObjectKey(commit.Subject, commit.RetentionClass, 0)
+	segment := store.Segment{Index: 1, Size: 3, Digest: strings.Repeat("a", 64)}
+	segment.ObjectKey, err = blob.LogObjectKey(commit.Subject, commit.RetentionClass, 1)
 	if err != nil {
 		return err
 	}
