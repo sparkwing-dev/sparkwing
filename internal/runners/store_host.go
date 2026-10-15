@@ -42,40 +42,30 @@ func (h StoreHosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit)
 	return hostAward(ctx, unit, h.bind)
 }
 
-func (h StoreHosting) bind(ctx context.Context, unit, _ controllerwire.ClaimedUnit, input nodehost.RunInput) (NativeServices, storeInputs, error) {
-	inputs, err := h.inputs(ctx, unit, input)
-	if err != nil {
-		return NativeServices{}, inputs, err
-	}
-	services, err := h.Bind(ctx, inputs.binding)
-	services.Config.Store = inputs.binding.Tenant
-	return services, inputs, err
-}
-
 type storeInputs struct {
-	binding StoreBinding
-	run     nodehost.RunInput
-	node    nodehost.NodeInput
+	run  nodehost.RunInput
+	node nodehost.NodeInput
 }
 
-func (h StoreHosting) inputs(ctx context.Context, unit controllerwire.ClaimedUnit, input nodehost.RunInput) (storeInputs, error) {
-	frozen, err := captureUnit(unit)
+func (h StoreHosting) bind(ctx context.Context, unit, _ controllerwire.ClaimedUnit, input nodehost.RunInput) (NativeServices, storeInputs, error) {
+	principal, err := h.authenticate(ctx, unit)
 	if err != nil {
-		return storeInputs{}, err
-	}
-	principal, err := h.authenticate(ctx, frozen)
-	if err != nil {
-		return storeInputs{}, err
+		return NativeServices{}, storeInputs{}, err
 	}
 	tenant, err := h.Store.ForTeam(ctx, store.Team(principal.Capability.Team))
 	if err != nil {
-		return storeInputs{}, err
+		return NativeServices{}, storeInputs{}, err
 	}
-	inputs, err := nativeInputs(ctx, tenant, frozen, principal, input)
-	inputs.binding = StoreBinding{Tenant: tenant, Principal: principal, Refresh: func(ctx context.Context) (capability.Principal, error) {
-		return h.authenticate(ctx, frozen)
+	inputs, err := nativeInputs(ctx, tenant, unit, principal, input)
+	if err != nil {
+		return NativeServices{}, inputs, err
+	}
+	binding := StoreBinding{Tenant: tenant, Principal: principal, Refresh: func(ctx context.Context) (capability.Principal, error) {
+		return h.authenticate(ctx, unit)
 	}}
-	return inputs, err
+	services, err := h.Bind(ctx, binding)
+	services.Config.Store = tenant
+	return services, inputs, err
 }
 
 func nativeInputs(ctx context.Context, state nodehost.NativeHostStore, unit controllerwire.ClaimedUnit, principal capability.Principal, input nodehost.RunInput) (storeInputs, error) {

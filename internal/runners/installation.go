@@ -32,82 +32,39 @@ func NewNativeInstallation(config NativeInstallationConfig) (RunnerInstallation,
 }
 
 type nativeInstallation struct {
-	config                       NativeInstallationConfig
-	mu                           sync.Mutex
-	drained, replaced, refreshed bool
-	version                      string
+	config NativeInstallationConfig
+	mu     sync.Mutex
 }
 
-func (i *nativeInstallation) Drain(ctx context.Context) error {
+func (i *nativeInstallation) Apply(ctx context.Context, release engine.VerifiedRelease) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	i.drained, i.replaced, i.refreshed = false, false, false
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := i.config.Drain(ctx); err != nil {
-		return err
-	}
-	i.drained = true
-	return nil
-}
-
-func (i *nativeInstallation) Replace(ctx context.Context, release engine.VerifiedRelease) error {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	if !i.drained {
-		return errors.New("runner must finish draining before replacement")
-	}
-	i.replaced, i.refreshed = false, false
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	target := releaseasset.Target{Binary: releaseasset.SparkwingRunner, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
 	if release.Target() != target || release.Version() == "" || release.Asset().Name() == "" {
 		return errors.New("replacement must be a verified runner release for this machine")
 	}
-	path, err := filepath.EvalSymlinks(i.config.Executable)
-	if err != nil {
-		return fmt.Errorf("resolve installed runner: %w", err)
+	for _, step := range []struct {
+		name string
+		run  func(context.Context) error
+	}{
+		{"drain held claims", i.config.Drain},
+		{"replace executable", func(ctx context.Context) error {
+			path, err := filepath.EvalSymlinks(i.config.Executable)
+			if err != nil {
+				return fmt.Errorf("resolve installed runner: %w", err)
+			}
+			return installRunner(ctx, path, release.Asset())
+		}},
+		{"refresh existing services and schedules", func(ctx context.Context) error { return i.config.RefreshManagedUnits(ctx, release.Version()) }},
+		{"restart registered runner", i.config.Restart},
+	} {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := step.run(ctx); err != nil {
+			return fmt.Errorf("runner update could not %s: %w; preserve the existing configuration and registration, then retry the update", step.name, err)
+		}
 	}
-	if err := installRunner(ctx, path, release.Asset()); err != nil {
-		return err
-	}
-	i.replaced = true
-	i.version = release.Version()
-	return nil
-}
-
-func (i *nativeInstallation) RefreshManagedUnits(ctx context.Context) error {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	if !i.replaced {
-		return errors.New("runner replacement must succeed before refreshing managed units")
-	}
-	i.refreshed = false
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := i.config.RefreshManagedUnits(ctx, i.version); err != nil {
-		return err
-	}
-	i.refreshed = true
-	return nil
-}
-
-func (i *nativeInstallation) Restart(ctx context.Context) error {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	if !i.refreshed {
-		return errors.New("managed-unit refresh must succeed before restarting the runner")
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := i.config.Restart(ctx); err != nil {
-		return err
-	}
-	i.drained, i.replaced, i.refreshed = false, false, false
 	return nil
 }
 

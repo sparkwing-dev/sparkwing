@@ -99,7 +99,7 @@ func TestManagedRunnerDrainsHeldWorkBeforeVerifiedReplacement(t *testing.T) {
 	if claims != 1 {
 		t.Fatalf("claimed %d units after policy changed", claims)
 	}
-	if !reflect.DeepEqual(installation.calls, []string{"drain", "replace", "refresh", "restart"}) {
+	if !reflect.DeepEqual(installation.calls, []string{"apply"}) {
 		t.Fatalf("installation: %v", installation.calls)
 	}
 }
@@ -131,7 +131,7 @@ func TestManagedRunnerUpdatesAfterPendingAwardDrains(t *testing.T) {
 		if err := runner.Run(t.Context()); err != nil {
 			t.Fatal(err)
 		}
-		if claims != 1 || hosted != 1 || !reflect.DeepEqual(installation.calls, []string{"drain", "replace", "refresh", "restart"}) {
+		if claims != 1 || hosted != 1 || !reflect.DeepEqual(installation.calls, []string{"apply"}) {
 			t.Fatalf("claims=%d hosted=%d installation=%v", claims, hosted, installation.calls)
 		}
 	})
@@ -159,7 +159,7 @@ func TestManagedRunnerUpdatesAfterCompletedUnitFailure(t *testing.T) {
 	if err := runner.Run(t.Context()); !errors.Is(err, failure) {
 		t.Fatalf("lost completed failure: %v", err)
 	}
-	if !reflect.DeepEqual(installation.calls, []string{"drain", "replace", "refresh", "restart"}) {
+	if !reflect.DeepEqual(installation.calls, []string{"apply"}) {
 		t.Fatalf("required update blocked by completed work: %v", installation.calls)
 	}
 }
