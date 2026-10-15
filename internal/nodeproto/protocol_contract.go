@@ -302,7 +302,8 @@ func (r Reply) Decode(result any) error {
 		}
 		return validated
 	}
-	if result == nil {
+	destination := reflect.ValueOf(result)
+	if destination.Kind() != reflect.Pointer || destination.IsNil() {
 		return fmt.Errorf("%w: missing result destination", ErrMalformed)
 	}
 	if _, err := protocolObject(r.Result); err != nil {
@@ -311,6 +312,8 @@ func (r Reply) Decode(result any) error {
 	if err := checkProtocolValue(r.Result, reflect.TypeOf(result)); err != nil {
 		return err
 	}
+	// safety: absent fields cannot inherit values from a previous reply.
+	destination.Elem().SetZero()
 	if err := json.Unmarshal(r.Result, result); err != nil {
 		return fmt.Errorf("%w: reply.result: %v", ErrMalformed, err)
 	}

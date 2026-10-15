@@ -57,9 +57,11 @@ func TestProtocol(t *testing.T) {
 						t.Run("fake-host-run-snapshot", testGoSDKFakeHostRunSnapshot)
 						t.Run("entrypoint-alias", testGoSDKEntrypointAlias)
 						t.Run("output-failures", testGoSDKOutputFailures)
+						t.Run("reply-result-reuse", testGoSDKReplyResultReuse)
 						t.Run("interface-outputs", testGoSDKInterfaceOutputs)
 						t.Run("real-process-plan-and-output", testGoSDKProcessPlanOutput)
 						t.Run("real-process-body-failure", testGoSDKProcessFailure)
+						t.Run("real-process-output-encoding-failure", testGoSDKProcessOutputEncodingFailure)
 						t.Run("real-process-application-retry", testGoSDKRetryStepOutputs)
 						t.Run("real-process-host-routes", testGoSDKProcessRoutes)
 						return

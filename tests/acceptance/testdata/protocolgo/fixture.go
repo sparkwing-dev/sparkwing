@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -41,10 +42,22 @@ func (Pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in Inputs, run spa
 	sparkwing.Job(plan, "failure", func(context.Context) error {
 		return errors.New("fixture failure")
 	})
+	sparkwing.Job(plan, "invalid-output", invalidOutput{})
 	sparkwing.Job(plan, "probe", probe{wait: in.Name == "cancel"}).
 		SkipIf(func(context.Context) bool { return false })
 	sparkwing.Job(plan, "retry", &retryProbe{}).Retry(1)
 	return nil
+}
+
+type invalidOutput struct {
+	sparkwing.Base
+	sparkwing.Produces[float64]
+}
+
+func (invalidOutput) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "run", func(context.Context) (float64, error) {
+		return math.NaN(), nil
+	}), nil
 }
 
 type producer struct {

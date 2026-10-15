@@ -156,7 +156,8 @@ func (sdkOperations) RunStep(ctx context.Context, built any, req nodeproto.Reque
 	}
 	result.Output, err = json.Marshal(out)
 	if err != nil {
-		return result, err
+		result.Error = sdkError(apierr.SDKError, err.Error())
+		return result, nil
 	}
 	if int64(len(result.Output)) > limits.NodeOutputBytes {
 		result.Output = nil
