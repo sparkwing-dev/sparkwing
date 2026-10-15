@@ -856,3 +856,48 @@ QA remain with the lead. No Sparkwing binary, pipeline or Git write ran.
 Commentcheck and sleepcheck pass against HEAD, and `git diff --check` is clean.
 The shared Git config has no local `user.name` or `core.worktree` entry.
 Worker scratch is deleted after verification.
+
+## Continuation: executable cache recovery
+
+`Resolver.Cached` treats a directory at the executable path, or missing owner
+execute permission on Unix, as a cache miss. Auto mode uses the existing verified
+publication path to restore the accepted engine. Local mode returns `unavailable`
+without a download. Windows keeps its native permission semantics. No public API,
+setting, environment variable or recovery mechanism was added.
+
+`TestExactEngineCacheCorruptionAndPolicyEnforcement` now checks byte corruption,
+directory replacement and Unix execute-permission loss. Each case checks local
+refusal without fetching, automatic recovery and the unchanged accepted identity.
+The permission regression failed before the fix with a cache hit for a file that
+could not execute, then passed. The W8 engine contract states the recovery rule.
+
+Verification uses `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOCACHE`, `GOTMPDIR`
+and `TMPDIR` under `/tmp/sw-astra-W8/`, with Go package parallelism at most four.
+
+- Whole-repository `go build -p 4 ./...` passes.
+- Vet passes for engine, runners, wingd and their subpackages, cluster and both
+  acceptance packages.
+- Full engine, runners and component acceptance tests pass. Native catalog
+  cells remain skipped. No native or deployed integration evidence is claimed.
+- Engine tests cross-compile for Windows/amd64. This does not test Windows ACLs.
+- Commentcheck, sleepcheck and `git diff --check` pass.
+- Independent read-only review found no correctness or simplification issue.
+
+This continuation deletes **0 obsolete files / 0 legacy-code lines** and ports
+**0 additional T1 tests**. No external caller migration was needed. Only the
+engine implementation, its existing test, its W8-owned contract and this shared
+handoff changed. No other area's contract changed.
+
+The remaining integration list above still applies. Source acquisition and the
+lease keeper still contain unimplemented final-contract methods. Host creation
+and delegated node-route/replay inputs remain undeclared. W9's pod bootstrap
+registry still omits the builder's unit, attempt, source-generation and engine
+arguments and requires a job for plan units. Its daemon registry names
+`--state-db` while the runtime uses `--home`. Shared local-controller services,
+Actions exchange, managed units, Windows identity and deployed Cloud probes and
+reservation cleanup remain open. No new human decision is requested.
+
+No Sparkwing binary, pipeline or Git write ran. The shared Git config has no
+local `user.name` or `core.worktree` override. Standards discovery succeeded with
+its installed-binary staleness notice. Worker scratch is deleted after the final
+checks. The lead retains committing and landing.

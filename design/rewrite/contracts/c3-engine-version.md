@@ -72,6 +72,9 @@ Publication accepts `VerifiedRelease` only. It retains the verification material
 and publishes atomically, so partial downloads never become executable. Concurrent
 requests may converge on the same valid entry. Missing or corrupt recoverable
 cache entries cause a miss and verification on refetch.
+An executable replaced by a directory, or missing its owner's execute permission
+on Unix, is also a cache miss. Auto mode restores the verified executable. Local
+mode reports the missing executable without fetching.
 
 Every start checks the current verified policy, even for a cached executable.
 `Cached` alone grants no execution permission. `Resolve` and `Ensure` enforce the

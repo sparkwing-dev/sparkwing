@@ -40,11 +40,13 @@ func (f *fixtureTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
 }
+
 func (f *fixtureTransport) policy(t *testing.T, key ed25519.PrivateKey, p VersionIndex) {
 	signed := signPolicy(t, key, p)
 	f.responses[VersionIndexURL] = signed.Body
 	f.responses[VersionIndexSignatureURL] = signed.Signature
 }
+
 func fixtureResolver(t *testing.T) (*Resolver, *fixtureTransport, ed25519.PrivateKey, VersionIndex, time.Time) {
 	t.Helper()
 	key := testSigningKey(t)
@@ -57,6 +59,7 @@ func fixtureResolver(t *testing.T) (*Resolver, *fixtureTransport, ed25519.Privat
 	}
 	return r, transport, key, policy, now
 }
+
 func TestIndexCacheFallbackRollbackAndPersistence(t *testing.T) {
 	r, transport, key, policy, now := fixtureResolver(t)
 	ctx := context.Background()
@@ -114,6 +117,7 @@ func TestIndexCacheFallbackRollbackAndPersistence(t *testing.T) {
 		t.Fatal("policy copy aliases authority")
 	}
 }
+
 func TestIndexFirstUseFailure(t *testing.T) {
 	r, transport, _, _, now := fixtureResolver(t)
 	transport.failure = true
@@ -124,7 +128,7 @@ func TestIndexFirstUseFailure(t *testing.T) {
 func fixtureExecutable(t *testing.T, version string, target releaseasset.Target) []byte {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "cmd", string(target.Binary)), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "cmd", string(target.Binary)), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	writeFixture(t, dir, "go.mod", []byte("module "+GoModule+"\ngo 1.26\n"))
@@ -142,6 +146,7 @@ func fixtureExecutable(t *testing.T, version string, target releaseasset.Target)
 	}
 	return body
 }
+
 func signedBundle(t *testing.T, key ed25519.PrivateKey, version string, target releaseasset.Target, asset []byte) ReleaseBundle {
 	t.Helper()
 	names, err := releaseasset.NamesForVersion(version)
@@ -163,6 +168,7 @@ func signedBundle(t *testing.T, key ed25519.PrivateKey, version string, target r
 	manifest := []byte(strings.Join(lines, "\n") + "\n")
 	return ReleaseBundle{Asset: asset, AssetSignature: ed25519.Sign(key, asset), Manifest: manifest, ManifestSignature: ed25519.Sign(key, manifest)}
 }
+
 func (f *fixtureTransport) release(t *testing.T, version string, target releaseasset.Target, bundle ReleaseBundle) {
 	t.Helper()
 	name, err := target.NameForVersion(version)
@@ -174,6 +180,7 @@ func (f *fixtureTransport) release(t *testing.T, version string, target releasea
 		f.responses[base+path] = body
 	}
 }
+
 func TestExactEngineCacheCorruptionAndPolicyEnforcement(t *testing.T) {
 	r, transport, key, policy, now := fixtureResolver(t)
 	ctx := context.Background()
@@ -193,19 +200,46 @@ func TestExactEngineCacheCorruptionAndPolicyEnforcement(t *testing.T) {
 	if err != nil || warm.Executable != cold.Executable || len(transport.requests) != requests {
 		t.Fatalf("cache miss: %+v %v", warm, err)
 	}
-	if err := os.WriteFile(cold.Executable, []byte("corrupt"), 0700); err != nil {
-		t.Fatal(err)
+	type cacheCorruption struct {
+		name   string
+		mutate func(string) error
 	}
-	if _, ok, err := r.Cached(ctx, cold.Identity, target); err != nil || ok {
-		t.Fatalf("corrupt cache: %v %v", ok, err)
+	corruptions := []cacheCorruption{
+		{"bytes", func(path string) error { return os.WriteFile(path, []byte("corrupt"), 0o700) }},
+		{"directory", func(path string) error {
+			if err := os.Remove(path); err != nil {
+				return err
+			}
+			return os.Mkdir(path, 0o700)
+		}},
 	}
-	r.config.Mode = toolchain.ModeLocal
-	if _, err := r.Resolve(ctx, pin, target); err == nil {
-		t.Fatal("local mode fetched missing engine")
+	if runtime.GOOS != "windows" {
+		corruptions = append(corruptions, cacheCorruption{"permissions", func(path string) error { return os.Chmod(path, 0o600) }})
 	}
-	r.config.Mode = toolchain.ModeAuto
-	if _, err := r.Resolve(ctx, pin, target); err != nil {
-		t.Fatal(err)
+	for _, corruption := range corruptions {
+		t.Run(corruption.name, func(t *testing.T) {
+			if err := corruption.mutate(cold.Executable); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok, err := r.Cached(ctx, cold.Identity, target); err != nil || ok {
+				t.Fatalf("corrupt cache accepted: hit=%t err=%v", ok, err)
+			}
+			requests := len(transport.requests)
+			r.config.Mode = toolchain.ModeLocal
+			_, err := r.Ensure(ctx, cold.Identity, target)
+			requireCode(t, err, apierr.Unavailable)
+			if len(transport.requests) != requests {
+				t.Fatal("local mode fetched a corrupt engine")
+			}
+			r.config.Mode = toolchain.ModeAuto
+			repaired, err := r.Ensure(ctx, cold.Identity, target)
+			if err != nil || repaired.Identity != cold.Identity {
+				t.Fatalf("repair changed accepted engine: %+v %v", repaired, err)
+			}
+			if _, ok, err := r.Cached(ctx, cold.Identity, target); err != nil || !ok {
+				t.Fatalf("repaired cache missed: hit=%t err=%v", ok, err)
+			}
+		})
 	}
 	policy.PublishedAt = now.Add(time.Minute)
 	policy.Revoked = []Restriction{{Version: pin.Version, Reason: "fixture security issue", Security: true, AnnouncedAt: now, EffectiveAt: now}}
@@ -241,6 +275,7 @@ func TestExactEngineCacheCorruptionAndPolicyEnforcement(t *testing.T) {
 		}
 	}
 }
+
 func TestReleaseVerificationRejectsUntrustedBytesBeforeExecution(t *testing.T) {
 	key := testSigningKey(t)
 	version := "v0.10.2"
@@ -298,6 +333,7 @@ func TestReleaseVerificationRejectsUntrustedBytesBeforeExecution(t *testing.T) {
 		t.Fatal("wrong embedded architecture accepted")
 	}
 }
+
 func TestEveryEnginePlatformCanBeInspectedWithoutExecution(t *testing.T) {
 	key := testSigningKey(t)
 	for _, goos := range []string{"linux", "darwin", "windows"} {
@@ -313,6 +349,7 @@ func TestEveryEnginePlatformCanBeInspectedWithoutExecution(t *testing.T) {
 		}
 	}
 }
+
 func TestDecodePolicyRejectsDuplicateKeysInUnknownFields(t *testing.T) {
 	key := testSigningKey(t)
 	p, now := policyFixture()

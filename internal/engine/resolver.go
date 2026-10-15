@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -42,7 +43,7 @@ func NewResolver(config Config) (*Resolver, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(config.CacheDirectory, 0700); err != nil {
+	if err := os.MkdirAll(config.CacheDirectory, 0o700); err != nil {
 		return nil, err
 	}
 	if config.HTTPClient == nil {
@@ -71,6 +72,7 @@ func (r *Resolver) Ensure(ctx context.Context, identity Identity, target release
 	}
 	return r.resolve(ctx, identity, target)
 }
+
 func (r *Resolver) resolve(ctx context.Context, identity Identity, target releaseasset.Target) (Resolved, error) {
 	if target.Binary != releaseasset.Sparkwing {
 		return Resolved{}, invalid("pipeline engines require the sparkwing executable", "Select the pipeline engine target.")
@@ -110,6 +112,7 @@ func (r *Resolver) resolve(ctx context.Context, identity Identity, target releas
 	resolved.Notices = notices
 	return resolved, err
 }
+
 func (r *Resolver) findCached(ctx context.Context, identity Identity, target releaseasset.Target) (Resolved, bool, error) {
 	if identity.ManifestDigest != "" {
 		return r.Cached(ctx, identity, target)
@@ -171,6 +174,16 @@ func (r *Resolver) Cached(ctx context.Context, identity Identity, target release
 		return Resolved{}, false, err
 	}
 	executable := filepath.Join(dir, name)
+	info, err := os.Stat(executable)
+	if os.IsNotExist(err) {
+		return Resolved{}, false, nil
+	}
+	if err != nil {
+		return Resolved{}, false, err
+	}
+	if !info.Mode().IsRegular() || (runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0) {
+		return Resolved{}, false, nil
+	}
 	bundle.Asset, err = os.ReadFile(executable)
 	if os.IsNotExist(err) {
 		return Resolved{}, false, nil
@@ -205,7 +218,7 @@ func (r *Resolver) StoreVerified(ctx context.Context, pin Pin, release VerifiedR
 	if err != nil {
 		return Resolved{}, err
 	}
-	if err := os.MkdirAll(parent, 0700); err != nil {
+	if err := os.MkdirAll(parent, 0o700); err != nil {
 		return Resolved{}, err
 	}
 	stage, err := os.MkdirTemp(parent, ".install-")
@@ -219,10 +232,10 @@ func (r *Resolver) StoreVerified(ctx context.Context, pin Pin, release VerifiedR
 	if err != nil {
 		return Resolved{}, err
 	}
-	if err := os.WriteFile(filepath.Join(stage, "verification.json"), metadata, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(stage, "verification.json"), metadata, 0o600); err != nil {
 		return Resolved{}, err
 	}
-	if err := os.WriteFile(filepath.Join(stage, release.asset.Name()), release.asset.Bytes(), 0700); err != nil {
+	if err := os.WriteFile(filepath.Join(stage, release.asset.Name()), release.asset.Bytes(), 0o700); err != nil {
 		return Resolved{}, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -242,6 +255,7 @@ func (r *Resolver) StoreVerified(ctx context.Context, pin Pin, release VerifiedR
 	}
 	return Resolved{Identity: identity, Target: release.target, AssetDigest: release.asset.Digest(), Executable: filepath.Join(destination, release.asset.Name())}, nil
 }
+
 func (r *Resolver) targetDirectory(version string, target releaseasset.Target) (string, error) {
 	name, err := target.NameForVersion(version)
 	if err != nil {
@@ -249,6 +263,7 @@ func (r *Resolver) targetDirectory(version string, target releaseasset.Target) (
 	}
 	return filepath.Join(r.config.CacheDirectory, "releases", version, name), nil
 }
+
 func validDigest(value string) bool {
 	if len(value) != 64 {
 		return false
