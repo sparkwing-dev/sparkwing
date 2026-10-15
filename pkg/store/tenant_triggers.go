@@ -132,27 +132,20 @@ func (t *Tenant) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key 
 	return t.GetTrigger(ctx, id)
 }
 
-// FindTriggerByWebhookReplay returns the trigger in t's team a refused
-// webhook delivery collided with: the one holding replayKey, or failing
-// that the one holding delivery. It reports [ErrNotFound] when neither
-// is stored, so a redelivery is answered with the run the first delivery
-// produced rather than a bare refusal. The delivery id is an unsigned
-// header, so a delivery signed for one team naming another team's
-// delivery id reads as not found rather than as that team's run.
-func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error) {
-	if replayKey == "" && delivery == "" {
-		return nil, notFound("trigger for webhook delivery", delivery)
+// FindTriggerByWebhookReplay returns the trigger in t's team matching the
+// signed material's replay key. An unsigned delivery header cannot select a run.
+func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey string) (*Trigger, error) {
+	if replayKey == "" {
+		return nil, notFound("trigger for webhook replay", replayKey)
 	}
 	var id string
 	err := t.s.queryRow(ctx,
 		`SELECT id FROM triggers
 		  WHERE team = ?
-		    AND ((webhook_replay_key != '' AND webhook_replay_key = ?)
-		      OR (webhook_delivery != '' AND webhook_delivery = ?))
-		  ORDER BY created_at LIMIT 1`,
-		string(t.team), replayKey, delivery).Scan(&id)
+		    AND webhook_replay_key != '' AND webhook_replay_key = ?`,
+		string(t.team), replayKey).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, notFound("trigger for webhook delivery", delivery)
+		return nil, notFound("trigger for webhook replay", replayKey)
 	}
 	if err != nil {
 		return nil, err

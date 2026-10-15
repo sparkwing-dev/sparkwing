@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"time"
 )
 
@@ -20,12 +22,57 @@ func SingletonWork() []string {
 
 // AcquireSingletonLease refuses a live foreign holder and advances the fence after a lapse.
 func (o *Operator) AcquireSingletonLease(ctx context.Context, name, holder string, ttl time.Duration) (SingletonLease, error) {
-	panic("unimplemented: c1-data")
+	if !slices.Contains(SingletonWork(), name) || holder == "" || ttl <= 0 {
+		return SingletonLease{}, fmt.Errorf("invalid singleton lease")
+	}
+	tx, err := o.s.beginTx(ctx)
+	if err != nil {
+		return SingletonLease{}, err
+	}
+	defer rollbackOrLog(tx)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO leases(name,holder,until,generation) VALUES (?,'',0,0) ON CONFLICT(name) DO NOTHING`, name); err != nil {
+		return SingletonLease{}, err
+	}
+	var prior string
+	var until, generation int64
+	if err := tx.QueryRowContext(ctx, `SELECT holder,until,generation FROM leases WHERE name = ?`+tx.forUpdate(), name).Scan(&prior, &until, &generation); err != nil {
+		return SingletonLease{}, err
+	}
+	now := tx.now()
+	if until > now.UnixNano() && prior != holder {
+		return SingletonLease{}, ErrLockHeld
+	}
+	if until <= now.UnixNano() {
+		generation++
+	}
+	expires := now.Add(ttl)
+	if _, err := tx.ExecContext(ctx, `UPDATE leases SET holder = ?, until = ?, generation = ? WHERE name = ?`, holder, expires.UnixNano(), generation, name); err != nil {
+		return SingletonLease{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return SingletonLease{}, err
+	}
+	return SingletonLease{Name: name, Holder: holder, Generation: generation, ExpiresAt: expires}, nil
 }
 
 // RenewSingletonLease refuses an expired fence; owner recovery acquires a new lease instead of reviving one.
 func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease, ttl time.Duration) (SingletonLease, error) {
-	panic("unimplemented: c1-data")
+	if ttl <= 0 || !slices.Contains(SingletonWork(), lease.Name) {
+		return SingletonLease{}, fmt.Errorf("invalid singleton renewal")
+	}
+	tx, err := o.s.beginTx(ctx)
+	if err != nil {
+		return SingletonLease{}, err
+	}
+	defer rollbackOrLog(tx)
+	if err := assertSingletonLeaseTx(ctx, tx, lease, lease.Name, tx.now()); err != nil {
+		return SingletonLease{}, err
+	}
+	lease.ExpiresAt = tx.now().Add(ttl)
+	if _, err := tx.ExecContext(ctx, `UPDATE leases SET until = ? WHERE name = ?`, lease.ExpiresAt.UnixNano(), lease.Name); err != nil {
+		return SingletonLease{}, err
+	}
+	return lease, tx.Commit()
 }
 
 // ReapedUnit reports recovery in the same run; application retry budgets are never consumed by a lapse.
@@ -39,11 +86,6 @@ type ReapedUnit struct {
 	Requeued    bool
 	Cancelled   bool
 	Failed      bool
-}
-
-// ReapUnits uses the store clock and cancellation precedence, settling billing and effects with each transition.
-func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) ([]ReapedUnit, error) {
-	panic("unimplemented: c1-data")
 }
 
 // RetentionRule separates operational expiration from pins and financial retention.
@@ -106,7 +148,7 @@ type RetentionResult struct {
 
 // MaintainRetention is the single deployment pass for run, metric, object and credential expiration.
 func (o *Operator) MaintainRetention(ctx context.Context, request RetentionRequest) (RetentionResult, error) {
-	panic("unimplemented: c1-data")
+	return o.maintainRetention(ctx, request)
 }
 
 // UsageDelta is additive per replica; summed counters are reports and never admission locks.
@@ -125,17 +167,36 @@ type QuotaReservation struct {
 	ExpiresAt time.Time
 }
 
-// AddUsage records accounting under the Tenant with a replica identity, including exact log egress.
+// AddUsage records egress_bytes, download_bytes, storage_bytes, storage_objects or runs per replica.
+// The runs counter is the team aggregate because UsageDelta carries no principal.
 func (t *Tenant) AddUsage(ctx context.Context, delta UsageDelta) error {
-	panic("unimplemented: c1-data")
+	if delta.Period == "" || delta.ReplicaID == "" || delta.Amount < 0 {
+		return fmt.Errorf("usage requires a period, replica and nonnegative amount")
+	}
+	query, err := usageStatement(delta.Counter)
+	if err != nil {
+		return err
+	}
+	result, err := t.s.exec(ctx, query, t.team, delta.Period, delta.ReplicaID, delta.Amount, t.s.now().UnixNano())
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return fmt.Errorf("usage counter overflow")
+	}
+	return nil
 }
 
 // ReserveQuota locks one shared team/quota row; log reads are exempt from download quota.
 func (t *Tenant) ReserveQuota(ctx context.Context, quota string, amount int64) (QuotaReservation, error) {
-	panic("unimplemented: c1-data")
+	return t.reserveQuota(ctx, quota, amount)
 }
 
 // SettleQuota commits actual usage or releases the reservation in one transaction.
 func (t *Tenant) SettleQuota(ctx context.Context, reservationID string, used int64) error {
-	panic("unimplemented: c1-data")
+	return t.settleQuota(ctx, reservationID, used)
 }

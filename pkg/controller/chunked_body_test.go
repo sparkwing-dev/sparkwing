@@ -167,29 +167,3 @@ func TestClaimSpecificTrigger_ChunkedBodyKeepsTheLease(t *testing.T) {
 			lease.Round(time.Second), store.DefaultLeaseDuration)
 	}
 }
-
-func TestReconcileOrphans_ChunkedBodyKeepsTheThreshold(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	admin, _, err := st.CreateToken("root", store.TokenKindUser,
-		[]string{controller.ScopeAdmin}, 0, time.Now().UTC())
-	if err != nil {
-		t.Fatalf("CreateToken admin: %v", err)
-	}
-
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
-	defer srv.Close()
-
-	resp := postChunked(t, srv.URL+"/api/v1/maintenance/reconcile-orphans", admin,
-		`{"threshold_nanos":`+strconv.FormatInt(int64(time.Hour), 10)+`}`)
-	defer func() { _ = resp.Body.Close() }()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d body=%s, want 200: the threshold the chunked body carried was dropped",
-			resp.StatusCode, raw)
-	}
-}

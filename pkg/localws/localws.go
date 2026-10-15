@@ -129,10 +129,6 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 	ctrl := controller.New(st, nil).
 		WithSecretsCipher(ring.For(st)).
 		WithLocalExecution().
-		WithReconcileHook(func(rctx context.Context) error {
-			_, err := orchestrator.ReconcileOrphanedLocalRuns(rctx, st, 0)
-			return err
-		}).
 		WithDashboard(controller.Dashboard{
 			Local:   true,
 			Bundle:  bundle,

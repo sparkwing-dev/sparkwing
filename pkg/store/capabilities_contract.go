@@ -2,86 +2,599 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"reflect"
+	"slices"
+	"strings"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// Issue is the only persistent capability constructor. It participates in the locked claim,
-// intake or exchange transaction and uses the store clock for ancestry, expiry and fences.
-// The caller must roll back the transaction on error and expose Raw only after commit.
-// Tagged parent_kind/parent_id resolve through C2 against the capability or session
-// store. Here descendants retain the requesting session/token ancestry. The full
-// CapabilityRecord envelope and every indexed projection persist in the same write.
-func (s *Store) Issue(ctx context.Context, tx *storeTx, request capability.IssueRequest) (capability.Issued, error) {
-	panic("unimplemented: c2-credentials")
-}
-
-// CapabilityRecord persists the complete authority shape with an explicit version.
-// Value.Digest is excluded from JSON and lives in the digest column. Raw bearers
-// never persist. Indexed columns are exact projections of this envelope, validated
-// on load and updated with it in one transaction; mutable state cannot fill gaps.
+// CapabilityRecord preserves the complete authority independently of its lookup indexes.
 type CapabilityRecord struct {
 	Version int                   `json:"version"`
 	Value   capability.Capability `json:"value"`
 }
 
-// Validate checks the record version and complete C2 authority shape before persistence.
-func (record CapabilityRecord) Validate() error {
-	panic("unimplemented: c1-authority")
+// Validate rejects incomplete or unknown persisted authority shapes.
+func (r CapabilityRecord) Validate() error {
+	c := r.Value
+	if r.Version != 1 || c.Prefix == "" || c.Subject.ID == "" || c.IssuedAt.IsZero() {
+		return authorityError(apierr.IntegrityFailure, "invalid capability envelope")
+	}
+	if !slices.Contains([]capability.SubjectKind{capability.SubjectAccount, capability.SubjectMachine, capability.SubjectService, capability.SubjectOperator, capability.SubjectLocal, capability.SubjectAnonymous}, c.Subject.Kind) {
+		return authorityError(apierr.IntegrityFailure, "invalid capability subject")
+	}
+	if c.Audience != capability.Controller && c.Audience != capability.NodeHost {
+		return authorityError(apierr.IntegrityFailure, "invalid capability audience")
+	}
+	seen := map[capability.Grant]bool{}
+	for _, g := range c.Grants {
+		if !slices.Contains(capability.Grants, g) || seen[g] {
+			return authorityError(apierr.IntegrityFailure, "invalid capability grants")
+		}
+		seen[g] = true
+	}
+	if c.Parent != nil && !validAuthorityRef(*c.Parent) {
+		return authorityError(apierr.IntegrityFailure, "invalid capability parent")
+	}
+	if c.ExpiresAt != nil && !c.ExpiresAt.After(c.IssuedAt) {
+		return authorityError(apierr.IntegrityFailure, "invalid capability expiry")
+	}
+	if c.Team == "" && (c.Binding.Kind != capability.BindingNone || (c.Subject.Kind != capability.SubjectService && c.Subject.Kind != capability.SubjectOperator)) {
+		return authorityError(apierr.IntegrityFailure, "unbound capability has tenant authority")
+	}
+	switch c.Binding.Kind {
+	case capability.BindingNone:
+		if c.Binding.RunID != "" || c.Binding.NodeID != "" || c.Binding.Generation != 0 || c.Binding.Holder != "" || c.Binding.Push != nil || c.Binding.Expansion != nil {
+			return authorityError(apierr.IntegrityFailure, "unbound capability has a resource fence")
+		}
+	case capability.BindingPush:
+		if c.Binding.Push == nil || c.Binding.Push.RepositoryKey == "" || c.Binding.Push.Ref == "" || c.Binding.Push.SHA == "" || c.Binding.Push.WorkflowRunID == "" {
+			return authorityError(apierr.IntegrityFailure, "invalid push binding")
+		}
+	case capability.BindingNode, capability.BindingRun, capability.BindingTrigger:
+		if c.Team == "" || c.Binding.RunID == "" || (c.Binding.Kind == capability.BindingNode && c.Binding.NodeID == "") {
+			return authorityError(apierr.IntegrityFailure, "invalid resource binding")
+		}
+	default:
+		return authorityError(apierr.IntegrityFailure, "unknown capability binding")
+	}
+	if c.Binding.Generation < 0 || c.Binding.Attempt < 0 {
+		return authorityError(apierr.IntegrityFailure, "invalid capability fence")
+	}
+	if c.Issuance != capability.Delegate && c.Issuance != capability.Award && c.Issuance != capability.Exchange {
+		return authorityError(apierr.IntegrityFailure, "unknown capability issuance")
+	}
+	if c.Unit == "" {
+		if c.UnitID != "" || c.Purpose != "" || c.Delivery != "" || c.Billing != nil || c.Issuance != capability.Delegate {
+			return authorityError(apierr.IntegrityFailure, "incomplete award identity")
+		}
+	} else {
+		p, ok := awardPolicy(c.Purpose)
+		if !ok || p.Unit != c.Unit || c.UnitID == "" || c.Parent == nil || c.Team == "" || c.Billing == nil {
+			return authorityError(apierr.IntegrityFailure, "invalid award identity")
+		}
+		if c.Delivery != capability.DeliveryDirect && c.Delivery != capability.DeliveryBootstrap {
+			return authorityError(apierr.IntegrityFailure, "invalid award delivery")
+		}
+		if c.Delivery == capability.DeliveryBootstrap && !slices.Contains(capability.BootstrapUnits, c.Unit) {
+			return authorityError(apierr.IntegrityFailure, "invalid bootstrap unit")
+		}
+		b := c.Billing
+		expected := capability.BillingUnit(c.Unit)
+		if c.Unit == capability.UnitTrigger {
+			expected = capability.BillingHost
+		}
+		if c.Unit == capability.UnitNode {
+			expected = capability.BillingJob
+		}
+		if b.PayerTeam != c.Team || b.ReservationID == "" || b.ExecutorClass == "" || b.Unit != expected || (b.Start != capability.BillingAtStart && b.Start != capability.BillingAtAward) {
+			return authorityError(apierr.IntegrityFailure, "invalid billing provenance")
+		}
+	}
+	return nil
 }
 
-// ResolveAuthority rechecks tagged session/capability authority inside the current write transaction.
-// Sessions resolve current membership and grants; capability prefixes remain separate
-// claim fences. A mismatch between Actor.Authority and its fence is refused.
+func authorityError(code apierr.Code, message string) error {
+	return &apierr.Error{Code: code, Message: message}
+}
+
+func validAuthorityRef(ref capability.AuthorityRef) bool {
+	return ref.ID != "" && (ref.Kind == capability.AuthorityCapability || ref.Kind == capability.AuthoritySession)
+}
+
+func awardPolicy(purpose capability.AwardPurpose) (capability.AwardPolicy, bool) {
+	for _, p := range capability.AwardPolicies {
+		if p.Purpose == purpose {
+			return p, true
+		}
+	}
+	return capability.AwardPolicy{}, false
+}
+
+func optionalString(v string) any {
+	if v == "" {
+		return nil
+	}
+	return v
+}
+
+func optionalTime(v *time.Time) any {
+	if v == nil {
+		return nil
+	}
+	return v.UnixNano()
+}
+
+var authorityColumns = []string{"prefix", "team", "subject_kind", "subject_id", "audience", "grants", "issuance", "authority_version", "parent_kind", "parent_id", "award_purpose", "delivery_purpose", "unit_id", "billing_unit", "bind_kind", "bind_run", "bind_node", "bind_generation", "bind_holder", "claim_by", "reserved_pools", "created_at", "expires_at", "revoked_at", "metered", "payer_team", "executor_class", "reservation_id", "billing_start", "unit_kind", "eval_unit_generation", "repo_key", "repo_scope", "ref_scope", "push_sha"}
+
+func authorityProjection(c capability.Capability) ([]any, error) {
+	grants, err := json.Marshal(c.Grants)
+	if err != nil {
+		return nil, err
+	}
+	pools, err := json.Marshal(c.ReservedPools)
+	if err != nil {
+		return nil, err
+	}
+	repos, err := json.Marshal(c.Repositories)
+	if err != nil {
+		return nil, err
+	}
+	var parentKind, parentID, billingUnit, payer, executor, reservation, start, expansion any
+	metered := int64(0)
+	if c.RootMetered {
+		metered = 1
+	}
+	if c.Parent != nil {
+		parentKind = string(c.Parent.Kind)
+		parentID = c.Parent.ID
+	}
+	if c.Billing != nil {
+		b := c.Billing
+		billingUnit = string(b.Unit)
+		payer = b.PayerTeam
+		executor = b.ExecutorClass
+		reservation = b.ReservationID
+		start = string(b.Start)
+		metered = 0
+		if b.Metered {
+			metered = 1
+		}
+	}
+	if c.Binding.Expansion != nil {
+		expansion = c.Binding.Expansion.Generation
+	}
+	repo, ref, sha := "", "", ""
+	if c.Data != nil {
+		repo = c.Data.RepositoryKey
+		ref = c.Data.WriteRef
+	}
+	if c.Binding.Push != nil {
+		repo = c.Binding.Push.RepositoryKey
+		ref = c.Binding.Push.Ref
+		sha = c.Binding.Push.SHA
+	}
+	var generation any
+	if c.Binding.Generation != 0 {
+		generation = c.Binding.Generation
+	}
+	return []any{c.Prefix, optionalString(c.Team), string(c.Subject.Kind), c.Subject.ID, string(c.Audience), grants, string(c.Issuance), int64(1), parentKind, parentID, optionalString(string(c.Purpose)), optionalString(string(c.Delivery)), optionalString(c.UnitID), billingUnit, string(c.Binding.Kind), optionalString(c.Binding.RunID), optionalString(c.Binding.NodeID), generation, optionalString(c.Binding.Holder), optionalTime(c.Binding.ClaimBy), pools, c.IssuedAt.UnixNano(), optionalTime(c.ExpiresAt), optionalTime(c.RevokedAt), metered, payer, executor, reservation, start, optionalString(string(c.Unit)), expansion, repo, repos, ref, sha}, nil
+}
+
+func persistCapabilityTx(ctx context.Context, tx *storeTx, c capability.Capability) error {
+	record := CapabilityRecord{Version: 1, Value: c}
+	if err := record.Validate(); err != nil {
+		return err
+	}
+	if c.Digest == ([32]byte{}) {
+		return authorityError(apierr.IntegrityFailure, "missing bearer digest")
+	}
+	body, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	values, err := authorityProjection(c)
+	if err != nil {
+		return err
+	}
+	values = append(values, hex.EncodeToString(c.Digest[:]), body, c.Subject.ID)
+	columns := append(slices.Clone(authorityColumns), "digest", "authority_json", "created_by")
+	_, err = tx.ExecContext(ctx, "INSERT INTO capabilities ("+strings.Join(columns, ",")+") VALUES ("+strings.TrimSuffix(strings.Repeat("?,", len(values)), ",")+")", values...)
+	return err
+}
+
+// safety: indexed columns may accelerate lookup but cannot add authority to the envelope.
+func loadCapabilityTx(ctx context.Context, tx *storeTx, prefix string) (capability.Capability, error) {
+	var digest string
+	var body []byte
+	actual := make([]any, len(authorityColumns))
+	dest := []any{&digest, &body}
+	for i := range actual {
+		dest = append(dest, &actual[i])
+	}
+	err := tx.QueryRowContext(ctx, "SELECT digest,authority_json,"+strings.Join(authorityColumns, ",")+" FROM capabilities WHERE prefix = ?", prefix).Scan(dest...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return capability.Capability{}, authorityError(apierr.Unauthenticated, "authority is unavailable")
+	}
+	if err != nil {
+		return capability.Capability{}, err
+	}
+	var record CapabilityRecord
+	if err := json.Unmarshal(body, &record); err != nil {
+		return capability.Capability{}, authorityError(apierr.IntegrityFailure, "invalid capability envelope")
+	}
+	if err := record.Validate(); err != nil {
+		return capability.Capability{}, err
+	}
+	expected, err := authorityProjection(record.Value)
+	if err != nil {
+		return capability.Capability{}, err
+	}
+	for i, v := range actual {
+		if !equalProjection(v, expected[i]) {
+			return capability.Capability{}, authorityError(apierr.IntegrityFailure, "capability projection mismatch: "+authorityColumns[i])
+		}
+	}
+	bytes, err := hex.DecodeString(digest)
+	if err != nil || len(bytes) != sha256.Size {
+		return capability.Capability{}, authorityError(apierr.IntegrityFailure, "invalid bearer digest")
+	}
+	copy(record.Value.Digest[:], bytes)
+	return record.Value, nil
+}
+
+func equalProjection(a, b any) bool {
+	if v, ok := a.([]byte); ok {
+		a = string(v)
+	}
+	if v, ok := b.([]byte); ok {
+		b = string(v)
+	}
+	return reflect.DeepEqual(a, b)
+}
+
+type authorityNode struct {
+	principal  capability.Principal
+	generation int64
+}
+
+func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, lock bool) (authorityNode, error) {
+	if !validAuthorityRef(ref) {
+		return authorityNode{}, authorityError(apierr.Unauthenticated, "invalid authority reference")
+	}
+	suffix := ""
+	if lock {
+		suffix = tx.forShare()
+	}
+	node := authorityNode{principal: capability.Principal{Authority: ref}}
+	if ref.Kind == capability.AuthorityCapability {
+		if err := tx.QueryRowContext(ctx, "SELECT revocation_generation FROM capabilities WHERE prefix = ?"+suffix, ref.ID).Scan(&node.generation); err != nil {
+			return node, err
+		}
+		c, err := loadCapabilityTx(ctx, tx, ref.ID)
+		if err != nil {
+			return node, err
+		}
+		node.principal.Capability = c
+		node.principal.Class = capability.CredentialBearer
+	} else {
+		var scopes, account, parent string
+		var created, expires int64
+		var revoked sql.NullInt64
+		c := capability.Capability{Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone}}
+		err := tx.QueryRowContext(ctx, "SELECT principal,team,scopes,account_id,capability_prefix,created_at,expires_at,revoked_at,auth_generation FROM sessions WHERE hash = ?"+suffix, ref.ID).Scan(&c.Subject.ID, &c.Team, &scopes, &account, &parent, &created, &expires, &revoked, &node.generation)
+		if err != nil {
+			return node, err
+		}
+		if account == "" {
+			return node, authorityError(apierr.Unauthenticated, "session identity is unavailable")
+		}
+		c.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: account}
+		c.IssuedAt = time.Unix(0, created).UTC()
+		expiry := time.Unix(0, expires).UTC()
+		c.ExpiresAt = &expiry
+		if revoked.Valid {
+			at := time.Unix(0, revoked.Int64).UTC()
+			c.RevokedAt = &at
+		}
+		if parent != "" {
+			c.Parent = &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: parent}
+		}
+		for _, scope := range strings.FieldsFunc(scopes, func(r rune) bool { return r == ',' || r == ' ' }) {
+			grant := capability.Grant(scope)
+			if !slices.Contains(capability.Grants, grant) {
+				return node, authorityError(apierr.IntegrityFailure, "unknown session grant")
+			}
+			c.Grants = append(c.Grants, grant)
+		}
+		node.principal.Capability = c
+		node.principal.Class = capability.CredentialSession
+	}
+	c := node.principal.Capability
+	if c.RevokedAt != nil || (c.ExpiresAt != nil && !tx.now().Before(*c.ExpiresAt)) {
+		return node, authorityError(apierr.Unauthenticated, "authority has ended")
+	}
+	if c.Subject.Kind == capability.SubjectAccount {
+		var role Role
+		if err := tx.QueryRowContext(ctx, "SELECT role FROM memberships WHERE team = ? AND account_id = ?"+suffix, c.Team, c.Subject.ID).Scan(&role); err != nil {
+			return node, err
+		}
+		if !role.Valid() {
+			return node, authorityError(apierr.Unauthenticated, "membership is unavailable")
+		}
+		if c.Unit == "" {
+			allowed := ScopesForRole(role)
+			node.principal.Capability.Grants = slices.DeleteFunc(slices.Clone(c.Grants), func(g capability.Grant) bool { return !slices.Contains(allowed, string(g)) })
+		}
+	}
+	return node, nil
+}
+
+func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, lock bool) ([]authorityNode, error) {
+	seen := map[capability.AuthorityRef]bool{}
+	var chain []authorityNode
+	for {
+		if seen[ref] {
+			return nil, authorityError(apierr.IntegrityFailure, "cyclic authority ancestry")
+		}
+		seen[ref] = true
+		node, err := readAuthorityTx(ctx, tx, ref, lock)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, authorityError(apierr.Unauthenticated, "authority ancestry is unavailable")
+		}
+		if err != nil {
+			return nil, err
+		}
+		chain = append(chain, node)
+		parent := node.principal.Capability.Parent
+		if parent == nil {
+			break
+		}
+		ref = *parent
+	}
+	now := tx.now()
+	for _, node := range chain {
+		c := node.principal.Capability
+		if c.ExpiresAt != nil && !now.Before(*c.ExpiresAt) {
+			return nil, authorityError(apierr.Unauthenticated, "authority expired while ancestry was locked")
+		}
+	}
+	for i := len(chain) - 2; i >= 0; i-- {
+		child := &chain[i].principal.Capability
+		parent := chain[i+1].principal.Capability
+		if child.Issuance == capability.Delegate {
+			child.Grants = slices.DeleteFunc(slices.Clone(child.Grants), func(g capability.Grant) bool { return !slices.Contains(parent.Grants, g) })
+		}
+		if child.Purpose == capability.PurposeHere && !slices.Contains(parent.Grants, capability.RunsWrite) {
+			return nil, authorityError(apierr.Unauthenticated, "here requester lost run authority")
+		}
+	}
+	return chain, nil
+}
+
+// ResolveAuthority locks live ancestry until the surrounding mutation commits.
 func (tx *storeTx) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error) {
-	panic("unimplemented: c1-authority")
+	chain, err := authorityChainTx(ctx, tx, ref, true)
+	if err != nil {
+		return capability.Principal{}, err
+	}
+	return chain[0].principal, nil
 }
 
-// AuthGenerations reads the credential and every ancestor plus team membership in
-// one consistent snapshot. Missing/revoked ancestry fails closed. Cross-team launcher
-// roots remain in the vector. Team must equal the leaf authority's team and may
-// be empty only for unbound deployment authority.
+// AuthGenerations returns one snapshot of the leaf's full ancestry and membership fence.
 func (s *Store) AuthGenerations(ctx context.Context, authority capability.AuthorityRef, team string) (capability.AuthGenerations, error) {
-	panic("unimplemented: c1-authority")
+	tx, err := s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return capability.AuthGenerations{}, err
+	}
+	defer rollbackOrLog(tx)
+	chain, err := authorityChainTx(ctx, tx, authority, false)
+	if err != nil {
+		return capability.AuthGenerations{}, err
+	}
+	if chain[0].principal.Capability.Team != team {
+		return capability.AuthGenerations{}, authorityError(apierr.Forbidden, "authority team mismatch")
+	}
+	result := capability.AuthGenerations{Team: team}
+	for _, node := range chain {
+		result.Authorities = append(result.Authorities, capability.AuthorityGeneration{Authority: node.principal.Authority, Generation: node.generation})
+	}
+	if team != "" {
+		if err := tx.QueryRowContext(ctx, "SELECT auth_generation FROM team_counters WHERE team = ?", team).Scan(&result.MembershipGeneration); err != nil {
+			return capability.AuthGenerations{}, err
+		}
+	}
+	return result, tx.Commit()
 }
 
-// RevokeAuthority resolves the actor and target transactionally, then revokes the
-// tenant capability/session and advances its generation in that same transaction.
-// Descendant cache reuse detects the changed ancestor without per-child writes.
+func resolveActorTx(ctx context.Context, tx *storeTx, actor Actor) (capability.Principal, error) {
+	if (actor.Authority.Kind == capability.AuthoritySession && actor.CapabilityPrefix != "") || (actor.Authority.Kind == capability.AuthorityCapability && actor.CapabilityPrefix != "" && actor.CapabilityPrefix != actor.Authority.ID) {
+		return capability.Principal{}, authorityError(apierr.Forbidden, "actor authority and fence disagree")
+	}
+	return tx.ResolveAuthority(ctx, actor.Authority)
+}
+
+// RevokeAuthority revokes a member's own authority or a tenant administrator's target.
 func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error {
-	panic("unimplemented: c1-authority")
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackOrLog(tx)
+	p, err := resolveActorTx(ctx, tx, actor)
+	if err != nil {
+		return err
+	}
+	if p.Capability.Team != string(t.team) || p.Capability.Binding.Kind != capability.BindingNone {
+		return authorityError(apierr.Forbidden, "revocation requires unbound tenant authority")
+	}
+	targetNode, err := readAuthorityTx(ctx, tx, target, true)
+	if err != nil {
+		return err
+	}
+	if targetNode.principal.Capability.Team != string(t.team) {
+		return authorityError(apierr.Forbidden, "revocation target belongs to another team")
+	}
+	if !slices.Contains(p.Capability.Grants, capability.TeamAdmin) && p.Authority != target {
+		return authorityError(apierr.Forbidden, "revocation requires team administration or own authority")
+	}
+	if err := revokeAuthorityTx(ctx, tx, target); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-// RevokeAuthority applies deployment authority to service/operator roots only.
-// It advances the root generation used by descendants across all awarded teams.
+// RevokeAuthority limits deployment revocation to service and operator roots.
 func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error {
-	panic("unimplemented: c1-authority")
+	tx, err := o.s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackOrLog(tx)
+	p, err := resolveActorTx(ctx, tx, actor)
+	if err != nil {
+		return err
+	}
+	if p.Capability.Team != "" || p.Capability.Binding.Kind != capability.BindingNone || !slices.Contains(p.Capability.Grants, capability.OperatorTokens) {
+		return authorityError(apierr.Forbidden, "deployment token authority is required")
+	}
+	node, err := readAuthorityTx(ctx, tx, target, true)
+	if err != nil {
+		return err
+	}
+	c := node.principal.Capability
+	if target.Kind != capability.AuthorityCapability || c.Parent != nil || c.Team != "" || (c.Subject.Kind != capability.SubjectService && c.Subject.Kind != capability.SubjectOperator) {
+		return authorityError(apierr.Forbidden, "target is not a deployment root")
+	}
+	if err := revokeAuthorityTx(ctx, tx, target); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-// MembershipUpdate sets a role, or removes the member when Role is nil.
+func revokeAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) error {
+	now := tx.now()
+	if ref.Kind == capability.AuthorityCapability {
+		c, err := loadCapabilityTx(ctx, tx, ref.ID)
+		if err != nil {
+			return err
+		}
+		c.RevokedAt = &now
+		body, err := json.Marshal(CapabilityRecord{Version: 1, Value: c})
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE capabilities SET revoked_at = ?, authority_json = ? WHERE prefix = ?", now.UnixNano(), body, ref.ID); err != nil {
+			return err
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET revoked_at = ? WHERE hash = ?", now.UnixNano(), ref.ID); err != nil {
+			return err
+		}
+	}
+	return advanceAuthGenerationsTx(ctx, tx, []capability.AuthorityRef{ref}, nil)
+}
+
+// MembershipUpdate changes a member's role, or removes it when Role is nil.
 type MembershipUpdate struct {
 	AccountID string
 	Role      *Role
 }
 
-// UpdateMembership authorizes the tagged actor, applies the membership change and
-// increments the team's auth generation atomically. It preserves last-owner rules.
+// UpdateMembership preserves the last owner and invalidates cached membership authority atomically.
 func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change MembershipUpdate) error {
-	panic("unimplemented: c1-authority")
+	if change.AccountID == "" || (change.Role != nil && !change.Role.Valid()) {
+		return ErrInvalidInput
+	}
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackOrLog(tx)
+	if err := t.lockTeamTx(ctx, tx); err != nil {
+		return err
+	}
+	p, err := resolveActorTx(ctx, tx, actor)
+	if err != nil {
+		return err
+	}
+	if p.Capability.Team != string(t.team) || p.Capability.Binding.Kind != capability.BindingNone || p.Capability.Subject.Kind != capability.SubjectAccount {
+		return authorityError(apierr.Forbidden, "membership changes require an account")
+	}
+	selfRemoval := change.Role == nil && p.Capability.Subject.ID == change.AccountID
+	if !selfRemoval && !slices.Contains(p.Capability.Grants, capability.TeamAdmin) {
+		return authorityError(apierr.Forbidden, "membership changes require team administration")
+	}
+	actorRole, err := t.roleTx(ctx, tx, p.Capability.Subject.ID)
+	if err != nil {
+		return err
+	}
+	current, err := t.roleTx(ctx, tx, change.AccountID)
+	if err != nil {
+		return err
+	}
+	if !actorRole.AtLeast(current) || (change.Role != nil && !actorRole.AtLeast(*change.Role)) {
+		return ErrRoleAboveOwn
+	}
+	if change.Role != nil && current == *change.Role {
+		return tx.Commit()
+	}
+	if current == RoleOwner {
+		if err := t.requireAnotherOwnerTx(ctx, tx, change.AccountID); err != nil {
+			return err
+		}
+	}
+	if change.Role == nil {
+		_, err = tx.ExecContext(ctx, "DELETE FROM memberships WHERE team = ? AND account_id = ?", string(t.team), change.AccountID)
+	} else {
+		_, err = tx.ExecContext(ctx, "UPDATE memberships SET role = ? WHERE team = ? AND account_id = ?", string(*change.Role), string(t.team), change.AccountID)
+	}
+	if err != nil {
+		return err
+	}
+	if err := advanceAuthGenerationsTx(ctx, tx, nil, &t.team); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-// safety: authority mutation and cache invalidation must share one commit.
-// Revocation increments each named capability/session generation; membership
-// changes increment the named team's auth_generation. No standalone write is valid.
+// safety: generation changes share the authority mutation's transaction.
 func advanceAuthGenerationsTx(ctx context.Context, tx *storeTx, authorities []capability.AuthorityRef, membershipTeam *Team) error {
-	panic("unimplemented: c1-authority")
+	for _, ref := range authorities {
+		var result sql.Result
+		var err error
+		switch ref.Kind {
+		case capability.AuthorityCapability:
+			result, err = tx.ExecContext(ctx, "UPDATE capabilities SET revocation_generation = revocation_generation + 1 WHERE prefix = ?", ref.ID)
+		case capability.AuthoritySession:
+			result, err = tx.ExecContext(ctx, "UPDATE sessions SET auth_generation = auth_generation + 1 WHERE hash = ?", ref.ID)
+		default:
+			return authorityError(apierr.Unauthenticated, "invalid authority reference")
+		}
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return ErrNotFound
+		}
+	}
+	if membershipTeam != nil {
+		_, err := tx.ExecContext(ctx, "INSERT INTO team_counters(team,auth_generation) VALUES (?,1) ON CONFLICT(team) DO UPDATE SET auth_generation = team_counters.auth_generation + 1", string(*membershipTeam))
+		return err
+	}
+	return nil
 }
 
 var _ capability.AuthorityResolver = (*storeTx)(nil)
-
-// safety: SQL indexes accelerate lookup but cannot broaden the persisted authority.
-// The loader validates CapabilityRecord, compares every indexed projection against
-// its envelope, restores Digest from the separate digest column and fails on drift.
-func loadCapabilityTx(ctx context.Context, tx *storeTx, prefix string) (capability.Capability, error) {
-	panic("unimplemented: c1-authority")
-}

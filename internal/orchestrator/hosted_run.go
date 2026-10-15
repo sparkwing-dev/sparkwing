@@ -22,7 +22,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -176,7 +175,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 		State: state, Artifacts: backends.Artifact, Attempts: attempts, Admission: admission,
 		Debug: nodehost.Debug{
 			PauseBefore: opts.Debug.PauseBefore, PauseAfter: opts.Debug.PauseAfter,
-			PauseOnFailure: opts.Debug.PauseOnFailure, PauseTimeout: pauseTimeout(), Bounces: hostedBounces(backends.State),
+			PauseOnFailure: opts.Debug.PauseOnFailure, PauseTimeout: pauseTimeout(),
 		},
 		Invocation: invocation, Requires: requires,
 		Memo: &nodehost.Memo{
@@ -186,9 +185,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 			},
 		},
 	}
-	if cfg.Rehydrate, err = hostedRehydration(ctx, backends.State, opts, runID); err != nil {
-		return nil, err
-	}
+	cfg.Rehydrate = hostedRehydration(opts)
 	if backends.LocalCoordination {
 		stopTriggers, err := hostedTriggerLoop(ctx, backends.State, runID, entry.Dir, opts.standalone)
 		if err != nil {
@@ -258,16 +255,6 @@ func hostedRunContext(opts Options, runID string) nodeproto.RunContext {
 		rc.Git = &nodeproto.Git{SHA: g.SHA, Branch: g.Branch, DefaultBranch: g.DefaultBranch, Repo: g.Repo, RepoURL: g.RepoURL}
 	}
 	return rc
-}
-
-func hostedBounces(state StateBackend) nodehost.Bounces {
-	switch s := state.(type) {
-	case localState:
-		return s.st
-	case *client.Client:
-		return s
-	}
-	return nil
 }
 
 // safety: plan code's logs have no node log to land in, so they go to the
@@ -662,23 +649,11 @@ func (l hostedNodeLog) EmitText(rec sparkwing.LogRecord) {
 
 // safety: a retry copies the nodes its source run already finished instead of running them, as the dispatcher
 // did, and an automatic retry with causes copies every node but those and what they reach.
-func hostedRehydration(ctx context.Context, state StateBackend, opts Options, runID string) (*nodehost.Rehydration, error) {
+func hostedRehydration(opts Options) *nodehost.Rehydration {
 	if opts.RetryOf == "" || opts.Full {
-		return nil, nil
+		return nil
 	}
-	r := &nodehost.Rehydration{SourceRunID: opts.RetryOf}
-	if opts.RetrySource != store.RetrySourceAuto {
-		return r, nil
-	}
-	row, err := state.GetRun(ctx, runID)
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-	case err != nil:
-		return nil, fmt.Errorf("read retry run %s: %w", runID, err)
-	default:
-		r.Causes = row.RetryCauseNodeIDs
-	}
-	return r, nil
+	return &nodehost.Rehydration{SourceRunID: opts.RetryOf}
 }
 
 // safety: a retry copies its source run's results only when it planned the same plan; the plan names its own

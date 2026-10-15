@@ -60,7 +60,7 @@ func liveRunnerCould(r RunnerPresence, d match.Demand, needSlot bool) bool {
 	if needSlot && (r.FreeSlots < 1 || !match.Fits(r.Profile.Capacity, r.Available, d.Request).OK()) {
 		return false
 	}
-	return match.EvaluateOld(r.profile(), d).OK()
+	return match.Evaluate(r.profile(), d).OK()
 }
 
 // ClaimPlacement is the local-first policy applied to one legacy claim. A node
@@ -226,11 +226,6 @@ func (p ClaimPlacement) needsRunRepository() bool {
 		}
 	}
 	return false
-}
-
-type nodeKey struct {
-	runID  string
-	nodeID string
 }
 
 type nodePlacementEvent struct {

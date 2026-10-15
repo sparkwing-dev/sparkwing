@@ -157,8 +157,6 @@ type ConsumerOptions struct {
 	Host string
 
 	Ready chan<- struct{}
-
-	NoStaleClaimSweep bool
 }
 
 var ErrConsumerElectionLost = errors.New("orchestrator: another trigger consumer already serves this home")
@@ -224,12 +222,11 @@ func ServeConsumer(ctx context.Context, opts ConsumerOptions) error {
 		close(opts.Ready)
 	}
 	return consumeLocalTriggers(ctx, st, logger, wedge, consumerRuntime{
-		home:     layout.Home,
-		idle:     opts.idleTimeout(),
-		lease:    opts.claimLease(),
-		unlock:   func() { _ = flockUnlock(lockF) },
-		relock:   func() bool { ok, lerr := flockTry(lockF); return lerr == nil && ok },
-		maintain: !opts.NoStaleClaimSweep,
+		home:   layout.Home,
+		idle:   opts.idleTimeout(),
+		lease:  opts.claimLease(),
+		unlock: func() { _ = flockUnlock(lockF) },
+		relock: func() bool { ok, lerr := flockTry(lockF); return lerr == nil && ok },
 	})
 }
 
@@ -256,8 +253,6 @@ type consumerRuntime struct {
 
 	unlock func()
 	relock func() bool
-
-	maintain bool
 }
 
 func consumeLocalTriggers(
@@ -302,9 +297,6 @@ func consumeLocalTriggers(
 
 		if time.Since(lastMaintenance) >= maintenanceInterval {
 			lastMaintenance = time.Now()
-			if rt.maintain {
-				requeueExpiredClaims(ctx, st, inFlight, logger)
-			}
 			if _, err := ReconcileSubmissionEnvironments(ctx, rt.home, st, 100); err != nil {
 				logger.Warn("reconcile submission environments", "err", err)
 			}
@@ -642,58 +634,6 @@ func heartbeatOnce(
 	}
 }
 
-func requeueExpiredClaims(ctx context.Context, st *store.Store, inFlight *inFlightSet, logger *slog.Logger) {
-	lapsed, err := st.ListExpiredClaims(ctx)
-	if err != nil {
-		logger.Warn("local trigger consumer: expired-claim sweep failed", "err", err)
-		return
-	}
-	for _, id := range lapsed {
-		if inFlight.has(id) {
-			continue
-		}
-		closed, ferr := st.FinishLapsedClaim(ctx, id)
-		if ferr != nil {
-			logger.Warn("close out stale claim", "trigger_id", id, "err", ferr)
-			continue
-		}
-		if closed {
-			logger.Warn("closed stale claim whose run ended under it", "trigger_id", id)
-			continue
-		}
-		// safety: the sweep lists every team's lapsed claims, so each is judged
-		// and requeued in the team that owns it; the default team's handle
-		// would read another team's run as absent and requeue nothing.
-		owner, terr := claimOwner(ctx, st, id)
-		if terr != nil {
-			logger.Warn("resolve stale claim's team", "trigger_id", id, "err", terr)
-			continue
-		}
-		run, gerr := owner.GetRun(ctx, id)
-		if gerr == nil && run != nil && run.Status != "pending" {
-			logger.Debug("leaving a started run to the orphan reaper",
-				"trigger_id", id, "status", run.Status)
-			continue
-		}
-		requeued, rerr := owner.RequeueUnstartedClaim(ctx, id)
-		if rerr != nil {
-			logger.Warn("requeue stale claim", "trigger_id", id, "err", rerr)
-			continue
-		}
-		if requeued {
-			logger.Warn("requeued a claim whose run never started", "trigger_id", id)
-		}
-	}
-}
-
-func claimOwner(ctx context.Context, st *store.Store, id string) (*store.Tenant, error) {
-	team, err := st.AsOperator().TriggerTeam(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return st.ForTeam(ctx, team)
-}
-
 type inFlightSet struct {
 	mu  sync.Mutex
 	ids map[string]struct{}
@@ -713,13 +653,6 @@ func (s *inFlightSet) remove(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.ids, id)
-}
-
-func (s *inFlightSet) has(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.ids[id]
-	return ok
 }
 
 func (s *inFlightSet) len() int {
@@ -770,13 +703,12 @@ func serveConsumerContending(
 	announcedStandDown := false
 	for {
 		err := ServeConsumer(ctx, ConsumerOptions{
-			Home:              home,
-			Store:             st,
-			Logger:            logger,
-			Version:           version,
-			Host:              "dashboard",
-			IdleTimeout:       -1,
-			NoStaleClaimSweep: true,
+			Home:        home,
+			Store:       st,
+			Logger:      logger,
+			Version:     version,
+			Host:        "dashboard",
+			IdleTimeout: -1,
 		})
 		switch {
 		case err == nil, errors.Is(err, context.Canceled):

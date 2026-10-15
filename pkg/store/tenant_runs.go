@@ -36,9 +36,6 @@ SELECT `+runColumns+`
 	if err != nil {
 		return nil, err
 	}
-	if err := t.s.loadAgentLossRetry(ctx, t.team, run); err != nil {
-		return nil, err
-	}
 	return run, nil
 }
 

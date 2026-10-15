@@ -52,18 +52,26 @@ type UnitClaim struct {
 // A named trigger Target also accepts the matching here Award's trigger.host after
 // rechecking its first-claim/reclaim window, reservation and requester authority.
 func (s *Store) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error) {
-	panic("unimplemented: c1-data")
+	return s.claimUnit(ctx, demand)
 }
 
 // ReleaseUnit returns an unstarted unit without consuming an attempt; cancellation and started leases use transitions.
 func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPrefix string) error {
-	panic("unimplemented: c1-data")
+	return s.releaseUnit(ctx, claim, capabilityPrefix)
+}
+
+// RenewUnit derives the unit's team, identity and fences from its live capability.
+// Executing records the first trigger, plan or eval execution; job starts use TransitionNode.
+// Cancelled units renew to drain and return CancelRequested without recording a new start.
+func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error) {
+	return s.renewUnit(ctx, capabilityPrefix, executing)
 }
 
 // OperatorStore restricts deployment work to explicit methods without embedding a tenant or raw Store.
 type OperatorStore interface {
 	AcquireSingletonLease(context.Context, string, string, time.Duration) (SingletonLease, error)
 	RenewSingletonLease(context.Context, SingletonLease, time.Duration) (SingletonLease, error)
+	ReconcileControllerRuns(context.Context, SingletonLease, string, int) ([]ControllerRun, error)
 	DueRunEffects(context.Context, SingletonLease, int) ([]DesiredRunEffect, error)
 	MaintainRetention(context.Context, RetentionRequest) (RetentionResult, error)
 }
@@ -74,5 +82,5 @@ var _ OperatorStore = (*Operator)(nil)
 // Profile reservations and identity come from the live capability; Demand comes
 // from the run seal and the selected unit's persisted execution settings.
 func matchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, unit UnitRef) (match.Profile, match.Demand, error) {
-	panic("unimplemented: c1-placement")
+	return resolveMatchingInputsTx(ctx, tx, request, unit)
 }

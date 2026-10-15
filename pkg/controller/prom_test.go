@@ -18,6 +18,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
+func newPlainServer(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	s, err := teststore.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	srv := httptest.NewServer(controller.New(s, nil).Handler())
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
 func newAuthedTestServer(t *testing.T) (baseURL, admin string, st *store.Store, cleanup func()) {
 	t.Helper()
 	dir := t.TempDir()
