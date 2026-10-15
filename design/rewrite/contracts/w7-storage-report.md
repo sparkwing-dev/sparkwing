@@ -1,170 +1,183 @@
 # W7 storage handoff
 
-W7 remains incomplete. Session 2 adds the physical object backends behind the
-frozen signing interface and removes more cache-service clients. Native
-acceptance, transactional integration and the remaining artifact/memo/source
-cut still need work. No git writes or Sparkwing executable invocations occurred.
+W7 remains incomplete. This session replaces artifact capture/staging and memo
+materialization with the blob contracts, removes the remaining gitcache source
+client, and keeps the repository build passing. Production host bindings,
+transactional storage and native acceptance remain open.
 
-## Implemented in session 2
+## Implemented in session 3
 
-- Filesystem and S3 implementations of `capability.DataSigner` in `internal/blob`.
-  PUTs bind the key, size, SHA-256 and expiry. GETs name immutable CAS objects,
-  exclude logs and enforce the sixty-second maximum from `internal/limits`.
-- Filesystem HTTP transfers use HMAC-signed URLs, confined directory operations,
-  verified staging and create-only publication. Bad, truncated or oversized
-  uploads leave no staging file. Tampered, expired and wrong-method URLs fail.
-- S3 PUT signatures include content length and SHA-256. Commit checks the object
-  checksum and length, fences the source ETag and creates the final key only if
-  absent. Both backends verify an existing final object before retry adoption.
-- `ObjectBackend` exposes signing, physical commit and deletion. It creates no
-  live rows or receipts. The authenticated controller/store transaction owns
-  those operations, as the frozen contract requires.
-- SDK git clone/fetch use upstream directly. Removed the cache probe, URL rewrite,
-  credential injection and fallback machinery.
-- Binary helpers take an injected data client and use only signed controller
-  routes. Removed `/bin` transfers and the older discovery/signing fallback.
-  Binary installation now checks exact size as well as SHA-256 and EOF. The new
-  short/long tests failed before that repair and pass afterward.
-- Removed the SDK lint-cache HTTP API and its pipeline calls. Lint retains its
-  local tool cache. Remote declaration through final `.Cache(Dir(...))` remains
-  open because that SDK method is a stub and the pipeline is a separate module.
+- `internal/artifacts` uses injected `blob.Store` and `blob.RecordStore`.
+  Capture uploads verified files and a deterministic manifest, then commits
+  every member. An existence answer cannot replace an uploader receipt.
+  Stage requires an authorized record, compares manifest bytes with all
+  authorized members, checks size/digest/EOF, and replaces files only after
+  verification. Corrupt downloads preserve the prior file.
+- Shared `blob.Manifest` and `DecodeManifest` keep artifact and memo validation
+  identical. The manifest includes file path, digest, size and mode. Workspace
+  confinement, symlink handling and mode masking have component tests.
+  Windows replacement handles a prior read-only file. Windows test compilation
+  passes, but native Windows execution has not been run.
+- `blob.MaterializeMemo` atomically copies authorized records through
+  `RecordStore.CopyMemo`, then verifies output, manifest and members within the
+  lookup budget. Missing follower output, missing bytes, corruption, refused
+  edges and failed manifest copies become misses. Parent cancellation fails.
+- The old host memo storage path no longer reads arbitrary source run outputs,
+  copies a bare manifest digest, or treats a failed manifest write as success.
+  It publishes output bytes and scoped memo records through blob contracts.
+  Lookup precedes slot coordination so the store can resolve trusted default
+  fallback. Slots coordinate cold executions with their legacy memo key field
+  empty. Promoted holders recheck the authorized record. The user no-memo flag
+  retains its bypass behavior.
+- Host artifact publication re-resolves the authenticated binding after
+  execution because retries advance the attempt. Old artifact-store injection
+  was removed. A job declaring artifacts without a binding fails explicitly.
+- Trigger and node source fetches use direct Git. Declared refs support branch,
+  tag and SHA. Working-tree baseline acquisition uses the same credential
+  resolution and a repository checkout without requiring `.sparkwing` or
+  fetching submodules. The baseline-without-pipeline regression failed before
+  the review repair and passes afterward.
+- Removed the obsolete direct artifact transport and its discovery fallback.
+  Snapshot validation and raw checkout restoration remain with the signed
+  source-bundle client because that client still needs them.
 
-Session 1's signed byte client, edge predicates, scoped keys, remote-cache reader,
-depcache backend, cache-service deletion and chart/package changes remain in the
-committed branch. They were not rebuilt from scratch.
+Sessions 1 and 2 remain committed. They supplied signed byte transfers, edge and
+scope predicates, filesystem/S3 physical backends, remote-cache reads, the
+blob depcache backend, the cache-service/chart/package-proxy deletion, direct
+SDK Git operations and the signed binary client. Those were not reimplemented.
 
-## Deleted
+## Deletions
 
-Session 2 removes six complete files containing **1,079 lines**:
+Session 3 deletes eight complete files containing **2,137 lines**:
 
-- `internal/bincache/{signed_download.go,signed_download_test.go,publication_test.go}`.
-  The publication-failure test was ported to `direct_data_test.go`.
-- `sparkwing/{toolcache_blobstore.go,toolcache_blobstore_test.go,toolcache_archive_test.go}`.
+- `internal/artifacts/{capture_test.go,stage_test.go}`: replaced by tests at the
+  new byte/record boundary, using real workspace files.
+- `internal/bincache/{fetch_test.go,promptless_test.go}`: obsolete cache-server
+  source tests. Direct-ref and baseline behavior have replacement tests.
+- `internal/nodehost/memo_unix_test.go`: old protocol, cache-row and event
+  integration assertions. Storage behavior is covered by the new component
+  tests. Final lifecycle and generator assertions still need native T1/W3 ports.
+- `internal/orchestrator/{direct_artifact.go,direct_artifact_test.go,
+  supervisor_artifact_internal_test.go}`: the removed artifact transport.
 
-It also removes obsolete binary transfer functions and tests, the SDK gitcache
-client, the CLI's fake cache-server tests and the removed SDK API documentation.
-Before this report update, the tracked session diff contained 2,298 removed lines.
-Session 1 removed 59 complete files containing 12,787 lines. Across both sessions,
-65 complete files containing 13,866 lines have been removed.
-
-The hard cut remains open for the gitcache source helpers in `internal/bincache`,
-old artifact/memo consumers, cache grants and old controller data handlers. The
-binary data client still uses `internal/directdata`; W2's final authenticated
-transport must replace it with `blob.Store`/`blob.RecordStore` bindings.
+The retained `internal/bincache/bincache.go` loses 412 lines of gitcache source
+helpers. Retained host and cluster files also lose old source retries, source
+selection, arbitrary memo reads and manifest-copy code. Across all three
+sessions, 73 complete files containing 16,003 lines have been removed.
 
 ## Acceptance and test ports
 
 **Native storage acceptance: 0 activated, 424 cells skipped.**
 `acceptance.New` and `acceptance.Run` still panic. Catalog and port-inventory
-checks pass, which does not prove native execution. No fake result was labelled
-as a passing SQLite, Postgres, S3 or placement acceptance cell.
+checks pass, but do not prove a native target. No fake was labelled SQLite,
+Postgres, S3, Windows runtime or placement evidence.
 
-Component evidence added:
+The missing-follower-output and failed-manifest-copy findings now have direct
+contract tests in `blob.TestMemoMaterializationFailures` and
+`nodehost.TestMemoMaterializationRunsOnRefusal`. They cover initial lookup,
+materialization after a leader, and a promoted holder. They also cover missing
+members, corrupt bytes, manifest/member disagreement, budget exhaustion and
+refused starts. Namespace tests from earlier sessions remain.
 
-- Filesystem signing, verified publication, interrupted-commit adoption, corrupt
-  final refusal, bad-body cleanup, expiry, tamper, path and log-download refusal.
-- S3 signing and commit through the real AWS SDK with a fake HTTP service.
-  Checks signed size/checksum headers, source/destination copy conditions,
-  deduplication, interrupted-commit adoption and corrupt final refusal.
-- Signed binary transfers with fake HTTP: exact size/digest, missing data,
-  cancellation, failed publication cleanup, and bearer isolation on object PUT.
-- Direct SDK clone, upstream fetch and preservation of an existing destination.
+Artifact tests replace the old store API fixtures with verified capture,
+manifest commit refusal, missing/unauthorized/corrupt/short/long staging,
+mutation during upload, directory matching, sorted entries, symlink escape,
+file replacement and mode tests. Direct source ports cover branch/tag/SHA,
+unsafe refs, baseline identity, baseline grafting and baselines without a
+pipeline directory.
 
-The interrupted-upload and conflicting-checksum cases cover the physical-object
-parts of `TestDirectCommitAdoptsVerifiedCopyAfterOldReservationExpires` and
-`TestDirectCommitRefusesExistingObjectWithDifferentChecksum`. Their transactional
-uploader/provenance obligations remain open, so these are partial ports. The
-prior presence-budget port remains in `TestHasManyBudget`.
+The native one-terminal-event assertion, generator replay, retry rehydration,
+transactional laundering, quota, retention and all placement cells remain
+open. The earlier physical upload retry/checksum ports still need W1's receipt
+and quota transaction portions.
 
-The follower-output, refused manifest-copy, retry materialization, quota, GC,
-server-owned scope, same-run laundering and native host ports still require
-transactional/runtime integration. They are not claimed complete.
+## Contracts and integration still needed
 
-## Contracts and real-integration points
+W7-local additions are `artifacts.Data`, record-based artifact edges,
+`blob.Manifest`/`DecodeManifest`, and `blob.MaterializedMemo`/`MaterializeMemo`.
+The stable artifact key is `KindManifest`, `Name=run ID`, and scope
+`repo/ref/pipeline/producer job` with an empty scope key. Attempt/generation
+remain in `Record.Source`. W1's memo copy must create the destination manifest
+under this layout. These additions are documented in `internal/blob/README.md`
+and asserted in the artifact contract test. Existing other-area interfaces
+and schema were not changed.
 
-Local W7 addition: `internal/blob/objects.go` declares `ObjectBackend`, implemented
-by `NewFilesystem` and `NewS3`. The object-signing types are unchanged from W2.
-The physical commit/deletion boundary is needed because neither signing nor
-`blob.RecordStore` owns object publication. No schema or another area's contract
-was changed. Removing these new backend files reverses this addition.
+Other-area contract changes and real integration points:
 
-The prior local W7 repairs remain: `Authority.Upload`,
-`RemoteCacheOptions.Records` and `RecordLookup.VerifiedDefaultOnly`.
+- **W1:** implement tenant `RecordStore`, read sets, atomic memo copy, live blob
+  existence, upload ticket/reservation/receipt lifecycle, quota and retention.
+  The upload lifecycle still lacks declared tenant methods. Do not adopt
+  object existence as an authorized receipt.
+- **W2:** replace `directdata` and cache grants with authenticated capability
+  transport. Reauthorize uploads at commit, bind quota before signing, commit
+  exact receipts and mount the filesystem signer or configure S3.
+- **W3/W8:** final run/node inputs need per-attempt byte/record bindings. The
+  old `nodehost.Config.Artifacts` callback now consumes the binding but the
+  production orchestrator constructors do not yet provide it. Artifact jobs
+  fail without it and memo runs cold. Bind against the current server attempt,
+  including after retries. Complete store-owned memoized lifecycle and retry
+  materialization through the final reconciler instead of old host methods.
+- **W4:** finish `.Cache` and migrate the repository lint declaration. The old
+  lint-cache HTTP API stays deleted.
+- **T1:** implement the native driver and activate the complete target cells.
 
-Other-area contract/integration work needed:
-
-- **W1:** expose the final tenant-bound upload lifecycle: persist immutable
-  tickets and quota reservations, resolve them at commit, then atomically record
-  live blob existence and the exact uploader receipt. `uploads` is in the final
-  schema, but the target contract files do not declare that lifecycle's methods.
-  Do not infer that an existing object is an authorized receipt.
-- **W1:** implement the `blob.RecordStore` methods, restricted default-branch
-  lookups, read sets, unique-byte accounting and retention. These remain stubs.
-- **W2:** authorize and reserve before signing. Mount the filesystem endpoint or
-  provide the S3 client, adapt the object backend to `blob.DataSigner`, and
-  reauthorize at commit. After the store commits, delete staging. Supply the
-  server-resolved uploader binding and final authenticated record transport.
-- **W3/W4/W8:** bind bytes and records to each host/attempt; migrate artifact,
-  memo, binary and depcache consumers. The final host inputs still do not expose
-  the storage binding. Replace the old source-fetch callers so gitcache helpers
-  and flags can be cut without adding an adapter.
-- **W4:** implement final `.Cache`; then migrate the repo lint declaration with
-  a workdir-safe key. Do not restore the deleted lint-cache HTTP API.
-- **T1:** implement the native driver and activate the full scenario assertions.
-
-No product design question was resolved outside the frozen architecture. These
-are implementation and integration obligations, not permission requests.
+Remaining W7 cuts include runner/agent/launcher `gitcache` flags and options,
+`WithGitcache`, dependency-proxy environment plumbing, old controller data
+handlers and cache grants, and old storage clients still serving controller
+or local-controller paths. The source-bundle and binary clients still use the
+prior `directdata` transport. Logs/publication also need final runtime binding.
+No product design decision or approval question is pending.
 
 ## Verification
 
-All Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, and `GOCACHE`,
-`GOTMPDIR`, `TMPDIR` beneath `/tmp/sw-astra-W7`. Parallelism was at most `-p 4`.
-The directory is deleted at handoff.
+Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, and `GOCACHE`,
+`GOTMPDIR`, `TMPDIR` beneath `/tmp/sw-astra-W7`. Each command used at most `-p 2`.
 
 Passed:
 
-- Root `go build -p 4 ./...` and `.sparkwing` module `go build -p 4 ./...`.
-- Root vet for `internal/blob/...`, `internal/bincache`, `internal/depcache`,
-  `sparkwing/git`, `internal/cluster`, `internal/orchestrator`, `cmd/sparkwing`.
-  The `.sparkwing/jobs` vet also passes.
-- Full `internal/blob/...` and `internal/depcache` tests.
-- Bincache tests matching `TestDownloadBinary`, `TestDirectBinaryUpload`,
-  `TestFailedBinaryPublication` and `TestCompilePipelineCancel`.
-- SDK cache tests matching `TestCacheDir` and `TestToolCacheDir`; git clone/fetch
-  and promptless tests; CLI `TestPipelineCacheKey_HyphenFormat`.
-- Pipeline tests matching `TestLint|TestGolangci`.
-- Acceptance catalog/port inventory and the explicitly skipped storage matrix.
-- Source/embedded docs equality and `git diff --check`.
+- Whole-repository `go build -p 2 ./...`.
+- Vet on `internal/blob/...`, `internal/artifacts`, `internal/bincache`,
+  `internal/nodehost`, `internal/orchestrator`, `internal/cluster`.
+- Full `internal/blob/...` and `internal/artifacts` tests.
+- Focused nodehost tests matching `TestArtifacts|TestMemoMaterialization`.
+- Direct-ref and baseline bincache tests, including
+  `TestAdoptWorkspaceBaseline*`; source URL orchestrator tests; cluster test
+  package compilation.
+- Windows amd64 artifact test cross-compilation, without native execution.
+- Acceptance catalog/documentation/port inventory, with all storage cells
+  explicitly skipped; source/embedded docs equality; `git diff --check`.
 
-Limitations and friction:
+Review found and fixed default-fallback lookup ordering, manifest/member
+agreement, read-only replacement on Windows, cold-miss coalescing, and baseline
+acquisition wrongly requiring a pipeline directory.
 
-- Full `sparkwing/git` tests fail in three unchanged filesystem-fallback tests:
-  `TestFilesetHashFilesystemFallback`, `TestFilesetHashFramesFileContents`,
-  `TestFilesetHashIncludesPermissions`. They report `git ls-files: not a git
-  repository`. The sandbox exposes an empty read-only `/tmp/.git`. The changed
-  clone/fetch tests pass. This is not a full git-package test pass.
-- The API snapshot generator runs, but the existing snapshot has broad rewrite
-  drift, including annotations and approvals. Only this session's four removed
-  SDK symbols were removed from the snapshot; whole-snapshot equality is not
-  claimed.
-- Real S3, controller sockets, native placement runs, Postgres, Windows and
-  Sparkwing pipelines/gates were not run. HTTP tests use recorders/transports,
-  and the S3 test exercises SDK requests against a fake service.
-- Directly importing depcache from the pipeline fails Go's internal-package
-  boundary. That attempt was removed; the final pipeline build passes.
-- Test git fixture commits now disable signing per command. No repository-local
-  identity or worktree setting was changed. No shared git metadata was written.
+Friction and limitations:
 
-## Shared files touched in session 2
+- Socket-backed source/credential and runtime tests cannot bind listeners in
+  the sandbox. Local Git fixtures and injected transports provide component
+  evidence only. No real S3, Postgres, cluster or native Windows test ran.
+- A legacy nodehost follower test failed while opening the old schema because
+  `sparkwing_meta` is absent. Its storage assertion was replaced by the new
+  contract test. Full nodehost/orchestrator suites are not claimed green.
+- Checks run during concurrent edits saw transient compile/import failures.
+  The final checks above were rerun after the repairs.
+- The installed `sparkwing info --for-agent` was invoked once during bootstrap,
+  before loading the swarm's no-binary rule. No candidate, daemon or pipeline
+  command was run. No git metadata was written.
+- Temporary files and caches under `/tmp/sw-astra-W7` are removed at handoff.
 
-- `internal/cluster/trigger_loop.go`: bind the signed binary data client.
-- `internal/orchestrator/{run_node_remote.go,claim_exec.go,pod_node_host_test.go}`:
-  migrate binary-helper callers and test doubles to that client.
-- `cmd/sparkwing/compile_cache_test.go`: delete tests of the removed `/bin` API.
-- `.sparkwing/jobs/lint_contention.go`: remove the deleted lint HTTP client calls.
-- `sparkwing/git/{clone.go,clone_test.go,clone_direct_test.go}` and
-  `sparkwing/depcache.go`: direct cloning and current storage documentation.
-- `.apidiff/sparkwing.txt`, `docs/{sdk.md,sdk-reference.md}`, `CHANGELOG.md` and
-  their embedded copies: remove deleted SDK APIs and record the cut.
+## Shared files touched in session 3
+
+- `internal/cluster/{pipeline_source_test.go,runner_pool_cli.go,trigger_loop.go,
+  trigger_loop_test.go}`: direct source callers and fixtures.
+- `internal/nodehost/{scheduler.go,artifacts.go,memo.go,artifacts_test.go,
+  memo_artifacts_test.go,memo_unix_test.go,events_test.go,podnode_test.go}`:
+  storage binding, replaced storage consumers and retired API fixtures.
+- `internal/orchestrator/{claim_exec.go,hosted_run.go,pod_node_host.go,
+  run_node_remote.go,trigger_host.go,envelope_coverage_test.go,
+  repo_admission_test.go,run_node_remote_cancel_test.go,source_url_test.go}`:
+  minimal caller migration for removed source/artifact/memo APIs.
+- The three deleted orchestrator artifact files listed above.
+- `CHANGELOG.md` and generated `pkg/docs/changelog.md`: record the cuts.
 
 STATUS: CONTINUE

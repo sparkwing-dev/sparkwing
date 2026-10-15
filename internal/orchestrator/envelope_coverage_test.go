@@ -266,9 +266,7 @@ func (r *envelopeRig) start(runID, pipeline string, args map[string]string, twea
 			OpenLog: func(context.Context, string, string) (nodehost.NodeLog, error) { return discardNodeLog{}, nil },
 		},
 		Admission: &nodehost.Admission{Slots: r.slots},
-		Memo: &nodehost.Memo{Slots: r.slots, Source: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) (nodehost.MemoSource, error) {
-			return nodehost.ReadMemoSource(ctx, r.st, runID, nodeID)
-		}},
+		Memo:      &nodehost.Memo{Slots: r.slots},
 	}
 	if r.daemon != nil {
 		cfg.Admission.Daemon = r.daemon

@@ -31,7 +31,7 @@ func TestAdmitTriggerSourceChecksTheFetchedRemoteAndTheGitHubName(t *testing.T) 
 		{GithubOwner: "acme", GithubRepo: "app", RepoURL: "https://github.com/acme/app"},
 	}
 	for _, tr := range admitted {
-		fetch, err := TriggerSourceURL(tr, true)
+		fetch, err := TriggerSourceURL(tr)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -45,7 +45,7 @@ func TestAdmitTriggerSourceChecksTheFetchedRemoteAndTheGitHubName(t *testing.T) 
 		{ID: "r3", RepoURL: "https://gitlab.com/acme/app.git"},
 	}
 	for _, tr := range refused {
-		fetch, err := TriggerSourceURL(tr, true)
+		fetch, err := TriggerSourceURL(tr)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -126,7 +126,7 @@ func TestRunNodeRemoteRefusesUncheckableSourcesBeforeFetching(t *testing.T) {
 		})
 	}
 
-	fetch, err := TriggerSourceURL(snapshot("https://github.com/acme/app.git"), true)
+	fetch, err := TriggerSourceURL(snapshot("https://github.com/acme/app.git"))
 	if err != nil {
 		t.Fatal(err)
 	}

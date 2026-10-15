@@ -124,7 +124,7 @@ func directTestRemote(t *testing.T) (remote, oldSHA, tipSHA string) {
 	t.Helper()
 	repoParent := t.TempDir()
 	oldSHA, tipSHA = makeBareRepoWithSparkwing(t, repoParent, "widgets", "main")
-	srv := startGitcacheTestServer(t, repoParent)
+	srv := startDirectGitTestServer(t, repoParent)
 	t.Cleanup(srv.Close)
 	return srv.URL + "/git/widgets.git", oldSHA, tipSHA
 }
@@ -176,6 +176,46 @@ func TestDirectCheckoutTakesTheBranchTipWithoutACommit(t *testing.T) {
 	}
 	if head := gitOut(t, dest, "rev-parse", "HEAD"); head != tipSHA {
 		t.Fatalf("HEAD = %s, want the branch tip %s", head, tipSHA)
+	}
+}
+
+func TestDirectCheckoutFetchesTheDeclaredRef(t *testing.T) {
+	repoParent := t.TempDir()
+	oldSHA, tipSHA := makeBareRepoWithSparkwing(t, repoParent, "widgets", "main")
+	remote := filepath.Join(repoParent, "widgets.git")
+	if out, err := exec.Command("git", "-C", remote, "tag", "main", oldSHA).CombinedOutput(); err != nil {
+		t.Fatalf("tag direct source: %v: %s", err, out)
+	}
+	for _, tc := range []struct {
+		ref, want string
+	}{
+		{"origin/main", tipSHA},
+		{"refs/remotes/origin/main", tipSHA},
+		{"refs/heads/main", tipSHA},
+		{"refs/tags/main", oldSHA},
+		{oldSHA, oldSHA},
+	} {
+		t.Run(tc.ref, func(t *testing.T) {
+			checkout := filepath.Join(t.TempDir(), "run")
+			opts := directOptions{protocols: "file"}
+			opts.sourceRef = tc.ref
+			if err := directCheckout(t.Context(), t.TempDir(), remote, "", "", checkout, opts); err != nil {
+				t.Fatal(err)
+			}
+			if got := gitOut(t, checkout, "rev-parse", "HEAD"); got != tc.want {
+				t.Fatalf("HEAD = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDirectCheckoutRefusesUnsafeDeclaredRef(t *testing.T) {
+	for _, ref := range []string{"-oProxyCommand=bad", "refs/heads/../evil", "refs/tags/a b", "HEAD~1"} {
+		opts := httpOnly
+		opts.sourceRef = ref
+		if err := directCheckout(t.Context(), t.TempDir(), "http://example.test/repo.git", "", "", filepath.Join(t.TempDir(), "run"), opts); err == nil {
+			t.Fatalf("accepted source ref %q", ref)
+		}
 	}
 }
 
@@ -247,7 +287,7 @@ func directTestRepo(t *testing.T, populate func(work string)) (remote, sha strin
 	bare := filepath.Join(repoParent, "repo.git")
 	git("", "clone", "--bare", "--quiet", work, bare)
 	git(bare, "config", "uploadpack.allowReachableSHA1InWant", "true")
-	srv := startGitcacheTestServer(t, repoParent)
+	srv := startDirectGitTestServer(t, repoParent)
 	t.Cleanup(srv.Close)
 	return srv.URL + "/git/repo.git", sha
 }

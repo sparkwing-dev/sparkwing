@@ -17,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -39,19 +38,7 @@ func runNodeRemote(
 	if cacheGrant == "" {
 		cacheGrant = os.Getenv(authwire.CacheGrantEnv)
 	}
-	gcURL := strings.TrimRight(gitcacheURL, "/")
-	if gcURL == "" {
-		gcURL = bincache.CacheURL()
-	}
-	// safety: without the operator's cache this runner fetches directly, with
-	// the credential the controller releases for the run, so it never
-	// borrows a cache it was not given.
-	direct := gcURL == ""
-	if !direct {
-		gcURL = bincache.ControllerRunGitcacheURL(gcURL, controllerURL, runID)
-	}
-
-	repoURL, sourceErr := TriggerSourceURL(trigger, direct)
+	repoURL, sourceErr := TriggerSourceURL(trigger)
 	if sourceErr != nil {
 		return runner.Result{}, sourceErr
 	}
@@ -79,7 +66,7 @@ func runNodeRemote(
 
 	logger.Info("runNodeRemote: fetching source",
 		"run_id", runID, "node_id", nodeID, "repo", sourceurl.Redact(repoURL), "branch", branch,
-		"sha", trigger.GitSHA, "direct", direct)
+		"sha", trigger.GitSHA)
 
 	workDir := filepath.Join(bincache.SparkwingHome(), "node-runner", runID+"-"+nodeID)
 	// #nosec G703 -- a work directory under this user's own Sparkwing home
@@ -94,28 +81,21 @@ func runNodeRemote(
 	case workspaceSource:
 		sparkwingDir, err = bincache.FetchSourceBundleDirect(ctx, controllerURL, cacheGrant, runID,
 			trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey], trigger.GitSHA, repoURL, workDir)
-	case direct:
+	default:
 		sparkwingDir, err = bincache.FetchRunSourceDirect(ctx, bincache.RunSource{
 			ControllerURL: controllerURL, ClaimToken: token, RunID: runID,
 			RepoURL: repoURL, Branch: branch, SHA: trigger.GitSHA, WorkDir: workDir,
 			OwnerCredentials: ownerFenced,
 		}, logger)
-	default:
-		sparkwingDir, err = bincache.FetchPipelineSourceWithCredentials(ctx, gcURL, controllerURL, token, cacheGrant,
-			repoURL, branch, trigger.GitSHA, workDir)
 	}
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("fetch source: %w", err)
 	}
 	if workspaceSource && repoURL != "" {
 		adoptNodeBaseline(ctx, trigger, filepath.Dir(sparkwingDir),
-			gcURL, bincache.GitcacheBearer(gcURL, controllerURL, token, cacheGrant), runID, nodeID, logger)
+			repoURL, controllerURL, token, ownerFenced, runID, nodeID, logger)
 	}
 
-	binaryCacheURL := gcURL
-	if cacheGrant == "" || bincache.ControllerGitcacheToken(gcURL, controllerURL, token) != "" {
-		binaryCacheURL = ""
-	}
 	binary, err := resolveRemoteBinary(ctx, sparkwingDir, directdata.New(controllerURL, cacheGrant, runID, nil), logger)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("resolve binary: %w", err)
@@ -123,13 +103,9 @@ func runNodeRemote(
 	defer binary.release()
 	logger.Info("runNodeRemote: binary ready",
 		"run_id", runID, "node_id", nodeID, "entry", binary.entry)
-	art, err := supervisorArtifactStore(ctx, controllerURL, runID, binaryCacheURL, cacheGrant)
-	if err != nil {
-		return runner.Result{}, fmt.Errorf("open the artifact store: %w", err)
-	}
 	return hostDispatchedNode(ctx, podNode{
 		entry: binary.entry, dir: filepath.Dir(sparkwingDir), controllerURL: controllerURL, token: token,
-		runID: runID, nodeID: nodeID, cacheGrant: cacheGrant, artifacts: art, logger: logger,
+		runID: runID, nodeID: nodeID, cacheGrant: cacheGrant, logger: logger,
 	})
 }
 
@@ -178,37 +154,21 @@ func hostDispatchedNode(ctx context.Context, p podNode) (runner.Result, error) {
 	return runner.Result{Outcome: res.Outcome, Err: res.Err}, nil
 }
 
-// safety: a pooled agent serves many runs from one process, so the cache grant is the node's,
-// never one read from the process environment.
-func supervisorArtifactStore(ctx context.Context, controllerURL, runID, cacheURL, cacheGrant string) (storage.ArtifactStore, error) {
-	if os.Getenv(ArtifactStoreEnvVar) != "" {
-		return resolveArtifactStoreFromEnv(ctx)
-	}
-	if controllerURL != "" && cacheGrant != "" && runID != "" {
-		d := directdata.New(controllerURL, cacheGrant, runID, nil)
-		available, err := d.Available(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if available {
-			return directArtifactStore{client: d}, nil
-		}
-	}
-	return resolveArtifactStoreFromEnv(ctx)
-}
-
-func adoptNodeBaseline(ctx context.Context, trigger *store.Trigger, checkoutDir, gcURL, token, runID, nodeID string, logger *slog.Logger) {
+func adoptNodeBaseline(ctx context.Context, trigger *store.Trigger, checkoutDir, repoURL, controllerURL, token string, ownerFenced bool, runID, nodeID string, logger *slog.Logger) {
 	baseline := bincache.WorkspaceBaselineFromEnv(trigger.TriggerEnv)
 	if baseline == (bincache.WorkspaceBaseline{}) {
 		return
 	}
-	err := bincache.AdoptWorkspaceBaseline(ctx, checkoutDir, gcURL, token, trigger.GitSHA, baseline)
+	err := bincache.AdoptWorkspaceBaseline(ctx, bincache.RunSource{
+		ControllerURL: controllerURL, ClaimToken: token, RunID: runID,
+		RepoURL: repoURL, OwnerCredentials: ownerFenced,
+	}, checkoutDir, trigger.GitSHA, baseline, logger)
 	switch {
 	case err == nil:
 		logger.Info("runNodeRemote: baseline ready",
 			"run_id", runID, "node_id", nodeID, "ref", baseline.Ref, "sha", baseline.SHA)
 	case errors.Is(err, bincache.ErrBaselineUnservable):
-		logger.Debug("runNodeRemote: source serves only the snapshot, so it carries no baseline",
+		logger.Debug("runNodeRemote: baseline source unavailable",
 			"run_id", runID, "node_id", nodeID, "ref", baseline.Ref)
 	default:
 		// safety: the checkout runs without the baseline, and a step that needs it says so itself.
@@ -262,14 +222,13 @@ func AdmitTriggerSource(allow sourceurl.RepoAllowlist, trigger *store.Trigger, f
 	return nil
 }
 
-// TriggerSourceURL is the remote a trigger's source comes from; direct reports
-// a runner that fetches it itself rather than through the git cache.
-func TriggerSourceURL(trigger *store.Trigger, direct bool) (string, error) {
+// TriggerSourceURL is the remote a runner fetches for a trigger's source.
+func TriggerSourceURL(trigger *store.Trigger) (string, error) {
 	if trigger == nil {
 		return "", nil
 	}
 	return bincache.TriggerRepoURL(trigger.RepoURL, trigger.TriggerEnv["GITHUB_REPOSITORY"],
-		trigger.GithubOwner, trigger.GithubRepo, direct)
+		trigger.GithubOwner, trigger.GithubRepo)
 }
 
 func triggerGitHubRepository(trigger *store.Trigger) string {

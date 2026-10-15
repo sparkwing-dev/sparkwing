@@ -168,6 +168,8 @@ unlock.
   The retry trigger was written with an empty `trigger_user` and only retry provenance in `trigger_env`, so a retried pull-request run planned as an anonymous push. It now copies the source trigger's user and the `GITHUB_EVENT_NAME` and `GITHUB_PR_*`/`GITHUB_BASE_*`/`GITHUB_HEAD_*` keys `PullRequestFromEnv` reads.
 
 ### Removed
+- **runner (Breaking):** Removed cache-server source fetching; source and working-tree baselines use upstream Git
+- **engine (Breaking):** Removed the legacy artifact transport; publication and staging require authorized blob records
 - **SDK + storage:** remove the gitcache clone probe and the lint-cache HTTP helpers. Git clones use their upstream directly. Binary transfers use signed controller data routes without cache-service fallbacks.
 - **pipeline binary (Breaking):** The pipeline binary answers only `--sw-node-protocol`; any other invocation exits 2 naming `sparkwing run`
   `<binary> <pipeline>`, `<pipeline> config`, `--plan`, `--explain`, `handle-trigger`, `run-node` (with `--coordinated`), `replay-node` and `ops queue|doctor|stats|stats-reset|version` are removed, with the binary's in-process dispatcher and local node runner. `sparkwing-runner run-node` and warm runners no longer run a pipeline compiled into the runner image; a node whose run names no repository or working-tree source is refused. Use `sparkwing run`, `sparkwing pipeline plan [--static]`, `sparkwing pipeline describe --secrets`, `sparkwing queue`, `sparkwing doctor` and `sparkwing version`; `ops stats` and `ops stats-reset` have no replacement. See [migration guide](docs/migrations/_unreleased.md#the-pipeline-binary-answers-only-the-node-protocol).

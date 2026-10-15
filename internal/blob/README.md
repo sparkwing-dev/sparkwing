@@ -41,6 +41,29 @@ Record transactions, read-set construction, unique-byte accounting, GC and
 retention belong to `pkg/store`. Controller authorization and upload tickets belong
 to the controller and capability packages.
 
+Artifact capture and staging live in `internal/artifacts`. Its `Data` value binds
+the byte store, record store and authority to the same job. Capture uploads each
+file even if another principal stored identical bytes, because an existence
+answer does not establish an upload receipt. It commits the manifest only after
+all uploads succeed. Staging requires an authorized record and verifies both
+the manifest and each member before replacing a destination file.
+
+Artifact records use `KindManifest`, the run ID as `Name`, and the authorized
+repository, ref, pipeline and producer job in `Scope`. `Scope.Key` is empty.
+Attempt and generation stay in `Record.Source`. A memo copy must create its
+destination manifest under the destination run and job's same key layout.
+`Manifest` and `DecodeManifest` define the shared bytes/member agreement for
+staging and memo reads. This includes each file's path, digest, size and mode.
+
+`MaterializeMemo` asks `RecordStore.CopyMemo` for an atomic, authorized copy,
+then verifies the output, manifest and every member within the lookup budget.
+Missing or corrupt bytes, a refused edge or a failed copy produces a miss.
+Caller cancellation remains an error. Hosts query records before coordinating
+a cold execution, so verified default-branch fallback does not depend on an
+old run or a concurrency-cache row. A promoted waiter checks records again.
+The host resolves a fresh storage binding after execution before publishing
+artifacts, because an application retry advances the upload attempt.
+
 `NewFilesystem` and `NewS3` implement `capability.DataSigner` and `ObjectBackend`.
 The controller passes an authorized `ObjectToSign` after reserving quota.
 PUT keys are `teams/<team>/pending/<ticket>` and bind the expected size and SHA-256.

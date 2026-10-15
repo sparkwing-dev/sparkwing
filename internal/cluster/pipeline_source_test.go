@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -54,8 +55,8 @@ func main(){body,err:=os.ReadFile("subject");if err!=nil{panic(err)};if err:=os.
 	revision := strings.TrimSpace(string(out))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	defer server.Close()
-	previous, previousRef, previousHost := fetchSourceFn, fetchPipelineRefFn, hostTriggerRunFn
-	t.Cleanup(func() { fetchSourceFn, fetchPipelineRefFn, hostTriggerRunFn = previous, previousRef, previousHost })
+	previous, previousHost := fetchSourceFn, hostTriggerRunFn
+	t.Cleanup(func() { fetchSourceFn, hostTriggerRunFn = previous, previousHost })
 	// safety: the fixture is a bare program, so the run host's stand-in starts it as the host starts each of
 	// its processes: the built binary, in the execution checkout.
 	hostTriggerRunFn = func(ctx context.Context, h orchestrator.TriggerHost) error {
@@ -80,14 +81,13 @@ func main(){body,err:=os.ReadFile("subject");if err!=nil{panic(err)};if err:=os.
 			// reports into its working directory rather than a path from the env.
 			output := filepath.Join(execution, "result")
 			calls := 0
-			fetchSourceFn = func(_ context.Context, _, _, _, _, _, _, _, _ string) (string, error) {
+			fetchSourceFn = func(_ context.Context, src bincache.RunSource, _ *slog.Logger) (string, error) {
 				calls++
-				return filepath.Join(execution, ".sparkwing"), nil
-			}
-			fetchPipelineRefFn = func(_ context.Context, _, _, _, _, _, ref, _ string) (string, error) {
-				calls++
-				if ref != source {
-					t.Errorf("declared ref changed: %q, want %q", ref, source)
+				if src.Ref == "" {
+					return filepath.Join(execution, ".sparkwing"), nil
+				}
+				if src.Ref != source {
+					t.Errorf("declared ref changed: %q, want %q", src.Ref, source)
 				}
 				return filepath.Join(selected, ".sparkwing"), nil
 			}

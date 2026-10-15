@@ -106,6 +106,7 @@ func DirectRepoURLFromGitHub(fullName string) string {
 // A zero timeout leaves ctx in charge, while the byte cap covers all mirrors under one home.
 type directOptions struct {
 	protocols      string
+	sourceRef      string
 	lookup         sourceurl.Lookup
 	fetchTimeout   time.Duration
 	maxMirrors     int
@@ -126,6 +127,14 @@ func defaultDirectOptions() directOptions {
 }
 
 func fetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDir string, opts directOptions) (string, error) {
+	checkout, err := fetchRepositorySourceDirect(ctx, repoURL, branch, sha, workDir, opts)
+	if err != nil {
+		return "", err
+	}
+	return directSparkwingDir(checkout)
+}
+
+func fetchRepositorySourceDirect(ctx context.Context, repoURL, branch, sha, workDir string, opts directOptions) (string, error) {
 	remote, sha, err := ValidateDirectSource(repoURL, sha)
 	if err != nil {
 		return "", err
@@ -133,7 +142,7 @@ func fetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDi
 	if remote, err = credentialRemote(remote, opts.cred); err != nil {
 		return "", err
 	}
-	if sha == "" {
+	if sha == "" && opts.sourceRef == "" {
 		if branch == "" {
 			branch = "main"
 		}
@@ -152,7 +161,7 @@ func fetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDi
 	if err := directCheckout(ctx, root, remote, branch, sha, checkout, opts); err != nil {
 		return "", err
 	}
-	return directSparkwingDir(checkout)
+	return checkout, nil
 }
 
 // safety: A repository may commit .sparkwing as a symlink outside the checkout; never compile or run it.
@@ -207,6 +216,19 @@ func directMirrorKey(remote string) string {
 
 func directCheckout(ctx context.Context, root, remote, branch, sha, dest string, opts directOptions) (err error) {
 	defer func() { err = redactCredential(err, opts.cred) }()
+	ref := "refs/heads/" + branch
+	if opts.sourceRef != "" {
+		if sha != "" {
+			return errors.New("direct source: a declared ref and commit cannot both select the checkout")
+		}
+		ref, err = normalizeDirectRef(ctx, opts.sourceRef)
+		if err != nil {
+			return err
+		}
+		if directCommitRE.MatchString(ref) {
+			sha, ref = ref, ""
+		}
+	}
 	mirror := directMirrorPath(root, remote)
 	lock, err := fssecure.OpenFile(mirror+".lock", os.O_CREATE|os.O_RDWR)
 	if err != nil {
@@ -334,8 +356,8 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 		}
 	}
 	if sha == "" {
-		if err := fetchRef("refs/heads/" + branch); err != nil {
-			return fmt.Errorf("direct source: fetch %s branch %s: %w", sourceurl.Redact(remote), branch, err)
+		if err := fetchRef(ref); err != nil {
+			return fmt.Errorf("direct source: fetch %s ref %s: %w", sourceurl.Redact(remote), ref, err)
 		}
 		if target, err = git("-C", mirror, "rev-parse", "--verify", "FETCH_HEAD^{commit}"); err != nil {
 			return fmt.Errorf("direct source: %w", err)
@@ -356,6 +378,23 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 		return fmt.Errorf("direct source: check out %s: %w", target, err)
 	}
 	return nil
+}
+
+func normalizeDirectRef(ctx context.Context, ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if directCommitRE.MatchString(ref) {
+		return strings.ToLower(ref), nil
+	}
+	if strings.HasPrefix(ref, "refs/remotes/origin/") {
+		ref = "refs/heads/" + strings.TrimPrefix(ref, "refs/remotes/origin/")
+	} else if strings.HasPrefix(ref, "origin/") {
+		ref = "refs/heads/" + strings.TrimPrefix(ref, "origin/")
+	}
+	if (!strings.HasPrefix(ref, "refs/heads/") && !strings.HasPrefix(ref, "refs/tags/")) ||
+		exec.CommandContext(ctx, "git", "check-ref-format", ref).Run() != nil {
+		return "", fmt.Errorf("direct source: invalid declared ref %q", ref)
+	}
+	return ref, nil
 }
 
 // safety: Drop git variables that redirect every command or trace credentials during a direct fetch.
@@ -439,16 +478,20 @@ func directLocalGitEnv(fetchEnv []string) []string {
 	return append(out, "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_LFS_SKIP_SMUDGE=1")
 }
 
-// TriggerRepoURL is the remote a runner fetches a trigger's source from, given
-// every name the trigger recorded for its repository: the clone URL,
-// GITHUB_REPOSITORY and github_owner/github_repo. They must all name one
-// repository (sourceurl.TriggerRepository), so the cache path and the direct
-// path fetch the same one and differ only in the form their transport needs:
-// the git cache names a GitHub repository by the ssh form a GitHub-sourced run
-// registers, and a direct fetch uses the recorded clone URL, else the GitHub
-// name's https form, fitted by DirectFetchURL to the identities this process
-// holds. An empty result means the trigger names no repository.
-func TriggerRepoURL(repoURL, githubRepository, githubOwner, githubRepo string, direct bool) (string, error) {
+// RepoURLFromGitHub is the clone URL recorded for a GitHub repository name.
+func RepoURLFromGitHub(fullName string) string {
+	if fullName == "" {
+		return ""
+	}
+	if strings.Contains(fullName, "://") || strings.HasPrefix(fullName, "git@") {
+		return fullName
+	}
+	return "git@github.com:" + fullName + ".git"
+}
+
+// TriggerRepoURL resolves the one repository named by a trigger and selects
+// the transport this machine can use for a direct fetch.
+func TriggerRepoURL(repoURL, githubRepository, githubOwner, githubRepo string) (string, error) {
 	if _, err := sourceurl.TriggerRepository(repoURL, githubRepository, githubOwner, githubRepo); err != nil {
 		return "", err
 	}
@@ -456,24 +499,14 @@ func TriggerRepoURL(repoURL, githubRepository, githubOwner, githubRepo string, d
 	if slug == "" && githubOwner != "" {
 		slug = githubOwner + "/" + githubRepo
 	}
-	var raw string
-	switch {
-	case direct && repoURL != "":
-		raw = repoURL
-	case direct:
+	raw := repoURL
+	if raw == "" {
 		raw = DirectRepoURLFromGitHub(slug)
-	case slug != "":
-		raw = RepoURLFromGitHub(slug)
-	default:
-		raw = repoURL
 	}
 	if raw == "" {
 		return "", nil
 	}
-	if direct {
-		raw = DirectFetchURL(raw)
-	}
-	return sourceurl.ValidateCloneURL(raw)
+	return sourceurl.ValidateCloneURL(DirectFetchURL(raw))
 }
 
 // safety: Git cannot cap fetch writes, so an oversized mirror is removed and its checkout refused afterward.

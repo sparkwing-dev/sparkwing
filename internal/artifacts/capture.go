@@ -1,6 +1,7 @@
 package artifacts
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,45 +16,50 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
-
-type artifactManifest struct {
-	Entries []artifactEntry `json:"entries"`
-}
-
-type artifactEntry struct {
-	Path   string `json:"path"`
-	Digest string `json:"digest"`
-	Mode   uint32 `json:"mode"`
-}
 
 var (
 	errArtifactOutsideWorkspace = errors.New("resolves outside the workspace")
 	errArtifactUnresolvable     = errors.New("cannot resolve")
 )
 
-// BlobKey is the store key of a file's bytes, by their sha256.
-func BlobKey(digest string) string { return "artifacts/blobs/" + digest }
+// Data binds artifact byte and record operations to the same caller authority.
+type Data struct {
+	Bytes     blob.Store
+	Records   blob.RecordStore
+	Authority blob.Authority
+	Identity  blob.UploadIdentity
+	Pipeline  string
+	Budget    blob.Budget
+}
 
-// ManifestKey is the store key of a manifest, by its sha256.
-func ManifestKey(digest string) string { return "artifacts/manifests/" + digest }
-
-// Capture uploads the workspace files that globs match and returns the digest
-// of the manifest naming them. A match that resolves outside the workspace is
-// skipped with a warning, unless a glob names it literally.
-func Capture(ctx context.Context, store storage.ArtifactStore, workspace string, globs []string, warn func(msg string)) (string, error) {
+// Capture uploads matched workspace files, commits their authorized manifest,
+// and returns the committed record. A wildcard match outside the workspace is
+// skipped with a warning; a literal outside match fails.
+func Capture(ctx context.Context, data Data, workspace string, globs []string, warn func(msg string)) (blob.Record, error) {
+	if data.Bytes == nil || data.Records == nil || warn == nil {
+		return blob.Record{}, fmt.Errorf("artifact data requires bytes, records and warning sink")
+	}
+	job := ""
+	if data.Identity.Attempt.Set {
+		job = data.Identity.Attempt.Value.NodeID
+	}
+	key, err := blob.ResolveWriteKey(data.Authority, blob.WriteScopeIntent{Kind: blob.KindManifest, Pipeline: data.Pipeline, Job: job, Name: data.Identity.RunID})
+	if err != nil {
+		return blob.Record{}, fmt.Errorf("artifact record key: %w", err)
+	}
 	wsRoot, err := filepath.EvalSymlinks(workspace)
 	if err != nil {
-		return "", fmt.Errorf("resolve workspace: %w", err)
+		return blob.Record{}, fmt.Errorf("resolve workspace: %w", err)
 	}
 	root, err := os.OpenRoot(wsRoot)
 	if err != nil {
-		return "", fmt.Errorf("open workspace: %w", err)
+		return blob.Record{}, fmt.Errorf("open workspace: %w", err)
 	}
 	defer func() { _ = root.Close() }()
 
-	var entries []artifactEntry
+	var entries []blob.ManifestEntry
 	walkErr := filepath.WalkDir(workspace, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -92,32 +98,41 @@ func Capture(ctx context.Context, store storage.ArtifactStore, workspace string,
 		if !info.Mode().IsRegular() {
 			return nil
 		}
-		digest, berr := storeArtifactFile(ctx, store, root, name)
+		digest, size, berr := storeArtifactFile(ctx, data, root, name)
 		if berr != nil {
 			return fmt.Errorf("artifact %q: %w", rel, berr)
 		}
-		entries = append(entries, artifactEntry{
+		entries = append(entries, blob.ManifestEntry{
 			Path:   rel,
 			Digest: digest,
+			Size:   size,
 			Mode:   uint32(info.Mode().Perm()),
 		})
 		return nil
 	})
 	if walkErr != nil {
-		return "", walkErr
+		return blob.Record{}, walkErr
 	}
 
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
-	manifestBytes, merr := json.Marshal(artifactManifest{Entries: entries})
+	manifestBytes, merr := json.Marshal(blob.Manifest{Entries: entries})
 	if merr != nil {
-		return "", fmt.Errorf("marshal manifest: %w", merr)
+		return blob.Record{}, fmt.Errorf("marshal manifest: %w", merr)
 	}
 	sum := sha256.Sum256(manifestBytes)
-	digest := hex.EncodeToString(sum[:])
-	if err := putBytes(ctx, store, ManifestKey(digest), manifestBytes); err != nil {
-		return "", fmt.Errorf("store manifest: %w", err)
+	digest := blob.Digest(hex.EncodeToString(sum[:]))
+	if _, err := data.Bytes.Put(ctx, blob.PutRequest{Identity: data.Identity, Authority: data.Authority, Digest: digest, Size: int64(len(manifestBytes)), Body: bytes.NewReader(manifestBytes)}); err != nil {
+		return blob.Record{}, fmt.Errorf("store manifest: %w", err)
 	}
-	return digest, nil
+	members := make([]blob.Member, 0, len(entries))
+	for _, entry := range entries {
+		members = append(members, blob.Member{Team: key.Team, ManifestDigest: digest, Digest: entry.Digest, Path: entry.Path, Size: entry.Size, Mode: entry.Mode})
+	}
+	record, err := data.Records.CommitRecord(ctx, blob.CommitRecordRequest{Source: data.Identity, Authority: data.Authority, Key: key, Digest: digest, Members: members})
+	if err != nil {
+		return blob.Record{}, fmt.Errorf("commit artifact manifest: %w", err)
+	}
+	return record, nil
 }
 
 // safety: resolve links before reading a match so a workspace symlink cannot publish a file outside it
@@ -152,35 +167,25 @@ func resolvesToDirectory(p string) bool {
 }
 
 // safety: one open serves both the hash and the upload so the stored bytes are the bytes the digest names
-func storeArtifactFile(ctx context.Context, store storage.ArtifactStore, root *os.Root, name string) (string, error) {
+func storeArtifactFile(ctx context.Context, data Data, root *os.Root, name string) (blob.Digest, int64, error) {
 	f, err := root.Open(name)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer func() { _ = f.Close() }()
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
+	n, err := io.Copy(h, f)
+	if err != nil {
+		return "", 0, err
 	}
-	digest := hex.EncodeToString(h.Sum(nil))
-	key := BlobKey(digest)
-	if ok, herr := store.Has(ctx, key); herr == nil && ok {
-		return digest, nil
-	}
+	digest := blob.Digest(hex.EncodeToString(h.Sum(nil)))
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return "", err
+		return "", 0, err
 	}
-	if err := store.Put(ctx, key, f); err != nil {
-		return "", err
+	if _, err := data.Bytes.Put(ctx, blob.PutRequest{Identity: data.Identity, Authority: data.Authority, Digest: digest, Size: n, Body: f}); err != nil {
+		return "", 0, err
 	}
-	return digest, nil
-}
-
-func putBytes(ctx context.Context, store storage.ArtifactStore, key string, b []byte) error {
-	if ok, err := store.Has(ctx, key); err == nil && ok {
-		return nil
-	}
-	return store.Put(ctx, key, strings.NewReader(string(b)))
+	return digest, n, nil
 }
 
 func anyGlobMatches(globs []string, rel string) bool {

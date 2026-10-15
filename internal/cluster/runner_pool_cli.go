@@ -14,10 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
-	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -715,7 +713,7 @@ func currentCapacity(ctx context.Context, provider headroomProvider) capacityRep
 func executePooledNode(
 	ctx context.Context,
 	ctrl *client.Client,
-	controllerURL, gitcacheURL string,
+	controllerURL, _ string,
 	allow sourceurl.RepoAllowlist,
 	token string,
 	n *store.Node,
@@ -754,17 +752,8 @@ func executePooledNode(
 	// serves only the claim's heartbeat and setup failures from this process.
 	claimToken := n.ClaimToken
 	grant := orchestrator.RequestRunCacheGrant(heartbeatCtx, controllerURL, claimToken, n.RunID, logger)
-	var announced string
-	if grant != "" {
-		services, err := discovery.ServicesFor(execCtx, controllerURL, token)
-		if err != nil {
-			logger.Debug("controller announces no cache; keeping --gitcache", "run_id", n.RunID, "err", err)
-		}
-		announced = services.CachePod
-	}
-	gitcacheURL = nodeCacheURL(gitcacheURL, controllerURL, announced, grant)
 	res, err := runPooledNodeOnce(execCtx, controllerURL, n.RunID, n.NodeID, holderID, claimToken,
-		logger, orchestrator.WithGitcache(gitcacheURL, grant), orchestrator.WithRepoAllowlist(allow),
+		logger, orchestrator.WithGitcache("", grant), orchestrator.WithRepoAllowlist(allow),
 		orchestrator.ClaimedNodeAttempt(n))
 	cancel()
 	hbWG.Wait()
@@ -777,16 +766,6 @@ func executePooledNode(
 	}
 	logger.Info(source+" finished node",
 		"run_id", n.RunID, "node_id", n.NodeID, "outcome", res.Outcome)
-}
-
-func nodeCacheURL(gitcacheURL, controllerURL, announced, grant string) string {
-	if grant == "" || announced == "" {
-		return gitcacheURL
-	}
-	if gitcacheURL == "" || bincache.IsControllerGitcache(gitcacheURL, controllerURL) {
-		return announced
-	}
-	return gitcacheURL
 }
 
 var runPooledNodeOnce = orchestrator.RunNodeOnce

@@ -1,14 +1,18 @@
 package nodehost
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -20,53 +24,13 @@ import (
 type Memo struct {
 	// Slots is the coordination store that holds the memo entries.
 	Slots ConcurrencySlots
-	// Source reads the output and artifact manifest a hit or a coalesced
-	// follower copies from the node runID/nodeID, in one read so both come
-	// from the same node. A claimed node cannot read another run, so it names
-	// the entry with in and the controller picks the node.
-	Source func(ctx context.Context, in store.ClaimInputRequest, runID, nodeID string) (MemoSource, error)
 	// NoCache runs every memoized node without reading an earlier result, as
 	// --sw-no-cache does; a success still records its output.
 	NoCache bool
-	// Claimed keys each entry under the run's repository, pipeline and node,
-	// the only memo keys the controller lets a claim take.
-	Claimed bool
-}
-
-// MemoSource is the finished node a hit or a coalesced follower copies.
-type MemoSource struct {
-	Output []byte
-	// ArtifactManifest is the node's artifact manifest digest, empty when it
-	// published none.
-	ArtifactManifest string
-}
-
-// MemoSourceReader reads a finished node's row and output.
-type MemoSourceReader interface {
-	GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error)
-	GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)
-}
-
-// ReadMemoSource reads runID/nodeID's output and manifest from st. A finished
-// node's row and output never change, so the two reads name one source. An
-// output read's error is returned with the manifest.
-func ReadMemoSource(ctx context.Context, st MemoSourceReader, runID, nodeID string) (MemoSource, error) {
-	row, err := st.GetNode(ctx, runID, nodeID)
-	if err != nil {
-		return MemoSource{}, err
-	}
-	var src MemoSource
-	if row != nil {
-		src.ArtifactManifest = row.ArtifactManifest
-	}
-	src.Output, err = st.GetNodeOutput(ctx, runID, nodeID)
-	return src, err
 }
 
 // safety: matches the dispatcher's bound on a cache key resolver.
 const memoKeyBudget = 30 * time.Second
-
-const memoKeyPrefix = "memo:"
 
 // safety: the cache_key closure runs in an eval process of its own before the
 // node starts, so a node whose result is reused never gets an attempt. A
@@ -80,16 +44,24 @@ func memoLayer(cfg *Config, next Executor) Executor {
 		if n.Plan.MemoKey == nil || n.Plan.MemoKey.Closure == "" {
 			return next(ctx, n)
 		}
+		if cfg.Artifacts == nil {
+			return next(ctx, n)
+		}
 		hash, res := memoHash(ctx, cfg, n)
 		switch {
 		case res.Outcome != sparkwing.Success:
 			return res
 		case hash == "":
 			return next(ctx, n)
-		case m.Slots == nil || m.Source == nil:
+		case m.Slots == nil:
 			return Result{Outcome: sparkwing.Failed, Err: errors.New("memo: no coordination store")}
 		}
-		key, err := m.key(ctx, n, hash)
+		data, err := cfg.Artifacts(ctx, n)
+		if err != nil {
+			return Result{Outcome: sparkwing.Failed, Err: err}
+		}
+		hash = fmt.Sprintf("%x", sha256.Sum256([]byte(hash)))
+		key, err := blob.MemoNamespace(blob.MemoKey{Repo: data.Authority.Repo, Ref: data.Authority.Ref.Scope, Pipeline: data.Pipeline, Job: n.Plan.ID, Hash: runspec.Hash(hash)})
 		if err != nil {
 			return Result{Outcome: sparkwing.Failed, Err: err}
 		}
@@ -141,20 +113,6 @@ func memoHash(ctx context.Context, cfg *Config, n *NodeRun) (string, Result) {
 	return hash, res
 }
 
-// safety: a claimed node memoizes under its own repository, pipeline and node,
-// read from the run row as the controller reads it; elsewhere a key is shared
-// across pipelines, as in the dispatcher.
-func (m *Memo) key(ctx context.Context, n *NodeRun, hash string) (string, error) {
-	if !m.Claimed {
-		return memoKeyPrefix + hash, nil
-	}
-	run, err := n.Run.State.GetRun(ctx, n.Run.ID)
-	if err != nil {
-		return "", fmt.Errorf("read the run to name its memo key: %w", err)
-	}
-	return store.ClaimMemoKey(store.ClaimRepoSlug(run.GithubOwner, run.GithubRepo), run.Pipeline, n.Plan.ID, hash), nil
-}
-
 type memoRun struct {
 	cfg  *Config
 	m    *Memo
@@ -165,33 +123,49 @@ type memoRun struct {
 }
 
 func (r *memoRun) run(ctx context.Context, bypass bool) (res Result, copied bool) {
+	if !bypass && !r.m.NoCache {
+		return r.materialize(ctx)
+	}
 	n, g := r.n, r.g
 	resp, err := r.m.Slots.AcquireSlot(ctx, store.AcquireSlotRequest{
 		Key: g.key, HolderID: n.Run.ID + "/" + n.Plan.ID, RunID: n.Run.ID, NodeID: n.Plan.ID,
-		Capacity: g.capacity, Cost: g.cost, Policy: g.policy, CacheKeyHash: g.memoHash, CacheTTL: g.memoTTL, BypassRead: bypass,
+		Capacity: g.capacity, Cost: g.cost, Policy: g.policy, BypassRead: r.m.NoCache,
 	})
 	if err != nil {
 		return admissionFailed(ctx, fmt.Errorf("memo acquire(%q): %w", g.key, err)), false
 	}
 	switch resp.Kind {
-	case store.AcquireCached:
-		return r.hit(ctx, resp.OriginRunID, resp.OriginNodeID, bypass)
 	case store.AcquireGranted:
-		return r.hold(ctx, n.Run.ID+"/"+n.Plan.ID), false
+		return r.hold(ctx, n.Run.ID+"/"+n.Plan.ID)
 	case store.AcquireCoalesced, store.AcquireQueued:
-		return r.wait(ctx, resp, bypass)
+		return r.wait(ctx, resp)
 	}
 	return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("memo acquire(%q) returned unexpected kind %q", g.key, resp.Kind)}, false
 }
 
-// safety: the row is written before the slot's release records the entry, so
-// a follower or a later run never reads the entry's origin before its output.
-func (r *memoRun) hold(ctx context.Context, holder string) Result {
+// safety: the slot only coordinates execution; blob records own every memo edge.
+func (r *memoRun) hold(ctx context.Context, holder string) (Result, bool) {
 	n := r.n
-	return r.adm.holdSlot(ctx, r.adm.nodeHolder(ctx, n), r.g, holder, func(ctx context.Context) Result {
+	coordination := r.g
+	coordination.memoHash, coordination.memoTTL = "", 0
+	copied := false
+	result := r.adm.holdSlot(ctx, r.adm.nodeHolder(ctx, n), coordination, holder, func(ctx context.Context) Result {
+		if !r.m.NoCache {
+			res, found, err := r.lookup(ctx)
+			if err != nil {
+				return admissionFailed(ctx, err)
+			}
+			if found {
+				copied = true
+				return res
+			}
+		}
 		res := r.next(ctx, n)
 		if res.Outcome != sparkwing.Success || res.recorded {
 			return res
+		}
+		if err := r.save(ctx, res.Output); err != nil {
+			n.Run.Logger.Warn("memo write failed; result remains successful", "node", n.Plan.ID, "err", err)
 		}
 		err := n.Run.State.FinishNodeWithReason(context.WithoutCancel(ctx), n.Run.ID, n.Plan.ID, string(res.Outcome), "", res.Output, res.Reason, nil)
 		if err != nil {
@@ -200,9 +174,10 @@ func (r *memoRun) hold(ctx context.Context, holder string) Result {
 		res.recorded = true
 		return res
 	})
+	return result, copied && result.Outcome == sparkwing.Cached
 }
 
-func (r *memoRun) wait(ctx context.Context, initial store.AcquireSlotResponse, bypass bool) (Result, bool) {
+func (r *memoRun) wait(ctx context.Context, initial store.AcquireSlotResponse) (Result, bool) {
 	n, g, slots := r.n, r.g, r.m.Slots
 	h := r.adm.nodeHolder(ctx, n)
 	h.activity(fmt.Sprintf("coalescing in %s behind %s", g.key, initial.LeaderRunID+"/"+initial.LeaderNodeID))
@@ -223,7 +198,7 @@ func (r *memoRun) wait(ctx context.Context, initial store.AcquireSlotResponse, b
 			return admissionFailed(ctx, ctx.Err()), false
 		case <-tick.C:
 		}
-		res, err := slots.ResolveWaiter(ctx, g.key, n.Run.ID, n.Plan.ID, g.memoHash, initial.LeaderRunID, initial.LeaderNodeID, bypass)
+		res, err := slots.ResolveWaiter(ctx, g.key, n.Run.ID, n.Plan.ID, "", initial.LeaderRunID, initial.LeaderNodeID, r.m.NoCache)
 		if err != nil {
 			if failingSince.IsZero() {
 				failingSince = outageClock()
@@ -241,11 +216,11 @@ func (r *memoRun) wait(ctx context.Context, initial store.AcquireSlotResponse, b
 		switch res.Status {
 		case store.WaiterStillWaiting:
 		case store.WaiterPromoted:
-			return r.hold(ctx, res.HolderID), false
+			return r.hold(ctx, res.HolderID)
 		case store.WaiterCached:
-			return r.hit(ctx, res.OriginRunID, res.OriginNodeID, bypass)
+			return r.materialize(ctx)
 		case store.WaiterLeaderFinished:
-			return r.follow(ctx, res.LeaderRunID, res.LeaderNodeID)
+			return r.materialize(ctx)
 		case store.WaiterCancelled:
 			return Result{Outcome: sparkwing.Superseded, Err: fmt.Errorf("memo key %q: waiter was cancelled or superseded", g.key)}, false
 		default:
@@ -255,85 +230,91 @@ func (r *memoRun) wait(ctx context.Context, initial store.AcquireSlotResponse, b
 	}
 }
 
-// safety: an entry whose artifacts or output bytes are gone, or whose bytes
-// fail their digest, runs as a miss rather than hand on a wrong value; the
-// rerun skips reading entries, so it cannot loop.
-func (r *memoRun) hit(ctx context.Context, srcRun, srcNode string, bypass bool) (Result, bool) {
-	in := store.ClaimInputRequest{Kind: store.ClaimInputCached, Key: r.g.key, CacheKeyHash: r.g.memoHash}
-	src, err := r.m.Source(ctx, in, srcRun, srcNode)
-	switch {
-	case (errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrOutputCorrupt)) && !bypass:
-		return r.run(ctx, true)
-	case err != nil:
-		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("cache hit: fetch output: %w", err)}, false
+// safety: result edges are copied atomically; missing or unreadable bytes rerun
+// the job instead of handing a follower a successful empty result.
+func (r *memoRun) materialize(ctx context.Context) (Result, bool) {
+	result, found, err := r.lookup(ctx)
+	if err != nil {
+		return admissionFailed(ctx, err), false
 	}
-	switch ready, err := r.artifactsReady(ctx, src.ArtifactManifest); {
-	case err != nil:
-		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("cache hit: read artifacts: %w", err)}, false
-	case !ready:
-		return r.run(ctx, true)
+	if found {
+		return result, true
 	}
-	r.copied(ctx, src.ArtifactManifest, sparkwing.Cached, "cache_hit", map[string]any{
-		"key": r.g.key, "cache_key_hash": r.g.memoHash, "origin_run_id": srcRun, "origin_node_id": srcNode,
-	}, map[string]any{"cache_hit": true})
-	return Result{Outcome: sparkwing.Cached, Output: src.Output}, true
+	return r.run(ctx, true)
 }
 
-// safety: the store resolves a follower this way only once its leader
-// succeeded, so the follower succeeds with the leader's output.
-func (r *memoRun) follow(ctx context.Context, leaderRun, leaderNode string) (Result, bool) {
-	in := store.ClaimInputRequest{Kind: store.ClaimInputCoalesced, Key: r.g.key, CacheKeyHash: r.g.memoHash}
-	src, err := r.m.Source(ctx, in, leaderRun, leaderNode)
-	if errors.Is(err, store.ErrNotFound) && r.m.Claimed {
-		// safety: a claim finds no output once the entry expired after its leader released, so the node runs
-		// rather than succeed with nothing.
-		return r.run(ctx, true)
+func (r *memoRun) lookup(ctx context.Context) (Result, bool, error) {
+	if r.cfg.Artifacts == nil {
+		return Result{}, false, nil
 	}
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("fetch leader output: %w", err)}, false
+	data, err := r.cfg.Artifacts(ctx, r.n)
+	if err != nil {
+		return Result{}, false, err
 	}
-	switch ready, err := r.artifactsReady(ctx, src.ArtifactManifest); {
-	case err != nil:
-		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("read leader artifacts: %w", err)}, false
-	case !ready:
-		return r.run(ctx, true)
+	if !data.Identity.Attempt.Set {
+		return Result{}, false, errors.New("memo requires an attempt binding")
 	}
-	r.copied(ctx, src.ArtifactManifest, sparkwing.Success, "coalesced", map[string]any{
-		"key": r.g.key, "leader_run_id": leaderRun, "leader_node_id": leaderNode, "leader_outcome": string(sparkwing.Success),
-	}, map[string]any{"coalesced_from": leaderRun + "/" + leaderNode})
-	return Result{Outcome: sparkwing.Success, Output: src.Output}, true
+	copied, err := blob.MaterializeMemo(ctx, data.Bytes, data.Records, blob.CopyMemoRequest{
+		Lookup: blob.MemoLookup{Authority: data.Authority, Budget: data.Budget, Key: blob.MemoKey{
+			Repo: data.Authority.Repo, Ref: data.Authority.Ref.Scope, Pipeline: data.Pipeline,
+			Job: r.n.Plan.ID, Hash: runspec.Hash(r.g.memoHash),
+		}},
+		Destination: data.Identity.Attempt.Value,
+	})
+	if err != nil {
+		return Result{}, false, err
+	}
+	if !copied.Hit.Found || (len(r.n.Plan.Outputs) > 0 && !copied.Hit.Manifest.Set) {
+		return Result{}, false, nil
+	}
+	if err := r.n.Run.State.StartNode(ctx, r.n.Run.ID, r.n.Plan.ID); err != nil {
+		return Result{}, false, fmt.Errorf("start memoized job: %w", err)
+	}
+	return Result{Outcome: sparkwing.Cached, Output: copied.Output}, true, nil
 }
 
-// safety: a node that declares outputs reuses a source only when its manifest and every blob it lists are
-// stored, since a consumer of a missing one fails where the producer could have run again. A host with no
-// artifact store publishes and stages nothing, so there is nothing to check.
-func (r *memoRun) artifactsReady(ctx context.Context, manifest string) (bool, error) {
-	switch {
-	case len(r.n.Plan.Outputs) == 0:
-		return true, nil
-	case manifest == "":
-		return false, nil
-	case r.cfg.Artifacts == nil:
-		return true, nil
+func (r *memoRun) save(ctx context.Context, output []byte) error {
+	if r.cfg.Artifacts == nil {
+		return nil
 	}
-	return artifacts.Present(ctx, r.cfg.Artifacts, manifest)
-}
-
-// safety: the event kinds, payloads and log attrs are the dispatcher's, which the dashboard's live stream reads.
-func (r *memoRun) copied(ctx context.Context, manifest string, outcome sparkwing.Outcome, kind string, event, attrs map[string]any) {
-	run, id := r.n.Run, r.n.Plan.ID
-	wctx := context.WithoutCancel(ctx)
-	if err := run.State.StartNode(wctx, run.ID, id); err != nil {
-		run.Logger.Warn("nodehost: start copied node", "node", id, "err", err)
+	data, err := r.cfg.Artifacts(ctx, r.n)
+	if err != nil {
+		return err
 	}
-	hostEventJSON(wctx, run, id, kind, event)
-	if manifest != "" {
-		if err := run.State.SetNodeArtifactManifest(wctx, run.ID, id, manifest); err != nil {
-			run.Logger.Warn("nodehost: copy artifact manifest", "node", id, "err", err)
+	if data.Bytes == nil || data.Records == nil {
+		return errors.New("memo requires records and bytes")
+	}
+	if int64(len(output)) > limits.NodeOutputBytes {
+		return fmt.Errorf("memo output exceeds %d bytes", limits.NodeOutputBytes)
+	}
+	key, err := blob.ResolveWriteKey(data.Authority, blob.WriteScopeIntent{Kind: blob.KindMemo, Pipeline: data.Pipeline, Job: r.n.Plan.ID, Key: r.g.memoHash, Name: "result"})
+	if err != nil {
+		return err
+	}
+	request := blob.CommitRecordRequest{Source: data.Identity, Authority: data.Authority, Key: key}
+	if len(r.n.Plan.Outputs) > 0 {
+		manifest, err := data.Records.LookupRecord(ctx, blob.RecordLookup{Authority: data.Authority, Budget: data.Budget, Key: blob.RecordKey{
+			Team: data.Identity.Team, Kind: blob.KindManifest, Name: data.Identity.RunID,
+			Scope: blob.Scope{Repo: data.Authority.Repo, Ref: data.Authority.Ref.Scope, Pipeline: data.Pipeline, Job: r.n.Plan.ID},
+		}})
+		if err != nil {
+			return err
 		}
+		if !manifest.Found {
+			return blob.ErrNotFound
+		}
+		request.ManifestDigest = runspec.Optional[blob.Digest]{Set: true, Value: manifest.Record.Digest}
+		request.Members = manifest.Members
 	}
-	attrs["outcome"], attrs["duration_ms"] = string(outcome), int64(0)
-	hostNodeLog(wctx, r.cfg, r.n, sparkwing.LogRecord{Level: LevelInfo, Event: "node_end", Attrs: attrs})
+	request.Digest = blob.Digest(fmt.Sprintf("%x", sha256.Sum256(output)))
+	if _, err := data.Bytes.Put(ctx, blob.PutRequest{Authority: data.Authority, Identity: data.Identity, Digest: request.Digest, Size: int64(len(output)), Body: bytes.NewReader(output)}); err != nil {
+		return err
+	}
+	if r.g.memoTTL > 0 {
+		request.ExpiresAt = runspec.Optional[time.Time]{Set: true, Value: time.Now().Add(r.g.memoTTL)}
+	}
+	_, err = data.Records.CommitRecord(ctx, request)
+	return err
 }
 
 // safety: a copied source never ran in a process, so its generators run in an

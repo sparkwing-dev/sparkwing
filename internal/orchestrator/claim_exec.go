@@ -92,10 +92,6 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 		}
 		go renewCacheGrant(ctx, controllerURL, token, runID)
 	}
-	art, err := supervisorArtifactStore(ctx, controllerURL, runID, "", grant)
-	if err != nil {
-		return fail(fmt.Errorf("open the artifact store: %w", err))
-	}
 	row, err := c.GetNode(ctx, runID, nodeID)
 	if err != nil {
 		return fail(fmt.Errorf("read the node's attempts: %w", err))
@@ -103,7 +99,7 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 	state := &claimState{Client: c, runID: runID, nodeID: nodeID}
 	res, err := hostPodNode(ctx, podNode{
 		entry: binary.entry, dir: src, controllerURL: controllerURL, token: token, runID: runID, nodeID: nodeID,
-		specHash: specHash, attempt: row.AttemptsConsumed + 1, state: state, artifacts: art, logger: logger,
+		specHash: specHash, attempt: row.AttemptsConsumed + 1, state: state, logger: logger,
 	})
 	if err != nil {
 		return fail(err)

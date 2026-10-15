@@ -1,73 +1,81 @@
-// Package artifacts publishes a node's declared outputs to the artifact store
-// and stages a producer's published outputs into a consumer's workspace.
+// Package artifacts publishes declared outputs and stages committed records.
 package artifacts
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
-// Edge names a producer whose published artifacts a node stages, and the
-// workspace prefix they land under; an empty Into keeps their own paths.
+// Edge names a committed artifact record and its destination prefix.
 type Edge struct {
-	Producer string
-	Into     string
+	Record blob.RecordKey
+	Into   string
 }
 
-// ManifestReader reads the node row that carries a producer's manifest digest.
-type ManifestReader interface {
-	GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error)
-}
-
-// Stage writes each producer's published files into workspace and returns
-// how many it wrote. A producer with no manifest stages nothing; a missing or
-// corrupt blob, or a path escaping the workspace, is an error.
-func Stage(ctx context.Context, store storage.ArtifactStore, state ManifestReader, runID, workspace string, edges []Edge) (int, error) {
-	staged := 0
-	var total int64
+// Stage looks up each record under the caller's authority and writes its verified
+// members into workspace. A missing, unauthorized or corrupt record fails.
+func Stage(ctx context.Context, data Data, workspace string, edges []Edge) (int, error) {
 	if len(edges) == 0 {
-		return staged, nil
+		return 0, nil
 	}
-	// safety: every staged path is resolved through the workspace root, so a
-	// symlink planted by an earlier node cannot redirect a write out of it.
+	if data.Bytes == nil || data.Records == nil {
+		return 0, fmt.Errorf("artifact data requires bytes and records")
+	}
 	root, err := os.OpenRoot(workspace)
 	if err != nil {
-		return staged, err
+		return 0, err
 	}
 	defer func() { _ = root.Close() }()
-
-	for _, e := range edges {
-		node, err := state.GetNode(ctx, runID, e.Producer)
+	staged := 0
+	for _, edge := range edges {
+		if _, err := stageRel(edge.Into, "."); err != nil {
+			return staged, err
+		}
+		result, err := data.Records.LookupRecord(ctx, blob.RecordLookup{Authority: data.Authority, Key: edge.Record, Budget: data.Budget})
 		if err != nil {
-			return staged, fmt.Errorf("producer %q: %w", e.Producer, err)
+			return staged, fmt.Errorf("artifact record: %w", err)
 		}
-		if node == nil || node.ArtifactManifest == "" {
-			continue
+		if !result.Found {
+			return staged, fmt.Errorf("artifact record: %w", blob.ErrNotFound)
 		}
-		manifest, err := fetchManifest(ctx, store, node.ArtifactManifest)
+		if result.Record.Key != edge.Record || result.Record.Key.Kind != blob.KindManifest {
+			return staged, blob.ErrDigestNotReadable
+		}
+		manifest, err := readManifest(ctx, data, result.Record.Digest, edge.Record.Team, result.Members)
 		if err != nil {
-			return staged, fmt.Errorf("producer %q manifest: %w", e.Producer, err)
+			return staged, fmt.Errorf("artifact manifest: %w", err)
 		}
+		members := make(map[string]blob.Member, len(result.Members))
+		for _, member := range result.Members {
+			members[member.Path] = member
+		}
+		paths := make([]string, 0, len(manifest.Entries))
+		ordered := make([]blob.Member, 0, len(manifest.Entries))
 		for _, entry := range manifest.Entries {
-			rel, err := stageRel(e.Into, entry.Path)
+			member := members[entry.Path]
+			rel, err := stageRel(edge.Into, entry.Path)
 			if err != nil {
-				return staged, fmt.Errorf("producer %q: %w", e.Producer, err)
+				return staged, err
 			}
-			n, err := stageBlob(ctx, store, root, entry, rel, maxStagedTotalBytes-total)
-			total += n
-			if err != nil {
-				return staged, fmt.Errorf("producer %q artifact %q: %w", e.Producer, entry.Path, err)
+			paths = append(paths, rel)
+			ordered = append(ordered, member)
+			delete(members, entry.Path)
+		}
+		for i, member := range ordered {
+			rel := paths[i]
+			if err := stageMember(ctx, data, root, member, rel); err != nil {
+				return staged, fmt.Errorf("artifact %q: %w", member.Path, err)
 			}
 			staged++
 		}
@@ -75,108 +83,111 @@ func Stage(ctx context.Context, store storage.ArtifactStore, state ManifestReade
 	return staged, nil
 }
 
-// Present reports whether the manifest digest names and every blob it lists
-// are stored; a missing or corrupt manifest or a missing blob is false.
-func Present(ctx context.Context, store storage.ArtifactStore, digest string) (bool, error) {
-	manifest, err := fetchManifest(ctx, store, digest)
-	switch {
-	case errors.Is(err, storage.ErrNotFound) || errors.Is(err, errManifestCorrupt):
-		return false, nil
-	case err != nil:
-		return false, err
+func readManifest(ctx context.Context, data Data, digest blob.Digest, team string, members []blob.Member) (blob.Manifest, error) {
+	r, err := data.Bytes.Get(ctx, blob.GetRequest{Authority: data.Authority, Digest: digest})
+	if err != nil {
+		return blob.Manifest{}, err
 	}
-	seen := map[string]bool{}
-	for _, entry := range manifest.Entries {
-		if seen[entry.Digest] {
-			continue
-		}
-		seen[entry.Digest] = true
-		ok, err := store.Has(ctx, BlobKey(entry.Digest))
-		if err != nil || !ok {
-			return false, err
-		}
+	defer func() { _ = r.Close() }()
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return blob.Manifest{}, err
 	}
-	return true, nil
+	if !r.Verified() || digestOfBytes(b) != digest {
+		return blob.Manifest{}, blob.ErrIntegrity
+	}
+	return blob.DecodeManifest(b, digest, team, members)
 }
 
-var errManifestCorrupt = errors.New("artifact manifest digest mismatch")
-
-func fetchManifest(ctx context.Context, store storage.ArtifactStore, digest string) (artifactManifest, error) {
-	rc, err := store.Get(ctx, ManifestKey(digest))
+func stageMember(ctx context.Context, data Data, root *os.Root, member blob.Member, rel string) error {
+	if member.Size < 0 {
+		return blob.ErrIntegrity
+	}
+	r, err := data.Bytes.Get(ctx, blob.GetRequest{Authority: data.Authority, Digest: member.Digest})
 	if err != nil {
-		return artifactManifest{}, err
+		return err
 	}
-	defer func() { _ = rc.Close() }()
-	b, err := io.ReadAll(rc)
-	if err != nil {
-		return artifactManifest{}, err
-	}
-	sum := sha256.Sum256(b)
-	if hex.EncodeToString(sum[:]) != digest {
-		return artifactManifest{}, errManifestCorrupt
-	}
-	var m artifactManifest
-	if err := json.Unmarshal(b, &m); err != nil {
-		return artifactManifest{}, fmt.Errorf("decode manifest: %w", err)
-	}
-	return m, nil
-}
-
-var (
-	maxStagedArtifactBytes = int64(8 << 30)
-	maxStagedTotalBytes    = int64(32 << 30)
-)
-
-func stageBlob(ctx context.Context, store storage.ArtifactStore, root *os.Root, entry artifactEntry, rel string, remaining int64) (int64, error) {
-	rc, err := store.Get(ctx, BlobKey(entry.Digest))
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = rc.Close() }()
-	if parent := filepath.Dir(rel); parent != "." {
+	defer func() { _ = r.Close() }()
+	parent := filepath.Dir(rel)
+	if parent != "." {
 		if err := root.MkdirAll(parent, 0o755); err != nil {
-			return 0, err
+			return err
 		}
 	}
-	mode := os.FileMode(entry.Mode).Perm()
-	// safety: replace an existing destination instead of opening through it,
-	// so a symlink left in the workspace cannot capture the write.
-	_ = root.Remove(rel)
-	f, err := root.OpenFile(rel, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+	tmp, err := temporaryName(parent)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	limit := min(maxStagedArtifactBytes, remaining)
+	f, err := root.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Remove(tmp) }()
 	hash := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, hash), io.LimitReader(rc, limit+1))
-	if err != nil {
+	n, copyErr := io.CopyN(io.MultiWriter(f, hash), r, member.Size)
+	if copyErr != nil {
 		_ = f.Close()
-		return n, err
+		return copyErr
 	}
-	if n > limit {
-		_ = f.Close()
-		if n > maxStagedArtifactBytes {
-			return n, fmt.Errorf("blob exceeds the staging size limit of %d bytes", maxStagedArtifactBytes)
+	var extra [1]byte
+	extraN, endErr := r.Read(extra[:])
+	closeErr := f.Close()
+	if closeErr != nil {
+		return closeErr
+	}
+	if n != member.Size || extraN != 0 || endErr != io.EOF || !r.Verified() || blob.Digest(hex.EncodeToString(hash.Sum(nil))) != member.Digest {
+		return blob.ErrIntegrity
+	}
+	if err := root.Chmod(tmp, os.FileMode(member.Mode).Perm()); err != nil {
+		return err
+	}
+	return replaceVerifiedFile(root, tmp, rel)
+}
+
+func replaceVerifiedFile(root *os.Root, source, destination string) error {
+	if runtime.GOOS == "windows" {
+		info, err := root.Lstat(destination)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
 		}
-		return n, fmt.Errorf("staged artifacts exceed the total staging limit of %d bytes", maxStagedTotalBytes)
-	}
-	if err := f.Close(); err != nil {
-		return n, err
-	}
-	if hex.EncodeToString(hash.Sum(nil)) != entry.Digest {
-		if err := root.Remove(rel); err != nil {
-			return n, fmt.Errorf("artifact blob digest mismatch; remove invalid file: %w", err)
+		// safety: Windows refuses replacing a read-only file; preserve its mode if publication fails.
+		if err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o200 == 0 {
+			if err := root.Chmod(destination, info.Mode().Perm()|0o200); err != nil {
+				return err
+			}
+			if err := root.Rename(source, destination); err != nil {
+				return errors.Join(err, root.Chmod(destination, info.Mode().Perm()))
+			}
+			return nil
 		}
-		return n, fmt.Errorf("artifact blob digest mismatch")
 	}
-	return n, root.Chmod(rel, mode)
+	return root.Rename(source, destination)
+}
+
+func digestOfBytes(b []byte) blob.Digest {
+	s := sha256.Sum256(b)
+	return blob.Digest(hex.EncodeToString(s[:]))
+}
+
+func temporaryName(parent string) (string, error) {
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, ".sparkwing-artifact-"+hex.EncodeToString(random[:])), nil
 }
 
 func stageRel(into, relPath string) (string, error) {
 	into = filepath.FromSlash(into)
 	relPath = filepath.FromSlash(relPath)
-	if filepath.IsAbs(into) || filepath.IsAbs(relPath) {
+	if strings.HasPrefix(into, string(filepath.Separator)) || strings.HasPrefix(relPath, string(filepath.Separator)) || filepath.VolumeName(into) != "" || filepath.VolumeName(relPath) != "" {
 		return "", fmt.Errorf("staged path %q must be relative to the workspace", relPath)
+	}
+	for _, part := range []string{into, relPath} {
+		clean := filepath.Clean(part)
+		if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("staged path %q escapes workspace", part)
+		}
 	}
 	rel := filepath.Clean(filepath.Join(into, relPath))
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -185,18 +196,16 @@ func stageRel(into, relPath string) (string, error) {
 	return rel, nil
 }
 
-// CheckPaths refuses an output glob or a staging prefix that is absolute or
-// climbs out of the workspace, so a node fails before it runs instead of
-// publishing or staging nothing.
+// CheckPaths refuses output patterns and destination prefixes outside a workspace.
 func CheckPaths(globs []string, edges []Edge) error {
 	for _, g := range globs {
 		if _, err := stageRel(g, "."); err != nil {
-			return fmt.Errorf("output %q must stay inside the workspace", g)
+			return fmt.Errorf("output %q must stay inside the workspace: %w", g, err)
 		}
 	}
 	for _, e := range edges {
 		if _, err := stageRel(e.Into, "."); err != nil {
-			return fmt.Errorf("consume %q into %q: prefix must stay inside the workspace", e.Producer, e.Into)
+			return fmt.Errorf("consume into %q: prefix must stay inside the workspace: %w", e.Into, err)
 		}
 	}
 	return nil

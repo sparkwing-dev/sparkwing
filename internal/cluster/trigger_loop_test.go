@@ -334,9 +334,6 @@ func TestRunTriggerLoop_DirectSourceRefusesARepositoryOutsideTheAllowlist(t *tes
 // kill's error.
 func TestRunTriggerLoop_CancelRequestFinishesTheRunCancelled(t *testing.T) {
 	withFastTriggerHeartbeat(t, 5*time.Millisecond, time.Second, time.Minute)
-	oldAttempts := triggerFetchMaxAttempts
-	triggerFetchMaxAttempts = 1
-	t.Cleanup(func() { triggerFetchMaxAttempts = oldAttempts })
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var claimed atomic.Bool
