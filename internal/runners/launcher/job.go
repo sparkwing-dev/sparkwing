@@ -145,13 +145,16 @@ func validateAward(a CloudJobAward) error {
 	}
 	switch b.Kind {
 	case CloudPlan:
+		if b.NodeID != "" || b.SourceNodeID != "" || b.SourceGeneration != 0 {
+			return errors.New("plan award requires a run binding without a job or expansion source")
+		}
 	case CloudEval:
-		if b.NodeID == "" || b.SourceNodeID == "" || b.SourceGeneration <= 0 {
+		if b.NodeID == "" || b.SourceNodeID != b.NodeID || b.SourceGeneration <= 0 {
 			return errors.New("eval award requires its source generation")
 		}
 	case CloudWork:
-		if b.NodeID == "" {
-			return errors.New("work award requires a job")
+		if b.NodeID == "" || b.SourceNodeID != "" || b.SourceGeneration != 0 {
+			return errors.New("work award requires a job without an expansion source")
 		}
 	default:
 		return errors.New("unknown Cloud unit kind")

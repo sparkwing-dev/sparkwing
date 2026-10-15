@@ -22,6 +22,7 @@ import (
 )
 
 type launcherControllerW8 struct {
+	controllerwire.Controller
 	claim func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
 	sync  func(context.Context, controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
 }

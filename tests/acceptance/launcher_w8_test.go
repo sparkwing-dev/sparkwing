@@ -18,10 +18,12 @@ import (
 type cloudBoundaryFake struct {
 	missingNetwork bool
 	wrongTeam      bool
+	reserved       int
 	released       int
 }
 
 func (b *cloudBoundaryFake) Reserve(_ context.Context, binding launcher.CloudJobBinding, name string) (launcher.CloudNodeReservation, launcher.CloudNetworkEvidence, error) {
+	b.reserved++
 	team := binding.Team
 	if b.wrongTeam {
 		team = "other-team"
@@ -41,12 +43,61 @@ func cloudFixture(kind launcher.CloudUnitKind) (time.Time, launcher.CloudJobConf
 	award := launcher.CloudJobAward{Binding: launcher.CloudJobBinding{UnitID: "unit", Kind: kind, Team: "team", RunID: "run", NodeID: "job", Holder: "holder", Generation: 1, Attempt: 1, OwnerDeadline: now.Add(time.Hour), AttemptDeadline: now.Add(10 * time.Minute), ParentCapabilityExpiry: now.Add(45 * time.Minute)}, Bootstrap: []byte("secret-bootstrap-value"), CPUCores: 1.5, Memory: 2 << 30}
 	if kind != launcher.CloudPlan {
 		award.Engine = &engine.Identity{Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3", InputsDigest: strings.Repeat("c", 64)}, Version: "v1.2.3", ManifestDigest: strings.Repeat("b", 64)}
+	} else {
+		award.Binding.NodeID = ""
 	}
 	if kind == launcher.CloudEval {
-		award.Binding.SourceNodeID = "source"
+		award.Binding.SourceNodeID = award.Binding.NodeID
 		award.Binding.SourceGeneration = 2
 	}
 	return now, cfg, award
+}
+
+func FuzzCloudAwardUnitBindingW8(f *testing.F) {
+	f.Add(uint8(0), "", "", int64(0))
+	f.Add(uint8(0), "job", "", int64(0))
+	f.Add(uint8(0), "", "source", int64(1))
+	f.Add(uint8(1), "job", "job", int64(2))
+	f.Add(uint8(1), "job", "other", int64(2))
+	f.Add(uint8(1), "", "", int64(1))
+	f.Add(uint8(1), "job", "job", int64(0))
+	f.Add(uint8(1), "job", "job", int64(-1))
+	f.Add(uint8(2), "job", "", int64(0))
+	f.Add(uint8(2), "job", "source", int64(2))
+	f.Add(uint8(2), "", "", int64(0))
+	f.Add(uint8(2), "\xe6", "", int64(0))
+	f.Fuzz(func(t *testing.T, kind uint8, job, source string, generation int64) {
+		job, source = strings.ToValidUTF8(job, "\ufffd"), strings.ToValidUTF8(source, "\ufffd")
+		kinds := []launcher.CloudUnitKind{launcher.CloudPlan, launcher.CloudEval, launcher.CloudWork}
+		now, cfg, award := cloudFixture(kinds[kind%3])
+		award.Binding.NodeID, award.Binding.SourceNodeID, award.Binding.SourceGeneration = job, source, generation
+		valid := false
+		switch award.Binding.Kind {
+		case launcher.CloudPlan:
+			valid = job == "" && source == "" && generation == 0
+		case launcher.CloudEval:
+			valid = job != "" && source == job && generation > 0
+		case launcher.CloudWork:
+			valid = job != "" && source == "" && generation == 0
+		}
+		boundary := &cloudBoundaryFake{}
+		resources, err := launcher.BuildJob(t.Context(), now, cfg, award, boundary)
+		if (err == nil) != valid {
+			t.Fatalf("unit binding: kind=%s job=%q source=%q generation=%d valid=%t error=%v", award.Binding.Kind, job, source, generation, valid, err)
+		}
+		if !valid && (resources.Job != nil || resources.BootstrapSecret != nil || boundary.reserved != 0) {
+			t.Fatal("invalid unit binding produced Cloud resources")
+		}
+		metadata, err := json.Marshal(award)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file := writeBootstrapW8(t, map[string][]byte{"bootstrap": award.Bootstrap, "award.json": metadata})
+		restored, err := launcher.ReadBootstrapAward(file)
+		if (err == nil) != valid || (valid && restored.Binding != award.Binding) || (!valid && len(restored.Bootstrap) != 0) {
+			t.Fatalf("private unit binding: valid=%t error=%v", valid, err)
+		}
+	})
 }
 
 func TestLauncherCloudPodContract(t *testing.T) {
@@ -114,10 +165,13 @@ func TestLauncherCloudPodContract(t *testing.T) {
 				t.Fatalf("deadline = %v/%v", resources.JobDeadline, resources.ClaimDeadline)
 			}
 			args := strings.Join(pod.Containers[0].Args, " ")
-			for _, flag := range []string{"--controller", "--run", "--job", "--generation", "--source-dir", "--module-cache", "--bootstrap-file"} {
+			for _, flag := range []string{"--controller", "--run", "--generation", "--source-dir", "--module-cache", "--bootstrap-file"} {
 				if !strings.Contains(args, flag) {
 					t.Fatalf("missing %s", flag)
 				}
+			}
+			if strings.Contains(args, "--job") != (kind != launcher.CloudPlan) {
+				t.Fatal("job argument does not match the operational unit")
 			}
 		})
 	}

@@ -48,11 +48,6 @@ func TestCloudBootstrapW8Components(t *testing.T) {
 		t.Run(string(kind), func(t *testing.T) {
 			now, cfg, award := cloudFixture(kind)
 			award.Source = source.Spec{RepoKey: "github.com/team/repo", RemoteURL: "https://github.com/team/repo.git", SHA: "sealed-commit", PipelineDir: ".sparkwing", Engine: award.Engine}
-			if kind == launcher.CloudPlan {
-				award.Binding.NodeID = ""
-			} else if kind == launcher.CloudEval {
-				award.Binding.SourceNodeID = award.Binding.NodeID
-			}
 			resources, err := launcher.BuildJob(t.Context(), now, cfg, award, &cloudBoundaryFake{})
 			if err != nil {
 				t.Fatal(err)

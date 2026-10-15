@@ -9,6 +9,10 @@ HTTP transport when opening award or exchange clients. Each uses its own bearer.
 images, resources, deadlines and engine identity before reserving an exclusive
 team node. `CloudBoundary` must return matching placement and network evidence.
 A failed boundary check releases its reservation and returns no runnable object.
+Plan awards have no job or expansion source. Eval awards identify the terminal
+source job and generation, while work awards have no expansion source. The
+builder and private award reader reject other shapes before source acquisition
+or node reservation. `FuzzCloudAwardUnitBindingW8` checks this boundary.
 
 Requested CPU and memory above the operator ceilings fail with both values in
 the error. The builder never clamps an award. CPU uses Kubernetes decimal

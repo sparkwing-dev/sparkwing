@@ -3,6 +3,7 @@ package acceptance_test
 import (
 	"context"
 	"errors"
+	"net/http"
 	"slices"
 	"testing"
 
@@ -14,7 +15,11 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 type cloudControlW8 struct {
@@ -105,7 +110,7 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 				t.Fatal(err)
 			}
 			reconstructedBoundary := *boundary
-			restarted := &launcher.Launcher{Kube: kube, Control: control, Boundary: &reconstructedBoundary, Config: cfg}
+			restarted := restartedLauncherW8(t, kube, &reconstructedBoundary, cfg, award, control)
 			if err := restarted.Sync(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -137,4 +142,59 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 			}
 		})
 	}
+}
+
+func restartedLauncherW8(t *testing.T, kube *fake.Clientset, boundary launcher.CloudBoundary, cfg launcher.CloudJobConfig, award launcher.CloudJobAward, control *cloudControlW8) *launcher.Launcher {
+	t.Helper()
+	b := award.Binding
+	unit := controllerwire.ClaimedUnit{
+		Unit: capability.UnitNode, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap,
+		UnitID: b.UnitID, RunID: b.RunID, JobID: b.NodeID,
+		Binding:       capability.Binding{Kind: capability.BindingNode, RunID: b.RunID, NodeID: b.NodeID, Holder: b.Holder, Generation: b.Generation, Attempt: b.Attempt},
+		Request:       runspec.SealedRequest{RunID: b.RunID, Request: runspec.Request{Team: b.Team}},
+		OwnerDeadline: &b.OwnerDeadline, AttemptDeadline: &b.AttemptDeadline, ParentCapabilityExpiry: &b.ParentCapabilityExpiry,
+	}
+	switch b.Kind {
+	case launcher.CloudPlan:
+		unit.Unit, unit.Purpose, unit.Binding.Kind = capability.UnitPlan, capability.PurposePlan, capability.BindingRun
+	case launcher.CloudEval:
+		unit.Unit, unit.Purpose, unit.SourceGeneration = capability.UnitEval, capability.PurposeEval, b.SourceGeneration
+		unit.Binding.Generation = b.SourceGeneration
+		unit.Binding.Expansion = &capability.LeaseRef{Kind: capability.UnitEval, ID: b.UnitID, Holder: b.Holder, Generation: b.Generation}
+	}
+	transport := &http.Client{}
+	restarted, err := launcher.NewLauncher(t.Context(), launcher.RuntimeConfig{
+		Kube: kube, Boundary: boundary, Jobs: cfg, HTTP: transport,
+		Demand: controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{unit.Unit}},
+		Bearer: func(context.Context) (string, error) { return "launcher-root", nil },
+		NewController: func(options client.EngineOptions) (controllerwire.Controller, error) {
+			bearer, err := options.Bearer(t.Context())
+			if err != nil || bearer != "launcher-root" || options.HTTP != transport || options.URL != cfg.ControllerURL || !options.Launcher {
+				t.Fatal("restart lost the shared launcher transport")
+			}
+			return launcherControllerW8{
+				claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+					t.Fatal("restart attempted to replace an observed award")
+					return controllerwire.ClaimResponse{}, nil
+				},
+				sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+					if len(request.Observed) != 1 {
+						t.Fatalf("restart observed %d Jobs", len(request.Observed))
+					}
+					observation := request.Observed[0]
+					if observation.UnitID != b.UnitID || observation.NodeUID != "node-uid" {
+						t.Fatal("restart lost persisted unit or node identity")
+					}
+					if control.remove {
+						return controllerwire.LauncherSyncResponse{Remove: []string{observation.JobName}}, nil
+					}
+					return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{unit}}, nil
+				},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return restarted
 }

@@ -147,27 +147,6 @@ and command are in `../w1-session12-progress.md`.
 
 W8 pending-claim outcome representation is implemented. The original regression,
 managed-update error preservation, here component and outcome property pass.
-**DESIGN: W8 interruption classification.** The second review finding is retained
-in TestLoopPendingPolicyAcceptsArbitraryCancellationCause: comparing an error to
-context.Cause(ctx) panics for a slice-backed cause. The proposed replacement
-recognizes only ctx.Err's comparable sentinel at error-tree leaves and leaves
-arbitrary causes to Run's existing defer. Independent joined denials must remain
-observable. The two-strikes rule leaves this runtime change for the lead.
-
-`FuzzLoopPendingPolicyInterruption` exercises nested cancellation and denial
-trees through Run, with comparable and slice-backed caller causes and optional
-committed awards. Seed 8 reproduces the panic before its award reaches the host.
-The proposed runtime change still needs the lead's decision.
-
-W8 verified the proposed leaf classification with a temporary Go overlay. The
-complete runner suite and 64,397 interruption fuzz executions pass with that
-change. The working tree still reproduces both retained failures. The approved
-outcome regression, repository build, W8 vet, commentcheck, engine/launcher and
-focused local-controller/component suites pass without the overlay. No runtime
-change was applied. The interruption DESIGN still needs the lead's decision.
-The committed outcome property also passed 60,631 fuzz executions without the
-overlay.
-
 **DESIGN approved (lead): W8 cancellation classification (third finding in the pending-claim mechanism).** Invariant: classifying a stop reason never panics and never confuses a caller's cancellation cause with a denial. Recognise cancellation only with `errors.Is(err, context.Canceled)` / `errors.Is(err, context.DeadlineExceeded)` (ctx.Err's comparable sentinels); never compare against `context.Cause(ctx)` with `==`. Run's joining defer returns the caller's arbitrary cause unchanged. Test nested wraps and joins, independent denials, and comparable and non-comparable custom causes, including a property test. Three bugs in one mechanism means it is too clever: while fixing this, cut the pending-claim stop logic to the smallest form that satisfies the approved outcome representation, and report the line count before and after.
 
 W8 completed the approved pending-claim cancellation classification. One policy
@@ -177,8 +156,9 @@ arbitrary-cause regression and expanded property pass with committed awards,
 caller cancellation/deadlines and comparable/non-comparable custom causes.
 The policy/claim stop path shrinks from 84 to 75 lines, the pending wait from
 44 to 40, and loop.go from 408 to 401 including a capacity-wait correction that
-returns to the existing stop checks. This supersedes W8's pending DESIGN status
-above. W3's shared run/plan/eval identity construction remains open. See
+returns to the existing stop checks. This completes the interruption redesign
+under the lead's cancellation-classification approval. W3's shared run/plan/eval
+identity construction remains open. See
 ../W8-AMENDMENTS-1.md for verification and remaining real-integration points.
 
 **W8 to W9: local HTTP transport implemented.**
@@ -196,5 +176,14 @@ and validates the complete unordered decision set before retiring any live Job.
 The two-Job wire-adapter acceptance component passes. The controller-side
 `EngineController.SyncLauncher` remains a stub owned by W2; launcher components
 test that contract with a fake rather than invoking the stub.
+
+W8's Kubernetes restart component now constructs `NewLauncher`, retains its
+HTTP transport and launcher credential, and routes sync through
+`ControllerControl` before real reservation cleanup. Plan/eval/work cases use
+canonical operational-unit bindings. `BuildJob` and private award decoding now
+reject job-bearing plans, mismatched eval sources and work expansion sources.
+The generated binding property checks refusal before reservation. W2's
+`SyncLauncher` and W9's HTTP client remain fake boundaries in this component.
+See [the composition report](../W8-LAUNCHER-COMPOSITION.md) for verification.
 
 **Lead decision for W3: "the W4 expansion-concurrency mismatch question" is settled by c3-protocol-notes.md line 66.** A generated job's concurrency membership must match the existing plan or job definition of that group on capacity, scope and on_limit; cost may differ; a mismatch refuses the expansion with `plan_invalid` naming the field path. The host supplies existing definitions through `ExistingConcurrency`. W3 implements this in the strict raw-bytes expansion validation (handoff "W3 expansion acceptance"). If a W4 membership test accepts a mismatch on capacity, scope or on_limit, W3 corrects that test as a minimal shared-file edit and lists it. No further lead input is needed.
