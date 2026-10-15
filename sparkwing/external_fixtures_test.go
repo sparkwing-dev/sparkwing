@@ -21,7 +21,3 @@ func (b *buildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		return buildOut{Tag: "v1", Digest: "sha256:abc"}, nil
 	}), nil
 }
-
-func jobFnNoop() func(context.Context) error {
-	return func(context.Context) error { return nil }
-}

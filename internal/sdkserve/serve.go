@@ -265,7 +265,7 @@ func (s *server) send(value any) {
 		return
 	}
 	raw, err := json.Marshal(value)
-	if err == nil && int64(len(raw)) > limits.NodeOutputBytes+limits.ProtocolEnvelopeBytes {
+	if err == nil && len(raw)+1 > nodeproto.MaxLineBytes {
 		err = fmt.Errorf("protocol frame exceeds output limit")
 	}
 	if err == nil {

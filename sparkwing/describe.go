@@ -74,10 +74,3 @@ type describeArg struct {
 	// tooling that needs to attribute flags to their source.
 	JobID string `json:"job_id,omitempty"`
 }
-
-// CheckEnum reports whether raw is allowed by the arg's enum, checking
-// each comma-separated element of a []string arg. Pipeline Inputs and
-// job args validate with the same rule when the run resolves them.
-func (a describeArg) checkEnum(raw string) error {
-	return checkEnum(a.Name, a.Type == "[]string", a.Enum, raw)
-}

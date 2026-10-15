@@ -205,7 +205,6 @@ type JobNode struct {
 	work                                                                *Work
 	resultStep                                                          *WorkStep
 	needs                                                               []string
-	env                                                                 map[string]string
 	outType                                                             reflect.Type
 
 	retryAttempts     int
@@ -244,8 +243,6 @@ type JobNode struct {
 	consumes    []consumeEdge
 }
 
-// Work satisfies the Workable interface but never executes; approval
-// nodes are routed through the approval-waiter path.
 // ApprovalTimeoutPolicy enumerates the resolution applied to an
 // unanswered approval gate when its Timeout elapses.
 type ApprovalTimeoutPolicy string

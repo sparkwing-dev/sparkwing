@@ -52,6 +52,7 @@ func TestProtocol(t *testing.T) {
 								t.Fatalf("%v; linked=%v", err, linked)
 							}
 						})
+						t.Run("sdk-frame-boundaries", testGoSDKFrameLimit)
 						t.Run("public-fake-host", testGoSDKFakeHost)
 						t.Run("fake-host-run-snapshot", testGoSDKFakeHostRunSnapshot)
 						t.Run("entrypoint-alias", testGoSDKEntrypointAlias)

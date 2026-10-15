@@ -25,7 +25,7 @@ const (
 // OnLimit is the closed set of behaviors for a node that finds its
 // [ConcurrencyGroup] at capacity. Sharing another member's result is
 // not among them: a group is different work taking turns, never the
-// same work -- result reuse is [JobNode.Cache]'s job.
+// same work. Result reuse belongs to [JobNode.Memo].
 type OnLimit string
 
 const (
@@ -55,7 +55,7 @@ const (
 type ConcurrencyLimit struct {
 	// Capacity is the total budget in author-defined units. With the
 	// default member cost of 1 it reads as "max members running at
-	// once". Values <= 0 are treated as 1 by the coordination backend.
+	// once". Capacity must be positive when the host validates the plan.
 	//
 	// When two live participants declare different capacities for the
 	// same group (a version skew across runs), the effective capacity
@@ -150,7 +150,7 @@ func (g *ConcurrencyGroup) String() string {
 // Concurrency enrolls the node in concurrency group g with the given
 // admission cost (default 1). The node competes with the group's other
 // members for g's budget; how it behaves at the limit follows g's
-// [OnLimit]. Independent of [JobNode.Cache] -- a node may declare both,
+// [OnLimit]. Independent of [JobNode.Memo] -- a node may declare both,
 // neither, or either.
 //
 //	shard := sparkwing.Job(plan, "shard-1", run)

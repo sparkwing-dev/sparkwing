@@ -40,11 +40,7 @@ type RunContext struct {
 
 // TriggerInfo describes the trigger that started the run.
 //
-// Trigger-supplied values flow through the pipeline's typed Config
-// struct. Declare them under the trigger's values: block in
-// sparkwing.yaml (e.g. on.push.values) with a matching `sw:"..."`
-// tag on a Config struct field, then read via
-// sparkwing.PipelineConfig[T](ctx).
+// Trigger-supplied arguments resolve into the pipeline's registered Inputs.
 type TriggerInfo struct {
 	Source string // "manual", "push", "schedule", "webhook"
 	User   string // invoker identity, when known
