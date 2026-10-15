@@ -95,7 +95,7 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 		t.Errorf("%d controllers held the tick at once, want at most 1", peak)
 	}
 
-	triggers, err := st.ListTriggers(ctx, store.TriggerFilter{Pipelines: []string{"nightly"}})
+	triggers, err := teststore.ForTeam(t, st, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Pipelines: []string{"nightly"}})
 	if err != nil {
 		t.Fatalf("ListTriggers: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestCronTick_ARepeatedInstantReachesTheFirstRun(t *testing.T) {
 	if second != first {
 		t.Errorf("the repeated instant started run %s, want the first run %s", second, first)
 	}
-	if triggers, err := st.ListTriggers(context.Background(), store.TriggerFilter{Pipelines: []string{"nightly"}}); err != nil || len(triggers) != 1 {
+	if triggers, err := teststore.ForTeam(t, st, store.DefaultTeam).ListTriggers(context.Background(), store.TriggerFilter{Pipelines: []string{"nightly"}}); err != nil || len(triggers) != 1 {
 		t.Errorf("recorded %d runs (%v), want 1", len(triggers), err)
 	}
 }

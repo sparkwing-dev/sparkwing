@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -48,11 +50,11 @@ func TestFinishNodeWithOutputRef_RefusesAnotherRunsObject(t *testing.T) {
 		}
 	}
 	foreign := commitOutput(t.Context(), t, s, store.DefaultTeam, "run-fin-b", "n", []byte(`"b"`))
-	if err := s.FinishNodeWithOutputRef(ctx, "run-fin-a", "n", "success", "", &foreign, "", nil); !errors.Is(err, store.ErrInvalidInput) {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishNodeWithOutputRef(ctx, "run-fin-a", "n", "success", "", &foreign, "", nil); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("finish naming another run's output: err = %v, want refused", err)
 	}
 	own := commitOutput(t.Context(), t, s, store.DefaultTeam, "run-fin-a", "n", []byte(`"a"`))
-	if err := s.FinishNodeWithOutputRef(ctx, "run-fin-a", "n", "success", "", &own, "", nil); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishNodeWithOutputRef(ctx, "run-fin-a", "n", "success", "", &own, "", nil); err != nil {
 		t.Fatalf("finish naming its own output: %v", err)
 	}
 }

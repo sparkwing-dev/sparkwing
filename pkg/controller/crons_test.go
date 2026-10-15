@@ -265,7 +265,7 @@ func TestControllerCrons_RunNowCreatesOneTriggerAndPendingRunPerDueInstant(t *te
 	}
 
 	ctx := context.Background()
-	trigger, err := f.store.GetTrigger(ctx, launched.RunID)
+	trigger, err := teststore.ForTeam(t, f.store, store.DefaultTeam).GetTrigger(ctx, launched.RunID)
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestControllerCrons_ASecondLaunchOfOneDueInstantReachesTheFirstRun(t *testi
 	}); err != nil {
 		t.Fatalf("CreateTrigger: %v", err)
 	}
-	found, err := f.store.FindTriggerByIdempotencyKey(ctx, sched.Pipeline, key)
+	found, err := teststore.ForTeam(t, f.store, store.DefaultTeam).FindTriggerByIdempotencyKey(ctx, sched.Pipeline, key)
 	if err != nil {
 		t.Fatalf("FindTriggerByIdempotencyKey: %v", err)
 	}

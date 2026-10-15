@@ -77,7 +77,7 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 		t.Errorf("retry_of=%v want %s", body["retry_of"], src.ID)
 	}
 
-	trig, err := st.GetTrigger(ctx, newID)
+	trig, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, newID)
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestRetry_WorkingTreeRunRetainsDesktopClaimSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	id, _ := body["id"].(string)
-	trigger, err := st.GetTrigger(ctx, id)
+	trigger, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestRetry_OfRetryInheritsOriginalCheckoutInsteadOfEphemeralSnapshot(t *test
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	trigger, err := st.GetTrigger(ctx, body["id"].(string))
+	trigger, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, body["id"].(string))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +346,7 @@ func TestRetry_FullQueryParam(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	fullID, _ := body1["id"].(string)
-	trig, err := st.GetTrigger(ctx, fullID)
+	trig, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, fullID)
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}

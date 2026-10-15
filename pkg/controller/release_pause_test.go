@@ -60,7 +60,7 @@ func seedActivePause(t *testing.T, st *store.Store, runID, nodeID string) {
 
 func assertReleasedBy(t *testing.T, st *store.Store, runID, nodeID, want string) {
 	t.Helper()
-	rows, err := st.ListDebugPauses(context.Background(), runID)
+	rows, err := teststore.ForTeam(t, st, store.DefaultTeam).ListDebugPauses(context.Background(), runID)
 	if err != nil {
 		t.Fatalf("ListDebugPauses: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestReleaseDebugPause_Unauthenticated(t *testing.T) {
 		t.Fatalf("status=%d want 401", rec.Code)
 	}
 
-	rows, err := st.ListDebugPauses(context.Background(), "run-3")
+	rows, err := teststore.ForTeam(t, st, store.DefaultTeam).ListDebugPauses(context.Background(), "run-3")
 	if err != nil {
 		t.Fatalf("ListDebugPauses: %v", err)
 	}

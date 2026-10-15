@@ -55,7 +55,7 @@ func TestHistoricalTriggerAttemptUsesMatchingClaim(t *testing.T) {
 	if err := st.CreateRun(fenced, store.Run{ID: trigger.ID, Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.FinishTrigger(fenced, trigger.ID); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishTrigger(fenced, trigger.ID); err != nil {
 		t.Fatal(err)
 	}
 	node := &store.Node{RunID: trigger.ID, NodeID: "inline", ExecutionAttempts: []store.ExecutionAttempt{

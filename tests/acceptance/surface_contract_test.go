@@ -54,19 +54,6 @@ func TestSurfaceGrammarContract(t *testing.T) {
 	}
 }
 
-func TestSurfaceRemovedClientRecoveryAPIs(t *testing.T) {
-	clientType := reflect.TypeFor[*client.Client]()
-	for _, name := range []string{
-		"PendingNodeBounce", "ConsumeNodeBounce", "ResetNodeForAutoRetry", "RetryRun", "ListTriggers",
-		"ListCrons", "GetCron", "PutCronRepo", "DeleteCronRepo", "PauseCron", "ResumeCron",
-		"DisarmCron", "RunCronNow", "SetCronOverride", "ClearCronOverride",
-	} {
-		if _, found := clientType.MethodByName(name); found {
-			t.Errorf("removed client API remains: %s", name)
-		}
-	}
-}
-
 func TestSurfaceRunQueryAndPruneTransport(t *testing.T) {
 	for _, endpoint := range []string{"http://api.sock", "https://controller.example"} {
 		calls := 0

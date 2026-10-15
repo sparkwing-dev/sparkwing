@@ -60,7 +60,7 @@ func TestClaimTrigger_ChunkedBodyKeepsThePipelineFilter(t *testing.T) {
 		t.Fatalf("status=%d body=%s, want 204: the filter excluded the only queued trigger", resp.StatusCode, raw)
 	}
 
-	trig, err := st.GetTrigger(context.Background(), "run-other")
+	trig, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(context.Background(), "run-other")
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestClaimSpecificTrigger_ChunkedBodyKeepsTheLease(t *testing.T) {
 		t.Fatalf("status=%d body=%s, want 200", resp.StatusCode, raw)
 	}
 
-	trig, err := st.GetTrigger(context.Background(), "run-specific")
+	trig, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(context.Background(), "run-specific")
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}

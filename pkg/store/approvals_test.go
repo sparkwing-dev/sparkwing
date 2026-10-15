@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -128,7 +130,7 @@ func TestListPendingApprovals_OrdersByRequestedAsc(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pend, err := s.ListPendingApprovals(ctx)
+	pend, err := teststore.ForTeam(t, s, store.DefaultTeam).ListPendingApprovals(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +155,7 @@ func TestListApprovalsForRun_IncludesResolved(t *testing.T) {
 		store.ApprovalResolutionDenied, "alice", "nope"); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := s.ListApprovalsForRun(ctx, "run-1")
+	rows, err := teststore.ForTeam(t, s, store.DefaultTeam).ListApprovalsForRun(ctx, "run-1")
 	if err != nil {
 		t.Fatal(err)
 	}

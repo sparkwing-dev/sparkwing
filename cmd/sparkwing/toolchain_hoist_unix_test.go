@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestDispatchRunSwitchesBeforeStartingADaemon(t *testing.T) {
+func TestDispatchRunSwitchesBeforeLocalIntake(t *testing.T) {
 	repo := t.TempDir()
 	dir := filepath.Join(repo, ".sparkwing")
 	if err := os.Mkdir(dir, 0o700); err != nil {
@@ -24,10 +24,7 @@ func TestDispatchRunSwitchesBeforeStartingADaemon(t *testing.T) {
 	t.Chdir(repo)
 	calls := []string{}
 	sentinel := errors.New("selected engine failed")
-	previous := ensureRunDaemonFn
-	ensureRunDaemonFn = func() { calls = append(calls, "daemon") }
-	t.Cleanup(func() { ensureRunDaemonFn = previous })
-	err := dispatchRunWithEngine([]string{"hello"}, func(got string) error {
+	err := dispatchRunWithEngine([]string{"hello"}, func(got string, _ func()) error {
 		calls = append(calls, "switch")
 		if got != dir {
 			t.Fatalf("selected source = %s", got)

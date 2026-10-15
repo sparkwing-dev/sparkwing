@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -109,7 +111,7 @@ func TestSetStepSummary_OverwritesLatestValue(t *testing.T) {
 		t.Fatalf("SetStepSummary second: %v", err)
 	}
 
-	steps, err := s.ListNodeSteps(ctx, "run-1")
+	steps, err := teststore.ForTeam(t, s, store.DefaultTeam).ListNodeSteps(ctx, "run-1")
 	if err != nil {
 		t.Fatalf("ListNodeSteps: %v", err)
 	}
@@ -129,7 +131,7 @@ func TestSetStepSummary_InsertsPlaceholderRowBeforeStart(t *testing.T) {
 	if err := s.SetStepSummary(ctx, "run-1", "node-a", "step-x", "## early"); err != nil {
 		t.Fatalf("SetStepSummary: %v", err)
 	}
-	steps, err := s.ListNodeSteps(ctx, "run-1")
+	steps, err := teststore.ForTeam(t, s, store.DefaultTeam).ListNodeSteps(ctx, "run-1")
 	if err != nil {
 		t.Fatalf("ListNodeSteps: %v", err)
 	}
@@ -157,7 +159,7 @@ func TestSetStepSummary_IdempotentRepeat(t *testing.T) {
 			t.Fatalf("SetStepSummary: %v", err)
 		}
 	}
-	steps, err := s.ListNodeSteps(ctx, "run-1")
+	steps, err := teststore.ForTeam(t, s, store.DefaultTeam).ListNodeSteps(ctx, "run-1")
 	if err != nil {
 		t.Fatalf("ListNodeSteps: %v", err)
 	}
@@ -194,7 +196,7 @@ func TestSetStepSummary_SurvivesReopen(t *testing.T) {
 	}
 	defer s2.Close()
 
-	steps, err := s2.ListNodeSteps(ctx, "run-1")
+	steps, err := teststore.ForTeam(t, s2, store.DefaultTeam).ListNodeSteps(ctx, "run-1")
 	if err != nil {
 		t.Fatalf("ListNodeSteps after reopen: %v", err)
 	}
@@ -235,7 +237,7 @@ func TestFinishNode_SettlesStepsStillRunning(t *testing.T) {
 			if err := s.FinishNode(ctx, "run-1", "node-a", tc.outcome, "", nil); err != nil {
 				t.Fatalf("FinishNode: %v", err)
 			}
-			steps, err := s.ListNodeSteps(ctx, "run-1")
+			steps, err := teststore.ForTeam(t, s, store.DefaultTeam).ListNodeSteps(ctx, "run-1")
 			if err != nil {
 				t.Fatalf("ListNodeSteps: %v", err)
 			}

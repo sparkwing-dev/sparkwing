@@ -1127,13 +1127,6 @@ func runCursorArgs(f RunFilter) []any {
 	return []any{f.AfterStartedAt, f.AfterStartedAt, f.AfterID}
 }
 
-// CountRuns returns how many runs match f, ignoring its Limit.
-//
-// Scope: this counts every team. See [Store.ListRuns].
-func (s *Store) CountRuns(ctx context.Context, f RunFilter) (int, error) {
-	return s.countRuns(ctx, allTeams(), f)
-}
-
 func (s *Store) countRuns(ctx context.Context, scope teamScope, f RunFilter) (int, error) {
 	where, args, err := runFilterWhere(s.dialect, scope, f)
 	if err != nil {
@@ -1278,22 +1271,7 @@ SELECT ` + runColumns + `
 	return scanRun(s.queryRow(ctx, q, args...))
 }
 
-// DeleteRun removes the run, its trigger and its memo entries;
-// CASCADE handles children.
-//
-// Triggers carrying parent_node_id are the cross-pipeline spawn
-// linkage from their PARENT run -- they double as the dispatch row
-// AND the edge the parent's DAG renders as "spawned this child".
-// Deleting that trigger would silently strip the spawn pill from the
-// parent and flip the node back to its declared Inline pill, which
-// surprises operators who only meant to discard the child. We keep
-// the trigger row in that case (orphaned: child run is gone, edge
-// remains visible) so parent DAGs stay stable.
-func (s *Store) DeleteRun(ctx context.Context, runID string) error {
-	return s.defaultTenant().DeleteRun(ctx, runID)
-}
-
-// DeleteRun is [Store.DeleteRun] confined to t's team.
+// DeleteRun removes one tenant run and its retained operational data.
 func (t *Tenant) DeleteRun(ctx context.Context, runID string) error {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
@@ -1643,13 +1621,7 @@ func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome
 	return s.defaultTenant().FinishNodeWithOutputRef(ctx, runID, nodeID, outcome, errMsg, ref, reason, exitCode)
 }
 
-// FinishNodeWithOutputRef finishes a node whose output, when there is one,
-// is already a committed object named by ref.
-func (s *Store) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error {
-	return s.defaultTenant().FinishNodeWithOutputRef(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
-}
-
-// FinishNodeWithOutputRef is [Store.FinishNodeWithOutputRef] confined to t's team.
+// FinishNodeWithOutputRef finishes a tenant job with committed output.
 func (t *Tenant) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error {
 	return t.finishNode(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
 }
@@ -2210,14 +2182,7 @@ ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
 	return tx.Commit()
 }
 
-// ListNodeSteps returns every step row for the run, across all
-// nodes. Returned in (node_id, started_at) order so callers can
-// stream-bucket by node without a second sort.
-func (s *Store) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error) {
-	return s.defaultTenant().ListNodeSteps(ctx, runID)
-}
-
-// ListNodeSteps is [Store.ListNodeSteps] confined to t's team.
+// ListNodeSteps returns persisted step observations for a tenant run.
 func (t *Tenant) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error) {
 	rows, err := t.s.query(ctx, `
 SELECT node_id, step_id, status, started_at, finished_at, annotations_json, summary
@@ -3212,11 +3177,6 @@ SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by,
 	return scanDebugPause(row)
 }
 
-// ListDebugPauses returns all pause rows for a run of the default team, newest first.
-func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPause, error) {
-	return s.defaultTenant().ListDebugPauses(ctx, runID)
-}
-
 // ListDebugPauses returns all pause rows for one of t's runs, newest first.
 func (t *Tenant) ListDebugPauses(ctx context.Context, runID string) (_ []*DebugPause, err error) {
 	rows, err := t.s.query(ctx, `
@@ -3511,7 +3471,7 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 // ErrDuplicateIdempotencyKey reports that a trigger insert lost the race
 // to another submission carrying the same idempotency key. It is not a
 // failure for the caller to report: the winning trigger is the answer,
-// and the caller resolves it with [Store.FindTriggerByIdempotencyKey].
+// and the caller resolves it with [Tenant.FindTriggerByIdempotencyKey].
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
 
 // ErrDuplicateWebhookDelivery reports a signed replay key already accepted
@@ -3525,41 +3485,6 @@ func isUniqueViolation(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "unique constraint") ||
 		strings.Contains(msg, "duplicate key value")
-}
-
-// FindTriggerByIdempotencyKey returns the trigger that already claimed
-// key for pipeline, or ErrNotFound when the pair is unused. An empty key
-// is never stored as a claim, so it always reports ErrNotFound rather
-// than matching the many rows that carry the empty default.
-//
-// The pipeline is part of the lookup for the same reason it is part of
-// the index: a key names one caller's intent, and answering a
-// submission of one pipeline with another pipeline's run would mean the
-// requested pipeline never runs at all.
-func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error) {
-	return s.defaultTenant().FindTriggerByIdempotencyKey(ctx, pipeline, key)
-}
-
-// FinishTriggerAtGeneration closes a trigger only while seq is still
-// its current claim generation, reporting false when it is not.
-//
-// This is the fence a superseded dispatch meets. Once a lapsed claim has
-// been re-taken by another consumer the trigger's generation moves on,
-// and the old dispatch -- which may still be running, and may still be
-// about to finish -- must not close out a claim it no longer holds. A
-// caller that sees false knows its work was superseded and that the
-// current claim owns the outcome.
-func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
-	return s.defaultTenant().FinishTriggerAtGeneration(ctx, id, seq)
-}
-
-// FinishTriggerAtGeneration is [Store.FinishTriggerAtGeneration] confined to t's team.
-func (t *Tenant) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
-	return t.endTriggerClaim(ctx, id, false,
-		`UPDATE triggers SET status = CASE WHEN EXISTS
-		   (SELECT 1 FROM runs WHERE runs.team = triggers.team AND runs.id = triggers.id AND runs.status = 'failed')
-		   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL
-		  WHERE team = ? AND id = ? AND claim_seq = ?`, string(t.team), id, seq)
 }
 
 // safety: a refused write rolls the settlement back with it, so a superseded caller cannot settle a
@@ -3592,93 +3517,6 @@ func (t *Tenant) endTriggerClaim(ctx context.Context, id string, refundAll bool,
 	return true, nil
 }
 
-// FinishRunAtGeneration writes a run's terminal status only while seq is
-// still its trigger's current claim generation.
-//
-// It pairs with FinishTriggerAtGeneration for the run row: a superseded
-// dispatch must not stamp its own outcome over the run the current claim
-// is producing. Reports false without writing when the generation has
-// moved on.
-func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int64, status, errMsg string) (bool, error) {
-	return s.defaultTenant().FinishRunAtGeneration(ctx, runID, seq, status, errMsg)
-}
-
-// FinishRunAtGeneration is [Store.FinishRunAtGeneration] confined to t's team.
-func (t *Tenant) FinishRunAtGeneration(ctx context.Context, runID string, seq int64, status, errMsg string) (bool, error) {
-	if !isTerminalRunStatus(status) {
-		return false, fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// safety: the trigger row stays held from the generation read through the
-	// run write. Read them apart and a re-claim lands between the two, which
-	// is the one interleaving this fence exists to refuse.
-	var current int64
-	switch err := tx.QueryRowContext(ctx,
-		`SELECT claim_seq FROM triggers WHERE team = ? AND id = ?`+tx.forUpdate(), string(t.team), runID).
-		Scan(&current); {
-	case errors.Is(err, sql.ErrNoRows):
-		return false, nil
-	case err != nil:
-		return false, err
-	case current != seq:
-		return false, nil
-	}
-
-	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, t.team); err != nil {
-		return false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-// ReleaseClaimAtGeneration returns a claimed trigger to the pending
-// queue, but only while seq is still its current claim generation.
-//
-// A consumer shutting down mid-dispatch uses it so the interrupted work
-// is immediately claimable by the next consumer instead of waiting out
-// a lease. The generation guard keeps a shutting-down consumer from
-// yanking a claim another consumer has already taken.
-func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
-	return s.defaultTenant().ReleaseClaimAtGeneration(ctx, id, seq)
-}
-
-// ReleaseClaimAtGeneration is [Store.ReleaseClaimAtGeneration] confined to t's team.
-func (t *Tenant) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
-	return t.endTriggerClaim(ctx, id, false,
-		`UPDATE triggers
-		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL,
-		        claim_principal = '', claim_token_prefix = ''
-		  WHERE team = ? AND id = ? AND claim_seq = ? AND status = ?`,
-		triggerStatusPending, string(t.team), id, seq, triggerStatusClaimed)
-}
-
-// TriggerClaimGeneration returns a trigger's current claim generation,
-// so a dispatch can tell whether it still owns the claim it started
-// under before it writes anything terminal.
-func (s *Store) TriggerClaimGeneration(ctx context.Context, id string) (int64, error) {
-	return s.defaultTenant().TriggerClaimGeneration(ctx, id)
-}
-
-// TriggerClaimGeneration is [Store.TriggerClaimGeneration] confined to t's team.
-func (t *Tenant) TriggerClaimGeneration(ctx context.Context, id string) (int64, error) {
-	var seq int64
-	if err := t.s.queryRow(ctx,
-		`SELECT claim_seq FROM triggers WHERE team = ? AND id = ?`, string(t.team), id).Scan(&seq); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, ErrNotFound
-		}
-		return 0, err
-	}
-	return seq, nil
-}
-
 // safety: a trigger cancelled while claimed, then released or lapsed back to the queue, is refused by
 // the claim filter, so without finalizing it here it would sit in the queue forever.
 func cancelRequeuedCancelledTriggersTx(ctx context.Context, tx *storeTx, now time.Time) error {
@@ -3706,17 +3544,9 @@ type SpawnedChild struct {
 	ChildRunID   string `json:"child_run_id"`
 }
 
-// GetRunAncestorPipelines returns ancestor pipeline names from
-// parent_run_id walks (excludes runID's own). Missing ancestors and
-// data cycles terminate cleanly; partial chains are still useful for
-// cycle detection.
-func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error) {
-	return s.defaultTenant().GetRunAncestorPipelines(ctx, runID)
-}
-
 // GetRunAncestorPipelines walks parent_run_id links inside t's team; an
 // ancestor in another team ends the walk as a missing one does. See
-// [Store.GetRunAncestorPipelines].
+// [Tenant.GetRunAncestorPipelines].
 func (t *Tenant) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error) {
 	if runID == "" {
 		return nil, nil
@@ -3909,14 +3739,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	return &t, nil
 }
 
-// HeartbeatTrigger charges a metered claim through the heartbeat before
-// extending its lease. It returns whether cancel was requested.
-// ErrNotFound when not claimed.
-func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error) {
-	return s.defaultTenant().HeartbeatTrigger(ctx, id, lease)
-}
-
-// HeartbeatTrigger is [Store.HeartbeatTrigger] confined to t's team.
+// HeartbeatTrigger renews the legacy tenant trigger claim.
 func (t *Tenant) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
@@ -3998,12 +3821,7 @@ func (t *Tenant) HeartbeatTrigger(ctx context.Context, id string, lease time.Dur
 	return cancelNS.Valid, nil
 }
 
-// FinishTrigger closes a trigger, recording a failed run as a failed trigger; idempotent.
-func (s *Store) FinishTrigger(ctx context.Context, id string) error {
-	return s.defaultTenant().FinishTrigger(ctx, id)
-}
-
-// FinishTrigger is [Store.FinishTrigger] confined to t's team.
+// FinishTrigger closes the legacy tenant trigger claim.
 func (t *Tenant) FinishTrigger(ctx context.Context, id string) error {
 	query := `UPDATE triggers SET status = CASE WHEN EXISTS
 	   (SELECT 1 FROM runs WHERE runs.team = triggers.team AND runs.id = triggers.id AND runs.status = 'failed')
@@ -4023,16 +3841,7 @@ func (t *Tenant) FinishTrigger(ctx context.Context, id string) error {
 	return ErrLockHeld
 }
 
-// ListPendingTriggersForParent returns every pending trigger whose
-// parent_run_id matches parentRunID, oldest first. Used by the
-// laptop-local trigger loop to scope its claim queue to the run
-// that started it -- without the filter, two parallel local runs
-// would steal each other's children. Empty list when no candidates.
-func (s *Store) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error) {
-	return s.defaultTenant().ListPendingTriggersForParent(ctx, parentRunID)
-}
-
-// ListPendingTriggersForParent is [Store.ListPendingTriggersForParent] confined to t's team.
+// ListPendingTriggersForParent returns pending child triggers for a tenant run.
 func (t *Tenant) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error) {
 	now := time.Now()
 	rows, err := t.s.query(ctx, `
@@ -4175,12 +3984,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	return &t, nil
 }
 
-// GetTrigger fetches a single trigger by ID.
-func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
-	return s.defaultTenant().GetTrigger(ctx, id)
-}
-
-// GetTrigger is [Store.GetTrigger] confined to t's team.
+// GetTrigger returns one tenant trigger.
 func (t *Tenant) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 	var tr Trigger
 	var argsJSON, envJSON []byte
@@ -4274,22 +4078,8 @@ const (
 	triggerRepoScanCap   = 5000
 )
 
-// ListTriggers returns triggers newest-first, filtered by f.
-//
-// Repo lives in a blob no dialect can filter on, so rows are read in
-// pages and matched in Go until the limit is filled, over at most the
-// newest 5,000 triggers that pass the other fields. Pages walk a keyset
-// cursor on (created_at, id) rather than an offset, so a trigger created
-// or deleted while the walk is in flight cannot shift a later page onto
-// a row already read or past one not yet read. Stopping at the horizon
-// with the limit unfilled is logged, since the caller cannot tell that
-// from a genuinely empty result.
-func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error) {
-	return s.listTriggers(ctx, allTeams(), f)
-}
-
 // ListTriggers returns t's triggers newest-first, filtered by f, with the
-// same paging and repo matching as [Store.ListTriggers].
+// same paging and repo matching as [Tenant.ListTriggers].
 func (t *Tenant) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error) {
 	return t.s.listTriggers(ctx, oneTeam(t.team), f)
 }
@@ -4471,14 +4261,7 @@ type NodeSettlement struct {
 	ChargeWindowOpen bool
 }
 
-// NodeSettlement reads what settling one node needs from the node's own row.
-// The claim recorded there names the credential the ledger priced the work
-// against, so a finish posted by another principal settles the same way.
-func (s *Store) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error) {
-	return s.defaultTenant().NodeSettlement(ctx, runID, nodeID)
-}
-
-// NodeSettlement is [Store.NodeSettlement] confined to t's team.
+// NodeSettlement returns the tenant job's legacy credit settlement.
 func (t *Tenant) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error) {
 	var out NodeSettlement
 	var startedAt, finishedAt sql.NullInt64
@@ -4655,11 +4438,6 @@ UPDATE approvals
 	return t.GetApproval(ctx, runID, nodeID)
 }
 
-// ListApprovalsForRun returns a default-team run's rows in request order.
-func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error) {
-	return s.defaultTenant().ListApprovalsForRun(ctx, runID)
-}
-
 // ListApprovalsForRun returns the rows of one of t's runs in request order.
 func (t *Tenant) ListApprovalsForRun(ctx context.Context, runID string) (_ []*Approval, err error) {
 	rows, err := t.s.query(ctx, `
@@ -4680,12 +4458,6 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
 		out = append(out, a)
 	}
 	return out, rows.Err()
-}
-
-// ListPendingApprovals returns the default team's unresolved approvals
-// oldest-first.
-func (s *Store) ListPendingApprovals(ctx context.Context) ([]*Approval, error) {
-	return s.defaultTenant().ListPendingApprovals(ctx)
 }
 
 func scanApproval(rs rowScanner) (*Approval, error) {

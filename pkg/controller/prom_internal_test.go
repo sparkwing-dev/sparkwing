@@ -615,7 +615,7 @@ func TestSettleFinishedNodeClearsTheWindowForAnUnmeteredFinisher(t *testing.T) {
 	if _, err := st.ClaimNextReadyNode(ctx, claimant, "holder-window", time.Minute, nil); err != nil {
 		t.Fatalf("metered claim: %v", err)
 	}
-	before, err := st.NodeSettlement(ctx, "run-window", "node-a")
+	before, err := teststore.ForTeam(t, st, store.DefaultTeam).NodeSettlement(ctx, "run-window", "node-a")
 	if err != nil {
 		t.Fatalf("NodeSettlement: %v", err)
 	}
@@ -635,7 +635,7 @@ func TestSettleFinishedNodeClearsTheWindowForAnUnmeteredFinisher(t *testing.T) {
 	srv := New(st, nil).WithLicense(meteringTestLicense(t))
 	srv.settleFinishedNode(httptest.NewRequest(http.MethodPost, "/finish", nil), "run-window", "node-a")
 
-	after, err := st.NodeSettlement(ctx, "run-window", "node-a")
+	after, err := teststore.ForTeam(t, st, store.DefaultTeam).NodeSettlement(ctx, "run-window", "node-a")
 	if err != nil {
 		t.Fatalf("NodeSettlement after the finish: %v", err)
 	}

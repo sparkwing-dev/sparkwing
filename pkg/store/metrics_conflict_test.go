@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -41,7 +43,7 @@ func TestMetricTimestampConflicts(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "conflicting node metric") {
 				t.Fatalf("conflicting sample was not rejected: %v", err)
 			}
-			got, err := st.ListNodeMetrics(t.Context(), "run", "node")
+			got, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeMetrics(t.Context(), "run", "node")
 			if err != nil || len(got) != 1 {
 				t.Fatalf("stored samples = %v, %v", got, err)
 			}
@@ -101,7 +103,7 @@ func TestMetricTimestampConcurrentWriters(t *testing.T) {
 			if failures != wantFailures {
 				t.Fatalf("write failures = %d; want %d", failures, wantFailures)
 			}
-			got, err := st.ListNodeMetrics(t.Context(), "run", "node")
+			got, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeMetrics(t.Context(), "run", "node")
 			if err != nil || len(got) != 1 {
 				t.Fatalf("stored samples = %v, %v", got, err)
 			}

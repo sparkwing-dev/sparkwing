@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -79,7 +81,7 @@ func TestCountRuns_IgnoresLimitAndHonoursTheCursor(t *testing.T) {
 		}
 	}
 
-	got, err := st.CountRuns(ctx, store.RunFilter{Limit: 5})
+	got, err := teststore.ForTeam(t, st, store.DefaultTeam).CountRuns(ctx, store.RunFilter{Limit: 5})
 	if err != nil {
 		t.Fatalf("CountRuns: %v", err)
 	}
@@ -88,7 +90,7 @@ func TestCountRuns_IgnoresLimitAndHonoursTheCursor(t *testing.T) {
 	}
 
 	newest := time.Unix(1700000000+runs-1, 0)
-	remaining, err := st.CountRuns(ctx, store.RunFilter{
+	remaining, err := teststore.ForTeam(t, st, store.DefaultTeam).CountRuns(ctx, store.RunFilter{
 		AfterStartedAt: newest.UnixNano(),
 		AfterID:        "run-count-" + strconv.Itoa(runs-1),
 	})

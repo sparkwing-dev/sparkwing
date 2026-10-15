@@ -3,16 +3,9 @@ package main
 import (
 	"errors"
 	"fmt"
-
-	flag "github.com/spf13/pflag"
 )
 
 var errNoProfile = errors.New("no profile configured")
-
-func addProfileFlag(fs *flag.FlagSet) *string {
-	return fs.String("profile", "",
-		"profile name from user config or this project")
-}
 
 func resolveProfile(name string) (*namedProfile, error) {
 	p, err := resolveProfileFlag(name)

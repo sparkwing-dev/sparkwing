@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -208,22 +207,6 @@ func TestSourceCredential_NeedsTheRunsOwnClaimToken(t *testing.T) {
 	}
 }
 
-// A runner's trigger claim fetches the run's source with its own claim token.
-func TestSourceCredential_TriggerClaimFetchesTheRunsSource(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	f.createRun(olga, "run-hook", "https://github.com/acme/widgets.git", 701)
-	machine, _ := f.teamRunner(olga, "trigger-runner")
-	trig, err := client.NewWithToken(f.url, nil, strings.TrimPrefix(machine, "Bearer ")).ClaimSpecificTrigger(context.Background(), "run-hook", time.Minute)
-	if err != nil || trig == nil || !strings.HasPrefix(trig.ClaimToken, store.ClaimTokenPrefix+"_") {
-		t.Fatalf("claim trigger = %+v, %v", trig, err)
-	}
-	got, code := f.sourceCredential("Bearer "+trig.ClaimToken, "run-hook")
-	if code != http.StatusOK || got.Kind != "github_app" || !f.app.TokenCovers(got.Token, "acme/widgets") {
-		t.Fatalf("trigger claim = %d %+v, want the App token", code, got)
-	}
-}
 
 func TestSourceCredential_AppTokenReadsOnlyTheOwnersExtraRepos(t *testing.T) {
 	f := newAppFixture(t)

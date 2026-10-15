@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -172,35 +173,6 @@ func TestHereRunner_TriggerRefusesWithoutAReasonOrRunWrite(t *testing.T) {
 	}
 }
 
-// safety: a pinned trigger is invisible to the fleet's queue claim and refused
-// to its by-id claim, so only the here-runner may host it.
-func TestHereRunner_OnlyItsCredentialClaimsThePinnedRunAndOnlyOnce(t *testing.T) {
-	f := newHereFixture(t)
-	out := f.here()
-	if code := f.do("POST", "/api/v1/triggers/claim", f.fleet, map[string]any{}, nil); code != http.StatusNoContent {
-		t.Fatalf("fleet queue claim = %d, want 204 with only a pinned trigger queued", code)
-	}
-	if code := f.do("POST", "/api/v1/triggers/"+out.RunID+"/claim", f.fleet, map[string]any{}, nil); code != http.StatusNotFound {
-		t.Fatalf("fleet claim of the pinned run = %d, want 404", code)
-	}
-	var claimed store.Trigger
-	if code := f.do("POST", "/api/v1/triggers/"+out.RunID+"/claim", out.RunnerToken, map[string]any{}, &claimed); code != http.StatusOK {
-		t.Fatalf("here-runner claim = %d, want 200", code)
-	}
-	if claimed.ClaimToken == "" {
-		t.Fatal("the here-runner's claim carries no claim token for the run's secrets")
-	}
-	if _, err := f.st.ReleaseClaimAtGeneration(t.Context(), out.RunID, claimed.ClaimSeq); err != nil {
-		t.Fatal(err)
-	}
-	if code := f.do("POST", "/api/v1/triggers/"+out.RunID+"/claim", out.RunnerToken, map[string]any{}, nil); code != http.StatusNotFound {
-		t.Fatalf("second here-runner claim = %d, want 404", code)
-	}
-	if code := f.do("POST", "/api/v1/triggers/"+out.RunID+"/claim", f.fleet, map[string]any{}, nil); code != http.StatusNotFound {
-		t.Fatalf("fleet claim of the released pinned run = %d, want 404", code)
-	}
-}
-
 // safety: the credential reaches its own run only; every other run, the queue
 // claims, secrets by listing, and starting work answer 403.
 func TestHereRunner_CredentialIsFencedToItsRun(t *testing.T) {
@@ -294,9 +266,12 @@ func TestHereRunner_AClaimedRunOutlivesTheFirstHour(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.restart()
-	beat := client.NewWithToken(f.url, nil, out.RunnerToken)
+	beat, err := client.NewEngineClient(client.EngineOptions{URL: f.url, Bearer: func(context.Context) (string, error) { return out.RunnerToken, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
 	fenced := store.WithTriggerClaimFence(t.Context(), store.TriggerClaimFence{ClaimGeneration: claimed.ClaimSeq})
-	if _, err := beat.HeartbeatTrigger(fenced, out.RunID); err != nil {
+	if _, err := beat.Renew(fenced, out.RunID, controllerwire.RenewalRequest{}); err != nil {
 		t.Fatalf("heartbeat 90 minutes after the mint: %v", err)
 	}
 	if code := f.do("GET", "/api/v1/runs/"+out.RunID, out.RunnerToken, nil, nil); code != http.StatusOK {

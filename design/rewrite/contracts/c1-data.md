@@ -1,5 +1,27 @@
 # C1 data contract
 
+## Explicit tenant readers and owner completion
+
+`FinishRunAtGeneration` is removed from Store and Tenant. Current completion
+uses `Tenant.FinishRunAndUnit`. The generated owner race check awards, releases
+and reclaims real units before racing stale failure against current success.
+Stale completion, same-verdict replay and release cannot change the successor's
+terminal snapshot. Existing completion properties cover foreign tenants,
+forged fences, rollback and concurrent exact replay.
+`FinishTriggerAtGeneration`, `ReleaseClaimAtGeneration` and
+`TriggerClaimGeneration` are also removed from both handles. `ReleaseUnit`
+derives current authority and atomically releases only unstarted work. Its
+generated owner property checks 192 forged trigger, plan and eval fences
+without changing their rows, run snapshot or billing. Failure completion
+retains the run verdict and masked error while closing its owner queue unit.
+
+Nineteen default-team Store wrappers are removed. Their callers select an
+explicit tenant for trigger reads and legacy mutations, run counts and deletion,
+step and metric reads, approval and debug lists, output-reference completion
+and settlement reads. The three retired generation APIs are included in this
+wrapper count. Three unused run-filter version probes are removed too. The
+remaining tenant implementations and the advertised filter version remain.
+
 ## Raw secret and launcher issuance cuts
 
 `Tenant.CreateOrReplaceSecret`, `DeleteSecret`, `GetSecret` and

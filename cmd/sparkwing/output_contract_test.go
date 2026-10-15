@@ -178,7 +178,8 @@ func TestRootOutputSelectsRunStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runOutput(inv, "json", false) != "pretty" || !slices.Equal(inv.Args, []string{"--output", "child"}) {
+	output, _ := runOutput(inv, "json", false)
+	if output != "pretty" || !slices.Equal(inv.Args, []string{"--output", "child"}) {
 		t.Fatalf("output leaked into pipeline args: %#v", inv)
 	}
 }

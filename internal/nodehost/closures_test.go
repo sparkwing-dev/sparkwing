@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -77,7 +79,7 @@ func TestClosures(t *testing.T) {
 	})
 
 	t.Run("APauseBeforeComesBeforeSkipIf", func(t *testing.T) {
-		pauses, err := cfg.State.(*store.Store).ListDebugPauses(t.Context(), "run-hooks")
+		pauses, err := teststore.ForTeam(t, cfg.State.(*store.Store), store.DefaultTeam).ListDebugPauses(t.Context(), "run-hooks")
 		if err != nil || len(pauses) != 1 || pauses[0].NodeID != "skipped" || pauses[0].Reason != store.PauseReasonBefore {
 			t.Errorf("pauses %+v err %v, want the skipped node paused before", pauses, err)
 		}

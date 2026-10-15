@@ -48,7 +48,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 				if _, err := st.DB().Exec(`UPDATE node_metrics SET memory_bytes='invalid' WHERE run_id='r' AND node_id='c'`); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := st.ListNodeMetrics(t.Context(), "r", "c"); err == nil {
+				if _, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeMetrics(t.Context(), "r", "c"); err == nil {
 					t.Fatal("corrupt metric read succeeded")
 				}
 			}

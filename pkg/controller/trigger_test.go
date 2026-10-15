@@ -139,7 +139,7 @@ func TestTrigger_StripsClientSuppliedLeaseTokenEnv(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	trigger, err := st.GetTrigger(context.Background(), body.RunID)
+	trigger, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(context.Background(), body.RunID)
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestTrigger_DropsEnvKeysOutsideTheAllowList(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 
-	trigger, err := st.GetTrigger(context.Background(), body.RunID)
+	trigger, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(context.Background(), body.RunID)
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}

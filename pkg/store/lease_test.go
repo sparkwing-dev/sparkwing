@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -48,11 +50,11 @@ func TestLease_HeartbeatExtends(t *testing.T) {
 	}
 	before := *claimed.LeaseExpiresAt
 
-	if _, err := s.HeartbeatTrigger(context.Background(), claimed.ID, 10*time.Second); err != nil {
+	if _, err := teststore.ForTeam(t, s, store.DefaultTeam).HeartbeatTrigger(context.Background(), claimed.ID, 10*time.Second); err != nil {
 		t.Fatalf("HeartbeatTrigger: %v", err)
 	}
 
-	got, err := s.GetTrigger(context.Background(), claimed.ID)
+	got, err := teststore.ForTeam(t, s, store.DefaultTeam).GetTrigger(context.Background(), claimed.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +65,7 @@ func TestLease_HeartbeatExtends(t *testing.T) {
 
 func TestLease_HeartbeatMissingReturnsNotFound(t *testing.T) {
 	s := storetest.Open(t)
-	_, err := s.HeartbeatTrigger(context.Background(), "nope", 5*time.Second)
+	_, err := teststore.ForTeam(t, s, store.DefaultTeam).HeartbeatTrigger(context.Background(), "nope", 5*time.Second)
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("err=%v want ErrNotFound", err)
 	}

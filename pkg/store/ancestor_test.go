@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -32,7 +34,7 @@ func TestAncestor_EmptyWhenNoParent(t *testing.T) {
 	insertChain(t, s, []struct{ id, pipeline string }{
 		{"only", "build"},
 	})
-	got, err := s.GetRunAncestorPipelines(context.Background(), "only")
+	got, err := teststore.ForTeam(t, s, store.DefaultTeam).GetRunAncestorPipelines(context.Background(), "only")
 	if err != nil {
 		t.Fatalf("GetRunAncestorPipelines: %v", err)
 	}
@@ -48,7 +50,7 @@ func TestAncestor_ReturnsChain(t *testing.T) {
 		{"mid", "B"},
 		{"leaf", "C"},
 	})
-	got, err := s.GetRunAncestorPipelines(context.Background(), "leaf")
+	got, err := teststore.ForTeam(t, s, store.DefaultTeam).GetRunAncestorPipelines(context.Background(), "leaf")
 	if err != nil {
 		t.Fatalf("walk: %v", err)
 	}
@@ -69,10 +71,10 @@ func TestAncestor_TerminatesOnMissingParent(t *testing.T) {
 		{"root", "A"},
 		{"mid", "B"},
 	})
-	if err := s.DeleteRun(context.Background(), "root"); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).DeleteRun(context.Background(), "root"); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.GetRunAncestorPipelines(context.Background(), "mid")
+	got, err := teststore.ForTeam(t, s, store.DefaultTeam).GetRunAncestorPipelines(context.Background(), "mid")
 	if err != nil {
 		t.Fatalf("walk: %v", err)
 	}
@@ -83,7 +85,7 @@ func TestAncestor_TerminatesOnMissingParent(t *testing.T) {
 
 func TestAncestor_RunIDNotFound(t *testing.T) {
 	s := storetest.Open(t)
-	got, err := s.GetRunAncestorPipelines(context.Background(), "does-not-exist")
+	got, err := teststore.ForTeam(t, s, store.DefaultTeam).GetRunAncestorPipelines(context.Background(), "does-not-exist")
 	if err != nil {
 		t.Fatalf("walk: %v", err)
 	}

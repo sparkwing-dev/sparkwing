@@ -1,3 +1,30 @@
+`TestFinishAtGeneration_ConcurrentReclaimKeepsTheCurrentOutcome` now runs as
+`TestOwnerFinishRaceRejectsStaleAwardProperty` through real `ClaimUnit`,
+`ReleaseUnit` and `FinishRunAndUnit` transactions. It varies the initial
+generation and races stale failure against current success. Same-verdict stale
+replay and release retain the completed snapshot. The two old team-generation
+tests are retired with their API. `TestRunCompletionAuthorityProperty` retains
+foreign-tenant and forged-owner refusal against the final schema. The colliding
+trigger fixture is invalid under the final composite run foreign key. Existing
+completion rollback and concurrent-winner tests remain. Native PostgreSQL
+evidence is separate.
+
+The old release-generation test now uses `TestReleaseUnitOwnerFenceProperty`,
+which generates 192 forged trigger, plan and eval releases without changing
+their unit rows, run snapshot or billing. `TestReleaseUnitReturnsUnstartedWorkWithoutAttempt`
+retains successful release and second-release refusal. The stale finish billing
+assertion uses `TestMeteredUnitStaleReportCannotSettleReplacementProperty` and
+`TestOwnerUnstartedRecoveryFencesPriorAwardsProperty`. The test for a leftover
+mutable trigger credit window is retired because final awards have immutable,
+generation-bound billing records. No raw release can leave that window behind.
+The two here tests that expected only one claim are removed because A1-55 allows
+reclaim. `TestClaimUnitHereWindowAndReclaim` retains the initial window,
+requester authority, reservation and expiry checks. The failed-trigger test
+becomes `TestFailedRunClosesOwnerAndKeepsVerdict`: its run keeps the failure and
+masked error, its queue owner closes, replay is exact and success cannot replace
+the committed failure. Old foreign-tenant generation assertions move to the
+current completion and release properties.
+
 The raw cancellation tests now run through `TransitionRun`, `ClaimUnit`,
 `RenewUnit` and `ReapUnits`. `TestRunCancellationPreventsUnclaimedAwards`
 retains unclaimed trigger/plan cancellation and reaper replay.

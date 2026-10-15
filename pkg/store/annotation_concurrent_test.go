@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -126,7 +128,7 @@ func TestPostgresAppendStepAnnotationKeepsEveryEntry(t *testing.T) {
 	}
 	wg.Wait()
 
-	steps, err := st.ListNodeSteps(ctx, "run-1")
+	steps, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeSteps(ctx, "run-1")
 	if err != nil {
 		t.Fatalf("ListNodeSteps: %v", err)
 	}
@@ -185,7 +187,7 @@ VALUES ($1,$2,$3,$4)`, "run-1", "build", "step-1", "running"); err != nil {
 		t.Fatal("AppendStepAnnotation never returned after the conflicting insert committed")
 	}
 
-	steps, err := st.ListNodeSteps(ctx, "run-1")
+	steps, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeSteps(ctx, "run-1")
 	if err != nil {
 		t.Fatalf("ListNodeSteps: %v", err)
 	}
@@ -215,7 +217,7 @@ func TestAppendStepAnnotationUpsertsAnExistingStep(t *testing.T) {
 		}
 	}
 
-	steps, err := st.ListNodeSteps(ctx, "run-1")
+	steps, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeSteps(ctx, "run-1")
 	if err != nil {
 		t.Fatalf("ListNodeSteps: %v", err)
 	}

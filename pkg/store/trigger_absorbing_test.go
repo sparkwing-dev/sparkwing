@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -17,14 +19,6 @@ func TestFinishedTriggerIsNeverReturnedToTheQueue(t *testing.T) {
 			if errors.Is(err, store.ErrNotFound) {
 				return nil
 			}
-			return err
-		},
-		"ReleaseClaimAtGeneration": func(s *store.Store, ctx context.Context, id string) error {
-			seq, err := s.TriggerClaimGeneration(ctx, id)
-			if err != nil {
-				return err
-			}
-			_, err = s.ReleaseClaimAtGeneration(ctx, id, seq)
 			return err
 		},
 	}
@@ -39,7 +33,7 @@ func TestFinishedTriggerIsNeverReturnedToTheQueue(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("CreateTrigger: %v", err)
 			}
-			if err := s.FinishTrigger(ctx, id); err != nil {
+			if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishTrigger(ctx, id); err != nil {
 				t.Fatalf("FinishTrigger: %v", err)
 			}
 
@@ -47,7 +41,7 @@ func TestFinishedTriggerIsNeverReturnedToTheQueue(t *testing.T) {
 				t.Fatalf("%s: %v", name, err)
 			}
 
-			got, err := s.GetTrigger(ctx, id)
+			got, err := teststore.ForTeam(t, s, store.DefaultTeam).GetTrigger(ctx, id)
 			if err != nil {
 				t.Fatalf("GetTrigger: %v", err)
 			}
@@ -69,11 +63,11 @@ func TestFinishingATriggerClearsItsLease(t *testing.T) {
 	if _, err := s.ClaimNextTrigger(ctx, time.Minute); err != nil {
 		t.Fatalf("ClaimNextTrigger: %v", err)
 	}
-	if err := s.FinishTrigger(ctx, id); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishTrigger(ctx, id); err != nil {
 		t.Fatalf("FinishTrigger: %v", err)
 	}
 
-	trig, err := s.GetTrigger(ctx, id)
+	trig, err := teststore.ForTeam(t, s, store.DefaultTeam).GetTrigger(ctx, id)
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}

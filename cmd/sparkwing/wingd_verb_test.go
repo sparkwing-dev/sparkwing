@@ -1,14 +1,13 @@
 package main
 
 import (
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"strings"
 	"testing"
-
-	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
 func TestWingdServesEveryVerbASpawnInvokes(t *testing.T) {
-	verbs := []string{"run", wingdclient.DaemonSpawnVerb}
+	verbs := []string{wingdclient.DaemonSpawnVerb}
 	for _, verb := range verbs {
 		err := runWingd([]string{verb, "--this-flag-does-not-exist"})
 		if err == nil {

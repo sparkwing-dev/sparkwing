@@ -44,39 +44,6 @@ func TestTriggerClaim_ReclaimDropsPreviousClaimant(t *testing.T) {
 	}
 }
 
-func TestTriggerClaim_ReleaseAtGenerationDropsClaimant(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	runnerA := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_aaaaaaaa"}
-
-	seedPending(t, s, "t1")
-	if _, err := s.ClaimNextTriggerFor(ctx, runnerA, time.Hour, nil, nil); err != nil {
-		t.Fatalf("ClaimNextTriggerFor: %v", err)
-	}
-	seq, err := s.TriggerClaimGeneration(ctx, "t1")
-	if err != nil {
-		t.Fatalf("TriggerClaimGeneration: %v", err)
-	}
-	released, err := s.ReleaseClaimAtGeneration(ctx, "t1", seq)
-	if err != nil {
-		t.Fatalf("ReleaseClaimAtGeneration: %v", err)
-	}
-	if !released {
-		t.Fatal("ReleaseClaimAtGeneration returned false at the current generation")
-	}
-	if _, err := s.ClaimSpecificTrigger(ctx, "t1", time.Hour); err != nil {
-		t.Fatalf("ClaimSpecificTrigger: %v", err)
-	}
-
-	held, err := s.PrincipalHoldsTriggerClaim(ctx, "t1", runnerA, time.Now())
-	if err != nil {
-		t.Fatalf("PrincipalHoldsTriggerClaim: %v", err)
-	}
-	if held {
-		t.Fatal("runner-a still holds the claim after releasing it at its generation")
-	}
-}
-
 // The claimant recorded on a trigger row outlives the claim's lease and
 // the trigger's own completion, which is what lets the holder close out
 // or retry a close.
@@ -97,7 +64,7 @@ func TestTriggerClaim_ClaimantOutlivesLeaseAndCompletion(t *testing.T) {
 		t.Fatalf("TriggerClaimant = %+v, want %+v", got, runnerA)
 	}
 
-	if err := s.FinishTrigger(ctx, "t1"); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishTrigger(ctx, "t1"); err != nil {
 		t.Fatalf("FinishTrigger: %v", err)
 	}
 	got, err = tenant(t, s, store.DefaultTeam).TriggerClaimant(ctx, "t1")

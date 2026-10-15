@@ -74,7 +74,7 @@ func validName(name string) bool { return name != "" && !strings.ContainsAny(nam
 // SSH_ASKPASS and SSH_AUTH_SOCK. Source acquisition selects private credential/config files through argv.
 // Git never inherits a repository/index/config override or a credential helper from a caller.
 func Build(k Kind, b Base, rt Runtime) ([]string, error) {
-	if k > HostChild {
+	if k > Git {
 		return nil, errors.New("unknown process environment kind")
 	}
 	if k == StepTool || k == Cleanup {
@@ -154,6 +154,13 @@ func inherited(k Kind, row Var, known bool, name string, b Base) bool {
 	}
 	if row.Owner == "engine" {
 		return k == CLI && (row.Name == "SPARKWING_TOOLCHAIN_ACTIVE" || row.Name == "SPARKWING_HOOK_SELFTEST" || row.Name == "SPARKWING_TESTLEAK_HOST" || row.Name == "SPARKWING_TEST_")
+	}
+	if k == Git {
+		key := strings.ToUpper(name)
+		if strings.HasPrefix(key, "GIT_") && key != "GIT_SSL_CAINFO" && key != "GIT_SSL_CAPATH" || key == "SSH_ASKPASS" || key == "SSH_AUTH_SOCK" {
+			return false
+		}
+		return row.RemoteBase
 	}
 	switch k {
 	case CLI:

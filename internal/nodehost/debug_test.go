@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -154,7 +156,7 @@ func TestDebugPauseExpiresOnItsTimeout(t *testing.T) {
 	if res.Status != "success" || !fx.ran("build") {
 		t.Errorf("status %q ran=%v, want success after the pause expired", res.Status, fx.ran("build"))
 	}
-	pauses, err := ds.ListDebugPauses(ctx, testRunID)
+	pauses, err := teststore.ForTeam(t, ds.Store, store.DefaultTeam).ListDebugPauses(ctx, testRunID)
 	if err != nil || len(pauses) != 1 || pauses[0].ReleaseKind != store.PauseReleaseTimeout {
 		t.Errorf("pauses %+v err %v, want one released by timeout", pauses, err)
 	}
@@ -232,7 +234,7 @@ func TestDebugRecoveryNodesAndGatesSkipTheirPauses(t *testing.T) {
 	awaitHostedResult(t, ctx, done)
 
 	wantRow(t, ds.Store, "rollback", sparkwing.Failed, "still broke")
-	pauses, err := ds.ListDebugPauses(ctx, testRunID)
+	pauses, err := teststore.ForTeam(t, ds.Store, store.DefaultTeam).ListDebugPauses(ctx, testRunID)
 	if err != nil || len(pauses) != 1 {
 		t.Errorf("pauses %+v err %v, want only the gate's pause-before", pauses, err)
 	}

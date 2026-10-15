@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -257,7 +259,7 @@ func TestAttemptExecutor(t *testing.T) {
 			t.Fatalf("session ledger record = %q (err %v), want the step command's record", ledger, err)
 		}
 		row := h.row(t, "run-exec", "exec")
-		steps, err := h.st.ListNodeSteps(t.Context(), "run-exec")
+		steps, err := teststore.ForTeam(t, h.st, store.DefaultTeam).ListNodeSteps(t.Context(), "run-exec")
 		if err != nil {
 			t.Fatal(err)
 		}

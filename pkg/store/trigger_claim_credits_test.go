@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -39,7 +38,7 @@ func TestMeteredTriggerClaimNeedsTheMinimumReservation(t *testing.T) {
 	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-1", pool, 0); !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("metered claim of run-1 by id on an empty balance = %v, want ErrInsufficientCredits", err)
 	}
-	if tr, err := st.GetTrigger(ctx, "run-1"); err != nil || tr.Status != "pending" {
+	if tr, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, "run-1"); err != nil || tr.Status != "pending" {
 		t.Fatalf("trigger = %+v, %v; want it left pending", tr, err)
 	}
 
@@ -129,7 +128,7 @@ func TestMeteredTriggerClaimReservesItsMinute(t *testing.T) {
 	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-b", pool, 0); !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("second claim against the reserved minute = %v, want ErrInsufficientCredits", err)
 	}
-	if tr, err := st.GetTrigger(ctx, "run-b"); err != nil || tr.Status != "pending" {
+	if tr, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, "run-b"); err != nil || tr.Status != "pending" {
 		t.Fatalf("refused trigger = %+v, %v; want it left pending", tr, err)
 	}
 
@@ -212,17 +211,17 @@ func TestMeteredTriggerHeartbeatStopsAnEmptyBalance(t *testing.T) {
 	}
 	backdateTriggerClaim(t, st, claimed.ID, pastTriggerMinimum(5*time.Second), time.Time{})
 	fenced := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{Claimant: pool, ClaimGeneration: claimed.ClaimSeq})
-	if _, err := st.HeartbeatTrigger(fenced, claimed.ID, time.Minute); !errors.Is(err, store.ErrInsufficientCredits) {
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).HeartbeatTrigger(fenced, claimed.ID, time.Minute); !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("empty-balance heartbeat = %v, want ErrInsufficientCredits", err)
 	}
-	got, err := st.GetTrigger(ctx, claimed.ID)
+	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, claimed.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Status != "failed" || got.LeaseExpiresAt != nil {
 		t.Fatalf("refused heartbeat left a live claim: status=%q lease=%v", got.Status, got.LeaseExpiresAt)
 	}
-	if _, err := st.HeartbeatTrigger(fenced, claimed.ID, time.Minute); !errors.Is(err, store.ErrLockHeld) {
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).HeartbeatTrigger(fenced, claimed.ID, time.Minute); !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("stopped claim renewed again: %v", err)
 	}
 	if got := balance(t, st); got != -5*(floor/store.MinBillableSeconds) {
@@ -252,16 +251,16 @@ func TestMeteredTriggerHeartbeatKeepsChargingAnAdmittedFrozenTeam(t *testing.T) 
 	}
 	backdateTriggerClaim(t, st, claimed.ID, pastTriggerMinimum(5*time.Second), time.Time{})
 	fenced := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{Claimant: pool, ClaimGeneration: claimed.ClaimSeq})
-	if _, err := st.HeartbeatTrigger(fenced, claimed.ID, time.Minute); err != nil {
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).HeartbeatTrigger(fenced, claimed.ID, time.Minute); err != nil {
 		t.Fatalf("admitted claim stopped on a later dispute hold: %v", err)
 	}
 	if got := balance(t, st); got != 2*floor-5*rate {
 		t.Fatalf("frozen-team balance = %d, want five elapsed seconds charged: %d", got, 2*floor-5*rate)
 	}
-	if got, err := st.GetTrigger(ctx, claimed.ID); err != nil || got.Status != "claimed" {
+	if got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, claimed.ID); err != nil || got.Status != "claimed" {
 		t.Fatalf("dispute hold ended admitted claim: %+v, %v", got, err)
 	}
-	if err := st.FinishTrigger(ctx, claimed.ID); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishTrigger(ctx, claimed.ID); err != nil {
 		t.Fatalf("finish admitted frozen claim: %v", err)
 	}
 }
@@ -285,10 +284,10 @@ func TestMeteredTriggerHeartbeatLedgerFailureDoesNotRenew(t *testing.T) {
 		BEGIN SELECT RAISE(FAIL, 'ledger write failed'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.HeartbeatTrigger(ctx, claimed.ID, 2*time.Minute); err == nil {
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).HeartbeatTrigger(ctx, claimed.ID, 2*time.Minute); err == nil {
 		t.Fatal("heartbeat renewed despite a failed ledger insert")
 	}
-	got, err := st.GetTrigger(ctx, claimed.ID)
+	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, claimed.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +318,7 @@ func TestMeteredTriggerHeartbeatRejectsSupersededGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	fenced := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{Claimant: pool, ClaimGeneration: claimed.ClaimSeq})
-	if _, err := st.HeartbeatTrigger(fenced, claimed.ID, time.Minute); !errors.Is(err, store.ErrLockHeld) {
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).HeartbeatTrigger(fenced, claimed.ID, time.Minute); !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("old generation heartbeat = %v, want ErrLockHeld", err)
 	}
 	if got := balance(t, st); got != floor {
@@ -341,7 +340,7 @@ func TestMeteredTriggerReapSettlesOnlyTheTailAfterHeartbeat(t *testing.T) {
 		t.Fatal(err)
 	}
 	backdateTriggerClaim(t, st, "run-reap-tail", pastTriggerMinimum(5*time.Second), time.Time{})
-	if _, err := st.HeartbeatTrigger(ctx, "run-reap-tail", time.Minute); err != nil {
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).HeartbeatTrigger(ctx, "run-reap-tail", time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	backdateTriggerClaim(t, st, "run-reap-tail", pastTriggerMinimum(8*time.Second), time.Now().Add(-100*time.Millisecond))
@@ -356,87 +355,11 @@ func TestMeteredTriggerReapSettlesOnlyTheTailAfterHeartbeat(t *testing.T) {
 		t.Fatal(err)
 	}
 	backdateTriggerClaim(t, st, "run-reap-tail", pastTriggerMinimum(3*time.Second), time.Time{})
-	if _, err := st.HeartbeatTrigger(ctx, "run-reap-tail", time.Minute); err != nil {
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).HeartbeatTrigger(ctx, "run-reap-tail", time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	if got := balance(t, st); got != before-floor-3*rate {
 		t.Fatalf("new claim inherited old usage: balance = %d, want %d", got, before-floor-3*rate)
-	}
-}
-
-func TestTriggerNewClaimRefusesAnUnsettledPriorCreditWindow(t *testing.T) {
-	for _, mode := range []string{"paid release to unmetered token"} {
-		t.Run(mode, func(t *testing.T) {
-			st := storetest.Open(t)
-			ctx := context.Background()
-			metered := meteredClaimant(t, st, "agent:cloud")
-			floor := triggerFloor(t, st, metered)
-			if err := st.FinishTrigger(ctx, "run-floor"); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 3*floor, "", "operator"); err != nil {
-				t.Fatal(err)
-			}
-			pendingTrigger(t, st, "run-transition")
-			prior, err := st.ClaimSpecificTriggerFor(ctx, "run-transition", metered, time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
-			backdateTriggerClaim(t, st, prior.ID, pastTriggerMinimum(5*time.Second), time.Time{})
-			switch mode {
-			case "paid release to unmetered token":
-				if err := st.CreateRun(ctx, store.Run{ID: prior.ID, Pipeline: "build", Status: "running", StartedAt: time.Now()}); err != nil {
-					t.Fatal(err)
-				}
-				if ok, err := st.ReleaseClaimAtGeneration(store.WithoutCreditMetering(ctx), prior.ID, prior.ClaimSeq); err != nil || !ok {
-					t.Fatalf("release prior claim = %t, %v", ok, err)
-				}
-			}
-			before := balance(t, st)
-			var markerBefore, secondsBefore, amountBefore int64
-			var reservationBefore string
-			if err := st.DB().QueryRowContext(ctx, storetest.Rebind(st,
-				`SELECT credit_reserved_at, credit_paid_seconds, credit_paid_amount_micro, credit_reservation_id
-				   FROM triggers WHERE id = ?`), prior.ID,
-			).Scan(&markerBefore, &secondsBefore, &amountBefore, &reservationBefore); err != nil {
-				t.Fatal(err)
-			}
-			claimCtx := ctx
-			claimant := metered
-			switch mode {
-			case "paid release to unmetered token":
-				claimant = unmeteredClaimant(t, st, "agent:laptop")
-			}
-			if _, err := st.ClaimSpecificTriggerFor(claimCtx, prior.ID, claimant, time.Minute); err == nil ||
-				!strings.Contains(err.Error(), "unsettled prior metered claim") {
-				t.Fatalf("named claim of unsettled trigger = %v, want actionable refusal", err)
-			}
-			if got, err := st.GetTrigger(ctx, prior.ID); err != nil || got.Status != "pending" || got.ClaimSeq != prior.ClaimSeq {
-				t.Fatalf("refused claim changed trigger: %+v, %v", got, err)
-			}
-			var markerAfter, secondsAfter, amountAfter int64
-			var reservationAfter string
-			if err := st.DB().QueryRowContext(ctx, storetest.Rebind(st,
-				`SELECT credit_reserved_at, credit_paid_seconds, credit_paid_amount_micro, credit_reservation_id
-				   FROM triggers WHERE id = ?`), prior.ID,
-			).Scan(&markerAfter, &secondsAfter, &amountAfter, &reservationAfter); err != nil {
-				t.Fatal(err)
-			}
-			if markerAfter != markerBefore || secondsAfter != secondsBefore ||
-				amountAfter != amountBefore || reservationAfter != reservationBefore {
-				t.Fatalf("refused claim erased prior credit cursor: before=%d/%d/%d/%q after=%d/%d/%d/%q",
-					markerBefore, secondsBefore, amountBefore, reservationBefore,
-					markerAfter, secondsAfter, amountAfter, reservationAfter)
-			}
-			pendingTrigger(t, st, "run-ready")
-			claimed, err := st.ClaimNextTriggerFor(claimCtx, claimant, time.Minute, nil, nil)
-			if err != nil || claimed.ID != "run-ready" {
-				t.Fatalf("parked oldest trigger hid ready work: %+v, %v", claimed, err)
-			}
-			if got := balance(t, st); got != before {
-				t.Fatalf("refused claim moved prior credit balance: got=%d, want=%d", got, before)
-			}
-		})
 	}
 }
 
@@ -455,7 +378,7 @@ func TestDisabledMeteringDoesNotSettleAnEarlierTriggerReservation(t *testing.T) 
 	if err != nil || len(before) != 1 {
 		t.Fatalf("earlier reservation = %+v, %v", before, err)
 	}
-	if err := st.FinishTrigger(store.WithoutCreditMetering(ctx), "run-licensed"); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishTrigger(store.WithoutCreditMetering(ctx), "run-licensed"); err != nil {
 		t.Fatal(err)
 	}
 	after, err := tenant(t, st, store.DefaultTeam).ListCreditCharges(ctx, 10)
@@ -528,14 +451,14 @@ func TestTriggerFinishSettlesItsReservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	backdateTriggerClaim(t, st, "run-short", time.Now().Add(-5*time.Second), time.Time{})
-	if err := st.FinishTrigger(ctx, "run-short"); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishTrigger(ctx, "run-short"); err != nil {
 		t.Fatal(err)
 	}
 	spent := grant - balance(t, st)
 	if spent != floor {
 		t.Fatalf("a 5s trigger step cost %d, want the %ds minimum at %d/s, %d", spent, store.MinBillableSeconds, rate, floor)
 	}
-	if err := st.FinishTrigger(ctx, "run-short"); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishTrigger(ctx, "run-short"); err != nil {
 		t.Fatal(err)
 	}
 	if again := grant - balance(t, st); again != spent {
@@ -548,13 +471,7 @@ func TestTriggerFinishSettlesItsReservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	backdateTriggerClaim(t, st, "run-long", time.Now().Add(-150*time.Second), time.Time{})
-	if _, err := st.FinishTriggerAtGeneration(ctx, "run-long", 99); err != nil {
-		t.Fatal(err)
-	}
-	if got := before - balance(t, st); got != floor {
-		t.Fatalf("a finish from a superseded generation settled the claim: spent %d, want the reserved %d", got, floor)
-	}
-	if err := st.FinishTrigger(ctx, "run-long"); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishTrigger(ctx, "run-long"); err != nil {
 		t.Fatal(err)
 	}
 	if got := before - balance(t, st); got < 150*rate || got > 151*rate {

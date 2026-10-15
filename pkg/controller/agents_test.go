@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -269,49 +268,6 @@ func TestAgents_PlainHolderUsesOwnLivePoll(t *testing.T) {
 	renewedSeen, err := time.Parse(time.RFC3339, renewed.LastSeen)
 	if err != nil || renewedSeen.After(time.Now()) {
 		t.Fatalf("heartbeat observed in the future: %q, %v", renewed.LastSeen, err)
-	}
-}
-
-func TestAgents_HeadroomIncludesControllerObservationTime(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	ctx := context.Background()
-	if err := st.CreateRun(ctx, store.Run{ID: "run-headroom", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-headroom", NodeID: "work", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.MarkNodeReady(ctx, "run-headroom", "work"); err != nil {
-		t.Fatal(err)
-	}
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	defer srv.Close()
-	ctrl := client.NewWithToken(srv.URL, nil, "")
-	if _, err := ctrl.ClaimNode(ctx, "runner:plain-box:1", nil, time.Minute, &client.Headroom{
-		Cores: 2, MemoryBytes: 4 << 30, QueueDepth: 1,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	data, err := httpGet(srv.URL + "/api/v1/agents")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var body struct {
-		Agents []controller.Agent `json:"agents"`
-	}
-	if err := json.Unmarshal(data, &body); err != nil || len(body.Agents) != 1 {
-		t.Fatalf("agents response = %+v, %v", body, err)
-	}
-	headroom := body.Agents[0].Headroom
-	if headroom == nil || headroom.Cores != 2 || headroom.QueueDepth != 1 {
-		t.Fatalf("agent headroom = %+v", headroom)
-	}
-	if _, err := time.Parse(time.RFC3339, headroom.ObservedAt); err != nil {
-		t.Fatalf("agent headroom observed_at = %q: %v", headroom.ObservedAt, err)
 	}
 }
 

@@ -131,11 +131,6 @@ SELECT cpu_millicores, memory_bytes, cpu_time_nanos, kind
 	return tx.Commit()
 }
 
-// ListNodeMetrics returns every sample oldest-first.
-func (s *Store) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]MetricSample, error) {
-	return s.defaultTenant().ListNodeMetrics(ctx, runID, nodeID)
-}
-
 // ListNodeMetrics returns every sample of a node of one of t's runs,
 // oldest-first.
 func (t *Tenant) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]MetricSample, error) {

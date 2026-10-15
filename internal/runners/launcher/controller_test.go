@@ -381,3 +381,45 @@ func TestCloudJobNamesSeparateAwardedUnits(t *testing.T) {
 		t.Fatal("different terminal source generations alias the same Kubernetes Job")
 	}
 }
+
+func FuzzControllerSyncPreservesAwardAndJobInstance(f *testing.F) {
+	f.Add("instance", "replacement", int64(7), true)
+	f.Add("same-instance", "same-instance", int64(3), false)
+	f.Fuzz(func(t *testing.T, uid, replacement string, generation int64, replace bool) {
+		if uid == "" || replacement == "" || generation <= 0 {
+			return
+		}
+		unit := wireAward(capability.UnitNode)
+		unit.Binding.Generation = generation
+		binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observation := CloudJobObservation{Binding: binding, JobName: jobName(binding), JobNamespace: "cloud", JobUID: uid, NodeUID: "node-uid"}
+		control, err := NewControllerControl(launcherWireFake{sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+			if len(request.Observed) != 1 {
+				t.Fatal("award observation missing")
+			}
+			got := request.Observed[0]
+			want := capability.LeaseRef{Kind: capability.UnitNode, ID: binding.UnitID, Holder: binding.Holder, Generation: generation}
+			if got.Award != want || got.Job.Namespace != "cloud" || got.Job.Name != observation.JobName || got.Job.UID != uid || got.NodeUID != observation.NodeUID {
+				t.Fatal("award or Job instance changed")
+			}
+			if replace {
+				got.Job.UID = replacement
+			}
+			return controllerwire.LauncherSyncResponse{Remove: []controllerwire.LauncherJobRef{got.Job}}, nil
+		}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		states, err := control.Sync(t.Context(), []CloudJobObservation{observation})
+		if replace && replacement != uid {
+			if err == nil || len(states) != 0 {
+				t.Fatal("replacement Job cleanup was accepted")
+			}
+		} else if err != nil || len(states) != 1 || !states[0].Delete || !sameBinding(states[0].Binding, binding) {
+			t.Fatalf("original instance was not retained: %+v %v", states, err)
+		}
+	})
+}

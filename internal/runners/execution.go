@@ -15,17 +15,17 @@ import (
 
 func runInputFor(unit controllerwire.ClaimedUnit) (nodehost.RunInput, error) {
 	request := unit.Request
-	if request.RunID != unit.RunID || request.Request.Team == "" || request.Hash == "" {
+	if request.RunID == "" || request.Request.Team == "" || request.Hash == "" {
 		return nodehost.RunInput{}, errors.New("runner award is missing its sealed request")
 	}
 	input := nodehost.RunInput{RunID: unit.RunID, RequestHash: string(request.Hash)}
 	var err error
-	input.SealedRequest, err = json.Marshal(request)
+	input.SealedRequest, err = json.Marshal(request.Request)
 	if err != nil {
 		return nodehost.RunInput{}, err
 	}
 	if accepted := unit.Accepted; accepted != nil {
-		if accepted.Spec.Request.RunID != unit.RunID || accepted.Spec.Request.Request.Team != request.Request.Team || accepted.Spec.Request.Hash != request.Hash || accepted.Spec.Hash == "" || accepted.PlanHash == "" {
+		if accepted.Spec.Request.RunID != request.RunID || accepted.Spec.Request.Request.Team != request.Request.Team || accepted.Spec.Request.Hash != request.Hash || accepted.Spec.Hash == "" || accepted.PlanHash == "" {
 			return nodehost.RunInput{}, errors.New("runner award has a different accepted run or request seal")
 		}
 		value, err := acceptedInput(unit.RunID, *accepted)

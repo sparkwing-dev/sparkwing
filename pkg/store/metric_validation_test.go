@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -42,7 +44,7 @@ func TestAddNodeMetricSample_Validation(t *testing.T) {
 			if (err == nil) != tc.valid {
 				t.Errorf("AddNodeMetricSample error = %v; valid = %v", err, tc.valid)
 			}
-			rows, err := st.ListNodeMetrics(ctx, "run", "node")
+			rows, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeMetrics(ctx, "run", "node")
 			if err != nil {
 				t.Fatal(err)
 			}

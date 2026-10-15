@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -46,7 +48,7 @@ func TestTrigger_ClaimAndReadReturnTheOwningTeam(t *testing.T) {
 	}
 
 	seedPending(t, s, "t-legacy")
-	legacy, err := s.GetTrigger(ctx, "t-legacy")
+	legacy, err := teststore.ForTeam(t, s, store.DefaultTeam).GetTrigger(ctx, "t-legacy")
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}

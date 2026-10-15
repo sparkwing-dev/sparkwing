@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -804,7 +806,7 @@ func TestConcurrentTriggerAdmissionLeavesNoOrphanTrigger(t *testing.T) {
 	}
 	wg.Wait()
 
-	triggers, err := s.ListTriggers(ctx, store.TriggerFilter{Limit: 100})
+	triggers, err := teststore.ForTeam(t, s, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Limit: 100})
 	if err != nil {
 		t.Fatalf("list triggers: %v", err)
 	}
@@ -856,7 +858,7 @@ func TestTriggerAndItsRunAreRefusedTogether(t *testing.T) {
 		store.Trigger{ID: "run-2", Pipeline: "demo", TriggerSource: "manual", CreatedAt: now},
 		store.Run{ID: "run-2", Pipeline: "demo", Status: "pending", StartedAt: now, CreatedAt: now})
 	limitRefusal(t, err, store.ComputeLimitGlobalRunsPerHour)
-	if trig, err := s.GetTrigger(ctx, "run-2"); err == nil && trig != nil {
+	if trig, err := teststore.ForTeam(t, s, store.DefaultTeam).GetTrigger(ctx, "run-2"); err == nil && trig != nil {
 		t.Fatal("the refused admission left a trigger behind")
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -138,7 +140,7 @@ func TestListTriggersClampsLimitToTheCap(t *testing.T) {
 		}
 	}
 
-	trigs, err := st.ListTriggers(ctx, store.TriggerFilter{Limit: 1 << 40})
+	trigs, err := teststore.ForTeam(t, st, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Limit: 1 << 40})
 	if err != nil {
 		t.Fatalf("ListTriggers: %v", err)
 	}

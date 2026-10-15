@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -37,7 +39,7 @@ func TestListTriggers_RepoFilterLooksPastTheFirstPage(t *testing.T) {
 		seedRepoTrigger(fmt.Sprintf("other-%02d", i), "other/repo", base.Add(time.Duration(i+1)*time.Minute))
 	}
 
-	got, err := s.ListTriggers(ctx, store.TriggerFilter{Repo: "want/repo", Limit: 20})
+	got, err := teststore.ForTeam(t, s, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Repo: "want/repo", Limit: 20})
 	if err != nil {
 		t.Fatalf("ListTriggers: %v", err)
 	}
@@ -70,7 +72,7 @@ func TestListTriggers_RepoFilterHonoursLimit(t *testing.T) {
 		}
 	}
 
-	got, err := s.ListTriggers(ctx, store.TriggerFilter{Repo: "want/repo", Limit: 2})
+	got, err := teststore.ForTeam(t, s, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Repo: "want/repo", Limit: 2})
 	if err != nil {
 		t.Fatalf("ListTriggers: %v", err)
 	}
@@ -112,7 +114,7 @@ func TestListTriggers_RepoFilterCrossesAPageBoundary(t *testing.T) {
 	}
 	seed("want-newest", "want/repo", base.Add(time.Hour))
 
-	got, err := s.ListTriggers(ctx, store.TriggerFilter{Repo: "want/repo", Limit: 20})
+	got, err := teststore.ForTeam(t, s, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Repo: "want/repo", Limit: 20})
 	if err != nil {
 		t.Fatalf("ListTriggers: %v", err)
 	}
@@ -147,7 +149,7 @@ func TestListTriggers_RepoFilterTiedTimestampsAcrossPages(t *testing.T) {
 		}
 	}
 
-	got, err := s.ListTriggers(ctx, store.TriggerFilter{Repo: "want/repo", Limit: 20})
+	got, err := teststore.ForTeam(t, s, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Repo: "want/repo", Limit: 20})
 	if err != nil {
 		t.Fatalf("ListTriggers: %v", err)
 	}
@@ -186,7 +188,7 @@ func TestListTriggers_RepoFilterWarnsWhenItStopsAtTheHorizon(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
 	defer slog.SetDefault(prev)
 
-	got, err := s.ListTriggers(ctx, store.TriggerFilter{Repo: "want/repo", Limit: 20})
+	got, err := teststore.ForTeam(t, s, store.DefaultTeam).ListTriggers(ctx, store.TriggerFilter{Repo: "want/repo", Limit: 20})
 	if err != nil {
 		t.Fatalf("ListTriggers: %v", err)
 	}

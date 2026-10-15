@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -31,26 +30,6 @@ func newTriggerUserServer(t *testing.T) (*store.Store, *httptest.Server, string)
 	ts := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
 	t.Cleanup(ts.Close)
 	return st, ts, raw
-}
-
-func TestTrigger_UserIsTheAuthenticatedPrincipal(t *testing.T) {
-	st, ts, raw := newTriggerUserServer(t)
-	ctx := context.Background()
-
-	resp, err := client.NewWithToken(ts.URL, nil, raw).CreateTrigger(ctx, client.TriggerRequest{
-		Pipeline: "demo",
-		Trigger:  client.TriggerMeta{Source: "manual"},
-	})
-	if err != nil {
-		t.Fatalf("CreateTrigger: %v", err)
-	}
-	trig, err := st.GetTrigger(ctx, resp.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if trig.TriggerUser != "alice" {
-		t.Fatalf("trigger user = %q, want the token's principal alice", trig.TriggerUser)
-	}
 }
 
 // Released CLIs still send trigger.user, and a CLI and a controller upgrade
@@ -77,7 +56,7 @@ func TestTrigger_IgnoresAUserNamedInTheBody(t *testing.T) {
 	if resp.StatusCode/100 != 2 || decodeErr != nil || created.RunID == "" {
 		t.Fatalf("status = %d (%v, run %q), want a released CLI's body accepted", resp.StatusCode, decodeErr, created.RunID)
 	}
-	trig, err := st.GetTrigger(context.Background(), created.RunID)
+	trig, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(context.Background(), created.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}

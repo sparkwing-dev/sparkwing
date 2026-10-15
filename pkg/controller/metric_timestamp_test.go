@@ -51,7 +51,7 @@ func TestMetricTimestamp(t *testing.T) {
 			if response.Code != tc.status {
 				t.Errorf("status = %d, want %d; %s", response.Code, tc.status, response.Body)
 			}
-			rows, err := st.ListNodeMetrics(ctx, "run", "node")
+			rows, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeMetrics(ctx, "run", "node")
 			if err != nil {
 				t.Fatal(err)
 			}

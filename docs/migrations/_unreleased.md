@@ -1,5 +1,30 @@
 # Migrating to the next release
 
+## Explicit tenant readers and owner completion
+
+`Store.FinishRunAtGeneration` and `Tenant.FinishRunAtGeneration` are removed.
+Use `Tenant.FinishRunAndUnit` with the current owner authority and its complete
+fence. A stale owner cannot finish a successor's run, even with the same verdict.
+`FinishTriggerAtGeneration`, `ReleaseClaimAtGeneration` and
+`TriggerClaimGeneration` are removed from both handles too. Release unstarted
+work with `Store.ReleaseUnit`, using the awarded `UnitClaim` and its capability.
+Read the generation from that award or the current owner snapshot. Completion
+closes the owner queue unit while retaining the run's separate verdict.
+
+These default-team wrappers on `Store` are removed. Select the registered
+tenant with `ForTeam(ctx, team)` and call its existing method. Local consumers
+select `DefaultTeam` and handle the selection error.
+
+- `CountRuns`, `DeleteRun`, `ListNodeSteps` and `ListNodeMetrics`.
+- `ListTriggers`, `GetTrigger`, `FindTriggerByIdempotencyKey`,
+  `GetRunAncestorPipelines` and `ListPendingTriggersForParent`.
+- `ListApprovalsForRun`, `ListPendingApprovals` and `ListDebugPauses`.
+- `FinishNodeWithOutputRef`, `NodeSettlement`, `HeartbeatTrigger` and `FinishTrigger`.
+
+The unused `SupportsRunIdentityFilters`, `SupportsRunCursor` and
+`SupportsRunDisplayFilters` probes are removed. Shared clients use the current
+controller API contract. The run-filter response header remains unchanged.
+
 ## Raw cancellation and unused readers removed
 
 `Store.RequestCancel`, `Tenant.RequestCancel`, `Store.CancelPendingTrigger`
@@ -176,6 +201,64 @@ Declare `needs_generated` in the accepted plan and submit generated jobs with
 `Tenant.AcceptExpansion`. Read `RunSnapshot.Scheduling` to resolve group members
 and decide when dependents can run. Accepted declarations stay unchanged.
 
+## CLI client retirement
+
+The legacy `Client`, `New` and `NewWithToken` are removed. Construct the shared
+clients with `EngineOptions`. Its `HTTP` field supports the private api.sock
+transport, and `Bearer` supplies the credential without exposing it in a URL.
+
+| Operation | Shared client |
+| --- | --- |
+| Intake, claim, renewal, plan acceptance, transitions, step reports and completion | `NewEngineClient` |
+| Public run history, steps and receipts | `NewRunReader` |
+| Persisted logs and lifecycle events | `NewLogReader` |
+| Job location and active pause | `NewDebugReader` |
+| Approvals and annotations | `NewRunReview` |
+| Secret values, metadata, writes, deletion and rotation | `NewSecretManager` |
+| Authorized object transfers and records | `NewDataClient` |
+| Run deletion with a persistence receipt | `NewRunPruner` |
+
+Intake uses the sealed `CreateRunRequest`. Hosts accept plans and expansions
+atomically and report fenced job transitions and typed step observations. The old
+trigger requests, node setters, claim-token headers, direct output uploads,
+concurrency-slot client and log-segment uploader are removed. There is no raw
+execution reader or capability probe that falls back to those APIs. The shared
+transport decodes the common error envelope and follows the route table's replay
+policy. Controller redirects are refused.
+
+`repos info` reads each pipeline's latest admitted run through the local
+controller's public projection. It follows pagination and reports read failures.
+A queued run has no start time until execution starts. Follow persisted logs with
+the returned cursor until the page is complete.
+
+The old orchestrator readers, SQLite/profile factories, `HostTriggerRun`,
+`TriggerHost`, `RunNodeOnce`, `RunHosted`, `HostClaimedTrigger`,
+`RunLocalTriggerConsumer` and `ServeConsumer` are removed. Their state, logging,
+admission, submission-environment and child-dispatch backends and the old
+`pkg/localws` server are also removed. Captured environments use the shared host
+snapshot contract. W3's retained `StateStoreOld` scheduler still needs retirement.
+
+Local lifecycle uses `wingd.LocalRuntime`. Foreground construction receives the
+parsed `--home` before election. Lifecycle, managed units and logs share that
+home. The elected controller factory, detached startup and native execution
+composition remain unfinished. Typed step reports also require the controller's
+matching request decoder and persistence acknowledgement.
+
+## Sealed step selections
+
+`--sw-start-at`, `--sw-stop-at` and `--sw-only` enter the request seal as
+`options.start_at`, `options.stop_at` and `options.only`. Each carries presence,
+value and origin. Plan acceptance rejects a changed selection, and retry keeps
+the original values. Hosts must read these fields from the seal. The native
+host integration remains unfinished.
+
+## Internal launcher arguments
+
+Launcher invocations require `--docker-image` with a digest-pinned DinD image
+beside the runner `--image`. Remove `--deadline`. The Job deadline derives from
+the awarded execution inputs. Plan awards omit `--job` in `fetch-source` and
+`run-node`; work and eval retain the job from their private award metadata.
+
 ## Daemon event cursors
 
 Replace `daemon events --offset N` with the returned `--cursor`. Repeat the same
@@ -288,7 +371,7 @@ unfinished native controller integrations.
 Before, `sparkwing pipeline sparks warmup` compiled a pipeline and uploaded its
 binary to gitcache. Local execution could also download that binary.
 
-Use `sparkwing cache warm --checkout /path/to/repo` to prepare the local cache.
+Use `sparkwing cache warm` from the checkout to prepare the local cache.
 Go pipelines build on this machine. TypeScript checkouts install dependencies.
 Compiled pipeline binaries stay local. Remove remote binary-upload steps from
 warming scripts. Explicit result publication and memo/artifact reads use their
@@ -313,6 +396,7 @@ Doctor no longer repairs private-home permissions or reaps processes from the
 CLI. Remove automation that expects those side effects. See
 [Doctor reports](../diagnosing-admission.md#doctor-reports) for the unfinished
 native runtime and machine-reader integration.
+
 ## Retry requests and receipts
 
 Use `runs retry --run RUN --failed` to reuse successful jobs or `--all-jobs`
@@ -333,6 +417,7 @@ required inputs. The registered SDK entrypoint selects the code; the invoked
 project name remains in the run context. Secret inputs reach planning but are
 redacted in previews and structured diagnostics. The preview JSON uses `jobs`
 in place of `nodes`.
+
 ## Memo copies use transactional blob records
 
 `AttemptReport.OutputFrom`, its `output_from` payload and
@@ -372,8 +457,8 @@ data/host bindings remain separate integration work.
 ## Log readers expose only reads
 
 `storage.LogStore` provides `Read`, `ReadRun` and `Stream`. Its unused
-`Append` and `DeleteRun` methods and the corresponding `client.NodeLogs`
-methods are removed. Writers publish tagged segments with `logseg.Sink`.
+`Append` and `DeleteRun` methods are removed. Controller readers use
+`client.NewLogReader`; the old `client.NodeLogs` adapter is removed. Writers publish tagged segments with `logseg.Sink`.
 Delete a run through the controller's run API to remove its logs.
 
 ```go
@@ -762,8 +847,10 @@ is the award's unit ID. Renewal cannot start a job without its start transition.
 
 Claim, exchange and reconciliation responses carry bearer material once. Do not
 retry a lost response automatically. The unused award recovers through its lease.
-Launcher sync uses `{observed:[{unit_id,job_name,node_uid}]}` and returns awards
-with empty capabilities plus job names to remove. Embedded controllers must
+Launcher sync carries each immutable award fence as `{kind,id,holder,generation}`,
+the Kubernetes Job as `{namespace,name,uid}`, and `node_uid`. It returns awards
+with empty capabilities and full Job references to remove. Name-only cleanup
+is removed. Embedded controllers must
 supply `EngineController.Launcher`. Missing snapshot wiring returns
 `policy_missing` and exposes no award.
 
@@ -1079,8 +1166,9 @@ that keep the logs service running.
   from the run directories, and `sparkwing runs prune` removes them through
   the dashboard.
 - **Go packages:** `pkg/logs` and `pkg/storage/sparkwinglogs` are removed.
-  Read node logs with `client.NodeLogs` from
-  `pkg/controller/client`, and their completeness with `pkg/storage/logseg`.
+  Read tagged log pages through `client.NewLogReader` from
+  `pkg/controller/client`. Each page reports whether the run and its logs
+  are complete.
 - **Mixed versions:** upgrade the runners and the controller together. A
   runner from before segments has nowhere to send its logs once the
   service is gone, and keeps them on its own disk.
@@ -1529,7 +1617,7 @@ kept for S3 and Postgres state profiles.
   `Surfaces.BinaryCache` and `Spec.URLSource` and adds
   `MigrationGuideURL`. `stdoutlogs.CheckSpec` drops its `urlSource`
   parameter.
-  `storeurl.OpenStateStoreFromSpec` opens `sqlite` and `controller` only.
+  `storeurl.OpenStateStoreFromSpec` is removed.
   `pkg/localws` drops `Options.NoLocalStore`. `pkg/pipelines` drops
   `KindProfileName` and `GuardContext.ProfileName`.
 
@@ -1728,9 +1816,17 @@ Both return `capability`, `prefix`, `team`, `grants` and optional RFC3339 expiry
 They return the bearer once, use no-store and require session CSRF for cookie
 authentication. Do not automatically replay issuance.
 
-Go callers use `EnrollRunner` and `CreateServiceToken`. Member `CreateToken`
-accepts `Grants` and `ExpiresAt`; the old kind/principal/scopes/TTL request and
-Token/Metadata response fields are removed. Controller integrations retain the
+Go callers use `client.NewRunnerTokenManager(...).EnrollRunner` for enrollment
+and `client.NewTokenManager(..., true).CreateToken` with kind `service` for
+deployment issuance. The legacy `Client.EnrollRunner` and `Client.CreateServiceToken`
+methods are removed. `runners add --reserved-for POOL` forwards the pool proposal
+to the team-admin enrollment route. Repeated and comma-separated values are
+preserved. Enrollment sends one request and never replays a lost bearer response.
+The legacy `Client.CreateToken`, `ListTokens`, `LookupToken`, `RevokeToken`,
+`RotateToken` and `ListSecrets` methods are removed. Use `NewTokenManager` and
+`NewSecretManager` for typed management operations. The legacy enqueue API is removed. Submit a sealed `CreateRunRequest` through
+`Controller.CreateRun`; the request retains its captured environment digest and
+resolved intake options. Controller integrations retain the
 existing `WithCredentialIssuer` and C1 `ProvisionPolicy` transaction boundary.
 Machine and service enrollment use persisted root registrations by default.
 The store checks current authority, canonical registration selectors, repository

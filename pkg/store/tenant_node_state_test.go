@@ -218,22 +218,11 @@ func TestTenantTriggersStayInTheirTeam(t *testing.T) {
 	if _, err := globex.TriggerClaimant(ctx, "trig-a"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("globex.TriggerClaimant = %v, want ErrNotFound", err)
 	}
-	if _, err := globex.TriggerClaimGeneration(ctx, "trig-a"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("globex.TriggerClaimGeneration = %v, want ErrNotFound", err)
-	}
 	if _, err := globex.HeartbeatTrigger(ctx, "trig-a", time.Minute); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("globex.HeartbeatTrigger = %v, want ErrNotFound", err)
 	}
 	if err := globex.FinishTrigger(ctx, "trig-a"); err != nil {
 		t.Fatalf("globex.FinishTrigger: %v", err)
-	}
-	for name, end := range map[string]func() (bool, error){
-		"FinishTriggerAtGeneration": func() (bool, error) { return globex.FinishTriggerAtGeneration(ctx, "trig-a", 0) },
-		"ReleaseClaimAtGeneration":  func() (bool, error) { return globex.ReleaseClaimAtGeneration(ctx, "trig-a", 0) },
-	} {
-		if ended, err := end(); err != nil || ended {
-			t.Errorf("globex.%s = %v, %v, want nothing ended", name, ended, err)
-		}
 	}
 	if id, err := globex.FindSpawnedChildTriggerID(ctx, "trig-a", "build", "sub"); err != nil || id != "" {
 		t.Fatalf("globex.FindSpawnedChildTriggerID = %q, %v, want none", id, err)

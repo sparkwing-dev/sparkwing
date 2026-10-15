@@ -199,10 +199,11 @@ the team runs.
 
 ## Local runs
 
-Every `sparkwing run` records to this machine: the local secret store,
-SQLite, and the run directories. Its node processes share artifacts
-through `SPARKWING_CACHE_URL` when it is set, and through `cache/` under
-the Sparkwing home otherwise.
+Every `sparkwing run` records through this machine's local controller. Jobs
+exchange artifacts through its local blob store. `--sw-cache-from PROFILE`
+opts into authorized, read-only remote cache access. `--publish PROFILE` copies
+completed results to a controller with local provenance. See
+[local execution](local-execution.md) for native binding requirements.
 
 ## Selecting a profile
 

@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -22,7 +24,7 @@ func TestDeleteRun_DropsMemoEntriesFromDeletedRun(t *testing.T) {
 	if err != nil || !released {
 		t.Fatalf("release: released=%v err=%v", released, err)
 	}
-	if err := s.DeleteRun(ctx, "producer"); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).DeleteRun(ctx, "producer"); err != nil {
 		t.Fatalf("DeleteRun: %v", err)
 	}
 

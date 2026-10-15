@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -22,7 +24,7 @@ func TestMetricKindsRoundTrip(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := st.ListNodeMetrics(t.Context(), "kind-run", "node")
+	got, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeMetrics(t.Context(), "kind-run", "node")
 	if err != nil || len(got) != len(samples) {
 		t.Fatalf("samples = %v, %v", got, err)
 	}
@@ -44,7 +46,7 @@ func TestMetricKindsRejectInvalidCombinations(t *testing.T) {
 			t.Fatalf("accepted %+v", sample)
 		}
 	}
-	got, err := st.ListNodeMetrics(t.Context(), "kind-run", "node")
+	got, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeMetrics(t.Context(), "kind-run", "node")
 	if err != nil || len(got) != 0 {
 		t.Fatalf("invalid samples persisted: %v, %v", got, err)
 	}

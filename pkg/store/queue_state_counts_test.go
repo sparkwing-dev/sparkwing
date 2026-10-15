@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -258,7 +260,7 @@ func TestNodeSettlement_ReadsTheNodesOwnClaimCredential(t *testing.T) {
 		t.Fatalf("finish: %v", err)
 	}
 
-	settlement, err := s.NodeSettlement(ctx, "run-settled", "metered")
+	settlement, err := teststore.ForTeam(t, s, store.DefaultTeam).NodeSettlement(ctx, "run-settled", "metered")
 	if err != nil {
 		t.Fatalf("NodeSettlement: %v", err)
 	}
@@ -283,7 +285,7 @@ func TestNodeSettlement_ReadsTheNodesOwnClaimCredential(t *testing.T) {
 	if err := s.FinishNode(ctx, "run-settled-local", "plain", "success", "", nil); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
-	local, err := s.NodeSettlement(ctx, "run-settled-local", "plain")
+	local, err := teststore.ForTeam(t, s, store.DefaultTeam).NodeSettlement(ctx, "run-settled-local", "plain")
 	if err != nil {
 		t.Fatalf("NodeSettlement: %v", err)
 	}

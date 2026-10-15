@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -42,7 +44,7 @@ func TestMetrics_RoundTrip(t *testing.T) {
 		}
 	}
 
-	samples, err := st.ListNodeMetrics(ctx, "run-1", "a")
+	samples, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeMetrics(ctx, "run-1", "a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +59,7 @@ func TestMetrics_RoundTrip(t *testing.T) {
 	if err := st.AddNodeMetricSample(ctx, "run-1", "a", dup); err != nil {
 		t.Fatalf("duplicate insert returned error: %v", err)
 	}
-	after, _ := st.ListNodeMetrics(ctx, "run-1", "a")
+	after, _ := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeMetrics(ctx, "run-1", "a")
 	if len(after) != 3 {
 		t.Errorf("duplicate insert changed count: %d", len(after))
 	}
@@ -115,7 +117,7 @@ SELECT team, id, 'a', ?, ?, 1, 0 FROM runs WHERE id = 'run-1'`)
 	if err != nil || len(second) != 3 || second[0].CPUMillicores != 3 {
 		t.Fatalf("second page = %+v, %v", second, err)
 	}
-	all, err := st.ListNodeMetrics(ctx, "run-1", "a")
+	all, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeMetrics(ctx, "run-1", "a")
 	if err != nil || len(all) != store.MaxNodeMetricSamples+store.MaxNodeMetricMarkers {
 		t.Fatalf("every sample = %d, %v", len(all), err)
 	}

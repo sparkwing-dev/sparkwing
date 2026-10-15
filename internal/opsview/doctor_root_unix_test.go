@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -164,7 +166,7 @@ func TestScanUnreclaimedRefWorktreesReportsWhatTheSweepWillReclaim(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	if err := st.FinishTrigger(ctx, "run-finished"); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishTrigger(ctx, "run-finished"); err != nil {
 		t.Fatal(err)
 	}
 

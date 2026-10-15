@@ -28,3 +28,9 @@ is unavailable. Use `debug env` to inspect those jobs.
 With `-o json`, attach first emits the execution target, then streams shell output
 in `{"kind":"debug_output","text":"..."}` records. Use `-o plain` for raw shell
 output. Child stderr remains on stderr. Attachment errors return a failed exit.
+
+`debug resume` uses the observed stable run/job identity and requires an authorized
+controller release operation. This rewrite checkout has no final release policy
+or writer binding, so it fails before opening local state. The old direct-store
+and legacy client release paths are removed. A successful bound operation emits
+one JSON receipt, one run/job value in plain mode, or a confirmation in pretty mode.

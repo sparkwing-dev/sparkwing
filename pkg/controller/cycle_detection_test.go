@@ -167,7 +167,7 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := st.GetTrigger(ctx, triggerResp.RunID)
+	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, triggerResp.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := st.GetTrigger(ctx, triggerResp.RunID)
+	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, triggerResp.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := st.GetTrigger(ctx, triggerResp.RunID)
+	got, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, triggerResp.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}

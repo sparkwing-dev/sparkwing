@@ -205,7 +205,7 @@ func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
 		t.Errorf("retry run args[token] = %q, want plaintext %q -- the retry would execute with a literal %s",
 			retried.Args["token"], ctlSecretValue, store.RedactedArgValue)
 	}
-	trig, err := st.GetTrigger(ctx, src.RetriedAs)
+	trig, err := teststore.ForTeam(t, st, store.DefaultTeam).GetTrigger(ctx, src.RetriedAs)
 	if err != nil {
 		t.Fatal(err)
 	}
