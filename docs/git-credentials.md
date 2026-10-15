@@ -29,7 +29,8 @@ source release checks the sealed source repository against current enrollment.
 
 A team owner stores one credential per host, under **Team > Git
 credentials** in the dashboard or with
-`POST /api/v1/team/git-credentials`. Only an owner stores, replaces,
+`POST /api/v1/team/git-credentials`. Live member or verified local authority
+with `team.admin` stores, replaces,
 confirms or deletes one, and no route returns its value: the list shows the
 host, the kind, the pinned host key and who stored it. The controller seals
 the value under its secrets key, bound to the team and the host, so a
@@ -40,6 +41,11 @@ authority with `runs.read`. It lists the authenticated team's metadata and
 uses `Cache-Control: no-store`. Query parameters and caller headers cannot
 select another team. Stored secrets are omitted, including when no decryption
 key is configured. Machine roots, claims and bootstraps cannot read this list.
+
+Session writes require CSRF proof. Embedded controllers supply
+`WithCredentialWriter` with tenant transactions that recheck authority before
+commit. Missing adapters return `policy_missing`. Mutation responses omit stored
+credentials and use `Cache-Control: no-store`.
 
 A credential is one of these kinds:
 

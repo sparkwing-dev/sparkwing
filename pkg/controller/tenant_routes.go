@@ -32,7 +32,6 @@ var (
 	resTeamToken          = tenantResource{"team token", ownerTeam}
 	resPipeline           = tenantResource{"pipeline", ownerTeam}
 	resConcurrencyKey     = tenantResource{"concurrency key", ownerTeam}
-	resGitCredential      = tenantResource{"git credential", ownerTeam}
 	resGitHubRunner       = tenantResource{"github runner binding", ownerTeam}
 	resGitHubInstallation = tenantResource{"github app installation", ownerTeam}
 	resOwnInvitation      = tenantResource{"invitation to the caller", ownerAccount}
@@ -163,10 +162,8 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/runs/{id}/receipt":                                  resRun,
 	"GET /api/v1/runs/{id}/steps":                                    resRun,
 
-	"POST /api/v1/secrets":          resNone,
-	"DELETE /api/v1/secrets/{name}": resSecret,
-	"GET /api/v1/secrets/{name}":    resSecret,
-	"POST /api/v1/secrets/rotate":   resNone,
+	"GET /api/v1/secrets/{name}":  resSecret,
+	"POST /api/v1/secrets/rotate": resNone,
 
 	"GET /api/v1/storage": resNone,
 
@@ -182,10 +179,7 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/team/build-trust": resNone,
 	"PUT /api/v1/team/build-trust": resNone,
 
-	"POST /api/v1/team/git-credentials":                resNone,
-	"DELETE /api/v1/team/git-credentials/{host}":       resGitCredential,
-	"POST /api/v1/team/git-credentials/{host}/confirm": resGitCredential,
-	"GET /api/v1/team/git-credentials/releases":        resNone,
+	"GET /api/v1/team/git-credentials/releases": resNone,
 
 	"GET /api/v1/team/github-app":                                              resNone,
 	"DELETE /api/v1/team/github-app/automation":                                resNone,

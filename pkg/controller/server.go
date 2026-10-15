@@ -52,6 +52,7 @@ type Server struct {
 	resolveCreditReader        func(context.Context, store.Team) (CreditReader, error)
 	resolveQueueReader         func(context.Context, store.Team) (QueueReader, error)
 	resolveCredentialInventory func(context.Context, store.Team) (CredentialInventoryReader, error)
+	resolveCredentialWriter    func(context.Context, store.Team) (CredentialWriter, error)
 
 	peerPrincipal func(*http.Request) *Principal
 
@@ -913,9 +914,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("DELETE /api/v1/team/invitations/{id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteInvitation)))
 	mux.Handle("GET /api/v1/team/build-trust", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetBuildTrust)))
 	mux.Handle("PUT /api/v1/team/build-trust", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutBuildTrust)))
-	mux.Handle("POST /api/v1/team/git-credentials", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitCredential)))
-	mux.Handle("POST /api/v1/team/git-credentials/{host}/confirm", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleConfirmGitCredential)))
-	mux.Handle("DELETE /api/v1/team/git-credentials/{host}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteGitCredential)))
 	mux.Handle("GET /api/v1/team/git-credentials/releases", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleListGitCredentialReleases)))
 	mux.Handle("POST /api/v1/team/tokens", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreateTeamToken)))
 	mux.Handle("GET /api/v1/team/tokens", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListTeamTokens)))
@@ -954,9 +952,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/credits/payments/{reference}", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handlePaidGrantLookup)))
 	mux.Handle("GET /api/v1/credits/settings", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsSettingsShow)))
 
-	mux.Handle("POST /api/v1/secrets", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateSecret), ScopeTeamAdmin))
 	mux.Handle("GET /api/v1/secrets/{name}", newClaimSensitiveRoute(claimSecretKinds, secretRunBinding, http.HandlerFunc(s.handleClaimSecret)).orElse(requireScope(ScopeSecretsRead, http.HandlerFunc(s.handleGetSecret), ScopeTeamAdmin)))
-	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret), ScopeTeamAdmin))
 	mux.Handle("POST /api/v1/secrets/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateSecrets)))
 
 	router := http.NewServeMux()
@@ -964,7 +960,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	s.registerEngineRoutes(router)
 	s.registerPolicyEndpoints(router, s.claimEndpoints())
 	s.registerAuthorityRoutes(router)
-	s.registerCredentialInventoryRoutes(router)
+	s.registerCredentialRoutes(router)
 	s.registerPolicyEndpoints(router, s.sizingEndpoints())
 	s.registerPolicyEndpoints(router, s.creditEndpoints())
 	s.registerPolicyEndpoints(router, s.queueEndpoints())

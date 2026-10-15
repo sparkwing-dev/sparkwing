@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -34,76 +33,48 @@ type secretJSON struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
-func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
-	var req secretSetReq
-	if err := decodeJSONLimit(r, &req, maxSecretJSONBody); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	req, err := decodeCredentialRequest[secretSetReq](r)
+	if err != nil {
+		return err
 	}
-	tn, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+	if err := secrets.ValidateName(req.Name); err != nil {
+		return invalidEngineBody("invalid secret name")
 	}
-	if err := validateSecretName(tn, req.Name, req.Pipeline); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	principal := "anonymous"
-	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
-		principal = p.Name
+	tn, err := s.credentialWriter(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
 	masked := true
 	if req.Masked != nil {
 		masked = *req.Masked
 	}
-	// safety: the envelope is sealed to the team the row is written into, so
-	// one tenant serves both and they cannot drift apart.
 	if s.secretsCipher == nil {
-		writeError(w, http.StatusServiceUnavailable, errNoSecretsCipher)
-		return
+		return &apierr.Error{Code: apierr.Unavailable, Message: "secret encryption is unavailable"}
 	}
 	binding := secretBinding{Team: tn.Team(), Name: req.Name, Scope: req.Pipeline, Shared: req.Shared, Masked: masked}
-	stored, sErr := sealSecret(s.secretsCipher, binding, req.Value)
-	if errors.Is(sErr, secrets.ErrKeyRefused) {
-		writeError(w, http.StatusConflict, sErr)
-		return
+	stored, err := sealSecret(s.secretsCipher, binding, req.Value)
+	if err != nil {
+		return credentialWriteError(err)
 	}
-	if sErr != nil {
-		writeError(w, http.StatusInternalServerError, sErr)
-		return
-	}
-	if err := tn.CreateOrReplaceSecret(store.Secret{
+	if err := tn.WriteSecret(r.Context(), a, store.Secret{
 		Name:      req.Name,
 		Value:     stored,
-		Principal: principal,
+		Principal: a.Principal.Capability.Subject.ID,
 		Pipeline:  req.Pipeline,
 		Masked:    masked,
 		Shared:    req.Shared,
-	}, time.Now().UTC()); err != nil {
-		if errors.Is(err, store.ErrSecretLimit) {
-			writeError(w, http.StatusRequestEntityTooLarge, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
+	}); err != nil {
+		return credentialWriteError(err)
 	}
 	noteAuditTarget(r.Context(), "secret_name", req.Name)
-	s.logger.Info("secret written", "name", req.Name, "principal", principal,
-		"pipeline", req.Pipeline, "masked", masked, "shared", req.Shared)
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 // safety: a server built without a cipher would otherwise store or serve
 // plaintext, so it refuses secret reads and writes outright.
 var errNoSecretsCipher = errors.New("secrets cipher: this controller has no secrets key, so it stores and serves no secret")
-
-// safety: the name rule guards new rows only, so a row written under an older rule can still be rotated.
-func validateSecretName(tn *store.Tenant, name, pipeline string) error {
-	if row, err := tn.GetSecretRow(name, pipeline); err == nil && row != nil {
-		return nil
-	}
-	return secrets.ValidateName(name)
-}
 
 func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 	sec, tn, ok := s.readSecretForCaller(w, r, r.PathValue("name"))
@@ -247,22 +218,18 @@ func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request, a cap
 	return nil
 }
 
-func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	name := r.PathValue("name")
-	tn, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+	tn, err := s.credentialWriter(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
-	if err := tn.DeleteSecret(name, r.URL.Query().Get("pipeline")); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
+	if err := tn.RemoveSecret(r.Context(), a, name, r.URL.Query().Get("pipeline")); err != nil {
+		return credentialWriteError(err)
 	}
 	noteAuditTarget(r.Context(), "secret_name", name)
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 // safety: a row held as plaintext and one sealed under the previous key both

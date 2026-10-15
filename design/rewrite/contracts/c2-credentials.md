@@ -183,6 +183,49 @@ signature changes. The replaced legacy list handlers and registrations are
 removed. Credential writes and audited per-claim secret release remain separate
 cutovers.
 
+### Credential mutations
+
+POST `/api/v1/secrets`, DELETE `/api/v1/secrets/{name}`, POST
+`/api/v1/team/git-credentials`, POST
+`/api/v1/team/git-credentials/{host}/confirm` and DELETE
+`/api/v1/team/git-credentials/{host}` use PolicyRouter's existing member
+`team.admin` rules. Session writes require CSRF. All responses use no-store.
+The authenticated team selects the writer. Request headers, query selectors
+and bodies supply no team or actor authority. Secret writes derive Principal
+and git writes derive CreatedBy from the authenticated subject.
+
+Invariant: only live team-admin authority can commit a credential mutation
+within its authenticated tenant, and stored envelopes bind to that tenant and
+the complete row. CredentialWriter owns the transactional authority recheck,
+store clock, row mutation and actor attribution. It exposes Team plus
+WriteSecret, RemoveSecret, WriteGitCredential, ConfirmGitCredentialFor and
+RemoveGitCredential, each taking context and Authorized. Secret writes carry
+store.Secret. Git writes carry and return store.GitCredential. Confirmation
+takes host/fingerprint and returns the persisted row. Deletes take the exact
+name/pipeline or host selector.
+
+WithCredentialWriter supplies this local C2 contract for embedded controllers
+and tests. The default tenant must implement it. Nil, foreign-team and missing
+writers fail with policy_missing. Existing Tenant credential writes take no
+authority and cannot satisfy this interface. C1 must supply the transaction
+adapter. No controller SQL or unfenced writer fallback is permitted. Fakes
+prove the HTTP boundary and envelope/storage round trip, not the production
+revocation race. The production integration remains open.
+
+Bodies accept one typed JSON object and refuse unknown authority fields and
+trailing values without echoing request data. Secret names always use the
+shared grammar, including replacements. Masking defaults to true. Missing
+encryption returns unavailable. Key-location refusal returns conflict with
+fixed configuration guidance. Other cipher/store diagnostics remain private.
+SSH writes pin the scanned host key and wait for owner confirmation. An omitted
+SSH port uses 22. An explicit zero is invalid. Confirmation preserves the
+pinned fingerprint check and returns only public metadata. Secret values and
+git credential bytes never enter mutation responses.
+
+Secret-by-name release, tenant key rotation and source-release audit reads
+remain separate cutovers. Rotation needs a tenant-scoped authority-bearing
+store transaction because the existing Store rotation walks every team.
+
 ### Cache record transport
 
 POST `/api/v1/data/memo/lookup` takes `pipeline`, `job`, `hash` and optional
@@ -419,6 +462,7 @@ All capability names below are in `internal/capability`.
 | `controller.RunTransactions`, `EngineController.ResolveTenant`, `EngineController.ResolveRunTeam`, `Server.WithEngineController` | Supply final intake/sealing transactions and resource ownership. Production uses the existing store methods. Embedded controllers and tests may supply the same contracts without SQL or alternate authorization. |
 | `controller.SizingReader`, `controller.SizingStore`, `Server.WithSizingStore` | Supply tenant sizing reads and authority-bearing measurement transactions. Default reads use `Tenant.GetPipelineProfile`. Writes require the explicit adapter and fail closed when it is absent. |
 | `controller.CredentialInventoryReader`, `Server.WithCredentialInventoryReader` | Supply the existing tenant secret/git inventory reads with an authenticated-team check. |
+| `controller.CredentialWriter`, `Server.WithCredentialWriter` | Supply tenant credential mutations with committing authority rechecks and actor attribution. Missing adapters refuse writes. |
 | `controller.RunStatusFacts`, `EngineController.ReadRunStatus` | Supply one committed snapshot, complete attempt history and validated log subjects for the authorized team/run. Verified engine policy supplies notices. The default uses Tenant.ReadRunView. No C1 signature changes. |
 
 The exported data tables are `Grants`, `AwardPolicies`, `LivenessPolicies`,

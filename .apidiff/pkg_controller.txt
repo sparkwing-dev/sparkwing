@@ -72,6 +72,14 @@ type CredentialIssuer interface {
 	ProvisionCapability(context.Context, capability.ProvisionSpec) (capability.Issued, error)
 	DelegateCapability(context.Context, capability.DelegateSpec) (capability.Issued, error)
 }
+type CredentialWriter interface {
+	Team() store.Team
+	WriteSecret(context.Context, capability.Authorized, store.Secret) error
+	RemoveSecret(context.Context, capability.Authorized, string, string) error
+	WriteGitCredential(context.Context, capability.Authorized, store.GitCredential) (store.GitCredential, error)
+	ConfirmGitCredentialFor(context.Context, capability.Authorized, string, string) (store.GitCredential, error)
+	RemoveGitCredential(context.Context, capability.Authorized, string) error
+}
 type CreditReader interface {
 	Team() store.Team
 	CreditState(context.Context, time.Duration) (store.CreditState, error)
@@ -433,6 +441,7 @@ func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithCredentialInventoryReader(resolve func(context.Context, store.Team) (CredentialInventoryReader, error)) *Server
 func (s *Server) WithCredentialIssuer(issuer CredentialIssuer) *Server
+func (s *Server) WithCredentialWriter(resolve func(context.Context, store.Team) (CredentialWriter, error)) *Server
 func (s *Server) WithCreditReader(resolve func(context.Context, store.Team) (CreditReader, error)) *Server
 func (s *Server) WithDashboard(d Dashboard) *Server
 func (s *Server) WithDashboardURL(url string) *Server

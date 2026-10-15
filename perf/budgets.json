@@ -30,13 +30,31 @@
     {
       "route": "/api/v1/secrets",
       "kind": "api",
-      "exempt": "Requires authenticated tenant inventory and encrypted config fixtures, absent from the dashboard corpus. In-memory HTTP tests are correctness evidence. Authorized latency, cold start and response bytes remain unmeasured.",
+      "exempt": "Requires authenticated tenant inventory, encrypted config fixtures and authority-bearing write transactions, absent from the dashboard corpus. A write probe would measure refusal without the transaction adapter. In-memory HTTP tests are correctness evidence. Authorized latency, cold start and response bytes remain unmeasured.",
       "baselines": {}
     },
     {
       "route": "/api/v1/team/git-credentials",
       "kind": "api",
-      "exempt": "Requires authenticated tenant inventory and stored git metadata fixtures, absent from the dashboard corpus. A refusal does not measure an inventory read. Authorized latency, cold start and response bytes remain unmeasured.",
+      "exempt": "Requires authenticated tenant inventory, stored git metadata fixtures and authority-bearing write transactions, absent from the dashboard corpus. A write probe would measure refusal without the transaction adapter. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/secrets/{name}",
+      "kind": "api",
+      "exempt": "Deletion needs live tenant-admin authority and a committing transaction adapter. Probing the unconfigured controller would measure refusal. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/team/git-credentials/{host}",
+      "kind": "api",
+      "exempt": "Deletion needs live tenant-admin authority and a committing transaction adapter. Probing the unconfigured controller would measure refusal. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/team/git-credentials/{host}/confirm",
+      "kind": "api",
+      "exempt": "Confirmation changes tenant credential authority and requires a pinned-host fixture plus a committing transaction adapter. A scheduled probe must not confirm a real credential. Authorized latency, cold start and response bytes are unmeasured.",
       "baselines": {}
     },
     {

@@ -985,6 +985,17 @@ cannot be opened, the request fails without returning a partial list. Missing
 decryption returns `unavailable`. The response uses `Cache-Control: no-store`.
 Machine roots, claims and bootstraps cannot read the inventory.
 
+Secret creation and deletion require live member or verified local authority
+with `team.admin`. Session mutations require CSRF proof. These routes use only
+the authenticated team and return `Cache-Control: no-store`. Secret names must
+pass the shared grammar on every write, including replacement. Masking defaults
+to true. Missing encryption returns `unavailable`, and failed writes return no
+secret value.
+
+Embedded controllers supply `WithCredentialWriter` with transactions that
+recheck authority before commit. A missing or foreign-team writer returns
+`policy_missing`. The legacy tenant writer is not used as a fallback.
+
 `POST /api/v1/tokens` rejects unknown or duplicate grants and caller-selected
 authority fields with `400`. Issuance beyond current grants or expiry is
 refused with `403`. An explicit empty grants array is legal and unlocks

@@ -2011,7 +2011,7 @@ paths:
 
   /api/v1/secrets:
     post:
-      x-sparkwing-scope: admin or team.admin
+      x-sparkwing-scope: team.admin
       tags: [secrets]
       summary: Create or replace a secret.
       requestBody:
@@ -2092,7 +2092,7 @@ paths:
         "403": {description: The caller may not read this value.}
         "404": {$ref: "#/components/responses/NotFound"}
     delete:
-      x-sparkwing-scope: admin or team.admin
+      x-sparkwing-scope: team.admin
       tags: [secrets]
       summary: Delete a secret.
       responses:

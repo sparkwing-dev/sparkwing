@@ -47,10 +47,15 @@ func (s *Server) credentialInventory(ctx context.Context, team string) (Credenti
 	return reader, nil
 }
 
-func (s *Server) registerCredentialInventoryRoutes(mux *http.ServeMux) {
+func (s *Server) registerCredentialRoutes(mux *http.ServeMux) {
 	endpoints := []Endpoint{
 		{Method: "GET", Pattern: "/api/v1/secrets", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleListSecrets},
+		{Method: "POST", Pattern: "/api/v1/secrets", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleCreateSecret},
+		{Method: "DELETE", Pattern: "/api/v1/secrets/{name}", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDeleteSecret},
 		{Method: "GET", Pattern: "/api/v1/team/git-credentials", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleListGitCredentials},
+		{Method: "POST", Pattern: "/api/v1/team/git-credentials", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handlePutGitCredential},
+		{Method: "POST", Pattern: "/api/v1/team/git-credentials/{host}/confirm", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleConfirmGitCredential},
+		{Method: "DELETE", Pattern: "/api/v1/team/git-credentials/{host}", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDeleteGitCredential},
 	}
 	for _, endpoint := range endpoints {
 		router := NewPolicyRouter(s.authorization)

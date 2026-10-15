@@ -1,5 +1,18 @@
 # Migrating to the next release
 
+## Credential mutations
+
+Secret create/delete and git-credential create/confirm/delete require live
+member or verified local authority with `team.admin`. Session mutations require
+CSRF. The authenticated team selects the rows, and errors use the shared API
+envelope. A deployment-admin bearer gains no team credential authority.
+
+Embedded controllers supply `WithCredentialWriter` with tenant transactions
+that recheck authority before commit. The default refuses writes with
+`policy_missing` until that adapter is installed. Existing unfenced Tenant
+writers cannot stand in for it. Secret names must pass the shared grammar on
+replacement too. Omit an SSH port to use 22. An explicit zero is invalid.
+
 ## Credential inventories
 
 Secret and git-credential lists use the shared capability policy. Use a live

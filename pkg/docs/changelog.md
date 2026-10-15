@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **controller (Breaking):** Secret and git-credential mutations require `team.admin`, session CSRF and tenant transactions that recheck authority before commit
+  Embedded controllers supply `WithCredentialWriter`. Missing adapters refuse writes. Secret replacement validates the shared name grammar, and an explicit SSH port of zero is invalid. See [migration guide](docs/migrations/_unreleased.md#credential-mutations).
 - **controller (Breaking):** Secret and git-credential inventories use the shared capability policy
   Reads select the authenticated team and keep credential values private. An unreadable public config value fails the secret list without returning partial rows. See [migration guide](docs/migrations/_unreleased.md#credential-inventories).
 - **controller:** Data routes expose scoped memo lookup, dependency-cache lookup and memo copy

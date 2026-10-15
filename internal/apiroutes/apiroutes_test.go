@@ -220,11 +220,16 @@ func TestParseSizingEndpointsUsesActualRegistrations(t *testing.T) {
 	}
 }
 
-func TestParseCredentialInventoryEndpoints(t *testing.T) {
-	src := writeFile(t, "server.go", "s.registerCredentialInventoryRoutes(router)")
+func TestParseCredentialEndpoints(t *testing.T) {
+	src := writeFile(t, "server.go", "s.registerCredentialRoutes(router)")
 	endpoints := `
 {Method: "GET", Pattern: "/api/v1/secrets"},
-{Method: "GET", Pattern: "/api/v1/team/git-credentials"},`
+{Method: "POST", Pattern: "/api/v1/secrets"},
+{Method: "DELETE", Pattern: "/api/v1/secrets/{name}"},
+{Method: "GET", Pattern: "/api/v1/team/git-credentials"},
+{Method: "POST", Pattern: "/api/v1/team/git-credentials"},
+{Method: "POST", Pattern: "/api/v1/team/git-credentials/{host}/confirm"},
+{Method: "DELETE", Pattern: "/api/v1/team/git-credentials/{host}"},`
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "credential_inventory.go"), []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +239,12 @@ func TestParseCredentialInventoryEndpoints(t *testing.T) {
 	}
 	want := []Route{
 		{Method: "GET", Path: "/api/v1/secrets", Scope: "runs.read` or `team.admin"},
+		{Method: "POST", Path: "/api/v1/secrets", Scope: "team.admin"},
+		{Method: "DELETE", Path: "/api/v1/secrets/{name}", Scope: "team.admin"},
 		{Method: "GET", Path: "/api/v1/team/git-credentials", Scope: "runs.read"},
+		{Method: "POST", Path: "/api/v1/team/git-credentials", Scope: "team.admin"},
+		{Method: "DELETE", Path: "/api/v1/team/git-credentials/{host}", Scope: "team.admin"},
+		{Method: "POST", Path: "/api/v1/team/git-credentials/{host}/confirm", Scope: "team.admin"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("inventory registrations=%+v want %+v", got, want)
