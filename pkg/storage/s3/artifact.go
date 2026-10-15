@@ -44,8 +44,6 @@ type ArtifactStore struct {
 	// MaxUsagePages bounds how many listings one [ArtifactStore.Usage]
 	// spends. Zero takes DefaultMaxUsagePages.
 	MaxUsagePages int
-
-	casOnce casProbe
 }
 
 // NewArtifactStore wires an ArtifactStore around the provided client.

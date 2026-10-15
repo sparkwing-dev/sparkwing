@@ -156,7 +156,6 @@ current set. The suites shipped today:
 |---|---|
 | [`storage.ArtifactStore`](./pkg/storage/storage.go) | [`pkg/storage/conformance.TestArtifactStore`](./pkg/storage/conformance) |
 | [`storage.LogStore`](./pkg/storage/storage.go) | [`pkg/storage/conformance.TestLogStore`](./pkg/storage/conformance) |
-| [`storage.ConditionalWriter`](./pkg/storage/storage.go) | [`pkg/storage/conformance.TestConditionalWriter`](./pkg/storage/conformance) |
 | [`controller.Cipher`](./pkg/controller/cipher.go) | [`pkg/controller/ciphertest.TestCipher`](./pkg/controller/ciphertest) |
 
 Each suite is a single exported `TestX(t, factory)` function. A

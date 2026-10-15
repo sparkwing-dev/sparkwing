@@ -195,10 +195,14 @@ legacy source byte transport and grant-based controller data handlers are
 deleted. The authenticated controller adapter and remaining output handlers
 still need binding to the store's upload transaction.
 
-The acceptance suite runs eight `storage-components` checks for receipt and
+The acceptance suite runs nine `storage-components` checks for receipt and
 namespace isolation, binary trust, verified streams, presence budgets, memo
 failure policy and tagged logs. Generated filesystem properties exercise signed
 HTTP handlers, immutable CAS recovery and log uploads/reads on real files.
+The remote-cache property reads real filesystem objects through signed transfers.
+It rejects altered record scope, missing verified-default evidence and corrupt
+or missing bytes before granting artifact access. Its record service is a fake.
+The memo budget check drives deadline expiry with a simulated clock.
 Controller authorization and transactional records use fakes. These component
 checks run separately from the skipped native targets, whose transport,
 transaction, backend matrix and placement assertions need their real drivers.

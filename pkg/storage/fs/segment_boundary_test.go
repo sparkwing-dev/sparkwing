@@ -89,7 +89,7 @@ func TestArtifactStore_RejectsPathEscapingKeys(t *testing.T) {
 			if err := as.Delete(ctx, tc.key); err == nil {
 				t.Error("Delete succeeded")
 			}
-			if _, err := as.PutIfAbsent(ctx, tc.key, bytes.NewReader([]byte("owned"))); err == nil {
+			if err := as.PutIfAbsent(ctx, tc.key, bytes.NewReader([]byte("owned"))); err == nil {
 				t.Error("PutIfAbsent succeeded")
 			}
 		})

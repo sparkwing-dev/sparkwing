@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"testing/synctest"
 	"time"
 	"unicode"
 
@@ -29,6 +30,7 @@ func storageBoundaryChecks() map[string]func(*testing.T) {
 		"storage-hasmany-large-budget":                   checkStoragePresence,
 		"storage-memo-materialization-failures":          checkStorageMemoFailures,
 		"storage-log-segments-and-fallback":              checkStorageLogs,
+		"storage-local-remote-cache-opt-in":              checkStorageRemoteCache,
 	}
 }
 
@@ -342,15 +344,21 @@ func checkStoragePresence(t *testing.T) {
 
 type storageMemo struct {
 	blob.RecordStore
-	hit blob.MemoHit
-	err error
+	hit  blob.MemoHit
+	err  error
+	wait bool
 }
 
-func (s storageMemo) CopyMemo(context.Context, blob.CopyMemoRequest) (blob.MemoHit, error) {
+func (s storageMemo) CopyMemo(ctx context.Context, _ blob.CopyMemoRequest) (blob.MemoHit, error) {
+	if s.wait {
+		<-ctx.Done()
+		return blob.MemoHit{}, ctx.Err()
+	}
 	return s.hit, s.err
 }
 
 func checkStorageMemoFailures(t *testing.T) {
+	t.Run("budget", checkStorageMemoBudget)
 	for _, fault := range []string{"missing_output", "record_refused", "missing_bytes", "corrupt_bytes", "short_bytes", "members_without_manifest", "valid", "explicit_empty"} {
 		t.Run(fault, func(t *testing.T) {
 			body := []byte(`{"answer":42}`)
@@ -388,4 +396,15 @@ func checkStorageMemoFailures(t *testing.T) {
 			}
 		})
 	}
+}
+
+func checkStorageMemoBudget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		result, err := blob.MaterializeMemo(t.Context(), blob.NewSignedStore(blob.SignedStoreOptions{}), storageMemo{wait: true}, blob.CopyMemoRequest{
+			Lookup: blob.MemoLookup{Budget: blob.Budget{Deadline: time.Now().Add(time.Second)}},
+		})
+		if err != nil || result.Hit.Found || result.Output != nil {
+			t.Fatalf("exhausted memo budget returned a hit: %+v, %v", result, err)
+		}
+	})
 }

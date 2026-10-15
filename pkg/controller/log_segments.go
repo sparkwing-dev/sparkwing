@@ -261,7 +261,7 @@ func logPutSubject(key string, size int64, contentMD5 string) string {
 	return key + "\x00" + strconv.FormatInt(size, 10) + "\x00" + contentMD5
 }
 
-func sealedOnConflict(_ storage.ETag, err error) error {
+func sealedOnConflict(err error) error {
 	if errors.Is(err, storage.ErrPreconditionFailed) {
 		return logseg.ErrSealed
 	}
@@ -648,6 +648,8 @@ func (s *Server) sealNodeLog(ctx context.Context, objs logObjectStore, rec store
 }
 
 func nodeLogSubject(rec store.NodeLog) blob.LogSubject {
-	return blob.LogSubject{Kind: blob.LogJobAttempt, Team: string(rec.Team), RunID: rec.RunID,
-		Attempt: &runspec.AttemptIdentity{Team: string(rec.Team), RunID: rec.RunID, NodeID: rec.NodeID, Attempt: rec.Attempt, Generation: rec.Generation}}
+	return blob.LogSubject{
+		Kind: blob.LogJobAttempt, Team: string(rec.Team), RunID: rec.RunID,
+		Attempt: &runspec.AttemptIdentity{Team: string(rec.Team), RunID: rec.RunID, NodeID: rec.NodeID, Attempt: rec.Attempt, Generation: rec.Generation},
+	}
 }

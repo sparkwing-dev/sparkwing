@@ -42,11 +42,7 @@ func LogCursor(ctx context.Context) string {
 	return c
 }
 
-// ErrPreconditionFailed is returned by [ConditionalWriter] writes when
-// the required precondition does not hold: the object already exists
-// for PutIfAbsent, or its current ETag differs from (or the object is
-// absent for) PutIfMatch. It signals a lost compare-and-swap race, not
-// a transport fault; the caller re-reads the current state and retries.
+// ErrPreconditionFailed reports an object that already exists.
 var ErrPreconditionFailed = errors.New("storage: conditional write precondition failed")
 
 // ArtifactStore is a content-addressed blob store. Keys are
@@ -74,67 +70,6 @@ type ArtifactStore interface {
 	// implementation-defined. Backends without a native enumeration
 	// primitive return ErrListNotSupported.
 	List(ctx context.Context, prefix string) ([]string, error)
-}
-
-// ETag is an opaque per-object version token. A successful
-// [ConditionalWriter] write returns the new ETag; the same value,
-// fed back to PutIfMatch, gates the next write on the object not
-// having changed in between. ETags are only comparable within one
-// backend instance; never persist one as cross-backend identity.
-type ETag string
-
-// ConditionalWriter is the optional compare-and-swap capability an
-// [ArtifactStore] exposes when its provider honors object-store write
-// preconditions (S3 If-None-Match/If-Match, GCS generation-match,
-// Azure Blob ETag preconditions). It turns a shared bucket into a
-// coordination primitive: many writers serialize on one key through
-// read-modify-CAS retry loops, with no database or lock service.
-//
-// Detect the capability before relying on it. Not every backend
-// implements the interface, and not every endpoint that does actually
-// enforces the preconditions -- some S3-compatible gateways accept the
-// headers and silently ignore them. [Conditional] reports the static
-// type capability; ConditionalWritesSupported probes the live
-// endpoint. When either reports false, fall back to last-write-wins
-// [ArtifactStore.Put]; a CAS loop against an endpoint that ignores
-// preconditions would hand out unsafe locks.
-type ConditionalWriter interface {
-	// GetWithETag returns a reader for the object at key together with
-	// its current ETag. The caller closes the reader. Returns
-	// ErrNotFound if the key has never been written.
-	GetWithETag(ctx context.Context, key string) (io.ReadCloser, ETag, error)
-
-	// PutIfAbsent writes r at key only when no object exists there,
-	// returning the new ETag. It returns ErrPreconditionFailed,
-	// without writing, when an object already exists.
-	PutIfAbsent(ctx context.Context, key string, r io.Reader) (ETag, error)
-
-	// PutIfMatch writes r at key only when the current object's ETag
-	// equals expect, returning the new ETag. It returns
-	// ErrPreconditionFailed, without writing, when the ETag differs
-	// (a concurrent writer won the race) or the object is absent.
-	PutIfMatch(ctx context.Context, key string, r io.Reader, expect ETag) (ETag, error)
-
-	// ConditionalWritesSupported reports whether the configured
-	// endpoint actually enforces write preconditions. A false result
-	// means the caller must fall back to last-write-wins. An
-	// implementation may answer from a live probe on every call, so a
-	// caller that asks repeatedly memoizes the answer itself -- and
-	// only an answer: an error is not one, and asking again after it is
-	// how a transient failure stops costing the caller its
-	// preconditions for the life of the process.
-	ConditionalWritesSupported(ctx context.Context) (bool, error)
-}
-
-// Conditional returns the [ConditionalWriter] view of store and true
-// when the backend type supports compare-and-swap writes. A false
-// result means the caller must fall back to last-write-wins. Callers
-// that must also tolerate endpoints which advertise but ignore
-// preconditions follow up with
-// [ConditionalWriter.ConditionalWritesSupported].
-func Conditional(store ArtifactStore) (ConditionalWriter, bool) {
-	cw, ok := store.(ConditionalWriter)
-	return cw, ok
 }
 
 // StoreUsage is how much a store holds: its total stored bytes and the

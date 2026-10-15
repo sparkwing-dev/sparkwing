@@ -149,9 +149,6 @@ func TestArtifactStore_UsageTotalsStoredBytesAndObjects(t *testing.T) {
 			t.Fatalf("Put %s: %v", key, err)
 		}
 	}
-	if ok, err := s.ConditionalWritesSupported(ctx); err != nil || !ok {
-		t.Fatalf("ConditionalWritesSupported = %t, %v", ok, err)
-	}
 	usage, _, err = storage.Usage(ctx, s)
 	if err != nil {
 		t.Fatalf("Usage: %v", err)

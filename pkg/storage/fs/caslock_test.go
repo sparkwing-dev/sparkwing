@@ -4,64 +4,77 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"sync"
 	"testing"
+	"testing/quick"
+	"testing/synctest"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
 func newStoreT(t *testing.T, dir string) *ArtifactStore {
 	t.Helper()
 	s, err := NewArtifactStore(dir)
 	if err != nil {
-		t.Fatalf("NewArtifactStore: %v", err)
+		t.Fatal(err)
 	}
 	return s
 }
 
 func TestPutIfAbsentGivesUpOnTheDeadlineWhileTheLockIsHeld(t *testing.T) {
 	dir := t.TempDir()
-	held, err := newStoreT(t, dir).lockKey(context.Background(), "k")
+	held, err := newStoreT(t, dir).lockKey(t.Context(), "k")
 	if err != nil {
-		t.Fatalf("lockKey: %v", err)
+		t.Fatal(err)
 	}
 	defer releaseKey(held)
-
 	blocked := newStoreT(t, dir)
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	start := time.Now()
-	_, err = blocked.PutIfAbsent(ctx, "k", bytes.NewReader([]byte("v")))
-	elapsed := time.Since(start)
-
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("PutIfAbsent against a held lock: err = %v, want context.DeadlineExceeded", err)
-	}
-	if elapsed > 2*time.Second {
-		t.Fatalf("PutIfAbsent returned after %s, want near its 50ms deadline", elapsed)
-	}
-	has, err := blocked.Has(context.Background(), "k")
-	if err != nil {
-		t.Fatalf("Has: %v", err)
-	}
-	if has {
-		t.Fatal("PutIfAbsent wrote the object it reported it could not take the lock for")
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+		defer cancel()
+		err := blocked.PutIfAbsent(ctx, "k", bytes.NewReader([]byte("v")))
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("blocked create = %v", err)
+		}
+	})
+	if has, err := blocked.Has(t.Context(), "k"); err != nil || has {
+		t.Fatalf("cancelled create published an object: %t, %v", has, err)
 	}
 }
 
-func TestConditionalWritesSupportedDoesNotWaitOnAHeldLock(t *testing.T) {
-	dir := t.TempDir()
-	held, err := newStoreT(t, dir).lockKey(context.Background(), casProbeKey)
-	if err != nil {
-		t.Fatalf("lockKey: %v", err)
+func TestPutIfAbsentAcrossHandles(t *testing.T) {
+	property := func(left, right [64]byte) bool {
+		dir := t.TempDir()
+		stores := []*ArtifactStore{newStoreT(t, dir), newStoreT(t, dir)}
+		bodies := [][]byte{left[:], right[:]}
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		var results [2]error
+		for i := range stores {
+			wg.Go(func() {
+				<-start
+				results[i] = stores[i].PutIfAbsent(t.Context(), "key", bytes.NewReader(bodies[i]))
+			})
+		}
+		close(start)
+		wg.Wait()
+		winner := 0
+		if results[0] != nil {
+			winner = 1
+		}
+		if results[winner] != nil || !errors.Is(results[1-winner], storage.ErrPreconditionFailed) {
+			return false
+		}
+		reader, err := stores[0].Get(t.Context(), "key")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, readErr := io.ReadAll(reader)
+		return errors.Join(readErr, reader.Close()) == nil && bytes.Equal(body, bodies[winner])
 	}
-	defer releaseKey(held)
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	ok, err := newStoreT(t, dir).ConditionalWritesSupported(ctx)
-	if err != nil {
-		t.Fatalf("ConditionalWritesSupported: %v", err)
-	}
-	if !ok {
-		t.Fatal("a lock another holder is already holding reported the filesystem as unable to lock")
+	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+		t.Fatal(err)
 	}
 }

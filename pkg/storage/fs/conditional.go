@@ -1,7 +1,6 @@
 package fs
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,13 +14,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
-var _ storage.ConditionalWriter = (*ArtifactStore)(nil)
-
 // safety: SafeArtifactKey rejects a segment starting with a dot, so no
 // stored object can land in here and List can skip the whole directory.
 const casLockDir = ".cas-locks"
-
-const casProbeKey = "conditional-write-probe"
 
 var errLockUnsupported = errors.New("storage: filesystem does not support locking")
 
@@ -89,109 +84,19 @@ func releaseKey(f *os.File) {
 	_ = f.Close()
 }
 
-// GetWithETag returns the object and the sha256 of its bytes as the
-// ETag. The ETag feeds back into PutIfMatch to gate the next write.
-func (s *ArtifactStore) GetWithETag(_ context.Context, key string) (io.ReadCloser, storage.ETag, error) {
-	root, rel, err := s.openRoot(key)
-	if err != nil {
-		return nil, "", notFound(err)
-	}
-	defer func() { _ = root.Close() }()
-	body, err := root.ReadFile(rel)
-	if err != nil {
-		return nil, "", notFound(err)
-	}
-	return io.NopCloser(bytes.NewReader(body)), contentETag(body), nil
-}
-
-// PutIfAbsent writes only when key has no object. A pre-existing
-// object yields ErrPreconditionFailed.
-func (s *ArtifactStore) PutIfAbsent(ctx context.Context, key string, r io.Reader) (storage.ETag, error) {
+// PutIfAbsent stores a new object and refuses an existing key.
+func (s *ArtifactStore) PutIfAbsent(ctx context.Context, key string, r io.Reader) error {
 	lock, err := s.lockKey(ctx, key)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer releaseKey(lock)
-
 	has, err := s.Has(ctx, key)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if has {
-		return "", storage.ErrPreconditionFailed
+		return storage.ErrPreconditionFailed
 	}
-	return s.writeAtomic(ctx, key, r)
-}
-
-// PutIfMatch writes only when the current object's ETag equals expect.
-// A differing or absent object yields ErrPreconditionFailed.
-func (s *ArtifactStore) PutIfMatch(ctx context.Context, key string, r io.Reader, expect storage.ETag) (storage.ETag, error) {
-	lock, err := s.lockKey(ctx, key)
-	if err != nil {
-		return "", err
-	}
-	defer releaseKey(lock)
-
-	rc, cur, err := s.GetWithETag(ctx, key)
-	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			return "", storage.ErrPreconditionFailed
-		}
-		return "", err
-	}
-	_ = rc.Close()
-	if cur != expect {
-		return "", storage.ErrPreconditionFailed
-	}
-	return s.writeAtomic(ctx, key, r)
-}
-
-// ConditionalWritesSupported reports whether this root can carry the
-// lock the CAS pair holds. It is true on a filesystem that locks, which
-// makes the preconditions hold between the processes sharing the path,
-// and false on a mount whose kernel refuses the lock, so a caller falls
-// back to last-write-wins instead of trusting a reservation nothing
-// enforces. It answers from one non-blocking attempt and never waits: a
-// lock another process is holding is a working lock.
-//
-// A mount that keeps its locks node-local -- NFS with
-// local_lock=flock|all is the common one -- answers true and enforces
-// nothing between hosts. Nothing observable from here distinguishes it
-// from a local disk.
-func (s *ArtifactStore) ConditionalWritesSupported(ctx context.Context) (bool, error) {
-	if err := ctx.Err(); err != nil {
-		return false, err
-	}
-	f, err := s.openLockFile(casProbeKey)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = f.Close() }()
-	locked, err := tryLockExclusive(f)
-	if errors.Is(err, errLockUnsupported) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if locked {
-		_ = unlockFile(f)
-	}
-	return true, nil
-}
-
-func (s *ArtifactStore) writeAtomic(ctx context.Context, key string, r io.Reader) (storage.ETag, error) {
-	body, err := io.ReadAll(r)
-	if err != nil {
-		return "", err
-	}
-	if err := s.Put(ctx, key, bytes.NewReader(body)); err != nil {
-		return "", err
-	}
-	return contentETag(body), nil
-}
-
-func contentETag(body []byte) storage.ETag {
-	sum := sha256.Sum256(body)
-	return storage.ETag(hex.EncodeToString(sum[:]))
+	return s.Put(ctx, key, r)
 }
