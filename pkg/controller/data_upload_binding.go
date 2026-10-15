@@ -98,9 +98,6 @@ func (s *boundData) Commit(ctx context.Context, request blob.CommitUpload) (blob
 	if !authority.Upload.Set || request.TicketID == "" {
 		return blob.Receipt{}, dataForbidden()
 	}
-	if err := s.authorize(ctx, capability.DataCommit, authority, capability.DataTarget{UploadID: request.TicketID}); err != nil {
-		return blob.Receipt{}, err
-	}
 	tenant, err := s.controller.dataTransactions(ctx, s.authorized.Target.Team)
 	if err != nil {
 		return blob.Receipt{}, err
@@ -118,10 +115,12 @@ func (s *boundData) Commit(ctx context.Context, request blob.CommitUpload) (blob
 	if err := s.authorize(ctx, capability.DataCommit, authority, capability.DataTarget{UploadID: request.TicketID, Digest: string(reservation.Blob.Digest)}); err != nil {
 		return blob.Receipt{}, err
 	}
-	if err := s.controller.Objects.CommitObject(ctx, reservation.StagingKey, reservation.Blob); err != nil {
-		return blob.Receipt{}, err
+	if reservation.CommittedAt == nil {
+		if err := s.controller.Objects.CommitObject(ctx, reservation.StagingKey, reservation.Blob); err != nil {
+			return blob.Receipt{}, err
+		}
 	}
-	receipt, err := tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{Authority: authority, TicketID: request.TicketID, Verified: reservation.Blob})
+	receipt, err := tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{Authority: authority, TicketID: request.TicketID, Verified: reservation.Blob, ReplicaID: s.controller.replicaID})
 	if err != nil {
 		return blob.Receipt{}, engineLookupError(err)
 	}

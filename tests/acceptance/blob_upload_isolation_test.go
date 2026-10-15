@@ -1,4 +1,4 @@
-package acceptance
+package acceptance_test
 
 import (
 	"context"
@@ -16,8 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// CheckBlobUploadIsolation checks independent upload receipts with SQLite and the supplied physical backend.
-func CheckBlobUploadIsolation(ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient) (err error) {
+func checkBlobUploadIsolation(ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient) (err error) {
 	path := filepath.Join(root, "upload-isolation.db")
 	s, err := store.Open(path)
 	if err != nil {

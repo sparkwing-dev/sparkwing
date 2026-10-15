@@ -1,4 +1,4 @@
-package acceptance
+package acceptance_test
 
 import (
 	"bytes"
@@ -18,8 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// CheckBlobCollection checks generated tenant graphs against the supplied physical backend.
-func CheckBlobCollection(ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient) (err error) {
+func checkBlobCollection(ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient) (err error) {
 	s, err := store.Open(filepath.Join(root, "collection.db"))
 	if err != nil {
 		return err

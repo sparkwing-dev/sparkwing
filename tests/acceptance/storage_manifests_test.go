@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -39,14 +38,14 @@ func checkStorageS3Manifests(t *testing.T) {
 
 func checkStorageFilesystemManifestRecords(t *testing.T) {
 	objects, _ := storageFilesystem(t)
-	if err := acceptance.CheckBlobManifestRecords(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)}); err != nil {
+	if err := checkBlobManifestRecords(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func checkStorageS3ManifestRecords(t *testing.T) {
 	objects, transport := storageS3(t)
-	if err := acceptance.CheckBlobManifestRecords(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: transport}); err != nil {
+	if err := checkBlobManifestRecords(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: transport}); err != nil {
 		t.Fatal(err)
 	}
 }

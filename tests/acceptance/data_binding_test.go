@@ -429,7 +429,7 @@ func TestDataUploadReservesBeforeSigningAndSettlesVerifiedBytes(t *testing.T) {
 	if err != nil || receipt.Identity != binding.Authority.Upload.Value || receipt.Digest != dataDigest() {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
-	if !reflect.DeepEqual(*events, []string{"authorize", "ticket", "authorize", "verify", "settle", "delete"}) {
+	if !reflect.DeepEqual(*events, []string{"ticket", "authorize", "verify", "settle", "delete"}) {
 		t.Fatalf("events=%v", *events)
 	}
 	if !ticket.Transfer.ExpiresAt.Equal(f.ticket.ExpiresAt) || ticket.Transfer.ExpiresAt.Before(time.Now()) {

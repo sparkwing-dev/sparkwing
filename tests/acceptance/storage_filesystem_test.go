@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -24,7 +23,7 @@ import (
 func checkStorageFilesystemCollection(t *testing.T) {
 	objects, _ := storageFilesystem(t)
 	transfers := blob.TransferClient{Transport: storageFilesystemHTTP(objects)}
-	if err := acceptance.CheckBlobCollection(t.Context(), t.TempDir(), objects, transfers); err != nil {
+	if err := checkBlobCollection(t.Context(), t.TempDir(), objects, transfers); err != nil {
 		t.Fatal(err)
 	}
 }

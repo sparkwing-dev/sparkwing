@@ -13,7 +13,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -41,7 +40,7 @@ func checkStorageFilesystemLogRecords(t *testing.T) {
 		if lost {
 			transport = storageLostResponse{storageFilesystemHTTP(objects)}
 		}
-		if err := acceptance.CheckBlobLogRecords(t.Context(), t.TempDir(), signing, objects, blob.TransferClient{Transport: transport}, seed, 1+int(ordinal%17)); err != nil {
+		if err := checkBlobLogRecords(t.Context(), t.TempDir(), signing, objects, blob.TransferClient{Transport: transport}, seed, 1+int(ordinal%17)); err != nil {
 			t.Fatal(err)
 		}
 		return true

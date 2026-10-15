@@ -222,7 +222,8 @@ callback are removed. The controller supplies its configured backend to the
 shared leased maintenance pass. Standalone S3 construction installs this backend.
 Standalone controllers install either backend through `Server.WithDataObjects`.
 That constructor also installs physical manifest verification for terminal results.
-The authenticated data bindings and local-controller host construction remain open.
+Authenticated data bindings use the controller's configured replica identity for
+upload settlement. Local-controller host construction remains separate.
 
 The obsolete `internal/teamblob` object-key builder is removed. Log team validation
 lives beside the tagged log keys. Tenant records own usage and reachability.
@@ -289,6 +290,7 @@ Controller authorization and transactional records use fakes. These component
 checks run separately from the skipped native targets, whose transport,
 transaction, backend matrix and placement assertions need their real drivers.
 
+Storage persistence proofs live in `tests/acceptance` as test-only helpers.
 The upload-isolation boundary uses real SQLite records with both filesystem
 objects and the S3 signer and SDK against a fake object service. Thirty-two
 generated uploads cover separate same-run receipts, missing staging and unique
@@ -347,10 +349,13 @@ Windows filesystem evidence remains required.
 The filesystem and S3 archive proofs drive the common host output and artifact
 publishers through real tenant upload and record transactions. Empty output is
 also covered directly through `OutputData.Put`. They commit memo through those
-same records. They reopen SQLite, verify
-required output bytes, materialize the memo and stage its artifacts. Their data
-signer is a contract fixture around real reservations, receipts and physical
-verification because authenticated controller binding remains separate.
+same records. `DataController.BindData` supplies the byte signer and record
+store through persisted authority resolution, live data-access checks and tenant
+transactions. The proofs reopen SQLite, verify required output bytes, materialize
+the memo and stage its artifacts. They reject a forged uploader and a commit
+without staging, replay settlement after staging cleanup and reopening, and
+refuse reads or receipt replay after revocation. Claim issuance is seeded.
+The S3 object service is injected. Native placement remains separate.
 
 The physical log proofs use real tenant segment commits and reads with both
 backends. Signed slots and stored references share `LogObjectKey`. Segment
