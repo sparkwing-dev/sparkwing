@@ -35,12 +35,8 @@ func hostAward(ctx context.Context, unit controllerwire.ClaimedUnit, bind func(c
 	if err := validateHostedAward(unit); err != nil {
 		return err
 	}
-	data, err := json.Marshal(unit)
+	captured, err := captureUnit(unit)
 	if err != nil {
-		return err
-	}
-	var captured controllerwire.ClaimedUnit
-	if err := json.Unmarshal(data, &captured); err != nil {
 		return err
 	}
 	input, err := RunInputForAward(captured)
@@ -85,6 +81,15 @@ func hostAward(ctx context.Context, unit controllerwire.ClaimedUnit, bind func(c
 	inputs.run.Storage = services.Storage
 	_, err = owner.Run(ctx, inputs.run)
 	return err
+}
+
+func captureUnit(unit controllerwire.ClaimedUnit) (controllerwire.ClaimedUnit, error) {
+	data, err := json.Marshal(unit)
+	var captured controllerwire.ClaimedUnit
+	if err == nil {
+		err = json.Unmarshal(data, &captured)
+	}
+	return captured, err
 }
 
 func (h Hosting) bind(ctx context.Context, unit, original controllerwire.ClaimedUnit, input nodehost.RunInput) (NativeServices, storeInputs, error) {

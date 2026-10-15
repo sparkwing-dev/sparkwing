@@ -337,7 +337,10 @@ func TestSubmissionEnvironment_DeniesTheChildStoreVariables(t *testing.T) {
 		StandaloneReasonEnv + "=" + standaloneNoDaemon,
 		"PATH=/submit/bin",
 	}
-	got := submissionExecutionEnvironment(captured, "/home")
+	got, err := filterSubmissionEnvironment(captured, quietLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, entry := range got {
 		if strings.HasPrefix(entry, StandaloneStateDBEnv+"=") || strings.HasPrefix(entry, StandaloneReasonEnv+"=") {
 			t.Fatalf("the consumer passed %q to its child", entry)

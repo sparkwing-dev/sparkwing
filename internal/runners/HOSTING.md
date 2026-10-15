@@ -14,6 +14,18 @@ Both placements share award capture, deadlines, partial-service cleanup,
 persisted-input checks and `nodehost.NewNativeHost`.
 The native owner and claimed hosts own source acquisition and their only lease keeper.
 
+`RuntimeConfig.Repositories` carries the machine owner's parsed `runner.repos`.
+`NewManagedRunner` checks the captured intake and accepted source locations before
+calling its host. Both must project valid sealed remote source admitted by that
+list. An empty list admits nothing. Machine-local checkout paths cannot enter a
+remote runner. The caller supplies the configured list even when the controller
+already authorized the claim. Controller authorization cannot grant use of the
+machine owner's credentials.
+`TestMachineRunnerAdmitsSealedSourceBeforeHosting` and
+`FuzzMachineRunnerRepositoryFence` cover trigger/job execution, URL spellings,
+empty lists, changed accepted locations, missing SHA and escaping directories.
+The managed native-store fixture supplies the same list at composition.
+
 `RunnerCLI` serves the existing metrics address alongside its bound factory's
 managed loop. Binding fails before any claim. Every claim records claimed,
 empty or error without changing its returned award or error. Metrics failure
@@ -102,3 +114,10 @@ attempt timeout and a 70-generation lineage through the final executor contract.
 The error-masking property covers both outer layers and output publication.
 These use scripted process and store boundaries. They do not establish native
 Cloud plan/eval hosting or deployed placement.
+
+The orphan `GCWarmRoot` sweeper and orchestrator repository-admission helpers
+are removed. Source projection and machine admission consume sealed source
+locations instead of rebuilding them from legacy trigger fields. The source
+contract describes a Git-bundle seed but has no separate marker for an uploaded
+working-tree snapshot. Final `accept_working_tree` transport and consent remain
+an integration obligation. A committed-source test does not close that obligation.

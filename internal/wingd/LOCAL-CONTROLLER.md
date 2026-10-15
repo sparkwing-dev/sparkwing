@@ -128,6 +128,12 @@ which started another consumer beside a second store owner, is removed too.
 The retained local HTTP handler fixtures use their own test server.
 The CLI service resolver and sealed local intake remain production bindings.
 
+The removed consumer's snapshot reader, consume-at-start rule and cleanup cursor
+are removed too. Final local hosts use `FileEnvironmentSnapshots`, whose sealed
+identity survives replacement owners, retries and children. Missing or altered
+values fail before acquisition. The remaining legacy CLI capture writer still
+needs migration to that intake contract. It has no consumer after the hard cut.
+
 
 `localcontroller.Config.Bind` still needs the production shared services.
 Its `State` interface supplies readiness, the owned secrets read, startup

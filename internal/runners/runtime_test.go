@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -38,7 +39,11 @@ func (runtimePolicy) PrepareRunnerUpdate(context.Context, string, releaseasset.T
 }
 
 func TestManagedRunnerCompositionSeparatesClaimantAndHeldTransport(t *testing.T) {
-	unit := hostingAward(capability.UnitTrigger)
+	unit := repositoryAward(capability.UnitTrigger, "https://github.com/acme/app.git")
+	repositories, err := sourceurl.ParseRepoAllowlist([]string{"github.com/acme/*"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	index, _ := runnerPolicyFixtures(t)
 	transport := &http.Client{}
 	clients, hosted := 0, 0
@@ -53,6 +58,7 @@ func TestManagedRunnerCompositionSeparatesClaimantAndHeldTransport(t *testing.T)
 			return runtimeController{award: unit}, nil
 		},
 		Loop: LoopConfig{Version: "v0.10.0", MaxConcurrent: 1, MaxClaims: 1}, Versions: runtimePolicy{index: index}, Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner},
+		Repositories: repositories,
 		Hosting: hostFunc(func(_ context.Context, got controllerwire.ClaimedUnit) error {
 			if got.Capability != unit.Capability {
 				t.Fatal("host lost its award bearer")

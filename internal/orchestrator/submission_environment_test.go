@@ -2,38 +2,14 @@ package orchestrator
 
 import (
 	"cmp"
-	"context"
-	"errors"
+	"encoding/json"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-func TestSubmissionUsesConsumerDaemonHost(t *testing.T) {
-	const host = "/opt/sparkwing/bin/sparkwing"
-	t.Setenv(wingdclient.HostBinEnv, host)
-	for _, captured := range [][]string{
-		{"PATH=/submit/bin"},
-		{wingdclient.HostBinEnv + "=/another/machine/sparkwing"},
-	} {
-		var hosts []string
-		for _, entry := range submissionExecutionEnvironment(captured, t.TempDir()) {
-			if value, ok := strings.CutPrefix(entry, wingdclient.HostBinEnv+"="); ok {
-				hosts = append(hosts, value)
-			}
-		}
-		if !slices.Equal(hosts, []string{host}) {
-			t.Errorf("daemon hosts = %v, want only the consumer's %s", hosts, host)
-		}
-	}
-}
 
 func TestSubmissionEnvironmentIsOwnerOnlyAndDiscarded(t *testing.T) {
 	home := t.TempDir()
@@ -50,15 +26,7 @@ func TestSubmissionEnvironmentIsOwnerOnlyAndDiscarded(t *testing.T) {
 	if err := fssecure.VerifyPrivateConfig(path, info); err != nil {
 		t.Fatalf("snapshot is not private: %v", err)
 	}
-	env, err := submissionEnvironment(home, &store.Trigger{
-		ID: runID,
-		TriggerEnv: map[string]string{
-			SubmissionEnvironmentCapturedKey: "1",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	env := readSubmissionCapture(t, home, runID)
 	if len(env) != 2 || env[0] != "SPARKWING_PROFILE=dev" || env[1] != "PATH=/submit/bin" {
 		t.Fatalf("snapshot = %#v", env)
 	}
@@ -68,212 +36,6 @@ func TestSubmissionEnvironmentIsOwnerOnlyAndDiscarded(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("snapshot still exists after discard: %v", err)
-	}
-}
-
-func TestSubmissionExecutionEnvironmentForcesHomeAndDropsRunControls(t *testing.T) {
-	env := submissionExecutionEnvironment([]string{
-		"PATH=/submit/bin",
-		"SPARKWING_HOME=/wrong",
-		"SPARKWING_START_AT=late",
-		"SPARKWING_SUBMIT_TEST_ENV=kept",
-	}, "/queue/home")
-	joined := strings.Join(env, "\n")
-	for _, forbidden := range []string{"/wrong", "SPARKWING_START_AT"} {
-		if strings.Contains(joined, forbidden) {
-			t.Fatalf("execution environment contains %q: %s", forbidden, joined)
-		}
-	}
-	for _, required := range []string{"PATH=/submit/bin", "SPARKWING_HOME=/queue/home", "SPARKWING_SUBMIT_TEST_ENV=kept"} {
-		if !strings.Contains(joined, required) {
-			t.Fatalf("execution environment omits %q: %s", required, joined)
-		}
-	}
-}
-
-func TestReconcileSubmissionEnvironmentsRemovesTerminalSnapshots(t *testing.T) {
-	home := t.TempDir()
-	st := consumerTestStore(t, home)
-	const runID = "run-terminal-environment"
-	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev"}, quietLogger()); err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	if err := st.CreateTrigger(ctx, store.Trigger{
-		ID: runID, Pipeline: "build", Status: "pending", CreatedAt: time.Now(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if cancelled, err := st.CancelPendingTrigger(ctx, runID); err != nil || !cancelled {
-		t.Fatalf("cancel pending trigger = %v, %v", cancelled, err)
-	}
-	removed, err := ReconcileSubmissionEnvironments(ctx, home, st, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if removed != 1 {
-		t.Fatalf("removed = %d, want 1", removed)
-	}
-	if _, err := os.Stat(submissionEnvironmentPath(home, runID)); !os.IsNotExist(err) {
-		t.Fatalf("terminal snapshot still exists: %v", err)
-	}
-}
-
-func TestReconcileSubmissionEnvironmentsRemovesMalformedResidueAndContinues(t *testing.T) {
-	home := t.TempDir()
-	st := consumerTestStore(t, home)
-	dir := filepath.Join(home, submissionEnvironmentDir)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "000-malformed.json"), []byte("{"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	const runID = "run-terminal-after-malformed"
-	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev"}, quietLogger()); err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	if err := st.CreateTrigger(ctx, store.Trigger{ID: runID, Pipeline: "build", Status: "pending", CreatedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	if cancelled, err := st.CancelPendingTrigger(ctx, runID); err != nil || !cancelled {
-		t.Fatalf("cancel pending trigger = %v, %v", cancelled, err)
-	}
-	removed, err := ReconcileSubmissionEnvironments(ctx, home, st, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if removed != 2 {
-		t.Fatalf("removed = %d, want malformed and terminal snapshots", removed)
-	}
-}
-
-func TestReconcileSubmissionEnvironmentsRemovesAbandonedTemporaryFile(t *testing.T) {
-	home := t.TempDir()
-	st := consumerTestStore(t, home)
-	dir := filepath.Join(home, submissionEnvironmentDir)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(dir, ".submission-environment-crash")
-	if err := os.WriteFile(path, []byte(`{"environment":["SPARKWING_PROFILE=dev"]}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	old := time.Now().Add(-abandonedSubmissionEnvironmentAge - time.Minute)
-	if err := os.Chtimes(path, old, old); err != nil {
-		t.Fatal(err)
-	}
-	removed, err := ReconcileSubmissionEnvironments(context.Background(), home, st, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if removed != 1 {
-		t.Fatalf("removed = %d, want 1", removed)
-	}
-}
-
-func TestReconcileSubmissionEnvironmentsHandlesTemporaryDirectories(t *testing.T) {
-	for _, tc := range []struct {
-		name, unexpected string
-		old, nested      bool
-	}{
-		{name: "abandoned", old: true},
-		{name: "fresh"},
-		{name: "unknown file", unexpected: "user-notes.txt", old: true},
-		{name: "nested directory", unexpected: "snapshot-nested", old: true, nested: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			home := t.TempDir()
-			st := consumerTestStore(t, home)
-			dir := filepath.Join(home, submissionEnvironmentDir)
-			if err := fssecure.EnsureConfigDir(dir); err != nil {
-				t.Fatal(err)
-			}
-			temporary, err := fssecure.MkdirPrivateTemp(dir, ".submission-environment-")
-			if err != nil {
-				t.Fatal(err)
-			}
-			snapshot := filepath.Join(temporary, "snapshot-crash")
-			if err := os.WriteFile(snapshot, []byte(`{"environment":["SPARKWING_PROFILE=dev"]}`), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if err := fssecure.SecurePrivateConfig(snapshot); err != nil {
-				t.Fatal(err)
-			}
-			if tc.unexpected != "" {
-				path := filepath.Join(temporary, tc.unexpected)
-				if tc.nested {
-					err = os.Mkdir(path, 0o700)
-				} else {
-					err = os.WriteFile(path, []byte("preserve"), 0o600)
-				}
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			if tc.old {
-				old := time.Now().Add(-abandonedSubmissionEnvironmentAge - time.Minute)
-				if err := os.Chtimes(temporary, old, old); err != nil {
-					t.Fatal(err)
-				}
-			}
-			removed, err := ReconcileSubmissionEnvironments(t.Context(), home, st, 100)
-			if tc.unexpected != "" {
-				if err == nil || removed != 0 {
-					t.Fatalf("unknown residue cleanup = %d, %v", removed, err)
-				}
-				if _, err := os.Stat(snapshot); err != nil {
-					t.Fatalf("snapshot removed before all entries were validated: %v", err)
-				}
-				if _, err := os.Stat(filepath.Join(temporary, tc.unexpected)); err != nil {
-					t.Fatalf("unexpected entry removed: %v", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if tc.old {
-				if removed != 1 {
-					t.Fatalf("removed = %d, want 1", removed)
-				}
-				if _, err := os.Stat(temporary); !os.IsNotExist(err) {
-					t.Fatalf("abandoned directory remains: %v", err)
-				}
-			} else if removed != 0 {
-				t.Fatalf("fresh directory removed: %d", removed)
-			}
-		})
-	}
-}
-
-func TestReconcileSubmissionEnvironmentsPreservesFreshSnapshotBeforeTriggerCommit(t *testing.T) {
-	home := t.TempDir()
-	st := consumerTestStore(t, home)
-	const runID = "run-capture-window"
-	if err := CaptureSubmissionEnvironment(home, runID, []string{"MODE=fresh"}, quietLogger()); err != nil {
-		t.Fatal(err)
-	}
-	removed, err := ReconcileSubmissionEnvironments(context.Background(), home, st, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if removed != 0 {
-		t.Fatalf("removed = %d, want fresh pre-trigger snapshot preserved", removed)
-	}
-	if _, err := os.Stat(submissionEnvironmentPath(home, runID)); err != nil {
-		t.Fatalf("fresh pre-trigger snapshot: %v", err)
-	}
-}
-
-func TestSubmissionWithoutCapturedEnvironmentUsesConsumerEnvironment(t *testing.T) {
-	env, err := submissionEnvironment(t.TempDir(), &store.Trigger{ID: "legacy"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if env != nil {
-		t.Fatalf("legacy submission environment = %#v, want nil", env)
 	}
 }
 
@@ -344,13 +106,7 @@ func TestCaptureSubmissionEnvironmentKeepsOnlyAllowedNonCredentialVariables(t *t
 			if err := CaptureSubmissionEnvironment(home, runID, tc.env, quietLogger()); err != nil {
 				t.Fatal(err)
 			}
-			got, err := submissionEnvironment(home, &store.Trigger{
-				ID:         runID,
-				TriggerEnv: map[string]string{SubmissionEnvironmentCapturedKey: "1"},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
+			got := readSubmissionCapture(t, home, runID)
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("captured environment = %#v, want %#v", got, tc.want)
 			}
@@ -370,108 +126,18 @@ func TestCaptureSubmissionEnvironmentRejectsABareWildcard(t *testing.T) {
 	}
 }
 
-func TestConsumeSubmissionEnvironmentDeletesTheSnapshotAtRunStart(t *testing.T) {
-	home := t.TempDir()
-	const runID = "run-consume"
-	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev"}, quietLogger()); err != nil {
-		t.Fatal(err)
-	}
-	trig := &store.Trigger{
-		ID:         runID,
-		TriggerEnv: map[string]string{SubmissionEnvironmentCapturedKey: "1"},
-	}
-	env, err := consumeSubmissionEnvironment(home, trig, quietLogger())
+func readSubmissionCapture(t *testing.T, home, runID string) []string {
+	t.Helper()
+	body, err := os.ReadFile(submissionEnvironmentPath(home, runID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(env, []string{"SPARKWING_PROFILE=dev"}) {
-		t.Fatalf("consumed environment = %#v", env)
-	}
-	if _, err := os.Stat(submissionEnvironmentPath(home, runID)); !os.IsNotExist(err) {
-		t.Fatalf("snapshot outlived the start of the run: %v", err)
-	}
-	again, againErr := consumeSubmissionEnvironment(home, trig, quietLogger())
-	if againErr == nil {
-		t.Fatalf("redispatch environment = %#v, want a fail-closed error", again)
-	}
-	if again != nil {
-		t.Fatalf("redispatch environment = %#v, want nothing", again)
-	}
-}
-
-func TestRequeuedRunDoesNotInheritTheConsumerShell(t *testing.T) {
-	t.Setenv("SPARKWING_DRY_RUN", "1")
-	t.Setenv("SPARKWING_ONLY", "deploy")
-	t.Setenv("SPARKWING_HOME", "/consumer/home")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "consumer-shell-secret")
-
-	home := t.TempDir()
-	const runID = "run-requeue"
-	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev"}, quietLogger()); err != nil {
+	var snapshot submissionEnvironmentSnapshot
+	if err := json.Unmarshal(body, &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	trig := &store.Trigger{ID: runID, TriggerEnv: map[string]string{SubmissionEnvironmentCapturedKey: "1"}}
-	if _, err := consumeSubmissionEnvironment(home, trig, quietLogger()); err != nil {
-		t.Fatal(err)
+	if snapshot.RunID != runID {
+		t.Fatal("capture changed run identity")
 	}
-
-	env, err := consumeSubmissionEnvironment(home, trig, quietLogger())
-	if err == nil {
-		t.Fatalf("requeued dispatch = %#v, want the missing snapshot to fail the run", env)
-	}
-
-	joined := strings.Join(submissionExecutionEnvironment(nil, home), "\n")
-	for _, forbidden := range []string{"SPARKWING_DRY_RUN", "SPARKWING_ONLY", "/consumer/home"} {
-		if strings.Contains(joined, forbidden) {
-			t.Fatalf("uncaptured dispatch environment carries %q", forbidden)
-		}
-	}
-	if !strings.Contains(joined, "SPARKWING_HOME="+home) {
-		t.Fatalf("uncaptured dispatch environment does not force SPARKWING_HOME: %s", joined)
-	}
-}
-
-func TestRetryRequiresItsOwnSubmissionEnvironment(t *testing.T) {
-	for _, source := range []string{store.RetrySourceManual} {
-		for _, capture := range []string{"absent", "missing", "empty", "present"} {
-			t.Run(source+"/"+capture, func(t *testing.T) {
-				home := t.TempDir()
-				trig := &store.Trigger{ID: "retry", RetryOf: "source", RetrySource: source, TriggerEnv: map[string]string{}}
-				if capture != "absent" {
-					trig.TriggerEnv[SubmissionEnvironmentCapturedKey] = "1"
-				}
-				if capture == "empty" || capture == "present" {
-					env := []string{}
-					if capture == "present" {
-						env = append(env, "PATH=caller")
-					}
-					if err := CaptureSubmissionEnvironment(home, trig.ID, env, quietLogger()); err != nil {
-						t.Fatal(err)
-					}
-				}
-				env, err := consumeSubmissionEnvironment(home, trig, quietLogger())
-				if capture == "absent" || capture == "missing" {
-					var unavailable *RetryEnvironmentUnavailableError
-					if !errors.As(err, &unavailable) {
-						t.Fatalf("environment = %v, %v; want typed refusal", env, err)
-					}
-				} else if err != nil || env == nil {
-					t.Fatalf("owned environment = %v, %v", env, err)
-				}
-			})
-		}
-	}
-}
-
-func TestDetachedTriggerRefusesMissingSubmissionEnvironment(t *testing.T) {
-	for _, trigger := range []*store.Trigger{
-		{ID: "missing-marker", TriggerSource: "runs-submit@host"},
-		{ID: "missing-path", TriggerEnv: map[string]string{SubmitRepoDirKey: "/checkout"}},
-	} {
-		env, err := consumeSubmissionEnvironment(t.TempDir(), trigger, quietLogger())
-		var missing *SubmissionEnvironmentUnavailableError
-		if !errors.As(err, &missing) || env != nil {
-			t.Fatalf("missing submission environment = %v, %v", env, err)
-		}
-	}
+	return snapshot.Environment
 }

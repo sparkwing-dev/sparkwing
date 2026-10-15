@@ -9,8 +9,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestSubmissionWindowsEnvironmentPreservesNativeRuntime(t *testing.T) {
@@ -25,10 +23,7 @@ func TestSubmissionWindowsEnvironmentPreservesNativeRuntime(t *testing.T) {
 	if err := CaptureSubmissionEnvironment(home, runID, original, quietLogger()); err != nil {
 		t.Fatal(err)
 	}
-	captured, err := submissionEnvironment(home, &store.Trigger{ID: runID, TriggerEnv: map[string]string{SubmissionEnvironmentCapturedKey: "1"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	captured := readSubmissionCapture(t, home, runID)
 	if !slices.Equal(captured, original) {
 		t.Fatalf("native environment differs: names=%v", keys)
 	}
@@ -37,7 +32,7 @@ func TestSubmissionWindowsEnvironmentPreservesNativeRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	command := exec.Command(executable, "-test.run=^TestSubmissionWindowsEnvironmentChild$")
-	command.Env = append(submissionExecutionEnvironment(captured, home), "SPARKWING_TEST_NATIVE_ENV_CHILD=1")
+	command.Env = append(captured, "SPARKWING_TEST_NATIVE_ENV_CHILD=1")
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("native child runtime: %v\n%s", err, out)
 	}

@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -208,10 +209,15 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	if mode == "remote_award" || mode == "remote_renewal" || mode == "remote_cancel" {
 		executionErr = remote.Host(ctx, unit)
 	} else if mode == "managed_remote" {
+		repositories, err := sourceurl.ParseRepoAllowlist([]string{"github.com/team/repo"})
+		if err != nil {
+			t.Fatal(err)
+		}
 		runner, err := runners.NewManagedRunner(ctx, runners.RuntimeConfig{
 			Controller: client.EngineOptions{URL: "https://controller.example", Bearer: func(context.Context) (string, error) { return root.Raw, nil }}, NewController: cloudStoreClientW8(t, server),
 			Loop: runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1, MaxClaims: 1}, Hosting: remote,
-			Versions: runnerVersionPolicyW8(t, "v0.71.0"), Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner}, RequestCapacity: func() (float64, int64) { return 2, 1 << 30 },
+			Repositories: repositories,
+			Versions:     runnerVersionPolicyW8(t, "v0.71.0"), Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner}, RequestCapacity: func() (float64, int64) { return 2, 1 << 30 },
 		})
 		if err != nil {
 			t.Fatal(err)

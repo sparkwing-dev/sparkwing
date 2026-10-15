@@ -8,6 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -17,6 +18,7 @@ type RuntimeConfig struct {
 	NewController   func(client.EngineOptions) (controllerwire.Controller, error)
 	Loop            LoopConfig
 	Hosting         UnitHost
+	Repositories    sourceurl.RepoAllowlist
 	Versions        SoftwarePolicy
 	Installation    RunnerInstallation
 	Target          releaseasset.Target
@@ -45,7 +47,7 @@ func NewManagedRunner(ctx context.Context, cfg RuntimeConfig) (*ManagedRunner, e
 		return nil, errors.New("runner controller factory returned no client")
 	}
 	return &ManagedRunner{
-		Loop:     &Loop{Config: cfg.Loop, Controller: controller, Host: cfg.Hosting, RequestCapacity: cfg.RequestCapacity, OnError: cfg.OnError},
+		Loop:     &Loop{Config: cfg.Loop, Controller: controller, Host: machineHost{host: cfg.Hosting, repositories: cfg.Repositories}, RequestCapacity: cfg.RequestCapacity, OnError: cfg.OnError},
 		Versions: cfg.Versions, Installation: cfg.Installation, Target: cfg.Target, Notices: cfg.Notices,
 	}, nil
 }

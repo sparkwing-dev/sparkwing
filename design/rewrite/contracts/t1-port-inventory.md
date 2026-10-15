@@ -989,9 +989,9 @@ W3 trigger host still consumes them.
 | --- | --- |
 | `TestDispatchedNode_WithoutASourceIsRefused` | `internal/runners.TestClaimedRunnerRefusesAwardWithoutSourceBeforeAcquisition` constructs persisted native inputs and invokes `ClaimedNodeHost.Execute`. It checks the source-location refusal and forbids acquisition and execution. |
 | `TestRunNodeRemoteCancelAbortsSourceFetch` | `internal/runners.TestRunnerSourceCancellationJoinsFetchAndRemovesCheckout` cancels `source.PrepareCheckout` while its git fetch is blocked, joins the process and checks workspace removal. It uses real git initialization with a Unix fetch-process fixture. No network evidence is claimed. |
-| `TestRunNodeRemoteRefusesARepositoryOutsideTheAllowlistBeforeFetching` | `TestAdmitTriggerSourceRefusesARepositoryOutsideTheAllowlist` retains the rejection at W3's source-policy helper. The removed fetch wrapper had no production caller. Production machine-source binding remains open. |
-| `TestRunNodeRemoteRefusesUncheckableSourcesBeforeFetching` | `TestAdmitTriggerSourceRefusesUncheckableSources` retains every refusal and accepted working-tree case at that helper. This is policy evidence only. |
-| `TestShouldRunRemoteAcceptsStoredRepoURL` | Drop the dead path selector. The retained `TestRemoteTriggerSourceURLUsesStoredRepoURLWithoutGitHubMetadata` checks the stored URL. Final source-location projections also retain their own tests. |
+| `TestRunNodeRemoteRefusesARepositoryOutsideTheAllowlistBeforeFetching` | `runners.TestMachineRunnerAdmitsSealedSourceBeforeHosting` and `FuzzMachineRunnerRepositoryFence` exercise `NewManagedRunner`. An unlisted intake or accepted remote cannot reach hosting. Real native service/source composition remains open. |
+| `TestRunNodeRemoteRefusesUncheckableSourcesBeforeFetching` | The machine-runner property refuses missing source identity, local checkout paths, missing SHA and escaping pipeline directories. Final working-tree snapshot transport and its opt-in acceptance case remain open because sealed source has no separate snapshot marker. No complete port is claimed for that case. |
+| `TestShouldRunRemoteAcceptsStoredRepoURL` | Drop the dead path selector. The machine-runner test checks HTTPS and SSH spellings. `source.TestSourceProjectionCannotInventLocationFromDisplay` and `TestSourceProjectionIgnoresLegacyLocationAndRetainsSealedDirectory` retain the final immutable location boundary. |
 | `TestObserveNodeExecution` and `TestObserveNodeExecution_SkipsEmpty` | Drop the unused histogram and observer with their last legacy producer. Unified claim metrics retain their existing behavior tests. |
 
 No native acceptance cell closes through this cut. The real runner-source
@@ -1023,8 +1023,8 @@ entry, as C4 requires. Local envelope tests retain their checkout/file helpers.
 
 No native catalog cell is newly closed. Remaining full placement scenarios are
 recorded in `../W8-ORPHAN-TRIGGER-CUT.md`. The earlier run-node retirement's
-repository allow-list helpers remain in `run_node_remote.go` pending the real
-machine source-authority binding.
+repository allow-list helpers are replaced by the machine-runner composition
+above. Their legacy trigger URL and admission tests are removed.
 ## W8 shared dispatched executor retirement
 
 The orphan `nodehost.HostDispatchedNode`, pod reconstruction helpers and old
@@ -1073,3 +1073,22 @@ path tests remain in `orchestrator/local_submission_test.go`. The legacy
 process replacement tests retire because a ready owner is reused and explicit
 restart controls replacement. Snapshot/idempotency/argument tests unrelated to
 the process remain. No native placement cell closes from these component ports.
+
+The consumer's remaining snapshot reader, consume-at-start adapter, cleanup
+cursor and execution-environment overlay are now removed. The CLI capture and
+discard callers retain their tests. Final snapshot evidence is
+`TestCapturedEnvironmentSurvivesRepeatedReadsAndPreservesExactValues`,
+`TestCapturedEnvironmentRejectsChangedMetadataAndPrivateFiles`,
+`TestSDKEnvironmentRechecksLoadedSnapshotBeforeBuilding`,
+`TestClaimedNodeHostRefusesChangedCapturedValuesBeforeAcquisition` and
+`TestOwnerHostRefusesChangedCapturedValuesBeforeSourceEnvironment`.
+The final contract retains a snapshot across retries and children, so deleting
+it at first execution and requiring a new retry capture are retired expectations.
+The old consumer cleanup-window and malformed-residue tests retire with their
+unused sweeper. They establish no final retention behavior. The Windows capture
+fixture retains its child-runtime check without the removed overlay. Native
+Windows execution remains unverified here.
+
+`GCWarmRoot`, its lister and its tmp/run-directory sweep tests are removed.
+There is no remaining warm-root producer or production caller. Final source
+workspace cleanup remains covered by cancellation/acquisition tests.
