@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -13,9 +14,10 @@ import (
 )
 
 type gitClient struct {
-	env        []string
-	credential Credential
-	workspace  string
+	env             []string
+	credential      Credential
+	workspace       string
+	bundleTransport http.RoundTripper
 }
 
 func gitEnvironment(base []string) []string {

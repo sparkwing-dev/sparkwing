@@ -8,7 +8,10 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
@@ -41,6 +44,45 @@ func (install entryInstaller) Install(ctx context.Context, resolved engine.Resol
 	return install(ctx, resolved, directory, environment)
 }
 
+type cancelledEngine struct {
+	source.EngineResolver
+	cancel context.CancelCauseFunc
+}
+
+func (r cancelledEngine) Ensure(ctx context.Context, identity engine.Identity, target releaseasset.Target) (engine.Resolved, error) {
+	resolved, err := r.EngineResolver.Ensure(ctx, identity, target)
+	r.cancel(lease.ErrLeaseLost)
+	return resolved, err
+}
+
+func TestAcquireAuthorityLossBeforeInstallationStartsNoInstaller(t *testing.T) {
+	for _, stage := range []string{"pin", "engine"} {
+		t.Run(stage, func(t *testing.T) {
+			dir, sha := sourcetest.Repository(t)
+			options, resolver, installed := acquisitionOptions(t, filepath.Join(dir, ".sparkwing"))
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(nil)
+			if stage == "pin" {
+				read := options.ReadPin
+				options.ReadPin = func(path string, sdk engine.SDKKind) (engine.Pin, error) {
+					pin, err := read(path, sdk)
+					cancel(lease.ErrLeaseLost)
+					return pin, err
+				}
+			} else {
+				options.Engines = cancelledEngine{EngineResolver: resolver, cancel: cancel}
+			}
+			entry, err := source.Acquire(ctx, source.Spec{RepoKey: "local:" + dir, LocalCheckout: dir, SHA: sha, Engine: &resolver.resolved.Identity}, options)
+			if entry != nil || !errors.Is(err, lease.ErrLeaseLost) || *installed != 0 {
+				t.Fatalf("acquisition after loss at %s: entry=%v, error=%v, installs=%d", stage, entry, err, *installed)
+			}
+			if stage == "pin" && len(resolver.calls) != 0 {
+				t.Fatal("lost source authority resolved an engine")
+			}
+		})
+	}
+}
+
 func acquisitionOptions(t *testing.T, directory string) (source.Options, *engineResolver, *int) {
 	t.Helper()
 	pin := engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3", Manifest: "go.mod", InputsDigest: "sealed-pin"}
@@ -52,7 +94,7 @@ func acquisitionOptions(t *testing.T, directory string) (source.Options, *engine
 	installed := new(int)
 	options := source.Options{
 		Engines: resolver, Target: target, SDK: engine.GoSDK,
-		GitEnvironment: gitBase(t), InstallEnvironment: []string{"PATH=/host/install/bin"},
+		GitEnvironment: sourcetest.Environment(t), InstallEnvironment: []string{"PATH=/host/install/bin"},
 		ReadPin: func(checkout string, sdk engine.SDKKind) (engine.Pin, error) {
 			if checkout != directory || sdk != pin.SDK {
 				t.Fatalf("read pin from %s for %s", checkout, sdk)
@@ -73,7 +115,7 @@ func acquisitionOptions(t *testing.T, directory string) (source.Options, *engine
 func TestAcquireResolvesEngineBeforeInstallation(t *testing.T) {
 	for _, sealed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "planning", true: "execution"}[sealed], func(t *testing.T) {
-			dir, sha := repository(t)
+			dir, sha := sourcetest.Repository(t)
 			options, resolver, installed := acquisitionOptions(t, filepath.Join(dir, ".sparkwing"))
 			spec := source.Spec{RepoKey: "local:" + dir, LocalCheckout: dir, SHA: sha}
 			wantCall := "resolve"
@@ -100,7 +142,7 @@ func TestAcquireResolvesEngineBeforeInstallation(t *testing.T) {
 func TestAcquireDoesNotInstallWithChangedPinOrRejectedEngine(t *testing.T) {
 	for _, failure := range []string{"changed pin", "pin read", "engine policy"} {
 		t.Run(failure, func(t *testing.T) {
-			dir, _ := repository(t)
+			dir, _ := sourcetest.Repository(t)
 			options, resolver, installed := acquisitionOptions(t, filepath.Join(dir, ".sparkwing"))
 			spec := source.Spec{RepoKey: "local:" + dir, LocalCheckout: dir}
 			sentinel := errors.New(failure)
@@ -126,9 +168,9 @@ func TestAcquireDoesNotInstallWithChangedPinOrRejectedEngine(t *testing.T) {
 }
 
 func TestAcquireRemovesRemoteCheckoutAfterInstallationFailure(t *testing.T) {
-	dir, sha := repository(t)
+	dir, sha := sourcetest.Repository(t)
 	remote := "https://8.8.8.8/team/repo"
-	remoteFixture(t, map[string]string{remote: dir})
+	sourcetest.Remote(t, map[string]string{remote: dir})
 	for _, failure := range []string{"installer", "empty command", "cancelled"} {
 		t.Run(failure, func(t *testing.T) {
 			options, resolver, _ := acquisitionOptions(t, "")

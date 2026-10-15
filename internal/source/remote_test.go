@@ -3,77 +3,16 @@ package source_test
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
-
-func remoteFixture(t *testing.T, repositories map[string]string, lfsEndpoint ...string) string {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("fixture uses a POSIX executable shim; Windows source support requires Windows CI")
-	}
-	realGit, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatal(err)
-	}
-	python, err := exec.LookPath("python3")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bin := t.TempDir()
-	log := filepath.Join(bin, "commands.jsonl")
-	if lfsEndpoint == nil {
-		lfsEndpoint = []string{}
-	}
-	encode := func(value any) string { b, _ := json.Marshal(value); return string(b) }
-	program := "#!" + python + "\n" + `import json, os, shlex, stat, subprocess, sys
-args = sys.argv[1:]
-config = [x.split('=', 1)[1] for x in args if x.startswith('include.path=')]
-ssh = shlex.split(os.environ.get('GIT_SSH_COMMAND', ''))
-if '-i' in ssh:
-    config.append(ssh[ssh.index('-i') + 1])
-    config.extend(x.split('=', 1)[1] for x in ssh if x.startswith('UserKnownHostsFile='))
-record = {'args': args, 'env': dict(os.environ), 'files': config}
-for name in config:
-    if stat.S_IMODE(os.stat(name).st_mode) != 0o600:
-        raise RuntimeError('credential file is not private')
-with open(` + encode(log) + `, 'a') as out:
-    out.write(json.dumps(record) + '\n')
-mapping = ` + encode(repositories) + `
-lfs_endpoint = ` + encode(lfsEndpoint) + `
-if 'lfs' in args and lfs_endpoint:
-    if 'fetch' in args:
-        if 'lfs.url=' + lfs_endpoint[0] not in args:
-            sys.exit(2)
-        if lfs_endpoint[0].startswith(('ssh://', 'git@')) and '-i' not in ssh:
-            sys.exit(3)
-        if lfs_endpoint[0].startswith('https://'):
-            auth = subprocess.run([` + encode(realGit) + `] + args[:args.index('lfs')] + ['config', '--get-urlmatch', 'http.extraheader', lfs_endpoint[0]], capture_output=True)
-            if auth.returncode != 0 or not auth.stdout:
-                sys.exit(4)
-    elif 'checkout' in args:
-        with open(os.path.join(args[args.index('-C') + 1], 'lfs.bin'), 'w') as out:
-            out.write('downloaded LFS content')
-    sys.exit(0)
-if 'fetch' in args or 'ls-remote' in args:
-    args = [mapping.get(x, x) for x in args]
-    os.environ['GIT_ALLOW_PROTOCOL'] = 'file'
-os.execv(` + encode(realGit) + `, [` + encode(realGit) + `] + args)
-`
-	name := filepath.Join(bin, "git")
-	if err := os.WriteFile(name, []byte(program), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return log
-}
 
 func TestPrepareCheckoutLFSKeepsAuthorizedSSHTransport(t *testing.T) {
 	for _, test := range []struct {
@@ -84,13 +23,13 @@ func TestPrepareCheckoutLFSKeepsAuthorizedSSHTransport(t *testing.T) {
 		{"HTTPS", "https://8.8.8.8/team/repo", "https://8.8.8.8/team/repo.git/info/lfs"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			dir, _ := repository(t)
-			write(t, filepath.Join(dir, ".lfsconfig"), "[lfs]\n\turl = https://attacker.invalid/leak\n")
-			write(t, filepath.Join(dir, "lfs.bin"), "version https://git-lfs.github.com/spec/v1\n")
-			git(t, dir, "add", ".")
-			git(t, dir, "commit", "-qm", "lfs")
-			sha := git(t, dir, "rev-parse", "HEAD")
-			log := remoteFixture(t, map[string]string{test.remote: dir}, test.endpoint)
+			dir, _ := sourcetest.Repository(t)
+			sourcetest.Write(t, filepath.Join(dir, ".lfsconfig"), "[lfs]\n\turl = https://attacker.invalid/leak\n")
+			sourcetest.Write(t, filepath.Join(dir, "lfs.bin"), "version https://git-lfs.github.com/spec/v1\n")
+			sourcetest.Git(t, dir, "add", ".")
+			sourcetest.Git(t, dir, "commit", "-qm", "lfs")
+			sha := sourcetest.Git(t, dir, "rev-parse", "HEAD")
+			log := sourcetest.Remote(t, map[string]string{test.remote: dir}, test.endpoint)
 			credential := source.Credential{Kind: "ssh", Host: "8.8.8.8", Secret: "-----BEGIN PRIVATE KEY-----\nprivate-key-content\n-----END PRIVATE KEY-----", KnownHosts: "8.8.8.8 ssh-ed25519 confirmed-key\n"}
 			if test.name == "HTTPS" {
 				credential = source.Credential{Kind: "https", Host: "8.8.8.8", Username: "source", Secret: "private-source-password"}
@@ -98,7 +37,7 @@ func TestPrepareCheckoutLFSKeepsAuthorizedSSHTransport(t *testing.T) {
 			entry, err := source.PrepareCheckout(t.Context(), source.Spec{
 				RepoKey: "git:8.8.8.8/team/repo", RemoteURL: test.remote, SHA: sha, DefaultBranch: "trunk",
 				Checkout: runspec.CheckoutPolicy{Policy: nodeproto.SourceSpec{LFS: new(true)}},
-			}, source.Options{GitEnvironment: gitBase(t), Workspace: t.TempDir(), Access: &access{credential: credential}})
+			}, source.Options{GitEnvironment: sourcetest.Environment(t), Workspace: t.TempDir(), Access: &access{credential: credential}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -136,17 +75,17 @@ func TestPrepareCheckoutLFSKeepsAuthorizedSSHTransport(t *testing.T) {
 }
 
 func TestPrepareCheckoutFetchesSealedCommitAfterHeadAdvances(t *testing.T) {
-	dir, sealed := repository(t)
-	write(t, filepath.Join(dir, ".sparkwing", "pipeline.go"), "package main // later\n")
-	git(t, dir, "add", ".")
-	git(t, dir, "commit", "-qm", "later")
+	dir, sealed := sourcetest.Repository(t)
+	sourcetest.Write(t, filepath.Join(dir, ".sparkwing", "pipeline.go"), "package main // later\n")
+	sourcetest.Git(t, dir, "add", ".")
+	sourcetest.Git(t, dir, "commit", "-qm", "later")
 	remote := "https://8.8.8.8/team/repo"
-	log := remoteFixture(t, map[string]string{remote: dir})
+	log := sourcetest.Remote(t, map[string]string{remote: dir})
 	t.Setenv("SPARKWING_API_TOKEN", "ambient-private-token")
 	t.Setenv("GIT_TRACE", filepath.Join(t.TempDir(), "trace"))
 	workspace := t.TempDir()
 	a := &access{credential: source.Credential{Kind: "https", Host: "8.8.8.8", Username: "source", Secret: "private-source-password"}}
-	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sealed}, source.Options{GitEnvironment: gitBase(t), Workspace: workspace, Access: a})
+	entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sealed}, source.Options{GitEnvironment: sourcetest.Environment(t), Workspace: workspace, Access: a})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,11 +126,11 @@ func TestPrepareCheckoutFetchesSealedCommitAfterHeadAdvances(t *testing.T) {
 }
 
 func TestPrepareCheckoutFailedFetchRemovesWorkspace(t *testing.T) {
-	dir, _ := repository(t)
+	dir, _ := sourcetest.Repository(t)
 	remote := "https://8.8.8.8/team/repo"
-	remoteFixture(t, map[string]string{remote: dir})
+	sourcetest.Remote(t, map[string]string{remote: dir})
 	workspace := t.TempDir()
-	_, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: strings.Repeat("a", 40)}, source.Options{GitEnvironment: gitBase(t), Workspace: workspace, Access: &access{}})
+	_, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: strings.Repeat("a", 40)}, source.Options{GitEnvironment: sourcetest.Environment(t), Workspace: workspace, Access: &access{}})
 	if err == nil {
 		t.Fatal("accepted a commit absent from the source")
 	}
@@ -202,19 +141,19 @@ func TestPrepareCheckoutFailedFetchRemovesWorkspace(t *testing.T) {
 }
 
 func TestPrepareCheckoutChecksSubmoduleAllowlistBeforeFetching(t *testing.T) {
-	child, childSHA := repository(t)
-	parent, _ := repository(t)
+	child, childSHA := sourcetest.Repository(t)
+	parent, _ := sourcetest.Repository(t)
 	remote := "https://8.8.8.8/team/repo"
 	subremote := "https://8.8.8.8/team/library"
-	write(t, filepath.Join(parent, ".gitmodules"), "[submodule \"library\"]\n\tpath = library\n\turl = ../library\n")
-	git(t, parent, "add", ".gitmodules")
-	git(t, parent, "update-index", "--add", "--cacheinfo", "160000,"+childSHA+",library")
-	git(t, parent, "commit", "-qm", "submodule")
-	sha := git(t, parent, "rev-parse", "HEAD")
-	log := remoteFixture(t, map[string]string{remote: parent, subremote: child})
+	sourcetest.Write(t, filepath.Join(parent, ".gitmodules"), "[submodule \"library\"]\n\tpath = library\n\turl = ../library\n")
+	sourcetest.Git(t, parent, "add", ".gitmodules")
+	sourcetest.Git(t, parent, "update-index", "--add", "--cacheinfo", "160000,"+childSHA+",library")
+	sourcetest.Git(t, parent, "commit", "-qm", "submodule")
+	sha := sourcetest.Git(t, parent, "rev-parse", "HEAD")
+	log := sourcetest.Remote(t, map[string]string{remote: parent, subremote: child})
 	spec := source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk", Checkout: runspec.CheckoutPolicy{Policy: nodeproto.SourceSpec{Submodules: new(true)}}}
 	credential := source.Credential{Kind: "https", Host: "8.8.8.8", Username: "source", Secret: "private-source-password"}
-	if _, err := source.PrepareCheckout(t.Context(), spec, source.Options{GitEnvironment: gitBase(t), Workspace: t.TempDir(), Access: &access{credential: credential}}); err == nil {
+	if _, err := source.PrepareCheckout(t.Context(), spec, source.Options{GitEnvironment: sourcetest.Environment(t), Workspace: t.TempDir(), Access: &access{credential: credential}}); err == nil {
 		t.Fatal("fetched an unauthorized submodule")
 	}
 	commands, err := os.ReadFile(log)
@@ -222,7 +161,7 @@ func TestPrepareCheckoutChecksSubmoduleAllowlistBeforeFetching(t *testing.T) {
 		t.Fatalf("unauthorized fetch: %s, %v", commands, err)
 	}
 	credential.ExtraRepositories = []string{"team/library"}
-	entry, err := source.PrepareCheckout(t.Context(), spec, source.Options{GitEnvironment: gitBase(t), Workspace: t.TempDir(), Access: &access{credential: credential}})
+	entry, err := source.PrepareCheckout(t.Context(), spec, source.Options{GitEnvironment: sourcetest.Environment(t), Workspace: t.TempDir(), Access: &access{credential: credential}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,14 +172,14 @@ func TestPrepareCheckoutChecksSubmoduleAllowlistBeforeFetching(t *testing.T) {
 }
 
 func TestPrepareCheckoutAppliesHistoryAndTagPolicy(t *testing.T) {
-	dir, _ := repository(t)
-	git(t, dir, "tag", "v1")
-	write(t, filepath.Join(dir, "later"), "later")
-	git(t, dir, "add", "later")
-	git(t, dir, "commit", "-qm", "later")
-	sha := git(t, dir, "rev-parse", "HEAD")
+	dir, _ := sourcetest.Repository(t)
+	sourcetest.Git(t, dir, "tag", "v1")
+	sourcetest.Write(t, filepath.Join(dir, "later"), "later")
+	sourcetest.Git(t, dir, "add", "later")
+	sourcetest.Git(t, dir, "commit", "-qm", "later")
+	sha := sourcetest.Git(t, dir, "rev-parse", "HEAD")
 	remote := "https://8.8.8.8/team/repo"
-	remoteFixture(t, map[string]string{remote: dir})
+	sourcetest.Remote(t, map[string]string{remote: dir})
 	for _, test := range []struct {
 		name          string
 		policy        nodeproto.SourceSpec
@@ -252,15 +191,15 @@ func TestPrepareCheckoutAppliesHistoryAndTagPolicy(t *testing.T) {
 		{"full history and tags", nodeproto.SourceSpec{FullHistory: new(true), Tags: new(true)}, "2", "v1"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk", Checkout: runspec.CheckoutPolicy{Policy: test.policy}}, source.Options{GitEnvironment: gitBase(t), Workspace: t.TempDir(), Access: &access{}})
+			entry, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha, DefaultBranch: "trunk", Checkout: runspec.CheckoutPolicy{Policy: test.policy}}, source.Options{GitEnvironment: sourcetest.Environment(t), Workspace: t.TempDir(), Access: &access{}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = entry.Close() })
-			if got := git(t, entry.Directory, "rev-list", "--count", "HEAD"); got != test.commits {
+			if got := sourcetest.Git(t, entry.Directory, "rev-list", "--count", "HEAD"); got != test.commits {
 				t.Fatalf("commit count = %s, want %s", got, test.commits)
 			}
-			if got := git(t, entry.Directory, "tag", "--list"); got != test.tags {
+			if got := sourcetest.Git(t, entry.Directory, "tag", "--list"); got != test.tags {
 				t.Fatalf("tags = %s, want %s", got, test.tags)
 			}
 		})
@@ -268,11 +207,11 @@ func TestPrepareCheckoutAppliesHistoryAndTagPolicy(t *testing.T) {
 }
 
 func TestPrepareCheckoutOwnerHelperFailureDoesNotFallBackToAnonymous(t *testing.T) {
-	dir, sha := repository(t)
+	dir, sha := sourcetest.Repository(t)
 	remote := "https://8.8.8.8/team/repo"
-	log := remoteFixture(t, map[string]string{remote: dir})
+	log := sourcetest.Remote(t, map[string]string{remote: dir})
 	ownerHome := t.TempDir()
-	write(t, filepath.Join(ownerHome, ".gitconfig"), "[credential]\n\thelper = !exit 1\n")
+	sourcetest.Write(t, filepath.Join(ownerHome, ".gitconfig"), "[credential]\n\thelper = !exit 1\n")
 	_, err := source.PrepareCheckout(t.Context(), source.Spec{RepoKey: "git:8.8.8.8/team/repo", RemoteURL: remote, SHA: sha}, source.Options{GitEnvironment: []string{"PATH=" + os.Getenv("PATH"), "HOME=" + ownerHome}, Workspace: t.TempDir(), Access: &access{}})
 	if err == nil || !strings.Contains(err.Error(), "helper failed") {
 		t.Fatalf("helper failure = %v", err)

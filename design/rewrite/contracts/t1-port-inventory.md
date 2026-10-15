@@ -161,6 +161,25 @@ The cache-mirror protocol has no replacement. Direct SSH, App and HTTPS source
 behavior remains covered by `internal/source`. Native runner and launcher source
 release through the final controller authority remains an integration requirement.
 
+`placement-direct-source/hermetic-native-git` adds direct fetch and verified
+bundle-plus-delta acquisition against a native git origin. The origin advances
+past the sealed commit and renames its default branch. Both acquisition paths
+retain the sealed source and default branch, restore the selected engine, install
+with an explicit environment and release their owned files. A second acquisition
+checks the same inputs after cleanup. Source release, engine policy, installer
+and signed-object transport are fakes. These are acquisition proofs after source
+authorization. `TestDataDownloadClaimUsesCloudProvenance`'s bound/unbound signing
+and binary provenance cases still require credential and storage implementations.
+
+`placement-direct-source/hermetic-bundle-failures` covers checksum mismatch,
+invalid git bundle, missing object, redirect, failed download/read/close,
+cancellation and lease loss. Each case stops before engine resolution or SDK
+installation and cleans up its reader and workspace. Signed URLs stay out of
+error messages.
+`TestAcquireAuthorityLossBeforeInstallationStartsNoInstaller` covers lease loss
+during pin reading and engine resolution. Neither case starts installation, and
+the original lease-loss cause remains matchable.
+
 `CheckExecutorEnvelope` drives `ClaimedNodeHost` and the common executor under
 `protocol-host-layers-risk-cleanup/hermetic-claimed-executor`. Its eight cases
 cover success, retries, drift, risk refusal, hook refusal, cleanup failure,

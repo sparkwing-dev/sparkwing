@@ -17,6 +17,9 @@ func pendingScenarios(t *testing.T, group string) {
 		count++
 		t.Run(scenario.ID, func(t *testing.T) {
 			switch scenario.ID {
+			case "placement-direct-source":
+				t.Run("hermetic-native-git", acceptance.CheckDirectSource)
+				t.Run("hermetic-bundle-failures", acceptance.CheckSourceBundleFailures)
 			case "lifecycle-result-commit-atomicity":
 				t.Run("hermetic-output-records", acceptance.CheckOutputRecordCommit)
 				t.Run("hermetic-executor-output", acceptance.CheckExecutorOutputCommit)

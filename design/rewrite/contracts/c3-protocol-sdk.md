@@ -219,6 +219,28 @@ passes `AcceptPlan`. Cache diagnostics omit input hashes and declaration content
 
 ## Host adapter boundaries
 
+`source.Options.BundleTransport` supplies the HTTP transport for signed source
+bundle downloads. Nil uses the standard transport. The source client owns
+redirect refusal independently of that transport. It verifies the complete
+bundle digest before unbundling, then fetches and checks out the sealed commit.
+Read and close failures return stage-specific messages because transport errors
+can contain the signed URL. Cancellation retains its cause. Every exit closes
+the reader and removes owned seed, credential and checkout files.
+
+Source acquisition checks cancellation after reading the SDK pin and after
+engine resolution. Authority lost at either boundary prevents installation.
+An acquired local checkout remains owned by the user.
+
+`placement-direct-source/hermetic-native-git` acquires the sealed commit twice
+through direct fetch and bundle-plus-delta fetch after origin advances and its
+default branch changes. Native git supplies the checkout. Credential release,
+engine resolution, installation and signed storage use contract fakes.
+`hermetic-bundle-failures` refuses corrupt bytes, an invalid bundle, missing
+objects, redirects, transfer/read/close errors and cancellation before engine
+startup. Both cases check source credential and workspace cleanup. Native
+placement drivers, real source-release authority, storage signing and Windows
+remain separate integration proofs.
+
 `ClaimedNodeHost.Execute` checks its award against persisted acceptance and job
 settings, then waits for a successful claim renewal before acquiring source.
 `source.ForExecution` supplies the sealed checkout policy and engine. Acquisition

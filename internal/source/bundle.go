@@ -33,15 +33,20 @@ func seedBundle(ctx context.Context, client *gitClient, checkout, digest string,
 	if err != nil {
 		return errors.New("source bundle URL is invalid")
 	}
-	httpClient := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	httpClient := &http.Client{Transport: client.bundleTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := httpClient.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return context.Cause(ctx)
 		}
 		return errors.New("source bundle download failed")
 	}
-	defer func() { err = errors.Join(err, response.Body.Close()) }()
+	defer func() {
+		if response.Body.Close() != nil {
+			// safety: transport errors can contain the signed URL, including its credential.
+			err = errors.Join(err, errors.New("source bundle download close failed"))
+		}
+	}()
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("source bundle download returned HTTP %d", response.StatusCode)
 	}
@@ -53,6 +58,13 @@ func seedBundle(ctx context.Context, client *gitClient, checkout, digest string,
 	defer func() { err = errors.Join(err, os.Remove(name)) }()
 	hash := sha256.New()
 	_, copyErr := io.Copy(io.MultiWriter(file, hash), response.Body)
+	if copyErr != nil {
+		if ctx.Err() != nil {
+			copyErr = context.Cause(ctx)
+		} else {
+			copyErr = errors.New("source bundle transfer failed")
+		}
+	}
 	if err := errors.Join(copyErr, file.Close()); err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package source
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -73,6 +74,9 @@ type Options struct {
 	// GitEnvironment is a host-built procenv base, never implicit ambient input.
 	// The source authority may add its owner's SSH_AUTH_SOCK after authorization.
 	GitEnvironment []string
+	// BundleTransport supplies signed-object transfers; the source client always refuses redirects.
+	// Nil uses the standard HTTP transport.
+	BundleTransport http.RoundTripper
 }
 
 // Entry is the acquired checkout and SDK command. Command excludes protocol argv.

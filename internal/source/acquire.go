@@ -12,7 +12,7 @@ import (
 )
 
 func acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err error) {
-	if err := ctx.Err(); err != nil {
+	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
 	if options.Engines == nil || options.Installer == nil || options.InstallEnvironment == nil {
@@ -26,9 +26,12 @@ func acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 	}
 	entry, err = PrepareCheckout(ctx, spec, options)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, context.Cause(ctx))
 	}
 	defer func() {
+		if cause := context.Cause(ctx); cause != nil && !errors.Is(err, cause) {
+			err = errors.Join(err, cause)
+		}
 		if err != nil {
 			err = errors.Join(err, entry.Close())
 			entry = nil
@@ -38,11 +41,14 @@ func acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 	if err != nil {
 		return entry, err
 	}
+	if err := context.Cause(ctx); err != nil {
+		return entry, err
+	}
 	command, err := options.Installer.Install(ctx, entry.Engine, entry.Directory, append([]string{}, options.InstallEnvironment...))
 	if err != nil {
 		return entry, fmt.Errorf("install source entry: %w", err)
 	}
-	if err := ctx.Err(); err != nil {
+	if err := context.Cause(ctx); err != nil {
 		return entry, err
 	}
 	if len(command) == 0 || command[0] == "" {
@@ -58,6 +64,9 @@ func acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 }
 
 func resolveEngine(ctx context.Context, spec Spec, options Options, directory string) (engine.Resolved, error) {
+	if err := context.Cause(ctx); err != nil {
+		return engine.Resolved{}, err
+	}
 	readPin := options.ReadPin
 	if readPin == nil {
 		readPin = engine.ReadPin
@@ -65,6 +74,9 @@ func resolveEngine(ctx context.Context, spec Spec, options Options, directory st
 	pin, err := readPin(directory, options.SDK)
 	if err != nil {
 		return engine.Resolved{}, fmt.Errorf("read source SDK pin: %w", err)
+	}
+	if err := context.Cause(ctx); err != nil {
+		return engine.Resolved{}, err
 	}
 	var resolved engine.Resolved
 	if spec.Engine == nil {
