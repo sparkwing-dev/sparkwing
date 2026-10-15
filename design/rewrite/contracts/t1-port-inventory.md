@@ -19,6 +19,12 @@ pending. This adds no archived source-function port identity.
 
 # Acceptance test port inventory
 
+The [W3 nodehost green continuation](../w3-nodehost-green-progress.md) ports
+`TestOnlyRunsTheMatchedNodesAndWhatTheyNeed` to tenant intake, claims, accepted
+seals and the shared scheduler. Exclusions use the existing selection policy
+and final-store transitions. Sealed selection ingestion remains W9 integration
+work. The full nodehost suite passes. No acceptance cell is added or activated.
+
 The [W3 owner assembly continuation](w3-owner-assembly-continuation.md) replaces
 the removed pre-intake stalled-describe assertion with native planning under a
 live owner. Failure finishes the owner without accepting topology and joins its

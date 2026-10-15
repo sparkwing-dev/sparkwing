@@ -3,7 +3,6 @@ package nodehost
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,29 +13,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func hostWith(t *testing.T, ctx context.Context, st *store.Store, cfg Config, doc nodeproto.PlanDoc) RunResult {
-	t.Helper()
-	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
-		t.Fatal(err)
-	}
-	skips, err := onlySkips(doc, cfg.Only, cfg.StartAt, cfg.StopAt)
-	if err != nil {
-		t.Fatalf("only: %v", err)
-	}
-	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), onlySkips: skips, validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
-	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
-	runPlanned(ctx, &cfg, run, &res)()
-	return res
-}
-
 func TestOnlyRunsTheMatchedNodesAndWhatTheyNeed(t *testing.T) {
-	st := openStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	fx := &fakeExec{}
 	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
 		{ID: "setup", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		{ID: "build-linux", Needs: deps("setup"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
@@ -45,20 +26,74 @@ func TestOnlyRunsTheMatchedNodesAndWhatTheyNeed(t *testing.T) {
 		{ID: "notify", OnFailureOf: "build-linux", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}
 
-	res := hostWith(t, ctx, st, Config{Execute: fx.run, Only: "build-l*"}, doc)
-	if res.Status != "success" {
-		t.Fatalf("status=%s err=%v, want success", res.Status, res.Err)
+	f := newStoreHostFixture(t, doc)
+	skips, err := onlySkips(doc, "build-l*", "", "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, id := range []string{"setup", "build-linux"} {
-		wantRow(t, st, id, sparkwing.Success, "")
-	}
-	for _, id := range []string{"build-mac", "deploy"} {
-		wantRow(t, st, id, sparkwing.Skipped, `outside --only="build-l*"`)
-		if fx.ran(id) {
-			t.Errorf("%s ran outside --sw-only", id)
+	for id, reason := range skips {
+		_, err := f.State.TransitionNode(ctx, store.NodeTransition{
+			Ref: store.NodeRef{RunID: f.Accepted.RunID, NodeID: id}, Actor: f.Actor,
+			To: store.NodeSkipped, Cause: store.CauseDependency,
+			Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSkipped, Reason: reason}},
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
-	wantRow(t, st, "notify", sparkwing.Skipped, "did not fail")
+	executed := make(chan string, len(doc.Jobs))
+	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+		executed <- input.NodeID
+		return f.report(ctx, input, store.NodeSuccess)
+	})
+	completion, err := f.Host.Run(ctx, f.Input)
+	if err != nil || completion.Outcome != "success" {
+		t.Fatalf("completion=%+v error=%v", completion, err)
+	}
+	close(executed)
+	var ran []string
+	for id := range executed {
+		ran = append(ran, id)
+	}
+	if !slices.Equal(ran, []string{"setup", "build-linux"}) {
+		t.Fatalf("executed=%v", ran)
+	}
+	events, err := f.Tenant.ListEventsAfter(ctx, f.Accepted.RunID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"setup", "build-linux", "build-mac", "deploy", "notify"} {
+		row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, reason := store.NodeSuccess, ""
+		if selected, ok := skips[id]; ok {
+			want, reason = store.NodeSkipped, selected
+		} else if id == "notify" {
+			want, reason = store.NodeSkipped, "parent_did_not_fail"
+		}
+		if row.Status != store.StatusDone || row.Outcome != want {
+			t.Errorf("%s: status=%s outcome=%s, want %s", id, row.Status, row.Outcome, want)
+		}
+		if want != store.NodeSkipped {
+			continue
+		}
+		ends := 0
+		for _, event := range events {
+			if event.NodeID != id || event.Kind != "job_skipped" {
+				continue
+			}
+			ends++
+			var result store.NodeResult
+			if err := json.Unmarshal(event.Payload, &result); err != nil || result.Reason != reason {
+				t.Errorf("%s: event=%s error=%v, want reason %q", id, event.Payload, err, reason)
+			}
+		}
+		if ends != 1 {
+			t.Errorf("%s: skipped events=%d, want 1", id, ends)
+		}
+	}
 }
 
 func TestOnlyRefusesWhatTheDispatcherRefused(t *testing.T) {

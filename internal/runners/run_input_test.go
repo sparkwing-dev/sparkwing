@@ -10,7 +10,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func FuzzHostingNodeInputKeepsAwardSeals(f *testing.F) {
@@ -86,6 +88,7 @@ func FuzzHostingRunInputKeepsAwardSeals(f *testing.F) {
 		}
 		unit.Request.Hash = "request-hash"
 		unit.Request.Request.RequestedArgs = map[string]string{"key": "sealed"}
+		unit.Runner.Labels = []string{"sealed-label"}
 		if resume {
 			unit.Accepted = &controllerwire.PlanAccepted{
 				Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash"},
@@ -97,6 +100,7 @@ func FuzzHostingRunInputKeepsAwardSeals(f *testing.F) {
 			ControllerURL: "http://controller", Lease: time.Minute, Interval: time.Second,
 			NewController: hostingClient(func(context.Context) (lease.Beat, error) {
 				unit.Request.Request.RequestedArgs["key"] = "changed-after-award"
+				unit.Runner.Labels[0] = "changed-after-award"
 				if unit.Accepted != nil {
 					unit.Accepted.Plan[0] = '!'
 				}
@@ -106,15 +110,21 @@ func FuzzHostingRunInputKeepsAwardSeals(f *testing.F) {
 				return ctx, func() { joined = true }
 			},
 			PrepareRun: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
-				prepared := nodehost.RunInput{RunID: preparedRun, RequestHash: preparedHash, SealedRequest: json.RawMessage(`{"ambient":true}`), Accepted: &nodehost.AcceptedRun{RunID: preparedRun}}
+				prepared := nodehost.RunInput{RunID: preparedRun, RequestHash: preparedHash, SealedRequest: json.RawMessage(`{"ambient":true}`), Accepted: &nodehost.AcceptedRun{RunID: preparedRun}, GrantedRunner: nodeproto.RunnerIdentity{Name: preparedRun, Type: "forged", Labels: []string{preparedHash}}, Owner: store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "authenticated-prefix"}, CapabilityPrefix: "authenticated-prefix", Kind: store.ActorOperator, Owner: store.OwnerLeaseRef{RunID: preparedRun, Holder: preparedHash, Generation: 999}}}
 				return runHostFunc(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
 						executed = true
-						var request runspec.SealedRequest
+						var request runspec.Request
 						if err := json.Unmarshal(input.SealedRequest, &request); err != nil {
 							t.Fatal(err)
 						}
-						if input.RunID != "run" || input.RequestHash != "request-hash" || request.Hash != "request-hash" || request.Request.RequestedArgs["key"] != "sealed" {
+						if input.RunID != "run" || input.RequestHash != "request-hash" || request.RequestedArgs["key"] != "sealed" {
 							t.Fatal("run execution lost the awarded first seal")
+						}
+						if input.GrantedRunner.Name != "granted-runner" || input.GrantedRunner.Type != "runner" || len(input.GrantedRunner.Labels) != 1 || input.GrantedRunner.Labels[0] != "sealed-label" {
+							t.Fatal("run execution replaced the granted runner")
+						}
+						if input.Owner.Kind != store.ActorRunHost || input.Owner.Owner != (store.OwnerLeaseRef{Kind: store.OwnerTrigger, RunID: "run", Holder: "holder", Generation: 2}) || input.Owner.Authority.ID != "authenticated-prefix" || input.Owner.CapabilityPrefix != "authenticated-prefix" {
+							t.Fatal("run execution replaced the owner fence or authenticated authority")
 						}
 						if resume {
 							accepted := input.Accepted

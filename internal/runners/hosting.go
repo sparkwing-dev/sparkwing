@@ -44,7 +44,7 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 	if unit.Unit == capability.UnitNode {
 		execution, err = executionFor(unit)
 	} else {
-		sealedRun, err = runInputFor(unit)
+		sealedRun, err = nodehost.NewRunInput(unit)
 	}
 	if err != nil {
 		return err
@@ -133,6 +133,8 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 		}
 		input.RunID, input.RequestHash = sealedRun.RunID, sealedRun.RequestHash
 		input.SealedRequest, input.Accepted = sealedRun.SealedRequest, sealedRun.Accepted
+		input.GrantedRunner = sealedRun.GrantedRunner
+		input.Owner.Kind, input.Owner.Owner = sealedRun.Owner.Kind, sealedRun.Owner.Owner
 		_, err = host.Run(unitCtx, input)
 		return err
 	}
@@ -193,11 +195,11 @@ func validateHostedAward(unit controllerwire.ClaimedUnit) error {
 		if unit.Engine == nil || unit.Accepted == nil || unit.Request.RunID != unit.RunID || unit.Request.Request.Team == "" || unit.Accepted.Spec.Request.RunID != unit.RunID || unit.Accepted.Spec.Request.Request.Team != unit.Request.Request.Team || unit.Accepted.Spec.Resolved.Engine != *unit.Engine {
 			return errors.New("runner award is missing its matching accepted engine and run")
 		}
-		if unit.Runner.Name == "" || unit.Runner.Type == "" {
-			return errors.New("runner award is missing its granted runner identity")
-		}
 	} else if (unit.Purpose != capability.PurposeTrigger && unit.Purpose != capability.PurposeHere) || binding.Kind != capability.BindingTrigger || unit.JobID != "" || binding.NodeID != "" {
 		return errors.New("runner award has an invalid trigger binding")
+	}
+	if unit.Runner.Name == "" || unit.Runner.Type == "" || unit.Runner.Labels == nil {
+		return errors.New("runner award is missing its granted runner identity")
 	}
 	if unit.LeaseExpiresAt.IsZero() {
 		return errors.New("runner award is missing its lease expiry")

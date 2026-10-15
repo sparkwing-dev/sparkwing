@@ -88,11 +88,13 @@ client and award clients over the same HTTP transport with separate bearers.
 Concrete shared host constructors and run/plan/eval execution identities remain
 with W3.
 
-For trigger and here awards, Hosting constructs RunInput's run ID, first seal
-and accepted second seal before renewal or preparation. Prepared host services
-supply storage, authority, engine resolution and plan caching. They cannot
-replace the awarded seals or add an accepted plan to a new run. Trigger and node
-preparation share the accepted-plan projection.
+For trigger and here awards, Hosting uses nodehost.NewRunInput before renewal or
+preparation. The constructor captures the run ID, owner fence, granted runner,
+first seal and accepted second seal. SealedRequest contains the inner Request.
+RequestHash carries its separate seal. Prepared host services supply storage,
+authenticated authority, engine resolution and plan caching. They cannot replace
+the awarded fences, identity or seals, or add an accepted plan to a new run.
+Trigger and node preparation share the accepted-plan projection.
 
 Reconciliation supports MaterializeOnly: an authorized cache/retry hit is committed,
 while a miss returns Dispatch without stealing remote execution. Private execution
@@ -173,6 +175,7 @@ are part of this contract.
 |---|---|
 | `nodehost.AcceptedRun` | Carries canonical accepted spec/plan bytes and their sealed hashes. |
 | `nodehost.RunInput` | Gives a new or resumed owner the sealed request and existing acceptance. |
+| `nodehost.NewRunInput` | Captures an authenticated award's sealed inputs, owner fence and granted runner before placement preparation. |
 | `nodehost.RunCompletion` | Reports the verdict after atomic run/unit finish. |
 | `nodehost.RunHost.Run` | Runs acquire through completion for every run-host placement. |
 | `nodehost.OwnerHost`, `OwnerStore` | Coordinate renewal, planning, acceptance, scheduling and atomic finish through the Tenant contracts. |
