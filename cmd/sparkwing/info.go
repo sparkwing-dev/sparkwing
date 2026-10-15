@@ -532,7 +532,7 @@ func gatherSDKPinWith(info Info, sdk engine.SDKKind, readPin func(string, engine
 		return nil
 	}
 	report := &InfoSDKPin{Installed: info.Version.Installed}
-	pin, err := readPin(filepath.Dir(info.Project.SparkwingDir), sdk)
+	pin, err := readPin(info.Project.SparkwingDir, sdk)
 	if err != nil {
 		report.Refusal = err.Error()
 		return report

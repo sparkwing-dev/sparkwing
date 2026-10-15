@@ -432,7 +432,7 @@ func TestTeamBoundary_EveryRunRouteAnswersAnotherTeamWith404(t *testing.T) {
 				{"team B token with every scope", f.everyScopeB},
 			} {
 				code, body := f.do(method, path, caller.auth, map[string]any{})
-				if code != http.StatusNotFound || strings.Contains(body, controller.UnsupportedRouteError) {
+				if code != http.StatusNotFound || strings.Contains(body, `"message":"route not found"`) {
 					t.Errorf("%s as %s = %d want the boundary's 404: %s", pattern, caller.name, code, body)
 				}
 			}
@@ -602,7 +602,7 @@ func TestTeamBoundary_NoMemberReachesAnAdminRoute(t *testing.T) {
 					continue
 				}
 				code, body := f.do(method, path, member.auth, map[string]any{})
-				if code == http.StatusNotFound && strings.Contains(body, controller.UnsupportedRouteError) {
+				if code == http.StatusNotFound && strings.Contains(body, `"message":"route not found"`) {
 					continue
 				}
 				checked++

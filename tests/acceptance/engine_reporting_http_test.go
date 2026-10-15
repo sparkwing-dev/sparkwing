@@ -158,25 +158,6 @@ func (tr reportTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return w.Result(), nil
 }
 
-func TestReportingClientUsesJobRoutes(t *testing.T) {
-	b, f := newCredentialBoundary(), &engineTransactions{}
-	c := client.NewWithToken("http://controller.invalid", &http.Client{Transport: reportTransport{expansionServer(t, b, f)}}, b.raw)
-	ctx := t.Context()
-	for _, send := range []func() error{
-		func() error { return c.AppendNodeAnnotation(ctx, "run", "job", "masked") },
-		func() error { return c.SetNodeSummary(ctx, "run", "job", "masked") },
-		func() error { return c.AppendStepAnnotation(ctx, "run", "job", "compile", "masked") },
-		func() error { return c.SetStepSummary(ctx, "run", "job", "compile", "masked") },
-	} {
-		if err := send(); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if f.writes != 4 {
-		t.Fatalf("accepted %d reports, want 4", f.writes)
-	}
-}
-
 func TestEngineReportingAuthorities(t *testing.T) {
 	for _, operation := range reportRequests {
 		for _, authority := range []string{"job", "owner", "publisher", "cancelling"} {

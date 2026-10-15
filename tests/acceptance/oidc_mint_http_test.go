@@ -26,7 +26,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/jwks"
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -268,7 +267,7 @@ func TestOIDCMintHTTPInputAndBudget(t *testing.T) {
 		t.Fatalf("claim shares another claim's budget: %d", w.Code)
 	}
 }
-func TestOIDCMintHTTPClientAndKeyRotation(t *testing.T) {
+func TestOIDCMintHTTPKeyRotation(t *testing.T) {
 	b, f := oidcBoundary()
 	_, oldKey := oidcPrivate(t)
 	_, nextKey := oidcPrivate(t)
@@ -278,10 +277,10 @@ func TestOIDCMintHTTPClientAndKeyRotation(t *testing.T) {
 	}
 	minted := make([]string, len(servers))
 	for i, h := range servers {
-		c := client.NewWithToken("https://issuer.example", &http.Client{Transport: reportTransport{handler: h}}, b.raw)
-		result, err := c.OIDCToken(t.Context(), "run", "vault")
-		if err != nil {
-			t.Fatal(err)
+		w := authorityHTTP(h, b, "POST", "/api/v1/runs/run/oidc-token", `{"audience":"vault"}`)
+		var result controller.OIDCTokenResponse
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Token == "" {
+			t.Fatalf("mint: %d %s", w.Code, w.Body)
 		}
 		minted[i] = result.Token
 	}

@@ -61,7 +61,6 @@ func (r *pipelineRun) materialize(env []string) error {
 	if err := resolveSparks(r.ctx, r.sparkwingDir, r.opts); err != nil {
 		return err
 	}
-	env = withWingdHost(env)
 	key, keyParts, err := bincache.ExplainCacheKey(r.sparkwingDir, env)
 	if err != nil {
 		return fmt.Errorf("read .sparkwing/ to weigh what it declares: %w", err)
@@ -117,11 +116,6 @@ func (r *pipelineRun) stop() {
 func (r *pipelineRun) finish(err error) error {
 	if r.ctx.Err() != nil {
 		r.stopSignals()
-		// safety: raiseInterrupt does not return on a platform that can
-		// re-raise, so teardown has to happen before it, not in a defer.
-		if r.opts.AfterChild != nil {
-			r.opts.AfterChild()
-		}
 		r.raiseInterrupt()
 	}
 	return err
@@ -198,11 +192,6 @@ type compileOptions struct {
 	ExecutionDir string
 	NoUpdate     bool
 	NoBincache   bool
-
-	// safety: every exec path ends in os.Exit to carry the pipeline's status,
-	// which skips defers, so teardown has to travel with the call and run once
-	// the pipeline binary has finished.
-	AfterChild func()
 }
 
 func resolveSparks(ctx context.Context, sparkwingDir string, opts compileOptions) error {

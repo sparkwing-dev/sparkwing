@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -28,7 +29,7 @@ func FuzzEngineTransitionSourceAttemptProjection(f *testing.F) {
 		if err := json.Unmarshal(raw, &decoded); err != nil {
 			t.Fatal(err)
 		}
-		request, err := nodeTransitionForStore(engineOwnerAuthorization(), decoded)
+		request, err := captureEngineTransition(t.Context(), decoded)
 		if err != nil || (request.SourceAttempt != nil) != present {
 			t.Fatalf("attempt presence changed: %+v %v", request, err)
 		}
@@ -86,4 +87,20 @@ func TestEngineWireRetryOrdinalCannotConsumeNextAttempt(t *testing.T) {
 	if err != nil || row.Attempt != 3 || row.ApplicationRetries != 2 || row.Status != store.StatusRunning {
 		t.Fatalf("refused write changed current execution: %+v %v", row, err)
 	}
+}
+
+type transitionCapture struct {
+	RunTransactions
+	change store.NodeTransition
+}
+
+func (c *transitionCapture) TransitionNode(_ context.Context, change store.NodeTransition) (store.Applied, error) {
+	c.change = change
+	return store.Applied{}, nil
+}
+func captureEngineTransition(ctx context.Context, body controllerwire.JobTransitionRequest) (store.NodeTransition, error) {
+	capture := &transitionCapture{}
+	server := &EngineController{ResolveTenant: func(context.Context, store.Team) (RunTransactions, error) { return capture, nil }}
+	_, err := server.TransitionJob(ctx, capability.Authorized{Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}, body)
+	return capture.change, err
 }

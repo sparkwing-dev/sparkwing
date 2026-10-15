@@ -17,8 +17,10 @@ import (
 
 type dataClient struct{ transport *engineClient }
 
-var _ blob.DataSigner = (*dataClient)(nil)
-var _ blob.RecordStore = (*dataClient)(nil)
+var (
+	_ blob.DataSigner  = (*dataClient)(nil)
+	_ blob.RecordStore = (*dataClient)(nil)
+)
 
 func (c *dataClient) Upload(ctx context.Context, input blob.UploadIntent) (blob.UploadTicket, error) {
 	var result wire.DataUploadTicket
@@ -194,4 +196,18 @@ func validateDataTransfer(transfer wire.DataSignedTransfer) error {
 
 func dataProtocolError(message string) error {
 	return &apierr.Error{Code: apierr.ProtocolError, Message: message}
+}
+
+// NewDataClient returns the shared authenticated signing and record transports.
+// It uses EngineOptions' HTTP/api.sock transport and private bearer provider.
+// Authority and upload identity in interface arguments are selectors to compare;
+// the server derives both from current authentication and persisted state.
+// Object transfer clients receive signed headers only, never the controller bearer.
+func NewDataClient(options EngineOptions) (blob.DataSigner, blob.RecordStore, error) {
+	c, err := newEngineClient(options)
+	if err != nil {
+		return nil, nil, err
+	}
+	data := &dataClient{transport: c}
+	return data, data, nil
 }

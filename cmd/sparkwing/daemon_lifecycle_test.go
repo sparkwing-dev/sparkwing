@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd/supervise"
 )
 
 type daemonLifecycleFake struct {
@@ -226,7 +225,7 @@ func TestDaemonLifecycleMissingAndCancelledRuntime(t *testing.T) {
 }
 
 func TestShutdownWindowsNest(t *testing.T) {
-	if wingd.FinalizeDrainWindow > supervise.DefaultTermGrace || supervise.DefaultTermGrace >= daemonRestartTimeout {
-		t.Fatalf("shutdown windows: drain=%s termination=%s restart=%s", wingd.FinalizeDrainWindow, supervise.DefaultTermGrace, daemonRestartTimeout)
+	if wingd.FinalizeDrainWindow >= daemonRestartTimeout {
+		t.Fatalf("shutdown windows: drain=%s restart=%s", wingd.FinalizeDrainWindow, daemonRestartTimeout)
 	}
 }

@@ -333,7 +333,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing run", PipelineArgument: true, PipelineArgsAfterSeparator: true, Rules: []string{"Always executes locally, including detached work on the local controller. --profile is refused.", "Publication is one-way run/results/logs with local provenance; a publication failure never changes the local run verdict.", "Cache-from reads only authorized verified-default-branch memo/artifacts/depcache; no shared writes or remote binary fetch.", "--sw-output applies to foreground and detached runs; explicit --sw-output beats -o, then SPARKWING_LOG_FORMAT, then terminal detection."}, Flags: []Flag{
 			{Name: "publish", Argument: "PROFILE"},
-			{Name: "sw-cache-from", Argument: "PROFILE"},
+			{Name: "sw-cache-from", Argument: "PROFILE", AllowEmpty: true, Meaning: "Read the authorized remote cache; an empty value disables the machine default."},
 			{Name: "sw-pause-before", Argument: "JOB", Repeatable: true, CommaList: true},
 			{Name: "sw-pause-after", Argument: "JOB", Repeatable: true, CommaList: true},
 			{Name: "sw-pause-on-failure"},
@@ -685,11 +685,7 @@ func Registry() []Command {
 			{Name: "stay"},
 			{Name: "standalone-reason", Argument: "REASON"},
 		}},
-		{Path: "sparkwing wingd supervise", Hidden: true, Flags: []Flag{
-			{Name: "version", Argument: "VERSION"},
-			{Name: "state-db", Argument: "PATH"},
-			{Name: "stay"},
-		}},
+
 		{Path: "sparkwing-controller", Flags: []Flag{
 			{Name: "addr", Argument: "VALUE"},
 			{Name: "metrics-addr", Argument: "VALUE"},
@@ -762,7 +758,7 @@ func Registry() []Command {
 		{Path: "sparkwing-runner fetch-source", Hidden: true, Rules: []string{"Use the bootstrap file only for authorized source acquisition; clone the sealed SHA exactly."}, Flags: []Flag{
 			{Name: "controller", Argument: "URL", Required: true},
 			{Name: "run", Argument: "RUN", Required: true},
-			{Name: "job", Argument: "JOB", Required: true},
+			{Name: "job", Argument: "JOB"},
 			{Name: "generation", Argument: "N", Required: true},
 			{Name: "bootstrap-file", Argument: "PATH", Required: true},
 			{Name: "source-dir", Argument: "PATH", Required: true},
@@ -774,14 +770,14 @@ func Registry() []Command {
 			{Name: "image", Argument: "IMAGE", Required: true},
 			{Name: "cpu-ceiling", Argument: "CPU", Required: true},
 			{Name: "memory-ceiling", Argument: "BYTES", Required: true},
-			{Name: "deadline", Argument: "DURATION"},
+			{Name: "docker-image", Argument: "IMAGE", Required: true},
 			{Name: "poll", Argument: "DURATION"},
 			{Name: "credentials-dir", Argument: "PATH", Required: true},
 		}},
 		{Path: "sparkwing-runner run-node", Hidden: true, Rules: []string{"Read the bootstrap file once, exchange it and keep the capability in memory; no bearer in argv or env."}, Flags: []Flag{
 			{Name: "controller", Argument: "URL", Required: true},
 			{Name: "run", Argument: "RUN", Required: true},
-			{Name: "job", Argument: "JOB", Required: true},
+			{Name: "job", Argument: "JOB"},
 			{Name: "generation", Argument: "N", Required: true},
 			{Name: "bootstrap-file", Argument: "PATH", Required: true},
 			{Name: "source-dir", Argument: "PATH", Required: true},

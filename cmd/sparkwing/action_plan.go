@@ -113,7 +113,7 @@ func withPipelineEntry(pipeline string, fn func(ctx context.Context, entry pipel
 	if err != nil {
 		return err
 	}
-	if err := switchToolchain(dir); err != nil {
+	if err := switchToolchain(dir, nil); err != nil {
 		return err
 	}
 	source, err := orchestrator.ResolvePipelineSource(context.Background(), filepath.Dir(dir), pipeline, "")

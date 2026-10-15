@@ -193,7 +193,7 @@ func TestCacheWarmUsesSelectedEngineAndCapturedEnvironment(t *testing.T) {
 			if sdk == engine.TypeScriptSDK {
 				manifest, body = "package.json", `{"main":"pipeline.ts","dependencies":{"@sparkwing/sdk":"1.0.0"}}`
 			}
-			if err := os.WriteFile(filepath.Join(dir, manifest), []byte(body), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, manifest), []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			selected := engine.Resolved{Executable: filepath.Join(t.TempDir(), "engine")}
@@ -206,7 +206,7 @@ func TestCacheWarmUsesSelectedEngineAndCapturedEnvironment(t *testing.T) {
 				return selected, nil
 			}, func(ctx context.Context, got engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
 				called = true
-				if ctx.Err() != nil || got.Executable != selected.Executable || request.Directory != dir || request.SDK != sdk || !reflect.DeepEqual(request.Environment, environment) {
+				if ctx.Err() != nil || got.Executable != selected.Executable || request.Directory != filepath.Dir(dir) || request.PipelineDir != filepath.Base(dir) || request.SDK != sdk || !reflect.DeepEqual(request.Environment, environment) {
 					t.Fatal("installation changed selected engine or captured input")
 				}
 				return engine.SDKCommand{Directory: dir, Command: []string{filepath.Join(dir, "pipeline")}}, nil

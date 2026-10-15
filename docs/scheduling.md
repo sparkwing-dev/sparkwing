@@ -88,12 +88,17 @@ Runner enrollment accepts repeatable labels and an owner repository allow-list:
 
 ```bash
 sparkwing runners add --runner build-box --profile prod --label gpu --repos 'github.com/acme/*'
+sparkwing runners add --runner deploy-box --profile prod --repos 'github.com/acme/*' --reserved-for prod
 sparkwing runners list --profile prod -o json
 ```
 
 The controller returns the granted runner identity, class, location and
 reservations separately from free labels and measured headroom. An absent
 headroom sample is unavailable data. It is not zero capacity.
+`--reserved-for` submits a pool proposal under team administration. Repeating
+the flag or separating pools with commas preserves every requested pool. The
+controller grants the reservation through enrollment. Enrollment never retries
+a response that could have contained the one-time credential.
 
 The unified runner uses one ordered claim loop for trigger and job units.
 The launcher claims plan, eval and work units and creates their Kubernetes Jobs.

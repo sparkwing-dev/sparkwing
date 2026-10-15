@@ -426,22 +426,6 @@ func (s *Server) writeRouteMiss(w http.ResponseWriter, r *http.Request) {
 	writeRouteMiss(w, allowedRouteMethods(s.routeProbe(), r, routeProbeMethods))
 }
 
-// WriteUnsupportedRoute answers a request for a route this build does not
-// register, in the body [UnsupportedRouteError] documents.
-func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusNotFound, map[string]string{
-		"error": UnsupportedRouteError,
-		"route": r.Method + " " + r.URL.Path,
-	})
-}
-
-// UnsupportedRouteError is the `error` member of the 404 body a controller
-// returns for a method and path it does not register. It names the surface
-// rather than the resource, so a client can tell a route this controller
-// predates from a row that does not exist and degrade instead of reporting
-// the run missing.
-const UnsupportedRouteError = "unsupported"
-
 var routeProbeMethods = []string{
 	http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
 	http.MethodPatch, http.MethodDelete, http.MethodOptions,

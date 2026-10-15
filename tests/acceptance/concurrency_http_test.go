@@ -19,7 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -316,43 +315,6 @@ func TestConcurrencyHTTPRefusals(t *testing.T) {
 				t.Fatalf("calls=%d want=%d body=%s", f.calls, calls, w.Body)
 			}
 		})
-	}
-}
-
-func TestConcurrencyHTTPClientUsesGroupRoutes(t *testing.T) {
-	b := newCredentialBoundary()
-	f := &concurrencyTransactions{team: "team", kind: store.AcquireGranted}
-	c := client.NewWithToken("http://controller.invalid", &http.Client{Transport: reportTransport{concurrencyServer(b, f, "deploy/prod +", "holder")}}, b.raw)
-	ctx := t.Context()
-	key := "deploy/prod +"
-	if result, err := c.AcquireSlot(ctx, key, client.AcquireSlotRequest{HolderID: "holder", RunID: "run", NodeID: "job", Max: 2, Cost: 1, Policy: "queue"}); err != nil || !result.Granted {
-		t.Fatalf("acquire=%+v %v", result, err)
-	}
-	if _, err := c.HeartbeatSlot(ctx, key, "holder", time.Minute); err != nil {
-		t.Fatal(err)
-	}
-	if result, err := c.ObserveSlot(ctx, key, "holder"); err != nil || result.NodeID != "job" {
-		t.Fatalf("holder=%+v %v", result, err)
-	}
-	if result, err := c.ResolveWaiter(ctx, key, "run", "job", "", "leader", "leader-job", false); err != nil || result.LeaderNodeID != "leader-job" {
-		t.Fatalf("resolution=%+v %v", result, err)
-	}
-	if result, err := c.ConcurrencyState(ctx, key); err != nil || result.Group != key || result.Waiters[0].CancelTimeout != 3*time.Second {
-		t.Fatalf("group=%+v %v", result, err)
-	}
-	if ok, err := c.CancelWaiter(ctx, key, "run", "job"); err != nil || !ok {
-		t.Fatal(err)
-	}
-	if err := c.ReleaseSlot(ctx, key, "holder", "success", "", "", 0); err != nil {
-		t.Fatal(err)
-	}
-	b.snapshot.Authorities = intakeBoundary().snapshot.Authorities
-	b.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsControl}
-	if dropped, err := c.ForceReleaseSuperseded(ctx, key); err != nil || len(dropped) != 1 {
-		t.Fatalf("drop=%+v %v", dropped, err)
-	}
-	if f.calls != 8 {
-		t.Fatalf("transactions=%d", f.calls)
 	}
 }
 

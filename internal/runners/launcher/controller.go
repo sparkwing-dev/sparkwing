@@ -142,7 +142,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 	request := controllerwire.LauncherSyncRequest{}
 	byJob, byUnit := make(map[string]int), make(map[string]int)
 	for i, observation := range observations {
-		if observation.Binding.UnitID == "" || observation.JobName != jobName(observation.Binding) || observation.NodeUID == "" {
+		if observation.JobNamespace == "" || observation.JobUID == "" || observation.Binding.UnitID == "" || observation.JobName != jobName(observation.Binding) || observation.NodeUID == "" {
 			return nil, errors.New("Cloud observation is missing its persisted unit, Job or node identity")
 		}
 		if _, ok := byJob[observation.JobName]; ok {

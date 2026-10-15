@@ -1262,7 +1262,7 @@ registrations. It exercises the real verifier and policy selector against
 committed-fact fakes, with negative requests repeated through Server.Handler.
 TestReportingRetiredRoutes covers the removed read paths. The actual controller
 client's NodeLogs read, stream, completeness and whole-run requests retain exact
-escaped selectors in TestNodeLogReaderUsesJobRoutes. The prior raw-event method
+escaped selectors in TestLogReaderUsesFinalRoutesAndAuthenticatedTransport. The retired NodeLogs client fixture is deleted with that API. The prior raw-event method
 refusal property still requires 405 with Allow after registration moves.
 
 The 258-line independent expected route table moved from
@@ -1372,7 +1372,7 @@ writer, preserving malformed, omitted and explicit timestamp coverage and adding
 nanosecond-range refusal. TestMetricsHTTPAuthorityProperty, ValidationAndLimit
 cover live authority, selected job/tenant, committing conflicts, canonical errors,
 missing/foreign adapters and invalid metric/usage bodies. The client transport
-port is TestMetricAndUsageClientsUseFinalJobRoutes. It does not prove persistence.
+fixture TestMetricAndUsageClientsUseFinalJobRoutes is retired with the removed Client API. TestMetricTimestamp and TestMetricsHTTPReadsPagedSamplesFromAuthorizedTenant retain the HTTP timestamp, accounting and read assertions. A final native metric/usage client contract is still required. These tests do not prove persistence.
 
 The old socket-based request-budget tests and claim-budget test are ported to
 real authenticated /runners/claim HTTP with SQLite. The ports cover empty-poll
@@ -1504,3 +1504,60 @@ The controller's duplicate log-limit constants are removed, and the retained
 deletion delay and legacy fixture assertions use `internal/limits` values.
 Final log-signing/verification HTTP composition remains open. These signer
 ports do not prove a final controller log mutation or native log-tail cell.
+
+
+## W2 integration-merge recovery and fixture retirement
+
+`TestCredentialMachineHTTPCannotBecomeAMemberProperty` replaces the two
+remaining declared-repository credential tests. It uses real SQLite capability
+lookup and actual Server routes. Generated machine grants and caller hints
+cannot authorize intake, retry or cancellation as a team member. The test also
+checks that refusal creates no run and records no cancellation. The positive
+member retry path remains in `TestEngineLifecycleHTTP`. The obsolete
+runner_scopes_test.go helper file is deleted after its last callers are ported.
+
+`TestCredentialMemberHTTPEncodedPathsPreserveTenantProperty` replaces the two
+legacy URL-path tenant tests. It issues real member capabilities in two teams,
+generates percent-encoded literal and identifier segments, checks positive own
+job reads, and refuses foreign reads without disclosing job data. It also checks
+nine noncanonical paths and unchanged persisted run state. A live foreign member
+now receives the final policy's canonical 403. The old 404 expectation is not
+copied. The raw invalid-HTTP-escape assertion retires because it tests Go's HTTP
+parser before Sparkwing receives a request.
+
+The seven token-table here-runner tests are deleted. Their final evidence is
+`TestAdmissionHereAwardRetainsRequestingAuthority`,
+`TestClaimUnitHereWindowAndReclaim`,
+`TestAuthenticationSnapshotHereClaimHistorySurvivesRequeue`,
+`TestLocalAndHereClaimsDoNotInventAnExecutionDeadline`,
+`TestAuthenticationHereWindowAndSessionParent`, `TestHereClaimStaysNamedAcrossReclaim`,
+`TestHereResumeClaimContract` and `TestHereClaimResponseLossIsNotRetried`.
+`TestSizingHTTPRefusals` retains the bound-pipeline boundary. The old fixed
+six-hour lifetime, machine-token scope table, token cache restart and
+no-reclaim expectations retire with their APIs. The final here selection has
+no reason field. These owner/component checks do not complete a native
+credential-matrix cell.
+
+The retired client fixtures `TestNodeLogReaderUsesJobRoutes`,
+`TestMetricAndUsageClientsUseFinalJobRoutes` and
+`TestConcurrencyHTTPClientUsesGroupRoutes` are removed. Final log transport
+coverage is `TestLogReaderUsesFinalRoutesAndAuthenticatedTransport`. Final queue
+client tests cover its retained read/priority contract. The existing
+`TestConcurrencyHTTPTransactions`, `TestConcurrencyHTTPRefusals`, `TestMetricTimestamp`,
+`TestMetricsHTTPAuthorityProperty`, `TestMetricsHTTPValidationAndLimit` and
+`TestMetricsHTTPReadsPagedSamplesFromAuthorizedTenant` retain the HTTP concerns.
+The final native metric/usage client contract and log mutation composition remain
+cross-area work. `TestOIDCMintHTTPKeyRotation` keeps the four-stage JWKS rotation
+proof through actual HTTP without the retired Client constructor.
+
+`TestUnregisteredRouteAnswersCanonicalNotFound` replaces the obsolete string
+error-envelope expectation. The unused `WriteUnsupportedRoute` and
+`UnsupportedRouteError` production API is deleted. Remaining legacy tenant
+fixtures check the canonical route-miss message until their persistence ports
+are supplied. No compatibility symbol is retained.
+
+The final independent route expectation table remains beside the route tests in
+pkg/controller/credential_route_expectations_test.go. The internal/acceptance
+copy remains absent. The catalog, port destinations and route declaration,
+ordering and drift checks pass. No scenario catalog, Harness or boundary registry
+entry is added.

@@ -619,8 +619,6 @@ type UnitRenewer interface {
 	RenewUnit(context.Context, string, bool) (store.LeaseBeat, error)
 }
 const UnpricedCPUClassCode = "unpriced_cpu_class"
-const UnsupportedRouteError = "unsupported"
-func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)
 
 # methods on un-declared receiver types (likely a bug)
 func (s *boundData) Commit(ctx context.Context, request blob.CommitUpload) (blob.Receipt, error)

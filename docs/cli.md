@@ -142,6 +142,12 @@ Help supplies descriptions, flags, and examples. Hidden commands require
 
 The describe schema uses the shared protocol v2 pipeline description. Project
 metadata comes from the `pipelines:` block in `.sparkwing/sparkwing.yaml`.
+Named `pipeline describe` reads the selected SDK's current protocol response,
+including with `--secrets`. A failed source build or protocol read fails the
+command. Pipeline listings can use cached metadata. Named describe always reads
+the selected SDK.
+Engine selection and `info` read the SDK pin from the pipeline directory's
+manifest and lockfile.
 A configured alias selects its registered SDK entrypoint for flags, help, secret
 classification and risks. Planning sends that entrypoint to the SDK and keeps
 the invoked alias in the run context. Pass required planning inputs after `--`,

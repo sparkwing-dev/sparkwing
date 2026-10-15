@@ -175,6 +175,115 @@ func TestCredentialClaimHTTPAncestryAndFenceProperty(t *testing.T) {
 	}
 }
 
+func TestCredentialMachineHTTPCannotBecomeAMemberProperty(t *testing.T) {
+	property := func(grantIndex uint8, selector []byte) bool {
+		e, _ := engineRuntimeStore(t)
+		grant := []capability.Grant{capability.NodesClaim, capability.TriggersClaim, capability.RunsWrite, capability.RunsControl}[grantIndex%4]
+		raw := engineHTTPRoot(t, e, "a", "machine", []capability.Grant{grant})
+		h := New(e.Store, nil).WithEngineController(e).Handler()
+		for _, request := range []struct{ path, body string }{
+			{"/api/v1/runs", `{"request":{"version":1,"team":"a","pipeline":"victim","git":{"repository":{"key":"gh:1"}}}}`},
+			{"/api/v1/runs/run/retry", `{"idempotency_key":"retry-once"}`},
+			{"/api/v1/runs/run/cancel", `{"reason":"forged"}`},
+		} {
+			r := httptest.NewRequest(http.MethodPost, request.path, strings.NewReader(request.body))
+			r.Header.Set("Authorization", "Bearer "+raw)
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("X-Sparkwing-Team", hex.EncodeToString(selector))
+			r.Header.Set("X-Sparkwing-Claim-Generation", "1")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			var failure apierr.Envelope
+			if w.Code != http.StatusForbidden || json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error == nil || failure.Error.Code != apierr.Forbidden {
+				t.Logf("grant=%s path=%s: %d %s", grant, request.path, w.Code, w.Body)
+				return false
+			}
+		}
+		var runs int
+		var cancelled any
+		if err := e.Store.DB().QueryRow(`SELECT COUNT(*),MAX(cancel_requested_at) FROM runs`).Scan(&runs, &cancelled); err != nil {
+			t.Fatal(err)
+		}
+		return runs == 1 && cancelled == nil
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCredentialMemberHTTPEncodedPathsPreserveTenantProperty(t *testing.T) {
+	s, session := credentialSessionServer(t)
+	h := s.Handler()
+	mint := func() string {
+		w := credentialRequestHTTP(t, h, session, `{"grants":["runs.read"]}`, false)
+		var issued credentialResponse
+		if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &issued) != nil || issued.Capability == "" {
+			t.Fatalf("issuance: %d %s", w.Code, w.Body)
+		}
+		return issued.Capability
+	}
+	own := mint()
+	engineSQL(t, s.store, `INSERT INTO teams(name,created_at,updated_at) VALUES ('b',1,1)`)
+	engineSQL(t, s.store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('b','member','reader',1)`)
+	engineSQL(t, s.store, `UPDATE sessions SET team='b'`)
+	foreign := mint()
+	engineSQL(t, s.store, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','private-job','pending',?,?)`, []byte(`{"id":"private-job"}`), []byte(`{}`))
+	property := func(encoded uint16, hint []byte) bool {
+		path := "/api/v1/runs/run/jobs"
+		var spelling strings.Builder
+		for i, value := range []byte(path) {
+			if value != '/' && encoded&(1<<uint(i%16)) != 0 {
+				spelling.WriteByte('%')
+				spelling.WriteString(hex.EncodeToString([]byte{value}))
+			} else {
+				spelling.WriteByte(value)
+			}
+		}
+		for _, auth := range []struct {
+			raw    string
+			status int
+		}{{own, http.StatusOK}, {foreign, http.StatusForbidden}} {
+			r := httptest.NewRequest(http.MethodGet, spelling.String()+"?team=a&holder="+hex.EncodeToString(hint), nil)
+			r.Header.Set("Authorization", "Bearer "+auth.raw)
+			r.Header.Set("X-Sparkwing-Team", "a")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != auth.status || (auth.status == http.StatusOK) != strings.Contains(w.Body.String(), "private-job") {
+				t.Logf("%s: %d %s want %d", spelling.String(), w.Code, w.Body, auth.status)
+				return false
+			}
+			if auth.status == http.StatusForbidden {
+				var failure apierr.Envelope
+				if json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error == nil || failure.Error.Code != apierr.Forbidden {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"/api/v1/runs//run/jobs", "/api/v1/runs/./run/jobs", "/api/v1/runs/x/../run/jobs",
+		"/api/v1//runs/run/jobs", "/api/v1/runs/run/jobs/", "/api/v1/runs/%2E%2E/run/jobs",
+		"/api/v1/runs/run%2Fjobs", "/api/v1/runs/%2572un/jobs", "/api/v1/runs/%EF%BD%92un/jobs",
+	} {
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r.Header.Set("Authorization", "Bearer "+foreign)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if !slices.Contains([]int{http.StatusMovedPermanently, http.StatusTemporaryRedirect, http.StatusBadRequest, http.StatusNotFound, http.StatusMethodNotAllowed}, w.Code) || strings.Contains(w.Body.String(), "private-job") {
+			t.Fatalf("noncanonical path %s: %d %s", path, w.Code, w.Body)
+		}
+	}
+	var state string
+	var cancelled any
+	if err := s.store.DB().QueryRow(`SELECT status,cancel_requested_at FROM runs WHERE team='a' AND id='run'`).Scan(&state, &cancelled); err != nil || state != "running" || cancelled != nil {
+		t.Fatalf("run changed: %s %v %v", state, cancelled, err)
+	}
+}
+
 func TestCredentialStartedClaimHTTPConsumesContractAttempt(t *testing.T) {
 	e, h, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
 	w := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 200)

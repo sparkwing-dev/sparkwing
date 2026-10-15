@@ -45,7 +45,7 @@ func TestEngineLifecycleHTTP(t *testing.T) {
 				f := &engineTransactions{applied: store.Applied{Replayed: true, CancelRequested: true, StateSeq: 8, Generation: 4, Attempt: 2},
 					beat:     store.LeaseBeat{ExpiresAt: b.snapshot.Now.Add(time.Minute), CancelRequested: true, CancelReason: "requested", Watched: true, WatchedNodes: []string{"job"}},
 					admitted: store.AdmissionResult{RunID: "retry", Replayed: true}}
-				path, body := "/api/v1/runs/run/jobs/job/transition", `{"to":"failed","cause":"report","result":{"outcome":"failed","reason":"exit","failure":{"job":"job","stage":"action","error":{"code":"sdk_error","message":"masked"}},"exit_code":1}}`
+				path, body := "/api/v1/runs/run/jobs/job/transition", `{"to":"failed","cause":"report","source_attempt":0,"result":{"outcome":"failed","reason":"exit","failure":{"job":"job","stage":"body","error":{"code":"sdk_error","message":"masked"}},"exit_code":1}}`
 				switch operation {
 				case "owner finish":
 					b, path, body = ownerBoundary(), "/api/v1/runs/run/finish", `{"outcome":"success"}`
@@ -101,7 +101,7 @@ func TestEngineLifecycleHTTP(t *testing.T) {
 				switch operation {
 				case "transition":
 					change := f.nodeChange
-					if change.Ref != (store.NodeRef{RunID: "run", NodeID: "job"}) || change.Actor.Authority != p.Authority || change.Actor.Kind != store.ActorHolder || change.Actor.Generation != 4 || change.Actor.Holder != "runner" || change.Cause != store.CauseReport || change.To != store.NodeFailed || change.Extra.Result.MaskedError != "masked" {
+					if change.Ref != (store.NodeRef{RunID: "run", NodeID: "job"}) || change.Actor.Authority != p.Authority || change.Actor.Kind != store.ActorHolder || change.Actor.Generation != 4 || change.Actor.Holder != "runner" || change.Cause != store.CauseReport || change.SourceAttempt == nil || *change.SourceAttempt != 0 || change.To != store.NodeFailed || change.Extra.Result.MaskedError != "masked" {
 						t.Fatalf("node transition = %+v", change)
 					}
 				case "owner finish":
@@ -158,7 +158,7 @@ func TestEngineResultReplayHTTP(t *testing.T) {
 			t.Run(operation+"/"+name, func(t *testing.T) {
 				b := newCredentialBoundary()
 				path, pattern, node := "/api/v1/runs/run/jobs/job/transition", "/api/v1/runs/{run}/jobs/{job}/transition", "job"
-				body := `{"to":"success","cause":"report","result":{"outcome":"success"}}`
+				body := `{"to":"success","cause":"report","source_attempt":0,"result":{"outcome":"success"}}`
 				if operation == "run" {
 					b = ownerBoundary()
 					path, pattern, node, body = "/api/v1/runs/run/finish", "/api/v1/runs/{run}/finish", "", `{"outcome":"success"}`
