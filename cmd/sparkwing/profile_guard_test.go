@@ -77,7 +77,7 @@ var profileGuardDirs = map[string]profileGuardRules{
 		// safety: podSecrets releases secrets through the controller's claim, so only pod execution, and a runner
 		// hosting a trigger it claimed from the controller (HostTriggerRun), may build one.
 		controllerSecrets: map[string]bool{
-			"controllerSecretSource": true, "ExecuteClaimedTrigger": true, "RunNodeOnce": true,
+			"controllerSecretSource": true, "ExecuteClaimedTrigger": true,
 			"podSecrets": true, "podSecrets.Resolve": true, "hostPodNode": true, "HostTriggerRun": true,
 		},
 	},

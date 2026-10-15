@@ -19,6 +19,12 @@ pending. This adds no archived source-function port identity.
 
 # Acceptance test port inventory
 
+The [W3 unused executor cut](../w3-legacy-executor-cut-progress.md) removes the
+uncalled RunNodeOnce path and ports its blocked credential-release cancellation
+to source.PrepareCheckout. Repository refusal checks retain the live trigger
+policy. Native placement composition and live legacy hosting deletion remain
+incomplete. No acceptance cell is added or activated.
+
 The [W3 package-test cleanup](../w3-harness-cleanup-progress.md) moves the retained
 host checks into `internal/nodehost` and `internal/lease` test files, consolidates
 their fakes and removes duplicate runners. Lifecycle, step and foreign-award

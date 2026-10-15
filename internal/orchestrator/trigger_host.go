@@ -397,3 +397,39 @@ func (s retryPlanState) UpdatePlanSnapshot(ctx context.Context, runID string, sn
 	}
 	return s.stoppingHostState.UpdatePlanSnapshot(ctx, runID, snapshot)
 }
+
+// safety: runner shutdown leaves persisted claims for lease recovery.
+type stoppingHostState struct {
+	*client.Client
+	shuttingDown func() bool
+}
+
+func shuttingDownOn(ctx context.Context) func() bool {
+	return func() bool { return errors.Is(context.Cause(ctx), context.Canceled) }
+}
+
+func (s stoppingHostState) FinishRun(ctx context.Context, runID, status, errMsg string) error {
+	if s.shuttingDown() {
+		return nil
+	}
+	return s.Client.FinishRun(ctx, runID, status, errMsg)
+}
+
+func (s stoppingHostState) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
+	if s.shuttingDown() {
+		return nil
+	}
+	return s.Client.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
+}
+
+func hostDispatchedNode(ctx context.Context, p podNode) (runner.Result, error) {
+	p.state = stoppingHostState{
+		Client:       client.NewWithToken(p.controllerURL, nil, p.token),
+		shuttingDown: shuttingDownOn(ctx),
+	}
+	res, err := hostPodNode(ctx, p)
+	if err != nil {
+		return runner.Result{}, err
+	}
+	return runner.Result{Outcome: res.Outcome, Err: res.Err}, nil
+}

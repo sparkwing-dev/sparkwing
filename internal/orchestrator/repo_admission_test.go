@@ -1,12 +1,7 @@
 package orchestrator
 
 import (
-	"context"
 	"errors"
-	"io"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -64,33 +59,10 @@ func TestAdmitTriggerSourceChecksTheFetchedRemoteAndTheGitHubName(t *testing.T) 
 	}
 }
 
-// A pool runner that fetches with its own credentials claims nodes of any run
-// in its team, so the node path must refuse a repository the owner did not
-// allow before anything is fetched.
-func TestRunNodeRemoteRefusesARepositoryOutsideTheAllowlistBeforeFetching(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	t.Setenv("SPARKWING_CACHE_URL", "")
-	trigger := &store.Trigger{
-		ID: "run-1", RepoURL: "https://git.invalid/evil/payload.git",
-		GitSHA: "0123456789abcdef0123456789abcdef01234567",
-	}
-	allow := mustAllow(t, "github.com/acme/*")
-	_, err := runNodeRemote(context.Background(), trigger, &store.Run{ID: "run-1", Pipeline: "demo"},
-		"http://controller.invalid", "run-1", "node-1", "", &allow,
-		slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if !errors.Is(err, ErrRepoNotAllowed) {
-		t.Fatalf("runNodeRemote = %v, want ErrRepoNotAllowed", err)
-	}
-	if _, statErr := os.Stat(filepath.Join(home, "source-direct")); !os.IsNotExist(statErr) {
-		t.Fatalf("a refused node still reached the fetch: %v", statErr)
-	}
-}
-
 // A compromised controller chooses a working-tree snapshot's code, and a
 // trigger naming no repository gives the list nothing to check, so an owner's
 // list refuses both unless the owner accepts snapshots of listed repositories.
-func TestRunNodeRemoteRefusesUncheckableSourcesBeforeFetching(t *testing.T) {
+func TestAdmitTriggerSourceRefusesUncheckableSources(t *testing.T) {
 	sha := "0123456789abcdef0123456789abcdef01234567"
 	snapshot := func(repo string) *store.Trigger {
 		return &store.Trigger{
@@ -111,17 +83,12 @@ func TestRunNodeRemoteRefusesUncheckableSourcesBeforeFetching(t *testing.T) {
 		{"trigger naming no repository", &store.Trigger{ID: "run-1", GitSHA: sha}, allow},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv("SPARKWING_HOME", home)
-			t.Setenv("SPARKWING_CACHE_URL", "")
-			_, err := runNodeRemote(context.Background(), tc.trigger, &store.Run{ID: "run-1", Pipeline: "demo"},
-				"http://controller.invalid", "run-1", "node-1", "", &tc.allow,
-				slog.New(slog.NewTextHandler(io.Discard, nil)))
-			if !errors.Is(err, ErrRepoNotAllowed) {
-				t.Fatalf("runNodeRemote = %v, want ErrRepoNotAllowed", err)
+			fetch, err := TriggerSourceURL(tc.trigger)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if _, statErr := os.Stat(filepath.Join(home, "node-runner")); !os.IsNotExist(statErr) {
-				t.Fatalf("a refused node still prepared its fetch: %v", statErr)
+			if err := AdmitTriggerSource(tc.allow, tc.trigger, fetch); !errors.Is(err, ErrRepoNotAllowed) {
+				t.Fatalf("source admission = %v, want ErrRepoNotAllowed", err)
 			}
 		})
 	}
