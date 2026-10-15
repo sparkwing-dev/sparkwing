@@ -31,7 +31,7 @@ func Registry() []Command {
 			{Name: "all-entries"},
 			{Name: "docs"},
 		}},
-		{Path: "sparkwing cache warm", Rules: []string{"Build Go pipelines into the local binary cache or install TypeScript dependencies. Binary cache entries stay on this machine. JSON emits one preparation receipt; plain emits the prepared path."}, Flags: []Flag{
+		{Path: "sparkwing cache warm", Rules: []string{"Build Go pipelines into the local binary cache or install TypeScript dependencies. Binary cache entries stay on this machine. JSON emits one preparation receipt; plain emits the prepared path.", "Go preparation uses the filtered install environment and masks compiler diagnostics. A failed build publishes no binary cache entry. Cached binaries retain the source, workspace dependencies and Go build settings that selected them."}, Flags: []Flag{
 			{Name: "clear-cache"},
 		}},
 		{Path: "sparkwing commands", Flags: []Flag{

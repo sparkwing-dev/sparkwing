@@ -32,7 +32,7 @@ func TestCompilePipelineNamesTheHomeOverride(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", locked)
 	dest := filepath.Join(locked, "cache", "pipelines", "deadbeef", "pipeline")
 
-	err := CompilePipeline(context.Background(), t.TempDir(), dest)
+	err := CompilePipeline(context.Background(), t.TempDir(), dest, CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr})
 	if err == nil {
 		t.Fatal("expected CompilePipeline to fail on an unwritable cache parent")
 	}

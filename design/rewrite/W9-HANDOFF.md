@@ -1,3 +1,152 @@
+# W9 Go preparation continuation
+
+W9 remains incomplete. This continuation started clean at 7d6e534c2. The
+previous merge is committed and there are no unmerged paths. No Git write,
+Sparkwing executable, pipeline, service or installed candidate ran. All scratch
+stayed under /tmp/sw-astra-W9 and is deleted before reporting.
+
+## Implemented
+
+- Replaced the Go preparation refusal in __sdk-install with the existing local
+  binary cache and shared compiler. The installer retains its exact-pin checks
+  before preparation and its pin-drift check afterward. Cache warm now uses the
+  same Go preparation path instead of failing at that refusal.
+- Hard-cut the compiler, uncached compiler and Go recovery helpers to explicit
+  environment and diagnostic inputs. Updated every caller. Go executable lookup,
+  workspace selection, overlay selection, floor probing, compilation and
+  missing-go.sum recovery consume the captured environment. The CLI passes its
+  masking stream through compiler output, notices and recovery output. Writer
+  errors and cancellation fail the operation.
+- Cache keys include captured Go build settings, including GOFLAGS, target and
+  CGO controls. Workspace dependency hashing uses the captured GOWORK selection.
+  The normalized workspace content owns its identity, so relocating an otherwise
+  identical workspace does not change its key. Credentials and run IDs do not
+  become compilation inputs or printed key details.
+- Reproduced a failed toolchain probe leaking proxy credentials through the
+  global debug logger. Removed raw probe errors from that log. The compiler's
+  actual output continues through its caller's diagnostic writer.
+- Updated the cache command registry, generated reference page, changelog and
+  embedded mirrors. Reversed the cache-warm missing-installer test. Updated the
+  docs breadcrumb test to use repeated Flags headings because the earlier
+  command rewrite removed its Examples headings.
+
+The security invariants are that controller credentials never enter compiler or
+recovery subprocess environments, and registered proxy credentials never appear
+in compiler or probe logs, including encoded forms. Both have fuzz targets.
+The failed-probe regression failed before the one-line logging fix and passes
+after it. Failed builds publish no cache entry. Successful cache reuse compiles
+once, and missing-sum recovery stays under the same environment/masking boundary.
+
+Assumptions/mechanisms: CompileOptions carries the two inputs the shared compiler
+previously obtained from process globals. Extending that compiler avoids a
+second compiler or global stdout/environment swapping. Existing helper APIs now
+require these inputs, with no old-signature adapter. Go build settings extend the
+existing cache key because reusing a binary built with another setting would be
+silently wrong. Undo is to revert these helper-signature, key and caller changes
+together. No public flag, environment variable, service, timeout or grant was
+added. These helpers are shared implementation APIs, not frozen contract changes.
+
+## Tests and accounting
+
+Added ten test functions and two fuzz targets across three files. Reversed one
+cache-warm stub expectation. No T1 inventory function names a W9-owned package,
+and no inventory port is claimed. Replaced 69 gross production Go lines,
+including the Go preparation refusal and ambient-only helper signatures. No
+whole legacy host file was retired. Initial trigger, legacy here hosting and
+local/detached host hard cuts remain unfinished.
+
+All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W9. Tests used -p 4 or lower.
+Passing evidence on final Go source:
+
+- Whole repository: go build -p 4 ./...
+- go vet -p 4 on cmd/sparkwing, internal/bincache, internal/gotoolchain,
+  internal/clisurface, internal/cluster, internal/orchestrator, internal/repos
+  and pkg/docs.
+- Full internal/clisurface, internal/controllerwire, internal/gotoolchain,
+  internal/doccheck and tests/acceptance packages.
+- cmd/sparkwing selection ^(TestCache|TestSDKInstall|TestLocalPipelineBinary|
+  TestWarmTypeScript|TestPipelineToolchain|TestPipelineCacheKey).
+- cmd/sparkwing, internal/bincache and internal/gotoolchain selection
+  ^(TestCache|TestSDKInstall|TestLocalPipelineBinary|TestWarmTypeScript|
+  TestPipelineToolchain|TestCapturedGo|TestGoCommands|TestCompilePipeline|
+  TestPipelineCacheKey|TestBuildEnv|FuzzSDKInstallGo).
+- The existing CLI registry, help, discovery and shipped-prose selection from
+  the preceding continuation, including TestCommandReferenceMatchesRegistry.
+- Pkg/docs read/list/search, content, catalog, changelog, guide, migration,
+  section, breadcrumb, command-name and privacy selections.
+- FuzzSDKInstallGoNeverReceivesControllerCredential: 924 executions, 3s,
+  two workers.
+- FuzzSDKInstallGoMasksCompilerDiagnostics: 1,645 executions, 3s, two workers.
+- commentcheck -base HEAD over the entire tree, sleepcheck -base HEAD,
+  sync-docs --check, gofmt and git diff --check.
+
+TestSDKInstallGoWithNativeCompiler exercised the real Go compiler and produced
+a regular executable through sdkInstaller.run. Its pin/version readers are
+fakes because W8's engine.ReadPin and VersionForPin remain panic stubs. It does
+not establish a working default __sdk-install invocation, matched engine fetch,
+RunHost integration or native acceptance cell. No new T1 cell was unskipped.
+The existing acceptance-contract suite passes with its required native skips.
+
+The required commentcheck -base main . ran and still fails only on incoming W1
+comments at pkg/store/state_materialize.go:15 and
+pkg/store/state_result_records.go:9. W9's diff is comment-clean. No deployment,
+PostgreSQL, Windows/Darwin, Docker, real-repository QA or full native suite ran.
+
+## Remaining contracts and real integration
+
+No foreign frozen contract was changed. This continuation advances A1-10 and
+A1-50's Go preparation/masking work. The earlier amendment ledger still applies.
+
+- W8: implement engine.ReadPin, VersionForPin, Resolved.InstallSDK and verified
+  matching-engine resolution. The native compiler check used fake pin metadata.
+  W3 must bind acquired source and host execution to that selected engine.
+- W3/W8: concrete RunHost/owner/source/storage/plan-cache/lease construction,
+  RemoteOwnerStore and NewLocalLifecycle still require implementation.
+- W6/W1/W2: initial here intake still has no sealed reason/audit proposal. Keep
+  this as a foreign-contract change request rather than hiding it in actor,
+  argument or environment fields.
+- W1/W2/W7: working-tree submission needs an authorized source_bundle handoff.
+  The old CLI uploads before intake, while the final UploadIdentity requires a
+  live owner/publication or job binding. Specify how the sealed digest becomes
+  authorized and ready before another runner claims it. No account upload
+  authority or pre-intake reservation was invented here.
+- W1/W2: failed/all retry selection remains absent from the merged Retry intake
+  transaction. Its adapter calls AdmitRun without retaining RetryRequest.Mode.
+- W9: initial trigger migration, local/detached hosting, public log following
+  and signals around the shared host, read-only cache/publication composition,
+  local schedules/tick and managed-unit wiring remain incomplete. The initial
+  trigger still uses TriggerResponse and the legacy host. No compatibility
+  adapter was added.
+
+There is no new human decision request. The foreign contract gaps need the
+owning areas or lead to amend the declarations before those pieces can be cut.
+
+## Shared files and friction
+
+Outside W9 ownership, the shared compiler changes are in
+internal/bincache/bincache.go and internal/bincache/toolchain.go, plus
+internal/gotoolchain/toolchain.go. Migrated production callers are
+internal/cluster/trigger_loop.go, internal/orchestrator/local_trigger_loop.go,
+internal/orchestrator/run_node_remote.go and internal/repos/resolver.go.
+Their changes only supply the inputs the old helpers inferred.
+
+Migrated shared tests are internal/bincache/bincache_test.go,
+cachedir_test.go, cancel_test.go, owners_test.go, portable_test.go and
+toolchain_floor_test.go. New shared compiler tests are compiler_inputs_test.go
+and compiler_inputs_unix_test.go in that package. The portability fixture now
+sets GOFLAGS=-buildvcs=false rather than clearing the worker's required flag.
+Other shared files are pkg/docs/sections_test.go, CHANGELOG.md,
+pkg/docs/changelog.md, pkg/docs/mirror/cli-cache.md and this handoff.
+
+Friction: the first fuzz compilation was invalidated by source edits made while
+its cold instrumented build was running. A frozen-source rerun passed, followed
+by both fuzz targets. Required native cells remain unavailable in the worker's
+socket-free verification path. Git's effective author is Korey Gambill and
+core.worktree is unset. The lead owns independent review, commits and landing.
+
+---
+
 # W9 merge, local transport and recovery continuation
 
 W9 remains incomplete. This continuation started at 68bef3fb7 during the merge

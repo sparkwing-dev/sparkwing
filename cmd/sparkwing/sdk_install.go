@@ -13,7 +13,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -176,5 +176,17 @@ func prepareInstalledSDK(ctx context.Context, dir string, sdk engine.SDKKind, en
 		result.Command = []string{node, main}
 		return result, err
 	}
-	return result, &apierr.Error{Code: apierr.Unavailable, Message: "Go SDK installation is unavailable in this build", Hint: "the shared compiler requires explicit install environment and masked output bindings"}
+	if sdk != engine.GoSDK {
+		return result, errors.New("SDK installation requires go or typescript")
+	}
+	key, parts, err := bincache.ExplainCacheKey(dir, env)
+	if err != nil {
+		return result, err
+	}
+	lease, _, err := pipelineBinary(ctx, dir, key, parts, env, diagnostics)
+	if err != nil {
+		return result, err
+	}
+	result.Command = []string{lease.Path()}
+	return result, lease.Release()
 }

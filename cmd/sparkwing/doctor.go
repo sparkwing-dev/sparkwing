@@ -215,7 +215,7 @@ func diagnoseGoToolchain(ctx context.Context) *opsview.DoctorGoToolchain {
 }
 
 func inspectDoctorGoToolchain(ctx context.Context, dir string, env []string) *opsview.DoctorGoToolchain {
-	overlay := bincache.EffectiveOverlay(dir)
+	overlay := bincache.EffectiveOverlay(dir, os.Environ())
 	report, err := gotoolchain.Inspect(ctx, dir, env, overlay)
 	finding := &opsview.DoctorGoToolchain{
 		Current: report.Current, Setting: report.Setting, Source: report.Source,

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func TestCompilePipelineCancelStopsTheBuild(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := CompilePipeline(ctx, t.TempDir(), filepath.Join(t.TempDir(), "bin", "pipelines"))
+	err := CompilePipeline(ctx, t.TempDir(), filepath.Join(t.TempDir(), "bin", "pipelines"), CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr})
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("CompilePipeline error = %v, want the cancellation", err)
 	}

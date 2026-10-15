@@ -29,7 +29,11 @@ func sdkInstallFixture(t *testing.T, sdk engine.SDKKind) (sdkInstaller, string) 
 			if dir != checkout || selected != sdk {
 				t.Fatalf("pin source: %s %s", dir, selected)
 			}
-			return engine.Pin{SDK: sdk, Version: "1.2.3", Manifest: ".sparkwing/package.json"}, nil
+			manifest := ".sparkwing/package.json"
+			if sdk == engine.GoSDK {
+				manifest = ".sparkwing/go.mod"
+			}
+			return engine.Pin{SDK: sdk, Version: "1.2.3", Manifest: manifest}, nil
 		},
 		versionFor: func(engine.Pin) (string, error) { return "v1.2.3", nil },
 		prepare: func(_ context.Context, dir string, selected engine.SDKKind, env []string, diagnostics io.Writer) (engine.SDKCommand, error) {

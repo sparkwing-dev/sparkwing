@@ -4,7 +4,7 @@ package main
 
 import (
 	"bytes"
-	"errors"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -51,13 +50,13 @@ exit 1
 		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader("missing"))}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
-	key, parts, err := bincache.ExplainCacheKey(dir)
+	key, parts, err := bincache.ExplainCacheKey(dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := gotoolchain.WithSession(t.Context(), os.Environ(), nil)
 	for _, wantSource := range []string{"compiled", "cached"} {
-		lease, source, err := pipelineBinary(ctx, dir, key, parts, os.Environ())
+		lease, source, err := pipelineBinary(ctx, dir, key, parts, os.Environ(), os.Stderr)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -115,25 +114,33 @@ func TestCacheWarmTypeScriptMasksNativeInstallerDiagnostics(t *testing.T) {
 	}
 }
 
-func TestCacheWarmGoRequiresSharedInstallerBeforeRunningTools(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "go.mod"), "module example.test/pipeline\n\ngo 1.26.0\n")
-	bin := t.TempDir()
-	marker := filepath.Join(dir, "unexpected-go")
-	if err := os.WriteFile(filepath.Join(bin, "go"), []byte("#!/bin/sh\nprintf called > '"+marker+"'\n"), 0o700); err != nil {
+func TestCacheWarmGoBuildsThroughSharedCompiler(t *testing.T) {
+	installer, body, log := goInstallerFixture(t, false)
+	var request struct {
+		Directory   string `json:"directory"`
+		PipelineDir string `json:"pipeline_dir"`
+	}
+	if err := json.Unmarshal([]byte(body), &request); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", bin)
-	var out bytes.Buffer
+	dir := filepath.Join(request.Directory, request.PipelineDir)
+	var out, diagnostics bytes.Buffer
 	err := runCacheWarmCommand(t.Context(), []string{"-o", "json"}, &out, cacheWarmDependencies{
-		locate: func() (string, error) { return dir, nil }, environment: []string{"PATH=" + bin},
-		buildEnv: procenv.Build, diagnostics: io.Discard, prepare: warmLocalPipeline,
+		locate: func() (string, error) { return dir, nil }, environment: installer.environment,
+		buildEnv: procenv.Build, diagnostics: &diagnostics, prepare: warmLocalPipeline,
 	})
-	var unavailable *apierr.Error
-	if !errors.As(err, &unavailable) || unavailable.Code != apierr.Unavailable || out.Len() != 0 {
-		t.Fatalf("Go preparation bypassed its missing installer: err=%v out=%s", err, &out)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("legacy compiler was invoked: %v", err)
+	var result cacheWarmResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Language != "go" || result.Status != "prepared" || !filepath.IsAbs(result.Path) || strings.Contains(diagnostics.String(), "p@ss") || strings.Contains(diagnostics.String(), "alice") {
+		t.Fatalf("Go warming: result=%+v diagnostics=%q", result, &diagnostics)
+	}
+	builds, err := os.ReadFile(log)
+	if err != nil || string(builds) != "build\n" {
+		t.Fatalf("Go warming: builds=%q error=%v", builds, err)
 	}
 }

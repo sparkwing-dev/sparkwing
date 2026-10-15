@@ -382,7 +382,7 @@ func runCacheExplain(args []string) error {
 		})
 	}
 
-	key, parts, err := bincache.ExplainCacheKey(dir)
+	key, parts, err := bincache.ExplainCacheKey(dir, os.Environ())
 	if err != nil {
 		return fmt.Errorf("cache explain: %w", err)
 	}

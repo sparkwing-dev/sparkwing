@@ -564,7 +564,7 @@ func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts Tr
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
 		tmp := filepath.Join(sparkwingDir, ".sparkwing-trigger-loop-bin")
-		if cerr := bincache.CompilePipeline(ctx, sparkwingDir, tmp); cerr != nil {
+		if cerr := bincache.CompilePipeline(ctx, sparkwingDir, tmp, bincache.CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr}); cerr != nil {
 			return triggerBinary{}, cerr
 		}
 		return triggerBinary{entry: pipelineentry.Binary(tmp), cache: binaryCacheCompiled, build: time.Since(start)}, nil
@@ -589,7 +589,7 @@ func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts Tr
 			}
 		}
 		compiled = true
-		return bincache.CompilePipeline(ctx, sparkwingDir, tempPath)
+		return bincache.CompilePipeline(ctx, sparkwingDir, tempPath, bincache.CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr})
 	})
 	if err != nil {
 		return triggerBinary{}, err

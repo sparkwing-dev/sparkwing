@@ -640,17 +640,30 @@ func (lb *lockedBuffer) Bytes() []byte {
 // and shared cache a stale binary forever. Tests replace it to prove that.
 var pipelineBuildFlags = []string{"-trimpath", "-ldflags", "-s -w"}
 
-func CompilePipeline(ctx context.Context, sparkwingDir, dest string) error {
-	return compilePipeline(ctx, sparkwingDir, dest, pipelineBuildFlags)
+// CompileOptions binds compiler subprocesses and diagnostics to captured inputs.
+type CompileOptions struct {
+	Environment []string
+	Diagnostics io.Writer
+}
+
+func CompilePipeline(ctx context.Context, sparkwingDir, dest string, options CompileOptions) error {
+	return compilePipeline(ctx, sparkwingDir, dest, pipelineBuildFlags, options)
 }
 
 // CompileUncachedPipeline preserves debug symbols for execution without the binary cache.
-func CompileUncachedPipeline(ctx context.Context, sparkwingDir, dest string) error {
-	return compilePipeline(ctx, sparkwingDir, dest, nil)
+func CompileUncachedPipeline(ctx context.Context, sparkwingDir, dest string, options CompileOptions) error {
+	return compilePipeline(ctx, sparkwingDir, dest, nil, options)
 }
 
-func compilePipeline(ctx context.Context, sparkwingDir, dest string, flags []string) error {
-	if _, err := exec.LookPath("go"); err != nil {
+func compilePipeline(ctx context.Context, sparkwingDir, dest string, flags []string, options CompileOptions) error {
+	if options.Environment == nil || options.Diagnostics == nil {
+		return errors.New("pipeline compilation requires a captured environment and diagnostic writer")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	tool, err := gotoolchain.Executable(options.Environment)
+	if err != nil {
 		return fmt.Errorf(
 			"go toolchain not on PATH: sparkwing compiles .sparkwing/ via `go build`.\n" +
 				"  Install Go 1.26+ from https://go.dev/dl/ and re-run",
@@ -661,44 +674,52 @@ func compilePipeline(ctx context.Context, sparkwingDir, dest string, flags []str
 	}
 
 	args := append([]string{"build"}, flags...)
-	ctx = gotoolchain.WithSession(ctx, nil, nil)
-	env, err := gotoolchain.BuildEnv(ctx, sparkwingDir, nil, EffectiveOverlay(sparkwingDir))
-	if err != nil {
+	var noticeErr error
+	ctx = gotoolchain.WithSession(ctx, options.Environment, func(message string) {
+		_, err := fmt.Fprintln(options.Diagnostics, message)
+		noticeErr = errors.Join(noticeErr, err)
+	})
+	env, err := gotoolchain.BuildEnv(ctx, sparkwingDir, options.Environment, EffectiveOverlay(sparkwingDir, options.Environment))
+	if err := errors.Join(err, noticeErr); err != nil {
 		return err
 	}
 	overlay := overlayModfilePath(sparkwingDir)
-	work, workPresent := goWorkInScope(sparkwingDir)
+	work, workPresent := goWorkInScope(sparkwingDir, env)
 	switch {
 	case workPresent && !goWorkCovers(work, sparkwingDir):
-		fmt.Fprintf(os.Stderr,
+		if _, err := fmt.Fprintf(options.Diagnostics,
 			"warning: %s does not include this .sparkwing module; ignoring it. "+
 				"A sparkwing project builds as a self-contained module, not nested "+
 				"inside another Go workspace; add it to the go.work `use` list to "+
 				"link it deliberately.\n",
 			work,
-		)
+		); err != nil {
+			return err
+		}
 		env = withGoworkOff(env)
 		if overlay != "" {
 			args = append(args, "-modfile="+overlay)
 		}
 	case workPresent:
 		if overlay != "" {
-			fmt.Fprintf(os.Stderr,
+			if _, err := fmt.Fprintf(options.Diagnostics,
 				"warning: %s in effect; skipping sparks resolution. "+
 					"Modules resolve from go.mod + workspace, not .resolved.mod. "+
 					"To use local copies of sparks libs too, add them to go.work.\n",
 				work,
-			)
+			); err != nil {
+				return err
+			}
 		}
 	case overlay != "":
 		args = append(args, "-modfile="+overlay)
 	}
 	args = append(args, "-o", dest, ".")
-	cmd := exec.Command("go", args...)
+	cmd := exec.Command(tool, args...)
 	cmd.Dir = sparkwingDir
 	var captured lockedBuffer
-	cmd.Stdout = io.MultiWriter(os.Stderr, &captured)
-	cmd.Stderr = io.MultiWriter(os.Stderr, &captured)
+	cmd.Stdout = io.MultiWriter(options.Diagnostics, &captured)
+	cmd.Stderr = cmd.Stdout
 	cmd.Env = env
 	if err := gotoolchain.Run(ctx, cmd); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -724,13 +745,13 @@ func overlayModfilePath(sparkwingDir string) string {
 	return p
 }
 
-func goWorkInScope(sparkwingDir string) (string, bool) {
-	switch env := os.Getenv("GOWORK"); env {
+func goWorkInScope(sparkwingDir string, environment []string) (string, bool) {
+	value, _ := gotoolchain.LookupEnv(environment, "GOWORK")
+	switch env := value; env {
 	case "off":
 		return "", false
 	case "":
 	default:
-		// #nosec G703 -- the GOWORK path comes from this process's own environment
 		if fi, err := os.Stat(env); err == nil && fi.Mode().IsRegular() {
 			return env, true
 		}
@@ -796,7 +817,7 @@ func PipelineCacheKey(sparkwingDir string) (string, error) {
 }
 
 func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, error) {
-	parts, err := keyParts(sparkwingDir, goos, goarch)
+	parts, err := keyParts(sparkwingDir, goos, goarch, os.Environ())
 	if err != nil {
 		return "", err
 	}
@@ -825,15 +846,15 @@ func digestOf(b []byte) string {
 	return fmt.Sprintf("%x", sum[:])[:12]
 }
 
-func ExplainCacheKey(sparkwingDir string) (string, []KeyPart, error) {
-	parts, err := keyParts(sparkwingDir, runtime.GOOS, runtime.GOARCH)
+func ExplainCacheKey(sparkwingDir string, env []string) (string, []KeyPart, error) {
+	parts, err := keyParts(sparkwingDir, runtime.GOOS, runtime.GOARCH, env)
 	if err != nil {
 		return "", nil, err
 	}
 	return foldKey(parts), parts, nil
 }
 
-func keyParts(sparkwingDir, goos, goarch string) ([]KeyPart, error) {
+func keyParts(sparkwingDir, goos, goarch string, env []string) ([]KeyPart, error) {
 	var parts []KeyPart
 	add := func(label, detail string, material []byte) {
 		parts = append(parts, KeyPart{
@@ -847,6 +868,7 @@ func keyParts(sparkwingDir, goos, goarch string) ([]KeyPart, error) {
 
 	flags := strings.Join(pipelineBuildFlags, " ")
 	add("build flags", flags, []byte("buildflags:"+flags+"\n"))
+	add("build environment", "captured Go build settings", buildEnvironmentKey(env))
 
 	var moduleBuf bytes.Buffer
 	moduleStats, err := hashDirIntoCounted(&moduleBuf, sparkwingDir, allFiles)
@@ -860,7 +882,7 @@ func keyParts(sparkwingDir, goos, goarch string) ([]KeyPart, error) {
 	if err != nil {
 		return nil, err
 	}
-	workTargets, workSummary, err := localWorkspaceTargets(sparkwingDir)
+	workTargets, workSummary, err := localWorkspaceTargets(sparkwingDir, env)
 	if err != nil {
 		return nil, err
 	}
@@ -1068,8 +1090,8 @@ func isLocalPath(p string) bool {
 	return strings.HasPrefix(p, ".") || strings.HasPrefix(p, "/")
 }
 
-func localWorkspaceTargets(sparkwingDir string) (targets []replaceTarget, summary string, err error) {
-	work, ok := goWorkInScope(sparkwingDir)
+func localWorkspaceTargets(sparkwingDir string, env []string) (targets []replaceTarget, summary string, err error) {
+	work, ok := goWorkInScope(sparkwingDir, env)
 	if !ok || !goWorkCovers(work, sparkwingDir) {
 		return nil, "", nil
 	}
@@ -1162,10 +1184,20 @@ func localWorkspaceTargets(sparkwingDir string) (targets []replaceTarget, summar
 }
 
 // EffectiveOverlay returns the overlay used when building the pipeline module.
-func EffectiveOverlay(dir string) string {
-	work, present := goWorkInScope(dir)
+func EffectiveOverlay(dir string, env []string) string {
+	work, present := goWorkInScope(dir, env)
 	if present && goWorkCovers(work, dir) {
 		return ""
 	}
 	return overlayModfilePath(dir)
+}
+
+func buildEnvironmentKey(env []string) []byte {
+	var input bytes.Buffer
+	for _, name := range strings.Fields("PATH GOOS GOARCH GO386 GOAMD64 GOARM GOARM64 GOMIPS GOMIPS64 GOPPC64 GORISCV64 GOWASM GOEXPERIMENT GOFLAGS GOTOOLCHAIN GOROOT GOPATH GOENV CGO_ENABLED CC CXX FC AR PKG_CONFIG CGO_CFLAGS CGO_CPPFLAGS CGO_CXXFLAGS CGO_FFLAGS CGO_LDFLAGS") {
+		value, _ := gotoolchain.LookupEnv(env, name)
+		fmt.Fprintf(&input, "%s=%s\x00", name, value)
+	}
+	sum := sha256.Sum256(input.Bytes())
+	return sum[:]
 }

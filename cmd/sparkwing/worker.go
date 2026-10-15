@@ -65,11 +65,11 @@ func buildCheckoutPipeline(ctx context.Context) (entry pipelineentry.Command, di
 		entry, err := orchestrator.PrepareTypeScriptOnRunner(ctx, sparkwingDir)
 		return entry, filepath.Dir(sparkwingDir), func() {}, err
 	}
-	key, keyParts, err := bincache.ExplainCacheKey(sparkwingDir)
+	key, keyParts, err := bincache.ExplainCacheKey(sparkwingDir, os.Environ())
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("read .sparkwing/: %w", err)
 	}
-	lease, _, err := pipelineBinary(ctx, sparkwingDir, key, keyParts, os.Environ())
+	lease, _, err := pipelineBinary(ctx, sparkwingDir, key, keyParts, os.Environ(), os.Stderr)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("build the pipeline: %w", err)
 	}

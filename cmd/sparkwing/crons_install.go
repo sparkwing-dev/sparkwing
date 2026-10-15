@@ -510,7 +510,7 @@ func compileRepoPipelines(ctx context.Context, repoRoot string) (crons.Proof, er
 		return crons.Proof{}, fmt.Errorf("cache entry: %w", err)
 	}
 	lease, _, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		return bincache.CompilePipeline(ctx, sparkwingDir, tempPath)
+		return bincache.CompilePipeline(ctx, sparkwingDir, tempPath, bincache.CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr})
 	})
 	if err != nil {
 		return crons.Proof{}, fmt.Errorf("compile %s: %w", sparkwingDir, err)
