@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -46,6 +47,15 @@ func (r *Resolver) Index(ctx context.Context, now time.Time) (IndexResult, error
 	if ctx.Err() != nil {
 		return IndexResult{}, ctx.Err()
 	}
+	// safety: Another process may have persisted a revocation while this resolver was fetching.
+	persisted, cacheErr := r.loadIndex(now)
+	if cacheErr == nil && persisted.index.Format != 0 && !persisted.index.PublishedAt.Before(r.index.index.PublishedAt) {
+		cacheErr = checkPolicyAdvance(r.index, persisted)
+		if cacheErr == nil {
+			r.index = persisted
+		}
+	}
+	err = errors.Join(err, cacheErr)
 	if r.index.index.Format == 0 {
 		return IndexResult{}, &apierr.Error{Code: apierr.Unavailable, Message: fmt.Sprintf("Cannot obtain a verified version policy: %v", err), Hint: "Check connectivity to sparkwing.dev and retry before running the pipeline."}
 	}
@@ -53,6 +63,7 @@ func (r *Resolver) Index(ctx context.Context, now time.Time) (IndexResult, error
 	r.indexErr = err
 	return indexResult(r.index, err), nil
 }
+
 func (r *Resolver) fetchIndex(ctx context.Context, now time.Time) (VerifiedIndex, error) {
 	body, err := r.fetch(ctx, VersionIndexURL, false)
 	if err != nil {
@@ -64,6 +75,7 @@ func (r *Resolver) fetchIndex(ctx context.Context, now time.Time) (VerifiedIndex
 	}
 	return VerifyIndex(SignedIndex{Body: body, Signature: signature}, now)
 }
+
 func checkPolicyAdvance(previous, next VerifiedIndex) error {
 	if previous.index.Format == 0 {
 		return nil
@@ -83,6 +95,7 @@ func checkPolicyAdvance(previous, next VerifiedIndex) error {
 	}
 	return nil
 }
+
 func (r *Resolver) loadIndex(now time.Time) (VerifiedIndex, error) {
 	dir := filepath.Join(r.config.CacheDirectory, "policy")
 	entries, err := os.ReadDir(dir)
@@ -122,10 +135,11 @@ func (r *Resolver) loadIndex(now time.Time) (VerifiedIndex, error) {
 	}
 	return latest, nil
 }
+
 func (r *Resolver) saveIndex(candidate VerifiedIndex) error {
 	// safety: Immutable snapshots keep concurrent processes from overwriting a newer policy floor.
 	dir := filepath.Join(r.config.CacheDirectory, "policy")
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	previous, err := r.loadIndex(candidate.verifiedAt)
@@ -140,8 +154,9 @@ func (r *Resolver) saveIndex(candidate VerifiedIndex) error {
 		return err
 	}
 	name := candidate.index.PublishedAt.UTC().Format("20060102T150405.000000000") + "-" + digest(candidate.signed.Body) + ".json"
-	return atomicWrite(filepath.Join(dir, name), body, 0600)
+	return atomicWrite(filepath.Join(dir, name), body, 0o600)
 }
+
 func atomicWrite(path string, body []byte, mode os.FileMode) (result error) {
 	file, err := os.CreateTemp(filepath.Dir(path), ".write-")
 	if err != nil {

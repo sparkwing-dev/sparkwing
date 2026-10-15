@@ -823,3 +823,36 @@ Only this handoff changes. Product behavior, contracts and release artifacts
 are unchanged. W8 remains incomplete until the listed contracts and native
 integrations are supplied. An initial installed discovery command preceded
 loading the no-binary rule. No stateful Sparkwing command or Git write ran.
+
+## Continuation: shared machine policy fallback
+
+`Resolver.Index` reloads the verified machine cache before returning fallback.
+Another process's newer policy advances its in-memory copy through the existing
+rollback and retained-record checks. Cache-read failures join the refresh error.
+The five-minute refresh interval and unlimited verified fallback age stay the same.
+
+`TestEngineW8FallbackHonorsSharedMachineRevocation` reproduces an older resolver
+allowing a revoked release after a second resolver persisted the revocation.
+Both unavailable-origin and older-signed-policy cases failed before the fix and
+pass afterward. The test uses public APIs, real cache files and a fake HTTP
+transport. A permitted release still runs. The engine contract documents this
+fallback rule. No types, interfaces, trust roots or configuration were added.
+
+Whole-repository `go build -p 4 ./...` passes. Vet passes for cluster, engine,
+runners and wingd, including their subpackages and both acceptance packages.
+Full tests pass for engine, runners and their subpackages, and component
+acceptance. Commands use `GOWORK=off`, `GOFLAGS=-buildvcs=false` and private
+caches and temporary directories under `/tmp/sw-astra-W8/`.
+
+This continuation deletes **0 obsolete files / 0 legacy-code lines** and ports
+no additional T1 tests. No native catalog cell was activated. Shared edits are
+`tests/acceptance/engine_w8_test.go` and this handoff. The W8-owned engine contract
+has a prose clarification. No external caller required migration. The remaining
+integration and contract list above still applies, including W3 host construction,
+W9 bootstrap/managed-unit grammar, native Windows identity and deployed Cloud
+probes/cleanup. No other area's contract changed. Independent review and native
+QA remain with the lead. No Sparkwing binary, pipeline or Git write ran.
+
+Commentcheck and sleepcheck pass against HEAD, and `git diff --check` is clean.
+The shared Git config has no local `user.name` or `core.worktree` entry.
+Worker scratch is deleted after verification.

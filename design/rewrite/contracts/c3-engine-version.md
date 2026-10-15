@@ -109,9 +109,11 @@ signature or validation failure retains the last verified copy without an age
 cutoff and emits a fallback notice. It never replaces verified state with
 unverified bytes. An index with an older `published_at`, or different body bytes
 at the same timestamp, cannot replace the cached policy. Identical replay is
-allowed. Without any verified copy, a failed fetch or verification returns
-`unavailable` with connectivity/retry guidance before execution. First use has
-only the fetched signature as freshness evidence.
+allowed. On refresh failure, fallback adopts any newer verified policy another
+process has saved in the machine cache. An older in-memory copy cannot bypass
+that policy's revocations or minimum. Without any verified copy, a failed fetch
+or verification returns `unavailable` with connectivity/retry guidance before
+execution. First use has only the fetched signature as freshness evidence.
 
 An active individual revocation returns `version_revoked`. A release below an
 effective minimum returns `version_unsupported`. Both include the signed reason

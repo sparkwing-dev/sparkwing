@@ -36,7 +36,8 @@ func TestEngineW8IndexFailureComponents(t *testing.T) {
 	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
 	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
 	published := now.AddDate(0, -9, 0)
-	policy := engine.VersionIndex{Format: 1, PublishedAt: now, Latest: "v0.20.0",
+	policy := engine.VersionIndex{
+		Format: 1, PublishedAt: now, Latest: "v0.20.0",
 		Versions: []engine.VersionInfo{
 			{Version: "v0.10.0", PublishedAt: published, SupportUntil: published.AddDate(0, 12, 0)},
 			{Version: "v0.20.0", PublishedAt: now.Add(-time.Hour), SupportUntil: now.Add(-time.Hour).AddDate(0, 12, 0)},
@@ -119,6 +120,67 @@ func (f *engineTransportW8) RoundTrip(request *http.Request) (*http.Response, er
 		return nil, fmt.Errorf("unexpected origin %s", request.URL)
 	}
 	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: request}, nil
+}
+
+func TestEngineW8FallbackHonorsSharedMachineRevocation(t *testing.T) {
+	public, key, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := releaseauth.TrustedPublicKeys
+	releaseauth.TrustedPublicKeys = []string{base64.StdEncoding.EncodeToString(public)}
+	t.Cleanup(func() { releaseauth.TrustedPublicKeys = previous })
+	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	for _, failure := range []string{"unavailable", "signed_replay"} {
+		t.Run(failure, func(t *testing.T) {
+			policy := engine.VersionIndex{Format: 1, PublishedAt: now, Latest: "v0.20.0", Versions: []engine.VersionInfo{
+				{Version: "v0.10.0", PublishedAt: now.AddDate(0, -9, 0), SupportUntil: now.AddDate(0, 3, 0)},
+				{Version: "v0.20.0", PublishedAt: now, SupportUntil: now.AddDate(1, 0, 0)},
+			}}
+			body, err := json.Marshal(policy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			transport := &engineTransportW8{body: body, signature: ed25519.Sign(key, body)}
+			config := engine.Config{CacheDirectory: t.TempDir(), HTTPClient: &http.Client{Transport: transport}}
+			first, err := engine.NewResolver(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := first.Index(t.Context(), now); err != nil {
+				t.Fatal(err)
+			}
+			policy.PublishedAt = now.Add(time.Minute)
+			policy.Revoked = []engine.Restriction{{Version: "v0.10.0", Reason: "shared machine security revocation", Security: true, AnnouncedAt: now, EffectiveAt: now}}
+			transport.body, err = json.Marshal(policy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			transport.signature = ed25519.Sign(key, transport.body)
+			second, err := engine.NewResolver(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result, err := second.Index(t.Context(), policy.PublishedAt); err != nil || result.Fallback {
+				t.Fatalf("publish newer verified policy: %+v %v", result, err)
+			}
+			transport.offline = failure == "unavailable"
+			transport.body, transport.signature = body, ed25519.Sign(key, body)
+			refreshedAt := now.Add(limits.VersionIndexRefresh)
+			result, err := first.Index(t.Context(), refreshedAt)
+			if err != nil || !result.Fallback {
+				t.Fatalf("refresh fallback: %+v %v", result, err)
+			}
+			_, err = engine.Evaluate(result.Index, "v0.10.0", refreshedAt)
+			var problem *apierr.Error
+			if !errors.As(err, &problem) || problem.Code != apierr.VersionRevoked {
+				t.Fatalf("newer cached revocation was lost: %v", err)
+			}
+			if _, err := engine.Evaluate(result.Index, "v0.20.0", refreshedAt); err != nil {
+				t.Fatalf("permitted release refused: %v", err)
+			}
+		})
+	}
 }
 
 func TestEngineW8Components(t *testing.T) {
