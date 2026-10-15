@@ -317,7 +317,6 @@ file. Other syntax and workflow checks remain active.
   | --- | --- | --- |
   | `./cmd/sparkwing/...` | 174s | 10m |
   | `./internal/orchestrator` | 121s | 10m |
-  | `./internal/cache` | 6s | 2m |
   | `./internal/cluster` | 4s | 2m |
 
   Under contention from parallel agents the two heavy packages have been

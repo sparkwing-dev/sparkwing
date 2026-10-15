@@ -211,7 +211,9 @@ lease. The backend derives that tenant's CAS key, and an absent object succeeds
 on replay. The old controller output pruner and bucket-measurement expiry
 callback are removed. The controller supplies its configured backend to the
 shared leased maintenance pass. Standalone S3 construction installs this backend.
-Standalone filesystem construction remains open.
+Standalone controllers install either backend through `Server.WithDataObjects`.
+That constructor also installs physical manifest verification for terminal results.
+The authenticated data bindings and local-controller host construction remain open.
 
 The retained `internal/teamblob` helper constructs keys for the older output
 downloader. Its bucket measurement, client interface, listing budgets and S3 test
@@ -308,11 +310,11 @@ Local host construction does not open an artifact backend from
 contract takes live byte and record clients through `nodehost.StorageBinding`.
 Runtime bindings still need integration.
 
-The remaining raw `pkg/storage.ArtifactStore` exposes create-only writes for
-legacy log storage. It has no mutable `Put` or unscoped `Has` operation. The
-filesystem log route accepts an exact retry after reading and closing the
-existing bytes, and refuses any replacement. Signed-data clients keep their
-separate authenticated presence API.
+The raw `pkg/storage.ArtifactStore` contract and filesystem adapter are removed.
+`pkg/storage/s3.ArtifactStore` still serves legacy S3 log handlers and read-only
+bucket measurements. Its remaining log reader and create-only writer retire
+with the authenticated log transport. Signed-data clients use their separate
+authenticated presence API.
 
 `storeurl.OpenArtifactStore`, `storage.Usage` and the controller's unused
 `WithArtifactStore` fallback are removed. `OpenMeasurementStore` and

@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **controller:** Remove unused cache-service egress flag selection and proxy
+  usage classification.
+
 - **storage (Breaking):** Removed `AttemptReport.OutputFrom`, the `output_from`
   attempt payload, `Store.FinishNodeCopyingOutput` and the unused backend
   output-read methods. Memo materialization uses transactional blob records.

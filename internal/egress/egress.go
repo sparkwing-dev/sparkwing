@@ -1,24 +1,4 @@
-// Package egress bounds the bytes a Sparkwing service sends to clients.
-//
-// One Meter per process counts the response bodies of the download
-// surfaces: artifact and cache-archive reads, log reads, the live log
-// stream, and git proxy fetches. Every byte is counted twice, once
-// against the principal that asked for it and once against the process
-// total, so an operator can see both who spent the month's egress and
-// how much left this process today.
-//
-// The meter refuses no byte. A principal at its concurrency cap is refused
-// one more simultaneous download or live log stream. The global daily
-// threshold raises an alarm the health route and the metrics report and the
-// log carries at warn level, because the bill an operator needs to see early
-// is the process's, not one principal's. What a team may download in a day
-// is the controller's per-team cap, which a service charges before a
-// response's first byte, so no download is cut off part way.
-//
-// Counting is in memory. [Meter.Flush] and [Meter.FlushDay] hand moved
-// totals to a caller's persistence operation and acknowledge them only
-// after that operation succeeds. [Meter.Restore] and [Meter.RestoreDay]
-// load them back at startup; nothing here writes one row per response.
+// Package egress meters controller responses and limits concurrent downloads and log streams.
 package egress
 
 import (
@@ -39,20 +19,15 @@ import (
 type Class string
 
 const (
-	// ClassArtifact counts artifact and cache-archive downloads.
+	// ClassArtifact counts object downloads.
 	ClassArtifact Class = "artifact"
 	// ClassLog counts durable log reads.
 	ClassLog Class = "log"
 	// ClassLogStream counts the live log stream.
 	ClassLogStream Class = "log_stream"
-	// ClassGit counts git proxy and dependency proxy fetches.
-	ClassGit Class = "git"
 )
 
-// AnonymousPrincipal labels bytes a service served without a bearer,
-// which is what the dependency proxy answers and what every request
-// resolves to on a service running with auth off. They share one budget,
-// so an open route cannot be spent anonymously past the cap.
+// AnonymousPrincipal labels bytes served without a bearer.
 const AnonymousPrincipal = "anonymous"
 
 // TeamPrincipal names a caller to a meter by its team and its token's name,

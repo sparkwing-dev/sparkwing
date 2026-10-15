@@ -235,7 +235,7 @@ func run(args []string) error {
 			"count with the measurement. Writes are counted as they happen, so this "+
 			"listing is the only enumeration the ceiling costs; 0 measures once at "+
 			"startup and never again")
-	readEgress := egress.Bind(fs, egress.ControllerSurfaces)
+	readEgress := egress.Bind(fs)
 	readLog := logutil.Bind(fs)
 	googleClientID := fs.String("google-client-id", "",
 		"Google OAuth client id for dashboard sign-in; the secret is the "+
