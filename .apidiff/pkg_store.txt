@@ -3085,9 +3085,6 @@ func (s *Store) ReconcileStorage(ctx context.Context, kind StorageKind, listed, 
 func (s *Store) RecordAgentLabels(ctx context.Context, prefix string, labels []string) error
 func (s *Store) RecordAttemptIntent(ctx context.Context, attemptID, paymentIntent string, now time.Time) error
 func (s *Store) RecordContention(ctx context.Context, pipeline string) error
-func (s *Store) RecordCreditGrant(
-	ctx context.Context, req CreditGrantRequest,
-) (CreditGrantResult, error)
 func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error
 func (s *Store) RecordEgressUsage(ctx context.Context, usages []EgressUsage) (err error)
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error

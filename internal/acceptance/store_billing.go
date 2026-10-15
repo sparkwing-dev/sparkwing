@@ -91,8 +91,16 @@ func CheckStoreBillingBoundary(ctx context.Context, root, id string) (err error)
 	if err != nil {
 		return err
 	}
-	if len(grants) != 1 || grants[0].ID != "fund" || grants[0].AmountMicro != state.GrantedMicro {
+	if len(grants) != 1 || grants[0].Team != tenant.Team() || grants[0].ID != "fund" || grants[0].AmountMicro != state.GrantedMicro {
 		return fmt.Errorf("tenant grant history includes a foreign grant: %+v", grants)
+	}
+	charges, err := tenant.ListCreditCharges(ctx, 100)
+	if err != nil {
+		return err
+	}
+	wantCharges := []store.CreditCharge{charge, {ID: "compute", Team: tenant.Team(), RunID: "old", NodeID: "job", TokenPrefix: "award", Kind: store.CreditChargeUsage, Seconds: 3, AmountMicro: 30, ChargedAt: grants[0].CreatedAt}}
+	if !slices.Equal(charges, wantCharges) {
+		return fmt.Errorf("tenant charge history lost attribution or includes a foreign charge: %+v", charges)
 	}
 	result, err := operator.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 100})
 	if err != nil {
@@ -144,8 +152,12 @@ func CheckStoreBillingBoundary(ctx context.Context, root, id string) (err error)
 	if err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(state, afterState) || !reflect.DeepEqual(grants, afterGrants) {
-		return errors.New("tenant credit state or grant history changed during run retention or restart")
+	afterCharges, err := tenant.ListCreditCharges(ctx, 100)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(state, afterState) || !reflect.DeepEqual(grants, afterGrants) || !reflect.DeepEqual(charges, afterCharges) {
+		return errors.New("tenant credit state or history changed during run retention or restart")
 	}
 	return nil
 }

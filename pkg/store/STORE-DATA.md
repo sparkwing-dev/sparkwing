@@ -4,6 +4,11 @@ Financial writes use the same transaction as the state change that caused them.
 Billing state and grant history use `Tenant.CreditState` and
 `Tenant.ListCreditGrants`. Their raw Store twins are removed. Burn windows use
 the store clock and include charges at the window's lower boundary.
+`Tenant.ListCreditCharges` reads the final `capability_prefix` column into
+`CreditCharge.TokenPrefix`. Both history methods return the selected tenant
+on every row and preserve ledger metadata after run retention. Equal timestamps
+sort by descending row ID. Default and maximum history sizes are unchanged.
+Grant requests use `Tenant.RecordCreditGrant`. Its raw Store twin is removed.
 Rate-table writes use `SetCreditSettings` with `CreditSettingsUpdate.RateTable`.
 The separate `SetCreditRateTable` wrapper is removed.
 `recordBillingAwardTx` stores immutable provenance and a reservation charge. The

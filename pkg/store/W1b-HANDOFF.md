@@ -1,10 +1,97 @@
 # W1b handoff
 
-Continues `496ba5f1a`. W1b remains incomplete. This continuation is uncommitted.
-The lead owns review, commits, pipelines and native integration. W1 implementation
-files are unchanged. No Git write or candidate Sparkwing runtime was used.
+Continues `9c42f1022` after the integration merge `766fd6694`. W1b remains
+incomplete. This continuation is uncommitted. The lead owns review, commits,
+pipelines and native integration.
 
 ## Current continuation
+
+Fixed final-schema billing history. Tenant.ListCreditCharges queried the removed
+credit_charges.token_prefix column. It now reads capability_prefix into the
+existing CreditCharge.TokenPrefix field. Grant and charge history now retain the
+selected tenant on every returned row. The two history methods moved unchanged
+apart from these fixes and their GoDoc into owned credit_history.go. The shared
+tenant_reads.go only loses those two W1b methods. W1's admission, state, claim,
+reconciliation, reaping and authority code is unchanged.
+
+The invariant is that history exposes only the selected tenant's immutable
+ledger and awarded capability identity. The new property first failed with
+"no such column: token_prefix". It passes 64 generated cases covering 128 tenant
+keys with Unicode and SQL metacharacters, all grant/charge kinds, exact metadata,
+equal-timestamp ordering, limits and reopening. The extended SQLite acceptance
+proof independently failed because grant history dropped the tenant. It now
+compares the complete compute and real storage-charge rows before leased run
+retention and after reopening, beside a foreign ledger.
+
+Removed Store.RecordCreditGrant, **13 legacy production Go lines**, counting its
+GoDoc and separating blank line. Its eighteen direct test calls use the existing
+tenant helper. The existing Store.GrantCredits consumer selects the default
+Tenant's grant recorder. Its legacy API remains until its external and W1-owned
+fixtures migrate. No new forwarding API was added. The surviving Tenant method
+retains its behavior. There was no cross-package production caller to migrate.
+The API snapshot, source migration guide, changelog and mirrors record the cut.
+
+Ported TestCreditHistoryLimitIsClampedToItsMaximum from the old three-grant fixture
+to final-schema tests of both histories with 1,005 rows each. The old **23 test
+lines** are deleted. The test checks default, negative, small, maximum and
+above-maximum requests and the exact newest/oldest returned rows. An existing
+reversal test's debit fixture now uses capability_prefix and bound arguments.
+No archived T1 inventory row is newly claimed complete.
+
+Verification uses the environment and command prefix under Manual below.
+
+- Whole-repository go build -p 4 ./... passed.
+- Scoped go vet over store and both acceptance trees passed.
+- Focused store checks passed **170 top-level tests / 434 cases**, with no skips.
+  The Manual selection also includes TestGrantCredits, TestCreditGrant,
+  TestCreditReversal and TestCreditHistory for this continuation.
+- Both acceptance trees passed **20 top-level tests / 486 cases**. The same
+  **12 SQLite data/billing cells** pass. The native/platform skeleton retains
+  **2,991 skips**. This continuation activates no new native cell.
+- The extended billing cell passed again after tightening the full-row comparison.
+- Tenant SQL-scope, writer and twin guards passed.
+- Required commentcheck -base main passed across 888 files. Session sleepcheck,
+  documentation/changelog checks, sync-docs --check and whitespace checks passed.
+
+The full legacy store suite, PostgreSQL, providers, physical storage, native
+placements, backup drill, candidates and pipelines were not run. Unit persistence
+proofs still use contract fakes for the unavailable calculator and storage policy.
+Review and native verification remain with the lead.
+
+Amendment disposition remains: A1-24 has the transactional data checker and merged
+binding integration. A1-27 has accounting helpers but no production callers from
+W1's award/start/wait/renew/finish/reap paths. A1-28 has committed-checkout settlement
+but still needs W2's verified-provider route cutover. A1-29 through A1-35 have the
+store persistence owners but need W2/W7 transport, policy and physical integration.
+A1-53 has these SQLite proofs while native coverage remains open. handoffs.md has
+no entry assigned to W1b. There is no new foreign contract shape or human question.
+
+The previous publication/result integration gaps remain. AttachResultRecords is
+implemented and must be configured with the real manifest reader. Materialization
+still lacks a destination identity for a terminal job that never executed, and
+the owner-publication identity contract remains unresolved. W1's continuation also
+requests an agreed unstarted-release refund operation for at-award intervals and
+an explicit customer-runner wait operation. Those need cross-owner agreement
+before metered lifecycle integration. C2 SettleBilling, VerifyPaymentEvent and
+W7's namespace/edge policy remain panic stubs in this checkout. Physical blob/log
+transports, deletion, proxy egress and legacy consumers remain integration work.
+No native readiness is claimed.
+
+Shared edits: tenant_reads.go (only the moved billing methods),
+internal/acceptance/store_billing.go, design/rewrite/contracts/c1-data.md,
+.apidiff/pkg_store.txt, CHANGELOG.md, docs/migrations/_unreleased.md and generated
+mirrors. Other edits are owned credit code/tests, STORE-DATA.md and this handoff.
+No caller in another package changed because the removed API had none.
+
+Friction was cold compilation, the removed-column fixture reproduced in the
+reversal test, and foreign runtime/identity gaps. The prior commentcheck finding
+has been fixed in the merged tree. No new schema, interface, setting, limit,
+environment variable or runtime mechanism was added. No Git write, service start
+or Sparkwing runtime command ran after bootstrap discovery. Git author identity
+remains Korey's default with no core.worktree override. Scratch is deleted after
+final inspection.
+
+## Previous continuation (committed in 9c42f1022)
 
 Removed `Store.CreditState` and `Store.ListCreditGrants`, **15 legacy production
 Go lines**, including their comments and separating blank lines. Production

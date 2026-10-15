@@ -941,29 +941,6 @@ func TestAppendEventOnceCollapsesRepeats(t *testing.T) {
 	}
 }
 
-func TestCreditHistoryLimitIsClampedToItsMaximum(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	for i := range 3 {
-		if _, err := s.GrantCredits(ctx, store.CreditGrantFree, int64(i+1)*store.MicroCreditsPerCent, "", "admin"); err != nil {
-			t.Fatalf("grant %d: %v", i, err)
-		}
-	}
-	for _, limit := range []int{0, 1, store.CreditHistoryMaxLimit, store.CreditHistoryMaxLimit + 5000} {
-		grants, err := tenant(t, s, store.DefaultTeam).ListCreditGrants(ctx, limit)
-		if err != nil {
-			t.Fatalf("list with limit %d: %v", limit, err)
-		}
-		want := 3
-		if limit == 1 {
-			want = 1
-		}
-		if len(grants) != want {
-			t.Fatalf("limit %d returned %d grants, want %d", limit, len(grants), want)
-		}
-	}
-}
-
 func TestFormatCreditsRendersTwoPlaces(t *testing.T) {
 	cases := []struct {
 		micro int64

@@ -1,5 +1,10 @@
 # Migrating to the next release
 
+## Grant requests use tenant handles
+
+`Store.RecordCreditGrant` is removed. Obtain a tenant with `Store.ForTeam`,
+then call `Tenant.RecordCreditGrant`. Local stores use `store.DefaultTeam`.
+
 ## Billing reads use tenant handles
 
 `Store.CreditState` and `Store.ListCreditGrants` are removed. Obtain a tenant

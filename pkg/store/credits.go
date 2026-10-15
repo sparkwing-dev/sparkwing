@@ -387,7 +387,7 @@ func (req CreditGrantRequest) validate() error {
 func (s *Store) GrantCredits(
 	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
 ) (*CreditGrant, error) {
-	return grantCredits(ctx, s.RecordCreditGrant, kind, amountMicro, reference, createdBy)
+	return grantCredits(ctx, s.defaultTenant().RecordCreditGrant, kind, amountMicro, reference, createdBy)
 }
 
 // GrantCredits adds credits to t's balance and returns the row it holds for
@@ -413,21 +413,7 @@ func grantCredits(
 	return &grant, nil
 }
 
-// RecordCreditGrant writes req against the default team's balance and reports
-// whether it wrote a new row. It refuses a reversal whose Reverses names no
-// paid grant of that team, so a refund can only take back a payment the
-// team's ledger recorded, and a free grant that would lift the balance above
-// [MaxTeamBalanceMicro] with a [CreditBalanceCapError]; a paid grant is never
-// held to the cap, because its payment already went through. A reversal may take the balance below zero; the
-// claim path then refuses that team's new metered work.
-func (s *Store) RecordCreditGrant(
-	ctx context.Context, req CreditGrantRequest,
-) (CreditGrantResult, error) {
-	return s.recordCreditGrant(ctx, DefaultTeam, req)
-}
-
-// RecordCreditGrant writes req against t's balance and reports whether it
-// wrote a new row. It reads the same as [Store.RecordCreditGrant] otherwise.
+// RecordCreditGrant writes a tenant grant or payment-linked reversal and reports whether it was created.
 func (t *Tenant) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
 ) (CreditGrantResult, error) {

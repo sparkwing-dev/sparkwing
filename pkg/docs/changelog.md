@@ -76,6 +76,8 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
+- **store (Breaking):** Remove `Store.RecordCreditGrant`. Submit grant requests through a tenant handle. See [migration guide](docs/migrations/_unreleased.md#grant-requests-use-tenant-handles).
+- **store:** Read charge history from the final capability column and return tenant attribution on grant and charge history. Ledger history remains readable after run retention.
 - **store (Breaking):** Remove `Store.CreditState` and `Store.ListCreditGrants`. Read billing state and grant history through a tenant handle. See [migration guide](docs/migrations/_unreleased.md#billing-reads-use-tenant-handles).
 - **store (Breaking):** Remove `Store.CreditRateTableSet`, `Store.CreditRateMicroPerSecond`, `Store.CreditGraceSeconds` and `Store.SetCreditRateTable`. Read presence, prices and grace through `CreditSettings` in one snapshot. Write rate tables through `SetCreditSettings`. See [migration guide](docs/migrations/_unreleased.md#rate-table-presence-uses-the-settings-snapshot).
 - **store:** Data authorization can run inside the transaction that owns a write. Receipt, reference, revocation and holder changes in that transaction govern access before commit.
