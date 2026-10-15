@@ -17,7 +17,7 @@ func TestLocalDepCacheCreatesPrivateArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	backend := &localBackend{}
-	if _, err := backend.store(context.Background(), "private-cache", source); err != nil {
+	if _, err := backend.Store(context.Background(), "private-cache", source); err != nil {
 		t.Fatal(err)
 	}
 	for path, want := range map[string]os.FileMode{

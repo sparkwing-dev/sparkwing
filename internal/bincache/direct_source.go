@@ -2,18 +2,15 @@ package bincache
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io/fs"
 	"net"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -35,7 +32,6 @@ func ValidateDirectSource(repoURL, sha string) (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("direct source: %w", err)
 	}
-	// safety: no forge needs one, and each spelling of one would get its own mirror.
 	if strings.ContainsAny(remote, "?#") {
 		return "", "", errors.New("direct source: the remote must not carry a query or fragment")
 	}
@@ -102,30 +98,35 @@ func DirectRepoURLFromGitHub(fullName string) string {
 	return "https://github.com/" + fullName + ".git"
 }
 
-// safety: Only loopback tests may skip address validation; production fetches keep it and both caps.
-// A zero timeout leaves ctx in charge, while the byte cap covers all mirrors under one home.
+// safety: Only transport fixtures may skip address validation; production fetches check every host.
+// A zero timeout leaves ctx in charge.
 type directOptions struct {
-	protocols      string
-	lookup         sourceurl.Lookup
-	fetchTimeout   time.Duration
-	maxMirrors     int
-	maxMirrorBytes int64
-	cred           DirectCredential
+	protocols    string
+	sourceRef    string
+	lookup       sourceurl.Lookup
+	fetchTimeout time.Duration
+	cred         DirectCredential
 	// safety: Cloud runners cannot write released deploy keys to disk.
 	keyTmpfsOnly bool
 }
 
 func defaultDirectOptions() directOptions {
 	return directOptions{
-		protocols:      directProtocols,
-		lookup:         net.DefaultResolver.LookupIPAddr,
-		fetchTimeout:   10 * time.Minute,
-		maxMirrors:     20,
-		maxMirrorBytes: 10 << 30,
+		protocols:    directProtocols,
+		lookup:       net.DefaultResolver.LookupIPAddr,
+		fetchTimeout: 10 * time.Minute,
 	}
 }
 
 func fetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDir string, opts directOptions) (string, error) {
+	checkout, err := fetchRepositorySourceDirect(ctx, repoURL, branch, sha, workDir, opts)
+	if err != nil {
+		return "", err
+	}
+	return directSparkwingDir(checkout)
+}
+
+func fetchRepositorySourceDirect(ctx context.Context, repoURL, branch, sha, workDir string, opts directOptions) (string, error) {
 	remote, sha, err := ValidateDirectSource(repoURL, sha)
 	if err != nil {
 		return "", err
@@ -133,7 +134,7 @@ func fetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDi
 	if remote, err = credentialRemote(remote, opts.cred); err != nil {
 		return "", err
 	}
-	if sha == "" {
+	if sha == "" && opts.sourceRef == "" {
 		if branch == "" {
 			branch = "main"
 		}
@@ -141,18 +142,14 @@ func fetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDi
 			return "", fmt.Errorf("direct source: %q is not a branch name", branch)
 		}
 	}
-	root := filepath.Join(SparkwingHome(), "source-direct")
-	if err := fssecure.EnsureDir(root); err != nil {
-		return "", fmt.Errorf("direct source: %w", err)
-	}
 	if err := fssecure.EnsureDir(workDir); err != nil {
 		return "", fmt.Errorf("direct source: %w", err)
 	}
 	checkout := filepath.Join(workDir, "src")
-	if err := directCheckout(ctx, root, remote, branch, sha, checkout, opts); err != nil {
+	if err := directCheckout(ctx, remote, branch, sha, checkout, opts); err != nil {
 		return "", err
 	}
-	return directSparkwingDir(checkout)
+	return checkout, nil
 }
 
 // safety: A repository may commit .sparkwing as a symlink outside the checkout; never compile or run it.
@@ -183,41 +180,32 @@ func validBranchName(ctx context.Context, branch string) bool {
 	return exec.CommandContext(ctx, "git", "check-ref-format", "--branch", branch).Run() == nil
 }
 
-func directMirrorPath(root, remote string) string {
-	sum := sha256.Sum256([]byte(directMirrorKey(remote)))
-	return filepath.Join(root, fmt.Sprintf("%x.git", sum[:16]))
-}
-
-// safety: Forge-equivalent host spellings share a mirror, while path case remains significant.
-func directMirrorKey(remote string) string {
-	trimPath := func(path string) string {
-		return strings.TrimSuffix(strings.TrimRight(path, "/"), ".git")
-	}
-	if u, err := url.Parse(remote); err == nil && u.Scheme != "" && u.Host != "" {
-		u.Scheme, u.Host, u.Path, u.RawPath = strings.ToLower(u.Scheme), strings.ToLower(u.Host), trimPath(u.Path), ""
-		return u.String()
-	}
-	dest, path, _ := strings.Cut(remote, ":")
-	user, host, found := strings.Cut(dest, "@")
-	if !found {
-		return strings.ToLower(dest) + ":" + trimPath(path)
-	}
-	return user + "@" + strings.ToLower(host) + ":" + trimPath(path)
-}
-
-func directCheckout(ctx context.Context, root, remote, branch, sha, dest string, opts directOptions) (err error) {
+func directCheckout(ctx context.Context, remote, branch, sha, dest string, opts directOptions) (err error) {
 	defer func() { err = redactCredential(err, opts.cred) }()
-	mirror := directMirrorPath(root, remote)
-	lock, err := fssecure.OpenFile(mirror+".lock", os.O_CREATE|os.O_RDWR)
-	if err != nil {
-		return fmt.Errorf("direct source: open mirror lock: %w", err)
+	ref := "refs/heads/" + branch
+	if opts.sourceRef != "" {
+		if sha != "" {
+			return errors.New("direct source: a declared ref and commit cannot both select the checkout")
+		}
+		ref, err = normalizeDirectRef(ctx, opts.sourceRef)
+		if err != nil {
+			return err
+		}
+		if directCommitRE.MatchString(ref) {
+			sha, ref = ref, ""
+		}
 	}
-	// safety: closing the file releases the lock.
-	defer func() { _ = lock.Close() }()
-	// safety: fetch, shallow bookkeeping and worktree registration all write the mirror.
-	if _, err := cacheLock(lock, cacheLockExclusive); err != nil {
-		return fmt.Errorf("direct source: lock mirror: %w", err)
+	if err := ctx.Err(); err != nil {
+		return err
 	}
+	if err := os.Mkdir(dest, 0o700); err != nil {
+		return fmt.Errorf("direct source: create checkout: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, os.RemoveAll(dest))
+		}
+	}()
 
 	fetchEnv := append(directGitEnv(os.Environ()), "GIT_ALLOW_PROTOCOL="+opts.protocols, "GIT_TERMINAL_PROMPT=0")
 	localEnv := directLocalGitEnv(fetchEnv)
@@ -225,7 +213,7 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 		fetchEnv = credentialFetchEnv(localEnv)
 	}
 	// safety: only the fetch sees the helper and the pipe; every command that
-	// touches the mirror or the checkout runs with localEnv, which reads no
+	// touches the checkout runs with localEnv, which reads no
 	// config from the environment at all.
 	pipeCred := opts.cred.Kind == CredentialGitHubApp || opts.cred.Kind == CredentialHTTPS
 	if pipeCred {
@@ -250,20 +238,12 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 		return runWith(ctx, env, nil, args...)
 	}
 	git := func(args ...string) (string, error) { return run(ctx, localEnv, args...) }
-	if _, statErr := os.Stat(filepath.Join(mirror, "HEAD")); statErr != nil {
-		if err := os.RemoveAll(mirror); err != nil {
-			return fmt.Errorf("direct source: clear mirror: %w", err)
-		}
-		if _, err := git("init", "--bare", "--quiet", mirror); err != nil {
-			return fmt.Errorf("direct source: %w", err)
-		}
-	}
-	if _, err := git("-C", mirror, "worktree", "prune"); err != nil {
+	// safety: an ambient template can install hooks or config before checkout.
+	if _, err := git("init", "--quiet", "--template=", "--", dest); err != nil {
 		return fmt.Errorf("direct source: %w", err)
 	}
-	now := time.Now()
-	if err := os.Chtimes(mirror, now, now); err != nil {
-		return fmt.Errorf("direct source: mark mirror used: %w", err)
+	if _, err := git("-C", dest, "remote", "add", "origin", remote); err != nil {
+		return fmt.Errorf("direct source: %w", err)
 	}
 
 	var sshCommand string
@@ -285,7 +265,7 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 	case !opts.cred.Empty():
 		sshCommand = "ssh" + directSSHOptions
 	default:
-		configured, err := run(ctx, fetchEnv, "-C", mirror, "config", "--get", "core.sshCommand")
+		configured, err := run(ctx, fetchEnv, "-C", dest, "config", "--get", "core.sshCommand")
 		// safety: git exits 1 when the key is unset; any other failure is a config the fetch cannot read either.
 		var exitErr *exec.ExitError
 		if err != nil && (!errors.As(err, &exitErr) || exitErr.ExitCode() != 1) {
@@ -313,7 +293,7 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 				return fmt.Errorf("source credential transport: %w", err)
 			}
 		}
-		_, err := runWith(fetchCtx, env, extra, "-C", mirror, "-c", "http.followRedirects=false",
+		_, err := runWith(fetchCtx, env, extra, "-C", dest, "-c", "http.followRedirects=false",
 			"fetch", "--quiet", "--no-tags", "--depth", "1", "--", remote, ref)
 		err = errors.Join(err, cleanup())
 		if err != nil && ctx.Err() == nil && errors.Is(fetchCtx.Err(), context.DeadlineExceeded) {
@@ -323,39 +303,54 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 	}
 
 	target := sha
-	needFetch := sha == ""
-	if !needFetch {
-		_, haveErr := git("-C", mirror, "cat-file", "-e", sha+"^{commit}")
-		needFetch = haveErr != nil
-	}
-	if needFetch && opts.lookup != nil {
+	if opts.lookup != nil {
 		if err := sourceurl.CheckResolvedHost(ctx, remote, opts.lookup); err != nil {
 			return fmt.Errorf("direct source: %w", err)
 		}
 	}
 	if sha == "" {
-		if err := fetchRef("refs/heads/" + branch); err != nil {
-			return fmt.Errorf("direct source: fetch %s branch %s: %w", sourceurl.Redact(remote), branch, err)
+		if err := fetchRef(ref); err != nil {
+			return fmt.Errorf("direct source: fetch %s ref %s: %w", sourceurl.Redact(remote), ref, err)
 		}
-		if target, err = git("-C", mirror, "rev-parse", "--verify", "FETCH_HEAD^{commit}"); err != nil {
+		if target, err = git("-C", dest, "rev-parse", "--verify", "FETCH_HEAD^{commit}"); err != nil {
 			return fmt.Errorf("direct source: %w", err)
 		}
-	} else if needFetch {
+	} else {
 		if err := fetchRef(sha); err != nil {
 			return fmt.Errorf("direct source: fetch %s at %s (is the commit pushed?): %w",
 				sourceurl.Redact(remote), sha, err)
 		}
 	}
-	if err := directEnforceCaps(root, mirror, opts, git); err != nil {
+	size, err := directDirSize(filepath.Join(dest, ".git"))
+	if err != nil {
 		return err
 	}
-	// safety: the mirror was created here and the checkout sees no ambient config,
-	// so the tree's hooks and attributes name nothing that can run.
-	if _, err := git("-C", mirror, "-c", "core.hooksPath=/dev/null",
-		"worktree", "add", "--quiet", "--detach", "--", dest, target); err != nil {
+	if size > MaxSourceBytes {
+		return fmt.Errorf("direct source: fetched Git data takes %d bytes, over the %d byte cap", size, MaxSourceBytes)
+	}
+	// safety: checkout sees no ambient config, hooks or template-installed code.
+	if _, err := git("-C", dest, "-c", "core.hooksPath="+os.DevNull,
+		"checkout", "--quiet", "--detach", target, "--"); err != nil {
 		return fmt.Errorf("direct source: check out %s: %w", target, err)
 	}
 	return nil
+}
+
+func normalizeDirectRef(ctx context.Context, ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if directCommitRE.MatchString(ref) {
+		return strings.ToLower(ref), nil
+	}
+	if strings.HasPrefix(ref, "refs/remotes/origin/") {
+		ref = "refs/heads/" + strings.TrimPrefix(ref, "refs/remotes/origin/")
+	} else if strings.HasPrefix(ref, "origin/") {
+		ref = "refs/heads/" + strings.TrimPrefix(ref, "origin/")
+	}
+	if (!strings.HasPrefix(ref, "refs/heads/") && !strings.HasPrefix(ref, "refs/tags/")) ||
+		exec.CommandContext(ctx, "git", "check-ref-format", ref).Run() != nil {
+		return "", fmt.Errorf("direct source: invalid declared ref %q", ref)
+	}
+	return ref, nil
 }
 
 // safety: Drop git variables that redirect every command or trace credentials during a direct fetch.
@@ -439,16 +434,20 @@ func directLocalGitEnv(fetchEnv []string) []string {
 	return append(out, "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_LFS_SKIP_SMUDGE=1")
 }
 
-// TriggerRepoURL is the remote a runner fetches a trigger's source from, given
-// every name the trigger recorded for its repository: the clone URL,
-// GITHUB_REPOSITORY and github_owner/github_repo. They must all name one
-// repository (sourceurl.TriggerRepository), so the cache path and the direct
-// path fetch the same one and differ only in the form their transport needs:
-// the git cache names a GitHub repository by the ssh form a GitHub-sourced run
-// registers, and a direct fetch uses the recorded clone URL, else the GitHub
-// name's https form, fitted by DirectFetchURL to the identities this process
-// holds. An empty result means the trigger names no repository.
-func TriggerRepoURL(repoURL, githubRepository, githubOwner, githubRepo string, direct bool) (string, error) {
+// RepoURLFromGitHub is the clone URL recorded for a GitHub repository name.
+func RepoURLFromGitHub(fullName string) string {
+	if fullName == "" {
+		return ""
+	}
+	if strings.Contains(fullName, "://") || strings.HasPrefix(fullName, "git@") {
+		return fullName
+	}
+	return "git@github.com:" + fullName + ".git"
+}
+
+// TriggerRepoURL resolves the one repository named by a trigger and selects
+// the transport this machine can use for a direct fetch.
+func TriggerRepoURL(repoURL, githubRepository, githubOwner, githubRepo string) (string, error) {
 	if _, err := sourceurl.TriggerRepository(repoURL, githubRepository, githubOwner, githubRepo); err != nil {
 		return "", err
 	}
@@ -456,137 +455,14 @@ func TriggerRepoURL(repoURL, githubRepository, githubOwner, githubRepo string, d
 	if slug == "" && githubOwner != "" {
 		slug = githubOwner + "/" + githubRepo
 	}
-	var raw string
-	switch {
-	case direct && repoURL != "":
-		raw = repoURL
-	case direct:
+	raw := repoURL
+	if raw == "" {
 		raw = DirectRepoURLFromGitHub(slug)
-	case slug != "":
-		raw = RepoURLFromGitHub(slug)
-	default:
-		raw = repoURL
 	}
 	if raw == "" {
 		return "", nil
 	}
-	if direct {
-		raw = DirectFetchURL(raw)
-	}
-	return sourceurl.ValidateCloneURL(raw)
-}
-
-// safety: Git cannot cap fetch writes, so an oversized mirror is removed and its checkout refused afterward.
-func directEnforceCaps(root, own string, opts directOptions, git func(...string) (string, error)) error {
-	if opts.maxMirrors <= 0 && opts.maxMirrorBytes <= 0 {
-		return nil
-	}
-	ownSize, err := directDirSize(own)
-	if err != nil {
-		return fmt.Errorf("direct source: size mirror: %w", err)
-	}
-	if opts.maxMirrorBytes > 0 && ownSize > opts.maxMirrorBytes {
-		if err := os.RemoveAll(own); err != nil {
-			return fmt.Errorf("direct source: remove oversized mirror: %w", err)
-		}
-		return fmt.Errorf("direct source: the fetched repository takes %d bytes, over the %d byte mirror cap",
-			ownSize, opts.maxMirrorBytes)
-	}
-	type mirrorUse struct {
-		path string
-		used time.Time
-		size int64
-	}
-	paths, err := filepath.Glob(filepath.Join(root, "*.git"))
-	if err != nil {
-		return fmt.Errorf("direct source: list mirrors: %w", err)
-	}
-	var others []mirrorUse
-	total := ownSize
-	for _, path := range paths {
-		fi, statErr := os.Stat(path)
-		if path == own || statErr != nil || !fi.IsDir() {
-			continue
-		}
-		size, sizeErr := directDirSize(path)
-		if sizeErr != nil {
-			continue
-		}
-		others = append(others, mirrorUse{path: path, used: fi.ModTime(), size: size})
-		total += size
-	}
-	sort.Slice(others, func(i, j int) bool { return others[i].used.Before(others[j].used) })
-	count := len(others) + 1
-	for _, m := range others {
-		overCount := opts.maxMirrors > 0 && count > opts.maxMirrors
-		overBytes := opts.maxMirrorBytes > 0 && total > opts.maxMirrorBytes
-		if !overCount && !overBytes {
-			break
-		}
-		if directEvict(m.path, git) {
-			count--
-			total -= m.size
-		}
-	}
-	return nil
-}
-
-// safety: Keep a mirror's lock file while another checkout may wait on it, or a third process could bypass that lock.
-// SweepDirectMirrors removes the direct-fetch mirrors in dir that no fetch has
-// used since cutoff, skipping one a fetch holds or a checkout still uses. It
-// reports how many it removed and the bytes they held.
-func SweepDirectMirrors(ctx context.Context, dir string, cutoff time.Time) (removed int, freed int64) {
-	paths, err := filepath.Glob(filepath.Join(dir, "*.git"))
-	if err != nil {
-		return 0, 0
-	}
-	env := directLocalGitEnv(directGitEnv(os.Environ()))
-	git := func(args ...string) (string, error) {
-		cmd := exec.CommandContext(ctx, "git", args...)
-		cmd.Env = env
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
-		}
-		return strings.TrimSpace(string(out)), nil
-	}
-	for _, mirror := range paths {
-		if ctx.Err() != nil {
-			break
-		}
-		fi, err := os.Stat(mirror)
-		if err != nil || !fi.IsDir() || !fi.ModTime().Before(cutoff) {
-			continue
-		}
-		size, err := directDirSize(mirror)
-		if err != nil {
-			continue
-		}
-		if directEvict(mirror, git) {
-			removed++
-			freed += size
-		}
-	}
-	return removed, freed
-}
-
-func directEvict(mirror string, git func(...string) (string, error)) bool {
-	lock, err := fssecure.OpenFile(mirror+".lock", os.O_CREATE|os.O_RDWR)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = lock.Close() }()
-	if ok, err := cacheLock(lock, cacheLockExclusiveNonblock); err != nil || !ok {
-		return false
-	}
-	if _, err := git("-C", mirror, "worktree", "prune"); err != nil {
-		return false
-	}
-	worktrees, err := os.ReadDir(filepath.Join(mirror, "worktrees"))
-	if (err != nil && !os.IsNotExist(err)) || len(worktrees) > 0 {
-		return false
-	}
-	return os.RemoveAll(mirror) == nil
+	return sourceurl.ValidateCloneURL(DirectFetchURL(raw))
 }
 
 func directDirSize(dir string) (int64, error) {

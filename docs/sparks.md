@@ -369,8 +369,8 @@ scope: it writes `.resolved.mod` as usual but skips materializing
 
 Compiled pipeline binaries are cached under a `PipelineCacheKey` that hashes
 the pipeline source, local replace targets, the resolved sparks versions,
-and the overlay modfile contents. The same key is used locally
-(`~/.sparkwing/cache/pipelines/<key>/`) and in gitcache (`/bin/<key>`).
+and the overlay modfile contents. Local runs reuse the binary under
+`$SPARKWING_HOME/cache/pipelines/v1/entries/<key>/`.
 
 Three tiers of cache behavior fall out of that key, each with a rough
 latency cost. Actual numbers vary by machine, network, and repo size; the
@@ -382,8 +382,7 @@ values below are order-of-magnitude on a developer laptop.
 | Go build cache hit | ~2-3s | New sparks version or drifted overlay, so the binary cache misses, but most dependency object files are still in the Go build cache. Only the changed module recompiles and the final link runs. |
 | Fully cold | ~10-15s | First-ever build in a fresh environment, a Go toolchain version change, or an invalidated build cache. Every object file is rebuilt from source. |
 
-In-cluster, only the compiled pipeline binary is shared, via the gitcache
-`/bin/<key>` endpoint (see [Warmup](#warmup)). The Go build cache lives on
+Remote binary transfers use the controller's signed data path. The Go build cache lives on
 the worker pod's scratch volume and dies with the pod, so a fresh pod that
 misses the binary cache pays the cold tier.
 
@@ -427,10 +426,8 @@ For the exact flags each subcommand takes, see
 `sparkwing pipeline sparks warmup` pre-compiles the pipeline binary across consumer
 repos after a sparks library release. It resolves the declared versions,
 compiles the repo's `.sparkwing/` package into its single pipeline binary,
-and uploads that binary to gitcache under its cache key (pass
-`--clear-cache` to discard the existing local binary cache first). The next
-`sparkwing run <pipeline>` run - locally or in-cluster - gets a binary-cache hit
-instead of paying the full compile cost.
+and stores it in the local binary cache. Pass `--clear-cache` to discard
+that cache first. The next local run with matching build inputs reuses it.
 
 Warmup uses the exact same build path as `sparkwing`, so cache keys match. It is
 an optimization, not a requirement: pipelines always resolve versions on

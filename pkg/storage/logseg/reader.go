@@ -11,8 +11,12 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
@@ -26,7 +30,7 @@ type Objects interface {
 }
 
 // safety: a segment covers at most SegmentBytes of raw log plus one append, so anything larger is not a segment.
-const maxSegmentStored = 8 << 20
+const maxSegmentStored = limits.LogSegmentUploadBytes
 
 // Log is one node attempt's log as a reader finds it.
 type Log struct {
@@ -45,12 +49,15 @@ type Log struct {
 // none yet.
 func Open(ctx context.Context, objs Objects, prefix string) (*Log, error) {
 	l := &Log{Prefix: prefix}
-	raw, err := readObject(ctx, objs, ManifestKey(prefix), maxSegmentStored)
+	raw, err := readObject(ctx, objs, blob.LogManifestKey(prefix), maxSegmentStored)
 	switch {
 	case err == nil:
 		m, perr := ParseManifest(raw)
 		if perr != nil {
 			return nil, perr
+		}
+		if err := m.checkPrefix(prefix); err != nil {
+			return nil, err
 		}
 		l.Manifest, l.Segments = m, m.Segments
 		return l, nil
@@ -61,6 +68,18 @@ func Open(ctx context.Context, objs Objects, prefix string) (*Log, error) {
 	return l, err
 }
 
+func (m Manifest) checkPrefix(prefix string) error {
+	parts := strings.SplitN(prefix, "/", 3)
+	if m.Subject == nil || len(parts) != 3 || parts[0] != "logs" {
+		return ErrBadManifest
+	}
+	want, err := blob.LogSubjectPrefix(parts[1], *m.Subject)
+	if err != nil || want != prefix {
+		return ErrBadManifest
+	}
+	return nil
+}
+
 func listSegments(ctx context.Context, objs Objects, prefix string) ([]Segment, error) {
 	keys, err := objs.List(ctx, prefix)
 	if err != nil {
@@ -68,7 +87,7 @@ func listSegments(ctx context.Context, objs Objects, prefix string) ([]Segment, 
 	}
 	var nums []int
 	for _, k := range keys {
-		if n, ok := SegmentNumber(prefix, k); ok {
+		if n, ok := blob.LogSegmentNumber(prefix, k); ok {
 			nums = append(nums, n)
 		}
 	}
@@ -157,7 +176,7 @@ var errBadSegment = errors.New("logseg: segment does not match its manifest")
 // when the manifest names one. A missing segment's error wraps
 // storage.ErrNotFound.
 func (l *Log) Segment(ctx context.Context, objs Objects, seg Segment) ([]byte, error) {
-	stored, err := readObject(ctx, objs, SegmentKey(l.Prefix, seg.N), maxSegmentStored)
+	stored, err := readObject(ctx, objs, blob.LogSegmentKey(l.Prefix, seg.N), maxSegmentStored)
 	if err != nil {
 		return nil, err
 	}
@@ -179,19 +198,25 @@ func decodeSegment(stored []byte, seg Segment) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: segment %d: %w", errBadSegment, seg.N, err)
 	}
-	if len(body) > maxSegmentStored {
+	if int64(len(body)) > maxSegmentStored {
 		return nil, fmt.Errorf("%w: segment %d decompresses past %d bytes", errBadSegment, seg.N, maxSegmentStored)
 	}
 	return body, nil
 }
 
-func readObject(ctx context.Context, objs Objects, key string, limit int64) ([]byte, error) {
+func readObject(ctx context.Context, objs SegmentObjects, key string, limit int64) ([]byte, error) {
 	rc, err := objs.Get(ctx, key)
 	if err != nil {
+		if rc != nil {
+			err = errors.Join(err, rc.Close())
+		}
 		return nil, err
 	}
-	defer func() { _ = rc.Close() }()
+	if rc == nil {
+		return nil, fmt.Errorf("logseg: object store returned no reader for %s", key)
+	}
 	raw, err := io.ReadAll(io.LimitReader(rc, limit+1))
+	err = errors.Join(err, rc.Close())
 	if err != nil {
 		return nil, err
 	}
@@ -222,6 +247,9 @@ func (l *Log) Completeness(node NodeProgress, now time.Time) Completeness {
 func SealAbandoned(ctx context.Context, objs Objects, prefix string, base Manifest, reason string,
 	put func(ctx context.Context, key string, body []byte) error,
 ) (*Manifest, error) {
+	if err := base.checkPrefix(prefix); err != nil {
+		return nil, err
+	}
 	found, err := Open(ctx, objs, prefix)
 	if err != nil {
 		return nil, err
@@ -235,7 +263,7 @@ func SealAbandoned(ctx context.Context, objs Objects, prefix string, base Manife
 	m.SealedBy, m.SealedAt = SealedByController, time.Now().UTC()
 	m.Segments, m.Lines, m.Bytes, m.FirstSeq, m.LastSeq = nil, 0, 0, 0, 0
 	for _, seg := range segs {
-		stored, err := readObject(ctx, objs, SegmentKey(prefix, seg.N), maxSegmentStored)
+		stored, err := readObject(ctx, objs, blob.LogSegmentKey(prefix, seg.N), maxSegmentStored)
 		if err != nil {
 			return nil, err
 		}
@@ -259,7 +287,7 @@ func SealAbandoned(ctx context.Context, objs Objects, prefix string, base Manife
 	if err != nil {
 		return nil, err
 	}
-	if err := put(ctx, ManifestKey(prefix), raw); errors.Is(err, ErrSealed) {
+	if err := put(ctx, blob.LogManifestKey(prefix), raw); errors.Is(err, ErrSealed) {
 		l, oerr := Open(ctx, objs, prefix)
 		if oerr != nil {
 			return nil, oerr

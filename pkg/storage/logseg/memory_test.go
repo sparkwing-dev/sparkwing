@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 )
@@ -59,16 +61,6 @@ func (m *memObjects) putIfAbsent(_ context.Context, key string, body []byte) err
 	return nil
 }
 
-func (m *memObjects) deletePrefix(prefix string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for k := range m.objs {
-		if strings.HasPrefix(k, prefix) {
-			delete(m.objs, k)
-		}
-	}
-}
-
 func (m *memObjects) resetGets() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -104,7 +96,7 @@ func (u *memUploader) PutSegment(_ context.Context, seg logseg.Segment, body []b
 	if refuse {
 		return errUnreachable
 	}
-	u.objs.put(logseg.SegmentKey(u.prefix, seg.N), body)
+	u.objs.put(blob.LogSegmentKey(u.prefix, seg.N), body)
 	u.stored <- seg.N
 	return nil
 }
@@ -120,7 +112,7 @@ func (u *memUploader) PutManifest(ctx context.Context, m logseg.Manifest) error 
 	if err != nil {
 		return err
 	}
-	return u.objs.putIfAbsent(ctx, logseg.ManifestKey(u.prefix), raw)
+	return u.objs.putIfAbsent(ctx, blob.LogManifestKey(u.prefix), raw)
 }
 
 func (u *memUploader) kill() {

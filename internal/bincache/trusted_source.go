@@ -25,8 +25,7 @@ type SourceOptions struct {
 	LFS        bool
 }
 
-// MaxSourceBytes caps a trusted checkout on disk, as the direct path caps
-// its mirrors.
+// MaxSourceBytes bounds fetched Git data and trusted checkouts on disk.
 const MaxSourceBytes int64 = 10 << 30
 
 // safety: a submodule nests another fetched tree, so recursion is bounded.

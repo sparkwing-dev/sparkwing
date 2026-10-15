@@ -9,20 +9,16 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 const gcTimeout = 5 * time.Second
-
-const gcMirrorAge = 7 * 24 * time.Hour
 
 const gcTmpFileAge = 24 * time.Hour
 
 const gcRunDirGrace = 1 * time.Hour
 
 type GCStats struct {
-	GitDirsRemoved    int
 	TmpEntriesRemoved int
 	RunDirsRemoved    int
 	BytesFreed        int64
@@ -52,10 +48,6 @@ func GCWarmRoot(ctx context.Context, root string, ctrl TerminalRunLister, logger
 	defer cancel()
 
 	now := time.Now()
-
-	gitDirs, gitBytes := bincache.SweepDirectMirrors(sweepCtx, filepath.Join(root, "source-direct"), now.Add(-gcMirrorAge))
-	stats.GitDirsRemoved = gitDirs
-	stats.BytesFreed += gitBytes
 
 	tmpEntries, tmpBytes := sweepAgeOldest(sweepCtx, filepath.Join(root, "tmp"), now.Add(-gcTmpFileAge), logger)
 	stats.TmpEntriesRemoved = tmpEntries

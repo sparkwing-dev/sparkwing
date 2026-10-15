@@ -7,7 +7,6 @@ import (
 	"maps"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -102,33 +102,12 @@ func (s *Server) checkLogLifecycle(ctx context.Context, d *directUploadS3) map[s
 		return missing
 	}
 	for _, class := range s.logClasses() {
-		days, _ := logseg.ClassDays(class)
-		prefix := d.prefix + "/" + logseg.ClassPrefix(class)
-		if !lifecycleExpires(rules, prefix, days) {
+		days, _ := blob.LogClassDays(class)
+		prefix := d.prefix + "/" + blob.LogClassPrefix(class)
+		if !blob.LogLifecycleExpires(rules, prefix, days) {
 			missing[class] = fmt.Errorf("bucket %s has no enabled lifecycle rule expiring prefix %q after %d days; add one",
 				d.bucket, prefix, days)
 		}
 	}
 	return missing
-}
-
-// safety: only an enabled rule with no tag or size condition expires every object under the prefix, so a rule
-// with one does not count; a broader prefix with the class's days does.
-func lifecycleExpires(rules []types.LifecycleRule, prefix string, days int) bool {
-	for _, r := range rules {
-		if r.Status != types.ExpirationStatusEnabled || r.Expiration == nil || aws.ToInt32(r.Expiration.Days) != int32(days) {
-			continue
-		}
-		rulePrefix := aws.ToString(r.Prefix) //nolint:staticcheck // the deprecated element still selects objects on rules written with it.
-		if f := r.Filter; f != nil {
-			if f.Tag != nil || f.And != nil || f.ObjectSizeGreaterThan != nil || f.ObjectSizeLessThan != nil {
-				continue
-			}
-			rulePrefix = aws.ToString(f.Prefix)
-		}
-		if strings.HasPrefix(prefix, rulePrefix) {
-			return true
-		}
-	}
-	return false
 }

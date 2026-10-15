@@ -5,7 +5,7 @@ single Kubernetes cluster:
 
 - `sparkwing-controller` -- the orchestrator (state DB, /api/v1/*,
   webhooks) and the dashboard with its sign-in pages
-- `sparkwing-runner-bundle` (sub-chart) -- runner + cache
+- `sparkwing-runner-bundle` (sub-chart) -- runners
 
 This is the chart referenced in architectural decision 0001 for the
 **Enterprise self-host** topology. It models the complete stack as one
@@ -17,7 +17,7 @@ paid tier and live in separate charts.
 > `appVersion` do not currently identify a compatible public image set. A bare
 > install renders the intended topology, but it is not a supported runnable
 > release. Until a corrected release is published, build or mirror one
-> mutually compatible controller, runner, and cache image set and
+> mutually compatible controller and runner image set and
 > explicitly set every enabled component's `image.repository` and `image.tag`.
 
 If you only need a runner pool against a remote controller (Cloud or
@@ -27,17 +27,14 @@ instead -- this chart pulls it in as a dependency.
 
 ## Render the chart
 
-`helm template` stops on the sub-chart's `validate.yaml` unless the cache's
-operator token Secret is named, and the values live under the sub-chart's
-key. It also stops while the controller has neither a bootstrap admin token
-nor `controller.allowOpenBootstrap=true` (see [Auth](#auth)). The minimal
-read-only render is:
+`helm template` requires a controller bootstrap admin token or
+`controller.allowOpenBootstrap=true` (see [Auth](#auth)). The runner's values
+live under the sub-chart key. A read-only render is:
 
 ```bash
 helm template sparkwing ./charts/sparkwing-full \
   --set controller.allowOpenBootstrap=true \
-  --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token \
-  --set sparkwing-runner-bundle.cache.grantKeySecret.name=sparkwing-cache-grant-key
+  --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token
 ```
 
 `charts/render_test.go` injects those same values, so what it exercises is
@@ -60,9 +57,9 @@ fresh clone with no `helm dependency update` first.
         ^
         | claim, node log segments
         |
-   +---------+      +---------+
-   |  runner |----> | gitcache|
-   +---------+      +---------+
+   +---------+
+   |  runner |
+   +---------+
             (sparkwing-runner-bundle sub-chart)
 ```
 
@@ -72,8 +69,7 @@ fresh clone with no `helm dependency update` first.
 - Explicit repositories and tags for a mutually compatible image set. The
   current default GHCR/appVersion combination is not a runnable release.
 - A default `StorageClass` (or set `controller.storage.pvc.storageClassName`
-  / equivalents on the sub-chart). The controller and cache
-  PVCs are both RWO.
+  / equivalents on the sub-chart). The controller PVC is RWO.
 - `helm` v3.13+ (chart uses standard idioms; nothing exotic).
 
 ### Pre-install Secrets (optional but recommended)
@@ -107,12 +103,6 @@ kubectl -n sparkwing create secret generic sparkwing-secrets-key \
 #       --from-literal=token=swr_...
 # A runner token needs `nodes.claim`, `triggers.claim` and `runs.state`.
 
-# The key cache grants are signed with, the only bearer the cache accepts.
-# It is a random secret of its own and never a runner token: pipeline code
-# can read the runner's token, and the key signs access to every team's
-# cache. The chart refuses to render when both name the same Secret key.
-kubectl -n sparkwing create secret generic sparkwing-cache-grant-key \
-    --from-literal=key="$(openssl rand -hex 32)"
 ```
 
 ## Install from source
@@ -126,8 +116,6 @@ controller:
 sparkwing-runner-bundle:
   runner:
     image: {repository: registry.example/sparkwing-runner, tag: <compatible-tag>}
-  cache:
-    image: {repository: registry.example/sparkwing-cache, tag: <compatible-tag>}
 ```
 
 ```bash
@@ -136,13 +124,11 @@ helm dep up ./charts/sparkwing-full
 
 # Install the complete stack with an explicitly compatible image set. This
 # source-test configuration has no auth or encryption-at-rest,
-# so the controller and the cache must opt out of their token
-# requirement explicitly.
+# so the controller must enable open bootstrap explicitly.
 helm install sparkwing ./charts/sparkwing-full \
     --namespace sparkwing --create-namespace \
     -f compatible-images.yaml \
-    --set controller.allowOpenBootstrap=true \
-    --set sparkwing-runner-bundle.cache.allowUnauthenticated=true
+    --set controller.allowOpenBootstrap=true
 ```
 
 ### Verify the source stack in Kubernetes
@@ -191,7 +177,6 @@ helm install sparkwing ./charts/sparkwing-full \
     --set controller.secretsKey.name=sparkwing-secrets-key \
     --set controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin \
     --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token \
-      --set sparkwing-runner-bundle.cache.grantKeySecret.name=sparkwing-cache-grant-key \
     --set ingress.enabled=true \
     --set ingress.hosts[0].host=sparkwing.example.com \
     --set ingress.hosts[0].paths[0].path=/ \
@@ -239,7 +224,6 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.requireAuth` | Refuse to start when no live token exists. Without `bootstrapAdminToken` the render refuses unless `allowOpenBootstrap` is true, because a fresh controller would have no way to mint its first token. | `true` |
 | `controller.allowOpenBootstrap` | Render without `bootstrapAdminToken` and drop `--require-auth`, so an empty tokens table serves every route unauthenticated until a token exists and the controller restarts. A controller that already holds a token stays authenticated. Bool only. | `false` |
 | `controller.argon2MemoryBudgetMB` | Memory ceiling in MiB for concurrent argon2id hashing; each hash holds 64 MiB. | `256` |
-| `controller.cache.url` | The cache the controller's gitcache proxy forwards to. | (auto-computed from sub-chart) |
 | `controller.externalURL` | Base URL the controller answers on from outside the cluster, passed as `--external-url`. | `""` |
 | `controller.oauthRedirectURIs` | Comma-separated sign-in callback URLs, passed as `--oauth-redirect-uris`. | `""` |
 | `controller.operatorAccounts` | Comma-separated account ids allowed into the operator console, passed as `--operator-accounts`. | `""` |
@@ -281,22 +265,18 @@ for the full schema; a few commonly overridden keys:
 | `sparkwing-runner-bundle.enabled` | Toggle the whole runner side. | `true` |
 | `sparkwing-runner-bundle.controller.url` | Where the runner claims from. | (in-cluster controller Service) |
 | `sparkwing-runner-bundle.controller.tokenSecret.name` | The runner's bearer-token Secret. | `""` |
-| `sparkwing-runner-bundle.cache.grantKeySecret.name` | The key the controller signs cache grants with, its own included, and the cache verifies them with. Never the runner's token. | `""` |
-| `sparkwing-runner-bundle.cache.allowUnauthenticated` | Serve the cache without a grant (bootstrap only). | `false` |
 | `sparkwing-runner-bundle.runner.replicas` | Pool size. | `1` |
 | `sparkwing-runner-bundle.runner.labels` | `Requires` labels. | `[cluster]` |
 | `sparkwing-runner-bundle.runner.automountServiceAccountToken` | Mount the runner pod's API token. Ordinary runners need no Kubernetes API access. | `false` |
 | `sparkwing-runner-bundle.volumePermissions.enabled` | Run a CHOWN-only init before the runner. | `true` |
 | `sparkwing-runner-bundle.runner.goCache.persistence.enabled` | Mount a PVC over the runner's `GOCACHE` and `GOMODCACHE`. | `false` |
 | `sparkwing-runner-bundle.runner.goCache.warmModules` | Modules downloaded into `GOMODCACHE` at runner startup. | `[]` |
-| `sparkwing-runner-bundle.cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
 
 The automatic controller URL follows the chart's default resource names. If
 you set top-level `nameOverride` or `fullnameOverride`, also set
 `sparkwing-runner-bundle.controller.url` to the resulting controller Service;
 the chart stops at render time with this instruction when the URL is missing.
-Nested `sparkwing-runner-bundle.nameOverride` and `fullnameOverride` values are
-included in the controller URL for the bundled cache Service.
+Nested runner-bundle naming values control the runner resource names.
 
 
 ## Auth
@@ -332,16 +312,8 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
 2. Mint the runner's token, stash it in a Secret (see Pre-install above),
    and reference it from `sparkwing-runner-bundle.controller.tokenSecret.name`.
 
-   A configured Secret name requires a non-empty key; the chart rejects
-   incomplete pairs. Runner and cache Secret references are required, so
-   Kubernetes holds those pods until the configured Secret is present.
-   `sparkwing-runner-bundle.cache.grantKeySecret` is what both the cache and
-   the controller read as `cache-grant-key`; the chart mounts it into both
-   services' credentials directories, and the controller signs its own calls
-   to the cache with it, so no static cache token exists. A cache-enabled
-   install without the grant key fails at render time unless
-   `sparkwing-runner-bundle.cache.allowUnauthenticated=true`. The bootstrap
-   window above needs it and the token upgrade should turn it back off.
+   A configured Secret name requires a non-empty key. Kubernetes holds a
+   runner pod until its configured Secret is present.
 
    The dashboard's log panes read node logs through the controller with
    the signed-in browser's own credential, so the dashboard needs no token
@@ -394,9 +366,8 @@ helm uninstall sparkwing --namespace sparkwing
 kubectl -n sparkwing delete pvc -l app.kubernetes.io/instance=sparkwing
 ```
 
-(That second line wipes the controller's state DB AND the runner
-bundle's cache PVC. Skip it if you want to roll forward
-later with the same data.)
+That second line deletes the controller's state DB and any runner Go cache
+PVCs. Keep the PVCs to retain those data.
 
 ## Ingress
 
@@ -453,12 +424,11 @@ the vendored `values.yaml` and `templates/` against the source chart, and
 Fallback image references rendered when a component tag is empty:
 
 - `ghcr.io/sparkwing-dev/sparkwing-controller:<chart appVersion>`
-- (sub-chart) `ghcr.io/sparkwing-dev/sparkwing-runner:<...>`,
-  `sparkwing-cache`
+- (sub-chart) `ghcr.io/sparkwing-dev/sparkwing-runner:<...>`
 
 These fallbacks describe the chart's intended registry layout; they are not a
 compatible public release contract for the current chart version. Pin both
-repository and tag for every enabled image. Keep all three images on the same
+repository and tag for every enabled image. Keep both images on the same
 compatible Sparkwing revision until a corrected chart release publishes and
 verifies a public default set.
 

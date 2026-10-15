@@ -26,7 +26,7 @@ const (
 	KindSourceBundle Kind = "source_bundle"
 )
 
-// safety: Kinds is the complete record-kind registry for schema and wire drift checks.
+// Kinds is the complete record-kind registry for schema and wire drift checks.
 var Kinds = []Kind{KindOutput, KindManifest, KindMemo, KindDepcache, KindBinary, KindSourceBundle}
 
 // safety: Blob is existence truth; object storage alone cannot establish a live blob.
@@ -132,7 +132,7 @@ const (
 	EdgeMemoScope         EdgeKind = "memo_scope"
 )
 
-// safety: EdgeKinds is complete so authorization tests cannot silently omit an edge.
+// EdgeKinds is complete so authorization tests cannot silently omit an edge.
 var EdgeKinds = []EdgeKind{EdgeOwnUpload, EdgeDependency, EdgeDeclaredReference, EdgeMemoHit, EdgeMemoScope}
 
 // safety: ReadEdge records a server-derived ancestry or scoped-cache entitlement.
@@ -175,7 +175,7 @@ type EdgeRequest struct {
 // Own-upload job edges require the exact Attempt, including generation. Owner and non-job
 // publication receipts authorize only binary/source_bundle, never another job's outputs.
 // Imported publication output edges require the matching imported attempt in a publish run.
-func AuthorizeEdge(EdgeRequest) error { panic("unimplemented: c1-data") }
+func AuthorizeEdge(request EdgeRequest) error { return authorizeEdge(request) }
 
 // safety: CommitRecordRequest leaves provenance to server derivation and checks every member.
 type CommitRecordRequest struct {
@@ -291,10 +291,13 @@ type HTTPClient interface {
 }
 
 // safety: NewSignedStore verifies transferred bytes and never falls back to cache-service routes.
-func NewSignedStore(SignedStoreOptions) Store { panic("unimplemented: c1-data") }
+func NewSignedStore(options SignedStoreOptions) Store { return newSignedStore(options) }
 
 // safety: ObjectKey produces teams/<team>/cas/<sha256> after validating both components.
-func ObjectKey(team string, digest Digest) (string, error) { panic("unimplemented: c1-data") }
+func ObjectKey(team string, digest Digest) (string, error) { return objectKey(team, digest) }
+
+// MemoRecordName identifies the result within a scoped memo key.
+const MemoRecordName = "output"
 
 // safety: MemoKey cannot share an unclaimed result across pipelines.
 type MemoKey struct {
@@ -306,7 +309,7 @@ type MemoKey struct {
 }
 
 // safety: MemoNamespace reserves manual:<ref> for submitter-vouched writes.
-func MemoNamespace(MemoKey) (string, error) { panic("unimplemented: c1-data") }
+func MemoNamespace(key MemoKey) (string, error) { return memoNamespace(key) }
 
 // safety: MemoLookup uses the authority's server-derived scope and verified default fallback.
 type MemoLookup struct {
@@ -353,7 +356,7 @@ type RestoreRule struct {
 	RequireVerifiedProvenance bool
 }
 
-// safety: DepcacheRestoreOrder is the complete ordered restore policy.
+// DepcacheRestoreOrder is the complete ordered restore policy.
 var DepcacheRestoreOrder = []RestoreRule{{RestoreOwnRef, false}, {RestorePRBase, true}, {RestoreDefaultBranch, true}}
 
 // safety: DepcacheLookup never accepts a caller-selected repo outside its data grant.
@@ -388,7 +391,7 @@ type FailureRule struct {
 	Action FailureAction
 }
 
-// safety: FailureRules is the complete per-use failure policy.
+// FailureRules is the complete per-use failure policy.
 var FailureRules = []FailureRule{{UseMemo, FailureMiss}, {UseStaging, FailureError}, {UseOutput, FailureError}, {UseDepcache, FailureCold}}
 
 // safety: BuildTrust preserves the team-owned opt-in for local binary provenance.
@@ -405,7 +408,7 @@ type BinaryExecution struct {
 }
 
 // safety: CheckBinaryExecution permits local provenance only with trust_local_builds.
-func CheckBinaryExecution(BinaryExecution) error { panic("unimplemented: c1-data") }
+func CheckBinaryExecution(execution BinaryExecution) error { return checkBinaryExecution(execution) }
 
 // safety: RemoteCacheOptions uses the user's existing repo-bound read authority.
 type RemoteCacheOptions struct {
@@ -417,6 +420,7 @@ type RemoteCacheOptions struct {
 
 // safety: RemoteCache exposes reads only, with no binary fetch or shared-cache write method.
 // Every returned record must originate in a verified default-branch run.
+// Memo and Depcache ignore the local key's Ref; the server selects the verified default ref.
 type RemoteCache interface {
 	Memo(context.Context, MemoKey, Budget) (MemoHit, error)
 	Depcache(context.Context, DepcacheKey, Budget) (Record, error)
@@ -424,7 +428,9 @@ type RemoteCache interface {
 }
 
 // safety: OpenRemoteCache is opt-in by profile and never borrows a runner credential.
-func OpenRemoteCache(RemoteCacheOptions, Store) (RemoteCache, error) { panic("unimplemented: c1-data") }
+func OpenRemoteCache(options RemoteCacheOptions, store Store) (RemoteCache, error) {
+	return openRemoteCache(options, store)
+}
 
 // safety: PublishPolicy labels published results local and never creates an owner claim.
 // Publication failure is reported separately from the completed local run's outcome.
@@ -436,16 +442,16 @@ type PublishPolicy struct {
 	Trust             BuildTrust
 }
 
-// safety: ErrBudget follows FailureRules instead of being treated as successful absence.
+// ErrBudget follows FailureRules instead of being treated as successful absence.
 var ErrBudget = errors.New("blob budget exhausted")
 
-// safety: ErrNotFound makes missing committed bytes loud at required-read boundaries.
+// ErrNotFound makes missing committed bytes loud at required-read boundaries.
 var ErrNotFound = errors.New("blob not found")
 
-// safety: ErrIntegrity prevents corrupt bytes from being accepted as a successful read.
+// ErrIntegrity prevents corrupt bytes from being accepted as a successful read.
 var ErrIntegrity = errors.New("blob integrity mismatch")
 
-// safety: ErrDigestNotReadable maps through C2 to forbidden with reason digest_not_readable.
+// ErrDigestNotReadable maps through C2 to forbidden with reason digest_not_readable.
 var ErrDigestNotReadable = errors.New("digest_not_readable")
 
 // safety: RecordLookup combines a logical key with authority instead of accepting a bare CAS digest.
@@ -489,16 +495,16 @@ type WriteScopeIntent struct {
 
 // safety: ResolveWriteKey derives repository and vouched/manual ref scope from live authority.
 // It rejects client-selected real-ref writes without server-verified facts.
-func ResolveWriteKey(Authority, WriteScopeIntent) (RecordKey, error) {
-	panic("unimplemented: c1-data")
+func ResolveWriteKey(authority Authority, intent WriteScopeIntent) (RecordKey, error) {
+	return resolveWriteKey(authority, intent)
 }
 
 // safety: RecordNamespace encodes typed components without delimiter collisions.
 // Memo namespaces preserve memo/<repo_key>/<ref_scope>/<pipeline>/<job>/<hash> semantics.
-func RecordNamespace(RecordKey) (string, error) { panic("unimplemented: c1-data") }
+func RecordNamespace(key RecordKey) (string, error) { return recordNamespace(key) }
 
 // safety: DepcacheNamespace shares the memo write-ref rule while preserving the cache name and key.
-func DepcacheNamespace(DepcacheKey) (string, error) { panic("unimplemented: c1-data") }
+func DepcacheNamespace(key DepcacheKey) (string, error) { return depcacheNamespace(key) }
 
 // safety: UploadIdentityKind covers executable jobs, preplan owners and non-executable publication.
 type UploadIdentityKind string
@@ -551,7 +557,7 @@ type UploadRule struct {
 	RecordKinds        []Kind
 }
 
-// safety: UploadRules is the complete identity/record-kind policy, rechecked at commit.
+// UploadRules is the complete identity/record-kind policy, rechecked at commit.
 // Publication with an imported attempt follows the final row rather than non-job publication.
 var UploadRules = []UploadRule{
 	{UploadJob, true, false, false, []Kind{KindOutput, KindManifest, KindMemo, KindDepcache, KindBinary, KindSourceBundle}},
@@ -563,6 +569,6 @@ var UploadRules = []UploadRule{
 // safety: AuthorizeUpload checks the C2-resolved identity and target kind in the write transaction.
 // It requires a live owner fence or publication authority, verifies imported job identity,
 // and rejects identity/principal/capability mismatches with the authenticated authority.
-func AuthorizeUpload(Authority, UploadIdentity, Kind) error {
-	panic("unimplemented: c1-data")
+func AuthorizeUpload(authority Authority, identity UploadIdentity, kind Kind) error {
+	return authorizeUpload(authority, identity, kind)
 }

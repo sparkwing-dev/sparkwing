@@ -168,8 +168,6 @@ type AttemptReport struct {
 
 	Output *OutputRef
 
-	OutputFrom *ClaimInputRequest
-
 	Failure          json.RawMessage
 	ArtifactManifest string
 }
@@ -933,7 +931,7 @@ type EgressUsage struct {
 }
 const EgressUsageRetentionMonths = 13
 var ErrAccountExists = errors.New("store: an account with this email already exists")
-var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, credits.grant, claims.launch or storage.count scope")
+var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, credits.grant, or claims.launch scope")
 var ErrAgentNameTaken = errors.New("store: another live machine token of this team carries that agent name; revoke it before minting a new one")
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
 var ErrAlreadyMember = errors.New("store: already a member of this team")
@@ -1441,7 +1439,6 @@ type LogSegmentGrant struct {
 
 	Watched bool
 }
-func LogSegmentObjectKey(subject blob.LogSubject, retention string, index int64) (string, error)
 type LogSegmentRequest struct {
 	Attempt    int64
 	Generation int64
@@ -2104,7 +2101,6 @@ type RepoFilter = match.RepoFilter
 func RepoIdentityFromPath(repoPath string) string
 func RepoIdentityFromURL(remote string) string
 func RepoKey(owner, name string) string
-func ResultBlobKey(attempt runspec.AttemptIdentity, repo runspec.RepoKey, ref blob.RefScope, pipeline string, kind blob.Kind) blob.RecordKey
 type RetentionRequest struct {
 	Lease SingletonLease
 	Limit int
@@ -2710,7 +2706,6 @@ type StorageCommit struct {
 	Bytes int64
 	Now   time.Time
 }
-const StorageCountScope = "storage.count"
 type StorageKind string
 func (k StorageKind) Valid() bool
 const StorageLimitBytesPerMonth = "bytes_per_month"
@@ -2886,7 +2881,6 @@ func (s *Store) DB() *sql.DB
 func (s *Store) DelegateCapability(ctx context.Context, spec capability.DelegateSpec) (capability.Issued, error)
 func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Time) (AccountDeletion, error)
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
-func (s *Store) DeleteRunNodeLogs(ctx context.Context, team Team, runID string) error
 func (s *Store) DeleteSecret(name, pipeline string) error
 func (s *Store) DeleteSession(rawSession string) error
 func (s *Store) Dialect() Dialect
@@ -2903,7 +2897,6 @@ func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPre
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
 func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
-func (s *Store) FinishNodeCopyingOutput(ctx context.Context, runID, nodeID, outcome, reason, srcRun, srcNode string) error
 func (s *Store) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, finish ExecutionAttemptFinish) error
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
 func (s *Store) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error

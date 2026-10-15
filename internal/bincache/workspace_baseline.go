@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,6 +63,16 @@ func (b WorkspaceBaseline) Env() map[string]string {
 	}
 }
 
+var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
+
+func validateGitObject(sha string) (string, error) {
+	sha = strings.ToLower(strings.TrimSpace(sha))
+	if !gitObjectRE.MatchString(sha) {
+		return "", fmt.Errorf("git sha must be a 40-64 character hex object id")
+	}
+	return sha, nil
+}
+
 // Resolve reports the baseline in the form the runner uses, and an error when the ref is not a
 // remote-tracking name or the commit is not an object id.
 func (b WorkspaceBaseline) Resolve() (WorkspaceBaseline, error) {
@@ -91,16 +102,12 @@ func validateRemoteTrackingRef(ref string) error {
 	return nil
 }
 
-// ErrBaselineUnservable reports a source that carries only the working-tree snapshot, such as the
-// single-ref server a local fleet run serves its own bundle from. It has no baseline commit to give.
-var ErrBaselineUnservable = errors.New("working-tree baseline: the source serves only the snapshot")
+// ErrBaselineUnservable means the snapshot names no repository to fetch its baseline from.
+var ErrBaselineUnservable = errors.New("working-tree baseline: no repository can serve the baseline")
 
 // AdoptWorkspaceBaseline gives a snapshot checkout the remote-tracking ref its capture was measured
-// against: it fetches the baseline commit from the checkout's origin, names it, and grafts the
-// parentless snapshot commit onto it, so `git merge-base <ref> HEAD` answers what it answers on the
-// machine that captured the snapshot. It returns ErrBaselineUnservable when the origin carries only
-// the snapshot, and reports the git failure otherwise; the checkout stays usable either way.
-func AdoptWorkspaceBaseline(ctx context.Context, checkoutDir, gcURL, token, snapshotSHA string, baseline WorkspaceBaseline) error {
+// against. Its commit comes through the same direct credential fence as the run's source.
+func AdoptWorkspaceBaseline(ctx context.Context, src RunSource, checkoutDir, snapshotSHA string, baseline WorkspaceBaseline, logger *slog.Logger) error {
 	resolved, err := baseline.Resolve()
 	if err != nil {
 		return err
@@ -115,29 +122,51 @@ func AdoptWorkspaceBaseline(ctx context.Context, checkoutDir, gcURL, token, snap
 	if !snapshot {
 		return fmt.Errorf("working-tree baseline: %s is not a working-tree snapshot commit", snapshotSHA)
 	}
-	servable, err := originServesMoreThanTheSnapshot(ctx, checkoutDir, gcURL, token, snapshotSHA)
+	if src.RepoURL == "" {
+		return ErrBaselineUnservable
+	}
+	baselineWork, err := os.MkdirTemp(filepath.Dir(checkoutDir), ".baseline-*")
 	if err != nil {
 		return err
 	}
-	if !servable {
-		return ErrBaselineUnservable
+	defer func() { _ = os.RemoveAll(baselineWork) }()
+	cred, err := runSourceCredential(ctx, src, logger)
+	if err != nil {
+		return err
+	}
+	opts := defaultDirectOptions()
+	opts.cred, opts.keyTmpfsOnly = cred, !src.OwnerCredentials
+	baselineDir, err := fetchRepositorySourceDirect(ctx, src.RepoURL, "", resolved.SHA, baselineWork, opts)
+	if err != nil {
+		return err
+	}
+	return adoptBaselineFromCheckout(ctx, checkoutDir, baselineDir, snapshotSHA, resolved)
+}
+
+func adoptBaselineFromCheckout(ctx context.Context, checkoutDir, baselineDir, snapshotSHA string, baseline WorkspaceBaseline) error {
+	env := append(directLocalGitEnv(directGitEnv(os.Environ())), "GIT_ALLOW_PROTOCOL=file", "GIT_TERMINAL_PROMPT=0")
+	head := exec.CommandContext(ctx, "git", "-C", baselineDir, "rev-parse", "HEAD")
+	head.Env = env
+	out, err := gitCommandCombinedOutput(head)
+	if err != nil || strings.TrimSpace(string(out)) != baseline.SHA {
+		return fmt.Errorf("working-tree baseline: fetched checkout does not contain %s: %v", baseline.SHA, err)
 	}
 	run := func(args ...string) error {
 		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", checkoutDir}, args...)...)
-		cmd.Env = gitHTTPEnv(gcURL, token)
+		cmd.Env = env
 		if out, runErr := gitCommandCombinedOutput(cmd); runErr != nil {
 			return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), runErr, strings.TrimSpace(string(out)))
 		}
 		return nil
 	}
-	if err := run("fetch", "--depth", "1", "--end-of-options", "origin", resolved.SHA); err != nil {
+	if err := run("fetch", "--depth", "1", "--no-tags", "--", baselineDir, baseline.SHA); err != nil {
 		return err
 	}
-	if err := run("update-ref", "refs/remotes/"+resolved.Ref, resolved.SHA); err != nil {
+	if err := run("update-ref", "refs/remotes/"+baseline.Ref, baseline.SHA); err != nil {
 		return err
 	}
 	// safety: the snapshot commit is parentless, so the baseline reaches HEAD only as a graft.
-	if err := run("replace", "--graft", snapshotSHA, resolved.SHA); err != nil {
+	if err := run("replace", "--graft", snapshotSHA, baseline.SHA); err != nil {
 		return err
 	}
 	// safety: a runner whose global config turns replacement off would read the graft as absent.
@@ -145,25 +174,6 @@ func AdoptWorkspaceBaseline(ctx context.Context, checkoutDir, gcURL, token, snap
 		return err
 	}
 	return completeShallowCommit(ctx, checkoutDir, snapshotSHA)
-}
-
-func originServesMoreThanTheSnapshot(ctx context.Context, checkoutDir, gcURL, token, snapshotSHA string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", checkoutDir, "ls-remote", "--refs", "origin")
-	cmd.Env = gitHTTPEnv(gcURL, token)
-	out, err := gitCommandCombinedOutput(cmd)
-	if err != nil {
-		return false, fmt.Errorf("list the source refs: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		_, ref, ok := strings.Cut(strings.TrimSpace(line), "\t")
-		if !ok {
-			continue
-		}
-		if ref != SeedRef(snapshotSHA) {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // hack: git stops a traversal at a shallow boundary even where a replacement supplies the

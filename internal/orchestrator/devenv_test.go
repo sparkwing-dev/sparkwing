@@ -32,12 +32,3 @@ func TestReadDevEnvIsEmptyWithoutAFile(t *testing.T) {
 		t.Fatalf("a home holding no dev.env resolved %v", values)
 	}
 }
-
-func TestServiceURLsReadOnlyTheProcessEnvironment(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", writeDevEnv(t, "SPARKWING_CACHE_URL=http://127.0.0.1:8090\n"))
-	t.Setenv(ArtifactStoreEnvVar, "")
-	store, err := resolveArtifactStoreFromEnv(t.Context())
-	if err != nil || store != nil {
-		t.Fatalf("artifact store = %v, %v; want none, since dev.env is no longer a fallback", store, err)
-	}
-}

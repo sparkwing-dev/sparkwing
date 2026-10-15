@@ -268,6 +268,16 @@ func (f *dataObjects) CommitObject(context.Context, string, blob.Blob) error {
 	return f.verifyErr
 }
 
+func (f *dataObjects) DeleteBlob(context.Context, blob.Blob) error {
+	*f.events = append(*f.events, "delete-blob")
+	return f.deleteErr
+}
+
+func (f *dataObjects) ReadManifest(context.Context, string, blob.Digest) ([]blob.Member, error) {
+	*f.events = append(*f.events, "read-manifest")
+	return nil, blob.ErrNotFound
+}
+
 func (f *dataObjects) DeleteObject(context.Context, string) error {
 	*f.events = append(*f.events, "delete")
 	return f.deleteErr

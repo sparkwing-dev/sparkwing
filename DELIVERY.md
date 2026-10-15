@@ -34,7 +34,7 @@ second command tags and pushes. The tag push starts the hosted release below.
 ### Release build and publication
 
 The hosted release builds the dashboard once and shares it with six target
-jobs. Each target compiles its supported commands in one Go cache; all 24
+jobs. Each target compiles its supported commands in one Go cache; all 16
 binary outputs remain available. Linux image packaging copies those same
 executables through the Dockerfiles' `release` stage. The default Dockerfile
 target still builds from source.
@@ -317,7 +317,6 @@ file. Other syntax and workflow checks remain active.
   | --- | --- | --- |
   | `./cmd/sparkwing/...` | 174s | 10m |
   | `./internal/orchestrator` | 121s | 10m |
-  | `./internal/cache` | 6s | 2m |
   | `./internal/cluster` | 4s | 2m |
 
   Under contention from parallel agents the two heavy packages have been

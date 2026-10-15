@@ -3,123 +3,61 @@ package s3
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
-	"sync/atomic"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
-type ignorePreconditionsAPI struct {
+type createOnlyAPI struct {
 	API
-	puts atomic.Int64
+	put func(*s3.PutObjectInput) (*s3.PutObjectOutput, error)
 }
 
-func (a *ignorePreconditionsAPI) PutObject(_ context.Context, _ *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
-	a.puts.Add(1)
-	etag := "\"ignored\""
-	return &s3.PutObjectOutput{ETag: &etag}, nil
+func (a createOnlyAPI) PutObject(_ context.Context, q *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+	return a.put(q)
 }
 
-func (a *ignorePreconditionsAPI) DeleteObject(_ context.Context, _ *s3.DeleteObjectInput, _ ...func(*s3.Options)) (*s3.DeleteObjectOutput, error) {
-	return &s3.DeleteObjectOutput{}, nil
-}
-
-func TestConditionalWritesSupported_FalseWhenEndpointIgnoresPreconditions(t *testing.T) {
-	t.Parallel()
-	api := &ignorePreconditionsAPI{}
-	s := NewArtifactStore(testBucket, "cache", api)
-	ctx := context.Background()
-
-	supported, err := s.ConditionalWritesSupported(ctx)
-	if err != nil {
-		t.Fatalf("ConditionalWritesSupported: %v", err)
-	}
-	if supported {
-		t.Fatalf("supported = true for an endpoint that ignores preconditions")
-	}
-}
-
-func TestConditionalWritesSupported_MemoizesProbe(t *testing.T) {
-	t.Parallel()
-	api := &ignorePreconditionsAPI{}
-	s := NewArtifactStore(testBucket, "cache", api)
-	ctx := context.Background()
-
-	for i := 0; i < 3; i++ {
-		if _, err := s.ConditionalWritesSupported(ctx); err != nil {
-			t.Fatalf("probe %d: %v", i, err)
-		}
-	}
-	if got := api.puts.Load(); got != 2 {
-		t.Fatalf("PutObject called %d times across 3 capability checks, want 2 (probe runs once)", got)
-	}
-}
-
-func TestConditionalWritesSupported_TrueAgainstFakeS3(t *testing.T) {
-	t.Parallel()
-	client, closer := fakeS3(t)
-	defer closer()
-
-	s := NewArtifactStore(testBucket, "cache", client)
-	supported, err := s.ConditionalWritesSupported(context.Background())
-	if err != nil {
-		t.Fatalf("ConditionalWritesSupported: %v", err)
-	}
-	if !supported {
-		t.Fatalf("supported = false against an endpoint that enforces preconditions")
-	}
-}
-
-func TestConditional_ReportsStaticCapability(t *testing.T) {
-	t.Parallel()
-	var store storage.ArtifactStore = NewArtifactStore(testBucket, "cache", &ignorePreconditionsAPI{})
-	if _, ok := storage.Conditional(store); !ok {
-		t.Fatalf("Conditional reported the s3 ArtifactStore as non-conditional")
-	}
-}
-
-func TestPutIfAbsent_MapsPreconditionFailed(t *testing.T) {
-	t.Parallel()
-	client, closer := fakeS3(t)
-	defer closer()
-
-	s := NewArtifactStore(testBucket, "cache", client)
-	ctx := context.Background()
-
-	if _, err := s.PutIfAbsent(ctx, "k", strings.NewReader("first")); err != nil {
-		t.Fatalf("first PutIfAbsent: %v", err)
-	}
-	_, err := s.PutIfAbsent(ctx, "k", strings.NewReader("second"))
-	if !errors.Is(err, storage.ErrPreconditionFailed) {
-		t.Fatalf("second PutIfAbsent: err = %v, want ErrPreconditionFailed", err)
-	}
-}
-
-type firstFailureAPI struct {
-	API
-	calls atomic.Int32
-}
-
-func (a *firstFailureAPI) PutObject(ctx context.Context, in *s3.PutObjectInput, opts ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
-	if a.calls.Add(1) == 1 {
-		return nil, errors.New("transient transport failure")
-	}
-	return a.API.PutObject(ctx, in, opts...)
-}
-
-func TestConditionalWritesSupportedRetriesTransientFailure(t *testing.T) {
-	api, closeServer := fakeS3(t)
-	defer closeServer()
-	flaky := &firstFailureAPI{API: api}
-	store := NewArtifactStore(testBucket, "cache", flaky)
-	if _, err := store.ConditionalWritesSupported(t.Context()); err == nil {
-		t.Fatal("expected initial failure")
-	}
-	supported, err := store.ConditionalWritesSupported(t.Context())
-	if err != nil || !supported {
-		t.Fatalf("transient failure latched: supported=%v err=%v puts=%d", supported, err, flaky.calls.Load())
+func TestPutIfAbsent(t *testing.T) {
+	transportErr := errors.New("transport failed")
+	for _, fault := range []string{"", "PreconditionFailed", "ConditionalRequestConflict", "412", "409", "transport"} {
+		t.Run(fault, func(t *testing.T) {
+			api := createOnlyAPI{put: func(q *s3.PutObjectInput) (*s3.PutObjectOutput, error) {
+				body, err := io.ReadAll(q.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if aws.ToString(q.Bucket) != "bucket" || aws.ToString(q.Key) != "logs/key" || aws.ToString(q.IfNoneMatch) != "*" || q.IfMatch != nil || string(body) != "bytes" {
+					t.Fatalf("unbound create: %+v, %q", q, body)
+				}
+				if fault == "transport" {
+					return nil, transportErr
+				}
+				if fault != "" {
+					return nil, &smithy.GenericAPIError{Code: fault}
+				}
+				return &s3.PutObjectOutput{}, nil
+			}}
+			err := NewArtifactStore("bucket", "logs", api).PutIfAbsent(t.Context(), "key", strings.NewReader("bytes"))
+			switch fault {
+			case "":
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "transport":
+				if !errors.Is(err, transportErr) {
+					t.Fatal(err)
+				}
+			default:
+				if !errors.Is(err, storage.ErrPreconditionFailed) {
+					t.Fatal(err)
+				}
+			}
+		})
 	}
 }

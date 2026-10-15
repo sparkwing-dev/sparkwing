@@ -20,6 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
@@ -86,31 +87,22 @@ type Server struct {
 	computeAlarmMu sync.Mutex
 	computeAlarmOn bool
 
-	artifactStore storage.ArtifactStore
-
-	bucketUsageStore storage.ArtifactStore
+	bucketUsageStore storage.UsageReporter
 	downloadStores   map[store.StorageKind]*teamblob.Store
 	downloadS3       *s3.PresignClient
 	downloadCDN      *sign.URLSigner
 	downloadDomain   string
 	directUploads    *directUploadS3
-	outputSigner     outputSigner
 	logRetention     map[store.Team]int
 	logLifecycle     logLifecycle
 	egress           *egress.Meter
-	// safety: the reaper goroutine is this field's only reader and
-	// writer, which is what lets the once-a-month prune gate skip a lock.
 
-	cachePodURL  string
 	dashboardURL string
 	externalURL  string
 	oidc         oidcState
 
-	cacheURL                     string
-	cacheGrantKey                string
 	downloadFree, downloadFunded int64
 
-	teamStorage        TeamStorage
 	mailer             mailer.Mailer
 	deletionHolderOnce sync.Once
 	deletionHolderID   string
@@ -186,7 +178,6 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 	srv := &Server{
 		store:              st,
 		operatorSettings:   storeOperatorSettings{Store: st, Operator: st.AsOperator()},
-		outputSigner:       newOutputSigner(),
 		logger:             logger,
 		loginLimit:         newLoginLimiter(),
 		queueTimeout:       15 * time.Minute,
@@ -256,30 +247,9 @@ func (s *Server) WithCostRate(rate float64, source string) *Server {
 	return s
 }
 
-// WithBucketUsage names the object store the bucket ceiling measures.
-// The store is read on the reconciliation interval and never served, so
-// pointing the controller at the bucket its runners write to gives the
-// ceiling a measured total without exposing those objects on any route.
-// Without one the ceiling counts only the writes this process made.
-func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server {
+// WithBucketUsage supplies read-only reporting for the bucket ceiling.
+func (s *Server) WithBucketUsage(a storage.UsageReporter) *Server {
 	s.bucketUsageStore = a
-	return s
-}
-
-// WithArtifactStore names the artifact store the bucket ceiling measures
-// when no bucket usage store is set (laptop mode). Cluster mode leaves it
-// nil.
-func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server {
-	s.artifactStore = a
-	return s
-}
-
-// WithCachePodURL announces the externally-reachable sparkwing-cache
-// pod URL via GET /api/v1/services so the operator CLI can discover
-// it without configuring `gitcache:` in config.yaml. Empty disables
-// the announcement (clients fall back to "no cache pod").
-func (s *Server) WithCachePodURL(url string) *Server {
-	s.cachePodURL = url
 	return s
 }
 
@@ -289,20 +259,6 @@ func (s *Server) WithCachePodURL(url string) *Server {
 // the announcement.
 func (s *Server) WithDashboardURL(url string) *Server {
 	s.dashboardURL = url
-	return s
-}
-
-// WithCacheURL configures the controller-to-cache proxy target used by the
-// gitcache registration and clone routes.
-func (s *Server) WithCacheURL(url string) *Server {
-	s.cacheURL = url
-	return s
-}
-
-// WithCacheGrantKey sets the key the controller signs cache grants with and
-// verifies a grant presented to it with. Empty mints and accepts no grants.
-func (s *Server) WithCacheGrantKey(key string) *Server {
-	s.cacheGrantKey = key
 	return s
 }
 
@@ -800,19 +756,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
 	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleGetTrigger)), ScopeNodesClaim, ScopeTriggersClaim))
-	mux.Handle("POST /api/v1/runs/{id}/cache-grant", newClaimSensitiveRoute(claimSourceKinds, nil, s.handleRunCacheGrant(s.runTeam)).orElse(requireScope(ScopeNodesClaim, s.handleRunCacheGrant(s.runTeam), ScopeTriggersClaim)))
 	mux.Handle("POST /api/v1/runs/{id}/oidc-token", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(handleClaimOIDCToken)).orElse(requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleOIDCToken), ScopeTriggersClaim)))
-	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))
-	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, s.meteredBytes(egress.ClassGit, http.HandlerFunc(s.handleGitcacheGit))))
-	mux.Handle("POST /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, s.meteredBytes(egress.ClassGit, http.HandlerFunc(s.handleGitcacheGit))))
-	mux.Handle("POST /api/v1/cache/store-ceiling/measure", requireScope(ScopeAdmin, s.handleCacheStoreCeiling("measure")))
-	mux.Handle("POST /api/v1/cache/store-ceiling/thaw", requireScope(ScopeAdmin, s.handleCacheStoreCeiling("thaw")))
-	mux.Handle("POST /api/v1/runs/{id}/gitcache/git/register", requireScope(ScopeNodesClaim,
-		s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheRegister))))
-	mux.Handle("GET /api/v1/runs/{id}/gitcache/git/{path...}", requireScope(ScopeNodesClaim,
-		s.meteredBytes(egress.ClassGit, s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheGit)))))
-	mux.Handle("POST /api/v1/runs/{id}/gitcache/git/{path...}", requireScope(ScopeNodesClaim,
-		s.meteredBytes(egress.ClassGit, s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheGit)))))
 
 	mux.Handle("GET /api/v1/trends", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTrends)))
 	mux.Handle("GET /api/v1/agents", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleAgents)))
@@ -935,10 +879,13 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	s.registerPolicyEndpoints(router, s.githubRunnerEndpoints())
 	s.registerPolicyEndpoints(router, s.sessionEndpoints())
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
-	// safety: these carry a URL signature this process minted, not a bearer.
-	router.HandleFunc("PUT /api/v1/outputs/uploads/{id}", s.handleOutputBlobPut)
-	router.HandleFunc("GET /api/v1/outputs/objects/{key...}", s.handleOutputBlobGet)
-	router.HandleFunc("PUT /api/v1/log-segments/{key...}", s.handleLogSegmentPut)
+	if s.dataController != nil {
+		if objects, ok := s.dataController.Objects.(*blob.Filesystem); ok {
+			router.Handle("PUT /api/v1/data/uploads/{upload}", objects)
+			router.Handle("GET /api/v1/data/objects/{key...}", objects)
+			router.Handle("PUT /api/v1/log-segments/{key...}", objects)
+		}
+	}
 	router.Handle("GET /api/v1/capabilities", http.HandlerFunc(s.handleCapabilities))
 	router.Handle("POST /webhooks/github-app", http.HandlerFunc(s.handleGitHubAppWebhook))
 	router.Handle("POST /webhooks/stripe", s.paymentHandler())
@@ -1173,9 +1120,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.githubApp.checks.shutdown(ctx)
 }
 
-// WithExternalURL declares the base URL this controller answers on from
-// outside the cluster. Signed filesystem output URLs use that address.
-// Empty uses the address each request arrived at.
+// WithExternalURL declares the externally reachable controller base URL.
 func (s *Server) WithExternalURL(rawURL string) *Server {
 	s.externalURL = strings.TrimRight(strings.TrimSpace(rawURL), "/")
 	return s

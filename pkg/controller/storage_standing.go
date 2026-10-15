@@ -3,7 +3,6 @@ package controller
 import (
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -37,7 +36,7 @@ func (s *Server) callerStorageStanding(r *http.Request) (*teamStandingJSON, erro
 		return nil, err
 	}
 	return &teamStandingJSON{
-		Team: string(team), Tier: storagequota.Tier(got.Tier), AllowanceBytes: got.AllowanceBytes,
+		Team: string(team), Tier: got.Tier, AllowanceBytes: got.AllowanceBytes,
 		CacheShareBytes: store.FreeCacheShare(got.AllowanceBytes),
 		LogShareBytes:   store.FreeLogShare(got.AllowanceBytes),
 		EventShareBytes: store.FreeEventShare(got.AllowanceBytes),
@@ -48,13 +47,13 @@ func (s *Server) callerStorageStanding(r *http.Request) (*teamStandingJSON, erro
 }
 
 type teamStandingJSON struct {
-	Team            string            `json:"team"`
-	Tier            storagequota.Tier `json:"tier"`
-	AllowanceBytes  int64             `json:"allowance_bytes"`
-	CacheShareBytes int64             `json:"cache_share_bytes"`
-	LogShareBytes   int64             `json:"log_share_bytes"`
-	EventShareBytes int64             `json:"event_share_bytes"`
-	EventBytes      int64             `json:"event_bytes"`
-	CacheBytes      int64             `json:"cache_bytes"`
-	LogBytes        int64             `json:"log_bytes"`
+	Team            string                `json:"team"`
+	Tier            store.TeamStorageTier `json:"tier"`
+	AllowanceBytes  int64                 `json:"allowance_bytes"`
+	CacheShareBytes int64                 `json:"cache_share_bytes"`
+	LogShareBytes   int64                 `json:"log_share_bytes"`
+	EventShareBytes int64                 `json:"event_share_bytes"`
+	EventBytes      int64                 `json:"event_bytes"`
+	CacheBytes      int64                 `json:"cache_bytes"`
+	LogBytes        int64                 `json:"log_bytes"`
 }

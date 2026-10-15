@@ -23,7 +23,3 @@ func ScopeLabelFromKey(key string) string {
 		return scope + " (" + identity + ")"
 	}
 }
-
-type copiedOutput struct {
-	runID, nodeID string
-}

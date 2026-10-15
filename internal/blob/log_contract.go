@@ -2,6 +2,7 @@ package blob
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 
@@ -53,7 +54,30 @@ type LogSubject struct {
 
 // Validate rejects malformed tagged subjects before authority or object-key lookup.
 func (subject LogSubject) Validate() error {
-	panic("unimplemented: c1-logs")
+	if subject.Team == "" || subject.RunID == "" {
+		return fmt.Errorf("log subject requires team and run")
+	}
+	switch subject.Kind {
+	case LogJobAttempt:
+		if subject.Unit == nil && subject.Attempt != nil && validAttempt(*subject.Attempt) && subject.Attempt.Team == subject.Team && subject.Attempt.RunID == subject.RunID {
+			return nil
+		}
+	case LogOwnerUnit:
+		if subject.Attempt != nil || subject.Unit == nil || subject.Unit.Generation <= 0 {
+			break
+		}
+		switch subject.Unit.Kind {
+		case LogTrigger, LogPlan:
+			if subject.Unit.Source == nil {
+				return nil
+			}
+		case LogEval:
+			if s := subject.Unit.Source; s != nil && s.NodeID != "" && s.Generation > 0 {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("invalid log subject identity")
 }
 
 // LogSigningRequest requests immutable segment slots under one authenticated subject.
@@ -66,20 +90,23 @@ type LogSigningRequest struct {
 }
 
 // LogUploadURL permits a PUT to one segment; it grants no read authority.
+// Headers must accompany the PUT, including signed create-only conditions.
 type LogUploadURL struct {
-	Index     int64     `json:"index"`
-	URL       string    `json:"url"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Index     int64             `json:"index"`
+	URL       string            `json:"url"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	ExpiresAt time.Time         `json:"expires_at"`
 }
 
 // LogUploadBatch uses the configured log batch limit and 15-minute PUT lifetime.
 // Signing refuses retention classes without a configured lifecycle rule.
 type LogUploadBatch struct {
-	Subject        LogSubject     `json:"subject"`
-	Segments       []LogUploadURL `json:"segments"`
-	ManifestURL    string         `json:"manifest_url"`
-	ExpiresAt      time.Time      `json:"expires_at"`
-	RetentionClass string         `json:"retention_class"`
+	Subject         LogSubject        `json:"subject"`
+	Segments        []LogUploadURL    `json:"segments"`
+	ManifestURL     string            `json:"manifest_url"`
+	ManifestHeaders map[string]string `json:"manifest_headers,omitempty"`
+	ExpiresAt       time.Time         `json:"expires_at"`
+	RetentionClass  string            `json:"retention_class"`
 }
 
 // LogReadRequest resumes by byte offset within exactly one subject and generation.
@@ -91,11 +118,26 @@ type LogReadRequest struct {
 	Follow  bool       `json:"follow"`
 }
 
+// LogUploadCheck identifies an uncertain immutable PUT without accepting an object
+// key. Index zero selects the final manifest; positive indexes select segments.
+// Size and Digest describe stored bytes, including compression for segments.
+type LogUploadCheck struct {
+	Subject LogSubject `json:"subject"`
+	Index   int64      `json:"index"`
+	Size    int64      `json:"size"`
+	Digest  Digest     `json:"digest"`
+}
+
 // LogTransport uses authenticated controller routes separate from the CAS data path.
 // Signing requires own-unit authority and its live generation, or C2's final-job
 // tail grace with the persisted writer/fence and no newer claim. Reads require
 // current read authority and meter egress, with the log download-cap exemption.
 type LogTransport interface {
 	SignSegments(context.Context, LogSigningRequest) (LogUploadBatch, error)
+	// VerifyUpload rechecks current writer authority, derives the key from the
+	// persisted retention class and verifies stored size and SHA-256. A HEAD or
+	// HTTP 412 alone cannot prove a matching payload. Success grants no read URL
+	// or record edge; the subsequent record commit rechecks writer authority.
+	VerifyUpload(context.Context, LogUploadCheck) error
 	ReadLog(context.Context, LogReadRequest) (io.ReadCloser, error)
 }

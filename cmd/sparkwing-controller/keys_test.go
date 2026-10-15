@@ -58,7 +58,7 @@ func TestReadCredentialsRefusesEveryPresentEmptyCredential(t *testing.T) {
 		credPGURL, credSecretsKey, credSecretsPreviousKey, credOIDCKey, credOIDCPublishedKey,
 		credBootstrapAdminToken, credLicense, credGitHubClientSecret, credGoogleClientSecret,
 		credGitHubAppKey, credGitHubAppWebhookSecret, credCloudFrontKey,
-		credBillingToken, credCacheGrantKey,
+		credBillingToken,
 	} {
 		for _, body := range []string{"", " \n\t"} {
 			_, err := readCredentials(credentialsDir(t, map[string]string{name: body}))

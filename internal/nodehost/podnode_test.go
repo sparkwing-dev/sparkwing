@@ -15,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -94,46 +93,5 @@ func TestExecuteMasksSecretInputs(t *testing.T) {
 	}
 	if text := logs.text("build"); strings.Contains(text, "input-secret-4242") || !strings.Contains(text, "pass=***") {
 		t.Fatalf("build's log = %s, want its secret input masked", text)
-	}
-}
-
-type memoMissSlots struct {
-	ConcurrencySlots
-	acquired store.AcquireSlotRequest
-	released bool
-}
-
-func (s *memoMissSlots) AcquireSlot(_ context.Context, in store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
-	s.acquired = in
-	return store.AcquireSlotResponse{Kind: store.AcquireGranted}, nil
-}
-
-func (s *memoMissSlots) ReleaseSlot(context.Context, string, string, string, string, string, time.Duration) error {
-	s.released = true
-	return nil
-}
-
-// safety: a follower must not turn a missing output into successful empty output.
-func TestMemoFollowerWithNoOutputRunsTheNode(t *testing.T) {
-	slots := &memoMissSlots{}
-	m := &Memo{
-		Slots: slots,
-		Source: func(context.Context, store.ClaimInputRequest, string, string) (MemoSource, error) {
-			return MemoSource{}, store.ErrNotFound
-		},
-	}
-	run := &Run{ID: "run-follower", Logger: slog.New(slog.DiscardHandler), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
-	ran := false
-	r := &memoRun{
-		cfg: &Config{}, m: m, adm: &Admission{Slots: m.Slots}, n: &NodeRun{Run: run, Plan: nodeproto.JobSpec{ID: "n", Steps: []nodeproto.StepSpec{{ID: "body"}}}},
-		next: func(context.Context, *NodeRun) Result {
-			ran = true
-			return Result{Outcome: sparkwing.Success, Output: []byte(`"own"`), recorded: true}
-		},
-		g: group{key: memoKeyPrefix + "h", policy: store.OnLimitCoalesce, capacity: 1, cost: 1, memoHash: "h"},
-	}
-	res, copied := r.follow(t.Context(), "run-leader", "n")
-	if !ran || copied || !slots.acquired.BypassRead || !slots.released || res.Outcome != sparkwing.Success || string(res.Output) != `"own"` {
-		t.Fatalf("follower = %+v (ran %v, copied %v), want the node run as a miss", res, ran, copied)
 	}
 }

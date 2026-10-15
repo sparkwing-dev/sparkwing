@@ -3,9 +3,6 @@
 type API interface {
 	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
 	PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
-	HeadObject(ctx context.Context, params *s3.HeadObjectInput, optFns ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
-	DeleteObject(ctx context.Context, params *s3.DeleteObjectInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectOutput, error)
-	DeleteObjects(ctx context.Context, params *s3.DeleteObjectsInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectsOutput, error)
 	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
 }
 type ArtifactStore struct {
@@ -15,15 +12,9 @@ type ArtifactStore struct {
 
 	MaxUsagePages int
 }
-func (s *ArtifactStore) ConditionalWritesSupported(ctx context.Context) (bool, error)
-func (s *ArtifactStore) Delete(ctx context.Context, key string) error
 func (s *ArtifactStore) Get(ctx context.Context, key string) (io.ReadCloser, error)
-func (s *ArtifactStore) GetWithETag(ctx context.Context, key string) (io.ReadCloser, storage.ETag, error)
-func (s *ArtifactStore) Has(ctx context.Context, key string) (bool, error)
 func (s *ArtifactStore) List(ctx context.Context, prefix string) ([]string, error)
-func (s *ArtifactStore) Put(ctx context.Context, key string, r io.Reader) error
-func (s *ArtifactStore) PutIfAbsent(ctx context.Context, key string, r io.Reader) (storage.ETag, error)
-func (s *ArtifactStore) PutIfMatch(ctx context.Context, key string, r io.Reader, expect storage.ETag) (storage.ETag, error)
+func (s *ArtifactStore) PutIfAbsent(ctx context.Context, key string, r io.Reader) error
 func (s *ArtifactStore) Usage(ctx context.Context) (storage.StoreUsage, error)
 const DefaultMaxUsagePages = 1000
 func NewArtifactStore(bucket, prefix string, client API) *ArtifactStore

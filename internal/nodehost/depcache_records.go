@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/depcache"
+	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -135,7 +135,7 @@ func directoryCacheKey(ctx context.Context, workspace string, declaration nodepr
 		if err := errors.Join(readErr, file.Close(), context.Cause(ctx)); err != nil {
 			return "", err
 		}
-		return depcache.Key(declaration.Name, declaration.KeyScope, value)
+		return depcachekey.Bytes(declaration.Name, declaration.KeyScope, value)
 	}
 	return "", errors.New("cache has no readable key file")
 }

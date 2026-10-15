@@ -26,7 +26,7 @@ func TestSSHCredentialNeedsATmpfsInCloudMode(t *testing.T) {
 	record := sshRecorder(t, repos, false)
 	cred := DirectCredential{Kind: CredentialSSH, Host: "git.example.invalid", Secret: testDeployKey(t), KnownHosts: testKnownHosts}
 	checkout := func(tmpfsOnly bool) error {
-		return directCheckout(context.Background(), t.TempDir(), "ssh://git@git.example.invalid/widgets.git",
+		return directCheckout(context.Background(), "ssh://git@git.example.invalid/widgets.git",
 			"main", tip, filepath.Join(t.TempDir(), "run"), directOptions{protocols: "ssh", cred: cred, keyTmpfsOnly: tmpfsOnly})
 	}
 
