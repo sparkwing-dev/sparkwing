@@ -4,7 +4,25 @@ W5 implements the merged W4 protocol at the SDK boundary. Native Windows
 artifacts, placement integration and the diagnostic redesign below remain open.
 The lead owns commits, independent review, pipelines and native acceptance.
 
-## This continuation
+## Post-merge audit
+
+The merged protocol branch passes the TypeScript suite, strict source/consumer
+typechecking, Linux native protocol/conformance tests, native-host vet and the
+whole-repository Go build. The W5 amendment ledger below still applies. No new
+runtime implementation, API removal or test port was needed in this audit.
+No shared file or production caller changed. Deleted source lines: zero.
+
+The remaining W5 implementation is the planning diagnostic redesign below.
+No amendment or handoff contains a lead decision approving that redesign.
+SWARM-BRIEF's two-strikes rule still requires that decision before another fix.
+The shared sanitizer proposal and its invariant remain ready for lead review.
+
+Native Windows validation also remains open. This environment has no MSVC,
+Clang, MinGW, Wine or native Windows runner. The two protocol.node artifacts
+cannot be built or exercised here. Passing Unix or fake-handle tests does not
+complete A1-52 or the Windows acceptance cells.
+
+## Queued eval cancellation
 
 Closure evaluations now run in request order, matching Go's eval gate. Queued
 evaluations register for cancellation before waiting. Cancellation returns
