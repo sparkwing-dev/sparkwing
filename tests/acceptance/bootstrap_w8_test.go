@@ -2,14 +2,18 @@ package acceptance_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/cluster"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -28,10 +32,22 @@ func (h bootstrapHostW8) Host(ctx context.Context, unit controllerwire.ClaimedUn
 	return h(ctx, unit)
 }
 
+func writeBootstrapW8(t *testing.T, data map[string][]byte) string {
+	t.Helper()
+	directory := t.TempDir()
+	for name, body := range data {
+		if err := os.WriteFile(filepath.Join(directory, name), body, 0o400); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return filepath.Join(directory, "bootstrap")
+}
+
 func TestCloudBootstrapW8Components(t *testing.T) {
 	for _, kind := range []launcher.CloudUnitKind{launcher.CloudPlan, launcher.CloudEval, launcher.CloudWork} {
 		t.Run(string(kind), func(t *testing.T) {
 			now, cfg, award := cloudFixture(kind)
+			award.Source = source.Spec{RepoKey: "github.com/team/repo", RemoteURL: "https://github.com/team/repo.git", SHA: "sealed-commit", PipelineDir: ".sparkwing", Engine: award.Engine}
 			if kind == launcher.CloudPlan {
 				award.Binding.NodeID = ""
 			} else if kind == launcher.CloudEval {
@@ -41,7 +57,11 @@ func TestCloudBootstrapW8Components(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			award.Bootstrap = resources.BootstrapSecret.Data["bootstrap"]
+			bootstrapFile := writeBootstrapW8(t, resources.BootstrapSecret.Data)
+			restored, err := launcher.ReadBootstrapAward(bootstrapFile)
+			if err != nil || !reflect.DeepEqual(restored, award) {
+				t.Fatalf("private award transport lost the original inputs: %v", err)
+			}
 			binding := award.Binding
 			unit := controllerwire.ClaimedUnit{
 				Unit: capability.UnitNode, Purpose: capability.PurposeWork, Delivery: capability.DeliveryDirect,
@@ -84,8 +104,34 @@ func TestCloudBootstrapW8Components(t *testing.T) {
 				}
 				return nil
 			})}
-			if err := host.Run(t.Context(), award); err != nil || !reflect.DeepEqual(events, []string{"exchange", "host"}) {
+			if err := host.RunFile(t.Context(), bootstrapFile); err != nil || !reflect.DeepEqual(events, []string{"exchange", "host"}) {
 				t.Fatalf("events=%v err=%v", events, err)
+			}
+		})
+	}
+}
+
+func TestCloudBootstrapGrammarW8Components(t *testing.T) {
+	for _, kind := range []launcher.CloudUnitKind{launcher.CloudEval, launcher.CloudWork} {
+		t.Run(string(kind), func(t *testing.T) {
+			now, cfg, award := cloudFixture(kind)
+			resources, err := launcher.BuildJob(t.Context(), now, cfg, award, &cloudBoundaryFake{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			pod := resources.Job.Spec.Template.Spec
+			for _, args := range [][]string{pod.InitContainers[1].Args, pod.Containers[0].Args} {
+				called := false
+				err := cluster.RunBootstrapCLI(t.Context(), args[0], args[1:], func(_ context.Context, options cluster.BootstrapOptions) error {
+					called = true
+					if options.RunID != award.Binding.RunID || options.JobID != award.Binding.NodeID || options.Generation != award.Binding.Generation || options.ControllerURL != cfg.ControllerURL || options.SourceDir != "/tmp/source" || options.ModuleCache != "/tmp/modules" || options.BootstrapFile != "/etc/sparkwing/bootstrap/bootstrap" {
+						t.Fatal("bootstrap entrypoint changed the awarded selectors or private paths")
+					}
+					return nil
+				})
+				if err != nil || !called {
+					t.Fatalf("built %s command did not reach its declared entrypoint: %v", args[0], err)
+				}
 			}
 		})
 	}

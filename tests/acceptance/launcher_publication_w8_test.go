@@ -179,6 +179,7 @@ func TestLauncherRefusesChangedBootstrapW8Components(t *testing.T) {
 		}{
 			{"renamed", func(s *corev1.Secret) { s.Name += "-renamed"; s.UID = "renamed-secret" }},
 			{"bytes", func(s *corev1.Secret) { s.Data["bootstrap"] = []byte("different-credential") }},
+			{"award", func(s *corev1.Secret) { s.Data["award.json"] = []byte("different-execution-inputs") }},
 			{"extra_data", func(s *corev1.Secret) { s.Data["other"] = []byte("extra") }},
 			{"string_data", func(s *corev1.Secret) { s.StringData = map[string]string{"bootstrap": "different-credential"} }},
 			{"mutable", func(s *corev1.Secret) { s.Immutable = new(false) }},

@@ -19,7 +19,7 @@ cell or establish an HTTP, Cloud or OS deployment proof.
 | A1-26 | The loop sends observed labels/capacity without manufacturing granted identity. ClaimProfileResolver and final root registration remain controller integration. |
 | A1-27 | W8 does not calculate settlement. Final store claim/start/finish/reaper integration must preserve the server award's billing facts. |
 | A1-36 | Hosting retains the complete award for preparation. Bound byte/record clients must still be supplied to RunInput/NodeInput by the concrete host composition. |
-| A1-38 | NewControllerControl maps immutable awards and sync decisions. Jobs persist UnitID and report Job name/node UID after restart. Eval retains its source fence and separate Expansion lease. BootstrapHost now exchanges once and validates the original binding, engine and resources before host dispatch. Component claim/sync/restart/exchange tests pass with fakes. Real HTTP/source/container handoff and host composition remain open. |
+| A1-38 | NewControllerControl maps immutable awards and sync decisions. Jobs persist UnitID and report Job name/node UID after restart. Eval retains its source fence and separate Expansion lease. The immutable Secret now carries the complete award in award.json beside the bootstrap. ReadBootstrapAward and BootstrapHost.RunFile restore it before the existing one-time exchange. Component file/claim/sync/restart/exchange tests pass with fakes. W9 grammar, HTTP, source and host composition remain open. |
 | A1-39 | The old cluster claim/source/heartbeat loops and old daemon remain deleted. Unified loop and Hosting components pass. Hosting binds node execution identity, checks direct delivery and unit purpose, and uses the earliest binding/owner/parent deadline. Property and controlled-clock component tests exercise these bounds. source.Acquire, lease.Keeper.Run and the engine HTTP client still panic. Host factories, delegated node routes and generated-code replay construction remain undeclared. |
 | A1-40 | The implemented local runtime keeps readiness/status/stay/drain and dynamic dashboard attachment. APIConn now exposes a verified UID/SID identity snapshot to the shared controller, replacing the UID-only accessor. Shared local controller/store/consumer services and native Windows SID transport remain unwired. |
 | A1-41 | Implemented the native home-bound ManagedUnitManager and final foreground/timer arguments. Refresh preserves captured settings and restarts installed controllers. W9 dashboard/schedule/update/doctor composition and native login/crash/drain proofs remain open. |
@@ -225,5 +225,37 @@ operation, host construction/delegation/replay, local services/activity,
 Cloud bootstrap grammar/source handoff and plan/eval resources remain open.
 Native cells stay blocked pending real placement, platform and deployment
 proofs. No additional T1 inventory port or old-code deletion is claimed.
+
+## Continuation: private Cloud award transport
+
+A1-38 now has a W8-owned source and execution payload contract. BuildJob puts
+`award.json` beside `bootstrap` in the same immutable Secret. The metadata
+contains engine, source, binding, CPU and memory. ReadBootstrapAward reads both
+files through the shared projected-credential reader. BootstrapHost.RunFile
+passes that original award through the existing exchange and dispatch path.
+The reader rejects malformed, duplicate, unknown and incorrectly cased fields,
+without returning partial authority or parser diagnostics containing token bytes.
+
+All three Cloud kinds pass from the builder through real files and exchange to
+a fake shared unit host. A Linux filesystem test uses Kubernetes projection
+symlinks. Admission mutation tests now replace award.json as well as the token.
+A fuzz property checks roundtrip inputs and credential-free failures.
+
+This is a local addition to the W8 CloudJobAward contract. The metadata has
+explicit JSON field names. The bootstrap path stays the same. Unit, attempt,
+engine and eval-source arguments are removed because their values now travel
+in the private file. The builder's eval/work commands pass the shared parser.
+The existing Kubernetes JSON module becomes a direct dependency at its existing
+version because strict nested decoding avoids another parser implementation.
+No other area's Go contract or production caller changes.
+
+W9 can now compose fetch-source with ReadBootstrapAward and run-node with
+BootstrapHost.RunFile. Its registry still requires a job for plans. W3 still
+owns source acquisition, keepers, shared hosts and
+the missing run/plan/eval identity inputs. The merged W1/W2 controller still
+clears Execution for plan/eval and leaves SyncLauncher unimplemented. The
+workspace-off binary-cache operation, local shared services and native platform,
+deployment and real-repository proofs remain open. The existing fake component
+proofs do not complete those integrations or activate native catalog cells.
 
 <!-- design:end -->

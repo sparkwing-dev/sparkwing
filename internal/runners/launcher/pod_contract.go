@@ -67,12 +67,12 @@ type CloudJobBinding struct {
 // Credentials are excluded from JSON and must not appear in diagnostics, argv or environment.
 // Engine is required for eval/work; a first plan resolves its pin after source acquisition.
 type CloudJobAward struct {
-	Engine    *engine.Identity
-	Source    source.Spec
-	Binding   CloudJobBinding
-	Bootstrap []byte `json:"-"`
-	CPUCores  float64
-	Memory    int64
+	Engine    *engine.Identity `json:"engine,omitempty"`
+	Source    source.Spec      `json:"source"`
+	Binding   CloudJobBinding  `json:"binding"`
+	Bootstrap []byte           `json:"-"`
+	CPUCores  float64          `json:"cpu_cores"`
+	Memory    int64            `json:"memory_bytes"`
 }
 
 // safety: CloudNodeReservation is an exclusive placement fact held until the Job and DinD have stopped.

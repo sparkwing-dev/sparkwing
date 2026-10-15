@@ -3,7 +3,6 @@ package acceptance_test
 import (
 	"context"
 	"errors"
-	"slices"
 	"testing"
 	"time"
 
@@ -41,10 +40,9 @@ func TestInitialAttemptW8Components(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		args := resources.Job.Spec.Template.Spec.Containers[0].Args
-		i := slices.Index(args, "--attempt")
-		if i < 0 || i+1 >= len(args) || args[i+1] != "0" {
-			t.Fatalf("unstarted Cloud award lost its ordinal: %v", args)
+		restored, err := launcher.ReadBootstrapAward(writeBootstrapW8(t, resources.BootstrapSecret.Data))
+		if err != nil || restored.Binding.Attempt != 0 {
+			t.Fatalf("unstarted Cloud award lost its ordinal: %v", err)
 		}
 	})
 }

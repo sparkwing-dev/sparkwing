@@ -65,6 +65,10 @@ func buildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 	if err := validateAward(award); err != nil {
 		return CloudJobResources{}, err
 	}
+	metadata, err := json.Marshal(award)
+	if err != nil {
+		return CloudJobResources{}, errors.New("invalid Cloud award metadata")
+	}
 	budget, err := cloudBudget(cfg, award)
 	if err != nil {
 		return CloudJobResources{}, err
@@ -95,13 +99,6 @@ func buildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 	if err != nil {
 		return CloudJobResources{}, fmt.Errorf("invalid award binding: %w", err)
 	}
-	var engineJSON []byte
-	if award.Engine != nil {
-		engineJSON, err = json.Marshal(award.Engine)
-		if err != nil {
-			return CloudJobResources{}, fmt.Errorf("invalid engine identity: %w", err)
-		}
-	}
 	reservation, network, err := boundary.Reserve(ctx, b, name)
 	if err != nil {
 		return CloudJobResources{}, fmt.Errorf("reserve Cloud boundary: %w", err)
@@ -114,8 +111,8 @@ func buildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 	if err != nil {
 		return CloudJobResources{}, errors.Join(err, boundary.Release(ctx, reservation))
 	}
-	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels, Finalizers: []string{cleanupFinalizer}, Annotations: map[string]string{bindingAnnotation: string(bindingJSON), reservationAnnotation: string(reservationJSON), deadlineAnnotation: deadline.Format(time.RFC3339Nano)}}, Spec: batchv1.JobSpec{BackoffLimit: ptr(int32(0)), ActiveDeadlineSeconds: &seconds, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels}, Spec: cloudPod(cfg, award, reservation, name, string(engineJSON), budget)}}}
-	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels}, Immutable: ptr(true), Type: corev1.SecretTypeOpaque, Data: map[string][]byte{"bootstrap": append([]byte(nil), award.Bootstrap...)}}
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels, Finalizers: []string{cleanupFinalizer}, Annotations: map[string]string{bindingAnnotation: string(bindingJSON), reservationAnnotation: string(reservationJSON), deadlineAnnotation: deadline.Format(time.RFC3339Nano)}}, Spec: batchv1.JobSpec{BackoffLimit: ptr(int32(0)), ActiveDeadlineSeconds: &seconds, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels}, Spec: cloudPod(cfg, award, reservation, name, budget)}}}
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels}, Immutable: ptr(true), Type: corev1.SecretTypeOpaque, Data: map[string][]byte{"bootstrap": append([]byte(nil), award.Bootstrap...), awardFileName: metadata}}
 	return CloudJobResources{Job: job, BootstrapSecret: secret, Reservation: reservation, Network: network, JobDeadline: deadline, ClaimDeadline: deadline}, nil
 }
 
@@ -175,9 +172,9 @@ func validateBoundary(namespace, team, name string, r CloudNodeReservation, n Cl
 	return nil
 }
 
-func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secret, engineJSON string, budget corev1.ResourceList) corev1.PodSpec {
+func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secret string, budget corev1.ResourceList) corev1.PodSpec {
 	scratch := resource.NewQuantity(limits.JobScratchBytes, resource.BinarySI)
-	main := hostContainer(cfg, a, "run-node", engineJSON)
+	main := hostContainer(cfg, a, "run-node")
 	// safety: one container's ephemeral limit establishes the aggregate pod budget,
 	// including sidecar logs and writable layers.
 	main.Resources = corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceEphemeralStorage: *scratch}, Limits: corev1.ResourceList{corev1.ResourceEphemeralStorage: *scratch}}
@@ -187,21 +184,15 @@ func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secre
 		// safety: the pod cgroup shares the awarded CPU and memory with DinD instead of doubling the billed allocation.
 		Resources:      &corev1.ResourceRequirements{Requests: budget, Limits: budget.DeepCopy()},
 		Volumes:        []corev1.Volume{{Name: "scratch", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: scratch}}}, {Name: "bootstrap", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secret, DefaultMode: ptr(int32(0o400))}}}},
-		InitContainers: []corev1.Container{dockerContainer(cfg), hostContainer(cfg, a, "fetch-source", engineJSON)}, Containers: []corev1.Container{main},
+		InitContainers: []corev1.Container{dockerContainer(cfg), hostContainer(cfg, a, "fetch-source")}, Containers: []corev1.Container{main},
 	}
 }
 
-func hostContainer(cfg CloudJobConfig, a CloudJobAward, verb, engineJSON string) corev1.Container {
+func hostContainer(cfg CloudJobConfig, a CloudJobAward, verb string) corev1.Container {
 	b := a.Binding
-	args := []string{verb, "--controller", cfg.ControllerURL, "--run", b.RunID, "--generation", strconv.FormatInt(b.Generation, 10), "--attempt", strconv.FormatInt(b.Attempt, 10), "--unit", string(b.Kind), "--source-dir", "/tmp/source", "--module-cache", "/tmp/modules", "--bootstrap-file", bootstrapPath}
+	args := []string{verb, "--controller", cfg.ControllerURL, "--run", b.RunID, "--generation", strconv.FormatInt(b.Generation, 10), "--source-dir", "/tmp/source", "--module-cache", "/tmp/modules", "--bootstrap-file", bootstrapPath}
 	if b.NodeID != "" {
 		args = append(args, "--job", b.NodeID)
-	}
-	if b.Kind == CloudEval {
-		args = append(args, "--source-job", b.SourceNodeID, "--source-generation", strconv.FormatInt(b.SourceGeneration, 10))
-	}
-	if a.Engine != nil {
-		args = append(args, "--engine", engineJSON)
 	}
 	return corev1.Container{Name: verb, Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{JobBinary}, Args: args, WorkingDir: "/tmp", Env: []corev1.EnvVar{{Name: "HOME", Value: "/tmp"}, {Name: "DOCKER_HOST", Value: "unix:///tmp/docker.sock"}}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}, {Name: "bootstrap", MountPath: "/etc/sparkwing/bootstrap", ReadOnly: true}}, SecurityContext: &corev1.SecurityContext{RunAsUser: ptr(int64(0))}}
 }

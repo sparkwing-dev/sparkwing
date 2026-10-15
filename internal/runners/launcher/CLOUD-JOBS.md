@@ -60,6 +60,27 @@ bootstrap mount is absent from Docker. Pipeline execution starts after source
 acquisition. Plan resolves the exact SDK pin. Eval and work use the accepted
 engine identity.
 
+The immutable Secret contains `bootstrap` and `award.json`. The metadata carries
+the awarded engine, complete source projection, binding, CPU and memory as
+`engine`, `source`, `binding`, `cpu_cores` and `memory_bytes`. The bootstrap is
+excluded from metadata. Source locations and bootstrap bytes stay out of Job
+metadata, arguments and environment. Both files use the existing private mount,
+which is absent from DinD. Admission verifies both files before activation.
+
+`ReadBootstrapAward` reads both files beside the absolute bootstrap path through
+the shared credential reader, including Kubernetes projection symlinks. It
+rejects duplicate, unknown, incorrectly cased or malformed metadata and returns
+no partial award on failure. Source metadata must be present and non-null.
+The shared source package validates and acquires its contents.
+`BootstrapHost.RunFile` restores this award and
+uses the same one-time exchange as `Run`. Fetch-source can read the award without
+exchanging it. The existing Kubernetes JSON decoder supplies strict decoding
+because it checks nested duplicates without another parser implementation.
+Unit kind, attempt, eval-source fence and engine now travel in that file. The
+builder emits only the declared bootstrap arguments. Eval and work commands
+pass the real shared parser. Plans still need the shared grammar to allow an
+owner unit without a job ID.
+
 `NewControllerControl` binds the launcher's claim and sync operations to the
 shared controller wire interface. Its client must use `EngineOptions.Launcher`.
 It captures observed labels/capacity and requests the configured Cloud unit

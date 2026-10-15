@@ -1837,3 +1837,121 @@ The last identity-only race run includes the added forged ambient variables.
 Windows compilation uses GOOS=windows GOARCH=amd64 with
 `go test -p 4 -c -o /tmp/sw-astra-W8/runners.test.exe ./internal/runners`.
 Sleepcheck passes. Worker scratch was removed and its absence verified.
+
+## Continuation: private Cloud award transport
+
+The continuation starts clean at e230ae5cf. All 26 amendment rows naming W8 and
+the W4 execution-identity handoff were rechecked. A1-38 gains the missing
+W8-owned payload transport. The other rows keep their recorded integration
+limits. The W4 run/plan/eval constructor and actual hello remain open.
+
+The invariant is that private award decoding preserves every serialized
+execution input and the exact bootstrap bytes, or returns an empty award with
+no credential bytes in its error. The immutable Job Secret now contains
+`award.json` beside the unchanged `bootstrap` file. CloudJobAward declares
+the metadata fields `engine`, `source`, `binding`, `cpu_cores` and
+`memory_bytes`. Bootstrap stays excluded from JSON. The complete source
+projection remains in the Secret rather than Job metadata, argv or env.
+
+ReadBootstrapAward reads the projected files through the existing credential
+reader. BootstrapHost.RunFile feeds the restored award into the existing
+one-time exchange and binding checks. Fetch-source can read the same award
+without consuming exchange. Neither helper opens a store, grants source
+authority, acquires source or starts SDK processes. Those remain the shared
+source and host contracts. The existing Secret admission check compares the
+whole data map, so changed metadata cannot activate the suspended Job.
+
+The acceptance component failed before implementation because the reader and
+file entrypoint were absent. It now covers plan/eval/work from BuildJob through
+real private files and the one-time exchange to a fake UnitHost. Focused tests
+cover nested duplicate and unknown fields, case changes, malformed/trailing
+JSON, invalid fences, missing files, cancellation and Kubernetes projection
+symlinks. Absent or null source metadata also fails before returning authority.
+The shared source package retains validation of the source contents.
+Admission components replace award.json for all three Cloud kinds.
+FuzzCloudAwardTransport checks preserved inputs and credential-free failures.
+An initial source-leak assertion used an all-a SHA also present in the fixture's
+image digest. The fixture now uses a distinct SHA. This was a test collision.
+
+The local contract addition consists of the metadata field names,
+ReadBootstrapAward and BootstrapHost.RunFile. It adds no flag, env variable,
+volume, trust root, timeout, compatibility path or independent parser. The
+existing Kubernetes JSON module is promoted to a direct dependency at the
+unchanged version because its strict decoder rejects nested duplicates and
+unknown fields. The smaller argv-only alternative omits the awarded source
+and other inputs needed by the pod. Undo removes the metadata file and reader
+with these component tests. No other-area Go contract or production caller
+changes. The redundant engine serialization and undeclared unit, attempt,
+engine and eval-source argument blocks are deleted (**13 production lines,
+0 files**). Their values now travel in the private file. The initial-attempt
+component checks ordinal zero after reading that file. New T1 inventory ports
+total **0**. A new grammar component failed with unknown --attempt before this
+cut, then passed both eval/work entrypoints through RunBootstrapCLI.
+
+Contract changes still needed in other areas:
+
+- W3 must declare granted runner inputs for run/plan/eval and the common
+  selected-engine process constructor required by W4 finding 3. NodeInput's
+  awarded identity slice remains implemented.
+- W9 must allow plans without a job in bootstrap grammar. Eval/work commands
+  now use only declared flags. The original award and source transport is
+  available through the two W8 helpers above.
+- The binary-cache owner still needs the explicit workspace-off key operation
+  already requested for selected-engine installation.
+
+Remaining real integrations include W3 source projections/acquisition,
+Keeper.Run, shared hosts, delegated routes and replay, W9 NewEngineClient,
+and local shared controller/store/consumer services. The merged W1/W2
+EngineController still clears Execution for plan/eval and leaves SyncLauncher
+unimplemented. Those are implementation gaps in existing interfaces.
+Kubernetes enforcement probes and node cleanup, native Windows/SID/services,
+actual hello, all native placement catalog cells and real-repository QA remain
+open. File and fake-service proofs do not complete them. No new product
+decision or unanswered product question was introduced.
+
+Shared edits are go.mod, tests/acceptance/bootstrap_w8_test.go,
+tests/acceptance/launcher_publication_w8_test.go,
+tests/acceptance/initial_attempt_w8_test.go and contracts/handoffs.md.
+Production edits stay in internal/runners/launcher. CLOUD-JOBS.md records the
+private file contract. Its component tests verify builder/reader agreement.
+No generated reference consumes that internal document. W8-AMENDMENTS-1.md
+records the amended status. No shared Go API was removed and no other-area production
+caller needed migration.
+
+All commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS at most four,
+and GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W8. Go tests use -p 4.
+
+- Whole-repository `go build -p 4 ./...` passes on the changed production tree.
+- Vet passes for runners, engine, cluster, wingd and subpackages, plus both
+  acceptance packages. A focused vet also covers the final added tests.
+- Full runners, engine and component acceptance suites pass.
+- Cluster tests pass with TestStartMetricsListener_ServesMetrics excluded
+  because this sandbox blocks sockets.
+- Local runtime/lifecycle/control/dashboard/drain and managed-unit tests pass
+  in wingd and its client using their existing fake service boundaries.
+- The final focused transport, projection, cancellation, exchange, initial
+  attempt, grammar and changed metadata admission tests pass.
+- The final FuzzCloudAwardTransport pass covers 4,243 generated cases with two workers.
+- Required commentcheck -base main reports one unchanged W9 finding at
+  internal/controllerwire/contracts.go:47. The earlier two W1 findings are
+  absent after the merge. commentcheck -base HEAD passes for all eight changed
+  Go files, including the new untracked files.
+- Sleepcheck and git diff --check pass. Local Git configuration has no author
+  or core.worktree override. No owned Go check process remains after completion.
+
+The lead retains independent review, staging and committing. No Sparkwing
+binary, pipeline, deployment, release or Git write ran. Worker scratch is
+removed after verification. Reproducible commands under the environment above:
+
+```sh
+go build -p 4 ./...
+go vet -p 4 ./internal/runners/... ./internal/engine/... ./internal/cluster ./internal/wingd/... ./tests/acceptance ./internal/acceptance
+go test -p 4 ./internal/runners/... ./internal/engine/... ./tests/acceptance ./internal/acceptance
+go test -p 4 ./internal/cluster -skip '^TestStartMetricsListener_ServesMetrics$' -count=1
+go test -p 4 ./internal/wingd ./internal/wingd/client -run 'Test(Local(Runtime|Lifecycle|Control|Dashboard|Drain)|ManagedUnits)' -count=1
+go test -p 4 ./internal/runners/launcher ./tests/acceptance
+go test -p 4 ./internal/runners/launcher -run '^$' -fuzz '^FuzzCloudAwardTransport$' -fuzztime=5s -parallel=2
+go run ./internal/commentcheck -base main .
+go run ./internal/commentcheck -base HEAD .
+go run ./internal/sleepcheck -base HEAD .
+```
