@@ -23,6 +23,16 @@ output-size check with C1. The repo-bound remote client also leaves tenant and
 verified-default-ref selection to the server, while W1's exact lookup still
 requires those fields. W7's component readers and physical adapters are ready.
 
+**W3 post-merge storage layers.** W7 resolved the protocol conflicts and migrated
+its memo/artifact tests to JobSpec, Artifacts and Memoized. The retained
+`TestHostedRunEmitsTheDispatchersEvents/local` now compiles but fails with
+`no such table: sparkwing_meta` through the legacy state path. Migrate that test
+with the final state owner. The cache layer now consumes the existing storage
+callback before restore and refreshes it after execution before save. Connect
+that callback to each fresh StorageBinding when constructing the final hosts.
+Generated tests cover changed attempt/generation and refused bindings without
+falling back to an ambient local archive. Final host construction remains W3/W8.
+
 ## From W4 review fixes (2026-10-15)
 
 
@@ -41,3 +51,6 @@ requires those fields. W7's component readers and physical adapters are ready.
 **DESIGN: W3 environment projection (finding 9).** Invariant: automatic startup classification and complete cleanup environment come from one procenv projection. Use `SplitJobEnv`/the shared builder before process creation and supply cleanup with the complete attempt environment. Test unmarked GOMAXPROCS/NODE_OPTIONS at interpreter startup, unchanged declarations on replan, and body/cleanup using the same DOCKER_HOST. An explicitly marked startup variable cannot establish automatic classification.
 
 W3 also owns finding 1's retained test port. `go test -p 4 -gcflags=-e ./internal/nodehost -run '^TestHostedRunEmitsTheDispatchersEvents$' -count=1` fails compilation. `events_test.go` still references PlanDocOld, PlanModifiers, PlanNode, PlanConsume, PlanApproval, PlanClosures and SkippedConcurrent. Its auto retry branches and node_auto_retry expectations describe removed behavior. Other node-host test files fail on old APIs too. The two orchestrator RetryAuto tests still pass removed `auto=true` to the fixture and need porting to retained retry semantics.
+
+
+**W3: `internal/nodehost` tests fail after the W4 protocol merge (c30046f22).** `go test ./internal/nodehost/` fails TestAdmissionLeasesHostAroundEachNode, TestAdmissionPriorityAndClassPrecedence and TestAdmissionRunHoldingTheHostTakesOnlySemaphores, then hangs until the 10-minute test timeout. The W4 review (review/areas/W4-review-3.md, findings 2, 4, 5, 9) names node-host gaps against protocol v2: `routes.go` still installs the old version-header/426 gate and `/nodes` routes, eval results ignore `EvalResult.Error`, generated declarations skip strict expansion validation, and startup/cleanup environments bypass procenv. Fix those, and make no test able to hang: a test that waits must fail on a deadline.

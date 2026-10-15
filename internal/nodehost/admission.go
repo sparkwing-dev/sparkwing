@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -100,24 +103,38 @@ type group struct {
 }
 
 func (a *Admission) admit(ctx context.Context, n *NodeRun, next Executor) Result {
-	m := n.Plan.Modifiers
-	if m == nil || m.ConcGroup == "" {
+	var local, remote []group
+	specs, err := settings.ResolveConcurrency(n.Plan.Concurrency)
+	if err != nil {
+		return Result{Outcome: sparkwing.Failed, Err: err}
+	}
+	for _, spec := range specs {
+		g := group{key: scopedConcurrencyKey(spec.Group, spec.Scope, n.Run.ID, a.boxID()), policy: spec.OnLimit, capacity: spec.Capacity, cost: spec.Cost, queueTO: millis(value(spec.QueueTimeoutMS)), cancelTO: millis(value(spec.CancelTimeoutMS))}
+		if a.Daemon != nil && (spec.Scope == "box" || spec.Scope == "run") {
+			local = append(local, g)
+		} else {
+			remote = append(remote, g)
+		}
+	}
+	order := func(x, y group) int { return strings.Compare(x.key, y.key) }
+	slices.SortFunc(local, order)
+	slices.SortFunc(remote, order)
+	body := Executor(func(ctx context.Context, n *NodeRun) Result {
+		if len(local) > 0 {
+			return a.underDaemon(ctx, n, local, next)
+		}
 		return a.withHost(ctx, n, next)
+	})
+	for _, g := range slices.Backward(remote) {
+		inner := body
+		body = func(ctx context.Context, n *NodeRun) Result {
+			if a.Slots == nil {
+				return failed(fmt.Errorf("concurrency group %q: no coordination store", g.key))
+			}
+			return a.underSlot(ctx, a.nodeHolder(ctx, n), g, func(ctx context.Context) Result { return inner(ctx, n) })
+		}
 	}
-	g := group{
-		key:      nodeproto.ConcurrencyGroupKey(m.ConcGroup, m.ConcScope, n.Run.ID, a.boxID),
-		policy:   m.ConcOnLimit,
-		capacity: m.ConcCapacity, cost: m.ConcCost,
-		queueTO:  time.Duration(m.ConcQueueTimeoutMS) * time.Millisecond,
-		cancelTO: time.Duration(m.ConcCancelTimeoutMS) * time.Millisecond,
-	}
-	if a.Daemon != nil && (m.ConcScope == string(sparkwing.ScopeBox) || m.ConcScope == string(sparkwing.ScopeRun)) {
-		return a.underDaemon(ctx, n, g, next)
-	}
-	if a.Slots == nil {
-		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("concurrency group %q: no coordination store", m.ConcGroup)}
-	}
-	return a.underSlot(ctx, a.nodeHolder(ctx, n), g, func(ctx context.Context) Result { return a.withHost(ctx, n, next) })
+	return body(ctx, n)
 }
 
 func (a *Admission) boxID() string {
@@ -132,43 +149,41 @@ func (a *Admission) boxID() string {
 
 // safety: a run whose own lease carries the plan's resources already holds
 // the host, so its nodes take no host lease of their own, as in the dispatcher.
-func hostAdmitted(doc nodeproto.PlanDocOld) bool {
-	return doc.Resources != nil && (doc.Resources.Cores > 0 || doc.Resources.MemoryBytes > 0)
+func hostAdmitted(doc nodeproto.PlanDoc) bool {
+	return doc.Resources != nil && (value(doc.Resources.Cores) > 0 || value(doc.Resources.MemoryBytes) > 0)
 }
 
 // safety: ids match the dispatcher's, so the queue view and the daemon's
 // owner checks read a hosted node's lease the same way.
-func (a *Admission) request(n *NodeRun, claim *wingwire.SemaphoreClaim) wingwire.AdmissionRequest {
+func (a *Admission) request(n *NodeRun, claims []wingwire.SemaphoreClaim) wingwire.AdmissionRequest {
 	doc := n.Run.Doc
 	req := wingwire.AdmissionRequest{
 		OwnerRunID: n.Run.ID, OwnerLeaseToken: n.Run.leaseToken,
-		DisplayRunID: n.Run.ID + "/" + n.Plan.ID, Pipeline: doc.Pipeline,
+		DisplayRunID: n.Run.ID + "/" + n.Plan.ID, Pipeline: n.Run.Pipeline,
 		SubLease: true, Priority: a.priority(doc),
 	}
-	if claim != nil {
-		req.Semaphores = []wingwire.SemaphoreClaim{*claim}
-	}
+	req.Semaphores = claims
 	if hostAdmitted(doc) {
 		req.RunID, req.SemaphoresOnly = wingwire.NodeSemaphoreParticipant(n.Run.ID, n.Plan.ID), true
 		return req
 	}
 	req.RunID = wingwire.NodeHostParticipant(n.Run.ID, n.Plan.ID)
 	req.Class = a.class(doc)
-	if m := n.Plan.Modifiers; m != nil {
-		req.Resources = wingwire.HostResources{Cores: m.ResCores, MemoryBytes: m.ResMemoryBytes}
+	if r := n.Plan.Resources; r != nil {
+		req.Resources = wingwire.HostResources{Cores: value(r.Cores), MemoryBytes: value(r.MemoryBytes)}
 	}
 	return req
 }
 
-func (a *Admission) priority(doc nodeproto.PlanDocOld) int {
+func (a *Admission) priority(doc nodeproto.PlanDoc) int {
 	if a.Priority != nil {
 		return *a.Priority
 	}
-	return doc.Priority
+	return value(doc.Priority)
 }
 
-func (a *Admission) class(doc nodeproto.PlanDocOld) string {
-	return cmp.Or(doc.AdmissionClass, a.Class, string(sparkwing.AdmissionNormal))
+func (a *Admission) class(doc nodeproto.PlanDoc) string {
+	return cmp.Or(value(doc.AdmissionClass), a.Class, string(sparkwing.AdmissionNormal))
 }
 
 func (a *Admission) withHost(ctx context.Context, n *NodeRun, next Executor) Result {
@@ -186,10 +201,12 @@ func (a *Admission) withHost(ctx context.Context, n *NodeRun, next Executor) Res
 	return a.runLeased(ctx, n, lease, next)
 }
 
-func (a *Admission) underDaemon(ctx context.Context, n *NodeRun, g group, next Executor) Result {
-	claim := wingwire.SemaphoreClaim{
-		Name: g.key, Cost: g.cost, Capacity: g.capacity,
-		Policy: wingwire.Policy(g.policy), CancelTimeoutMS: g.cancelTO.Milliseconds(),
+func (a *Admission) underDaemon(ctx context.Context, n *NodeRun, groups []group, next Executor) Result {
+	claims := make([]wingwire.SemaphoreClaim, 0, len(groups))
+	byKey := make(map[string]group, len(groups))
+	for _, g := range groups {
+		claims = append(claims, wingwire.SemaphoreClaim{Name: g.key, Cost: g.cost, Capacity: g.capacity, Policy: wingwire.Policy(g.policy), CancelTimeoutMS: g.cancelTO.Milliseconds()})
+		byKey[g.key] = g
 	}
 	acquireCtx, cancelAcquire := context.WithCancelCause(ctx)
 	defer cancelAcquire(nil)
@@ -198,6 +215,7 @@ func (a *Admission) underDaemon(ctx context.Context, n *NodeRun, g group, next E
 	var mu sync.Mutex
 	var timer *time.Timer
 	queuedOnce := false
+	var waiting group
 	defer func() {
 		mu.Lock()
 		if timer != nil {
@@ -208,26 +226,26 @@ func (a *Admission) underDaemon(ctx context.Context, n *NodeRun, g group, next E
 	onQueued := func(q wingwire.Queued) {
 		if !queuedOnce {
 			queuedOnce = true
-			hostEventJSON(ctx, n.Run, n.Plan.ID, "concurrency_wait", map[string]any{
-				"key": g.key, "kind": "queued", "position": q.Position, "queue_length": q.QueueLength,
-			})
-		}
-		if (g.policy != store.OnLimitQueue && g.policy != "") || g.queueTO <= 0 {
-			return
+			hostEventJSON(ctx, n.Run, n.Plan.ID, "concurrency_wait", map[string]any{"key": q.Key, "kind": "queued", "position": q.Position, "queue_length": q.QueueLength})
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		switch {
-		case q.Key == g.key && timer == nil:
-			timer = time.AfterFunc(g.queueTO, func() { cancelAcquire(errQueueTimeout) })
-		case q.Key != g.key && timer != nil:
+		g := byKey[q.Key]
+		if waiting.key != g.key && timer != nil {
 			timer.Stop()
 			timer = nil
 		}
+		waiting = g
+		if timer == nil && g.queueTO > 0 && (g.policy == store.OnLimitQueue || g.policy == "") {
+			timer = time.AfterFunc(g.queueTO, func() { cancelAcquire(errQueueTimeout) })
+		}
 	}
 	reporter, waited := a.queuedReporter(ctx, n, onQueued)
-	lease, err := a.Daemon.Acquire(acquireCtx, a.request(n, &claim), reporter)
+	lease, err := a.Daemon.Acquire(acquireCtx, a.request(n, claims), reporter)
 	if err != nil {
+		mu.Lock()
+		g := waiting
+		mu.Unlock()
 		var admErr *wingdclient.AdmissionError
 		switch {
 		case errors.Is(context.Cause(acquireCtx), errQueueTimeout) && ctx.Err() == nil:
@@ -236,7 +254,7 @@ func (a *Admission) underDaemon(ctx context.Context, n *NodeRun, g group, next E
 		case ctx.Err() != nil:
 			return admissionFailed(ctx, ctx.Err())
 		case errors.As(err, &admErr) && admErr.Policy == wingwire.PolicySkip:
-			return Result{Outcome: sparkwing.SkippedConcurrent}
+			return Result{Outcome: sparkwing.Skipped}
 		case errors.As(err, &admErr) && admErr.Policy == wingwire.PolicyFail:
 			return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("concurrency key %q: slot full under OnLimit:Fail", g.key)}
 		}
@@ -366,7 +384,7 @@ func (a *Admission) underSlot(ctx context.Context, h slotHolder, g group, run fu
 		if h.nodeID == "" {
 			hostEvent(ctx, h.run, "", "plan_skipped_concurrent", nil)
 		}
-		return Result{Outcome: sparkwing.SkippedConcurrent}
+		return Result{Outcome: sparkwing.Skipped}
 	case store.AcquireFailed:
 		if h.nodeID == "" {
 			hostEvent(ctx, h.run, "", "plan_failed_concurrent", nil)
@@ -548,9 +566,9 @@ func concHolders(holders []store.ConcurrencyHolder) []map[string]any {
 
 func slotOutcome(o sparkwing.Outcome) string {
 	switch o {
-	case sparkwing.Success, sparkwing.Cached:
+	case sparkwing.Success, sparkwing.Memoized:
 		return "success"
-	case sparkwing.Skipped, sparkwing.SkippedConcurrent:
+	case sparkwing.Skipped:
 		return "skipped"
 	case sparkwing.Superseded:
 		return "superseded"

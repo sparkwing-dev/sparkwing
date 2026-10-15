@@ -41,9 +41,9 @@ func TestClosures(t *testing.T) {
 		OpenLog: func(_ context.Context, _, node string) (NodeLog, error) { return memLog{logs: logs, node: node}, nil },
 	}
 	cfg := Config{
-		Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second},
+		Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
 		Pipeline: "attempts", Args: args,
-		Run:   nodeproto.RunContextOld{RunID: "run-hooks"},
+		Run:   nodeproto.RunContext{RunID: "run-hooks"},
 		State: openStore(t), Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
 		Attempts: attempts,
 		Debug:    Debug{PauseBefore: []string{"skipped"}, PauseTimeout: time.Millisecond},
@@ -166,12 +166,12 @@ func TestClosures(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var doc nodeproto.PlanDocOld
+		var doc nodeproto.PlanDoc
 		if err := json.Unmarshal(run.PlanSnapshot, &doc); err != nil {
 			t.Fatal(err)
 		}
-		var hooked nodeproto.PlanNode
-		for _, n := range doc.Nodes {
+		var hooked nodeproto.JobSpec
+		for _, n := range doc.Jobs {
 			if n.ID == "hooked" {
 				hooked = n
 			}
@@ -179,7 +179,7 @@ func TestClosures(t *testing.T) {
 		if err := os.Remove(filepath.Join(marker, "hooked")); err != nil {
 			t.Fatal(err)
 		}
-		r := &Run{ID: "run-hooks", Doc: doc, Pipeline: "attempts", Args: args, Context: cfg.Run, State: cfg.State, Logger: cfg.Logger}
+		r := &Run{ID: "run-hooks", Doc: doc, Pipeline: "attempts", Args: args, Context: cfg.Run, State: cfg.State, Logger: cfg.Logger, validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 		exec := attempts.executor(&cfg)
 		var retried []Result
 		first := exec(t.Context(), &NodeRun{Run: r, Plan: hooked, Attempt: 1, Retried: func(res Result) bool {

@@ -4,7 +4,10 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -335,9 +338,13 @@ func dispatchedHeld(t *testing.T, stop func(context.CancelCauseFunc)) *hostedTri
 		t.Fatal(err)
 	}
 	var hash string
-	for _, n := range planned.Doc.Nodes {
+	for _, n := range planned.Doc.Jobs {
 		if n.ID == "held" {
-			hash = n.SpecHash
+			raw, err := json.Marshal(n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hash = fmt.Sprintf("%x", sha256.Sum256(raw))
 		}
 	}
 	ctx := store.WithoutCreditMetering(t.Context())
@@ -556,9 +563,7 @@ func TestDispatchThrough_BoundsTheNodeByAllItsAttempts(t *testing.T) {
 		got = req
 		return runner.Result{Outcome: sparkwing.Success}
 	}), "p")
-	exec(t.Context(), &nodehost.NodeRun{Run: &nodehost.Run{ID: "r"}, Plan: nodeproto.PlanNode{ID: "n", Modifiers: &nodeproto.PlanModifiers{
-		TimeoutMS: 5 * 60_000, Retry: 1, RetryAuto: true, RetryBackoffMS: 6 * 60_000, ResCores: 4, ResMemoryBytes: 8 << 30,
-	}}})
+	exec(t.Context(), &nodehost.NodeRun{Run: &nodehost.Run{ID: "r"}, Plan: nodeproto.JobSpec{ID: "n", TimeoutMS: testOrchestratorPtr[int64](5 * 60_000), Retry: &nodeproto.RetrySpec{Attempts: 1, BackoffMS: testOrchestratorPtr[int64](6 * 60_000)}, Resources: &nodeproto.ResourceSpec{Cores: testOrchestratorPtr[float64](4), MemoryBytes: testOrchestratorPtr[int64](8 << 30)}}})
 	if got.Timeout != 16*time.Minute || got.Cores != 4 || got.MemoryBytes != 8<<30 {
 		t.Fatalf("request timeout=%s cores=%v memory=%d, want 16m, 4 cores and 8 GiB", got.Timeout, got.Cores, got.MemoryBytes)
 	}
@@ -571,8 +576,8 @@ func TestTriggerHost_PlansWithTheTriggersActorAndPullRequest(t *testing.T) {
 	h := newHostedTriggerWith(t, map[string]string{"envout": envOut}, func(trig *store.Trigger) {
 		trig.TriggerUser, trig.TriggerSource = "alice", "github"
 		trig.TriggerEnv = map[string]string{
-			sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest, sparkwing.EnvPRNumber: "42",
-			sparkwing.EnvPRBaseRef: "main", sparkwing.EnvPRHeadRef: "feature",
+			"GITHUB_EVENT_NAME": "pull_request", "SPARKWING_PR_NUMBER": "42",
+			"SPARKWING_PR_BASE_REF": "main", "SPARKWING_PR_HEAD_REF": "feature",
 		}
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)

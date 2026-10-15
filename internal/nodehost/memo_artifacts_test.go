@@ -114,7 +114,7 @@ func TestMemoMaterializationRunsOnRefusal(t *testing.T) {
 				}}
 				m := &Memo{Slots: memoTestSlots{}}
 				ran := false
-				r := &memoRun{cfg: cfg, m: m, adm: &Admission{Slots: m.Slots}, n: &NodeRun{Run: &Run{ID: "run", State: state, Logger: slog.New(slog.DiscardHandler)}, Plan: nodeproto.PlanNode{ID: "job"}}, g: group{key: "memo", policy: store.OnLimitCoalesce, capacity: 1, cost: 1, memoHash: strings.Repeat("a", 64)}, next: func(context.Context, *NodeRun) Result {
+				r := &memoRun{cfg: cfg, m: m, adm: &Admission{Slots: m.Slots}, n: &NodeRun{Run: &Run{ID: "run", State: state, Logger: slog.New(slog.DiscardHandler)}, Plan: nodeproto.JobSpec{ID: "job"}}, g: group{key: "memo", policy: store.OnLimitCoalesce, capacity: 1, cost: 1, memoHash: strings.Repeat("a", 64)}, next: func(context.Context, *NodeRun) Result {
 					ran = true
 					return Result{Outcome: sparkwing.Success, Output: []byte(`"own"`), recorded: true}
 				}}
@@ -129,7 +129,7 @@ func TestMemoMaterializationRunsOnRefusal(t *testing.T) {
 				}
 				switch failure {
 				case "none":
-					if ran || !copied || string(got.Output) != `"leader"` || got.Outcome != sparkwing.Cached {
+					if ran || !copied || string(got.Output) != `"leader"` || got.Outcome != sparkwing.Memoized {
 						t.Fatalf("result %+v copied=%v ran=%v", got, copied, ran)
 					}
 				case "start":

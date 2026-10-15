@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -28,7 +29,7 @@ type Config struct {
 	Args map[string]string
 	// Run is the run context plan code reads. RunID is required; a zero
 	// StartedAt means now and an empty trigger source means manual.
-	Run nodeproto.RunContextOld
+	Run nodeproto.RunContext
 	// Requires are the placement labels the host reads from the pipeline's
 	// YAML; they join the plan's own.
 	Requires []string
@@ -55,7 +56,8 @@ type Config struct {
 	Invocation map[string]any
 	// CheckArgs, when set, refuses the run before its row is recorded, given
 	// the arguments the run plans with, describe's defaults filled in.
-	CheckArgs func(map[string]string) error
+	CheckArgs    func(map[string]string) error
+	CheckSecrets func(context.Context, []string) error
 	// Memo reuses memoized nodes' earlier results; nil runs every node.
 	Memo *Memo
 	// Dispatch, when set, runs each admitted node elsewhere, whole: the
@@ -122,9 +124,9 @@ type Executor func(ctx context.Context, n *NodeRun) Result
 // NodeRun is one node's turn through the executor chain.
 type NodeRun struct {
 	Run  *Run
-	Plan nodeproto.PlanNode
+	Plan nodeproto.JobSpec
 	// Failure says how the parent failed; it is set only for an on_failure node.
-	Failure *nodeproto.Failure
+	Failure *nodeproto.JobFailure
 	// Attempt is the 1-based attempt number; zero means 1.
 	Attempt int
 	// Retried reports whether the retries layer starts another attempt after
@@ -156,14 +158,17 @@ type NodeRun struct {
 
 // Run is the hosted run an executor works within.
 type Run struct {
-	ID string
+	validation nodeproto.ValidationContext
+	ID         string
 	// Doc is the accepted plan. Nodes added with [Run.Add] are not in it.
-	Doc nodeproto.PlanDocOld
+	Doc      nodeproto.PlanDoc
+	Secrets  []string
+	Requires []string
 	// Pipeline, Args and Context are the accepted plan's request; every
 	// later process of the run plans with the same.
 	Pipeline string
 	Args     map[string]string
-	Context  nodeproto.RunContextOld
+	Context  nodeproto.RunContext
 	StartAt  string
 	StopAt   string
 	State    storage.StateStoreOld
@@ -178,13 +183,13 @@ type Run struct {
 
 type addRequest struct {
 	ctx   context.Context
-	nodes []nodeproto.PlanNode
+	nodes []nodeproto.JobSpec
 	reply chan error
 }
 
 // Add validates nodes against the run's nodes, records their rows and
 // schedules them. Only an executor of a running node of this run may call it.
-func (r *Run) Add(ctx context.Context, nodes ...nodeproto.PlanNode) error {
+func (r *Run) Add(ctx context.Context, nodes ...nodeproto.JobSpec) error {
 	// safety: the reply is buffered so the scheduler never waits on a caller that gave up.
 	req := addRequest{ctx: ctx, nodes: nodes, reply: make(chan error, 1)}
 	select {
@@ -264,6 +269,9 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	if err == nil && cfg.CheckArgs != nil {
 		err = cfg.CheckArgs(args)
 	}
+	if err == nil && cfg.CheckSecrets != nil {
+		err = cfg.CheckSecrets(ctx, slices.Clone(sess.requiredSecrets))
+	}
 	err = releaseDescribed(sess, known, err)
 	if err == nil {
 		err = cfg.State.CreateRun(ctx, runRow(cfg, args))
@@ -294,9 +302,6 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	defer stopHeartbeat()
 
 	doc, raw, err := planRun(ctx, sess, cfg.Pipeline, args, cfg.Run)
-	if err == nil {
-		doc, raw, err = hostRequires(doc, raw, cfg.Requires)
-	}
 	closeSession()
 	if err == nil {
 		err = validateStepRange(doc, cfg.StartAt, cfg.StopAt)
@@ -316,7 +321,9 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		res.Status = runStatus(res.Err)
 		return res, nil
 	}
-	releaseLease = runPlanned(ctx, &cfg, newRun(&cfg, doc, args, skips), &res)
+	run := newRun(&cfg, doc, args, skips)
+	run.Secrets = slices.Clone(sess.secrets)
+	releaseLease = runPlanned(ctx, &cfg, run, &res)
 	return res, nil
 }
 
@@ -331,7 +338,7 @@ func runPlanned(ctx context.Context, cfg *Config, run *Run, res *RunResult) (rel
 			return memoGenerate(ctx, cfg, n, output)
 		}
 	}
-	if err := s.add(ctx, ctx, run.Doc.Nodes, nil); err != nil {
+	if err := s.add(ctx, ctx, run.Doc.Jobs, nil); err != nil {
 		res.Status, res.Err = "failed", err
 		return release
 	}
@@ -360,9 +367,9 @@ func runPlanned(ctx context.Context, cfg *Config, run *Run, res *RunResult) (rel
 	return release
 }
 
-func newRun(cfg *Config, doc nodeproto.PlanDocOld, args, skips map[string]string) *Run {
+func newRun(cfg *Config, doc nodeproto.PlanDoc, args, skips map[string]string) *Run {
 	run := &Run{
-		ID: cfg.Run.RunID, Doc: doc, Pipeline: cfg.Pipeline, Args: args, Context: cfg.Run,
+		ID: cfg.Run.RunID, Doc: doc, validation: cfg.Session.Validation, Requires: slices.Clone(cfg.Requires), Pipeline: cfg.Pipeline, Args: args, Context: cfg.Run,
 		StartAt: cfg.StartAt, StopAt: cfg.StopAt, State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest),
 		onlySkips: skips,
 	}
@@ -429,8 +436,8 @@ func chain(cfg *Config) Executor {
 		if err := n.Run.State.StartNode(ctx, n.Run.ID, n.Plan.ID); err != nil {
 			return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("start node %s: %w", n.Plan.ID, err)}
 		}
-		// safety: the dispatcher starts a node once per dispatch, and only retry_auto re-dispatches.
-		if m := n.Plan.Modifiers; n.Attempt <= 1 || (m != nil && m.RetryAuto) {
+		// safety: application retries share one node start event.
+		if n.Attempt <= 1 {
 			hostEvent(ctx, n.Run, n.Plan.ID, "node_started", nil)
 		}
 		return inner(ctx, n)
@@ -445,7 +452,7 @@ func chain(cfg *Config) Executor {
 type scheduler struct {
 	run     *Run
 	exec    Executor
-	nodes   []nodeproto.PlanNode
+	nodes   []nodeproto.JobSpec
 	results map[string]Result
 	started map[string]bool
 	order   []string
@@ -496,7 +503,7 @@ func (s *scheduler) loop(ctx context.Context) {
 }
 
 func (s *scheduler) startReady(ctx context.Context, done chan<- finished, running *int) (progressed bool) {
-	byID := make(map[string]nodeproto.PlanNode, len(s.nodes))
+	byID := make(map[string]nodeproto.JobSpec, len(s.nodes))
 	for _, n := range s.nodes {
 		byID[n.ID] = n
 	}
@@ -551,22 +558,22 @@ func (s *scheduler) startReady(ctx context.Context, done chan<- finished, runnin
 
 // safety: one rule for the run host and a dispatched recovery node's host,
 // which reads its parent's reason and error from the row this host recorded.
-func parentFailure(parent, reason, message string) *nodeproto.Failure {
+func parentFailure(parent, reason, message string) *nodeproto.JobFailure {
 	stage := "action"
 	if reason == store.FailureVerify {
 		stage = "verify"
 	}
-	return &nodeproto.Failure{Node: parent, Stage: stage, Message: message}
+	return &nodeproto.JobFailure{Job: parent, Stage: stage, Error: &apierr.Error{Code: apierr.SDKError, Message: message}}
 }
 
 // safety: a continue_on_error upstream's failure does not hold back its
 // dependents, as in the in-process dispatcher.
-func (s *scheduler) upstreamFailed(waits []string, byID map[string]nodeproto.PlanNode) bool {
+func (s *scheduler) upstreamFailed(waits []string, byID map[string]nodeproto.JobSpec) bool {
 	for _, d := range waits {
 		if s.results[d].Outcome.OK() {
 			continue
 		}
-		if m := byID[d].Modifiers; m == nil || !m.ContinueOnError {
+		if !byID[d].ContinueOnError {
 			return true
 		}
 	}
@@ -588,7 +595,7 @@ func (s *scheduler) finish(ctx context.Context, id string, res Result) {
 
 func (s *scheduler) skipAll(ctx context.Context) {
 	for _, n := range s.nodes {
-		s.terminal(ctx, n.ID, sparkwing.SkippedConcurrent, "a plan concurrency group is full under OnLimit:Skip")
+		s.terminal(ctx, n.ID, sparkwing.Skipped, "a plan concurrency group is full under OnLimit:Skip")
 	}
 }
 
@@ -607,8 +614,8 @@ func (s *scheduler) terminal(ctx context.Context, id string, outcome sparkwing.O
 
 // safety: from, when set, names the source and generator that returned nodes, and each row records it with the
 // node's whole spec, so no later host of the run generates the node again.
-func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNode, from *expansionFrom) error {
-	if err := validateNodes(append(slices.Clone(s.nodes), nodes...)); err != nil {
+func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.JobSpec, from *expansionFrom) error {
+	if err := validateNodes(append(slices.Clone(s.nodes), nodes...), s.run.validation); err != nil {
 		return err
 	}
 	existing, err := s.resumedRows(writeCtx, nodes)
@@ -652,7 +659,7 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNod
 // safety: a resumed run reads every row an earlier host left before it
 // writes any, so a node planned under another spec_hash refuses the whole
 // resume with plan_drift and no row, a live holder's included, is touched.
-func (s *scheduler) resumedRows(ctx context.Context, nodes []nodeproto.PlanNode) (map[string]*store.Node, error) {
+func (s *scheduler) resumedRows(ctx context.Context, nodes []nodeproto.JobSpec) (map[string]*store.Node, error) {
 	if !s.resume {
 		return nil, nil
 	}
@@ -664,10 +671,10 @@ func (s *scheduler) resumedRows(ctx context.Context, nodes []nodeproto.PlanNode)
 			continue
 		case err != nil:
 			return nil, fmt.Errorf("read node %s: %w", n.ID, err)
-		case row.SpecHash != n.SpecHash:
-			return nil, &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(
+		case row.SpecHash != jobHash(n):
+			return nil, &apierr.Error{Code: apierr.PlanDrift, Message: fmt.Sprintf(
 				"node %s was planned as %s by an earlier host of this run and as %s now; plan code must be deterministic for a run",
-				n.ID, row.SpecHash, n.SpecHash)}
+				n.ID, row.SpecHash, jobHash(n))}
 		}
 		rows[n.ID] = row
 	}
@@ -675,7 +682,7 @@ func (s *scheduler) resumedRows(ctx context.Context, nodes []nodeproto.PlanNode)
 }
 
 // safety: terminal results survive resume; the reaper returns recoverable work to pending.
-func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.PlanNode, row *store.Node) {
+func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.JobSpec, row *store.Node) {
 	id := n.ID
 	if row.Status != "done" || row.Outcome == "" {
 		return
@@ -688,7 +695,7 @@ func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.PlanNode, row *sto
 	if generatesNodes(n, res.Outcome) {
 		batches, err := storedExpansions(ctx, s.run.State, s.run.ID, n)
 		if err != nil {
-			for _, g := range n.Closures.Generator {
+			for _, g := range n.Closures.Generate {
 				res.expansions = append(res.expansions, expansion{closure: g, err: err})
 			}
 		} else {
@@ -713,18 +720,16 @@ func recordedOutput(ctx context.Context, st storage.StateStoreOld, runID, id str
 	return out, err
 }
 
-func pendingRow(run *Run, n nodeproto.PlanNode) store.Node {
+func pendingRow(run *Run, n nodeproto.JobSpec) store.Node {
 	row := store.Node{
-		RunID: run.ID, NodeID: n.ID, Status: "pending", RequestedSlots: 1, SpecHash: n.SpecHash,
-		Deps: append(slices.Clone(n.Deps), n.OptionalDeps...),
+		RunID: run.ID, NodeID: n.ID, Status: "pending", RequestedSlots: 1, SpecHash: jobHash(n),
+		Deps: append(slices.Clone(n.Needs), n.NeedsIfPresent...),
 	}
-	var runsOn, whenRunner []string
-	if m := n.Modifiers; m != nil {
-		runsOn, whenRunner = m.RunsOn, m.WhenRunner
-		row.PrefersLabels = m.Prefers
-		row.RequestedCores, row.RequestedMemoryBytes = m.ResCores, m.ResMemoryBytes
+	row.PrefersLabels = slices.Clone(n.Prefers)
+	if r := n.Resources; r != nil {
+		row.RequestedCores, row.RequestedMemoryBytes = value(r.Cores), value(r.MemoryBytes)
 	}
-	row.NeedsLabels = appendNew(appendNew(slices.Clone(runsOn), run.Doc.Requires), whenRunner)
+	row.NeedsLabels = appendNew(slices.Clone(n.Requires), run.Requires)
 	return row
 }
 
@@ -776,7 +781,7 @@ func (s *scheduler) nodeVerdict() (string, error) {
 	var failed, cancelled, superseded []string
 	for _, n := range s.nodes {
 		oc := s.results[n.ID].Outcome
-		if oc.OK() || n.OnFailureOf != "" || (n.Modifiers != nil && n.Modifiers.Optional) {
+		if oc.OK() || n.OnFailureOf != "" || n.Optional {
 			continue
 		}
 		switch oc {
@@ -889,5 +894,5 @@ func boundedNodeErrText(text string) string {
 
 type discardSink struct{}
 
-func (discardSink) Text(string, string)        {}
-func (discardSink) Record(nodeproto.LogRecord) {}
+func (discardSink) Text(string, string)       {}
+func (discardSink) Record(nodeproto.FrameLog) {}

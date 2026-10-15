@@ -4,7 +4,10 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -50,9 +53,13 @@ func newClaimedCommand(t *testing.T, args map[string]string, nodeID string) *cla
 		t.Fatal(err)
 	}
 	var hash string
-	for _, n := range planned.Doc.Nodes {
+	for _, n := range planned.Doc.Jobs {
 		if n.ID == nodeID {
-			hash = n.SpecHash
+			raw, err := json.Marshal(n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hash = fmt.Sprintf("%x", sha256.Sum256(raw))
 		}
 	}
 	ctx := store.WithoutCreditMetering(t.Context())

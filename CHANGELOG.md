@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **storage:** SDK and host dependency-cache keys share workspace-contained
+  lockfile reads. Go module caches use the protocol resolver. Signed-data cache
+  saves refresh the upload binding after retries. Refused bindings run cold.
+
 - **storage:** Filesystem and S3 manifest readers verify stored length, digest
   and successful close before returning file metadata. Authenticated controller
   binding remains pending.

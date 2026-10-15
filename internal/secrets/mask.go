@@ -182,6 +182,18 @@ func (m *Masker) Values() []string {
 	return out
 }
 
+// ContainsSecret reports whether an identifier contains a registered masking pattern.
+func (m *Masker) ContainsSecret(identifier string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, value := range m.values {
+		if strings.Contains(identifier, value) {
+			return true
+		}
+	}
+	return false
+}
+
 // Stream masks one text stream that arrives as lines, and as pieces of a line
 // too long to hold whole, so a value split across pieces is still masked.
 // One goroutine owns a Stream.

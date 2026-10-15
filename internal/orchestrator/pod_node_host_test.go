@@ -222,7 +222,7 @@ func TestLaunchedNode_PlansWithTheTriggersActorAndPullRequest(t *testing.T) {
 	base := newLaunchedRun(t, nil)
 	r := &launchedRun{
 		st: base.st, url: base.url, runID: "run-pull-request", src: base.src, user: "octocat",
-		triggerEnv: map[string]string{sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest, sparkwing.EnvPRNumber: "42"},
+		triggerEnv: map[string]string{"GITHUB_EVENT_NAME": "pull_request", "SPARKWING_PR_NUMBER": "42"},
 	}
 	envOut := filepath.Join(t.TempDir(), "env")
 	r.create(t, map[string]string{"envout": envOut})
@@ -291,7 +291,7 @@ func TestPodNode_WithoutAnAcceptedHashFailsClosed(t *testing.T) {
 // A retry_auto node's every attempt is its own claim and pod: before_run runs
 // in each, as every dispatch did, and after_run in the last, the one the
 // controller does not retry.
-func TestLaunchedNode_RetryAutoRunsAfterRunLast(t *testing.T) {
+func TestLaunchedNode_RetryRunsAfterRunLast(t *testing.T) {
 	trace := filepath.Join(t.TempDir(), "trace")
 	r := newLaunchedRun(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "trace": trace, "auto": "true"})
 	requests := r.recordRequests(t)
@@ -339,7 +339,7 @@ func (r *launchedRun) recordRequests(t *testing.T) string {
 
 // A retry_auto node whose before_run refuses never runs its body, though the
 // controller dispatches it again.
-func TestLaunchedNode_RetryAutoNeverRunsABodyItsBeforeRunRefused(t *testing.T) {
+func TestLaunchedNode_RetryNeverRunsABodyItsBeforeRunRefused(t *testing.T) {
 	envOut := filepath.Join(t.TempDir(), "env")
 	r := newLaunchedRun(t, map[string]string{
 		"envout": envOut, "trace": filepath.Join(t.TempDir(), "trace"), "auto": "true", "refuse": "true",
@@ -443,8 +443,8 @@ func TestPodNodeLog_SealsIncompleteAfterALoss(t *testing.T) {
 // the first run's artifact manifest with it; a source that recorded no
 // manifest runs as a miss, since a hit would hand its consumers nothing.
 func TestLaunchedNode_MemoHitsThroughTheClaim(t *testing.T) {
-	t.Run("Hit", func(t *testing.T) { podMemoRuns(t, false, true, sparkwing.Cached, "body\n") })
-	t.Run("ArtifactsHit", func(t *testing.T) { podMemoRuns(t, true, true, sparkwing.Cached, "body\n") })
+	t.Run("Hit", func(t *testing.T) { podMemoRuns(t, false, true, sparkwing.Memoized, "body\n") })
+	t.Run("ArtifactsHit", func(t *testing.T) { podMemoRuns(t, true, true, sparkwing.Memoized, "body\n") })
 	t.Run("NoManifestRunsAsAMiss", func(t *testing.T) { podMemoRuns(t, true, false, sparkwing.Success, "body\nbody\n") })
 }
 

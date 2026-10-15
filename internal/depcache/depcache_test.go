@@ -10,10 +10,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	goruntime "runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
 )
+
+var keyRE = regexp.MustCompile(`^dep-[a-f0-9]{64}$`)
+
+func keyForFile(name, scope, file string) (string, error) {
+	return depcachekey.Files(filepath.Dir(file), name, scope, []string{filepath.Base(file)})
+}
 
 func TestDeriveDepCacheKeyStableAndSafe(t *testing.T) {
 	dir := t.TempDir()
@@ -22,11 +31,11 @@ func TestDeriveDepCacheKeyStableAndSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	k1, err := deriveKey("go-modules", "", lock)
+	k1, err := keyForFile("go-modules", "", lock)
 	if err != nil {
 		t.Fatalf("derive: %v", err)
 	}
-	k2, err := deriveKey("go-modules", "", lock)
+	k2, err := keyForFile("go-modules", "", lock)
 	if err != nil {
 		t.Fatalf("derive again: %v", err)
 	}
@@ -34,9 +43,9 @@ func TestDeriveDepCacheKeyStableAndSafe(t *testing.T) {
 		t.Fatalf("key not stable: %q vs %q", k1, k2)
 	}
 	if !keyRE.MatchString(k1) {
-		t.Fatalf("key %q fails the cache service's key pattern", k1)
+		t.Fatalf("key %q is not safe for local archive names", k1)
 	}
-	wantPrefix := "dep-go-modules-" + goruntime.GOOS + "-" + goruntime.GOARCH + "-"
+	wantPrefix := "dep-"
 	if !strings.HasPrefix(k1, wantPrefix) {
 		t.Fatalf("key %q missing prefix %q", k1, wantPrefix)
 	}
@@ -44,7 +53,7 @@ func TestDeriveDepCacheKeyStableAndSafe(t *testing.T) {
 	if err := os.WriteFile(lock, []byte("example.com/mod v1.1.0 h1:def\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	k3, err := deriveKey("go-modules", "", lock)
+	k3, err := keyForFile("go-modules", "", lock)
 	if err != nil {
 		t.Fatalf("derive after edit: %v", err)
 	}
@@ -53,13 +62,13 @@ func TestDeriveDepCacheKeyStableAndSafe(t *testing.T) {
 	}
 }
 
-func TestDeriveDepCacheKeySanitizesName(t *testing.T) {
+func TestDependencyKeyHashesArbitraryNames(t *testing.T) {
 	dir := t.TempDir()
 	lock := filepath.Join(dir, "lock")
 	if err := os.WriteFile(lock, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	key, err := deriveKey("weird/name with spaces", "", lock)
+	key, err := keyForFile("weird/name with spaces", "", lock)
 	if err != nil {
 		t.Fatalf("derive: %v", err)
 	}
@@ -346,11 +355,11 @@ func TestDirKeyIncludesPath(t *testing.T) {
 	if err := os.WriteFile(lock, []byte("same content\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ka, err := deriveKey("vendor", "service-a/vendor", lock)
+	ka, err := keyForFile("vendor", "service-a/vendor", lock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	kb, err := deriveKey("vendor", "service-b/vendor", lock)
+	kb, err := keyForFile("vendor", "service-b/vendor", lock)
 	if err != nil {
 		t.Fatal(err)
 	}

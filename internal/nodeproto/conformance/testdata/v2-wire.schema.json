@@ -1,0 +1,399 @@
+{
+  "$defs": {
+    "EngineIdentity": {
+      "additionalProperties": true,
+      "properties": {
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "type": "object"
+    },
+    "Error": {
+      "additionalProperties": true,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": {},
+          "type": "object"
+        },
+        "hint": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "EvalResult": {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/Error"
+        },
+        "value": {}
+      },
+      "required": [
+        "value"
+      ],
+      "type": "object"
+    },
+    "FrameLog": {
+      "additionalProperties": true,
+      "properties": {
+        "attrs": {},
+        "event": {
+          "type": "string"
+        },
+        "level": {
+          "type": "string"
+        },
+        "msg": {
+          "type": "string"
+        },
+        "step": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ts"
+      ],
+      "type": "object"
+    },
+    "Git": {
+      "additionalProperties": true,
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "default_branch": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "repo_url": {
+          "type": "string"
+        },
+        "sha": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha",
+        "branch"
+      ],
+      "type": "object"
+    },
+    "HelloResult": {
+      "additionalProperties": true,
+      "properties": {
+        "features": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "protocol": {
+          "type": "integer"
+        },
+        "sdk": {
+          "$ref": "#/$defs/SDKIdentity"
+        }
+      },
+      "required": [
+        "protocol",
+        "sdk",
+        "features"
+      ],
+      "type": "object"
+    },
+    "JobFailure": {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/Error"
+        },
+        "job": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "job",
+        "stage",
+        "error"
+      ],
+      "type": "object"
+    },
+    "ProcessBinding": {
+      "additionalProperties": true,
+      "properties": {
+        "job_id": {
+          "type": "string"
+        },
+        "routes": {
+          "$ref": "#/$defs/ProcessRoutes"
+        },
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "job_id",
+        "routes"
+      ],
+      "type": "object"
+    },
+    "ProcessRoutes": {
+      "additionalProperties": true,
+      "properties": {
+        "bearer": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "bearer"
+      ],
+      "type": "object"
+    },
+    "PullRequest": {
+      "additionalProperties": true,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "base_ref": {
+          "type": "string"
+        },
+        "base_sha": {
+          "type": "string"
+        },
+        "head_ref": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "number": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "number"
+      ],
+      "type": "object"
+    },
+    "Reply": {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/Error"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "reply": {
+          "type": "string"
+        },
+        "result": {}
+      },
+      "required": [
+        "reply",
+        "ok"
+      ],
+      "type": "object"
+    },
+    "Request": {
+      "additionalProperties": true,
+      "properties": {
+        "args": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "attempt": {
+          "type": "integer"
+        },
+        "binding": {
+          "$ref": "#/$defs/ProcessBinding"
+        },
+        "closure": {
+          "type": "string"
+        },
+        "engine": {
+          "$ref": "#/$defs/EngineIdentity"
+        },
+        "failure": {
+          "$ref": "#/$defs/JobFailure"
+        },
+        "id": {
+          "type": "string"
+        },
+        "input": {},
+        "job": {
+          "type": "string"
+        },
+        "op": {
+          "type": "string"
+        },
+        "pipeline": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "integer"
+        },
+        "run": {
+          "$ref": "#/$defs/RunContext"
+        },
+        "runner": {
+          "$ref": "#/$defs/RunnerIdentity"
+        },
+        "settled": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "step": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "op"
+      ],
+      "type": "object"
+    },
+    "RunContext": {
+      "additionalProperties": true,
+      "properties": {
+        "dry_run": {
+          "type": "boolean"
+        },
+        "git": {
+          "$ref": "#/$defs/Git"
+        },
+        "no_memo": {
+          "type": "boolean"
+        },
+        "pipeline": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "trigger": {
+          "$ref": "#/$defs/Trigger"
+        }
+      },
+      "required": [
+        "run_id",
+        "pipeline"
+      ],
+      "type": "object"
+    },
+    "RunResult": {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/Error"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "output": {}
+      },
+      "required": [
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "RunnerIdentity": {
+      "additionalProperties": true,
+      "properties": {
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "labels"
+      ],
+      "type": "object"
+    },
+    "SDKIdentity": {
+      "additionalProperties": true,
+      "properties": {
+        "language": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "language",
+        "version"
+      ],
+      "type": "object"
+    },
+    "Trigger": {
+      "additionalProperties": true,
+      "properties": {
+        "pull_request": {
+          "$ref": "#/$defs/PullRequest"
+        },
+        "source": {
+          "type": "string"
+        },
+        "user": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

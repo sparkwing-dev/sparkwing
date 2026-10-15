@@ -22,11 +22,11 @@ var (
 // firing lands in the attempt's cleanups, which the timeouts do not cover.
 func timeoutLayer(cfg *Config, next Executor) Executor {
 	return func(ctx context.Context, n *NodeRun) Result {
-		m := n.Plan.Modifiers
-		if m == nil || (m.TimeoutMS <= 0 && m.NoProgressTimeoutMS <= 0) {
+		m := n.Plan
+		if value(m.TimeoutMS) <= 0 && value(m.NoProgressTimeoutMS) <= 0 {
 			return next(ctx, n)
 		}
-		wall, idle := millis(m.TimeoutMS), millis(m.NoProgressTimeoutMS)
+		wall, idle := millis(value(m.TimeoutMS)), millis(value(m.NoProgressTimeoutMS))
 		actx, cancel := context.WithCancelCause(ctx)
 		defer cancel(nil)
 		attempt := *n

@@ -54,9 +54,13 @@ of accepted cache lookups.
 
 The dependency archive backend lives in `internal/blob/depcache`. Hosts construct
 it with their bound clients and install it through `depcache.WithBackend`.
-`internal/depcache` cannot import blob because protocol declarations import its
-cache specification. A download is verified before archive extraction publishes
+The executor cache layer uses the artifact binding for signed-data restores and
+refreshes it after successful execution before saving. A refused binding runs
+cold or skips the save. A download is verified before archive extraction publishes
 files. Without an injected backend, dependency caches use local files.
+The SDK and host share `internal/depcachekey` for workspace-contained lockfile
+reads and full SHA-256 keys. Candidate inputs outside the workspace, including
+escaping symlinks, disable caching. The protocol's Go resolver is `go-modules`.
 `ExtractArchiveStaged(ctx, reader, dir)` consumes the gzip trailer before
 publishing, so checksum errors and truncated trailers preserve the destination.
 Cancellation during extraction also preserves it. A failed restore runs cold

@@ -32,10 +32,13 @@ type Host interface {
 	Plan(context.Context, string, map[string]string) (nodeproto.PlanDoc, error)
 	RunStep(context.Context, *sparkwing.Plan, string, string) (json.RawMessage, error)
 	Eval(ctx context.Context, plan *sparkwing.Plan, jobID, closureID string, input json.RawMessage) (json.RawMessage, error)
+	// Records returns isolated log snapshots with numeric attributes represented as json.Number.
 	Records() []sparkwing.LogRecord
 	Masks() []string
+	// Close cancels and joins active operations and service callbacks. Call it outside those calls.
 	Close() error
 }
 
-// safety: New isolates fixtures so concurrent tests cannot share secrets, outputs or protocol state.
-func New(opts Options) Host { panic("unimplemented: c3-protocol-sdk") }
+// New snapshots option values so later caller edits cannot change an existing fixture.
+// Service callbacks remain callable dependencies owned by the test.
+func New(opts Options) Host { return newHost(opts) }

@@ -55,7 +55,7 @@ func (j *weatherStamp) run(ctx context.Context) (WeatherOut, error) {
 		TempF:    55 + rand.IntN(35),
 		At:       time.Now(),
 	}
-	sparkwing.AnnotateOld(ctx, fmt.Sprintf("forecast: %s · %d°F", out.Forecast, out.TempF))
+	sparkwing.Annotate(ctx, sparkwing.Annotation{Message: fmt.Sprintf("forecast: %s · %d°F", out.Forecast, out.TempF)})
 	return out, nil
 }
 

@@ -124,7 +124,7 @@ func (p *BuildImages) resolveTag(ctx context.Context) error {
 	}
 
 	sparkwing.Info(ctx, "resolved tag=%s; %d images to build", p.tag, len(p.refs))
-	sparkwing.AnnotateOld(ctx, "tag: "+p.tag)
+	sparkwing.Annotate(ctx, sparkwing.Annotation{Message: "tag: " + p.tag})
 	return nil
 }
 
@@ -165,7 +165,7 @@ func (p *BuildImages) buildOne(ctx context.Context, spec buildImageSpec) error {
 	if err != nil {
 		return fmt.Errorf("build %s: %w", spec.name, err)
 	}
-	sparkwing.AnnotateOld(ctx, spec.name+" -> "+imageRef)
+	sparkwing.Annotate(ctx, sparkwing.Annotation{Message: spec.name + " -> " + imageRef})
 	return nil
 }
 

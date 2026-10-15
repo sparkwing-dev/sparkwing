@@ -57,5 +57,8 @@ func TestStorage(t *testing.T) {
 	t.Run("storage-reference-edge-laundering/s3-manifests", checkStorageS3Manifests)
 	t.Run("storage-reference-edge-laundering/filesystem-manifest-records", checkStorageFilesystemManifestRecords)
 	t.Run("storage-reference-edge-laundering/s3-manifest-records", checkStorageS3ManifestRecords)
+	t.Run("storage-components/dependency-key-contract", checkStorageDependencyKeys)
+	t.Run("storage-components/dependency-key-containment", checkStorageKeyContainment)
+	t.Run("storage-components/go-modules-resolver", checkStorageGoModulesResolver)
 	pendingScenarios(t, "storage")
 }

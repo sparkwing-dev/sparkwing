@@ -5,7 +5,6 @@ package nodehost
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -15,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -83,7 +83,7 @@ func (p *planSinkText) Text(_, line string) {
 	p.text.WriteString(p.masker.Mask(line) + "\n")
 }
 
-func (p *planSinkText) Record(rec nodeproto.LogRecord) { p.Text("", rec.Msg) }
+func (p *planSinkText) Record(rec nodeproto.FrameLog) { p.Text("", rec.Message) }
 
 func (p *planSinkText) String() string {
 	p.mu.Lock()
@@ -131,10 +131,10 @@ func TestAttemptExecutor(t *testing.T) {
 		res, err := Execute(ctx, Config{
 			Session: SessionConfig{
 				Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second,
-				Env: env, Sink: h.plan,
+				Env: env, Sink: h.plan, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 			},
 			Pipeline: "attempts", Args: args,
-			Run:   nodeproto.RunContextOld{RunID: runID},
+			Run:   nodeproto.RunContext{RunID: runID},
 			State: h.st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
 			Attempts: &Attempts{
 				Routes: srv, Resolver: fixtureResolver{}, Masker: h.plan.masker,
@@ -213,9 +213,9 @@ func TestAttemptExecutor(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var snap nodeproto.PlanDocOld
-		if err := json.Unmarshal(run.PlanSnapshot, &snap); err != nil || len(snap.Nodes) != 1 || !strings.HasPrefix(snap.Nodes[0].SpecHash, "sha256:") {
-			t.Errorf("plan snapshot = %s (err %v), want each node stamped with its spec_hash", run.PlanSnapshot, err)
+		var snap nodeproto.PlanDoc
+		if err := json.Unmarshal(run.PlanSnapshot, &snap); err != nil || len(snap.Jobs) != 1 || snap.Jobs[0].ID != "build" {
+			t.Errorf("plan snapshot = %s (err %v), want the declared job", run.PlanSnapshot, err)
 		}
 	})
 
@@ -315,7 +315,7 @@ func TestAttemptExecutor(t *testing.T) {
 			t.Fatalf("status=%s err=%v, want failed", res.Status, res.Err)
 		}
 		row := h.row(t, "run-drift", "build")
-		if row.Outcome != string(sparkwing.Failed) || row.FailureReason != string(nodeproto.CodePlanDrift) {
+		if row.Outcome != string(sparkwing.Failed) || row.FailureReason != string(apierr.PlanDrift) {
 			t.Errorf("build row outcome=%q reason=%q error=%q, want failed with plan_drift", row.Outcome, row.FailureReason, row.Error)
 		}
 		if strings.Contains(h.logs.text("build"), "token=") {
@@ -329,7 +329,7 @@ func TestAttemptExecutor(t *testing.T) {
 			t.Fatalf("status=%s err=%v build=%+v, want failed with build still a success", res.Status, res.Err, res.Nodes["build"])
 		}
 		row := h.row(t, "run-crash", "crash")
-		if row.Outcome != string(sparkwing.Failed) || row.FailureReason != string(nodeproto.CodeSDKExited) {
+		if row.Outcome != string(sparkwing.Failed) || row.FailureReason != string(apierr.SDKExited) {
 			t.Errorf("crash row outcome=%q reason=%q error=%q, want failed with sdk_exited", row.Outcome, row.FailureReason, row.Error)
 		}
 		if _, err := os.Stat(filepath.Join(h.marker, "crash")); err != nil {
@@ -344,10 +344,6 @@ func TestAProtocolBreakAfterTheReplyFailsTheNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = srv.Close() })
-	hash, err := nodeproto.SpecHash([]byte(`{"id":"reply-then-garbage","deps":[]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
 	logs := &memLogs{records: map[string][]sparkwing.LogRecord{}}
 	masker := secrets.NewMasker()
 	a := &Attempts{
@@ -357,47 +353,17 @@ func TestAProtocolBreakAfterTheReplyFailsTheNode(t *testing.T) {
 	cfg := &Config{Session: SessionConfig{
 		Entry: pipelineentry.Binary(os.Args[0]), Grace: 500 * time.Millisecond,
 		// bug: the race runtime otherwise sleeps a second at exit, past the grace.
-		Env: append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
+		Env: append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 	}}
 	run := &Run{
-		ID: "run-garble", Pipeline: "p", Context: nodeproto.RunContextOld{RunID: "run-garble"},
-		State: openStore(t), Logger: slog.New(slog.DiscardHandler),
+		ID: "run-garble", Pipeline: "p", Context: nodeproto.RunContext{RunID: "run-garble"},
+		State: openStore(t), Logger: slog.New(slog.DiscardHandler), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
 	}
-	res := a.executor(cfg)(t.Context(), &NodeRun{Run: run, Plan: nodeproto.PlanNode{ID: "reply-then-garbage", SpecHash: hash}})
-	if res.Outcome != sparkwing.Failed || res.Reason != string(nodeproto.CodeProtocolError) {
+	res := a.executor(cfg)(t.Context(), &NodeRun{Run: run, Plan: nodeproto.JobSpec{ID: "reply-then-garbage", Steps: []nodeproto.StepSpec{{ID: "body"}}}})
+	if res.Outcome != sparkwing.Failed || res.Reason != string(apierr.ProtocolError) {
 		t.Errorf("result = %+v, want failed with protocol_error despite the success reply", res)
 	}
 	if len(masker.Values()) == 0 {
 		t.Error("the attempt's bearer was not registered with the run's masker")
-	}
-}
-
-func TestSpecHashRefusesAliasesAndDuplicates(t *testing.T) {
-	for name, plan := range map[string]string{
-		"folded spec_hash": `{"protocol":"1","nodes":[{"id":"a","deps":[],"\u017fpec_hash":"fixed"}]}`,
-		"cased spec_hash":  `{"protocol":"1","nodes":[{"id":"a","deps":[],"Spec_Hash":"fixed"}]}`,
-		"duplicate key":    `{"protocol":"1","nodes":[{"id":"a","deps":[],"env":{"X":"1","X":"2"}}]}`,
-		"folded nodes":     `{"protocol":"1","nodes":[],"NODES":[{"id":"a","spec_hash":"fixed"}]}`,
-	} {
-		_, err := nodeproto.StampSpecHashes([]byte(plan))
-		var perr *nodeproto.Error
-		if !errors.As(err, &perr) || perr.Code != nodeproto.CodePlanInvalid {
-			t.Errorf("%s: err = %v, want plan_invalid", name, err)
-		}
-	}
-}
-
-func TestSpecHashIgnoresKeyOrderAndItsOwnField(t *testing.T) {
-	a, err := nodeproto.SpecHash([]byte(`{"id":"a","deps":[],"env":{"X":"1","Y":"<2>"}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := nodeproto.SpecHash([]byte(`{ "env": {"Y":"<2>","X":"1"}, "spec_hash":"sha256:old", "deps":[], "id":"a" }`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, _ := nodeproto.SpecHash([]byte(`{"id":"a","deps":[],"env":{"X":"1","Y":"<3>"}}`))
-	if a != b || a == c {
-		t.Errorf("hashes a=%s b=%s c=%s, want a == b != c", a, b, c)
 	}
 }

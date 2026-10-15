@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
@@ -140,7 +141,7 @@ func planLaunchedRun(ctx context.Context, c *client.Client, src string, entry pi
 	if err != nil {
 		return fail(err)
 	}
-	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: entry, Dir: src, Sink: sink, Env: env},
+	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: entry, Dir: src, Sink: sink, Env: env, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLauncher, Secrets: masker}},
 		nodehost.PlanRequest{
 			Pipeline: run.Pipeline, Args: args, Run: podRunContext(run), Requires: requires, Masker: masker,
 			StartAt: flags.StartAt, StopAt: flags.StopAt, Only: flags.Only, CheckArgs: checkArgs,

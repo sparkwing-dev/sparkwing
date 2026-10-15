@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -41,7 +42,7 @@ func memoLayer(cfg *Config, next Executor) Executor {
 		return next
 	}
 	return func(ctx context.Context, n *NodeRun) Result {
-		if n.Plan.MemoKey == nil || n.Plan.MemoKey.Closure == "" {
+		if n.Plan.Memo == nil || n.Plan.Closures.MemoKey == "" {
 			return next(ctx, n)
 		}
 		if cfg.Artifacts == nil {
@@ -66,8 +67,8 @@ func memoLayer(cfg *Config, next Executor) Executor {
 			return Result{Outcome: sparkwing.Failed, Err: err}
 		}
 		g := group{key: key, policy: store.OnLimitCoalesce, capacity: 1, cost: 1, memoHash: hash}
-		if mod := n.Plan.Modifiers; mod != nil {
-			g.memoTTL = time.Duration(mod.CacheTTLMS) * time.Millisecond
+		if memo := n.Plan.Memo; memo != nil {
+			g.memoTTL = millis(value(memo.TTLMS))
 		}
 		mr := &memoRun{cfg: cfg, m: m, adm: &Admission{Slots: m.Slots}, n: n, next: next, g: g}
 		res, copied := mr.run(ctx, m.NoCache)
@@ -80,7 +81,7 @@ func memoLayer(cfg *Config, next Executor) Executor {
 
 // safety: an empty hash with a success is the closure's null, so the node runs without memo.
 func memoHash(ctx context.Context, cfg *Config, n *NodeRun) (string, Result) {
-	id := n.Plan.MemoKey.Closure
+	id := n.Plan.Closures.MemoKey
 	hash := ""
 	res := cfg.Attempts.process(ctx, cfg.Session, n, func(ctx context.Context, sess *Session, log *LogSink) Result {
 		keyFailed := func(err error) Result {
@@ -91,19 +92,19 @@ func memoHash(ctx context.Context, cfg *Config, n *NodeRun) (string, Result) {
 		}
 		kctx, cancel := context.WithTimeout(ctx, memoKeyBudget)
 		defer cancel()
-		var er nodeproto.EvalResultOld
-		if err := ask(kctx, sess, nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: id}, &er); err != nil {
+		var er nodeproto.EvalResult
+		if err := ask(kctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: id}, &er); err != nil {
 			return keyFailed(err)
 		}
-		if er.Error != nil {
-			return keyFailed(errors.New(*er.Error))
+		if err := er.ValidateValue("memo_key"); err != nil {
+			return keyFailed(err)
 		}
 		if len(er.Value) == 0 || string(er.Value) == "null" {
 			closureNote(log, LevelInfo, fmt.Sprintf("Memoize(%s) returned NoCache; memoization skipped", n.Plan.ID))
 			return Result{Outcome: sparkwing.Success}
 		}
 		if err := json.Unmarshal(er.Value, &hash); err != nil {
-			return keyFailed(hostError(nodeproto.CodeProtocolError, "cache_key %s returned %s, not a string or null", id, er.Value))
+			return keyFailed(hostError(apierr.ProtocolError, "cache_key %s returned %s, not a string or null", id, er.Value))
 		}
 		if hash == "" {
 			return keyFailed(errors.New("empty key"))
@@ -174,7 +175,7 @@ func (r *memoRun) hold(ctx context.Context, holder string) (Result, bool) {
 		res.recorded = true
 		return res
 	})
-	return result, copied && result.Outcome == sparkwing.Cached
+	return result, copied && result.Outcome == sparkwing.Memoized
 }
 
 func (r *memoRun) wait(ctx context.Context, initial store.AcquireSlotResponse) (Result, bool) {
@@ -264,13 +265,13 @@ func (r *memoRun) lookup(ctx context.Context) (Result, bool, error) {
 	if err != nil {
 		return Result{}, false, err
 	}
-	if !copied.Hit.Found || (len(r.n.Plan.Outputs) > 0 && !copied.Hit.Manifest.Set) {
+	if !copied.Hit.Found || (len(r.n.Plan.Artifacts) > 0 && !copied.Hit.Manifest.Set) {
 		return Result{}, false, nil
 	}
 	if err := r.n.Run.State.StartNode(ctx, r.n.Run.ID, r.n.Plan.ID); err != nil {
 		return Result{}, false, fmt.Errorf("start memoized job: %w", err)
 	}
-	return Result{Outcome: sparkwing.Cached, Output: copied.Output}, true, nil
+	return Result{Outcome: sparkwing.Memoized, Output: copied.Output}, true, nil
 }
 
 func (r *memoRun) save(ctx context.Context, output []byte) error {
@@ -292,7 +293,7 @@ func (r *memoRun) save(ctx context.Context, output []byte) error {
 		return err
 	}
 	request := blob.CommitRecordRequest{Source: data.Identity, Authority: data.Authority, Key: key}
-	if len(r.n.Plan.Outputs) > 0 {
+	if len(r.n.Plan.Artifacts) > 0 {
 		manifest, err := data.Records.LookupRecord(ctx, blob.RecordLookup{Authority: data.Authority, Budget: data.Budget, Key: blob.RecordKey{
 			Team: data.Identity.Team, Kind: blob.KindManifest, Name: data.Identity.RunID,
 			Scope: blob.Scope{Repo: data.Authority.Repo, Ref: data.Authority.Ref.Scope, Pipeline: data.Pipeline, Job: r.n.Plan.ID},
@@ -322,7 +323,7 @@ func (r *memoRun) save(ctx context.Context, output []byte) error {
 // own; a generated node rereads it from the source's row as usual.
 func memoGenerate(ctx context.Context, cfg *Config, n *NodeRun, output json.RawMessage) []expansion {
 	c := n.Plan.Closures
-	if c == nil || len(c.Generator) == 0 {
+	if len(c.Generate) == 0 {
 		return nil
 	}
 	held := *n
@@ -348,7 +349,7 @@ func memoGenerate(ctx context.Context, cfg *Config, n *NodeRun, output json.RawM
 	})(ctx, &held)
 	if res.Outcome != sparkwing.Success {
 		out = out[:0]
-		for _, id := range c.Generator {
+		for _, id := range c.Generate {
 			out = append(out, expansion{closure: id, err: res.Err})
 		}
 	}

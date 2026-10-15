@@ -51,6 +51,13 @@ writes cannot overwrite verified branch entries. Memo reads its own scope
 before a verified default-branch fallback. Dependency caches try their own
 ref, the pull-request base, then the verified default branch.
 
+Dependency-cache keys use the declaration, platform and the first present
+lockfile inside the workspace. The SDK's `DirCache.Key` and host share that
+calculation. Moving the checkout preserves its keys. An escaping path or symlink
+runs cold. Hosts with a signed-data binding restore through it and refresh the
+binding after successful execution, so retries save under the final attempt.
+A refused binding runs cold or skips the save. Local runs keep local archives.
+
 ## Source and package downloads
 
 Runners clone the source repository directly. The controller releases the

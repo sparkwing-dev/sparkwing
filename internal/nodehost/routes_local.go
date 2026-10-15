@@ -49,7 +49,7 @@ func (s *Server) serveLocalNodeOutput(w http.ResponseWriter, r *http.Request, g 
 	case row.Status != "done":
 		s.writeError(w, http.StatusConflict, "not_ready", "node "+quote(node)+" has not finished")
 		return
-	case row.Outcome != string(sparkwing.Success) && row.Outcome != string(sparkwing.Cached):
+	case row.Outcome != string(sparkwing.Success) && row.Outcome != string(sparkwing.Memoized):
 		s.writeError(w, http.StatusNotFound, "no_output", "node "+quote(node)+" finished without succeeding")
 		return
 	}
@@ -59,7 +59,7 @@ func (s *Server) serveLocalNodeOutput(w http.ResponseWriter, r *http.Request, g 
 // safety: as the controller does for a claim, a node reads another
 // pipeline's output only through a reference its plan declares.
 func (s *Server) serveLocalPipelineLatest(w http.ResponseWriter, r *http.Request, g *grant, pipeline, node string, maxAge time.Duration) {
-	if !slices.Contains(g.Refs, nodeproto.PlanPipelineRef{Pipeline: pipeline, Node: node}) {
+	if !slices.Contains(g.Refs, nodeproto.PipelineReference{Pipeline: pipeline, Job: node}) {
 		s.referenceUndeclared(w, g, pipeline, node)
 		return
 	}

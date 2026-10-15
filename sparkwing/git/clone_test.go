@@ -72,3 +72,30 @@ func runTestGit(t *testing.T, dir string, args ...string) {
 		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
 	}
 }
+
+func TestCloneAndFetchUseOriginDirectly(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	dest := filepath.Join(root, "clone")
+	command := exec.Command("git", "init", "--bare", source)
+	if out, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("init: %v %s", err, out)
+	}
+	t.Setenv("SPARKWING_GITCACHE_URL", "http://invalid.example")
+	if err := Clone(t.Context(), source, dest); err != nil {
+		t.Fatal(err)
+	}
+	if err := Fetch(t.Context(), dest); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(dest, "keep")
+	if err := os.WriteFile(marker, []byte("retained"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Clone(t.Context(), source, dest); err == nil {
+		t.Fatal("clone replaced an existing destination")
+	}
+	if raw, err := os.ReadFile(marker); err != nil || string(raw) != "retained" {
+		t.Fatalf("destination changed: %s %v", raw, err)
+	}
+}

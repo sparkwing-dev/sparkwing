@@ -34,7 +34,7 @@ func TestRecordUsage(t *testing.T) {
 	if RecordUsage(nil) != nil {
 		t.Fatal("nil store must give a nil hook")
 	}
-	n := &NodeRun{Run: &Run{ID: "r1", Logger: slog.Default()}, Plan: nodeproto.PlanNode{ID: "build"}}
+	n := &NodeRun{Run: &Run{ID: "r1", Logger: slog.Default(), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}, Plan: nodeproto.JobSpec{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}
 	full := Usage{CPUTime: time.Second, MaxRSSBytes: 1 << 20, Wall: 2 * time.Second, SessionWide: true}
 	leaderOnly := full
 	leaderOnly.SessionWide = false

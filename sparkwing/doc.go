@@ -1,47 +1,20 @@
-// Package sparkwing is the author-facing SDK for declaring pipelines.
-// Pipelines are Go structs with a Plan method that returns a typed
-// DAG; the orchestrator (in a separate process) executes the DAG.
+// Package sparkwing declares pipelines and executes the author code requested
+// by a host over protocol v2. Register a Pipeline and call Main from the
+// executable's main function.
 //
-// # The two-layer model
+// A Plan contains jobs. Job creates a job from a Workable or a function.
+// A Workable declares its steps with Step and selects its typed result with
+// Produces. RefTo and StepGet read declared job and step outputs.
 //
-// A [Pipeline] returns a [Plan]. A Plan is a DAG of [JobNode]s. Each
-// JobNode in turn returns a [Work] -- its own inner DAG of [WorkStep]s.
-// The outer layer is for cross-job structure (dependencies, retries,
-// approvals, dynamic expansion); the inner layer is for ordering the
-// concrete units of work inside one job. Most pipelines only use the
-// inner layer when a job needs more than one step.
+// Memo reuses a job result. Cache declares dependency directories. Artifacts
+// publishes files, and Consumes declares which producer supplies them.
+// Generate declares children from an upstream result. NeedsGenerated waits
+// for that expansion and its children. Plan.Approval declares a manual gate.
 //
-// # Registration
+// The SDK emits declarations. The host validates them, chooses placement,
+// applies policy, persists state, and decides which work is ready. Body
+// environment takes effect after planning. Credentials arrive in hello and
+// stay out of child-process environment variables.
 //
-// Pipelines register themselves at package init via [Register], keyed
-// by name. The CLI looks them up by name when the user runs
-// `sparkwing run <name>`. The .sparkwing/jobs/*.go files in a
-// consuming repo are the registration site; the .sparkwing/main.go
-// blank-imports the jobs package and calls runner.Main.
-//
-// # Building Plans and Work
-//
-// Use [Job] to attach a job to a Plan. Use [JobApproval] for human
-// gates and [JobFanOutDynamic] for children decided by an upstream
-// job's output at dispatch time. Inside a multi-step job, use [Step] on the supplied
-// [Work] and order with [WorkStep.Needs] or [GroupSteps]. Cross-step
-// data flow is via typed [Ref] values returned by [RefTo].
-//
-// # Modifier categories
-//
-// Plan-layer modifiers (set on a [JobNode]): Needs, Retry, Timeout,
-// OnFailure, Cache, RunsOn, Inline, BeforeRun / AfterRun. Work-layer
-// modifiers (set on a [WorkStep]): SkipIf, DryRun, [WorkStep.Risk],
-// SafeWithoutDryRun. Risk labels are author-defined strings
-// ("destructive", "prod", "rotates-key", ...) that gate execution
-// behind the --sw-allow CLI flag.
-//
-// # Where to start
-//
-// Pipeline authors typically open a job file and look at three
-// symbols: [Register] (how the pipeline gets named), [Job] (how a
-// single-step job attaches to a Plan), and [Step] (how a multi-step
-// Job builds its inner DAG). The other types in this package are
-// either return values from these primitives or modifier methods on
-// them.
+// Use sparkwingtest to test author code with isolated host services.
 package sparkwing

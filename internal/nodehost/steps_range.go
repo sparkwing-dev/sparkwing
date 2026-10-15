@@ -11,14 +11,14 @@ import (
 
 // safety: a bound naming no step anywhere in the plan is a typo, and running
 // the whole pipeline in its place could deploy what the author meant to skip.
-func validateStepRange(doc nodeproto.PlanDocOld, start, stop string) error {
+func validateStepRange(doc nodeproto.PlanDoc, start, stop string) error {
 	if start == "" && stop == "" {
 		return nil
 	}
 	var known []string
-	for _, n := range doc.Nodes {
-		if n.Work != nil {
-			for _, st := range n.Work.Steps {
+	for _, n := range doc.Jobs {
+		if len(n.Steps) > 0 {
+			for _, st := range n.Steps {
 				known = append(known, st.ID)
 			}
 		}
@@ -44,7 +44,7 @@ func validateStepRange(doc nodeproto.PlanDocOld, start, stop string) error {
 
 // safety: a node holding neither bound runs every step, since the window may
 // name another node's steps.
-func rangeSkips(steps []nodeproto.PlanStep, children map[string][]string, start, stop string) map[string]string {
+func rangeSkips(steps []nodeproto.StepSpec, children map[string][]string, start, stop string) map[string]string {
 	parents := make(map[string][]string, len(steps))
 	for _, st := range steps {
 		parents[st.ID] = st.Needs

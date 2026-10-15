@@ -47,7 +47,7 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 		profiles = matchProfileName(all, pipeline)
 	}
 	stats := groupCapacityStats(profiles)
-	cachedExcluded, err := st.CacheExcludedCounts(ctx, barePipeline(pipeline), string(sparkwing.Cached), capacity.CacheDominantFraction)
+	cachedExcluded, err := st.CacheExcludedCounts(ctx, barePipeline(pipeline), string(sparkwing.Memoized), capacity.CacheDominantFraction)
 	if err != nil {
 		return err
 	}

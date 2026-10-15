@@ -4,12 +4,12 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -17,13 +17,13 @@ import (
 
 // safety: a step graph the host cannot order would hang an attempt or run a
 // step before its need, so the run fails before any node starts.
-func validateSteps(n nodeproto.PlanNode) error {
-	if n.Work == nil {
+func validateSteps(n nodeproto.JobSpec) error {
+	if len(n.Steps) == 0 {
 		return nil
 	}
-	indeg := make(map[string]int, len(n.Work.Steps))
+	indeg := make(map[string]int, len(n.Steps))
 	children := map[string][]string{}
-	for _, st := range n.Work.Steps {
+	for _, st := range n.Steps {
 		if st.ID == "" {
 			return invalid("node %s holds a step with no id", n.ID)
 		}
@@ -33,7 +33,7 @@ func validateSteps(n nodeproto.PlanNode) error {
 		indeg[st.ID] = len(st.Needs)
 	}
 	var ready []string
-	for _, st := range n.Work.Steps {
+	for _, st := range n.Steps {
 		for _, d := range st.Needs {
 			if _, ok := indeg[d]; !ok {
 				return invalid("step %s of node %s needs %s, which the node does not hold", st.ID, n.ID, d)
@@ -52,7 +52,7 @@ func validateSteps(n nodeproto.PlanNode) error {
 				ready = append(ready, c)
 			}
 		}
-		if done+1 == len(n.Work.Steps) {
+		if done+1 == len(n.Steps) {
 			return nil
 		}
 	}
@@ -78,9 +78,9 @@ type stepDone struct {
 }
 
 func driveSteps(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun, attempt int) Result {
-	w := n.Plan.Work
+	w := n.Plan
 	r := &stepRun{sess: sess, sink: sink, n: n, attempt: attempt}
-	steps := make(map[string]nodeproto.PlanStep, len(w.Steps))
+	steps := make(map[string]nodeproto.StepSpec, len(w.Steps))
 	indeg := make(map[string]int, len(w.Steps))
 	children := map[string][]string{}
 	pending := map[string]bool{}
@@ -133,7 +133,7 @@ func driveSteps(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun, a
 				defer cancels.Done()
 				// safety: a cancel that fails leaves the step to finish on its
 				// own, and a broken session fails the step's own reply too.
-				if _, err := sess.Call(ctx, nodeproto.RequestOld{Op: nodeproto.OpCancelOld, Node: n.Plan.ID, Step: id}); err != nil {
+				if _, err := sess.Call(ctx, nodeproto.Request{Op: nodeproto.OpCancel, Job: n.Plan.ID, Step: id}); err != nil {
 					n.Run.Logger.Warn("nodehost: cancel step", "run", n.Run.ID, "node", n.Plan.ID, "step", id, "err", err)
 				}
 			}()
@@ -206,7 +206,7 @@ func driveSteps(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun, a
 		if !lastAt.IsZero() {
 			latency = lastAt.Sub(failFastAt)
 		}
-		r.sink.host(sparkwing.LogRecord{Level: "info", Event: sparkwing.EventWorkFailFast, Msg: fatalStep, Attrs: map[string]any{
+		r.sink.host(sparkwing.LogRecord{Level: "info", Event: "work_fail_fast", Msg: fatalStep, Attrs: map[string]any{
 			"trigger_step":            fatalStep,
 			"cancelled_siblings":      len(cancelledSteps),
 			"cancelled_steps":         cancelledSteps,
@@ -219,7 +219,7 @@ func driveSteps(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun, a
 	return Result{Outcome: sparkwing.Success, Output: output}
 }
 
-func (r *stepRun) run(ctx context.Context, st nodeproto.PlanStep) stepDone {
+func (r *stepRun) run(ctx context.Context, st nodeproto.StepSpec) stepDone {
 	d := stepDone{id: st.ID}
 	if reason := r.skips[st.ID]; reason != "" {
 		r.skip(st.ID, reason)
@@ -239,20 +239,17 @@ func (r *stepRun) run(ctx context.Context, st nodeproto.PlanStep) stepDone {
 	}
 	d.started = true
 	start := time.Now()
-	r.record("info", sparkwing.EventStepStart, st.ID, map[string]any{"step": st.ID})
-	var rr nodeproto.RunResultOld
-	err = ask(ctx, r.sess, nodeproto.RequestOld{
-		Op: nodeproto.OpRunStepOld, Node: r.n.Plan.ID, Step: st.ID, Attempt: r.attempt, Failure: r.n.Failure,
+	r.record("info", "step_start", st.ID, map[string]any{"step": st.ID})
+	var rr nodeproto.RunResult
+	err = ask(ctx, r.sess, nodeproto.Request{
+		Op: nodeproto.OpRunStep, Job: r.n.Plan.ID, Step: st.ID, Attempt: r.attempt, Failure: r.n.Failure,
 	}, &rr)
-	if err == nil {
-		err = rr.Validate()
-	}
 	d.elapsed = time.Since(start)
 	switch {
 	case err != nil:
 		d.err = err
-	case rr.Outcome == nodeproto.OutcomeFailed:
-		d.err = errors.New(cmp.Or(rr.Error, "step body failed"))
+	case rr.Outcome == "failed":
+		d.err = rr.Error
 	default:
 		d.output = rr.Output
 	}
@@ -261,21 +258,19 @@ func (r *stepRun) run(ctx context.Context, st nodeproto.PlanStep) stepDone {
 
 // safety: a skip_if that throws fails its step, as a panicking predicate
 // does in process, so a broken guard never runs what it was meant to skip.
-func (r *stepRun) skipIf(ctx context.Context, st nodeproto.PlanStep) (bool, error) {
-	if st.Closures == nil {
-		return false, nil
-	}
+func (r *stepRun) skipIf(ctx context.Context, st nodeproto.StepSpec) (bool, error) {
+
 	for _, id := range st.Closures.SkipIf {
-		var res nodeproto.EvalResultOld
-		if err := ask(ctx, r.sess, nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: id}, &res); err != nil {
+		var res nodeproto.EvalResult
+		if err := ask(ctx, r.sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: id}, &res); err != nil {
 			return false, err
 		}
-		if res.Error != nil {
-			return false, fmt.Errorf("skip_if: %s", *res.Error)
+		if err := res.ValidateValue("skip_if"); err != nil {
+			return false, err
 		}
 		var skip bool
 		if err := json.Unmarshal(res.Value, &skip); err != nil {
-			return false, hostError(nodeproto.CodeProtocolError, "skip_if %s answered %s, not a boolean", id, res.Value)
+			return false, hostError(apierr.ProtocolError, "skip_if %s answered %s, not a boolean", id, res.Value)
 		}
 		if skip {
 			return true, nil
@@ -289,7 +284,7 @@ func (r *stepRun) skip(id, reason string) {
 	if reason != "" {
 		attrs["reason"] = reason
 	}
-	r.record("info", sparkwing.EventStepSkipped, id, attrs)
+	r.record("info", "step_skipped", id, attrs)
 }
 
 func (r *stepRun) end(id string, elapsed time.Duration, err error, cancelled bool) {
@@ -301,7 +296,7 @@ func (r *stepRun) end(id string, elapsed time.Duration, err error, cancelled boo
 	case err != nil:
 		attrs["outcome"], attrs["error"], level = string(sparkwing.Failed), err.Error(), "error"
 	}
-	r.record(level, sparkwing.EventStepEnd, id, attrs)
+	r.record(level, "step_end", id, attrs)
 }
 
 // safety: a row the store refuses is logged and never changes the step's
@@ -310,9 +305,9 @@ func (r *stepRun) record(level, event, id string, attrs map[string]any) {
 	st, ctx, run, node := r.n.Run.State, r.sink.ctx, r.n.Run.ID, r.n.Plan.ID
 	var err error
 	switch event {
-	case sparkwing.EventStepStart:
+	case "step_start":
 		err = st.StartNodeStep(ctx, run, node, id)
-	case sparkwing.EventStepSkipped:
+	case "step_skipped":
 		err = st.SkipNodeStep(ctx, run, node, id)
 	default:
 		status := store.StepPassed

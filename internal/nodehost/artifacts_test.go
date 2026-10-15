@@ -26,9 +26,9 @@ func writeFile(dir, rel, body string) Result {
 }
 
 func TestArtifactsRequireAuthenticatedBinding(t *testing.T) {
-	for _, declared := range []nodeproto.PlanNode{
-		{ID: "build", Outputs: []string{"*.bin"}},
-		{ID: "deploy", Consumes: []nodeproto.PlanConsume{{Producer: "build"}}},
+	for _, declared := range []nodeproto.JobSpec{
+		{ID: "build", Artifacts: []string{"*.bin"}},
+		{ID: "deploy", Consumes: []nodeproto.ArtifactInput{{Producer: "build"}}},
 	} {
 		t.Run(declared.ID, func(t *testing.T) {
 			ran := false
@@ -44,7 +44,7 @@ func TestArtifactsRequireAuthenticatedBinding(t *testing.T) {
 func TestArtifactsBindingFailurePrecedesExecution(t *testing.T) {
 	want := errors.New("binding revoked")
 	cfg := &Config{Session: SessionConfig{Dir: t.TempDir()}, Artifacts: func(context.Context, *NodeRun) (artifacts.Data, error) { return artifacts.Data{}, want }}
-	got := artifactsLayer(cfg, func(context.Context, *NodeRun) Result { t.Fatal("ran after refused binding"); return Result{} })(t.Context(), &NodeRun{Plan: nodeproto.PlanNode{ID: "job", Outputs: []string{"*"}}})
+	got := artifactsLayer(cfg, func(context.Context, *NodeRun) Result { t.Fatal("ran after refused binding"); return Result{} })(t.Context(), &NodeRun{Plan: nodeproto.JobSpec{ID: "job", Artifacts: []string{"*"}}})
 	if !errors.Is(got.Err, want) {
 		t.Fatal(got.Err)
 	}
@@ -55,7 +55,7 @@ func TestArtifactsStageRefusalPrecedesExecution(t *testing.T) {
 	cfg := &Config{Session: SessionConfig{Dir: t.TempDir()}, Artifacts: func(context.Context, *NodeRun) (artifacts.Data, error) {
 		return artifacts.Data{Bytes: unusedArtifactBytes{}, Records: records, Identity: blob.UploadIdentity{Team: "team"}, Pipeline: "pipeline"}, nil
 	}}
-	got := artifactsLayer(cfg, func(context.Context, *NodeRun) Result { t.Fatal("ran without required artifacts"); return Result{} })(t.Context(), &NodeRun{Run: &Run{ID: "run"}, Plan: nodeproto.PlanNode{ID: "job", Consumes: []nodeproto.PlanConsume{{Producer: "build"}}}})
+	got := artifactsLayer(cfg, func(context.Context, *NodeRun) Result { t.Fatal("ran without required artifacts"); return Result{} })(t.Context(), &NodeRun{Run: &Run{ID: "run"}, Plan: nodeproto.JobSpec{ID: "job", Consumes: []nodeproto.ArtifactInput{{Producer: "build"}}}})
 	if got.Outcome != sparkwing.Failed {
 		t.Fatalf("result %+v", got)
 	}
