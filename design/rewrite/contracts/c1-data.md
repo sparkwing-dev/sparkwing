@@ -564,13 +564,14 @@ uploader can read the digest and usage counts one blob. Authority and physical
 verification are contract fixtures. Native transfer integrity and EOF checks
 remain separate integration proofs.
 
-The `storage-owner-receipts-and-stream-verification/store-data-sqlite` proof
-commits trigger and plan uploads before jobs exist. It checks failed verification,
-exact tagged receipt replay, reopening and refusal to transfer the receipt or
-ticket to a job in the same run. Award issuance and physical verification are
-contract fixtures. Generated eval tests check both source and unit fences under
-explicit fake write authority. C2's issued eval grant table remains read-only.
-The native cell still requires signed transfer and stream EOF verification.
+`TestBlobOwnerReceiptCannotTransferToAJob` and
+`TestBlobUploadOwnerTicketsRetainUnitIdentity` check tagged trigger/plan uploads
+before any job exists, reopening and refusal to transfer an owner's receipt or
+ticket to a job.
+`TestBlobUploadCommitRechecksTicketAndAuthority` checks failed verification.
+Generated eval tests check both source and unit fences under explicit fake write
+authority. C2's issued eval grant table remains read-only. The native cell still
+requires signed transfer and stream EOF verification.
 
 Upload tickets reserve monthly bytes, lifetime run bytes and lifetime run objects
 in the existing quota tables. Each dimension has its own durable reservation.
@@ -604,12 +605,17 @@ expiry and manifest fields. Returned metadata matches persisted metadata across
 replay and reopening. A different expiry instant still conflicts with an immutable
 output or manifest record.
 
-The `storage-quota-settlement-crash-replay/store-data-sqlite` proof exercises
-upload admission, commit, abort and deduplication. Child processes exit without
-closing their store at before/after commit and abort checkpoints. The parent
-reopens and verifies the persisted state before replay. Publication authority
-is preseeded and verification evidence is a contract fake. Native controller
-checkpoints, signing and transfer integrity remain integration obligations.
+`TestBlobUploadCrashReplay` exercises admission, commit, abort and deduplication
+through the store's shared upload fixture. Child processes exit without closing
+the database before and after commit and abort. The parent reopens the database
+and checks persisted tickets, quota holds, usage and replay capacity. Physical
+verification evidence is a contract fake. Native controller checkpoints, signing
+and transfer integrity remain integration obligations.
+
+The `TestReplica` tests use `pkg/store/internal/storetest` targets to check usage
+sums, quota races, reservation release, singleton election and download caps
+across independent clients and reopening. Quota setup uses ReserveQuota and
+SettleQuota. The suite's dialect selection applies to these tests.
 
 LookupRecord, LookupMemo, LookupDepcache, CommitRecord and CopyMemo remain the
 only record owners. W1 integrates receipt/read-set checks, members, unique-byte
@@ -948,18 +954,17 @@ Generated tests cross the job lease, leaf capability and ancestor expiry during
 that read through CommitRecord, LookupRecord, LookupMemo, LookupDepcache and
 CopyMemo. Refusals return no read set and persist no output or manifest record.
 
-The `storage-log-segments-and-fallback/store-data-sqlite` proof exercises
-immutable job segments, transactional rollback of a gapped batch, reopening,
-offset reads, final incomplete seals, exact replay, retained-byte accounting,
-subject isolation, revocation and leased abandoned-stream sealing across reopening.
-Its terminal-read check uses an expired attempt and a later node finish. The node
-finish cannot extend the attempt's read grace. Generated store tests check reads,
-segment commits, final seals and maintenance at the nanosecond before grace,
-at its exact boundary and after it. Historical reads and stored bytes survive
-sealing, and log loss leaves the successful job result unchanged.
-Claim authority and segment digests are
-preseeded contract facts. Physical bytes, owner-unit transport, ring fallback,
-signing, lifecycle expiry and proxy egress remain cross-area integrations.
+The `TestLogPersistence` tests own immutable segments, gapped-batch rollback,
+offset reads, incomplete seals, replay, retained-byte accounting, subject
+isolation, revocation and abandoned-stream maintenance. Job, publication and
+maintenance-seal metadata survive reopening. Publication adds no operational or
+financial units. A later node finish cannot extend an attempt's read grace.
+Generated tests check reads, segment commits, final seals and maintenance before,
+at and after the grace boundary. Historical reads and stored bytes survive
+sealing. Log loss leaves the successful job result unchanged. Claim authority
+and segment digests are contract fixtures. Physical bytes, owner-unit transport,
+ring fallback, signing, lifecycle expiry and proxy egress remain integration
+obligations.
 
 `Operator.SealAbandonedLogStreams(ctx, maintenanceLease, limit)` closes existing
 unsealed execution streams with `writer_lost`. Job attempts wait until strictly

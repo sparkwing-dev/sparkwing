@@ -34,6 +34,7 @@ func TestLogPersistenceRetainedBytesCountSegmentsOnce(t *testing.T) {
 			t.Fatal("conflicting or oversized segment accepted")
 		}
 	}
+	blobAccountingDiskStore(t, s)
 	key, err := blob.LogObjectKey(commit.Subject, "r30", 2)
 	if err != nil {
 		t.Fatal(err)
