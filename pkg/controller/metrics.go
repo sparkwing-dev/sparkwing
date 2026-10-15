@@ -7,8 +7,22 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func (s *Server) metricEndpoints() []Endpoint {
+	engine := s.engineController
+	if engine == nil {
+		engine = &EngineController{Store: s.store}
+	}
+	return []Endpoint{
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/metrics", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.handleAddJobMetric},
+		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/usage", Authentication: capability.AuthCapability, Decode: engine.runTarget, Handle: s.handleAddJobUsage},
+	}
+}
 
 type metricSample struct {
 	Kind          store.MetricKind `json:"kind"`
@@ -18,42 +32,36 @@ type metricSample struct {
 	CPUTimeNanos  int64            `json:"cpu_time_nanos,omitempty"`
 }
 
-func (s *Server) handleAddNodeMetric(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
+func (s *Server) handleAddJobMetric(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var body metricSample
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &body); err != nil {
+		return err
 	}
 	ts := time.Now()
 	if body.TS != "" {
 		parsed, err := time.Parse(time.RFC3339Nano, body.TS)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
+			return invalidEngineBody("ts must be an RFC3339 timestamp")
 		}
 		ts = parsed
 	}
-	if err := tenant.AddNodeMetricSample(r.Context(), runID, nodeID, store.MetricSample{
-		Kind:          body.Kind,
-		TS:            ts,
-		CPUMillicores: body.CPUMillicores,
-		MemoryBytes:   body.MemoryBytes,
-		CPUTime:       time.Duration(body.CPUTimeNanos),
-	}); err != nil {
-		if status := runLimitStatus(err); status != 0 {
-			writeError(w, status, err)
-			return
-		}
-		s.writeInternalError(w, r, "add node metric", err)
-		return
+	sample := store.MetricSample{Kind: body.Kind, TS: ts, CPUMillicores: body.CPUMillicores, MemoryBytes: body.MemoryBytes, CPUTime: time.Duration(body.CPUTimeNanos)}
+	if err := sample.ValidateResourceValues(); err != nil {
+		return invalidEngineBody(err.Error())
+	}
+	if !time.Unix(0, ts.UnixNano()).Equal(ts) {
+		return invalidEngineBody("ts exceeds the nanosecond storage range")
+	}
+	writer, err := s.metricWriter(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
+	}
+	err = writer.WriteMetric(r.Context(), a, sample)
+	if err != nil {
+		return metricError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 const (
@@ -103,26 +111,28 @@ func newMetricsPage(samples []store.MetricSample, limit int) metricsPage {
 	return page
 }
 
-func (s *Server) handleGetNodeMetrics(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleGetJobMetrics(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	tenant, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	after, limit, err := metricsPageRequest(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return invalidEngineBody(err.Error())
 	}
-	samples, err := tenant.ListNodeMetricsPage(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), after, limit+1)
+	samples, err := tenant.ListNodeMetricsPage(r.Context(), a.Target.RunID, a.Target.NodeID, after, limit+1)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	writeJSON(w, http.StatusOK, newMetricsPage(samples, limit))
+	return nil
+}
+
+func metricError(err error) error {
+	if errors.Is(err, store.ErrNodeMetricLimit) {
+		return &apierr.Error{Code: apierr.RateLimited, Message: "job metric sample limit reached"}
+	}
+	return engineLookupError(err)
 }
 
 func runLimitStatus(err error) int {
@@ -158,27 +168,21 @@ func (b nodeUsageReq) validate() error {
 	return nil
 }
 
-func (s *Server) handleAddNodeUsage(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
+func (s *Server) handleAddJobUsage(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var body nodeUsageReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &body); err != nil {
+		return err
 	}
 	if err := body.validate(); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return invalidEngineBody(err.Error())
 	}
-	if err := tenant.AddNodeUsage(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), store.NodeUsage{
-		CPUTime:     time.Duration(body.CPUTimeNanos),
-		MaxRSSBytes: body.MaxRSSBytes,
-		Wall:        time.Duration(body.WallNanos),
-	}); err != nil {
-		s.writeInternalError(w, r, "add node usage", err)
-		return
+	writer, err := s.metricWriter(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
+	}
+	if err := writer.WriteUsage(r.Context(), a, store.NodeUsage{CPUTime: time.Duration(body.CPUTimeNanos), MaxRSSBytes: body.MaxRSSBytes, Wall: time.Duration(body.WallNanos)}); err != nil {
+		return metricError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }

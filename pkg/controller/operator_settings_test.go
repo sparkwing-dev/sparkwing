@@ -24,6 +24,7 @@ type operatorSettingsFixture struct {
 	quota    store.StorageQuota
 	writes   int
 	failure  error
+	seen     capability.Authorized
 }
 
 func (f *operatorSettingsFixture) ComputeLimits(context.Context) (store.ComputeLimits, error) {
@@ -32,7 +33,8 @@ func (f *operatorSettingsFixture) ComputeLimits(context.Context) (store.ComputeL
 func (f *operatorSettingsFixture) ComputeUsage(context.Context) (store.ComputeUsage, error) {
 	return store.ComputeUsage{Runners: 3, ByPrincipal: map[string]int64{"other-team": 3}}, f.failure
 }
-func (f *operatorSettingsFixture) SetComputeLimits(_ context.Context, updates map[string]int64) (store.ComputeLimits, error) {
+func (f *operatorSettingsFixture) WriteComputeLimits(_ context.Context, a capability.Authorized, updates map[string]int64) (store.ComputeLimits, error) {
+	f.seen = a
 	if f.failure != nil {
 		return store.ComputeLimits{}, f.failure
 	}
@@ -54,26 +56,33 @@ func (f *operatorSettingsFixture) SignUpGate(context.Context) (store.SignUpGate,
 func (f *operatorSettingsFixture) SignUpCounts(context.Context, time.Time) (store.SignUpCounts, error) {
 	return store.SignUpCounts{LastHour: 2, LastDay: 3, Waitlisted: 1}, f.failure
 }
-func (f *operatorSettingsFixture) SetSignUpLimits(_ context.Context, limits store.SignUpLimits) (store.SignUpGate, error) {
+func (f *operatorSettingsFixture) WriteSignUpSettings(_ context.Context, a capability.Authorized, req SignUpSettingsChange) error {
+	f.seen = a
 	if f.failure != nil {
-		return store.SignUpGate{}, f.failure
+		return f.failure
+	}
+	for _, field := range []struct {
+		in  *int
+		out *int
+	}{{req.HourlyLimit, &f.gate.Limits.HourlyLimit}, {req.DailyLimit, &f.gate.Limits.DailyLimit}, {req.HourlyWarn, &f.gate.Limits.HourlyWarn}, {req.GitHubMinAccountDays, &f.gate.Limits.GitHubMinAccountDays}, {req.FreeTeamMembers, &f.gate.Limits.FreeTeamMembers}} {
+		if field.in != nil {
+			*field.out = *field.in
+		}
+	}
+	if req.Mode != nil {
+		f.gate.Mode = store.SignUpMode(*req.Mode)
+		f.gate.Reason = req.Reason
+		f.gate.SetBy = a.Principal.Capability.Subject.ID
+		f.gate.UpdatedAt = time.Now()
 	}
 	f.writes++
-	f.gate.Limits = limits
-	return f.gate, nil
-}
-func (f *operatorSettingsFixture) SetSignUpMode(_ context.Context, mode store.SignUpMode, reason, actor string, now time.Time) (store.SignUpGate, error) {
-	if f.failure != nil {
-		return store.SignUpGate{}, f.failure
-	}
-	f.writes++
-	f.gate.Mode, f.gate.Reason, f.gate.SetBy, f.gate.UpdatedAt = mode, reason, actor, now
-	return f.gate, nil
+	return nil
 }
 func (f *operatorSettingsFixture) StorageSettings(context.Context) (store.StorageSettings, error) {
 	return f.settings, f.failure
 }
-func (f *operatorSettingsFixture) SetStorageSettings(_ context.Context, settings store.StorageSettings) error {
+func (f *operatorSettingsFixture) WriteStorageSettings(_ context.Context, a capability.Authorized, settings store.StorageSettings) error {
+	f.seen = a
 	if f.failure != nil {
 		return f.failure
 	}
@@ -87,26 +96,18 @@ func (f *operatorSettingsFixture) ListStorageQuotas(context.Context) ([]store.St
 func (f *operatorSettingsFixture) TopStorageTeams(context.Context, string, int) ([]store.StorageTeamUsage, error) {
 	return []store.StorageTeamUsage{{Team: "customer", Bytes: 100, Objects: 2}}, f.failure
 }
-func (f *operatorSettingsFixture) StorageTenant(_ context.Context, team store.Team) (storageQuotaStore, error) {
+func (f *operatorSettingsFixture) WriteStorageQuota(_ context.Context, a capability.Authorized, quota store.StorageQuota) (store.StorageQuota, error) {
+	f.seen = a
 	if f.failure != nil {
-		return nil, f.failure
-	}
-	f.quota.Team = team
-	return f, nil
-}
-func (f *operatorSettingsFixture) SetStorageQuota(_ context.Context, quota store.StorageQuota) error {
-	if f.failure != nil {
-		return f.failure
+		return store.StorageQuota{}, f.failure
 	}
 	f.writes++
-	quota.Team, quota.AllowanceBytes = f.quota.Team, f.quota.AllowanceBytes
+	quota.Team, quota.AllowanceBytes = store.Team(a.Target.Team), f.quota.AllowanceBytes
 	f.quota = quota
-	return nil
+	return quota, nil
 }
-func (f *operatorSettingsFixture) StorageQuota(context.Context) (store.StorageQuota, error) {
-	return f.quota, f.failure
-}
-func (f *operatorSettingsFixture) SetStorageAllowance(_ context.Context, size int64) (store.StorageQuota, error) {
+func (f *operatorSettingsFixture) WriteStorageAllowance(_ context.Context, a capability.Authorized, size int64) (store.StorageQuota, error) {
+	f.seen = a
 	if f.failure != nil {
 		return store.StorageQuota{}, f.failure
 	}
@@ -143,6 +144,7 @@ func newOperatorSettingsFixture(t *testing.T) (*Server, *operatorSettingsFixture
 	f := &operatorSettingsFixture{gate: store.SignUpGate{Mode: store.SignUpOpen}, quota: store.StorageQuota{Team: "customer", AllowanceBytes: 32}}
 	s := New(nil, nil).WithAuthorization(RouteAuthorization{Authenticator: capability.NewAuthenticator(a), Bindings: a})
 	s.operatorSettings = f
+	s.WithOperatorSettingsWriter(f)
 	return s, f, a
 }
 
@@ -197,7 +199,7 @@ func TestOperatorSettingsHTTPRoundTrip(t *testing.T) {
 	if storage.Settings.RunRetentionDays != 7 || len(storage.Quotas) != 1 || storage.Quotas[0].StorageAllowanceBytes != 45 || storage.Quotas[0].MaxBytesPerRun != 22 || len(storage.Teams) != 1 {
 		t.Fatalf("storage = %+v", storage)
 	}
-	if f.writes != 6 {
+	if f.writes != 5 {
 		t.Fatalf("writes = %d", f.writes)
 	}
 }

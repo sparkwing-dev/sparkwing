@@ -39,8 +39,7 @@ func TestCallerStorageStandingUsesFinalTenantInventory(t *testing.T) {
 	}), pub, now, nil)
 	server := New(s, nil).WithLicense(lic)
 	request := httptest.NewRequest("GET", "/", nil)
-	request = request.WithContext(contextWithPrincipal(request.Context(), &Principal{Team: "a"}))
-	got, err := server.callerStorageStanding(request)
+	got, err := server.teamStorageStanding(request, "a")
 	if err != nil || got == nil || got.Team != "a" || got.CacheBytes != 3 || got.LogBytes != 0 || got.EventBytes != 0 {
 		t.Fatalf("controller standing=%+v: %v", got, err)
 	}

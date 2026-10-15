@@ -24,7 +24,7 @@ func (f consoleFixtureAuthority) Authenticate(ctx context.Context, presentation 
 			return capability.Authenticated{}, &apierr.Error{Code: apierr.Unauthenticated}
 		}
 		p.Capability.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: "fixture-member"}
-		if slices.Contains(tok.Scopes, ScopeAdmin) {
+		if slices.Contains(tok.Scopes, "admin") {
 			p.Capability.Subject = capability.Subject{Kind: capability.SubjectOperator, ID: tok.Principal}
 			p.Capability.Grants = []capability.Grant{capability.OperatorLimits, capability.OperatorObjectStore}
 		}

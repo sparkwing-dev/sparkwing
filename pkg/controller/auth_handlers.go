@@ -2,7 +2,6 @@ package controller
 
 import (
 	"errors"
-	"net/http"
 	"time"
 )
 
@@ -38,18 +37,6 @@ func (s *Server) sessionInitialTTL() time.Duration {
 		return sessionTTL
 	}
 	return min(s.sessionMaxLifetime, sessionTTL)
-}
-
-func extractSessionHeader(r *http.Request) string {
-	h := r.Header.Get("Authorization")
-	const prefix = "Session "
-	if len(h) <= len(prefix) {
-		return ""
-	}
-	if h[:len(prefix)] != prefix {
-		return ""
-	}
-	return h[len(prefix):]
 }
 
 const (

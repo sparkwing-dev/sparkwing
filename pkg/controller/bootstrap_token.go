@@ -1,37 +1,36 @@
 package controller
 
 import (
-	"errors"
-	"time"
+	"context"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// BootstrapAdminPrincipal labels the token [EnsureBootstrapAdminToken]
-// writes, so an operator listing tokens can tell the provisioned
-// credential apart from one an admin minted through the API.
+// BootstrapAdminPrincipal identifies the first deployment administrator.
 const BootstrapAdminPrincipal = "bootstrap:admin"
 
-// EnsureBootstrapAdminToken stores raw as an admin token when the tokens
-// table holds no rows, and reports whether it created one. An empty raw
-// creates nothing. Provisioning calls it before the listener binds, which
-// is what lets a controller come up with --require-auth satisfied and no
-// window in which it serves unauthenticated.
-//
-// raw is the credential the operator already holds; only its hash reaches
-// the database, the same as for a token minted through POST /api/v1/tokens.
-// It has to carry the shape [store.ValidateRawToken] describes, because a
-// bearer lookup selects on the indexed prefix.
-//
-// A table that already holds a token is left alone, so restarting with the
-// same secret mounted neither duplicates the row nor revives a revoked one.
-func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error) {
+// BootstrapAdminIssuer commits a seeded root through Issue's once-only bootstrap gate.
+type BootstrapAdminIssuer interface {
+	EnsureBootstrapCapability(context.Context, capability.ProvisionSpec) (bool, error)
+}
+
+// EnsureBootstrapAdminToken sends the mounted presentation to the gated capability issuer.
+func EnsureBootstrapAdminToken(ctx context.Context, issuer CredentialIssuer, raw string) (bool, error) {
 	if raw == "" {
 		return false, nil
 	}
-	if st == nil {
-		return false, errors.New("bootstrap admin token: no store")
+	spec := capability.ProvisionSpec{
+		Kind: capability.ProvisionBootstrap, Seed: raw,
+		Subject: capability.Subject{Kind: capability.SubjectOperator, ID: BootstrapAdminPrincipal},
+		Binding: capability.Binding{Kind: capability.BindingNone},
+		Grants:  []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore},
 	}
-	return st.CreateTokenIfNoneExist(raw, BootstrapAdminPrincipal, store.TokenKindUser,
-		[]string{ScopeAdmin}, now)
+	if err := capability.ValidateProvisionSeed(spec); err != nil {
+		return false, err
+	}
+	bootstrap, ok := issuer.(BootstrapAdminIssuer)
+	if !ok {
+		return false, missingEndpointPolicy()
+	}
+	return bootstrap.EnsureBootstrapCapability(ctx, spec)
 }

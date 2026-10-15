@@ -193,7 +193,7 @@ func TestCacheWarmUsesSelectedEngineAndCapturedEnvironment(t *testing.T) {
 			if sdk == engine.TypeScriptSDK {
 				manifest, body = "package.json", `{"main":"pipeline.ts","dependencies":{"@sparkwing/sdk":"1.0.0"}}`
 			}
-			if err := os.WriteFile(filepath.Join(dir, manifest), []byte(body), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, manifest), []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			selected := engine.Resolved{Executable: filepath.Join(t.TempDir(), "engine")}

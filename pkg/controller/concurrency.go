@@ -1,165 +1,22 @@
 package controller
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-// safety: a concurrency key is shared across runs, so a claim-scoped token may
-// move only a slot belonging to a run it holds a live claim on. The run comes
-// out of the request the caller sends, either named outright or through the
-// holder row it names; admin bypasses, as it does on every other claim fence.
-type slotRunResolver func(http.ResponseWriter, *http.Request) (slotOwner, *http.Request, bool)
-
-type slotOwner struct{ runID, nodeID string }
-
-func (s *Server) claimedSlot(resolve slotRunResolver, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		p, ok := PrincipalFromContext(ctx)
-		if !ok || p.HasScope(ScopeAdmin) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		owner, r, ok := resolve(w, r)
-		if !ok {
-			return
-		}
-		if tok, claim := claimTokenFromContext(ctx); claim {
-			if err := s.claimOwnsSlot(r, tok, owner); err != nil {
-				writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "claim_mismatch", Message: err.Error()})
-				return
-			}
-			next.ServeHTTP(w, r)
-			return
-		}
-		held, err := s.ownsRun(ctx, owner.runID, claimIdentity(r))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		if !held {
-			writeAuthError(w, http.StatusForbidden, authErrorBody{
-				Code: "claim_required", Principal: p.label(),
-				Message: "run " + owner.runID + " is not claimed by this principal",
-			})
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// safety: the one ownership rule for every concurrency route a claim reaches:
-// the holder or waiter it acts on is its own node's in its own run, under a
-// key its node's accepted plan declares, and requestTenant holds it to its team.
-func (s *Server) claimOwnsSlot(r *http.Request, tok store.ClaimToken, owner slotOwner) error {
-	if owner.runID != tok.RunID || owner.nodeID != tok.NodeID {
-		return errors.New("this claim token acts only on its own node's holders and waiters")
-	}
-	return s.store.CheckClaimKey(r.Context(), tok, r.PathValue("key"))
-}
-
-func (s *Server) slotRunFromBody(w http.ResponseWriter, r *http.Request) (slotOwner, *http.Request, bool) {
-	var body struct {
-		RunID  string `json:"run_id"`
-		NodeID string `json:"node_id"`
-	}
-	r, ok := peekJSONBody(w, r, &body)
-	if !ok {
-		return slotOwner{}, r, false
-	}
-	if body.RunID == "" {
-		writeError(w, http.StatusBadRequest, errors.New("run_id is required"))
-		return slotOwner{}, r, false
-	}
-	return slotOwner{body.RunID, body.NodeID}, r, true
-}
-
-func (s *Server) slotRunFromBodyHolder(w http.ResponseWriter, r *http.Request) (slotOwner, *http.Request, bool) {
-	var body struct {
-		HolderID string `json:"holder_id"`
-	}
-	r, ok := peekJSONBody(w, r, &body)
-	if !ok {
-		return slotOwner{}, r, false
-	}
-	return s.slotRunFromHolder(w, r, body.HolderID)
-}
-
-func (s *Server) slotRunFromQueryHolder(w http.ResponseWriter, r *http.Request) (slotOwner, *http.Request, bool) {
-	return s.slotRunFromHolder(w, r, r.URL.Query().Get("holder_id"))
-}
-
-func (s *Server) slotRunFromQueryRun(w http.ResponseWriter, r *http.Request) (slotOwner, *http.Request, bool) {
-	q := r.URL.Query()
-	if q.Get("run_id") == "" {
-		writeError(w, http.StatusBadRequest, errors.New("run_id is required"))
-		return slotOwner{}, r, false
-	}
-	return slotOwner{q.Get("run_id"), q.Get("node_id")}, r, true
-}
-
-// safety: a key's state names no holder of its own, so a claim reads it as
-// its own node, under the same key rule as every other route.
-func (s *Server) slotOwnKey(_ http.ResponseWriter, r *http.Request) (slotOwner, *http.Request, bool) {
-	tok, _ := claimTokenFromContext(r.Context())
-	return slotOwner{tok.RunID, tok.NodeID}, r, true
-}
-
-// safety: a holder whose lease has lapsed names no run the caller can prove it
-// owns, so the request is refused rather than resolved against a stale row.
-func (s *Server) slotRunFromHolder(w http.ResponseWriter, r *http.Request, holderID string) (slotOwner, *http.Request, bool) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return slotOwner{}, r, false
-	}
-	if holderID == "" {
-		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
-		return slotOwner{}, r, false
-	}
-	holder, err := tenant.ConcurrencyHolder(r.Context(), r.PathValue("key"), holderID, time.Now())
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			p, _ := PrincipalFromContext(r.Context())
-			writeAuthError(w, http.StatusForbidden, authErrorBody{
-				Code: "claim_required", Principal: p.label(),
-				Message: "holder " + holderID + " does not hold this key",
-			})
-			return slotOwner{}, r, false
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return slotOwner{}, r, false
-	}
-	return slotOwner{holder.RunID, holder.NodeID}, r, true
-}
-
-func peekJSONBody(w http.ResponseWriter, r *http.Request, v any) (*http.Request, bool) {
-	raw, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, maxJSONBody))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return r, false
-	}
-	_ = r.Body.Close()
-	r.Body = io.NopCloser(bytes.NewReader(raw))
-	if err := json.Unmarshal(raw, v); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return r, false
-	}
-	return r, true
-}
 
 type acquireSlotReq struct {
 	HolderID          string `json:"holder_id"`
 	InheritedHolderID string `json:"inherited_holder_id,omitempty"`
 	RunID             string `json:"run_id"`
-	NodeID            string `json:"node_id,omitempty"`
+	NodeID            string `json:"job_id,omitempty"`
 	Max               int    `json:"max,omitempty"`
 	Cost              int    `json:"cost,omitempty"`
 	Policy            string `json:"policy,omitempty"`
@@ -171,43 +28,35 @@ type acquireSlotReq struct {
 }
 
 type acquireSlotResp struct {
-	Granted          bool              `json:"granted"`
-	Kind             string            `json:"kind"`
-	HolderID         string            `json:"holder_id,omitempty"`
-	LeaseExpiresAt   time.Time         `json:"lease_expires_at,omitempty"`
-	LeaderRunID      string            `json:"leader_run_id,omitempty"`
-	LeaderNodeID     string            `json:"leader_node_id,omitempty"`
-	OutputRef        string            `json:"output_ref,omitempty"`
-	OriginRunID      string            `json:"origin_run_id,omitempty"`
-	OriginNodeID     string            `json:"origin_node_id,omitempty"`
-	SupersededIDs    []string          `json:"superseded_ids,omitempty"`
-	PreviousCapacity int               `json:"previous_capacity,omitempty"`
-	DriftNote        string            `json:"drift_note,omitempty"`
-	Position         int               `json:"position,omitempty"`
-	QueueLength      int               `json:"queue_length,omitempty"`
-	Holders          []stateHolderResp `json:"holders,omitempty"`
+	Granted          bool                              `json:"granted"`
+	Kind             string                            `json:"kind"`
+	HolderID         string                            `json:"holder_id,omitempty"`
+	LeaseExpiresAt   time.Time                         `json:"lease_expires_at,omitempty"`
+	LeaderRunID      string                            `json:"leader_run_id,omitempty"`
+	LeaderNodeID     string                            `json:"leader_job_id,omitempty"`
+	OutputRef        string                            `json:"output_ref,omitempty"`
+	OriginRunID      string                            `json:"origin_run_id,omitempty"`
+	OriginNodeID     string                            `json:"origin_job_id,omitempty"`
+	SupersededIDs    []string                          `json:"superseded_ids,omitempty"`
+	PreviousCapacity int                               `json:"previous_capacity,omitempty"`
+	DriftNote        string                            `json:"drift_note,omitempty"`
+	Position         int                               `json:"position,omitempty"`
+	QueueLength      int                               `json:"queue_length,omitempty"`
+	Holders          []controllerwire.QueueGroupHolder `json:"holders,omitempty"`
 }
 
-func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	tenant, err := s.concurrencyStore(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
-	key := r.PathValue("key")
+	key := a.Target.SlotKey
 	var body acquireSlotReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeConcurrencyRequest(r, &body); err != nil {
+		return err
 	}
 	if body.HolderID == "" || body.RunID == "" {
-		writeError(w, http.StatusBadRequest, errors.New("holder_id and run_id are required"))
-		return
-	}
-	if tok, claim := claimTokenFromContext(r.Context()); claim {
-		if err := s.checkClaimAcquire(r, tok, key, &body); err != nil {
-			writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "slot_undeclared", Message: err.Error()})
-			return
-		}
+		return invalidEngineBody("holder_id and run_id are required")
 	}
 	req := store.AcquireSlotRequest{
 		Key:               key,
@@ -224,14 +73,9 @@ func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
 		Lease:             time.Duration(body.LeaseSecs) * time.Second,
 		BypassRead:        body.BypassRead,
 	}
-	resp, err := tenant.AcquireConcurrencySlot(r.Context(), req)
+	resp, err := tenant.AcquireAuthorizedSlot(r.Context(), a, req)
 	if err != nil {
-		if errors.Is(err, store.ErrConcurrencySuperseded) {
-			writeError(w, http.StatusConflict, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return concurrencyError(err)
 	}
 	bodyOut := acquireSlotResp{
 		Kind:             string(resp.Kind),
@@ -260,8 +104,9 @@ func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
 	case store.AcquireSkipped, store.AcquireFailed:
 		writeJSON(w, http.StatusTooManyRequests, bodyOut)
 	default:
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("unknown kind %q", resp.Kind))
+		return fmt.Errorf("unknown concurrency result %q", resp.Kind)
 	}
+	return nil
 }
 
 type heartbeatSlotReq struct {
@@ -274,61 +119,47 @@ type heartbeatSlotResp struct {
 	CancelledByNewer bool      `json:"cancelled_by_newer"`
 }
 
-func (s *Server) handleHeartbeatSlot(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleHeartbeatSlot(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	tenant, err := s.concurrencyStore(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
-	key := r.PathValue("key")
+	key := a.Target.SlotKey
 	var body heartbeatSlotReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeConcurrencyRequest(r, &body); err != nil {
+		return err
 	}
 	if body.HolderID == "" {
-		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
-		return
+		return invalidEngineBody("holder_id is required")
 	}
 	lease := time.Duration(body.LeaseSecs) * time.Second
-	if tok, claim := claimTokenFromContext(r.Context()); claim {
-		lease = claimSlotLease(tok, lease)
-	}
-	expires, superseded, err := tenant.HeartbeatConcurrencySlot(r.Context(), key, body.HolderID, lease)
+	expires, superseded, err := tenant.HeartbeatAuthorizedSlot(r.Context(), a, key, body.HolderID, lease)
 	if err != nil {
-		if errors.Is(err, store.ErrLockHeld) {
-			writeError(w, http.StatusConflict, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return concurrencyError(err)
 	}
 	writeJSON(w, http.StatusOK, heartbeatSlotResp{
 		LeaseExpiresAt:   expires,
 		CancelledByNewer: superseded,
 	})
+	return nil
 }
 
-func (s *Server) handleObserveSlot(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleObserveSlot(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	tenant, err := s.concurrencyStore(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
-	key := r.PathValue("key")
+	key := a.Target.SlotKey
 	holderID := r.URL.Query().Get("holder_id")
 	if holderID == "" {
-		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
-		return
+		return invalidEngineBody("holder_id is required")
 	}
-	holder, err := tenant.ConcurrencyHolder(r.Context(), key, holderID, time.Now())
+	holder, err := tenant.ReadAuthorizedHolder(r.Context(), a, key, holderID)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return concurrencyError(err)
 	}
-	writeJSON(w, http.StatusOK, holderResp(*holder))
+	writeJSON(w, http.StatusOK, holderResp(holder))
+	return nil
 }
 
 type releaseSlotReq struct {
@@ -339,56 +170,31 @@ type releaseSlotReq struct {
 	CacheTTLNS   int64  `json:"cache_ttl_ns,omitempty"`
 }
 
-func (s *Server) handleReleaseSlot(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleReleaseSlot(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	tenant, err := s.concurrencyStore(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
-	key := r.PathValue("key")
+	key := a.Target.SlotKey
 	var body releaseSlotReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeConcurrencyRequest(r, &body); err != nil {
+		return err
 	}
 	if body.HolderID == "" {
-		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
-		return
+		return invalidEngineBody("holder_id is required")
 	}
-	_, _, _, err := tenant.ReleaseAndNotify(
-		r.Context(), key, body.HolderID, body.Outcome,
-		body.OutputRef, body.CacheKeyHash,
-		time.Duration(body.CacheTTLNS), store.DefaultConcurrencyLease,
-	)
+	err = tenant.ReleaseAuthorizedSlot(r.Context(), a, key, body.HolderID, body.Outcome,
+		body.OutputRef, body.CacheKeyHash, time.Duration(body.CacheTTLNS))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return concurrencyError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
-type stateResp struct {
-	Key               string            `json:"key"`
-	Capacity          int               `json:"capacity"`
-	EffectiveCapacity int               `json:"effective_capacity"`
-	UsedCost          int               `json:"used_cost"`
-	Holders           []stateHolderResp `json:"holders"`
-	Waiters           []stateWaiterResp `json:"waiters"`
-}
-
-type stateHolderResp struct {
-	HolderID       string     `json:"holder_id"`
-	RunID          string     `json:"run_id"`
-	NodeID         string     `json:"node_id,omitempty"`
-	ClaimedAt      time.Time  `json:"claimed_at"`
-	QueueArrivedAt *time.Time `json:"queue_arrived_at,omitempty"`
-	LeaseExpiresAt time.Time  `json:"lease_expires_at"`
-	Superseded     bool       `json:"superseded"`
-	Cost           int        `json:"cost,omitempty"`
-}
-
-func holderResp(h store.ConcurrencyHolder) stateHolderResp {
-	resp := stateHolderResp{
-		HolderID: h.HolderID, RunID: h.RunID, NodeID: h.NodeID,
+func holderResp(h store.ConcurrencyHolder) controllerwire.QueueGroupHolder {
+	resp := controllerwire.QueueGroupHolder{
+		HolderID: h.HolderID, RunID: h.RunID, JobID: h.NodeID,
 		ClaimedAt: h.ClaimedAt, LeaseExpiresAt: h.LeaseExpiresAt,
 		Superseded: h.Superseded, Cost: h.Cost,
 	}
@@ -398,92 +204,72 @@ func holderResp(h store.ConcurrencyHolder) stateHolderResp {
 	return resp
 }
 
-type stateWaiterResp struct {
-	RunID         string    `json:"run_id"`
-	NodeID        string    `json:"node_id,omitempty"`
-	ArrivedAt     time.Time `json:"arrived_at"`
-	Policy        string    `json:"policy"`
-	CacheKeyHash  string    `json:"cache_key_hash,omitempty"`
-	LeaderRunID   string    `json:"leader_run_id,omitempty"`
-	LeaderNodeID  string    `json:"leader_node_id,omitempty"`
-	CancelTimeout string    `json:"cancel_timeout,omitempty"`
-	Cost          int       `json:"cost,omitempty"`
-	Position      int       `json:"position"`
-}
-
-func (s *Server) handleConcurrencyState(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	key := r.PathValue("key")
-	st, err := tenant.GetConcurrencyState(r.Context(), key)
+func (s *Server) handleConcurrencyState(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	tenant, err := s.concurrencyStore(r.Context(), a.Target.Team)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return err
 	}
-	resp := stateResp{
-		Key: st.Key, Capacity: st.Capacity,
-		EffectiveCapacity: st.EffectiveCapacity, UsedCost: st.UsedCost,
+	key := a.Target.SlotKey
+	st, err := tenant.ReadAuthorizedGroup(r.Context(), a, key)
+	if err != nil {
+		return concurrencyError(err)
+	}
+	if st == nil || st.Key != key {
+		return missingEndpointPolicy()
+	}
+	resp := controllerwire.QueueGroup{
+		Group: st.Key, Capacity: st.Capacity, EffectiveCapacity: st.EffectiveCapacity, UsedCost: st.UsedCost,
+		Holders: []controllerwire.QueueGroupHolder{}, Waiters: []controllerwire.QueueGroupWaiter{},
 	}
 	for _, h := range st.Holders {
 		resp.Holders = append(resp.Holders, holderResp(h))
 	}
 	for _, wt := range st.Waiters {
-		var ct string
-		if wt.CancelTimeout > 0 {
-			ct = wt.CancelTimeout.String()
-		}
-		resp.Waiters = append(resp.Waiters, stateWaiterResp{
-			RunID: wt.RunID, NodeID: wt.NodeID, ArrivedAt: wt.ArrivedAt,
+		resp.Waiters = append(resp.Waiters, controllerwire.QueueGroupWaiter{
+			RunID: wt.RunID, JobID: wt.NodeID, ArrivedAt: wt.ArrivedAt,
 			Policy: wt.Policy, CacheKeyHash: wt.CacheKeyHash,
-			LeaderRunID: wt.LeaderRunID, LeaderNodeID: wt.LeaderNodeID,
-			CancelTimeout: ct, Cost: wt.Cost, Position: wt.Position,
+			LeaderRunID: wt.LeaderRunID, LeaderJobID: wt.LeaderNodeID,
+			CancelTimeout: wt.CancelTimeout, Cost: wt.Cost, Position: wt.Position + 1,
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
+	return nil
 }
 
 type resolveWaiterResp struct {
-	Status              string            `json:"status"`
-	HolderID            string            `json:"holder_id,omitempty"`
-	HolderLeaseExpires  time.Time         `json:"holder_lease_expires,omitempty"`
-	OutputRef           string            `json:"output_ref,omitempty"`
-	OriginRunID         string            `json:"origin_run_id,omitempty"`
-	OriginNodeID        string            `json:"origin_node_id,omitempty"`
-	LeaderRunID         string            `json:"leader_run_id,omitempty"`
-	LeaderNodeID        string            `json:"leader_node_id,omitempty"`
-	LeaderOutcome       string            `json:"leader_outcome,omitempty"`
-	LeaderFailureReason string            `json:"leader_failure_reason,omitempty"`
-	Position            int               `json:"position,omitempty"`
-	QueueLength         int               `json:"queue_length,omitempty"`
-	Holders             []stateHolderResp `json:"holders,omitempty"`
+	Status              string                            `json:"status"`
+	HolderID            string                            `json:"holder_id,omitempty"`
+	HolderLeaseExpires  time.Time                         `json:"holder_lease_expires,omitempty"`
+	OutputRef           string                            `json:"output_ref,omitempty"`
+	OriginRunID         string                            `json:"origin_run_id,omitempty"`
+	OriginNodeID        string                            `json:"origin_job_id,omitempty"`
+	LeaderRunID         string                            `json:"leader_run_id,omitempty"`
+	LeaderNodeID        string                            `json:"leader_job_id,omitempty"`
+	LeaderOutcome       string                            `json:"leader_outcome,omitempty"`
+	LeaderFailureReason string                            `json:"leader_failure_reason,omitempty"`
+	Position            int                               `json:"position,omitempty"`
+	QueueLength         int                               `json:"queue_length,omitempty"`
+	Holders             []controllerwire.QueueGroupHolder `json:"holders,omitempty"`
 }
 
-func (s *Server) handleResolveWaiter(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleResolveWaiter(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	tenant, err := s.concurrencyStore(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
-	key := r.PathValue("key")
+	key := a.Target.SlotKey
 	q := r.URL.Query()
 	runID := q.Get("run_id")
 	if key == "" || runID == "" {
-		writeError(w, http.StatusBadRequest, errors.New("key and run_id are required"))
-		return
+		return invalidEngineBody("group and run_id are required")
 	}
-	res, err := tenant.ResolveWaiter(
-		r.Context(), key, runID, q.Get("node_id"),
-		q.Get("cache_key_hash"), q.Get("leader_run_id"), q.Get("leader_node_id"),
+	res, err := tenant.ResolveAuthorizedWaiter(
+		r.Context(), a, key, runID, q.Get("job_id"),
+		q.Get("cache_key_hash"), q.Get("leader_run_id"), q.Get("leader_job_id"),
 		q.Get("bypass_read") == "true",
 	)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return concurrencyError(err)
 	}
 	out := resolveWaiterResp{
 		Status:              string(res.Status),
@@ -503,93 +289,68 @@ func (s *Server) handleResolveWaiter(w http.ResponseWriter, r *http.Request) {
 		out.Holders = append(out.Holders, holderResp(h))
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 type cancelWaiterReq struct {
 	RunID  string `json:"run_id"`
-	NodeID string `json:"node_id,omitempty"`
+	NodeID string `json:"job_id,omitempty"`
 }
 
 type cancelWaiterResp struct {
 	Cancelled bool `json:"cancelled"`
 }
 
-func (s *Server) handleCancelWaiter(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleCancelWaiter(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	tenant, err := s.concurrencyStore(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
-	key := r.PathValue("key")
+	key := a.Target.SlotKey
 	var body cancelWaiterReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeConcurrencyRequest(r, &body); err != nil {
+		return err
 	}
 	if body.RunID == "" {
-		writeError(w, http.StatusBadRequest, errors.New("run_id is required"))
-		return
+		return invalidEngineBody("run_id is required")
 	}
-	cancelled, err := tenant.CancelWaiter(r.Context(), key, body.RunID, body.NodeID)
+	cancelled, err := tenant.CancelAuthorizedWaiter(r.Context(), a, key, store.NodeRef{RunID: body.RunID, NodeID: body.NodeID})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return concurrencyError(err)
 	}
 	writeJSON(w, http.StatusOK, cancelWaiterResp{Cancelled: cancelled})
+	return nil
 }
 
 type forceReleaseResp struct {
-	Dropped []stateHolderResp `json:"dropped,omitempty"`
+	Dropped []controllerwire.QueueGroupHolder `json:"dropped,omitempty"`
 }
 
-func (s *Server) handleForceRelease(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	key := r.PathValue("key")
-	dropped, err := tenant.ForceReleaseSupersededHolders(r.Context(), key)
+func (s *Server) handleForceRelease(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	tenant, err := s.concurrencyStore(r.Context(), a.Target.Team)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return err
 	}
-	if len(dropped) > 0 {
-		if _, err := tenant.PromoteNextWaiters(r.Context(), key, store.DefaultConcurrencyLease); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Errorf("force-release: promote: %w", err))
-			return
-		}
+	key := a.Target.SlotKey
+	dropped, err := tenant.ForceReleaseAuthorizedSlots(r.Context(), a, key)
+	if err != nil {
+		return concurrencyError(err)
 	}
 	var out forceReleaseResp
 	for _, h := range dropped {
 		out.Dropped = append(out.Dropped, holderResp(h))
 	}
 	writeJSON(w, http.StatusOK, out)
-}
-
-// safety: a claim takes only a slot its node's plan declares, under its own
-// node's holder ID, joins no holder, and holds it no longer than
-// its claim token lives, so it cannot supersede, renew or block another run's
-// holder beyond what the declared policy allows.
-func (s *Server) checkClaimAcquire(r *http.Request, tok store.ClaimToken, key string, body *acquireSlotReq) error {
-	// safety: an acquire naming a live holder's ID renews that holder, so a
-	// claim names only the ID the SDK gives its own node.
-	if body.HolderID != tok.RunID+"/"+tok.NodeID {
-		return errors.New("a claim acquires under its own node's holder ID only")
-	}
-	if err := s.store.CheckClaimSlot(r.Context(), tok, key, body.Policy, body.Max, body.Cost); err != nil {
-		return err
-	}
-	// safety: joining a holder takes its slot at no cost; a claimed node never
-	// joins one, and its own earlier holder already carries its holder ID.
-	if body.InheritedHolderID != "" {
-		return errors.New("a claim does not join another holder")
-	}
-	body.LeaseSecs = int(claimSlotLease(tok, time.Duration(body.LeaseSecs)*time.Second) / time.Second)
 	return nil
 }
 
-func claimSlotLease(tok store.ClaimToken, lease time.Duration) time.Duration {
-	if lease <= 0 {
-		lease = store.DefaultConcurrencyLease
+func concurrencyError(err error) error {
+	switch {
+	case errors.Is(err, store.ErrLockHeld):
+		return &apierr.Error{Code: apierr.LockHeld, Message: "concurrency holder changed"}
+	case errors.Is(err, store.ErrConcurrencySuperseded):
+		return &apierr.Error{Code: apierr.Conflict, Message: "concurrency work superseded", Details: map[string]any{"reason": "concurrency_superseded"}}
+	default:
+		return engineLookupError(err)
 	}
-	return max(min(lease, time.Until(tok.ExpiresAt)), time.Second)
 }

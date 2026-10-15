@@ -65,11 +65,12 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request, a ca
 	if !validDataDigest(request.Digest) {
 		return invalidEngineBody("download requires a SHA-256 digest")
 	}
-	binding, err := s.dataController.BindData(r.Context(), a)
+	ctx := dataDownloadContext(r)
+	binding, err := s.dataController.BindData(ctx, a)
 	if err != nil {
 		return dataRouteError(err)
 	}
-	transfer, err := binding.Signer.Download(r.Context(), blob.GetRequest{Authority: binding.Authority, Digest: request.Digest})
+	transfer, err := binding.Signer.Download(ctx, blob.GetRequest{Authority: binding.Authority, Digest: request.Digest})
 	if err != nil {
 		return dataRouteError(err)
 	}

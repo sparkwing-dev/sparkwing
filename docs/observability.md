@@ -384,20 +384,16 @@ It also shows what admission is doing with the machine:
   reserve, measured external applications, and total capacity. An external
   sensor gap remains a gap rather than becoming zero. Mirrors `sparkwing
   queue`.
-- **Fleet section**: the caller's team's runners that claimed work in the last
-  hour, with the labels and slot ceiling each last advertised, observed
-  liveness and headroom, and current run activity. A claim-mode agent with a plain `holder_prefix` keeps one stable
-  identity; idle polls from the credential that made its stored claim refresh
-  liveness. Polls from another credential cannot keep that claim live. The
-  most recently started claim owns a shared display name; unstarted
-  claims use stable credential order. Its active runs never mix with another
-  credential's. `last_seen` is the most recent node start, live poll, or
-  accepted claim heartbeat from that credential, never the future lease
-  deadline. A busy runner's heartbeat does not advertise a free slot. The
-  headroom observation time stays separate. Home reads its recently failed
-  pipelines from the caller's team-scoped runs. Database, object-store, auth,
-  and slow-response problems still degrade their service; the controller
-  health API keeps its own status.
+- **Fleet section**: the caller's team's granted runner identities, accepted
+  observations, active jobs and measured headroom from one store snapshot.
+  Distinct credentials with the same display name stay separate. `last_seen`
+  records an accepted poll or renewal, never a future lease deadline. A busy
+  runner's heartbeat does not advertise a free slot or refresh headroom.
+  Runner and queue views share the same snapshot. Embedded controllers supply
+  `WithRunnerInventory`; missing adapters refuse the read with `policy_missing`.
+  Home reads recently failed pipelines from the caller's team-scoped runs.
+  Database, object-store, auth and slow-response problems still degrade their
+  service. The controller health API keeps its own status.
 
 The run node list and DAG show a small location icon for known execution sites.
 Hover or focus the icon to see the runner or repository. Machine, Sparkwing
@@ -456,14 +452,11 @@ additionally export traces and structured logs via OTLP.
 
 Always active on every service; scrape it with your Prometheus.
 
-On its API listener the controller serves `/metrics` only to an `admin`
-bearer when authentication is on, because the run counters name every
-team's pipelines; with authentication off it serves it to anyone.
+The controller serves `/metrics` to a deployment bearer with `operator.limits`
+or an authorized operator-console session, because the run counters name every
+team's pipelines. The same policy applies on either listener.
 `sparkwing-controller --metrics-addr 127.0.0.1:9090` moves the endpoint onto its own listener,
-which serves it without a bearer, so bind it to a pod-local or
-cluster-internal address and leave it out of the ingress. The API
-listener then answers `401` for `/metrics` when authentication is on,
-and `404` when it is off. In `sparkwing-full`,
+and the API listener then answers `404` for `/metrics`. In `sparkwing-full`,
 `controller.metricsPort` passes that flag and exposes the port on the
 controller container only; the controller Service does not publish it,
 so an in-cluster scraper reaches it by pod address. The controller
@@ -504,8 +497,6 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_object_store_bucket_ceiling_freezes_total` | Counter | (none) | Times the bucket crossed its ceiling and began refusing object writes |
 | `sparkwing_object_store_bucket_ceiling_refused_total` | Counter | (none) | Object writes the ceiling refused |
 | `sparkwing_object_store_bucket_ceiling_measurement_incomplete` | Gauge | (none) | 1 while the last measurement stopped early and was discarded |
-| `sparkwing_auth_token_cache_total` | Counter | `result` | Bearer verifications by how the verified-token cache answered them (`hit`, `miss`, `coalesced`) |
-| `sparkwing_auth_hashing_rejected_total` | Counter | (none) | Credential verifications the argon2id memory budget shed rather than queued, answered `503` with a `Retry-After` |
 | `sparkwing_principal_throttled_total` | Counter | `route_class` | Requests a request budget refused with `429` (`claim`, `heartbeat`, `idle_poll`, `token`) |
 | `sparkwing_request_rate_alarm_total` | Counter | (none) | Minutes in which the controller served more requests than `--requests-per-minute-alarm`; it refuses nothing |
 | `sparkwing_egress_day_bytes` | Gauge | (none) | Bytes the process has sent to clients in the current UTC day |
@@ -526,7 +517,7 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_credits_charged_micro_total` | Counter | (none) | Micro-credits execution billed |
 | `sparkwing_credits_refunded_micro_total` | Counter | (none) | Micro-credits returned to claims whose machine never started, or whose setup the platform failed |
 | `sparkwing_credits_storage_micro_total` | Counter | (none) | Micro-credits retained bytes billed; this series buys no runner time, so the charged series does not carry it |
-| `sparkwing_requests_by_principal_total` | Counter | `credential` | Requests that authenticated, by the kind of credential behind them: `user`, `runner`, `service` or `other` |
+| `sparkwing_requests_by_principal_total` | Counter | `credential` | Requests that authenticated, by capability subject: `account`, `machine`, `service`, `operator`, `local`, `anonymous` or `other` |
 
 `sparkwing_node_seconds_total{placement="cloud"}` is the billing line, and it
 comes from the credit ledger rather than from a request handler. A metered claim

@@ -39,12 +39,12 @@ func newGHFixture(t *testing.T) *ghFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, time.Now().UTC())
+	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
 	google, gh := googletest.New(t), githuboidctest.New(t)
-	srv := controller.New(st, nil).EnableAuthFromStore().
+	srv := controller.New(st, nil).
 		WithLicense(license.Resolve(raw, pub, time.Now(), nil)).
 		WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
 		WithExternalURL(ghAudience).
@@ -197,7 +197,7 @@ func TestGitHubRunnerCredentialsPerTeamAreBounded(t *testing.T) {
 	}
 	for i := range 20 {
 		if _, _, err := tn.CreateToken(context.Background(), "github:42:Acme/Widgets", store.TokenKindRunner,
-			[]string{controller.ScopeNodesClaim}, time.Hour, time.Now()); err != nil {
+			[]string{"nodes.claim"}, time.Hour, time.Now()); err != nil {
 			t.Fatalf("mint %d: %v", i, err)
 		}
 	}

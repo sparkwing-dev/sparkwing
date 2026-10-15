@@ -67,11 +67,14 @@ func takesAuthorization(fn *ast.FuncDecl) bool {
 }
 
 func handlerAuthorizationCall(name string) bool {
+	if name == "AuthorizeURL" {
+		return false
+	}
 	if strings.HasPrefix(strings.ToLower(name), "authorize") || strings.HasPrefix(strings.ToLower(name), "authenticate") {
 		return true
 	}
 	switch name {
-	case "PrincipalFromContext", "accountPrincipal", "teamMember", "requireScope", "requireServiceScope", "requireOperator", "operatorSession", "triggerClaimRequest", "requestTenant", "requestTeam":
+	case "PrincipalFromContext", "accountPrincipal", "teamMember", "requireScope", "requireServiceScope", "requireOperator", "triggerClaimRequest", "requestTenant", "requestTeam":
 		return true
 	}
 	return false

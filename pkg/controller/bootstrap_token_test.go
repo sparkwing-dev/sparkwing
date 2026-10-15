@@ -1,125 +1,69 @@
 package controller_test
 
 import (
-	"net/http"
-	"net/http/httptest"
-	"path/filepath"
+	"context"
+	"encoding/base64"
+	"errors"
+	"slices"
 	"testing"
-	"time"
+	"testing/quick"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-const bootstrapAdminRaw = "swu_provisionedbootstrapadmin00001"
-
-func openBootstrapStore(t *testing.T) *store.Store {
-	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	return st
+type bootstrapIssuer struct {
+	*store.Store
+	ensure func(context.Context, capability.ProvisionSpec) (bool, error)
 }
 
-func statusWithBearer(t *testing.T, url, token string) int {
-	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		t.Fatalf("new request: %v", err)
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("GET %s: %v", url, err)
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode
+func (f bootstrapIssuer) EnsureBootstrapCapability(ctx context.Context, spec capability.ProvisionSpec) (bool, error) {
+	return f.ensure(ctx, spec)
 }
 
-func TestEnsureBootstrapAdminToken_NoUnauthenticatedWindow(t *testing.T) {
-	st := openBootstrapStore(t)
-	now := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
-
-	created, err := controller.EnsureBootstrapAdminToken(st, bootstrapAdminRaw, now)
-	if err != nil {
-		t.Fatalf("EnsureBootstrapAdminToken: %v", err)
+func TestEnsureBootstrapAdminTokenForwardsOnlyGatedSeedProperty(t *testing.T) {
+	property := func(secret [32]byte, created bool) bool {
+		raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(secret[:])
+		called := 0
+		issuer := bootstrapIssuer{ensure: func(ctx context.Context, spec capability.ProvisionSpec) (bool, error) {
+			called++
+			if ctx != t.Context() || spec.Seed != raw || spec.Kind != capability.ProvisionBootstrap || spec.Authority != nil || spec.Team != "" || spec.Subject != (capability.Subject{Kind: capability.SubjectOperator, ID: controller.BootstrapAdminPrincipal}) || spec.Binding != (capability.Binding{Kind: capability.BindingNone}) || spec.Metered || spec.ExpiresAt != nil || spec.Data != nil || len(spec.ReservedPools) != 0 || len(spec.Repositories) != 0 || !slices.Equal(spec.Grants, []capability.Grant{capability.OperatorTokens, capability.OperatorLimits, capability.OperatorObjectStore}) {
+				return false, errors.New("invalid bootstrap request")
+			}
+			return created, nil
+		}}
+		got, err := controller.EnsureBootstrapAdminToken(t.Context(), issuer, raw)
+		return err == nil && got == created && called == 1
 	}
-	if !created {
-		t.Fatal("a fresh store reported no bootstrap token created")
-	}
-
-	srv := controller.New(st, nil).EnableAuthFromStore()
-	if !srv.AuthEnabled() {
-		t.Fatal("the bootstrap token left authentication disabled, so --require-auth would refuse to start")
-	}
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
-
-	if got := statusWithBearer(t, ts.URL+"/api/v1/tokens", ""); got != http.StatusUnauthorized {
-		t.Fatalf("first unauthenticated request status=%d, want 401", got)
-	}
-	if got := statusWithBearer(t, ts.URL+"/api/v1/tokens", bootstrapAdminRaw); got != http.StatusOK {
-		t.Fatalf("bootstrap token status=%d, want 200", got)
+	if err := quick.Check(property, &quick.Config{MaxCount: 40}); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestEnsureBootstrapAdminToken_SkipsAPopulatedTable(t *testing.T) {
-	st := openBootstrapStore(t)
-	now := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
-
-	existing, _, err := st.CreateToken("operator", store.TokenKindUser,
-		[]string{controller.ScopeAdmin}, 0, now)
-	if err != nil {
-		t.Fatalf("seed token: %v", err)
+func TestEnsureBootstrapAdminTokenRefusals(t *testing.T) {
+	calls := 0
+	issuer := bootstrapIssuer{ensure: func(context.Context, capability.ProvisionSpec) (bool, error) {
+		calls++
+		return false, errors.New("commit refused")
+	}}
+	for _, raw := range []string{"not-a-token", "swu_provisionedbootstrapadmin00001", "swn_" + base64.RawURLEncoding.EncodeToString(make([]byte, 32)), "swk_" + base64.RawURLEncoding.EncodeToString(make([]byte, 31)), "swk_private\n"} {
+		if created, err := controller.EnsureBootstrapAdminToken(t.Context(), issuer, raw); err == nil || created {
+			t.Fatalf("malformed seed accepted")
+		}
 	}
-
-	created, err := controller.EnsureBootstrapAdminToken(st, bootstrapAdminRaw, now)
-	if err != nil {
-		t.Fatalf("EnsureBootstrapAdminToken: %v", err)
+	if created, err := controller.EnsureBootstrapAdminToken(t.Context(), issuer, ""); err != nil || created || calls != 0 {
+		t.Fatalf("empty/invalid seed reached issuer: %d %v", calls, err)
 	}
-	if created {
-		t.Fatal("a populated tokens table accepted a bootstrap token")
+	raw := "swk_" + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	if created, err := controller.EnsureBootstrapAdminToken(t.Context(), issuer, raw); err == nil || created || calls != 1 {
+		t.Fatal("commit refusal suppressed")
 	}
-
-	ts := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
-	defer ts.Close()
-
-	if got := statusWithBearer(t, ts.URL+"/api/v1/tokens", bootstrapAdminRaw); got != http.StatusUnauthorized {
-		t.Fatalf("unwritten bootstrap token status=%d, want 401", got)
-	}
-	if got := statusWithBearer(t, ts.URL+"/api/v1/tokens", existing); got != http.StatusOK {
-		t.Fatalf("pre-existing token status=%d, want 200", got)
-	}
-}
-
-func TestEnsureBootstrapAdminToken_EmptyValueCreatesNothing(t *testing.T) {
-	st := openBootstrapStore(t)
-
-	created, err := controller.EnsureBootstrapAdminToken(st, "", time.Now().UTC())
-	if err != nil {
-		t.Fatalf("EnsureBootstrapAdminToken: %v", err)
-	}
-	if created {
-		t.Fatal("an empty bootstrap value created a token")
-	}
-	toks, err := st.ListTokens("", true)
-	if err != nil {
-		t.Fatalf("ListTokens: %v", err)
-	}
-	if len(toks) != 0 {
-		t.Fatalf("ListTokens len=%d want 0", len(toks))
-	}
-}
-
-func TestEnsureBootstrapAdminToken_RefusesAMalformedValue(t *testing.T) {
-	st := openBootstrapStore(t)
-
-	if _, err := controller.EnsureBootstrapAdminToken(st, "not-a-token", time.Now().UTC()); err == nil {
-		t.Fatal("EnsureBootstrapAdminToken accepted a value no bearer lookup could resolve")
+	var st *store.Store
+	created, err := controller.EnsureBootstrapAdminToken(t.Context(), st, raw)
+	var api *apierr.Error
+	if created || !errors.As(err, &api) || api.Code != apierr.PolicyMissing {
+		t.Fatalf("missing transaction: %t %v", created, err)
 	}
 }

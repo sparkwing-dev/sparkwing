@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -43,37 +45,44 @@ func (s *Server) WithBillingCheckout(url, token string) *Server {
 
 var errCheckoutRefused = errors.New("the checkout service refused the session")
 
-// safety: The paid grant names the Stripe session, which stops accepting payment at its expiry.
-type checkoutSession struct {
-	URL       string
-	ID        string
-	ExpiresAt time.Time
-}
-
-func (c *billingCheckout) open(ctx context.Context, team string, cents int64) (checkoutSession, error) {
+func (c *billingCheckout) openReservedPage(ctx context.Context, page *capability.BillingPage) error {
+	path := "/internal/checkout"
+	body := map[string]any{"team": page.Team, "key": page.ReservationID}
+	switch page.Kind {
+	case capability.BillingPageCredits:
+		body["amount_cents"] = page.AmountCents
+	case capability.BillingPageCard:
+		path = "/internal/card-setup"
+		body["setup_id"], body["customer"], body["email"] = page.ReservationID, page.Customer, page.Email
+	case capability.BillingPageRecovery:
+		path = "/internal/charge-checkout"
+		body["charge_id"], body["attempt_id"] = page.ChargeID, page.AttemptID
+		body["amount_cents"], body["customer"] = page.AmountCents, page.Customer
+	default:
+		return missingEndpointPolicy()
+	}
 	var out struct {
 		URL       string `json:"url"`
 		ID        string `json:"id"`
 		ExpiresAt int64  `json:"expires_at"`
 	}
-	if err := c.post(ctx, "/internal/checkout", map[string]any{"team": team, "amount_cents": cents}, &out); err != nil {
-		return checkoutSession{}, err
+	if err := c.post(ctx, path, body, &out); err != nil {
+		return err
 	}
-	// safety: the browser is sent wherever this says, so only an https page
-	// is followed; a service answering anything else is misconfigured.
-	if !strings.HasPrefix(out.URL, "https://") {
-		return checkoutSession{}, fmt.Errorf("%w: it answered a non-https checkout url", errCheckoutRefused)
+	if !validBillingPageURL(out.URL) {
+		return fmt.Errorf("%w: non-https payment page", errCheckoutRefused)
 	}
-	// safety: the paid grant finds its checkout by the session id, and an
-	// unnamed session would count against the cap until its hold ran out.
-	if out.ID == "" {
-		return checkoutSession{}, fmt.Errorf("%w: it answered no session id", errCheckoutRefused)
+	if page.Kind == capability.BillingPageCredits && out.ID == "" {
+		return fmt.Errorf("%w: missing session id", errCheckoutRefused)
 	}
-	session := checkoutSession{URL: out.URL, ID: out.ID}
+	page.URL, page.ProviderID = out.URL, out.ID
 	if out.ExpiresAt > 0 {
-		session.ExpiresAt = time.Unix(out.ExpiresAt, 0)
+		expires := time.Unix(out.ExpiresAt, 0)
+		if page.ExpiresAt.IsZero() || expires.Before(page.ExpiresAt) {
+			page.ExpiresAt = expires
+		}
 	}
-	return session, nil
+	return nil
 }
 
 func (c *billingCheckout) post(ctx context.Context, path string, in, out any) error {
@@ -105,21 +114,6 @@ func (c *billingCheckout) post(ctx context.Context, path string, in, out any) er
 	return nil
 }
 
-// safety: a hosted Stripe page is the only place a browser is sent, so an
-// answer naming anything else is refused.
-func (c *billingCheckout) hostedPage(ctx context.Context, path string, in any) (string, error) {
-	var out struct {
-		URL string `json:"url"`
-	}
-	if err := c.post(ctx, path, in, &out); err != nil {
-		return "", err
-	}
-	if !strings.HasPrefix(out.URL, "https://") {
-		return "", fmt.Errorf("%w: it answered a non-https page", errCheckoutRefused)
-	}
-	return out.URL, nil
-}
-
 type cardChargeResult struct {
 	PaymentIntent string `json:"payment_intent"`
 	Status        string `json:"status"`
@@ -149,4 +143,9 @@ func (c *billingCheckout) refund(ctx context.Context, paymentIntent, key, reason
 		err = fmt.Errorf("%w: it named no refund and status", errCheckoutRefused)
 	}
 	return out.Refund, out.Status, err
+}
+
+func validBillingPageURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil
 }

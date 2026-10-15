@@ -8,7 +8,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 const (
@@ -16,35 +15,19 @@ const (
 	loginClientWindow = time.Minute
 	loginGlobalWindow = time.Minute
 	loginGlobalKey    = "all-clients"
-
-	// safety: sizing the listener bucket per argon2 slot bounds hashing work rather than a fleet's real logins.
-	loginGlobalPerHashSlot = 600
+	loginGlobalBurst  = 2400
 )
 
 type loginLimiter struct {
 	clients *ratelimit.Limiter
 	global  *ratelimit.Limiter
-
-	globalBurst int
 }
 
 func newLoginLimiter() *loginLimiter {
-	globalBurst := loginGlobalPerHashSlot * store.Argon2Slots()
 	return &loginLimiter{
-		clients:     ratelimit.New(loginClientBurst, loginClientWindow),
-		global:      ratelimit.New(globalBurst, loginGlobalWindow),
-		globalBurst: globalBurst,
+		clients: ratelimit.New(loginClientBurst, loginClientWindow),
+		global:  ratelimit.New(loginGlobalBurst, loginGlobalWindow),
 	}
-}
-
-func (l *loginLimiter) middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := l.admit(r); err != nil {
-			writePolicyError(w, err)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func (l *loginLimiter) admit(r *http.Request) error {
@@ -60,11 +43,6 @@ func (l *loginLimiter) admit(r *http.Request) error {
 
 func (l *loginLimiter) client(r *http.Request) string {
 	return ratelimit.ClientIP(r)
-}
-
-// safety: keying a failure budget on the public prefix alone would let any stranger lock that token out.
-func failureKey(prefix, client string) string {
-	return prefix + "|" + client
 }
 
 func writeRetryAfter(w http.ResponseWriter, after time.Duration, message string) {

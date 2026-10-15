@@ -290,12 +290,10 @@ describe("purchase limit", () => {
     respond = () =>
       Response.json(
         {
-          error: "over limit",
-          code: "purchase_limit",
-          trusted: false,
-          limit_cents: 5_000,
-          purchased_cents: 4_000,
-          amount_cents: 2_000,
+          error: { code: "conflict", message: "over limit", details: {
+            reason: "purchase_limit", trusted: false, limit_cents: 5_000,
+            purchased_cents: 4_000, amount_cents: 2_000,
+          } },
         },
         { status: 409 },
       );
@@ -337,7 +335,7 @@ describe("getBilling", () => {
   });
 
   it("carries the controller's refusal", async () => {
-    respond = () => Response.json({ error: "team not found" }, { status: 404 });
+    respond = () => Response.json({ error: {code: "not_found", message: "team not found"} }, { status: 404 });
     await assert.rejects(lib.getBilling(), (err: Error) => {
       assert.ok(err instanceof lib.BillingApiError);
       assert.equal(err.status, 404);
@@ -358,6 +356,7 @@ describe("startCheckout", () => {
     assert.equal(call.url, "/api/v1/team/billing/checkout");
     assert.equal(call.method, "POST");
     assert.equal(call.headers.get("Content-Type"), "application/json");
+    assert.ok(call.headers.get("Idempotency-Key"));
     assert.equal(call.headers.get("X-CSRF-Token"), "session-csrf");
     assert.deepEqual(JSON.parse(call.body), { amount_cents: 2_500 });
   });
@@ -366,11 +365,10 @@ describe("startCheckout", () => {
     respond = () =>
       Response.json(
         {
-          error: "over cap",
-          code: "balance_cap",
+          error: { code: "conflict", message: "over cap", details: { reason: "balance_cap",
           balance_micro: 499_500_000_000,
           cap_micro: 500_000_000_000,
-          amount_micro: 1_000_000_000,
+          amount_micro: 1_000_000_000, } },
         },
         { status: 409 },
       );
@@ -392,12 +390,11 @@ describe("startCheckout", () => {
     respond = () =>
       Response.json(
         {
-          error: "over cap",
-          code: "balance_cap",
+          error: { code: "conflict", message: "over cap", details: { reason: "balance_cap",
           balance_micro: 400_000_000_000,
           open_micro: 60_000_000_000,
           cap_micro: 500_000_000_000,
-          amount_micro: 50_000_000_000,
+          amount_micro: 50_000_000_000, } },
         },
         { status: 409 },
       );
@@ -411,14 +408,14 @@ describe("startCheckout", () => {
   for (const [status, body, pattern] of [
     [
       400,
-      { error: "amount out of range", code: "amount_out_of_range" },
+      { error: {code: "bad_request", message: "amount out of range", details: {reason: "amount_out_of_range"} } },
       /refused this amount: amount out of range/,
     ],
-    [403, { error: "forbidden" }, /Only a team owner/],
+    [403, {error: {code: "forbidden", message:"forbidden"}}, /Only a team owner/],
     [502, "bad gateway", /Nothing was charged/],
     [
       503,
-      { error: "no service", code: "checkout_unavailable" },
+      {error: {code: "unavailable", message: "no service", details: {reason: "checkout_unavailable"}}},
       /not available on this controller/,
     ],
     [500, "", /Checkout failed \(500\)/],

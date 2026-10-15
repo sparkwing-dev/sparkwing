@@ -1,18 +1,15 @@
 package controller
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
-	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/web"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // safety: host-only scoping stops a sibling host under the registrable domain reading these cookies and does not
@@ -153,70 +150,4 @@ func validFormCSRF(r *http.Request, secure bool) bool {
 func csrfError(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 	http.Error(w, "invalid CSRF token", http.StatusForbidden)
-}
-
-type browserSession struct {
-	principal *Principal
-	csrfToken string
-}
-
-type browserSessionKey struct{}
-
-func withBrowserSession(ctx context.Context, sess *browserSession) context.Context {
-	return context.WithValue(ctx, browserSessionKey{}, sess)
-}
-
-func browserSessionFrom(ctx context.Context) *browserSession {
-	sess, _ := ctx.Value(browserSessionKey{}).(*browserSession)
-	return sess
-}
-
-// safety: a cookie is the one credential a browser attaches on its own, so it
-// authenticates only a request that carries no Authorization of its own, and
-// it never authenticates a write that fails the CSRF check. Bearer, claim and
-// Session-header requests reach the authenticator exactly as they arrived.
-func (s *Server) cookieSessions(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		secure := s.cookiesSecure()
-		raw := sessionCookie(r, secure)
-		if raw == "" || r.Header.Get("Authorization") != "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		sess, err := s.resolveBrowserSession(r.Context(), raw)
-		if err != nil {
-			s.refuseBrowserSession(w, err, secure)
-			return
-		}
-		if unsafeMethod(r.Method) && !validAPIRequestCSRF(r, sess.csrfToken, secure) {
-			csrfError(w)
-			return
-		}
-		next.ServeHTTP(w, r.WithContext(withBrowserSession(r.Context(), sess)))
-	})
-}
-
-func (s *Server) resolveBrowserSession(ctx context.Context, raw string) (*browserSession, error) {
-	p, sess, err := s.lookupSession(ctx, raw, time.Now().UTC())
-	if err != nil {
-		return nil, err
-	}
-	noteAuditPrincipal(ctx, p)
-	return &browserSession{principal: p, csrfToken: sess.CSRFToken}, nil
-}
-
-// safety: a backend fault answered 401 would read as expiry and clear a live
-// session's cookies, so only a refused session ends the browser's.
-func (s *Server) refuseBrowserSession(w http.ResponseWriter, err error, secure bool) {
-	w.Header().Set("Cache-Control", "no-store")
-	if errors.Is(err, store.ErrSessionBackend) {
-		s.logger.Error("session.unavailable", "error", err.Error())
-		setRetryAfter(w, authUnavailableRetryAfter)
-		writeAuthError(w, http.StatusServiceUnavailable, authErrorBody{
-			Code: "unavailable", Message: "authentication is temporarily unavailable",
-		})
-		return
-	}
-	clearSessionCookies(w, secure)
-	writeAuthError(w, http.StatusUnauthorized, authErrorBody{Code: "unauthenticated", Message: err.Error()})
 }
