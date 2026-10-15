@@ -30,9 +30,10 @@ Use an exact package version in `.sparkwing/package.json`. Its version selects
 the matching engine. The package requires Node.js 22.18 or later. The public
 API is [index.d.ts](index.d.ts).
 
-Durations are milliseconds and memory is bytes. Omitted options remain unset
-where the wire supports presence. Explicit zero remains zero, including an
+Numeric duration options use milliseconds. Memory uses bytes. Omitted options
+remain unset where the wire supports presence. Explicit zero remains zero, including an
 indefinite approval timeout. Argument values stay strings, including `int64`.
+Duration arguments use Go syntax such as `1h30m`, including `0`, `+0` and `-0`.
 String-array arguments use comma splitting, trimming and empty-item removal.
 
 `Context` provides lazy secrets and plain variables, typed outputs, references,

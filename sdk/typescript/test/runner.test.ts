@@ -44,6 +44,41 @@ function fakeServices(overrides: Partial<HostServices> = {}): HostServices {
   };
 }
 
+test("duration arguments preserve signed zero in defaults and explicit inputs", async (t) => {
+  for (const value of ["0", "+0", "-0"]) {
+    await t.test(value, async () => {
+      resetPipelines();
+      definePipeline({
+        name: "fixture",
+        args: [{ name: "wait", type: "duration", default: value }],
+        plan(plan) {
+          plan
+            .job("build", (ctx) => ({ pipeline: ctx.run.args.wait, job: ctx.args.jobWait }))
+            .withArgs({ name: "jobWait", type: "duration", default: value });
+        },
+      });
+      for (const args of [{}, { wait: value, jobWait: value }]) {
+        const host = await setup();
+        try {
+          const described = await host.send({ id: "describe", op: "describe" });
+          assert.equal(described.ok, true, JSON.stringify(described));
+          assert.deepEqual(
+            described.result.pipelines[0].args.map((arg: { default: string }) => arg.default),
+            [value, value],
+          );
+          const planned = await host.send({ ...planRequest, args });
+          assert.equal(planned.ok, true, JSON.stringify(planned));
+          const executed = await host.send({ id: "step", op: "run_step", job: "build", step: "run", attempt: 1 });
+          assert.equal(executed.result.outcome, "success", JSON.stringify(executed));
+          assert.deepEqual(executed.result.output, { pipeline: value, job: value });
+        } finally {
+          await host.close();
+        }
+      }
+    });
+  }
+});
+
 test("hello facts remain sealed, plans stay flat, body env starts only after planning", async () => {
   resetPipelines();
   let duringPlan: string | undefined;

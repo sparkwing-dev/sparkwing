@@ -6,7 +6,7 @@ const integer = /^[+-]?\d+$/;
 const durationPattern = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:ns|us|µs|μs|ms|s|m|h)(?:(?:\d+(?:\.\d*)?|\.\d+)(?:ns|us|µs|μs|ms|s|m|h))*$/;
 
 function validDuration(value: string): boolean {
-  if (value === "0") return true;
+  if (/^[+-]?0$/.test(value)) return true;
   if (!durationPattern.test(value)) return false;
   const units: Record<string, bigint> = {
     ns: 1n,

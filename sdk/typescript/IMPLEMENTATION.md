@@ -4,6 +4,35 @@ Snapshot: 2026-10-14. W5 remains incomplete at the native Windows and integrated
 host acceptance boundaries. The source implementation and local SDK proofs are
 ready for integration. The lead owns commits, pipelines and native verification.
 
+## Continuation: signed zero duration arguments
+
+Duration arguments now accept `+0` and `-0`, matching Go's `time.ParseDuration`.
+The protocol regression covers pipeline and job defaults, explicit inputs,
+describe and body output. Both signed cases failed before the one-line parser
+repair and passed afterward. The README distinguishes numeric duration options
+from serialized duration arguments.
+
+All 126 TypeScript tests, strict typechecking and Prettier passed. Repository-wide
+`go build -p 4 ./...`, focused `go vet -p 4 ./sdk/typescript/test/nativehost
+./internal/acceptance ./tests/acceptance` and `go test -p 4
+./internal/acceptance ./tests/acceptance` passed. The existing runner acceptance
+children cover the new regression. Linux native pipe execution also passed.
+No new placement or Windows cell was enabled.
+
+Windows tooling remains unavailable. PowerShell fails with WSL's
+`UtilBindVsockAnyPort: socket failed 1`, no Windows compiler is on PATH, and
+package preflight rejects the missing x64 bridge. Both bridge builds and native
+runs remain open, as do the host, storage, DinD and placement integrations below.
+No shared file or contract changed. No further inventory test was ported or
+legacy code deleted. The prior legacy deletion remains 2,896 lines. No new
+mechanism, dependency or environment variable was added.
+
+Go checks used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`, and
+caches and temporary files beneath `/tmp/sw-astra-W5`. TypeScript tests used
+`node --test --experimental-test-isolation=none 'test/**/*.test.ts'` from the
+SDK directory. The temporary directory was removed after verification. No
+Sparkwing pipeline or Git write ran.
+
 ## Continuation: data-service acceptance boundaries
 
 Added protocol tests for artifact declarations and consumption edges, dependency
