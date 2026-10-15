@@ -29,6 +29,8 @@ type executionHostStore struct {
 	reject  store.TransitionCause
 }
 
+func (*executionHostStore) RecordStep(context.Context, store.StepReport) error { return nil }
+
 func (s *executionHostStore) TransitionNode(_ context.Context, change store.NodeTransition) (store.Applied, error) {
 	row := s.snapshot.Nodes[0]
 	if change.Ref != row.Ref || change.Actor.Kind != store.ActorHolder || change.Actor.Holder != row.ClaimedBy || change.Actor.CapabilityPrefix != row.CapabilityPrefix || change.Actor.Generation != row.Generation || change.Actor.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: row.CapabilityPrefix}) {
@@ -61,6 +63,10 @@ func (p *executionSDK) Request(ctx context.Context, request nodeproto.Request) (
 		return p.expansionSDK.Request(ctx, request)
 	case nodeproto.OpEval:
 		*p.trace = append(*p.trace, request.Closure)
+		if request.Closure == "step_guard" && p.mode == "step_skip" {
+			result = nodeproto.EvalResult{Value: json.RawMessage("true")}
+			break
+		}
 		if request.Closure != "before" && request.Closure != "after" && request.Closure != "verify" {
 			return nodeproto.Reply{}, errors.New("executor evaluated an owner closure")
 		}
@@ -77,7 +83,7 @@ func (p *executionSDK) Request(ctx context.Context, request nodeproto.Request) (
 		}
 		*p.trace = append(*p.trace, fmt.Sprintf("body:%d", request.Attempt))
 		outcome := "success"
-		if (p.mode == "retry" || p.mode == "artifact_retry" || p.mode == "artifact_publish_retry" || p.mode == "cache_retry") && request.Attempt < 3 || p.mode == "artifact_publish_failed" || p.mode == "cache_failed" {
+		if (p.mode == "retry" || p.mode == "artifact_retry" || p.mode == "artifact_publish_retry" || p.mode == "cache_retry") && request.Attempt < 3 || p.mode == "artifact_publish_failed" || p.mode == "cache_failed" || p.mode == "step_failed" && request.Step == "body" {
 			outcome = "failed"
 		}
 		result = nodeproto.RunResult{Outcome: outcome}
@@ -113,6 +119,13 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	if mode == "output_refused" {
 		job.ResultStep = "body"
 	}
+	if mode == "step_skip" {
+		job.Steps[0].Closures.SkipIf = []string{"step_guard"}
+	}
+	if mode == "step_failed" {
+		job.Steps = append(job.Steps, nodeproto.StepSpec{ID: "blocked", Needs: []string{"body"}}, nodeproto.StepSpec{ID: "cleanup", Needs: []string{"blocked"}, Finally: true})
+		job.Retry = &nodeproto.RetrySpec{Attempts: 0}
+	}
 	if mode == "artifact_retry" {
 		job.Needs = []string{"producer"}
 		job.Consumes = []nodeproto.ArtifactInput{{Producer: "producer"}}
@@ -133,6 +146,9 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	resolved := engine.Resolved{Identity: identity}
 	execution := runspec.JobExecutionSettings{}
 	execution.Retry.Set, execution.Retry.Value = true, 2
+	if mode == "step_failed" {
+		execution.Retry.Value = 0
+	}
 	request := runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "build"}}
 	if strings.HasPrefix(mode, "artifact_") || strings.HasPrefix(mode, "cache_") {
 		request.Request.Team = "team"

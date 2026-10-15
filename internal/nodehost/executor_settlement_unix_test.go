@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,27 +29,38 @@ func TestNodeExecutorDrivesNativeSDKSteps(t *testing.T) {
 		t.Fatalf("build SDK fixture: %v: %s", err, out)
 	}
 	cfg := ProtocolSessionConfig{Command: []string{bin}, Environment: []string{"PATH=" + os.Getenv("PATH")}, Revoke: func() error { return nil }}
-	process, err := StartProtocolSession(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = process.Close() })
-	session := &executorSession{process: process}
 	runner := nodeproto.RunnerIdentity{Name: "granted", Type: "local", Labels: []string{}}
 	var hello nodeproto.HelloResult
-	if err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: "fixture"}, Runner: &runner}, &hello); err != nil {
-		t.Fatal(err)
+	plans := map[bool]nodeproto.PlanDoc{}
+	for _, dry := range []bool{false, true} {
+		process, err := StartProtocolSession(ctx, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = process.Close() })
+		session := &executorSession{process: process}
+		if err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: "fixture"}, Runner: &runner}, &hello); err != nil {
+			t.Fatal(err)
+		}
+		args := map[string]string{}
+		if dry {
+			args["set"] = "dry"
+		}
+		var plan nodeproto.PlanDoc
+		if err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: "steps", Args: args, Run: &nodeproto.RunContext{RunID: "run", Pipeline: "steps", DryRun: dry}}, &plan); err != nil {
+			t.Fatal(err)
+		}
+		plans[dry] = plan
+		if err := process.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
-	var plan nodeproto.PlanDoc
-	if err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: "steps", Args: map[string]string{}, Run: &nodeproto.RunContext{RunID: "run", Pipeline: "steps"}}, &plan); err != nil {
-		t.Fatal(err)
-	}
-	if err := process.Close(); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []string{"order", "parallel", "failfast", "finally-chain", "collect", "continue", "optional", "skips", "skippanic", "panics"} {
+	for _, id := range []string{"order", "parallel", "failfast", "finally-chain", "collect", "continue", "optional", "skips", "skippanic", "panics", "dry"} {
 		t.Run(id, func(t *testing.T) {
 			input, st, deps, _ := executorFixture(t)
+			records := &executorStepStore{NodeTransitionStore: st}
+			deps.Store = records
+			plan := plans[id == "dry"]
 			var job nodeproto.JobSpec
 			for _, declared := range plan.Jobs {
 				if declared.ID == id {
@@ -75,6 +87,10 @@ func TestNodeExecutorDrivesNativeSDKSteps(t *testing.T) {
 			spec.PlanHash, spec.Resolved.Engine = hash, input.Engine.Identity
 			spec.Request.Request.Pipeline, spec.Resolved.Entrypoint = "steps", "steps"
 			spec.Resolved.Settings.Jobs = map[string]runspec.JobExecutionSettings{id: input.Execution}
+			if id == "dry" {
+				spec.Resolved.Args = map[string]string{"set": "dry"}
+				spec.Resolved.Settings.Options.DryRun.Value = true
+			}
 			input.Accepted.Spec, err = json.Marshal(spec)
 			if err != nil {
 				t.Fatal(err)
@@ -99,11 +115,12 @@ func TestNodeExecutorDrivesNativeSDKSteps(t *testing.T) {
 				return input.Engine, nil
 			}
 			var child *ProtocolSession
-			cleanupRan := false
+			var logMu sync.Mutex
+			var messages []string
 			cfg.Log = func(_ context.Context, frame nodeproto.FrameLog) error {
-				if frame.Message == "cleanup ran" {
-					cleanupRan = true
-				}
+				logMu.Lock()
+				defer logMu.Unlock()
+				messages = append(messages, frame.Message)
 				return nil
 			}
 			deps.Start = func(ctx context.Context, _ NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
@@ -137,8 +154,44 @@ func TestNodeExecutorDrivesNativeSDKSteps(t *testing.T) {
 			if child == nil || child.cmd.ProcessState == nil {
 				t.Fatal("SDK process was not joined")
 			}
-			if id == "finally-chain" && !cleanupRan {
-				t.Fatal("cleanup ran before its transitive prerequisites settled")
+			states := map[string]string{}
+			for _, report := range records.reports {
+				states[report.StepID] = report.State
+			}
+			wantStates := map[string]map[string]string{
+				"order":         {"a": "passed", "c1": "passed", "c2": "passed", "b": "passed"},
+				"parallel":      {"p1": "passed", "p2": "passed", "p3": "passed"},
+				"failfast":      {"setup": "passed", "slow": "cancelled", "reject": "failed", "pending": "cancelled", "cleanup": "passed"},
+				"finally-chain": {"slow": "cancelled", "reject": "failed", "pending": "cancelled", "cleanup": "passed"},
+				"collect":       {"reject": "failed", "independent": "passed", "dependent": "cancelled"},
+				"continue":      {"reject": "failed", "dependent": "passed"},
+				"optional":      {"best-effort": "failed", "real-work": "passed"},
+				"skips":         {"a": "skipped", "b": "passed"},
+				"skippanic":     {"guarded": "failed"}, "panics": {"oops": "failed"},
+				"dry": {"with-dry": "passed", "safe": "passed", "plain": "skipped"},
+			}
+			if !equalMaps(states, wantStates[id]) {
+				t.Fatalf("native step records=%v, want=%v", states, wantStates[id])
+			}
+			present := map[string][]string{
+				"order": {"b saw from-a after 2 checks"}, "failfast": {"slow saw its cancel", "cleanup saw env-7"},
+				"finally-chain": {"cleanup ran"}, "collect": {"independent finished"}, "continue": {"dependent ran"},
+				"optional": {"real work ran"}, "skips": {"ran b"}, "dry": {"dry body", "safe ran"},
+			}
+			absent := map[string][]string{
+				"failfast": {"pending ran"}, "finally-chain": {"pending ran"}, "collect": {"dependent ran"},
+				"skips": {"ran a"}, "skippanic": {"guarded ran"}, "dry": {"real body", "plain ran"},
+			}
+			text := strings.Join(messages, "\n")
+			for _, message := range present[id] {
+				if !strings.Contains(text, message) {
+					t.Fatalf("native output lacks %q: %s", message, text)
+				}
+			}
+			for _, message := range absent[id] {
+				if strings.Contains(text, message) {
+					t.Fatalf("native output contains %q: %s", message, text)
+				}
 			}
 		})
 	}

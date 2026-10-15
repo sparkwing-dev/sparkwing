@@ -1,5 +1,9 @@
 # Cross-area handoffs
 
+W3's [step continuation](w3-step-continuation.md) adds fenced step persistence,
+six SQLite cases and native Go step-state/dry-run coverage. The remaining
+cross-area contract gaps and legacy runtime cuts are listed there.
+
 W3's [execution continuation](w3-execution-continuation.md) updates the earlier
 [settlement audit](w3-settlement-continuation.md). Finding 4 now uses one decoder
 across both executors, with real SDK failures for predicates, memo and generation.
@@ -9,6 +13,18 @@ legacy event port and runtime deletion remain open. The merged W4 concurrency
 tests still differ from finding 5's mismatch-refusal wording.
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
+
+**W9/W2: typed fenced step reports for W3.** The common executor now requires
+C1's `RecordStep`. C2 already declares start/finish/skip routes, but
+`controllerwire.Controller` and the engine client have no typed step writer.
+Declare the transport and map it to `StepReport` using server-derived actor,
+generation and attempt. W3's local interface and SQLite evidence are in the
+[step continuation](w3-step-continuation.md). Do not restore unfenced old writers.
+
+**W6/W9: seal retained step-window selections for W3.** The acceptance inventory
+retains StartAt/StopAt/Only, but `runspec.Options` has no representation for them.
+Declare their intake/seal representation before W3 migrates those assertions to
+the common executor. Mutable flags and invocation blobs cannot replace the seal.
 
 ## From W4 review fixes (2026-10-15)
 

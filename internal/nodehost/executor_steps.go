@@ -5,20 +5,25 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type executorStepResult struct {
 	id     string
 	output json.RawMessage
+	state  string
 	err    error
 }
 
 func (h *nodeExecutor) steps(ctx, parent context.Context, session *executorSession, input NodeInput, spec runspec.Spec, job nodeproto.JobSpec) (json.RawMessage, error) {
+	ctx, abort := context.WithCancelCause(ctx)
+	defer abort(nil)
 	if len(job.Steps) == 0 {
 		return nil, executorError(apierr.PlanInvalid, "executable job has no steps")
 	}
@@ -28,6 +33,7 @@ func (h *nodeExecutor) steps(ctx, parent context.Context, session *executorSessi
 	failed := make(map[string]bool, len(job.Steps))
 	running := map[string]bool{}
 	cancelled := map[string]bool{}
+	started := map[string]*time.Time{}
 	for _, step := range job.Steps {
 		if step.ID == "" || pending[step.ID] {
 			return nil, executorError(apierr.PlanInvalid, "job has an absent or duplicate step ID")
@@ -63,7 +69,12 @@ func (h *nodeExecutor) steps(ctx, parent context.Context, session *executorSessi
 			if !ready {
 				continue
 			}
-			if parent.Err() != nil || (fatal || ctx.Err() != nil) && !step.Finally || blocked && !step.Finally {
+			var recordFailure *executorStepRecordError
+			if parent.Err() != nil || errors.As(context.Cause(ctx), &recordFailure) || (fatal || ctx.Err() != nil) && !step.Finally || blocked && !step.Finally {
+				if err := h.recordStep(ctx, input, spec, step.ID, "cancelled", nil, nil); err != nil {
+					firstErr = errors.Join(firstErr, err)
+					abort(err)
+				}
 				delete(pending, step.ID)
 				finished[step.ID] = true
 				failed[step.ID] = true
@@ -71,6 +82,18 @@ func (h *nodeExecutor) steps(ctx, parent context.Context, session *executorSessi
 				continue
 			}
 			delete(pending, step.ID)
+			now := time.Now()
+			started[step.ID] = &now
+			writeCtx := ctx
+			if step.Finally && ctx.Err() != nil {
+				writeCtx = parent
+			}
+			if err := h.recordStep(writeCtx, input, spec, step.ID, "running", &now, nil); err != nil {
+				finished[step.ID], failed[step.ID], changed = true, true, true
+				firstErr = errors.Join(firstErr, err)
+				abort(err)
+				continue
+			}
 			running[step.ID] = true
 			changed = true
 			settled := settledSteps(job.Steps, finished)
@@ -81,8 +104,8 @@ func (h *nodeExecutor) steps(ctx, parent context.Context, session *executorSessi
 					stepCtx, cancel = context.WithTimeout(parent, limits.CleanupTimeout)
 					defer cancel()
 				}
-				raw, err := h.step(stepCtx, session, input, spec, step, settled)
-				done <- executorStepResult{id: step.ID, output: raw, err: err}
+				raw, state, err := h.step(stepCtx, session, input, spec, step, settled)
+				done <- executorStepResult{id: step.ID, output: raw, state: state, err: err}
 			}()
 		}
 		if len(running) == 0 {
@@ -95,6 +118,17 @@ func (h *nodeExecutor) steps(ctx, parent context.Context, session *executorSessi
 		delete(running, result.id)
 		finished[result.id] = true
 		step := steps[result.id]
+		state := result.state
+		if result.err != nil {
+			state = "failed"
+			if cancelled[result.id] || errors.Is(result.err, context.Canceled) || errors.Is(result.err, context.DeadlineExceeded) {
+				state = "cancelled"
+			}
+		}
+		if err := h.recordStep(ctx, input, spec, result.id, state, started[result.id], result.err); err != nil {
+			result.err = errors.Join(result.err, err)
+			abort(err)
+		}
 		if result.err == nil {
 			if result.id == job.ResultStep {
 				output = result.output
@@ -105,7 +139,10 @@ func (h *nodeExecutor) steps(ctx, parent context.Context, session *executorSessi
 		if step.Finally && ctx.Err() != nil && !step.Optional {
 			cleanupErr = errors.Join(cleanupErr, result.err)
 		}
-		if !step.Optional && !cancelled[result.id] && firstErr == nil {
+		var recordFailure *executorStepRecordError
+		if errors.As(result.err, &recordFailure) {
+			firstErr = errors.Join(firstErr, result.err)
+		} else if !step.Optional && !cancelled[result.id] && firstErr == nil {
 			firstErr = result.err
 		}
 		if job.FailurePolicy == "collect_all" || step.ContinueOnError || fatal {
@@ -149,41 +186,73 @@ func settledSteps(steps []nodeproto.StepSpec, finished map[string]bool) []string
 	return settled
 }
 
-func (h *nodeExecutor) step(ctx context.Context, session *executorSession, input NodeInput, spec runspec.Spec, step nodeproto.StepSpec, settled []string) (json.RawMessage, error) {
+func (h *nodeExecutor) step(ctx context.Context, session *executorSession, input NodeInput, spec runspec.Spec, step nodeproto.StepSpec, settled []string) (json.RawMessage, string, error) {
 	for _, closure := range step.Closures.SkipIf {
 		raw, err := h.eval(ctx, session, input, closure, nil, settled)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		var skip bool
 		if string(raw) == "null" || json.Unmarshal(raw, &skip) != nil {
-			return nil, executorError(apierr.ProtocolError, "step predicate did not return a boolean")
+			return nil, "", executorError(apierr.ProtocolError, "step predicate did not return a boolean")
 		}
 		if skip {
-			return nil, nil
+			return nil, "skipped", nil
 		}
 	}
 	if spec.Resolved.Settings.Options.DryRun.Value && !step.HasDryRun && !step.SafeWithoutDryRun {
-		return nil, nil
+		return nil, "skipped", nil
 	}
 	if !spec.Resolved.Settings.Options.DryRun.Value {
 		for _, risk := range step.Risks {
 			if !executorContains(spec.Resolved.Settings.Options.AllowRisk.Value, risk) {
-				return nil, executorError(apierr.Forbidden, "step requires an unapproved risk")
+				return nil, "", executorError(apierr.Forbidden, "step requires an unapproved risk")
 			}
 		}
 	}
 	var result nodeproto.RunResult
 	if err := session.call(ctx, nodeproto.Request{Op: nodeproto.OpRunStep, Job: input.NodeID, Step: step.ID, Attempt: int(input.Attempt), Settled: settled}, &result); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if err := executorResultFailure(result); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if len(result.Output) > 0 {
 		if err := checkOutput(result.Output); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
-	return result.Output, nil
+	return result.Output, "passed", nil
+}
+
+type executorStepRecordError struct{ err error }
+
+func (e *executorStepRecordError) Error() string { return e.err.Error() }
+func (e *executorStepRecordError) Unwrap() error { return e.err }
+
+func (h *nodeExecutor) recordStep(ctx context.Context, input NodeInput, spec runspec.Spec, id, state string, started *time.Time, failure error) error {
+	if err := executorLostAuthority(ctx); err != nil {
+		return err
+	}
+	report := store.StepReport{
+		Attempt: runspec.AttemptIdentity{Team: spec.Request.Request.Team, RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: input.Generation, Attempt: input.Attempt},
+		Actor:   executorActor(input), StepID: id, State: state, StartedAt: started,
+	}
+	if failure != nil {
+		report.MaskedError = limits.Error(h.deps.Mask(failure.Error()))
+	}
+	if state != "running" {
+		finished := time.Now()
+		if report.StartedAt == nil {
+			report.StartedAt = &finished
+		}
+		report.FinishedAt = &finished
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
+		defer cancel()
+	}
+	if err := h.deps.Store.RecordStep(ctx, report); err != nil {
+		return &executorStepRecordError{err: err}
+	}
+	return nil
 }

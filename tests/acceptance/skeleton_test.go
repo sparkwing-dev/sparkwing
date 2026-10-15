@@ -19,6 +19,7 @@ func pendingScenarios(t *testing.T, group string) {
 			switch scenario.ID {
 			case "lifecycle-transition-replay-and-fencing":
 				t.Run("hermetic-store-executor-events", acceptance.CheckHostLifecycleEvents)
+				t.Run("hermetic-store-step-records", acceptance.CheckHostStepPersistence)
 			case "placement-direct-source":
 				t.Run("hermetic-native-git", acceptance.CheckDirectSource)
 				t.Run("hermetic-bundle-failures", acceptance.CheckSourceBundleFailures)

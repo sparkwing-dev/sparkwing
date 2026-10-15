@@ -488,6 +488,14 @@ rejection before renewal, source acquisition, SDK startup or result writes.
 
 ## Open questions for the lead
 
+The [W3 step continuation](w3-step-continuation.md) ports the stored-step checks
+from `TestHostDrivesSteps` through the common executor. Native Go processes prove
+step states for ordering, parallel work, fail-fast, Finally, collect-all,
+ContinueOnError, Optional, SkipIf, panic and dry-run. Six SQLite cases prove
+attempt/generation persistence, blocked cancellation, retries and refused writes.
+Step windows and host-generated diagnostic records remain open. The old test is
+retained until those assertions have their final port.
+
 1. **Short secret values in identifiers.** The old `below the floor` case accepts a two-character registered value. Decision 90 and §6.3 name no length exemption. The proposed port refuses every registered nonempty value in an ID. If the final registry excludes short values, the test must distinguish an unregistered value from an exemption in validation.
 2. **Artifact provenance.** `TestDataDownloadClaimUsesCloudProvenance` refuses local artifacts as well as local binaries. Frozen §8.1 explicitly restricts binary execution by provenance and governs artifact reads through the read set. The proposed port uses read-set authority for artifacts and `trust_local_builds` for binaries. It does not add a new artifact restriction.
 3. **Canonical writer checks.** The old source-grep tests pin implementation counts. The architecture requires one state writer and shared holder rules. The proposed port keeps the writer-owner assertion as a focused package architectural check and replaces helper call counts with transaction behavior. The lead can choose the repository's existing static-check mechanism without changing acceptance behavior.

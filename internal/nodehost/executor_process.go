@@ -135,6 +135,10 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 	result = store.NodeResult{Outcome: store.NodeSuccess}
 	if bodyErr != nil {
 		result = h.failure(bodyErr)
+		var recordFailure *executorStepRecordError
+		if errors.As(bodyErr, &recordFailure) {
+			return result, bodyErr
+		}
 		var application *executorApplicationError
 		if !errors.As(bodyErr, &application) && timeout == nil {
 			return result, bodyErr

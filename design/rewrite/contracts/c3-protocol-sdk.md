@@ -1,5 +1,8 @@
 # C3 protocol and SDK contract
 
+[Step persistence](w3-step-continuation.md) connects the common executor to C1's
+fenced step writer and ports native step-state and dry-run assertions.
+
 [Settlement and expansion continuation](w3-settlement-continuation.md) consumes
 the amended step snapshots and concurrency context, resolves the working merge
 contents and adds real Go SDK process proofs. Native runtime migration remains open.
@@ -227,6 +230,10 @@ are part of this contract.
    retries advance the ordinal under the same claim and generation. Only a lapsed
    lease releases work. Started lapses consume the separate disruption allowance.
    OOM is an ordinary job failure governed by application retry policy.
+   NodeTransitionStore includes C1's RecordStep. Running step records commit before
+   SDK invocation. Terminal and blocked-step records carry the same holder,
+   capability, generation and attempt as the job. A refused write stops further
+   dispatch, joins active steps and fails loudly without an application retry.
 7. The layer table is authoritative: debug, skip_if, approval, memo and admission
    belong to the owner. Artifacts, caches, retry and timeout belong to the executor.
    A local in-process execution applies both sides once. A dispatched executor

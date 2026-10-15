@@ -35,17 +35,8 @@ func CheckHostLifecycleEvents(t *testing.T) {
 				deps.Store = fixture.tenant
 			})
 			input.Authority.CapabilityPrefix = fixture.holder.CapabilityPrefix
-			spec := fake.snapshot.Run.Spec
-			spec.Request.Request.Team = string(store.DefaultTeam)
-			input.Accepted.Spec = marshalEventFixture(t, spec)
-			plan := marshalEventFixture(t, input.Accepted.Plan)
-			if _, err := fixture.s.DB().ExecContext(ctx, `UPDATE runs SET request_json=?,spec_json=?,plan_json=?,plan_hash=? WHERE id='run'`, marshalEventFixture(t, spec.Request), input.Accepted.Spec, plan, input.Accepted.PlanHash); err != nil {
-				t.Fatal(err)
-			}
+			installExecutionFixture(t, ctx, fixture, &input, fake)
 			row := fake.snapshot.Nodes[0]
-			if _, err := fixture.s.DB().ExecContext(ctx, `UPDATE nodes SET spec_json=?,spec_hash=?,execution_json=? WHERE run_id='run' AND node_id='job'`, row.Spec, row.SpecHash, marshalEventFixture(t, row.Execution)); err != nil {
-				t.Fatal(err)
-			}
 			if mode == "result_refused" {
 				if _, err := fixture.s.DB().ExecContext(ctx, `CREATE TRIGGER refuse_result BEFORE UPDATE OF outcome ON nodes WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'result transaction refused'); END`); err != nil {
 					t.Fatal(err)
@@ -113,6 +104,104 @@ func CheckHostLifecycleEvents(t *testing.T) {
 						t.Fatal("refused hook ran a body")
 					}
 				}
+			}
+		})
+	}
+}
+
+func installExecutionFixture(t *testing.T, ctx context.Context, fixture storeRecoveryFixture, input *nodehost.NodeInput, fake *executionHostStore) {
+	t.Helper()
+	spec := fake.snapshot.Run.Spec
+	spec.Request.Request.Team = string(store.DefaultTeam)
+	input.Accepted.Spec = marshalEventFixture(t, spec)
+	plan := marshalEventFixture(t, input.Accepted.Plan)
+	if _, err := fixture.s.DB().ExecContext(ctx, `UPDATE runs SET request_json=?,spec_json=?,plan_json=?,plan_hash=? WHERE id='run'`, marshalEventFixture(t, spec.Request), input.Accepted.Spec, plan, input.Accepted.PlanHash); err != nil {
+		t.Fatal(err)
+	}
+	row := fake.snapshot.Nodes[0]
+	if _, err := fixture.s.DB().ExecContext(ctx, `UPDATE nodes SET spec_json=?,spec_hash=?,execution_json=? WHERE run_id='run' AND node_id='job'`, row.Spec, row.SpecHash, marshalEventFixture(t, row.Execution)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// CheckHostStepPersistence exercises fenced step writes and lifecycle ordering against SQLite.
+func CheckHostStepPersistence(t *testing.T) {
+	t.Helper()
+	for _, mode := range []string{"success", "retry", "before_refused", "step_skip", "step_failed", "step_write_refused"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			fixture, err := newStoreRecoveryFixture(ctx, filepath.Join(t.TempDir(), "steps.db"), false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := fixture.s.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			var trace []string
+			var processes []*executionSDK
+			input, fake, host := executionHostFixture(t, mode, &trace, &processes, func(deps *nodehost.ExecutorDependencies) { deps.Store = fixture.tenant })
+			input.Authority.CapabilityPrefix = fixture.holder.CapabilityPrefix
+			installExecutionFixture(t, ctx, fixture, &input, fake)
+			host.Store, host.Mask = fixture.tenant, func(text string) string { return text }
+			if mode == "step_write_refused" {
+				if _, err := fixture.s.DB().ExecContext(ctx, `CREATE TRIGGER refuse_step BEFORE UPDATE OF status ON node_steps WHEN NEW.status='passed' BEGIN SELECT RAISE(ABORT,'step transaction refused'); END`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err = host.Execute(ctx, input)
+			if (err != nil) != (mode == "before_refused" || mode == "step_write_refused") {
+				t.Fatalf("execution=%v trace=%v", err, trace)
+			}
+			rows, err := fixture.s.DB().QueryContext(ctx, `SELECT attempt,generation,step_id,status,started_at,finished_at FROM node_steps WHERE team=? AND run_id='run' AND node_id='job' ORDER BY attempt,step_id`, store.DefaultTeam)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			states := map[int64]map[string]string{}
+			for rows.Next() {
+				var attempt, generation, started int64
+				var id, state string
+				var finished *int64
+				if err := rows.Scan(&attempt, &generation, &id, &state, &started, &finished); err != nil {
+					t.Fatal(err)
+				}
+				if generation != input.Generation || started <= 0 || state != "running" && (finished == nil || *finished < started) {
+					t.Fatal("step lost its generation or timestamps")
+				}
+				if states[attempt] == nil {
+					states[attempt] = map[string]string{}
+				}
+				states[attempt][id] = state
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatal(err)
+			}
+			want := map[int64]map[string]string{1: {"body": "passed"}}
+			switch mode {
+			case "retry":
+				want = map[int64]map[string]string{1: {"body": "failed"}, 2: {"body": "failed"}, 3: {"body": "passed"}}
+			case "before_refused":
+				want = map[int64]map[string]string{}
+			case "step_skip":
+				want[1]["body"] = "skipped"
+			case "step_failed":
+				want[1] = map[string]string{"body": "failed", "blocked": "cancelled", "cleanup": "passed"}
+			case "step_write_refused":
+				want[1]["body"] = "running"
+			}
+			if !reflect.DeepEqual(states, want) {
+				t.Fatalf("persisted step states=%v, want=%v", states, want)
+			}
+			persisted, err := fixture.tenant.ReadNode(ctx, store.NodeRef{RunID: "run", NodeID: "job"})
+			outcome := store.NodeSuccess
+			if mode == "before_refused" || mode == "step_failed" || mode == "step_write_refused" {
+				outcome = store.NodeFailed
+			}
+			if err != nil || persisted.Outcome != outcome {
+				t.Fatalf("job hid its step result: %+v error=%v", persisted, err)
 			}
 		})
 	}

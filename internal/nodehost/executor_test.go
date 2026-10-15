@@ -34,6 +34,8 @@ type executorStore struct {
 	nodes      map[string]store.NodeRow
 }
 
+func (*executorStore) RecordStep(context.Context, store.StepReport) error { return nil }
+
 func (s *executorStore) ReadSnapshot(_ context.Context, runID string) (store.RunSnapshot, error) {
 	return store.RunSnapshot{Run: store.RunRow{ID: runID}, Nodes: []store.NodeRow{s.row}, Expansions: s.expansions}, nil
 }

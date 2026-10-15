@@ -26,6 +26,7 @@ type NodeTransitionStore interface {
 	ReadNode(context.Context, store.NodeRef) (store.NodeRow, error)
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
+	RecordStep(context.Context, store.StepReport) error
 }
 
 // ExecutorProcess must cancel pending requests when their context ends while
@@ -288,11 +289,15 @@ func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, cause st
 		result := recordNodeFailure(input.NodeID, *extra.Result, h.deps.Mask)
 		extra.Result = &result
 	}
-	applied, err := h.deps.Store.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, To: to, Cause: cause, Actor: store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, Holder: input.Authority.Holder, Generation: input.Generation}, Extra: extra})
+	applied, err := h.deps.Store.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, To: to, Cause: cause, Actor: executorActor(input), Extra: extra})
 	if err != nil {
 		return applied, &executorTransitionError{err: err}
 	}
 	return applied, nil
+}
+
+func executorActor(input NodeInput) store.Actor {
+	return store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, CapabilityPrefix: input.Authority.CapabilityPrefix, Holder: input.Authority.Holder, Generation: input.Generation}
 }
 
 func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result store.NodeResult, runErr error) error {
