@@ -2313,3 +2313,15 @@ activity. `RunnerPresence` is removed.
 and `NodeMetering` are removed too. Pause resume uses the authorized tenant
 transaction. Child admission and lineage use sealed intake and the run snapshot.
 Current awards retain immutable metering and settlement facts.
+
+## Reporting transactions and schedule lease
+
+The raw `Store` and `Tenant` methods `AddNodeMetricSample` and `AddNodeUsage`
+are removed. Use the tenant's `WriteMetric` and `WriteUsage` with the current
+`capability.Authorized` from the reporting route. The store rechecks ancestry,
+tenant and reporting fences inside the write transaction. Use a current run-host
+award to record process accounting after the job has finished.
+
+`RunCronTickLeased` moves from `Store` to `Operator`. It uses `schedules.tick`
+and the store clock. `Operator.ReleaseSingletonLease` releases an exact lease
+fence. No legacy metadata table is needed for cron ticks.

@@ -40,7 +40,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 					}
 					cpu = 0
 				}
-				if err := st.AddNodeMetricSample(t.Context(), "r", id, store.MetricSample{Kind: store.MetricInterval, TS: start, CPUMillicores: cpu, MemoryBytes: 100}); err != nil {
+				if err := teststore.SeedMetric(st.DB(), t.Context(), "r", id, store.MetricSample{Kind: store.MetricInterval, TS: start, CPUMillicores: cpu, MemoryBytes: 100}); err != nil {
 					t.Fatal(err)
 				}
 			}

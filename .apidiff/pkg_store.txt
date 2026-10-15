@@ -1558,10 +1558,12 @@ func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonL
 func (o *Operator) RecordAttemptIntent(ctx context.Context, attemptID, paymentIntent, customer string, now time.Time) error
 func (o *Operator) RecordCronTick(ctx context.Context, tick CronTick) error
 func (o *Operator) RecordTeamDeletionFailure(ctx context.Context, team Team, cause string) error
+func (o *Operator) ReleaseSingletonLease(ctx context.Context, lease SingletonLease) error
 func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease, ttl time.Duration) (SingletonLease, error)
 func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.Time) (TeamDeletion, []string, error)
 func (o *Operator) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error
 func (o *Operator) RotateCapability(ctx context.Context, a capability.Authorized, grace time.Duration, expires *time.Time) (capability.Rotation, error)
+func (o *Operator) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (o *Operator) RunTeam(ctx context.Context, runID string) (Team, error)
 func (o *Operator) SealAbandonedLogStreams(ctx context.Context, lease SingletonLease, limit int) (int64, error)
 func (o *Operator) SeedRunRetention(ctx context.Context, days int64) (bool, error)
@@ -2478,8 +2480,6 @@ func (s *Store) AccountByEmail(ctx context.Context, email string) (_ Account, er
 func (s *Store) AccountIdentities(ctx context.Context, accountID string) (_ []Identity, err error)
 func (s *Store) AccountIdentity(ctx context.Context, accountID, provider string) (string, error)
 func (s *Store) AccountMemberships(ctx context.Context, accountID string) (_ []Membership, err error)
-func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error
-func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error)
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, actor string, now time.Time) ([]Account, error)
 func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, actor string, now time.Time) ([]Account, error)
@@ -2554,7 +2554,6 @@ func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executin
 func (s *Store) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error)
 func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error)
 func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
-func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
 func (s *Store) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, err error)
 func (s *Store) SetActiveTeam(ctx context.Context, accountID string, team Team, now time.Time) error
@@ -2634,8 +2633,6 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 func (t *Tenant) AcceptPlan(ctx context.Context, request PlanAcceptance) (AcceptedPlan, error)
 func (t *Tenant) AcknowledgeRunEffect(ctx context.Context, delivery EffectDelivery) error
 func (t *Tenant) AcquireCapacity(ctx context.Context, req AcquireSlotRequest, binding CapacityBinding, actor Actor) (AcquireSlotResponse, error)
-func (t *Tenant) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error
-func (t *Tenant) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error)
 func (t *Tenant) AddUsage(ctx context.Context, delta UsageDelta) error
 func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (AdmissionResult, error)
 func (t *Tenant) AdoptCapacity(ctx context.Context, key, id string, binding CapacityBinding, actor Actor) (CapacityAdoption, error)
@@ -2845,9 +2842,11 @@ func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationI
 func (t *Tenant) WriteActivity(ctx context.Context, ref NodeRef, actor Actor, detail string) error
 func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite) error
 func (t *Tenant) WriteGitCredential(ctx context.Context, a capability.Authorized, row GitCredential) (GitCredential, error)
+func (t *Tenant) WriteMetric(ctx context.Context, a capability.Authorized, sample MetricSample) error
 func (t *Tenant) WritePoolAccess(ctx context.Context, actor Actor, id string, rules []PoolAccessRule) (bool, error)
 func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, row Secret) error
 func (t *Tenant) WriteSummary(ctx context.Context, summary SummaryWrite) error
+func (t *Tenant) WriteUsage(ctx context.Context, a capability.Authorized, usage NodeUsage) error
 func TierQuota(tier string) (StorageQuota, bool)
 type Token struct {
 	Hash   string

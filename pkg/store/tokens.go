@@ -371,21 +371,6 @@ func dedupeScopes(in []string) []string {
 	return out
 }
 
-func splitScopes(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
 func expiresUnix(t *time.Time) any {
 	if t == nil {
 		return nil

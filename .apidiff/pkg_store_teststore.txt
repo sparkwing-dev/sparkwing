@@ -5,6 +5,7 @@ func MaintainConcurrency(ctx context.Context, s *store.Store, opts store.Concurr
 func Open(path string) (*store.Store, error)
 func ReapUnits(ctx context.Context, s *store.Store) ([]store.ReapedUnit, error)
 func SeedCacheScope(ctx context.Context, db *sql.DB) (store.UploadReservationRequest, error)
+func SeedMetric(db *sql.DB, ctx context.Context, run, job string, sample store.MetricSample) error
 func SeedPresence(ctx context.Context, db *sql.DB) (store.UploadReservationRequest, error)
 func SeedSecret(s *store.Store, team store.Team, row store.Secret, at time.Time) error
 func SeedUpload(ctx context.Context, db *sql.DB) (store.UploadReservationRequest, error)

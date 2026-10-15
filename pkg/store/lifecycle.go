@@ -12,16 +12,6 @@ func nodeRunActiveSQL(alias string) string {
 // every other claim path passes over them.
 const nodeTriggerDispatched = `kind = ''`
 
-func nodeClaimLiveSQL(alias string) string {
-	return alias + "claimed_by IS NOT NULL AND " + alias +
-		"lease_expires_at IS NOT NULL AND " + alias + "lease_expires_at > ?"
-}
-
-func triggerClaimLiveSQL(alias string) string {
-	return alias + "status = 'claimed' AND " + alias +
-		"lease_expires_at IS NOT NULL AND " + alias + "lease_expires_at > ?"
-}
-
 const nodeFailSet = `status = 'done', outcome = 'failed'`
 
 const (

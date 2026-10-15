@@ -1,5 +1,30 @@
 # C1 data contract
 
+## Reporting transactions and schedule lease
+
+`Tenant.WriteMetric(ctx, Authorized, MetricSample)` and
+`WriteUsage(ctx, Authorized, NodeUsage)` implement C2's `MetricWriter`. Both
+recheck the tenant, full live ancestry, selected route rule and current claim
+fence in the committing transaction. Job reports carry the captured attempt.
+A retry advances that attempt, so a delayed report cannot move to it. A holder
+can report during cancellation while its lease remains live. The run host can
+report a finished job while its own owner lease remains live.
+
+`Store.AddNodeMetricSample`, `Tenant.AddNodeMetricSample`, `Store.AddNodeUsage`
+and `Tenant.AddNodeUsage` are removed. Identical metric retries succeed at the
+sample limit. Conflicting readings and overflowing usage totals leave stored
+values unchanged. The controller selects the concrete tenant writer by default.
+Its optional test resolver can still supply a fake.
+
+`Operator.RunCronTickLeased` replaces the Store method and uses the declared
+`schedules.tick` singleton lease. The existing tick window uses the store clock.
+The last successful tick is a nanosecond timestamp in `settings`. Success is
+stamped only while the captured lease is live. `Operator.ReleaseSingletonLease`
+checks the exact name, holder and generation, so a stale callback cannot release
+a replacement. Failure, cancellation and panic release the captured lease.
+
+The unused claim-liveness SQL helpers and token scope decoder are removed.
+
 ## Tenant writes and typed claim fences
 
 `Store.CreateRun`, `CreateTrigger`, `CreateTriggerWithRun` and `FinishRun` are

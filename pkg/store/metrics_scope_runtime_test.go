@@ -1,7 +1,6 @@
 package store_test
 
 import (
-	"errors"
 	"math/rand/v2"
 	"testing"
 	"time"
@@ -13,15 +12,16 @@ import (
 func TestMetricIdentityPreservesTenantAndConflictingRetriesProperty(t *testing.T) {
 	f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
 	foreign := tenantFor(t, f.s, "foreign")
+	a := metricAuthorization(t, f, "metrics")
 	random := rand.New(rand.NewPCG(981, 372))
 	at := time.Unix(1800000000, 123)
 	for i := range 64 {
 		sample := store.MetricSample{TS: at.Add(time.Duration(i) * time.Nanosecond), CPUMillicores: random.Int64N(1 << 40), MemoryBytes: random.Int64N(1 << 60), CPUTime: time.Duration(random.Int64N(1 << 60))}
-		if err := foreign.AddNodeMetricSample(t.Context(), f.ref.RunID, f.ref.NodeID, sample); !errors.Is(err, store.ErrNotFound) {
+		if err := foreign.WriteMetric(t.Context(), a, sample); err == nil {
 			t.Fatalf("foreign metric: %v", err)
 		}
 		for range 2 {
-			if err := f.tenant.AddNodeMetricSample(t.Context(), f.ref.RunID, f.ref.NodeID, sample); err != nil {
+			if err := f.tenant.WriteMetric(t.Context(), a, sample); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -34,7 +34,7 @@ func TestMetricIdentityPreservesTenantAndConflictingRetriesProperty(t *testing.T
 		case 2:
 			conflict.CPUTime++
 		}
-		if err := f.tenant.AddNodeMetricSample(t.Context(), f.ref.RunID, f.ref.NodeID, conflict); err == nil {
+		if err := f.tenant.WriteMetric(t.Context(), a, conflict); err == nil {
 			t.Fatal("conflicting metric replaced its predecessor")
 		}
 		rows, err := f.tenant.ListNodeMetrics(t.Context(), f.ref.RunID, f.ref.NodeID)

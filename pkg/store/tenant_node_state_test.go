@@ -96,15 +96,16 @@ func TestTenantMetricsStayInTheRunsTeam(t *testing.T) {
 	f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
 	acme := f.tenant
 	globex := tenantFor(t, f.s, "globex")
+	a := metricAuthorization(t, f, "metrics")
 
 	sample := store.MetricSample{TS: time.Now(), CPUMillicores: 5}
-	if err := globex.AddNodeMetricSample(ctx, f.ref.RunID, f.ref.NodeID, sample); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("globex.AddNodeMetricSample = %v, want ErrNotFound", err)
+	if err := globex.WriteMetric(ctx, a, sample); err == nil {
+		t.Fatalf("globex.AddNodeMetricSample = %v, want refusal", err)
 	}
-	if err := acme.AddNodeMetricSample(ctx, f.ref.RunID, f.ref.NodeID, sample); err != nil {
+	if err := acme.WriteMetric(ctx, a, sample); err != nil {
 		t.Fatalf("acme.AddNodeMetricSample: %v", err)
 	}
-	if err := acme.AddNodeMetricSample(ctx, f.ref.RunID, f.ref.NodeID, sample); err != nil {
+	if err := acme.WriteMetric(ctx, a, sample); err != nil {
 		t.Fatalf("an identical retry: %v", err)
 	}
 	if got, err := globex.ListNodeMetricsPage(ctx, f.ref.RunID, f.ref.NodeID, time.Time{}, 0); err != nil || len(got) != 0 {

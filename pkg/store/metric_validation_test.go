@@ -5,8 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -32,19 +30,14 @@ func TestAddNodeMetricSample_Validation(t *testing.T) {
 		{"negative CPU time", store.MetricSample{TS: time.Unix(1, 0), CPUTime: -1}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			st := storetest.Open(t)
+			f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
+			a := metricAuthorization(t, f, "metrics")
 			ctx := t.Context()
-			if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "run", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
-				t.Fatal(err)
-			}
-			if err := st.CreateNode(ctx, store.Node{RunID: "run", NodeID: "node", Status: "running"}); err != nil {
-				t.Fatal(err)
-			}
-			err := st.AddNodeMetricSample(ctx, "run", "node", tc.sample)
+			err := f.tenant.WriteMetric(ctx, a, tc.sample)
 			if (err == nil) != tc.valid {
 				t.Errorf("AddNodeMetricSample error = %v; valid = %v", err, tc.valid)
 			}
-			rows, err := teststore.ForTeam(t, st, store.DefaultTeam).ListNodeMetrics(ctx, "run", "node")
+			rows, err := f.tenant.ListNodeMetrics(ctx, f.ref.RunID, f.ref.NodeID)
 			if err != nil {
 				t.Fatal(err)
 			}

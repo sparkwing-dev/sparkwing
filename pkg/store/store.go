@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -1443,76 +1442,6 @@ UPDATE node_steps SET status = ?, finished_at = ?
  WHERE team = ? AND run_id = ? AND node_id = ? AND status = ?`,
 		status, time.Now().UnixNano(), team, runID, nodeID, StepRunning)
 	return err
-}
-
-// NodeUsage is the kernel's exit accounting for one process that
-// executed a node: CPUTime is user plus system time across that process
-// tree, MaxRSSBytes its peak resident set size, and Wall the span it
-// existed for, spawn to reap.
-type NodeUsage struct {
-	CPUTime     time.Duration
-	MaxRSSBytes int64
-	Wall        time.Duration
-}
-
-// AddNodeUsage folds one finished process's accounting into a node's
-// row. Called by the runner that supervised the process, after the
-// process it describes has exited and therefore after the node's own
-// terminal row -- which is why it is a separate write rather than a
-// FinishNode argument: the figures do not exist until the process is
-// reaped, and the node that wrote its own outcome is not the process
-// that can read them.
-//
-// It adds rather than replaces because a node can be executed more than
-// once: an auto-retry runs a fresh process per attempt, and the machine
-// paid for every one of them, so CPU and wall accumulate. Peak RSS takes
-// the high-water instead, since the attempts did not hold their peaks at
-// the same time. Negative inputs and overflowing totals reject the entire observation.
-// Zero stays the value every reader treats as absent.
-func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error) {
-	return s.defaultTenant().AddNodeUsage(ctx, runID, nodeID, u)
-}
-
-// AddNodeUsage is [Store.AddNodeUsage] confined to t's team; a node of
-// another team reads as missing, which is the no-op a missing node gets.
-func (t *Tenant) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error) {
-	if u.CPUTime < 0 || u.Wall < 0 || u.MaxRSSBytes < 0 {
-		return errors.New("node usage requires nonnegative CPU time, wall time and peak RSS")
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	var cpu, wall int64
-	err = tx.QueryRowContext(ctx, `SELECT cpu_nanos, process_wall_nanos FROM nodes
- WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID).Scan(&cpu, &wall)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if cpu < 0 || wall < 0 {
-		return errors.New("stored node usage has negative CPU or wall time")
-	}
-	if cpu > math.MaxInt64-int64(u.CPUTime) {
-		return errors.New("node CPU time overflow")
-	}
-	if wall > math.MaxInt64-int64(u.Wall) {
-		return errors.New("node wall time overflow")
-	}
-	_, err = tx.ExecContext(ctx, `
-UPDATE nodes
-   SET cpu_nanos = cpu_nanos + ?,
-       process_wall_nanos = process_wall_nanos + ?,
-       max_rss_bytes = CASE WHEN ? > max_rss_bytes THEN ? ELSE max_rss_bytes END
- WHERE team = ? AND run_id = ? AND node_id = ?`,
-		int64(u.CPUTime), int64(u.Wall), u.MaxRSSBytes, u.MaxRSSBytes, string(t.team), runID, nodeID)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 // ListNodes returns the nodes for a run in insertion order, which the

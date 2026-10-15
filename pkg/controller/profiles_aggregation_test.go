@@ -68,7 +68,7 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 					stamp = stamp.Add(24 * time.Hour)
 				}
 				for i := range 2 {
-					if err := st.AddNodeMetricSample(ctx, "r", id, store.MetricSample{Kind: store.MetricInterval, TS: stamp.Add(time.Duration(i) * time.Second), CPUMillicores: 1000, MemoryBytes: 100}); err != nil {
+					if err := teststore.SeedMetric(st.DB(), ctx, "r", id, store.MetricSample{Kind: store.MetricInterval, TS: stamp.Add(time.Duration(i) * time.Second), CPUMillicores: 1000, MemoryBytes: 100}); err != nil {
 						t.Fatal(err)
 					}
 				}

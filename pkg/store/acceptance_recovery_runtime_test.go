@@ -25,6 +25,7 @@ type storeRecoveryFixture struct {
 	ref           store.NodeRef
 	target        *storetest.Target
 	seq           int64
+	holderBearer  string
 }
 
 func newStoreRecoveryFixture(t *testing.T, started bool) *storeRecoveryFixture {
@@ -70,6 +71,7 @@ func newStoreRecoveryFixtureAt(t *testing.T, started bool, target *storetest.Tar
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.holderBearer = string(claim.Bearer)
 	f.holder = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
 	row, err := f.tenant.ReadNode(ctx, f.ref)
 	if err != nil {

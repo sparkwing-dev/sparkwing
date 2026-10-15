@@ -2401,3 +2401,31 @@ committed manifest selectors with terminal state and replay.
 generation and record-key forgeries. `TestNode_DefaultsToEmptyManifest` retires
 with that column. `TestResultRecordsCommitWithTerminalState` verifies absent
 selectors after refused attachment. Those current tests are unchanged.
+
+
+### W1 reporting transactions and cron lease continuation
+
+`TestMetrics_RoundTrip`, `TestMetricTimestampConflicts`,
+`TestMetricTimestampConcurrentWriters`, `TestMetricKindsRoundTrip`,
+`TestMetricKindsRejectInvalidCombinations`, `TestAddNodeMetricSample_Validation`,
+`TestNodeMetricsCapAndPages`, `TestMetricIdentityPreservesTenantAndConflictingRetriesProperty`,
+`TestTenantMetricsStayInTheRunsTeam` and all four `TestAddNodeUsage*` checks now
+use real admission, plan acceptance and claims with `WriteMetric`/`WriteUsage`.
+They retain timestamp limits, timezone-equivalent replay, conflicts, concurrent
+writers, resource kinds, pagination, sample and marker limits, integer boundaries,
+overflow rollback and foreign-tenant refusal. Identical retries at the cap now
+pass. The former raw writers are removed.
+
+`TestMetricTransactionsRecheckReportingAuthorityProperty` generates 96 forged
+team/run/job/fence/authority/rule combinations and verifies refusal without
+writes. `TestMetricReportsFollowAttemptAndCancellation` covers retries,
+cancellation reporting and terminal refusal. `TestMetricRunHostReportsFinishedJobsUnderItsOwnFence`
+retains post-process accounting under a live run host.
+
+The `TestRunCronTickLeased_*` checks now use Operator and the final lease table.
+`TestSweepClaimGenerationSQLDialects` retains repeated-failure generation checks.
+`TestCronTickUsesStoreClockAndFencesStaleCompletionProperty` generates 32 takeover
+and tick-window cases. `TestSingletonReleaseCannotClearAnotherFenceProperty`
+generates 64 invalid releases and checks stale takeover refusal.
+
+These checks do not promote native PostgreSQL or end-to-end HTTP acceptance.

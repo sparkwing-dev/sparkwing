@@ -31,6 +31,7 @@ func (f *metricWriterFake) WriteMetric(_ context.Context, a capability.Authorize
 	f.seen, f.sample = a, sample
 	return f.err
 }
+
 func (f *metricWriterFake) WriteUsage(_ context.Context, a capability.Authorized, usage store.NodeUsage) error {
 	f.calls++
 	f.seen, f.usage = a, usage
@@ -60,8 +61,11 @@ func TestMetricTimestamp(t *testing.T) {
 		name, timestamp string
 		status          int
 	}{
-		{"malformed", "not-a-time", 400}, {"explicit", "2026-01-01T00:00:00Z", 204},
-		{"empty", "", 204}, {"omitted", "", 204}, {"out-of-range", "9999-01-01T00:00:00Z", 400},
+		{"malformed", "not-a-time", 400},
+		{"explicit", "2026-01-01T00:00:00Z", 204},
+		{"empty", "", 204},
+		{"omitted", "", 204},
+		{"out-of-range", "9999-01-01T00:00:00Z", 400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, writer := metricHTTPFixture(t)
@@ -120,7 +124,7 @@ func TestMetricsHTTPAuthorityProperty(t *testing.T) {
 					writer.team = "foreign"
 					want = 500
 				case 5:
-					f.s.resolveMetricWriter = nil
+					f.s.WithMetricWriter(func(context.Context, store.Team) (MetricWriter, error) { return nil, nil })
 					want = 500
 				case 6:
 					body = `{"cpu_time_nanos":-1}`

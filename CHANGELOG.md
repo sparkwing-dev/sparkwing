@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Replace raw metric and usage writers with tenant transactions that recheck current reporting authority. Metric retries succeed at the sample limit. Cron ticks move to Operator and use the fenced schedule lease. See [migration guide](docs/migrations/_unreleased.md#reporting-transactions-and-schedule-lease).
+
 - **store (Breaking):** Remove default-team run/trigger writers, raw node-start and manifest setters, unused source-upload admission and context-carried claim fences. Select a tenant and use its typed lifecycle transactions. Metric retries use the final tenant-keyed schema. See [migration guide](docs/migrations/_unreleased.md#tenant-writes-and-typed-claim-fences).
 
 - **store (Breaking):** Use ordered placement preferences with per-step holds on the store clock. Existing local-first flags configure the preferred runner and everyone else. Only accepted polls refresh placement liveness. Remove unused raw debug-pause writers, ancestor and child-trigger lookups, and legacy node settlement. See [migration guide](docs/migrations/_unreleased.md#ordered-placement-and-unused-store-apis).
