@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -519,7 +521,7 @@ func TestComputeLimits_CronLaunchesCarryTheArmingPrincipal(t *testing.T) {
 	}
 	f.call(http.MethodPut, "/api/v1/crons/repos", f.writer, body, http.StatusOK, nil)
 
-	rows, err := f.store.ListCronSchedules(ctx)
+	rows, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListCronSchedules(ctx)
 	if err != nil {
 		t.Fatalf("list schedules: %v", err)
 	}
@@ -548,7 +550,7 @@ func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
 		},
 	}
 	f.call(http.MethodPut, "/api/v1/crons/repos", f.writer, body, http.StatusOK, nil)
-	rows, err := f.store.ListCronSchedules(ctx)
+	rows, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListCronSchedules(ctx)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("list schedules = %d rows, %v", len(rows), err)
 	}

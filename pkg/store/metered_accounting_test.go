@@ -75,7 +75,7 @@ func TestStoreDataMeteredUnstartedRefundAndReplay(t *testing.T) {
 	}
 	for range 2 {
 		if err := s.inTx(t.Context(), func(tx *storeTx) error {
-			_, err := settleBillingAwardWithTx(t.Context(), tx, "a", "reservation", s.now(), calculate)
+			_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", s.now(), true, calculate)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -119,7 +119,7 @@ func TestStoreDataMeteredIntervalsExcludeWaitAndSettleAfterAuthorityPruning(t *t
 		return capability.BillingSettlement{ReservationID: p.ReservationID, BillableSeconds: 60}, nil
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := settleBillingAwardWithTx(t.Context(), tx, "a", "reservation", at.Add(2*time.Hour), calculate)
+		_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", at.Add(2*time.Hour), true, calculate)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -227,7 +227,7 @@ func TestStoreDataMeteredHeartbeatChargesOnlyNewCompute(t *testing.T) {
 	}
 	rewriteSchemaCount(t, s.db, "credit_charges", 2)
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		_, err := settleBillingAwardWithTx(t.Context(), tx, "a", "reservation", start.Add(75*time.Second), calculate)
+		_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", start.Add(75*time.Second), true, calculate)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -237,7 +237,7 @@ func TestStoreDataMeteredHeartbeatChargesOnlyNewCompute(t *testing.T) {
 		t.Fatalf("usage=%d seconds, %d micro, %v", seconds, amount, err)
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		got, err := settleBillingAwardWithTx(t.Context(), tx, "a", "reservation", start.Add(80*time.Second), calculate)
+		got, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", start.Add(80*time.Second), true, calculate)
 		if got.BillableSeconds != 75 {
 			t.Fatalf("settlement replay=%+v", got)
 		}
@@ -296,7 +296,7 @@ func TestStoreDataUnmeteredSettlementNeedsNoCalculator(t *testing.T) {
 				rewriteSchemaExec(t, s.db, "DELETE FROM capabilities")
 				for range 2 {
 					if err := s.inTx(t.Context(), func(tx *storeTx) error {
-						got, err := settleBillingAwardTx(t.Context(), tx, "a", want.ReservationID, s.now())
+						got, err := accountBillingAwardTx(t.Context(), tx, "a", want.ReservationID, s.now(), true, nil)
 						if err == nil && got != want {
 							t.Fatalf("settlement=%+v, want %+v", got, want)
 						}

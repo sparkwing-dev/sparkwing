@@ -601,33 +601,6 @@ func TestHeartbeat_SurvivesATransientStoreError(t *testing.T) {
 	}
 }
 
-func TestHeartbeat_StopsWhenTheClaimIsSuperseded(t *testing.T) {
-	home := t.TempDir()
-	st := consumerTestStore(t, home)
-	ctx := context.Background()
-	seedSubmission(t, st, "run-super", "deploy", "")
-	stale, err := st.ClaimNextTrigger(ctx, time.Nanosecond)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expireTriggerLease(t, st, "run-super")
-	if _, err := st.RequeueUnstartedClaim(ctx, "run-super"); err != nil {
-		t.Fatal(err)
-	}
-	current, err := st.ClaimNextTrigger(ctx, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if _, keepGoing := heartbeatOnce(ctx, st, "run-super", stale.ClaimSeq, time.Minute, 50*time.Millisecond, quietLogger()); keepGoing {
-		t.Fatal("a superseded dispatch kept renewing a claim it no longer holds")
-	}
-	got, err := st.GetTrigger(ctx, "run-super")
-	if err != nil || !got.LeaseExpiresAt.Equal(*current.LeaseExpiresAt) {
-		t.Fatalf("stale heartbeat changed successor's lease from %v to %+v, %v", current.LeaseExpiresAt, got, err)
-	}
-}
-
 type cancelRequestingHeartbeatStore struct{ seq int64 }
 
 func (s *cancelRequestingHeartbeatStore) HeartbeatTrigger(context.Context, string, time.Duration) (bool, error) {

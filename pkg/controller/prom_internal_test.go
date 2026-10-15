@@ -20,6 +20,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -463,34 +464,15 @@ func TestSamplersFillTheOperationalSeries(t *testing.T) {
 	restoreGlobals(t)
 
 	ctx := context.Background()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-
-	if err := st.CreateRun(ctx, store.Run{
-		ID: "run-reaper", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	if err := st.CreateNode(ctx, store.Node{
-		RunID: "run-reaper", NodeID: "node-a", Status: "pending",
-	}); err != nil {
-		t.Fatalf("create node: %v", err)
-	}
-	billingTenant, err := st.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
+	engine, billingTenant := engineRuntimeStore(t)
+	st := engine.Store
+	engineSQL(t, st, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','node-a','pending',?,?)`, []byte(`{"id":"node-a"}`), []byte(`{}`))
 	if _, err := billingTenant.GrantCredits(ctx, store.CreditGrantFree, 4_000_000, "trial", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 
 	srv := New(st, nil).WithLicense(meteringTestLicense(t))
-	api := httptest.NewServer(srv.Handler())
-	t.Cleanup(api.Close)
-	claimWithLabels(t, api.URL, "pool-a", []string{"zone=b"})
+	srv.runnerPresence.record(presenceKey{name: "pool-a"}, []string{"zone=b"}, nil, match.Profile{}, nil, time.Now())
 
 	srv.sampleCreditLedger(ctx)
 	srv.sampleOperationalSeries(ctx)

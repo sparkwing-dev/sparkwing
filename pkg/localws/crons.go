@@ -182,7 +182,12 @@ func (a *cronsAPI) service(w http.ResponseWriter) (*crons.Service, bool) {
 			http.StatusBadGateway)
 		return nil, false
 	}
-	return &crons.Service{Store: a.store, PinRoot: filepath.Join(a.paths.Root, cronPinDir)}, true
+	tenant, err := a.store.ForTeam(context.Background(), store.DefaultTeam)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return nil, false
+	}
+	return &crons.Service{Store: a.store, Schedules: tenant, PinRoot: filepath.Join(a.paths.Root, cronPinDir)}, true
 }
 
 func (a *cronsAPI) writableService(w http.ResponseWriter) (*crons.Service, bool) {

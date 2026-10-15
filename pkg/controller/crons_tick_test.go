@@ -17,7 +17,7 @@ import (
 
 func armPushedForTick(t *testing.T, st *store.Store) store.CronSchedule {
 	t.Helper()
-	svc := &crons.Service{Store: st}
+	svc := &crons.Service{Store: st, Schedules: teststore.ForTeam(t, st, store.DefaultTeam)}
 	report, err := svc.ArmPushed(context.Background(), crons.ArmPush{
 		RepoURL: "https://github.com/acme/widgets.git",
 		Branch:  "main",
@@ -120,7 +120,7 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 		t.Errorf("run status = %q, want pending", run.Status)
 	}
 
-	tick, err := st.GetCronTick(ctx)
+	tick, err := st.AsOperator().GetCronTick(ctx)
 	if err != nil {
 		t.Fatalf("GetCronTick: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
 	if err != nil || !slices.ContainsFunc(fires, func(f store.CronFire) bool { return f.RunID == sched.LastRunID }) {
 		t.Errorf("team B's fire history = %+v (err %v), want the fired run in it", fires, err)
 	}
-	if _, err := st.GetCronSchedule(ctx, id); !errors.Is(err, store.ErrNotFound) {
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).GetCronSchedule(ctx, id); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("the default team reads team B's schedule: %v", err)
 	}
 }

@@ -518,12 +518,8 @@ func (s *Server) noteCreditsBlocked(r *http.Request, shortfall *store.Insufficie
 // trigger claim gets when it names no node runner that claims each node.
 const MeteredInProcessNodesCode = "metered_inprocess_nodes"
 
-// safety: credits are charged on node claims, and a trigger holder that runs
-// nodes in its own process never makes one, so a metered credential claims a
-// trigger only when it runs the nodes through k8s Jobs or warm capacity,
-// which claim each node themselves.
 func (s *Server) refuseMeteredInProcessNodes(w http.ResponseWriter, r *http.Request, nodeRunner string) bool {
-	if nodeRunner == "k8s" || nodeRunner == "warm" {
+	if nodeRunner == "k8s" {
 		return false
 	}
 	prefix, err := s.meteredTokenPrefix(r)
@@ -537,7 +533,7 @@ func (s *Server) refuseMeteredInProcessNodes(w http.ResponseWriter, r *http.Requ
 	p, _ := PrincipalFromContext(r.Context())
 	writeAuthError(w, http.StatusForbidden, authErrorBody{
 		Code: MeteredInProcessNodesCode, Principal: p.label(),
-		Message: store.ErrMeteredInProcessNodes.Error() + "; run the trigger runner as k8s or warm",
+		Message: store.ErrMeteredInProcessNodes.Error() + "; run the trigger runner as k8s",
 	})
 	return true
 }

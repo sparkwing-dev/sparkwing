@@ -142,7 +142,7 @@ func TestSetComputeLimitsWritesEveryNamedGuardOrNone(t *testing.T) {
 func TestSetComputeLimitsRollsBackWhenOneGuardWriteFails(t *testing.T) {
 	s := storetest.OpenSQLite(t)
 	ctx := context.Background()
-	if _, err := s.DB().Exec(`CREATE TRIGGER refuse_scale_step BEFORE INSERT ON sparkwing_meta
+	if _, err := s.DB().Exec(`CREATE TRIGGER refuse_scale_step BEFORE INSERT ON settings
 WHEN NEW.key = 'compute_limit_max_run_seconds'
 BEGIN SELECT RAISE(ABORT, 'run seconds refused'); END`); err != nil {
 		t.Fatalf("create trigger: %v", err)

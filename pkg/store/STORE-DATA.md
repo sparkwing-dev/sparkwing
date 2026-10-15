@@ -94,9 +94,11 @@ sort by descending row ID. Default and maximum history sizes are unchanged.
 `Tenant.CreditUsageByRun` nets reservation, usage and refund rows by run. Storage
 and runless charges affect the balance but stay outside this report. Per-run
 usage survives operational run retention and reopening.
-`Store.CreditLedgerTotals` reads deployment-wide grants and charges in one
+`Operator.CreditLedgerTotals` reads deployment-wide grants and charges in one
 snapshot. Open metered awards exclude their refundable seconds using C2's
-calculator and immutable intervals. A report cannot advance charged checkpoints,
+calculator and immutable intervals. It uses the same configured calculator as
+unit renewal and settlement. The raw Store method is removed. A report cannot
+advance charged checkpoints,
 close intervals or write settlement. It counts no storage seconds and consults
 no node, trigger or current credential rows. Settled and unmetered awards need
 no calculator call. C2's production calculator is still an integration dependency.

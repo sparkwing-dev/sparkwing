@@ -35,20 +35,6 @@ func TestDirectSourceRunnerRunsATriggeredRun(t *testing.T) {
 	e.awaitSuccess(runID)
 }
 
-// TestDirectSourceNodeExecutorFetchesTheSource splits the work the way a
-// cloud pool does: one runner claims the trigger and dispatches its nodes to
-// the controller, and a second runner, which holds no pipeline binary, claims
-// the node and must fetch and compile the run's source itself.
-func TestDirectSourceNodeExecutorFetchesTheSource(t *testing.T) {
-	e := newDirectSourceE2E(t)
-	runID := e.trigger(envOr("SPARKWING_E2E_NODE_PIPELINE", "admission-stress-light-sequential"))
-	e.startRunner("dispatcher", e.command+" --claim-nodes=false --trigger-runner warm")
-	nodeOnly := strings.Replace(e.command, " --also-claim-triggers", "", 1)
-	nodeOnly = strings.Replace(nodeOnly, "--holder-prefix alice-laptop", "--holder-prefix alice-pool --metrics-addr=", 1)
-	e.startRunner("node-runner", nodeOnly)
-	e.awaitSuccess(runID)
-}
-
 // TestCLITokenTriggerRunsOnADirectSourceRunner is the path a team member
 // takes from a terminal: mint a CLI token in the dashboard, paste the setup
 // command it returns, and trigger a pipeline from a checkout of a pushed

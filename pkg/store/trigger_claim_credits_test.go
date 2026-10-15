@@ -364,83 +364,8 @@ func TestMeteredTriggerReapSettlesOnlyTheTailAfterHeartbeat(t *testing.T) {
 	}
 }
 
-func TestMeteredTriggerRequeueRefundsHeartbeatUsage(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	pool := meteredClaimant(t, st, "agent:cloud")
-	floor := triggerFloor(t, st, pool)
-	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 2*floor, "", "operator"); err != nil {
-		t.Fatal(err)
-	}
-	pendingTrigger(t, st, "run-unstarted-paid")
-	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-unstarted-paid", pool, time.Minute); err != nil {
-		t.Fatal(err)
-	}
-	table, err := st.AsOperator().CreditRateTable(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := range table {
-		table[i].MicroPerSecond *= 2
-	}
-	if _, err := st.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &table}); err != nil {
-		t.Fatal(err)
-	}
-	backdateTriggerClaim(t, st, "run-unstarted-paid", pastTriggerMinimum(5*time.Second), time.Time{})
-	if _, err := st.HeartbeatTrigger(ctx, "run-unstarted-paid", time.Minute); err != nil {
-		t.Fatal(err)
-	}
-	if ok, err := st.RequeueUnstartedClaim(ctx, "run-unstarted-paid"); err != nil || !ok {
-		t.Fatalf("requeue = %t, %v", ok, err)
-	}
-	if got := balance(t, st); got != 2*floor {
-		t.Fatalf("requeue refunded %d, want original %d", got, 2*floor)
-	}
-	if ok, err := st.RequeueUnstartedClaim(ctx, "run-unstarted-paid"); err != nil || ok {
-		t.Fatalf("second requeue = %t, %v", ok, err)
-	}
-	if got := balance(t, st); got != 2*floor {
-		t.Fatalf("second requeue moved balance to %d", got)
-	}
-}
-
-func TestMeteredTriggerRequeueCannotRefundAnEarlierGenerationAgain(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	pool := meteredClaimant(t, st, "agent:cloud")
-	floor := triggerFloor(t, st, pool)
-	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 3*floor, "", "operator"); err != nil {
-		t.Fatal(err)
-	}
-	pendingTrigger(t, st, "run-skew")
-	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-skew", pool, time.Minute); err != nil {
-		t.Fatal(err)
-	}
-	backdateTriggerClaim(t, st, "run-skew", pastTriggerMinimum(5*time.Second), time.Time{})
-	if _, err := st.HeartbeatTrigger(ctx, "run-skew", time.Minute); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB().Exec(storetest.Rebind(st,
-		`UPDATE credit_charges SET charged_at = ? WHERE run_id = ? AND kind = ?`),
-		time.Now().Add(time.Hour).UnixNano(), "run-skew", store.CreditChargeUsage); err != nil {
-		t.Fatal(err)
-	}
-	if ok, err := st.RequeueUnstartedClaim(ctx, "run-skew"); err != nil || !ok {
-		t.Fatalf("first requeue = %t, %v", ok, err)
-	}
-	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-skew", pool, time.Minute); err != nil {
-		t.Fatal(err)
-	}
-	if ok, err := st.RequeueUnstartedClaim(ctx, "run-skew"); err != nil || !ok {
-		t.Fatalf("second requeue = %t, %v", ok, err)
-	}
-	if got := balance(t, st); got != 3*floor {
-		t.Fatalf("earlier generation minted credits on second refund: balance=%d, want %d", got, 3*floor)
-	}
-}
-
 func TestTriggerNewClaimRefusesAnUnsettledPriorCreditWindow(t *testing.T) {
-	for _, mode := range []string{"paid release to unmetered token", "unstarted requeue with metering disabled"} {
+	for _, mode := range []string{"paid release to unmetered token"} {
 		t.Run(mode, func(t *testing.T) {
 			st := storetest.Open(t)
 			ctx := context.Background()
@@ -466,10 +391,6 @@ func TestTriggerNewClaimRefusesAnUnsettledPriorCreditWindow(t *testing.T) {
 				if ok, err := st.ReleaseClaimAtGeneration(store.WithoutCreditMetering(ctx), prior.ID, prior.ClaimSeq); err != nil || !ok {
 					t.Fatalf("release prior claim = %t, %v", ok, err)
 				}
-			case "unstarted requeue with metering disabled":
-				if ok, err := st.RequeueUnstartedClaim(store.WithoutCreditMetering(ctx), prior.ID); err != nil || !ok {
-					t.Fatalf("requeue prior claim = %t, %v", ok, err)
-				}
 			}
 			before := balance(t, st)
 			var markerBefore, secondsBefore, amountBefore int64
@@ -485,8 +406,6 @@ func TestTriggerNewClaimRefusesAnUnsettledPriorCreditWindow(t *testing.T) {
 			switch mode {
 			case "paid release to unmetered token":
 				claimant = unmeteredClaimant(t, st, "agent:laptop")
-			case "unstarted requeue with metering disabled":
-				claimCtx = store.WithoutCreditMetering(ctx)
 			}
 			if _, err := st.ClaimSpecificTriggerFor(claimCtx, prior.ID, claimant, time.Minute); err == nil ||
 				!strings.Contains(err.Error(), "unsettled prior metered claim") {
@@ -643,9 +562,7 @@ func TestTriggerFinishSettlesItsReservation(t *testing.T) {
 	}
 }
 
-// A lapsed claim is billed through its lease's end, not through the reap, and
-// a claim that never started its run is refunded whole.
-func TestTriggerReapAndRequeueSettleTheReservation(t *testing.T) {
+func TestTriggerReapSettlesThroughLeaseEnd(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	pool := meteredClaimant(t, st, "agent:cloud")
@@ -668,18 +585,5 @@ func TestTriggerReapAndRequeueSettleTheReservation(t *testing.T) {
 	}
 	if got := before - balance(t, st); got != 90*rate {
 		t.Fatalf("a claim whose lease lapsed 90s in cost %d, want %d", got, 90*rate)
-	}
-
-	pendingTrigger(t, st, "run-unstarted")
-	before = balance(t, st)
-	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-unstarted", pool, 0); err != nil {
-		t.Fatal(err)
-	}
-	backdateTriggerClaim(t, st, "run-unstarted", time.Now().Add(-5*time.Minute), time.Time{})
-	if ok, err := st.RequeueUnstartedClaim(ctx, "run-unstarted"); err != nil || !ok {
-		t.Fatalf("requeue = %v, %v", ok, err)
-	}
-	if got := before - balance(t, st); got != 0 {
-		t.Fatalf("a claim that never started its run cost %d, want a full refund", got)
 	}
 }

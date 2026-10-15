@@ -424,10 +424,6 @@ const ClaimResult
 type ClaimResultCommit struct {
 }
 func (c ClaimResultCommit) Token() ClaimToken
-type ClaimRoundResult struct {
-	Revoked bool
-	Pending bool
-}
 type ClaimRouteClass int
 const ClaimSensitive ClaimRouteClass = iota + 1
 const ClaimTeamHeader = "X-Sparkwing-Claim-Team"
@@ -514,21 +510,13 @@ type ConcurrencyHolder struct {
 	DeclaredCapacity int
 }
 type ConcurrencyMaintenanceOptions struct {
-	Lease time.Duration
-
+	Lease        time.Duration
 	WaiterMaxAge time.Duration
-
-	CacheCap int
 }
 type ConcurrencyMaintenanceResult struct {
-	Reconciled   int
 	StaleHolders []ConcurrencyHolder
 	Promoted     int
-	CacheExpired int64
 	StaleWaiters []ConcurrencyWaiter
-	CacheEvicted int64
-
-	CacheOrphaned int64
 }
 type ConcurrencyState struct {
 	Key               string
@@ -849,7 +837,6 @@ const DefaultArgon2AcquireTimeout = 250 * time.Millisecond
 const DefaultArgon2MemoryBudget = int64(256) << 20
 const DefaultBusyTimeoutMS = 30000
 const DefaultCancelTimeout = 60 * time.Second
-const DefaultConcurrencyCacheCap = 10_000
 const DefaultConcurrencyHeartbeatInterval = 3 * time.Second
 const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
 const DefaultConcurrencyLease = DefaultLeaseDuration
@@ -1023,7 +1010,6 @@ var ErrOutputLimit = errors.New("output limit exceeded")
 var ErrOutputNotStored = errors.New("the node's output was not stored")
 var ErrPaymentWarned = errors.New("credits: the payment drew an early fraud warning and is refunded, not granted")
 var ErrPlanAccepted = errors.New("store: the run's plan was accepted from its planning claim")
-var ErrPlanInvalid = errors.New("store: plan refused")
 var ErrProviderAlreadyLinked = errors.New("store: this account already has a sign-in from that provider")
 var ErrPurchaseLimit = errors.New("credits: the 30-day purchase limit refuses this amount")
 var ErrReversalExceedsPayment = errors.New("credits: the reversal exceeds what the payment paid")
@@ -1476,14 +1462,6 @@ const LogWatchHeader = "X-Sparkwing-Log-Watch"
 func LooksLikeEmail(email string) bool
 func MachinePrincipal(name string) string
 func MachineTokenScopes() []string
-var Maintenance = storeMaintenanceFns{
-	ReapStaleConcurrencyHolders:   (*Store).reapStaleConcurrencyHolders,
-	ReapStaleConcurrencyWaiters:   (*Store).reapStaleConcurrencyWaiters,
-	SweepExpiredConcurrencyCache:  (*Store).sweepExpiredConcurrencyCache,
-	SweepOrphanedConcurrencyCache: (*Store).sweepOrphanedConcurrencyCache,
-	SweepLRUConcurrencyCache:      (*Store).sweepLRUConcurrencyCache,
-	ReconcileConcurrencyKeys:      (*Store).reconcileConcurrencyKeys,
-}
 const Materialize ReconcileKind = "materialize"
 type MaterializeSource struct {
 	Kind   SourcePolicy
@@ -1511,14 +1489,11 @@ const MaxGitHubRunnerCredentials = 20
 const MaxInvitationEmailsPerDay = 5
 const MaxInvitationsPerDay = 100
 const MaxLeaseDuration = 10 * time.Minute
-const MaxNodeIDBytes = 200
 const MaxNodeMetricMarkers = 8
 const MaxNodeMetricSamples = 10_000
-const MaxNodeRetries = 10
 const MaxOpenInvitations = 50
 const MaxOutputBytes int64 = 64 << 20
 const MaxPlanBytes = 4 << 20
-const MaxPlanNodes = 1000
 const MaxPurchaseLimitCents = MaxTeamBalanceMicro / MicroCreditsPerCent
 const MaxRetryBackoff = 5 * time.Minute
 const MaxRunAnnotationBytes = 4 << 20
@@ -1805,11 +1780,12 @@ type NodeStep struct {
 const NodeSuccess NodeState = "success"
 const NodeSuperseded NodeState = "superseded"
 type NodeTransition struct {
-	Ref   NodeRef
-	To    NodeState
-	Actor Actor
-	Cause TransitionCause
-	Extra TransitionExtra
+	Ref           NodeRef
+	To            NodeState
+	Actor         Actor
+	Cause         TransitionCause
+	SourceAttempt *int64
+	Extra         TransitionExtra
 }
 func NodeTransitions() []NodeEdge
 type NodeUsage struct {
@@ -1833,25 +1809,28 @@ func (o *Operator) AcquireSingletonLease(ctx context.Context, name, holder strin
 func (o *Operator) ChargeRetainedStorage(ctx context.Context, lease SingletonLease) (StorageChargeSweep, error)
 func (o *Operator) ClaimTeamDeletion(ctx context.Context, team Team, holder string, now time.Time, lease time.Duration) (bool, error)
 func (o *Operator) CollectBlobTombstones(ctx context.Context, lease SingletonLease, limit int, deleter BlobDeleter) (int64, error)
-func (o *Operator) CountConcurrencyCache(ctx context.Context) (int, error)
 func (o *Operator) CreateTeam(ctx context.Context, team Team) error
+func (o *Operator) CreditLedgerTotals(ctx context.Context) (CreditLedgerTotals, error)
 func (o *Operator) CreditRateTable(ctx context.Context) (CreditRateTable, error)
 func (o *Operator) CreditSettings(ctx context.Context) (_ CreditSettings, err error)
 func (o *Operator) DatabaseSize(ctx context.Context) (DatabaseSize, error)
 func (o *Operator) DueRunEffects(ctx context.Context, lease SingletonLease, limit int) ([]DesiredRunEffect, error)
 func (o *Operator) EgressUsageAcrossTeams(ctx context.Context, period string) (_ []EgressUsage, err error)
 func (o *Operator) FinishTeamRecheck(ctx context.Context, team Team, holder string, now time.Time) error
+func (o *Operator) GetCronTick(ctx context.Context) (tick CronTick, err error)
 func (o *Operator) GitHubAppInstallationTeam(ctx context.Context, installation int64) (GitHubAppInstallation, error)
 func (o *Operator) ListCronSchedulesAcrossTeams(ctx context.Context) ([]CronSchedule, error)
 func (o *Operator) ListStorageQuotas(ctx context.Context) (_ []StorageQuota, err error)
 func (o *Operator) ListTeams(ctx context.Context) (_ []Team, err error)
 func (o *Operator) ListWaitingNodes(ctx context.Context, readyBefore time.Time, after [2]string, limit int) ([]WaitingNode, error)
+func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease, opts ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error)
 func (o *Operator) MaintainRetention(ctx context.Context, request RetentionRequest) (RetentionResult, error)
 func (o *Operator) MarkBlobTombstones(ctx context.Context, lease SingletonLease, limit int) (int64, error)
 func (o *Operator) PendingTeamDeletions(ctx context.Context) ([]TeamDeletion, error)
 func (o *Operator) PruneEgressUsage(ctx context.Context, lease SingletonLease) (int64, error)
 func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, now time.Time, recheckAfter time.Duration) error
 func (o *Operator) ReconcileControllerRuns(ctx context.Context, lease SingletonLease, after string, limit int) ([]ControllerRun, error)
+func (o *Operator) RecordCronTick(ctx context.Context, tick CronTick) error
 func (o *Operator) RecordTeamDeletionFailure(ctx context.Context, team Team, cause string) error
 func (o *Operator) RenewSingletonLease(ctx context.Context, lease SingletonLease, ttl time.Duration) (SingletonLease, error)
 func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.Time) (TeamDeletion, []string, error)
@@ -1882,6 +1861,7 @@ type OperatorStore interface {
 	ReconcileControllerRuns(context.Context, SingletonLease, string, int) ([]ControllerRun, error)
 	DueRunEffects(context.Context, SingletonLease, int) ([]DesiredRunEffect, error)
 	MaintainRetention(context.Context, RetentionRequest) (RetentionResult, error)
+	MaintainConcurrency(context.Context, SingletonLease, ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error)
 }
 func OutputKeyPrefix(runID, nodeID string) string
 func OutputPath(dir, key string) string
@@ -2196,8 +2176,6 @@ type Run struct {
 	AnnotationCount int
 	TopAnnotation   string
 	Annotations     []string
-
-	LastHeartbeatAt *time.Time
 
 	NeedsAttention string
 
@@ -2795,7 +2773,6 @@ type StorageUsage struct {
 type Store struct {
 }
 func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (InvitationAcceptance, error)
-func (s *Store) AcceptPlan(ctx context.Context, commit ClaimResultCommit, body []byte, now time.Time) (replayed bool, err error)
 func (s *Store) Account(ctx context.Context, id string) (Account, error)
 func (s *Store) AccountByEmail(ctx context.Context, email string) (_ Account, err error)
 func (s *Store) AccountEmail(ctx context.Context, accountID string) (string, error)
@@ -2810,7 +2787,6 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, actor string, now time.Time) ([]Account, error)
 func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, actor string, now time.Time) ([]Account, error)
-func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (CronSchedule, bool, error)
 func (s *Store) AsOperator() *Operator
 func (s *Store) AuthGenerations(ctx context.Context, authority capability.AuthorityRef, team string) (capability.AuthGenerations, error)
 func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class ClaimRouteClass, now time.Time) (ClaimToken, error)
@@ -2841,7 +2817,6 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant ClaimIdentity, lease time.Duration) (*Trigger, error)
 func (s *Store) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error)
 func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (ClaimedRun, error)
-func (s *Store) ClearCronOverride(ctx context.Context, id string, now time.Time) error
 func (s *Store) Close() error
 func (s *Store) CommitUpload(ctx context.Context, team Team, id, recordedUploader string, now time.Time) (err error)
 func (s *Store) CommittedObject(ctx context.Context, team Team, key string) (Upload, error)
@@ -2853,7 +2828,6 @@ func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, 
 func (s *Store) ConsumeIdentityLinkState(ctx context.Context, nonce string, expires, now time.Time) (bool, error)
 func (s *Store) CoordinatorID(ctx context.Context) (string, error)
 func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (int, error)
-func (s *Store) CountDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) CountNodesByQueueState(ctx context.Context) (map[string]int, error)
 func (s *Store) CountPendingNodes(ctx context.Context) (int, error)
 func (s *Store) CountPendingTriggers(ctx context.Context) (int, error)
@@ -2876,14 +2850,11 @@ func (s *Store) CreateTokenWith(
 ) (string, *Token, error)
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
 func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) error
-func (s *Store) CreditLedgerTotals(ctx context.Context) (CreditLedgerTotals, error)
 func (s *Store) CurrentNodeAttempt(ctx context.Context, team Team, runID, nodeID string) (attempt, generation int64, err error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
 func (s *Store) DelegateCapability(ctx context.Context, spec capability.DelegateSpec) (capability.Issued, error)
 func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Time) (AccountDeletion, error)
-func (s *Store) DeleteCronSchedule(ctx context.Context, id string) error
-func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (int, error)
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteRunNodeLogs(ctx context.Context, team Team, runID string) error
 func (s *Store) DeleteSecret(name, pipeline string) error
@@ -2898,7 +2869,6 @@ func (s *Store) ExchangeCapability(ctx context.Context, spec capability.Exchange
 func (s *Store) FailCardAttempt(
 	ctx context.Context, attemptID, paymentIntent, declineCode string, now time.Time,
 ) (team Team, first bool, err error)
-func (s *Store) FinalizeClaimRound(ctx context.Context, runID, nodeID string) (ClaimRoundResult, error)
 func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
@@ -2918,8 +2888,6 @@ func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error)
 func (s *Store) FreeSlots(ctx context.Context) (taken, limit int64, err error)
 func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error)
 func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error)
-func (s *Store) GetCronSchedule(ctx context.Context, id string) (CronSchedule, error)
-func (s *Store) GetCronTick(ctx context.Context) (tick CronTick, err error)
 func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error)
 func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error)
 func (s *Store) GetNodeLog(ctx context.Context, team Team, runID, nodeID string, attempt, generation int64) (NodeLog, error)
@@ -2947,8 +2915,6 @@ func (s *Store) Issue(ctx context.Context, tx *storeTx, request capability.Issue
 func (s *Store) LatestNodeLog(ctx context.Context, team Team, runID, nodeID string) (NodeLog, error)
 func (s *Store) LinkIdentity(ctx context.Context, accountID string, p SignInProfile, now time.Time) (Identity, error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
-func (s *Store) ListCronFires(ctx context.Context, scheduleID string, limit int) ([]CronFire, error)
-func (s *Store) ListCronSchedules(ctx context.Context) ([]CronSchedule, error)
 func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPause, error)
 func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
 func (s *Store) ListNodeExecutionAttempts(ctx context.Context, runID, nodeID string) ([]ExecutionAttempt, error)
@@ -2967,7 +2933,6 @@ func (s *Store) LookupSession(ctx context.Context, rawSession string) (*Session,
 func (s *Store) LookupSessionAndRenew(ctx context.Context, rawSession string, ttl, maxLifetime time.Duration) (*Session, error)
 func (s *Store) LookupToken(raw string, now time.Time) (*Token, error)
 func (s *Store) LookupTokenByPrefix(prefix string) (*Token, error)
-func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error)
 func (s *Store) MarkCardRefundMade(
 	ctx context.Context, team Team, key, refundID, status string, now time.Time,
 ) error
@@ -2997,13 +2962,11 @@ func (s *Store) PrincipalHoldsProfileClaim(ctx context.Context, key string, clai
 func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) ProvisionCapability(ctx context.Context, spec capability.ProvisionSpec) (capability.Issued, error)
-func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error)
 func (s *Store) ReadClaimProfile(ctx context.Context, authority capability.AuthorityRef) (match.Profile, match.Resources, error)
 func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) ([]ReapedUnit, error)
 func (s *Store) RecordAgentLabels(ctx context.Context, prefix string, labels []string) error
 func (s *Store) RecordAttemptIntent(ctx context.Context, attemptID, paymentIntent string, now time.Time) error
-func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
 func (s *Store) RecordLocalOutput(ctx context.Context, runID, nodeID string, ref OutputRef, now time.Time) (err error)
 func (s *Store) RecordPaymentWarning(ctx context.Context, w PaymentWarning, now time.Time) (_ Team, err error)
@@ -3017,18 +2980,15 @@ func (s *Store) ReplayClaimResult(ctx context.Context, tok ClaimToken, digest st
 func (s *Store) ReportAttempt(ctx context.Context, commit ClaimResultCommit, report AttemptReport, now time.Time) (replayed bool, err error)
 func (s *Store) ReportCardRefund(ctx context.Context, key, refundID, status string, now time.Time) (bool, error)
 func (s *Store) RequestCancel(ctx context.Context, id string) error
-func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error)
 func (s *Store) ResealSecrets(ctx context.Context, sealedPrefix string, batchSize int, reseal func(Team, Secret) (string, error)) (SecretResealCounts, error)
 func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload, err error)
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
 func (s *Store) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error)
 func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req ClaimInputRequest, now time.Time) (ClaimInput, error)
-func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) error
 func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error)
 func (s *Store) ReversePayment(
 	ctx context.Context, paymentID, reference, createdBy string, amountMicro int64,
 ) (_ CreditReversal, err error)
-func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (s *Store) RevokeToken(prefix string, now time.Time) error
 func (s *Store) RotateGitCredentialSecrets(ctx context.Context, reseal func(GitCredential) (string, error)) (rotated int, err error)
 func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Team, Secret) (string, error)) (rotated int, err error)
@@ -3037,7 +2997,6 @@ func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, windo
 func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
 func (s *Store) RunNodeLogs(ctx context.Context, team Team, runID string) (_ []NodeLog, err error)
-func (s *Store) RunReaperLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunStoragePassLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
 func (s *Store) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, err error)
@@ -3046,16 +3005,10 @@ func (s *Store) SetActiveTeam(ctx context.Context, accountID string, team Team, 
 func (s *Store) SetClaimProfileResolver(resolver ClaimProfileResolver)
 func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error
 func (s *Store) SetComputeLimits(ctx context.Context, updates map[string]int64) (_ ComputeLimits, err error)
-func (s *Store) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
-func (s *Store) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
-func (s *Store) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error
-func (s *Store) SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time, now time.Time) error
-func (s *Store) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
 func (s *Store) SetEventLimits(ctx context.Context, limits EventLimits) (err error)
 func (s *Store) SetFreeTeamSlots(ctx context.Context, slots int64) error
 func (s *Store) SetIntakePolicy(policy IntakePolicy)
 func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
-func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
 func (s *Store) SetOutputDir(dir string)
 func (s *Store) SetPlanSecretOpener(opener PlanSecretOpener)
@@ -3081,8 +3034,6 @@ func (s *Store) SyncLaunchJobs(ctx context.Context, launcher ClaimIdentity, jobs
 func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error)
 func (s *Store) TeamInfo(ctx context.Context, team Team) (TeamInfo, error)
 func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)
-func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
-func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (s *Store) TriggerClaimFenceIsLive(ctx context.Context, runID string, claimant ClaimIdentity, generation int64, now time.Time) (bool, error)
 func (s *Store) TriggerClaimGeneration(ctx context.Context, id string) (int64, error)
 func (s *Store) TriggerClaimOrigin(ctx context.Context, runID string, generation int64) (principal string, metered bool, err error)
@@ -3362,7 +3313,6 @@ func (t *Tenant) RenewOwner(ctx context.Context, actor Actor) (LeaseBeat, error)
 func (t *Tenant) ReportGitHubCheck(ctx context.Context, runID string, fn func(ctx context.Context, checkRun int64) (int64, error)) error
 func (t *Tenant) RequestCancel(ctx context.Context, id string) error
 func (t *Tenant) RequestDeletion(ctx context.Context, actorID string, now time.Time) (TeamDeletion, []string, error)
-func (t *Tenant) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error)
 func (t *Tenant) ReserveBlobUpload(ctx context.Context, request UploadReservationRequest) (UploadReservation, error)
 func (t *Tenant) ReserveQuota(ctx context.Context, quota string, amount int64) (QuotaReservation, error)
 func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
@@ -3373,7 +3323,6 @@ func (t *Tenant) ResolveCronDue(ctx context.Context, id string, cursor time.Time
 func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
 func (t *Tenant) RetryRunEffect(ctx context.Context, delivery EffectDelivery, nextAt time.Time) error
 func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error
-func (t *Tenant) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (t *Tenant) RevokeTeamToken(ctx context.Context, prefix string, now time.Time) error
 func (t *Tenant) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
 func (t *Tenant) SaveCard(ctx context.Context, c Card, actor string, now time.Time) (err error)
@@ -3388,7 +3337,6 @@ func (t *Tenant) SetGitHubAppExtraRepoIDs(ctx context.Context, repository string
 func (t *Tenant) SetGitHubAppExtraRepos(ctx context.Context, repository string, extras []string, by string, now time.Time) (_ []string, err error)
 func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, role Role, now time.Time) ([]string, error)
 func (t *Tenant) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
-func (t *Tenant) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 func (t *Tenant) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (t *Tenant) SetRepoDispatch(ctx context.Context, owner, name string, dispatch RepoDispatch, now time.Time) error
@@ -3416,8 +3364,6 @@ func (t *Tenant) Team() Team
 func (t *Tenant) TeamOwnerEmails(ctx context.Context) (_ []string, err error)
 func (t *Tenant) TeamToken(ctx context.Context, prefix string) (Token, error)
 func (t *Tenant) TeamTokens(ctx context.Context, accountID string, allMachines bool, now time.Time) (_ []Token, err error)
-func (t *Tenant) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
-func (t *Tenant) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (t *Tenant) TransitionNode(ctx context.Context, change NodeTransition) (Applied, error)
 func (t *Tenant) TransitionRun(ctx context.Context, change RunTransition) (Applied, error)
 func (t *Tenant) TriggerClaimGeneration(ctx context.Context, id string) (int64, error)
@@ -3743,7 +3689,6 @@ func WithClaimProfile(ctx context.Context, profile match.Profile) context.Contex
 func WithCreatingPrincipal(ctx context.Context, principal string) context.Context
 func WithGitHubRunnerScope(ctx context.Context, scope GitHubRunnerScope) context.Context
 func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Context
-func WithQueueRunners(ctx context.Context, live []RunnerPresence) context.Context
 func WithTriggerClaimFence(ctx context.Context, fence TriggerClaimFence) context.Context
 func WithoutClaimFences(ctx context.Context) context.Context
 func WithoutCreditMetering(ctx context.Context) context.Context

@@ -397,7 +397,7 @@ func runRunnerCLI(args []string, version string) error {
 	maxClaims := fs.Int("max-claims-before-restart", 25,
 		"exit the loop after N successful claims so kubelet restarts the container (0 = unlimited; FOLLOWUPS #12)")
 	alsoClaimTriggers := fs.Bool("also-claim-triggers", false,
-		"run the trigger-loop (claim triggers, clone repo, compile, host the run) as a goroutine alongside the node-claim loop. Lets one warm-runner pool handle both trigger and node layers.")
+		"run the trigger-loop (claim triggers, clone repo, compile, host the run) as a goroutine alongside the node-claim loop. Lets one runner handle both trigger and node layers.")
 	claimNodes := fs.Bool("claim-nodes", true,
 		"claim and execute controller node work in this runner process")
 	gitcacheURL := fs.String("gitcache", "",
@@ -418,15 +418,15 @@ func runRunnerCLI(args []string, version string) error {
 	triggerSources := fs.String("trigger-sources", "",
 		"comma-separated trigger_source values the trigger loop handles (e.g. github); empty = accept any source")
 	triggerRunnerKind := fs.String("trigger-runner", "",
-		"node runner used by claimed triggers: inprocess | k8s | warm")
+		"node runner used by claimed triggers: inprocess | k8s")
 	triggerRunnerNamespace := fs.String("trigger-runner-namespace", os.Getenv("POD_NAMESPACE"),
-		"namespace for trigger-spawned runner Jobs (k8s or warm fallback)")
+		"namespace for trigger-spawned runner Jobs (k8s)")
 	triggerRunnerImage := fs.String("trigger-runner-image", "",
-		"runner image for trigger-spawned runner Jobs (k8s or warm fallback)")
+		"runner image for trigger-spawned runner Jobs (k8s)")
 	triggerRunnerSA := fs.String("trigger-runner-sa", "",
-		"service account for trigger-spawned runner Jobs (k8s or warm fallback)")
+		"service account for trigger-spawned runner Jobs (k8s)")
 	triggerRunnerPullSecret := fs.String("trigger-runner-image-pull-secret", "",
-		"imagePullSecret for trigger-spawned runner Jobs (k8s or warm fallback)")
+		"imagePullSecret for trigger-spawned runner Jobs (k8s)")
 	triggerRunnerCtrlURL := fs.String("trigger-runner-controller-url", "",
 		"controller URL for trigger-spawned runner Jobs (defaults to --controller)")
 	triggerRunnerKubeconfig := fs.String("trigger-runner-kubeconfig", os.Getenv("KUBECONFIG"),
@@ -495,15 +495,13 @@ func runRunnerCLI(args []string, version string) error {
 		return errors.New("--controller is required")
 	}
 	if *triggerRunnerKind != "" && *triggerRunnerKind != "inprocess" &&
-		*triggerRunnerKind != "k8s" && *triggerRunnerKind != "warm" {
-		return fmt.Errorf("--trigger-runner=%q: expected inprocess, k8s, or warm", *triggerRunnerKind)
+		*triggerRunnerKind != "k8s" {
+		return fmt.Errorf("--trigger-runner=%q: expected inprocess or k8s", *triggerRunnerKind)
 	}
-	if (*triggerRunnerKind == "k8s" || *triggerRunnerKind == "warm") && !*alsoClaimTriggers {
-		return errors.New("--trigger-runner=k8s or warm requires --also-claim-triggers")
+	if *triggerRunnerKind == "k8s" && !*alsoClaimTriggers {
+		return errors.New("--trigger-runner=k8s requires --also-claim-triggers")
 	}
-	if *triggerRunnerKind == "warm" && *claimNodes {
-		return errors.New("--trigger-runner=warm requires --claim-nodes=false so this process does not race remote agents")
-	}
+
 	if !*claimNodes && !*alsoClaimTriggers {
 		return errors.New("--claim-nodes=false requires --also-claim-triggers")
 	}
@@ -622,8 +620,7 @@ func runRunnerCLI(args []string, version string) error {
 
 	if *alsoClaimTriggers {
 		// safety: without this the child rejects each claimed trigger after admission.
-		usesK8sJobs := *triggerRunnerKind == "k8s" ||
-			(*triggerRunnerKind == "warm" && *triggerRunnerImage != "")
+		usesK8sJobs := *triggerRunnerKind == "k8s"
 		if usesK8sJobs && *triggerRunnerSA == "" {
 			return fmt.Errorf("--trigger-runner-sa is required with --trigger-runner=%s", *triggerRunnerKind)
 		}

@@ -8,8 +8,12 @@ import (
 )
 
 // CreditLedgerTotals reports deployment-wide financial totals from one snapshot.
-func (s *Store) CreditLedgerTotals(ctx context.Context) (CreditLedgerTotals, error) {
-	return s.creditLedgerTotalsWith(ctx, capability.SettleBilling)
+func (o *Operator) CreditLedgerTotals(ctx context.Context) (CreditLedgerTotals, error) {
+	calculate := o.s.billing
+	if calculate == nil {
+		calculate = capability.SettleBilling
+	}
+	return o.s.creditLedgerTotalsWith(ctx, calculate)
 }
 
 func (s *Store) creditLedgerTotalsWith(ctx context.Context, calculate billingCalculator) (_ CreditLedgerTotals, err error) {

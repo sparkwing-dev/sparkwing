@@ -119,6 +119,10 @@ func (t *Tenant) AcceptPlan(ctx context.Context, request PlanAcceptance) (Accept
 		return err
 	})
 	if err != nil {
+		var refused *SecretPreflightError
+		if errors.As(err, &refused) {
+			return AcceptedPlan{}, errors.Join(err, t.s.recordSecretPreflight(ctx, t.team, request, refused))
+		}
 		return AcceptedPlan{}, err
 	}
 	return result, nil
@@ -201,6 +205,9 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 			return err
 		} else if count != 1 {
 			return holderRefusal()
+		}
+		if err := finishExpansionBillingTx(ctx, tx, t.team, request); err != nil {
+			return err
 		}
 		return settleControllerTx(ctx, tx, t.team, request.Source.RunID, now)
 	})

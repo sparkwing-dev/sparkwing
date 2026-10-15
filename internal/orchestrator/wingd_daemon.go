@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -139,6 +140,7 @@ func maintainRunStore(ctx context.Context, runs *HeldRunStore, ready <-chan stru
 		return
 	}
 	fault := ""
+	holder := "local-reaper:" + rand.Text()
 	pass := func(force bool) {
 		passCtx, cancel := context.WithTimeout(ctx, runStoreReapTimeout)
 		defer cancel()
@@ -151,7 +153,17 @@ func maintainRunStore(ctx context.Context, runs *HeldRunStore, ready <-chan stru
 			return
 		}
 		fault = ""
-		res, err := st.MaintainConcurrency(passCtx, store.ConcurrencyMaintenanceOptions{})
+		lease, err := st.AsOperator().AcquireSingletonLease(passCtx, "controller.reaper", holder, time.Minute)
+		if errors.Is(err, store.ErrLockHeld) {
+			return
+		}
+		if err != nil {
+			if ctx.Err() == nil {
+				logf("reaper lease: %v", err)
+			}
+			return
+		}
+		res, err := st.AsOperator().MaintainConcurrency(passCtx, lease, store.ConcurrencyMaintenanceOptions{})
 		if err != nil && ctx.Err() == nil {
 			logf("concurrency maintenance: %v", err)
 		}
@@ -182,10 +194,6 @@ func reapSummary(res store.ConcurrencyMaintenanceResult) string {
 	add(len(res.StaleHolders), "stale holder(s)")
 	add(len(res.StaleWaiters), "stale waiter(s)")
 	add(res.Promoted, "promoted waiter(s)")
-	add(res.Reconciled, "reconciled key(s)")
-	add(int(res.CacheExpired), "expired cache row(s)")
-	add(int(res.CacheOrphaned), "orphaned cache row(s)")
-	add(int(res.CacheEvicted), "evicted cache row(s)")
 	return strings.Join(parts, ", ")
 }
 

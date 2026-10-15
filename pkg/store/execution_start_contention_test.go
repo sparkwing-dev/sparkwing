@@ -10,7 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func TestPostgresConcurrentExecutionStartsAndHeartbeats(t *testing.T) {
+func TestPostgresConcurrentExecutionStartsAndActivity(t *testing.T) {
 	s := openPGTestStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -58,7 +58,7 @@ func TestPostgresConcurrentExecutionStartsAndHeartbeats(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			errs <- s.TouchNodeHeartbeat(ctx, runID, n.NodeID)
+			errs <- s.UpdateNodeActivity(ctx, runID, n.NodeID, "running")
 		}()
 	}
 	close(start)
@@ -66,7 +66,7 @@ func TestPostgresConcurrentExecutionStartsAndHeartbeats(t *testing.T) {
 	close(errs)
 	for err := range errs {
 		if err != nil {
-			t.Errorf("concurrent execution start or heartbeat: %v", err)
+			t.Errorf("concurrent execution start or activity: %v", err)
 		}
 	}
 }

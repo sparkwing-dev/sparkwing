@@ -62,15 +62,6 @@ func withStore(t *testing.T, p paths.Paths, fn func(st *store.Store)) {
 	fn(st)
 }
 
-func backdateHeartbeat(t *testing.T, st *store.Store, runID string, age time.Duration) {
-	t.Helper()
-	if _, err := st.DB().Exec(
-		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`,
-		time.Now().Add(-age).UnixNano(), runID); err != nil {
-		t.Fatalf("backdate heartbeat: %v", err)
-	}
-}
-
 func TestDiagnose_CleanHomeFindsNothing(t *testing.T) {
 	p := doctorHome(t)
 	rep, err := diagnose(context.Background(), p, p.Root, false)
@@ -111,68 +102,6 @@ func TestDiagnose_ReportsQuarantinedLedgersWithoutRemoving(t *testing.T) {
 	}
 	if _, err := os.Stat(quarantined); err != nil {
 		t.Fatalf("doctor removed the quarantined ledger: %v", err)
-	}
-}
-
-func TestDiagnose_FinalizesOrphanedRunKeepsRecent(t *testing.T) {
-	p := doctorHome(t)
-	ctx := context.Background()
-	withStore(t, p, func(st *store.Store) {
-		if err := st.CreateRun(ctx, store.Run{
-			ID: "run-orphan", Pipeline: "demo", Status: "running",
-			StartedAt: time.Now().Add(-10 * time.Minute),
-		}); err != nil {
-			t.Fatal(err)
-		}
-		backdateHeartbeat(t, st, "run-orphan", 10*time.Minute)
-		if err := st.CreateRun(ctx, store.Run{
-			ID: "run-fresh", Pipeline: "demo", Status: "running",
-			StartedAt: time.Now(),
-		}); err != nil {
-			t.Fatal(err)
-		}
-	})
-
-	rep, err := diagnose(ctx, p, p.Root, false)
-	if err != nil {
-		t.Fatalf("diagnose: %v", err)
-	}
-	if len(rep.OrphanedRuns) != 1 || rep.OrphanedRuns[0] != "run-orphan" {
-		t.Fatalf("OrphanedRuns = %v, want [run-orphan]", rep.OrphanedRuns)
-	}
-	withStore(t, p, func(st *store.Store) {
-		orphan, _ := st.GetRun(ctx, "run-orphan")
-		if orphan == nil || orphan.Status != "cancelled" {
-			t.Fatalf("orphan run status = %v, want cancelled", orphan)
-		}
-		fresh, _ := st.GetRun(ctx, "run-fresh")
-		if fresh == nil || fresh.Status != "running" {
-			t.Fatalf("fresh run status = %v, want running (protected by grace)", fresh)
-		}
-	})
-}
-
-func TestDiagnose_RemovesDeadLocalConcurrencyRows(t *testing.T) {
-	p := doctorHome(t)
-	ctx := context.Background()
-	withStore(t, p, func(st *store.Store) {
-		if err := st.CreateRun(ctx, store.Run{ID: "run-dead", Pipeline: "demo", Status: "failed", StartedAt: time.Now()}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := st.DB().ExecContext(ctx,
-			`INSERT INTO concurrency_holders (key, holder_id, run_id, claimed_at, lease_expires_at)
-			 VALUES ('r:run-dead:build','run-dead:n','run-dead',?,?)`,
-			time.Now().UnixNano(), time.Now().Add(time.Hour).UnixNano()); err != nil {
-			t.Fatal(err)
-		}
-	})
-
-	rep, err := diagnose(ctx, p, p.Root, false)
-	if err != nil {
-		t.Fatalf("diagnose: %v", err)
-	}
-	if rep.DeadConcurrencyHolders != 1 {
-		t.Fatalf("DeadConcurrencyHolders = %d, want 1", rep.DeadConcurrencyHolders)
 	}
 }
 
@@ -268,33 +197,6 @@ func TestDiagnose_FlagsPoisonedProfileWithoutRepair(t *testing.T) {
 		prof, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "myrepo/ci", "")
 		if err != nil || prof == nil || prof.FloorCores != floor {
 			t.Fatalf("profile after diagnose = %+v (err %v), want the learned floor untouched", prof, err)
-		}
-	})
-}
-
-func TestDiagnose_DryRunChangesNothing(t *testing.T) {
-	p := doctorHome(t)
-	ctx := context.Background()
-	withStore(t, p, func(st *store.Store) {
-		if err := st.CreateRun(ctx, store.Run{
-			ID: "run-orphan", Pipeline: "demo", Status: "running",
-			StartedAt: time.Now().Add(-10 * time.Minute),
-		}); err != nil {
-			t.Fatal(err)
-		}
-		backdateHeartbeat(t, st, "run-orphan", 10*time.Minute)
-	})
-	rep, err := diagnose(ctx, p, p.Root, true)
-	if err != nil {
-		t.Fatalf("diagnose dry-run: %v", err)
-	}
-	if len(rep.OrphanedRuns) != 1 {
-		t.Fatalf("dry-run OrphanedRuns = %v, want one candidate reported", rep.OrphanedRuns)
-	}
-	withStore(t, p, func(st *store.Store) {
-		orphan, _ := st.GetRun(ctx, "run-orphan")
-		if orphan == nil || orphan.Status != "running" {
-			t.Fatalf("dry-run changed the run: status = %v, want running", orphan)
 		}
 	})
 }

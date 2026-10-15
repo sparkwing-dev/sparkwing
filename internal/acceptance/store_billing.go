@@ -119,7 +119,7 @@ func CheckStoreBillingBoundary(ctx context.Context, root, id string) (err error)
 	if !slices.Equal(usage, []store.RunCreditUsage{{RunID: "old", Seconds: 3, AmountMicro: 30, LastChargedAt: grants[0].CreatedAt}}) {
 		return fmt.Errorf("tenant run usage includes storage or a foreign ledger: %+v", usage)
 	}
-	totals, err := s.CreditLedgerTotals(ctx)
+	totals, err := s.AsOperator().CreditLedgerTotals(ctx)
 	if err != nil {
 		return err
 	}
@@ -188,7 +188,7 @@ func CheckStoreBillingBoundary(ctx context.Context, root, id string) (err error)
 	if !reflect.DeepEqual(state, afterState) || !reflect.DeepEqual(grants, afterGrants) || !reflect.DeepEqual(charges, afterCharges) || !slices.Equal(usage, afterUsage) {
 		return errors.New("tenant credit state or history changed during run retention or restart")
 	}
-	afterTotals, err := s.CreditLedgerTotals(ctx)
+	afterTotals, err := s.AsOperator().CreditLedgerTotals(ctx)
 	if err != nil {
 		return err
 	}

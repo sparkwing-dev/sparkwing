@@ -263,7 +263,7 @@ func TestFinalizeNodeCreditsRefundsAReservationWhenExecutionNeverStarts(t *testi
 	if balance != granted {
 		t.Fatalf("balance = %d, want the full grant %d restored", balance, granted)
 	}
-	totals, err := s.CreditLedgerTotals(ctx)
+	totals, err := s.AsOperator().CreditLedgerTotals(ctx)
 	if err != nil {
 		t.Fatalf("totals: %v", err)
 	}

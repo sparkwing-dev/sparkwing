@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/internal/api"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -64,7 +66,7 @@ func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 			t.Errorf("schedule %s team = %q, want %q", sched.ID, sched.Team, teamB)
 		}
 	}
-	if own, err := f.store.ListCronSchedules(ctx); err != nil || len(own) != 0 {
+	if own, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListCronSchedules(ctx); err != nil || len(own) != 0 {
 		t.Fatalf("default team holds %d schedules (err %v), want none", len(own), err)
 	}
 
@@ -106,7 +108,7 @@ func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 	}
 
 	f.call(http.MethodPut, "/api/v1/crons/repos", f.writer, cronPushBody(), http.StatusOK, nil)
-	own, err := f.store.ListCronSchedules(ctx)
+	own, err := teststore.ForTeam(t, f.store, store.DefaultTeam).ListCronSchedules(ctx)
 	if err != nil || len(own) != 2 {
 		t.Fatalf("the default team holds %d schedules (err %v) after arming the same repository, want 2", len(own), err)
 	}

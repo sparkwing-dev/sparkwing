@@ -22,6 +22,67 @@ digest, expiry and verified settlement. Generic byte deltas cannot mint a blob
 or receipt. The controller's retention probe reads `Tenant.StorageStanding`
 and slot availability without writing reservations. Private exact-size helpers
 remain only for legacy direct-upload and node-log transport callers.
+`SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed
+with their legacy HTTP handlers. Debug pauses use `status_detail` through
+activity writes and leave lifecycle state intact. Queue withdrawal uses
+`Tenant.TransitionNode` with `CauseRevoke` under the current owner fence.
+Claimed, running and terminal jobs cannot be withdrawn. Refused transitions
+change neither state nor events. The SQLite
+`lifecycle-transition-replay-and-fencing/store-sqlite` proof covers withdrawal,
+reopening, holder exclusion, cleared terminal claims and exact replay.
+The raw readiness publisher remains pending its caller migrations.
+
+`Store.TouchRunHeartbeat`, its Tenant twin, `Client.TouchRunHeartbeat` and
+`Run.LastHeartbeatAt` are removed with the independent scheduler ticker,
+legacy HTTP handler and Doctor's heartbeat-age run finalizer. `TouchNodeHeartbeat`
+on Store, Tenant and Client is also removed with the node-touch route and
+Kubernetes dispatcher's advisory heartbeat loop. Job claim renewal supplies
+the job's liveness timestamp. Run liveness is
+the current owner lease. `RenewUnit` and `RenewOwner` renew that exact fence.
+Only the elected `ReapUnits` pass recovers an expired owner. Job renewal never
+extends its run owner's lease. The final C2 owner-heartbeat route remains a
+declaration for W2 to bind to the implemented `EngineController.Renew` adapter.
+
+`Tenant.AcceptPlan` is the sole plan-acceptance API. The raw `Store.AcceptPlan`,
+its separate decoder/validator/inserter and `Client.SubmitPlan` are removed.
+The controller's claim-token acceptance branch and old launched planner are
+removed with them. Legacy plan-node bootstrap, snapshots, claims and lifecycle
+writers remain pending their caller migrations. They are not v2 acceptance paths.
+
+Required-secret preflight returns canonical `plan_invalid`. After acceptance
+rolls back, its diagnostic transaction rechecks the current owner, serializes
+on the tenant's run and records the detail once using the store clock. It
+rechecks the owner before commit. A failed or stale diagnostic write leaves
+no diagnostic. The original refusal is retained if recording fails.
+
+The SQLite `lifecycle-request-and-plan-seals/store-sqlite` cell exercises real
+admission, owner claim, strict validation, settings resolution and sealing. It
+checks invalid-input refusal, rollback on the second job insertion, immutable
+replay and drift after reopening. Intake policy and enrollment use contract
+fakes. Native execution and HTTP transport remain separate evidence.
+
+Schedule reads, edits, deletion and fire history belong to `Tenant`. The thirteen
+implicit-default-team `Store` schedule methods are removed. Local CLI and
+dashboard constructors select the registered DefaultTeam. Controller requests
+retain their authenticated tenant. A deployment tick enumerates teams through
+`Operator.ListCronSchedulesAcrossTeams`, then selects each tenant before resolving
+its schedules. `Service.Schedules` is required for tenant operations. A nil value
+selects deployment enumeration only for Tick.
+
+`Operator.RecordCronTick` and `Operator.GetCronTick` persist deployment tick
+metadata atomically in `settings`. The old Store methods and their
+`sparkwing_meta` writes are removed. The cadence guard reads the same `settings`
+rows its existing writer commits. `Tenant.ArmCronSchedule` writes the required
+`repo_key` through `runspec.CanonicalRepository`. GitHub identities require the
+resolved numeric repository ID. A non-run history entry stores SQL NULL for
+run_id. A fired history entry retains the final same-team run foreign key.
+
+The SQLite `surface-schedules-and-managed-timers/store-sqlite` proof checks two
+teams sharing a repository path, foreign read/edit/history refusal, atomic rollback
+when history insertion fails, nanosecond timestamps, reopening, tick metadata and
+tenant deletion. The generated package property varies 32 pairs of schedules
+and mutation order. Native timers, schedule launch admission and HTTP remain
+integration obligations.
 
 [Amendments 1](amendments-1.md) records the worker requests and assignments.
 These declarations leave transaction implementation with W1.
@@ -85,6 +146,22 @@ These declarations leave transaction implementation with W1.
   none. Application retry advances under the same generation. Start/retry return
   the authoritative ordinal in Applied. Owner/eval logs always use unit subjects.
 
+`NodeTransition.SourceAttempt` is a required nonnegative ordinal pointer for
+holder start, retry, report and unstarted release. It names the persisted ordinal
+before the edge. Initial start supplies an explicit zero. A resumed claim supplies
+the last ordinal it retained through disruption. Start and retry return the new
+ordinal in `Applied.Attempt`. An unstarted report or release allocates none.
+Other actors and causes must omit the pointer.
+
+The source ordinal participates in the transition digest. An exact replay of the
+last committed transition returns its recorded result, including after retry has
+advanced the ordinal. Every other holder execution transition must match the
+locked row's current ordinal. Missing or negative ordinals return bad_request.
+A mismatched ordinal loses holder rights. Delayed reports cannot close a newer
+attempt under the same claim generation. W9 must add the corresponding optional
+wire field and preserve its presence through the adapter. The store never derives
+an externally reported source ordinal from current authentication state.
+
 `Store.ReapUnits` is the sole unit-expiry entry point. Every pass requires the
 current `controller.reaper` lease and rechecks it in each unit transaction.
 `Store.ReapExpiredNodeClaims`, `Maintenance.RecoverExpiredNodeClaims`,
@@ -93,7 +170,31 @@ returns tagged `ReapedUnit` results and never creates a retry run. A local owner
 that has started fails in place after lease loss. An unstarted local owner
 requeues without consuming a disruption. Terminal owner timestamps stay recorded.
 The old dispatcher-expiry path and its application-retry accounting are removed.
-Metered recovery still needs W1b's final transactional settlement integration.
+Metered recovery uses the lifecycle settlement join. C2's production billing
+calculator remains an integration point.
+`Store.RequeueUnstartedClaim` and its Tenant twin are removed. Only the leased
+pass recovers expired owners. Unstarted owner recovery preserves intake identity,
+clears holder authority, consumes no disruption and fences every previous award.
+C2's billing start rule still determines whether compute began at award or awaits
+a qualifying pod renewal/start.
+
+`Operator.MaintainConcurrency(ctx, lease, options)` runs under that same
+`controller.reaper` fence. It locks affected capacity entries in tenant/key order,
+removes expired or terminal holders and abandoned waiters, and promotes live queued work in
+one transaction. The fence is checked before work and before commit. Any failure
+returns zero counters and rolls back the whole pass. Expired waiter leases never
+retain arrival order. Waiters bound to terminal or missing jobs cannot promote.
+Live blocked waiters retain their arrival and lease. Options retain the existing
+promotion lease and abandoned-waiter age defaults.
+
+`Store.MaintainConcurrency`, the `Maintenance` function registry and its six
+unfenced operations are removed. `OperatorStore` includes the leased pass. The
+obsolete concurrency memo sweep, cache-count API and cache-cap fields are removed
+because the final schema stores memo records through C1's blob-record contract.
+Record expiry remains in `Operator.MaintainRetention`.
+`Store.PurgeDeadLocalConcurrency` and `Store.CountDeadLocalConcurrency` are removed.
+The elected pass cleans terminal work in every scope. Doctor no longer runs an
+independent local-key repair or exposes its two repair counters.
 
 Cancellation intent persists in `runs.cancel_reason` and `nodes.cancel_reason`,
 separately from terminal result fields. The first request owns that intent.
@@ -198,7 +299,7 @@ The raw Store twins and unused deployment-wide ListConcurrencyStates are removed
 The local adapter selects the registered DefaultTeam and propagates handle errors.
 Acquisition and promotion persist the work's current generation. Queued arrivals
 also persist their lease. Expired waiters cannot keep arrival order or promote.
-Admission, polling, renewal and cache expiry use the store clock. Promotion and
+Admission, polling, renewal and capacity maintenance use the store clock. Promotion and
 waiter maintenance use the owner lease or a live run job claim instead of the
 removed run heartbeat. Run queries carry the selected tenant key.
 
@@ -284,6 +385,25 @@ removes the consent under the same root lock used by release. Team administratio
 cannot replace machine ownership. Its timestamp uses the store clock.
 The production C2 policy, route/decryption adapter, trusted machine-owner
 enrollment and GitHub App issuance path remain separate integrations.
+
+Offer-round finalization and the warm-dispatch fallback are removed.
+`Store.FinalizeClaimRound`, `ClaimRoundResult` and `WithQueueRunners` no longer
+exist. The controller endpoint and client finalizer are removed with their warm
+dispatcher caller. `ClaimUnit` uses shared matching and persisted queue order.
+A soft preference never requires an offer window. A mismatch changes no ready
+row and emits no event. The final ordered-queue SQLite acceptance proof covers
+push scope, eligible ordering, soft preferences and a later matching claimant.
+
+Legacy node readiness writers remain until their host callers migrate. They no
+longer open or emit offer rounds. The old offer columns remain because legacy
+claim and credit code still references them. Their removal is part of that cut.
+
+Actions claims and awards check every push binding in the capability ancestry.
+The sealed repository, ref and SHA must match. The workflow run identifies the
+verified credential and cannot be replaced by a claim request. Named and queued
+claims use the same check, and direct issuance repeats it in the award transaction.
+Push authority never creates verified-branch trust. Production Actions evidence
+and enrollment remain C2's integration.
 
 ### Upload and record persistence
 
@@ -382,6 +502,26 @@ Claim/start/reap/finish transactions invoke the shared billing owner with immuta
 award facts. Plan/eval have no minimum, job and host minima remain separate, and
 customer-runner waiting is excluded. Verified payment events settle committed
 checkouts idempotently. No caller-selected team or credit amount reaches settlement.
+
+The unit lifecycle joins W1b's billing helpers in the claim, start, renewal,
+release, plan acceptance, expansion acceptance, finish and reaper transactions.
+Pricing comes from the sealed request or resolved job resources. The existing
+minute reservation is refundable. C2's calculator applies the separate final
+minimums, including zero for plan/eval. A here intake capability authorizes a
+future claim and opens no compute reservation at generation zero.
+
+Queued matching checks funding before ranking eligible work and repeats the
+reservation under the ledger lock when awarding. An unfunded team cannot block
+funded matches. Renewal starts Cloud job billing without consuming an execution
+attempt. Owner Executing reports current compute. False closes an interval and
+true resumes it with a fresh key. Application retries keep their reservation
+and open another interval. Reaping settles at the persisted lease lapse.
+The eval lease and billing generation come from persisted expansion authority.
+C2's production calculator and W3's current-activity reporting remain integration
+dependencies. The SQLite billing-start proof covers issuance, exchange, starts,
+immutable pricing and reopening. Lifecycle tests substitute C2's calculator with
+a contract fake. Awarding repeats the claim and eval-owner deadline checks after
+accounting. Expiry rolls back the reservation and unit binding together.
 
 
 
@@ -798,6 +938,11 @@ The existing free grant and payment-linked reversal paths remain. Checkout
 settlement checks actionable fraud warnings in the same transaction as the
 grant and event receipt. A refusal leaves the checkout and ledger unchanged.
 The verified-event implementation and HTTP adapter remain W2 integrations.
+
+`Operator.CreditLedgerTotals` owns deployment-wide ledger reports. Its raw Store
+method is removed. Reports use the same billing calculator as unit renewal and
+settlement and never advance financial checkpoints. The real claim/exchange/release
+regression checks an unstarted reservation before and after its refund.
 
 Credit pricing and storage-rate settings use unsealed JSON values in `settings`.
 Only missing keys select defaults. Malformed values, invalid prices and sealed

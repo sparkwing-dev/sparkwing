@@ -114,7 +114,7 @@ func TestCreditReversalNetsOutOfTheBalanceAndTheHistory(t *testing.T) {
 	if err != nil || state.GrantedMicro != 1000000 || state.ReversedMicro != 400000 || state.BalanceMicro != 600000 {
 		t.Fatalf("reversal state: %+v, %v", state, err)
 	}
-	totals, err := s.CreditLedgerTotals(t.Context())
+	totals, err := s.AsOperator().CreditLedgerTotals(t.Context())
 	if err != nil || totals.ReversedMicro != 400000 || totals.BalanceMicro != 600000 {
 		t.Fatalf("reversal totals: %+v, %v", totals, err)
 	}

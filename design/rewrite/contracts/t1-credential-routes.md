@@ -582,7 +582,7 @@ The exact source spelling is retained in the first column, including `/metrics`,
 | `POST /api/v1/runs/{id}/nodes/{nodeID}/finish` | unresolved | One TransitionNode report operation and AcceptPlan/AcceptExpansion creation. C2 names the wire paths. | `credentials-matrix-trigger-and-parent` | NODE-WRITE; HOST; EXPANSION where jobs are inserted |
 | `POST /api/v1/runs/{id}/nodes/{nodeID}/mark-ready` | unresolved | One TransitionNode report operation and AcceptPlan/AcceptExpansion creation. C2 names the wire paths. | `credentials-matrix-trigger-and-parent` | NODE-WRITE; HOST; EXPANSION where jobs are inserted |
 | `POST /api/v1/runs/{id}/nodes/{nodeID}/release` | unresolved | One TransitionNode report operation and AcceptPlan/AcceptExpansion creation. C2 names the wire paths. | `credentials-matrix-trigger-and-parent` | NODE-WRITE; HOST; EXPANSION where jobs are inserted |
-| `POST /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready` | unresolved | One TransitionNode report operation and AcceptPlan/AcceptExpansion creation. C2 names the wire paths. | `credentials-matrix-trigger-and-parent` | NODE-WRITE; HOST; EXPANSION where jobs are inserted |
+| `POST /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready` | delete | Removed with RevokeNodeReady. Queue withdrawal uses TransitionNode with CauseRevoke under the current owner fence. C2 names the final wire path. | `credentials-matrix-trigger-and-parent` | CUT-SURFACE |
 | `POST /api/v1/runs/{id}/nodes/{nodeID}/start` | unresolved | One TransitionNode report operation and AcceptPlan/AcceptExpansion creation. C2 names the wire paths. | `credentials-matrix-trigger-and-parent` | NODE-WRITE; HOST; EXPANSION where jobs are inserted |
 
 ### Bound credential release

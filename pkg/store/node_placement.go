@@ -53,11 +53,8 @@ func (r RunnerPresence) profile() match.Profile {
 	return p
 }
 
-// safety: the hold and the offer window ask this one question, so they cannot
-// disagree about which runner could take a node. A runner with no free slot
-// still keeps the offer window, whose five seconds cover one poll.
-func liveRunnerCould(r RunnerPresence, d match.Demand, needSlot bool) bool {
-	if needSlot && (r.FreeSlots < 1 || !match.Fits(r.Profile.Capacity, r.Available, d.Request).OK()) {
+func liveRunnerCould(r RunnerPresence, d match.Demand) bool {
+	if r.FreeSlots < 1 || !match.Fits(r.Profile.Capacity, r.Available, d.Request).OK() {
 		return false
 	}
 	return match.Evaluate(r.profile(), d).OK()
@@ -194,16 +191,13 @@ func (s *Store) runnerTeams(ctx context.Context, live []RunnerPresence) (_ map[s
 // from one that can, so the preference alone never earns a hold.
 func (p ClaimPlacement) someLiveRunnerCanTakeIt(demand match.Demand, prefers []string) bool {
 	for _, runner := range p.Live {
-		if liveRunnerCould(runner, demand, true) && preferenceMet(prefers, runner.Labels) {
+		if liveRunnerCould(runner, demand) && preferenceMet(prefers, runner.Labels) {
 			return true
 		}
 	}
 	return false
 }
 
-// safety: one satisfied term is the whole preference, as in the enrolled offer
-// round where the first matching term ranks an executor. A preference reads the
-// labels as asserted, because a runner's own location speaks to it.
 func preferenceMet(prefers, labels []string) bool {
 	asserted := match.Profile{Labels: labels}
 	for _, term := range prefers {
@@ -232,15 +226,4 @@ type nodePlacementEvent struct {
 	HolderID string   `json:"holder_id"`
 	Reason   string   `json:"reason"`
 	Prefers  []string `json:"prefers,omitempty"`
-}
-
-type queueRunnersKey struct{}
-
-// WithQueueRunners carries every claim-mode runner a controller has
-// heard from inside its liveness window into [Store.MarkNodeReady], which may
-// then open a round already due when none of them could claim the node. The
-// controller attaches it only once its registry has listened for a whole
-// window; a context without it leaves every offer round its window.
-func WithQueueRunners(ctx context.Context, live []RunnerPresence) context.Context {
-	return context.WithValue(ctx, queueRunnersKey{}, live)
 }
