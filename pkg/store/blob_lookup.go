@@ -51,6 +51,9 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 	if !found || (record.ExpiresAt.Set && !record.Pinned && !record.ExpiresAt.Value.After(tx.now())) {
 		return result, nil
 	}
+	if err := blobRecordReadableTx(ctx, tx, a, key, namespace); err != nil {
+		return result, err
+	}
 	if err := r.authorizeDigestTx(ctx, tx, a, key.Kind, record.Digest); err != nil {
 		return result, err
 	}
@@ -182,6 +185,11 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 	}
 	if a.capability.Data.Use != capability.DataRemoteCache && (key.Pipeline != a.pipeline || !a.authority.Attempt.Set || key.Job != a.authority.Attempt.Value.NodeID || key.Ref != a.authority.Ref.Scope) {
 		return result, blob.ErrDigestNotReadable
+	}
+	if a.capability.Data.Use != capability.DataRemoteCache {
+		if err := requireBlobMemoTx(ctx, tx, a); err != nil {
+			return result, err
+		}
 	}
 	refs := []blob.RefScope{a.authority.Ref.Scope}
 	if a.capability.Data.Use == capability.DataRemoteCache {

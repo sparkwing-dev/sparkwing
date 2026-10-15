@@ -46,8 +46,9 @@ func (f fakeBlobManifests) ReadBlobManifest(_ context.Context, _ Team, d blob.Di
 func blobRecordFixture(t *testing.T) (*Store, *blobRecords, blob.UploadIntent) {
 	t.Helper()
 	s, tenant, actor, attempt := resultFixture(t)
+	rewriteSchemaExec(t, s.db, "UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'", []byte(`{"id":"job","memo":{}}`))
 	intent := blobIntent(actor, attempt)
-	if _, err := tenant.CommitBlob(t.Context(), intent, blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })); err != nil {
+	if _, err := tenant.CommitBlob(t.Context(), intent, reserveBlobTestQuota(t, tenant, intent.Size), blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })); err != nil {
 		t.Fatal(err)
 	}
 	return s, &blobRecords{tenant: tenant, rules: fakeBlobRules{}}, intent
@@ -155,7 +156,7 @@ func TestBlobRecordsManifestChecksEveryMemberAndKeepsMetadata(t *testing.T) {
 	records.manifests = manifests
 	manifestIntent := intent
 	manifestIntent.Digest = member.ManifestDigest
-	if _, err := records.tenant.CommitBlob(t.Context(), manifestIntent, blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })); err != nil {
+	if _, err := records.tenant.CommitBlob(t.Context(), manifestIntent, reserveBlobTestQuota(t, records.tenant, manifestIntent.Size), blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })); err != nil {
 		t.Fatal(err)
 	}
 	key := ResultBlobKey(intent.Identity.Attempt.Value, "gh:1", blob.RefScope{}, "ci", blob.KindManifest)
@@ -169,12 +170,12 @@ func TestBlobRecordsManifestChecksEveryMemberAndKeepsMetadata(t *testing.T) {
 	}
 	other := addBlobJob(t, s, intent, "other")
 	other.Digest = blob.Digest(strings.Repeat("c", 64))
-	if _, err := records.tenant.CommitBlob(t.Context(), other, blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })); err != nil {
+	if _, err := records.tenant.CommitBlob(t.Context(), other, reserveBlobTestQuota(t, records.tenant, other.Size), blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })); err != nil {
 		t.Fatal(err)
 	}
 	forgedManifest := intent
 	forgedManifest.Digest = blob.Digest(strings.Repeat("d", 64))
-	if _, err := records.tenant.CommitBlob(t.Context(), forgedManifest, blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })); err != nil {
+	if _, err := records.tenant.CommitBlob(t.Context(), forgedManifest, reserveBlobTestQuota(t, records.tenant, forgedManifest.Size), blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })); err != nil {
 		t.Fatal(err)
 	}
 	forged := member
@@ -226,7 +227,7 @@ func TestBlobRecordsMemoCopyRollsBackBothDestinations(t *testing.T) {
 	s, records, intent := blobRecordFixture(t)
 	manifest := intent
 	manifest.Digest = blob.Digest(strings.Repeat("b", 64))
-	if _, err := records.tenant.CommitBlob(t.Context(), manifest, blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })); err != nil {
+	if _, err := records.tenant.CommitBlob(t.Context(), manifest, reserveBlobTestQuota(t, records.tenant, manifest.Size), blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })); err != nil {
 		t.Fatal(err)
 	}
 	members := []blob.Member{{Team: "a", ManifestDigest: manifest.Digest, Digest: intent.Digest, Path: "output", Mode: 0o644, Size: 3}}
@@ -295,7 +296,7 @@ func TestBlobRecordsAuthorizeManifestBeforeReadingBytes(t *testing.T) {
 	s, records, intent := blobRecordFixture(t)
 	other := addBlobJob(t, s, intent, "other")
 	other.Digest = blob.Digest(strings.Repeat("c", 64))
-	if _, err := records.tenant.CommitBlob(t.Context(), other, blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })); err != nil {
+	if _, err := records.tenant.CommitBlob(t.Context(), other, reserveBlobTestQuota(t, records.tenant, other.Size), blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })); err != nil {
 		t.Fatal(err)
 	}
 	called := false

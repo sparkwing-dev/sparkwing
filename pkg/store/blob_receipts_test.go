@@ -25,11 +25,11 @@ func TestBlobPersistenceReceiptIdentityAndDeduplication(t *testing.T) {
 	s, tenant, actor, attempt := resultFixture(t)
 	intent := blobIntent(actor, attempt)
 	verifier := blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })
-	first, err := tenant.CommitBlob(t.Context(), intent, verifier)
+	first, err := tenant.CommitBlob(t.Context(), intent, reserveBlobTestQuota(t, tenant, intent.Size), verifier)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := tenant.CommitBlob(t.Context(), intent, verifier)
+	second, err := tenant.CommitBlob(t.Context(), intent, reserveBlobTestQuota(t, tenant, intent.Size), verifier)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestBlobPersistenceReceiptIdentityAndDeduplication(t *testing.T) {
 	rewriteSchemaCount(t, s.db, "blobs", 1)
 	rewriteSchemaCount(t, s.db, "blob_receipts", 1)
 	intent.Size++
-	if _, err := tenant.CommitBlob(t.Context(), intent, verifier); !errors.Is(err, blob.ErrIntegrity) {
+	if _, err := tenant.CommitBlob(t.Context(), intent, reserveBlobTestQuota(t, tenant, intent.Size), verifier); !errors.Is(err, blob.ErrIntegrity) {
 		t.Fatalf("conflicting bytes: %v", err)
 	}
 	rewriteSchemaCount(t, s.db, "blob_receipts", 1)
@@ -73,7 +73,7 @@ func TestBlobPersistenceVerificationAndReauthorization(t *testing.T) {
 			case "missing_verifier":
 				verifier = nil
 			}
-			if _, err := tenant.CommitBlob(t.Context(), intent, verifier); err == nil {
+			if _, err := tenant.CommitBlob(t.Context(), intent, reserveBlobTestQuota(t, tenant, intent.Size), verifier); err == nil {
 				t.Fatal("unverified or foreign receipt accepted")
 			}
 			rewriteSchemaCount(t, s.db, "blobs", 0)
@@ -85,7 +85,7 @@ func TestBlobPersistenceVerificationAndReauthorization(t *testing.T) {
 func TestBlobPersistenceOwnReceiptDoesNotTransferWithinRun(t *testing.T) {
 	s, tenant, actor, attempt := resultFixture(t)
 	intent := blobIntent(actor, attempt)
-	if _, err := tenant.CommitBlob(t.Context(), intent, blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })); err != nil {
+	if _, err := tenant.CommitBlob(t.Context(), intent, reserveBlobTestQuota(t, tenant, intent.Size), blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })); err != nil {
 		t.Fatal(err)
 	}
 	for _, change := range []func(*blob.UploadIdentity){func(i *blob.UploadIdentity) { i.Attempt.Value.NodeID = "other" }, func(i *blob.UploadIdentity) { i.Attempt.Value.Attempt++ }, func(i *blob.UploadIdentity) { i.Attempt.Value.Generation++ }, func(i *blob.UploadIdentity) { i.CapabilityRef = "other" }} {
@@ -109,7 +109,7 @@ func TestBlobPersistenceChecksIdentityBeforeVerification(t *testing.T) {
 	intent.Identity.Principal = "foreign"
 	called := false
 	verifier := blobVerifierFunc(func(context.Context, blob.UploadIntent) error { called = true; return nil })
-	if _, err := tenant.CommitBlob(t.Context(), intent, verifier); err == nil || called {
+	if _, err := tenant.CommitBlob(t.Context(), intent, reserveBlobTestQuota(t, tenant, intent.Size), verifier); err == nil || called {
 		t.Fatalf("unauthorized verification: called=%v, err=%v", called, err)
 	}
 }

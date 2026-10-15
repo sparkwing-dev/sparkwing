@@ -193,9 +193,9 @@ func finishBillableIntervalTx(ctx context.Context, tx *storeTx, team Team, reser
 		return nil
 	}
 	id := billingID("interval", team, reservation, key)
-	var start int64
+	var start, charged int64
 	var end sql.NullInt64
-	if err := tx.QueryRowContext(ctx, "SELECT started_at,finished_at FROM billable_intervals WHERE team=? AND reservation_id=? AND id=?", team, reservation, id).Scan(&start, &end); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT started_at,finished_at,charged_through FROM billable_intervals WHERE team=? AND reservation_id=? AND id=?", team, reservation, id).Scan(&start, &end, &charged); err != nil {
 		return err
 	}
 	if at.After(tx.now()) || at.UnixNano() < start {
@@ -209,6 +209,9 @@ func finishBillableIntervalTx(ctx context.Context, tx *storeTx, team Team, reser
 	}
 	if a.settled.Valid {
 		return authorityError(apierr.Conflict, "billing award is settled")
+	}
+	if at.UnixNano() < charged {
+		return authorityError(apierr.Conflict, "compute finish precedes its charged checkpoint")
 	}
 	_, err = tx.ExecContext(ctx, "UPDATE billable_intervals SET finished_at=? WHERE team=? AND reservation_id=? AND id=?", at.UnixNano(), team, reservation, id)
 	return err

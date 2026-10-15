@@ -60,7 +60,7 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 		return PaymentSettlement{}, err
 	}
 	var checkout paymentCheckout
-	err = tx.QueryRowContext(ctx, `SELECT id,team,payment_id,currency,amount_minor,amount_micro,paid_at,grant_id FROM credit_checkouts WHERE payment_mode = ? AND session_id = ?`+tx.forUpdate(), string(event.Mode), event.CheckoutID).Scan(&checkout.result.CheckoutID, &checkout.result.Team, &checkout.payment, &checkout.currency, &checkout.amount, &checkout.result.AmountMicro, &checkout.paid, &checkout.grant)
+	err = tx.QueryRowContext(ctx, `SELECT id,team,payment_id,currency,amount_minor,amount_micro,paid_at,grant_id FROM credit_checkouts WHERE payment_mode = ? AND session_id = ? AND session_id <> id`+tx.forUpdate(), string(event.Mode), event.CheckoutID).Scan(&checkout.result.CheckoutID, &checkout.result.Team, &checkout.payment, &checkout.currency, &checkout.amount, &checkout.result.AmountMicro, &checkout.paid, &checkout.grant)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PaymentSettlement{}, authorityError(apierr.NotFound, "committed checkout is unavailable")
 	}
@@ -108,18 +108,26 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 }
 
 func configuredPaymentModeTx(ctx context.Context, tx *storeTx, eventMode capability.PaymentMode) error {
-	var encoded []byte
-	if err := tx.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = 'payment_mode'"+tx.forShare()).Scan(&encoded); err != nil {
-		return authorityError(apierr.Unavailable, "payment mode is not configured")
-	}
-	var mode capability.PaymentMode
-	if json.Unmarshal(encoded, &mode) != nil || (mode != capability.PaymentTest && mode != capability.PaymentLive) {
-		return authorityError(apierr.Unavailable, "configured payment mode is invalid")
+	mode, err := paymentModeTx(ctx, tx)
+	if err != nil {
+		return err
 	}
 	if mode != eventMode {
 		return authorityError(apierr.Forbidden, "payment mode does not match configuration")
 	}
 	return nil
+}
+
+func paymentModeTx(ctx context.Context, tx *storeTx) (capability.PaymentMode, error) {
+	var encoded []byte
+	if err := tx.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = 'payment_mode'"+tx.forShare()).Scan(&encoded); err != nil {
+		return "", authorityError(apierr.Unavailable, "payment mode is not configured")
+	}
+	var mode capability.PaymentMode
+	if json.Unmarshal(encoded, &mode) != nil || (mode != capability.PaymentTest && mode != capability.PaymentLive) {
+		return "", authorityError(apierr.Unavailable, "configured payment mode is invalid")
+	}
+	return mode, nil
 }
 
 func paymentEventReplayTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, digest string) (bool, error) {

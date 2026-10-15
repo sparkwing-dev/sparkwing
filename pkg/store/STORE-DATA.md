@@ -20,21 +20,33 @@ for per-unit minimums and elapsed seconds. Settlement reads the award and ledger
 so deleting a run or revoking its claimant cannot change its payer or rate.
 Refunds retain the reservation's card and spend day. Callers keep renewal,
 transition and accounting in one transaction. They apply the existing spend
-policy to the resulting balance.
+policy to the resulting balance. A pause cannot precede the interval's last
+charged checkpoint.
 
 `SettlePayment` resolves the team and credit amount from a committed checkout.
 Provider mode, event identity, signed amount, currency and payment identity must
 match. The ledger lock serializes payment grants with reservations. A provider
 payment cannot fund another checkout, including one belonging to another team.
+Checkout creation snapshots the configured payment mode, USD cents and credits.
+Until the provider session is attached, the checkout ID occupies the required
+session column. Settlement refuses that pending identity. Attachment is immutable,
+and abort closes only an unattached checkout. Financial checkout rows survive
+later checkout creation and abort.
 
-`CommitBlob` takes the signed upload intent and a `BlobVerifier`. Verification
+`CommitBlob` takes the signed upload intent, `BlobAccounting` and a `BlobVerifier`. Verification
 must bind the uploader and original signed ticket to a completed upload, check
 size and SHA-256, and confirm the immutable commit. An existing CAS object alone
 cannot establish upload authority. The store then resolves
 authority again and commits existence and the uploader receipt together. A job
 receipt retains its exact team, run, job, attempt, generation and capability.
-Owner and publication identities remain tagged. Reuploading the same bytes does
-not create a second blob row.
+Owner and publication identities remain tagged. The signer reserves storage
+quota before issuing a ticket and binds the reservation ID to that ticket.
+It supplies the replica identity when committing. Neither accounting field comes
+from the caller's commit body. Blob existence, receipt, reservation settlement
+and per-replica usage commit together. Only the insertion of a new blob counts
+bytes and an object. A deduplicated upload commits its reservation with zero used
+bytes. Abort uses `SettleQuota(id, 0)`. Replaying a committed reservation requires
+an existing exact receipt and matching size, so it cannot create another upload.
 
 `BlobRecords(manifestReader)` provides the `blob.RecordStore` contract. The
 manifest reader verifies bytes before decoding paths, modes and sizes. SQL stores
@@ -56,6 +68,9 @@ The record naming conventions are:
   name in `RecordKey.Name`. Pipeline and job are empty because this namespace is
   shared within the authorized repository/ref.
 
+Memo reads and writes require memoization in the accepted job declaration.
+Record lookup checks authority over the named record before checking its bytes.
+Read access to the same digest through another record grants no metadata access.
 Memo copies preserve source provenance while assigning operational ownership to
 the destination. Both result records commit together. Memo failures become
 misses and depcache failures become cold restores for missing or corrupt bytes

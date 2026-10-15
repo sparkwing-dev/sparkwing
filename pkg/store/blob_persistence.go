@@ -26,7 +26,7 @@ type BlobVerifier interface {
 
 // CommitBlob records existence and an exact uploader receipt after byte verification.
 // The signer supplies the original upload intent; authority is rechecked after verification.
-func (t *Tenant) CommitBlob(ctx context.Context, intent blob.UploadIntent, verifier BlobVerifier) (blob.Receipt, error) {
+func (t *Tenant) CommitBlob(ctx context.Context, intent blob.UploadIntent, accounting BlobAccounting, verifier BlobVerifier) (blob.Receipt, error) {
 	if verifier == nil || !validBlobDigest(intent.Digest) || intent.Size < 0 {
 		return blob.Receipt{}, authorityError(apierr.BadRequest, "verified blob commit is required")
 	}
@@ -57,10 +57,35 @@ func (t *Tenant) CommitBlob(ctx context.Context, intent blob.UploadIntent, verif
 	if !reflect.DeepEqual(intent.Identity, auth.source) {
 		return blob.Receipt{}, authorityError(apierr.Forbidden, "upload identity differs from live authority")
 	}
+	quota, err := lockBlobQuotaTx(ctx, tx, t.team, accounting, intent.Size)
+	if err != nil {
+		return blob.Receipt{}, err
+	}
 	if err := advisoryLockTx(ctx, tx, "blob:"+string(t.team)+":"+string(intent.Digest)); err != nil {
 		return blob.Receipt{}, err
 	}
-	_, err = tx.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", t.team, intent.Digest, intent.Size, tx.now().UnixNano())
+	if quota.state == "committed" {
+		receipt, err := readOwnBlobReceiptTx(ctx, tx, auth.source, intent.Digest)
+		if err != nil {
+			return blob.Receipt{}, err
+		}
+		if !receipt.Set {
+			return blob.Receipt{}, authorityError(apierr.Conflict, "upload reservation is already committed")
+		}
+		size, err := requireBlobTx(ctx, tx, t.team, intent.Digest)
+		if err != nil {
+			return blob.Receipt{}, err
+		}
+		if size != intent.Size {
+			return blob.Receipt{}, blob.ErrIntegrity
+		}
+		return receipt.Value, tx.Commit()
+	}
+	inserted, err := tx.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?) ON CONFLICT(team,digest) DO NOTHING", t.team, intent.Digest, intent.Size, tx.now().UnixNano())
+	if err != nil {
+		return blob.Receipt{}, err
+	}
+	objects, err := inserted.RowsAffected()
 	if err != nil {
 		return blob.Receipt{}, err
 	}
@@ -76,6 +101,9 @@ func (t *Tenant) CommitBlob(ctx context.Context, intent blob.UploadIntent, verif
 		return blob.Receipt{}, err
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM blob_tombstones WHERE team=? AND digest=?", t.team, intent.Digest); err != nil {
+		return blob.Receipt{}, err
+	}
+	if err := settleBlobQuotaTx(ctx, tx, t.team, auth.source.RunID, accounting, quota, intent.Size*objects, objects); err != nil {
 		return blob.Receipt{}, err
 	}
 	return receipt, tx.Commit()

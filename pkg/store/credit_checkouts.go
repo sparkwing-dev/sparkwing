@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-const checkoutCloseWindow = 7 * 24 * time.Hour
-
 // OpenCreditCheckout records a checkout of amountMicro that stays open until
 // hold from now, and returns its id. It refuses with a
 // [CreditBalanceCapError] when the team's balance, plus every checkout of the
@@ -18,10 +16,10 @@ const checkoutCloseWindow = 7 * 24 * time.Hour
 // verified payment never meets a cap it cannot pass, and with a
 // [PurchaseLimitError] when what the team bought over [PurchaseLimitWindow],
 // plus its open checkouts, plus this one would pass its purchase limit.
-// Checkouts that can no longer be paid or granted are removed.
+// Mode and USD cents are persisted before the provider session opens.
 func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now time.Time, hold time.Duration) (_ string, err error) {
-	if amountMicro <= 0 {
-		return "", errors.New("credits: a checkout amount must be positive")
+	if amountMicro <= 0 || amountMicro%MicroCreditsPerCent != 0 || hold <= 0 {
+		return "", errors.New("credits: checkout requires whole positive USD cents and a positive hold")
 	}
 	id, err := newCreditID("checkout")
 	if err != nil {
@@ -39,6 +37,10 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return "", err
 	}
+	mode, err := paymentModeTx(ctx, tx)
+	if err != nil {
+		return "", err
+	}
 	if err := t.lockTeamTx(ctx, tx); err != nil {
 		return "", err
 	}
@@ -51,14 +53,6 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 		return "", ErrTeamBeingDeleted
 	}
 	nowNS := now.UnixNano()
-	// safety: an unpaid checkout outlives its hold until the processor reports
-	// how it ended, so the close finds it; a week bounds a report that never comes.
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM credit_checkouts WHERE team = ? AND expires_at <= ?
-		   AND (paid_at IS NOT NULL OR closed_at IS NOT NULL OR session_id = '' OR expires_at <= ?)`,
-		string(t.team), nowNS, now.Add(-checkoutCloseWindow).UnixNano()); err != nil {
-		return "", err
-	}
 	if err := refuseAboveBalanceCapTx(ctx, tx, t.team, amountMicro, nowNS); err != nil {
 		return "", err
 	}
@@ -66,8 +60,8 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 		return "", t.commitPurchaseRefusal(tx, id, err, now)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO credit_checkouts (id, team, amount_micro, opened_at, expires_at)
-		VALUES (?, ?, ?, ?, ?)`, id, string(t.team), amountMicro, nowNS, now.Add(hold).UnixNano()); err != nil {
+		INSERT INTO credit_checkouts (id, team, session_id, payment_mode, currency, amount_minor, amount_micro, opened_at, expires_at)
+		VALUES (?, ?, ?, ?, 'usd', ?, ?, ?, ?)`, id, string(t.team), id, string(mode), amountMicro/MicroCreditsPerCent, amountMicro, nowNS, now.Add(hold).UnixNano()); err != nil {
 		return "", fmt.Errorf("credits: record the checkout: %w", err)
 	}
 	if err := RecordBusinessEvent(tx, BusinessEvent{
@@ -105,7 +99,7 @@ func (t *Tenant) commitPurchaseRefusal(tx *storeTx, checkoutID string, refusal e
 func openCheckoutMicroTx(ctx context.Context, q rowQuerier, team Team, nowNS int64) (int64, error) {
 	var open sql.NullInt64
 	err := q.QueryRowContext(ctx,
-		`SELECT SUM(amount_micro) FROM credit_checkouts WHERE team = ? AND paid_at IS NULL AND expires_at > ?`,
+		`SELECT SUM(amount_micro) FROM credit_checkouts WHERE team = ? AND paid_at IS NULL AND closed_at IS NULL AND expires_at > ?`,
 		string(team), nowNS).Scan(&open)
 	return open.Int64, err
 }
@@ -123,7 +117,7 @@ func settlingCheckoutMicroTx(ctx context.Context, q rowQuerier, team Team, now t
 	var open sql.NullInt64
 	err := q.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_checkouts
 	  WHERE team = ? AND paid_at IS NULL AND closed_at IS NULL
-	    AND (expires_at > ? OR (session_id != '' AND expires_at > ?))`,
+	    AND (expires_at > ? OR (session_id != id AND expires_at > ?))`,
 		string(team), now.UnixNano(), now.Add(-CheckoutSettleWindow).UnixNano()).Scan(&open)
 	return open.Int64, err
 }
@@ -132,13 +126,31 @@ func settlingCheckoutMicroTx(ctx context.Context, q rowQuerier, team Team, now t
 // moment it expires, so the paid grant finds the checkout and an unpaid one
 // stops counting against the cap when the session can no longer be paid.
 func (t *Tenant) AttachCreditCheckout(ctx context.Context, id, sessionID string, expiresAt time.Time) error {
-	_, err := t.s.exec(ctx,
-		`UPDATE credit_checkouts SET session_id = ?, expires_at = ? WHERE team = ? AND id = ?`,
-		sessionID, expiresAt.UnixNano(), string(t.team), id)
-	return err
+	if sessionID == "" || sessionID == id {
+		return ErrInvalidInput
+	}
+	return t.s.inTx(ctx, func(tx *storeTx) error {
+		if err := lockCreditLedgerTx(ctx, tx); err != nil {
+			return err
+		}
+		var prior string
+		var expires int64
+		var paid, closed sql.NullInt64
+		if err := tx.QueryRowContext(ctx, "SELECT session_id,expires_at,paid_at,closed_at FROM credit_checkouts WHERE team=? AND id=?"+tx.forUpdate(), t.team, id).Scan(&prior, &expires, &paid, &closed); err != nil {
+			return err
+		}
+		if prior == sessionID && expires == expiresAt.UnixNano() {
+			return nil
+		}
+		if prior != id || paid.Valid || closed.Valid || !expiresAt.After(tx.now()) || expiresAt.UnixNano() > expires {
+			return ErrInvalidInput
+		}
+		_, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET session_id=?,expires_at=? WHERE team=? AND id=?", sessionID, expiresAt.UnixNano(), t.team, id)
+		return err
+	})
 }
 
-// DropCreditCheckout removes a checkout whose session never opened and
+// DropCreditCheckout closes a checkout whose session never opened and
 // records it as [BusinessEventCheckoutFailed] at the session stage.
 func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) (err error) {
 	tx, err := t.s.beginTx(ctx)
@@ -146,12 +158,22 @@ func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) (err error) 
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	res, err := tx.ExecContext(ctx, `DELETE FROM credit_checkouts WHERE team = ? AND id = ?`, string(t.team), id)
-	if err != nil {
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return err
 	}
-	if n, err := res.RowsAffected(); err != nil || n == 0 {
-		return errors.Join(err, tx.Commit())
+	var session string
+	var closed sql.NullInt64
+	if err := tx.QueryRowContext(ctx, "SELECT session_id,closed_at FROM credit_checkouts WHERE team=? AND id=?"+tx.forUpdate(), t.team, id).Scan(&session, &closed); err != nil {
+		return err
+	}
+	if session != id {
+		return ErrInvalidInput
+	}
+	if closed.Valid {
+		return tx.Commit()
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET closed_at=? WHERE team=? AND id=?", tx.now().UnixNano(), t.team, id); err != nil {
+		return err
 	}
 	if err := RecordBusinessEvent(tx, BusinessEvent{
 		Team: t.team, Kind: BusinessEventCheckoutFailed, SubjectID: id,

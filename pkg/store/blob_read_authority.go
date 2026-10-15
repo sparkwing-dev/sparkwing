@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -22,23 +23,76 @@ type blobReadCandidate struct {
 	facts                                blob.RefFacts
 }
 
+const blobReadCandidateColumns = `b.kind,b.name,b.pipeline,b.repo_key,b.ref_scope,COALESCE(b.run_id,''),COALESCE(b.node_id,''),COALESCE(b.attempt,0),COALESCE(b.generation,0),b.source_identity_json,b.ref_facts_json`
+
+func scanBlobReadCandidate(row rowScanner) (blobReadCandidate, error) {
+	var c blobReadCandidate
+	var source, facts []byte
+	if err := row.Scan(&c.kind, &c.name, &c.pipeline, &c.repo, &c.ref, &c.run, &c.node, &c.attempt, &c.generation, &source, &facts); err != nil {
+		return c, err
+	}
+	if err := json.Unmarshal(source, &c.source); err != nil {
+		return c, err
+	}
+	if err := json.Unmarshal(facts, &c.facts); err != nil {
+		return c, err
+	}
+	return c, nil
+}
+
+func blobRecordReadableTx(ctx context.Context, tx *storeTx, a blobActor, key blob.RecordKey, namespace string) error {
+	c, err := scanBlobReadCandidate(tx.QueryRowContext(ctx, "SELECT "+blobReadCandidateColumns+" FROM blob_records b WHERE b.team=? AND b.kind=? AND b.scope=? AND b.name=?", key.Team, key.Kind, namespace, key.Name))
+	if errors.Is(err, sql.ErrNoRows) {
+		return blob.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if c.repo != string(key.Scope.Repo) || c.ref != blobRefScope(key.Scope.Ref) || c.pipeline != key.Scope.Pipeline {
+		return blob.ErrDigestNotReadable
+	}
+	if key.Kind == blob.KindMemo && (!c.source.Attempt.Set || c.source.Attempt.Value.NodeID != key.Scope.Job) {
+		return blob.ErrDigestNotReadable
+	}
+	_, allowed, err := blobCandidateEdgeTx(ctx, tx, a, c)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return blob.ErrDigestNotReadable
+	}
+	return nil
+}
+
+func requireBlobMemoTx(ctx context.Context, tx *storeTx, a blobActor) error {
+	if !a.authority.Attempt.Set {
+		return blob.ErrDigestNotReadable
+	}
+	id := a.authority.Attempt.Value
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, "SELECT spec_json FROM nodes WHERE team=? AND run_id=? AND node_id=?", id.Team, id.RunID, id.NodeID).Scan(&raw); err != nil {
+		return err
+	}
+	var spec nodeproto.JobSpec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		return err
+	}
+	if spec.Memo == nil {
+		return blob.ErrDigestNotReadable
+	}
+	return nil
+}
+
 func blobReadSetTx(ctx context.Context, tx *storeTx, a blobActor, digest blob.Digest) (blob.ReadSet, error) {
 	set := blob.ReadSet{Reader: a.authority.Attempt.Value}
-	rows, err := tx.QueryContext(ctx, `SELECT b.kind,b.name,b.pipeline,b.repo_key,b.ref_scope,COALESCE(b.run_id,''),COALESCE(b.node_id,''),COALESCE(b.attempt,0),COALESCE(b.generation,0),b.source_identity_json,b.ref_facts_json FROM blob_records b WHERE b.team=? AND b.repo_key=? AND (b.expires_at IS NULL OR b.expires_at>? OR EXISTS(SELECT 1 FROM pipeline_success_pins p WHERE p.team=b.team AND p.run_id=b.run_id)) AND (b.digest=? OR b.manifest_digest=? OR EXISTS(SELECT 1 FROM blob_members m WHERE m.team=b.team AND m.member_digest=? AND (m.manifest_digest=b.manifest_digest OR (b.kind='manifest' AND m.manifest_digest=b.digest))))`, a.capability.Team, a.authority.Repo, tx.now().UnixNano(), digest, digest, digest)
+	rows, err := tx.QueryContext(ctx, `SELECT `+blobReadCandidateColumns+` FROM blob_records b WHERE b.team=? AND b.repo_key=? AND (b.expires_at IS NULL OR b.expires_at>? OR EXISTS(SELECT 1 FROM pipeline_success_pins p WHERE p.team=b.team AND p.run_id=b.run_id)) AND (b.digest=? OR b.manifest_digest=? OR EXISTS(SELECT 1 FROM blob_members m WHERE m.team=b.team AND m.member_digest=? AND (m.manifest_digest=b.manifest_digest OR (b.kind='manifest' AND m.manifest_digest=b.digest))))`, a.capability.Team, a.authority.Repo, tx.now().UnixNano(), digest, digest, digest)
 	if err != nil {
 		return set, err
 	}
 	var candidates []blobReadCandidate
 	for rows.Next() {
-		var c blobReadCandidate
-		var source, facts []byte
-		if err := rows.Scan(&c.kind, &c.name, &c.pipeline, &c.repo, &c.ref, &c.run, &c.node, &c.attempt, &c.generation, &source, &facts); err != nil {
-			return set, errors.Join(err, rows.Close())
-		}
-		if err := json.Unmarshal(source, &c.source); err != nil {
-			return set, errors.Join(err, rows.Close())
-		}
-		if err := json.Unmarshal(facts, &c.facts); err != nil {
+		c, err := scanBlobReadCandidate(rows)
+		if err != nil {
 			return set, errors.Join(err, rows.Close())
 		}
 		candidates = append(candidates, c)
@@ -74,6 +128,10 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 		edge.Kind = blob.EdgeMemoScope
 		return edge, allowed, nil
 	}
+	if c.kind == blob.KindBinary || c.kind == blob.KindSourceBundle {
+		edge.Kind = blob.EdgeOwnUpload
+		return edge, c.source == a.source, nil
+	}
 	if c.kind == blob.KindMemo || c.kind == blob.KindDepcache {
 		allowed := slices.Contains(scope.ReadRefs, c.ref)
 		if c.ref != blobRefScope(a.authority.Ref.Scope) {
@@ -81,6 +139,13 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 		}
 		if c.kind == blob.KindMemo {
 			allowed = allowed && c.pipeline == a.pipeline && a.authority.Attempt.Set && c.source.Attempt.Value.NodeID == a.authority.Attempt.Value.NodeID
+			if allowed {
+				if err := requireBlobMemoTx(ctx, tx, a); errors.Is(err, blob.ErrDigestNotReadable) {
+					return edge, false, nil
+				} else if err != nil {
+					return edge, false, err
+				}
+			}
 		}
 		edge.Kind = blob.EdgeMemoScope
 		return edge, allowed, nil

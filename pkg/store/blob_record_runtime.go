@@ -90,6 +90,11 @@ func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecor
 	if err := checkBlobWriteKey(a, request.Key); err != nil {
 		return blob.Record{}, err
 	}
+	if request.Key.Kind == blob.KindMemo {
+		if err := requireBlobMemoTx(ctx, tx, a); err != nil {
+			return blob.Record{}, err
+		}
+	}
 	if err := r.authorizeDigestTx(ctx, tx, a, request.Key.Kind, request.Digest); err != nil {
 		return blob.Record{}, err
 	}
@@ -192,6 +197,9 @@ func checkBlobWriteKey(a blobActor, key blob.RecordKey) error {
 	}
 	if key.Kind == blob.KindMemo && key.Name != "output" && key.Name != "manifest" {
 		return authorityError(apierr.BadRequest, "memo record must name output or manifest")
+	}
+	if key.Kind == blob.KindMemo && key.Scope.Key == "" {
+		return authorityError(apierr.BadRequest, "memo record requires an input hash")
 	}
 	if key.Kind == blob.KindOutput || key.Kind == blob.KindManifest {
 		if key != ResultBlobKey(a.source.Attempt.Value, a.authority.Repo, a.authority.Ref.Scope, a.pipeline, key.Kind) {

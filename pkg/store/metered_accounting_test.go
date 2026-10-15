@@ -287,3 +287,28 @@ func TestStoreDataMeteredHeartbeatChargesOnlyNewCompute(t *testing.T) {
 	}
 	rewriteSchemaCount(t, s.db, "credit_charges", 3)
 }
+
+func TestStoreDataMeteredPauseCannotUndoRenewedCompute(t *testing.T) {
+	s, c := meteringFixture(t, capability.UnitPlan, capability.BillingAtAward)
+	reserveMetering(t, s, c)
+	start := s.now()
+	s.clock = func() time.Time { return start.Add(2 * time.Minute) }
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		_, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", start.Add(70*time.Second), false, func(p capability.BillingProvenance, _ []capability.BillableInterval) (capability.BillingSettlement, error) {
+			return capability.BillingSettlement{ReservationID: p.ReservationID, BillableSeconds: 70}, nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		return finishBillableIntervalTx(t.Context(), tx, "a", "reservation", "award", start.Add(65*time.Second))
+	}); err == nil {
+		t.Fatal("pause rewound compute already charged by renewal")
+	}
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		return finishBillableIntervalTx(t.Context(), tx, "a", "reservation", "award", start.Add(75*time.Second))
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

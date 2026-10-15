@@ -59,7 +59,7 @@ func TestBlobGCReceiptProtectsUploadedBytesAndClearsTombstone(t *testing.T) {
 	intent := blobIntent(actor, attempt)
 	rewriteSchemaExec(t, s.db, "INSERT INTO blobs(team,digest,size,created_at) VALUES ('a',?,3,1)", intent.Digest)
 	rewriteSchemaExec(t, s.db, "INSERT INTO blob_tombstones(team,digest,marked_at) VALUES ('a',?,1)", intent.Digest)
-	if _, err := tenant.CommitBlob(t.Context(), intent, blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })); err != nil {
+	if _, err := tenant.CommitBlob(t.Context(), intent, reserveBlobTestQuota(t, tenant, intent.Size), blobVerifierFunc(func(context.Context, blob.UploadIntent) error { return nil })); err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaCount(t, s.db, "blob_tombstones", 0)
