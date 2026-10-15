@@ -11,4 +11,5 @@ type ObjectBackend interface {
 	capability.DataSigner
 	CommitObject(context.Context, string, Blob) error
 	DeleteObject(context.Context, string) error
+	DeleteBlob(context.Context, Blob) error
 }

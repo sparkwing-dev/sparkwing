@@ -2,149 +2,134 @@
 
 <!-- design:begin -->
 
-W7 remains incomplete. The merge contents are resolved, two byte/authority defects
-are fixed, and two additional SQLite acceptance boundaries pass. Cross-area
-record contracts and authenticated host wiring still block the remaining hard cut.
+W7 remains incomplete. Physical collection now connects to the shared store
+contract. Authenticated runtime binding, the legacy output/log cut and native
+acceptance remain.
 
-## Implemented
+## Implemented in this continuation
 
-The first invariant is: an uncommitted upload ticket cannot mint a receipt without
-its own verified staged bytes. Filesystem and S3 `CommitObject` now return
-`ErrNotFound` for missing staging even when the final digest already exists.
-Both still verify existing final content. Before settlement, retries retain and
-reverify staging. After settlement, the controller must reauthorize and replay the
-persisted receipt without calling physical publication. Cleanup follows settlement.
-`ObjectBackend` and C1 document this local precondition. No signature changed.
+Invariant: reachable blobs survive collection regardless of age, and newly
+unreachable blobs survive the full tombstone grace period.
 
-The second invariant is: a reader without a job attempt can reference only its
-server-derived, repository-matching verified cache edges. `AuthorizeEdge` accepts
-these `memo_scope` edges for output, manifest, memo and depcache. It requires an
-opaque principal/capability, an empty reader attempt and no upload identity.
-Binary/source records, owner uploads, other repos, manual refs and job read sets
-are refused. The store still resolves live authority and verified-default evidence.
+Filesystem and S3 implement W1's existing `BlobDeleter` through `DeleteBlob`.
+The backend derives the tenant CAS key from the blob selected by the leased
+collector. Missing objects succeed on replay. Reachability and the 24-hour
+grace period stay in the store.
 
-The filesystem/SQLite proof generates 32 payloads, including empty bytes. It
-checks physical publication before settlement, independent same-run job receipts,
-missing staging, successful independent uploads, unique-byte/object accounting,
-and receipt replay after staging cleanup. The S3 proof generates the same payload
-sizes against its AWS HTTP boundary. The reader property generates 64 identities
-and mutates thirteen authority/edge fields. Its SQLite proof uses the real shared
-record rules and refuses records without verified-default evidence.
+The generated proof uses twelve graph pairs with sixteen objects per tenant.
+Tenants store identical digests under independent reference graphs. Cases cover
+empty bytes, old referenced objects, reachable and unreachable cycles, references
+added after marking, grace and removal of the last reference. An independent
+graph walk determines which physical bytes remain. Interruptions before and
+after physical deletion preserve inventory for replay.
 
-Removed **7 executable fallback lines**. Preserved deletion of **7 resurrected
-legacy files, 2,524 lines on the incoming side**: `internal/cache/cache.go`,
-`internal/cache/egress_budget_test.go`, `internal/storagequota/client.go`,
-`internal/storagequota/storagequotatest/controller.go`,
-`pkg/controller/direct_upload_test.go`, `pkg/controller/storage_counters.go`, and
-`pkg/controller/storage_counters_test.go`. The remaining legacy output/log code
-has not been retired.
+Both proofs use real SQLite collection transactions and seeded reference graphs.
+The filesystem proof uses signed HTTP handlers and real files. The S3 proof uses
+the real presigner, transfer client and AWS SDK with a fake object service.
+Controller authentication, record admission, maintenance scheduling and native
+S3 remain separate integrations.
 
-## Merge and amendment actions
+Bucket measurement counts objects without deleting them. The retained helper
+now exposes only measurement, key construction and team validation. Removed its
+unused cache uploads, multipart transfers, reads, deletes, prefix/directory
+listing, write breaker and mutable byte-delta accounting. Its client interface
+permits only S3 listing. This removes the mutation class from measurement.
 
-All 23 conflicted paths have resolved file contents or the intended deletion.
-Contract prose keeps both the W7 byte guarantees and W1 amendments. Retired cache
-routes, credentials and accounting code stay removed. The controller API snapshot
-was regenerated and embedded docs were synced from their sources.
+Retired bucket/pruning production code is **879 lines smaller**, including the
+entire 152-line write breaker. Deleted the 39-line
+`TestPruneExpiredOutputs_DeletesBytesAndRowsPastRetention`. Replaced the old
+bucket-cache tests with generated namespace-isolation properties and real-SDK
+measurement tests for old objects, exact counts, partial failure and truncation.
+The tests use an in-process S3 HTTP handler because the sandbox refuses sockets.
+Final CAS tests retain upload, integrity, reference and interrupted-deletion
+coverage. Earlier cache-service, proxy, grant and transport deletions remain
+committed.
 
-No Git write ran. The index still reports 23 unmerged paths. The lead must stage
-the resolved files and deletions and finish the merge.
+## Acceptance and verification
 
-| Row | W7 result and remaining integration |
-| --- | --- |
-| A1-24 | The new boundaries use W1's real upload, receipt, lookup and read-set transactions. C2 binding remains separate. |
-| A1-29 | W7 requests restricted lookup, checks returned verified evidence and preserves member metadata. W1/W2 must resolve remote lookup team/default ref. |
-| A1-30 | `RemoteCacheOptions.Records` and the read-only memo/depcache adapters remain implemented. The repo-reader edge check now works without a job attempt. |
-| A1-31 | Exact tagged upload/receipt checks remain. The new physical precondition closes a receipt-minting path across unrelated jobs. |
-| A1-32 | W1 upload admission, commit and receipt replay are exercised with real filesystem publication and SQLite settlement. |
-| A1-33 | Filesystem/S3 implement the declared backend. Missing staging cannot be replaced by another ticket's final object. |
-| A1-34 | W7 transfers remain behind the declared binding. `DataController.DataAuthority`, `BindData` and `client.NewDataClient` remain panic stubs. W2 must implement settled-ticket replay as described above. |
-| A1-35 | W1 persistence is implemented. The record-layout/name conflicts below prevent W7 output/memo writers from using it. |
-| A1-36 | `StorageBinding` still appears only in the host declarations. W3/W8 must construct and refresh it per attempt/generation. |
-| A1-37 | W7's removed cache transport stays deleted. SDK Cache/lint consumer completion remains W4/W9 work. |
-| A1-43 | This continuation changes no engine assets, trust roots, version resolution or release support. |
-| A1-50 | W7's remote cache is opt-in and read-only. W9 still owns CLI cache/publication binding. |
-| A1-53 | Native placement/backend/OS cells remain skipped pending their drivers. These boundary proofs do not satisfy them. |
+Two additional boundary cells pass:
 
-## Contract changes needed in other areas
+- `TestStorage/storage-reachability-and-retention-tails/filesystem-store`
+- `TestStorage/storage-reachability-and-retention-tails/s3-store-boundary`
 
-No new cross-area signature is proposed. Three W1 implementation conflicts with
-C1 were reproduced through a temporary Go overlay, using W1's fixtures and real
-methods. The overlay was not written into the repository.
+`TestStorage` now has 22 passing boundary/component checks. Its 424 native
+placement/backend/OS cells remain skipped. New complete native T1 inventory
+ports: **0**. These proofs extend live-reference and reference/GC obligations
+without claiming native coverage.
 
-| Input required by C1/W7 | W1 result |
-| --- | --- |
-| Output/manifest key with run ID as `Name` and empty `Scope.Key` | `CommitRecord` returns `result key differs from attempt fence`. `ResultBlobKey` instead uses `Name=result` and `Scope.Key=<run>/<attempt>/<generation>`. |
-| Memo key with `Name=blob.MemoRecordName` (`result`) | `CommitRecord` returns `memo record must name output or manifest`. W1 memo lookup also searches those other names. |
-| Repo-bound restricted lookup with team/default ref left for server resolution | `LookupRecord` returns `digest_not_readable`. The same reader succeeds with a fully specified authorized key after the W7 edge fix. |
-
-The owning files are `pkg/store/blob_record_runtime.go` and
-`pkg/store/blob_lookup.go`. W1/W2 must implement C1, or the lead must amend the
-shared layouts and migrate W3/W7 writers and readers together. W7 has not silently
-changed its keys to match the conflicting implementation.
-
-## Acceptance, ports and checks
-
-`TestStorage` has **19 passing boundary/component checks and 424 skipped native
-cells**. This includes nine existing W7 component checks, eight merged W1 SQLite
-proofs and these two additions:
-
-- `storage-reference-edge-laundering/filesystem-store`
-- `storage-local-remote-cache-opt-in/store-data-sqlite`
-
-New complete T1 native inventory ports: **0**. Existing CAS interrupted-upload,
-checksum and reference-edge ports remain, with their physical retry assertions
-updated to retain ticket-specific staging. The whole native transport/placement
-matrix is still required.
-
-Go commands use `GOWORK=off GOFLAGS=-buildvcs=false GOMAXPROCS=4`, `-p 4`,
+Commands used `GOWORK=off GOFLAGS=-buildvcs=false GOMAXPROCS=4`, `-p 4`,
 `GOCACHE=/tmp/sw-astra-W7/cache`, `GOTMPDIR=/tmp/sw-astra-W7/tmp` and
 `TMPDIR=/tmp/sw-astra-W7/testtmp`.
 
 Passed:
 
 - Whole-repository `go build -p 4 ./...` and compile-only `go test -p 4 ./... -run '^$'`.
-- Focused vet over `internal/blob/...`, artifacts, depcache, `pkg/storage/...`, and both acceptance packages.
-- Full tests for blob/depcache, artifacts, depcache, raw storage, filesystem, S3, logseg and both acceptance packages.
-- Controller route guards, API route/spec checks, formatting and `git diff --check`.
-- Negative controls: the old filesystem behavior fails the new receipt proof, the old S3 implementation fails the generated property, and the old edge helper fails the verified remote-reader SQLite proof.
+- Full tests for `internal/blob/...`, artifacts, depcache, teamblob, raw storage,
+  filesystem, S3, logseg and both acceptance packages.
+- Focused vet for blob, artifacts, depcache, teamblob, acceptance and controller.
+- Embedded storage-doc/changelog drift checks, formatting and `git diff --check`.
+- Negative controls through temporary Go overlays. A valid but wrong tenant
+  deletion key leaves an unreachable object and fails the filesystem proof.
+  Removing the collector's reachability recheck deletes newly referenced bytes
+  and fails its independent expected count.
 
 `go run ./internal/commentcheck -base main .` still fails only at
-`internal/controllerwire/contracts.go:47`, `pkg/store/state_materialize.go:15`,
-and `pkg/store/state_result_records.go:9`. None is in W7's edits.
+`internal/controllerwire/contracts.go:47`, `pkg/store/state_materialize.go:15`
+and `pkg/store/state_result_records.go:9`. These unchanged out-of-area comments
+were reported in the prior handoff.
 
-Five merged API snapshots remain stale outside this continuation:
-`pkg_controller_client.txt`, `pkg_projectconfig.txt`, `pkg_match.txt`,
-`pkg_store.txt`, and `sparkwing.txt`. W7's resolved controller snapshot matches
-the generator. No Sparkwing executable, socket service, pipeline or release ran.
-Independent review and native S3/Postgres/placement checks remain with the lead.
-Scratch is removed at the end.
+## Contracts and real integration left
 
-## Shared files and remaining work
+The local W7 addition is `ObjectBackend.DeleteBlob(context.Context, Blob) error`,
+matching W1's existing interface. No W1/C2 signature or record layout changed.
 
-Merge resolution touched `.apidiff/pkg_controller.txt`, `api/openapi.yaml`,
-`design/rewrite/contracts/c1-data.md`, `internal/orchestrator/wingd_api_routes_test.go`,
-`pkg/controller/server.go`, `pkg/controller/route_scope_guard_test.go`, the seven
-deletions listed above, and the source/mirror pairs for `api-reference.md`,
-`auth.md`, `migrations/_unreleased.md`, `observability.md`, and `security.md`.
+- W1's `checkBlobWriteKey` still conflicts with C1/W7 output and manifest keys.
+  W7 uses the run ID as `Name` and an empty `Scope.Key`. W1 requires
+  `Name=result` and `<run>/<attempt>/<generation>` in `Scope.Key`.
+- W1 memo commit/lookup uses `output` and `manifest`, while C1/W7 use
+  `MemoRecordName=result` with its optional manifest and members.
+- The prior handoff reproduced W1 refusing restricted remote-cache lookup when
+  the repo-bound reader leaves team/default-ref resolution to the server.
+  That integration remains open.
+- W2's `DataController.DataAuthority`, `BindData` and `client.NewDataClient`
+  remain stubs. Bind upload reservation, physical commit, receipt settlement
+  and reauthorized receipt replay before staging cleanup.
+- The shared maintenance coordinator must pass the final backend to
+  `MarkBlobTombstones`/`CollectBlobTombstones` under its maintenance lease.
+  The physical adapters now satisfy the existing deletion interface directly.
+- W2 must bind tagged log signing, uncertain-PUT verification, records, proxied
+  reads and egress. Future S3 slots still need upload admission before their
+  payload size and digest are known.
+- W3/W8 must construct and refresh `StorageBinding` per attempt/generation and
+  bind final logs. W4/W9 own SDK/CLI consumers and remote-cache opt-in.
+- T1/lead must run authenticated HTTP/api.sock, native S3/Postgres, placement,
+  OS and real-repository QA. Component passes cannot remove those skips.
 
-New shared acceptance files are `internal/acceptance/blob_upload_isolation.go`,
-`internal/acceptance/blob_remote_edges.go`, `tests/acceptance/storage_test.go`, and
-`tests/acceptance/storage_filesystem_test.go`. Source docs are `docs/storage.md`
-and `CHANGELOG.md`, with their generated embedded copies. Other edits are in
-`internal/blob` and this handoff. No out-of-area runtime caller was migrated.
+## Remaining hard cut and shared files
 
-Remaining real integration includes W2's authenticated byte/record/log adapters,
-W1's conflicting record keys and names, W3/W8 storage/log binding construction,
-W4/W9 SDK/CLI consumers, and T1's native harness. Once these bind to the final
-contracts, retire `pkg/controller/node_output.go`, `output_objects_s3.go`,
+Retire `pkg/controller/node_output.go`, `output_objects_s3.go`,
 `output_download_s3.go`, `log_segments.go`, `client/output.go`,
 `client/logsegments.go`, `internal/orchestrator/segment_logs.go`, their legacy
-tests, and the remaining raw artifact/log backends.
+tests and the remaining raw artifact/log backends after final bindings replace
+their consumers. The output-pruning portion is now removed.
 
-Open product questions: none. Friction is the cross-area contract drift, the
-unimplemented authenticated bindings, the three existing comment violations,
-five stale merged API snapshots and the merge index awaiting the lead. No new
-limit, setting, credential, environment variable or compatibility path was added.
+Shared runtime callers changed minimally in `pkg/controller/server.go` and
+`pkg/controller/storage_pass.go`. The associated legacy test is in
+`pkg/controller/node_output_internal_test.go`. Shared acceptance edits are
+`internal/acceptance/blob_collection.go`, `tests/acceptance/storage_test.go`,
+`storage_filesystem_test.go` and `storage_s3_test.go`. The contract edit is in
+`c1-data.md`. Source docs are `docs/storage.md`, `CHANGELOG.md` and the blob
+README, with generated embedded copies synced. Other code edits are W7's blob
+and retained bucket helper.
+
+No git write ran, and no unmerged paths remain. Installed discovery ran only
+`sparkwing info --for-agent`. No candidate, stateful Sparkwing command, pipeline,
+service or release ran. Scratch is removed before the final response.
+
+Open product questions: none. Friction is the three W1 record integrations,
+unimplemented authenticated/host bindings, native-driver requirements and three
+existing commentcheck violations. No new setting, credential, environment
+variable, customer limit or compatibility path was added.
 
 <!-- design:end -->
 

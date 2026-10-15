@@ -160,9 +160,29 @@ The controller still owns record checks, maintenance scheduling and egress accou
 An object commit does not create a live blob or a receipt. The controller must
 reauthorize the immutable upload ticket, call `CommitObject`, and commit the blob
 row and exact uploader receipt in the store transaction. Only afterward may it
-delete the pending object. GC calls `DeleteObject` after the store's reachability
+delete the pending object. GC calls `DeleteBlob` after the store's reachability
 and tombstone decision. Provenance stays on records because identical bytes may
 be uploaded by principals with different trust.
+
+Both backends implement `store.BlobDeleter` through `DeleteBlob`. The collector
+passes a tenant and digest after rechecking reachability under its maintenance
+lease. The backend derives that tenant's CAS key, and an absent object succeeds
+on replay. The old controller output pruner and bucket-measurement expiry
+callback are removed. The controller still needs to supply its final backend to
+the shared maintenance coordinator.
+
+The retained `internal/teamblob` helper provides key construction and read-only
+bucket measurement. Its client interface exposes only S3 listing. Cache byte
+uploads, multipart transfers, reads, deletions and the write breaker are removed.
+
+The filesystem and S3 collection acceptance boundaries generate twelve pairs of
+tenant graphs, including identical digests, cycles, old referenced bytes and
+references added after tombstone marking. An independent graph walk checks
+which bytes remain. Interrupted collection before and after physical deletion
+replays without losing reachable objects. The filesystem proof uses real files.
+The S3 proof uses the real signer and SDK with a fake object service. Both use
+real SQLite collection transactions and seeded reference graphs. They do not
+replace authenticated controller or native placement evidence.
 
 Artifact staging and dependency-cache restore close each verified stream before
 publishing the downloaded files. A close failure returns an error and preserves

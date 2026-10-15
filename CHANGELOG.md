@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+- **storage:** Filesystem and S3 CAS backends support the leased reachability
+  collector. Removed age-based output pruning and bucket-measurement expiry.
+  Referenced bytes survive regardless of object age.
+
 - **storage:** Blob commits require the upload ticket's verified staging bytes
   even when identical final content exists. A digest alone cannot mint another
   uploader's receipt. Committed receipt replay remains a store operation.

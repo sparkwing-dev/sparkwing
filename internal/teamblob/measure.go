@@ -20,21 +20,13 @@ type Tally struct {
 
 // Measurement is what a whole-store listing found.
 type Measurement struct {
-	// Teams is each team namespace's holdings after expiry.
 	Teams map[string]Tally
 	// Operator is the store root outside every team's namespace.
 	Operator Tally
-	// Expired is what the listing deleted past a team's maximum age.
-	Expired Tally
-	At      time.Time
+	At       time.Time
 }
 
-// Measure lists every namespace in the store once, one LIST per thousand
-// objects plus a delimited listing of the root and of teams/, and deletes
-// objects past [Options.TeamObjectMaxAge] in the same walk. It runs on
-// a schedule of hours, never per request. A namespace whose listing fails is
-// left out and the error returned, so a caller never takes a partial
-// measurement for the whole.
+// Measure counts stored objects without changing them and reports incomplete listings as errors.
 func (s *Store) Measure(ctx context.Context) (Measurement, error) {
 	out := Measurement{Teams: map[string]Tally{}, At: s.now().UTC()}
 	root := s.root()
@@ -59,9 +51,7 @@ func (s *Store) Measure(ctx context.Context) (Measurement, error) {
 				if !ValidTeam(team) {
 					continue
 				}
-				t, expired, err := s.measureNamespace(ctx, team, tp)
-				out.Expired.Bytes += expired.Bytes
-				out.Expired.Objects += expired.Objects
+				t, err := s.measureNamespace(ctx, tp)
 				if err != nil {
 					errs = append(errs, err)
 					continue
@@ -69,9 +59,7 @@ func (s *Store) Measure(ctx context.Context) (Measurement, error) {
 				out.Teams[team] = t
 			}
 		default:
-			t, expired, err := s.measureNamespace(ctx, "", top)
-			out.Expired.Bytes += expired.Bytes
-			out.Expired.Objects += expired.Objects
+			t, err := s.measureNamespace(ctx, top)
 			if err != nil {
 				errs = append(errs, err)
 				continue
@@ -83,35 +71,16 @@ func (s *Store) Measure(ctx context.Context) (Measurement, error) {
 	return out, errors.Join(errs...)
 }
 
-// safety: only deletions the store confirmed leave the tally; an object it refused stays in it.
-func (s *Store) measureNamespace(ctx context.Context, team, prefix string) (Tally, Tally, error) {
+func (s *Store) measureNamespace(ctx context.Context, prefix string) (Tally, error) {
 	var t Tally
-	var expired []sizedKey
-	var age time.Duration
-	if s.maxAge != nil {
-		age = s.maxAge(team)
-	}
-	cutoff := s.now().Add(-age)
 	err := s.walk(ctx, prefix, func(o types.Object) {
 		t.Bytes += aws.ToInt64(o.Size)
 		t.Objects++
-		// safety: the controller holds a source through its run and an output
-		// for 30 days after its run finishes; S3 LastModified cannot express
-		// that finish-based expiry.
-		rel := strings.TrimPrefix(aws.ToString(o.Key), prefix)
-		runScoped := team != "" && (strings.HasPrefix(rel, "local/sources/") ||
-			strings.HasPrefix(rel, "local/outputs/") || strings.HasPrefix(rel, "cloud/outputs/"))
-		if age > 0 && !runScoped && aws.ToTime(o.LastModified).Before(cutoff) {
-			expired = append(expired, sizedKey{key: aws.ToString(o.Key), size: aws.ToInt64(o.Size)})
-		}
 	})
 	if err != nil {
-		return Tally{}, Tally{}, err
+		return Tally{}, err
 	}
-	d, err := s.deleteKeys(ctx, expired)
-	t.Bytes -= d.Bytes
-	t.Objects -= d.Objects
-	return t, Tally{Bytes: d.Bytes, Objects: d.Objects}, err
+	return t, nil
 }
 
 func (s *Store) children(ctx context.Context, prefix string) ([]string, error) {
@@ -121,16 +90,9 @@ func (s *Store) children(ctx context.Context, prefix string) ([]string, error) {
 		if page >= s.maxPages {
 			return out, ErrListTruncated
 		}
-		var res *s3.ListObjectsV2Output
-		err := s.guarded(ctx, func() error {
-			var lerr error
-			res, lerr = s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-				Bucket:            aws.String(s.bucket),
-				Prefix:            aws.String(prefix),
-				Delimiter:         aws.String("/"),
-				ContinuationToken: token,
-			})
-			return lerr
+		res, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket: aws.String(s.bucket), Prefix: aws.String(prefix),
+			Delimiter: aws.String("/"), ContinuationToken: token,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("teamblob: list %s: %w", prefix, err)
@@ -145,21 +107,24 @@ func (s *Store) children(ctx context.Context, prefix string) ([]string, error) {
 	}
 }
 
-// ListDirs returns the names of the prefixes directly under team's
-// relPrefix, one delimited LIST per thousand of them. An index keyed by
-// date uses it to find its days without listing their entries.
-func (s *Store) ListDirs(ctx context.Context, team, relPrefix string) ([]string, error) {
-	full, _, err := s.listPrefix(team, relPrefix)
-	if err != nil {
-		return nil, err
+func (s *Store) walk(ctx context.Context, prefix string, visit func(types.Object)) error {
+	var token *string
+	for page := 0; ; page++ {
+		if page >= s.maxPages {
+			return ErrListTruncated
+		}
+		out, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket: aws.String(s.bucket), Prefix: aws.String(prefix), ContinuationToken: token,
+		})
+		if err != nil {
+			return fmt.Errorf("teamblob: list %s: %w", prefix, err)
+		}
+		for _, o := range out.Contents {
+			visit(o)
+		}
+		if !aws.ToBool(out.IsTruncated) {
+			return nil
+		}
+		token = out.NextContinuationToken
 	}
-	if !strings.HasSuffix(full, "/") {
-		full += "/"
-	}
-	prefixes, err := s.children(ctx, full)
-	names := make([]string, 0, len(prefixes))
-	for _, p := range prefixes {
-		names = append(names, strings.TrimSuffix(strings.TrimPrefix(p, full), "/"))
-	}
-	return names, err
 }

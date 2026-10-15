@@ -51,5 +51,7 @@ func TestStorage(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	t.Run("storage-reachability-and-retention-tails/filesystem-store", checkStorageFilesystemCollection)
+	t.Run("storage-reachability-and-retention-tails/s3-store-boundary", checkStorageS3Collection)
 	pendingScenarios(t, "storage")
 }

@@ -32,6 +32,13 @@ content already exists. Missing staging fails the commit. Before settlement, a
 retry keeps the staged object; after settlement, it replays the stored receipt
 under current authority. Staging cleanup follows settlement.
 
+Blob collection uses the store's live reference graph and a 24-hour tombstone
+grace period. References added after marking protect their bytes at collection.
+Object age alone cannot delete a live blob. Both physical backends implement the
+leased collector's deletion interface. Replaying a deletion of absent bytes
+succeeds. Controller maintenance still needs its final backend binding.
+Bucket measurement counts bytes without deleting them.
+
 Memo and dependency-cache records carry repository and ref scope. Manual
 writes cannot overwrite verified branch entries. Memo reads its own scope
 before a verified default-branch fallback. Dependency caches try their own

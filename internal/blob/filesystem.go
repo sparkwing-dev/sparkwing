@@ -247,4 +247,13 @@ func (f *Filesystem) DeleteObject(ctx context.Context, key string) error {
 	return err
 }
 
+// DeleteBlob removes a CAS object after the leased collector's reachability recheck.
+func (f *Filesystem) DeleteBlob(ctx context.Context, object Blob) error {
+	key, err := ObjectKey(object.Team, object.Digest)
+	if err != nil {
+		return err
+	}
+	return f.DeleteObject(ctx, key)
+}
+
 var _ ObjectBackend = (*Filesystem)(nil)

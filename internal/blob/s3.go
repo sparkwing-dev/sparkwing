@@ -141,6 +141,15 @@ func (s *S3) DeleteObject(ctx context.Context, key string) error {
 	return err
 }
 
+// DeleteBlob removes a CAS object after the leased collector's reachability recheck.
+func (s *S3) DeleteBlob(ctx context.Context, object Blob) error {
+	key, err := ObjectKey(object.Team, object.Digest)
+	if err != nil {
+		return err
+	}
+	return s.DeleteObject(ctx, key)
+}
+
 // Get opens an exact log key for a controller-authorized read. The committed
 // reader verifies the recorded digest and range before emitting any bytes.
 // Listings and signed downloads never authorize log access.

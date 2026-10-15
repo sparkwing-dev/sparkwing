@@ -164,6 +164,19 @@ creates the final key only if absent, and verifies final bytes before returning.
 A physical commit grants no record, existence row or receipt. Those remain W1's
 transactional responsibility after the controller repeats authorization.
 
+`ObjectBackend.DeleteBlob` implements W1's existing `BlobDeleter` interface for
+filesystem and S3 collection. It derives the tenant CAS key from the selected
+blob. Missing bytes are an idempotent success. The leased collector owns the
+reachability recheck and tombstone grace, including references added after
+marking. The controller's age-based output pruner and the bucket measurement
+expiry callback are removed. The maintenance coordinator must bind the final
+physical backend before collecting objects.
+
+`internal/teamblob` retains scoped key construction, team validation and
+read-only bucket measurement. Its unused cache byte/multipart APIs, prefix
+deletion, directory listing and write breaker are removed. Its S3 client
+interface exposes only `ListObjectsV2`; measurement cannot mutate objects.
+
 `CommitObject` requires verified bytes at the exact ticket's staging key even
 when the final CAS object already exists. An absent staging key returns
 `ErrNotFound`; a digest and another uploader's final object cannot establish an
