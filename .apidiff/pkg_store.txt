@@ -190,6 +190,7 @@ type BlobDeleter interface {
 }
 type BlobManifestReader interface {
 	ReadBlobManifest(context.Context, Team, blob.Digest) ([]blob.Member, error)
+	VerifyBlobManifest(context.Context, Team, blob.Digest, []blob.Member) error
 }
 type BudgetAlert struct {
 	Team          Team
@@ -1129,7 +1130,6 @@ type Identity struct {
 	CreatedAt time.Time
 }
 type IllegalTransitionReason string
-const IncludeSecretValues = "secret_values"
 type InsufficientCreditsError struct {
 	BalanceMicro  int64
 	RequiredMicro int64
@@ -1776,10 +1776,6 @@ type ReconciledNode struct {
 	Bearer []byte
 }
 func RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error
-func RedactInvocation(inv map[string]any) map[string]any
-const RedactedArgValue = "***"
-func RedactedRun(run *Run) *Run
-func RedactedRuns(runs []*Run) []*Run
 type RegisteredAgent struct {
 	Name, CapabilityPrefix string
 
@@ -1846,8 +1842,6 @@ type Run struct {
 	TriggerUser     string
 	PullRequest     *RunPullRequest
 }
-func (r Run) RedactedForDisplay() Run
-func (r Run) SecretArgNames() []string
 const RunCancel RunCause = "cancel"
 const RunCancelled RunState = "cancelled"
 type RunCause string
@@ -2038,7 +2032,6 @@ var SchemaTables = []SchemaTable{
 	{Name: "card_charges", Owner: SchemaTenant},
 	{Name: "card_refunds", Owner: SchemaTenant},
 	{Name: "card_spend_days", Owner: SchemaOperator},
-	{Name: "child_invocations", Owner: SchemaTenant},
 	{Name: "concurrency_entries", Owner: SchemaTenant},
 	{Name: "concurrency_holders", Owner: SchemaTenant},
 	{Name: "concurrency_waiters", Owner: SchemaTenant},
@@ -2428,7 +2421,6 @@ func (s *Store) ConsumeIdentityLinkState(ctx context.Context, nonce string, expi
 func (s *Store) CreateAccountSession(ctx context.Context, acct Account, team Team, ttl time.Duration) (string, string, *Session, error)
 func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl time.Duration) (string, *Session, error)
 func (s *Store) CreateIdentityAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error)
-func (s *Store) CreateNode(ctx context.Context, n Node) error
 func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
 func (s *Store) CreateTokenWith(
@@ -2462,7 +2454,6 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error)
 func (s *Store) LookupCapability(ctx context.Context, digest [32]byte) (capability.Principal, error)
 func (s *Store) LookupSession(ctx context.Context, rawSession string) (*Session, error)
 func (s *Store) LookupSessionAndRenew(ctx context.Context, rawSession string, ttl, maxLifetime time.Duration) (*Session, error)
-func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) NewestWaitlisted(ctx context.Context, limit, offset int) ([]WaitlistedAccount, error)
 func (s *Store) OpenInvitationsForEmail(ctx context.Context, email string, now time.Time) (_ []Invitation, err error)
 func (s *Store) ProvisionCapability(ctx context.Context, spec capability.ProvisionSpec) (capability.Issued, error)
@@ -2629,7 +2620,7 @@ func (t *Tenant) GitHubAppInstallations(ctx context.Context) (_ []GitHubAppInsta
 func (t *Tenant) GitHubAppTriggers(ctx context.Context) (_ []GitHubAppTrigger, err error)
 func (t *Tenant) GitHubAppTriggersFor(ctx context.Context, installation, repositoryID int64) (_ []GitHubAppTrigger, err error)
 func (t *Tenant) GitHubCheckRun(ctx context.Context, runID string) (int64, error)
-func (t *Tenant) GitHubCommitTriggers(ctx context.Context, repo GitHubRepo, sha string) ([]*Trigger, error)
+func (t *Tenant) GitHubCommitTriggers(ctx context.Context, repo GitHubRepo, sha string) (_ []*Trigger, err error)
 func (t *Tenant) GitHubRunnerBinding(ctx context.Context, repositoryID int64) (GitHubRunnerBinding, error)
 func (t *Tenant) GitHubRunnerBindings(ctx context.Context) (_ []GitHubRunnerBinding, err error)
 func (t *Tenant) HoldByOperator(ctx context.Context, actor, reason string, now time.Time) (string, error)
@@ -2662,7 +2653,6 @@ func (t *Tenant) LookupBlobUpload(ctx context.Context, authority blob.Authority,
 func (t *Tenant) LookupDepcache(ctx context.Context, request blob.DepcacheLookup) (blob.DepcacheHit, error)
 func (t *Tenant) LookupMemo(ctx context.Context, request blob.MemoLookup) (blob.MemoHit, error)
 func (t *Tenant) LookupRecord(ctx context.Context, request blob.RecordLookup) (blob.RecordLookupResult, error)
-func (t *Tenant) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (t *Tenant) MemberRole(ctx context.Context, accountID string) (Role, error)
 func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error)
 func (t *Tenant) NodeIsAncestor(ctx context.Context, runID, ancestor, node string) (found bool, err error)
@@ -2847,7 +2837,6 @@ type Trigger struct {
 	Team             Team
 	RunnerPin        string
 }
-func (t Trigger) IsFinished() bool
 type TriggerFilter struct {
 	Statuses  []string
 	Pipelines []string

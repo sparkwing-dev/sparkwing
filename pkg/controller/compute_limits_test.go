@@ -29,12 +29,12 @@ func seedRunNodeFor(t *testing.T, f creditsFixture, principal, runID, nodeID str
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := f.store.CreateNode(ctx, store.Node{
+	if err := teststore.SeedNode(f.store, ctx, store.Node{
 		RunID: runID, NodeID: nodeID, Status: "pending",
 	}); err != nil {
 		t.Fatalf("create node: %v", err)
 	}
-	if err := f.store.MarkNodeReady(ctx, runID, nodeID); err != nil {
+	if err := teststore.SeedNodeReady(f.store, ctx, runID, nodeID); err != nil {
 		t.Fatalf("mark ready: %v", err)
 	}
 }

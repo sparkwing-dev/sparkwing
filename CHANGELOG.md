@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Remove raw job creation and queue publication APIs and the legacy invocation redactors. Plan and expansion acceptance enforce job-count guards atomically. Reports and receipts use sealed display inputs, and GitHub commit reports follow numeric repository identity through renames. See [migration guide](docs/migrations/_unreleased.md#job-creation-queue-publication-and-sealed-display).
+
 - **store (Breaking):** Remove raw job finish APIs. Job results commit through fenced tenant transitions. Run and trigger reports read sealed inputs, mask secret arguments, and query the final schema. Pending runs page correctly before execution starts. See [migration guide](docs/migrations/_unreleased.md#sealed-reporting-and-job-completion).
 
 - **store (Breaking):** Remove the unfenced tenant run finisher and unused heartbeat timing and profile-key helpers. Fenced completion records the team’s first success atomically. See [migration guide](docs/migrations/_unreleased.md#owner-completion-and-retired-store-helpers).

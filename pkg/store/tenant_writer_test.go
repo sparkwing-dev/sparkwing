@@ -44,7 +44,6 @@ func TestMintedTokenCarriesItsTeam(t *testing.T) {
 	if got := storedTeam(t, st, `SELECT team FROM tokens WHERE prefix = ?`, tok.Prefix); got != "acme" {
 		t.Errorf("stored token row carries team %q, want acme", got)
 	}
-
 }
 
 // A node is told no team by its caller; it belongs to a run, and the run
@@ -55,7 +54,7 @@ func TestCreatedNodeCarriesItsRunsTeam(t *testing.T) {
 	tn := tenantFor(t, st, "acme")
 	seedTenantRun(t, tn, "run-acme", "build")
 
-	if err := st.CreateNode(ctx, store.Node{
+	if err := teststore.SeedNode(st, ctx, store.Node{
 		RunID:  "run-acme",
 		NodeID: "compile",
 		Status: "pending",

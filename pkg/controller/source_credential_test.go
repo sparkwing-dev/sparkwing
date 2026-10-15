@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -57,10 +59,10 @@ func (f *appFixture) claimRunNode(owner signedIn, runID, repoURL string, repoID 
 	f.t.Helper()
 	ctx := context.Background()
 	f.createRun(owner, runID, repoURL, repoID)
-	if err := f.store.CreateNode(ctx, store.Node{RunID: runID, NodeID: "compile", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: runID, NodeID: "compile", Status: "pending"}); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := f.store.MarkNodeReady(ctx, runID, "compile"); err != nil {
+	if err := teststore.SeedNodeReady(f.store, ctx, runID, "compile"); err != nil {
 		f.t.Fatal(err)
 	}
 	bearer, prefix = f.teamRunner(owner, "r-"+runID)
@@ -183,10 +185,10 @@ func TestSourceCredential_NeedsTheRunsOwnClaimToken(t *testing.T) {
 	olga, bob := f.ghUser(501, "olga"), f.ghUser(502, "bob")
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.createRun(olga, "run-widgets", "https://github.com/acme/widgets.git", 701)
-	if err := f.store.CreateNode(context.Background(), store.Node{RunID: "run-widgets", NodeID: "compile", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(f.store, context.Background(), store.Node{RunID: "run-widgets", NodeID: "compile", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.MarkNodeReady(context.Background(), "run-widgets", "compile"); err != nil {
+	if err := teststore.SeedNodeReady(f.store, context.Background(), "run-widgets", "compile"); err != nil {
 		t.Fatal(err)
 	}
 	machine, _ := f.teamRunner(olga, "holder")
@@ -206,7 +208,6 @@ func TestSourceCredential_NeedsTheRunsOwnClaimToken(t *testing.T) {
 		t.Fatalf("another team's claim token = %d %+v, want a refusal that reveals nothing", code, got)
 	}
 }
-
 
 func TestSourceCredential_AppTokenReadsOnlyTheOwnersExtraRepos(t *testing.T) {
 	f := newAppFixture(t)

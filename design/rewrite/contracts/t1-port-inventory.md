@@ -871,8 +871,8 @@ The final three comparisons include all changes since the recorded merge base. E
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/retry_team_test.go` | `TestManualRetryKeepsActorAndPullRequest` | `TestManualRetryKeepsActorAndPullRequest` | Replace | `lifecycle_test.go:TestLifecycle/lifecycle-retry-sealed-lineage/actor_and_pull_request`. Retain sealed actor, PR, original SHA and verified branch facts. Remove trigger-env copying and agent-loss retry-run framing. |
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/run_inputs_test.go` | `TestCreateRun_TheIntakesInvocationKeysWin` | `TestCreateRun_TheIntakesInvocationKeysWin` | Replace | `pkg/store/run_spec_test.go:TestRequestSealIsImmutable` and `lifecycle_test.go:TestLifecycle/lifecycle-request-and-plan-seals/intake_precedence`. Fill resolved fields at the second seal without rewriting the request. |
 | `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/run_inputs_test.go` | `TestCreateRun_ConcurrentWritersNeverShrinkTheSecretArgs` | `TestCreateRun_ConcurrentWritersNeverShrinkTheSecretArgs` | Replace | `pkg/store/run_spec_test.go:TestConcurrentClassification`. Interleave final API writes on Postgres and prove classification never shrinks. Replace the pending-upsert hook with the owning transaction boundary. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/secretargs_test.go` | `TestRedactedForDisplay_RedactsEveryArgOfAnUnclassifiedRun` | `TestRedactedForDisplay_RedactsEveryArgOfAnUnclassifiedRun` | Keep | `pkg/store/secretargs_test.go:TestUnclassifiedDisplay`. Absent or malformed classification hides all argument values and their reproducer/invocation copies. |
-| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/secretargs_test.go` | `TestRedactedForDisplay_AnEmptyClassificationShowsEveryArg` | `TestRedactedForDisplay_AnEmptyClassificationShowsEveryArg` | Keep | `pkg/store/secretargs_test.go:TestExplicitEmptyClassification`. Explicit empty classification differs from absent classification and survives inheritance. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/secretargs_test.go` | `TestRedactedForDisplay_RedactsEveryArgOfAnUnclassifiedRun` | `TestRedactedForDisplay_RedactsEveryArgOfAnUnclassifiedRun` | Keep | `pkg/store/reporting_seals_test.go:TestReportingDistinguishesUnknownAndEmptyClassification` and `TestReportingReadsSealedFactsWithoutSecretValuesProperty`. Real sealed reports and receipts hide absent, nil, duplicate and invalid classification. |
+| `run-input-divergences` | `5ba4cb0ec1ec222defc58f5eaee6ca332a058303` | `pkg/store/secretargs_test.go` | `TestRedactedForDisplay_AnEmptyClassificationShowsEveryArg` | `TestRedactedForDisplay_AnEmptyClassificationShowsEveryArg` | Keep | `pkg/store/reporting_seals_test.go:TestReportingDistinguishesUnknownAndEmptyClassification`. Explicit empty classification exposes public arguments and permits their receipt input hash. Absent classification hides values and omits the hash. |
 | `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/artifacts/retention_test.go` | `TestCaptureRewritesStoredContentSoItsAgeRestarts` | `TestCaptureRewritesStoredContentSoItsAgeRestarts` | Replace | `storage_test.go:TestStorage/storage-reachability-and-retention-tails/reused_content`. Referenced bytes survive GC. Delete the exact two-PUT assertion because reachability and pinned records replace object-age refresh. |
 | `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/artifacts/retention_test.go` | `TestPresentIsBoundedAndAnswersAMissPastItsBudget` | `TestPresentIsBoundedAndAnswersAMissPastItsBudget` | Replace | `internal/blob/store_test.go:TestHasManyBudget` and `storage_test.go:TestStorage/storage-memo-materialization-failures/budget`. Presence lookup respects its budget. A timed-out memo lookup is a miss. Do not pin the old worker count. |
 | `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `internal/cache/scope_test.go` | `TestArtifactsAreScopedToTheGrantsRepository` | `TestArtifactsAreScopedToTheGrantsRepository`, subtests `volume`, `bucket` | Replace | `storage_test.go:TestStorage/storage-reference-edge-laundering/filesystem` and `/s3`. Preserve foreign read/existence refusal and own-upload authority. Repository membership alone grants no read. Delete cache-server paths and credentials. |
@@ -2485,3 +2485,43 @@ literal repository filters are covered by
 `TestReportingRefusesMalformedSeals` requires errors for corrupt requests.
 The unused dispatch-route fixture had no tests or consumers and is removed.
 No native topology matrix cell is claimed by these component tests.
+
+## W1 job insertion, ready replay and reporting ports
+
+- `TestNodesPerRunGuardRefusesAMeteredPrincipalPastTheCap`, the node half of
+  `TestPerPrincipalGuardsLeaveLocalWorkAlone`, and
+  `TestPerPrincipalGuardsUseTheRunsTeamForMetering` move to
+  `TestPlanInsertionLimitsAreAtomicProperty`. Metered scope comes from committed
+  awards. Unmetered and unrelated-run awards do not spend the per-run guard.
+- `TestGlobalNodesPerRunGuardCountsEveryRun`,
+  `TestConcurrentNodeCreationNeverPassesThePerRunGuard`, and the raw job-recreate
+  assertion move to `TestPlanInsertionGlobalLimitAndReplay`,
+  `TestConcurrentPlanAcceptanceCannotExceedInsertionLimit` and
+  `TestExpansionInsertionLimitRollsBackBatch`. Initial and generated batches
+  respect the configured cap, roll back together, and replay after a cap falls.
+  `TestStorePlanInsertionLimitUsesCanonicalRefusal` drives real shared validation
+  and seals, checks `plan_invalid` plus `ErrComputeLimit`, and retries/replays
+  through configured cap changes.
+  The run-rate assertions remain in `TestGuardsLetAnIdempotentRunRecreateThrough`
+  and `TestRunRateGuardsUseTheRunsTeamForMetering` until raw run intake retires.
+- `TestNodeClaim_MarkReadyIsIdempotent` moves to
+  `TestOwnerReadyReplayPreservesQueueAge`. The real owner transition preserves
+  the original ready timestamp and state sequence on replay.
+- `TestGitHubCheckRunIsRecordedOnce` moves to
+  `TestGitHubCommitReportingUsesSealedIdentityProperty`. Sealed intake supplies
+  runs. The generated probe retains first-check replay, foreign-team refusal,
+  exact SHA and numeric repository isolation, ordering and rename behavior.
+- Legacy `RedactedForDisplay`, `RedactedRuns` and receipt raw-invocation tests
+  move to `TestReportingReadsSealedFactsWithoutSecretValuesProperty` and
+  `TestReportingDistinguishesUnknownAndEmptyClassification`. These exercise
+  real intake and accepted seals, then report and receipt output. Unknown,
+  nil, malformed and explicit empty classification stay distinct. Receipt
+  component tests retain cost, topology, hash stability and optional-secret
+  behavior. Raw invocation rewriters and their historical compatibility tests
+  are removed with the old API.
+
+Reporting and legacy claim fixtures use explicit `teststore.SeedNode` and
+`SeedNodeReady`. They grant no production authority and run no admission logic.
+`TestJobReportingSeedUsesCurrentSchemaAndRejectsMissingRun` checks their schema,
+nanosecond timestamps and failure when no target exists. New lifecycle and
+acceptance probes use `AdmitRun`, `AcceptPlan` and `TransitionNode` instead.

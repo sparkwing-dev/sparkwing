@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-
 	"testing"
 	"time"
 
@@ -28,7 +27,7 @@ func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 		}
 		for _, outcome := range run.outcomes {
 			nodeID := "work-" + outcome
-			if err := st.CreateNode(ctx, store.Node{RunID: run.id, NodeID: nodeID, Status: "pending"}); err != nil {
+			if err := teststore.SeedNode(st, ctx, store.Node{RunID: run.id, NodeID: nodeID, Status: "pending"}); err != nil {
 				t.Fatal(err)
 			}
 			if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, store.NodeRef{RunID: run.id, NodeID: nodeID}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {

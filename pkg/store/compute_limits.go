@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // Compute guards use zero for an unlimited operator ceiling.
@@ -403,10 +405,7 @@ func runElapsedSecondsTx(ctx context.Context, tx *storeTx, team Team, runID stri
 	return elapsed / int64(time.Second), nil
 }
 
-// safety: a re-created row is the caller guaranteeing the row exists before it
-// writes a terminal status, so it is measured against nothing; only a row the
-// statement would actually insert counts.
-func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) error {
+func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
 	limits, err := computeLimitsTx(ctx, tx)
 	if err != nil {
 		return err
@@ -414,18 +413,13 @@ func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, team Team, runID, no
 	if limits.NodesPerRun <= 0 && limits.GlobalNodesPerRun <= 0 {
 		return nil
 	}
-	present, err := rowPresentTx(ctx, tx,
-		`SELECT 1 FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`, team, runID, nodeID)
-	if err != nil || present {
-		return err
-	}
 	principal, err := runPrincipalTx(ctx, tx, team, runID)
 	if err != nil {
 		return err
 	}
 	ceiling, guard := limits.GlobalNodesPerRun, ComputeLimitGlobalNodesPerRun
 	if limits.NodesPerRun > 0 {
-		metered, err := principalMetered(ctx, tx, team, principal)
+		metered, err := rowPresentTx(ctx, tx, `SELECT 1 FROM capabilities WHERE team=? AND bind_run=? AND issuance='award' AND unit_kind IN ('trigger','plan') AND metered=1 LIMIT 1`, team, runID)
 		if err != nil {
 			return err
 		}
@@ -436,20 +430,16 @@ func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, team Team, runID, no
 	if ceiling <= 0 {
 		return nil
 	}
-	if err := lockComputeGuardsTx(ctx, tx); err != nil {
-		return err
-	}
 	var nodes int64
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM nodes WHERE team = ? AND run_id = ?`, team, runID).Scan(&nodes); err != nil {
 		return err
 	}
 	if nodes >= ceiling {
-		return &ComputeLimitError{
-			Limit: guard, Cap: ceiling, Observed: nodes,
-			Scope: "run " + runID, Principal: principal,
-		}
+		refused := &ComputeLimitError{Limit: guard, Cap: ceiling, Observed: nodes, Scope: "run " + runID, Principal: principal}
+		return errors.Join(refused, authorityError(apierr.PlanInvalid, refused.Error()))
 	}
+
 	return nil
 }
 

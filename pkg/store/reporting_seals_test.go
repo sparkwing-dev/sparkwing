@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/receipt"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
@@ -46,15 +47,21 @@ func TestReportingReadsSealedFactsWithoutSecretValuesProperty(t *testing.T) {
 				}
 				wantPublic := public
 				if !accepted && i%2 != 0 {
-					wantPublic = store.RedactedArgValue
+					wantPublic = runspec.RedactedArgValue
 				}
-				if run.Args["secret"] != store.RedactedArgValue || run.Args["public"] != wantPublic || run.GitSHA != "abcdef1234" || run.GitBranch != "main" || run.CreatedAt.IsZero() || !run.StartedAt.IsZero() {
+				if run.Args["secret"] != runspec.RedactedArgValue || run.Args["public"] != wantPublic || run.GitSHA != "abcdef1234" || run.GitBranch != "main" || run.CreatedAt.IsZero() || !run.StartedAt.IsZero() {
 					t.Fatalf("reported run = %+v", run)
 				}
 				body, err := json.Marshal(run)
 				if err != nil || strings.Contains(string(body), secret) {
 					t.Fatalf("secret in report: %s, %v", body, err)
 				}
+				rec := receipt.BuildReceipt(run, nil, 0, "")
+				body, err = json.Marshal(rec)
+				if err != nil || strings.Contains(string(body), secret) || rec.Identity.InputsHash != "" {
+					t.Fatalf("unsafe receipt: %s %v", body, err)
+				}
+
 				filter := store.RunFilter{Pipelines: []string{"fixture"}, Text: []string{"acme"}}
 				runs, err := tenant.ListRuns(t.Context(), filter)
 				if err != nil || len(runs) != 1 || !reflect.DeepEqual(runs[0], run) {
@@ -188,5 +195,45 @@ func TestReportingReadsCurrentJobLifecycle(t *testing.T) {
 		if jobs, err := foreign.ListNodes(t.Context(), f.ref.RunID); err != nil || len(jobs) != 0 {
 			t.Fatalf("foreign job list = %+v, %v", jobs, err)
 		}
+	}
+}
+
+func TestReportingDistinguishesUnknownAndEmptyClassification(t *testing.T) {
+	for _, classification := range []struct {
+		name         string
+		names        []string
+		set, visible bool
+	}{
+		{name: "absent"},
+		{name: "nil", set: true},
+		{name: "empty", set: true, names: []string{}, visible: true},
+		{name: "duplicate", set: true, names: []string{"value", "value"}},
+		{name: "invalid", set: true, names: []string{""}},
+	} {
+		t.Run(classification.name, func(t *testing.T) {
+			s := storetest.Open(t)
+			tenant, request, err := storePlanSealRequestWith(t.Context(), s, func(in *store.IntakeRequest, _ *nodeproto.PlanDoc) {
+				in.Request.RequestedArgs = map[string]string{"value": "public-when-classified"}
+				in.Request.SecretArgs = runspec.Optional[[]string]{Set: classification.set, Value: classification.names}
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, err := tenant.GetRun(t.Context(), request.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := runspec.RedactedArgValue
+			if classification.visible {
+				want = "public-when-classified"
+			}
+			if run.Args["value"] != want {
+				t.Fatalf("classification %s displayed %q", classification.name, run.Args["value"])
+			}
+			rec := receipt.BuildReceipt(run, nil, 0, "")
+			if (rec.Identity.InputsHash != "") != classification.visible {
+				t.Fatalf("classification %s hashed arguments: %+v", classification.name, rec.Identity)
+			}
+		})
 	}
 }

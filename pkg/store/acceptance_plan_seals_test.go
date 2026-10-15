@@ -198,3 +198,36 @@ func (acceptanceClaimProfile) ResolveClaimProfile(context.Context, capability.Pr
 }
 
 func acceptanceAttempt(attempt int64) *int64 { return &attempt }
+
+func TestStorePlanInsertionLimitUsesCanonicalRefusal(t *testing.T) {
+	s := storetest.Open(t)
+	tenant, request, err := storePlanSealRequest(t.Context(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetComputeLimit(t.Context(), store.ComputeLimitGlobalNodesPerRun, 1); err != nil {
+		t.Fatal(err)
+	}
+	_, err = tenant.AcceptPlan(t.Context(), request)
+	var canonical *apierr.Error
+	if !errors.Is(err, store.ErrComputeLimit) || !errors.As(err, &canonical) || canonical.Code != apierr.PlanInvalid {
+		t.Fatalf("plan ceiling refusal: %v", err)
+	}
+	before, err := tenant.ReadSnapshot(t.Context(), request.RunID)
+	if err != nil || before.Run.Spec != nil || len(before.Nodes) != 0 {
+		t.Fatalf("failed acceptance left partial state: %+v %v", before, err)
+	}
+	if err := s.SetComputeLimit(t.Context(), store.ComputeLimitGlobalNodesPerRun, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetComputeLimit(t.Context(), store.ComputeLimitGlobalNodesPerRun, 1); err != nil {
+		t.Fatal(err)
+	}
+	replay, err := tenant.AcceptPlan(t.Context(), request)
+	if err != nil || !replay.Replayed {
+		t.Fatalf("accepted replay met the lowered ceiling: %+v %v", replay, err)
+	}
+}

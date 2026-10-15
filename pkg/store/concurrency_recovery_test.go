@@ -431,7 +431,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterFailedLeaderRelease(t *testing
 	if leader.Kind != store.AcquireGranted {
 		t.Fatalf("leader: want Granted got %s", leader.Kind)
 	}
-	if err := s.CreateNode(ctx, store.Node{RunID: "leader", NodeID: "node", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(s, ctx, store.Node{RunID: "leader", NodeID: "node", Status: "pending"}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
 	follower := acquireT(t, s, store.AcquireSlotRequest{
@@ -486,7 +486,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterSkippedLeaderRelease(t *testin
 	if leader.Kind != store.AcquireGranted {
 		t.Fatalf("leader: want Granted got %s", leader.Kind)
 	}
-	if err := s.CreateNode(ctx, store.Node{RunID: "leader", NodeID: "node", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(s, ctx, store.Node{RunID: "leader", NodeID: "node", Status: "pending"}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
 	follower := acquireT(t, s, store.AcquireSlotRequest{
@@ -598,7 +598,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterLeaderAgentLost(t *testing.T) 
 	if leader.Kind != store.AcquireGranted {
 		t.Fatalf("leader: want Granted got %s", leader.Kind)
 	}
-	if err := s.CreateNode(ctx, store.Node{RunID: "leader", NodeID: "node", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(s, ctx, store.Node{RunID: "leader", NodeID: "node", Status: "pending"}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
 	follower := acquireT(t, s, store.AcquireSlotRequest{
@@ -648,7 +648,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterLeaderAgentLostRelease(t *test
 	if leader.Kind != store.AcquireGranted {
 		t.Fatalf("leader: want Granted got %s", leader.Kind)
 	}
-	if err := s.CreateNode(ctx, store.Node{RunID: "leader", NodeID: "node", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(s, ctx, store.Node{RunID: "leader", NodeID: "node", Status: "pending"}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
 	follower := acquireT(t, s, store.AcquireSlotRequest{

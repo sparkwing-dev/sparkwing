@@ -28,7 +28,7 @@ func TestTeamBoundary_ResolveWaiterDoesNotReadAnotherTeamsLeader(t *testing.T) {
 
 		leaderB := "leader-b"
 		seedRun(t, f.teamB, leaderB, "build-b")
-		if err := f.st.CreateNode(ctx, store.Node{RunID: leaderB, NodeID: "lead", Status: "running"}); err != nil {
+		if err := teststore.SeedNode(f.st, ctx, store.Node{RunID: leaderB, NodeID: "lead", Status: "running"}); err != nil {
 			t.Fatal(err)
 		}
 		if err := teststore.SeedNodeFinish(f.st, ctx, f.teamB.Team(), store.NodeRef{RunID: leaderB, NodeID: "lead"}, store.NodeResult{Outcome: store.NodeState("success"), MaskedError: ""}); err != nil {

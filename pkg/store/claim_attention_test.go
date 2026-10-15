@@ -2,10 +2,11 @@ package store_test
 
 import (
 	"context"
-
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
@@ -83,13 +84,13 @@ func seedMatchNode(t *testing.T, s *store.Store, runID, repoURL string, cores fl
 	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE runs SET plan_json = ? WHERE id = ?`), plan, runID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreateNode(ctx, store.Node{
+	if err := teststore.SeedNode(s, ctx, store.Node{
 		RunID: runID, NodeID: "work", Status: "pending", NeedsLabels: needs,
 		RequestedCores: cores,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MarkNodeReady(ctx, runID, "work"); err != nil {
+	if err := teststore.SeedNodeReady(s, ctx, runID, "work"); err != nil {
 		t.Fatal(err)
 	}
 }

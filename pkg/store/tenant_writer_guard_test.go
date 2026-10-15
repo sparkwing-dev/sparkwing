@@ -38,8 +38,7 @@ func TestTenantWriters_EveryTenantTableHasAWriterThatSetsTheKey(t *testing.T) {
 			continue
 		}
 		t.Errorf("no INSERT in this package sets %s.team, so this table has no production seeding path for %q.\n"+
-			"Give the table a writer, the way createRunTx carries the team and CreateNode "+
-			"takes it off the run that owns the node.", table, DefaultTeam)
+			"Give the table a writer, the way insertAdmissionTx and insertNodeTx carry their tenant key.", table, DefaultTeam)
 	}
 	for _, table := range tablesWithNoTeamWriter {
 		if !slices.Contains(tenantTables, table) {

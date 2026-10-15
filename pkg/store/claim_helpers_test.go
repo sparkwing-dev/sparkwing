@@ -24,10 +24,10 @@ func createRetryRunAndReadyNode(t *testing.T, s *store.Store, runID string, retr
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreateNode(context.Background(), store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(s, context.Background(), store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MarkNodeReady(context.Background(), runID, "build"); err != nil {
+	if err := teststore.SeedNodeReady(s, context.Background(), runID, "build"); err != nil {
 		t.Fatal(err)
 	}
 }

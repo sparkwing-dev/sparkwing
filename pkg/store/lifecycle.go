@@ -7,13 +7,6 @@ func nodeRunActiveSQL(alias string) string {
      AND ar.id = ` + alias + `run_id AND ar.finished_at IS NULL AND NOT (ar.` + runTerminalIn + `))`
 }
 
-// safety: a controller-dispatched run's nodes carry a kind, and only the
-// launcher's claim hands their pods the claim token they report through, so
-// every other claim path passes over them.
-const nodeTriggerDispatched = `kind = ''`
-
-const nodeFailSet = `status = 'done', outcome = 'failed'`
-
 const (
 	nodeStatusPending = "pending"
 	nodeStatusRunning = "running"
@@ -24,7 +17,6 @@ const (
 	triggerStatusPending = "pending"
 	triggerStatusClaimed = "claimed"
 	triggerStatusDone    = "done"
-	triggerStatusFailed  = "failed"
 )
 
 const (
@@ -36,12 +28,6 @@ const (
 )
 
 const runTerminalIn = `status IN ('success','failed','cancelled')`
-
-// IsFinished reports whether this trigger has reached the state it never
-// leaves, so what is keyed to it can be reclaimed.
-func (t Trigger) IsFinished() bool {
-	return t.Status == triggerStatusDone || t.Status == triggerStatusFailed
-}
 
 const (
 	outcomeSuccess    = "success"

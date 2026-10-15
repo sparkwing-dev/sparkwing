@@ -47,7 +47,7 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 				if id == "b" && mode == "cached" {
 					outcome = "cached"
 				}
-				if err := st.CreateNode(ctx, store.Node{RunID: "r", NodeID: id, Status: "running"}); err != nil {
+				if err := teststore.SeedNode(st, ctx, store.Node{RunID: "r", NodeID: id, Status: "running"}); err != nil {
 					t.Fatal(err)
 				}
 				if err := teststore.SeedNodeFinish(st, ctx, store.DefaultTeam, store.NodeRef{RunID: "r", NodeID: id}, store.NodeResult{Outcome: store.NodeState(outcome), MaskedError: ""}); err != nil {

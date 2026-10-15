@@ -1038,9 +1038,11 @@ func scanRun(rs rowScanner, tail ...any) (*Run, error) {
 	var created int64
 	var started, finished sql.NullInt64
 	var parent sql.NullString
-	destinations := []any{&r.ID, &r.Number, &r.Pipeline, &r.Status, &r.TriggerSource, &r.GitBranch, &r.GitSHA,
+	destinations := []any{
+		&r.ID, &r.Number, &r.Pipeline, &r.Status, &r.TriggerSource, &r.GitBranch, &r.GitSHA,
 		&request, &spec, &r.PlanSnapshot, &r.Error, &created, &started, &finished, &parent, &r.DeclaredRepo, &r.RetryOf, &r.RetriedAs,
-		&lineage, &r.ReplayOfRunID, &r.ReplayOfNodeID, &r.AnnotationCount, &r.TopAnnotation, &annotations, &r.Admission, &r.NeedsAttention}
+		&lineage, &r.ReplayOfRunID, &r.ReplayOfNodeID, &r.AnnotationCount, &r.TopAnnotation, &annotations, &r.Admission, &r.NeedsAttention,
+	}
 	if err := rs.Scan(append(destinations, tail...)...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound("run", "")
@@ -1163,61 +1165,6 @@ type GeneratedNode struct {
 	Batch int `json:"batch"`
 	// Spec is the node's plan document, spec_hash included.
 	Spec json.RawMessage `json:"spec"`
-}
-
-// CreateNode inserts a node in the "pending" state.
-func (s *Store) CreateNode(ctx context.Context, n Node) error {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	// safety: the team comes off the run rather than off the caller, so a node
-	// cannot land in a team its run does not belong to.
-	team, err := creditTeamForRunTx(ctx, tx, n.RunID)
-	if err != nil {
-		return err
-	}
-	if err := enforceNodesPerRunTx(ctx, tx, team, n.RunID, n.NodeID); err != nil {
-		return err
-	}
-	requestedSlots := n.RequestedSlots
-	if requestedSlots < 1 {
-		requestedSlots = 1
-	}
-	n.RequestedSlots = requestedSlots
-	depsJSON, _ := json.Marshal(n.Deps)
-	var generatedJSON []byte
-	if n.Generated != nil {
-		if generatedJSON, err = json.Marshal(n.Generated); err != nil {
-			return fmt.Errorf("node %s generated spec: %w", n.NodeID, err)
-		}
-	}
-	var labelsJSON []byte
-	if len(n.NeedsLabels) > 0 {
-		labelsJSON, _ = json.Marshal(n.NeedsLabels)
-	}
-	var prefersJSON []byte
-	if len(n.PrefersLabels) > 0 {
-		prefersJSON, _ = json.Marshal(n.PrefersLabels)
-	}
-	_, err = tx.ExecContext(ctx, `
-INSERT INTO nodes (team, run_id, node_id, status, deps_json, needs_labels, prefers_labels,
-                   requested_cores, requested_memory_bytes, requested_slots,
-			       attempts_consumed, retry_root_run_id,
-			       spec_hash, generated_json, seq)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-		(SELECT COALESCE(MAX(seq), 0) + 1 FROM nodes WHERE team = ? AND run_id = ?))`,
-		string(team), n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, prefersJSON,
-		n.RequestedCores, n.RequestedMemoryBytes, requestedSlots,
-		n.AttemptsConsumed,
-		n.RunID,
-		n.SpecHash, generatedJSON,
-		string(team), n.RunID)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 // ListNodes returns the nodes for a run in insertion order, which the
@@ -1390,61 +1337,6 @@ ORDER BY node_id, started_at`, string(t.team), runID)
 		out = append(out, ns)
 	}
 	return out, rows.Err()
-}
-
-// MarkNodeReady publishes a job to its team's queue.
-func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
-	t, err := s.runTenant(ctx, runID)
-	if err != nil {
-		return err
-	}
-	return t.MarkNodeReady(ctx, runID, nodeID)
-}
-
-// MarkNodeReady publishes a job to the tenant's queue.
-func (t *Tenant) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	node := &Node{}
-	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
- FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID), node); err != nil {
-		return err
-	}
-	charge, err := nodeChargeTx(ctx, tx, runID, nodeID)
-	if err != nil {
-		return err
-	}
-	class, err := readyCPUClassTx(ctx, tx, charge)
-	if err != nil {
-		return err
-	}
-	now := tx.now().UnixNano()
-	if _, err := tx.ExecContext(ctx, `UPDATE nodes SET ready_at=COALESCE(ready_at,?), placement_hold_from=COALESCE(placement_hold_from,?), credit_cpu_class=? WHERE team=? AND run_id=? AND node_id=?`, now, now, class, t.team, runID, nodeID); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-// safety: the class a node becomes ready at is stamped on its row so the queue
-// read can leave the classes a warm runner may not have out of the scan window
-// entirely. A class no table prices stamps zero, which keeps the node scannable
-// so the claim that prices it fails it with the class to add.
-func readyCPUClassTx(ctx context.Context, tx *storeTx, charge ExecutorResource) (int64, error) {
-	table, err := creditRateTableTx(ctx, tx)
-	if err != nil {
-		return 0, err
-	}
-	class, err := table.ClassForResource(charge)
-	if err != nil {
-		if errors.Is(err, ErrUnpricedCPUClass) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	return class.Cores, nil
 }
 
 // safety: a rollback after a successful commit reports ErrTxDone, which is the

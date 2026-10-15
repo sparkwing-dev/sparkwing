@@ -113,7 +113,7 @@ func (f *appFixture) finishRun(c claimedRun, runID, status, errMsg string) {
 func (f *appFixture) addNode(runID, nodeID, outcome, errMsg string) {
 	f.t.Helper()
 	ctx := context.Background()
-	if err := f.store.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
 		f.t.Fatal(err)
 	}
 	team, err := f.store.AsOperator().RunTeam(ctx, runID)

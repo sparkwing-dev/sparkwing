@@ -553,6 +553,9 @@ func insertNodeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow) erro
 	if row.Ref.RunID == "" || row.Ref.NodeID == "" || row.Status != StatusPending || row.StateSeq != 0 || row.ClaimedBy != "" || row.Generation != 0 || row.SpecHash == "" {
 		return errors.New("invalid initial job")
 	}
+	if err := enforceNodesPerRunTx(ctx, tx, team, row.Ref.RunID); err != nil {
+		return err
+	}
 	execution, err := json.Marshal(row.Execution)
 	if err != nil {
 		return err

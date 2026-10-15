@@ -15,7 +15,7 @@ func seedRunNode(t *testing.T, st *store.Store, runID, nodeID string) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateNode(t.Context(), store.Node{
+	if err := teststore.SeedNode(st, t.Context(), store.Node{
 		RunID: runID, NodeID: nodeID, Status: "pending",
 	}); err != nil {
 		t.Fatal(err)

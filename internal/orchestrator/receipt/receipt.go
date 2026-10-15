@@ -52,6 +52,7 @@ type Cost struct {
 	Settled      bool   `json:"settled"`
 }
 
+// BuildReceipt hashes a redacted reporting view and its job observations.
 func BuildReceipt(run *store.Run, nodes []*store.Node, rate float64, rateSource string) Receipt {
 	if run == nil {
 		return Receipt{}
@@ -64,7 +65,7 @@ func BuildReceipt(run *store.Run, nodes []*store.Node, rate float64, rateSource 
 		StartedAt:  run.StartedAt,
 		FinishedAt: run.FinishedAt,
 
-		Invocation: store.RedactInvocation(run.Invocation),
+		Invocation: run.Invocation,
 	}
 	if run.FinishedAt != nil {
 		r.DurationMS = run.FinishedAt.Sub(run.StartedAt).Milliseconds()
@@ -82,7 +83,7 @@ func buildIdentity(run *store.Run, nodes []*store.Node) Identity {
 		PlanHash:            planTopologyHash(nodes),
 		OutputsHash:         outputsHashes(nodes),
 	}
-	if !containsNamedArg(run.Args, run.SecretArgNames()) {
+	if names, known := run.Invocation[store.InvocationSecretArgsKey].([]string); known && names != nil && !containsNamedArg(run.Args, names) {
 		id.InputsHash = hashCanonical(run.Args)
 	}
 	return id

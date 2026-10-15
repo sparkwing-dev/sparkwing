@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-
 	"testing"
 	"time"
 
@@ -22,7 +21,7 @@ func seedRunAndNode(t *testing.T, s *store.Store, runID, nodeID string) {
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := s.CreateNode(ctx, store.Node{
+	if err := teststore.SeedNode(s, ctx, store.Node{
 		RunID:  runID,
 		NodeID: nodeID,
 		Status: "pending",
@@ -67,33 +66,6 @@ func expireNodeClaim(t *testing.T, s *store.Store, runID, nodeID string) {
 	}
 }
 
-func TestNodeClaim_MarkReadyIsIdempotent(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	seedRunAndNode(t, s, "run-1", "node-a")
-
-	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
-		t.Fatalf("MarkNodeReady: %v", err)
-	}
-	n1, err := s.GetNode(ctx, "run-1", "node-a")
-	if err != nil {
-		t.Fatalf("GetNode: %v", err)
-	}
-	if n1.ReadyAt == nil {
-		t.Fatal("ready_at not set after MarkNodeReady")
-	}
-	first := time.Unix(123, 456)
-	setNodeReadyAt(t, s, "run-1", "node-a", first)
-
-	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
-		t.Fatalf("MarkNodeReady 2: %v", err)
-	}
-	n2, _ := s.GetNode(ctx, "run-1", "node-a")
-	if !n2.ReadyAt.Equal(first) {
-		t.Fatalf("ready_at changed on 2nd MarkNodeReady: %v -> %v", first, *n2.ReadyAt)
-	}
-}
-
 func seedNodeWithLabels(t *testing.T, s *store.Store, runID, nodeID string, labels []string) {
 	t.Helper()
 	ctx := context.Background()
@@ -102,12 +74,12 @@ func seedNodeWithLabels(t *testing.T, s *store.Store, runID, nodeID string, labe
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := s.CreateNode(ctx, store.Node{
+	if err := teststore.SeedNode(s, ctx, store.Node{
 		RunID: runID, NodeID: nodeID, Status: "pending", NeedsLabels: labels,
 	}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
-	if err := s.MarkNodeReady(ctx, runID, nodeID); err != nil {
+	if err := teststore.SeedNodeReady(s, ctx, runID, nodeID); err != nil {
 		t.Fatalf("MarkNodeReady: %v", err)
 	}
 }

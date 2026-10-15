@@ -2868,3 +2868,28 @@ route. Legacy claim selection shares one private metering query until those
 claim APIs are retired.
 
 <!-- design:end -->
+
+## Job insertion and reporting hard cuts
+
+`Store.CreateNode`, both `MarkNodeReady` methods and the unused run-tenant
+fallback are removed. `insertNodeTx` remains the sole production insertion
+owner. Plan and expansion acceptance hold the run lock and apply configured
+job-count guards there. The metered guard reads committed owner/plan award
+billing facts from capabilities. It reads no legacy token marker. A failed
+batch rolls back the seal, all inserted jobs and the expansion barrier.
+Replay of an accepted plan or expansion does not spend the limit again.
+Configured job-count refusal preserves `ErrComputeLimit` and carries canonical
+`plan_invalid` for HTTP and engine clients.
+
+The unused `child_invocations` table is removed from the baseline and schema
+inventory. Child admission already stores lineage and the invocation replay
+key on runs. Storage reservation and receipt table retirement belongs to W1b.
+
+Run reports already use C4's sealed display projection. The legacy invocation
+redactor, its public wrappers/constants and the unused classification getter are
+removed. HTTP and dashboard
+readers consume the reporting view directly. Receipts consume that same view
+and omit input hashes for unknown classification and supplied secret args.
+GitHub commit reporting shares the sealed trigger scanner and filters by the
+tenant, numeric repository key and exact SHA. It no longer reads removed
+trigger repository columns or issues one read per result.

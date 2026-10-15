@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-
 	"testing"
 	"time"
 
@@ -29,10 +28,10 @@ func seedRepoNode(t *testing.T, st *store.Store, runID, repoURL string) {
 	} else {
 		seedRepoTrigger(t, st, runID, repoURL, time.Now())
 	}
-	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(st, ctx, store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.MarkNodeReady(ctx, runID, "build"); err != nil {
+	if err := teststore.SeedNodeReady(st, ctx, runID, "build"); err != nil {
 		t.Fatal(err)
 	}
 }

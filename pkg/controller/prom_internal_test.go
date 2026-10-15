@@ -450,7 +450,7 @@ func TestReaperSamplesTheOperationalSeries(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := st.CreateNode(setup, store.Node{
+	if err := teststore.SeedNode(st, setup, store.Node{
 		RunID: "run-reaper-sweep", NodeID: "node-a", Status: "pending",
 	}); err != nil {
 		t.Fatalf("create node: %v", err)

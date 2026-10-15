@@ -445,10 +445,10 @@ func TestCredits_AClaimAboveTheLargestClassFailsTheNode(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := f.store.CreateNode(ctx, store.Node{RunID: "run-huge", NodeID: "build", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: "run-huge", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatalf("create node: %v", err)
 	}
-	if err := f.store.MarkNodeReady(ctx, "run-huge", "build"); err != nil {
+	if err := teststore.SeedNodeReady(f.store, ctx, "run-huge", "build"); err != nil {
 		t.Fatalf("mark ready: %v", err)
 	}
 
@@ -491,10 +491,10 @@ func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := f.store.CreateNode(ctx, store.Node{RunID: "run-big", NodeID: "build", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: "run-big", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatalf("create node: %v", err)
 	}
-	if err := f.store.MarkNodeReady(ctx, "run-big", "build"); err != nil {
+	if err := teststore.SeedNodeReady(f.store, ctx, "run-big", "build"); err != nil {
 		t.Fatalf("mark ready: %v", err)
 	}
 
@@ -548,10 +548,10 @@ func TestCredits_TheClaimResponseCarriesTheBilledClass(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := f.store.CreateNode(ctx, store.Node{RunID: "run-big", NodeID: "build", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: "run-big", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatalf("create node: %v", err)
 	}
-	if err := f.store.MarkNodeReady(ctx, "run-big", "build"); err != nil {
+	if err := teststore.SeedNodeReady(f.store, ctx, "run-big", "build"); err != nil {
 		t.Fatalf("mark ready: %v", err)
 	}
 
@@ -593,10 +593,10 @@ func TestCredits_QuarterCorePinReservesTwoCoreMinimum(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := f.store.CreateNode(ctx, store.Node{RunID: "run-quarter", NodeID: "build", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: "run-quarter", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatalf("create node: %v", err)
 	}
-	if err := f.store.MarkNodeReady(ctx, "run-quarter", "build"); err != nil {
+	if err := teststore.SeedNodeReady(f.store, ctx, "run-quarter", "build"); err != nil {
 		t.Fatalf("mark ready: %v", err)
 	}
 	status, body := creditsRequest(t, http.MethodPost,
@@ -630,10 +630,10 @@ func TestCredits_ANamedClaimThatDoesNotSizeToClassIsRefused(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := f.store.CreateNode(ctx, store.Node{RunID: "run-big", NodeID: "build", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: "run-big", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatalf("create node: %v", err)
 	}
-	if err := f.store.MarkNodeReady(ctx, "run-big", "build"); err != nil {
+	if err := teststore.SeedNodeReady(f.store, ctx, "run-big", "build"); err != nil {
 		t.Fatalf("mark ready: %v", err)
 	}
 
@@ -665,10 +665,10 @@ func TestCredits_AWarmClaimPassesOverAClassAboveTheWarmPool(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := f.store.CreateNode(ctx, store.Node{RunID: "run-big", NodeID: "build", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(f.store, ctx, store.Node{RunID: "run-big", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatalf("create node: %v", err)
 	}
-	if err := f.store.MarkNodeReady(ctx, "run-big", "build"); err != nil {
+	if err := teststore.SeedNodeReady(f.store, ctx, "run-big", "build"); err != nil {
 		t.Fatalf("mark ready: %v", err)
 	}
 

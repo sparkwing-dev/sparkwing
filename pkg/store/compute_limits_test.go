@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -78,10 +77,6 @@ func TestComputeLimitsAreUnlimitedUntilSet(t *testing.T) {
 		if v, ok := limits.Value(name); !ok || v != 0 {
 			t.Fatalf("guard %s = %d (known %v), want 0", name, v, ok)
 		}
-	}
-	seedClaimedNode(t, s, "run-open", "build")
-	if err := s.CreateNode(ctx, store.Node{RunID: "run-open", NodeID: "test", Status: "pending"}); err != nil {
-		t.Fatalf("an unset guard refused a node: %v", err)
 	}
 }
 
@@ -164,87 +159,17 @@ BEGIN SELECT RAISE(ABORT, 'run seconds refused'); END`); err != nil {
 	}
 }
 
-func TestNodesPerRunGuardRefusesAMeteredPrincipalPastTheCap(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	claimant := meteredClaimant(t, s, "agent:cloud")
-	setLimit(t, s, store.ComputeLimitNodesPerRun, 2)
-	if err := createRunAs(t, s, claimant.Principal, "run-fan"); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	if err := s.CreateNode(ctx, store.Node{RunID: "run-fan", NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatalf("create node: %v", err)
-	}
-
-	if err := s.CreateNode(ctx, store.Node{RunID: "run-fan", NodeID: "fan-1", Status: "pending"}); err != nil {
-		t.Fatalf("the second node must fit under a cap of two: %v", err)
-	}
-	err := s.CreateNode(ctx, store.Node{RunID: "run-fan", NodeID: "fan-2", Status: "pending"})
-	refused := limitRefusal(t, err, store.ComputeLimitNodesPerRun)
-	if refused.Cap != 2 || refused.Observed != 2 || refused.Principal != claimant.Principal {
-		t.Fatalf("refusal = %+v, want cap 2 observed 2 for the creating principal", refused)
-	}
-	nodes, err := s.ListNodes(ctx, "run-fan")
-	if err != nil {
-		t.Fatalf("list nodes: %v", err)
-	}
-	if len(nodes) != 2 {
-		t.Fatalf("nodes = %d, want the refused one absent", len(nodes))
-	}
-}
-
-func TestPerPrincipalGuardsLeaveLocalWorkAlone(t *testing.T) {
+func TestRunRateGuardsLeaveLocalWorkAlone(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	setLimit(t, s, store.ComputeLimitNodesPerRun, 1)
 	setLimit(t, s, store.ComputeLimitRunsPerHour, 1)
-	seedClaimedNode(t, s, "run-local", "build")
-
-	if err := s.CreateNode(ctx, store.Node{RunID: "run-local", NodeID: "second", Status: "pending"}); err != nil {
-		t.Fatalf("a local run's node was refused: %v", err)
-	}
 	for _, id := range []string{"run-local-2", "run-local-3"} {
 		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 			ID: id, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 		}); err != nil {
 			t.Fatalf("a local run was refused: %v", err)
 		}
-	}
-}
-
-func TestGlobalNodesPerRunGuardCountsEveryRun(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	setLimit(t, s, store.ComputeLimitGlobalNodesPerRun, 1)
-	seedClaimedNode(t, s, "run-any", "build")
-
-	err := s.CreateNode(ctx, store.Node{RunID: "run-any", NodeID: "second", Status: "pending"})
-	limitRefusal(t, err, store.ComputeLimitGlobalNodesPerRun)
-}
-
-func TestGuardsLetAnIdempotentRecreateThrough(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	setLimit(t, s, store.ComputeLimitGlobalNodesPerRun, 1)
-	setLimit(t, s, store.ComputeLimitGlobalRunsPerHour, 1)
-	seedClaimedNode(t, s, "run-again", "build")
-
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
-		ID: "run-again", Pipeline: "demo", Status: "failed", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("re-creating the same run must not meet the hourly guard: %v", err)
-	}
-	// safety: re-creating a node must fail on the row that already exists, not
-	// on the guard, so the error is read rather than merely tolerated.
-	err := s.CreateNode(ctx, store.Node{RunID: "run-again", NodeID: "build", Status: "pending"})
-	if err == nil {
-		t.Fatal("re-creating the same node reported no duplicate")
-	}
-	if errors.Is(err, store.ErrComputeLimit) {
-		t.Fatalf("re-creating the same node met a guard: %v", err)
-	}
-	if !strings.Contains(strings.ToLower(err.Error()), "unique") {
-		t.Fatalf("re-creating the same node failed with %v, want a unique-constraint violation", err)
 	}
 }
 
@@ -271,33 +196,6 @@ func TestRunsPerHourGuardRefusesAMeteredPrincipalPastTheCap(t *testing.T) {
 	rewindRunCreation(t, s, "run-1", time.Now().Add(-2*time.Hour))
 	if err := createRunAs(t, s, claimant.Principal, "run-4"); err != nil {
 		t.Fatalf("a run outside the window must not count: %v", err)
-	}
-}
-
-func TestPerPrincipalGuardsUseTheRunsTeamForMetering(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	acme := teamHandle(t, s, "acme")
-	globex := teamHandle(t, s, "globex")
-	const principal = "agent:shared"
-	meteredTeamClaimant(t, acme, principal)
-	if _, _, err := globex.CreateTokenWith(ctx, principal, store.TokenKindRunner,
-		[]string{"nodes.claim"}, 0, time.Now(), store.TokenOptions{}); err != nil {
-		t.Fatalf("mint globex's unmetered token: %v", err)
-	}
-	setLimit(t, s, store.ComputeLimitNodesPerRun, 1)
-	setLimit(t, s, store.ComputeLimitRunsPerHour, 1)
-	create := store.WithCreatingPrincipal(ctx, principal)
-	if err := globex.CreateRun(create, store.Run{ID: "globex-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatalf("create globex's first run: %v", err)
-	}
-	for _, nodeID := range []string{"build", "test"} {
-		if err := s.CreateNode(ctx, store.Node{RunID: "globex-1", NodeID: nodeID, Status: "pending"}); err != nil {
-			t.Fatalf("unmetered globex node %s: %v", nodeID, err)
-		}
-	}
-	if err := globex.CreateRun(create, store.Run{ID: "globex-2", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatalf("unmetered globex's second run: %v", err)
 	}
 }
 
@@ -403,10 +301,10 @@ func TestOldestWaitingReadyNodeForPrincipalStaysInsideThePrincipal(t *testing.T)
 		if err := createRunAs(t, s, principal, runID); err != nil {
 			t.Fatalf("create run: %v", err)
 		}
-		if err := s.CreateNode(ctx, store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
+		if err := teststore.SeedNode(s, ctx, store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
 			t.Fatalf("create node: %v", err)
 		}
-		if err := s.MarkNodeReady(ctx, runID, "build"); err != nil {
+		if err := teststore.SeedNodeReady(s, ctx, runID, "build"); err != nil {
 			t.Fatalf("mark ready: %v", err)
 		}
 	}
@@ -445,10 +343,10 @@ func TestOldestWaitingReadyNodeForPrincipalStaysInsideTheTeam(t *testing.T) {
 		if err := run.tn.CreateRun(ctx, store.Run{ID: run.id, Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.CreateNode(ctx, store.Node{RunID: run.id, NodeID: "build", Status: "pending"}); err != nil {
+		if err := teststore.SeedNode(s, ctx, store.Node{RunID: run.id, NodeID: "build", Status: "pending"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.MarkNodeReady(ctx, run.id, "build"); err != nil {
+		if err := teststore.SeedNodeReady(s, ctx, run.id, "build"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -458,32 +356,6 @@ func TestOldestWaitingReadyNodeForPrincipalStaysInsideTheTeam(t *testing.T) {
 	}
 	if runID != "run-acme" {
 		t.Fatalf("acme's agent:ci resolved %q, want its own run-acme over the other team's older one", runID)
-	}
-}
-
-func TestConcurrentNodeCreationNeverPassesThePerRunGuard(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	setLimit(t, s, store.ComputeLimitGlobalNodesPerRun, 3)
-	seedClaimedNode(t, s, "run-fan", "build")
-
-	var wg sync.WaitGroup
-	for i := range 8 {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			_ = s.CreateNode(ctx, store.Node{
-				RunID: "run-fan", NodeID: fmt.Sprintf("fan-%d", i), Status: "pending",
-			})
-		}(i)
-	}
-	wg.Wait()
-	nodes, err := s.ListNodes(ctx, "run-fan")
-	if err != nil {
-		t.Fatalf("list nodes: %v", err)
-	}
-	if len(nodes) > 3 {
-		t.Fatalf("concurrent creation wrote %d nodes past a cap of 3", len(nodes))
 	}
 }
 
@@ -529,5 +401,41 @@ func TestTriggerAndItsRunAreRefusedTogether(t *testing.T) {
 	limitRefusal(t, err, store.ComputeLimitGlobalRunsPerHour)
 	if trig, err := teststore.ForTeam(t, s, store.DefaultTeam).GetTrigger(ctx, "run-2"); err == nil && trig != nil {
 		t.Fatal("the refused admission left a trigger behind")
+	}
+}
+
+func TestGuardsLetAnIdempotentRunRecreateThrough(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	setLimit(t, s, store.ComputeLimitGlobalNodesPerRun, 1)
+	setLimit(t, s, store.ComputeLimitGlobalRunsPerHour, 1)
+	seedClaimedNode(t, s, "run-again", "build")
+
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
+		ID: "run-again", Pipeline: "demo", Status: "failed", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("re-creating the same run must not meet the hourly guard: %v", err)
+	}
+}
+
+func TestRunRateGuardsUseTheRunsTeamForMetering(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, s, "acme")
+	globex := teamHandle(t, s, "globex")
+	const principal = "agent:shared"
+	meteredTeamClaimant(t, acme, principal)
+	if _, _, err := globex.CreateTokenWith(ctx, principal, store.TokenKindRunner,
+		[]string{"nodes.claim"}, 0, time.Now(), store.TokenOptions{}); err != nil {
+		t.Fatalf("mint globex's unmetered token: %v", err)
+	}
+	setLimit(t, s, store.ComputeLimitNodesPerRun, 1)
+	setLimit(t, s, store.ComputeLimitRunsPerHour, 1)
+	create := store.WithCreatingPrincipal(ctx, principal)
+	if err := globex.CreateRun(create, store.Run{ID: "globex-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("create globex's first run: %v", err)
+	}
+	if err := globex.CreateRun(create, store.Run{ID: "globex-2", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("unmetered globex's second run: %v", err)
 	}
 }

@@ -852,19 +852,6 @@ CREATE TABLE storage_commit_receipts (
     PRIMARY KEY (team, store, id)
 );
 
-CREATE TABLE child_invocations (
-    team TEXT NOT NULL REFERENCES teams(name),
-    parent_run_id TEXT NOT NULL,
-    parent_node_id TEXT NOT NULL,
-    generation BIGINT NOT NULL,
-    ordinal BIGINT NOT NULL,
-    request_digest TEXT NOT NULL,
-    child_run_id TEXT NOT NULL,
-    created_at BIGINT NOT NULL,
-    PRIMARY KEY (team, parent_run_id, parent_node_id, generation, ordinal),
-    FOREIGN KEY(team,parent_run_id) REFERENCES runs(team,id) ON DELETE CASCADE
-);
-
 -- safety: account audit events precede team creation, so this operator table permits no team.
 CREATE TABLE business_events (
     id TEXT NOT NULL PRIMARY KEY,

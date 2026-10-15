@@ -20,6 +20,7 @@ func fixedRun() *store.Run {
 		Status:       "success",
 		GitSHA:       "abc1234",
 		Args:         map[string]string{"env": "prod", "tag": "v1.2.3"},
+		Invocation:   map[string]any{store.InvocationSecretArgsKey: []string{}},
 		PlanSnapshot: []byte(`{"nodes":["build","deploy"]}`),
 		StartedAt:    start,
 		FinishedAt:   &end,
@@ -212,42 +213,6 @@ func TestBuildReceipt_NilRunReturnsZeroValue(t *testing.T) {
 	}
 }
 
-func TestBuildReceipt_RedactsSecretArgsInInvocation(t *testing.T) {
-	run := fixedRun()
-	run.Args = map[string]string{"token": "s3cr3t-token-value", "env": "prod"}
-	run.Invocation = map[string]any{
-		"args":                        map[string]string{"token": "s3cr3t-token-value", "env": "prod"},
-		"reproducer":                  "sparkwing run deploy --env=prod --token=s3cr3t-token-value",
-		"inputs_hash":                 "sha256:offline-oracle",
-		store.InvocationSecretArgsKey: []string{"token"},
-	}
-
-	rec := receipt.BuildReceipt(run, nil, 0, "")
-	args, _ := rec.Invocation["args"].(map[string]string)
-	if args["token"] != store.RedactedArgValue {
-		t.Errorf("receipt invocation.args[token] = %q, want %q", args["token"], store.RedactedArgValue)
-	}
-	if args["env"] != "prod" {
-		t.Errorf("receipt redacted a non-secret arg: %q", args["env"])
-	}
-	if repro, _ := rec.Invocation["reproducer"].(string); strings.Contains(repro, "s3cr3t-token-value") {
-		t.Errorf("receipt reproducer leaked the secret: %q", repro)
-	}
-	if _, ok := rec.Invocation["inputs_hash"]; ok {
-		t.Errorf("receipt invocation exposes an input-hash oracle: %v", rec.Invocation)
-	}
-	if rec.Identity.InputsHash != "" {
-		t.Errorf("receipt identity inputs_hash = %q, want empty for secret arguments", rec.Identity.InputsHash)
-	}
-
-	if run.Args["token"] != "s3cr3t-token-value" {
-		t.Errorf("BuildReceipt mutated the run: %q", run.Args["token"])
-	}
-	if inv, _ := run.Invocation["args"].(map[string]string); inv["token"] != "s3cr3t-token-value" {
-		t.Errorf("BuildReceipt mutated the run's invocation: %q", inv["token"])
-	}
-}
-
 func TestBuildReceipt_UnsuppliedSecretKeepsInputsHash(t *testing.T) {
 	run := fixedRun()
 	run.Invocation = map[string]any{
@@ -260,20 +225,11 @@ func TestBuildReceipt_UnsuppliedSecretKeepsInputsHash(t *testing.T) {
 	}
 }
 
-func TestBuildReceipt_SHACoversTheRedactedDocument(t *testing.T) {
+func TestBuildReceiptUnclassifiedArgsHaveNoHash(t *testing.T) {
 	run := fixedRun()
-	run.Invocation = map[string]any{
-		"args":                        map[string]string{"token": "s3cr3t-token-value"},
-		store.InvocationSecretArgsKey: []string{"token"},
-	}
-	redacted := receipt.BuildReceipt(run, nil, 0, "")
-
-	plain := fixedRun()
-	plain.Invocation = map[string]any{
-		"args":                        map[string]string{"token": store.RedactedArgValue},
-		store.InvocationSecretArgsKey: []string{"token"},
-	}
-	if got, want := receipt.BuildReceipt(plain, nil, 0, "").ReceiptSHA, redacted.ReceiptSHA; got != want {
-		t.Errorf("receipt_sha does not commit to the delivered bytes: %q vs %q", got, want)
+	run.Invocation = nil
+	rec := receipt.BuildReceipt(run, nil, 0, "")
+	if rec.Identity.InputsHash != "" {
+		t.Fatal("unknown classification created an input hash")
 	}
 }

@@ -59,7 +59,7 @@ func TestStoreBackend_RunsRoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "n1", Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(st, ctx, store.Node{RunID: "r1", NodeID: "n1", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
 

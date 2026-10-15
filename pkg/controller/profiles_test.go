@@ -43,7 +43,7 @@ func TestFinishRunFoldsPartialSamplesRaiseOnly(t *testing.T) {
 			if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "partial", Pipeline: "demo", Status: "running", StartedAt: start}); err != nil {
 				t.Fatal(err)
 			}
-			if err := st.CreateNode(ctx, store.Node{RunID: "partial", NodeID: "build", Status: "running", StartedAt: &start}); err != nil {
+			if err := teststore.SeedNode(st, ctx, store.Node{RunID: "partial", NodeID: "build", Status: "running", StartedAt: &start}); err != nil {
 				t.Fatal(err)
 			}
 			for _, id := range []string{"build", ""} {

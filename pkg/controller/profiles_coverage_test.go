@@ -23,7 +23,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, id := range []string{"a", "c"} {
-				if err := st.CreateNode(t.Context(), store.Node{RunID: "r", NodeID: id, Status: "running", StartedAt: &start}); err != nil {
+				if err := teststore.SeedNode(st, t.Context(), store.Node{RunID: "r", NodeID: id, Status: "running", StartedAt: &start}); err != nil {
 					t.Fatal(err)
 				}
 				outcome := "success"

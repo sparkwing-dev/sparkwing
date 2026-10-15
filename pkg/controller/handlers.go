@@ -79,7 +79,7 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request, authoriz
 	if err != nil {
 		return engineLookupError(err)
 	}
-	runs = store.RedactedRuns(runs)
+
 	if runs == nil {
 		runs = []*store.Run{}
 	}
@@ -126,7 +126,7 @@ func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request, au
 	if err != nil {
 		return engineLookupError(err)
 	}
-	writeJSON(w, http.StatusOK, store.RedactedRun(run))
+	writeJSON(w, http.StatusOK, run)
 	return nil
 }
 

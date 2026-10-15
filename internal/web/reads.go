@@ -694,7 +694,7 @@ func RunsGrepHandler(b backend.Backend, bounds SearchBounds) http.HandlerFunc {
 					}
 					total++
 					matches = append(matches, match{RunID: run.ID, Pipeline: run.Pipeline, NodeID: node.NodeID, StepID: d.step, Line: displayLine, Content: d.body})
-					runsMeta[run.ID] = store.RedactedRun(run)
+					runsMeta[run.ID] = run
 					if maxMatches > 0 && len(matches) >= maxMatches {
 						truncated = true
 						break

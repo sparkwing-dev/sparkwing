@@ -2368,3 +2368,25 @@ ordinal, with attempt history from `node_attempts`. Output and manifest
 selectors remain on the typed `ReadNode` and `ReadSnapshot` records.
 Unused offer-priority fields, raw claim-token fields and `Node.ArtifactManifest`
 are removed. The unused legacy claim-token type and kind constants are removed.
+
+## Job creation, queue publication and sealed display
+
+`Store.CreateNode`, `Store.MarkNodeReady` and `Tenant.MarkNodeReady` are removed.
+Create jobs through `Tenant.AcceptPlan` or `Tenant.AcceptExpansion`. Publish
+ready work with the current owner's `Tenant.TransitionNode`, `NodeReady` and
+`CauseRelease`. Exact replay preserves the original queue timestamp.
+
+Acceptance enforces the configured job-count ceiling in the same transaction
+as the seal or expansion. Refusal leaves no partial jobs or accepted expansion.
+Metered per-run ceilings use persisted award billing facts.
+
+`Run.RedactedForDisplay`, `Run.SecretArgNames`, `RedactedRun`, `RedactedRuns`, `RedactInvocation`,
+`RedactedArgValue` and `IncludeSecretValues` are removed from `pkg/store`.
+`Run` is a redacted reporting view. Display projection belongs to
+`runspec.DisplayRequest` and `DisplaySpec`. Receipt builders consume that view
+and omit input hashes when classification is unknown or a secret is supplied.
+
+GitHub commit reports select the tenant's canonical numeric repository key
+and exact SHA. Repository renames preserve the reports. A different repository
+with the old name inherits none. The unused child-invocation table is removed
+because sealed run intake already owns child lineage and request replay.

@@ -15,10 +15,10 @@ func createRunAndReadyNode(t *testing.T, s *store.Store, runID, nodeID string) {
 	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := s.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(s, ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
 		t.Fatalf("create node: %v", err)
 	}
-	if err := s.MarkNodeReady(ctx, runID, nodeID); err != nil {
+	if err := teststore.SeedNodeReady(s, ctx, runID, nodeID); err != nil {
 		t.Fatalf("mark ready: %v", err)
 	}
 }

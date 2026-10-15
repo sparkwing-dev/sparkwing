@@ -2,9 +2,10 @@ package store_test
 
 import (
 	"context"
-
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
@@ -27,10 +28,10 @@ func nodeTeam(t *testing.T, st *store.Store, runID, nodeID string) string {
 func seedReadyNode(t *testing.T, st *store.Store, runID, nodeID string) {
 	t.Helper()
 	ctx := context.Background()
-	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
+	if err := teststore.SeedNode(st, ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
 		t.Fatalf("CreateNode(%s/%s): %v", runID, nodeID, err)
 	}
-	if err := st.MarkNodeReady(ctx, runID, nodeID); err != nil {
+	if err := teststore.SeedNodeReady(st, ctx, runID, nodeID); err != nil {
 		t.Fatalf("MarkNodeReady(%s/%s): %v", runID, nodeID, err)
 	}
 }

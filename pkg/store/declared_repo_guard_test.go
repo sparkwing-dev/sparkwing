@@ -23,7 +23,6 @@ var declaredRepoReaders = map[string]string{
 	"internal/orchestrator/backends.go":      "copies a parent run's repository onto a child trigger",
 	"internal/orchestrator/pod_node_host.go": "hands the repository to plan code in the run context",
 	"internal/orchestrator/trigger_host.go":  "hands plan code the repository the run row records, as every node host of the run reads it",
-	"pkg/store/child_invocations.go":         "copies a child trigger's repository onto the child's run row",
 	"internal/orchestrator/runs_page.go":     "passes the operator's runs list --repo filter through",
 	"cmd/sparkwing/repos.go":                 "groups runs by repository for display",
 	"cmd/sparkwing/repos_info.go":            "matches runs to a repository for display",

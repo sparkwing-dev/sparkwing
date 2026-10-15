@@ -74,7 +74,7 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 		}
 		for n := range 2 {
 			nodeID := fmt.Sprintf("node-%d", n)
-			if err := st.CreateNode(ctx, store.Node{
+			if err := teststore.SeedNode(st, ctx, store.Node{
 				RunID:      runID,
 				NodeID:     nodeID,
 				Status:     "done",
