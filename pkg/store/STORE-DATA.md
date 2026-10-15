@@ -224,3 +224,10 @@ unit fence is gone. Eval also checks the source generation. The bounded batch
 locks runs and rechecks the maintenance fence before writing. Any error rolls
 the batch back. Existing final seals remain immutable. Publication streams keep
 their publisher's final-commit contract because publication has no lease.
+
+The independent bucket-listing storage pass is removed with its mark/reconcile
+APIs, raw download-day pruning, legacy receipt pruning and free-share log row
+selection. The controller's maintenance timer uses the existing singleton lease,
+final retention, tagged-stream sealing and committed-inventory billing. Physical
+bucket bytes cannot overwrite replica counters or become retained billing facts.
+Allowance-driven physical eviction still requires the final record/log adapter.

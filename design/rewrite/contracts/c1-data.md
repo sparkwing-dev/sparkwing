@@ -910,8 +910,14 @@ and reports. Run and metric windows use `operator.run_retention_days` and
 existing names in the final settings table. Policy writes commit as one batch.
 Malformed, sealed, negative and overflowing values fail loudly.
 
-The controller's storage pass calls leased retention and billing with the same
-maintenance fence. Cloud seeds 90-day run retention only when absent. Metric
+The controller's storage maintenance calls leased retention and billing with the same
+maintenance fence. The independent bucket-listing reconciliation pass and its
+StorageMarks, ReconcileStorage, TeamsOverFreeLogShare and
+PrunableNodeLogs APIs are removed. Retained-byte reports and billing read unique
+blobs and committed tagged log streams. Bucket listings cannot replace replica
+usage counters. PruneStorageCommitReceipts and PruneDownloadDays are removed with
+the pass. Final upload tickets and quota reservations retain their atomic replay
+state through leased maintenance. Cloud seeds 90-day run retention only when absent. Metric
 retention stays independent. The old event-only and principal allowance sweeps
 are removed. Allowance-driven eviction, physical GC and full elected-worker
 coordination remain integration obligations.

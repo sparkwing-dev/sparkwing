@@ -1,39 +1,42 @@
 # W1b handoff
 
-Continues 3ca8df53f. W1b remains incomplete. The lead owns commits, independent
-review, pipelines and native integration. Earlier continuation reports remain
+Continues 55eb66915. W1b remains incomplete. The lead owns commits, independent
+review, pipelines and native integration. Prior implementation and reports remain
 in Git history and the swarm's rewrite-logs directory.
 
 ## This continuation
 
-Completed the first two lead handoffs in contracts/handoffs.md.
+The first two lead handoffs were already committed and were not repeated. The
+shared CommitRecord/CopyMemo mutation owner and its authority property remain
+intact. This continuation advances the third handoff by retiring the independent
+bucket-listing storage pass and its consumers.
 
-Invariant: no record, manifest or memo copy persists unless the writer,
-ancestor and holder authority is current at the mutation boundary.
+Removed six public Store APIs: StorageMarks, ReconcileStorage,
+TeamsOverFreeLogShare, PrunableNodeLogs, PruneStorageCommitReceipts and
+PruneDownloadDays. TeamOverShare, lockCommittedTx, everHeldCredits, the one-day
+receipt horizon and the S3/filesystem log measurement helpers are also removed.
+The controller no longer has WithStoragePass, RunStoragePass, StoragePassEvery,
+its background loop, health projection or free-share log-pruning algorithm.
+Controller startup no longer configures that pass. The existing maintenance
+timer continues to use the singleton maintenance lease, final retention,
+tagged-stream sealing and committed-inventory billing.
 
-CommitRecord and CopyMemo now share mutateRecordsTx in blob_record_mutation.go.
-They prepare every destination namespace and verified manifest before the owner
-takes sorted blob locks. The owner checks existence, authorized references and
-immutable destinations, then reloads writer ancestry and the holder against the
-store clock. Only then does it persist the complete record/member batch and
-clear tombstones. The caller retains commit and rollback. Failed commits return
-no record or memo hit. Copy deadlines are checked again before commit.
-Immutable replay retains the prior record metadata and copied provenance.
+Deleted 482 production Go lines and added one replacement GoDoc line, for a net
+481-line production reduction. Removed 412 legacy test lines, added five replacement lines
+in retained tests, and added the final-inventory controller test plus the minimal
+31-line S3 fixture still needed by the legacy direct-upload test. The fixture no
+longer builds a cache store or listing hook. No schema, billing price, minimum,
+quota, flag, setting, environment variable or compatibility mechanism was added.
+Allowance-driven physical eviction remains an integration obligation from C1.
 
-Removed 77 lines of the former separate mutation paths and four catalog lines.
-No legacy public API or feature was retired in this continuation. No schema,
-rate, limit, setting, environment variable or public contract shape was added.
-The shared mutation owner is the mechanism the lead explicitly approved.
-
-Deleted exactly the two authorized catalog entries from tenantTables
-(output_runs and output_tombstones) and the ExpiredOutputRuns exemption from
-reviewedUnscopedSQL. The catalog guards now pass. No other W1 code changed.
-
-The complete pre-existing TestBlobRecordsMutationCannotOutliveAuthority property
-failed before the change in all six commit/copy x lease/leaf/ancestor cases. It
-now passes its live controls, exact-expiry checks and 48 generated cases per
-combination. Existing manifest-I/O expiry, immutable replay, atomic-copy rollback
-and copy-versus-GC tests also pass. No archived T1 port is newly closed.
+TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage verifies that the
+real controller maintenance path completes without errors on the final schema,
+bills committed blob inventory despite stale raw counters, and preserves summed
+replica usage. The old listing-reconciliation, one-day receipt-pruning and
+free-share deletion tests were retired with their algorithms. Existing store
+proofs retain atomic upload replay, retained inventory, concurrent-client,
+rollback and restart coverage. No archived T1 source row is newly closed and no
+native acceptance cell was activated.
 
 ## Verification
 
@@ -42,21 +45,23 @@ GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W1b/. Use
 `go -C /home/bombuntu/.xwing/envs/1088/sparkwing`. Builds and tests use -p 4.
 
 - Whole-repository go build ./... passed.
-- go vet ./pkg/store/... ./internal/acceptance/... ./tests/acceptance/... passed.
-- The W1b store selection passed 199 top-level tests / 607 cases with no skips
-  or exclusions. It includes the complete publication property and both repaired
-  catalog guards. This is not a full-store pass.
+- go vet ./pkg/store/... ./pkg/controller/... ./internal/acceptance/...
+  ./tests/acceptance/... passed.
+- W1b selection: 199 top-level store tests / 607 passing cases, zero skips or
+  failures, in 74.546 seconds. This is not a full-store suite pass.
+- Five controller tests passed: the new inventory test, cloud default retention,
+  explicit self-hosted retention, the maintenance lease refusal/takeover test,
+  and the already-removed egress endpoint test.
 - TestStorage and TestBilling passed 2 top-level tests / 43 cases, including all
-  12 existing store-data-sqlite proofs. Native/platform skeletons retain 562
-  skips. No native cell was activated.
+  12 existing store-data-sqlite proofs. The 562 native/platform skips remain.
 - Required commentcheck -base main passed across 1012 files. sleepcheck -base HEAD
   and git diff --check passed.
-- All six generated publication-property branches passed under -race across
-  two invocations. The full invocation hit its 240-second test timeout during
-  copy/ancestor after the other five branches passed. Running that unfinished
-  branch alone passed in 48.636 seconds. No full-invocation race pass is claimed.
+- cmd/apidiff regenerated every package into scratch. All generated files match
+  .apidiff. Only this cut's entries changed in the committed snapshots.
+- The nine focused changelog/mirror tests passed. Root and embedded changelog
+  and migration sources match.
 
-The store run selection is:
+Store selection:
 
 ```text
 ^(TestStoreData|TestLogPersistence|TestResult|TestBlob|TestPayment|TestReversePaymentTakesBack|TestCreditSettings|TestSetCreditSettings|TestUnsetRateTable|TestSetRateTable|TestAStoredRateTable|TestATableWithoutAFourCore|TestStorage|TestBilling|TestGrantCredits|TestCreditGrant|TestCreditReversal|TestCreditHistory|TestCreditsBalanceIs|TestCreditsDefaultTenant|TestTenantSQLScope|TestTenantWriters|TestTenantTwins)
@@ -65,58 +70,88 @@ The store run selection is:
 Use `go test -json -p 4 ./pkg/store -run '<selection>' -count=1 -timeout=240s`.
 Acceptance uses `go test -json -p 4 ./internal/acceptance/... ./tests/acceptance/...
 -run '^(TestStorage|TestBilling)$' -count=1 -timeout=240s`.
-The race invocations add -race and select
-`^TestBlobRecordsMutationCannotOutliveAuthority$` (timeout 240s), then
-`^TestBlobRecordsMutationCannotOutliveAuthority$/^copy$/^ancestor$`
-(timeout 180s). The first invocation timed out as described above.
 
-## Remaining work and contract dependencies
+Controller selection:
 
-The lead's third handoff is open. Prioritize the legacy hard cuts and lifecycle
-billing joins next. Do not restore the deleted reapers or another record writer.
+```text
+^(TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage|TestAMultiTeamStoragePassSeedsRetentionAndReleasesOldRuns|TestASingleTeamControllerKeepsItsOperatorsRetention|TestStorageRetentionPassRequiresMaintenanceFence|TestLegacyEgressTotalsEndpointIsGone)$
+```
 
-- A1-24 retains the transaction-owned data checker and binding integration.
-- A1-27 still needs W1's issuance/start/renew/release/reap/finish joins. The real
-  issuer refuses metered roots and otherwise persists unmetered awards directly.
-  W1/W2 must agree how an unstarted at_award award refunds its automatically
-  opened interval, and how hosts explicitly report customer-runner waits. C1's
-  RenewUnit executing flag only records first execution. It does not declare a
-  wait/pause operation. Do not silently reinterpret that flag. C2 SettleBilling
-  remains a panic stub. The existing accounting tests use a contract calculator
-  fake and do not prove real issuance or lifecycle settlement.
-- A1-28 retains committed-checkout settlement. W2 owns verified provider events
-  and removal of caller-selected paid grants. VerifiedPaymentEvent.Event and
-  provider verification remain panic stubs.
-- A1-29 through A1-35 retain upload/receipt/provenance/member/reference/depcache,
-  tombstone and tagged-log persistence. The approved publication redesign is now
-  implemented. W7 RecordNamespace and AuthorizeEdge remain stubs, so store proofs
-  use contract fakes. Physical verification/deletion, manifests, GC integration,
-  binary execution, trusted replica identity and proxy egress remain open.
-- DataController.DataAuthority and BindData remain W2 stubs. The legacy controller
-  data_download.go handler still combines source, artifact and binary signing
-  through cache grants. Deleting only its binary lookup also removes a transport
-  used by existing direct-source callers. The complete old transport and caller
-  cut remains open. No endpoint or client was partially disabled here.
-- Legacy claim-credit, raw storage counters, output, direct-upload and log paths
-  still need retirement. Source identity for never-executed materialization and
-  imported owner-log identity still need the previously requested cross-area
-  contracts. Result attachment requires the real verified manifest reader.
-- A1-53 needs native acceptance evidence. PostgreSQL, providers, physical
-  backends and native placements were not exercised here.
+Docs selection:
 
-No foreign contract changed. These are existing integration gaps, not newly
-approved billing semantics. The first two lead entries are done. The third is
-not done.
+```text
+^(TestEmbeddedChangelogMatchesRoot|TestPkgDocsContentMatchesDocsRoot|TestReadChangelogTopicReturnsBody|TestListIncludesChangelogTopic|TestSearchFindsChangelog|TestChangelogSection_|TestChangelogHeadingMatches)
+```
 
-## Files and cleanup
+The first controller compile found an unused io import left by deleting its
+measurement test. Removing that import fixed compilation. Full pkg/docs testing
+cannot run because TestWebClient_Versions_HappyPath opens a forbidden socket.
+A broader docs selection also failed TestDocsNameOnlySymbolsThatExist on 17 SDK
+symbols in inherited reference pages. Those pages and SDK exports were not
+changed here. Neither result is claimed as a pass. No full controller, full docs,
+race, PostgreSQL, provider, physical-backend or native-platform pass is claimed.
 
-Owned code changes: blob_lookup.go, blob_record_runtime.go and the new
-blob_record_mutation.go. Owned documentation: STORE-DATA.md and this handoff.
-Shared files: design/rewrite/contracts/c1-data.md, tenant.go (two catalog lines)
-and tenant_sql_scope_guard_test.go (the two-line obsolete exemption). No caller
-outside pkg/store changed.
+## Amendment audit and remaining work
 
-No Sparkwing binary, service, provider, deployment, release, Git write or harness
-memory write ran. Git identity remains Korey Gambill and core.worktree is unset.
-Scratch is removed after verification. No independent review or pipeline pass
-is claimed.
+- A1-24: transaction-owned data authorization and binding proofs remain.
+  W2 DataController.DataAuthority and BindData still need real adapters.
+- A1-27: issuance/start/renew/release/reap/finish billing joins remain open.
+  authority_issue.go still refuses metered roots and persists unmetered awards
+  through W1's separate writer. C2 SettleBilling remains a panic stub. W1/W2 must
+  specify how an unstarted at_award award refunds its automatically opened
+  interval, and how hosts explicitly report customer-runner waits. RenewUnit's
+  executing flag records first execution, not pause/resume. No new semantics were
+  inferred here. Accounting proofs continue to use contract calculator fakes.
+- A1-28: committed-checkout settlement remains implemented. W2 owns verified
+  provider events and removal of caller-selected paid grants.
+  VerifiedPaymentEvent.Event and provider verification remain stubs.
+- A1-29 through A1-35: upload tickets, exact tagged receipts, provenance,
+  manifests/members, reference authorization, depcache, tombstones and tagged
+  logs remain implemented behind contracts. W7 RecordNamespace and AuthorizeEdge
+  remain stubs. Store proofs use contract fakes. Physical verification/deletion,
+  verified manifest-reader configuration, GC, trusted replica identity, binary
+  execution policy, signed transfers and exact proxy egress remain integration
+  work. This continuation removes raw bucket reconciliation and its pruning
+  path. It does not complete allowance-driven physical eviction.
+- Legacy claim-credit, principal-selected event counters, storage reservation
+  and download counters, output objects, direct uploads and node-log transport
+  still need complete hard cuts with their callers. The old data_download.go
+  handler combines direct source, artifacts and binary signing through cache
+  grants. Do not remove only its binary lookup and strand direct-source callers.
+  Source identity for never-executed materialization and imported owner-log
+  identity still need the previously requested cross-area contracts.
+- A1-53: all native placement, real provider/backend and PostgreSQL acceptance
+  evidence remains with the lead and integrating areas.
+
+W1's bucket_measure_lease.go is untouched. Its now-unused RunStoragePassLeased
+wrapper and storage.pass keys remain for W1 to remove. Its reaper and bucket
+measurement concerns were outside this cut. The legacy expired-claim accounting
+helper was already removed before this continuation and was not recreated.
+
+No foreign Go contract changed. C1 documents the removed surface. The first two
+lead items remain done. The third remains in progress.
+
+## Shared files and cleanup
+
+Owned store changes: team_storage.go, node_logs.go, team_storage_test.go,
+STORE-DATA.md and this handoff. The only W1 test edit removes five SQL-review
+exemptions for deleted functions. Its guard passes. No W1 runtime file changed.
+
+Minimal production caller removals outside pkg/store:
+cmd/sparkwing-controller/main.go and controller handlers.go, server.go,
+storage.go, log_segments.go, plus deletion of storage_pass.go. Shared fixtures:
+direct_upload_test.go, log_segments_internal_test.go, the extracted
+direct_upload_bucket_test.go, the new storage_inventory_internal_test.go and
+deletion of storage_pass_test.go. No internal/blob, internal/cache, host,
+ protocol or SDK implementation changed.
+
+Shared documentation: contracts/c1-data.md, contracts/t1-port-inventory.md,
+.apidiff/pkg_store.txt, .apidiff/pkg_controller.txt, CHANGELOG.md,
+docs/migrations/_unreleased.md and their two embedded copies. The report names
+all caller migrations. Product docs state that physical eviction is unfinished.
+
+No service, candidate installation, provider call, deployment, release, Git write
+or harness-memory write ran. Bootstrap discovery ran installed sparkwing info
+before the brief was loaded. No Sparkwing command ran after the brief. There is
+no local Git identity or core.worktree override. Scratch and owned check processes
+are removed before reporting. The lead retains committing, review and pipelines.

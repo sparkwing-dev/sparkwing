@@ -42,17 +42,11 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).DueCardRefunds":      "the payment worker lists every team's queued refunds in one pass",
 	"(*Store).ReportCardRefund": "Stripe names a refund by its payment and refund ids alone; the team is what " +
 		"the queued row says",
-	"globalRunnerRefusal":                 "the global concurrent runner cap counts live claims from every team",
-	"globalRunsPerHourRefusal":            "the global hourly cap counts runs from every team",
-	"(*Store).NodeClaimFenceNodeForRun":   "the run ID is global, and the query matches its exact claimant and generation",
-	"(*Store).PruneStorageCommitReceipts": "the hourly storage pass drops receipt rows past the retry window for every team",
+	"globalRunnerRefusal":               "the global concurrent runner cap counts live claims from every team",
+	"globalRunsPerHourRefusal":          "the global hourly cap counts runs from every team",
+	"(*Store).NodeClaimFenceNodeForRun": "the run ID is global, and the query matches its exact claimant and generation",
 	"(*Store).expiredReservationRows": "the sweep finds which teams hold expired reservations; each release " +
 		"then runs under that team's own row lock",
-	"(*Store).StorageMarks":          "the storage pass reconciles every team's count of one store from one bucket listing",
-	"(*Store).TeamsOverFreeLogShare": "the storage pass finds every team whose logs are past its share, slot or no slot",
-	"lockCommittedTx":                "the storage pass reconciles every team's count of one store from one bucket listing",
-	"(*Store).PruneDownloadDays": "drops every team's download days past the window, which is a deployment-wide " +
-		"retention, not one team's data",
 
 	"runOwnerTx":             "asks which team owns an id, so an answer scoped to the asker is no answer",
 	"(*Store).NodeOutputKey": "the run ID is global, and the key only names an attempt the upload's own check binds",

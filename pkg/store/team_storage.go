@@ -46,8 +46,6 @@ func (k StorageKind) limitName() string { return "free_" + string(k) + "_share" 
 // when the writer that took it never commits or releases it.
 const DefaultStorageReservationTTL = time.Hour
 
-const storageCommitReceiptHorizon = 24 * time.Hour
-
 func execStatements(ctx context.Context, tx *storeTx, script string) error {
 	for _, stmt := range splitStatements(script) {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
@@ -110,12 +108,7 @@ func newReservationID() (string, error) {
 	return "sr_" + hex.EncodeToString(b[:]), nil
 }
 
-// ReserveStorage holds req.Bytes of the team's room in one store, or refuses
-// with a [*StorageQuotaError] past a free team's cache share and with
-// [ErrFreeStoragePaused] for a team with neither credits nor a slot while
-// every slot is taken. A free team's log writes are never refused for its
-// share; the hourly storage pass prunes its oldest finished runs back under
-// it. A funded team is granted what it asks for and counted all the same.
+// ReserveStorage holds the team's room in one store, subject to cache share and free-slot availability.
 func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ StorageReservation, err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -517,20 +510,6 @@ func replayStorageRenewTx(ctx context.Context, tx *storeTx, c StorageCommit, nex
 	}
 }
 
-// PruneStorageCommitReceipts bounds the receipt table after the retry window.
-// A commit replayed after that window counts again.
-func (s *Store) PruneStorageCommitReceipts(ctx context.Context, now time.Time) (int64, error) {
-	if now.IsZero() {
-		now = time.Now()
-	}
-	res, err := s.exec(ctx, `DELETE FROM storage_commit_receipts WHERE committed_at < ?`,
-		now.Add(-storageCommitReceiptHorizon).UnixNano())
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
-}
-
 // ReleaseStorage gives back team's reservation id, whose write stored
 // nothing. A reservation already committed, released or expired, or not
 // team's, is not an error.
@@ -630,83 +609,6 @@ func (s *Store) TeamStorage(ctx context.Context, team Team) (_ map[StorageKind]T
 			u.ReconciledAt = time.Unix(0, reconciled).UTC()
 		}
 		out[StorageKind(kind)] = u
-	}
-	return out, rows.Err()
-}
-
-// StorageMarks reports every team's running total of committed bytes in
-// kind. The storage pass takes it before it lists the bucket and hands it to
-// [Store.ReconcileStorage], which keeps what was committed in between.
-func (s *Store) StorageMarks(ctx context.Context, kind StorageKind) (_ map[Team]int64, err error) {
-	rows, err := s.query(ctx, `SELECT team, committed_bytes FROM team_storage WHERE store = ?`, string(kind))
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	out := map[Team]int64{}
-	for rows.Next() {
-		var team string
-		var n int64
-		if err := rows.Scan(&team, &n); err != nil {
-			return nil, err
-		}
-		out[Team(team)] = n
-	}
-	return out, rows.Err()
-}
-
-// ReconcileStorage replaces every team's stored bytes in kind with what a
-// listing found plus what was committed since marks was taken. A team the
-// listing did not find holds only what it committed since. An object written
-// while its team was being listed can land in both and count twice, which
-// holds the team to less, never more, until the next pass. A listed team
-// the deployment does not know gets no row.
-func (s *Store) ReconcileStorage(ctx context.Context, kind StorageKind, listed, marks map[Team]int64, now time.Time) (err error) {
-	if !kind.Valid() {
-		return fmt.Errorf("%w: unknown store %q", ErrInvalidInput, kind)
-	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	for team := range listed {
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO team_storage (team, store, used_bytes, reserved_bytes, committed_bytes, reconciled_at, updated_at)
-SELECT ?, ?, 0, 0, 0, 0, ? WHERE EXISTS (SELECT 1 FROM teams WHERE name = ?)
-ON CONFLICT (team, store) DO NOTHING`, string(team), string(kind), now.UnixNano(), string(team)); err != nil {
-			return err
-		}
-	}
-	committed, err := lockCommittedTx(ctx, tx, kind)
-	if err != nil {
-		return err
-	}
-	for team, total := range committed {
-		used := max(listed[team]+max(total-marks[team], 0), 0)
-		if _, err := tx.ExecContext(ctx, `
-UPDATE team_storage SET used_bytes = ?, reconciled_at = ?, updated_at = ? WHERE team = ? AND store = ?`,
-			used, now.UnixNano(), now.UnixNano(), string(team), string(kind)); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-func lockCommittedTx(ctx context.Context, tx *storeTx, kind StorageKind) (_ map[Team]int64, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT team, committed_bytes FROM team_storage WHERE store = ? ORDER BY team`+tx.forUpdate(), string(kind))
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	out := map[Team]int64{}
-	for rows.Next() {
-		var team string
-		var n int64
-		if err := rows.Scan(&team, &n); err != nil {
-			return nil, err
-		}
-		out[Team(team)] = n
 	}
 	return out, rows.Err()
 }
@@ -815,88 +717,4 @@ INSERT INTO team_download_day (team, day, bytes, updated_at) VALUES (?, ?, 0, ?)
 	}
 	out.DayBytes = used + c.Bytes
 	return out, tx.Commit()
-}
-
-// PruneDownloadDays deletes every team's download days before day, which is
-// spelled "2006-01-02".
-func (s *Store) PruneDownloadDays(ctx context.Context, day string) (int64, error) {
-	res, err := s.exec(ctx, `DELETE FROM team_download_day WHERE day < ?`, day)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
-}
-
-// TeamOverShare is a free team whose logs hold more than its share.
-type TeamOverShare struct {
-	Team      Team
-	OverBytes int64
-}
-
-// TeamsOverFreeLogShare reports every team without credits whose logs hold
-// more than its share of the free allowance, and by how much. A team with
-// neither credits nor a slot, and that never held credits, has a share of
-// zero; a team whose credits lapsed keeps its logs to retention.
-func (s *Store) TeamsOverFreeLogShare(ctx context.Context) (_ []TeamOverShare, err error) {
-	rows, err := s.query(ctx, `
-SELECT team, used_bytes FROM team_storage WHERE store = ? AND used_bytes > 0 ORDER BY team`, string(StorageLogs))
-	if err != nil {
-		return nil, err
-	}
-	used := map[Team]int64{}
-	var teams []Team
-	for rows.Next() {
-		var team string
-		var n int64
-		if err := rows.Scan(&team, &n); err != nil {
-			return nil, errors.Join(err, rows.Close())
-		}
-		used[Team(team)] = n
-		teams = append(teams, Team(team))
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return nil, err
-	}
-	// safety: the rows are closed before each team's standing is read, because
-	// SQLite's one connection deadlocks on a query under an open cursor.
-	var out []TeamOverShare
-	for _, team := range teams {
-		standing, err := s.StorageStandingFor(ctx, team)
-		if err != nil {
-			return nil, err
-		}
-		var share int64
-		switch standing.Tier {
-		case TeamTierFree:
-			share = FreeLogShare(standing.AllowanceBytes)
-		case TeamTierNone:
-			held, err := s.everHeldCredits(ctx, team)
-			if err != nil {
-				return nil, err
-			}
-			if held {
-				continue
-			}
-		default:
-			continue
-		}
-		if over := used[team] - share; over > 0 {
-			out = append(out, TeamOverShare{Team: team, OverBytes: over})
-		}
-	}
-	return out, nil
-}
-
-func (s *Store) everHeldCredits(ctx context.Context, team Team) (_ bool, err error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	held, err := rowPresentTx(ctx, tx, `SELECT 1 FROM credit_grants WHERE team = ? AND kind != ? AND amount_micro > 0 LIMIT 1`,
-		string(NormalizeTeam(team)), CreditGrantReversal)
-	if err != nil {
-		return false, err
-	}
-	return held, tx.Commit()
 }

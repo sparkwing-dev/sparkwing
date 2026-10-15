@@ -8,6 +8,16 @@ The primary inventory has 74 changed or added functions: 6 lifecycle, 6 state-ma
 
 ## Source snapshots
 
+The independent bucket-listing storage pass and its tests are retired.
+`pkg/controller/storage_inventory_internal_test.go:TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage`
+checks the replacement maintenance path against the final SQLite schema. It
+requires a clean maintenance pass, billing from committed blob inventory despite
+stale raw counters, and unchanged replica usage. Existing retained-storage and
+replica-accounting proofs cover rollback, concurrent clients and reopening.
+Listing reconciliation, receipt replay after one-day pruning, and free-share
+log deletion tests are deleted with those mechanisms. Allowance-driven physical
+eviction and native transport remain open. No archived source row is newly closed.
+
 The unfenced node/trigger reapers and their dispatcher-expiry helpers are removed.
 `pkg/controller/reaper_test.go:TestReaperRecoversExpiredOwnerAndKeepsLiveOwner`
 replaces its private ticker-based reaper with the real elected controller pass.

@@ -81,10 +81,6 @@ func (s *Server) maintainStorage(ctx context.Context) {
 		s.logger.Error("storage settings read failed", "err", err)
 		return
 	}
-	now := time.Now().UTC()
-	if _, err := s.store.PruneStorageCommitReceipts(ctx, now); err != nil {
-		s.logger.Error("prune storage commit receipts failed", "err", err)
-	}
 	s.maintainRetainedData(ctx)
 	size, err := s.store.AsOperator().DatabaseSize(ctx)
 	if err != nil {

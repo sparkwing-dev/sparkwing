@@ -3034,16 +3034,12 @@ func (s *Store) PrincipalHoldsProfileClaim(ctx context.Context, key string, clai
 func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) ProvisionCapability(ctx context.Context, spec capability.ProvisionSpec) (capability.Issued, error)
-func (s *Store) PrunableNodeLogs(ctx context.Context, team Team, limit int) (_ []NodeLog, err error)
-func (s *Store) PruneDownloadDays(ctx context.Context, day string) (int64, error)
 func (s *Store) PruneEgressUsage(ctx context.Context, before string) (int, error)
-func (s *Store) PruneStorageCommitReceipts(ctx context.Context, now time.Time) (int64, error)
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error)
 func (s *Store) ReadClaimProfile(ctx context.Context, authority capability.AuthorityRef) (match.Profile, match.Resources, error)
 func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) ([]ReapedUnit, error)
 func (s *Store) ReconcileFreeEventBytes(ctx context.Context) error
-func (s *Store) ReconcileStorage(ctx context.Context, kind StorageKind, listed, marks map[Team]int64, now time.Time) (err error)
 func (s *Store) RecordAgentLabels(ctx context.Context, prefix string, labels []string) error
 func (s *Store) RecordAttemptIntent(ctx context.Context, attemptID, paymentIntent string, now time.Time) error
 func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error
@@ -3127,14 +3123,12 @@ func (s *Store) SourceBoundToRun(ctx context.Context, team Team, key, runID stri
 func (s *Store) StartClaimExecution(ctx context.Context, tok ClaimToken, now time.Time) (specHash string, err error)
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
-func (s *Store) StorageMarks(ctx context.Context, kind StorageKind) (_ map[Team]int64, err error)
 func (s *Store) StorageStandingFor(ctx context.Context, team Team) (_ StorageStanding, err error)
 func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID string, from, to Team) error
 func (s *Store) SyncLaunchJobs(ctx context.Context, launcher ClaimIdentity, jobs []LaunchJob, now time.Time) ([]LaunchJobResult, error)
 func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error)
 func (s *Store) TeamInfo(ctx context.Context, team Team) (TeamInfo, error)
 func (s *Store) TeamStorage(ctx context.Context, team Team) (_ map[StorageKind]TeamStorageUsage, err error)
-func (s *Store) TeamsOverFreeLogShare(ctx context.Context) (_ []TeamOverShare, err error)
 func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)
 func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error
@@ -3192,10 +3186,6 @@ type TeamMatch struct {
 	Slug        Team
 	DisplayName string
 	Owners      []string
-}
-type TeamOverShare struct {
-	Team      Team
-	OverBytes int64
 }
 type TeamSecret struct {
 	Team   Team

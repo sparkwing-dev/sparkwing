@@ -1,5 +1,20 @@
 # Migrating to the next release
 
+## Storage maintenance uses committed inventory
+
+Remove `Server.WithStoragePass` and `Server.RunStoragePass` calls. The controller's
+existing maintenance timer runs leased retention, tagged-log sealing and storage
+billing. An embedding that serves `Handler` directly calls `Server.MaintainStorage`.
+`StoragePassEvery` is removed. `StorageMaintenanceInterval` names the timer period.
+
+`Store.StorageMarks`, `ReconcileStorage`, `TeamsOverFreeLogShare`,
+`PrunableNodeLogs`, `PruneStorageCommitReceipts` and `PruneDownloadDays` are removed.
+Use `Tenant.StorageRetainedBytes` for retained inventory and `Tenant.StorageUsageFor`
+for summed replica usage. `Operator.ChargeRetainedStorage` and `MaintainRetention`
+require the current maintenance lease. Bucket listings no longer replace usage
+counters. Log retention follows the run's persisted class. Allowance-driven
+physical eviction still requires the final storage adapter.
+
 ## Unit recovery requires the elected reaper lease
 
 `Store.ReapExpiredNodeClaims`, `Maintenance.RecoverExpiredNodeClaims`,
@@ -138,8 +153,8 @@ that keep the logs service running.
 
 - **Controller:** drop `--logs-url` and `--logs-archive-store`, and delete
   the `logs-delete-token` file from `--credentials-dir` (or the
-  `controller.credentialsSecret` key); nothing reads it. The storage pass
-  counts and prunes logs from the segments, and deleting a team deletes its
+  `controller.credentialsSecret` key). Nothing reads it. Leased maintenance
+  bills committed blob and tagged-log inventory. Deleting a team deletes its
   segments.
 - **Runners and agents:** drop `--logs` from `sparkwing-runner runner` and
   `launch`, `--trigger-runner-logs-url` from `runner`, and the `logs:` key

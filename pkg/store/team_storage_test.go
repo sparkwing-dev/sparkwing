@@ -61,7 +61,7 @@ func TestReserveHoldsAFreeTeamToEachShareApart(t *testing.T) {
 		t.Fatalf("the log share with the cache share full: %v", err)
 	}
 	if past, err := reserve(st, "team-a", store.StorageLogs, 1, now); err != nil || past.Granted != 1 {
-		t.Fatalf("one byte past the log share = %+v, %v; want it granted for the storage pass to prune", past, err)
+		t.Fatalf("one byte past the log share = %+v, %v; want it granted without a log-share refusal", past, err)
 	}
 
 	if err := st.CommitStorage(context.Background(), store.StorageCommit{ID: res.ID, Team: "team-a", Kind: store.StorageCache, Bytes: 10 << 10, Now: now}); err != nil {
@@ -313,37 +313,6 @@ func TestCommitOfAShrinkingOverwriteNeverGoesNegative(t *testing.T) {
 	}
 }
 
-func TestShrinkingOverwriteSeenDuringListingKeepsListedBytes(t *testing.T) {
-	st := storetest.Open(t)
-	freeTeam(t, st, "team-a")
-	ctx := context.Background()
-	now := time.Now()
-	first, err := reserve(st, "team-a", store.StorageCache, 100, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CommitStorage(ctx, store.StorageCommit{ID: first.ID, Team: "team-a", Kind: store.StorageCache, Bytes: 100, Now: now}); err != nil {
-		t.Fatal(err)
-	}
-	marks, err := st.StorageMarks(ctx, store.StorageCache)
-	if err != nil {
-		t.Fatal(err)
-	}
-	overwrite, err := reserve(st, "team-a", store.StorageCache, 20, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CommitStorage(ctx, store.StorageCommit{ID: overwrite.ID, Team: "team-a", Kind: store.StorageCache, Bytes: -80, Now: now}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.ReconcileStorage(ctx, store.StorageCache, map[store.Team]int64{"team-a": 20}, marks, now); err != nil {
-		t.Fatal(err)
-	}
-	if got := usageOf(t, st, "team-a", store.StorageCache).UsedBytes; got != 20 {
-		t.Fatalf("listed shrink used %d bytes, want 20", got)
-	}
-}
-
 // A commit is scoped to the team that names it: another team's reservation
 // id drops nothing of that team's and counts only for the committer.
 func TestCommitNamingAnotherTeamsReservationTouchesOnlyTheCommitter(t *testing.T) {
@@ -421,40 +390,6 @@ func TestCommitReceiptCountsReplayOnceAndRejectsChangedBytes(t *testing.T) {
 	}
 }
 
-func TestCommitReceiptPrunesAfterOneDay(t *testing.T) {
-	st := storetest.Open(t)
-	freeTeam(t, st, "team-a")
-	now := time.Now()
-	res, err := reserve(st, "team-a", store.StorageLogs, 100, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := store.StorageCommit{ID: res.ID, Team: "team-a", Kind: store.StorageLogs, Bytes: 100, Now: now}
-	if err := st.CommitStorage(t.Context(), c); err != nil {
-		t.Fatal(err)
-	}
-	if n, err := st.PruneStorageCommitReceipts(t.Context(), now.Add(23*time.Hour)); err != nil || n != 0 {
-		t.Fatalf("prune before horizon = %d, %v", n, err)
-	}
-	c.Now = now.Add(23 * time.Hour)
-	if err := st.CommitStorage(t.Context(), c); err != nil {
-		t.Fatal(err)
-	}
-	if got := usageOf(t, st, "team-a", store.StorageLogs).UsedBytes; got != 100 {
-		t.Fatalf("within horizon used %d, want 100", got)
-	}
-	if n, err := st.PruneStorageCommitReceipts(t.Context(), now.Add(25*time.Hour)); err != nil || n != 1 {
-		t.Fatalf("prune after horizon = %d, %v", n, err)
-	}
-	c.Now = now.Add(25 * time.Hour)
-	if err := st.CommitStorage(t.Context(), c); err != nil {
-		t.Fatal(err)
-	}
-	if got := usageOf(t, st, "team-a", store.StorageLogs).UsedBytes; got != 200 {
-		t.Fatalf("after pruned horizon used %d, want 200", got)
-	}
-}
-
 func charge(st *store.Store, team store.Team, n int64, now time.Time) (store.DownloadCharged, error) {
 	return st.ChargeDownload(context.Background(), store.DownloadCharge{
 		Team: team, Bytes: n, Now: now, FreeCapBytes: 100, FundedCapBytes: 1000,
@@ -513,47 +448,6 @@ func TestChargeDownloadRaceForTheLastBytesAdmitsExactlyOne(t *testing.T) {
 		if won != 1 {
 			t.Fatalf("round %d: %d of %d racing charges took the last 60 bytes, want exactly 1", round, won, readers)
 		}
-	}
-}
-
-// The storage pass replaces the count with what it listed plus what was
-// committed while it listed, so a write that lands mid-listing is kept.
-func TestReconcileKeepsWritesCommittedWhileListing(t *testing.T) {
-	st := storetest.Open(t)
-	freeTeam(t, st, "team-a")
-	freeTeam(t, st, "team-b")
-	freeTeam(t, st, "team-c")
-	ctx := context.Background()
-	now := time.Now()
-	commit := func(team store.Team, n int64) {
-		t.Helper()
-		res, err := st.ReserveStorage(ctx, store.StorageReserve{Team: team, Kind: store.StorageCache, Bytes: n, Now: now})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := st.CommitStorage(ctx, store.StorageCommit{ID: res.ID, Team: team, Kind: store.StorageCache, Bytes: n, Now: now}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	commit("team-a", 100)
-	commit("team-b", 100)
-	marks, err := st.StorageMarks(ctx, store.StorageCache)
-	if err != nil {
-		t.Fatal(err)
-	}
-	commit("team-a", 7)
-	commit("team-c", 5)
-	listed := map[store.Team]int64{"team-a": 300}
-	if err := st.ReconcileStorage(ctx, store.StorageCache, listed, marks, now); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	for team, want := range map[store.Team]int64{"team-a": 307, "team-b": 0, "team-c": 5} {
-		if got := usageOf(t, st, team, store.StorageCache); got.UsedBytes != want {
-			t.Errorf("%s used = %d, want %d", team, got.UsedBytes, want)
-		}
-	}
-	if got := usageOf(t, st, "team-a", store.StorageLogs); got.UsedBytes != 0 {
-		t.Errorf("logs row after a cache reconcile = %+v", got)
 	}
 }
 

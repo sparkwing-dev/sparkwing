@@ -421,9 +421,9 @@ func TestDirectCommitRefusesExistingObjectWithDifferentChecksum(t *testing.T) {
 }
 
 func TestDirectUploadRequiresTheRunsLiveClaim(t *testing.T) {
-	b := newPassBuckets(t)
+	bucket := directUploadBucket(t)
 	f := newAppFixture(t, func(s *controller.Server) *controller.Server {
-		return s.WithDirectUploads(b.raw, passBucket, "cache")
+		return s.WithDirectUploads(bucket, directUploadBucketName, "cache")
 	})
 	olga := f.ghUser(501, "olga")
 	rawRunner, prefix := f.runWork(olga, "run-direct", "https://github.com/acme/widgets.git")
