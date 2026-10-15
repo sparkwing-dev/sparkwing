@@ -51,6 +51,7 @@ type Server struct {
 	resolveCreditReader        func(context.Context, store.Team) (CreditReader, error)
 	resolveConcurrencyStore    func(context.Context, store.Team) (ConcurrencyStore, error)
 	resolveQueueReader         func(context.Context, store.Team) (QueueReader, error)
+	resolveRunnerInventory     func(context.Context, store.Team) (RunnerInventoryReader, error)
 	resolveCredentialInventory func(context.Context, store.Team) (CredentialInventoryReader, error)
 	resolveCredentialWriter    func(context.Context, store.Team) (CredentialWriter, error)
 	resolveCredentialRotator   func(context.Context, store.Team) (CredentialRotator, error)
@@ -112,12 +113,8 @@ type Server struct {
 	trustedProxyAddr string
 	metricsLn        net.Listener
 
-	runnerHeadroom *runnerHeadroomRegistry
-
-	liveLogs         *liveLogs
-	runnerPresence   *runnerPresenceRegistry
-	runnerHeartbeats *runnerHeartbeatRegistry
-	placement        placementPolicy
+	liveLogs  *liveLogs
+	placement placementPolicy
 
 	// safety: names this process in the cron tick lease and on each recorded
 	// tick, so an operator can tell which controller evaluated.
@@ -165,10 +162,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		loginLimit:         newLoginLimiter(),
 		queueTimeout:       15 * time.Minute,
 		sessionMaxLifetime: DefaultSessionMaxLifetime,
-		runnerHeadroom:     newRunnerHeadroomRegistry(),
 		liveLogs:           newLiveLogs(),
-		runnerPresence:     newRunnerPresenceRegistry(),
-		runnerHeartbeats:   newRunnerHeartbeatRegistry(),
 		cronHolder:         defaultCronHolder(),
 		leaseHolder:        rand.Text(),
 		requestBudget:      newPrincipalBudget(RequestBudget{}),
@@ -681,17 +675,13 @@ func (s *Server) sampleOperationalSeries(ctx context.Context) {
 	} else {
 		setPendingNodes(n)
 	}
-	if n, err := s.store.CountActiveRunners(ctx, runnerLivenessWindow); err != nil {
-		s.logger.Error("active runners sample failed", "err", err)
-	} else {
-		setActiveRunners(n)
-	}
+
 	if counts, err := s.store.CountNodesByQueueState(ctx); err != nil {
 		s.logger.Error("queue depth sample failed", "err", err)
 	} else {
 		setQueueDepth(counts)
 	}
-	liveRunners.sample(s.runnerPresence.liveLabelSets(time.Now(), runnerLivenessWindow))
+	s.sampleRunners(ctx)
 }
 
 // safety: both ledger sums scan a table that is never pruned, so they run on a

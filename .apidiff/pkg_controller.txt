@@ -23,15 +23,13 @@ type Agent struct {
 	Status        string
 	ActiveJobs    []string
 	MaxConcurrent int
-
-	Headroom *AgentHeadroom
+	Headroom      *AgentHeadroom
 }
 type AgentHeadroom struct {
 	Cores       float64
 	MemoryBytes int64
 	QueueDepth  int
-
-	ObservedAt string
+	ObservedAt  string
 }
 type AuthorityRevoker interface {
 	RevokeAuthority(context.Context, store.Actor, capability.AuthorityRef) error
@@ -430,8 +428,31 @@ type RunTransactions interface {
 type RunnerAdmissionPolicy interface {
 	CheckRunner(context.Context, string) error
 }
+type RunnerHeadroom struct {
+	Cores       float64
+	MemoryBytes int64
+	QueueDepth  int
+	ObservedAt  time.Time
+}
+type RunnerInventoryReader interface {
+	Team() store.Team
+	ReadRunners(context.Context) (RunnerSnapshot, error)
+}
 type RunnerMeteringWriter interface {
 	SetRunnerMetered(context.Context, capability.Authorized, string, bool) error
+}
+type RunnerObservation struct {
+	Team          store.Team
+	Runner        nodeproto.RunnerIdentity
+	Location      string
+	LastSeen      time.Time
+	ActiveJobs    []string
+	MaxConcurrent int
+	Headroom      *RunnerHeadroom
+}
+type RunnerSnapshot struct {
+	Now     time.Time
+	Runners []RunnerObservation
 }
 type ScheduleWriter interface {
 	Team() store.Team
@@ -514,6 +535,7 @@ func (s *Server) WithQueueReader(resolve func(context.Context, store.Team) (Queu
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
 func (s *Server) WithRunControlWriter(resolve func(context.Context, store.Team) (RunControlWriter, error)) *Server
+func (s *Server) WithRunnerInventory(resolve func(context.Context, store.Team) (RunnerInventoryReader, error)) *Server
 func (s *Server) WithRunnerMeteringWriter(writer RunnerMeteringWriter) *Server
 func (s *Server) WithS3Logs(client *s3.Client, bucket, prefix string) *Server
 func (s *Server) WithScheduleWriter(resolve func(context.Context, store.Team) (ScheduleWriter, error)) *Server

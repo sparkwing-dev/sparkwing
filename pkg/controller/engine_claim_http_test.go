@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -231,4 +232,59 @@ func TestEngineClaimHTTPAuthenticatesBeforeNamedLookupErrors(t *testing.T) {
 	}
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/claim", `{"runner_version":"v1","kinds":["trigger"],"run_id":"foreign"}`, 400)
 	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/claim", body, 200)
+}
+
+func TestEngineClaimHTTPDeadCredentialProperty(t *testing.T) {
+	e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
+	body := `{"runner_version":"v1","kinds":["node"],"available_cores":1}`
+	if err := quick.Check(func(secret [32]byte, legacy bool) bool {
+		prefix := "swk_"
+		if legacy {
+			prefix = "swr_"
+		}
+		unknown := prefix + base64.RawURLEncoding.EncodeToString(secret[:])
+		w := engineClaimHTTP(t, h, unknown, "POST", "/api/v1/runners/claim", body, 401)
+		return !strings.Contains(w.Body.String(), unknown) && !strings.Contains(w.Body.String(), `"capability"`)
+	}, &quick.Config{MaxCount: 64}); err != nil {
+		t.Fatal(err)
+	}
+	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"compute_start"}`, 403)
+	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}
+	if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: ref}, ref); err != nil {
+		t.Fatal(err)
+	}
+	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", body, 401)
+	var count int
+	if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM capabilities WHERE issuance='award' AND subject_id='root'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("dead roots persisted %d awards: %v", count, err)
+	}
+}
+
+func TestEngineClaimHTTPCommitsRunnerObservations(t *testing.T) {
+	e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
+	before := time.Now()
+	body := `{"runner_version":"v1","kinds":["node"],"available_cores":1,"labels":["tool:git","name=impostor","class=cloud","pool=forged"]}`
+	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", body, 200)
+	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runners, err := tenant.ListRegisteredAgents(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, runner := range runners {
+		if runner.CapabilityPrefix != "root" {
+			continue
+		}
+		if runner.Name != "root" || runner.Profile.Class != "agent" || len(runner.Profile.ReservedPools) != 0 || !reflect.DeepEqual(runner.Profile.Labels, []string{"tool:git"}) || runner.LastSeen.Before(before) || runner.LastSeen.After(time.Now()) {
+			t.Fatalf("poll changed enrollment or lost its observation: %+v", runner)
+		}
+		return
+	}
+	t.Fatal("committed machine observation missing")
 }

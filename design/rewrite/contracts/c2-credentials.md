@@ -2823,3 +2823,52 @@ replacing an ingress GET URL. It uses the same validated key, digest, size and
 expiry. PUTs and direct requests retain the S3 signature. Ingress selection travels
 in a private request context and grants no object authority. No foreign interface
 changed. W1 data-authority, metadata and charging composition remains required.
+
+
+## Runner observation cutover
+
+`Server.WithRunnerInventory` supplies the tenant-scoped `RunnerInventoryReader`:
+`Team() store.Team` and `ReadRunners(context.Context) (RunnerSnapshot, error)`.
+`RunnerSnapshot.Now` is the store clock for the same snapshot as its `Runners`.
+Each `RunnerObservation` carries its `Team`, granted `nodeproto.RunnerIdentity`,
+location, last accepted observation time, active job references, enrolled maximum
+concurrency and optional `RunnerHeadroom`. Headroom carries cores, memory bytes,
+queue depth and the store's accepted `ObservedAt` time.
+
+W1 implements this read on Tenant. Resolve live enrollment and complete ancestry,
+then join accepted polls, renewals and current awards by their stored authority.
+Use the award's immutable runner identity for cloud/here activity. A display name,
+holder string or caller label cannot select or merge authority. Keep distinct
+roots distinct even if their names match. Return only this tenant's rows and
+current same-team job references. Exclude expired, revoked or replaced authority.
+Neither a lease deadline nor a caller-supplied clock is an observation time.
+An accepted renewal updates liveness without advertising free capacity or changing
+headroom. LastSeen and headroom observation times remain separate. Unknown
+headroom stays absent. The shared claim wire exposes available cores/memory but
+has no queue-depth observation field. W8/W9 must supply that contract before
+real queue-depth ingestion can be connected.
+
+GET /api/v1/runners and GET /api/v1/queue use this snapshot. The former retains
+its `agents` response field, with granted name/type/location and copied labels,
+activity and capacity. Duplicate names remain separate rows. No live jobs and
+an observation older than the existing two-minute window yields `offline`.
+Headroom older than the existing one-hour window is omitted. Foreign readers,
+foreign rows, absent snapshot clocks and corrupt numeric/timestamp facts refuse
+before any partial response. The default uses Store.ForTeam only when Tenant
+implements RunnerInventoryReader. Missing adapters return `policy_missing`.
+There is no ListAgentClaims or process-local observation fallback.
+
+Operational runner gauges use the same tenant snapshots through the existing
+Operator.ListTeams enumeration. A failed read preserves the previous sample and
+logs the failure. Claim-attention uses Tenant.ListRegisteredAgents and its
+committed profile/LastSeen. It does not overwrite enrollment from an in-memory
+poll. Successful authenticated machine claim polls call C1 RecordAgentLabels,
+which rechecks live authority and persists filtered labels with the store clock.
+Here and launcher credentials do not enter that machine-only transaction.
+
+The old holder parser, claim-token-prefix projection caller, runner presence,
+headroom and heartbeat registries, and their obsolete claim-body structs are
+deleted. The port inventory records the test mappings. W2's snapshot tests use
+real member credential issuance/authentication and a fake reader. Claim attention
+and accepted-poll observations use real SQLite. No native cell or production
+ReadRunners adapter is claimed by these component checks.

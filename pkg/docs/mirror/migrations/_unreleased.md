@@ -17,6 +17,16 @@ once authentication succeeds, including later authorization refusals. Remove
 queries for `sparkwing_auth_token_cache_total`, because the token-table cache is
 removed.
 
+## Runner observation snapshots
+
+Embedded controllers supply `Server.WithRunnerInventory` with a tenant-scoped
+`RunnerInventoryReader`. Runner lists and queue headroom use the same committed
+snapshot. The old process-local presence, heartbeat and headroom registries and
+holder-name parser are removed. A missing snapshot adapter returns `policy_missing`.
+The `/api/v1/runners` response retains `agents`. Equal display names can appear in
+separate rows because they do not merge credentials. Last-seen and headroom
+observation times remain separate. Runner metrics read the same snapshots.
+
 ## Reporting credential routes
 
 Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.

@@ -19,7 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -294,11 +293,6 @@ func removeLocalRunDir(runsDir, runID string) error {
 	return errors.Join(root.RemoveAll(runID), root.Close())
 }
 
-type claimResources struct {
-	Capacity     match.Resources `json:"capacity"`
-	Availability match.Resources `json:"availability"`
-}
-
 func newRunID() string {
 	ts := time.Now().UTC().Format("20060102-150405")
 	var suffix [2]byte
@@ -369,11 +363,6 @@ func writeError(w http.ResponseWriter, status int, err error) {
 func (s *Server) writeInternalError(w http.ResponseWriter, r *http.Request, operation string, err error) {
 	s.logger.Error(operation, append(requestLogAttrs(r), "err", err)...)
 	writeError(w, http.StatusInternalServerError, err)
-}
-
-type claimCapacity struct {
-	MaxConcurrent int `json:"max_concurrent"`
-	ActiveClaims  int `json:"active_claims"`
 }
 
 func (s *Server) handleListNodeSteps(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {

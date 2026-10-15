@@ -580,6 +580,12 @@ The controller returns granted class and location alongside free labels,
 repository fences, active jobs and measured headroom. Missing headroom means
 there is no observation. It is not a zero-capacity sample.
 
+Runner and queue views read one tenant-scoped store snapshot. Display names and
+holder strings grant no identity. Distinct credentials with the same name remain
+separate observations. Accepted renewals refresh liveness without offering a free
+slot or refreshing headroom. Embedded controllers supply `WithRunnerInventory`.
+A missing adapter returns `policy_missing`.
+
 A here runner is reserved for its run. Pool access comes from granted
 reservations and verified repository authority. The first eligible matching
 claim wins under the same matcher used for queued and named work.

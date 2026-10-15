@@ -384,20 +384,16 @@ It also shows what admission is doing with the machine:
   reserve, measured external applications, and total capacity. An external
   sensor gap remains a gap rather than becoming zero. Mirrors `sparkwing
   queue`.
-- **Fleet section**: the caller's team's runners that claimed work in the last
-  hour, with the labels and slot ceiling each last advertised, observed
-  liveness and headroom, and current run activity. A claim-mode agent with a plain `holder_prefix` keeps one stable
-  identity; idle polls from the credential that made its stored claim refresh
-  liveness. Polls from another credential cannot keep that claim live. The
-  most recently started claim owns a shared display name; unstarted
-  claims use stable credential order. Its active runs never mix with another
-  credential's. `last_seen` is the most recent node start, live poll, or
-  accepted claim heartbeat from that credential, never the future lease
-  deadline. A busy runner's heartbeat does not advertise a free slot. The
-  headroom observation time stays separate. Home reads its recently failed
-  pipelines from the caller's team-scoped runs. Database, object-store, auth,
-  and slow-response problems still degrade their service; the controller
-  health API keeps its own status.
+- **Fleet section**: the caller's team's granted runner identities, accepted
+  observations, active jobs and measured headroom from one store snapshot.
+  Distinct credentials with the same display name stay separate. `last_seen`
+  records an accepted poll or renewal, never a future lease deadline. A busy
+  runner's heartbeat does not advertise a free slot or refresh headroom.
+  Runner and queue views share the same snapshot. Embedded controllers supply
+  `WithRunnerInventory`; missing adapters refuse the read with `policy_missing`.
+  Home reads recently failed pipelines from the caller's team-scoped runs.
+  Database, object-store, auth and slow-response problems still degrade their
+  service. The controller health API keeps its own status.
 
 The run node list and DAG show a small location icon for known execution sites.
 Hover or focus the icon to see the runner or repository. Machine, Sparkwing

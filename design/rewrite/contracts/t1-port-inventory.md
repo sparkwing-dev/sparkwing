@@ -19,6 +19,48 @@ pending. This adds no archived source-function port identity.
 
 # Acceptance test port inventory
 
+W2 runner-observation ports: the five tests in agents_test.go move to
+TestRunnerInventoryHTTPUsesCommittedSnapshot,
+TestRunnerInventoryHTTPNameProperty, TestRunnerInventoryHTTPTenantProperty,
+TestRunnerInventoryHTTPRequiresMemberCredential and
+TestRunnerInventoryHTTPRefusesMissingAndCorruptFacts. They retain empty arrays,
+private storage-error refusal, distinct authority behind equal names, activity,
+liveness and separate headroom observation time through the actual authenticated
+HTTP handler. The inventory reader is a fake. Durable poll/renewal correlation,
+revocation, replacement and restarting the controller remain W1 integration
+obligations. The old newest-holder-wins display rule retires with holder parsing.
+
+TestBusyRunnerHeartbeatUpdatesObservedLivenessWithoutPolling is replaced at the
+HTTP projection boundary by the separate LastSeen/headroom snapshot assertions.
+The actual renewal already runs in TestEngineJobLifecycleRenewsAndReplaysUnderStoreFences.
+W1 still needs to project that accepted renewal into ReadRunners and preserve
+liveness on refused renewal. A fake snapshot does not close that persistence
+obligation. The heartbeat-cache pruning test retires with that removed cache.
+
+TestClaimAttentionNamesWhyARunWaits and
+TestClaimAttentionPassWrapsDespiteNewNodes now run against the final SQLite
+capabilities, execution seals and node-attention projection. Their old token-table
+and HTTP-listener fixtures are deleted. Cloud matching remains covered by
+TestClaimAttentionCountsSparkwingCloud. The platform-change registry test retires
+with that cache. Current enrolled platform/pool/repository/capacity preservation
+runs in TestClaimAttentionPreservesEnrollmentWhenARunnerIsOnline.
+TestClaimAttentionCommittedLivenessProperty generates past/future observations
+and checks the existing two-minute boundary. TestEngineClaimHTTPCommitsRunnerObservations
+proves accepted claim polls persist C1's filtered labels and store time.
+
+The runner-presence credential-carrying test retires with that registry.
+TestQueueStateShowsOnlyTheCallersTeamsRunners now consumes the same final
+snapshot interface. QueueRead HTTP acceptance tests keep their existing policy,
+concurrency-group and error assertions with a runner-snapshot fake.
+
+The two auth_claim_test.go tests move to TestEngineClaimHTTPRefusalsDoNotAward,
+TestEngineClaimHTTPDeadCredentialProperty and the final claim-kind fuzz test.
+They check anonymous/unknown/legacy/revoked credentials, root-versus-claim grants,
+canonical 401/403 and zero persisted awards on refusal. The old TokenDeadError
+classification and admin-only readiness route retire with that legacy protocol.
+These ports complete no native credential-matrix cell.
+
+
 W2 signing/fixture cleanup ports: tokens_test.go's six scope validation tests move
 to TestCredentialIssuanceValidatesEveryGrant and RefusedGrantProperty. They exercise
 the final issuer with real SQLite, all declared grants, empty grants and generated
