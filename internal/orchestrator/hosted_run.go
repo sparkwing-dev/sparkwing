@@ -588,7 +588,7 @@ func (h hostedChildren) StartChild(ctx context.Context, parent nodehost.ChildPar
 	if h.dryRun {
 		env = map[string]string{envDryRun: "1"}
 	}
-	id, err := enqueueTriggerWithEnv(ctx, h.state, req.Pipeline, req.Args, parent.RunID, parent.NodeID, "",
+	id, err := h.state.EnqueueTriggerWithEnv(ctx, req.Pipeline, req.Args, parent.RunID, parent.NodeID, "",
 		"await-pipeline", "", req.Repo, req.Branch, env)
 	if errors.Is(err, errTriggerCycle) {
 		return "", errors.Join(nodehost.ErrChildCycle, err)

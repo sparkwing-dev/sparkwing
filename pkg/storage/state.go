@@ -61,9 +61,6 @@ type StateStoreOld interface {
 	ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 	ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error)
 
-	// Trigger lookup. EnqueueTrigger is intentionally not here -- it
-	// carries cycle-detection logic that lives in the orchestrator's
-	// adapter, not in the storage handle.
 	FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 
 	// Approvals.

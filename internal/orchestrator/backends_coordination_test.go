@@ -65,7 +65,7 @@ func TestLocalStateServesEveryRunCoordinationMethod(t *testing.T) {
 		t.Errorf("node usage = (%d, %d), want (%d, 4096)", n.CPUNanos, n.MaxRSSBytes, int64(2*time.Second))
 	}
 
-	childID, err := state.EnqueueTrigger(ctx, "child", nil, "r1", "build", "", "await-pipeline", "", "", "")
+	childID, err := state.EnqueueTriggerWithEnv(ctx, "child", nil, "r1", "build", "", "await-pipeline", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("EnqueueTrigger: %v", err)
 	}

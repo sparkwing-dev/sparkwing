@@ -58,6 +58,7 @@ func TestSurfaceRemovedClientRecoveryAPIs(t *testing.T) {
 	clientType := reflect.TypeFor[*client.Client]()
 	for _, name := range []string{
 		"HeartbeatTrigger", "ClaimLaunch", "SourceCredential", "WithClaimResources", "BaseURL", "AppendNodeLiveLog", "DeleteRun", "EnrollRunner", "CreateServiceToken",
+		"EnqueueTrigger", "CreateToken", "ListTokens", "LookupToken", "RevokeToken", "RotateToken", "ListSecrets",
 		"PendingNodeBounce", "ConsumeNodeBounce", "ResetNodeForAutoRetry", "RetryRun", "ListTriggers",
 		"ListCrons", "GetCron", "PutCronRepo", "DeleteCronRepo", "PauseCron", "ResumeCron",
 		"DisarmCron", "RunCronNow", "SetCronOverride", "ClearCronOverride",

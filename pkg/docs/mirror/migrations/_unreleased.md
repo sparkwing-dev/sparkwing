@@ -1590,7 +1590,11 @@ deployment issuance. The legacy `Client.EnrollRunner` and `Client.CreateServiceT
 methods are removed. `runners add --reserved-for POOL` forwards the pool proposal
 to the team-admin enrollment route. Repeated and comma-separated values are
 preserved. Enrollment sends one request and never replays a lost bearer response.
-Member `Client.CreateToken` accepts `Grants` and `ExpiresAt`. Controller integrations retain the
+The legacy `Client.CreateToken`, `ListTokens`, `LookupToken`, `RevokeToken`,
+`RotateToken` and `ListSecrets` methods are removed. Use `NewTokenManager` and
+`NewSecretManager` for typed management operations. The legacy host's
+`EnqueueTrigger` shortcut is removed. Its remaining callers use
+`EnqueueTriggerWithEnv` with an explicit environment. Controller integrations retain the
 existing `WithCredentialIssuer` and C1 `ProvisionPolicy` transaction boundary.
 Missing origin policy refuses with `unavailable`. Production enrollment and
 console-origin persistence must be provided before enabling those flows.

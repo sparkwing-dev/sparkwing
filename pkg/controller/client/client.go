@@ -711,27 +711,6 @@ func (c *Client) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, par
 	return body.RunID, nil
 }
 
-// EnqueueTrigger matches orchestrator.StateBackend's shape for
-// spawning a new pipeline run from inside another. Cycle errors from
-// the controller pass through verbatim.
-func (c *Client) EnqueueTrigger(
-	ctx context.Context,
-	pipeline string,
-	args map[string]string,
-	parentRunID string,
-	parentNodeID string,
-	retryOf string,
-	source string,
-	user string,
-	repo string,
-	branch string,
-) (string, error) {
-	return c.EnqueueTriggerWithEnv(
-		ctx, pipeline, args, parentRunID, parentNodeID,
-		retryOf, source, user, repo, branch, nil,
-	)
-}
-
 func (c *Client) EnqueueTriggerWithEnv(
 	ctx context.Context,
 	pipeline string,
@@ -761,7 +740,7 @@ func (c *Client) EnqueueTriggerWithEnv(
 	if repo != "" {
 		req.Git.Repo = repo
 		req.Git.Branch = branch
-		if i := indexByte(repo, '/'); i > 0 && i < len(repo)-1 {
+		if i := strings.IndexByte(repo, '/'); i > 0 && i < len(repo)-1 {
 			req.Git.GithubOwner = repo[:i]
 			req.Git.GithubRepo = repo[i+1:]
 		}
@@ -771,15 +750,6 @@ func (c *Client) EnqueueTriggerWithEnv(
 		return "", err
 	}
 	return resp.RunID, nil
-}
-
-func indexByte(s string, b byte) int {
-	for i := range len(s) {
-		if s[i] == b {
-			return i
-		}
-	}
-	return -1
 }
 
 // GetLatestRun returns the newest run of pipeline whose status is in

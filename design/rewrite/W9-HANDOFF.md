@@ -1,8 +1,143 @@
 # W9 handoff
 
-This continuation starts at e6958e0f9 with a clean worktree. W9 is still
-incomplete. The lead owns Git staging/commits, independent review, pipelines
-and native QA. Session 13 supersedes conflicting earlier status below.
+Session 14 starts at edc98d9d4 with a clean worktree. This report supersedes
+conflicting status below. W9 remains incomplete. The lead owns Git writes,
+independent review, pipelines, native QA and release/publication.
+
+## This continuation (session 14)
+
+### Changes and deletions
+
+Removed Client.CreateToken, ListTokens, LookupToken, RevokeToken, RotateToken
+and ListSecrets. Typed token/secret managers already own their operations.
+The request/response structs remain because the final transport consumes them.
+Removed Client.EnqueueTrigger and localState.EnqueueTrigger. StateBackend now
+requires EnqueueTriggerWithEnv, and hosted child dispatch calls it directly.
+Deleted the optional interface, wrapper and environment-dropping fallback.
+Both direct local fixtures pass nil explicitly. No compatibility helper replaces
+these methods. strings.IndexByte replaces the private duplicate.
+
+Removed the unused releaseAssetName and manifestSignedByTrustSet helpers.
+Moved implemented engine constructors from engine_contract.go to engine_client.go.
+Moved NewDataClient into data.go and deleted data_contract.go. These are real
+implementations, not additional constructors or interfaces.
+
+Net production Go reduction is 209 lines across all touched files: 153 in W9
+and 56 in shared caller/diagnostic files. Physical source removes 306 lines and
+adds 97, including relocation of 76 scaffolding-file lines as 73 implementation
+lines. The lead's area-budget filter, including the untracked implementation
+file, gives W9 -5,503 production lines against main, versus its -2,900 target.
+Legacy code still exists, so meeting that budget does not establish completion.
+
+### Doctor handoff
+
+Invariant: the sweep's result determines success, while failure to record an
+outcome remains visible in the report. A current-schema SQLite fixture creates
+a run, registers a cleanup, deletes the run, and invokes the real sweep. Before
+the fix, the completed cleanup failed with sql: no rows in result set.
+
+The retained diagnostic helper now records each outcome independently and puts
+its recording failure in DoctorStraySession.RecordError. Pretty output warns
+beside the session, JSON carries record_error, and plain output counts
+unrecorded_step_outcomes. Sweep errors still propagate. The regression proves
+that the record is removed, the verdict remains reaped and all three formats
+expose the recording failure. It uses a real command cleanup and store, with
+no sleep or mock event writer. SQL fixture seeding isolates this diagnostic
+from the already-broken legacy CreateRun API. This proves the retained sweep
+adapter. Native lifecycle CLI cleanup remains unconnected.
+
+### Verification
+
+Go uses GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache,
+GOTMPDIR and TMPDIR under /tmp/sw-astra-W9, and -p 4 at most.
+
+- Whole-repository go build -p 4 ./... passes.
+- Vet passes for cmd/sparkwing, controller/client, clisurface, controllerwire,
+  orchestrator, opsview, storage and tests/acceptance.
+- Focused CLI local intake/hosting, standalone hosting, foreground lifecycle,
+  controller options, verified release and update tests pass.
+- The new doctor pruning regression and existing report/render tests pass.
+- Engine/credential/runner-enrollment/data/secret-management/surface components
+  pass in controller/client and tests/acceptance, including enrollment seeds.
+- Full clisurface, controllerwire, doccheck, apiref and apispec suites pass.
+- TypeScript native-packaging/publication and release-target checks pass.
+  Windows packaging was already implemented and needed no source change.
+- The default-team caller inventory passes. There is no stale W9 entry to edit.
+- Commentcheck passes across 2,113 files. Whitespace and embedded-doc drift
+  checks pass. The client API snapshot is regenerated with cmd/apidiff.
+
+The initial broader component run found stale acceptance inputs. Failure reads
+now expect generation, matching client and server. Transition/replay fixtures
+carry source_attempt and the structured JobFailure instead of result.error.
+The projection assertion checks the ordinal. Those migrated tests pass. No new
+scenario, harness registry entry or archived T1 port is claimed. No native
+acceptance cell was enabled. Full legacy CLI/client/orchestrator suites, real
+HTTP/api.sock, Windows/Darwin, Docker/Kubernetes and real-repo QA remain unrun.
+No operational Sparkwing binary, pipeline, release or publication ran.
+
+### Assignment audit and remaining integration
+
+Earlier completed work remains in place. No foreign contract was changed.
+
+| Assignments | Status |
+| --- | --- |
+| A1-03/08/09/13-18/22/38/55; attempt/step/launcher handoffs | Shared wire, source ordinal, typed step report and immutable award/Job-instance correlation are implemented. Native owner/step/launcher integration remains. The stale fixture migration above now passes. |
+| A1-10/11/19; execution and pipeline identity handoffs | Selected-engine/source inspection and separate alias/entrypoint mapping remain. Full source-to-host-to-hello composition remains. |
+| A1-20/39/40/41/49 | Typed enrollment, reserved-pool proposals, private-file rollback and lifecycle adapters remain. Real provisioning, runner startup, local controller factory and services remain. |
+| A1-29/30/34/37/50 | Signed data, read-only remote cache opt-in, local/here prepared intake and publication adapters remain. Full authorized storage/result/log and host composition and old wire deletion remain. Publication must preserve the local verdict on upload failure. |
+| A1-43/45/47 | Exact engine selection, notices, upgrade, setting precedence and shared guard grammar remain. Native selected-source hosting and scheduled intake remain. |
+| A1-51 | Current schemas/docs and final public readers remain. Duplicate management methods are now removed too. Remaining raw state, trigger and named-claim Client methods still serve the W3 legacy graph. |
+| A1-52; Windows packaging | Both native bridge architectures, version stamping, package assembly and publication dependency remain implemented. Native Windows execution/publication evidence belongs to CI/lead. |
+| A1-53 | Native/platform/placement cells remain unclaimed. |
+| Sealed step windows; launcher grammar | Previously implemented and retained. |
+| Doctor missing-run outcome | Retained sweep fix and regression pass. Native lifecycle cleanup integration remains separate. |
+| Acceptance harness cleanup | No new harness production code, catalog entry or scenario registry was added. W9's existing package tests remain in place. |
+
+Concrete integration points still open:
+
+- W2 must supply the elected factory implementing wingd.LocalController.
+  NewLocalRuntime and NewLocalLifecycle exist. No NewLocalController constructor
+  exists in this tree. W9's native local-services resolver remains unfinished.
+- W3's RemoteOwnerStore implements reconciliation, expansion and scheduling,
+  but not the full NativeHostStore. ReadSnapshot, AcceptPlan, TransitionRun,
+  TransitionNode, FinishRunAndUnit, RenewOwner and RenewNodeClaim still need
+  the remote implementation and necessary private snapshot transport. The
+  public ScheduleSnapshot cannot substitute for store.RunSnapshot.
+- NewNativeHost exists. Native source capture, owner policy/waiting, per-process
+  delegation and authorized byte/record/log binding still need composition.
+  No fake-only component result is evidence for those native bindings.
+- Immutable initial here-reason retention, local schedule checkout/environment/
+  proof/pin operations, native managed timer/tick/dry-run operations, debug-release
+  policy/acknowledgement and authorized publication remain the previously
+  recorded foreign contract/integration requests. No alternate route was added.
+- The remaining legacy client graph reaches StateStoreOld/RunCoordination in
+  trigger_host.go, run_node.go, backends.go, hosted_backends.go and storeurl/spec.go.
+  Queued-claim methods additionally have W2/W3 legacy fixture callers. They are
+  not copied into a test helper or replaced with forwarding compatibility code.
+
+### Shared files, assumptions and friction
+
+Shared caller migrations: internal/orchestrator/backends.go, hosted_run.go,
+backends_coordination_test.go and hosted_backends_test.go. The obsolete
+EnqueueTrigger note is removed from pkg/storage/state.go.
+Other shared edits: internal/opsview/doctor.go and doctor_recording_unix_test.go,
+tests/acceptance/{engine_amendments,engine_lifecycle_http,surface_contract}_test.go,
+.apidiff/pkg_controller_client.txt, CHANGELOG.md and generated documentation
+mirrors. Lead-owned handoffs.md and amendments files are untouched.
+
+The doctor change adds one diagnostic field and one plain-report count because
+a successful cleanup cannot disappear when its event write fails. It adds no
+new service, interface, setting, environment variable, cap or timeout. The
+trigger cleanup removes an optional-interface mechanism. Engine/data file
+relocation removes completed scaffolding without changing their APIs.
+
+Initial doctor fixture attempts hit the retired CreateRun args_json column and
+a terminal-row constraint. The final fixture uses current-schema pending state,
+then deletes it before the sweep. The real missing-run recording failure was
+reproduced before the fix. Overwing reported its installed-binary staleness
+notice but matching/showing worked. Git retains Korey's identity with no injected
+core.worktree. No Git state was written. Scratch is removed before reporting,
+and /tmp/sw-gocache is retained.
 
 ## This continuation (session 13)
 

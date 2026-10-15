@@ -548,6 +548,17 @@ configuration authority. The existing private-file configuration and rollback
 path remains. Supervised runner start/refresh and native controller/store
 provisioning still need integration evidence. No C2 contract changed here.
 
+### Legacy client retirement
+
+`Client.CreateToken`, `ListTokens`, `LookupToken`, `RevokeToken`, `RotateToken`
+and `ListSecrets` are removed. Credential and secret management use the typed
+managers above. Their issuance and metadata messages remain shared with the
+controller. `Client.EnqueueTrigger` is removed. The remaining legacy host caller
+requires `EnqueueTriggerWithEnv` directly, including an explicit nil environment.
+There is no environment-dropping fallback. The final engine constructors live
+in `engine_client.go`, and the data constructor lives beside its implementation
+in `data.go`.
+
 ### Schedule management
 
 `ScheduleManager` uses existing C2 `/api/v1/schedules` routes for both api.sock

@@ -10,12 +10,7 @@ import (
 	"net/url"
 )
 
-// Secret mirrors the wire shape of one secret row. Value is populated
-// only on GetSecret; ListSecrets blanks it. Masked indicates whether
-// the value should be redacted in run logs. Bound reports that the
-// stored value is encrypted and tied to this row; false means the row
-// is plaintext, or an envelope written before binding that a read
-// will rebind.
+// Secret contains the legacy execution secret read response.
 type Secret struct {
 	Name      string `json:"name"`
 	Value     string `json:"value,omitempty"`
@@ -101,31 +96,6 @@ func secretRefusal(resp *http.Response) error {
 		return fmt.Errorf("controller %d: %s", resp.StatusCode, cmp.Or(body.Code, resp.Status))
 	}
 	return fmt.Errorf("controller %d (%s): %s", resp.StatusCode, body.Code, body.Message)
-}
-
-// ListSecrets fetches every secret row with Value blanked by the
-// server.
-func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error) {
-	u := c.baseURL + "/api/v1/secrets"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, readHTTPError(resp)
-	}
-	var body struct {
-		Secrets []Secret `json:"secrets"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, err
-	}
-	return body.Secrets, nil
 }
 
 // DeleteSecret removes the row by name. Returns store.ErrNotFound

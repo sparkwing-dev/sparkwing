@@ -92,7 +92,7 @@ func TestHostedSelection_ChildOfAForcedParentReadsTheParentsStore(t *testing.T) 
 	if err := st.CreateRun(ctx, store.Run{ID: "parent", Pipeline: "parent", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	id, err := (localState{st: st}).EnqueueTrigger(ctx, "child", nil, "parent", "job", "", "await-pipeline", "", "", "")
+	id, err := (localState{st: st}).EnqueueTriggerWithEnv(ctx, "child", nil, "parent", "job", "", "await-pipeline", "", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

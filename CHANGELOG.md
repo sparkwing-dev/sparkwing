@@ -190,6 +190,9 @@ unlock.
   for that object.
 
 ### Removed
+
+- **controller client (Breaking):** Remove duplicate legacy credential-management methods, the raw secret list and the environment-free trigger shortcut
+  Use the typed token and secret managers. Remaining legacy host callers pass the trigger environment explicitly.
 - **storage (Breaking):** removed cache-grant issuance, verification, the controller credential and the grant-authenticated data routes
   Services no longer announce those routes. Authenticated byte/record adapter wiring remains incomplete. See [migration steps](docs/migrations/_unreleased.md#cache-grants-are-removed).
 - **logs (Breaking):** removed `logseg.AttemptPrefix` and flat manifest identity fields
@@ -489,6 +492,9 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Fixed
+
+- **controller diagnostics:** Preserve successful stray-session cleanup when outcome recording fails
+  Reports show a recording warning for each unrecorded outcome, including when its run was pruned. Native lifecycle cleanup integration remains separate.
 
 - **cli:** Keep local controller retries under the shared route policy and bind retained here authority to its API socket
 - **controller client:** Preserve an absent recorded recovery failure without synthesizing an error
