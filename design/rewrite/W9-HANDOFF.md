@@ -1,3 +1,133 @@
+# W9 prepared initial-trigger intake continuation
+
+Started clean at 868e22d62. W9 remains incomplete. No Git write, Sparkwing
+executable, service, pipeline or release ran. Writes stayed in this worktree and
+/tmp/sw-astra-W9, deleted before reporting. The lead still owns commits and
+native integration.
+
+## Implemented component
+
+`submitTriggeredRun` consumes a fully prepared C3 CreateRunRequest through the
+shared Controller interface. It submits once, preserves a supplied idempotency
+key, generates one when absent, and rejects invalid output and detached here
+execution before intake. The transport retains responsibility for C2's retry
+rules. The component adds no retry loop.
+
+It verifies the returned first seal, initial run identity and pipeline before
+using the response. A fresh here response requires a bearer; replay requires its
+absence. The complete private response reaches the retaining here handoff.
+Cancellation during intake still hands a received bearer to that owner before
+returning. The real private-file regression proves retention without starting
+a host after cancellation.
+
+Receipts carry run ID, allocated team number, replay, an observed terminal
+outcome and a masked error. Detached submission never follows. Missing,
+unfinished or failed observation returns exit 3. An observed failed or cancelled
+run retains its recorded verdict and nonzero exit. The existing shared masking
+wrapper protects requested values, returned execution arguments and the here
+bearer in messages, hints, details and detail keys. No seal is serialized into
+the receipt.
+
+This is a prepared-request component, not a completed public-command cutover.
+`runPipelineTrigger` still reaches its preceding preparation/intake/here path.
+No new public behavior, compatibility path, flag, timeout or authority rule was
+introduced. The component adds 128 production lines.
+
+## Contract changes needed and remaining bindings
+
+- W6/W1/W2/W9 must preserve the required here reason. CreateRunRequest,
+  IntakeRequest and runspec.Request have no reason field. Initial here intake
+  cannot record `--reason` through those contracts. The reason must survive the
+  immutable intake and replay. This is recorded in contracts/handoffs.md.
+  No foreign contract was changed, and no argument/env/actor workaround was added.
+- Native preparation still needs canonical repository discovery, the exact
+  selected execution/pipeline sources, captured submit-environment linkage and
+  authorized signed source-bundle upload. GitHub identity needs a numeric ID;
+  it cannot be substituted with a slug. These remain preparation work, not
+  evidence established by the transport fake.
+- Connect the component to the public command after that preparation and the
+  reason contract are complete. Bind its here callback to handoffHereRun and
+  its follower to the final public log/status readers. W3's shared native host
+  and W8's local lifecycle constructor remain unavailable in this checkout.
+- The previous source-attempt fencing request, publication/cache composition,
+  local/detached-host retirement, schedule pass, effective endpoints and native
+  launch evidence remain open as recorded below.
+
+No old code was deleted: **0 lines**. Its callers were not migrated because the
+public cutover cannot drop the required reason. No production file outside W9
+ownership was touched.
+
+## Acceptance, tests and verification
+
+Invariant: initial-trigger receipts and diagnostics expose neither requested
+argument values nor one-time here authority, including encoded diagnostics.
+FuzzInitialTriggerDiagnosticsExcludePrivateInputs passed four seeds and 1,341
+executions over five requested seconds with four workers. It includes Unicode,
+quotes, control characters, encoded hints, overlapping values and detail keys.
+
+Eight new CLI tests cover detached submission, private handoff, preflight,
+invalid receipts, recorded/unknown outcomes, incomplete here receipts, cancelled
+handoff retention and failure propagation. These port detached/follow/preflight
+expectations to the final interface; the preceding tests remain with their
+still-connected command. T1's parked inventory assigns no original function
+directly to W9. No native scenario was unskipped.
+
+TestSurfaceInitialTriggerIntakeTransport passes the remote-HTTP and api.sock
+transport-fake cells for ordinary and here requests. It verifies the route,
+exact request, idempotency key and complete first seal/bearer round trip. It
+does not establish native socket, authority, source or store behavior.
+
+All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE=/tmp/sw-astra-W9/cache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W9/tmp.
+Tests used -p 4 or less. Passed on the final production source:
+
+- Whole-repository go build -p 4 ./....
+- Vet on cmd/sparkwing, clisurface, controllerwire, controller/client and
+  tests/acceptance. CLI and acceptance vet were repeated after the code changes.
+- The eight CLI intake tests and fuzz seeds, plus the generated property run.
+- Full clisurface and controllerwire tests.
+- Acceptance TestSurface and TestProtocolSchema selections, including the new
+  transport cell. internal/acceptance compiles and has no test files.
+- commentcheck -base main, clean across 1,302 Go files, sleepcheck -base HEAD,
+  gofmt and git diff --check.
+
+The initial compile failed before the component existed. The cancellation
+regression then reproduced a discarded received bearer before the handoff was
+ordered first; the missing-fresh-bearer regression reproduced an invalid handoff
+before presence was checked. Both pass. The first transport fixture omitted
+required seal fields; using the real sealed response fixed that fixture.
+
+A broader acceptance invocation hit its 90-second timeout in
+TestProtocol/protocol-additive-fields-and-child-handles/typescript_native_pipes.
+That invocation is not a broad acceptance pass. The corrected W9 selection
+passes. No corresponding child process was visible in the sandbox process
+sweep. No full CLI/client/native suite, pipeline or release was run.
+
+## Amendment and handoff audit
+
+All amendments-1 rows naming W9 and the W9 handoffs were checked against the
+preceding ledger. No completed implementation was redone.
+
+| Rows / handoff | This continuation and remaining integration |
+| --- | --- |
+| A1-03/08/09/13/14/15/16/17/18/20/22/38/55 | Retained final errors, claims, reconciliation, failures, expansion and cloud wire. Native owner composition and source-attempt fencing remain. |
+| A1-10/11/19; execution and alias identity | Initial intake component preserves the prepared request and returned seal. Native source preparation, selected-engine construction and alias execution remain. |
+| A1-29/30/34/37 | Retained signed-data transport. Native read-only cache, publication copying and legacy storage-consumer retirement remain. |
+| A1-39/40/41/49/50 | Prepared initial submission, receipt and handoff composition is implemented with fakes. Public cutover waits for preparation and the reason contract. Local/detached hosting, native lifecycle/runner construction and scheduler seams remain. |
+| A1-43/45/47 | Prior notice, upgrade, settings and guard work is retained. Native engine/index and scheduled-intake composition remain. |
+| A1-51 | C3 documents the component and its native limits. Initial-trigger/runtime retirement and future regenerated surface docs remain. |
+| A1-52; Windows packaging | Prior packaging work is retained. Native Windows publication evidence remains unverified. |
+| A1-53 | New transport/component evidence only. T1/lead still own native topology/backend/platform drivers and real-repository QA. |
+
+Shared files touched are tests/acceptance/trigger_contract_test.go,
+contracts/c3-controller-wire.md, contracts/handoffs.md and this report.
+No foreign API caller migration was needed. The required here-reason field is
+the new contract friction. The broad acceptance timeout and cold instrumentation
+build are verification friction, not evidence of a W9 runtime defect. Git still
+reports Korey Gambill and no core.worktree setting.
+
+---
+
 # W9 retained-event cursor continuation
 
 Started clean at 9ddb98836. W9 remains incomplete. No Git write, Sparkwing

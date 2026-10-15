@@ -4,6 +4,16 @@ Each worker acts on every entry naming its area. Entries come from area reviews 
 
 ## From W4 review fixes (2026-10-15)
 
+**Contract change needed, W6/W1/W2/W9: preserve the required here reason.**
+Invariant: a `pipeline trigger --runner here --reason TEXT` request records the
+reason with its immutable intake, and replay cannot replace or lose it. C3
+`CreateRunRequest` and C1 `IntakeRequest` have no reason field; `runspec.Request`
+also has none. Agree the request field and persistence projection before W9
+connects initial here intake to the prepared-request component. W9 has not
+hidden the reason in arguments, actor display or environment, and has not
+changed these foreign contracts. The component and the remaining preparation
+bindings are described in `../W9-HANDOFF.md`.
+
 
 **DESIGN: W3 production service router (finding 2).** Invariant: the SDK and negotiated production service router implement one route/error contract. Replace the header/426 gate, `/nodes` routes, legacy errors and missing service handlers together. Test SDK calls against the actual registered node-host router for secrets, output, mask, annotation, summary, OIDC and children. Removing the version gate alone is insufficient.
 

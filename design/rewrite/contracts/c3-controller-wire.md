@@ -44,6 +44,23 @@ Local transport also binds the absolute API socket path. Local clients use a raw
 socket transport under the same C2 route retry policy as HTTP clients, without
 an additional transport retry loop.
 
+The prepared-request initial-trigger component calls `Controller.CreateRun` once,
+preserving a supplied idempotency key or generating one before submission. Its
+receipt exposes run ID, team number, replay, observed terminal outcome and a
+masked error. The component validates the returned first seal and initial run
+identity before handing the complete private response to here hosting. A fresh
+here receipt requires its bearer; a replay cannot contain one. Received here
+authority reaches the retaining handoff even if cancellation arrived during
+intake. Detached submission does not observe the run. An unfinished or failed
+observation exits 3 independently of any recorded outcome.
+
+This component has fake-controller and HTTP/api.sock transport evidence. The
+public command still uses its preceding preparation and intake path. Its cutover
+requires native repository/snapshot preparation and a contract for persisting
+the required here reason. Neither `CreateRunRequest` nor C1 `IntakeRequest` carries
+that reason. It must survive intake and replay before the CLI can replace the old
+path without dropping it. No foreign contract is changed by this component.
+
 Sealed here resume and retry follow public logs with the caller's display
 credential. The retained bearer selects the named owner claim, and the fresh
 award capability binds the host. The first interrupt requests cancellation with
