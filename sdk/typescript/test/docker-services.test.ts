@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as fs from "node:fs/promises";
-import { delimiter } from "node:path";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import { docker, services } from "../src/index.ts";
 import { runScope } from "../src/scope.ts";
 import { registerCommandContext } from "../src/command.ts";
@@ -31,8 +32,7 @@ test("Docker push tries remaining registries but propagates all errors", async (
 });
 
 test("Docker login masks first and passes its secret through stdin without argv or exec logs", async (t) => {
-  await fs.mkdir("/tmp/sw-astra-W5/helpers", { recursive: true });
-  const root = await fs.mkdtemp("/tmp/sw-astra-W5/helpers/login-");
+  const root = await fs.mkdtemp(join(tmpdir(), "sdk-login-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   if (process.platform === "win32") await fs.copyFile(process.execPath, root + "/docker.exe");
   else await fs.symlink(process.execPath, root + "/docker");
@@ -120,8 +120,7 @@ test("local multi-platform Docker builds request a loaded image and propagate un
 });
 
 test("Docker run uses API file transfer and registered cleanup", async (t) => {
-  await fs.mkdir("/tmp/sw-astra-W5/helpers", { recursive: true });
-  const root = await fs.mkdtemp("/tmp/sw-astra-W5/helpers/docker-");
+  const root = await fs.mkdtemp(join(tmpdir(), "sdk-docker-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const fake = fakeContext(() => "");
   await runScope({ phase: "execute", root }, () =>
@@ -135,12 +134,12 @@ test("Docker run uses API file transfer and registered cleanup", async (t) => {
     }),
   );
   const name = fake.registrations[0]![3]!;
-  assert.deepEqual(fake.calls.find((call) => call.argv[1] === "cp")!.argv, ["docker", "cp", root + "/input/.", name + ":/work"]);
+  assert.deepEqual(fake.calls.find((call) => call.argv[1] === "cp")!.argv, ["docker", "cp", join(root, "input") + "/.", name + ":/work"]);
   assert.deepEqual(fake.calls.filter((call) => call.argv[1] === "cp")[1]!.argv, [
     "docker",
     "cp",
     name + ":/work/result/.",
-    root + "/output",
+    join(root, "output"),
   ]);
   assert.deepEqual(fake.calls.at(-1)!.argv, ["docker", "rm", "-f", name]);
   assert.deepEqual(fake.unregistered, ["cleanup-1"]);
@@ -181,8 +180,7 @@ test("Docker cleanup failures keep host cleanup armed and preserve a body failur
 });
 
 test("Docker run forwards raw output bytes through the command helper", async (t) => {
-  await fs.mkdir("/tmp/sw-astra-W5/helpers", { recursive: true });
-  const root = await fs.mkdtemp("/tmp/sw-astra-W5/helpers/stream-");
+  const root = await fs.mkdtemp(join(tmpdir(), "sdk-stream-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   if (process.platform === "win32") await fs.copyFile(process.execPath, root + "/docker.exe");
   else await fs.symlink(process.execPath, root + "/docker");
@@ -204,8 +202,7 @@ test("Docker run forwards raw output bytes through the command helper", async (t
 });
 
 test("Docker missing requested output fails and still removes its owned container", async (t) => {
-  await fs.mkdir("/tmp/sw-astra-W5/helpers", { recursive: true });
-  const root = await fs.mkdtemp("/tmp/sw-astra-W5/helpers/output-");
+  const root = await fs.mkdtemp(join(tmpdir(), "sdk-output-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const missing = new Error("requested output path does not exist");
   const fake = fakeContext(({ argv }) => {
@@ -427,8 +424,7 @@ test("Docker and services reject planning before side effects", async () => {
 });
 
 test("Docker image tags retain commit and content identity plus dirty and production suffixes", async (t) => {
-  await fs.mkdir("/tmp/sw-astra-W5/helpers", { recursive: true });
-  const root = await fs.mkdtemp("/tmp/sw-astra-W5/helpers/tags-");
+  const root = await fs.mkdtemp(join(tmpdir(), "sdk-tags-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   await fs.mkdir(root + "/.git");
   await fs.writeFile(root + "/input", "image content");

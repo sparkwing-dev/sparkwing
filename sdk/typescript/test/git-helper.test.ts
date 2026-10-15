@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as fs from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { git, Git, gitFromTree, githubOwnerRepo } from "../src/index.ts";
 import { runScope } from "../src/scope.ts";
 import { fakeContext, commandFailure } from "./helper-context.ts";
 
 test("git queries preserve sealed snapshot and use direct promptless commands", async () => {
+  const root = resolve("repo");
   const fake = fakeContext(({ argv, options }) => {
-    assert.equal(options.cwd, "/repo");
+    assert.equal(options.cwd, root);
     assert.equal(options.env?.GIT_TERMINAL_PROMPT, "0");
     assert.equal(options.env?.GCM_INTERACTIVE, "0");
     if (argv[1] === "rev-parse") return "0123456789abcdef";
@@ -17,7 +20,7 @@ test("git queries preserve sealed snapshot and use direct promptless commands", 
     if (argv[1] === "diff") return "space name.txt\0line\nname.txt\0";
     throw new Error("unexpected command");
   });
-  const snapshot = new Git("/repo", { repo: "owner/repo", branch: "sealed", commit: "sealed0123456789" });
+  const snapshot = new Git(root, { repo: "owner/repo", branch: "sealed", commit: "sealed0123456789" });
   assert.equal(snapshot.branch, "sealed");
   assert.equal(snapshot.shortSHA(), "sealed012345");
   assert.equal(snapshot.name(), "repo");
@@ -25,7 +28,7 @@ test("git queries preserve sealed snapshot and use direct promptless commands", 
   assert.deepEqual(await snapshot.changedFiles(fake.ctx, "--bad"), ["space name.txt", "line\nname.txt"]);
   const diff = fake.calls.find((call) => call.argv[1] === "diff")!.argv;
   assert.deepEqual(diff.slice(-2), ["--end-of-options", "--bad...HEAD"]);
-  const discovered = await gitFromTree(fake.ctx, "/repo");
+  const discovered = await gitFromTree(fake.ctx, root);
   assert.equal(discovered.repo, "owner/repo");
   assert.equal(discovered.commit, "0123456789abcdef");
   assert.equal(discovered.branch, "new-branch");
@@ -117,8 +120,7 @@ test("git clone and fetch have no cache-service path and enforce planning purity
 });
 
 test("fileset hashes local bytes, permissions, filenames and Docker ignore rules", async (t) => {
-  await fs.mkdir("/tmp/sw-astra-W5/helpers", { recursive: true });
-  const root = await fs.mkdtemp("/tmp/sw-astra-W5/helpers/git-");
+  const root = await fs.mkdtemp(join(tmpdir(), "sdk-git-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   await fs.mkdir(root + "/.git");
   await fs.writeFile(root + "/a", "one");

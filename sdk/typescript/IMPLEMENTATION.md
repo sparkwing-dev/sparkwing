@@ -2,7 +2,48 @@
 
 Snapshot: 2026-10-14. W5 remains incomplete at the native Windows and integrated
 host acceptance boundaries. The source implementation and local SDK proofs are
-ready for integration. No commits or Sparkwing binaries were run.
+ready for integration. The lead owns commits, pipelines and native verification.
+
+## Continuation: portable acceptance fixtures
+
+The Docker, Git and memo tests now use the platform temp directory instead of
+seven hard-coded W5 scratch paths. Git and Docker assertions use native path
+separators. The tree test exercises directory links, using a junction on Windows,
+and retains file-link coverage on Unix.
+
+Before the change, ten tests failed when the hard-coded helper directory was
+unavailable even though `TMPDIR` selected a writable directory. After the change,
+all 106 TypeScript tests passed with the old path still blocked and a temporary
+path containing spaces. Strict typechecking and Prettier passed. No runtime API,
+contract, dependency or mechanism changed. No shared file changed and no further
+legacy code or T1 inventory test was deleted or ported. The prior legacy deletion
+remains 2,896 lines.
+
+Repository-wide `go build -p 4 ./...` passed. `go vet -p 4` passed for
+`sdk/typescript/test/nativehost`, `internal/acceptance` and `tests/acceptance`.
+`go test -p 4 ./internal/acceptance ./tests/acceptance` passed, including the Linux
+native-pipe fixture. The existing SDK children in
+`protocol-memo-input-boundaries` and `protocol-host-layers-risk-cleanup` cover the
+changed fixtures. Placement targets remain skipped by the acceptance skeleton.
+
+Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`, and
+`GOCACHE`, `GOTMPDIR` and `TMPDIR` beneath `/tmp/sw-astra-W5`. Node tests used
+`TMPDIR='/tmp/sw-astra-W5/portable temp'` and
+`node --test --experimental-test-isolation=none 'test/**/*.test.ts'` from
+`sdk/typescript`. The temporary files were removed after verification.
+
+Native Windows execution remains blocked. PowerShell is on PATH through WSL,
+but a read-only tool-discovery invocation failed with
+`UtilBindVsockAnyPort: socket failed 1`. No Windows compiler is available in this
+sandbox. Package preflight still refuses the missing x64 bridge. Both x64 and
+arm64 builds and native runs remain required. Another Linux-only session cannot
+establish those acceptance results.
+
+The W3/W4 parser, validator and host integration points below remain open, as do
+the W3 service routes, W4 job-only cancellation and concurrency-presence contract
+agreements. Real storage, authorization, DinD and placement tests still need the
+other workers' implementations. No integration or native Windows cell was
+marked complete by these fixture changes.
 
 ## Implemented
 

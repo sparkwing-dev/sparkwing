@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as fs from "node:fs/promises";
+import { tmpdir } from "node:os";
 import * as paths from "node:path";
 import {
   workDir,
@@ -23,8 +24,7 @@ import { runScope } from "../src/scope.ts";
 import { fakeContext } from "./helper-context.ts";
 
 async function fixture(t: import("node:test").TestContext): Promise<string> {
-  await fs.mkdir("/tmp/sw-astra-W5/helpers", { recursive: true });
-  const root = await fs.mkdtemp("/tmp/sw-astra-W5/helpers/files-");
+  const root = await fs.mkdtemp(paths.join(tmpdir(), "sdk-files-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   await fs.mkdir(paths.join(root, "nested"));
   await fs.writeFile(paths.join(root, "a.txt"), "one");
@@ -95,7 +95,8 @@ test("tree hashes recursively, skips symlinks and rejects missing or non-directo
     ctx = fakeContext(() => "").ctx;
   await runScope({ phase: "execute", root }, async () => {
     const before = await tree(".")(ctx);
-    await fs.symlink(paths.join(root, "a.txt"), paths.join(root, "linked.txt"));
+    if (process.platform !== "win32") await fs.symlink(paths.join(root, "a.txt"), paths.join(root, "linked.txt"));
+    await fs.symlink(paths.join(root, "nested"), paths.join(root, "linked-dir"), process.platform === "win32" ? "junction" : "dir");
     assert.equal(before, await tree(".")(ctx));
     await fs.writeFile(paths.join(root, "nested", "b.txt"), "updated");
     assert.notEqual(before, await tree(".")(ctx));
