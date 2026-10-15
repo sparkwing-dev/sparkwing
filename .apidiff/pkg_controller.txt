@@ -438,6 +438,7 @@ func (s *Server) WithExternalURL(rawURL string) *Server
 func (s *Server) WithFloodPolicy(p FloodPolicy) *Server
 func (s *Server) WithFreeTier(src FreeTierSource) *Server
 func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server
+func (s *Server) WithGitHubRunnerBindingLookup(lookup func(context.Context, store.Team, int64) (store.GitHubRunnerBinding, error)) *Server
 func (s *Server) WithGitHubRunners(cfg githuboidc.Config) *Server
 func (s *Server) WithGitHubSignIn(client *githubauth.Client, redirectURIs []string) *Server
 func (s *Server) WithGoogleSignIn(client *googleauth.Client, redirectURIs []string) *Server

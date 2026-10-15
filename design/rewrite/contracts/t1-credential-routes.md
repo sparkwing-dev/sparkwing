@@ -72,6 +72,11 @@ accepted by regenerating a golden file from C2 or a running controller.
 Creation has no existing token selector. The issuer derives the member subject
 and team from live authority and checks grants in the committing transaction.
 Its one-time bearer makes automatic retries unsafe, so retry policy is `never`.
+
+The Actions exchange at `POST /api/v1/runners/github/exchange` also has retry
+policy `never` because it returns a new bearer without secret replay. Its proof
+is the signed Actions JWT plus the selected team's matching repository/owner
+binding. Caller-selected grants, push facts, pools and metering are refused.
 Token-specific lookup, revocation and rotation keep their own-token binding.
 
 ### Reconciled C2 permissions

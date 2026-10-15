@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **controller (Breaking):** GitHub Actions exchange issues a push-bound controller capability through the common issuer
+  The request accepts only `id_token` and `team`. Grants and repository identity come from verified claims and the team's binding. The route uses canonical errors and does not retry a lost bearer response. See [GitHub Actions runners](docs/github-actions-runners.md#what-the-credential-can-do).
 - **controller (Breaking):** Member credential creation uses `/api/v1/tokens` with explicit grants. Sessions issue personal roots, bearer delegation keeps revocation ancestry, and the response returns its capability once. See [migration guide](docs/migrations/_unreleased.md#member-credential-issuance).
 - **controller (Breaking):** Source release uses the shared capability policy and commits a store audit before decryption. Machine consent requires its owner's account session at `/api/v1/tokens/{token}/git-credentials`. Plan acceptance uses the configured secrets cipher for stored-secret validation. See [migration guide](docs/migrations/_unreleased.md#source-credentials).
 - **controller (Breaking):** Data upload, commit and record routes use live capability policy and server-derived uploader scope. Upload accepts a digest and size. Commit returns a receipt after physical verification. Cache-grant uploads and caller-selected object keys are removed. See [migration guide](docs/migrations/_unreleased.md#data-writes-and-records).

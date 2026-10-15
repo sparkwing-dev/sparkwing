@@ -91,6 +91,7 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 		{"s.registerPolicyEndpoints(router, s.queueEndpoints())", "queue_view.go"},
 		{"s.registerPolicyEndpoints(router, s.dataEndpoints())", "data_routes.go"},
 		{"s.registerPolicyEndpoints(router, s.sourceEndpoints())", "source_controller.go"},
+		{"s.registerPolicyEndpoints(router, s.actionsEndpoints())", "github_actions_exchange.go"},
 	} {
 		if !strings.Contains(string(data), group.registration) {
 			continue
@@ -124,6 +125,8 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 			scope := strings.Join(alternatives, "` or `")
 			if policy.Authentication == capability.AuthPublic {
 				scope = Public
+			} else if policy.Authentication != capability.AuthCapability {
+				scope = string(policy.Authentication)
 			}
 			routes = append(routes, Route{Method: match[1], Path: match[2], Scope: scope})
 		}

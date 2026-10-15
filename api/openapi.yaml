@@ -4566,7 +4566,7 @@ paths:
 
   /api/v1/runners/github/exchange:
     post:
-      x-sparkwing-scope: public
+      x-sparkwing-scope: github_actions_oidc
       summary: Registered route awaiting a description.
       description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
       responses:

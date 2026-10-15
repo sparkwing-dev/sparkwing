@@ -263,3 +263,19 @@ func TestParseDataEndpointsUsesActualRegistrations(t *testing.T) {
 		t.Fatalf("data registration=%+v want=%+v", got, want)
 	}
 }
+
+func TestParseActionsEndpointUsesActualProof(t *testing.T) {
+	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.actionsEndpoints())")
+	endpoints := `{Method: "POST", Pattern: "/api/v1/runners/github/exchange", Authentication: capability.AuthGitHubActions}`
+	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "github_actions_exchange.go"), []byte(endpoints), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Route{{Method: "POST", Path: "/api/v1/runners/github/exchange", Scope: "github_actions_oidc"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Actions registration=%+v want=%+v", got, want)
+	}
+}

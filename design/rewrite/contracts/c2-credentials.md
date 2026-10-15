@@ -81,12 +81,50 @@ The independent T1 creation expectation follows this correction.
 `Server.New` uses its store. `WithCredentialIssuer` injects that same contract
 for embedded controllers and tests. Session ancestry/digest/CSRF integration
 remains required before the default browser path is usable. No identity or
-CSRF fallback is added. Machine, service, bootstrap, Actions provisioning,
+CSRF fallback is added. Machine, service, bootstrap provisioning,
 credential listing and rotation still require their final adapters.
 
 The old global token mint and old member-family mint are removed. The remaining
 legacy team-token path only handles machine registration. The dashboard's member
 caller and response use the new route, grants and timestamp representation.
+
+### GitHub Actions root exchange
+
+`POST /api/v1/runners/github/exchange` uses `PolicyRouter` with
+`AuthGitHubActions`. The proof verifier checks the signed JWT's issuer,
+audience, time window and required repository IDs. The allowed event and branch
+rules remain unchanged. A commit, workflow ref and workflow run are required.
+The body accepts only `id_token` and `team`. Other headers and query selectors
+supply no authority. Failed proofs expose no token or provider diagnostic.
+
+The binding reader resolves the selected team's persisted numeric repository
+and owner IDs. All three selectors must match before provisioning. Renames do
+not change repository identity. `WithGitHubRunnerBindingLookup` supplies that
+same read contract to embedded controllers and tests. The default reads through
+`Store.ForTeam` and `Tenant.GitHubRunnerBinding`.
+
+The controller sends a trusted `ProvisionActions` to the existing sole issuer.
+It contains exactly `nodes.claim` and `triggers.claim`, the canonical `gh:<id>`
+repository, and a push binding with the verified ref, SHA and workflow run ID.
+Its registration ID is `github:<repository-id>:<owner-id>`. Its machine subject
+appends `:<workflow-run-id>`. The existing one-hour root lifetime remains.
+No caller selects pools, metering, trust, grants or expiry. The response retains
+`token`, `team`, `repository`, `expires_at` and `labels` for the runner consumer.
+
+This is a local C2 declaration of the trusted registration selectors, not a
+second registry. C1's `ProvisionPolicy` must check that registration inside the
+issuance transaction, preserve any applicable issuance limits, and connect
+binding removal to the new capability roots. Missing policy returns unavailable.
+The real-store HTTP test uses a fake policy and proves the committed capability
+round trip and refusal rollback. It does not prove the registry race or native
+Actions placement.
+
+The old exchange mint handler is removed. The route has `RetryNever` because
+issuance returns a one-time bearer with no replay contract. This local C2
+correction follows the existing claim and member issuance policy. The public
+reference generator records the named external proof instead of an empty scope.
+Binding administration, legacy runner fences and their old combined tests remain
+until their final routes and transactional writers are ported.
 
 ProvisionSpec is ratified as trusted root-only Delegate input, with the origin
 checks in issuance.go. It is never decoded from a delegation body. Root authority
@@ -206,9 +244,9 @@ team-token consent route and handler are removed.
 `WithSecretsCipher` installs a PlanSecretOpener on its store. The adapter uses
 the stored tenant, name, pipeline, shared and masked fields through the same
 secret-envelope opener as controller reads. Clearing the cipher removes the
-opener. Missing or failed decryption refuses acceptance. W4's ValidatePlan is
-still a stub in this checkout, so complete encrypted-secret identifier
-acceptance remains an integration obligation.
+opener. Missing or failed decryption refuses acceptance. The controller/store
+tests use the shared validator to refuse decrypted secret identifiers before
+insertion. Native host and generated-expansion evidence remain separate.
 
 C1's audited release method returns confirmed stored SSH/HTTPS credentials.
 GitHub App minting and extra-repository release still need an audited C1

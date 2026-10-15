@@ -28,6 +28,12 @@
   },
   "routes": [
     {
+      "route": "/api/v1/runners/github/exchange",
+      "kind": "api",
+      "exempt": "Verifies a third-party Actions identity and commits a new one-time credential. The local dashboard corpus has no signed Actions proof or transactional origin policy. A refusal does not measure issuance. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
       "route": "/api/v1/data/records",
       "kind": "api",
       "exempt": "Requires live data authority and transactionally authorized record/member edges, absent from the dashboard corpus. Read and write probes without these fixtures measure rejection. Authorized latency, cold start and response bytes remain unmeasured.",

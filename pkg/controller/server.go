@@ -970,6 +970,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	s.registerPolicyEndpoints(router, s.queueEndpoints())
 	s.registerPolicyEndpoints(router, s.dataEndpoints())
 	s.registerPolicyEndpoints(router, s.sourceEndpoints())
+	s.registerPolicyEndpoints(router, s.actionsEndpoints())
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	// safety: the cache proves itself with its storage.count service token,
 	// which these handlers check.
@@ -986,8 +987,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	router.Handle("GET /api/v1/capabilities", http.HandlerFunc(s.handleCapabilities))
 	router.Handle("POST /webhooks/github-app", http.HandlerFunc(s.handleGitHubAppWebhook))
 	router.Handle("POST /webhooks/stripe", s.paymentHandler())
-	// safety: the caller proves itself with a GitHub Actions ID token, not a bearer, so this route is public.
-	router.Handle("POST /api/v1/runners/github/exchange", noStore(http.HandlerFunc(s.handleGitHubRunnerExchange)))
 
 	return mux, router
 }

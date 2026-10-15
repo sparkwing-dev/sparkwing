@@ -125,67 +125,6 @@ func (f *ghFixture) workAt(team, runID, slug, branch, sha string) {
 	}
 }
 
-func TestGitHubRunnerExchangeNeedsBothSidesOfConsent(t *testing.T) {
-	f := newGHFixture(t)
-	owner := f.user("o", "olga@example.com")
-	stranger := f.user("s", "sam@example.com")
-	f.bind(owner, widgetsJob)
-
-	cred, code := f.exchange(f.gh.Token(widgetsJob, ghAudience), owner.team)
-	if code != http.StatusCreated || cred.Team != owner.team || cred.Repository != "Acme/Widgets" ||
-		len(cred.Labels) != 1 || cred.Labels[0] != controller.GitHubActionsLabel {
-		t.Fatalf("exchange = %d %+v", code, cred)
-	}
-	w := f.whoami("Bearer " + cred.Token)
-	if w.Team != owner.team || w.Principal != "github:42:Acme/Widgets" {
-		t.Fatalf("whoami = %+v", w)
-	}
-	token, err := f.store.LookupToken(cred.Token, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if token.ExpiresAt == nil || token.ExpiresAt.Unix() != cred.ExpiresAt ||
-		token.ExpiresAt.Sub(token.CreatedAt) <= 0 || token.ExpiresAt.Sub(token.CreatedAt) > time.Hour {
-		t.Fatalf("credential expiry = %d, stored token = %+v; want a live lifetime at most an hour", cred.ExpiresAt, token)
-	}
-	tenant, err := f.store.ForTeam(context.Background(), store.Team(owner.team))
-	if err != nil {
-		t.Fatal(err)
-	}
-	push, err := tenant.GitHubRunnerCredentialPush(context.Background(), token.Prefix)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if push.RunID != widgetsJob.RunID {
-		t.Fatalf("credential workflow run = %q, want %q", push.RunID, widgetsJob.RunID)
-	}
-
-	transferred := widgetsJob
-	transferred.RepositoryOwnerID = 8
-	past := time.Now().Add(-time.Hour).Unix()
-	refusals := map[string]struct {
-		token, team string
-		want        int
-	}{
-		"repository the team never bound":       {f.gh.Token(gadgetsJob, ghAudience), owner.team, http.StatusForbidden},
-		"team that never bound the repository":  {f.gh.Token(widgetsJob, ghAudience), stranger.team, http.StatusForbidden},
-		"team that does not exist":              {f.gh.Token(widgetsJob, ghAudience), "nobody", http.StatusForbidden},
-		"no team named":                         {f.gh.Token(widgetsJob, ghAudience), "", http.StatusForbidden},
-		"repository transferred to a new owner": {f.gh.Token(transferred, ghAudience), owner.team, http.StatusForbidden},
-		"token for another audience":            {f.gh.Token(widgetsJob, "https://other.example.com"), owner.team, http.StatusUnauthorized},
-		"expired token":                         {f.gh.TokenWith(widgetsJob, ghAudience, map[string]any{"exp": past}), owner.team, http.StatusUnauthorized},
-		"token from an unpublished key":         {f.gh.TokenSignedBy(f.gh.ForeignKey(), widgetsJob, ghAudience), owner.team, http.StatusUnauthorized},
-		"another issuer":                        {f.gh.TokenWith(widgetsJob, ghAudience, map[string]any{"iss": "https://evil.example.com"}), owner.team, http.StatusUnauthorized},
-	}
-	for name, c := range refusals {
-		t.Run(name, func(t *testing.T) {
-			if got, code := f.exchange(c.token, c.team); code != c.want || got.Token != "" {
-				t.Fatalf("exchange = %d %+v, want %d and no credential", code, got, c.want)
-			}
-		})
-	}
-}
-
 func TestGitHubRunnerCredentialClaimsOnlyItsRepository(t *testing.T) {
 	f := newGHFixture(t)
 	owner := f.user("o", "olga@example.com")
@@ -351,43 +290,6 @@ func TestGitHubRunnerCredentialClaimsOnlyItsOwnPush(t *testing.T) {
 	}
 	if code := f.call("POST", "/api/v1/nodes/claim", runner, claim, &node); code != http.StatusOK || node.RunID != "run-feature" {
 		t.Fatalf("claim = %d %+v, want run-feature", code, node)
-	}
-}
-
-// A pull_request or pull_request_target job runs code or input the
-// repository's owners did not push, so it gets no credential; neither does a
-// job for anything but a branch push.
-func TestGitHubRunnerExchangeRefusesAnythingButABranchPush(t *testing.T) {
-	f := newGHFixture(t)
-	owner := f.user("o", "olga@example.com")
-	f.bind(owner, widgetsJob)
-	refusals := map[string]githuboidctest.Job{}
-	for _, event := range []string{"pull_request", "pull_request_target"} {
-		job := widgetsJob
-		job.EventName, job.Ref = event, "refs/pull/7/merge"
-		refusals[event] = job
-		onBranch := widgetsJob
-		onBranch.EventName = event
-		refusals[event+" naming a branch ref"] = onBranch
-	}
-	tag := widgetsJob
-	tag.Ref = "refs/tags/v1.0.0"
-	refusals["tag push"] = tag
-	for name, job := range refusals {
-		t.Run(name, func(t *testing.T) {
-			if got, code := f.exchange(f.gh.Token(job, ghAudience), owner.team); code != http.StatusForbidden || got.Token != "" {
-				t.Fatalf("exchange = %d %+v, want 403 and no credential", code, got)
-			}
-		})
-	}
-	noSHA := f.gh.TokenWith(widgetsJob, ghAudience, map[string]any{"sha": nil})
-	if got, code := f.exchange(noSHA, owner.team); code/100 == 2 || got.Token != "" {
-		t.Fatalf("exchange without a sha claim = %d %+v, want a refusal", code, got)
-	}
-	dispatch := widgetsJob
-	dispatch.EventName = "workflow_dispatch"
-	if _, code := f.exchange(f.gh.Token(dispatch, ghAudience), owner.team); code != http.StatusCreated {
-		t.Fatalf("workflow_dispatch on a branch = %d, want 201", code)
 	}
 }
 

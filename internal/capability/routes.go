@@ -207,7 +207,7 @@ var Routes = []RoutePolicy{
 	externalRoute("GET", "/api/v1/capabilities", AuthPublic, OwnerNone, RetrySafe),
 	externalRoute("POST", "/webhooks/stripe", AuthPaymentWebhook, OwnerTeam, RetryExactBody),
 	externalRoute("POST", "/webhooks/github-app", AuthGitHubWebhook, OwnerTeam, RetryExactBody),
-	externalRoute("POST", "/api/v1/runners/github/exchange", AuthGitHubActions, OwnerTeam, RetryIdempotencyKey),
+	externalRoute("POST", "/api/v1/runners/github/exchange", AuthGitHubActions, OwnerTeam, RetryNever),
 	externalRoute("GET", "/.well-known/openid-configuration", AuthPublic, OwnerNone, RetrySafe),
 	externalRoute("GET", "/.well-known/jwks.json", AuthPublic, OwnerNone, RetrySafe),
 	externalRoute("PUT", "/api/v1/data/uploads/{upload}", AuthSignedObject, OwnerTeam, RetryExactBody),

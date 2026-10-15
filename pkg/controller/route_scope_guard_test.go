@@ -21,8 +21,6 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 		"/":                        true,
 		// safety: a signed-out browser draws the sign-in page from it; it reports only teams and providers.
 		"GET /api/v1/capabilities": true,
-		// safety: a GitHub Actions job proves itself with its signed ID token; it answers 404 without an external URL.
-		"POST /api/v1/runners/github/exchange": true,
 		// safety: a GitHub App delivery proves itself with its signature; it answers 404 without an App.
 		"POST /webhooks/github-app": true,
 		// safety: the payment verifier checks Stripe's exact body before settlement.
@@ -33,11 +31,6 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 		"POST /internal/storage/commit":   true,
 		"POST /internal/storage/release":  true,
 		"POST /internal/downloads/charge": true,
-		"POST /api/v1/data/download":      true,
-		// safety: upload and commit authenticate a bound grant or runner token and
-		// check its live claim inside the handler.
-		"POST /api/v1/data/upload": true,
-		"POST /api/v1/data/commit": true,
 		// safety: output bytes move through URLs this controller signed for one
 		// upload or one object; the handlers check the signature and its expiry.
 		"PUT /api/v1/outputs/uploads/{id}":     true,

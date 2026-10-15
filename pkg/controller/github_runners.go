@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -45,6 +46,7 @@ type githubRunnerConfig struct {
 	once     sync.Once
 	override *githuboidc.Config
 	verifier *githuboidc.Verifier
+	lookup   func(context.Context, store.Team, int64) (store.GitHubRunnerBinding, error)
 }
 
 // WithGitHubRunners trusts cfg's issuer for the GitHub Actions exchange
@@ -79,106 +81,6 @@ type githubExchangeResp struct {
 	Repository string   `json:"repository"`
 	ExpiresAt  int64    `json:"expires_at"`
 	Labels     []string `json:"labels"`
-}
-
-var errNoGitHubBinding = errors.New("this team has not bound the job's repository to GitHub Actions runners")
-
-func (s *Server) handleGitHubRunnerExchange(w http.ResponseWriter, r *http.Request) {
-	verifier := s.githubVerifier()
-	if verifier == nil {
-		writeError(w, http.StatusNotFound, errors.New("GitHub Actions runners need the controller's external URL"))
-		return
-	}
-	var req githubExchangeReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	claims, err := verifier.Verify(r.Context(), req.IDToken)
-	if errors.Is(err, githuboidc.ErrRejected) {
-		s.logger.Info("github runner exchange rejected", "reason", err.Error())
-		writeAuthError(w, http.StatusUnauthorized, authErrorBody{Code: "unauthenticated", Message: err.Error()})
-		return
-	}
-	if err != nil {
-		s.logger.Warn("github runner exchange could not verify", "error", err.Error())
-		writeError(w, http.StatusBadGateway, errors.New("GitHub's signing keys could not be read"))
-		return
-	}
-	repo, ok := store.ParseGitHubRepo(claims.Repository)
-	if !ok {
-		writeError(w, http.StatusBadRequest, errors.New("the token names no owner/name repository"))
-		return
-	}
-	branch, isBranch := strings.CutPrefix(claims.Ref, "refs/heads/")
-	var refusal string
-	switch {
-	case !githubRunnerEvents[claims.EventName]:
-		refusal = "a " + strconv.Quote(claims.EventName) + " job gets no runner credential; only push, workflow_dispatch and schedule jobs do"
-	case !isBranch || branch == "":
-		refusal = "the job ran for " + strconv.Quote(claims.Ref) + "; a runner credential binds only to a branch"
-	case !githubCommit(claims.SHA):
-		refusal = "the token names no commit"
-	}
-	if refusal != "" {
-		s.logger.Info("github runner exchange refused",
-			"repository", claims.Repository, "event", claims.EventName, "ref", claims.Ref, "reason", refusal)
-		writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "forbidden", Message: refusal})
-		return
-	}
-	// safety: consent is two-sided: the workflow names the team, and an
-	// owner of that team bound this repository id. A team binding a
-	// repository it does not control gets nothing, because that
-	// repository's workflows never name it.
-	team := store.NormalizeTeam(store.Team(req.Team))
-	t, err := s.store.ForTeam(r.Context(), team)
-	if err != nil && !errors.Is(err, store.ErrUnknownTeam) && !errors.Is(err, store.ErrNoTeam) {
-		s.writeInternalError(w, r, "github runner team", err)
-		return
-	}
-	var binding store.GitHubRunnerBinding
-	if err == nil {
-		binding, err = t.GitHubRunnerBinding(r.Context(), claims.RepositoryID)
-	}
-	if err != nil && !errors.Is(err, store.ErrNotFound) && !errors.Is(err, store.ErrUnknownTeam) && !errors.Is(err, store.ErrNoTeam) {
-		s.writeInternalError(w, r, "github runner binding", err)
-		return
-	}
-	// safety: a transferred repository keeps its id, so the owner id pinned at
-	// binding time is what stops its new owner inheriting the team's work.
-	if err != nil || binding.RepositoryOwnerID != claims.RepositoryOwnerID {
-		s.logger.Info("github runner exchange refused",
-			"team", string(team), "repository", claims.Repository, "repository_id", claims.RepositoryID,
-			"reason", "no binding")
-		writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "forbidden", Message: errNoGitHubBinding.Error()})
-		return
-	}
-	now := time.Now().UTC()
-	principal := store.GitHubRunnerPrincipalPrefix + strconv.FormatInt(claims.RepositoryID, 10) + ":" + repo.Slug()
-	raw, tok, err := t.MintGitHubRunnerCredential(r.Context(), binding, principal,
-		store.GitHubRunnerPush{Branch: branch, SHA: claims.SHA, RunID: claims.RunID}, store.MachineTokenScopes(), githubRunnerCredentialTTL, now)
-	if errors.Is(err, store.ErrNotFound) {
-		writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "forbidden", Message: errNoGitHubBinding.Error()})
-		return
-	}
-	if errors.Is(err, store.ErrGitHubRunnerCredentialLimit) {
-		setRetryAfter(w, time.Minute)
-		writeError(w, http.StatusTooManyRequests, errors.New(
-			"this team already has "+strconv.Itoa(store.MaxGitHubRunnerCredentials)+" live GitHub Actions runner credentials"))
-		return
-	}
-	if err != nil {
-		s.writeInternalError(w, r, "mint github runner credential", err)
-		return
-	}
-	s.logger.Info("github runner credential minted",
-		"team", string(team), "prefix", tok.Prefix, "repository", claims.Repository,
-		"repository_id", claims.RepositoryID, "ref", claims.Ref, "sha", claims.SHA, "event", claims.EventName,
-		"workflow_ref", claims.WorkflowRef, "github_run_id", claims.RunID)
-	writeJSON(w, http.StatusCreated, githubExchangeResp{
-		Token: raw, Team: string(team), Repository: repo.Slug(),
-		ExpiresAt: tok.ExpiresAt.Unix(), Labels: []string{GitHubActionsLabel},
-	})
 }
 
 func githubRunnerScope(p *Principal) (scope store.GitHubRunnerScope, isGitHub, ok bool) {

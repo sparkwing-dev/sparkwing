@@ -105,7 +105,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/pipelines/{name}/sizing/waits` | `node.report` |
 | `GET` | `/api/v1/queue` | `runs.read` |
 | `POST` | `/api/v1/runners/claim` | `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/runners/github/exchange` | `public` |
+| `POST` | `/api/v1/runners/github/exchange` | `github_actions_oidc` |
 | `GET` | `/api/v1/runs` | `runs.read` |
 | `POST` | `/api/v1/runs` | `runs.write` or `children.start` |
 | `GET` | `/api/v1/runs/grep` | `logs.read` |
