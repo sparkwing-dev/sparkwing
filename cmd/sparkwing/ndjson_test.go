@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func decodeNDJSON[T any](t *testing.T, out string) []T {
@@ -77,7 +77,7 @@ func TestPipelineListIsAnIndexAndDescribeKeepsTheDetail(t *testing.T) {
 		Help:       "A long help essay that belongs behind describe.",
 		Entrypoint: "Release",
 		Triggers:   []string{"push:main"},
-		Examples:   []sparkwing.Example{{Comment: "Run it", Command: "sparkwing run release"}},
+		Examples:   []nodeproto.UsageExample{{Comment: "Run it", Command: "sparkwing run release"}},
 		Risks:      []string{"publishes"},
 	}
 	line, err := json.Marshal(full.index())

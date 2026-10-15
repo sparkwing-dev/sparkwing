@@ -1,6 +1,6 @@
 //go:build unix
 
-package sparkwing_test
+package sparkwing
 
 import (
 	"context"
@@ -14,17 +14,14 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type sampleCollector struct {
 	mu      sync.Mutex
-	samples []sparkwing.ResourceSample
+	samples []resourceSample
 }
 
-func (c *sampleCollector) report(s sparkwing.ResourceSample) {
+func (c *sampleCollector) report(s resourceSample) {
 	c.mu.Lock()
 	c.samples = append(c.samples, s)
 	c.mu.Unlock()
@@ -49,10 +46,10 @@ func TestExec_ShellBurnerRecordsNonzeroCPU(t *testing.T) {
 		t.Skip("slow: 2.6s of real work; the fast class runs under -short")
 	}
 	col := &sampleCollector{}
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
-	ctx = sparkwing.WithResourceReporter(ctx, col.report)
+	ctx := withTestLogger(context.Background(), &recordingLogger{})
+	ctx = withResourceReporter(ctx, col.report)
 
-	_, err := sparkwing.Bash(ctx, `i=0; while [ $i -lt 1000000 ]; do i=$((i+1)); done`).Run()
+	_, err := Bash(ctx, `i=0; while [ $i -lt 1000000 ]; do i=$((i+1)); done`).Run()
 	if err != nil {
 		t.Fatalf("Bash burner: %v", err)
 	}
@@ -73,10 +70,10 @@ func TestExec_SpawnedBinaryBurnerRecordsNonzeroCPU(t *testing.T) {
 		t.Skip("awk not on PATH")
 	}
 	col := &sampleCollector{}
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
-	ctx = sparkwing.WithResourceReporter(ctx, col.report)
+	ctx := withTestLogger(context.Background(), &recordingLogger{})
+	ctx = withResourceReporter(ctx, col.report)
 
-	_, err := sparkwing.Exec(ctx, "awk", "BEGIN{for(i=0;i<40000000;i++)s+=i; print s}").Run()
+	_, err := Exec(ctx, "awk", "BEGIN{for(i=0;i<40000000;i++)s+=i; print s}").Run()
 	if err != nil {
 		t.Fatalf("awk burner: %v", err)
 	}
@@ -91,13 +88,13 @@ func TestExec_ResourceReportIsFiledAtTheReapNotAfterTheDrain(t *testing.T) {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
 	}
 	reported := make(chan time.Duration, 4)
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := withTestLogger(context.Background(), &recordingLogger{})
 	started := time.Now()
-	ctx = sparkwing.WithResourceReporter(ctx, func(sparkwing.ResourceSample) {
+	ctx = withResourceReporter(ctx, func(resourceSample) {
 		reported <- time.Since(started)
 	})
 
-	if _, err := sparkwing.Bash(ctx, `sleep 5 & echo spawned`).Run(); err != nil {
+	if _, err := Bash(ctx, `sleep 5 & echo spawned`).Run(); err != nil {
 		t.Fatalf("Bash with a surviving grandchild: %v", err)
 	}
 
@@ -112,8 +109,8 @@ func TestExec_ResourceReportIsFiledAtTheReapNotAfterTheDrain(t *testing.T) {
 }
 
 func TestExec_NoReporterIsHarmless(t *testing.T) {
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
-	if _, err := sparkwing.Bash(ctx, "true").Run(); err != nil {
+	ctx := withTestLogger(context.Background(), &recordingLogger{})
+	if _, err := Bash(ctx, "true").Run(); err != nil {
 		t.Fatalf("Run without reporter: %v", err)
 	}
 }
@@ -121,13 +118,13 @@ func TestExec_NoReporterIsHarmless(t *testing.T) {
 func TestExec_CancelKillsProcessTree(t *testing.T) {
 	dir := t.TempDir()
 	pidfile := filepath.Join(dir, "child.pid")
-	ctx, cancel := context.WithCancel(sparkwingruntime.WithLogger(context.Background(), &recordingLogger{}))
+	ctx, cancel := context.WithCancel(withTestLogger(context.Background(), &recordingLogger{}))
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		script := fmt.Sprintf(`sleep 120 & echo $! > %q; wait`, pidfile)
-		_, _ = sparkwing.Bash(ctx, script).Run()
+		_, _ = Bash(ctx, script).Run()
 	}()
 	t.Cleanup(func() {
 		cancel()

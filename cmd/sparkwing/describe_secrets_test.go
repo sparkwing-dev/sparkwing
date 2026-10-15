@@ -12,7 +12,6 @@ const describeSecretsSource = `package main
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -31,7 +30,7 @@ func (*Fixture) Plan(_ context.Context, p *sparkwing.Plan, _ sparkwing.NoInputs,
 
 func main() {
 	sparkwing.Register("fixture", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Fixture{} })
-	runner.Main()
+	sparkwing.Main()
 }
 `
 

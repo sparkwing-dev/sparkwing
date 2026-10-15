@@ -299,7 +299,6 @@ var tenantTables = []string{
 var operatorTables = []string{
 	"accounts",
 	"card_spend_days",
-	"egress_day",
 	"github_app_connect_states",
 	"github_app_deliveries",
 	"identities",

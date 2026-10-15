@@ -1,148 +1,313 @@
 # Node protocol
 
-Protocol v2 is the boundary between a matching Sparkwing engine and an SDK process. The host owns scheduling, placement, admission, leases, retries, storage, secret release and output masking. The SDK declares jobs and runs customer code when the host requests it. Go and TypeScript share this wire contract.
+Protocol 2 connects a run host to an SDK process containing pipeline code. The
+host owns scheduling, placement, admission, retries, deadlines, storage, masking
+and state transitions. The SDK declares jobs and runs step bodies and closures
+when the host requests them. The Go and TypeScript SDKs use the same wire types.
 
-<!-- design:begin -->
-The native host and SDK cutover is unfinished. This page and the generated schemas specify the v2 contract. Schema tests establish message shapes. They do not establish native execution on every placement or Windows handle inheritance.
-<!-- design:end -->
+The declarations in `internal/nodeproto` define the wire. The schemas and corpus
+in `internal/nodeproto/conformance/testdata` exercise requests, replies, strict
+plans, errors and generated declarations across SDKs.
 
-## Processes and transport
+## Process startup
 
-The engine acquires the sealed source SHA, reads its exact SDK pin and selects the verified matching engine. That engine installs dependencies, builds the entry and hosts execution. Go uses a locally cached pipeline binary. TypeScript runs `node <main> --sw-node-protocol`, where `main` comes from `.sparkwing/package.json`. Installation uses the shared filtered install environment and masked diagnostics.
+The host starts a Go pipeline binary as `<entry> --sw-node-protocol`. It starts a
+TypeScript entry as `node <main> --sw-node-protocol`. The working directory is the
+acquired repository checkout.
 
-The host starts an entry with `--sw-node-protocol`. On Unix the SDK reads requests from descriptor 3 and writes frames to descriptor 4. stdin is the null device. stdout and stderr carry customer text and are captured separately. A frame contains one JSON object followed by a newline. Customer stdout cannot forge a protocol reply.
+| Stream | Unix descriptor | Purpose |
+|---|---|---|
+| stdin | 0 | Null device |
+| stdout | 1 | Customer text |
+| stderr | 2 | Customer text |
+| request pipe | 3 | Host requests |
+| frame pipe | 4 | SDK replies and structured logs |
 
-On Windows the host appends `--sw-protocol-handles <request>,<frame>` with decimal inherited handles. Both SDKs support this transport. At transport initialization the SDK clears inheritance on the descriptors or handles before starting tools. Code in an independent Go package may initialize before the SDK, so package initialization must not spawn tools that inherit the pipes.
+On Windows the host passes inherited decimal handles through
+`--sw-protocol-handles <request>,<frame>` in argv. SDK transport initialization
+marks the pipes close-on-exec or clears handle inheritance before starting tools.
+Go package initialization orders this before packages that import the SDK.
+Independent packages can initialize earlier, so pipeline packages should start
+commands inside execution callbacks.
 
-The first request is `hello`, exactly once. Its in-memory binding carries a delegated node-host bearer when the process is bound to a job. The reusable controller or runner credential stays with the host. A describe or plan process has no job binding. Protocol handles, route bearers and version negotiation use this transport, rather than process environment variables or HTTP version headers.
+Every process receives `hello` first. Its runner is the identity granted by the
+host, including the actual runner name, type and labels. Execution processes also
+receive a binding to one run and job, with a loopback route URL and a delegated
+bearer. Discovery and initial planning omit that binding. The SDK keeps the
+binding in memory. Credentials and protocol handles travel through the private
+pipe or argv handle argument, respectively.
 
-The shared process environment builder distinguishes installation, Git acquisition, planning and job execution. Startup environment applies before the process starts. Body environment applies after planning. Startup environment must not influence declarations.
-
-## Hello and operations
-
-Every request has a nonempty `id` unique within the process and an `op`. Replies correlate through `reply`. Requests and replies accept additive unknown fields. Recognized fields must have the required type and cannot contradict the operation.
-
-| Operation | Required fields beyond `id` and `op` | Meaning |
-| --- | --- | --- |
-| `hello` | `protocol`, `engine`, `runner` | Negotiate protocol 2 and pass verified engine and server-granted runner identity. Optional `binding` carries job authority. |
-| `describe` | none | Read registered pipeline metadata and secret declarations. |
-| `plan` | `pipeline`, `args`, `run` | Declare a run once per process. `args` is an explicit object, including when empty. |
-| `run_step` | `job`, `step`, `attempt` | Run one planned step. Attempt is the positive, node-wide ordinal. Optional `failure` carries persisted recovery data. |
-| `eval` | `closure` | Evaluate a declared closure with optional job, step, attempt, input or recovery context. |
-| `cancel` | `job`, optionally `step`, or `target` | Join selected work before acknowledging cancellation. `target` names an active request, including an eval without a job. |
-
-A cancellation cannot mix `target` with job or step selectors. Job-only cancellation includes active evals for that job. The original request still receives its own reply. Work execution requires an earlier plan in the process. A body-only job declares one step.
-
-A hello exchange looks like this. The runner identity is granted by the controller, rather than selected by the pipeline:
-
-```json
-{"id":"1","op":"hello","protocol":2,"engine":{"version":"v1.0.0"},"runner":{"name":"builder","type":"self_hosted","labels":["arch=amd64"]}}
-{"reply":"1","ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"v1.0.0"},"features":[]}}
+```text
+-> {"id":"1","op":"hello","protocol":2,"engine":{"version":"v0.71.0"},"runner":{"name":"local","type":"local","labels":["os=linux"]},"binding":{"run_id":"r1","job_id":"build","routes":{"url":"http://127.0.0.1:41873","bearer":"example-bearer"}}}
+<- {"reply":"1","ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"v0.71.0"},"features":[]}}
 ```
 
-`features` advertises optional operations. A major mismatch returns `protocol_mismatch` with supported majors in structured details. An old SDK answering `unknown_op` to hello needs rebuilding against the matching SDK. Protocol identity is negotiated once. Describe and plan documents carry their data without another version stamp.
+Hello occurs exactly once. A major mismatch returns `protocol_mismatch` with
+`supported_majors` in error details. The selected major applies to the process.
+Documents and HTTP requests carry their own data without another version stamp.
+The SDK's optional operations are advertised in hello's `features` array.
 
-A plan request keeps the invoked name in the sealed run context:
+## Framing
 
-```json
-{"id":"2","op":"plan","pipeline":"Build","args":{},"run":{"run_id":"run-example","pipeline":"build"}}
-```
+Each request or frame is one JSON object followed by a newline. Correlation IDs
+are nonempty and unique within a process. Replies can arrive out of order.
 
-`run` also carries optional sealed Git and trigger facts, the start time, dry-run and memo controls. The SDK uses those facts rather than looking them up through controller credentials.
-
-## Replies and errors
-
-Successful replies have `ok: true` and exactly one `result`. Failed replies have `ok: false` and exactly one `error`. Empty acknowledgements use `{}`. Null may be a result value where the operation permits it. Duplicate, unsolicited or contradictory replies fail the session.
-
-Protocol errors use the shared inner object, with a nonempty code and a present string message:
+A successful reply contains `reply`, `ok: true` and an object `result`. A failed
+reply contains `reply`, `ok: false` and an inner error object. Exactly one of
+`result` and `error` is present. The common error shape is:
 
 ```json
-{"reply":"3","ok":false,"error":{"code":"unknown_step","message":"step is not declared","hint":"rebuild the pipeline"}}
+{"error":{"code":"forbidden","message":"the operation is not authorized","hint":"check the declared dependency","details":{"reason":"reference_undeclared"}}}
 ```
 
-Optional `hint` and `details` retain structured diagnostics. Unknown future codes and additive fields remain readable. The shared decoder refuses null, duplicate keys, trailing input and nested error envelopes. HTTP errors wrap this object once as `{"error":{...}}`.
+HTTP errors use that envelope. A protocol reply places the inner object directly
+in its `error` field:
 
-A body failure is a successful invocation with a failed outcome. Failure to invoke the requested body is a failed protocol reply:
+```text
+-> {"id":"2","op":"describe"}
+<- {"reply":"2","ok":false,"error":{"code":"plan_failed","message":"pipeline discovery failed"}}
+```
+
+`code` and `message` are required strings. `hint` and `details` are optional.
+Clients branch on codes. Decoders accept additive error fields and future codes.
+Requests, replies and log records accept additive fields while checking the types
+and required fields of known members. Plans have a stricter boundary described
+below. Duplicate or unsolicited replies, malformed frames and oversized frames
+fail the protocol.
+
+A log frame has `ts` and optional `level`, `step`, `event`, `msg` and object
+`attrs`. The SDK leaves job attribution to the host. The host assigns the bound
+job, filters debug records and masks text before storage or truncation. Planning
+and closure-evaluation logs belong to the run log. Unknown events remain ordinary
+records.
 
 ```json
-{"reply":"4","ok":true,"result":{"outcome":"failed","error":{"code":"internal","message":"compiler failed"}}}
+{"ts":"2026-10-15T12:00:00Z","level":"info","step":"compile","msg":"compiling","attrs":{"packages":3}}
 ```
 
-`RunResult` admits `success` or `failed` and optional JSON output. Recovery requests carry `failure` with the source `job`, `stage` and this same inner error object. The host reads persisted failure data instead of inferring it from a status string.
+stdout and stderr remain separate from frames. Customer text cannot supply
+protocol replies. Closing the request pipe cancels active operations and ends the
+SDK process. Cancellation acknowledgements and the original operation replies
+allow the host to wait for cleanup before closing the process.
 
-## Describe and plan documents
+## Operations
 
-Describe returns `pipelines`. Each pipeline declares `name`, an explicit `args` array and optional help, examples, environment documentation, risks, step risks and secrets. Shared argument descriptions use `name`, `type`, `required`, optional `desc`, default, enum, secret classification and `job_id`. Step risks use `job_id` and `step_id`. Secret declarations carry names and optionality, never values. Describe is the sole source of secret declarations.
+| Operation | Request fields after `id` and `op` | Result |
+|---|---|---|
+| `hello` | `protocol`, `engine`, `runner`, optional `binding` | `protocol`, `sdk`, `features` |
+| `describe` | None | `pipelines` |
+| `plan` | `pipeline`, `args`, `run` | Flat plan document |
+| `run_step` | `job`, `step`, positive `attempt`, `settled`, optional `failure` | `outcome`, optional `output` or `error` |
+| `eval` | `closure`, optional `input`; step predicates also carry `attempt`, `settled` | `value`, optional `error` |
+| `cancel` | `job` with optional `step`, or `target` | `{}` |
 
-A plan contains an explicit `jobs` array and optional concurrency, resources, priority, claim wait, admission class and checkout policy. Jobs carry their execution envelopes directly:
+### Describe and plan
 
-```json
-{"jobs":[{"id":"build","env":{"MODE":{"value":"test","startup":false}},"steps":[{"id":"compile"},{"id":"test","needs":["compile"]}],"result_step":"test","retry":{"attempts":0},"artifacts":["dist/**"]}],"priority":0,"concurrency":[{"group":"builds"}]}
+`describe` lists registered pipelines and their inputs, help, risks and secret
+names. Secrets are declared here once. A pipeline description always includes
+`name` and `args`. Each argument includes `name`, `type` and `required`, with
+optional description, default, enum, secret classification and owning `job_id`.
+Describe failures fail discovery instead of returning a partial schema.
+
+```text
+-> {"id":"3","op":"describe"}
+<- {"reply":"3","ok":true,"result":{"pipelines":[{"name":"ship","args":[{"name":"target","type":"string","required":false,"default":"staging"}],"secrets":[{"name":"DEPLOY_TOKEN"}]}]}}
 ```
 
-| Declaration | Fields and interpretation |
-| --- | --- |
-| Job edges | `deps`, `deps_if_present`, `needs_generated`; recovery uses `on_failure_of`. |
-| Steps | `id`, `needs`, `groups`, `finally`, risks, optionality, error policy, dry-run support and closures. `result_step` chooses the job result. |
-| Environment | A name maps to `{value,startup?}`. Startup and body values follow their separate process boundaries. |
-| Placement | Job `requires`, `prefers` and `inline`; the host resolves inherited run requirements separately. |
-| Artifacts | `artifacts` selects published paths. `consumes` entries name `producer` and optional `into`. |
-| References | `pipeline_refs` declares `pipeline` and `job` read edges. A declaration grants no authority itself. |
-| Retry | `retry.attempts` counts additional application attempts. Optional `backoff_ms` stays under the same claim and generation. Lease-loss disruptions have their own counter. |
-| Timeouts | `timeout_ms`, `no_progress_timeout_ms` and `skip_if_budget_ms` retain independent meanings. Parent deadlines still apply. |
-| Memo | `memo.ttl_ms` controls result reuse. `closures.memo_key` names code that computes a key. |
-| Directory cache | `caches` entries contain `name`, exactly one of `path` or `resolver`, optional `key_scope`, and explicit `key_files`. |
-| Concurrency | Plan or job arrays contain `group` and optional `scope`, `capacity`, `cost`, `on_limit`, queue timeout and cancel timeout. Only the host computes scoped keys. |
-| Resources | `cores` and `memory_bytes` preserve omission. The host resolves winners and refuses requests above operator ceilings. |
-| Approval | A control job with `approval` and no step body. `message`, `timeout_ms` and `on_timeout` describe its gate. Zero timeout remains indefinite where the owner can wait. `SkipIf` is supported. |
-| Failure policy | `fail_fast` or `collect_all`. Persisted outcomes use `success`, `failed`, `cancelled`, `skipped`, `superseded` and `memoized`. |
+`plan.pipeline` names a registered SDK entrypoint. `args` is an explicit object,
+including `{}` when empty. `run` requires `run_id` and `pipeline`. Its pipeline
+name is the invoked name, which may be a project alias for the SDK entrypoint.
+Optional context includes `git`, `trigger`, `started_at`, `dry_run` and `no_memo`.
 
-Plan JSON is strict at every nested level. Unknown and duplicate keys, null required collections and host-owned fields fail with `plan_invalid`. Run identity, accepted hashes, secret declarations and resolved authority belong to the host. The v1 `nodes`, `modifiers`, `work`, computed concurrency keys and duplicate step-group/result wrappers are removed.
+Planning occurs at most once per process. Execution processes reconstruct the
+plan from the accepted inputs and compare job declarations with the accepted
+hash. A changed declaration fails with `plan_drift` before execution. Generated
+jobs reconstruct their ancestor generator chain from recorded outputs under the
+same rule. Reconstruction cannot change persisted topology.
 
-Omission and explicit zero or false stay distinct. Omitted concurrency fields resolve to `global`, capacity 1, cost 1 and `queue`; explicit nonpositive counts fail. The shared settings owner checks group consistency, cost versus capacity and operator ceilings. It never silently clamps an explicit value.
+```text
+-> {"id":"4","op":"plan","pipeline":"ship","args":{"target":"staging"},"run":{"run_id":"r1","pipeline":"ship","dry_run":false,"no_memo":false}}
+<- {"reply":"4","ok":true,"result":{"jobs":[{"id":"build","steps":[{"id":"compile"},{"id":"test","needs":["compile"]}],"result_step":"test"},{"id":"deploy","deps":["build"],"retry":{"attempts":1,"backoff_ms":1000},"timeout_ms":600000,"steps":[{"id":"apply"}]}]}}
+```
 
-The shared validator also checks graphs, references, closure IDs, placement support and secret-bearing identifiers. Diagnostics identify the field path without echoing a secret or the identifier containing it. Every accepted and generated identifier uses the same secret registry as masking. Hashing follows validation. The store commits the accepted declarations, resolved winners and hashes at the second seal.
+### Plan document
 
-## Closures and generated jobs
+A plan has a required `jobs` array. Its optional top-level declarations are
+`concurrency`, `resources`, `priority`, `claim_wait_ms`, `admission_class` and
+`source`. The host resolves these settings and checks operator ceilings when it
+accepts the plan. Run identity, accepted hashes, authorization and computed
+concurrency keys remain host state.
 
-`closures` contains `skip_if`, `before_run`, `verify`, `after_run`, `memo_key` and `generate` IDs. The IDs are opaque references to code in the SDK process. The host decides when they run. Approval jobs retain skip conditions while executable before/after hooks are removed.
+Each job is flat:
 
-`EvalResult.value` is boolean for skip conditions, string or null for memo keys, null for hooks and verify, and an array of flat job declarations for generation. Its optional error is the shared inner error object. The host wraps generated jobs in a plan for validation with expansion context.
+| Fields | Meaning |
+|---|---|
+| `id`, `groups` | Job and grouping identifiers |
+| `deps`, `deps_if_present`, `needs_generated` | Required, optional and generated dependencies |
+| `steps`, `result_step`, `failure_policy` | Step graph, selected typed result and failure handling |
+| `retry`, `timeout_ms`, `no_progress_timeout_ms` | Application retry and execution deadlines |
+| `optional`, `continue_on_error`, `on_failure_of` | Failure propagation and recovery |
+| `closures`, `skip_if_budget_ms` | Opaque callback IDs and condition budget |
+| `approval` | Manual decision with message, timeout and timeout policy |
+| `memo`, `caches`, `artifacts`, `consumes`, `pipeline_refs` | Result reuse, files and declared read edges |
+| `env`, `requires`, `prefers`, `inline`, `concurrency`, `resources` | Execution declarations |
 
-Successful and memoized sources with declared generators keep settlement open until expansion is accepted or failed. Empty successful expansion is explicit. Exact replay preserves the persisted topology and state. A fresh execution process reconstructs generated code from persisted source outputs and compares its validated declaration with the persisted spec hash. A mismatch fails as `plan_drift` before executing that body. Reconstruction never inserts jobs or resets their lifecycle.
+Executable jobs declare one or more steps. An approval has no step body. Steps
+have `id`, optional `needs`, `groups`, `finally`, `risks`, `optional`,
+`continue_on_error`, dry-run declarations and `closures`. `result_step` selects
+the job output. Failure policy is `fail_fast` or `collect_all`.
 
-## Bound node-host services
+`closures` may contain `skip_if`, `before_run`, `after_run` and `generate` arrays,
+a `verify` ID and a `memo_key` ID. These identify code without serializing it.
+Approvals support skip conditions and separate recovery jobs.
 
-The hello binding contains `run_id`, `job_id` and `routes: {url,bearer}`. Each service authenticates this delegated bearer and checks the bound process and its allowed read edges. Repository identity and caller-selected resource names confer no authority.
+`env` maps names to `{value, startup?}`. Body values take effect after planning,
+before execution. `startup: true` and the engine's fixed interpreter variable
+list apply before process startup. Startup values must leave declarations
+unchanged. Commands and cleanups inherit the attempt environment.
 
-| Method and route | Purpose |
-| --- | --- |
-| GET `/node/v1/secrets/{name}` | Release a declared secret under current authority. |
-| GET `/node/v1/jobs/{job}/output` | Read output through an authorized dependency edge. |
-| GET `/node/v1/pipelines/{name}/latest` | Resolve a declared pipeline reference. |
-| POST `/node/v1/oidc-token` | Mint a provider session under the job binding. |
-| POST `/node/v1/masks` | Register `{value}` across output sinks before acknowledging. |
-| POST `/node/v1/annotations` | Submit `level`, `message`, optional file, line, end line, column and step. |
-| POST `/node/v1/summary` | Replace a summary with `markdown` and optional step. |
-| POST `/node/v1/children` | Start an authorized child run. |
-| GET `/node/v1/children/{run}/await` | Await a child belonging to the bound job. |
-| POST `/node/v1/cleanups` | Register cleanup for the bound process. |
-| DELETE `/node/v1/cleanups/{cleanup}` | Remove its registered cleanup. |
+Concurrency entries contain a `group` with optional `scope`, `capacity`, `cost`,
+`on_limit`, `queue_timeout_ms` and `cancel_timeout_ms`. Omitted values resolve to
+`global`, `1`, `1` and `queue`. Explicit zero capacity or cost is invalid. The host
+computes scoped keys and checks consistent group definitions. Scopes are
+`global`, `run` and `box`. Policies are `queue`, `fail`, `skip` and `cancel_others`.
 
-Mask registration that collides with an accepted identifier fails before acknowledgement. The response names the field path without printing the value. Successful registration also protects later generated declarations. Annotation and summary writes validate optional step membership, mask text and apply the shared record bound before persistence. A failed service call returns an error to the SDK.
+`resources` carries optional `cores` and `memory_bytes`. `source` carries
+optional checkout declarations `full_history`, `depth`, `tags`, `submodules` and
+`lfs`. Presence is significant for all optional numeric and boolean settings.
 
-## Logs, output and limits
+`nodeproto.ValidatePlan` validates initial plans and expansions for every
+placement. It rejects duplicate and unknown keys at every nesting level, null
+required collections, invalid enums, cycles, unresolved required dependencies
+and contradictory declarations. Omitted optional fields remain unset. It
+rejects registered secret values contained in any job, step, group, approval or
+identifier-bearing reference. Errors name the field path without echoing the
+secret. Host acceptance separately checks authorization and resolved settings.
 
-An SDK log frame contains `ts` and optional `level`, `step`, `event`, `msg` and `attrs`. Levels are `debug`, `info`, `warn` and `error`. The SDK omits job attribution. The host assigns the bound subject, validates step attribution, filters debug and masks all streams before persistence or truncation. Plan and eval output retain their own run-level subjects. Unknown events remain ordinary records.
+### Steps and settlement
 
-The host measures process usage. A partial platform measurement is labelled partial. SDK-reported command measurements do not replace the host's measurement.
+The host schedules step dependencies. Every `run_step` carries the positive,
+node-wide attempt ordinal and an explicit array of terminal step IDs for that
+job and attempt. `settled: []` declares an empty snapshot. Step-condition evals
+carry the same attempt and settlement state.
 
-The shared limits package owns numeric bounds. Typed job or step output is bounded at 16 MiB, and an annotation or summary at 128 KiB after masking. Application retries permit at most ten additional attempts. The 256-job fan-out bound applies to a generated expansion rather than an initial plan. Parent, execution, queue-wait, approval and inactivity deadlines remain separate.
+```text
+-> {"id":"5","op":"run_step","job":"build","step":"compile","attempt":1,"settled":[]}
+<- {"reply":"5","ok":true,"result":{"outcome":"success","output":{"packages":3}}}
+-> {"id":"6","op":"run_step","job":"build","step":"test","attempt":1,"settled":["compile"]}
+<- {"reply":"6","ok":true,"result":{"outcome":"failed","error":{"code":"sdk_error","message":"tests failed"}}}
+```
 
-## Schemas and conformance
+The SDK checks known, unique settled IDs and all transitive prerequisites before
+invoking a predicate or body. A terminal step cannot execute again in that
+attempt. Parallel steps share completed local outputs. Settled predecessors
+without local output read as their output type's zero value. A new,
+non-overlapping attempt resets outputs before applying its snapshot. Stale,
+incomplete or overlapping state fails with `protocol_error` before mutation.
 
-The generated schemas are [requests and replies](schemas/node-protocol.schema.json), [describe and plan](schemas/describe.schema.json) and [SDK log records](schemas/log-record.schema.json). Use `$defs/plan` for a plan and `$defs/job` for a generated job. Other definitions name their corresponding message types.
+Body outcomes are `success` or `failed`. A body error, panic or output encoding
+failure returns `ok: true` with a failed result. Failure to invoke the body
+returns `ok: false`. Persisted job outcomes also include `cancelled`, `skipped`,
+`superseded` and `memoized`, with a separate reason.
 
-From the repository root, `GOWORK=off go generate ./internal/doccheck` regenerates all three from the final Go wire types. The documentation check and its tests reject drift. Shape tests cover v2 hello, cancellation, flat plans, explicit zero, additive fields and common errors. JSON Schema cannot establish duplicate-key refusal, session ordering, graph validity, secret exclusion, transaction fencing or native process behavior. Those require the shared decoders and runtime acceptance suite.
+Application retries advance the attempt ordinal under the same claim. Lease-loss
+recovery uses a separate disruption allowance.
 
-The matching engine owns its SDK node protocol. Separately, the controller supports each engine's API for twelve calendar months after its release. Older releases continue until an explicit signed security revocation or minimum-version policy ends them. Age alone never revokes a version. Shared version notices explain policy changes, and `sparkwing upgrade` updates the exact SDK pin and verifies the selected engine.
+### Closures and generated jobs
+
+`eval.closure` names a declaration's opaque ID. Result shapes depend on its kind:
+
+| Kind | Successful `value` |
+|---|---|
+| `skip_if` | Boolean |
+| `memo_key` | Nonempty string, or null to bypass reuse |
+| `before_run`, `after_run`, `verify` | Null |
+| `generate` | Array of flat job declarations |
+
+Failed evals return `value: null` and a canonical inner `error`. `after_run`
+receives the final step-result shape in `input`, preserving the final failure.
+Successful completion passes no error to the Go hook.
+
+Generators run after successful or memoized source outputs. Each generated job
+names exactly one of the source's generator IDs in its `groups`. The host wraps
+the returned jobs in a plan and validates them against existing topology and
+concurrency declarations. It accepts at most 256 jobs per generator, preserving
+empty generator groups. Acceptance, replay, source generation and cancellation
+checks occur at the store boundary. Failed, skipped, cancelled and superseded
+sources settle their barriers without invoking generators.
+
+### Cancellation
+
+`cancel` selects either a job with an optional step or an active correlation ID
+in `target`. Job-only cancellation includes active evals for that job. Target
+cancellation can select an eval without a job or step. Selectors cannot be mixed
+or cross the process binding. The SDK acknowledges after the selected operation
+has stopped. That operation also receives its own reply.
+
+```text
+-> {"id":"7","op":"eval","closure":"build/verify/0"}
+-> {"id":"8","op":"cancel","target":"7"}
+<- {"reply":"7","ok":false,"error":{"code":"cancelled","message":"evaluation cancelled"}}
+<- {"reply":"8","ok":true,"result":{}}
+```
+
+## Host service routes
+
+Bound SDK calls use the URL and bearer supplied by hello. Every request carries
+`Authorization: Bearer <bearer>`. Identifiers are opaque path segments, escaped
+before transport. The host derives run, job and claim authority from the bearer.
+
+<!-- node-routes:start -->
+| Method | Path | Request | Response |
+|---|---|---|---|
+| GET | `/node/v1/secrets/{name}` | None | `{value, masked}` |
+| GET | `/node/v1/jobs/{job}/output` | None | `{output}` |
+| GET | `/node/v1/pipelines/{name}/latest` | `job`, `max_age_ms` query | `{output}` |
+| POST | `/node/v1/oidc-token` | `{audience}` | `{token}` |
+| POST | `/node/v1/children` | `{pipeline, job, args, repo?, branch?}` | `{run_id}` |
+| GET | `/node/v1/children/{run}/await` | `job`, `wait_ms` query | `{status, output?, error?}` |
+| POST | `/node/v1/cleanups` | `{argv, description}` | `{id}` |
+| DELETE | `/node/v1/cleanups/{id}` | None | Successful status |
+| POST | `/node/v1/masks` | `{value}` | `{}` |
+| POST | `/node/v1/annotations` | `{level, message, file?, line?, end_line?, column?, step?}` | `{}` |
+| POST | `/node/v1/summary` | `{markdown, step?}` | `{}` |
+<!-- node-routes:end -->
+
+Secret responses require both a string value and a boolean masking
+classification, including empty values and false. Output responses require an
+`output` member, which can be JSON null. OIDC tokens and cleanup IDs must be
+nonempty. A successful child result requires output. Missing result fields fail
+the call instead of becoming an absent optional reference.
+
+Mask registration waits for acknowledgement before returning. It also updates
+the matcher used to validate later generated identifiers. Annotations and
+summaries wait for acknowledgement, and write failures fail the operation.
+Annotation levels are `debug`, `info`, `warn` and `error`. Positions are one-based
+when supplied. The host masks text before applying record bounds.
+
+## Limits
+
+`internal/limits` owns the limits used by both SDKs and the host.
+
+| Boundary | Limit |
+|---|---|
+| Typed output per job or step | 16 MiB |
+| Encoded reply or log frame, including newline | 17 MiB |
+| Generated jobs | 256 per generator |
+| Additional application retries | 10 |
+| Memo TTL | 30 days maximum |
+| Individual annotation or summary | 128 KiB after masking |
+| Registered cleanups | 16 per job |
+| Cleanup arguments | 64 per registration |
+
+Operator ceilings and inherited deadlines also apply. Invalid declarations fail
+when accepted. Dependency-cache failures allow cold execution. Artifact staging
+failures and missing required output reads fail the job.
+
+## Version selection
+
+The pinned SDK version selects a matching engine. Each engine negotiates its
+node protocol once through hello. Optional wire fields, routes, error codes and
+log events are additive. Optional operations are advertised in `features`.
+Breaking wire changes require a new major. Strict plan fields must be understood
+by the accepting engine.

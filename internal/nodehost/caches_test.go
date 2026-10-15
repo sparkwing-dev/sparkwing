@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -37,7 +36,7 @@ func (f *cacheFixture) write(rel, body string) {
 	}
 }
 
-func (f *cacheFixture) run(specs []depcache.Spec, install string, outcome sparkwing.Outcome) map[string]string {
+func (f *cacheFixture) run(specs []nodeproto.CacheSpec, install string, outcome sparkwing.Outcome) map[string]string {
 	f.t.Helper()
 	for _, s := range specs {
 		if err := os.RemoveAll(filepath.Join(f.repo, s.Path)); err != nil {
@@ -59,16 +58,16 @@ func (f *cacheFixture) run(specs []depcache.Spec, install string, outcome sparkw
 		}
 		return Result{Outcome: outcome, Err: errors.New("install broke")}
 	}
-	cfg := &Config{Session: SessionConfig{Dir: f.repo}}
-	n := &NodeRun{Plan: nodeproto.PlanNode{ID: "build", Caches: specs}}
+	cfg := &Config{Session: SessionConfig{Dir: f.repo, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}}}
+	n := &NodeRun{Plan: nodeproto.JobSpec{ID: "build", Caches: specs, Steps: []nodeproto.StepSpec{{ID: "body"}}}}
 	if res := cachesLayer(cfg, exec)(context.Background(), n); res.Outcome != outcome {
 		f.t.Fatalf("outcome %s, want %s", res.Outcome, outcome)
 	}
 	return found
 }
 
-func modules() []depcache.Spec {
-	return []depcache.Spec{{Name: "mods", Path: "vendor", KeyFiles: []string{"go.sum"}}}
+func modules() []nodeproto.CacheSpec {
+	return []nodeproto.CacheSpec{{Name: "mods", Path: "vendor", KeyFiles: []string{"go.sum"}}}
 }
 
 func TestCachesRestoreWhatASuccessSaved(t *testing.T) {
@@ -111,7 +110,7 @@ func TestCachesNeverSaveAfterAFailure(t *testing.T) {
 
 func TestCachesKeyScopeSeparatesDirsSharingAKeyFile(t *testing.T) {
 	f := newCacheFixture(t)
-	specs := []depcache.Spec{
+	specs := []nodeproto.CacheSpec{
 		{Name: "deps", Path: "a", KeyScope: "a", KeyFiles: []string{"go.sum"}},
 		{Name: "deps", Path: "b", KeyScope: "b", KeyFiles: []string{"go.sum"}},
 	}

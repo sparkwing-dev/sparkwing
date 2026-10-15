@@ -719,15 +719,6 @@ CREATE TABLE team_download_day (
     PRIMARY KEY(team,period,replica_id)
 );
 
-CREATE TABLE egress_day (
-    service TEXT NOT NULL,
-    period TEXT NOT NULL,
-    bytes BIGINT NOT NULL DEFAULT 0,
-    updated_at BIGINT NOT NULL,
-    replica_id TEXT NOT NULL,
-    PRIMARY KEY(service,period,replica_id)
-);
-
 CREATE TABLE git_credentials (
     id TEXT NOT NULL PRIMARY KEY,
     team TEXT NOT NULL REFERENCES teams(name),

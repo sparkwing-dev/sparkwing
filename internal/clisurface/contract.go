@@ -34,10 +34,7 @@ type Flag struct {
 	Meaning    string
 }
 
-// safety: Command separates parser metadata from handlers; Flags adds to GlobalFlags.
-// Only run and pipeline trigger accept a pipeline positional, then arguments after --.
-// PipelineOptionalOnResume permits a here reattach without a new pipeline name.
-// Empty Platforms means all supported systems; Authority confers no additional grants.
+// Command separates command selectors, pipeline argument boundaries and authority metadata.
 type Command struct {
 	Path                       string
 	Flags                      []Flag
@@ -127,7 +124,7 @@ func Validate(commands []Command) error {
 			return fmt.Errorf("%s: missing parent", c.Path)
 		}
 		pipeline := c.Path == "sparkwing run" || c.Path == "sparkwing pipeline trigger"
-		if c.PipelineArgument != pipeline || c.PipelineArgsAfterSeparator != pipeline {
+		if c.PipelineArgument != pipeline || c.PipelineArgsAfterSeparator != (pipeline || c.Path == "sparkwing pipeline plan") {
 			return fmt.Errorf("%s: invalid positional grammar", c.Path)
 		}
 		names, shorts := map[string]bool{}, map[string]bool{}

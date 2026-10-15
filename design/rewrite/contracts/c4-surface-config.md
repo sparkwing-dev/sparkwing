@@ -297,6 +297,11 @@ displaying the invoked name. Hosts carry the pair into the sealed source and
 resolved entrypoint. Protocol v2 plan requests select the entrypoint in
 `Request.Pipeline` and retain the invoked name in `RunContext.Pipeline`.
 
+`pipeline plan --pipeline NAME -- <pipeline args>` accepts opaque pipeline flags
+after the separator while retaining the kind-named selector. It resolves the
+configured entrypoint for SDK requests and keeps the invoked name in RunContext.
+Plan previews redact classified arguments and structured planning failures.
+
 - `run` is local. `--publish P` uploads the record/results/logs with local
   provenance under trust_local_builds; publication failure cannot fail the run.
   `--sw-cache-from P` or run.cache_from reads only authorized verified-default-

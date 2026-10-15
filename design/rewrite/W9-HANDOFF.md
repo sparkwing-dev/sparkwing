@@ -1,3 +1,149 @@
+# W9 v2 merge and inspection continuation
+
+W9 remains incomplete. This continuation started at d448d9d8c with an in-progress
+merge of bw-3095-rewrite. All 13 conflict paths have resolved file contents,
+including deletion of runs_capacity.go. No conflict markers remain. The index
+still records the merge conflicts because SWARM-BRIEF forbids Git writes. The
+lead must stage the resolutions and finish the merge. No Sparkwing executable,
+service, installed candidate or pipeline ran. Scratch is /tmp/sw-astra-W9 and is
+removed before the final response.
+
+## Delivered
+
+- Kept W9's registry-based help and alias metadata behavior while migrating to
+  nodeproto.PipelineDescription, ArgumentDescription and canonical API errors.
+  Preserved W9's RetryRequest.Validate and the incoming amended wire shapes.
+  Kept the incoming v2 protocol/SDK guides and W3 schema tests. Retained the
+  capacity implementation's earlier deletion instead of restoring old APIs.
+- Inspection requests select the configured entrypoint; RunContext keeps the
+  invoked alias. A real Go SDK subprocess test loads project YAML, accepts
+  required pipeline/job flags, and observes deploy-prod/deploy-stage in author
+  Plan code. This proves inspection, not accepted-engine run hosting.
+- Extended W9's C4 grammar so pipeline plan --pipeline NAME -- <args> can supply
+  required inputs. It still rejects a pipeline positional. Generated help and
+  references use the same rule. This local contract change is documented in
+  c4-surface-config.md and the unreleased migration guide. No foreign interface
+  changed.
+- Plan previews retain only redacted display arguments. SDK requests keep the
+  execution values. Structured planning errors use the existing maskedCLIError
+  boundary. Secret enum diagnostics expose neither submitted nor allowed values.
+  Preserved comma-list enum validation after removing the old SDK CheckEnum API.
+- Plan preview JSON now exposes jobs, and text renders Job. Removed the
+  unreachable static-plan parser/renderer, its unused trigger renderer, and
+  their obsolete tests. Updated repos.go, the remaining preview consumer.
+- Ported CLI subprocess fixtures to v2 hello/describe and required fields.
+  Removed every pkg/runner import in W9 fixtures in favor of sparkwing.Main.
+  Updated fixture entrypoint declarations to their actual SDK registration names.
+  Native detached/source/risk suites still require the lead's runnable environment.
+- Regenerated published protocol schemas and SDK references, including the
+  sparkwingtest page and removal of the planguard page. Fixed sidebar entries,
+  final guard/schedule YAML, removed command links and guide examples for Memo,
+  Cache, Artifacts, Generate, Approval and Inline. Synchronized embedded mirrors.
+- The docs command checker now consumes clisurface.Registry rather than regexes
+  over the retired help table. Temporary documentation builds disable VCS
+  stamping because they have no repository identity. A negative control first
+  showed a nonexistent SDK function passing as a partial example. The fix made
+  it fail and exposed 13 stale examples, all migrated. The full docs check now
+  reports no SDK drift; fragments remain partial/non-self-contained, not fully
+  compiled examples.
+
+Invariant: classified planning arguments reach SDK execution inputs but do not
+appear in preview JSON or structured error messages, hints or details, including
+encoded forms. The final process-level fuzzer passed 93 generated cases using two
+workers for three seconds. Example regressions reproduced the raw preview leak
+and rejected argument separator before the fixes.
+
+Mechanisms added: no production package, interface, retry, cache, service,
+credential, environment variable, timeout or customer limit. W9's existing
+separator metadata now includes plan inspection. Existing shared error masking
+and protocol decoding own validation. Undo is to revert these consumers and the
+local grammar change together.
+
+## Tests, deletion and evidence
+
+Added ten test functions and one fuzz target. TestSurfacePlanArgumentsContract
+passes; TestSurfacePipelineIdentityContract remains passing. No native T1 cell
+was unskipped and no T1 inventory port is claimed. Ported W9's existing protocol
+and SDK fixture consumers rather than recreating completed transport adapters.
+
+Deleted 532 production Go lines and 251 test lines from the retired inspection
+path, measured against HEAD: action_explain.go (381), explain_triggers.go (135),
+takeStaticFlag (16), the two old test files (224), and the old snapshot test (27).
+The merged action_explain.go had 358 lines before deletion. Regeneration also
+removed the 13-line sdk-planguard source page and its mirror. Other replaced
+lines are not included in these deletion counts.
+
+All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and
+GOCACHE/GOTMPDIR/TMPDIR inside /tmp/sw-astra-W9. Tests used -p 4 or lower.
+Passing evidence:
+
+- Whole repository go build -p 4 ./... and focused go vet over cmd/sparkwing,
+  clisurface, controllerwire, controller/client, doccheck, orchestrator,
+  pkg/docs and tests/acceptance.
+- Full clisurface, controllerwire, doccheck and tests/acceptance packages.
+  Acceptance includes incoming W4 component evidence; native cells retain their
+  existing skips and are not claimed complete by W9.
+- CLI plan, argument/help, alias, describe cache, source binding, template,
+  surface-error and generated-reference tests, including real SDK planning.
+- Engine/data transport tests in controller/client. Full client tests reach
+  httptest listeners and are refused by the sandbox.
+- Protocol schema/transcript tests in orchestrator and published-schema tests
+  in doccheck. Full documentation check and all 61 documentation tests outside
+  the TestWebClient family. WebClient needs native sockets.
+- FuzzPlanInspectionDoesNotDisplaySecrets, commentcheck -base main,
+  sync-docs --check and git diff --check.
+
+Sleepcheck -base HEAD still reports incoming W4 code at
+sparkwing/sparkwingtest/host_test.go:214 (time.After). W9 adds no sleeps.
+The native error writer is also a foreign stub: apierr.WriteJSON and WriteHTTP
+panic. Tests inject an encoder through the existing callback and verify the
+real W9 masking/projection. W2 must implement its existing contract.
+
+## Remaining amendments and handoffs
+
+Handoff finding 7: W9 discovery, parsing and v2 inspection now use the configured
+pair, including author Plan context. Real run execution remains W3/W8/W9 work:
+RunHosted still passes cfg.Pipeline as the SDK selector. Finding 3/A1-19 still
+requires one accepted-engine/granted-runner constructor and native hello evidence.
+The CLI's inspection hello is not selected-engine or awarded-runner proof.
+
+The prior ledger remains in force. Completed adapters were not reimplemented.
+Unfinished W9 work and its real integration points:
+
+| Rows | State after this continuation |
+| --- | --- |
+| A1-10/11 | Go/TS installer adapters remain implemented. W3 source Acquire/ForRequest/ForExecution and W8 selected-engine resolution/install remain stubs. Local/detached/here intake must use their accepted source and engine contracts. |
+| A1-29/30/34 | Data signer/record transport remains tested. Local host RemoteCache composition is unfinished; blob.OpenRemoteCache is a stub. Publication is unfinished and must preserve the local verdict. |
+| A1-39/40/41 | W9 lifecycle/foreground/update adapters retain fake evidence. Native runtime, managed units, stable tick, runner startup and final local queue composition remain. NewLocalLifecycle is a stub. |
+| A1-43 | Shared notices and upgrade verifier remain implemented. Native exact-engine upgrade/index/release verification remains W8 integration. |
+| A1-45/47 | Final guard/schedule examples now parse. Native schedule intake must retain captured settings and infer batch only below explicit settings. |
+| A1-49 | W9 credential-file and rollback work remains implemented. W8 must connect final startup/service paths. |
+| A1-50 | Inspection, redaction, grammar, private wire and docs advanced. Final local/detached/here hosts, source intake, publication/cache and obsolete host/client removal remain unfinished. |
+| A1-51 | W9 v2 fixtures, guides, generated schemas/reference and drift checks advanced. Native old-host retirement and parity remain other owners' work. Broader legacy runtime prose, especially local-execution/security, still needs the final host cutover audit. |
+| A1-52/53 | Native Windows bridge packaging, supported-platform/placement evidence and real-repository launch QA remain unclaimed. Linux process tests cannot satisfy those cells. |
+| A1-55 | Existing sealed-resume/private-bearer adapter evidence remains. Native here binding, reclaim and requester authority remain W1/W2/W3/W8/W9 integration. |
+
+No new foreign contract change is requested. Earlier initial-here reason/audit
+and authorized working-tree source-bundle proposals remain open with W6/W1/W2/W7.
+W9 still owns substantial composition work beyond these foreign stub bodies.
+
+## Shared files and friction
+
+Shared changes are internal/doccheck/{main,main_test,cliverbs,cliverbs_test,
+auxdocs,auxdocs_test,protocolschema_test}.go, the merge resolution in
+internal/orchestrator/node_protocol_schema_test.go, the C4 contract, the acceptance
+identity-contract test, CHANGELOG.md, generated pkg/docs content,
+charts/sparkwing-full/README.md and web/README.md. No foreign production API was
+removed or changed. The sole additional production preview caller migrated is
+W9-owned cmd/sparkwing/repos.go.
+
+Friction: native sockets are refused, merge index writes are forbidden, source,
+engine, storage and lifecycle native bindings are incomplete, and W2's canonical
+error writers remain stubs. The first fuzz build overlapped deletion of the dead
+source file and failed to compile. Its completed rerun passed. Git identity is
+Korey's default and local core.worktree remains unset. The lead owns review,
+staging, merge completion, pipelines, landing and native launch QA.
+
 # W9 pipeline identity continuation
 
 W9 remains incomplete. This continuation started clean at f91bb20ac. No Git

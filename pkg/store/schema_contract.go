@@ -110,7 +110,6 @@ var SchemaTables = []SchemaTable{
 	{Name: "cron_fires", Owner: SchemaTenant},
 	{Name: "cron_schedules", Owner: SchemaTenant},
 	{Name: "debug_pauses", Owner: SchemaTenant},
-	{Name: "egress_day", Owner: SchemaOperator},
 	{Name: "egress_usage", Owner: SchemaTenant},
 	{Name: "eval_units", Owner: SchemaTenant},
 	{Name: "events", Owner: SchemaTenant},

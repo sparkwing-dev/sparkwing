@@ -59,21 +59,20 @@ type RegisteredAgent struct {
 	LastSeen time.Time
 }
 
-// ListRegisteredAgents reads the team's live machine claimants and their last
-// observed labels. Capability ancestry supplies granted identity and pools.
-func (s *Store) ListRegisteredAgents(ctx context.Context, team Team) ([]RegisteredAgent, error) {
-	tx, err := s.beginSnapshotReadTx(ctx)
+// ListRegisteredAgents reads this tenant's live machine claimants and observed labels.
+func (t *Tenant) ListRegisteredAgents(ctx context.Context) ([]RegisteredAgent, error) {
+	tx, err := t.s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
-	agents, err := registeredAgentObservationsTx(ctx, tx, team)
+	agents, err := registeredAgentObservationsTx(ctx, tx, t.team)
 	if err != nil {
 		return nil, err
 	}
 	var out []RegisteredAgent
 	for _, observed := range agents {
-		agent, err := registeredAgentTx(ctx, tx, team, observed)
+		agent, err := registeredAgentTx(ctx, tx, t.team, observed)
 		var denied *apierr.Error
 		if errors.As(err, &denied) && denied.Code == apierr.Unauthenticated {
 			continue
@@ -159,11 +158,11 @@ type WaitingNode struct {
 // after the key after, that first became ready before readyBefore and that no
 // agent has claimed. A controller-dispatched node is the launcher's, so no
 // agent's absence explains its wait and it is not listed.
-func (s *Store) ListWaitingNodes(ctx context.Context, readyBefore time.Time, after [2]string, limit int) ([]WaitingNode, error) {
+func (o *Operator) ListWaitingNodes(ctx context.Context, readyBefore time.Time, after [2]string, limit int) ([]WaitingNode, error) {
 	if limit <= 0 {
 		return nil, errors.New("waiting node limit must be positive")
 	}
-	rows, err := s.query(ctx, `SELECT n.run_id,n.node_id,n.team,n.execution_json,n.attention_reason,
+	rows, err := o.s.query(ctx, `SELECT n.run_id,n.node_id,n.team,n.execution_json,n.attention_reason,
        r.repo_display,r.request_json,r.allowed_pools
   FROM nodes n JOIN runs r ON r.id=n.run_id AND r.team=n.team
  WHERE n.ready_at IS NOT NULL AND n.ready_at < ?
@@ -229,10 +228,10 @@ type NodeAttention struct {
 // settlement, which locks a run's nodes in its own order, cannot deadlock
 // against it. A reason is advisory, so one lost to an error is rewritten on
 // the next pass.
-func (s *Store) SetNodeAttention(ctx context.Context, updates []NodeAttention) error {
+func (o *Operator) SetNodeAttention(ctx context.Context, updates []NodeAttention) error {
 	var errs []error
 	for _, u := range updates {
-		if _, err := s.exec(ctx, `UPDATE nodes SET attention_reason = ?
+		if _, err := o.s.exec(ctx, `UPDATE nodes SET attention_reason = ?
  WHERE team = ? AND run_id = ? AND node_id = ? AND ready_at IS NOT NULL AND claimed_by IS NULL
  AND status='pending' AND cancel_requested_at IS NULL
  AND EXISTS (SELECT 1 FROM runs r WHERE r.team=nodes.team AND r.id=nodes.run_id AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL)`,

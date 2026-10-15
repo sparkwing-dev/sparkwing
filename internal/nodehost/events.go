@@ -67,8 +67,6 @@ func nodeEndEvent(ctx context.Context, run *Run, id string, res Result) {
 		hostEvent(ctx, run, id, "node_cancelled", text)
 	case sparkwing.Skipped:
 		hostEvent(ctx, run, id, "node_skipped", text)
-	case sparkwing.SkippedConcurrent:
-		hostEvent(ctx, run, id, "node_skipped_concurrent", nil)
 	case sparkwing.Superseded:
 		hostEvent(ctx, run, id, "node_superseded", text)
 	}

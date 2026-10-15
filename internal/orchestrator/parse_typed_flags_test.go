@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -41,11 +43,11 @@ func init() {
 }
 
 func TestInvoke_RequiredSatisfiedByMergedArgs(t *testing.T) {
-	reg, _ := sparkwing.Lookup("ptf-demo")
-	if _, err := reg.Invoke(context.Background(), map[string]string{"repo": "r"}, sparkwing.RunContext{Pipeline: "ptf-demo"}); err != nil {
+	ops := sdkserve.DefaultOperations
+	if _, _, err := ops.Plan(context.Background(), "ptf-demo", map[string]string{"repo": "r"}, nodeproto.RunContext{RunID: "r", Pipeline: "ptf-demo"}); err != nil {
 		t.Fatalf("required repo from merged args should satisfy, got %v", err)
 	}
-	if _, err := reg.Invoke(context.Background(), map[string]string{}, sparkwing.RunContext{Pipeline: "ptf-demo"}); err == nil {
+	if _, _, err := ops.Plan(context.Background(), "ptf-demo", map[string]string{}, nodeproto.RunContext{RunID: "r", Pipeline: "ptf-demo"}); err == nil {
 		t.Fatal("missing required repo should still fail at Invoke")
 	}
 }

@@ -20,7 +20,7 @@ unlock.
 
 ## [Unreleased]
 
-- **pipeline aliases:** local argument parsing, help, completion and catalog metadata use the configured SDK entrypoint while keeping the invoked pipeline name. Aliases retain the entrypoint's secret classifications and risk declarations.
+- **pipeline aliases:** (Breaking) local argument parsing, help, completion and catalog metadata use the configured SDK entrypoint while keeping the invoked pipeline name. Aliases retain the entrypoint's secret classifications and risk declarations. `pipeline plan --pipeline NAME -- <args>` passes required inputs to the registered entrypoint while preserving the invoked alias in the run context. Previews and structured planning failures redact secret arguments. Plan output uses `jobs`; the unreachable static-plan parser and renderer are removed. See [migration](docs/migrations/_unreleased.md#plan-inspection).
 
 - **cli rewrite:** here retries retain their one-time bearer in a private controller/run-bound file. `pipeline trigger --resume` resolves the existing run and passes its awarded seals to the shared host. Incomplete handoffs exit 3 without claiming native execution. Native host construction and initial trigger intake remain integration requirements.
 

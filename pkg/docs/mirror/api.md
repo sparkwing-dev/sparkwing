@@ -155,6 +155,6 @@ after the last one is gone.
 
 ## Concurrency
 
-The `.Memoize()` and `.Concurrency()` coordination primitives are backed
+The `.Memo()` and `.Concurrency()` coordination primitives are backed
 by the `/api/v1/concurrency/{key}/*` routes (acquire, heartbeat,
 release, state, resolve). See [caching.md](caching.md) for the model.

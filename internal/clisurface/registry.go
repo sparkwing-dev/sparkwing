@@ -221,7 +221,7 @@ func Registry() []Command {
 			{Name: "hidden"},
 			{Name: "short", Argument: "TEXT"},
 		}},
-		{Path: "sparkwing pipeline plan", Flags: []Flag{
+		{Path: "sparkwing pipeline plan", PipelineArgsAfterSeparator: true, Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME", Required: true},
 			{Name: "start-at", Argument: "STEP"},
 			{Name: "stop-at", Argument: "STEP"},

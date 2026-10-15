@@ -27,9 +27,9 @@ primitives.
 - Docker: `Build`, `BuildAndPush`, `Push`, `Login`, `ComputeTags`
 - Git: `ShortCommit`, `IsDirty`, `FilesetHash`, `CurrentBranch`, `TagsAtHead`, `PushTag`
 - Services: `WithServices` (docker-run backed sidecars)
-- Approval gates: `JobApproval` with `ApprovalConfig` (`ApprovalApprove` /
+- Approval gates: `plan.Approval` with `ApprovalConfig` (`ApprovalApprove` /
   `ApprovalDeny` / `ApprovalFail` expiry policies)
-- Plan / modifiers: `CacheKey`, `Requires`, `RunAndAwait`,
+- Plan / modifiers: `MemoKey`, `Requires`, `RunAndAwait`,
   typed `Ref[T]` outputs
 
 **In a sparks library:** anything with deep opinions on specific tooling.

@@ -1,7 +1,5 @@
 package sparkwing
 
-import "github.com/sparkwing-dev/sparkwing/pkg/pipelines"
-
 // HelpProvider is optionally implemented by pipelines to contribute
 // a short description to `sparkwing run <name> --help`. One or two sentences
 // explaining what the pipeline does and when to use it.
@@ -55,53 +53,11 @@ type EnvVarDoc struct {
 	Default     string `json:"default,omitempty"`
 }
 
-// DescribePipeline is one pipeline's CLI-facing schema. The pipeline
-// binary answers it to the node protocol's describe request; the sparkwing
-// CLI reads it for flag parsing, tab completion, and per-pipeline help.
-type DescribePipeline struct {
-	Name     string        `json:"name"`
-	Short    string        `json:"short,omitempty"`
-	Help     string        `json:"help,omitempty"`
-	Examples []Example     `json:"examples,omitempty"`
-	Args     []DescribeArg `json:"args"`
-	// EnvVars are environment variables the pipeline reads as inputs,
-	// declared via the optional [EnvVarDocer] interface. Empty unless
-	// the pipeline opts in.
-	EnvVars []EnvVarDoc `json:"env_vars,omitempty"`
-	// Extra is true when the pipeline's Inputs struct declares a
-	// `flag:",extra"` bag; in that mode unknown flags don't error.
-	Extra bool `json:"extra,omitempty"`
-	// Risks is the sorted, deduplicated union of per-step risk labels
-	// declared anywhere in this pipeline's plan. The dispatcher walks
-	// this set against --sw-allow so an operator or agent dispatching
-	// a pipeline that calls a risk-labeled Step gets a hard refusal
-	// until every label is acknowledged (or --sw-dry-run bypasses).
-	// Empty when no step declares a risk; the gate stays silent.
-	Risks []string `json:"risks,omitempty"`
-	// RisksBySteps is the per-step breakdown so a renderer or agent
-	// can show "this is the step that will refuse" in the error path.
-	// Only populated for pipelines whose Plan() builds successfully
-	// without args during describe; pipelines with required Inputs
-	// degrade to the union field above.
-	RisksBySteps []DescribeStepRisks `json:"risks_by_step,omitempty"`
-	// Secrets are the secrets the pipeline's typed Secrets struct declares.
-	Secrets pipelines.SecretsField `json:"secrets,omitempty"`
-}
-
-// DescribeStepRisks is one row of the per-step risk-label list.
-// StepID is the inner WorkStep id (within the Plan's Job graph);
-// Labels are the author-declared risk labels on that step.
-type DescribeStepRisks struct {
-	NodeID string   `json:"node_id"`
-	StepID string   `json:"step_id"`
-	Labels []string `json:"labels"`
-}
-
 // DescribeArg is one CLI-visible argument. Name is the user-facing
 // flag (without leading --); GoName is the original Go field name.
 // Type is one of: string, bool, int, int64, float64, duration,
 // []string.
-type DescribeArg struct {
+type describeArg struct {
 	Name     string   `json:"name"`
 	GoName   string   `json:"go_name"`
 	Short    string   `json:"short,omitempty"`
@@ -117,11 +73,4 @@ type DescribeArg struct {
 	// the help renderer to group "from job X" annotations and by
 	// tooling that needs to attribute flags to their source.
 	JobID string `json:"job_id,omitempty"`
-}
-
-// CheckEnum reports whether raw is allowed by the arg's enum, checking
-// each comma-separated element of a []string arg. Pipeline Inputs and
-// job args validate with the same rule when the run resolves them.
-func (a DescribeArg) CheckEnum(raw string) error {
-	return checkEnum(a.Name, a.Type == "[]string", a.Enum, raw)
 }

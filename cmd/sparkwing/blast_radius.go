@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 type stepRiskFinding struct {
@@ -12,13 +14,23 @@ type stepRiskFinding struct {
 	Labels []string
 }
 
-func risksIn(schema sparkwing.DescribePipeline) []stepRiskFinding {
+type riskBlockedError struct {
+	Pipeline      string
+	StepID        string
+	MissingLabels []string
+}
+
+func (e *riskBlockedError) Error() string {
+	return fmt.Sprintf("step %q in pipeline %q requires --sw-allow-risk %s to confirm (or --sw-dry-run to preview).", e.StepID, e.Pipeline, strings.Join(e.MissingLabels, ","))
+}
+
+func risksIn(schema nodeproto.PipelineDescription) []stepRiskFinding {
 	var out []stepRiskFinding
-	for _, row := range schema.RisksBySteps {
+	for _, row := range schema.RisksByStep {
 		if len(row.Labels) == 0 {
 			continue
 		}
-		out = append(out, stepRiskFinding{NodeID: row.NodeID, StepID: row.StepID, Labels: row.Labels})
+		out = append(out, stepRiskFinding{NodeID: row.JobID, StepID: row.StepID, Labels: row.Labels})
 	}
 	if len(out) == 0 && len(schema.Risks) > 0 {
 		out = append(out, stepRiskFinding{Labels: schema.Risks})
@@ -73,7 +85,7 @@ func enforceRiskGate(
 	if len(stepOrder) > 0 {
 		stepID = stepOrder[0]
 	}
-	return &sparkwing.RiskBlockedError{
+	return &riskBlockedError{
 		Pipeline:      pipelineName,
 		StepID:        stepID,
 		MissingLabels: allMissing,

@@ -38,7 +38,7 @@ also reads `SPARKWING_CONTROLLER_URL` as a fallback for its own `--controller`.
 |---|---|
 | `SPARKWING_AGENT_TOKEN` | [architecture](architecture.md), [auth](auth.md), [local-execution](local-execution.md), [threat-model](threat-model.md) |
 | `SPARKWING_CONTROLLER_URL` | [architecture](architecture.md), [auth](auth.md), [security](security.md), [self-hosting](self-hosting.md) |
-| `SPARKWING_GITCACHE_URL` | [remaining cache readers](caching.md#rewrite-integration) |
+| `SPARKWING_GITCACHE_URL` | [cache storage](caching.md#storage) |
 | `SPARKWING_CACHE_URL` | [architecture](architecture.md), [caching](caching.md) |
 
 ## Configuration: the `sparkwing` CLI and local runs
@@ -50,7 +50,7 @@ also reads `SPARKWING_CONTROLLER_URL` as a fallback for its own `--controller`.
 | `SPARKWING_CONFIG_ENV` | [machine-config](machine-config.md) |
 | `SPARKWING_DEBUG` | [sdk](sdk.md) |
 | `SPARKWING_FLEET_CONFIG` | [machine-config](machine-config.md) |
-| `SPARKWING_HOME` | [architecture](architecture.md), [backup-restore](backup-restore.md), [caching](caching.md), [schedules](schedules.md), [deployment-modes](deployment-modes.md), [diagnosing-admission](diagnosing-admission.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [native-mode](native-mode.md), [sdk](sdk.md), [security](security.md), [versioning](versioning.md), [cli-cache](cli-cache.md), [cli-cluster](cli-cluster.md), [profiles](cli-profiles.md), [cli-doctor](cli-doctor.md), [cli-queue](cli-queue.md), [cli-runs](cli-runs.md), [cli-secrets](cli-secrets.md), [cli-serve](cli-serve.md), [cli-version](cli-version.md) |
+| `SPARKWING_HOME` | [architecture](architecture.md), [backup-restore](backup-restore.md), [caching](caching.md), [schedules](schedules.md), [deployment-modes](deployment-modes.md), [diagnosing-admission](diagnosing-admission.md), [local-execution](local-execution.md), [machine-config](machine-config.md), [native-mode](native-mode.md), [sdk](sdk.md), [security](security.md), [versioning](versioning.md), [cli-cache](cli-cache.md), [runners](cli-runners.md), [profiles](cli-profiles.md), [cli-doctor](cli-doctor.md), [cli-queue](cli-queue.md), [cli-runs](cli-runs.md), [cli-secrets](cli-secrets.md), [dashboard](cli-dashboard.md), [cli-version](cli-version.md) |
 | `SPARKWING_LOG_FORMAT` | [hooks](hooks.md), [cli-run](cli-run.md) |
 | `SPARKWING_PROFILES` | [machine-config](machine-config.md) |
 | `SPARKWING_REPOS` | [machine-config](machine-config.md) |
@@ -73,7 +73,7 @@ Set by Sparkwing for pipeline code and node processes.
 
 | Variable | Described in |
 |---|---|
-| `SPARKWING_CACHE_GRANT` | [remaining cache readers](caching.md#rewrite-integration) |
+| `SPARKWING_CACHE_GRANT` | [cache storage](caching.md#storage) |
 | `SPARKWING_RUN_ID` | [architecture](architecture.md) |
 | `SPARKWING_NODE_ID` | [architecture](architecture.md) |
 | `SPARKWING_RUNNER_NAME` | [architecture](architecture.md) |

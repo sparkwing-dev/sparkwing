@@ -693,7 +693,7 @@ toolchains can use glibc. It supplies bash, coreutils, git, OpenSSH client,
 CA certificates, curl, tar, gzip, xz, make, jq, and unzip for pipeline steps.
 It also carries the Go version needed to compile Sparkwing pipelines on a
 cache miss. Pipeline steps install other language toolchains at the version
-their project needs; `.CacheDir(...)` can retain downloaded dependencies
+their project needs; `.Cache(...)` can retain downloaded dependencies
 between runs. The chart can persist `GOCACHE` and `GOMODCACHE` on a PVC with
 `runner.goCache.persistence.enabled`. The image runs as UID/GID 65534 and
 keeps the runner entrypoint for credential setup.
@@ -1137,13 +1137,6 @@ the daemon does not serve, on a run whose state is already with that
 daemon -- cannot move stores, so it prints a single line naming the cause
 and saying where the run's state stays, instead of one of the blocks
 above.
-
-One in-body feature changes shape on the standalone path.
-`sparkwing.ToolSlot(ctx, group)` -- the budget a job body takes out
-around a tool that manages its own parallelism -- returns
-`granted=false`, its documented fallback, and the body uses whatever
-private serialization the tool ships with. Job bodies already have to
-handle that return.
 
 Dry runs (`--sw-dry-run`) mutate nothing, so a dry run that would go
 standalone writes to a throwaway store that is removed when it ends: it

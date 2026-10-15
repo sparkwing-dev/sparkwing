@@ -25,7 +25,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
 // ErrDockerUnavailable is returned by every function that shells out
@@ -85,7 +85,7 @@ type BuildResult struct {
 // Build runs `docker build` (or `docker buildx build` when Platforms
 // is non-empty) and applies the tags locally. It does not push.
 func Build(ctx context.Context, cfg BuildConfig) (BuildResult, error) {
-	planguard.Guard(ctx, "docker.Build")
+	sdkserve.RequireExecution(ctx, "docker.Build")
 	return build(ctx, cfg, false)
 }
 
@@ -93,7 +93,7 @@ func Build(ctx context.Context, cfg BuildConfig) (BuildResult, error) {
 // to every configured registry. For multi-platform builds, buildx
 // handles push in-line via --push.
 func BuildAndPush(ctx context.Context, cfg BuildConfig) (BuildResult, error) {
-	planguard.Guard(ctx, "docker.BuildAndPush")
+	sdkserve.RequireExecution(ctx, "docker.BuildAndPush")
 	return build(ctx, cfg, true)
 }
 
@@ -288,7 +288,7 @@ func pushedManifestDigest(output, tag string) string {
 // registry with every requested tag. Best-effort: a single registry
 // failure does not abort the rest; errors are joined.
 func Push(ctx context.Context, image string, tags, registries []string) error {
-	planguard.Guard(ctx, "docker.Push")
+	sdkserve.RequireExecution(ctx, "docker.Push")
 	if err := ensureDocker(); err != nil {
 		return err
 	}
@@ -328,7 +328,7 @@ func Push(ctx context.Context, image string, tags, registries []string) error {
 // piped via stdin to `docker login --password-stdin`, never placed on
 // the command line.
 func Login(ctx context.Context, registry, username, secret string) error {
-	planguard.Guard(ctx, "docker.Login")
+	sdkserve.RequireExecution(ctx, "docker.Login")
 	if err := ensureDocker(); err != nil {
 		return err
 	}
@@ -371,7 +371,7 @@ func buildxAvailable(ctx context.Context) bool {
 // Returns ErrDockerUnavailable when docker is not on PATH and
 // ErrBuildxRequired when the buildx plugin is missing.
 func BuildxPlatforms(ctx context.Context) ([]string, error) {
-	planguard.Guard(ctx, "docker.BuildxPlatforms")
+	sdkserve.RequireExecution(ctx, "docker.BuildxPlatforms")
 	if err := ensureDocker(); err != nil {
 		return nil, err
 	}
@@ -391,7 +391,7 @@ func BuildxPlatforms(ctx context.Context) ([]string, error) {
 // any "linux/amd64/<variant>" entry. Order is preserved relative to
 // `wish`. Returns the same errors as BuildxPlatforms.
 func FilterBuildxPlatforms(ctx context.Context, wish []string) ([]string, error) {
-	planguard.Guard(ctx, "docker.FilterBuildxPlatforms")
+	sdkserve.RequireExecution(ctx, "docker.FilterBuildxPlatforms")
 	if len(wish) == 0 {
 		return nil, nil
 	}

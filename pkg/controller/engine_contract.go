@@ -15,8 +15,9 @@ import (
 // supplies C2 Authorized values; bodies cannot supply actors, grants or fences.
 // Every mutation rechecks that authority transactionally through the store.
 type EngineController struct {
-	Store        *store.Store
-	RunnerPolicy RunnerAdmissionPolicy
+	Store         *store.Store
+	RunnerPolicy  RunnerAdmissionPolicy
+	VersionPolicy *SignedEngineVersionPolicy
 }
 
 // ExpansionForStore is the only expansion adapter. It derives Source and Actor
@@ -301,7 +302,17 @@ func (s *EngineController) RunDetail(ctx context.Context, authorized capability.
 	if err != nil {
 		return controllerwire.RunDetail{}, err
 	}
-	return engineRunDetail(view), nil
+	detail := engineRunDetail(view)
+	if detail.Engine != nil {
+		if s.VersionPolicy == nil {
+			return controllerwire.RunDetail{}, versionPolicyUnavailable()
+		}
+		detail.Notices, err = s.VersionPolicy.Notices(ctx, detail.Engine.Version)
+		if err != nil {
+			return controllerwire.RunDetail{}, err
+		}
+	}
+	return detail, nil
 }
 
 // Snapshot takes one ReadSnapshot and its Scheduling projection, including empty
@@ -321,5 +332,11 @@ func (s *EngineController) Snapshot(ctx context.Context, authorized capability.A
 // Compatibility serves /api/v1/capabilities?engine_version= from verified release
 // metadata. API compatibility and security eligibility remain separate decisions.
 func (s *EngineController) Compatibility(ctx context.Context, engineVersion string) (controllerwire.Compatibility, error) {
-	panic("unimplemented: controller-wire")
+	if engineVersion == "" {
+		return controllerwire.Compatibility{}, engineBadRequest("engine_version is required")
+	}
+	if s.VersionPolicy == nil {
+		return controllerwire.Compatibility{}, versionPolicyUnavailable()
+	}
+	return s.VersionPolicy.Compatibility(ctx, engineVersion)
 }

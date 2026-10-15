@@ -7,9 +7,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing/git"
 )
 
-// Git is the run-scoped view of a single git working tree. The same
-// instance lives on both `RunContext.Git` (passed to Plan and Job)
-// and `Runtime().Git` (read by SDK helpers like docker.ComputeTags).
+// Git is the run-scoped view of a single git working tree, supplied
+// through RunContext.Git.
 //
 // Data fields (SHA, Branch, Repo, RepoURL) are populated by the
 // orchestrator at run start. Methods (IsDirty, FilesetHash, …) shell

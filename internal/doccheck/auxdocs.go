@@ -68,11 +68,7 @@ func ownsMatchedFlag(owned map[string]bool, match string) bool {
 }
 
 func checkAuxDocs(repoRoot string) bool {
-	valid, posArgs, err := loadRegistry(repoRoot)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "aux-docs: load registry:", err)
-		return false
-	}
+	valid, posArgs := loadRegistry()
 
 	mdFiles := auxDocFiles(repoRoot)
 	goFiles, _ := filepath.Glob(filepath.Join(repoRoot, ".sparkwing", "*.go"))

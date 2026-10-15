@@ -53,7 +53,7 @@ func main() {
 	fmt.Println()
 	ok = checkLinks(contentDir) && ok
 	fmt.Println()
-	ok = checkCLIVerbs(contentDir, repoRoot) && ok
+	ok = checkCLIVerbs(contentDir) && ok
 	fmt.Println()
 	ok = checkServicePorts(contentDir, repoRoot) && ok
 	fmt.Println()
@@ -102,7 +102,7 @@ func checkGoBlocks(contentDir, repoRoot string) bool {
 			fmt.Fprintln(os.Stderr, "write:", err)
 			os.Exit(2)
 		}
-		cmd := exec.Command("go", "build", "-o", os.DevNull, "./b"+fmt.Sprintf("%03d", i))
+		cmd := exec.Command("go", "build", "-buildvcs=false", "-o", os.DevNull, "./b"+fmt.Sprintf("%03d", i))
 		cmd.Dir = tmp
 		cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
 		out, berr := cmd.CombinedOutput()

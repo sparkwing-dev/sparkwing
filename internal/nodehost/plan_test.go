@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -30,10 +31,10 @@ func TestExecutePlansWithTheSDK(t *testing.T) {
 	}
 	config := func(st *store.Store, runID string, args map[string]string, exec Executor) Config {
 		return Config{
-			Session:   SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second},
+			Session:   SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
 			Pipeline:  "conformance",
 			Args:      args,
-			Run:       nodeproto.RunContextOld{RunID: runID, Git: &nodeproto.Git{SHA: "4f2c1e0", Branch: "main", Repo: "acme/app"}},
+			Run:       nodeproto.RunContext{RunID: runID, Git: &nodeproto.Git{SHA: "4f2c1e0", Branch: "main", Repo: "acme/app"}},
 			State:     st,
 			Execute:   exec,
 			Logger:    slog.New(slog.DiscardHandler),
@@ -128,11 +129,11 @@ func runsThePlannedNodes(t *testing.T, config configFn) {
 	if run.Args["env"] != "prod" || run.Args["count"] != "3" {
 		t.Errorf("run args = %v, want env from the invocation and count from its default", run.Args)
 	}
-	var snap nodeproto.PlanDocOld
-	if err := json.Unmarshal(run.PlanSnapshot, &snap); err != nil || snap.RunID != "run-e2e" || len(snap.Nodes) == 0 {
+	var snap nodeproto.PlanDoc
+	if err := json.Unmarshal(run.PlanSnapshot, &snap); err != nil || len(snap.Jobs) == 0 {
 		t.Fatalf("plan snapshot = %s (err %v)", run.PlanSnapshot, err)
 	}
-	for _, n := range snap.Nodes {
+	for _, n := range snap.Jobs {
 		row, err := st.GetNode(t.Context(), "run-e2e", n.ID)
 		if err != nil || row.Status != "done" {
 			t.Errorf("node %s row = %+v (err %v), want done", n.ID, row, err)
@@ -149,8 +150,8 @@ func aPlanFailureFinishesTheRunRow(t *testing.T, config configFn) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var perr *nodeproto.Error
-	if res.Status != "failed" || !errors.As(res.Err, &perr) || perr.Code != nodeproto.CodePlanFailed {
+	var perr *apierr.Error
+	if res.Status != "failed" || !errors.As(res.Err, &perr) || perr.Code != apierr.PlanFailed {
 		t.Errorf("status=%s err=%v, want failed with plan_failed", res.Status, res.Err)
 	}
 	run, err := st.GetRun(t.Context(), "run-plan-fail")
@@ -167,8 +168,8 @@ func anUnknownPipelineWritesNoRun(t *testing.T, config configFn) {
 	cfg := config(st, "run-unknown", nil, nil)
 	cfg.Pipeline = "ghost"
 	_, err := Execute(t.Context(), cfg)
-	var perr *nodeproto.Error
-	if !errors.As(err, &perr) || perr.Code != nodeproto.CodeUnknownPipeline {
+	var perr *apierr.Error
+	if !errors.As(err, &perr) || perr.Code != apierr.UnknownPipeline {
 		t.Fatalf("err = %v, want unknown_pipeline", err)
 	}
 	if _, err := st.GetRun(t.Context(), "run-unknown"); !errors.Is(err, store.ErrNotFound) {

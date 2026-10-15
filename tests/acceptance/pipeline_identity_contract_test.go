@@ -50,3 +50,13 @@ func TestSurfacePipelineIdentityContract(t *testing.T) {
 		t.Fatal("empty invocation supplied an execution identity")
 	}
 }
+
+func TestSurfacePlanArgumentsContract(t *testing.T) {
+	inv, err := clisurface.Parse("sparkwing", []string{"pipeline", "plan", "--pipeline", "deploy-prod", "--", "--region", "us-east", "--image", "release"})
+	if err != nil || inv.Value("pipeline") != "deploy-prod" || len(inv.Args) != 4 {
+		t.Fatalf("plan arguments: %+v %v", inv, err)
+	}
+	if _, err := clisurface.Parse("sparkwing", []string{"pipeline", "plan", "deploy-prod"}); err == nil {
+		t.Fatal("plan accepted a pipeline positional")
+	}
+}

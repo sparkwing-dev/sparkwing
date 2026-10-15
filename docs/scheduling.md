@@ -45,8 +45,7 @@ needs ["linux,macos","amd64"] have ["macos","amd64"] -> match
 Empty / no needed labels match any runner.
 
 A few keys are answered from facts the runner cannot choose for itself.
-Every claim route, and the dispatcher's own `WhenRunner` check, uses the one
-matcher in `pkg/match`, so they agree:
+Claim routes use the shared matcher in `pkg/match`:
 
 - `name=<agent>` matches only the runner whose token was minted for that
   agent name. A runner asserting `name=...` as a label matches nothing, and a
@@ -82,8 +81,8 @@ lacks one it declares.
 sw.Job(plan, "apply", &Apply{}).NeedsTools("terraform")
 ```
 
-`JobGroup.NeedsTools` applies to every member, including those a
-`JobFanOutDynamic` group generates after its source finishes.
+`JobGroup.NeedsTools` applies to its declared members. Declare tools on each
+job created inside a generator callback.
 
 ## Waiting nodes and `needs_attention`
 
@@ -123,9 +122,8 @@ tool is never retried automatically.
 
 ## Per-node modifiers (Go SDK)
 
-Three chainable modifiers on `*sparkwing.JobNode` (and the same names on
-`*sparkwing.JobGroup`) control placement. All take the comma-OR / AND
-term syntax above.
+Placement declarations on `*sparkwing.JobNode` control placement. `Requires` and `Prefers` use the label term syntax above.
+`Inline` runs a job on its run host.
 
 ```go
 // Hard filter on the claim queue: no runner advertising these labels
@@ -139,9 +137,8 @@ sw.Job(plan, "integration", &Integration{}).
     Requires("os=linux").
     Prefers("cloud-linux")
 
-// Conditional: silently skip the node when the dispatching runner does
-// not advertise the labels (downstream Needs treats it as satisfied).
-preflight := sw.Job(plan, "preflight-sso", &CheckSSO{}).WhenRunner("local")
+// Run this job on the run host before its dependent work.
+preflight := sw.Job(plan, "preflight-sso", &CheckSSO{}).Inline()
 sw.Job(plan, "deploy", &Deploy{}).Needs(preflight)
 ```
 
@@ -153,12 +150,7 @@ sw.Job(plan, "deploy", &Deploy{}).Needs(preflight)
   metadata. A preference holds the node back from a runner that does not
   advertise it, for the controller's hold window; see
   [Local-first placement in claim mode](#local-first-placement-in-claim-mode).
-- **`WhenRunner`** -- conditional execution. A runner that advertises
-  labels evaluates the terms up front and skips the node when they are
-  not satisfied (downstream `Needs` treats a skip as satisfied); a runner
-  that advertises no labels matches anything. On a controller-dispatched
-  run the terms are folded into the node's claim labels instead, so the
-  node waits for a runner advertising them.
+- **`Inline`** runs the job on its run host. It does not filter by a runner label.
 
 ## Pipeline-level `requires` (`sparkwing.yaml`)
 
@@ -301,13 +293,9 @@ the namespace-scoped Job lifecycle and pod-read access overflow needs.
 
 ## Direct (`sparkwing run`) vs dispatched (`trigger`)
 
-`sparkwing run <pipeline>` executes the pipeline **on this machine**,
-each job in a process this binary spawns -- there is no controller and
-no claim step, so label matching against remote runners does not apply
-(`.Requires()` is not enforced here -- there is no claim step to filter
-on -- while `WhenRunner` evaluates against the local runner, which
-advertises `local` unless the caller overrides its label set). Use
-`requires: [local]` keeps any runner from claiming a dispatched node.
+`sparkwing run <pipeline>` hosts the run on this machine. Inline jobs execute
+with that host. Runner placement uses the shared requirements and preferences
+from the accepted declarations.
 
 `sparkwing pipeline trigger <pipeline> --profile prod` hands the run to a
 controller, which schedules each node onto a runner whose labels satisfy
@@ -343,13 +331,9 @@ worth waiting for, up to the placement hold; see
 ### A local-only preflight before a remote build
 
 ```go
-preflight := sw.Job(plan, "check-sso", &CheckSSO{}).WhenRunner("local")
+preflight := sw.Job(plan, "check-sso", &CheckSSO{}).Inline()
 sw.Job(plan, "build", &Build{}).Needs(preflight)
 ```
 
-The preflight runs when you `sparkwing run` locally, because the local
-runner advertises `local`. Dispatched to a controller, the
-term becomes a claim-queue label rather than an up-front skip: unless a
-connected runner advertises `local`, the node waits unclaimed and fails
-with `queue_timeout`. Keep environment-scoped preflights on
-locally-executed pipelines, or run a runner that advertises the label.
+The preflight runs on the run host before the build can become ready. `Inline`
+keeps that execution with the host for local and controller-triggered runs.

@@ -187,7 +187,7 @@ import (
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--sw-node-protocol" {
 		_, _ = bufio.NewReader(os.NewFile(3, "requests")).ReadString('\n')
-		fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":\"1\",\"pipelines\":[{\"name\":\"fixture\"}]}}")
+		fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":2,\"sdk\":{\"language\":\"go\",\"version\":\"fixture\"},\"features\":[]}}"); _, _ = bufio.NewReader(os.NewFile(3, "requests")).ReadString('\n'); fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"2\",\"ok\":true,\"result\":{\"pipelines\":[{\"name\":\"fixture\",\"args\":[]}]}}")
 		return
 	}
 	f, err := os.OpenFile(os.Getenv("SPARKWING_SUBMIT_TEST_MARKER"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
@@ -731,7 +731,6 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -771,7 +770,7 @@ func appendLine(path, line string) {
 
 func main() {
 	sparkwing.Register("fixture", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Fixture{} })
-	runner.Main()
+	sparkwing.Main()
 }
 `
 
@@ -784,7 +783,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -812,7 +810,7 @@ func appendLine(path, line string) {
 
 func main() {
 	sparkwing.Register("fixture", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Fixture{} })
-	runner.Main()
+	sparkwing.Main()
 }
 `
 

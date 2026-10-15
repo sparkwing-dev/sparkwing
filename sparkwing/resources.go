@@ -17,6 +17,7 @@ import (
 // exceeds it, while the Kubernetes backend turns the pin into the pod's
 // requests and limits, capped by the operator's configured ceiling.
 type ResourceHints struct {
+	coresSet, memorySet bool
 	// Cores is the pinned peak number of CPU cores the work uses.
 	// Fractional values are meaningful (0.5 = half a core). Zero means
 	// cores were not pinned.
@@ -33,23 +34,23 @@ type ResourceHint func(*ResourceHints)
 
 // Cores pins the work's peak to n CPU cores. Fractional values are
 // meaningful: Cores(0.5) pins light, mostly-waiting work. Panics unless
-// n is a positive, finite number.
+// n is a nonnegative, finite number.
 func Cores(n float64) ResourceHint {
-	if n <= 0 || math.IsInf(n, 0) || math.IsNaN(n) {
-		panic(fmt.Sprintf("sparkwing: Cores(%v): hint must be a positive, finite number of cores", n))
+	if n < 0 || math.IsInf(n, 0) || math.IsNaN(n) {
+		panic(fmt.Sprintf("sparkwing: Cores(%v): hint must be a nonnegative, finite number of cores", n))
 	}
-	return func(h *ResourceHints) { h.Cores = n }
+	return func(h *ResourceHints) { h.Cores = n; h.coresSet = true }
 }
 
 // MemoryGB pins the work's peak to n gigabytes of resident memory, where
 // one gigabyte is 2^30 bytes. The value is stored in bytes (see
-// [ResourceHints.MemoryBytes]). Panics unless n is a positive, finite
+// [ResourceHints.MemoryBytes]). Panics unless n is a nonnegative, finite
 // number.
 func MemoryGB(n float64) ResourceHint {
-	if n <= 0 || math.IsInf(n, 0) || math.IsNaN(n) {
-		panic(fmt.Sprintf("sparkwing: MemoryGB(%v): hint must be a positive, finite number of gigabytes", n))
+	if n < 0 || math.IsInf(n, 0) || math.IsNaN(n) {
+		panic(fmt.Sprintf("sparkwing: MemoryGB(%v): hint must be a nonnegative, finite number of gigabytes", n))
 	}
-	return func(h *ResourceHints) { h.MemoryBytes = int64(math.Round(n * float64(1<<30))) }
+	return func(h *ResourceHints) { h.MemoryBytes = int64(math.Round(n * float64(1<<30))); h.memorySet = true }
 }
 
 // Resources pins the whole run's peak CPU and memory: an explicit,
@@ -82,7 +83,7 @@ func (p *Plan) Resources(hints ...ResourceHint) *Plan {
 
 // ResourceHints returns a copy of the plan-level resource pin declared
 // via [Plan.Resources], or nil when the plan declared none.
-func (p *Plan) ResourceHints() *ResourceHints {
+func (p *Plan) resourceHints() *ResourceHints {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return copyResourceHints(p.resources)
@@ -106,7 +107,7 @@ func (n *JobNode) Resources(hints ...ResourceHint) *JobNode {
 
 // ResourceHints returns a copy of the resource pin declared via
 // [JobNode.Resources], or nil when the node declared none.
-func (n *JobNode) ResourceHints() *ResourceHints {
+func (n *JobNode) resourceHints() *ResourceHints {
 	return copyResourceHints(n.resources)
 }
 

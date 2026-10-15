@@ -7,8 +7,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestRepoShortName_FindsGitToplevelBasename(t *testing.T) {
@@ -83,58 +81,33 @@ func TestRepoShortName_LinkedWorktreeResolvesToItsRepo(t *testing.T) {
 func TestCurrentProfileKey_SurvivesABranchChange(t *testing.T) {
 	repo, first := linkedWorktree(t, "sample-repo", "first-branch")
 	_, second := linkedWorktree(t, "sample-repo", "second-branch")
-	previousWorkDir := sparkwing.CurrentRuntime().WorkDir
-	t.Cleanup(func() { sparkwing.SetWorkDir(previousWorkDir) })
 
-	sparkwing.SetWorkDir(repo)
 	t.Chdir(repo)
 	want := currentProfileKey("pre-commit")
 	if want != "11:sample-repopre-commit" {
 		t.Fatalf("main checkout keyed %q, want 11:sample-repopre-commit", want)
 	}
-	sparkwing.SetWorkDir(first)
 	t.Chdir(first)
 	if got := currentProfileKey("pre-commit"); got != want {
 		t.Errorf("first worktree keyed %q, want %q", got, want)
 	}
-	sparkwing.SetWorkDir(second)
 	t.Chdir(second)
 	if got := currentProfileKey("pre-commit"); got != want {
 		t.Errorf("second worktree keyed %q, want %q", got, want)
 	}
 }
 
-func TestCurrentProfileKey_UsesRunWorkDirAfterCWDChanges(t *testing.T) {
+func TestCurrentProfileKey_UsesCWD(t *testing.T) {
 	root := t.TempDir()
 	repo := filepath.Join(root, "sample-repo")
 	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	previousWorkDir := sparkwing.CurrentRuntime().WorkDir
-	sparkwing.SetWorkDir(repo)
-	t.Cleanup(func() { sparkwing.SetWorkDir(previousWorkDir) })
-	t.Chdir(t.TempDir())
+	t.Chdir(repo)
 
 	if got := currentProfileKey("build"); got != "11:sample-repobuild" {
 		t.Fatalf("profile key after cwd change = %q, want 11:sample-repobuild", got)
-	}
-}
-
-func TestCurrentProfileKey_FallsBackToCWDWithoutRunWorkDir(t *testing.T) {
-	root := t.TempDir()
-	repo := filepath.Join(root, "fallback-repo")
-	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	previousWorkDir := sparkwing.CurrentRuntime().WorkDir
-	sparkwing.SetWorkDir("")
-	t.Cleanup(func() { sparkwing.SetWorkDir(previousWorkDir) })
-	t.Chdir(repo)
-
-	if got := currentProfileKey("build"); got != "13:fallback-repobuild" {
-		t.Fatalf("profile key without run directory = %q, want 13:fallback-repobuild", got)
 	}
 }
 

@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -11,115 +13,148 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto/conformance"
 )
 
-type protocolSchema struct {
-	*conformance.Schema
-	root map[string]any
-}
+type protocolSchema struct{ *conformance.Schema }
 
 func loadProtocolSchema(t *testing.T, name string) protocolSchema {
 	t.Helper()
-	s, err := conformance.LoadSchema(filepath.Join("..", "..", "docs", "schemas", name))
+	s, err := conformance.LoadSchema(filepath.Join("..", "nodeproto", "conformance", "testdata", name))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return protocolSchema{Schema: s, root: s.Root}
-}
-
-func (s protocolSchema) def(t *testing.T, name string) map[string]any {
-	t.Helper()
-	d, ok := s.Def(name)
-	if !ok {
-		t.Fatalf("schema has no $defs/%s", name)
-	}
-	return d
-}
-
-func (s protocolSchema) validate(schema map[string]any, value any, at string) []string {
-	return s.Validate(schema, value, at)
-}
-
-func asJSONValue(t *testing.T, v any) any {
-	t.Helper()
-	raw, err := json.Marshal(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		t.Fatal(err)
-	}
-	return out
+	return protocolSchema{s}
 }
 
 func (s protocolSchema) mustValidate(t *testing.T, def string, v any) {
 	t.Helper()
-	if errs := s.validate(s.def(t, def), asJSONValue(t, v), def); len(errs) > 0 {
-		t.Errorf("%s does not match docs/schemas: %s", def, strings.Join(errs, "; "))
+	d, ok := s.Def(def)
+	if !ok {
+		t.Fatalf("schema has no $defs/%s", def)
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatal(err)
+	}
+	if errs := s.Validate(d, value, def); len(errs) > 0 {
+		t.Errorf("%s: %s", def, strings.Join(errs, "; "))
 	}
 }
 
-// safety: compare every field so a declaration omitted by a sample cannot hide schema drift.
-func (s protocolSchema) requireFieldsDeclared(t *testing.T, def string, typ reflect.Type) {
-	t.Helper()
-	props, _ := s.def(t, def)["properties"].(map[string]any)
-	emitted := map[string]bool{}
-	for f := range typ.Fields() {
-		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
-		if name == "" || name == "-" {
-			continue
-		}
-		emitted[name] = true
-		if _, ok := props[name]; !ok {
-			t.Errorf("%s emits %q, absent from $defs/%s", typ, name, def)
-		}
-	}
-	for name := range props {
-		if !emitted[name] {
-			t.Errorf("$defs/%s declares %q, absent from %s", def, name, typ)
-		}
-	}
-}
-
-func TestDescribeSchemaDeclaresEveryEmittedField(t *testing.T) {
-	s := loadProtocolSchema(t, "describe.schema.json")
-	for def, typ := range map[string]reflect.Type{
-		"describe":    reflect.TypeFor[nodeproto.DescribeDoc](),
-		"pipeline":    reflect.TypeFor[nodeproto.PipelineDescription](),
-		"example":     reflect.TypeFor[nodeproto.UsageExample](),
-		"arg":         reflect.TypeFor[nodeproto.ArgumentDescription](),
-		"envVar":      reflect.TypeFor[nodeproto.EnvironmentDescription](),
-		"stepRisks":   reflect.TypeFor[nodeproto.StepRisks](),
-		"plan":        reflect.TypeFor[nodeproto.PlanDoc](),
-		"source":      reflect.TypeFor[nodeproto.SourceSpec](),
-		"secret":      reflect.TypeFor[nodeproto.SecretDeclaration](),
-		"concurrency": reflect.TypeFor[nodeproto.ConcurrencySpec](),
-		"resources":   reflect.TypeFor[nodeproto.ResourceSpec](),
-		"job":         reflect.TypeFor[nodeproto.JobSpec](),
-		"consume":     reflect.TypeFor[nodeproto.ArtifactInput](),
-		"approval":    reflect.TypeFor[nodeproto.ApprovalSpec](),
-		"retry":       reflect.TypeFor[nodeproto.RetrySpec](),
-		"step":        reflect.TypeFor[nodeproto.StepSpec](),
-		"cache":       reflect.TypeFor[nodeproto.CacheSpec](),
-		"memo":        reflect.TypeFor[nodeproto.MemoSpec](),
-		"closures":    reflect.TypeFor[nodeproto.ClosureSpec](),
+func TestProtocolSchemaDeclaresEveryEmittedField(t *testing.T) {
+	for _, group := range []struct {
+		name  string
+		types []reflect.Type
+	}{
+		{"v2-wire.schema.json", []reflect.Type{reflect.TypeFor[nodeproto.Request](), reflect.TypeFor[nodeproto.Reply](), reflect.TypeFor[nodeproto.FrameLog](), reflect.TypeFor[nodeproto.HelloResult](), reflect.TypeFor[nodeproto.RunResult](), reflect.TypeFor[nodeproto.EvalResult]()}},
+		{"v2-documents.schema.json", []reflect.Type{reflect.TypeFor[nodeproto.DescribeDoc](), reflect.TypeFor[nodeproto.PlanDoc](), reflect.TypeFor[nodeproto.JobSpec](), reflect.TypeFor[nodeproto.StepSpec]()}},
 	} {
-		s.requireFieldsDeclared(t, def, typ)
+		s := loadProtocolSchema(t, group.name)
+		for _, typ := range group.types {
+			def, ok := s.Def(typ.Name())
+			if !ok {
+				t.Fatalf("schema has no %s", typ.Name())
+			}
+			props := def["properties"].(map[string]any)
+			emitted := map[string]bool{}
+			for field := range typ.Fields() {
+				name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+				if name == "" || name == "-" {
+					continue
+				}
+				emitted[name] = true
+				if _, ok := props[name]; !ok {
+					t.Errorf("%s emits undeclared field %s", typ, name)
+				}
+			}
+			for name := range props {
+				if !emitted[name] {
+					t.Errorf("%s declares absent field %s", typ, name)
+				}
+			}
+		}
 	}
 }
 
-func TestLogRecordSchemaDeclaresEveryEmittedField(t *testing.T) {
-	s := loadProtocolSchema(t, "log-record.schema.json")
-	s.requireFieldsDeclared(t, "frameLog", reflect.TypeFor[nodeproto.FrameLog]())
-}
-
-func TestLogRecordsMatchTheSchema(t *testing.T) {
-	s := loadProtocolSchema(t, "log-record.schema.json")
-	s.mustValidate(t, "", nodeproto.FrameLog{TS: "2026-10-14T00:00:00Z", Level: "info", Message: "hello"})
-	services := loadProtocolSchema(t, "node-protocol.schema.json")
-	services.mustValidate(t, "annotationRequest", nodeproto.AnnotationRequest{Level: "error", Message: "unused variable", File: "cmd/app/main.go", Line: 42, EndLine: 43, Column: 2, Step: "lint"})
-	services.mustValidate(t, "summaryRequest", nodeproto.SummaryRequest{Markdown: "## done", Step: "lint"})
-	annotation := map[string]any{"level": "error", "message": "unused variable", "line": 0.0}
-	if failures := services.validate(services.def(t, "annotationRequest"), annotation, "annotation"); len(failures) == 0 {
-		t.Fatal("schema accepted annotation at line zero")
+func TestNodeProtocolTranscriptsMatchTheSchemas(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "node-protocol.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := loadProtocolSchema(t, "v2-wire.schema.json")
+	docs := loadProtocolSchema(t, "v2-documents.schema.json")
+	checked := 0
+	ops := map[string]nodeproto.Op{}
+	for _, block := range strings.Split(string(raw), "```text\n")[1:] {
+		block, _, _ = strings.Cut(block, "```")
+		for i, line := range strings.Split(strings.TrimSpace(block), "\n") {
+			t.Run(fmt.Sprintf("line-%d", checked), func(t *testing.T) {
+				if len(line) < 3 {
+					t.Fatalf("invalid transcript line %d: %q", i+1, line)
+				}
+				dir, msg := line[:3], []byte(line[3:])
+				checked++
+				if dir == "-> " {
+					req, err := nodeproto.ParseRequest(msg)
+					if err != nil {
+						t.Fatal(err)
+					}
+					wire.mustValidate(t, "Request", req)
+					if _, exists := ops[req.ID]; exists {
+						t.Fatalf("request ID %q reused", req.ID)
+					}
+					ops[req.ID] = req.Op
+					return
+				}
+				if dir != "<- " {
+					t.Fatalf("unknown transcript direction %q", dir)
+				}
+				frame, err := nodeproto.ParseFrame(msg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if frame.Log != nil {
+					wire.mustValidate(t, "FrameLog", frame.Log)
+					return
+				}
+				reply := frame.Reply
+				wire.mustValidate(t, "Reply", reply)
+				op, ok := ops[reply.ID]
+				if !ok {
+					t.Fatalf("reply to unknown request %q", reply.ID)
+				}
+				if !reply.OK {
+					return
+				}
+				var result any
+				var schema protocolSchema
+				var def string
+				switch op {
+				case nodeproto.OpHello:
+					result, schema, def = &nodeproto.HelloResult{}, wire, "HelloResult"
+				case nodeproto.OpDescribe:
+					result, schema, def = &nodeproto.DescribeDoc{}, docs, "DescribeDoc"
+				case nodeproto.OpPlan:
+					result, schema, def = &nodeproto.PlanDoc{}, docs, "PlanDoc"
+				case nodeproto.OpRunStep:
+					result, schema, def = &nodeproto.RunResult{}, wire, "RunResult"
+				case nodeproto.OpEval:
+					result, schema, def = &nodeproto.EvalResult{}, wire, "EvalResult"
+				case nodeproto.OpCancel:
+					return
+				default:
+					t.Fatalf("unrecognized request %s", op)
+				}
+				if err := reply.Decode(result); err != nil {
+					t.Fatal(err)
+				}
+				schema.mustValidate(t, def, result)
+			})
+		}
+	}
+	if checked == 0 {
+		t.Fatal("found no transcript lines")
 	}
 }

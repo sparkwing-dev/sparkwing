@@ -49,7 +49,7 @@ func TestHostedRendererMasksRecordsNoSourceMasked(t *testing.T) {
 	masker.Register(secret)
 	rec := &planSinkRecorder{}
 	delegate := nodehost.MaskingLogger(rec, masker)
-	emitHostedPlan(delegate, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "deploy-" + secret, Deps: []string{"build-" + secret}}}})
+	emitHostedPlan(delegate, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "deploy-" + secret, Needs: []string{"build-" + secret}}}})
 	delegate.Log("info", "summary "+secret)
 	raw, err := json.Marshal(rec.recs)
 	if err != nil {

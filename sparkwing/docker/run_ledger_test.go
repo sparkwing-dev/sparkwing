@@ -31,7 +31,7 @@ func TestRun_RegistersADockerCleanupWhileRunningAndClearsAfter(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("SPARKWING_RUN_ID", "run-dtest")
-	t.Setenv("SPARKWING_NODE_ID", "build")
+	t.Setenv("SPARKWING_JOB_ID", "build")
 	ledger := sessionledger.Open(paths.PathsAt(home).SessionLedgerDir())
 
 	done := make(chan error, 1)
@@ -80,7 +80,7 @@ func TestRun_OutsideARunRegistersNothing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("SPARKWING_RUN_ID", "")
-	t.Setenv("SPARKWING_NODE_ID", "")
+	t.Setenv("SPARKWING_JOB_ID", "")
 	if err := Run(context.Background(), RunOptions{Image: "busybox", Cmd: []string{"true"}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}

@@ -290,6 +290,14 @@ self-update verifies release bytes, and a stale runner cannot bypass its minimum
 
 ## Activation and launch gate
 
+`TestRecovery` also runs two SQLite persistence cells through
+`CheckStoreRecoveryBoundary`: cancellation after holder loss and reconciliation
+before and after reaping. They check late-report refusal, one self-award under
+concurrent reconciliation, unchanged run identity and attempt history, memo-miss
+dispatch, unique lifecycle events, and persistence across reopening. Authority is
+preseeded in the final schema and enrollment uses a contract fake. These cells
+do not replace the native placement cells below.
+
 The nine skeleton groups are `TestLifecycle`, `TestRecovery`, `TestPlacement`,
 `TestCredentials`, `TestStorage`, `TestProtocol`, `TestEnvironment`, `TestSurface`
 and `TestBilling`. Each enumerates its catalog scenarios and target cells. The

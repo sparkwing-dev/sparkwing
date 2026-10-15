@@ -160,10 +160,7 @@ func (s *Server) measureBucketLeased(ctx context.Context, ceiling *objectguard.C
 }
 
 func (s *Server) measureHolder() string {
-	if s.cronHolder != "" {
-		return s.cronHolder
-	}
-	return "controller"
+	return s.leaseHolder
 }
 
 func (s *Server) bucketMeasured() bool {

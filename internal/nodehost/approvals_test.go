@@ -73,12 +73,12 @@ func fastApprovalPoll(t *testing.T) {
 	t.Cleanup(func() { approvalPoll = prev })
 }
 
-func hostGates(t *testing.T, ctx context.Context, gs *gateStore, doc nodeproto.PlanDocOld, fx *fakeExec) (RunResult, map[string]*gateLog) {
+func hostGates(t *testing.T, ctx context.Context, gs *gateStore, doc nodeproto.PlanDoc, fx *fakeExec) (RunResult, map[string]*gateLog) {
 	t.Helper()
 	if err := gs.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateNodes(doc.Nodes); err != nil {
+	if err := validateNodes(doc.Jobs, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
 	masker := secrets.NewMasker()
@@ -91,10 +91,10 @@ func hostGates(t *testing.T, ctx context.Context, gs *gateStore, doc nodeproto.P
 		logs[node] = &gateLog{}
 		return logs[node], nil
 	}}}
-	run := &Run{ID: testRunID, Doc: doc, State: gs, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
+	run := &Run{ID: testRunID, Doc: doc, State: gs, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
-	if err := s.add(ctx, ctx, doc.Nodes, nil); err != nil {
+	if err := s.add(ctx, ctx, doc.Jobs, nil); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	s.loop(ctx)
@@ -102,19 +102,19 @@ func hostGates(t *testing.T, ctx context.Context, gs *gateStore, doc nodeproto.P
 	return res, logs
 }
 
-func gateDoc(gate nodeproto.PlanApproval) nodeproto.PlanDocOld {
-	return nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
-		{ID: "build"},
-		{ID: "gate", Deps: deps("build"), Approval: &gate, Modifiers: &nodeproto.PlanModifiers{OnFailure: "rollback"}},
-		{ID: "deploy", Deps: deps("gate")},
-		{ID: "rollback", OnFailureOf: "gate"},
+func gateDoc(gate nodeproto.ApprovalSpec) nodeproto.PlanDoc {
+	return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "gate", Needs: deps("build"), Approval: &gate},
+		{ID: "deploy", Needs: deps("gate"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "rollback", OnFailureOf: "gate", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}
 }
 
 func TestApprovalGateResolvesAsTheDispatcherDoes(t *testing.T) {
 	fastApprovalPoll(t)
 	cases := map[string]struct {
-		gate       nodeproto.PlanApproval
+		gate       nodeproto.ApprovalSpec
 		resolve    func(st *store.Store) error
 		outcome    sparkwing.Outcome
 		errHas     string
@@ -123,7 +123,7 @@ func TestApprovalGateResolvesAsTheDispatcherDoes(t *testing.T) {
 		row        string
 	}{
 		"granted": {
-			gate:       nodeproto.PlanApproval{Message: "ship it?"},
+			gate:       nodeproto.ApprovalSpec{Message: "ship it?"},
 			resolve:    resolveAs(store.ApprovalResolutionApproved, "alice", "looks good"),
 			outcome:    sparkwing.Success,
 			annotation: "approved by alice · looks good",
@@ -131,7 +131,7 @@ func TestApprovalGateResolvesAsTheDispatcherDoes(t *testing.T) {
 			row:        store.ApprovalResolutionApproved,
 		},
 		"denied": {
-			gate:       nodeproto.PlanApproval{Message: "ship it?"},
+			gate:       nodeproto.ApprovalSpec{Message: "ship it?"},
 			resolve:    resolveAs(store.ApprovalResolutionDenied, "bob", "not today"),
 			outcome:    sparkwing.Failed,
 			errHas:     "denied by bob: not today",
@@ -140,21 +140,21 @@ func TestApprovalGateResolvesAsTheDispatcherDoes(t *testing.T) {
 			row:        store.ApprovalResolutionDenied,
 		},
 		"timed out failing": {
-			gate:       nodeproto.PlanApproval{TimeoutMS: 1},
+			gate:       nodeproto.ApprovalSpec{TimeoutMS: new(int64(1))},
 			outcome:    sparkwing.Failed,
 			errHas:     "approval timed out (policy=fail)",
 			annotation: "approval timed out (policy=fail)",
 			row:        store.ApprovalResolutionTimedOut,
 		},
 		"timed out denying": {
-			gate:       nodeproto.PlanApproval{TimeoutMS: 1, OnTimeout: store.ApprovalOnTimeoutDeny},
+			gate:       nodeproto.ApprovalSpec{TimeoutMS: new(int64(1)), OnTimeout: store.ApprovalOnTimeoutDeny},
 			outcome:    sparkwing.Failed,
 			errHas:     "approval timed out (policy=deny)",
 			annotation: "auto-denied (timeout policy=deny)",
 			row:        store.ApprovalResolutionTimedOut,
 		},
 		"timed out approving": {
-			gate:       nodeproto.PlanApproval{TimeoutMS: 1, OnTimeout: store.ApprovalOnTimeoutApprove},
+			gate:       nodeproto.ApprovalSpec{TimeoutMS: new(int64(1)), OnTimeout: store.ApprovalOnTimeoutApprove},
 			outcome:    sparkwing.Success,
 			annotation: "auto-approved (timeout policy=approve)",
 			row:        store.ApprovalResolutionTimedOut,
@@ -220,7 +220,7 @@ func TestApprovalGateResolvesAsTheDispatcherDoes(t *testing.T) {
 			}
 			wantRow(t, st, "deploy", sparkwing.Cancelled, "upstream-failed")
 			wantRow(t, st, "rollback", sparkwing.Success, "")
-			if f := fx.seen["rollback"].Failure; f == nil || f.Node != "gate" || f.Stage != "action" || f.Message != tc.errHas {
+			if f := fx.seen["rollback"].Failure; f == nil || f.Job != "gate" || f.Stage != "action" || f.Error == nil || f.Error.Message != tc.errHas {
 				t.Errorf("rollback failure = %+v, want the gate's action failure %q", f, tc.errHas)
 			}
 			if res.Status != "failed" {
@@ -265,7 +265,7 @@ func TestApprovalGateCancelledWithTheRun(t *testing.T) {
 	}()
 	fx := &fakeExec{}
 
-	res, logs := hostGates(t, ctx, gs, gateDoc(nodeproto.PlanApproval{}), fx)
+	res, logs := hostGates(t, ctx, gs, gateDoc(nodeproto.ApprovalSpec{}), fx)
 
 	wantRow(t, st, "gate", sparkwing.Cancelled, "ctx-cancelled")
 	wantRow(t, st, "deploy", sparkwing.Cancelled, "")
@@ -300,7 +300,7 @@ func TestApprovalGateTimeoutYieldsToALateHumanAnswer(t *testing.T) {
 		return st.GetApproval(ctx, runID, nodeID)
 	}
 
-	res, _ := hostGates(t, t.Context(), gs, gateDoc(nodeproto.PlanApproval{TimeoutMS: 1}), &fakeExec{})
+	res, _ := hostGates(t, t.Context(), gs, gateDoc(nodeproto.ApprovalSpec{TimeoutMS: new(int64(1))}), &fakeExec{})
 
 	wantRow(t, st, "gate", sparkwing.Success, "")
 	if row := nodeRow(t, st, "gate"); len(row.Annotations) != 1 || row.Annotations[0] != "approved by carol" {
@@ -319,7 +319,7 @@ func TestApprovalGateFailsOnAStoreThatCannotRecover(t *testing.T) {
 		return nil, errors.New("database: locking protocol")
 	}
 
-	hostGates(t, t.Context(), gs, gateDoc(nodeproto.PlanApproval{}), &fakeExec{})
+	hostGates(t, t.Context(), gs, gateDoc(nodeproto.ApprovalSpec{}), &fakeExec{})
 
 	wantRow(t, st, "gate", sparkwing.Failed, "locking protocol")
 	wantRow(t, st, "rollback", sparkwing.Success, "")

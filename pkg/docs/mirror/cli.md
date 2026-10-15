@@ -151,9 +151,13 @@ Command records carry `path`, `synopsis`, and `subcommand_count`.
 Help supplies descriptions, flags, and examples. Hidden commands require
 `--include-hidden`. See [Bounded discovery](#bounded-discovery) for pagination.
 
-The describe schema matches `sparkwing.DescribePipeline` plus
-`group` / `tags` / `triggers` drawn from the `pipelines:` block in
-`.sparkwing/sparkwing.yaml`.
+The describe schema uses the shared protocol v2 pipeline description. Project
+metadata comes from the `pipelines:` block in `.sparkwing/sparkwing.yaml`.
+A configured alias selects its registered SDK entrypoint for flags, help, secret
+classification and risks. Planning sends that entrypoint to the SDK and keeps
+the invoked alias in the run context. Pass required planning inputs after `--`,
+for example `sparkwing pipeline plan --pipeline deploy-prod -- --region us-east`.
+Previews redact secret arguments while the SDK receives their execution values.
 
 ## Headless hosts
 

@@ -1,15 +1,3 @@
-// Command podnodefixture is the pipeline the pod-side node host's tests run:
-// one node that writes its environment to a file and prints a file's
-// content; when asked, a plan that drifts between processes, a failing node
-// with retries whose before_run and after_run calls are traced, and a node in a
-// concurrency group; when asked, a node that waits until it is stopped, and a
-// deploy node whose skip_if reads a secret, and a failing node whose recovery
-// records the failure it was handed; when asked, a source node whose output
-// generates one node per target and a summary that needs them all, a node
-// that records its job args, a node with a typed output, and memoized artifact
-// producers an aggregator stages; when asked, a ship node of three steps behind
-// a prep node, beside a lint node. The trigger's actor and pull request, when
-// set, reach the build node's environment as ACTOR.
 package main
 
 import (
@@ -20,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -29,7 +16,6 @@ type inputs struct {
 	Echo    string `flag:"echo" desc:"File whose content the node prints"`
 	Drift   string `flag:"drift" desc:"File counting plans; set, each plan differs"`
 	Trace   string `flag:"trace" desc:"File the node's before_run and after_run calls append to; set, the node fails and retries twice"`
-	Auto    bool   `flag:"auto" desc:"Retry the traced node with retry_auto"`
 	Group   bool   `flag:"group" desc:"Put the node in a concurrency group"`
 	Refuse  bool   `flag:"refuse" desc:"The traced node's before_run refuses"`
 	Pass    string `flag:"pass" secret:"true" desc:"A secret the node prints"`
@@ -51,8 +37,6 @@ type inputs struct {
 	Stage   string `flag:"stage" default:"prod" desc:"A value only guards read"`
 }
 
-// shipJob's steps run compile, package, upload in order, each appending its
-// name to the ranged file.
 type shipJob struct {
 	sparkwing.Base
 	out string
@@ -104,8 +88,6 @@ func (j *scaleJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	}), nil
 }
 
-// addShards adds two memoized producers that each publish one shard, and an
-// aggregator that stages both and writes them to out.
 func addShards(plan *sparkwing.Plan, out string) {
 	producer := func(id, rel, content string) *sparkwing.JobNode {
 		return sparkwing.Job(plan, id, func(context.Context) error {
@@ -113,7 +95,7 @@ func addShards(plan *sparkwing.Plan, out string) {
 				return err
 			}
 			return os.WriteFile(rel, []byte(content), 0o600)
-		}).Outputs(rel).Memoize(func(context.Context) (sparkwing.CacheKey, error) { return sparkwing.Key(id, "v1"), nil })
+		}).Artifacts(rel).Memo(func(context.Context) (sparkwing.MemoValue, error) { return sparkwing.MemoKey(id, "v1"), nil })
 	}
 	one, two := producer("shard-1", "shards/1.txt", "one"), producer("shard-2", "shards/2.txt", "two")
 	sparkwing.Job(plan, "aggregate", func(context.Context) error {
@@ -164,11 +146,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 			return nil
 		}).
 			AfterRun(func(_ context.Context, err error) { trace(fmt.Sprintf("after:%v", err)) })
-		if in.Auto {
-			build.Retry(2, sparkwing.RetryAuto())
-		} else {
-			build.Retry(2)
-		}
+		build.Retry(2)
 	}
 	if in.Memo != "" {
 		memoized := sparkwing.Job(plan, "memoized", func(context.Context) error {
@@ -184,9 +162,9 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 				return err
 			}
 			return os.WriteFile("dist/out.txt", []byte("artifact\n"), 0o600)
-		}).Memoize(func(context.Context) (sparkwing.CacheKey, error) { return "pod-memo-v1", nil })
+		}).Memo(func(context.Context) (sparkwing.MemoValue, error) { return "pod-memo-v1", nil })
 		if in.Publish {
-			memoized.Outputs("dist/*")
+			memoized.Artifacts("dist/*")
 		}
 	}
 	var summary *sparkwing.JobNode
@@ -221,7 +199,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 		if pr != nil {
 			actor += "#" + strconv.Itoa(pr.Number)
 		}
-		build.EnvOld("ACTOR", actor)
+		build.Env("ACTOR", actor)
 	}
 	if in.Recover != "" {
 		sparkwing.Job(plan, "broken", func(context.Context) error { return errors.New("broken on purpose") }).
@@ -238,7 +216,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 		sparkwing.Job(plan, "ship", &shipJob{out: in.Ranged}).Needs(prep)
 	}
 	if in.Region {
-		build.EnvOld("PLAN_REGION", os.Getenv("AWS_REGION"))
+		build.Env("PLAN_REGION", os.Getenv("AWS_REGION"))
 	}
 	if in.Scale != "" {
 		sparkwing.Job(plan, "scale", &scaleJob{out: in.Scale, zone: in.Zone})
@@ -259,7 +237,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 		if err := os.WriteFile(in.Drift, []byte(strconv.Itoa(n)), 0o600); err != nil {
 			return err
 		}
-		build.EnvOld("PLAN_SEQ", strconv.Itoa(n))
+		build.Env("PLAN_SEQ", strconv.Itoa(n))
 	}
 	return nil
 }
@@ -274,19 +252,23 @@ func fanOut(plan *sparkwing.Plan, in inputs) *sparkwing.JobNode {
 	}
 	source := sparkwing.Job(plan, "targets", &targetsJob{list: in.FanOut, log: logBody})
 	if in.FanMemo {
-		source.Memoize(func(context.Context) (sparkwing.CacheKey, error) { return "pod-fanout-v1", nil })
+		source.Memo(func(context.Context) (sparkwing.MemoValue, error) { return "pod-fanout-v1", nil })
 	}
-	tests := sparkwing.JobFanOutDynamic(plan, "tests", source, func(target string) (string, any) {
-		id := "test-" + target
-		return id, func(context.Context) error {
-			logBody(id)
-			if _, err := os.Stat(in.FanFail); target == "fail" && err == nil {
-				return errors.New("target fail is broken")
-			}
-			return nil
+	targets := sparkwing.RefTo[[]string](source)
+	tests := source.Generate(func(ctx context.Context, expansion *sparkwing.Plan) error {
+		for _, target := range targets.Get(ctx) {
+			id := "test-" + target
+			sparkwing.Job(expansion, id, func(context.Context) error {
+				logBody(id)
+				if _, err := os.Stat(in.FanFail); target == "fail" && err == nil {
+					return errors.New("target fail is broken")
+				}
+				return nil
+			})
 		}
+		return nil
 	})
-	return sparkwing.Job(plan, "summary", func(context.Context) error { logBody("summary"); return nil }).Needs(tests)
+	return sparkwing.Job(plan, "summary", func(context.Context) error { logBody("summary"); return nil }).NeedsGenerated(tests)
 }
 
 type targetsJob struct {
@@ -304,5 +286,5 @@ func (j *targetsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 func main() {
 	sparkwing.Register[inputs]("podnode", func() sparkwing.Pipeline[inputs] { return pipeline{} })
-	runner.Main()
+	sparkwing.Main()
 }

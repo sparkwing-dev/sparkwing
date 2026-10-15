@@ -12,13 +12,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func aliasProject(t *testing.T) (string, sparkwing.DescribePipeline) {
+func aliasProject(t *testing.T) (string, nodeproto.PipelineDescription) {
 	t.Helper()
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	projectAt(t, "pipelines:\n  - name: deploy-prod\n    entrypoint: Deploy\n  - name: deploy-stage\n    entrypoint: Deploy\n")
@@ -27,21 +25,21 @@ func aliasProject(t *testing.T) (string, sparkwing.DescribePipeline) {
 		t.Fatal(err)
 	}
 	writeRepoFile(t, filepath.Join(dir, "go.mod"), "module aliasfixture\n\ngo 1.26\n")
-	schema := sparkwing.DescribePipeline{
+	schema := nodeproto.PipelineDescription{
 		Name: "Deploy", Short: "Deploy a service", Help: "Deploys the selected service.",
-		Args: []sparkwing.DescribeArg{
+		Args: []nodeproto.ArgumentDescription{
 			{Name: "region", Short: "r", Type: "string", Required: true},
 			{Name: "image", Type: "string", Required: true, JobID: "rollout"},
 			{Name: "password", Type: "string", Secret: true},
 		},
-		Secrets: pipelines.SecretsField{{Name: "DEPLOY_TOKEN"}},
+		Secrets: []nodeproto.SecretDeclaration{{Name: "DEPLOY_TOKEN"}},
 		Risks:   []string{"prod"},
 	}
 	key, err := bincache.PipelineCacheKey(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := storeDescribe(dir, key, sdkserve.DescribeDoc{Protocol: "1", Pipelines: []sparkwing.DescribePipeline{schema}}); err != nil {
+	if err := storeDescribe(dir, key, nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{schema}}); err != nil {
 		t.Fatal(err)
 	}
 	return dir, schema
@@ -49,8 +47,8 @@ func aliasProject(t *testing.T) (string, sparkwing.DescribePipeline) {
 
 func TestPipelineAliasRiskGateUsesEntrypointDeclaration(t *testing.T) {
 	dir, schema := aliasProject(t)
-	err := (riskGate{Pipeline: "deploy-prod", Surface: "detached", SubmitDir: filepath.Dir(dir), Declared: []sparkwing.DescribePipeline{schema}}).check(filepath.Dir(dir), "")
-	var blocked *sparkwing.RiskBlockedError
+	err := (riskGate{Pipeline: "deploy-prod", Surface: "detached", SubmitDir: filepath.Dir(dir), Declared: []nodeproto.PipelineDescription{schema}}).check(filepath.Dir(dir), "")
+	var blocked *riskBlockedError
 	if !errors.As(err, &blocked) || blocked.Pipeline != "deploy-prod" || !reflect.DeepEqual(blocked.MissingLabels, []string{"prod"}) {
 		t.Fatalf("alias bypassed entrypoint risks: %v", err)
 	}
@@ -66,9 +64,9 @@ func FuzzPipelineAliasMetadataIsolation(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		schemas := []sparkwing.DescribePipeline{
-			{Name: alias, Args: []sparkwing.DescribeArg{{Name: "password", Type: "string"}}},
-			{Name: entry, Args: []sparkwing.DescribeArg{{Name: "password", Type: "string", Secret: true}}, Risks: []string{"prod"}},
+		schemas := []nodeproto.PipelineDescription{
+			{Name: alias, Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string"}}},
+			{Name: entry, Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}, Risks: []string{"prod"}},
 		}
 		if reverse {
 			schemas[0], schemas[1] = schemas[1], schemas[0]
@@ -78,7 +76,7 @@ func FuzzPipelineAliasMetadataIsolation(f *testing.F) {
 			t.Fatalf("alias changed secret classification: %+v %v", schema, err)
 		}
 		err = enforceRiskGate(alias, risksIn(schema), runFlags{})
-		var blocked *sparkwing.RiskBlockedError
+		var blocked *riskBlockedError
 		if !errors.As(err, &blocked) || blocked.Pipeline != alias || !reflect.DeepEqual(blocked.MissingLabels, []string{"prod"}) {
 			t.Fatalf("alias bypassed entrypoint risks: %v", err)
 		}
@@ -150,7 +148,7 @@ func TestPipelineAliasDoesNotFallBackToAnUnrelatedRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := storeDescribe(dir, key, sdkserve.DescribeDoc{Protocol: "1", Pipelines: []sparkwing.DescribePipeline{registered}}); err != nil {
+	if err := storeDescribe(dir, key, nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{registered}}); err != nil {
 		t.Fatal(err)
 	}
 	run := &pipelineRun{ctx: t.Context(), sparkwingDir: dir}
@@ -160,7 +158,7 @@ func TestPipelineAliasDoesNotFallBackToAnUnrelatedRegistration(t *testing.T) {
 	if _, err := pipelineFlagsFromCache(t.Context(), dir, "deploy-prod"); err == nil {
 		t.Fatal("completion used an unrelated registration")
 	}
-	gate := riskGate{Pipeline: "deploy-prod", Surface: "detached", SubmitDir: filepath.Dir(dir), Declared: []sparkwing.DescribePipeline{registered}}
+	gate := riskGate{Pipeline: "deploy-prod", Surface: "detached", SubmitDir: filepath.Dir(dir), Declared: []nodeproto.PipelineDescription{registered}}
 	if err := gate.check(filepath.Dir(dir), ""); err == nil {
 		t.Fatal("detached risk gate used an unrelated registration")
 	}

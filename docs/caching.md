@@ -1,213 +1,86 @@
 # Caching
 
-Sparkwing caches at four levels:
-
-1. **Job results.** `.Memoize(key, opts...)` replays a recorded result for
-   the same content key, skipping execution.
-2. **Dependency directories.** `.CacheDir(...)` restores dependency stores
-   before execution and saves them after success. See
-   [Dependency caches](#dependency-caches).
-3. **Build layers.** Docker layers, BuildKit cache mounts, warm PVCs, and
-   dependency proxies reuse build inputs. See [Build caching](build-caching.md).
-4. **Pipeline binaries.** Sparkwing reuses a compiled pipeline until its
-   source inputs change. See [Pipeline binary cache](#pipeline-binary-cache).
-
-Result keys identify work across groups and runs.
-[`Concurrency`](sdk.md#concurrency) independently bounds how many nodes run.
+Job memoization, dependency caches and compiled pipeline binaries have separate
+keys. Build tools can also use their own layer caches. Each declaration identifies
+content. The host authorizes the storage namespace independently.
 
 ## The model
 
+`Memo` reuses a successful job's recorded output and artifacts. The key callback
+runs after dependencies settle. Return `MemoKey(parts...)` with every input that
+affects the result, or `NoMemo` to execute without publishing a memo record.
+Errors and empty keys fail rather than becoming a cache hit.
+
 ```go
-shard := sparkwing.Job(plan, "coverage-shard-1", func(ctx context.Context) error {
-    return nil
-})
-shard.Memoize(func(ctx context.Context) (sparkwing.CacheKey, error) {
-    return sparkwing.Key("coverage", "shard-1", "v1"), nil
-}, sparkwing.TTL(7*24*time.Hour))
+sparkwing.Job(plan, "coverage-shard-1", func(context.Context) error { return nil }).
+    Memo(func(context.Context) (sparkwing.MemoValue, error) {
+        return sparkwing.MemoKey("coverage", "shard-1", "toolchain-v1"), nil
+    }, sparkwing.MemoTTL(7*24*time.Hour))
 ```
 
-When the orchestrator evaluates `shard`, it:
-
-1. Runs upstream dependencies so `Ref[T]` values are resolved.
-2. Resolves the `CacheKeyFn` after dependencies complete. A returned error,
-   panic, empty key, or expired resolution deadline fails before dispatch.
-3. Runs uncached for `NoCache, nil`; otherwise looks up the content key.
-   A live entry replays its output and records a cache-hit event.
-4. Otherwise it runs the node and persists the output under the hash.
-
-`.Memoize()` resolves its key once per node before dispatch.
-
-`TTL(d)` bounds how long a stored result stays reusable. Omit it for the
-default (`sparkwing.DefaultCacheTTL`, 7 days); values above
-`sparkwing.MaxCacheTTL` (35 days) are clamped with a plan-time warning.
+`MemoTTL` accepts at most 30 days. A missing or corrupt object produces a miss.
+Use `sparkwing/inputs` helpers to fingerprint repository files, directories,
+environment and composed inputs. See [Memo](sdk.md#memo-caches-and-artifacts).
 
 ## Building keys
 
-```go
-sparkwing.Key("deploy", "prod", "v1.2.3")
-
-build := sparkwing.Job(plan, "build", func(ctx context.Context) (string, error) {
-    return "example-digest", nil
-})
-buildOut := sparkwing.RefTo[string](build)
-deploy := sparkwing.Job(plan, "deploy", func(ctx context.Context) error { return nil }).Needs(build)
-deploy.Memoize(func(ctx context.Context) (sparkwing.CacheKey, error) {
-    return sparkwing.Key("deploy", "prod", buildOut.Get(ctx)), nil
-})
-```
-
-Choose parts with stable, distinct representations. `Key` formats each
-part with `%v`, which omits type information, and separates parts with
-byte `0x1e`. A part containing that separator can alias multiple parts.
-Resolve a `Ref` inside the callback to key on its output; passing the
-`Ref` itself keys on its node ID.
-
-## What a cache hit skips
-
-A hit restores the recorded typed output into the current node's row so
-that downstream `Ref[T]` values resolve it. The node's action, steps, and
-`Verify` check are skipped.
-
-Declare file outputs with [`Outputs`](artifacts.md). A cache hit carries
-that artifact manifest forward, and downstream [`Consumes`](artifacts.md)
-stages its files. Files omitted from the manifest are not restored.
-
-## In-flight dedupe
-
-Nodes resolving the same key share an in-flight execution across groups
-and runs against a shared controller. The first arrival computes the
-result; followers wait and replay a reusable successful result. A follower
-executes its own work when the leader ends without a reusable result.
-
-## Opting out per invocation
-
-Return `sparkwing.NoCache, nil` to run uncached for one invocation.
-Return an error when the key cannot be computed; an empty key fails
-resolution, even when returned with a nil error:
+Resolve a typed reference inside the key callback when its result is an input:
 
 ```go
-skipCache := false
-sparkwing.Job(plan, "maybe", func(ctx context.Context) error { return nil }).
-    Memoize(func(ctx context.Context) (sparkwing.CacheKey, error) {
-        if skipCache {
-            return sparkwing.NoCache, nil
-        }
-        return sparkwing.Key("maybe", "v1"), nil
+build := sparkwing.Job(plan, "build", &Build{})
+output := sparkwing.RefTo[BuildOutput](build)
+sparkwing.Job(plan, "deploy", func(context.Context) error { return nil }).
+    Memo(func(ctx context.Context) (sparkwing.MemoValue, error) {
+        return sparkwing.MemoKey("deploy", output.Get(ctx).Digest), nil
     })
 ```
 
-`sparkwing run --sw-no-cache` disables cache *reads* for a whole run
-while still writing results on success, so the next run hits a freshly
-populated cache.
+Choose stable key parts that distinguish different work. Each member of a group
+needs its own key when its inputs differ.
 
-## Limitations
+## What a cache hit skips
 
-- **No partial-node caching.** Caching is per node; you cannot skip one
-  step inside a job. Split the cachable work into its own node.
-- **Bounded retention.** Cache entries expire after their `TTL`. The
-  controller sweeps expired entries automatically on a schedule, and the
-  cache is additionally capped at roughly ten thousand rows, evicting the
-  least recently used entries past that cap.
-- **Build-layer caching is separate.** See
-  [build-caching.md](build-caching.md).
+A hit restores the recorded output and artifact references. The host skips the
+job's execution callbacks. Declare file results with
+[`Artifacts`](artifacts.md); `Consumes` stages those files for a dependent job.
+
+## Opting out per invocation
+
+Return `sparkwing.NoMemo, nil` from a key callback to bypass reuse for that job.
+`sparkwing run <pipeline> --sw-no-memo` bypasses memoization for the invocation.
+Dependency directory caches remain a separate declaration.
 
 ## Dependency caches
 
-`.CacheDir()` declares dependency directories to restore before execution
-and save after the node's first successful run under that key.
+`Cache` declares directories restored before a job attempt. A successful attempt
+can save their contents. Missing caches and failed transfers allow cold execution.
 
 ```go
-sparkwing.Job(plan, "test", runTests).
-    CacheDir(sparkwing.GoModules())
+sparkwing.Job(plan, "test", func(ctx context.Context) error {
+    _, err := sparkwing.Exec(ctx, "go", "test", "./...").Run()
+    return err
+}).Cache(sparkwing.GoModules())
 
-sparkwing.Job(plan, "web-test", runWebTests).
-    CacheDir(sparkwing.NpmCache())
+sparkwing.Job(plan, "web-test", func(context.Context) error { return nil }).
+    Cache(sparkwing.Npm())
 
-sparkwing.Job(plan, "gems", runSpecs).
-    CacheDir(sparkwing.Dir("vendor/bundle", sparkwing.KeyFromFile("Gemfile.lock")))
+sparkwing.Job(plan, "gems", func(context.Context) error { return nil }).
+    Cache(sparkwing.Dir("vendor/bundle", sparkwing.KeyFromFile("Gemfile.lock")))
 ```
-
-Groups take the same declaration and apply it to every member:
-`group.CacheDir(sparkwing.GoModules())`.
-
-The engine performs the restore and the save, not the node's own hooks:
-it restores before the node's `BeforeRun` hooks and saves after its
-`AfterRun` hooks. The plan snapshot lists each node's declared caches
-under `caches`.
 
 ### Directory helpers
 
-`GoModules()` targets GOMODCACHE. `NpmCache()` targets the directory
-reported by `npm config get cache`. `Dir()` names a directory explicitly;
-choose a key that invalidates every stale input stored there.
-
-### Keys
-
-The key is `dep-<name>-<GOOS>-<GOARCH>-<hash>`, where the hash is the
-content of the ecosystem's lockfile (`go.sum`, `package-lock.json`,
-or the `KeyFromFile` target). Editing the lockfile changes the key;
-restoring its previous bytes restores the previous key. Platform is
-part of the key because compiled dependency content is not portable
-across it.
-
-Restores require an exact key match.
+`GoModules()` uses `go.sum`. `Npm()` uses an npm lockfile. `Dir()` names a
+directory and explicit lockfile input. `DirCache.Key(workdir)` hashes the
+declaration, platform and lockfile content inside that workspace. An escaping
+path, missing input or read failure returns an error.
 
 ### Storage
 
-- **Laptop:** archives under `$SPARKWING_HOME/depcache/`.
-- **Cluster:** the sparkwing-cache service's `/cache/<key>` blob
-  store, reached through `SPARKWING_CACHE_URL` (node pods) or
-  `SPARKWING_GITCACHE_URL` (warm runners), authenticated with the
-  runner's agent token. Every pod in the cluster shares one cache.
-
-Both use tar.gz archives.
-The cache service bounds one archive at
-`sparkwing-cache --max-cache-archive-bytes`, 500 MB by default and unbounded
-at `0`. A larger archive is refused with `413` naming the cap, and the
-node logs a warning and proceeds without the dependency cache. The cap
-is applied before the first byte reaches the volume, so one pipeline
-cannot spend a team's quota, or the store ceiling, on a single object.
-The SDK skips an upload over 500 MB client-side before it asks; that constant is the
-client's own, and the service's cap is what actually holds.
-
-`--max-store-bytes` and `--max-store-objects`
-bound the dependency-archive, team and git mirror trees
-together rather than one object. At or above either one the service refuses every upload
-with `507` naming the ceiling, while reads and deletes keep working, and
-a later measurement that finds the store back under the ceiling thaws
-it. `--warn-store-bytes` and `--warn-store-objects` mark the store as warning without
-refusing anything, and `--store-reconcile`
-(hourly by default, `0` measures once
-at startup) is how often the service walks its trees and replaces its
-running count with the measurement. All of
-them are off until set, and the chart carries them as `cache.limits.*`.
-`GET /health` reports the store under `store_ceiling` (frozen, warning,
-counted bytes and objects, and when it was last measured), and the same
-state is exported as `sparkwing.cache.store_*`.
-
-The cache serves no delete, so recovery runs through two admin routes,
-which take only the controller's operator grant. An operator calls them
-through the controller with an `admin` bearer: `POST
-/api/v1/cache/store-ceiling/measure` walks the trees immediately, which is
-how freeing space on the volume turns into uploads flowing again rather than
-a wait for the interval, and `POST /api/v1/cache/store-ceiling/thaw` accepts
-uploads until the next measurement (a `409` when none is scheduled). Both
-forward the cache's answer, which carries the ceiling state.
-
-### Guarantees
-
-A missing lockfile, an unreachable cache service, an oversized archive,
-or a failed extract logs a warning and execution proceeds without the
-dependency cache. A failed node never saves.
-A restore is also skipped when the target directory already has
-content -- a warm runner's existing cache is left alone.
-
-For scoping a tool's cache directory to
-the current worktree rather than persisting it across runs, see
-`sparkwing.ToolCacheDir` in [sdk.md](sdk.md); the two compose --
-`ToolCacheDir` names a directory, `Dir()` can persist one.
-
-See `examples/dep-cache/` for a runnable cold/warm demo.
+Remote cache records use repository-bound authority and signed `/data` transfers.
+The read-only cache contract permits verified default-branch memo, artifact and
+dependency-cache records. It has no write or pipeline-binary fetch operation.
+Local pipeline binaries stay on the machine that builds them.
 
 ## Pipeline binary cache
 
@@ -227,9 +100,9 @@ The key fingerprints the inputs sparkwing controls: the Go major/minor
 version, `GOOS`/`GOARCH`, the `go build` flags sparkwing passes, the
 contents of `.sparkwing/`, the contents of every local `replace` target,
 the directives of a covering `go.work`, and the resolved module overlays.
-Build environment the calling shell exports -- `GOFLAGS`, `GOEXPERIMENT`,
-`CGO_ENABLED` -- is not among them, so two shells that disagree on one
-compute the same key.
+Captured Go build settings, including `GOFLAGS`, `GOEXPERIMENT` and
+`CGO_ENABLED`, also contribute to the key. Different build settings produce
+different cache entries.
 
 Contents are hashed, not timestamps -- editing a file back to its
 previous bytes restores the previous key. Paths are recorded relative
@@ -329,16 +202,3 @@ To skip the binary cache entirely for one invocation, pass
 `--sw-no-bincache`; sparkwing builds a temporary binary with debug
 symbols, then runs it with your original environment. The Go toolchain floor
 adjustment applies only while building.
-
-## Rewrite integration
-
-The final storage contract has no cache service, cache grant or package proxy.
-Some runtime consumers in this source revision still read legacy cache plumbing,
-including `SPARKWING_GITCACHE_URL`, `SPARKWING_CACHE_URL` and
-`SPARKWING_CACHE_GRANT`. The environment inventory retains those names until
-their owning runtime consumers are retired. They do not select a supported
-cache-service deployment in the final design.
-
-Pipeline binaries stay local. Final remote-cache reads use an explicit profile
-and only authorized verified-default-branch records over signed `/data`. Native
-host/storage composition still needs integration evidence.

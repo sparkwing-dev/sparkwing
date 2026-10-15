@@ -5,20 +5,18 @@ package orchestrator
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -26,7 +24,6 @@ const (
 	nodeProtocolEntryEnv = "SW_TEST_NODE_PROTOCOL_ENTRY"
 	servePipeline        = "node-protocol-serve-fixture"
 	serveEntrypoint      = "NodeProtocolServeEntry"
-	serveAlias           = "node-protocol-serve-alias"
 	forgedReply          = `{"reply":"5","ok":true,"result":{"forged":true}}`
 )
 
@@ -56,15 +53,16 @@ func (serveFixturePipeline) Plan(ctx context.Context, plan *sparkwing.Plan, in s
 	if in.Panic {
 		panic("plan blew up")
 	}
-	sparkwing.Info(ctx, "planning %s for %s", in.Env, rc.Git.Branch)
-	if v, ok := os.LookupEnv(protofd.HandlesEnv); ok {
-		return fmt.Errorf("%s is still set to %q", protofd.HandlesEnv, v)
+	branch := ""
+	if rc.Git != nil {
+		branch = rc.Git.Branch
 	}
+	sparkwing.Info(ctx, "planning %s for %s", in.Env, branch)
 	if initHeld != "" {
-		return fmt.Errorf("a subprocess started during package init inherited protocol descriptors or the node bearer %q", initHeld)
+		return fmt.Errorf("a subprocess started during package init inherited protocol descriptors %q", initHeld)
 	}
 	if held := heldProtocolFDs(); held != "" {
-		return fmt.Errorf("a subprocess inherited protocol descriptors or the node bearer %q", held)
+		return fmt.Errorf("a subprocess inherited protocol descriptors %q", held)
 	}
 	build := sparkwing.Job(plan, "build", protocolStepsJob{})
 	sparkwing.Job(plan, "deploy", &serveDeployJob{}).Needs(build)
@@ -73,7 +71,7 @@ func (serveFixturePipeline) Plan(ctx context.Context, plan *sparkwing.Plan, in s
 
 func heldProtocolFDs() string {
 	held, err := exec.Command("sh", "-c",
-		`(: <&3) 2>/dev/null && echo 3; (: >&4) 2>/dev/null && echo 4; [ -n "$SPARKWING_NODE_TOKEN" ] && echo token; true`).Output()
+		`(: <&3) 2>/dev/null && echo 3; (: >&4) 2>/dev/null && echo 4; true`).Output()
 	if err != nil {
 		return err.Error()
 	}
@@ -107,7 +105,7 @@ func TestNodeProtocolEntryProcess(t *testing.T) {
 		return serveFixturePipeline{}
 	})
 	os.Args = []string{os.Args[0], protofd.Arg}
-	Main()
+	sparkwing.Main()
 }
 
 type entrySession struct {
@@ -117,13 +115,11 @@ type entrySession struct {
 	frames *nodeproto.Reader
 	stdout bytes.Buffer
 	nextID int
-	ops    map[string]nodeproto.OpOld
 	proto  protocolSchema
 	doc    protocolSchema
-	record protocolSchema
 }
 
-func startEntry(t *testing.T) *entrySession {
+func startEntry(t *testing.T, job ...string) *entrySession {
 	t.Helper()
 	reqR, reqW, err := os.Pipe()
 	if err != nil {
@@ -134,22 +130,13 @@ func startEntry(t *testing.T) *entrySession {
 		t.Fatal(err)
 	}
 	s := &entrySession{
-		t: t, req: reqW, frames: nodeproto.NewReader(frR), ops: map[string]nodeproto.OpOld{},
-		proto:  loadProtocolSchema(t, "node-protocol.schema.json"),
-		doc:    loadProtocolSchema(t, "describe.schema.json"),
-		record: loadProtocolSchema(t, "log-record.schema.json"),
+		t: t, req: reqW, frames: nodeproto.NewReader(frR),
+		proto: loadProtocolSchema(t, "v2-wire.schema.json"),
+		doc:   loadProtocolSchema(t, "v2-documents.schema.json"),
 	}
 	s.cmd = exec.Command(os.Args[0], protofd.Arg)
 	s.cmd.Dir = t.TempDir()
-	yaml := "pipelines:\n  - name: " + serveAlias + "\n    entrypoint: " + serveEntrypoint + "\n"
-	if err := os.MkdirAll(filepath.Join(s.cmd.Dir, ".sparkwing"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(s.cmd.Dir, ".sparkwing", "sparkwing.yaml"), []byte(yaml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	s.cmd.Env = append(os.Environ(), nodeProtocolEntryEnv+"=1", protofd.HandlesEnv+"=3,4",
-		protofd.NodeURLEnv+"=http://127.0.0.1:1", protofd.NodeTokenEnv+"=swn_entry-bearer")
+	s.cmd.Env = append(os.Environ(), nodeProtocolEntryEnv+"=1")
 	s.cmd.ExtraFiles = []*os.File{reqR, frW}
 	s.cmd.Stdout = &s.stdout
 	if err := s.cmd.Start(); err != nil {
@@ -165,12 +152,20 @@ func startEntry(t *testing.T) *entrySession {
 			_ = s.cmd.Wait()
 		}
 	})
+	hello := nodeproto.Request{Op: nodeproto.OpHello, Protocol: nodeproto.Version, Engine: &nodeproto.EngineIdentity{Version: "fixture"}, Runner: &nodeproto.RunnerIdentity{Name: "fixture", Type: "local", Labels: []string{}}}
+	if len(job) > 0 {
+		hello.Binding = &nodeproto.ProcessBinding{RunID: "run-1", JobID: job[0], Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "fixture"}}
+	}
+	reply, _ := s.call(hello)
+	if !reply.OK {
+		t.Fatalf("hello: %+v", reply)
+	}
 	return s
 }
 
 // safety: returns the log records that arrived before the reply, so a test
 // can see plan code's logging went to the frame pipe.
-func (s *entrySession) call(req nodeproto.RequestOld) (nodeproto.ReplyOld, []map[string]any) {
+func (s *entrySession) call(req nodeproto.Request) (nodeproto.Reply, []map[string]any) {
 	s.t.Helper()
 	id := s.send(req)
 	reply, logs := s.next()
@@ -195,29 +190,20 @@ func (s *entrySession) end() {
 	}
 }
 
-func jsonValue(t *testing.T, raw []byte) any {
-	t.Helper()
-	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
-		t.Fatal(err)
-	}
-	return v
-}
-
-func wantCode(t *testing.T, r nodeproto.ReplyOld, code nodeproto.ErrorCode) {
+func wantCode(t *testing.T, r nodeproto.Reply, code apierr.Code) {
 	t.Helper()
 	if r.OK || r.Error == nil || r.Error.Code != code {
 		t.Errorf("reply %+v, want a failure with code %s", r, code)
 	}
 }
 
-func planRequest(args map[string]string) nodeproto.RequestOld {
+func planRequest(args map[string]string) nodeproto.Request {
 	return planRequestFor(servePipeline, args)
 }
 
-func planRequestFor(pipeline string, args map[string]string) nodeproto.RequestOld {
-	return nodeproto.RequestOld{Op: nodeproto.OpPlanOld, Pipeline: pipeline, Args: args, Run: &nodeproto.RunContextOld{
-		RunID: "run-1", Trigger: &nodeproto.Trigger{Source: "push"},
+func planRequestFor(pipeline string, args map[string]string) nodeproto.Request {
+	return nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: pipeline, Args: args, Run: &nodeproto.RunContext{
+		RunID: "run-1", Pipeline: pipeline, Trigger: &nodeproto.Trigger{Source: "push"},
 		Git: &nodeproto.Git{SHA: "4f2c1e0", Branch: "main", Repo: "acme/app"},
 	}}
 }
@@ -225,36 +211,31 @@ func planRequestFor(pipeline string, args map[string]string) nodeproto.RequestOl
 func TestNodeProtocolEntryServesDescribeAndPlan(t *testing.T) {
 	s := startEntry(t)
 
-	reply, _ := s.call(nodeproto.RequestOld{Op: nodeproto.OpDescribeOld})
-	var described sdkserve.DescribeDoc
+	reply, _ := s.call(nodeproto.Request{Op: nodeproto.OpDescribe})
+	var described nodeproto.DescribeDoc
 	if err := reply.Decode(&described); err != nil {
 		t.Fatal(err)
 	}
-	if described.Protocol != nodeproto.VersionOld || !slices.ContainsFunc(described.Pipelines, func(p sparkwing.DescribePipeline) bool {
+	if !slices.ContainsFunc(described.Pipelines, func(p nodeproto.PipelineDescription) bool {
 		return p.Name == servePipeline
 	}) {
-		t.Errorf("describe = %+v, want protocol %s listing %s", described, nodeproto.VersionOld, servePipeline)
+		t.Errorf("describe = %+v, want listing %s", described, servePipeline)
 	}
 
 	reply, logs := s.call(planRequest(map[string]string{"env": "prod"}))
-	var doc nodeproto.PlanDocOld
+	var doc nodeproto.PlanDoc
 	if err := reply.Decode(&doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc.RunID != "run-1" || doc.Pipeline != servePipeline || len(doc.Nodes) != 2 {
-		t.Errorf("plan = %+v, want run-1's two nodes", doc)
-	}
-	for _, n := range doc.Nodes {
-		if n.SpecHash != "" {
-			t.Errorf("node %s carries spec_hash %q, which only the host computes", n.ID, n.SpecHash)
-		}
+	if len(doc.Jobs) != 2 {
+		t.Errorf("plan = %+v, want two jobs", doc)
 	}
 	if len(logs) != 1 || logs[0]["msg"] != "planning prod for main" {
 		t.Errorf("plan logged %v on the frame pipe, want the plan's one Info record", logs)
 	}
 
 	reply, _ = s.call(planRequest(map[string]string{"env": "prod"}))
-	wantCode(t, reply, nodeproto.CodeBadRequest)
+	wantCode(t, reply, apierr.ProtocolError)
 
 	s.end()
 	if !strings.Contains(s.stdout.String(), forgedReply) {
@@ -264,14 +245,14 @@ func TestNodeProtocolEntryServesDescribeAndPlan(t *testing.T) {
 
 func TestNodeProtocolEntryRefusesBadPlans(t *testing.T) {
 	for name, tc := range map[string]struct {
-		req  nodeproto.RequestOld
-		want nodeproto.ErrorCode
+		req  nodeproto.Request
+		want apierr.Code
 	}{
-		"unknown pipeline": {nodeproto.RequestOld{Op: nodeproto.OpPlanOld, Pipeline: "nope", Args: map[string]string{}, Run: &nodeproto.RunContextOld{RunID: "r"}}, nodeproto.CodeUnknownPipeline},
-		"missing flag":     {planRequest(map[string]string{}), nodeproto.CodeInvalidArgs},
-		"bad int":          {planRequest(map[string]string{"env": "prod", "count": "many"}), nodeproto.CodeInvalidArgs},
-		"bad job flag":     {planRequest(map[string]string{"env": "prod", "replicas": "many"}), nodeproto.CodeInvalidArgs},
-		"bad alias int":    {planRequestFor(serveAlias, map[string]string{"env": "prod", "count": "many"}), nodeproto.CodeInvalidArgs},
+		"unknown pipeline":   {nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: "nope", Args: map[string]string{}, Run: &nodeproto.RunContext{RunID: "r", Pipeline: "nope"}}, apierr.UnknownPipeline},
+		"missing flag":       {planRequest(map[string]string{}), apierr.InvalidArgs},
+		"bad int":            {planRequest(map[string]string{"env": "prod", "count": "many"}), apierr.InvalidArgs},
+		"bad job flag":       {planRequest(map[string]string{"env": "prod", "replicas": "many"}), apierr.InvalidArgs},
+		"bad entrypoint int": {planRequestFor(serveEntrypoint, map[string]string{"env": "prod", "count": "many"}), apierr.InvalidArgs},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := startEntry(t)
@@ -285,11 +266,11 @@ func TestNodeProtocolEntryRefusesBadPlans(t *testing.T) {
 func TestNodeProtocolEntrySurvivesAPanickingPlan(t *testing.T) {
 	s := startEntry(t)
 	reply, _ := s.call(planRequest(map[string]string{"env": "prod", "panic": "true"}))
-	wantCode(t, reply, nodeproto.CodePlanFailed)
-	if reply.Error != nil && !strings.Contains(reply.Error.Message, "plan blew up") {
+	wantCode(t, reply, apierr.PlanFailed)
+	if reply.Error != nil && !strings.Contains(reply.Error.Message, "panicked") {
 		t.Errorf("panic reply %q does not carry the panic", reply.Error.Message)
 	}
-	if reply, _ := s.call(nodeproto.RequestOld{Op: nodeproto.OpDescribeOld}); !reply.OK {
+	if reply, _ := s.call(nodeproto.Request{Op: nodeproto.OpDescribe}); !reply.OK {
 		t.Errorf("describe after the panic = %+v, want an answer from the same process", reply)
 	}
 	s.end()

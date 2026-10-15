@@ -948,6 +948,12 @@
         "runner": {
           "$ref": "#/$defs/runnerIdentity"
         },
+        "settled": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "step": {
           "minLength": 1,
           "type": "string"

@@ -6,11 +6,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
-
-var registryPathRE = regexp.MustCompile(`Path:\s*"(sparkwing[^"]*)"`)
-
-var posArgsFieldRE = regexp.MustCompile(`^\s*PosArgs:`)
 
 type cliVerb struct {
 	file   string
@@ -28,12 +26,8 @@ var shellLangs = map[string]bool{
 	"text":    true,
 }
 
-func checkCLIVerbs(contentDir, repoRoot string) bool {
-	valid, posArgs, err := loadRegistry(repoRoot)
-	if err != nil {
-		fmt.Println("cli-verbs: load registry:", err)
-		return false
-	}
+func checkCLIVerbs(contentDir string) bool {
+	valid, posArgs := loadRegistry()
 
 	var invocations []cliVerb
 	// #nosec G703 -- a build-time tool reading paths the operator names
@@ -76,33 +70,13 @@ func checkCLIVerbs(contentDir, repoRoot string) bool {
 	return true
 }
 
-func loadRegistry(repoRoot string) (valid, posArgs map[string]bool, err error) {
-	// #nosec G703 -- a build-time tool reading paths the operator names
-	data, err := os.ReadFile(filepath.Join(repoRoot, "cmd", "sparkwing", "help_registry.go"))
-	if err != nil {
-		return nil, nil, err
+func loadRegistry() (valid, posArgs map[string]bool) {
+	valid, posArgs = map[string]bool{}, map[string]bool{}
+	for _, command := range clisurface.Registry() {
+		valid[command.Path] = true
+		posArgs[command.Path] = command.PipelineArgument
 	}
-	valid = map[string]bool{}
-	posArgs = map[string]bool{}
-	var lastPath string
-	for _, line := range strings.Split(string(data), "\n") {
-		if m := registryPathRE.FindStringSubmatch(line); m != nil {
-			lastPath = m[1]
-			valid[lastPath] = true
-			continue
-		}
-		if lastPath == "" {
-			continue
-		}
-		if posArgsFieldRE.MatchString(line) {
-			posArgs[lastPath] = true
-			continue
-		}
-	}
-	if len(valid) == 0 {
-		return nil, nil, fmt.Errorf("no Command paths found in help_registry.go")
-	}
-	return valid, posArgs, nil
+	return valid, posArgs
 }
 
 var inlineCodeRE = regexp.MustCompile("`([^`]+)`")

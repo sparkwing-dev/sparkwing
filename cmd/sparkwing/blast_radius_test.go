@@ -4,8 +4,6 @@ import (
 	"errors"
 	"reflect"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 var _ func(string, []stepRiskFinding, runFlags) error = enforceRiskGate
@@ -33,7 +31,7 @@ func TestEnforceRiskGate_DestructiveBlocks(t *testing.T) {
 	if err == nil {
 		t.Fatal("enforceRiskGate: want refusal, got nil")
 	}
-	var rbe *sparkwing.RiskBlockedError
+	var rbe *riskBlockedError
 	if !errors.As(err, &rbe) {
 		t.Fatalf("expected *RiskBlockedError, got %T", err)
 	}
@@ -76,7 +74,7 @@ func TestEnforceRiskGate_ProductionBlocks(t *testing.T) {
 	if err == nil {
 		t.Fatal("enforceRiskGate: want refusal for prod label")
 	}
-	var rbe *sparkwing.RiskBlockedError
+	var rbe *riskBlockedError
 	if !errors.As(err, &rbe) {
 		t.Fatalf("expected *RiskBlockedError, got %T", err)
 	}
@@ -124,7 +122,7 @@ func TestEnforceRiskGate_NamesEveryMissingLabel(t *testing.T) {
 		{NodeID: "n2", StepID: "step-b", Labels: []string{"prod"}},
 	}
 	err := enforceRiskGate("multi", findings, runFlags{})
-	var rbe *sparkwing.RiskBlockedError
+	var rbe *riskBlockedError
 	if !errors.As(err, &rbe) {
 		t.Fatalf("expected *RiskBlockedError, got %T (%v)", err, err)
 	}
@@ -140,7 +138,7 @@ func TestEnforceRiskGate_PartialAllow(t *testing.T) {
 	}
 	wf := runFlags{allow: []string{"destructive"}}
 	err := enforceRiskGate("partial", findings, wf)
-	var rbe *sparkwing.RiskBlockedError
+	var rbe *riskBlockedError
 	if !errors.As(err, &rbe) {
 		t.Fatalf("expected *RiskBlockedError, got %T (%v)", err, err)
 	}

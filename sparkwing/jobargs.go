@@ -1,19 +1,27 @@
 package sparkwing
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 )
 
 type jobArgsDecl struct {
 	jobID  string
-	schema InputSchema
+	schema inputSchema
 	goType reflect.Type
 	holder argsHolder
+}
+
+func registerRecoveryArgs(p *Plan) {
+	for _, job := range p.nodes {
+		for recovery := range recoveryChain(job.onFailure) {
+			registerJobArgs(p, recovery.id, recovery.job)
+		}
+	}
 }
 
 func registerJobArgs(p *Plan, id string, jobValue any) {
@@ -56,13 +64,13 @@ func registerJobArgs(p *Plan, id string, jobValue any) {
 // pipeline, in registration order, each stamped with its owning job id.
 // The describe cache, --help renderer and completion read this so job
 // flags share the envelope of pipeline-level Inputs fields.
-func (p *Plan) JobArgs() []DescribeArg {
+func (p *Plan) declaredArguments() []describeArg {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	var out []DescribeArg
+	var out []describeArg
 	for _, d := range p.jobArgs {
 		for _, f := range d.schema.Fields {
-			out = append(out, DescribeArg{
+			out = append(out, describeArg{
 				Name:     f.Name,
 				GoName:   f.GoName,
 				Short:    f.Short,
@@ -80,25 +88,29 @@ func (p *Plan) JobArgs() []DescribeArg {
 
 // safety: the CLI maps every flag and alias of the pipeline and its jobs
 // into one table, so a shared name would silently route a value to one owner.
-func assertJobArgsDisjoint(p *Plan, pipe InputSchema) error {
-	names := map[string]bool{}
+func assertJobArgsDisjoint(p *Plan, pipe inputSchema, existing ...jobArgsDecl) error {
+	names := map[string]string{}
 	shorts := map[string]string{}
 	for _, f := range pipe.Fields {
 		if f.isExtraBag {
 			continue
 		}
-		names[f.Name] = true
+		names[f.Name] = "pipeline Inputs"
 		if f.Short != "" {
 			shorts[f.Short] = f.Name
 		}
 	}
-	for _, d := range p.jobArgs {
+	for _, d := range slices.Concat(existing, p.jobArgs) {
 		for _, f := range d.schema.Fields {
-			if names[f.Name] {
-				return fmt.Errorf("job %q declares --%s, which the pipeline Inputs already declare", d.jobID, f.Name)
+			if prior, exists := names[f.Name]; exists {
+				return fmt.Errorf("job %q declares --%s, already declared by %s", d.jobID, f.Name, prior)
 			}
 			if prior, dup := shorts[f.Short]; f.Short != "" && dup {
-				return fmt.Errorf("job %q declares -%s for --%s, which the pipeline Inputs already use for --%s", d.jobID, f.Short, f.Name, prior)
+				return fmt.Errorf("job %q declares -%s for --%s, already used for --%s", d.jobID, f.Short, f.Name, prior)
+			}
+			names[f.Name] = fmt.Sprintf("job %q", d.jobID)
+			if f.Short != "" {
+				shorts[f.Short] = f.Name
 			}
 		}
 	}
@@ -148,30 +160,9 @@ func resolveAndBindJobArgs(p *Plan, args map[string]string) error {
 			problems = append(problems, fmt.Errorf("job %q: %w", d.jobID, err))
 			continue
 		}
-		if err := d.holder.BindFromAny(val.Interface()); err != nil {
+		if err := d.holder.bindFromAny(val.Interface()); err != nil {
 			problems = append(problems, fmt.Errorf("job %q: %w", d.jobID, err))
 		}
 	}
 	return errors.Join(problems...)
-}
-
-type keySkipArgResolveType struct{}
-
-var keySkipArgResolve = keySkipArgResolveType{}
-
-// SkipArgResolve marks ctx so a registration's Invoke builds the plan
-// without resolving and binding [WithArgs] values. Describe-time
-// callers use it to walk the plan graph without failing on missing
-// required job args; run paths never set it, so a missing required
-// arg fails before any step runs.
-func SkipArgResolve(ctx context.Context) context.Context {
-	return context.WithValue(ctx, keySkipArgResolve, true)
-}
-
-func skipArgResolveFromContext(ctx context.Context) bool {
-	if ctx == nil {
-		return false
-	}
-	v, _ := ctx.Value(keySkipArgResolve).(bool)
-	return v
 }

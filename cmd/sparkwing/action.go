@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
@@ -19,7 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type Pipeline struct {
@@ -30,17 +31,17 @@ type Pipeline struct {
 	Entrypoint string   `json:"entrypoint,omitempty"`
 	// PinnedProfile is the profile: the pipeline's sparkwing.yaml entry names;
 	// the pipeline runs only through `pipeline trigger <pipeline> --profile` with it.
-	PinnedProfile string                  `json:"pinned_profile,omitempty"`
-	Args          []sparkwing.DescribeArg `json:"args,omitempty"`
-	Examples      []sparkwing.Example     `json:"examples,omitempty"`
+	PinnedProfile string                          `json:"pinned_profile,omitempty"`
+	Args          []nodeproto.ArgumentDescription `json:"args,omitempty"`
+	Examples      []nodeproto.UsageExample        `json:"examples,omitempty"`
 
-	EnvVars []sparkwing.EnvVarDoc `json:"env_vars,omitempty"`
+	EnvVars []nodeproto.EnvironmentDescription `json:"env_vars,omitempty"`
 
 	Risks []string `json:"risks,omitempty"`
 
-	RisksBySteps []sparkwing.DescribeStepRisks `json:"risks_by_step,omitempty"`
+	RisksBySteps []nodeproto.StepRisks `json:"risks_by_step,omitempty"`
 
-	Secrets pipelines.SecretsField `json:"secrets,omitempty"`
+	Secrets []nodeproto.SecretDeclaration `json:"secrets,omitempty"`
 }
 
 type PipelineIndex struct {
@@ -285,7 +286,7 @@ func runPipelineDescribe(args []string) error {
 // safety: the catalog's describe cache can be cold or older than the source,
 // so secrets come from the current build's own describe or the command fails.
 func describePipelineSecrets(name, format string) error {
-	var secrets pipelines.SecretsField
+	var secrets []nodeproto.SecretDeclaration
 	err := withPipelineEntry(name, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
 		identity, err := pipelineIdentityAt(filepath.Join(dir, ".sparkwing"), name)
 		if err != nil {
@@ -303,7 +304,7 @@ func describePipelineSecrets(name, format string) error {
 		return fmt.Errorf("describe --secrets: %w", err)
 	}
 	if secrets == nil {
-		secrets = pipelines.SecretsField{}
+		secrets = []nodeproto.SecretDeclaration{}
 	}
 	if format == "json" {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{"pipeline": name, "secrets": secrets})
@@ -320,7 +321,7 @@ func describePipelineSecrets(name, format string) error {
 	}
 	for _, s := range secrets {
 		req := "optional"
-		if s.IsRequired() {
+		if !s.Optional {
 			req = "required"
 		}
 		fmt.Printf("  %-*s  %s\n", width, s.Name, req)
@@ -337,7 +338,7 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 	if err != nil {
 		return nil, err
 	}
-	describeByName := map[string]sparkwing.DescribePipeline{}
+	describeByName := map[string]nodeproto.PipelineDescription{}
 	if sparkwingDir, ok := walkUpForSparkwing(cwd); ok {
 		if schema, serr := readDescribeCache(context.Background(), sparkwingDir); serr == nil {
 			for _, dp := range schema {
@@ -364,7 +365,7 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				a.Examples = dp.Examples
 				a.EnvVars = dp.EnvVars
 				a.Risks = dp.Risks
-				a.RisksBySteps = dp.RisksBySteps
+				a.RisksBySteps = dp.RisksByStep
 				a.Secrets = dp.Secrets
 			}
 			out = append(out, a)
@@ -462,11 +463,11 @@ func printPipelineDetail(a *Pipeline) {
 				tag = "[required]"
 			}
 			dflt := ""
-			if x.Default != "" {
-				dflt = " (default: " + x.Default + ")"
+			if x.Default != nil {
+				dflt = " (default: " + *x.Default + ")"
 			}
 			fmt.Printf("  --%-20s %s %s  %s%s\n",
-				x.Name+" <"+x.Type+">", tag, x.Type, x.Desc, dflt)
+				x.Name+" <"+x.Type+">", tag, x.Type, x.Description, dflt)
 		}
 	}
 	if len(a.EnvVars) > 0 {
@@ -476,8 +477,8 @@ func printPipelineDetail(a *Pipeline) {
 			if e.Description != "" {
 				line += "  " + e.Description
 			}
-			if e.Default != "" {
-				line += "  (default: " + e.Default + ")"
+			if e.Default != nil {
+				line += "  (default: " + *e.Default + ")"
 			}
 			fmt.Println(line)
 		}

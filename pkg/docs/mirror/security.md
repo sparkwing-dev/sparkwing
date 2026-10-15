@@ -19,8 +19,7 @@ Run lists use that team, and a run belonging to another team is answered as
 not found. See [Teams and sign-in](auth.md#teams-and-sign-in).
 
 Within a team, scopes and member roles decide which operations a caller may
-perform. The team is the only tenant boundary. Inside a team, two kinds of
-name bound something, and nothing else does:
+perform. The team is the only tenant boundary. Within a team, repository and secret scopes constrain access:
 
 - **Repository and git ref (branch) bound cache writes.** A run's cache and
   binary entries are written under its own repository and ref, as

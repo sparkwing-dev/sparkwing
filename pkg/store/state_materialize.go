@@ -12,11 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// materializationRecords authorizes the policy-specific source and copies all
-// verified output/manifest edges in this transaction. Memo hits must match the
-// sealed namespace; coalesced hits must match the persisted waiter and leader.
-// A missing or corrupt member is an error, including for a source run pruned
-// after its independently retained memo record was written.
 type materializationRecords interface {
 	CopyMaterializedRecords(context.Context, *storeTx, Team, Actor, NodeRef, MaterializeSource) (materializedRecords, error)
 }

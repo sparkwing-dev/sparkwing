@@ -6,13 +6,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type hostedRun struct {
-	schema    sparkwing.DescribePipeline
+	schema    nodeproto.PipelineDescription
 	args      map[string]string
 	flags     runFlags
 	env       []string
@@ -95,6 +96,8 @@ func (r *pipelineRun) host(h hostedRun) error {
 	r.stopSignals()
 	_, err := orchestrator.RunHostedCommand(context.WithoutCancel(r.ctx), opts, orchestrator.HostedEntry{
 		Command: r.entry, Dir: repoRoot, Env: h.env, SecretArgs: secretArgs,
+		Engine:           nodeproto.EngineIdentity{Version: installedVersion()},
+		Runner:           nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 		PipelineRevision: h.source, BinarySource: r.source, Flags: extra,
 	}, h.logFormat)
 	if err != nil {

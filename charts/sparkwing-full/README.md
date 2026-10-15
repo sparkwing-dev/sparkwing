@@ -86,7 +86,7 @@ running install:
 
 # The first admin token. The controller stores it as an admin credential
 # before it binds, so it never serves a request unauthenticated. Keep the
-# value: it is the admin bearer for `sparkwing cluster tokens create`. The
+# value: it is the admin bearer for `sparkwing tokens create`. The
 # umask makes the file 0600, so no other local account can read it.
 (umask 077 && printf 'swu_%s' "$(openssl rand -hex 24)" > "$HOME/sparkwing-bootstrap-admin")
 kubectl -n sparkwing create secret generic sparkwing-bootstrap-admin \
@@ -333,8 +333,8 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
 
    ```bash
    kubectl -n sparkwing port-forward deploy/sparkwing-controller 9001:80 &
-   sparkwing cluster tokens create --profile <profile-pointing-at-localhost:9001> \
-       --type user --principal admin --scope admin
+   sparkwing tokens create --profile <profile-pointing-at-localhost:9001> \
+       --type member --principal admin --scope runs.read,runs.write
    kubectl -n sparkwing rollout restart deploy/sparkwing-controller
    ```
 

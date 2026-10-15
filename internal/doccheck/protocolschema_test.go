@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto/conformance"
 	"os"
 	"path/filepath"
@@ -87,7 +88,7 @@ func TestProtocolGuideExamplesMatchSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	schemas := map[string]*conformance.Schema{}
-	for _, name := range []string{"node-protocol", "describe"} {
+	for _, name := range []string{"node-protocol", "describe", "log-record"} {
 		schemas[name], err = conformance.LoadSchema(filepath.Join(dir, "schemas", name+".schema.json"))
 		if err != nil {
 			t.Fatal(err)
@@ -105,6 +106,18 @@ func TestProtocolGuideExamplesMatchSchemas(t *testing.T) {
 			}
 			schema, def := schemas["node-protocol"], "request"
 			switch {
+			case value["error"] != nil && value["reply"] == nil:
+				inner, err := json.Marshal(value["error"])
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := apierr.DecodeInner(inner); err != nil {
+					t.Fatal(err)
+				}
+				checked++
+				continue
+			case value["ts"] != nil:
+				schema, def = schemas["log-record"], "frameLog"
 			case value["reply"] != nil:
 				def = "reply"
 			case value["jobs"] != nil:

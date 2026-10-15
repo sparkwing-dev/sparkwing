@@ -49,17 +49,14 @@ type CreateRunRequest struct {
 	IdempotencyKey string          `json:"idempotency_key"`
 }
 
-// CreateRunResponse includes HereBearer only on the first successful here intake response. An
-// idempotent intake replay returns the existing run without a replacement bearer.
-// A client that lost it reports failed handoff and requires a fresh trigger request;
-// it never reports that the here runner started. The abandoned initial reservation
-// expires under its existing claim_by policy. Resume requires the retained private bearer.
+// CreateRunResponse returns the accepted run and any first-intake here bearer.
 type CreateRunResponse struct {
-	RunID      string                `json:"run_id"`
-	Number     int64                 `json:"number"`
-	Request    runspec.SealedRequest `json:"request"`
-	HereBearer string                `json:"here_bearer,omitempty"`
-	Replayed   bool                  `json:"replayed"`
+	RunID   string                `json:"run_id"`
+	Number  int64                 `json:"number"`
+	Request runspec.SealedRequest `json:"request"`
+	// HereBearer is issued once; lost handoffs need fresh intake, while resume requires the retained private bearer.
+	HereBearer string `json:"here_bearer,omitempty"`
+	Replayed   bool   `json:"replayed"`
 }
 
 // PlanSubmission has no client-selected acceptance timestamp, actor or authority.

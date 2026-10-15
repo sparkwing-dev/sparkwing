@@ -51,7 +51,7 @@ pipelines:
       push:
         branches: [main] # documents the intended GitHub event
     guards:
-      require: [git:branch=main]
+      when: [git:branch=main]
 ```
 
 The literal name must match the checked-out head. For pull requests that is

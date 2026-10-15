@@ -25,7 +25,7 @@ func TestTrackedFileReadErrorsReachCallers(t *testing.T) {
 		t.Fatal(err)
 	}
 	withWorkDir(t, repository, func() {
-		for _, resolve := range []sparkwing.CacheKeyFn{RepoFilesOld(), FilesOld("sample.txt")} {
+		for _, resolve := range []sparkwing.MemoKeyFn{RepoFiles(), Files("sample.txt")} {
 			key, err := resolve(t.Context())
 			var pathError *os.PathError
 			if key != "" || !errors.As(err, &pathError) || pathError.Path != expectedPath {
@@ -37,7 +37,7 @@ func TestTrackedFileReadErrorsReachCallers(t *testing.T) {
 
 func TestRepoInputsPreserveGitDiagnostics(t *testing.T) {
 	withWorkDir(t, t.TempDir(), func() {
-		key, err := RepoFilesOld()(t.Context())
+		key, err := RepoFiles()(t.Context())
 		if key != "" || err == nil || !strings.Contains(err.Error(), "rev-parse") || !strings.Contains(err.Error(), "fatal:") {
 			t.Fatalf("repository lookup = (%q, %v)", key, err)
 		}
@@ -48,22 +48,22 @@ func TestComposePreservesFailureAndExplicitBypass(t *testing.T) {
 	cause := errors.New("sample input failure")
 	for _, fail := range []bool{false, true} {
 		calls := 0
-		first := func(context.Context) (sparkwing.CacheKey, error) {
+		first := func(context.Context) (sparkwing.MemoValue, error) {
 			if fail {
 				return "sample-key", cause
 			}
-			return sparkwing.NoCache, nil
+			return sparkwing.NoMemo, nil
 		}
-		second := func(context.Context) (sparkwing.CacheKey, error) {
+		second := func(context.Context) (sparkwing.MemoValue, error) {
 			calls++
 			return "sample-key", nil
 		}
-		key, err := ComposeOld(first, second)(t.Context())
+		key, err := Compose(first, second)(t.Context())
 		if fail {
 			if key != "" || !errors.Is(err, cause) {
 				t.Errorf("composition failure = (%q, %v)", key, err)
 			}
-		} else if key != sparkwing.NoCache || err != nil {
+		} else if key != sparkwing.NoMemo || err != nil {
 			t.Errorf("composition bypass = (%q, %v)", key, err)
 		}
 		if calls != 0 {

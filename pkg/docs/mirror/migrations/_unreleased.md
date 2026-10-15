@@ -783,3 +783,11 @@ script that called the binary directly moves to the CLI:
 [{"name": ..., "required": true}]}` (or `"optional": true`), read from
 describe, instead of the per-field Go names and resolution notes the binary
 printed.
+
+## Plan inspection
+
+Use `sparkwing pipeline plan --pipeline NAME -- <pipeline arguments>` to supply
+required inputs. The registered SDK entrypoint selects the code; the invoked
+project name remains in the run context. Secret inputs reach planning but are
+redacted in previews and structured diagnostics. The preview JSON uses `jobs`
+in place of `nodes`.

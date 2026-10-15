@@ -6,19 +6,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
-var argsFixture = sparkwing.DescribePipeline{
+var argsFixture = nodeproto.PipelineDescription{
 	Name: "deploy",
 	Help: "Ships the service.",
-	Args: []sparkwing.DescribeArg{
-		{Name: "env", Short: "e", Type: "string", Required: true, Desc: "target environment", Enum: []string{"dev", "prod"}},
-		{Name: "replicas", Type: "int", Default: "2", Desc: "pod count", JobID: "rollout"},
-		{Name: "force", Type: "bool", Desc: "skip checks"},
+	Args: []nodeproto.ArgumentDescription{
+		{Name: "env", Short: "e", Type: "string", Required: true, Description: "target environment", Enum: []string{"dev", "prod"}},
+		{Name: "replicas", Type: "int", Default: new("2"), Description: "pod count", JobID: "rollout"},
+		{Name: "force", Type: "bool", Description: "skip checks"},
 		{Name: "token", Type: "string", Secret: true},
 	},
-	Examples: []sparkwing.Example{{Comment: "ship to dev", Command: "sparkwing run deploy --env dev"}},
+	Examples: []nodeproto.UsageExample{{Comment: "ship to dev", Command: "sparkwing run deploy --env dev"}},
 }
 
 func TestParsePipelineArgsFromDescribe(t *testing.T) {
@@ -26,7 +26,7 @@ func TestParsePipelineArgsFromDescribe(t *testing.T) {
 	extra.Extra = true
 	for _, tc := range []struct {
 		name   string
-		schema sparkwing.DescribePipeline
+		schema nodeproto.PipelineDescription
 		args   []string
 		want   map[string]string
 		err    string
@@ -86,8 +86,28 @@ func TestPipelineHelpFromDescribe(t *testing.T) {
 	}
 
 	buf.Reset()
-	printPipelineHelp(&buf, sparkwing.DescribePipeline{Name: "lint", Extra: true})
+	printPipelineHelp(&buf, nodeproto.PipelineDescription{Name: "lint", Extra: true})
 	if out := buf.String(); !strings.Contains(out, "No pipeline-specific flags.") || strings.Contains(out, "[flags]") {
 		t.Errorf("help for a pipeline without flags:\n%s", out)
+	}
+}
+
+func TestPipelineArgumentEnumDoesNotEchoSecretValue(t *testing.T) {
+	schema := nodeproto.PipelineDescription{Name: "demo", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true, Enum: []string{"valid-private-value"}}}}
+	_, err := parsePipelineArgs(schema, []string{"--password", "invalid-private-value"})
+	if err == nil || strings.Contains(err.Error(), "invalid-private-value") || strings.Contains(err.Error(), "valid-private-value") {
+		t.Fatalf("secret enum diagnostic: %v", err)
+	}
+}
+
+func TestPipelineArgumentSliceEnumChecksEachValue(t *testing.T) {
+	schema := nodeproto.PipelineDescription{Name: "demo", Args: []nodeproto.ArgumentDescription{{Name: "target", Type: "[]string", Enum: []string{"linux", "darwin"}}}}
+	for _, value := range []string{"linux,darwin", "linux, darwin,", ""} {
+		if _, err := parsePipelineArgs(schema, []string{"--target", value}); err != nil {
+			t.Fatalf("valid list: %v", err)
+		}
+	}
+	if _, err := parsePipelineArgs(schema, []string{"--target", "linux,unknown"}); err == nil {
+		t.Fatal("invalid list member accepted")
 	}
 }

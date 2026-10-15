@@ -11,24 +11,26 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
 type planPreviewDoc struct {
-	Pipeline     string               `json:"pipeline"`
-	ResolvedArgs map[string]string    `json:"resolved_args,omitempty"`
-	StartAt      string               `json:"start_at,omitempty"`
-	StopAt       string               `json:"stop_at,omitempty"`
-	Nodes        []planPreviewNodeDoc `json:"nodes"`
+	Pipeline     string              `json:"pipeline"`
+	ResolvedArgs map[string]string   `json:"resolved_args,omitempty"`
+	StartAt      string              `json:"start_at,omitempty"`
+	StopAt       string              `json:"stop_at,omitempty"`
+	Jobs         []planPreviewJobDoc `json:"jobs"`
 }
 
-type planPreviewNodeDoc struct {
+type planPreviewJobDoc struct {
 	ID          string              `json:"id"`
 	Deps        []string            `json:"deps,omitempty"`
 	IsApproval  bool                `json:"is_approval,omitempty"`
@@ -65,7 +67,7 @@ func parsePipelinePlanArgs(args []string) (pipelinePlanArgs, bool, error) {
 	if err != nil {
 		return pipelinePlanArgs{}, false, err
 	}
-	return pipelinePlanArgs{output: inv.Output(color.IsInteractiveStdout()), pipeline: inv.Value("pipeline"), startAt: inv.Value("start-at"), stopAt: inv.Value("stop-at")}, inv.Help(), nil
+	return pipelinePlanArgs{output: inv.Output(color.IsInteractiveStdout()), pipeline: inv.Value("pipeline"), startAt: inv.Value("start-at"), stopAt: inv.Value("stop-at"), passthrough: inv.Args}, inv.Help(), nil
 }
 
 func runPipelinePlan(args []string) error {
@@ -138,7 +140,7 @@ func withPipelineEntry(pipeline string, fn func(ctx context.Context, entry pipel
 type planned struct {
 	pipeline string
 	args     map[string]string
-	doc      nodeproto.PlanDocOld
+	doc      nodeproto.PlanDoc
 }
 
 // safety: inspection never evaluates a closure. A skip_if predicate is customer code with side effects the
@@ -149,6 +151,7 @@ func planOverProtocol(ctx context.Context, entry pipelineentry.Command, dir, pip
 	if err != nil {
 		return out, err
 	}
+	masker := secrets.NewMasker()
 	err = repos.Converse(ctx, entry, dir, func(s *repos.Session) error {
 		described, err := s.Describe()
 		if err != nil {
@@ -158,41 +161,62 @@ func planOverProtocol(ctx context.Context, entry pipelineentry.Command, dir, pip
 		if err != nil {
 			return err
 		}
-		if out.args, err = parsePipelineArgs(schema, args); err != nil {
-			return &nodeproto.Error{Code: nodeproto.CodeInvalidArgs, Message: err.Error()}
+		resolvedArgs, err := parsePipelineArgs(schema, args)
+		if err != nil {
+			return &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
 		}
-		req := nodeproto.RequestOld{Op: nodeproto.OpPlanOld, Pipeline: pipeline, Args: out.args, Run: &nodeproto.RunContextOld{RunID: runID}}
-		return s.Call(req, &out.doc)
+		out.args = maps.Clone(resolvedArgs)
+		for _, arg := range schema.Args {
+			if arg.Secret {
+				if arg.Default != nil {
+					masker.Register(*arg.Default)
+				}
+				masker.Register(resolvedArgs[arg.Name])
+				if _, present := out.args[arg.Name]; present {
+					out.args[arg.Name] = "***"
+				}
+			}
+		}
+		req := nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: identity.Entrypoint, Args: resolvedArgs, Run: &nodeproto.RunContext{RunID: runID, Pipeline: pipeline}}
+		var raw json.RawMessage
+		if err := s.Call(req, &raw); err != nil {
+			return err
+		}
+		out.doc, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: masker})
+		return err
 	})
-	return out, planError(pipeline, err)
+	if err != nil {
+		err = &maskedCLIError{err: planError(pipeline, err), masker: masker}
+	}
+	return out, err
 }
 
 type planFailure struct {
 	msg   string
-	cause *nodeproto.Error
+	cause *apierr.Error
 }
 
 func (e *planFailure) Error() string { return e.msg }
 func (e *planFailure) Unwrap() error { return e.cause }
 
 func planError(pipeline string, err error) error {
-	var perr *nodeproto.Error
+	var perr *apierr.Error
 	switch {
 	case err == nil:
 		return nil
 	case !errors.As(err, &perr):
 		return fmt.Errorf("%s: %w", pipeline, err)
-	case perr.Code == nodeproto.CodeInvalidArgs:
+	case perr.Code == apierr.InvalidArgs:
 		return &planFailure{fmt.Sprintf("%s: invalid arguments: %s", pipeline, perr.Message), perr}
-	case perr.Code == nodeproto.CodePlanFailed:
+	case perr.Code == apierr.PlanFailed:
 		return &planFailure{fmt.Sprintf("%s: the pipeline's Plan failed: %s", pipeline, perr.Message), perr}
 	}
 	return fmt.Errorf("%s: %w", pipeline, err)
 }
 
 func isInvalidArgs(err error) bool {
-	var perr *nodeproto.Error
-	return errors.As(err, &perr) && perr.Code == nodeproto.CodeInvalidArgs
+	var perr *apierr.Error
+	return errors.As(err, &perr) && perr.Code == apierr.InvalidArgs
 }
 
 func previewPlan(p planned, startAt, stopAt string) (planPreviewDoc, error) {
@@ -200,17 +224,17 @@ func previewPlan(p planned, startAt, stopAt string) (planPreviewDoc, error) {
 	if err := checkStepRange(p.doc, startAt, stopAt); err != nil {
 		return doc, err
 	}
-	for _, n := range p.doc.Nodes {
-		pn := planPreviewNodeDoc{ID: n.ID, Deps: n.Deps, IsApproval: n.Approval != nil, OnFailureOf: n.OnFailureOf, Decision: "would_run"}
-		if n.Work != nil && n.Approval == nil {
+	for _, n := range p.doc.Jobs {
+		pn := planPreviewJobDoc{ID: n.ID, Deps: n.Needs, IsApproval: n.Approval != nil, OnFailureOf: n.OnFailureOf, Decision: "would_run"}
+		if len(n.Steps) > 0 && n.Approval == nil {
 			pn.Work = &planPreviewWorkDoc{}
-			ranged := rangeSkips(n.Work.Steps, startAt, stopAt)
+			ranged := rangeSkips(n.Steps, startAt, stopAt)
 			skipped := 0
-			for _, s := range n.Work.Steps {
+			for _, s := range n.Steps {
 				it := planPreviewItemDoc{ID: s.ID, Needs: s.Needs, Decision: "would_run", Risks: s.Risks}
 				if reason, ok := ranged[s.ID]; ok {
 					it.Decision, it.SkipReason, it.SkipDetail = "would_skip", "range_skip", reason
-				} else if s.Closures != nil && len(s.Closures.SkipIf) > 0 {
+				} else if len(s.Closures.SkipIf) > 0 {
 					it.Decision, it.SkipReason, it.SkipDetail = "may_skip", "user_skipif", "SkipIf is evaluated at run time"
 				}
 				if it.Decision == "would_skip" {
@@ -218,20 +242,20 @@ func previewPlan(p planned, startAt, stopAt string) (planPreviewDoc, error) {
 				}
 				pn.Work.Steps = append(pn.Work.Steps, it)
 			}
-			if skipped > 0 && skipped == len(n.Work.Steps) {
+			if skipped > 0 && skipped == len(n.Steps) {
 				pn.Decision, pn.SkipReason = "would_skip", "all_steps_skipped"
 			}
 		}
-		doc.Nodes = append(doc.Nodes, pn)
+		doc.Jobs = append(doc.Jobs, pn)
 	}
 	return doc, nil
 }
 
-func checkStepRange(doc nodeproto.PlanDocOld, startAt, stopAt string) error {
+func checkStepRange(doc nodeproto.PlanDoc, startAt, stopAt string) error {
 	known := map[string]bool{}
-	for _, n := range doc.Nodes {
-		if n.Work != nil {
-			for _, s := range n.Work.Steps {
+	for _, n := range doc.Jobs {
+		if len(n.Steps) > 0 {
+			for _, s := range n.Steps {
 				known[s.ID] = true
 			}
 		}
@@ -250,7 +274,7 @@ func checkStepRange(doc nodeproto.PlanDocOld, startAt, stopAt string) error {
 	return nil
 }
 
-func rangeSkips(steps []nodeproto.PlanStep, startAt, stopAt string) map[string]string {
+func rangeSkips(steps []nodeproto.StepSpec, startAt, stopAt string) map[string]string {
 	parents := map[string][]string{}
 	children := map[string][]string{}
 	for _, s := range steps {
@@ -311,17 +335,17 @@ func printPlanPreview(doc *planPreviewDoc) {
 			fmt.Printf("  %s=%s\n", k, doc.ResolvedArgs[k])
 		}
 	}
-	if len(doc.Nodes) == 0 {
-		fmt.Println("(no nodes)")
+	if len(doc.Jobs) == 0 {
+		fmt.Println("(no jobs)")
 		return
 	}
-	for _, n := range doc.Nodes {
-		printPlanPreviewNode(&n, "  ")
+	for _, n := range doc.Jobs {
+		printPlanPreviewJob(&n, "  ")
 	}
 }
 
-func printPlanPreviewNode(n *planPreviewNodeDoc, indent string) {
-	tag := "Node"
+func printPlanPreviewJob(n *planPreviewJobDoc, indent string) {
+	tag := "Job"
 	if n.IsApproval {
 		tag = "Approval"
 	}
@@ -369,21 +393,4 @@ func orDashStr(s string) string {
 		return "-"
 	}
 	return s
-}
-
-func takeStaticFlag(args []string) (bool, []string) {
-	rest := make([]string, 0, len(args))
-	static := false
-	for i, tok := range args {
-		if tok == "--" {
-			rest = append(rest, args[i:]...)
-			break
-		}
-		if tok == "--static" || tok == "--static=true" {
-			static = true
-			continue
-		}
-		rest = append(rest, tok)
-	}
-	return static, rest
 }

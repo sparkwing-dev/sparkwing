@@ -3,12 +3,7 @@ package jobs
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,51 +11,9 @@ import (
 )
 
 func TestLintCommandWaitsForTheBoxWideLockInsteadOfFailingOnIt(t *testing.T) {
-	got := lintCommandFor(false)
+	got := lintCommand()
 	if !strings.Contains(got, "--allow-serial-runners") {
 		t.Fatalf("the gate would fail on a neighboring lint instead of waiting for it: %s", got)
-	}
-}
-
-func TestLintCommandNeverDropsTheToolLockWithoutABudget(t *testing.T) {
-	withoutBudget := lintCommandFor(false)
-	if strings.Contains(withoutBudget, "--allow-parallel-runners") {
-		t.Fatalf("lint dropped its own lock while holding no budget: %s", withoutBudget)
-	}
-
-	withBudget := lintCommandFor(true)
-	if !strings.Contains(withBudget, "--allow-parallel-runners") {
-		t.Fatalf("lint kept the serializing lock while holding a budget, so the budget buys nothing: %s", withBudget)
-	}
-	if strings.Contains(withBudget, "--allow-serial-runners") {
-		t.Fatalf("lint passed both runner flags: %s", withBudget)
-	}
-}
-
-func TestLintSlotCostIsAdmissibleOnThisBox(t *testing.T) {
-	cost, capacity := lintSlotCost(), lintBudget.Limit().Capacity
-	if cost < 1 {
-		t.Fatalf("lint draws no budget, so any number of lints would be admitted: cost %d", cost)
-	}
-	if cost > capacity {
-		t.Fatalf("lint cost %d exceeds budget capacity %d, so it could never be admitted", cost, capacity)
-	}
-}
-
-func TestLintBudgetIsBoxScoped(t *testing.T) {
-	if got := lintBudget.Limit().Scope; got != sparkwing.ScopeBox {
-		t.Fatalf("lint budget scope is %q, so it does not bound the machine the tool lock bounded", got)
-	}
-	if got := lintBudget.Limit().OnLimit; got != sparkwing.Queue {
-		t.Fatalf("lint budget on-limit is %q, so a contended gate fails instead of waiting", got)
-	}
-}
-
-func TestLintCostIsPricedForTheColdRunNotTheWarmOne(t *testing.T) {
-	if lintCoreCost < measuredColdCoreDemand {
-		t.Fatalf("lint is priced at %.2f cores against a cold run measured at %.2f, so a full "+
-			"budget of concurrent lints demands more cores than the box has",
-			lintCoreCost, measuredColdCoreDemand)
 	}
 }
 
@@ -115,33 +68,6 @@ func TestDescribeLintFailureReportsRealFindingsUnchanged(t *testing.T) {
 	}
 	if !strings.Contains(got, "golangci-lint:") {
 		t.Fatalf("finding lost its golangci-lint attribution: %s", got)
-	}
-}
-
-func TestRunGolangciLint_AttemptsRestoreFromBlobStoreBeforeLint(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
-	}
-	var gets atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/cache/lint-cache-") {
-			gets.Add(1)
-		}
-		http.NotFound(w, r)
-	}))
-	t.Cleanup(srv.Close)
-	binDir := t.TempDir()
-	linter := filepath.Join(binDir, "golangci-lint")
-	if err := os.WriteFile(linter, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	t.Setenv("SPARKWING_GITCACHE_URL", srv.URL)
-	_ = runGolangciLint(context.Background())
-
-	if gets.Load() == 0 {
-		t.Fatal("blob store GET not sent before golangci-lint ran")
 	}
 }
 
