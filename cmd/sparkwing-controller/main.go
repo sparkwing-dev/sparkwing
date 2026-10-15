@@ -16,6 +16,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
@@ -533,7 +534,6 @@ func run(args []string) error {
 		if err != nil {
 			return fmt.Errorf("--cache-blob-store: %w", err)
 		}
-		srv = srv.WithStoragePass(cache)
 		privateKey := creds.CloudFrontKey
 		domain, keyPairID := *cloudFrontDomain, *cloudFrontKeyPairID
 		client, _, _, err := s3store.Open(ctx, *cacheBlobStore)
@@ -554,7 +554,11 @@ func run(args []string) error {
 		if err != nil {
 			return fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
 		}
-		srv = srv.WithDirectUploads(client, bucket, prefix)
+		objects, err := blob.NewS3(client, bucket)
+		if err != nil {
+			return err
+		}
+		srv = srv.WithDataObjects(objects).WithDirectUploads(client, bucket, prefix)
 	} else if st.OutputDir() == "" {
 		// safety: without the cache bucket, node outputs live on this
 		// replica's disk, which the filesystem output store serves alone.
@@ -793,11 +797,11 @@ func openTeamStore(ctx context.Context, raw string) (*teamblob.Store, error) {
 	if raw == "" {
 		return nil, nil
 	}
-	client, bucket, prefix, err := s3store.Open(ctx, raw)
+	_, bucket, prefix, err := s3store.Open(ctx, raw)
 	if err != nil {
 		return nil, err
 	}
-	return teamblob.New(teamblob.Options{Bucket: bucket, Prefix: prefix, Client: client})
+	return teamblob.New(teamblob.Options{Bucket: bucket, Prefix: prefix})
 }
 
 // safety: a negative bound would silently remove the ceiling it names, so it stops the controller instead.

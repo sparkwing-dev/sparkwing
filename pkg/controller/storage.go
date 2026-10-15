@@ -122,6 +122,9 @@ func (s *Server) maintainRetainedData(ctx context.Context) {
 		s.logger.Error("seal abandoned log streams failed", "err", err)
 		return
 	}
+	if err := s.maintainDataObjects(ctx, lease); err != nil {
+		s.logger.Error("data storage maintenance failed", "err", err)
+	}
 	if !s.Metering() {
 		return
 	}

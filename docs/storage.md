@@ -43,8 +43,10 @@ Blob collection uses the store's live reference graph and a 24-hour tombstone
 grace period. References added after marking protect their bytes at collection.
 Object age alone cannot delete a live blob. Both physical backends implement the
 leased collector's deletion interface. Replaying a deletion of absent bytes
-succeeds. Controller maintenance still needs its final backend binding.
-Bucket measurement counts bytes without deleting them.
+succeeds. The controller supplies its configured backend to the leased
+retained-data pass. Standalone S3 construction installs the backend. Filesystem
+controller construction remains an integration point. Deployment bucket
+measurement stays separate from tenant accounting and deletes nothing.
 
 Memo and dependency-cache records carry repository and ref scope. Manual
 writes cannot overwrite verified branch entries. Memo reads its own scope
@@ -110,7 +112,9 @@ backend reads the rules and leaves their configuration to the operator.
 The filesystem backend provides an expiry pass for the controller's maintenance
 lease. It expires objects by their stored class, including retired classes.
 An identical upload retry preserves the original age. The pass leaves CAS data
-to its separate reachability rules. Maintenance scheduling remains to be bound.
+to its separate reachability rules. The controller runs this pass after renewing
+its maintenance lease when its physical backend is configured. Standalone
+filesystem construction remains a host integration point.
 
 The reader uses authorized segment records, verifies each segment before sending
 its bytes and resumes at an uncompressed byte offset. It reports how many bytes
@@ -122,7 +126,8 @@ lengths against the segment or manifest bound before returning a stream.
 
 Physical log keys have one owner in `internal/blob`. Signed slots use
 `LogObjectKey`: zero names the final manifest and positive indexes name immutable
-segments. The physical uploader-to-store proof remains blocked by the store's
-separate key layout and zero-based records. Component proofs use record fakes.
+segments. The physical uploader-to-store proofs use real tenant segment commits
+and reads, reopen SQLite and verify byte offsets with filesystem and S3 backends.
+Authentication and award issuance remain fixtures.
 
 <!-- design:end -->

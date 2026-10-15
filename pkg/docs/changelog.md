@@ -20,6 +20,12 @@ unlock.
 
 ## [Unreleased]
 
+- **storage (Breaking):** The controller's leased maintenance pass collects
+  unreachable CAS objects through the configured backend. Removed bucket-listing
+  accounting, the free-log-share pruner, `WithStoragePass`, `RunStoragePass`,
+  `StoragePassEvery` and the `storage_pass` health field. See
+  [migration steps](docs/migrations/_unreleased.md#storage-uses-record-backed-maintenance).
+
 - **storage:** Opted-in remote memo and dependency-cache lookups let the server
   select the verified default ref. Local archive readers can restore without a
   caller-selected ref. Local saves stay local after remote misses.

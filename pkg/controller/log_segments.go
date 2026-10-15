@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	iofs "io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -49,17 +48,8 @@ type logObjectStore interface {
 	deletePrefix(ctx context.Context, prefix string) (int64, error)
 	// safety: the URL accepts only a body of exactly size bytes whose base64 MD5 is contentMD5.
 	presignPut(ctx context.Context, r *http.Request, team store.Team, key string, size int64, contentMD5 string) (string, map[string]string, error)
-	measure(ctx context.Context) (map[store.Team]int64, error)
 	// safety: classes are read from the store, not the configuration, so a retired class's logs stay reachable.
 	classes(ctx context.Context) ([]string, error)
-}
-
-func logObjectTeam(key string) (store.Team, bool) {
-	parts := strings.SplitN(key, "/", 5)
-	if len(parts) < 5 || parts[0] != "logs" || parts[2] != "teams" {
-		return "", false
-	}
-	return store.Team(parts[3]), true
 }
 
 // safety: the S3 store presigns and the filesystem store signs URLs back at
@@ -120,29 +110,6 @@ func (o s3LogObjects) deletePrefix(ctx context.Context, prefix string) (int64, e
 		}
 		if !aws.ToBool(page.IsTruncated) {
 			return deleted, errors.Join(errs...)
-		}
-		token = page.NextContinuationToken
-	}
-}
-
-func (o s3LogObjects) measure(ctx context.Context) (map[store.Team]int64, error) {
-	out := map[store.Team]int64{}
-	root := o.d.prefix + "/"
-	var token *string
-	for {
-		page, err := o.d.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-			Bucket: aws.String(o.d.bucket), Prefix: aws.String(root + "logs/"), ContinuationToken: token,
-		})
-		if err != nil {
-			return nil, err
-		}
-		for _, obj := range page.Contents {
-			if team, ok := logObjectTeam(strings.TrimPrefix(aws.ToString(obj.Key), root)); ok {
-				out[team] += aws.ToInt64(obj.Size)
-			}
-		}
-		if !aws.ToBool(page.IsTruncated) {
-			return out, nil
 		}
 		token = page.NextContinuationToken
 	}
@@ -210,32 +177,6 @@ func (o fsLogObjects) deletePrefix(ctx context.Context, prefix string) (int64, e
 
 // hack: the filesystem store shards a key under its first two characters, and every log key begins
 // "logs/", so the log objects all sit under lo/logs/ beneath its root.
-func (o fsLogObjects) measure(context.Context) (map[store.Team]int64, error) {
-	out := map[store.Team]int64{}
-	root := filepath.Join(o.objs.Root, "lo")
-	err := filepath.WalkDir(filepath.Join(root, "logs"), func(path string, d iofs.DirEntry, err error) error {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		if err != nil || d.IsDir() {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		if team, ok := logObjectTeam(filepath.ToSlash(rel)); ok {
-			out[team] += info.Size()
-		}
-		return nil
-	})
-	return out, err
-}
-
 func (o fsLogObjects) classes(context.Context) ([]string, error) {
 	entries, err := os.ReadDir(filepath.Join(o.objs.Root, "lo", "logs"))
 	if errors.Is(err, os.ErrNotExist) {

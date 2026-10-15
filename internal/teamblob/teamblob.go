@@ -1,69 +1,41 @@
-// Package teamblob measures tenant bucket namespaces and constructs scoped keys.
+// Package teamblob constructs tenant-scoped object keys.
 package teamblob
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
-	"time"
-
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
-
-// Client provides only the listing operation required for measurement.
-type Client interface {
-	ListObjectsV2(context.Context, *s3.ListObjectsV2Input, ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
-}
 
 // ErrInvalidKey reports an invalid tenant or relative key.
 var ErrInvalidKey = errors.New("teamblob: invalid key")
 
-// ErrListTruncated reports an incomplete listing at its page budget.
-var ErrListTruncated = errors.New("teamblob: listing stopped at its page cap")
-
 const (
-	// DefaultMaxListPages bounds each listing walk.
-	DefaultMaxListPages = 1000
-	teamsSegment        = "teams"
-	metaSegment         = "_meta"
+	teamsSegment = "teams"
+	metaSegment  = "_meta"
 )
 
-// Options configures bucket measurement and scoped key construction.
+// Options configures the bucket and key namespace.
 type Options struct {
 	Bucket string
 	Prefix string
-	Client Client
-	// MaxListPages defaults to DefaultMaxListPages.
-	MaxListPages int
-	// Now defaults to time.Now.
-	Now func() time.Time
 }
 
-// Store measures a bucket prefix without modifying its objects.
+// Store constructs scoped keys for its configured bucket.
 type Store struct {
-	bucket   string
-	prefix   string
-	client   Client
-	maxPages int
-	now      func() time.Time
+	bucket string
+	prefix string
 }
 
-// New validates the bucket and namespace before constructing a measurement store.
+// New validates the bucket and namespace before constructing scoped keys.
 func New(opts Options) (*Store, error) {
-	if opts.Bucket == "" || opts.Client == nil || strings.Trim(opts.Prefix, "/") == "" {
-		return nil, errors.New("teamblob: bucket, client and nonempty prefix are required")
+	if opts.Bucket == "" || strings.Trim(opts.Prefix, "/") == "" {
+		return nil, errors.New("teamblob: bucket and nonempty prefix are required")
 	}
-	if opts.MaxListPages <= 0 {
-		opts.MaxListPages = DefaultMaxListPages
-	}
-	if opts.Now == nil {
-		opts.Now = time.Now
-	}
-	return &Store{bucket: opts.Bucket, prefix: strings.Trim(opts.Prefix, "/"), client: opts.Client, maxPages: opts.MaxListPages, now: opts.Now}, nil
+	return &Store{bucket: opts.Bucket, prefix: strings.Trim(opts.Prefix, "/")}, nil
 }
 
-// Bucket returns the bucket used for measurement and signing.
+// Bucket returns the configured bucket.
 func (s *Store) Bucket() string { return s.bucket }
 
 // ValidTeam reports whether a team is a DNS-label slug.

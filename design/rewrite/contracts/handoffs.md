@@ -2,6 +2,45 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+## From W7 controller maintenance cutover
+
+**Completed W7 maintenance integration.** The retained-data worker now passes
+its configured ObjectBackend to W1's real MarkBlobTombstones and
+CollectBlobTombstones APIs under a renewed maintenance fence. Configured
+filesystem objects also run class expiry after renewal. Standalone S3 startup
+installs the backend through WithDataObjects and the declared DataController
+fields. Authenticated data methods remain W2's implementation.
+
+Deleted the separate bucket-reconciliation worker, free-share log pruning,
+listing-derived tenant accounting, storage_pass health projection and unused
+teamblob measurement API. The cut removes 881 Go lines, including 432 obsolete
+test lines. Physical collection errors do not skip retained-storage billing.
+A signed-license regression proves the zero-rate watermark still resets after
+backend deletion fails. The existing key-containment property has no S3 fixture. A real
+SQLite/filesystem controller property checks 64 generated tenant objects,
+references, tombstone grace and replay. A foreign lease prevents physical expiry.
+No new acceptance cell was added.
+
+**W1b/W2 staging cleanup contract needed.** Quota expiry is wired through W1's
+marking transaction. Expired or abandoned pending objects are separate from live
+CAS blobs. W7 has no leased operator seam returning their staging keys or
+invoking ObjectBackend.DeleteObject. Declare that seam before physical cleanup;
+W7 will not duplicate uploads SQL or infer authority from bucket listings.
+
+**W2/W3/W8/W9 remaining construction.** The existing LogTransport and
+SegmentRecorder need bound client construction and the controller wire needs a
+segment-commit operation. Authenticated data methods, filesystem startup/route
+mounting and fresh host StorageBinding construction remain open. The older
+output/log handlers, clients, host sinks and raw backends remain live until that
+cutover. No new foreign contract or compatibility protocol was added.
+
+Build, storage tests, the new controller integration tests, vet, commentcheck,
+current-diff sleepcheck and embedded-doc drift pass. TestStorage passes with
+81 passing events and 424 native/platform skips. Sleepcheck against main
+still reports internal/limits/deadline_test.go:58/:66 and
+sparkwing/sparkwingtest/host_test.go:214, outside W7's change. See
+[w7-storage-report.md](w7-storage-report.md) for command scope and final acceptance.
+
 ## From W7 merged-store wiring
 
 **Completed W7 record-layout integration.** Output and artifact capture now use

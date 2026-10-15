@@ -73,7 +73,7 @@ type Server struct {
 	computeAlarmOn bool
 
 	bucketUsageStore storage.UsageReporter
-	storagePass      *storagePass
+	data             *DataController
 	downloadStores   map[store.StorageKind]*teamblob.Store
 	downloadS3       *s3.PresignClient
 	downloadCDN      *sign.URLSigner
@@ -1182,7 +1182,6 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	go s.runCronTick(ctx, cronTickOffer)
 	go s.runStorageMaintenance(ctx, StorageMaintenanceInterval)
 	go s.runBucketCeiling(ctx)
-	go s.runStoragePass(ctx)
 	go s.runTeamDeletions(ctx, TeamDeletionInterval)
 	go s.runCardBilling(ctx, CardBillingInterval)
 

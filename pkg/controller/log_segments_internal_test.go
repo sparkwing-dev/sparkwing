@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -647,100 +646,6 @@ func TestAnEndedClaimFinishesOnlyItsOwnLogWithinTheGrace(t *testing.T) {
 	}
 }
 
-// The storage pass counts what a team's log segments hold, from a
-// listing of the bucket, so a count left wrong by a failed commit heals.
-func TestStoragePassCountsLogSegments(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	s, _ := f.sink(t, tok, "a")
-	for i := 1; i <= 4; i++ {
-		if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := s.Close(ctx, logseg.End{}); err != nil {
-		t.Fatal(err)
-	}
-	counted, err := f.srv.logObjects().measure(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	keys, err := f.srv.logObjects().List(ctx, rec.Prefix)
-	if err != nil || len(keys) < 2 {
-		t.Fatalf("objects = %v, %v", keys, err)
-	}
-	var want int64
-	for _, k := range keys {
-		body, err := f.srv.logObjects().Get(ctx, k)
-		if err != nil {
-			t.Fatal(err)
-		}
-		n, _ := io.Copy(io.Discard, body)
-		_ = body.Close()
-		want += n
-	}
-	if counted[store.DefaultTeam] != want {
-		t.Fatalf("measured %d bytes for the team, want %d", counted[store.DefaultTeam], want)
-	}
-	f.srv.WithStoragePass(nil)
-	if ran, err := f.srv.RunStoragePass(ctx); err != nil || !ran {
-		t.Fatalf("storage pass = %v, %v", ran, err)
-	}
-	usage, err := f.st.TeamStorage(ctx, store.DefaultTeam)
-	if err != nil || usage[store.StorageLogs].UsedBytes != want {
-		t.Fatalf("reconciled log storage = %+v, %v; want %d used", usage[store.StorageLogs], err, want)
-	}
-}
-
-// A team past its free log share loses its finished runs' segments and
-// records, and never a run still going.
-func TestPruningATeamOverItsShareDeletesOnlyFinishedRunsSegments(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	s, _ := f.sink(t, tok, "a")
-	for i := 1; i <= 4; i++ {
-		if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := s.Close(ctx, logseg.End{}); err != nil {
-		t.Fatal(err)
-	}
-	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	objs := f.srv.logObjects()
-	over := store.TeamOverShare{Team: store.DefaultTeam, OverBytes: 1}
-	if _, err := f.srv.pruneTeamSegments(ctx, objs, over); err != nil {
-		t.Fatal(err)
-	}
-	if keys, err := objs.List(ctx, rec.Prefix); err != nil || len(keys) == 0 {
-		t.Fatalf("a running run's segments after the prune = %v, %v; want them kept", keys, err)
-	}
-	if _, err := f.st.DB().ExecContext(ctx, `UPDATE runs SET status = 'success' WHERE id = 'run-d'`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.srv.pruneTeamSegments(ctx, objs, over); err != nil {
-		t.Fatal(err)
-	}
-	if keys, err := objs.List(ctx, rec.Prefix); err != nil || len(keys) != 0 {
-		t.Fatalf("a finished run's segments after the prune = %v, %v; want none", keys, err)
-	}
-	if recs, err := f.st.RunNodeLogs(ctx, store.DefaultTeam, "run-d"); err != nil || len(recs) != 0 {
-		t.Fatalf("log records after the prune = %v, %v; want none", recs, err)
-	}
-}
-
-// A sealed log that lost a segment, or holds other bytes under its key,
-// must not read, or report, as whole: the reader gets the lines before
-// the gap and a loss marker, and completeness says incomplete.
 func TestALostSegmentReadsAndReportsAsIncomplete(t *testing.T) {
 	for name, damage := range map[string]func(context.Context, fsLogObjects, string) error{
 		"deleted": func(ctx context.Context, objs fsLogObjects, key string) error {
@@ -881,42 +786,6 @@ func TestTheLiveRingStartsOverForANewAttempt(t *testing.T) {
 	chunk, ok := f.srv.liveLogs.Read("run-d", "a", 0)
 	if !ok || string(chunk.Data) != "second attempt\n" {
 		t.Fatalf("live ring after a second attempt = %q, %v; want only the second attempt's line", chunk.Data, ok)
-	}
-}
-
-// Pruning stops once the bytes it actually deleted cover the overage, even
-// for attempts never charged: the oldest finished run goes, the next stays.
-func TestPruningCountsTheBytesItDeletes(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	objs := f.srv.logObjects()
-	base := time.Now().Add(-time.Hour)
-	prefixes := map[string]string{}
-	for i, runID := range []string{"r-old", "r-new"} {
-		at := base.Add(time.Duration(i) * time.Minute)
-		if err := f.st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "demo", Status: "success", StartedAt: at}); err != nil {
-			t.Fatal(err)
-		}
-		prefix := "logs/r90/teams/default/runs/" + runID + "/jobs/a/a1-g1/"
-		if _, err := f.st.OpenNodeLog(ctx, store.NodeLog{Team: store.DefaultTeam, RunID: runID, NodeID: "a", Attempt: 1, Generation: 1, Prefix: prefix}, at); err != nil {
-			t.Fatal(err)
-		}
-		if err := objs.putIfAbsent(ctx, blob.LogSegmentKey(prefix, 1), bytes.Repeat([]byte("x"), 100)); err != nil {
-			t.Fatal(err)
-		}
-		prefixes[runID] = prefix
-	}
-	freed, err := f.srv.pruneTeamSegments(ctx, objs, store.TeamOverShare{Team: store.DefaultTeam, OverBytes: 50})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if freed != 100 {
-		t.Fatalf("freed %d bytes, want the 100 the oldest run held", freed)
-	}
-	for runID, want := range map[string]int{"r-old": 0, "r-new": 1} {
-		if left, err := objs.List(ctx, prefixes[runID]); err != nil || len(left) != want {
-			t.Fatalf("%s holds %v after the prune, %v; want %d object(s)", runID, left, err, want)
-		}
 	}
 }
 

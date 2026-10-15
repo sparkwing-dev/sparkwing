@@ -312,7 +312,6 @@ func (s *Server) MultiTeam() bool
 func (s *Server) ProcessTeamDeletions(ctx context.Context, now time.Time)
 func (s *Server) RegisteredRoute(r *http.Request) bool
 func (s *Server) ResealStoredSecrets(ctx context.Context) (store.SecretResealCounts, error)
-func (s *Server) RunStoragePass(ctx context.Context) (bool, error)
 func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
@@ -321,6 +320,7 @@ func (s *Server) WithBucketUsage(a storage.UsageReporter) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDashboard(d Dashboard) *Server
 func (s *Server) WithDashboardURL(url string) *Server
+func (s *Server) WithDataObjects(objects blob.ObjectBackend) *Server
 func (s *Server) WithDirectUploads(client *s3.Client, bucket, prefix string) *Server
 func (s *Server) WithEgressMeter(m *egress.Meter) *Server
 func (s *Server) WithExternalURL(rawURL string) *Server
@@ -351,7 +351,6 @@ func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
 func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Account) error) *Server
 func (s *Server) WithSignUpWaitlist(on bool) *Server
 func (s *Server) WithSignedDownloads(cache *teamblob.Store, client *s3.Client, domain, keyPairID, privateKey string) error
-func (s *Server) WithStoragePass(cache *teamblob.Store) *Server
 func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
 func (s *Server) WithTrustedProxyAddr(addr string) *Server
@@ -370,7 +369,6 @@ func (p SignedRunnerAdmission) CheckRunner(ctx context.Context, version string) 
 const SpendLimitCode = "spend_limit"
 const StaleCardSetupCode = "stale_card_setup"
 const StorageMaintenanceInterval = time.Hour
-const StoragePassEvery = time.Hour
 const TeamDeletionInterval = time.Minute
 type TokenRequestBudget struct {
 	PerTokenMinute int

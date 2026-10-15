@@ -49,40 +49,18 @@ picks the attempt's retention class, and each later request reports the bytes
 the runner has stored; the controller commits the growth once, so a retried
 request never charges twice.
 
-A log write is never refused for the log share, so a run always keeps its
-logs. The hourly storage pass holds a free team to the share instead: after it
-recounts the segments, it deletes the segments of the team's least recently
-written finished runs until the team is back under its share. It never prunes
-a run still going; bucket lifecycle rules remove the rest. Only the bytes
-charged for the deleted segments come off the team's count, so a failed
-deletion frees nothing. A team with
-neither credits nor a slot, and that never held credits, has a log share of
-zero, so the pass prunes the finished runs a refused commit left behind. A
-team whose credits lapsed keeps its logs until retention removes them. A team can therefore sit past
-its log share by about an hour of log growth.
+Storage usage comes from committed blob rows and tagged log-stream records.
+Bucket listings do not replace those authoritative counts. The controller's
+leased maintenance pass expires records, marks unreachable blobs and collects
+eligible tombstones after the 24-hour grace period. References added before
+collection preserve the bytes. Physical deletion failures retain the tombstone
+for a later pass.
 
-A cache write past its share is refused with `413` and a reason that names the share,
-what the team holds and what the write needs. The cache judges a declared
-`Content-Length` before it reads one byte, and stages a binary only after the
-check. An upload of unknown length gets the room the team has left, up to the
-per-object cap, and is cut past it; the cut aborts the upload, so no partial
-object remains. An overwrite commits the difference from what it replaced.
-
-When the controller cannot answer, the cache refuses a
-free team's write with `503` and a `Retry-After`: an outage never lifts a
-limit. The operator's team never asks, and a team the controller answered
-funded within the last five minutes proceeds. A team that buys credits is
-unblocked by its next write.
-
-The hourly storage pass replaces each team's count with a listing of the
-cache bucket's objects and node log segments plus whatever was committed while
-it listed, so a count that drifted, from a delete or a crash between a write
-and its commit, is corrected within the hour. It lists the bucket the
-controller names with `--cache-blob-store`, or the segments in its output
-directory without one. One replica runs the pass an hour, under a lease
-in the database. A pass that cannot list a bucket leaves that store's counts
-as they were, and `GET /api/v1/health` reports `storage_pass.ok: false` with a
-`problems` entry until a pass succeeds.
+Log retention follows the run's stored class. S3 uses lifecycle rules. A
+configured filesystem backend expires classed objects during leased maintenance.
+The former bucket-reconciliation pass, free-log-share pruner and
+`storage_pass` health field are removed. See [Storage](storage.md) for the
+remaining authenticated transport and host bindings.
 
 ## Job outputs
 
@@ -134,13 +112,9 @@ transaction that counts it, and keeps it until the team is deleted. A
 reservation takes no slot, so one nobody commits costs the tier nothing; it is
 refused only once every slot is taken. A commit whose team cannot take a slot
 is refused with `402`, so no team without a slot commits a byte beyond the
-small outputs above: up to 1 MiB each and 64 MiB in all. A writer puts its
-bytes before it commits them, so teams whose reservations raced for the last
-slot can each leave one write behind. A refused commit records nothing and
-leaves its bytes in place, because a retry of the same upload may still
-commit them; the storage pass's age expiry reclaims a direct upload's object, a
-refused output's object stays, and a cache object or a log segment stays until
-the hourly pass counts it and the team's next reservation is refused.
+small outputs above: up to 1 MiB each and 64 MiB in all. A writer uploads before
+settlement. A refused settlement records no receipt or live blob. Pending objects require cleanup separately from committed CAS
+collection.
 The free bytes a deployment holds are therefore at most slots times the
 allowance, plus those in-flight writes. A team with a slot
 keeps writing inside its shares after the slots run out; a team with neither a
@@ -173,16 +147,14 @@ second run over the same data removes nothing more.
 | Runs and operational children | finished runs past the run window, preserving each pipeline's newest success | controller, leased hourly maintenance | `run_retention_days`; Cloud defaults to 90 days, self-hosted defaults to disabled |
 | Node metrics | samples past their independent window | controller, leased hourly maintenance | `node_metric_retention_days` |
 | Node log segments | by retention class: `logs/r90/` 90 days for a funded or single-team controller, `logs/r30/` 30 days for a team the controller answered free when the attempt's log opened, `logs/r<days>/` for a team `--log-retention` names | the bucket's lifecycle rules, which the controller verifies before it issues URLs into a class; deleting a run or a team deletes its segments | `--log-retention team=days`; see [self-hosting.md](self-hosting.md#node-log-retention) |
-| Cache binaries, dependency archives and artifacts | written more than 30 days ago, including the default team and the operator grant's cache root | controller, hourly storage pass | `--cache-blob-store` |
-| Job outputs | 30 days after the run finished, except each pipeline's newest successful run | controller, hourly storage pass, or hourly on a controller without one | none |
-| Registry proxy entries | past `--proxy-max-age`, and least recently served first past the byte cap | cache, hourly and on each store | `--proxy-max-age`, `--proxy-max-bytes` (2 GiB) |
-| Invitations | accepted, withdrawn or expired more than 30 days ago | controller, hourly storage pass | none |
-| API, CLI and runner tokens | revoked or expired more than 30 days ago | controller, hourly storage pass | none |
-| Browser sessions, GitHub runner credentials | expired | controller, hourly storage pass | none |
+| Blob records and their bytes | unpinned records expire; unreachable bytes pass a 24-hour tombstone grace period | controller, leased hourly maintenance with a configured object backend | record expiry and pins |
+| Job outputs | expire through record retention, preserving each pipeline's newest successful output | controller, leased hourly maintenance | output record expiry and pins |
+| Invitations | accepted, withdrawn or expired more than 30 days ago | controller, leased hourly maintenance | none |
+| API, CLI and runner tokens | revoked or expired more than 30 days ago | controller, leased hourly maintenance | none |
+| Browser sessions, GitHub runner credentials | expired | controller, leased hourly maintenance | none |
 | Cron fire history | beyond 200 per schedule | controller, on each fire | none |
 | Egress usage rows | older than 13 months | controller, monthly | none |
-| Team download days | older than 7 days | controller, hourly storage pass | none |
-| Storage reservations | an hour after a writer took one it never committed or released | controller, on the team's next write and in the hourly storage pass | none |
+| Storage reservations | an hour after a writer took one it never committed or released | controller, on the team's next write and in the leased hourly maintenance | none |
 
 Every rule keys on when a run finished or when a file or object was last
 written, never on when a run was created, so a run that just ended is never
@@ -198,8 +170,8 @@ bounds it. The last column is where the bound is enforced or defaulted.
 | Teams per user | three created over the account's life, the personal team included | `pkg/store/identity.go` |
 | Free teams | `--free-team-slots`, 200 by default, released only when a team is deleted | `pkg/store/free_tier.go` |
 | Run events | the event share, 64 MiB by default | `pkg/store/free_tier.go` |
-| Log segments | the log share, 192 MiB by default; writes past it are kept, and the hourly storage pass deletes the team's least recently written finished runs' logs back under it | `pkg/store/team_storage.go`, `pkg/controller/storage_pass.go` |
-| Cache binaries, dependency archives and artifacts | the cache share, 768 MiB by default, refused before the body is read | `pkg/store/team_storage.go`, `internal/cache/blobquota.go` |
+| Log segments | retention class fixed by the run; expiry follows that class | `pkg/store/result_logs.go`, `internal/blob/log_retention.go` |
+| Cache binaries, dependency archives and artifacts | the cache share, 768 MiB by default, refused before the body is read | `pkg/store/upload_runtime.go`, `pkg/store/quota_runtime.go` |
 | Job outputs | the cache share, 64 MiB per output and 1 GiB per run, refused at reservation; 30 days after the run finished | `pkg/store/node_output.go` |
 | Events per run | 256 KiB per event, 64 MiB and 50,000 events per run | `pkg/store/event_limits.go` |
 | Annotations per run | 64 KiB per annotation, 1,000 per run, and 4 MiB per run JSON-encoded, node and step annotations together; past a bound the append answers `413` for size or `429` for count and stores nothing | `pkg/store/store.go` |
@@ -208,7 +180,7 @@ bounds it. The last column is where the bound is enforced or defaulted.
 | Logs per node | 64 MiB per node attempt; the runner truncates past it | `pkg/storage/logseg/sink.go` |
 | Log retention | 30 days for a team without credits (`logs/r30/`), 90 days for a funded team (`logs/r90/`), expired by the bucket's lifecycle rules | `pkg/storage/logseg/keys.go`, `pkg/controller/log_segments.go` |
 | Run events past retention | removed with their bytes 30 days after the run finished on a multi-team controller | `pkg/controller/team_storage.go`, `pkg/store/storage_retention.go` |
-| Team cache objects | 30 days after they were written | `pkg/controller/storage_pass.go` |
+| Team cache objects | unpinned records expire; unreachable bytes pass a 24-hour tombstone grace period | `pkg/store/blob_gc.go`, `pkg/controller/data_storage.go` |
 | Bytes downloaded by one team | 5 GiB a UTC day for a free team (`--team-daily-download-free-bytes`), 50 GiB for a funded team (`--team-daily-download-funded-bytes`), counted per team in the controller's database across the cache, the controller's artifact and git proxy routes, and signed URLs; log reads are not counted. A download is charged the bytes it delivers, 8 MiB at a time as it streams; signing a URL charges the stored object's size. Only a team already at its cap is refused, so a download under way always finishes and the team's next request gets `429` until midnight UTC. A free team's request gets `503` while the controller cannot answer. A signed URL, for S3 or CloudFront, is charged once when it is minted and expires 60 seconds later; it can be fetched more than once inside that minute, so the counter is an abuse limit rather than an exact bandwidth meter | `pkg/store/team_storage.go`, `pkg/controller/data_download.go` |
 | Cloud runner time | only an operator-metered token claims cloud capacity, and each claim needs credits | `pkg/store/credits.go` |
 | Nodes per run | `max_global_nodes_per_run` when the operator sets it | `pkg/store/compute_limits.go` |

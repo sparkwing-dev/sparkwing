@@ -190,8 +190,8 @@ Rules limited by tags or object size cannot establish expiry for the whole
 class. The backend reads the rules and leaves their configuration to the operator.
 
 `Filesystem.ExpireLogs` removes log objects whose file age reaches their stored
-class. The controller must call it under its maintenance lease before treating
-filesystem retention as configured. Identical uploads preserve the file age.
+class. The controller calls it after renewing its maintenance lease when this
+backend is configured. Identical uploads preserve the file age.
 The sweep includes retired classes, ignores upload temporary files and leaves
 CAS bytes to their separate reachability rules. Cancellation and filesystem
 errors return a count of objects already removed and an error.
@@ -209,12 +209,14 @@ Both backends implement `store.BlobDeleter` through `DeleteBlob`. The collector
 passes a tenant and digest after rechecking reachability under its maintenance
 lease. The backend derives that tenant's CAS key, and an absent object succeeds
 on replay. The old controller output pruner and bucket-measurement expiry
-callback are removed. The controller still needs to supply its final backend to
-the shared maintenance coordinator.
+callback are removed. The controller supplies its configured backend to the
+shared leased maintenance pass. Standalone S3 construction installs this backend.
+Standalone filesystem construction remains open.
 
-The retained `internal/teamblob` helper provides key construction and read-only
-bucket measurement. Its client interface exposes only S3 listing. Cache byte
-uploads, multipart transfers, reads, deletions and the write breaker are removed.
+The retained `internal/teamblob` helper constructs keys for the older output
+downloader. Its bucket measurement, client interface, listing budgets and S3 test
+fixture are removed with the bucket-reconciliation pass. Usage and reachability
+come from the store. The final output transport cut also removes this key helper.
 
 The filesystem and S3 collection acceptance boundaries generate twelve pairs of
 tenant graphs, including identical digests, cycles, old referenced bytes and
@@ -339,3 +341,10 @@ backends. Signed slots and stored references share `LogObjectKey`. Segment
 numbering starts at one. They cover replay, reopening, offset reads, retained
 bytes and revoked-reader refusal. Authentication and award issuance are seeded
 fixtures. Native placement and transport acceptance remain separate.
+
+The controller's retained-data pass now marks and collects blob tombstones through
+real operator APIs and its configured `ObjectBackend`. It renews the maintenance
+lease before physical work. Filesystem log expiry follows the same pass. The
+bucket-reconciliation worker, its free-share log pruning, listing-based counters
+and `storage_pass` health projection are removed. Read-only deployment bucket
+measurement remains separate from authoritative tenant accounting.

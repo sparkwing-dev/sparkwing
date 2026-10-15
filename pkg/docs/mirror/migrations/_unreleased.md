@@ -761,3 +761,12 @@ conformance suite checks that a second write cannot replace the first payload.
 
 Use an authorized blob presence query for distributed data. A digest or a raw
 object existence check does not establish read access or an upload receipt.
+
+## Storage uses record-backed maintenance
+
+Remove calls to `WithStoragePass` and `RunStoragePass`, references to
+`StoragePassEvery`, and readers of the `storage_pass` health field. No forwarding
+API remains. Controller embedders supply the physical backend with
+`WithDataObjects`. Leased retained-data maintenance marks unreachable blobs,
+collects eligible tombstones and expires filesystem logs. Bucket listings no
+longer replace tenant usage counts. Log lifetime follows retention classes.
