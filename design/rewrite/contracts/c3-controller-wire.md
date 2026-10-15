@@ -4,6 +4,14 @@
 
 ## Amendment 1: private execution and claim wire
 
+Owner adapters serialize `runspec.Request` into `RunInput.SealedRequest`, as
+required by C3's host boundary. `RequestHash` remains the enclosing request seal's
+canonical hash. `RunInput.RunID` and `AcceptedRun.RunID` identify the awarded
+execution, including a retry whose original request/spec retain their source
+run ID. Local and here handoff share the award projection and reject invalid
+seals or mismatched claim bindings before native binding. Initial intake receipt
+validation separately requires the new seal's run ID to match its receipt.
+
 `ClaimedUnit.HostContext` bounds source/host binding and execution by the earliest
 caller, binding, owner or parent-capability deadline. Local, here and runner
 hosting share it. An already expired award stops before binding. Lease expiry

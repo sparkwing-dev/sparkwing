@@ -106,7 +106,7 @@ func TestHereResumeUsesOnlyAwardedInputs(t *testing.T) {
 					}
 					return hereHostSession{close: func() error { closed++; return nil }, host: hereTestHost(func(ctx context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
 						calls = append(calls, "host")
-						var request runspec.SealedRequest
+						var request runspec.Request
 						var accepted runspec.Spec
 						if err := json.Unmarshal(input.SealedRequest, &request); err != nil {
 							t.Fatal(err)
@@ -117,7 +117,7 @@ func TestHereResumeUsesOnlyAwardedInputs(t *testing.T) {
 						if err := json.Unmarshal(input.Accepted.Spec, &accepted); err != nil {
 							t.Fatal(err)
 						}
-						if input.RunID != "retry-run" || input.RequestHash != string(award.Request.Hash) || !reflect.DeepEqual(request, award.Request) || !reflect.DeepEqual(accepted, spec) || input.Accepted.RunID != "retry-run" || input.Accepted.PlanHash != string(spec.PlanHash) {
+						if input.RunID != "retry-run" || input.RequestHash != string(award.Request.Hash) || !reflect.DeepEqual(request, award.Request.Request) || !reflect.DeepEqual(accepted, spec) || input.Accepted.RunID != "retry-run" || input.Accepted.PlanHash != string(spec.PlanHash) {
 							t.Fatal("resume changed the request or accepted seal")
 						}
 						return nodehost.RunCompletion{Outcome: "success"}, nil

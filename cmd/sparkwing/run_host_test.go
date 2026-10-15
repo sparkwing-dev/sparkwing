@@ -104,11 +104,11 @@ func localRuntimeFor(t *testing.T, award controllerwire.ClaimedUnit, detached bo
 					close: func() error { *observed = append(*observed, "host-close"); return nil },
 					host: hereTestHost(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
 						*observed = append(*observed, "host")
-						var sealed runspec.SealedRequest
+						var sealed runspec.Request
 						if err := json.Unmarshal(input.SealedRequest, &sealed); err != nil {
 							t.Fatal(err)
 						}
-						if input.RunID != award.RunID || input.RequestHash != string(award.Request.Hash) || !reflect.DeepEqual(sealed, award.Request) || !reflect.DeepEqual(input.GrantedRunner, award.Runner) {
+						if input.RunID != award.RunID || input.RequestHash != string(award.Request.Hash) || !reflect.DeepEqual(sealed, award.Request.Request) || !reflect.DeepEqual(input.GrantedRunner, award.Runner) {
 							t.Fatal("host received mutable inputs instead of the awarded seal")
 						}
 						return nodehost.RunCompletion{Outcome: "success"}, nil
@@ -313,7 +313,7 @@ func TestLocalReceiptAndPrivateRunHandleSurviveCancellationAfterIntake(t *testin
 		t.Fatal("handle contains private execution inputs")
 	}
 	info, err := os.Stat(path)
-	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
+	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("private handle mode: %v %v", info, err)
 	}
 	if !reflect.DeepEqual(calls, []string{"resolve", "prepare", "create", "close"}) {
@@ -394,11 +394,11 @@ func FuzzLocalOwnerSealCannotChange(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var decoded runspec.SealedRequest
-		if err := json.Unmarshal(input.SealedRequest, &decoded); err != nil || !reflect.DeepEqual(decoded, sealed) {
+		var decoded runspec.Request
+		if err := json.Unmarshal(input.SealedRequest, &decoded); err != nil || !reflect.DeepEqual(decoded, sealed.Request) {
 			t.Fatalf("sealed input changed: %v", err)
 		}
-		if foreign != decoded.Request.RequestedArgs["password"] {
+		if foreign != decoded.RequestedArgs["password"] {
 			award.Request.Request.RequestedArgs["password"] = foreign
 			changedHash, err := runspec.CanonicalHash(award.Request)
 			if err != nil {

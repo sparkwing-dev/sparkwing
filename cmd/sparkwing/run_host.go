@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -11,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"slices"
 	"strings"
 	"syscall"
 
@@ -272,36 +270,10 @@ func hostLocalRun(ctx context.Context, runtime localRunRuntime, run string, requ
 }
 
 func localRunInput(run string, requestHash runspec.Hash, award controllerwire.ClaimedUnit) (nodehost.RunInput, error) {
-	input := nodehost.RunInput{RunID: run, RequestHash: string(award.Request.Hash), GrantedRunner: award.Runner}
-	input.GrantedRunner.Labels = slices.Clone(award.Runner.Labels)
-	if award.Unit != capability.UnitTrigger || award.Purpose != capability.PurposeTrigger || award.Delivery != capability.DeliveryDirect || award.RunID != run || award.UnitID == "" || award.JobID != "" || award.Capability == "" || award.Binding.Kind != capability.BindingTrigger || award.Binding.RunID != run || award.Binding.NodeID != "" || award.Binding.Holder == "" || award.Binding.Generation <= 0 || award.LeaseExpiresAt.IsZero() {
-		return input, localRunProtocolError("controller returned an invalid local owner award")
+	if requestHash != "" && award.Request.Hash != requestHash {
+		return nodehost.RunInput{}, localRunProtocolError("controller returned a different local request seal")
 	}
-	if err := validateLocalReceipt(controllerwire.CreateRunResponse{RunID: run, Request: award.Request}); err != nil || (requestHash != "" && award.Request.Hash != requestHash) {
-		return input, localRunProtocolError("controller returned a different or invalid local request seal")
-	}
-	var err error
-	input.SealedRequest, err = json.Marshal(award.Request)
-	if err != nil || award.Accepted == nil {
-		return input, err
-	}
-	accepted := award.Accepted
-	_, sealErr := runspec.CheckSeal(accepted.Spec, accepted.Spec)
-	planHash, planErr := runspec.CanonicalHash(accepted.Plan)
-	if sealErr != nil || planErr != nil || planHash != accepted.PlanHash || accepted.Spec.Request.Hash != award.Request.Hash || accepted.Spec.PlanHash != accepted.PlanHash {
-		return input, localRunProtocolError("controller returned inconsistent accepted local seals")
-	}
-	body, err := json.Marshal(accepted.Spec)
-	if err != nil {
-		return input, err
-	}
-	input.Accepted = &nodehost.AcceptedRun{RunID: run, Spec: body, SpecHash: string(accepted.Spec.Hash), PlanHash: string(accepted.PlanHash)}
-	decoder := json.NewDecoder(bytes.NewReader(accepted.Plan))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input.Accepted.Plan); err != nil {
-		return input, localRunProtocolError("controller returned an invalid accepted local plan")
-	}
-	return input, nil
+	return ownerRunInput(run, award, capability.PurposeTrigger)
 }
 
 func localRunProtocolError(message string) error {

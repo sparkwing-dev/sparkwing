@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -180,38 +178,10 @@ func runHereAward(ctx context.Context, options client.EngineOptions, run string,
 }
 
 func hereRunInput(run string, award controllerwire.ClaimedUnit) (nodehost.RunInput, error) {
-	input := nodehost.RunInput{RunID: run, RequestHash: string(award.Request.Hash), GrantedRunner: award.Runner}
-	input.GrantedRunner.Labels = slices.Clone(award.Runner.Labels)
-	if award.Unit != capability.UnitTrigger || award.Purpose != capability.PurposeHere || award.Delivery != capability.DeliveryDirect || award.RunID != run || award.UnitID == "" || award.JobID != "" || award.Capability == "" || award.Binding.Kind != capability.BindingTrigger || award.Binding.RunID != run || award.Binding.Holder == "" || award.Binding.Generation <= 0 || !award.Request.Request.Options.Runner.Set || award.Request.Request.Options.Runner.Value.Kind != runspec.RunnerHere {
-		return input, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an invalid here owner award"}
+	if !award.Request.Request.Options.Runner.Set || award.Request.Request.Options.Runner.Value.Kind != runspec.RunnerHere {
+		return nodehost.RunInput{}, localRunProtocolError("controller returned a different here runner selection")
 	}
-	hash, err := runspec.CanonicalHash(award.Request)
-	if err != nil || award.Request.Version != 1 || award.Request.Request.Version != 1 || award.Request.RunID == "" || award.Request.Hash == "" || hash != award.Request.Hash {
-		return input, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an invalid here request seal"}
-	}
-	input.SealedRequest, err = json.Marshal(award.Request)
-	if err != nil {
-		return input, err
-	}
-	if award.Accepted != nil {
-		accepted := award.Accepted
-		_, sealErr := runspec.CheckSeal(accepted.Spec, accepted.Spec)
-		planHash, planErr := runspec.CanonicalHash(accepted.Plan)
-		if sealErr != nil || planErr != nil || planHash != accepted.PlanHash || accepted.Spec.Request.Hash != award.Request.Hash || accepted.Spec.PlanHash != accepted.PlanHash {
-			return input, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned inconsistent here seals"}
-		}
-		body, err := json.Marshal(accepted.Spec)
-		if err != nil {
-			return input, err
-		}
-		input.Accepted = &nodehost.AcceptedRun{RunID: run, Spec: body, SpecHash: string(accepted.Spec.Hash), PlanHash: string(accepted.PlanHash)}
-		decoder := json.NewDecoder(bytes.NewReader(accepted.Plan))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&input.Accepted.Plan); err != nil {
-			return input, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an invalid accepted here plan"}
-		}
-	}
-	return input, nil
+	return ownerRunInput(run, award, capability.PurposeHere)
 }
 
 func runHereResumeCommand(ctx context.Context, flags triggerFlags, out io.Writer,

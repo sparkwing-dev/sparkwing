@@ -1,5 +1,89 @@
 # W9 handoff
 
+## Continuation from d526ef30b
+
+This section supersedes conflicting status below. W9 remains incomplete because
+native controller construction and private execution-state transport are open.
+The worktree started clean. The lead retains commits, pipelines and native QA.
+
+### Implementation and deletion
+
+- Local and here handoff now share one owner-award projection. It validates the
+  award and seals before binding, copies granted labels and serializes the inner
+  `runspec.Request` required by C3 into `RunInput.SealedRequest`. The separate
+  `RequestHash` retains the enclosing first seal's canonical hash.
+- A retry's current execution ID stays separate from its original seal ID.
+  Local award validation no longer applies the initial-intake receipt equality
+  rule to retries. Initial intake receipts retain that equality check.
+- Migrated W8's `runInputFor` with three changed lines. It passes the inner
+  request and compares acceptance against the source seal ID. It permits the
+  awarded execution to have a different ID. Its regression failed before this
+  change with `runner award is missing its sealed request`.
+- Removed the duplicated local/here seal projection. W9 production Go versus
+  HEAD is **52 added, 64 removed, net -12**, including the new untracked file.
+  W8's shared migration is **3 added, 3 removed, net zero**. Total production
+  change is **55 added, 67 removed, net -12**. W9 versus main is **-8,838**,
+  within the -2,900 budget. These counts exclude tests, testdata, acceptance and
+  contract declaration paths. No legacy production file was deleted this session.
+  The prior host/client cuts and W9-CLIENT-CUT-FILES.md remain applicable.
+
+### Verification and acceptance
+
+Every Go command used GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache and TMPDIR/GOTMPDIR=/tmp/sw-astra-W9. Tests used -p 4.
+
+- Whole-repository `go build -p 4 ./...` and scoped CLI/runner vet pass.
+- `TestCLIOwnerCompositionPreservesRetrySeals` runs the CLI award paths through
+  W3's real OwnerHost, lease keeper, scheduling projection and decider. Eight
+  combinations cover local/here, initial/retry identity and successful/refused
+  completion persistence. The private store and source acquisition are fakes.
+  Every case failed before the projection fix. All pass, including under race.
+  A failed completion write returns no successful completion. Cleanup runs once.
+- Invariant: malformed seals and mismatched award bindings cannot reach host
+  binding. `TestOwnerAwardMismatchCannotReachBindingProperty` passes 256 generated
+  cases across ten mutations, including changed request bytes, accepted seals,
+  plan, run/job binding, generation and missing lease metadata. It and the
+  retained deadline/runner-label properties pass under race.
+- The focused CLI local, standalone, here and owner suite passes. Full runners,
+  clisurface, controllerwire, controller/client and doccheck suites pass.
+  The runner retry regression and retained input fuzz seeds pass.
+- `TestSurface` passes its existing SQLite schedule cell. Its native scenarios
+  remain skipped. No new native acceptance cell or archived T1 port is claimed.
+- Commentcheck against main is clean across 2,029 files. Whitespace and embedded
+  documentation equality checks pass. No sleeps or test waiting loops were added.
+  The known sandbox socket restriction still limits full CLI/native testing.
+
+### Contracts, integration and shared files
+
+C3 already specifies inner-request serialization and immutable retry seals.
+No foreign interface or wire message changed. The real-host component replaces
+only the host fake at this boundary. It does not establish SDK hello, verified
+engine/source acquisition, a real private store transport or native placement.
+The shared helper replaces duplicate projections and adds no setting, flag,
+environment variable, timeout, retry policy or interface.
+
+The earlier assignment audit remains applicable. Lead decisions 07:40 items 1
+and 6, the doctor handoff and Windows packaging were already committed.
+W2 still needs to supply the elected wingd.LocalController factory and its store,
+queue, reconciliation, maintenance and authenticated API/dashboard bindings.
+W3's NativeHostStore still has no remote private snapshot/acceptance/transition/
+completion/renewal adapter. Public scheduling snapshots cannot substitute for it.
+W2's step handler still uses step_id/status rather than the contracted typed
+report and acknowledgement. These are existing foreign integration requests.
+Captured-environment delivery, delegated process services, authorized data/log
+bindings, owner policies, source-bundle intake, here reasons, schedules/pins/ticks,
+publication copying and debug release retain their recorded gaps. Publication
+failure must preserve the completed local verdict. Windows bridge runtime and
+native platform/backend/placement evidence still require the lead and CI.
+
+Shared code/test edits are internal/runners/execution.go and run_input_test.go.
+Other code and tests are W9-owned. The W9 C3 wire notes, docs/api.md, CHANGELOG.md
+and their generated pkg/docs mirrors are updated. Lead-owned handoffs and
+amendments are unchanged. Friction: the previous fake hosts accepted a seal
+encoding that the real W3 host refuses. The new component exercises that actual
+boundary. Git still resolves Korey's identity with no core.worktree override.
+Session scratch is removed at shutdown. The shared build cache is retained.
+
 ## Continuation from efb4f6c61
 
 This section supersedes conflicting status below. The worktree started clean.
