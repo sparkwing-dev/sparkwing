@@ -718,7 +718,7 @@ func (s *Store) AccountMemberships(ctx context.Context, accountID string) (_ []M
 func (s *Store) OpenInvitationsForEmail(ctx context.Context, email string, now time.Time) (_ []Invitation, err error) {
 	rows, err := s.query(ctx, invitationSelect+`
 		WHERE i.email = ? AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
-		ORDER BY i.created_at`, NormalizeEmail(email), now.UTC().Unix())
+		ORDER BY i.created_at`, NormalizeEmail(email), now.UTC().UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -745,7 +745,7 @@ func scanInvitations(rows *sql.Rows) ([]Invitation, error) {
 			return nil, err
 		}
 		inv.Team, inv.Role = Team(team), Role(role)
-		inv.CreatedAt, inv.ExpiresAt = time.Unix(created, 0).UTC(), time.Unix(expires, 0).UTC()
+		inv.CreatedAt, inv.ExpiresAt = time.Unix(0, created).UTC(), time.Unix(0, expires).UTC()
 		out = append(out, inv)
 	}
 	return out, rows.Err()
@@ -802,7 +802,7 @@ func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID st
 	if !acct.EmailVerified || acct.Email != email {
 		return none, ErrEmailMismatch
 	}
-	if accepted.Valid || withdrawn.Valid || expires <= at {
+	if accepted.Valid || withdrawn.Valid || expires <= now.UnixNano() {
 		return none, ErrInvitationClosed
 	}
 	// safety: the gate row is locked before the member count and the admission
@@ -819,7 +819,7 @@ func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID st
 	// take it.
 	res, err := tx.ExecContext(ctx, `
 		UPDATE invitations SET accepted_at = ?, accepted_by = ?
-		WHERE id = ? AND team = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`, at, accountID, invitationID, team)
+		WHERE id = ? AND team = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`, now.UnixNano(), accountID, invitationID, team)
 	if err != nil {
 		return none, err
 	}
@@ -1178,7 +1178,7 @@ func (t *Tenant) withdrawInvitationsIssuedByTx(ctx context.Context, tx *storeTx,
 		UPDATE invitations SET withdrawn_at = ?
 		WHERE team = ? AND invited_by = ? AND accepted_at IS NULL AND withdrawn_at IS NULL
 		  AND role IN (`+placeholders(len(above))+`)`,
-		append([]any{now.UTC().Unix(), string(t.team), accountID}, above...)...)
+		append([]any{now.UTC().UnixNano(), string(t.team), accountID}, above...)...)
 	return err
 }
 
@@ -1289,7 +1289,7 @@ func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, ro
 	if !actor.AtLeast(role) {
 		return Invitation{}, ErrRoleAboveOwn
 	}
-	at := now.UTC().Unix()
+	at := now.UTC().UnixNano()
 	var open, today int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM invitations
@@ -1298,7 +1298,7 @@ func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, ro
 		return Invitation{}, err
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM invitations WHERE team = ? AND created_at > ?`,
-		string(t.team), at-int64((24*time.Hour).Seconds())).Scan(&today); err != nil {
+		string(t.team), now.Add(-24*time.Hour).UnixNano()).Scan(&today); err != nil {
 		return Invitation{}, err
 	}
 	if open >= MaxOpenInvitations || today >= MaxInvitationsPerDay {
@@ -1327,12 +1327,12 @@ func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, ro
 	}
 	inv := Invitation{
 		ID: id, Team: t.team, Email: email, Role: role, InvitedBy: actorID,
-		CreatedAt: time.Unix(at, 0).UTC(), ExpiresAt: time.Unix(at, 0).UTC().Add(invitationTTL),
+		CreatedAt: now.UTC(), ExpiresAt: now.UTC().Add(invitationTTL),
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO invitations (id, team, email, role, invited_by, created_at, expires_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		inv.ID, string(t.team), inv.Email, string(inv.Role), actorID, at, inv.ExpiresAt.Unix()); err != nil {
+		inv.ID, string(t.team), inv.Email, string(inv.Role), actorID, at, inv.ExpiresAt.UnixNano()); err != nil {
 		if isUniqueViolation(err) {
 			return Invitation{}, ErrInvitationOpen
 		}
@@ -1345,7 +1345,7 @@ func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, ro
 func (t *Tenant) Invitations(ctx context.Context, now time.Time) (_ []Invitation, err error) {
 	rows, err := t.s.query(ctx, invitationSelect+`
 		WHERE i.team = ? AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
-		ORDER BY i.created_at`, string(t.team), now.UTC().Unix())
+		ORDER BY i.created_at`, string(t.team), now.UTC().UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -1364,7 +1364,7 @@ func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time)
 	res, err := t.s.exec(ctx, `
 		UPDATE invitations SET withdrawn_at = ?
 		WHERE team = ? AND id = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`,
-		now.UTC().Unix(), string(t.team), id)
+		now.UTC().UnixNano(), string(t.team), id)
 	if err != nil {
 		return err
 	}

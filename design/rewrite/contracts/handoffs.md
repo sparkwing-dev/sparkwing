@@ -39,3 +39,18 @@ migrations and evidence. W2 still needs to extend C2 `BindingState` with the
 cancellation reason before W1 can project it through `ReadAuthentication`. W1 has
 not changed that foreign contract. OAuth/browser middleware and roleless-session
 representation remain integration points.
+
+**DESIGN approved (lead, pending Korey's ratification): SDK planning diagnostic sanitization, W5 and W4.** Invariant: no declared secret argument value (default or supplied, pipeline or job scope) appears in any error the SDK returns from describe, argument resolution or planning: not in message, hint, details or detail keys, in any encoding. Each SDK collects the nonempty declared secret values once at its discovery/planning boundary and passes every outgoing canonical error through one sanitizer, which keeps codes and field paths. That replaces the describe-only replacement. Host masking still owns execution output and dynamic service values. Both SDKs carry a property test over thrown values, canonical errors, overlapping values, encodings and both argument scopes. W5 implements it in TypeScript; W4 implements the same in the Go SDK. No cross-area contract change.
+
+**Contract change needed, W1/W9/W3: attempt identity on job transitions.**
+Invariant: an execution report affects only the attempt it names, and replay of
+that report cannot consume another attempt. C1 `NodeTransition` and C3
+`JobTransitionRequest` carry claim generation but no source attempt ordinal.
+Two successive identical retry failures therefore hash identically. A direct
+store probe with retry budget two starts attempt four, then the next failure
+returns `Replayed:true, Attempt:4` instead of starting five. A delayed report
+also lacks an attempt fence after retry under the same claim. Carry the source
+attempt through the request and adapter, check it in the committing transaction,
+and include it in replay identity. Start, unstarted refusal and reaper semantics
+must remain explicit. W1 has not changed the foreign wire shape. The reproducer
+and command are in `../w1-session12-progress.md`.

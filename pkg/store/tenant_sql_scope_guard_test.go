@@ -24,8 +24,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"claimUnitTx":                         "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
 	"readMatchingInputsTx":                "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
 	"loadAwardRowTx":                      "awards derive team from the globally identified unit and check it against the authenticated claimant before issuing authority",
-	"(*Operator).maintainRetention":       "the elected deployment maintenance pass expires sessions across teams while preserving live capability ancestry",
 	"deleteRetentionMetricsTx":            "the elected deployment maintenance pass selects expired metrics across teams and deletes each exact team/run/job/time identity",
+	"deleteRetentionIdentityTx":           "the elected deployment maintenance pass expires every team's spent identity rows while preserving session ancestry",
 	"paidGrantForPaymentTx":               "provider payment identity is resolved before the payer is known; the configured mode and persisted checkout select the grant",
 	"paymentWarningTeamTx":                "a provider warning names a payment identity; its persisted grant or card attempt supplies the team",
 	"(*Store).settlePaymentFacts":         "a verified event resolves its committed checkout by configured mode and provider session, then rejects payment identities already used by any other checkout",
@@ -124,8 +124,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"so the installation's binding is how either finds the team it belongs to",
 	"(*Operator).usageRuns": "counts every team's runs per week for the operator's usage metrics, " +
 		"which report totals across teams and name none",
-	"(*Store).PruneSpentIdentity": "deletes every team's invitations, tokens and runner credentials that stopped " +
-		"admitting anyone, because a sweep that pruned one team would leave the rest to grow",
 	"(*Store).FreeSlots": "the free tier is bounded by how many teams hold a slot, so it counts every team's",
 	"freeSlotOpenTx":     "a reservation asks whether any slot is left, so it counts every team's",
 	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +
@@ -141,7 +139,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"its own scan selected",
 
 	"(*Store).PruneEgressUsage": "drops every team's egress months past the window, which is a deployment-wide retention",
-	"(*Store).ExpireSessions":   "the identity prune deletes every team's expired sessions",
 	"ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
 		"account deletion can tell sole ownership from shared",
 	"(*Store).ExpiredOutputRuns": "the output retention sweep finds every team's expired or deleted runs holding outputs, " +

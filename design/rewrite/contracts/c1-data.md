@@ -221,6 +221,15 @@ Final run pruning uses `Operator.MaintainRetention`. The unleased
 `Store.PruneRunsOlderThan` API is removed. Finish time controls eligibility, and
 a failed pass rolls back every removal and discards its result counters.
 
+Identity expiry also uses `Operator.MaintainRetention`. The unleased
+`Store.PruneSpentIdentity` and `Store.ExpireSessions` methods, `IdentityPrune` and
+`SpentIdentityRetention` are removed. Invitations expire thirty days after
+acceptance, withdrawal or expiry. Invitation and email-delivery timestamps use
+nanoseconds. Each identity table observes the pass limit. Session expiry preserves
+any row named by a capability parent. `RetentionResult.Invitations` and
+`RetentionResult.Sessions` count only committed deletions. Controller maintenance
+calls this fenced pass once instead of running a second identity sweep.
+
 `Tenant.ReleaseSourceCredential` accepts C2's authorized authority reference and
 route target. In one write transaction it reloads ancestry, locks the owner, run
 and job, checks the live unstarted source binding and run deadline, and derives

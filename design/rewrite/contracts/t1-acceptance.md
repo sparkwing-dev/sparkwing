@@ -292,7 +292,9 @@ self-update verifies release bytes, and a stale runner cannot bypass its minimum
 
 `TestCredentials/credentials-session-digest-csrf/store-sqlite` exercises account
 session creation, digest lookup, sealed CSRF-key persistence, reopening, demotion
-and revocation against a real SQLite file. It is store-boundary evidence. Native
+and revocation against a real SQLite file. It also checks maintenance-fence
+refusal, expired-session cleanup, preservation of a live session and persistence
+after another reopen. It is store-boundary evidence. Native
 browser, OAuth and production C2 route-matrix cells remain blocked. The existing
 `recovery-cancel-beats-loss/store-sqlite` proof also checks that the first reason
 survives cooperative draining, reaping and reopening.
@@ -304,6 +306,14 @@ concurrent reconciliation, unchanged run identity and attempt history, memo-miss
 dispatch, unique lifecycle events, and persistence across reopening. Authority is
 preseeded in the final schema and enrollment uses a contract fake. These cells
 do not replace the native placement cells below.
+
+`TestRecovery/recovery-application-retry-ordinal/store-sqlite` checks a failed
+attempt followed by a successful retry under one holder, generation and lease.
+Both completed attempt records and the three exact lifecycle events survive
+reopening. Terminal replay emits no extra event and a conflicting result fails.
+The repeated-identical-failure contract gap in `handoffs.md` remains open.
+This cell proves one application retry at the store boundary. Native process,
+backoff and launcher-Job continuity still require their placement cells.
 
 The nine skeleton groups are `TestLifecycle`, `TestRecovery`, `TestPlacement`,
 `TestCredentials`, `TestStorage`, `TestProtocol`, `TestEnvironment`, `TestSurface`

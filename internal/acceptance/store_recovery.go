@@ -19,12 +19,14 @@ import (
 
 // StoreRecoveryBoundaryScenarios lists SQLite persistence proofs, separate from native execution cells.
 func StoreRecoveryBoundaryScenarios() []string {
-	return []string{"recovery-cancel-beats-loss", "recovery-reconciler-waits-and-reclaims", "recovery-unstarted-lapse", "recovery-started-lapse-cap", "recovery-concurrency-continuous-adoption"}
+	return []string{"recovery-cancel-beats-loss", "recovery-reconciler-waits-and-reclaims", "recovery-unstarted-lapse", "recovery-started-lapse-cap", "recovery-concurrency-continuous-adoption", "recovery-application-retry-ordinal"}
 }
 
 // CheckStoreRecoveryBoundary exercises the final transitions, reaper and reconciler against SQLite.
 func CheckStoreRecoveryBoundary(ctx context.Context, root, id string) error {
 	switch id {
+	case "recovery-application-retry-ordinal":
+		return checkRecoveryApplicationRetry(ctx, root)
 	case "recovery-cancel-beats-loss":
 		return checkRecoveryCancellation(ctx, root)
 	case "recovery-unstarted-lapse":

@@ -1349,12 +1349,6 @@ type Identity struct {
 	Linked    bool
 	CreatedAt time.Time
 }
-type IdentityPrune struct {
-	Invitations             int64
-	Tokens                  int64
-	Sessions                int64
-	GitHubRunnerCredentials int64
-}
 type IllegalTransitionReason string
 const IncludeSecretValues = "secret_values"
 func InheritSecretArgs(inv map[string]any, src *Run) map[string]any
@@ -2146,6 +2140,8 @@ type RetentionResult struct {
 	Records       int64
 	Capabilities  int64
 	Effects       int64
+	Invitations   int64
+	Sessions      int64
 	ReleasedBytes int64
 	PinnedRuns    int64
 	PinnedOutputs int64
@@ -2692,7 +2688,6 @@ func (s SpendStanding) CardBilled() bool
 func (s SpendStanding) ChargeFailed() bool
 func (s SpendStanding) Headroom() (int64, string)
 const SpendWindowDays = 30
-const SpentIdentityRetention = 30 * 24 * time.Hour
 func SplitProfileKey(key string) (repo, pipeline string)
 type StateEvent struct {
 	Seq      int64
@@ -2946,7 +2941,6 @@ func (s *Store) DueCardRefunds(ctx context.Context, now time.Time) (_ []CardRefu
 func (s *Store) EnqueueChildRun(ctx context.Context, tok ClaimToken, ordinal int64, t Trigger, now time.Time) (childID string, err error)
 func (s *Store) EventLimits(ctx context.Context) (_ EventLimits, err error)
 func (s *Store) ExchangeCapability(ctx context.Context, spec capability.ExchangeSpec) (capability.Issued, error)
-func (s *Store) ExpireSessions(now time.Time) (int64, error)
 func (s *Store) ExpiredOutputRuns(ctx context.Context, now time.Time, limit int) (out []ExpiredOutputRun, err error)
 func (s *Store) FailCardAttempt(
 	ctx context.Context, attemptID, paymentIntent, declineCode string, now time.Time,
@@ -3065,7 +3059,6 @@ func (s *Store) PrunableNodeLogs(ctx context.Context, team Team, limit int) (_ [
 func (s *Store) PruneDownloadDays(ctx context.Context, day string) (int64, error)
 func (s *Store) PruneEgressUsage(ctx context.Context, before string) (int, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
-func (s *Store) PruneSpentIdentity(ctx context.Context, now time.Time) (IdentityPrune, error)
 func (s *Store) PruneStorageCommitReceipts(ctx context.Context, now time.Time) (int64, error)
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error)

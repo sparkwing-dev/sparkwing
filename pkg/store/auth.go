@@ -196,18 +196,6 @@ func (s *Store) DeleteSession(rawSession string) error {
 	return err
 }
 
-// ExpireSessions purges rows whose expires_at is past.
-func (s *Store) ExpireSessions(now time.Time) (int64, error) {
-	res, err := s.execNoCtx(
-		`DELETE FROM sessions WHERE expires_at <= ?`,
-		now.UTC().UnixNano(),
-	)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
-}
-
 func nullableUnix(v sql.NullInt64) *time.Time {
 	if !v.Valid {
 		return nil

@@ -108,5 +108,39 @@ func checkStoreSessions(ctx context.Context, root string) (err error) {
 	if _, err := s.LookupSession(ctx, raw); err == nil {
 		return errors.New("revoked session still authenticates by presentation")
 	}
+	if _, err := s.DB().ExecContext(ctx, `UPDATE sessions SET expires_at=1 WHERE hash=?`, hex.EncodeToString(lookup.Digest[:])); err != nil {
+		return err
+	}
+	lease, err := s.AsOperator().AcquireSingletonLease(ctx, "maintenance", "session-acceptance", time.Hour)
+	if err != nil {
+		return err
+	}
+	forged := lease
+	forged.Generation++
+	if result, err := s.AsOperator().MaintainRetention(ctx, store.RetentionRequest{Lease: forged, Limit: 1}); !errors.Is(err, store.ErrLockHeld) || result != (store.RetentionResult{}) {
+		return fmt.Errorf("forged maintenance fence returned %+v: %v", result, err)
+	}
+	if result, err := s.AsOperator().MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 1}); err != nil || result.Sessions != 1 {
+		return fmt.Errorf("session maintenance returned %+v: %v", result, err)
+	}
+	if _, err := s.LookupSession(ctx, ownerRaw); err != nil {
+		return fmt.Errorf("maintenance removed the live owner session: %w", err)
+	}
+	if err := s.Close(); err != nil {
+		return err
+	}
+	reopened, err = store.Open(path)
+	if err != nil {
+		return err
+	}
+	s = reopened
+	s.SetSessionKeyCipher(cipher)
+	var retained int
+	if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions WHERE hash=?`, hex.EncodeToString(lookup.Digest[:])).Scan(&retained); err != nil {
+		return err
+	}
+	if retained != 0 {
+		return errors.New("expired session returned after reopening")
+	}
 	return nil
 }

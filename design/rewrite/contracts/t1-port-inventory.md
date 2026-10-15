@@ -39,6 +39,24 @@ successor adoption. Node and run terminal transactions release their own groups.
 Each release admits exactly one queued competitor. Enrollment is a contract fake.
 Native processes and placement transports remain required.
 
+`recovery_test.go:TestRecovery/recovery-application-retry-ordinal/store-sqlite`
+adds persistence evidence for a failed attempt followed by a successful retry.
+It checks the unchanged holder, generation and lease, zero disruptions, distinct
+attempt ordinals, terminal replay and exactly one retry event. Native process
+continuity remains required. The old local
+`TestReapExpiredNodeClaims_KeepsTheClaimGeneration` fixture is deleted because
+the active unstarted-lapse and reconciler cells already check exact generation
+preservation on reaping and advancement on each next award.
+
+`pkg/store/maintenance_identity_test.go` ports the preservation assertions from
+`TestPruneSpentIdentityKeepsWhatStillAdmits` to the final leased API. It covers
+bounded invitation cleanup, expiry and repeated passes. The generated session
+property preserves live sessions and capability-parent rows. Rollback and expired
+maintenance fences leave both tables unchanged. Token-table assertions are
+removed with that table. Capability expiry remains covered by the final retention
+and ancestry tests. The invitation API proof checks nanosecond persistence for
+creation, listing, email delivery, acceptance and withdrawal.
+
 `pkg/store/concurrency_admission_runtime_test.go:TestHolderLivenessUsesStoreClock`
 replaces `TestConcurrencyGuard_CanonicalSQLSitesOnly` from design-found-hotfixes.
 Acquisition uses the injected clock. Expired capacity stops counting, heartbeat
