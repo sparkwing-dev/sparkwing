@@ -20,20 +20,16 @@ type APIConn interface {
 	PeerUID() int
 }
 
-func (d *Daemon) startAPI(ctx context.Context) {
+func (d *Daemon) startAPI(ctx context.Context) error {
 	if d.cfg.ServeAPI == nil {
-		return
+		return nil
 	}
-	ln, err := bindSocket(d.layout.apiSock)
+	ln, err := d.bind(d.layout.apiSock)
 	if err != nil {
-		// safety: admission is the daemon's reason to exist, so a socket the
-		// API cannot bind is reported through api_ready rather than taken as
-		// a reason to leave the machine without a daemon.
 		d.mu.Lock()
 		d.apiErr = err.Error()
 		d.mu.Unlock()
-		d.cfg.logf("controller API unavailable: %v", err)
-		return
+		return err
 	}
 	done := make(chan struct{})
 	d.mu.Lock()
@@ -45,6 +41,7 @@ func (d *Daemon) startAPI(ctx context.Context) {
 		d.cfg.ServeAPI(ctx, apiListener{Listener: ln, d: d})
 	}()
 	d.cfg.logf("serving the controller API on %s", d.layout.apiSock)
+	return nil
 }
 
 func (d *Daemon) apiState() (bool, string) {

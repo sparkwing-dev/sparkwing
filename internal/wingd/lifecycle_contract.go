@@ -101,7 +101,8 @@ type LocalStartOptions struct {
 // Run and AwaitReady must finish cleanup and return when their contexts are cancelled.
 type LocalRuntime interface {
 	Run(context.Context, LocalStartOptions) error
-	// AwaitReady waits for the controller API, store and startup reconciliation.
+	// AwaitReady waits for the next active Run's API, store and startup reconciliation.
+	// A completed previous Run cannot satisfy a new readiness request.
 	AwaitReady(context.Context) (LocalStatus, error)
 	Status(context.Context) (LocalStatus, error)
 	SetStay(context.Context, bool) error

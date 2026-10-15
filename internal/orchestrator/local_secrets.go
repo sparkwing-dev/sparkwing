@@ -34,6 +34,9 @@ type LocalAPIHealth struct {
 	SecretsProblem string `json:"secrets_problem,omitempty"`
 }
 
+// APISecretsSealed identifies a controller that seals its local secrets at rest.
+const APISecretsSealed = "sealed"
+
 // ReadLocalAPIHealth asks the daemon serving sock for its [LocalAPIHealth].
 func ReadLocalAPIHealth(ctx context.Context, sock string) (LocalAPIHealth, error) {
 	ctx, cancel := context.WithTimeout(ctx, hostedAPIProbeTimeout)

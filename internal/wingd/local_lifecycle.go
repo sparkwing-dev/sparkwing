@@ -87,7 +87,7 @@ func (l *localLifecycle) EnsureStarted(ctx context.Context, opts LocalStartOptio
 		run.err = l.runtime.Run(runCtx, opts)
 		close(run.done)
 	}()
-	if err := l.awaitReady(ctx, run, opts.Standalone); err != nil {
+	if err := l.awaitReady(ctx, run); err != nil {
 		cancel()
 		<-run.done
 		return LocalStatus{}, err
@@ -99,7 +99,7 @@ func (l *localLifecycle) EnsureStarted(ctx context.Context, opts LocalStartOptio
 	return status, err
 }
 
-func (l *localLifecycle) awaitReady(ctx context.Context, run *localRun, standalone bool) error {
+func (l *localLifecycle) awaitReady(ctx context.Context, run *localRun) error {
 	ctx, cancel := context.WithCancel(ctx)
 	ready := make(chan error, 1)
 	finished := make(chan struct{})
@@ -119,14 +119,6 @@ func (l *localLifecycle) awaitReady(ctx context.Context, run *localRun, standalo
 	case err := <-ready:
 		return err
 	case <-run.done:
-		if errors.Is(run.err, ErrNotElected) && !standalone {
-			select {
-			case err := <-ready:
-				return err
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
 		if run.err != nil {
 			return run.err
 		}

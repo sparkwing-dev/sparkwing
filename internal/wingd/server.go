@@ -33,6 +33,7 @@ type Daemon struct {
 
 	lockFile *os.File
 	ln       net.Listener
+	listen   func(string) (net.Listener, error)
 
 	apiLn   net.Listener
 	apiDone chan struct{}
@@ -193,6 +194,15 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return ErrNotElected
 	}
 	defer d.releaseLock()
+	return d.runElected(ctx)
+}
+
+func (d *Daemon) runElected(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	incarnation := journal.NextIncarnation()
 	incarnation, persistErr := journal.PersistIncarnation(d.layout.dir, incarnation)
 	if incarnation == 0 {
@@ -236,18 +246,27 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 	d.ln = ln
-	d.startAPI(ctx)
+	if err := d.startAPI(ctx); err != nil {
+		d.shutdownWithReason("API bind failed")
+		d.finalShutdown()
+		return err
+	}
 	d.startGrace()
 	close(d.ready)
 	d.recordJournal("ready", nil, map[string]any{"socket": d.layout.sock})
 	d.cfg.logf("elected; serving %s (version %q)", d.layout.sock, d.cfg.Version)
 
-	d.startDiagnostics(ctx.Done())
+	diagnosticsDone := d.startDiagnostics(ctx.Done())
 
-	go d.watchContext(ctx)
-	go d.sampleLoop(ctx)
-	go d.stallLoop(ctx)
-	go d.idleLoop(ctx)
+	var workers sync.WaitGroup
+	for _, run := range []func(context.Context){d.watchContext, d.sampleLoop, d.stallLoop, d.idleLoop} {
+		workers.Go(func() { run(ctx) })
+	}
+	defer func() {
+		cancel()
+		workers.Wait()
+		<-diagnosticsDone
+	}()
 
 	for {
 		nc, err := ln.Accept()
@@ -1584,17 +1603,27 @@ func (d *Daemon) handleRelease(c *conn, _ *wingwire.Release) {
 
 func (d *Daemon) handleDrain(c *conn, req *wingwire.DrainRequest) {
 	d.recordJournal("drain_begin", nil, map[string]any{"successor_version": req.SuccessorVersion})
-	d.mu.Lock()
-	d.draining = true
-	remaining := len(d.leaseRun)
-	d.mu.Unlock()
-	if err := d.persistState(); err != nil {
+	remaining, err := d.beginDrain()
+	if err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
-	d.closeAPIListener()
 	d.cfg.logf("draining for successor %s", req.SuccessorVersion)
 	_ = c.send(&wingwire.DrainAck{HoldersRemaining: remaining})
 	d.shutdownWithReason("drain")
+}
+
+func (d *Daemon) beginDrain() (int, error) {
+	remaining := d.markDraining()
+	err := d.persistState()
+	d.closeAPIListener()
+	return remaining, err
+}
+
+func (d *Daemon) markDraining() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.draining = true
+	return len(d.leaseRun)
 }
 
 func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {

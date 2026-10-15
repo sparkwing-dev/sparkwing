@@ -21,16 +21,9 @@ import (
 
 var ErrNotElected = errors.New("wingd: another daemon is already elected")
 
-// FinalizeDrainWindow is how long a stopping daemon waits for the run
-// finalizes it started to reach the store. It is the middle of four windows
-// that must nest, so a finalize is neither cut short by its own deadline
-// before the drain can wait for it nor killed by the supervisor while the
-// drain still holds the process open:
-//
-//	orchestrator.FinalizeTimeout (one finalize)
-//	  < FinalizeDrainWindow (the daemon's drain)
-//	  <= supervise.DefaultTermGrace (before SIGKILL)
-//	  < the CLI's daemon-restart budget
+// FinalizeDrainWindow bounds the admission daemon's warning about a slow
+// finalizer. The local runtime still joins that finalizer before closing its
+// store. The supervisor's termination grace must outlast this window.
 //
 // Health probes run every 2s with a 3s timeout. A failed probe needs three
 // samples and 60s without heartbeat progress before replacement; continuous

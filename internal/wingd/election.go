@@ -67,7 +67,14 @@ func LockHeld(home string) (bool, error) {
 }
 
 func (d *Daemon) bindListener() (net.Listener, error) {
-	return bindSocket(d.layout.sock)
+	return d.bind(d.layout.sock)
+}
+
+func (d *Daemon) bind(path string) (net.Listener, error) {
+	if d.listen != nil {
+		return d.listen(path)
+	}
+	return bindSocket(path)
 }
 
 func bindSocket(path string) (net.Listener, error) {
