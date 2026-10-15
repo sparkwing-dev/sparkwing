@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -116,7 +117,8 @@ type Server struct {
 
 	// safety: names this process in the cron tick lease and on each recorded
 	// tick, so an operator can tell which controller evaluated.
-	cronHolder string
+	cronHolder  string
+	leaseHolder string
 
 	// safety: the cron evaluator's clock, so a test can resolve a due
 	// instant without waiting a minute for one. Nil reads time.Now.
@@ -181,6 +183,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		runnerPresence:      newRunnerPresenceRegistry(),
 		runnerHeartbeats:    newRunnerHeartbeatRegistry(),
 		cronHolder:          defaultCronHolder(),
+		leaseHolder:         rand.Text(),
 		requestBudget:       newPrincipalBudget(RequestBudget{}),
 		idleClaimPoll:       DefaultMaxIdleClaimPoll,
 		downloadFree:        DefaultTeamDailyDownloadFreeBytes,
@@ -1235,6 +1238,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	}
 
 	s.loadEgressUsage(ctx)
+	s.reconcileOwnedRuns(ctx)
 
 	go s.runReaper(ctx, 10*time.Second)
 	go s.runCreditSampler(ctx, creditSampleInterval)
@@ -1362,6 +1366,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			s.sweepEgressUsage(ctx)
 			s.pruneOutputsWithoutStoragePass(ctx, time.Now())
 			s.reapLeased(ctx)
+			s.reconcileOwnedRuns(ctx)
 			s.sampleOperationalSeries(ctx)
 		}
 	}

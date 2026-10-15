@@ -148,8 +148,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).ReapExpiredNodeClaims": "clears every team's lapsed node claims in one locked pass; each write names a node " +
 		"its own scan selected",
 
-	"(*Store).PruneRunsOlderThan": "the run retention window is the deployment's, so the prune finds every team's expired " +
-		"runs",
 	"(*Store).PruneEgressUsage": "drops every team's egress months past the window, which is a deployment-wide retention",
 	"(*Store).ExpireSessions":   "the identity prune deletes every team's expired sessions",
 	"(*Store).sweepTable": "the retention sweep deletes every team's events and node metrics past the window that the " +

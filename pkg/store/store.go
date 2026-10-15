@@ -1373,41 +1373,6 @@ UNION ALL SELECT 1 FROM triggers WHERE team = ? AND id = ? LIMIT 1`,
 	return tx.Commit()
 }
 
-// PruneRunsOlderThan deletes terminal runs finished before cutoff, falling back
-// to start time when no finish time is recorded. It returns only deleted ids,
-// including on failure, so callers can purge their log files and cache blobs.
-func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error) {
-	rows, err := s.query(ctx,
-		`SELECT id, team FROM runs
-		   WHERE COALESCE(finished_at, started_at) < ?
-		     AND `+runTerminalIn,
-		cutoff.UnixNano())
-	if err != nil {
-		return nil, err
-	}
-	var ids []string
-	teams := map[string]Team{}
-	for rows.Next() {
-		var id, team string
-		if err := rows.Scan(&id, &team); err != nil {
-			return nil, errors.Join(err, rows.Close())
-		}
-		ids = append(ids, id)
-		teams[id] = Team(team)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return nil, err
-	}
-	var deleted []string
-	for _, id := range ids {
-		if err := (&Tenant{s: s, team: teams[id]}).DeleteRun(ctx, id); err != nil {
-			return deleted, err
-		}
-		deleted = append(deleted, id)
-	}
-	return deleted, nil
-}
-
 type rowScanner interface {
 	Scan(dest ...any) error
 }

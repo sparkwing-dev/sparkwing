@@ -105,8 +105,29 @@ Log subjects expose identity only, without object prefixes, segment keys or
 signing authority. This reader does not write log persistence. The controller's
 `RunDetail` adapter projects seals through `runspec.DisplayRequest` or
 `DisplaySpec`, uses the destination row's retry lineage and omits private hashes,
-bearers and execution declarations. Version-policy notices still require the
-engine owner's integration.
+bearers and execution declarations. `EngineController.VersionPolicy` supplies
+read-time policy through the engine owner. `SignedEngineVersionPolicy` loads the
+verified index, preserves fallback warnings, and evaluates the accepted engine
+version. Active revocation/minimum errors become enforcement notices on stored
+runs. Other policy failures discard the response instead of returning partial
+status. A run without an accepted engine needs no version lookup.
+
+`EngineController.Compatibility` looks up the exact release in verified metadata
+and delegates calendar arithmetic to `controllerwire.CompatibilityFor`. Execution
+eligibility does not change that release's API guarantee. Missing configuration,
+failed index reads and unknown releases return errors. The engine index/evaluation
+and wire calendar helper remain their owners' runtime integrations.
+
+The controller calls `Operator.ReconcileControllerRuns` on startup and each
+maintenance tick under `controller.owner`. It pages across all teams and renews
+the exact fence between full pages. Election, renewal or reconciliation failure
+stops the pass. Every Server has a random instance lease identity, separate from
+the hostname displayed in schedule history. Another process on the same machine
+cannot reuse that holder's live fence.
+
+Final run pruning uses `Operator.MaintainRetention`. The unleased
+`Store.PruneRunsOlderThan` API is removed. Finish time controls eligibility, and
+a failed pass rolls back every removal and discards its result counters.
 
 `Tenant.ReleaseSourceCredential` accepts C2's authorized authority reference and
 route target. In one write transaction it reloads ancestry, locks the owner, run

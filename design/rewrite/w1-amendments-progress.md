@@ -1,10 +1,89 @@
 # W1 amendment handoff
 
-Continuation of b96641913. W1 is incomplete. The index is clean. The lead owns
+Continuation of 2e30bb891. W1 is incomplete. The lead owns
 commits, independent review and delivery pipelines. W1b implementation files
 were left alone.
 
 ## Latest continuation
+
+Implemented the controller's compatibility and version-notice adapters. The
+server-owned SignedEngineVersionPolicy supplies verified metadata. It calls the existing engine index, policy and evaluator contracts and
+controllerwire.CompatibilityFor. Compatibility uses the exact release and never
+applies execution eligibility. Status uses the accepted engine version, retains
+fallback warnings and displays active revocation/minimum errors as enforcement
+notices. Missing configuration and other policy failures return an error with
+no partial detail. Unplanned runs need no policy lookup.
+
+The engine and wire owners still have stub bodies, so those boundaries use
+contract fakes. No signature verification, calendar calculation or version
+ordering was duplicated. Production wiring must install
+SignedEngineVersionPolicy with the engine resolver. The helper and engine
+implementation are still real-integration points. Returning an error for an
+unavailable status-policy lookup is the adapter's explicit choice because the
+response cannot assert that no signed warning exists. The lead should ratify
+that behavior.
+
+Connected controller-owned recovery to Server startup and the existing
+maintenance tick. The pass elects controller.owner, walks all bounded pages,
+renews the exact fence between full pages and stops on any failed election,
+renewal or reconciliation. A real-store proof resumes a persisted controller
+run and emits one completion event. Fakes test pagination and committed-prefix
+errors without creating another reconciliation implementation.
+
+The invariant is that a different controller instance cannot reuse an elected
+holder's live fence, including two instances on the same machine. A real-store
+regression ran red: the second instance finished the first instance's run
+because both used the hostname. Server now creates a random leaseHolder once.
+Schedule history keeps its existing hostname. The reaper uses the same instance
+identity, and its overlap test no longer supplies artificial distinct holders.
+Property tests vary instance counts, holder strings and generations and verify
+that election or renewal loss stops the next page. This fixes identity at its
+source rather than adding a locking layer.
+
+Deleted Store.PruneRunsOlderThan and its obsolete tests and SQL-scope exemption:
+**110 legacy lines**, comprising 35 production, 73 test and 2 guard lines. The
+recent-finish and failure concerns now exercise MaintainRetention through final
+fixtures. The final failure test verifies whole-pass rollback after a later
+delete fails, then verifies a successful pass. The old concurrency-cache test
+for the deleted pruning entry point was retired. No other package called this
+API. RunReaperLeased remains in W1b's storage-lease file, which is unchanged.
+
+No native acceptance cell was enabled and no T1 inventory port is newly claimed.
+The two pruning test ports are from the retired API, outside that inventory.
+No other area's contract changed. The existing slot, exact replay, source/eval,
+launcher-correlation and trusted provisioning gaps below remain open. W1b's
+billing, record, upload and log implementations remain separate integrations.
+StateStoreOld and legacy plan/claim/trigger/offer runtime callers remain.
+
+Verification uses the environment under Verification below. Whole-repository
+build and scoped vet pass. The W1 selection passes 242 top-level tests / 689
+cases without skips. Reproduce the selection from the two handoff file lists,
+adding maintenance_retention_test.go and retention_run_test.go. The controller
+selection ^TestEngine|^TestReaperRunsInOneOfTwoOverlappingControllers passes
+34 top-level tests / 57 cases. The six focused bucket measurement tests pass.
+Full match, controllerwire and acceptance package commands return success.
+Acceptance retains 2,995 native skeleton skips. OpenAPI drift and diff whitespace
+checks pass. commentcheck -base HEAD passes. The required -base main run reports
+three pre-existing violations in internal/controllerwire/contracts.go,
+pkg/store/state_materialize.go and pkg/store/state_result_records.go. Those files
+are unchanged in this session. No claim of a clean main-based check is made.
+
+Shared production files touched are pkg/controller/engine_contract.go,
+server.go and objectstore.go. New adapter files are engine_version.go and
+engine_recovery.go. Controller tests are engine_version_test.go,
+engine_recovery_test.go, engine_detail_test.go and reaper_lease_internal_test.go.
+Other source changes stay in pkg/store. C1 documents the adapters. The new adapter uses a private contract-fake seam because the engine owner's
+VerifiedIndex is opaque and its implementation is a stub. The concrete
+configured adapter and this one seam suffice. No policy decision or calendar
+rule is duplicated. No setting, environment variable, service, table, customer
+limit or compatibility alias was added.
+
+Native HTTP/api.sock, PostgreSQL interleavings, other operating systems, race and
+delivery pipelines remain lead checks. API snapshots need aggregate regeneration
+after integration. No Git writes or runtime Sparkwing invocation occurred after
+the required startup discovery. Scratch is removed before the final report.
+
+## Previous source-release continuation
 
 Continues b96641913 with a clean index. Added the C1 team source-credential release
 transaction and current-owner consent mutation. Release reloads authority and
@@ -307,13 +386,13 @@ ports remain in the W1 selection. Legacy API deletion is still required.
 | A1-20 | Member roots have no session parent. Ordinary delegation uses C2's validator contract and retains immutable award identity. Other trusted provisioning origins still lack transaction adapters. |
 | A1-21, A1-22 | Snapshot implementation covers persisted bearer/session and unit/log facts. Exact HTTP replay and the other credential classes remain open. |
 | A1-23 | Store-backed engine adapters have component evidence. W2 still owns actual route registration and process authority. |
-| A1-24 | AuthorityResolver and BindingChecker are implemented. Slot-key transport, transactional data edges and the final source-release adapter remain open. DataAccessChecker and record edges remain W1b work under the split. |
+| A1-24 | AuthorityResolver, BindingChecker and the source-release transaction are implemented. Slot-key transport and transactional data edges remain open. DataAccessChecker and record edges remain W1b work under the split. W2 source policy and transport remain integration work. |
 | A1-25 | Duplicate secret-opener declarations are removed. Existing secret preflight/identifier/transaction tests pass. Verified App delivery transport remains a W2 integration gap. |
 | A1-26 | Enrollment reader, capacity recheck and controller claim adapter pass with a registered-profile fake. Actual enrollment persistence/transport is still needed. |
 | A1-27, A1-28 | W1b owns accounting and payment settlement. Metered awards still fail closed. Joint lifecycle integration remains required. |
 | A1-29, A1-31, A1-32, A1-33, A1-34, A1-35 | W1b owns blob/record/upload/receipt/read-edge persistence, quota settlement and its retention. W7/W2 own physical storage and signed transport. Their files were left alone. W1's transactional record interfaces still use fakes. |
 | A1-38 | Claim payload and single-use exchange adapters pass. Launcher sync still needs the observation correlation contract below. |
-| A1-40 | Existing owner reaping/controller reconciliation tests pass. Local/here no-deadline claims are fixed. Runtime readiness/drain integration remains W8 work. |
+| A1-40 | Owner reaping/controller reconciliation tests pass. Startup and maintenance ticks invoke the controller recovery pass with instance-scoped lease identity. Local/here no-deadline claims are fixed. Runtime readiness/drain integration remains W8 work. |
 | A1-44 | Real W6 seal integration preserves intake classifications. Plan and expansion preflight tests remain green. |
 | A1-45 | W6 owns admission-class precedence. Store sealing calls the shared resolver; no competing precedence rule was added. |
 | A1-51 | No competing wire vocabulary or compatibility surface was added. W3/W8 runtime retirement, W4/W5 fixtures and W9 generation remain open. |
@@ -353,12 +432,13 @@ were not represented as implemented by W1.
 
 W2 must install the intake policy, plan secret opener and enrollment resolver,
 connect the real route verifier and finish slot/data/source integration.
-W8 must supply a working engine resolver to SignedRunnerAdmission. W3/W8/W9 must
-finish their host/runner callers. SyncLauncher and Compatibility still have
-declaration bodies. RunDetail reads persisted status but still needs signed
-version-policy notices. Remote Snapshot is implemented with the guard transport
-gap described above. The controller loops must invoke ReapUnits,
-ReconcileControllerRuns and completion delivery under their elected leases.
+W8 must supply a working engine resolver to SignedRunnerAdmission and
+SignedEngineVersionPolicy. W9 must implement CompatibilityFor. W3/W8/W9 must
+finish their host/runner callers. SyncLauncher still has a declaration body. Compatibility and RunDetail notices
+have controller adapters, with engine and wire runtime integration still open.
+Remote Snapshot is implemented with the guard transport gap described above.
+The controller loops invoke ReapUnits and ReconcileControllerRuns under their
+elected leases. Completion delivery still needs runtime wiring.
 
 StateStoreOld, legacy plan/claim/trigger writers and offer rounds still have
 runtime callers. Their removal remains W1 work after migrating or deleting those
