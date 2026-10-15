@@ -1352,11 +1352,13 @@ also checks exact deployment totals across pruning and reopening, with storage
 seconds excluded. The unused `Store.RunFinished` pruning query is removed.
 `Operator.CreditSettings`, `Operator.CreditRateTable` and
 `Operator.WarmCPUClassCores` own deployment price and policy reads.
-`Operator.SetCreditSettings` preserves the existing programmatic update rules.
-`Operator.SetOperatorCreditSettings` preserves the operator rule that a stored
-rate table cannot be replaced by a scalar update. Validation, ledger locking,
-settings serialization and rollback stay in their existing transaction owners.
-The five raw Store methods are removed with every caller.
+`Operator.SetCreditSettings` owns every billing-policy update. A stored rate
+table refuses a scalar price update before any setting changes. The separate
+`SetOperatorCreditSettings` writer and the reader override for older binaries
+are removed. Explicit tables supply their own prices. An absent table derives
+the default ladder from the scalar rate. Validation, ledger locking, settings
+serialization and rollback stay in their existing transaction owners.
+The raw Store methods are removed with every caller.
 `Store.GrantCredits`, `Store.ListCreditCharges` and `Store.AppendEventOnce` are
 also removed. Callers select a Tenant explicitly before grants, charge history
 or idempotent events. The tenant methods keep their existing behavior.

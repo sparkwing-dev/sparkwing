@@ -977,3 +977,19 @@ restart, atomic rollback and serialized table-update checks through that owner.
 `TestStoreDataUnmeteredSettlementNeedsNoCalculator` closes the shared settlement
 helper's dependency on a calculator for unmetered work. No native cell is newly
 marked complete by these caller migrations.
+
+## Billing-policy writer port
+
+The twelve `TestCreditSettings_*` value, table, scalar and concurrency tests
+removed from `pkg/controller/credits_test.go` use the final writer instead of
+the retired token fixture and team write route.
+`TestCreditSettingsHTTPPolicyWritesPersist` covers defaults, scalar updates,
+unnamed settings, case folding, list/object tables and installed-table refusal.
+`TestCreditSettingsHTTPInvalidBodiesLeavePolicyUnchanged` covers empty, null,
+duplicate-null, invalid range, unusable table and mixed-field rollback cases.
+Both exercise the registered Operator PUT route and real SQLite settings, with
+the existing C2 authentication fixture and a synthetic console/CSRF transport.
+They use no listener. The two store independent-writer and generated scalar
+properties cover serialization and all-or-nothing updates through the one writer.
+The old read-authorization test remains for W2's GET route migration. No native
+console/session authentication proof is claimed by this port.

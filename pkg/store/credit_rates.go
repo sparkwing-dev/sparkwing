@@ -226,15 +226,7 @@ func creditRateTable(raw string, rate int64) (CreditRateTable, error) {
 	if err := stored.Validate(); err != nil {
 		return nil, fmt.Errorf("stored rate table prices nothing usable: %w", err)
 	}
-	out := stored.Sorted()
-	// safety: the two settings name one price, so the scalar an operator or an
-	// older binary set wins for the class it prices.
-	for i := range out {
-		if out[i].Cores == CreditRateBaseClassCores {
-			out[i].MicroPerSecond = rate
-		}
-	}
-	return out, nil
+	return stored.Sorted(), nil
 }
 
 func addCreditRateTableWrites(writes map[string]string, table CreditRateTable) error {

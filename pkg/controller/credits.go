@@ -289,7 +289,7 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 	if err := decodeJSON(r, &body); err != nil {
 		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	}
-	settings, err := s.store.AsOperator().SetOperatorCreditSettings(r.Context(), body.update())
+	settings, err := s.store.AsOperator().SetCreditSettings(r.Context(), body.update())
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidCreditSetting) {
 			return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}

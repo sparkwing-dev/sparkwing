@@ -232,7 +232,7 @@ func spendStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time
 			return s, err
 		}
 	}
-	if s.BalanceMicro, err = balanceMicroTx(ctx, q, team); err != nil {
+	if s.BalanceMicro, err = creditBalanceTx(ctx, q, team); err != nil {
 		return s, err
 	}
 	ceiling, daily, rung := int64(NewSpendCeilingCents), int64(NewDailyCapCents), int64(0)
@@ -264,14 +264,6 @@ func spendStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time
 		s.CreditLimitMicro = 2 * s.RungMicro
 	}
 	return s, nil
-}
-
-func balanceMicroTx(ctx context.Context, q rowQuerier, team Team) (int64, error) {
-	var granted, charged sql.NullInt64
-	if err := q.QueryRowContext(ctx, creditBalanceSQL, string(team), string(team)).Scan(&granted, &charged); err != nil {
-		return 0, err
-	}
-	return granted.Int64 - charged.Int64, nil
 }
 
 func openCardChargeTx(ctx context.Context, q rowQuerier, team Team) (*CardCharge, error) {

@@ -157,8 +157,6 @@ func TestUnsetRateTablePricesTheDefaultLadder(t *testing.T) {
 	}
 }
 
-// The single rate setting is the four-core price, so a binary that reads only
-// that setting bills a four-core node at the table's own figure.
 func TestSetRateTableWritesTheFourCorePriceToTheSingleRate(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
@@ -175,15 +173,15 @@ func TestSetRateTableWritesTheFourCorePriceToTheSingleRate(t *testing.T) {
 	}
 
 	single := int64(21_000)
-	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{RateMicroPerSecond: &single}); err != nil {
-		t.Fatalf("set the single rate: %v", err)
+	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{RateMicroPerSecond: &single}); !errors.Is(err, store.ErrInvalidCreditSetting) {
+		t.Fatalf("scalar replaced an installed table: %v", err)
 	}
 	table, err := s.AsOperator().CreditRateTable(ctx)
 	if err != nil {
 		t.Fatalf("rate table: %v", err)
 	}
-	if got := table.RateFor(4); got != 21_000 {
-		t.Fatalf("four-core class = %d, want the single rate 21000", got)
+	if got := table.RateFor(4); got != 20_000 {
+		t.Fatalf("four-core class = %d, want the installed table price 20000", got)
 	}
 	if got := table.RateFor(8); got != 36_667 {
 		t.Fatalf("eight-core class = %d, want the table's 36667", got)

@@ -120,10 +120,11 @@ report counted only because the reaper had not run yet.
 Grant requests use `Tenant.RecordCreditGrant`. Its raw Store twin is removed.
 Deployment price and policy reads use `Operator.CreditSettings`,
 `Operator.CreditRateTable` and `Operator.WarmCPUClassCores`.
-Rate-table writes use `Operator.SetCreditSettings` with `CreditSettingsUpdate.RateTable`.
-The operator-facing setter is `Operator.SetOperatorCreditSettings`, which
-preserves a stored table against a scalar override. The raw Store methods are
-removed. The transaction owners, defaults, validation and prices are unchanged.
+Billing-policy writes use `Operator.SetCreditSettings`. Once a table is stored,
+change prices through `CreditSettingsUpdate.RateTable`. A scalar update is
+refused before any sibling settings change. An absent table derives the default
+ladder from the scalar rate. The separate `SetOperatorCreditSettings` writer
+and the reader override for older binaries are removed.
 `Store.GrantCredits`, `Store.ListCreditCharges` and `Store.AppendEventOnce` are
 removed too. Each caller must select a Tenant for its grants, charge history
 and idempotent events.

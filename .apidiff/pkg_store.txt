@@ -1787,9 +1787,6 @@ func (o *Operator) SeedRunRetention(ctx context.Context, days int64) (bool, erro
 func (o *Operator) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) (_ CreditSettings, err error)
 func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, installation int64, suspended bool, now time.Time) error
 func (o *Operator) SetNodeAttention(ctx context.Context, updates []NodeAttention) error
-func (o *Operator) SetOperatorCreditSettings(
-	ctx context.Context, up CreditSettingsUpdate,
-) (_ CreditSettings, err error)
 func (o *Operator) SetStorageSettings(ctx context.Context, in StorageSettings) error
 func (o *Operator) SettleCardPayment(ctx context.Context, p CardPayment, now time.Time) (created bool, warned *WarnedCardPayment, err error)
 func (o *Operator) StorageSettings(ctx context.Context) (StorageSettings, error)

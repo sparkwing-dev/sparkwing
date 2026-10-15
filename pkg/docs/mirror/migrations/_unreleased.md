@@ -1579,7 +1579,7 @@ cannot commit, including a zero-byte ticket.
 ## Credit persistence uses explicit handles
 
 Deployment billing settings now use `store.AsOperator()`. This includes
-`CreditSettings`, `SetCreditSettings`, `SetOperatorCreditSettings`,
+`CreditSettings`, `SetCreditSettings`,
 `CreditRateTable` and `WarmCPUClassCores`. Their raw Store methods are removed.
 The settings, validation and update rules are unchanged.
 
@@ -1657,3 +1657,12 @@ Token/Metadata response fields are removed. Controller integrations retain the
 existing `WithCredentialIssuer` and C1 `ProvisionPolicy` transaction boundary.
 Missing origin policy refuses with `unavailable`. Production enrollment and
 console-origin persistence must be provided before enabling those flows.
+
+## Billing policy writer
+
+Replace `Operator.SetOperatorCreditSettings` with `Operator.SetCreditSettings`.
+Once a rate table is installed, use `CreditSettingsUpdate.RateTable` to change
+prices. A scalar `RateMicroPerSecond` update is refused and leaves every field
+in the request unchanged. Without an installed table, the scalar still prices
+the four-core entry of the default ladder. Stored tables supply their own prices
+and no longer accept a reader override from an older scalar setting.
