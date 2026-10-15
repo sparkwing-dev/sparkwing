@@ -616,7 +616,7 @@ The exact source spelling is retained in the first column, including `/metrics`,
 
 | Old route | Disposition | Final resource/path or C2 assumption | Destination scenario ID | Independent rule / unresolved right |
 |---|---|---|---|---|
-| `POST /api/v1/runs/{id}/oidc-token` | replaced | PolicyRouter uses `/api/v1/runs/{run}/oidc-token` with live run-bound oidc.mint authority. W2 component signing/client tests pass against committed-fact fakes. C1 ReadOIDCFacts and native integration remain required. | `credentials-matrix-node-child-slot` | OIDC |
+| `POST /api/v1/runs/{id}/oidc-token` | rename | PolicyRouter uses `/api/v1/runs/{run}/oidc-token` with live run-bound oidc.mint authority. W2 component signing/client tests pass against committed-fact fakes. C1 ReadOIDCFacts and native integration remain required. | `credentials-matrix-node-child-slot` | OIDC |
 | `POST /api/v1/runs/{id}/source-credential` | unresolved | Source release survives. C2 names its final path. | `credentials-matrix-node-child-slot` | SOURCE |
 
 ### Plan acceptance

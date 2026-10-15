@@ -1215,7 +1215,7 @@ cell or production C1 identity projection is claimed complete by this port.
 ## W2 concurrency transport cut
 
 TestObserveSlotMapsMissingHolder and TestHeartbeatSlotMapsLostOwnership move to
-pkg/controller/client/concurrency_test.go:TestConcurrencyClientDomainErrors.
+`pkg/controller/client/concurrency_test.go:TestConcurrencyClientDomainErrors`.
 The tests now use in-process transport and canonical errors. They preserve
 errors.Is for the store sentinels and errors.As for apierr.Error. Untyped legacy
 error bodies cannot become lost-ownership results. TestConcurrencyClientDistinguishesAdmissionFromRateLimits
@@ -1460,3 +1460,47 @@ link-persistence success is claimed by the component ports.
 The remaining token/claim helper declarations support other unported fixtures.
 The cross-run, identity, team and log fixtures still need their final ports.
 No native cell, scenario catalog, Harness or boundary registry changed.
+
+## W2 identity and team HTTP fixture ports
+
+The 16 tests in `pkg/controller/identity_signin_test.go`, 14 tests in
+`identity_team_test.go` and five tests in `identity_link_test.go` are removed.
+The three files lose 1,019 lines. Their account-response and shared team fixture
+declarations move into `identity_fixture_test.go`, because other retained
+integration fixtures use them. The unused license splitter is removed there.
+
+| Retired HTTP assertions | Final evidence and remaining integration |
+| --- | --- |
+| Google sign-in, repeated sign-in, recycled email and provider subject selection | `TestGoogleOAuthHTTPSubjectAndProofProperty` verifies signed Google ID tokens through the real OAuth handler and real SQLite sessions. Two existing accounts share an email and have distinct provider subjects. Arbitrary names never choose the account. Fresh session presentations and identity are checked. New-account admission, personal-space creation and slug collisions remain in W1's `TestIdentitySignInCreatesOnePersonalSpace`, `TestIdentitySecondSubjectFromTheSameProviderGetsItsOwnAccount` and `TestIdentityConcurrentFirstSignInsShareALocalPart`. |
+| Unverified Google email, another flow's verifier, redirect allowlist | The Google property refuses unverified signed claims and unrelated PKCE verifiers without changing session state. `TestOAuthHTTPProviderAndStoreRefusals` and `TestOAuthHTTPProofProperty` retain redirect and browser-proof refusal. |
+| Public capabilities and unusable/tampered licenses | `TestOAuthHTTPLicenseControlsPublicProviders` checks both providers through real HTTP registration for absent, valid, expired, wrong-key, featureless, changed-signature and changed-payload licenses. Invalid licenses offer no provider and refuse OAuth start before provider I/O. |
+| Roleless services, unknown sessions, lost license and token-parented sessions | `TestAccountRolelessHTTPKeepsOnlyAccountAuthorityProperty` permits account reads and refuses services, members and runners despite caller team headers. Its snapshot is fake. `TestSessionPolicyHTTPRefusals`, `TestSessionRoutePreservesCapabilityScopeProperty` and `TestLoginHTTPAccountCapabilitySession` retain real session, scope, digest and license checks. W1 still supplies durable roleless sessions. |
+| Team creation, duplicate/reserved slugs and account team cap | `TestAccountMutationHTTPIdentityProperty`, `TestAccountMutationHTTPInputAndMissingWriter` and `TestAccountTeamHTTPTransactionGuards` retain authenticated identity, canonical slugs, exact transaction forwarding and safe refusals. Account writers are fakes. W1 retains slug collision, account-cap and atomic owner/session-selection requirements. |
+| Invitation creation, matching email, replay/expiry and team switching | `TestTeamWriteHTTPAuthorityProperty`, `TestAccountReadHTTPIdentityProperty`, `TestAccountMutationHTTPIdentityProperty` and `TestAccountTeamHTTPTransactionGuards` retain authority forwarding, invitation visibility and committing-writer error propagation. Closed invitations now use canonical 409. W1's invitation transaction must prove verified-email matching, one-use state and atomic membership/session selection. |
+| Reader/editor restrictions, role changes, last owner, tenant boundary and demotion | `TestAccountMembershipHTTPCurrentRoleProperty` uses real SQLite authentication and binding checks for owner/editor/reader grants, then a fake committing writer. `TestAuthorityMutationHTTPStoreGuards`, `TestAuthorityMemberDirectoryHTTP`, `TestTeamWriteHTTPAuthorityProperty` and `TestCredentialMemberHTTPMembershipAndSessionLifecycle` retain last-owner conflicts, current role, tenant and demotion checks. Last-owner refusal is canonical 409. |
+| Machine root scope, owner revocation, reader/name refusal and per-team cap | Existing `TestRootProvisioningHTTPAuthorityProperty`, `TestRootProvisioningHTTPInput`, `TestRootProvisioningHTTPOrigin`, `TestAuthorityMutationHTTP` and the member lifecycle property replace the retired combined `/team/tokens` fixture. Enrollment and inventory writers remain fakes. W1 still must prove registration caps/races, ownership, origin invalidation and rotation persistence. |
+| Removed member's personal-team fallback and last-team removal | The roleless property preserves account-only policy. W1's `TestIdentityLastOwnerCannotLeaveAndAMemberKeepsTheirTeams` and `TestIdentityUserWithNoTeamGetsAFreshSpace` retain fallback and durable session-selection requirements. The C2 snapshot does not prove their persistence. |
+| Linking a provider with another address, identity ownership conflicts and recent sign-in | `TestIdentityLinkHTTPAddressDoesNotSelectAccountProperty`, `TestIdentityLinkHTTPCommittedIdentityConflicts`, `TestIdentityLinkHTTPCommitsVerifiedIdentityOnce` and `TestIdentityLinkHTTPRefusals` retain exact account/provider/subject handoff, cross-account refusal, one-use transport and recent-sign-in checks. The link writer is fake. |
+| Unlinking the last method, reauthentication, future sign-in and retained App installation | `TestAccountUnlinkHTTPPreservesLastMethodAndReauthenticationRefusals` checks canonical reasons and unchanged real session state on writer refusal. `TestAccountMutationHTTPIdentityProperty` checks exact unlink authority. W1's `TestUnlinkIdentityKeepsTheLastSignInMethod` and `TestUnlinkedSignInNoLongerReachesTheAccount` retain durable method/session effects. App installation retention remains an integration obligation. |
+
+The three W1 signup tests selected in the preceding continuation still fail with
+an admission foreign-key error. Removing the explicit contract snapshot from
+`TestCredentialStartedClaimHTTPConsumesContractAttempt` still makes its first
+post-start annotation fail with 401. The fake-backed ports do not close either
+integration gap. Cross-run and log fixtures remain pending the contracts listed
+in `../W2-identity-ports-handoff.md`. No native matrix cell is newly completed.
+
+The duplicate controller S3 log presigner and its private client are deleted.
+`TestS3LogSegmentURLsSignTheSizeAndMD5` retires with that signer. W7's
+`TestS3LogSigningBindsCreateOnlyHeader` and `TestS3LogSigningRejectsBeforeSigning`
+check the final immutable-slot signer. Upload bytes are checked after transfer
+by `TestLogUploadReplayVerifiesExactObject` and `TestLogUploadReplayRefusals`.
+The legacy `TestDiskLogSegmentURLsAcceptOnlyTheSignedBytes` is replaced by
+`TestSignedLogKeyCannotBeReplaced` and `TestDataStorageSignedFilesystemRoutes`
+through actual controller transfer registration, plus the shared filesystem
+tagged-log round trip and retry tests. Batch signing no longer binds the future
+payload to MD5. Exact stored SHA-256 and size precede record commit.
+The controller's duplicate log-limit constants are removed, and the retained
+deletion delay and legacy fixture assertions use `internal/limits` values.
+Final log-signing/verification HTTP composition remains open. These signer
+ports do not prove a final controller log mutation or native log-tail cell.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -166,7 +167,7 @@ var teamPurgeDelay = 2 * tenantCacheTTL
 // verified by its signature alone and writes into the team's storage until it
 // expires, so the cache tree and logs are deleted once more after the
 // longest-lived of them has lapsed.
-const teamRecheckDelay = logSegmentURLTTL + time.Hour
+const teamRecheckDelay = limits.LogUploadURLTTL + time.Hour
 
 // safety: A stopped replica keeps a deletion lease only until another can resume it.
 const teamDeletionLease = 5 * time.Minute

@@ -22,13 +22,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
-
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -476,9 +473,9 @@ func (f logSegmentFixture) sign(t *testing.T, bearer, nodeID string, n int, body
 func TestLogSegmentsRefuseSegmentsPastTheNodeCap(t *testing.T) {
 	f := newLogSegmentFixture(t)
 	tok := f.claim(t, "a", store.ClaimTokenWork)
-	chunk := bytes.Repeat([]byte{'x'}, maxLogSegmentBytes)
+	chunk := bytes.Repeat([]byte{'x'}, int(limits.LogSegmentUploadBytes))
 	var n int
-	for stored := int64(0); stored+maxLogSegmentBytes <= maxNodeLogStoredBytes; stored += maxLogSegmentBytes {
+	for stored := int64(0); stored+limits.LogSegmentUploadBytes <= limits.StoredAttemptLogBytes; stored += limits.LogSegmentUploadBytes {
 		n++
 		chunk[0] = byte(n)
 		if code, _ := f.sign(t, tok, "a", n, chunk); code != http.StatusOK {
@@ -487,76 +484,10 @@ func TestLogSegmentsRefuseSegmentsPastTheNodeCap(t *testing.T) {
 	}
 	chunk[0] = byte(n + 1)
 	if code, _ := f.sign(t, tok, "a", n+1, chunk); code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("a segment past the %d-byte cap: %d, want 413", maxNodeLogStoredBytes, code)
+		t.Fatalf("a segment past the %d-byte cap: %d, want 413", limits.StoredAttemptLogBytes, code)
 	}
-	if rec, err := f.st.LatestNodeLog(t.Context(), store.DefaultTeam, "run-d", "a"); err != nil || rec.StoredBytes > maxNodeLogStoredBytes {
+	if rec, err := f.st.LatestNodeLog(t.Context(), store.DefaultTeam, "run-d", "a"); err != nil || rec.StoredBytes > limits.StoredAttemptLogBytes {
 		t.Fatalf("record = %+v, %v; want at most the cap stored", rec, err)
-	}
-}
-
-// A disk URL accepts only the size and MD5 it was signed for, and a URL
-// whose size or digest was edited is no URL at all.
-func TestDiskLogSegmentURLsAcceptOnlyTheSignedBytes(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	body := []byte("signed segment bytes")
-	code, grant := f.sign(t, tok, "a", 1, body)
-	if code != http.StatusOK || !strings.HasPrefix(grant.URL, "http://example.com/") {
-		t.Fatalf("sign: %d %+v", code, grant)
-	}
-	put := func(u string, payload []byte) int {
-		t.Helper()
-		u = strings.Replace(u, "http://example.com", f.url, 1)
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, u, bytes.NewReader(payload))
-		if err != nil {
-			t.Fatal(err)
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = resp.Body.Close()
-		return resp.StatusCode
-	}
-	if code := put(grant.URL, []byte("signed segment BYTES")); code != http.StatusBadRequest {
-		t.Fatalf("other bytes of the signed size: %d, want 400", code)
-	}
-	if code := put(grant.URL, append(bytes.Clone(body), '!')); code != http.StatusBadRequest {
-		t.Fatalf("a longer body: %d, want 400", code)
-	}
-	if code := put(strings.Replace(grant.URL, "size=20", "size=21", 1), append(bytes.Clone(body), '!')); code != http.StatusForbidden {
-		t.Fatalf("an edited size: %d, want 403", code)
-	}
-	if code := put(grant.URL, body); code != http.StatusOK {
-		t.Fatalf("the signed bytes: %d, want 200", code)
-	}
-}
-
-// An S3 URL signs Content-Length and Content-MD5, so the store refuses any
-// other body.
-func TestS3LogSegmentURLsSignTheSizeAndMD5(t *testing.T) {
-	client := s3.New(s3.Options{
-		Region: "us-west-2", BaseEndpoint: aws.String("https://s3.example.test"), UsePathStyle: true,
-		Credentials: credentials.NewStaticCredentialsProvider("test", "test", ""),
-	})
-	srv := New(nil, nil).WithS3Logs(client, "bucket", "cache")
-	md := md5.Sum([]byte("segment"))
-	digest := base64.StdEncoding.EncodeToString(md[:])
-	raw, headers, err := srv.logObjects().presignPut(t.Context(), httptest.NewRequest(http.MethodPost, "/", nil),
-		store.DefaultTeam, "logs/r90/teams/default/runs/r/jobs/n/a1-g1/seg-000001.ndjson.gz", 7, digest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	signed := strings.Split(u.Query().Get("X-Amz-SignedHeaders"), ";")
-	if !slices.Contains(signed, "content-length") || !slices.Contains(signed, "content-md5") {
-		t.Fatalf("signed headers = %q, want content-length and content-md5", signed)
-	}
-	if headers["Content-Md5"] != digest && headers["Content-MD5"] != digest {
-		t.Fatalf("headers = %v, want the Content-MD5 the writer must send", headers)
 	}
 }
 
@@ -682,7 +613,7 @@ func TestARefusedLogChargeStaysRefusedOnRetry(t *testing.T) {
 	}
 	seg := store.NodeLogSegment{N: 1, StoredBytes: 100, MD5: "m", SHA256: "s"}
 	for try := 1; try <= 2; try++ {
-		if err := f.st.SignNodeLogSegment(ctx, rec, seg, maxNodeLogStoredBytes, true, now); err == nil {
+		if err := f.st.SignNodeLogSegment(ctx, rec, seg, limits.StoredAttemptLogBytes, true, now); err == nil {
 			t.Fatalf("charge %d for a team with no storage succeeded", try)
 		}
 		got, err := f.st.GetNodeLog(ctx, rec.Team, rec.RunID, rec.NodeID, rec.Attempt, rec.Generation)
