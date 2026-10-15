@@ -44,12 +44,13 @@ func TestMaskEventPayload_CoversEmbeddedSecrets(t *testing.T) {
 	}
 }
 
-func TestMaskEventPayload_NoOpWithoutSecrets(t *testing.T) {
+func TestMaskEventPayload_CanonicalWithoutSecrets(t *testing.T) {
 	payload := []byte(`{"child_run_id":"c1","args":{"env":"prod"}}`)
-	if got := secrets.NewMasker().MaskJSON(payload); string(got) != string(payload) {
+	want := `{"args":{"env":"prod"},"child_run_id":"c1"}`
+	if got := secrets.NewMasker().MaskJSON(payload); string(got) != want {
 		t.Errorf("payload changed: %s", got)
 	}
-	if got := (*secrets.Masker)(nil).MaskJSON(payload); string(got) != string(payload) {
+	if got := (*secrets.Masker)(nil).MaskJSON(payload); string(got) != want {
 		t.Errorf("nil masker changed the payload: %s", got)
 	}
 }
@@ -144,12 +145,15 @@ func TestEscapedChildEventSecretsStayMaskedInStoreAndReaderHTTP(t *testing.T) {
 	}
 }
 
-func TestMaskEventPayloadPreservesUnchangedAndPlainFallback(t *testing.T) {
+func TestMaskEventPayloadPreservesCanonicalAndPlainFallback(t *testing.T) {
 	m := secrets.NewMasker()
 	m.Register("plain-private-token")
-	for _, raw := range []string{`{ "value": 9007199254740993, "safe": true }`, "ordinary plain bytes"} {
-		if got := m.MaskJSON([]byte(raw)); string(got) != raw {
-			t.Fatalf("unchanged payload rewritten: %s", got)
+	for raw, want := range map[string]string{
+		`{ "value": 9007199254740993, "safe": true }`: `{"safe":true,"value":9007199254740993}`,
+		"ordinary plain bytes":                        "ordinary plain bytes",
+	} {
+		if got := m.MaskJSON([]byte(raw)); string(got) != want {
+			t.Fatalf("payload = %s, want %s", got, want)
 		}
 	}
 	if got := string(m.MaskJSON([]byte("invalid JSON plain-private-token"))); got != "invalid JSON ***" {

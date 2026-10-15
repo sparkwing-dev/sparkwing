@@ -3,9 +3,9 @@ package nodehost
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
-	"strings"
+	"strconv"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -145,43 +145,45 @@ func (h maskHandler) attr(a slog.Attr) slog.Attr {
 		}
 		return slog.Group(a.Key, masked...)
 	}
-	switch v.Kind() {
-	case slog.KindString:
-		return slog.String(a.Key, h.m.Mask(v.String()))
-	case slog.KindAny:
-		// safety: JSON text keeps structured content but loses object nesting, so downstream handlers
-		// cannot invoke the original value's encoders after masking.
-		return slog.String(a.Key, string(h.m.MaskJSON([]byte(renderMaskValue(v.Any())))))
-	default:
-		text := renderMaskValue(v.Any())
-		if masked := h.m.Mask(text); masked != text {
-			return slog.String(a.Key, masked)
-		}
-	}
-	return a
+	// safety: only masked strings reach downstream handlers, so formatting cannot expose another representation.
+	return slog.String(a.Key, h.render(v))
 }
 
-func renderMaskValue(value any) (text string) {
+func (h maskHandler) render(v slog.Value) (text string) {
 	const unrenderable = "!masked: unrenderable"
 	defer func() {
 		if recover() != nil {
-			text = unrenderable
+			text = h.m.Mask(unrenderable)
 		}
 	}()
-	if err, ok := value.(error); ok {
-		return err.Error()
+	switch v.Kind() {
+	case slog.KindString:
+		text = v.String()
+	case slog.KindBool:
+		text = strconv.FormatBool(v.Bool())
+	case slog.KindInt64:
+		text = strconv.FormatInt(v.Int64(), 10)
+	case slog.KindUint64:
+		text = strconv.FormatUint(v.Uint64(), 10)
+	case slog.KindFloat64:
+		text = strconv.FormatFloat(v.Float64(), 'g', -1, 64)
+	case slog.KindDuration:
+		text = v.Duration().String()
+	case slog.KindTime:
+		text = v.Time().Format(time.RFC3339Nano)
+	case slog.KindAny:
+		if err, ok := v.Any().(error); ok {
+			text = err.Error()
+			break
+		}
+		encoded, err := json.Marshal(v.Any())
+		if err != nil {
+			text = unrenderable
+			break
+		}
+		return string(h.m.MaskJSON(encoded))
+	default:
+		text = unrenderable
 	}
-	encoded, err := json.Marshal(value)
-	if err == nil {
-		return string(encoded)
-	}
-	if _, unsupported := err.(*json.UnsupportedTypeError); !unsupported {
-		return unrenderable
-	}
-	text = fmt.Sprintf("%+v", value)
-	// safety: fmt recovers method panics itself and embeds their payload in its output.
-	if strings.Contains(text, "%!v(PANIC=") {
-		return unrenderable
-	}
-	return text
+	return h.m.Mask(text)
 }

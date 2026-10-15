@@ -142,8 +142,8 @@ func (m *Masker) Mask(s string) string {
 }
 
 // MaskJSON masks raw's canonical encoding as text, so a value is found in a
-// key or a number, and in a string however it was escaped. Raw comes back as
-// it is when nothing matched. Masked JSON that no longer parses, such as a
+// key or a number, and in a string however it was escaped. It returns that
+// canonical text even when nothing matched. Masked JSON that no longer parses, such as a
 // masked number, comes back as {"masked_attrs": text}, so JSON in is JSON out.
 func (m *Masker) MaskJSON(raw []byte) []byte {
 	text, valid := string(raw), json.Valid(raw)
@@ -159,10 +159,7 @@ func (m *Masker) MaskJSON(raw []byte) []byte {
 		}
 	}
 	masked := m.Mask(text)
-	switch {
-	case masked == text:
-		return raw
-	case valid && !json.Valid([]byte(masked)):
+	if valid && !json.Valid([]byte(masked)) {
 		out, err := json.Marshal(map[string]string{"masked_attrs": masked})
 		if err != nil {
 			return []byte(`{"masked_attrs":"***"}`)

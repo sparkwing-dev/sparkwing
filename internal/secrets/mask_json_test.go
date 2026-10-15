@@ -35,7 +35,7 @@ func TestMaskJSONReachesKeysNumbersAndEscapes(t *testing.T) {
 		`{"s3cr3t":"ok","n":3}`:        `{"n":3,"***":"ok"}`,
 		`{"v":"s3cr3t","w":"a<b"}`:     `{"v":"***","w":"***"}`,
 		`{"pin":1234567}`:              `{"masked_attrs":"{\"pin\":***}"}`,
-		`{ "safe": 9007199254740993 }`: `{ "safe": 9007199254740993 }`,
+		`{ "safe": 9007199254740993 }`: `{"safe":9007199254740993}`,
 		`not json s3cr3t`:              `not json ***`,
 	} {
 		if got := string(m.MaskJSON([]byte(raw))); got != want {
@@ -45,6 +45,21 @@ func TestMaskJSONReachesKeysNumbersAndEscapes(t *testing.T) {
 	var nilMasker *Masker
 	if got := string(nilMasker.MaskJSON([]byte(`{"a":1}`))); got != `{"a":1}` {
 		t.Errorf("nil masker changed the payload: %s", got)
+	}
+}
+
+func TestMaskJSONReturnsCanonicalPayload(t *testing.T) {
+	for name, m := range map[string]*Masker{
+		"registered": newTestMasker("private-token"),
+		"empty":      NewMasker(),
+		"nil":        nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw := []byte(`{ "x": "private-token", "x": "healthy", "n": 9007199254740993 }`)
+			if got := string(m.MaskJSON(raw)); got != `{"n":9007199254740993,"x":"healthy"}` {
+				t.Fatalf("uninspected payload returned: %s", got)
+			}
+		})
 	}
 }
 
