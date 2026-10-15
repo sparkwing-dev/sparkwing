@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // ManifestVersion is the manifest format this package writes and reads.
@@ -29,38 +30,34 @@ const (
 	ReasonDropped      = "writer dropped lines"
 	ReasonUnsealed     = "writer did not seal"
 	ReasonStopped      = "node stopped before its log was finished"
-	// ReasonMigratedUnsealed marks a log exported from the logs service
-	// whose writer never numbered its lines, so nothing said it was whole.
-	ReasonMigratedUnsealed = "migrated without seal"
 )
 
 // Who sealed a log.
 const (
 	SealedByNode       = "node"
 	SealedByController = "controller"
-	// SealedByExport marks a log the logs service's export converted.
-	SealedByExport = "export"
 )
 
 // Manifest seals one node attempt's log: which segments it holds, what
 // each one covers and its digest, and whether the log is whole.
 type Manifest struct {
-	Version      int       `json:"version"`
-	Run          string    `json:"run"`
-	Node         string    `json:"node"`
-	Attempt      int64     `json:"attempt"`
-	Generation   int64     `json:"generation"`
-	Status       string    `json:"status"`
-	Reason       string    `json:"reason"`
-	SealedBy     string    `json:"sealed_by"`
-	SealedAt     time.Time `json:"sealed_at"`
-	FirstSeq     int64     `json:"first_seq"`
-	LastSeq      int64     `json:"last_seq"`
-	Lines        int64     `json:"lines"`
-	Bytes        int64     `json:"bytes"`
-	DroppedLines int64     `json:"dropped_lines"`
-	Gaps         []Gap     `json:"gaps"`
-	Segments     []Segment `json:"segments"`
+	Subject      *blob.LogSubject `json:"subject,omitempty"`
+	Version      int              `json:"version"`
+	Run          string           `json:"run,omitempty"`
+	Node         string           `json:"node,omitempty"`
+	Attempt      int64            `json:"attempt,omitempty"`
+	Generation   int64            `json:"generation,omitempty"`
+	Status       string           `json:"status"`
+	Reason       string           `json:"reason"`
+	SealedBy     string           `json:"sealed_by"`
+	SealedAt     time.Time        `json:"sealed_at"`
+	FirstSeq     int64            `json:"first_seq"`
+	LastSeq      int64            `json:"last_seq"`
+	Lines        int64            `json:"lines"`
+	Bytes        int64            `json:"bytes"`
+	DroppedLines int64            `json:"dropped_lines"`
+	Gaps         []Gap            `json:"gaps"`
+	Segments     []Segment        `json:"segments"`
 }
 
 // Segment is one uploaded segment object. Line numbers count the lines
@@ -141,7 +138,7 @@ const (
 // SealGrace is how long after a node finishes a reader waits for its
 // manifest before the controller seals the attempt as abandoned. A
 // writer whose claim ended may upload and seal for as long.
-const SealGrace = store.NodeLogSealGrace
+const SealGrace = limits.LogSealGrace
 
 // Completeness is a reader's verdict on one node's log. Message is the
 // synthetic line a reader renders after the log; it is empty when there

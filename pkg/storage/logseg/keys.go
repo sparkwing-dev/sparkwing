@@ -1,13 +1,11 @@
 package logseg
 
 import (
-	"cmp"
-	"context"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
@@ -64,6 +62,32 @@ func RunPrefix(class, team, runID string) (string, error) {
 	return ClassPrefix(class) + "teams/" + team + "/runs/" + runID + "/", nil
 }
 
+// SubjectPrefix separates job attempts from trigger, plan and eval units. Eval
+// keys retain both their own lease generation and the immutable source fence.
+func SubjectPrefix(class string, subject blob.LogSubject) (string, error) {
+	if err := subject.Validate(); err != nil {
+		return "", err
+	}
+	run, err := RunPrefix(class, subject.Team, subject.RunID)
+	if err != nil {
+		return "", err
+	}
+	if a := subject.Attempt; a != nil {
+		if err := storage.SafeRelPath(a.NodeID); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%sjobs/%s/a%d-g%d/", run, EscapeNode(a.NodeID), a.Attempt, a.Generation), nil
+	}
+	u := subject.Unit
+	if u.Kind == blob.LogEval {
+		if err := storage.SafeRelPath(u.Source.NodeID); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%sunits/eval/%s/s%d-g%d/", run, EscapeNode(u.Source.NodeID), u.Source.Generation, u.Generation), nil
+	}
+	return fmt.Sprintf("%sunits/%s/g%d/", run, u.Kind, u.Generation), nil
+}
+
 // AttemptPrefix is the key prefix of one node attempt's segments and
 // manifest. The node ID is escaped into one key segment: a hierarchical
 // ID such as build/linux becomes build_2flinux, and no two node IDs
@@ -98,81 +122,6 @@ func EscapeNode(nodeID string) string {
 		}
 	}
 	return b.String()
-}
-
-// UnescapeNode reverses [EscapeNode], and reports false for a segment
-// EscapeNode would not have written.
-func UnescapeNode(escaped string) (string, bool) {
-	var b strings.Builder
-	for i := 0; i < len(escaped); i++ {
-		if escaped[i] != '_' {
-			b.WriteByte(escaped[i])
-			continue
-		}
-		if i+2 >= len(escaped) {
-			return "", false
-		}
-		c, err := strconv.ParseUint(escaped[i+1:i+3], 16, 8)
-		if err != nil {
-			return "", false
-		}
-		b.WriteByte(byte(c))
-		i += 2
-	}
-	node := b.String()
-	return node, node != "" && EscapeNode(node) == escaped
-}
-
-// Attempt names one attempt directory under a node's prefix.
-type Attempt struct {
-	Prefix     string
-	NodeID     string
-	Attempt    int64
-	Generation int64
-}
-
-// FindAttempts lists every attempt of a run's logs under the given
-// retention classes, for logs no run store records, such as those
-// exported from the logs service. nodeID narrows the listing to one node
-// when set. The newest attempt of each node comes last among that node's.
-func FindAttempts(ctx context.Context, objs Objects, classes []string, team, runID, nodeID string) ([]Attempt, error) {
-	seen := map[string]bool{}
-	var out []Attempt
-	for _, class := range classes {
-		run, err := RunPrefix(class, team, runID)
-		if err != nil {
-			return nil, err
-		}
-		under := run
-		if nodeID != "" {
-			under += EscapeNode(nodeID) + "/"
-		}
-		keys, err := objs.List(ctx, under)
-		if err != nil {
-			return nil, err
-		}
-		for _, key := range keys {
-			parts := strings.Split(strings.TrimPrefix(key, run), "/")
-			if len(parts) != 3 {
-				continue
-			}
-			node, ok := UnescapeNode(parts[0])
-			var a Attempt
-			if _, err := fmt.Sscanf(parts[1], "a%d-g%d", &a.Attempt, &a.Generation); !ok || err != nil ||
-				fmt.Sprintf("a%d-g%d", a.Attempt, a.Generation) != parts[1] {
-				continue
-			}
-			a.NodeID, a.Prefix = node, run+parts[0]+"/"+parts[1]+"/"
-			if !seen[a.Prefix] {
-				seen[a.Prefix] = true
-				out = append(out, a)
-			}
-		}
-	}
-	slices.SortFunc(out, func(x, y Attempt) int {
-		return cmp.Or(strings.Compare(x.NodeID, y.NodeID), cmp.Compare(x.Attempt, y.Attempt), cmp.Compare(x.Generation, y.Generation))
-	})
-	return out, nil
 }
 
 // SegmentKey is segment n's key within an attempt prefix. Numbers are

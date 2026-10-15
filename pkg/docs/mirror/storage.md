@@ -1,7 +1,7 @@
 # Storage rewrite contract
 
-This page describes the target storage contract. The byte backends and
-artifact, binary and source-bundle clients implement it. Controller,
+This page describes the target storage contract. The byte backends,
+artifact, binary, source-bundle and tagged-log components implement it. Controller,
 tenant-store and host integration are still in progress. Working-tree
 triggers require an authorized storage binding and fail before upload or
 submission while that binding is absent.
@@ -53,5 +53,16 @@ See [Caching](caching.md) for authoring cache declarations.
 Logs use immutable segments with their own signed upload path. Log reads pass
 through the controller for exact egress accounting. They do not use the blob
 download path and remain readable when a team reaches its download cap.
+
+A log belongs to one job attempt or one trigger, plan or eval unit. Its
+generation fences both signing and segment commits. Eval logs retain a separate
+source-job generation. The uploader verifies bytes, uses batches of sixteen
+segment URLs and seals the committed segment list with a manifest.
+
+The reader uses authorized segment records, verifies each segment before sending
+its bytes and resumes at an uncompressed byte offset. It reports how many bytes
+it sent even when a later segment fails. Objects without a persisted log record
+do not establish a readable log. The tagged components still need controller
+and host bindings.
 
 <!-- design:end -->

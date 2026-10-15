@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Removed
+- **logs (Breaking):** removed reads of unrecorded exported log objects
+  The controller reads logs indexed by the store. Object listings no longer make an unrecorded log readable.
 - **storage (Breaking):** removed runner and launcher gitcache/package-proxy options, agent `gitcache`, controller cache URL announcements, and the CLI cache-health probe. Runners fetch source directly. Custom registry settings use `run.submit_env_allow`.
 - **runner (Breaking):** removed legacy shared binary transfers and cache-grant environment renewal
   Runners build into their machine's binary cache while the new record-backed storage client awaits host binding.

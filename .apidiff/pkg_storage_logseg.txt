@@ -1,17 +1,16 @@
 # pkg/storage/logseg
 
 func Assess(m *Manifest, node NodeProgress, now time.Time) Completeness
-type Attempt struct {
-	Prefix     string
-	NodeID     string
-	Attempt    int64
-	Generation int64
-}
 func AttemptPrefix(class, team, runID, nodeID string, attempt, generation int64) (string, error)
 func ClassDays(class string) (int, bool)
 const ClassFree = "r30"
 func ClassPrefix(class string) string
 const ClassStandard = "r90"
+type CommittedReader struct {
+	Records SegmentLookup
+	Objects Objects
+}
+func (r CommittedReader) Read(ctx context.Context, actor store.Actor, request blob.LogReadRequest, out io.Writer) (result ReadResult, err error)
 type Completeness struct {
 	State        string
 	Lines        int64
@@ -19,6 +18,14 @@ type Completeness struct {
 	Message      string
 }
 func (c Completeness) SyntheticLine() string
+type Data struct {
+	Subject    blob.LogSubject
+	Transport  blob.LogTransport
+	HTTPClient blob.HTTPClient
+	Records    SegmentRecorder
+	Actor      store.Actor
+}
+func (d Data) Read(ctx context.Context, offset int64, follow bool) (io.ReadCloser, error)
 type End struct {
 	Stopped bool
 }
@@ -26,7 +33,6 @@ var ErrBadManifest = errors.New("logseg: unreadable manifest")
 var ErrClosed = errors.New("logseg: the sink is closed")
 var ErrSealed = errors.New("logseg: the attempt already has a manifest")
 func EscapeNode(nodeID string) string
-func FindAttempts(ctx context.Context, objs Objects, classes []string, team, runID, nodeID string) ([]Attempt, error)
 type Gap struct {
 	From int64
 	To   int64
@@ -46,6 +52,7 @@ func (l *Log) Read(ctx context.Context, objs Objects, opts storage.ReadOpts) ([]
 func (l *Log) Segment(ctx context.Context, objs Objects, seg Segment) ([]byte, error)
 func (l *Log) Verify(ctx context.Context, objs Objects) error
 type Manifest struct {
+	Subject      *blob.LogSubject
 	Version      int
 	Run          string
 	Node         string
@@ -69,6 +76,7 @@ const ManifestName = "manifest.json"
 const ManifestVersion = 1
 const MaxNodeBytes int64 = 64 << 20
 func NewSink(ctx context.Context, up Uploader, opts Options) (*Sink, error)
+func NewSubjectUploader(data Data) (*SubjectUploader, error)
 const NoTeam = "_"
 type NodeProgress struct {
 	Started    bool
@@ -99,9 +107,13 @@ type Options struct {
 	Logger    *slog.Logger
 }
 func ParseManifest(raw []byte) (*Manifest, error)
+type ReadResult struct {
+	Bytes            int64
+	Complete         bool
+	IncompleteReason string
+}
 const ReasonByteCap = "byte cap"
 const ReasonDropped = "writer dropped lines"
-const ReasonMigratedUnsealed = "migrated without seal"
 const ReasonRunnerLost = "runner lost"
 const ReasonSequenceGap = "sequence gap"
 const ReasonStopped = "node stopped before its log was finished"
@@ -111,9 +123,8 @@ func RunPrefix(class, team, runID string) (string, error)
 func SealAbandoned(ctx context.Context, objs Objects, prefix string, base Manifest, reason string,
 	put func(ctx context.Context, key string, body []byte) error,
 ) (*Manifest, error)
-const SealGrace = store.NodeLogSealGrace
+const SealGrace = limits.LogSealGrace
 const SealedByController = "controller"
-const SealedByExport = "export"
 const SealedByNode = "node"
 type Segment struct {
 	N           int
@@ -127,7 +138,13 @@ type Segment struct {
 const SegmentBytes = 1 << 20
 const SegmentInterval = 10 * time.Second
 func SegmentKey(prefix string, n int) string
+type SegmentLookup interface {
+	ReadLogSegments(context.Context, store.Actor, blob.LogReadRequest) (store.LogSegments, error)
+}
 func SegmentNumber(prefix, key string) (int, bool)
+type SegmentRecorder interface {
+	RecordSegments(context.Context, store.SegmentCommit) error
+}
 type Sink struct {
 }
 func (s *Sink) Append(data []byte, stream string, first, last int64) error
@@ -142,8 +159,12 @@ const StateUnknown = "unknown"
 const StatusComplete = "complete"
 const StatusCutOff = "cut_off"
 const StatusIncomplete = "incomplete"
+func SubjectPrefix(class string, subject blob.LogSubject) (string, error)
+type SubjectUploader struct {
+}
+func (u *SubjectUploader) PutManifest(ctx context.Context, m Manifest) error
+func (u *SubjectUploader) PutSegment(ctx context.Context, seg Segment, body []byte) error
 const TruncationMarker = "[sparkwing] truncated: the node log reached its 64 MiB cap\n"
-func UnescapeNode(escaped string) (string, bool)
 type Uploader interface {
 	PutSegment(ctx context.Context, seg Segment, body []byte) error
 

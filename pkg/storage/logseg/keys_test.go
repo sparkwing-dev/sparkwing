@@ -1,7 +1,6 @@
 package logseg_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -54,31 +53,5 @@ func TestAttemptPrefixRefusesBadParts(t *testing.T) {
 	}
 	if _, err := logseg.AttemptPrefix(logseg.ClassStandard, logseg.NoTeam, "r", "n", 1, 0); err != nil {
 		t.Fatalf("teamless run refused: %v", err)
-	}
-}
-
-func TestFindAttemptsListsUnrecordedLogs(t *testing.T) {
-	objs := newMemObjects()
-	for _, a := range []struct {
-		class, node string
-		attempt     int64
-	}{{logseg.ClassStandard, "build/linux", 1}, {logseg.ClassStandard, "build/linux", 2}, {logseg.ClassFree, "test", 1}} {
-		p, err := logseg.AttemptPrefix(a.class, "acme", "run-1", a.node, a.attempt, 1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		objs.put(logseg.ManifestKey(p), []byte("{}"))
-	}
-	classes := []string{logseg.ClassStandard, logseg.ClassFree}
-	all, err := logseg.FindAttempts(t.Context(), objs, classes, "acme", "run-1", "")
-	if err != nil || len(all) != 3 || all[0].NodeID != "build/linux" || all[1].Attempt != 2 || all[2].NodeID != "test" {
-		t.Fatalf("attempts = %+v, %v", all, err)
-	}
-	one, err := logseg.FindAttempts(t.Context(), objs, classes, "acme", "run-1", "test")
-	if err != nil || len(one) != 1 || !strings.HasPrefix(one[0].Prefix, "logs/r30/") {
-		t.Fatalf("attempts of test = %+v, %v", one, err)
-	}
-	if node, ok := logseg.UnescapeNode(logseg.EscapeNode(".x/a_b")); !ok || node != ".x/a_b" {
-		t.Fatalf("UnescapeNode round trip = %q, %v", node, ok)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
@@ -26,7 +27,7 @@ type Objects interface {
 }
 
 // safety: a segment covers at most SegmentBytes of raw log plus one append, so anything larger is not a segment.
-const maxSegmentStored = 8 << 20
+const maxSegmentStored = limits.LogSegmentUploadBytes
 
 // Log is one node attempt's log as a reader finds it.
 type Log struct {
@@ -179,7 +180,7 @@ func decodeSegment(stored []byte, seg Segment) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: segment %d: %w", errBadSegment, seg.N, err)
 	}
-	if len(body) > maxSegmentStored {
+	if int64(len(body)) > maxSegmentStored {
 		return nil, fmt.Errorf("%w: segment %d decompresses past %d bytes", errBadSegment, seg.N, maxSegmentStored)
 	}
 	return body, nil
@@ -188,10 +189,16 @@ func decodeSegment(stored []byte, seg Segment) ([]byte, error) {
 func readObject(ctx context.Context, objs Objects, key string, limit int64) ([]byte, error) {
 	rc, err := objs.Get(ctx, key)
 	if err != nil {
+		if rc != nil {
+			err = errors.Join(err, rc.Close())
+		}
 		return nil, err
 	}
-	defer func() { _ = rc.Close() }()
+	if rc == nil {
+		return nil, fmt.Errorf("logseg: object store returned no reader for %s", key)
+	}
 	raw, err := io.ReadAll(io.LimitReader(rc, limit+1))
+	err = errors.Join(err, rc.Close())
 	if err != nil {
 		return nil, err
 	}

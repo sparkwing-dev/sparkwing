@@ -388,9 +388,7 @@ func TestHeartbeatsReportWhatAViewerWatches(t *testing.T) {
 	}
 }
 
-// A log the run store does not record reads and deletes like one a runner
-// wrote.
-func TestUnrecordedLogsReadAndDelete(t *testing.T) {
+func TestUnrecordedLogObjectsAreNotReadable(t *testing.T) {
 	f := newLogSegmentFixture(t)
 	ctx := t.Context()
 	objs := f.srv.logObjects()
@@ -414,10 +412,10 @@ func TestUnrecordedLogsReadAndDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	logs := f.srv.dashboardLogs(store.DefaultTeam)
-	if got, err := logs.Read(ctx, "run-d", "b", storage.ReadOpts{}); err != nil || string(got) != "exported line\n" {
+	if got, err := logs.Read(ctx, "run-d", "b", storage.ReadOpts{}); err != nil || len(got) != 0 {
 		t.Fatalf("read = %q, %v", got, err)
 	}
-	if run, err := logs.ReadRun(ctx, "run-d"); err != nil || !strings.Contains(string(run), "=== b ===\nexported line\n") {
+	if run, err := logs.ReadRun(ctx, "run-d"); err != nil || len(run) != 0 {
 		t.Fatalf("read run = %q, %v", run, err)
 	}
 	if code, raw := f.do(t, http.MethodDelete, "/api/v1/runs/run-d", f.admin(t), nil); code != http.StatusNoContent {
