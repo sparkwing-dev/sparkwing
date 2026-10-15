@@ -1196,21 +1196,29 @@ because the raw bearer is returned once.
 
 The response carries `capability`, `prefix`, `team`, `grants` and optional
 `expires_at`. Expiry is an RFC3339 timestamp. The dashboard sends its selected
-member grants to this route. The former member mint through
-`POST /api/v1/team/tokens` is removed. That legacy route still handles machine
-registration while the runner enrollment cutover is pending.
+member grants to this route. POST `/api/v1/team/tokens` is removed.
 
-- A **machine** token is for a runner. Its scopes are a subset of
-  `nodes.claim`, `triggers.claim` and `runs.state` that includes
-  `nodes.claim` or `triggers.claim`. Minting one
-  needs `editor` (`403` otherwise), and the request names the agent in `name`
-  (1 to 63 letters, digits, `-`, `_` or `.`) and the repositories in `repos`,
-  allowlist patterns that the returned connect `command` passes to the runner.
-  The token's principal is `agent:<name>`, and a name a live machine or runner
-  token already holds answers `409`. It expires once it goes 90 days unused:
-  each use moves its expiry to 90 days past that use, written at most once an
-  hour, and the token list shows when. A team holds at most 100 live machine
-  tokens.
+`POST /api/v1/runners` enrolls a machine under `team.admin`. The request names
+its `name` (1 to 63 letters, digits, `-`, `_` or `.`), `repos` (1 to 32 host/path
+patterns), optional `reserved_pools`, optional `grants` and optional absolute
+`expires_at`. Omitted grants select `nodes.claim` and `triggers.claim`.
+Explicit grants select a nonempty subset of those two. Work reporting, source,
+secrets and data permissions come from an awarded claim. The authenticated
+team supplies the root's team, and the subject is the named machine.
+
+`POST /api/v1/operator/tokens` provisions a deployment service root under
+`operator.tokens` or a verified operator console session. The request accepts
+`name`, `grants` and optional absolute `expires_at`. Grants select
+`claims.launch`, `operator.limits`, `operator.object_store` or `operator.tokens`.
+The root cannot acquire console powers. Deployment scope has an empty team.
+
+Both routes return `capability`, `prefix`, `team`, `grants` and optional
+RFC3339 `expires_at`. They use the sole transactional issuer and require its
+root-origin policy. Missing policy returns `unavailable`. The policy checks
+registration, identity, repository and pool rights and issuance limits.
+Cookies require CSRF, responses use no-store, and clients must not replay a
+request after losing its one-time bearer. The dashboard's setup command writes
+the bearer to a private file before starting its granted claim loops.
 
 Token issuance uses the role held when the token is written, so a pending
 request cannot restore authority after a demotion. No token minted into a team

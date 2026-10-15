@@ -20,7 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/health"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // safety: what an operator's own credential needs to dispatch work and watch it.
@@ -123,7 +122,7 @@ func runCloudConnect(args []string) error {
 	}
 
 	if *adminStdin {
-		minted, err := mintCloudUserToken(base, supplied, name, splitCSV(*scopes))
+		minted, err := mintCloudUserToken(base, supplied, splitCSV(*scopes))
 		if err != nil {
 			return err
 		}
@@ -321,12 +320,12 @@ type cloudStatusReport struct {
 	OK          bool                 `json:"ok"`
 }
 
-func mintCloudUserToken(controllerURL, adminToken, principal string, scopes []string) (mintedToken, error) {
+func mintCloudUserToken(controllerURL, adminToken string, scopes []string) (mintedToken, error) {
 	if len(scopes) == 0 {
 		return mintedToken{}, errors.New("cloud connect: --scope selected no scopes")
 	}
 	return mintToken(controllerURL, adminToken, client.CreateTokenRequest{
-		Kind: store.TokenKindUser, Principal: principal, Scopes: scopes,
+		Grants: scopes,
 	})
 }
 

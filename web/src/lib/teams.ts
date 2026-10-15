@@ -52,7 +52,7 @@ export function canManageTeam(role: Role | undefined): boolean {
 }
 
 export function canConnectMachines(role: Role | undefined): boolean {
-  return role !== undefined && roleRank[role] >= roleRank.editor;
+  return canManageTeam(role);
 }
 
 export function assignableRoles(role: Role | undefined): Role[] {
@@ -251,15 +251,7 @@ export function unixSecondsISO(seconds?: number): string {
   return new Date(seconds * 1000).toISOString();
 }
 
-export interface MintedMachineToken {
-  token: string;
-  prefix: string;
-  family: "machine";
-  name: string;
-  scopes: string[];
-  expires_at: number;
-  command: string;
-}
+export type MintedMachineToken = MintedMemberToken;
 
 export interface MintedMemberToken {
   capability: string;
@@ -366,16 +358,11 @@ export async function listTeamTokens(): Promise<TeamToken[]> {
   return asList<TeamToken>(await res.json(), "tokens");
 }
 
-// A runner needs every machine scope to claim, report and fetch what a run
-// uses, so the page mints them all.
-export const machineScopes = ["nodes.claim", "triggers.claim", "runs.state"];
-
 export async function mintMachineToken(
   name: string,
   repos: string[],
 ): Promise<MintedMachineToken> {
-  const res = await send("POST", "/api/v1/team/tokens", "Connect a machine", {
-    scopes: machineScopes,
+  const res = await send("POST", "/api/v1/runners", "Connect a machine", {
     name,
     repos,
   });
@@ -414,26 +401,23 @@ export function parseRepoPatterns(input: string): string[] {
     .filter((s) => s.length > 0);
 }
 
-// The controller composes the connect command because only it knows the URL a
-// machine reaches it on. Without one, the same command carries a placeholder the
-// reader fills in, and the page says so.
-export const controllerURLPlaceholder = "<controller-url>";
-
 export function runnerConnectCommand(
-  minted: Pick<MintedMachineToken, "token" | "command">,
+  minted: Pick<MintedMachineToken, "capability" | "grants">,
   name: string,
   repos: string[],
+  controllerURL: string,
 ): string {
-  if (minted.command) return minted.command;
   const quoted = (s: string) =>
     /^[A-Za-z0-9._:/@=-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
   const dir = '"$HOME/.config/sparkwing/runner-credentials"';
   return [
-    `(umask 077 && mkdir -p ${dir} && rm -f ${dir}/agent-token && printf '%s' ${quoted(minted.token)} > ${dir}/agent-token) &&`,
+    `(umask 077 && mkdir -p ${dir} && rm -f ${dir}/agent-token && printf '%s' ${quoted(minted.capability)} > ${dir}/agent-token) &&`,
     `sparkwing-runner runner --credentials-dir ${dir}`,
-    `--controller ${controllerURLPlaceholder}`,
+    `--controller ${quoted(controllerURL)}`,
     ...repos.map((r) => `--allow-repo '${r.replace(/'/g, `'\\''`)}'`),
-    "--also-claim-triggers --max-claims-before-restart 0 --metrics-addr=",
+    ...(minted.grants.includes("triggers.claim") ? ["--also-claim-triggers"] : []),
+    ...(!minted.grants.includes("nodes.claim") ? ["--claim-nodes=false"] : []),
+    "--max-claims-before-restart 0 --metrics-addr=",
     `--holder-prefix ${quoted(name)}`,
   ].join(" ");
 }

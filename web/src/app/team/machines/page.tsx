@@ -20,7 +20,6 @@ import {
   canConnectMachines,
   canManageTeam,
   cliTokenStartsRuns,
-  controllerURLPlaceholder,
   listMembers,
   listTeamTokens,
   memberLabel,
@@ -111,7 +110,7 @@ function Machines({ me }: { me: Me }) {
 
   // An editor may revoke only the tokens they minted; the controller decides,
   // so the button is offered to editors and a refusal is shown as it comes back.
-  const mayRevoke = canConnectMachines(role);
+  const mayRevoke = role === "owner" || role === "editor";
 
   return (
     <>
@@ -119,7 +118,7 @@ function Machines({ me }: { me: Me }) {
         <ConnectForm team={me.active_team.display_name} onMinted={load} />
       ) : (
         <div className="mb-6 text-sm text-[var(--muted)]">
-          Editors and owners connect machines to this team.
+          An owner connects machines to this team.
         </div>
       )}
       <Panel
@@ -364,7 +363,7 @@ function ConnectForm({
   const [repos, setRepos] = useState("");
   const [minting, setMinting] = useState(false);
   const [minted, setMinted] = useState<
-    (MintedMachineToken & { repos: string[] }) | null
+    (MintedMachineToken & { name: string; repos: string[] }) | null
   >(null);
 
   const repoPatterns = parseRepoPatterns(repos);
@@ -376,7 +375,7 @@ function ConnectForm({
     setMinting(true);
     try {
       const out = await mintMachineToken(n, repoPatterns);
-      setMinted({ ...out, repos: repoPatterns });
+      setMinted({ ...out, name: n, repos: repoPatterns });
       setName("");
       setRepos("");
       await onMinted();
@@ -388,7 +387,7 @@ function ConnectForm({
   }
 
   const command = minted
-    ? runnerConnectCommand(minted, minted.name, minted.repos)
+    ? runnerConnectCommand(minted, minted.name, minted.repos, window.location.origin)
     : "";
 
   return (
@@ -448,19 +447,12 @@ function ConnectForm({
               Run on {minted.name}
             </div>
             <CopyField value={command} label="Connect command" multiline />
-            {minted.command ? null : (
-              <div className="text-xs text-[var(--muted)] mt-1">
-                Replace{" "}
-                <span className="font-mono">{controllerURLPlaceholder}</span>{" "}
-                with the URL this machine reaches the controller on.
-              </div>
-            )}
           </div>
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
               Token
             </div>
-            <CopyField value={minted.token} label="Runner token" />
+            <CopyField value={minted.capability} label="Runner token" />
           </div>
         </div>
       ) : null}

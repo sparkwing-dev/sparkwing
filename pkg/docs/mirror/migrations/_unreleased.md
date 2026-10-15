@@ -1092,3 +1092,21 @@ mint with `POST /api/v1/tokens`. Send `grants` and optional RFC3339
 metering. A session provisions its own member root. A member bearer narrows
 its authority through delegation. Save the returned capability privately and
 do not automatically retry issuance.
+
+## Root provisioning
+
+Machine enrollment uses `POST /api/v1/runners` with `name`, `repos`, optional
+`reserved_pools`, optional narrow `grants` and optional absolute `expires_at`.
+It requires `team.admin`. `POST /api/v1/team/tokens` is removed. Deployment
+service issuance uses `POST /api/v1/operator/tokens` with `name`, operational
+`grants` and optional `expires_at`, under `operator.tokens` or console authority.
+Both return `capability`, `prefix`, `team`, `grants` and optional RFC3339 expiry.
+They return the bearer once, use no-store and require session CSRF for cookie
+authentication. Do not automatically replay issuance.
+
+Go callers use `EnrollRunner` and `CreateServiceToken`. Member `CreateToken`
+accepts `Grants` and `ExpiresAt`; the old kind/principal/scopes/TTL request and
+Token/Metadata response fields are removed. Controller integrations retain the
+existing `WithCredentialIssuer` and C1 `ProvisionPolicy` transaction boundary.
+Missing origin policy refuses with `unavailable`. Production enrollment and
+console-origin persistence must be provided before enabling those flows.

@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **controller (Breaking):** Machine enrollment and deployment service issuance use the capability issuer and shared route policy
+  Machines use `/api/v1/runners` under `team.admin`; services use `/api/v1/operator/tokens` under operator authority. The legacy team-token mint is removed. Both return the capability once and refuse automatic replay. See [migration guide](docs/migrations/_unreleased.md#root-provisioning).
 - **controller (Breaking):** Capability inventories and rotation use the shared policy and authority-bearing store transactions
   Team lists use `/api/v1/tokens`. Deployment metadata uses `/api/v1/operator/tokens`. Metadata carries subjects, grants and RFC3339 times. Rotation returns its capability once and accepts an absolute expiry. Embedded controllers supply `WithCapabilityManager`. See [migration guide](docs/migrations/_unreleased.md#capability-inventory-and-rotation).
 - **controller (Breaking):** Session renewal and logout use the shared route policy and verified session proof

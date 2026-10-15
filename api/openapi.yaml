@@ -4338,53 +4338,38 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/team/tokens:
+  /api/v1/runners:
     post:
-      x-sparkwing-scope: runs.read
+      x-sparkwing-scope: team.admin
       tags: [teams]
-      summary: Mint a team token in the active team.
-      description: >-
-        Needs a signed-in session; a bearer token cannot mint one. The scopes pick the family, and must all come from one of two disjoint sets; an empty list, an unknown scope or a mix answers 400. A member token carries a subset of the scopes the caller's role grants, without team administration, acts as the caller, lapses after 90 days and goes when the member leaves or is demoted to reader; a scope above the caller's role answers 403, and a member holds at most 10. docs/auth.md lists both scope sets. A machine token carries a subset of the runner scopes that claims nodes or triggers, needs the editor role, a name and repos, authenticates as agent:<name> and lapses 90 days after its last use; a team holds at most 100 runner and machine tokens and one live token per agent name. The plaintext is returned once: with the `sparkwing cloud connect` and `sparkwing pipeline trigger` commands for a member token, or with a `sparkwing-runner` command that connects the machine for a machine token.
+      summary: Enroll a team machine through the sole capability issuer.
+      description: Team administration and enrollment policy are rechecked in the issuance transaction. The request selects a name, repository patterns, authorized pools and optional narrower claim grants or expiry. Team, subject, registration and metering come from authenticated origin facts. The response returns its bearer once. Clients must not automatically retry enrollment.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.teamTokenReq
+              x-sparkwing-go-type: pkg/controller.runnerEnrollmentRequest
               type: object
-              required: [scopes]
+              required: [name, repos]
+              additionalProperties: false
               properties:
-                scopes: {type: array, items: {type: string}}
-                name: {type: string, description: "A machine token's agent name: 1 to 63 letters, digits, '-', '_' or '.'. Absent for a member token."}
-                repos:
-                  type: array
-                  items: {type: string}
-                  description: >-
-                    A machine token's repositories, as host/path patterns such as github.com/acme/*. They go into the returned command as --allow-repo flags, since the allowlist belongs to the machine's owner. At most 32. Absent for a member token.
+                name: {type: string}
+                repos: {type: array, items: {type: string}, minItems: 1, maxItems: 32}
+                reserved_pools: {type: array, items: {type: string}}
+                grants: {type: array, items: {type: string, enum: [nodes.claim, triggers.claim]}, minItems: 1, uniqueItems: true}
+                expires_at: {type: string, format: date-time}
       responses:
         "201":
-          description: Minted.
+          description: Committed root with its one-time bearer.
           content:
             application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.teamTokenResp
-                type: object
-                required: [token, prefix, family, scopes, expires_at]
-                properties:
-                  token: {type: string}
-                  prefix: {type: string}
-                  family: {type: string, enum: [member, machine]}
-                  name: {type: string, description: The machine token's agent name.}
-                  scopes: {type: array, items: {type: string}}
-                  expires_at: {type: integer, format: int64, description: Unix seconds.}
-                  profile: {type: string, description: "A member token's profile name, which is the team slug."}
-                  setup: {type: string, description: A member token's command that reads the token from a no-echo prompt and writes the profile.}
-                  run: {type: string, description: "A member token's command that starts a run from a pushed checkout, with a pipeline placeholder."}
-                  command: {type: string, description: A machine token's command that stores the token and starts sparkwing-runner.}
+              schema: {$ref: "#/components/schemas/CredentialResponse"}
         "400": {$ref: "#/components/responses/BadRequest"}
-        "409": {description: "The member or team holds as many tokens of this family as it may, or another live machine token carries the name."}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: Enrollment identity or limit conflict.}
+        "503": {description: Root origin verification is unavailable.}
 
   /api/v1/tokens/{token}/git-credentials:
     put:
@@ -6926,6 +6911,34 @@ paths:
         "409": {description: The state or authority changed before the transaction committed.}
 
   /api/v1/operator/tokens:
+    post:
+      x-sparkwing-scope: operator.tokens or operator
+      tags: [tokens]
+      summary: Provision a deployment service root.
+      description: Requires operator.tokens or an operator console session and a transactionally verified service registration. Grants select deployment operations or claims.launch. Console authority cannot be issued. The bearer is returned once and issuance must not be replayed automatically.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.serviceCredentialRequest
+              type: object
+              required: [name, grants]
+              additionalProperties: false
+              properties:
+                name: {type: string}
+                grants: {type: array, items: {type: string, enum: [claims.launch, operator.limits, operator.object_store, operator.tokens]}, minItems: 1, uniqueItems: true}
+                expires_at: {type: string, format: date-time}
+      responses:
+        "201":
+          description: Committed root with its one-time bearer.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CredentialResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "503": {description: Root origin verification is unavailable.}
     get:
       x-sparkwing-scope: operator.tokens or operator
       tags: [tokens]

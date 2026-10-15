@@ -4,12 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
-	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -220,35 +218,6 @@ func validRunnerName(name string) bool {
 		}
 	}
 	return true
-}
-
-// safety: the connect command stores the token in a file, never on the runner's
-// command line, where any local user can read it; the old file goes first,
-// because umask sets only a new file's mode, and && keeps a failed removal from
-// writing the token into that old file (set -e is off inside an && operand).
-const runnerCredentialsDir = `"$HOME/.config/sparkwing/runner-credentials"`
-
-func runnerTokenSetup(raw string) string {
-	file := runnerCredentialsDir + "/agent-token"
-	return "(umask 077 && mkdir -p " + runnerCredentialsDir + " && rm -f " + file + " && printf '%s' " + raw + " > " + file + ")"
-}
-
-// hack: --metrics-addr= because a second runner on a machine would collide on its port; no
-// --gitcache since the git cache is the operator's. Patterns are single-quoted because '*' is
-// a shell glob. The claim flags follow the token's scopes, since a loop the token may not
-// claim for fails.
-func runnerConnectArgs(controllerURL, name string, allow sourceurl.RepoAllowlist, scopes []string) string {
-	cmd := "sparkwing-runner runner --credentials-dir " + runnerCredentialsDir + " --controller " + controllerURL
-	for _, p := range allow.Patterns() {
-		cmd += " --allow-repo '" + p + "'"
-	}
-	if slices.Contains(scopes, ScopeTriggersClaim) {
-		cmd += " --also-claim-triggers"
-	}
-	if !slices.Contains(scopes, ScopeNodesClaim) {
-		cmd += " --claim-nodes=false"
-	}
-	return cmd + " --max-claims-before-restart 0 --metrics-addr= --holder-prefix " + name
 }
 
 func (s *Server) controllerURL(r *http.Request) string {

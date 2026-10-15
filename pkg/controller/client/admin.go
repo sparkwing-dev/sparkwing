@@ -8,20 +8,35 @@ import (
 	"time"
 )
 
-// CreateTokenRequest is the body of POST /api/v1/tokens. TTLSecs of zero mints
-// a token that never expires.
+// CreateTokenRequest narrows a member credential's grants and optional expiry.
 type CreateTokenRequest struct {
-	Kind      string   `json:"kind"`
-	Principal string   `json:"principal"`
-	Scopes    []string `json:"scopes"`
-	TTLSecs   int64    `json:"ttl_secs,omitempty"`
+	Grants    []string   `json:"grants"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
-// CreatedToken is a newly minted token. Token is the raw bearer, returned only
-// this once; Metadata is the controller's record of it, as sent.
+// CreatedToken contains the one-time bearer and its public issuance metadata.
 type CreatedToken struct {
-	Token    string          `json:"token"`
-	Metadata json.RawMessage `json:"metadata"`
+	Capability string     `json:"capability"`
+	Prefix     string     `json:"prefix"`
+	Team       string     `json:"team"`
+	Grants     []string   `json:"grants"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+}
+
+// EnrollRunnerRequest selects a machine name, repository patterns and authorized pools.
+type EnrollRunnerRequest struct {
+	Name          string     `json:"name"`
+	Repos         []string   `json:"repos"`
+	ReservedPools []string   `json:"reserved_pools,omitempty"`
+	Grants        []string   `json:"grants,omitempty"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+}
+
+// CreateServiceTokenRequest selects deployment service grants without console authority.
+type CreateServiceTokenRequest struct {
+	Name      string     `json:"name"`
+	Grants    []string   `json:"grants"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 // TokenSubject identifies the account, machine, service or operator holding a credential.
@@ -54,10 +69,28 @@ type RotatedToken struct {
 	OldRevokedAt time.Time `json:"old_revoked_at"`
 }
 
-// CreateToken mints a token. It needs the admin scope.
+// CreateToken provisions or delegates the authenticated account's member credential once.
 func (c *Client) CreateToken(ctx context.Context, req CreateTokenRequest) (*CreatedToken, error) {
 	var out CreatedToken
 	if err := c.post(ctx, "/api/v1/tokens", req, http.StatusCreated, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// EnrollRunner provisions a team machine root once under current team administration.
+func (c *Client) EnrollRunner(ctx context.Context, req EnrollRunnerRequest) (*CreatedToken, error) {
+	var out CreatedToken
+	if err := c.post(ctx, "/api/v1/runners", req, http.StatusCreated, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CreateServiceToken provisions a deployment service root once under operator.tokens.
+func (c *Client) CreateServiceToken(ctx context.Context, req CreateServiceTokenRequest) (*CreatedToken, error) {
+	var out CreatedToken
+	if err := c.post(ctx, "/api/v1/operator/tokens", req, http.StatusCreated, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

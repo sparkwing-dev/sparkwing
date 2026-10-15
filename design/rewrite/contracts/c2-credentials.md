@@ -131,12 +131,69 @@ The independent T1 creation expectation follows this correction.
 `Server.New` uses its store. `WithCredentialIssuer` injects that same contract
 for embedded controllers and tests. The default session digest, CSRF and account
 renewal paths are integrated with C1. Roleless sessions and console identity still
-need their final adapters. Machine, service, bootstrap provisioning,
-credential listing and rotation still require their final adapters.
+need their final adapters. Machine and service provisioning use the transport
+below. Bootstrap provisioning and production capability-manager transactions
+remain open.
 
-The old global token mint and old member-family mint are removed. The remaining
-legacy team-token path only handles machine registration. The dashboard's member
+The old global token mint, member-family mint and legacy team-token path are
+removed. The dashboard's member
 caller and response use the new route, grants and timestamp representation.
+
+### Machine and deployment service provisioning
+
+POST `/api/v1/runners` uses PolicyRouter with member `team.admin` and
+BindNone. It accepts `name`, `repos`, optional `reserved_pools`, optional
+`grants` and optional absolute `expires_at`. The existing machine-name grammar
+and 32-pattern bound remain. Repository patterns use sourceurl's shared parser.
+Omitted grants select nodes.claim and triggers.claim. Explicit grants narrow
+to a nonempty unique subset of those two. A root has no reporting or sensitive
+release grants. Pool names are unique and nonempty; the origin policy checks
+that the registering team admin may assign them.
+
+The authenticated team selects the machine's team. Its subject is machine/name
+and its trusted registration selector is `runner:<team>:<name>`. The request
+cannot select these origin fields, ancestry, metering or data authority. It
+cannot create a service or operator root. The server calls the existing
+CredentialIssuer.ProvisionCapability with ProvisionMachine. There is no
+legacy CreateMachineToken fallback. POST `/api/v1/team/tokens`, its handler,
+request/response types and server-built shell command are removed.
+
+POST `/api/v1/operator/tokens` uses PolicyRouter with operator.tokens or
+console authority. It accepts `name`, a nonempty unique `grants` array and
+optional absolute `expires_at`. Its subject is service/name, team is empty,
+and its registration selector is `service:<name>`. Grants are limited to
+claims.launch, operator.limits, operator.object_store and operator.tokens.
+It cannot issue console, member, work, source or data grants. It calls the same
+issuer with ProvisionService and carries the authenticated AuthorityRef.
+
+Both endpoints return credentialResponse: capability, prefix, team, grants and
+optional RFC3339 expires_at. An omitted root expiry remains nil in the trusted
+request and is subject to the origin policy. Explicit null or invalid expiry
+is refused. Both use RetryNever because raw bearers are delivered once.
+Session and console mutations require their selected session's CSRF proof.
+Responses use no-store and canonical errors. Failed origin verification exposes
+no bearer. Header and query team hints supply no authority.
+
+These are local C2 transport declarations over C1's existing ProvisionSpec,
+ProvisionPolicy and sole Store.Issue path. No persistence interface or second
+registry is introduced. W1's production origin policy must atomically enforce
+registration identity, current team administration, permitted pools/repos,
+issuance limits and service enrollment. It must persist origin/registration
+facts needed by claim identity and later root rotation. The controller cannot
+supply those transactions by adding SQL. Missing origin policy returns
+unavailable. Console service provisioning still needs W1 to recognize its
+verified console session origin; the existing service check only accepts
+operator/service subjects carrying operator.tokens.
+
+Real SQLite HTTP tests prove machine and service root round trips and
+refusal rollback through Store.Issue with a fake origin policy. They do not
+prove production registration, duplicate-name races, issuance limits, console
+session representation or ClaimProfileResolver integration. The Go client
+uses separate member, machine and service requests and never replays issuance.
+CLI/dashboard callers consume the same final response. The dashboard constructs
+its runner setup from the one-time capability and returned grant set. Its
+shell tests prove replacement of readable credential files, stop-on-failure,
+repository arguments and grant-selected claim loops.
 
 ### GitHub Actions root exchange
 

@@ -2,6 +2,23 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+**W1/W2: root enrollment origin integration.** W2 now registers POST
+/api/v1/runners and POST /api/v1/operator/tokens through PolicyRouter and the
+existing CredentialIssuer.ProvisionCapability. C2 declares their strict local
+request shapes. Trusted registration selectors are runner:<team>:<name> and
+service:<name>. W1's production ProvisionPolicy must verify or create the
+registration within the same issuance transaction, enforce live team-admin or
+deployment/console origin, permitted pools/repositories, existing issuance
+limits and active name uniqueness, and retain registration/origin facts for
+claims and rotation. No W2 SQL, alternate issuer or registry is added. Missing
+origin policy refuses with unavailable. Real SQLite root round trips and
+rollback pass with a fake policy. They do not prove registry races or production
+ClaimProfileResolver behavior. W1's current ProvisionService origin check also
+requires operator/service subjects with operator.tokens, so a verified console
+account cannot pass it yet. W1 owns that representation. W2's named console
+HTTP proof passes with a fake issuer. See
+[W2-root-provisioning-handoff.md](../W2-root-provisioning-handoff.md).
+
 **W1/W2: capability inventory and rotation.** W2's member/deployment metadata
 and rotation HTTP routes use PolicyRouter and C2's CapabilityManager. Its
 shared Metadata, InventoryFilter and Rotation types live in internal/capability

@@ -48,7 +48,7 @@
     {
       "route": "/api/v1/operator/tokens",
       "kind": "api",
-      "exempt": "Requires live scoped credential authority and a capability inventory/rotation transaction adapter, absent from the dashboard corpus. A write probe must not rotate real credentials. Fake-backed HTTP proofs establish correctness only. Authorized latency, cold start and response bytes are unmeasured.",
+      "exempt": "Inventory and one-time service issuance require authenticated deployment authority, production origin and transaction adapters, absent from the dashboard performance corpus. Authorized latency, cold start and response bytes are unmeasured.",
       "baselines": {}
     },
     {
@@ -370,6 +370,12 @@
       "route": "/login",
       "kind": "page",
       "exempt": "Answers 404 unless the dashboard is configured to require a login, so this corpus cannot measure it. Baseline it from a listener started with that configuration and remove this exemption.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/runners",
+      "kind": "api",
+      "exempt": "Enrollment commits a one-time root and requires a production origin policy plus authenticated registration corpus. These fixtures are absent from the dashboard performance corpus. Authorized latency, cold start and response bytes are unmeasured.",
       "baselines": {}
     }
   ]

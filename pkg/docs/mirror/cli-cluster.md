@@ -425,25 +425,24 @@ save it before leaving this command.
 
 ### Subcommands
 
-- `create` -- Mint a new API token
+- `create` -- Provision a deployment service token
 - `list` -- List token prefixes + metadata
 - `revoke` -- Mark a token revoked
 - `rotate` -- Mint a replacement token with a grace window
 
 ## `sparkwing cluster tokens create`
 
-Mint a new API token
+Provision a deployment service token
 
-Creates a token of the given --type scoped to --principal.
-Comma-separated --scope lists which API surfaces the token may
-call. The raw token is printed to stdout exactly once; after
+Creates a service root named by --principal.
+Comma-separated --scope selects operator.limits, operator.object_store,
+operator.tokens or claims.launch. The raw token is printed to stdout exactly once; after
 this command exits it cannot be recovered.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--type KIND` | Token type: user \| runner \| service (required) |
 | `--principal NAME` | Name identifying the token holder (required) |
 | `--scope CSV` | Comma-separated scopes; use sparkwing docs read --topic auth for the supported set |
 | `--ttl DURATION` | Token lifetime (30d, 720h, and similar durations). 0 = never expires |
@@ -452,11 +451,11 @@ this command exits it cannot be recovered.
 ### Examples
 
 ```sh
-# Mint a service token with write scopes
-sparkwing cluster tokens create --type service --principal deploy-bot --scope runs.read,runs.write --profile prod
+# Mint a launcher service token
+sparkwing cluster tokens create --principal launcher --scope claims.launch --profile prod
 
-# Mint a user token that expires in 30 days
-sparkwing cluster tokens create --type user --principal fictional-user --scope admin --ttl 720h --profile prod
+# Mint an operational service token that expires in 30 days
+sparkwing cluster tokens create --principal operations --scope operator.limits --ttl 720h --profile prod
 ```
 
 ## `sparkwing cluster tokens list`

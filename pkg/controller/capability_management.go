@@ -68,12 +68,14 @@ func (s *Server) capabilityEndpoints() []Endpoint {
 		e = &EngineController{Store: s.store}
 	}
 	return []Endpoint{
+		{Method: "POST", Pattern: "/api/v1/runners", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleEnrollRunner},
 		{Method: "GET", Pattern: "/api/v1/tokens", Authentication: capability.AuthCapability, Decode: capabilityListTarget, Handle: s.handleListCapabilities},
 		{Method: "POST", Pattern: "/api/v1/tokens", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleIssueCredential},
 		{Method: "GET", Pattern: "/api/v1/tokens/{token}", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleReadCapability},
 		{Method: "DELETE", Pattern: "/api/v1/tokens/{token}", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: e.handleRevokeAuthority},
 		{Method: "POST", Pattern: "/api/v1/tokens/{token}/rotate", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleRotateCapability},
 		{Method: "GET", Pattern: "/api/v1/operator/tokens", Authentication: capability.AuthCapability, Decode: capabilityListTarget, Handle: s.handleListCapabilities},
+		{Method: "POST", Pattern: "/api/v1/operator/tokens", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleIssueServiceCredential},
 		{Method: "GET", Pattern: "/api/v1/operator/tokens/{token}", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleReadCapability},
 		{Method: "DELETE", Pattern: "/api/v1/operator/tokens/{token}", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: e.handleRevokeAuthority},
 		{Method: "POST", Pattern: "/api/v1/operator/tokens/{token}/rotate", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleRotateCapability},

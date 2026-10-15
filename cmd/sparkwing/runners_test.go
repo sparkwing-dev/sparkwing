@@ -35,6 +35,8 @@ type runnersFixture struct {
 
 // safety: a real controller with auth from its own store, so token minting and
 // revocation run through the handlers an operator's controller runs.
+var runnerTokenScopes = []string{"nodes.claim", "triggers.claim"}
+
 func newRunnersFixture(t *testing.T) *runnersFixture {
 	t.Helper()
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))

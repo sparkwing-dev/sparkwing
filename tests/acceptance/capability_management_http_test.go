@@ -375,7 +375,7 @@ func TestCapabilityManagementHTTPMissingAdaptersAndCSRF(t *testing.T) {
 	s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/team/tokens", nil))
-	if w.Code != http.StatusMethodNotAllowed {
+	if w.Code != http.StatusNotFound {
 		t.Fatalf("legacy inventory: HTTP %d %s", w.Code, w.Body.String())
 	}
 }

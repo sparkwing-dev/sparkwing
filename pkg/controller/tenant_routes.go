@@ -198,7 +198,6 @@ var tenantRoutes = map[string]tenantResource{
 
 	"POST /api/v1/teams": resNone,
 
-	"POST /api/v1/team/tokens": resNone,
 
 	"POST /api/v1/tokens/{prefix}/metered": resToken,
 

@@ -45,7 +45,6 @@ func runTokens(args []string) error {
 func runTokensCreate(args []string) error {
 	fs := flag.NewFlagSet(cmdTokensCreate.Path, flag.ContinueOnError)
 	on := addProfileFlag(fs)
-	kind := fs.String("type", "", "token type: user|runner|service")
 	principal := fs.String("principal", "", "free-form label identifying the token holder")
 	scopes := fs.String("scope", "", "comma-separated scopes")
 	ttl := fs.Duration("ttl", 0, "token lifetime (0 = never expires)")
@@ -64,19 +63,22 @@ func runTokensCreate(args []string) error {
 		return err
 	}
 
-	req := client.CreateTokenRequest{Kind: *kind, Principal: *principal, Scopes: splitCSV(*scopes)}
-	if *ttl > 0 {
-		req.TTLSecs = int64((*ttl).Seconds())
+	if *ttl < 0 {
+		return errors.New("tokens create requires a nonnegative ttl")
 	}
-	out, err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).CreateToken(context.Background(), req)
+	req := client.CreateServiceTokenRequest{Name: *principal, Grants: splitCSV(*scopes)}
+	if *ttl > 0 {
+		expires := time.Now().Add(*ttl)
+		req.ExpiresAt = &expires
+	}
+	out, err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).CreateServiceToken(context.Background(), req)
 	if err != nil {
 		return err
 	}
 
 	fmt.Fprintln(os.Stderr, "WARNING: stash this token NOW. It is not recoverable after this command exits.")
-	fmt.Println(out.Token)
-	fmt.Fprintln(os.Stderr, "---")
-	fmt.Fprintln(os.Stderr, string(out.Metadata))
+	fmt.Println(out.Capability)
+	fmt.Fprintln(os.Stderr, "prefix:", out.Prefix)
 	return nil
 }
 
