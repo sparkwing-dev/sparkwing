@@ -88,6 +88,10 @@ kinds in one call. The server supplies team, holder, generation, resources and
 the one-time bootstrap. The launcher has no caller-selected holder override.
 Transport failures never trigger a second claim in the adapter.
 
+`sparkwing-runner launch --poll <duration>` sets the interval between claim and
+reconciliation cycles. The duration must be positive. Omitting it keeps the
+runtime's configured interval, which defaults to five seconds.
+
 The adapter projects plan source through `source.ForRequest`, and eval/work
 through `source.ForExecution` using the accepted spec and matching engine.
 Each award must include resolved CPU and memory in `ClaimedUnit.Execution`.

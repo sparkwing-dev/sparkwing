@@ -6,8 +6,10 @@ This snapshot covers every amendment-1 row whose action column names W8. A
 component pass proves its named boundary. It does not activate a native catalog
 cell or establish an HTTP, Cloud or OS deployment proof.
 
-The continuation audit at `965c71a6b` found no pending merge or new amendment.
-All 26 assigned rows and both W8 handoffs retain the dependencies recorded here.
+The continuation from `7ca0ca82a` found no pending merge or new amendment.
+All 26 assigned rows and the W8 handoffs retain the dependencies recorded here.
+W8 also implemented the declared launcher polling option and recorded the
+remaining launch grammar gaps in handoffs.md.
 The merge-resolution sections below describe earlier sessions.
 
 | Amendment | W8 action and remaining integration |
@@ -282,5 +284,25 @@ binary-cache keys and shared local services still need their owning areas.
 W8 keeps its existing fake-based component coverage at those declared ports.
 Native platform, placement, deployment and real-repository evidence remains
 open. No native cell or new T1 port is claimed.
+
+## Continuation: launcher polling
+
+RunLaunchCLI now accepts the registry's existing --poll option and applies an
+explicit positive value to the real launch loop. Omission preserves its configured
+interval. Controlled-clock components prove one-second claim spacing and preserved
+omission. Zero, negative, malformed and empty values fail before runtime construction.
+No old code, API or production caller was removed. No native cell or T1 port is claimed.
+
+The remaining W9 grammar request now includes launch. Its registry omits the
+runtime's required --docker-image and declares --deadline without a corresponding
+CloudJobConfig input. Temporary overlay probes reproduce both failures. These
+are contract requests in handoffs.md, not silent grammar amendments.
+
+Whole-repository build, W8 vet, commentcheck, full runner/launcher/engine suites,
+W8 component acceptance and focused local-controller tests pass. Cluster passes
+with its socket-based metrics listener excluded. No new production mechanism,
+setting, environment variable or timeout was introduced. Remaining source/keeper,
+HTTP/data, shared host/local-service, plan/eval resource, launcher sync and native
+deployment obligations are unchanged.
 
 <!-- design:end -->

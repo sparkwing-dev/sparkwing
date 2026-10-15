@@ -33,6 +33,7 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 	fs.StringVar(&cfg.DockerImage, "docker-image", "", "Docker-in-Docker image pinned by digest")
 	cpu := fs.String("cpu-ceiling", "", "most cores one Job may request")
 	memory := fs.String("memory-ceiling", "", "most memory one Job may request")
+	poll := fs.Duration("poll", 0, "interval between controller claims and reconciliation")
 	credentialsDir := fs.String(credentials.FlagName, "", "directory holding the launcher credential")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -42,6 +43,9 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	if fs.Changed("poll") && *poll <= 0 {
+		return errors.New("--poll must be positive")
 	}
 	cpuQuantity, err := resource.ParseQuantity(*cpu)
 	if err != nil {
@@ -79,6 +83,9 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 	}
 	if runner == nil {
 		return errors.New("launcher runtime returned no launcher")
+	}
+	if fs.Changed("poll") {
+		runner.Poll = *poll
 	}
 	return runner.Run(ctx)
 }

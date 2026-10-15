@@ -3,13 +3,19 @@ package acceptance_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/cluster"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -26,6 +32,64 @@ func (c launcherControllerW8) Claim(ctx context.Context, request controllerwire.
 
 func (c launcherControllerW8) SyncLauncher(ctx context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
 	return c.sync(ctx, request)
+}
+
+func TestLauncherPollingW8Components(t *testing.T) {
+	for _, option := range []string{"--poll=1s", ""} {
+		t.Run(option, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), 2*time.Hour)
+				defer cancel()
+				dir := t.TempDir()
+				if err := os.WriteFile(filepath.Join(dir, "agent-token"), []byte("fixture-launcher-root"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				_, config, _ := cloudFixture(launcher.CloudWork)
+				var claims []time.Time
+				control, err := launcher.NewControllerControl(launcherControllerW8{
+					claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+						claims = append(claims, time.Now())
+						if len(claims) == 2 {
+							cancel()
+						}
+						return controllerwire.ClaimResponse{}, nil
+					},
+				}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				args := []string{"--controller=" + config.ControllerURL, "--namespace=" + config.Namespace, "--image=" + config.RunnerImage, "--docker-image=" + config.DockerImage, "--cpu-ceiling=4", "--memory-ceiling=8Gi", "--credentials-dir=" + dir}
+				want := time.Hour
+				if option != "" {
+					args = append(args, option)
+					want = time.Second
+				}
+				err = cluster.RunLaunchCLI(ctx, args, func(_ context.Context, cfg launcher.CloudJobConfig, _ string) (*launcher.Launcher, error) {
+					return &launcher.Launcher{Config: cfg, Kube: fake.NewClientset(), Control: control, Boundary: &cloudBoundaryFake{}, Poll: time.Hour}, nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(claims) != 2 || claims[1].Sub(claims[0]) != want {
+					t.Fatalf("launcher claim times = %v, want two claims %v apart", claims, want)
+				}
+			})
+		})
+	}
+}
+
+func TestLauncherPollingRefusesInvalidW8Components(t *testing.T) {
+	for _, value := range []string{"0s", "-1s", "invalid", ""} {
+		t.Run(value, func(t *testing.T) {
+			err := cluster.RunLaunchCLI(t.Context(), []string{"--poll=" + value}, func(context.Context, launcher.CloudJobConfig, string) (*launcher.Launcher, error) {
+				t.Fatal("invalid poll reached launcher construction")
+				return nil, nil
+			})
+			if err == nil || !strings.Contains(err.Error(), "--poll") {
+				t.Fatalf("poll validation error = %v", err)
+			}
+		})
+	}
 }
 
 func TestLauncherControllerW8Components(t *testing.T) {
