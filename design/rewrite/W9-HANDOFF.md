@@ -1,3 +1,135 @@
+## Continuation from fe2aa986b - current guide and installer commands
+
+W9 remains CONTINUE. Lead findings 1 and 7 still fail their production probes.
+This section supersedes earlier test counts. The worktree started clean at
+fe2aa986b. No Git write, candidate install or Sparkwing executable ran. Installer
+tests execute their signed shell stub under a private HOME.
+
+### Implemented and deleted
+
+- Current inline guide examples now reject unknown flags and flags belonging to
+  another command through the shared CLI parser. The existing doccheck extractor
+  follows inline code across line breaks and consumes shell continuations once.
+  It still accepts incomplete inline command fragments. Complete shell examples
+  retain full grammar validation. The new regressions failed before this change.
+- Fixed the five invocations exposed by that check: README's retired CI mode,
+  admission and pipeline secret selectors, install-to-green's static-plan flag,
+  and observability's capacity selector. Corrected runner enrollment to `--repos`
+  and the log JSON example to `--job`. The CI guide now uses the local controller
+  model and valid commands in its GitHub Actions, Buildkite and GitLab examples.
+  A YAML-backed test parses those provider commands against the current grammar.
+  Retained worker, sparks-overlay and remote-cache guidance uses final flags.
+- Migrated bin/install-to-green.sh to `pipeline new --pipeline demo` and
+  `pipeline plan --pipeline demo`. Its stub now records actual argument vectors.
+  A test feeds those vectors to clisurface.Parse, checking scaffold, compile and
+  run are reached. The fixture does not establish native local execution.
+- The daemon missing/cancelled test fix, liveness source-scan deletion and legacy
+  opsview doctor-facade deletion were already committed. They were not repeated.
+  No legacy production file or API was removed this session, so no production
+  API caller migration was needed.
+
+W9-owned production Go changes by **0 lines this session**, and remains
+**-8,129 versus main** (15,629 added, 23,758 removed), within the -2,900 budget.
+The shared doccheck change is 17 added / 2 removed production lines, net **+15**.
+Tests, testdata and contract declaration files are excluded. Old CI-mode prose
+and stale command examples were removed from source and regenerated mirrors.
+Source guides changed by 42 added / 67 removed lines, net -25. Their generated
+mirrors carry the same delta. No production file was deleted this session.
+
+### Verification
+
+Go checks use GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache,
+GOMAXPROCS=4 and TMPDIR/GOTMPDIR=/tmp/sw-astra-W9. Tests use -p 4.
+
+- Whole-repository `go build -p 4 ./...` passes. Scoped vet of cmd/sparkwing,
+  doccheck, clisurface, controllerwire, controller/client, opsview, pkg/docs and
+  bin passes. Commentcheck against main passes across 2,059 files.
+- Full doccheck, clisurface, controllerwire, controller/client and opsview tests
+  pass. Current guides resolve 333 invocations. pkg/docs passes with
+  `-skip '^TestWebClient'`. Its full run panicked at httptest.NewServer because
+  this sandbox cannot bind a socket. No test skip was added to repository code.
+- Focused CLI checks pass for generated/embedded references, public doctor
+  components, daemon missing/cancelled runtime, native-owner composition,
+  local-run components and local-service/schedule components. Run with
+  `go test -p 4 ./cmd/sparkwing -run '^Test(CommandReferenceMatchesRegistry|EmbeddedReferencePagesNameOnlyDispatchedCommands|RepoDocsNameOnlyDispatchedCommandsOutsideTheirDesignRegions|DaemonLifecycleMissingAndCancelledRuntime|Doctor|CLIOwnerComposition|LocalServices|LocalRun|LocalSchedule)' -count=1`.
+- Installer accepted-argument, phase reporting, private-HOME/cache isolation,
+  inherited Git-binding and false-green tests pass. Run with
+  `go test -p 4 ./bin -run '^TestInstallToGreen(UsesAcceptedCommands|ReportsEveryPhaseOfTheDemoPath|MeasuresAgainstACleanHomeAndAnEmptyModuleCache|LeavesTheCallersGitBindingAlone|RefusesToCallAnUnprovenRunGreen)$' -count=1`.
+  Shell syntax and docs/mirror drift checks pass.
+- The initial short CLI selection excluding known socket tests reports
+  **952 pass, 15 skip, 2 fail** at top level. opsview reports **39 pass**.
+  The two failures remain W8's real pin reader: TestSDKCheckRejectsFIFO is
+  killed by its existing subprocess bound, and the oversized-module test gets
+  a 1,048,606-byte parse refusal instead of the regular-file size refusal.
+  The previous continuation's skip expression reproduces this selection.
+- `go test -p 4 ./tests/acceptance -run '^(TestSurface|TestHere|TestSchedule)' -count=1`
+  passes. The existing surface store-sqlite cell and client/grammar components
+  remain green. No native acceptance cell is newly complete or unskipped.
+  No archived T1 test port is newly closed.
+
+### Production probes and contracts still needed
+
+The unchanged probes ran with:
+
+```
+go test -p 4 -tags rewrite_integration ./cmd/sparkwing -run '^TestReview(ProductionExecutionBindings|PublicDoctorSweepsAndWarnsForPrunedRun)$' -count=1
+```
+
+Local run refuses its controller/shared-host binding. openLocalController
+refuses its elected owner. Public schedules install refuses its local schedule
+factory. Public doctor leaves the pruned run's one ledger record and returns
+no unrecorded_step_outcome warning. These failures do not depend on socket
+availability. Findings 1 and 7 are open.
+
+NewNativeHost and NewLocalRuntime exist, but they are dependency constructors.
+This branch has no concrete wingd.LocalController outside test fixtures.
+NewLocalRuntime still requires LocalRuntimeConfig.Open. W2's default policy
+reader handles persisted bearer/session authority, not verified local peers.
+LocalLifecycle.Doctor(ctx, version) has no sweep/dry-run operation or independent
+recording-warning result. A constructor name or integration commit was requested
+while the independent W9 work continued. None was supplied in this session.
+
+Contract changes / implementations needed from other owners remain:
+
+1. W2/W8: elected controller/store/queue/reconciliation/API/UI composition,
+   verified local-peer authority and controller-owned doctor cleanup. Doctor's
+   exit status must reflect the sweep, with recording failures as warnings.
+   No second writer or deleted opsview sweep facade was restored.
+2. W2/W3: private ReadSnapshot/ReadNode/TransitionRun/TransitionNode transport,
+   captured snapshots, delegated processes, source/engine, data/log and owner
+   policy bindings for NewNativeHost. Scheduling/public projections cannot
+   replace those private rows or drop transition extras.
+3. W2/W8: local schedule checkout/environment/proof/pin operations and elected
+   tick/dry-run ownership. W9's command components already test their declared
+   interfaces with fakes. A fake production factory would not close this gap.
+4. Prior A1-50 requests: immutable initial here reason, authorized source-bundle
+   upload, controller retention of submitted environment values, result/log
+   publication that preserves the local verdict, and final debug release.
+   Exact-engine inspection controls/sparks overlays and upgrade pin-directory
+   integration remain as recorded in the earlier sections. W1b's materialization
+   ownership was left untouched.
+
+All amendments/handoffs entries assigned to W9 retain the preceding assignment
+audit. Completed wire, source-attempt, step-window, step-report, launcher-fence,
+grammar, enrollment, notice/upgrade and Windows-packaging work was preserved.
+Native HTTP/api.sock, platform/backend/placement and real-repository QA remain
+with T1/lead. No foreign contract or lead-owned file was changed.
+
+### Shared files, assumptions and friction
+
+Shared changes are internal/doccheck/cliverbs.go and its tests,
+bin/install-to-green.sh and bin/install_to_green_test.go, plus generated
+pkg/docs/mirror copies. Other edits are W9-owned docs and this report.
+There is no new production interface, service, setting, flag, environment
+variable, retry, timeout or compatibility alias. Existing parser/extractor
+behavior was extended because inline examples were only checking verb names.
+The argument trace is test-only and does not change installer runtime behavior.
+
+Friction is the absent owner adapters/contracts, the two W8 pin-reader failures
+and sandbox socket denial. The lead owns commits, independent review, gates
+and native verification. Session scratch is deleted before reporting, while
+/tmp/sw-gocache is retained.
+
 ## Continuation from 47449fbd8 - command handlers and rendered guidance
 
 W9 remains CONTINUE. The worktree started clean at 47449fbd8. Lead findings
