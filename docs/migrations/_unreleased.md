@@ -1760,3 +1760,19 @@ committed `setup_id`.
 
 The account dashboard no longer calls the removed self-service account-deletion
 route. Account deletion belongs to the deployment operator console.
+
+## Browser connection and console transactions
+
+The GitHub App browser flow uses the shared policy router and current account
+session authority. Embedded controllers supply `WithGitHubConnectWriter` for
+linked GitHub identity reads, one-use flow consumption and installation binding.
+The old browser Principal lookup and standalone form middleware are removed.
+
+Console writes require `WithConsoleWriter`. Raw credit, billing, hold, deletion,
+waitlist, settings and installation methods are no longer HTTP fallbacks.
+Missing transaction adapters return `policy_missing`. Waitlist approval requires
+an `Idempotency-Key` header. Keep the same key when retrying an approval request.
+Console clients read failures from `error.message` in the canonical envelope.
+
+The unused token-table metering and HTTP billing-finalization helpers are removed.
+Claim billing and settlement belong to the store's immutable award lifecycle.

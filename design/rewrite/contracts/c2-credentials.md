@@ -2322,12 +2322,13 @@ Amendment 1 ratifies the interpretations below. They are not approval gates.
    The external checkout service must use `/webhooks/stripe` and commit
    checkout mode/currency through C1.
 
-7. **Console mutation rechecks.** Existing grant, trust, hold, deletion,
-   waitlist, credit-settings and deployment-settings store methods do not accept `AuthorityRef`.
-   C1 must replace those signatures with an authority-bearing transaction
-   boundary that rechecks revocation and derives the audit actor. The HTTP
-   policy gate is implemented, but it cannot establish that transaction
-   guarantee. No C1 signature was changed in this cutover.
+7. **Console mutation rechecks.** The console's nine business mutations now use
+   `controller.ConsoleWriter`, receiving the verified `Authorized` value. A
+   missing adapter returns `policy_missing`. C1 must implement the direct-session,
+   revocation and actor checks inside each committing transaction. The prior
+   raw store methods are no longer HTTP fallbacks. Deployment-settings writes
+   still need their separate authority-bearing contract. No C1 signature was
+   changed in this cutover.
 
 8. **Local recovery.** The retired orphan-reconciliation HTTP endpoint and its
    client are deleted. Local maintenance uses the internal store boundary.
@@ -2670,5 +2671,78 @@ requireScope, here/Actions route fences, tenant route table and browser API
 cookie middleware are deleted. Remaining Principal consumers belong to browser
 page/provider flows and old unregistered runtime helpers. Their remaining cut
 is listed in W2's report. No native credential-matrix cell is closed here.
+
+
+## Browser App connection and console committing adapters
+
+The seven browser App routes register through PolicyRouter. Start, picker,
+selection and completion verify the selected live session, current active-team
+`team.admin`, exact session account/team and form CSRF before reaching a handler.
+They reuse the canonical team-administration access alternative. Setup and
+callback verify signed state, its expiry, the browser verifier and exact state
+return. Duplicate flow/session/CSRF cookies and repeated form fields are refused.
+The retired browser Principal lookup and standalone form middleware are deleted.
+
+C2 declares the following local interface in browser_github_app_routes.go.
+
+```go
+type GitHubConnectWriter interface {
+    Team() store.Team
+    LinkedGitHubSubject(context.Context, capability.Authorized) (string, error)
+    ConsumeGitHubConnect(context.Context, capability.Authorized, string, time.Time) error
+    BindAuthorizedGitHubInstallation(context.Context, capability.Authorized, store.GitHubAppInstallation) (store.GitHubAppInstallation, error)
+}
+```
+
+`WithGitHubConnectWriter` resolves it for exactly the authorized team. Missing or
+wrong-team writers fail before provider access. C1 rechecks live session ancestry,
+current owner membership, exact team and account at each transaction. The linked
+subject read is authority-bearing. Consume uses the store clock, refuses expired
+or consumed nonces, commits consumption before code redemption/provider requests,
+and leaves failed provider attempts consumed. Bind rechecks that the linked
+GitHub subject still equals GitHubUserID, derives ConnectedBy from authority,
+validates provider installation facts and atomically refuses foreign ownership.
+The server performs the provider user/admin check and passes verified facts.
+No raw AccountIdentity, nonce-consumer or installation-bind fallback remains.
+
+C2 declares ConsoleWriter in console_writes.go. All methods receive context and
+Authorized before their operation fields. Its exact methods are ConsoleGrantCredit
+(CreditGrantRequest to CreditGrantResult), ConsoleSetBillingTrust
+(BillingTrustChange to BillingStanding), ConsoleFreeze (reason to TeamCreditFreeze),
+ConsoleUnfreeze (hold and reason to TeamCreditFreeze), ConsoleDeleteAccount
+(to AccountDeletion), ConsoleDeleteTeam (to TeamDeletion), ConsoleApproveWaitlist
+(account IDs, oldest and replay key to []Account), ConsoleSetCreditSettings
+(CreditSettingsUpdate to CreditSettings), and ConsoleUnbindGitHubInstallation
+(installation ID to Team). Each also returns error. WithConsoleWriter injects it.
+The default discovers it only on Store.AsOperator and refuses its absence.
+
+C1 rechecks the hashed direct account-session authority with no capability parent,
+current configured console authorization and operator.console inside every write.
+The committing adapter owns the trusted configured-operator gate. Derive all audit
+actors from that authority, use the store clock, select the target from Authorized,
+and preserve the existing business validation, ledger deduplication and audit effects.
+DeleteAccount resolves an ID or unique email selector inside its transaction,
+retaining ambiguous-email, last-owner and money-in-flight conflicts. Unfreeze with
+an empty hold releases only operator holds. An unknown explicit hold is not_found.
+Freeze and unfreeze return the committed freeze projection. Credit settings update
+atomically. App unbind resolves installation ownership inside its transaction.
+Waitlist approval commits one selected batch and its replay record together,
+rejects a changed body under the same key, and returns only newly admitted accounts
+for notification. A repeated completed request never selects the next oldest batch.
+Errors produce no approval notification. W1 supplies these transactions. C2 tests
+use fakes and do not prove the persistence rechecks.
+
+TestGitHubBrowserConnectionAuthorityProperty and StateProperty generate hostile
+selectors, authority, cookie, form and signed-state cases. ProviderAndReplay runs
+start, setup, callback, picker, selection and completion through actual Server HTTP
+with a fake provider and transaction writer. CommitRefusal and RequiresTransaction
+cover authority races, safe errors and missing adapters. ConsoleWriteHTTPAuthorityProperty
+covers all nine actual writes, forwarding the authority and target, refusal before
+a writer, committing conflicts, private failures and missing transactions. Existing
+console executable acceptance now injects an explicit store-backed transaction fake.
+The old TestSettleFinishedNodeClearsTheWindowForAnUnmeteredFinisher is retired with
+its dead helper. Store's TestMeteredUnitNodeLifecycleUsesImmutableAward,
+SettlementFailureRollsBackResult and StaleReportCannotSettleReplacementProperty
+retain the immutable-billing, atomic-finalization and stale-holder invariants.
 
 <!-- design:end -->

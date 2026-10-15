@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"context"
-	"errors"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -164,36 +162,4 @@ func (s *Server) endPriorSession(r *http.Request, newSessionID string) {
 	}
 }
 
-// safety: a form post is checked for its origin and its double-submitted token before a handler reads it, so a
-// page on another site cannot sign a browser in, out, or into a flow.
-func (s *Server) formCSRF(next http.HandlerFunc) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		if !sameOriginRequest(r) {
-			csrfError(w)
-			return
-		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxFormBody)
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if !validFormCSRF(r, s.cookiesSecure()) {
-			csrfError(w)
-			return
-		}
-		next(w, r)
-	})
-}
-
 const maxFormBody = 64 << 10
-
-func (s *Server) signedInBrowser(ctx context.Context, r *http.Request) (*browserSession, error) {
-	raw := sessionCookie(r, s.cookiesSecure())
-	if raw == "" {
-		return nil, errNoBrowserSession
-	}
-	return s.resolveBrowserSession(ctx, raw)
-}
-
-var errNoBrowserSession = errors.New("no session cookie")

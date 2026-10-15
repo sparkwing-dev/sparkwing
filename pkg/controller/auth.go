@@ -92,15 +92,6 @@ const (
 
 const authUnavailableRetryAfter = 5 * time.Second
 
-func claimIdentity(r *http.Request) store.ClaimIdentity {
-	p, ok := PrincipalFromContext(r.Context())
-	if !ok {
-		return store.ClaimIdentity{}
-	}
-	// safety: the token prefix, not the shared principal label, is what binds a claim.
-	return store.ClaimIdentity{Principal: p.Name, TokenPrefix: p.TokenPrefix}
-}
-
 func (p *Principal) label() string {
 	if p == nil {
 		return ""

@@ -141,38 +141,6 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (s *Server) lookupSession(ctx context.Context, raw string, now time.Time) (*Principal, *store.Session, error) {
-	sess, err := s.store.LookupSessionAndRenew(ctx, raw, sessionTTL, s.sessionMaxLifetime)
-	if err != nil {
-		return nil, nil, err
-	}
-	if s.sessionExpired(sess.CreatedAt, now) {
-		if err := s.store.DeleteSession(raw); err != nil {
-			s.logger.Warn("deleting an expired session failed", "error", err.Error())
-		}
-		return nil, nil, errSessionLifetimeExceeded
-	}
-	p := &Principal{
-		Name: sess.Principal, Kind: store.TokenKindUser, Team: sess.Team,
-		Authed: now, session: raw, signedInAt: sess.CreatedAt, Scopes: sess.Scopes,
-	}
-	if sess.AccountID == "" {
-		return p, sess, nil
-	}
-	// safety: an account exists only under a multi-team license, so a session it opened stops
-	// authenticating the moment the license is gone or expires, not only new sign-ins.
-	if !s.MultiTeam() {
-		return nil, nil, errAccountSessionsDisabled
-	}
-	p.AccountID = sess.AccountID
-	role, err := s.memberRole(ctx, sess.Team, sess.AccountID)
-	if err != nil {
-		return nil, nil, err
-	}
-	p.Role = string(role)
-	return p, sess, nil
-}
-
 // safety: a missing team or membership answers the empty role, which carries no scope.
 func (s *Server) memberRole(ctx context.Context, team store.Team, accountID string) (store.Role, error) {
 	t, err := s.store.ForTeam(ctx, team)

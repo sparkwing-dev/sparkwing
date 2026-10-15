@@ -157,11 +157,11 @@ func (s *Server) handleOperatorGrant(w http.ResponseWriter, r *http.Request, aut
 	if req.Key = strings.TrimSpace(req.Key); req.Key == "" {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "key is required, so a retried grant grants once"}
 	}
-	t, err := s.consoleTenant(r.Context(), authorized.Target.Team)
+	writer, err := s.consoleWriter()
 	if err != nil {
 		return err
 	}
-	res, err := t.RecordCreditGrant(r.Context(), store.CreditGrantRequest{
+	res, err := writer.ConsoleGrantCredit(r.Context(), authorized, store.CreditGrantRequest{
 		Kind: store.CreditGrantFree, AmountMicro: req.AmountCents * store.MicroCreditsPerCent,
 		Reference: "console:" + req.Key, CreatedBy: authorized.Principal.Capability.Subject.ID, Reason: req.Reason,
 	})
@@ -187,14 +187,16 @@ func (s *Server) handleOperatorFreeze(w http.ResponseWriter, r *http.Request, au
 	if err != nil {
 		return err
 	}
-	t, err := s.consoleTenant(r.Context(), authorized.Target.Team)
+	writer, err := s.consoleWriter()
 	if err != nil {
 		return err
 	}
-	if _, err := t.HoldByOperator(r.Context(), authorized.Principal.Capability.Subject.ID, req.Reason, time.Now()); err != nil {
-		return err
+	freeze, err := writer.ConsoleFreeze(r.Context(), authorized, req.Reason)
+	if err != nil {
+		return engineLookupError(err)
 	}
-	return s.writeOperatorFreeze(w, r, t)
+	writeOperatorFreeze(w, authorized.Target.Team, freeze)
+	return nil
 }
 
 func (s *Server) handleOperatorUnfreeze(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
@@ -202,34 +204,20 @@ func (s *Server) handleOperatorUnfreeze(w http.ResponseWriter, r *http.Request, 
 	if err != nil {
 		return err
 	}
-	t, err := s.consoleTenant(r.Context(), authorized.Target.Team)
+	writer, err := s.consoleWriter()
 	if err != nil {
 		return err
 	}
-	if hold := strings.TrimSpace(req.Hold); hold != "" {
-		var n int64
-		n, err = s.store.ReleaseCreditFreezes(r.Context(), t.Team(), hold, authorized.Principal.Capability.Subject.ID, req.Reason, time.Now())
-		if err == nil && n == 0 {
-			return &apierr.Error{Code: apierr.NotFound, Message: "team does not hold the named hold"}
-		}
-	} else {
-		_, err = t.ReleaseOperatorHolds(r.Context(), authorized.Principal.Capability.Subject.ID, req.Reason, time.Now())
-	}
+	freeze, err := writer.ConsoleUnfreeze(r.Context(), authorized, strings.TrimSpace(req.Hold), req.Reason)
 	if err != nil {
-		return err
+		return engineLookupError(err)
 	}
-	return s.writeOperatorFreeze(w, r, t)
+	writeOperatorFreeze(w, authorized.Target.Team, freeze)
+	return nil
 }
 
-func (s *Server) writeOperatorFreeze(w http.ResponseWriter, r *http.Request, t *store.Tenant) error {
-	freeze, err := t.CreditFreeze(r.Context())
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"team": string(t.Team()), "frozen": freeze.Frozen, "holds": append([]string{}, freeze.Disputes...),
-	})
-	return nil
+func writeOperatorFreeze(w http.ResponseWriter, team string, freeze store.TeamCreditFreeze) {
+	writeJSON(w, http.StatusOK, map[string]any{"team": team, "frozen": freeze.Frozen, "holds": append([]string{}, freeze.Disputes...)})
 }
 
 const operatorWaitlistPage = 50

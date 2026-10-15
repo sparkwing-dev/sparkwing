@@ -3,7 +3,6 @@ package controller
 import (
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -59,7 +58,7 @@ func billingTrustBody(team store.Team, b store.BillingStanding) billingTrustJSON
 }
 
 func (s *Server) handleBillingTrustSet(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
-	t, err := s.consoleTenant(r.Context(), authorized.Target.Team)
+	writer, err := s.consoleWriter()
 	if err != nil {
 		return err
 	}
@@ -75,16 +74,16 @@ func (s *Server) handleBillingTrustSet(w http.ResponseWriter, r *http.Request, a
 		return &apierr.Error{Code: apierr.BadRequest, Message: "trust must be granted, revoked or automatic"}
 	}
 	actor := authorized.Principal.Capability.Subject.ID
-	_, after, err := t.SetBillingTrust(r.Context(), store.BillingTrustChange{
+	after, err := writer.ConsoleSetBillingTrust(r.Context(), authorized, store.BillingTrustChange{
 		Trust: trust, Actor: actor, Reason: req.Reason, LimitCents: req.LimitCents,
 		DailyCapCents: req.DailyCapCents, RungCents: req.RungCents, RunnerCap: req.RunnerCap,
-	}, time.Now())
+	})
 	switch {
 	case errors.Is(err, store.ErrInvalidInput):
 		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	case err != nil:
 		return err
 	}
-	writeJSON(w, http.StatusOK, billingTrustBody(t.Team(), after))
+	writeJSON(w, http.StatusOK, billingTrustBody(store.Team(authorized.Target.Team), after))
 	return nil
 }

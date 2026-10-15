@@ -1258,3 +1258,27 @@ by the earlier real console-route port. Teams and billing HTTP fixtures now use
 canonical failures and the required replay headers. Old broad team/billing/App
 fixtures still need migration off retired token/trigger APIs. No native matrix
 cell is newly enabled and no fake-backed result is native integration evidence.
+
+## Browser connection and console continuation
+
+W2 moves the seven GitHub App browser registrations to PolicyRouter and deletes
+the old browser Principal lookup, renewal wrapper and standalone form middleware.
+TestGitHubBrowserConnectionAuthorityProperty, StateProperty, ProviderAndReplay,
+CommitRefusal and RequiresTransaction cover the real HTTP/proof/provider adapter.
+The provider and committing writer are fake. They port the connection ownership,
+forged/foreign state, admin proof and single-use concerns from github_app_test.go.
+That broad socket fixture still needs its other App/trigger callers migrated.
+
+ConsoleWriteHTTPAuthorityProperty covers all nine business writes against the
+new ConsoleWriter. The executable TestOperatorHTTPForwardsActionsAndAudits and
+TestConsoleAccountDeletionRetainsLastOwnerConflict inject an explicit transaction
+fake over SQLite. These prove HTTP forwarding, output, audit and error mapping.
+They do not prove the real committing authority checks. W1 owns those checks.
+
+TestSettleFinishedNodeClearsTheWindowForAnUnmeteredFinisher is removed with its
+unused finalizer. TestMeteredUnitNodeLifecycleUsesImmutableAward,
+TestMeteredUnitSettlementFailureRollsBackResult and
+TestMeteredUnitStaleReportCannotSettleReplacementProperty pass against the final
+store and retain its award-billing, settlement rollback and stale-report fencing.
+An anonymous/unmetered HTTP request no longer finalizes another claim's window.
+No native credential-matrix cell is newly completed by this continuation.

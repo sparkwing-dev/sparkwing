@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **controller (Breaking):** GitHub connection and console writes require authority-bearing transactions
+  Browser connections use the shared policy router. Embedded controllers supply `WithGitHubConnectWriter` and `WithConsoleWriter`. Waitlist approval requires a replay key. See [migration guide](docs/migrations/_unreleased.md#browser-connection-and-console-transactions).
+
 - **controller (Breaking):** Team, GitHub App and billing writes use the shared capability policy
   The legacy token verifier, caches and route fences are removed. Invitation and payment-page POSTs require a replay key. Embedded controllers supply authority-bearing transaction adapters. Account deletion is available through the operator console. See [migration guide](docs/migrations/_unreleased.md#remaining-team-credential-routes).
 

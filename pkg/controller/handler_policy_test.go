@@ -67,6 +67,9 @@ func takesAuthorization(fn *ast.FuncDecl) bool {
 }
 
 func handlerAuthorizationCall(name string) bool {
+	if name == "AuthorizeURL" {
+		return false
+	}
 	if strings.HasPrefix(strings.ToLower(name), "authorize") || strings.HasPrefix(strings.ToLower(name), "authenticate") {
 		return true
 	}

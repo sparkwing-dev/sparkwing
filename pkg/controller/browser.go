@@ -85,13 +85,7 @@ func (s *Server) signInRoutes(mux *http.ServeMux) {
 	s.registerPolicyEndpoints(mux, s.browserSessionEndpoints())
 	s.registerPolicyEndpoints(mux, s.oauthEndpoints())
 	s.registerPolicyEndpoints(mux, s.identityLinkEndpoints())
-	mux.Handle("POST /github/app/connect", s.formCSRF(s.handleGitHubAppConnect(false)))
-	mux.Handle("POST /github/app/connect/existing", s.formCSRF(s.handleGitHubAppConnect(true)))
-	mux.HandleFunc("GET /github/app/setup", s.handleGitHubAppSetup)
-	mux.HandleFunc("GET "+githubAppCallbackPath, s.handleGitHubAppCallback)
-	mux.HandleFunc("GET "+githubAppCompletePath, s.handleGitHubAppComplete)
-	mux.HandleFunc("GET "+githubAppAvailablePath, s.handleGitHubAppAvailable)
-	mux.Handle("POST /github/app/select", s.formCSRF(s.handleGitHubAppSelect))
+	s.registerPolicyEndpoints(mux, s.githubBrowserEndpoints())
 }
 
 // safety: the browser's own routes write the same request log, audit record and X-Request-Id the API does, so a
@@ -157,10 +151,6 @@ func (s *Server) pageGate(pages http.Handler) http.Handler {
 
 func operatorPage(p string) bool {
 	return p == "/operator" || strings.HasPrefix(p, "/operator/") || strings.HasPrefix(p, "/operator.")
-}
-
-func refusalIsBackend(err error) bool {
-	return errors.Is(err, store.ErrSessionBackend)
 }
 
 func sessionFlowUnavailable(err error) bool {

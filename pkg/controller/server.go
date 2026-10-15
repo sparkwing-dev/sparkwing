@@ -63,6 +63,7 @@ type Server struct {
 	resolveScheduleWriter      func(context.Context, store.Team) (ScheduleWriter, error)
 	resolveBillingWriter       func(context.Context, store.Team) (BillingWriter, error)
 	resolveTeamWriter          func(context.Context, store.Team) (TeamWriter, error)
+	resolveGitHubConnectWriter func(context.Context, store.Team) (GitHubConnectWriter, error)
 	resolveGitHubAppWriter     func(context.Context, store.Team) (GitHubAppWriter, error)
 	resolveRunControlWriter    func(context.Context, store.Team) (RunControlWriter, error)
 
@@ -149,6 +150,7 @@ type Server struct {
 	paymentVerifier capability.PaymentAuthenticator
 	paymentLedger   PaymentSettler
 	operators       atomic.Pointer[map[string]bool]
+	consoleWrites   ConsoleWriter
 
 	dashboard     *Dashboard
 	localHTTPOnce sync.Once

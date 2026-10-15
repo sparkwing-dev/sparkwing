@@ -456,10 +456,3 @@ func (s *Server) handleListDebugPauses(w http.ResponseWriter, r *http.Request, a
 	writeJSON(w, http.StatusOK, pauses)
 	return nil
 }
-
-func auditPrincipal(r *http.Request) string {
-	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil && p.Name != "" {
-		return p.Name
-	}
-	return "anonymous"
-}

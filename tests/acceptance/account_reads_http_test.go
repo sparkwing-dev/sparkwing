@@ -231,7 +231,7 @@ func TestConsoleAccountDeletionRetainsLastOwnerConflict(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	h := f.server.WithOperatorAccounts([]string{"member"}).Handler()
+	h := f.server.WithOperatorAccounts([]string{"member"}).WithConsoleWriter(consoleStoreFake{store: f.store}).Handler()
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, f.request("DELETE", "/api/v1/operator/accounts/target", ""))
 	assertEngineError(t, w, 409, apierr.Conflict)

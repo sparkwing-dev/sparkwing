@@ -2,7 +2,6 @@ package controller
 
 import (
 	"bytes"
-	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -295,7 +294,11 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 	if err := decodeJSON(r, &body); err != nil {
 		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	}
-	settings, err := s.store.AsOperator().SetOperatorCreditSettings(r.Context(), body.update())
+	writer, err := s.consoleWriter()
+	if err != nil {
+		return err
+	}
+	settings, err := writer.ConsoleSetCreditSettings(r.Context(), authorized, body.update())
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidCreditSetting) {
 			return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
@@ -392,258 +395,14 @@ func creditGrantToJSON(g store.CreditGrant) creditGrantJSON {
 
 // safety: a runner tells this apart from a transport failure and keeps polling
 // rather than retrying the request.
-type creditsRefusalJSON struct {
-	Error         string `json:"error"`
-	Code          string `json:"code"`
-	BalanceMicro  int64  `json:"balance_micro"`
-	RequiredMicro int64  `json:"required_micro"`
-}
-
-// CreditsRefusedCode is the machine-readable code on a 402 from a claim or
-// heartbeat the ledger refused.
+// CreditsRefusedCode identifies a claim refused for insufficient credits.
 const CreditsRefusedCode = "insufficient_credits"
 
-// SpendLimitCode is the code on a 402 refusing a claim at a spend limit:
-// the 30-day ceiling, the daily cap, the owner's budget, or a failed charge.
+// SpendLimitCode identifies a claim refused by a spend limit.
 const SpendLimitCode = "spend_limit"
 
-// CreditsFrozenCode is the code on a 402 refusing a claim for a team whose
-// cloud usage is held while a payment dispute is open.
+// CreditsFrozenCode identifies a claim refused by a billing hold.
 const CreditsFrozenCode = "credits_frozen"
 
-// safety: the refusal is a standing condition, so it is recorded once against
-// the run whose node is waiting rather than on every poll.
-func (s *Server) writeCreditsRefusal(w http.ResponseWriter, r *http.Request, err error) bool {
-	if !errors.Is(err, store.ErrInsufficientCredits) {
-		return false
-	}
-	refusal := creditsRefusalJSON{
-		Error: store.ErrInsufficientCredits.Error(),
-		Code:  CreditsRefusedCode,
-	}
-	var shortfall *store.InsufficientCreditsError
-	if errors.As(err, &shortfall) {
-		refusal.BalanceMicro = shortfall.BalanceMicro
-		refusal.RequiredMicro = shortfall.RequiredMicro
-		if shortfall.Frozen && shortfall.Limit != store.SpendLimitChargeFailed {
-			refusal.Error, refusal.Code = shortfall.Error(), CreditsFrozenCode
-		} else if shortfall.Limit != "" && shortfall.Limit != store.SpendLimitBalance {
-			refusal.Error, refusal.Code = shortfall.Error(), SpendLimitCode
-		}
-		s.noteCreditsBlocked(r, shortfall)
-	}
-	writeJSON(w, http.StatusPaymentRequired, refusal)
-	return true
-}
-
-// UnpricedCPUClassCode is the machine-readable code on the refusal of a claim
-// for a node asking for more cores than the credit rate table prices.
+// UnpricedCPUClassCode identifies a claim whose CPU class has no rate.
 const UnpricedCPUClassCode = "unpriced_cpu_class"
-
-// safety: a runner tells a priced-out node apart from a transport failure and
-// stops asking for it until the operator adds the class.
-type unpricedClassRefusalJSON struct {
-	Error    string `json:"error"`
-	Code     string `json:"code"`
-	Cores    int64  `json:"cores"`
-	MaxCores int64  `json:"max_cores"`
-}
-
-// safety: the ledger cannot price the node, so the claim is refused rather
-// than billed at a class the operator never set.
-func (s *Server) writeUnpricedClassRefusal(w http.ResponseWriter, r *http.Request, err error) bool {
-	var unpriced *store.UnpricedCPUClassError
-	if !errors.As(err, &unpriced) {
-		return false
-	}
-	s.logger.Warn("claim refused: the credit rate table prices no class this large",
-		"run_id", unpriced.RunID, "node_id", unpriced.NodeID,
-		"cores", unpriced.Cores, "max_cores", unpriced.MaxCores)
-	if unpriced.RunID != "" {
-		// safety: every poller would otherwise retry this node forever, so the
-		// run is failed with the reason rather than left waiting on a claim the
-		// ledger cannot price.
-		tenant, failErr := s.tenantFor(r)
-		if failErr == nil {
-			failErr = tenant.FailNodeForUnpricedClass(r.Context(), unpriced, time.Now())
-		}
-		if failErr != nil {
-			s.logger.Warn("failing a node the rate table cannot price",
-				"run_id", unpriced.RunID, "node_id", unpriced.NodeID, "err", failErr)
-		}
-	}
-	writeJSON(w, http.StatusConflict, unpricedClassRefusalJSON{
-		Error: unpriced.Error(), Code: UnpricedCPUClassCode,
-		Cores: unpriced.Cores, MaxCores: unpriced.MaxCores,
-	})
-	return true
-}
-
-// safety: the poller asks twice a second, so the waiting run records the
-// refusal once per node rather than on every poll. It lands on the node the
-// claim was refused for, which is the claimant's own team's; the oldest
-// waiting node on the controller may be another team's.
-func (s *Server) noteCreditsBlocked(r *http.Request, shortfall *store.InsufficientCreditsError) {
-	ctx := r.Context()
-	runID, nodeID := shortfall.RunID, shortfall.NodeID
-	if runID == "" {
-		return
-	}
-	balance, required := shortfall.BalanceMicro, shortfall.RequiredMicro
-	payload, err := json.Marshal(map[string]any{
-		"balance_micro": balance, "required_micro": required, "limit": cmp.Or(shortfall.Limit, store.SpendLimitBalance),
-	})
-	if err != nil {
-		return
-	}
-	tenant, err := s.tenantFor(r)
-	if err != nil {
-		s.logger.Warn("recording a credit-blocked claim failed",
-			"run_id", runID, "node_id", nodeID, "err", err)
-		return
-	}
-	wrote, err := tenant.AppendEventOnce(ctx, runID, nodeID, store.EventKindCreditsBlocked, payload)
-	if err != nil {
-		s.logger.Warn("recording a credit-blocked claim failed",
-			"run_id", runID, "node_id", nodeID, "err", err)
-		return
-	}
-	if wrote {
-		s.logger.Warn("claim refused: a spend limit or the balance is spent",
-			"run_id", runID, "node_id", nodeID, "limit", shortfall.Limit,
-			"balance_micro", balance, "required_micro", required)
-	}
-}
-
-// MeteredInProcessNodesCode is the machine-readable code on the 403 a metered
-// trigger claim gets when it names no node runner that claims each node.
-const MeteredInProcessNodesCode = "metered_inprocess_nodes"
-
-func (s *Server) refuseMeteredInProcessNodes(w http.ResponseWriter, r *http.Request, nodeRunner string) bool {
-	if nodeRunner == "k8s" {
-		return false
-	}
-	prefix, err := s.meteredTokenPrefix(r)
-	if err != nil {
-		s.writeInternalError(w, r, "read metered token", err)
-		return true
-	}
-	if prefix == "" {
-		return false
-	}
-	p, _ := PrincipalFromContext(r.Context())
-	writeAuthError(w, http.StatusForbidden, authErrorBody{
-		Code: MeteredInProcessNodesCode, Principal: p.label(),
-		Message: store.ErrMeteredInProcessNodes.Error() + "; run the trigger runner as k8s",
-	})
-	return true
-}
-
-// safety: a stored marker may outlive its license, so the controller checks
-// the license before treating that token as a billable claimant.
-func (s *Server) meteredTokenPrefix(r *http.Request) (string, error) {
-	if !s.Metering() {
-		return "", nil
-	}
-	prefix := claimIdentity(r).TokenPrefix
-	if prefix == "" {
-		return "", nil
-	}
-	metered, err := s.store.TokenMetered(r.Context(), prefix)
-	if err != nil {
-		return "", err
-	}
-	if !metered {
-		return "", nil
-	}
-	return prefix, nil
-}
-
-// safety: the node's own claim carries the credential the ledger priced the
-// work against, so a finish posted by another principal settles the same way,
-// and a node whose credential was revoked mid-run still releases its charge
-// window instead of holding a reservation open forever.
-func (s *Server) settleFinishedNode(r *http.Request, runID, nodeID string) {
-	settlement, err := s.nodeSettlement(r, runID, nodeID)
-	if err != nil {
-		return
-	}
-	s.settleNodeLedger(r, runID, nodeID, settlement)
-	// safety: an earlier licensed charge window must not also count as local
-	// work when the license expires before this node finishes.
-	if settlement.Metering == store.MeteringFree && !settlement.ChargeWindowOpen {
-		addLocalNodeSeconds(settlement.Seconds)
-	}
-}
-
-func (s *Server) nodeSettlement(r *http.Request, runID, nodeID string) (store.NodeSettlement, error) {
-	var settlement store.NodeSettlement
-	tenant, err := s.tenantFor(r)
-	if err == nil {
-		settlement, err = tenant.NodeSettlement(r.Context(), runID, nodeID)
-	}
-	if err != nil {
-		s.logger.Warn("reading a node's settlement failed",
-			"run_id", runID, "node_id", nodeID, "err", err)
-	}
-	return settlement, err
-}
-
-func (s *Server) cancelForExhaustedCredits(
-	r *http.Request, runID, nodeID, prefix string, res store.CreditChargeResult,
-) {
-	ctx := r.Context()
-	payload, err := json.Marshal(map[string]any{
-		"balance_micro":   res.BalanceMicro,
-		"exhausted_for_s": int64(res.ExhaustedFor.Seconds()),
-	})
-	if err != nil {
-		payload = nil
-	}
-	tenant, err := s.tenantFor(r)
-	if err == nil {
-		_, err = tenant.AppendEventOnce(ctx, runID, nodeID, store.EventKindCreditsExhausted, payload)
-	}
-	if err != nil {
-		s.logger.Warn("recording an exhausted-credit cancellation failed",
-			"run_id", runID, "node_id", nodeID, "err", err)
-	}
-	if err := s.store.CancelNodeForExhaustedCredits(ctx, runID, nodeID, prefix, time.Now()); err != nil {
-		s.logger.Error("cancelling a node for exhausted credits failed",
-			"run_id", runID, "node_id", nodeID, "err", err)
-		return
-	}
-	s.logger.Warn("cancelled a node: the credit balance stayed spent past the grace period",
-		"run_id", runID, "node_id", nodeID,
-		"balance_micro", res.BalanceMicro,
-		"exhausted_for_s", int64(res.ExhaustedFor.Seconds()))
-}
-
-// safety: without this the tail between the last heartbeat and the finish is
-// free, and the unused part of the claim reservation is never refunded.
-func (s *Server) finalizeMeteredNode(r *http.Request, runID, nodeID string) {
-	settlement, err := s.nodeSettlement(r, runID, nodeID)
-	if err != nil {
-		return
-	}
-	s.settleNodeLedger(r, runID, nodeID, settlement)
-}
-
-// safety: an open window is the only thing worth settling, and it is also what
-// keeps a node in the reservation index, so it is released whatever the
-// finishing principal presents.
-func (s *Server) settleNodeLedger(r *http.Request, runID, nodeID string, settlement store.NodeSettlement) {
-	if !s.Metering() || !settlement.ChargeWindowOpen {
-		return
-	}
-	res, err := s.store.FinalizeNodeCredits(r.Context(), runID, nodeID, settlement.ClaimTokenPrefix, time.Now())
-	if err != nil {
-		s.logger.Warn("settling a metered node failed",
-			"run_id", runID, "node_id", nodeID, "err", err)
-		return
-	}
-	if res.ForgivenSeconds > 0 {
-		s.logger.Warn("charge cap engaged at finish; the gap since the previous charge is not billed",
-			"run_id", runID, "node_id", nodeID, "forgiven_s", res.ForgivenSeconds)
-	}
-}

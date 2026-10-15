@@ -36,6 +36,21 @@ membership and the selected route alternative. Team administration, run deletion
 with `policy_missing`. Metrics on the API listener uses deployment or console
 policy.
 
+GitHub App connection pages verify their signed browser flow through the shared
+policy router. Connecting, listing administered installations, selecting and
+completing a connection require a live account session with `team.admin` in its
+active team. Form posts require the session's CSRF token. Provider returns
+verify signed state and the browser verifier. Embedded controllers supply
+`WithGitHubConnectWriter` for the linked-identity read, single-use state
+consumption and installation binding. Each write rechecks the session and
+current team ownership. The final bind also rechecks the linked GitHub identity.
+
+Console mutations pass their verified authority to `WithConsoleWriter`.
+The transaction derives the audit actor and rechecks the direct operator session.
+This covers credit grants, billing trust, holds, account/team deletion, waitlist
+approval, credit settings and installation unbinding. Waitlist approval requires
+an `Idempotency-Key` header. A missing transaction adapter returns `policy_missing`.
+
 Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.
 
 Job logs use `/api/v1/runs/{run}/jobs/{job}/logs`, with `/stream` and `/completeness` beneath it. The old `/runs/{run}/logs/{job}` paths are removed. Use `/api/v1/runners` instead of `/api/v1/agents`, `/api/v1/approvals` instead of `/api/v1/approvals/pending`, and `/api/v1/sizing` or `/api/v1/sizing/explain` instead of `/api/v1/capacity/profiles`. Read debug pauses at `/runs/{run}/debug-pauses`. The `paused` alias is removed.

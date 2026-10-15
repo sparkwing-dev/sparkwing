@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"net/http"
 	"sync"
 	"time"
@@ -66,10 +65,12 @@ func (t *tokenBudget) values() TokenRequestBudget {
 }
 
 func (s *Server) allowDataRequest(w http.ResponseWriter, r *http.Request, team store.Team, prefix string) bool {
-	principal := &Principal{Team: team, TokenPrefix: prefix}
-	// safety: this partial principal only keys the budget, so it stays out of
-	// the audit record that names the credential the caller authenticated.
-	key := s.floodKey(r.WithContext(context.WithValue(r.Context(), principalCtxKey{}, principal)), "")
+	key := "client:" + s.loginLimit.client(r)
+	if team = store.NormalizeTeam(team); team != "" && team != store.DefaultTeam {
+		key = "team:" + string(team)
+	} else if prefix != "" {
+		key = "token:" + prefix
+	}
 	return s.allowTokenRequest(w, r, key)
 }
 

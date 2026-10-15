@@ -93,25 +93,11 @@ type deletedAccountJSON struct {
 }
 
 func (s *Server) handleOperatorDeleteAccount(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
-	ref := strings.TrimSpace(authorized.Target.AccountID)
-	id := ref
-	if strings.Contains(ref, "@") {
-		acct, err := s.store.AccountByEmail(r.Context(), ref)
-		switch {
-		case errors.Is(err, store.ErrNotFound):
-			return &apierr.Error{Code: apierr.NotFound, Message: "account not found"}
-		case errors.Is(err, store.ErrAmbiguousAccount):
-			return &apierr.Error{Code: apierr.Conflict, Message: err.Error()}
-		case err != nil:
-			return err
-		}
-		id = acct.ID
+	writer, err := s.consoleWriter()
+	if err != nil {
+		return err
 	}
-	return s.deleteAccount(w, r, id, authorized.Principal.Capability.Subject.ID)
-}
-
-func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, accountID, by string) error {
-	res, err := s.store.DeleteAccount(r.Context(), accountID, time.Now())
+	res, err := writer.ConsoleDeleteAccount(r.Context(), authorized)
 	var lastOwner *store.LastOwnerError
 	switch {
 	case moneyInFlight(err):
@@ -122,6 +108,8 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, accountID
 			teams = append(teams, teamRefJSON{Slug: string(t.Slug), DisplayName: t.Label(), Role: string(store.RoleOwner)})
 		}
 		return &apierr.Error{Code: apierr.Conflict, Message: "hand ownership of these teams to another member, or delete them, first", Details: map[string]any{"teams": teams}}
+	case errors.Is(err, store.ErrAmbiguousAccount):
+		return &apierr.Error{Code: apierr.Conflict, Message: "account email matches more than one account"}
 	case errors.Is(err, store.ErrNotFound):
 		return &apierr.Error{Code: apierr.NotFound, Message: "account not found"}
 	case errors.Is(err, store.ErrInvalidInput):
@@ -133,13 +121,17 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, accountID
 	for _, t := range res.DeletedTeams {
 		out.DeletedTeams = append(out.DeletedTeams, string(t))
 	}
-	s.logger.Info("account deleted", "account", res.AccountID, "by", by, "teams_deleted", len(res.DeletedTeams))
+	s.logger.Info("account deleted", "account", res.AccountID, "by", authorized.Principal.Capability.Subject.ID, "teams_deleted", len(res.DeletedTeams))
 	writeJSON(w, http.StatusOK, out)
 	return nil
 }
 
 func (s *Server) handleOperatorDeleteTeam(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
-	del, _, err := s.store.AsOperator().RequestTeamDeletion(r.Context(), store.Team(authorized.Target.Team), time.Now())
+	writer, err := s.consoleWriter()
+	if err != nil {
+		return err
+	}
+	del, err := writer.ConsoleDeleteTeam(r.Context(), authorized)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		return &apierr.Error{Code: apierr.NotFound, Message: "team is not registered"}

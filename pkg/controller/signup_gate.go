@@ -360,23 +360,28 @@ func (s *Server) handleApproveWaitlist(w http.ResponseWriter, r *http.Request, a
 	if len(req.AccountIDs) > maxWaitlistPage || req.Oldest > maxWaitlistPage {
 		return &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("approve at most %d accounts at a time", maxWaitlistPage)}
 	}
-	ctx, now := r.Context(), time.Now().UTC()
+	if req.Oldest < 0 {
+		return invalidEngineBody("oldest must be positive")
+	}
+	key, err := controlIdempotencyKey(r)
+	if err != nil {
+		return err
+	}
+	ctx := r.Context()
 	actor := authorized.Principal.Capability.Subject.ID
-	var approved []store.Account
-	var err error
-	if req.Oldest > 0 {
-		approved, err = s.store.ApproveOldestWaitlisted(ctx, req.Oldest, actor, now)
-	} else {
-		approved, err = s.store.ApproveWaitlisted(ctx, req.AccountIDs, actor, now)
+	writer, err := s.consoleWriter()
+	if err != nil {
+		return err
+	}
+	approved, err := writer.ConsoleApproveWaitlist(ctx, authorized, req.AccountIDs, req.Oldest, key)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	out := make([]approvedJSON, 0, len(approved))
 	for _, a := range approved {
 		s.logger.Info("signup.approved", "account", a.ID, "by", actor, "team", string(a.ActiveTeam))
 		s.notifyApproved(ctx, a)
 		out = append(out, approvedJSON{ID: a.ID, Email: a.Email, ActiveTeam: string(a.ActiveTeam)})
-	}
-	if err != nil {
-		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"approved": out})
 	return nil
