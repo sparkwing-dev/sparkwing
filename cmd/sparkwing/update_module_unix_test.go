@@ -17,9 +17,9 @@ func TestSDKCheckRejectsFIFO(t *testing.T) {
 	if root := os.Getenv("SPARKWING_UPDATE_FIFO_FIXTURE"); root != "" {
 		isolateUpdateTests(t)
 		t.Chdir(root)
-		report, code := checkPinUpdate(t, "--check")
-		if report.Status != "unknown" || code != 2 || report.Installed.Path != filepath.Join(root, ".sparkwing", "go.mod") {
-			t.Fatalf("FIFO module misreported: %+v %d", report, code)
+		report := readPinSummary(filepath.Join(root, ".sparkwing"))
+		if report.Runs != "" || report.Refusal == "" {
+			t.Fatalf("FIFO module misreported: %+v", report)
 		}
 		if _, err := os.Stat(os.Getenv("SPARKWING_HOME")); !os.IsNotExist(err) {
 			t.Fatal("FIFO check wrote state")

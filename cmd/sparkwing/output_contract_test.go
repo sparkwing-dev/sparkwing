@@ -148,7 +148,7 @@ func TestOutputContractPlainCompletionAndEmptyList(t *testing.T) {
 	if err != nil || !strings.Contains(string(output), "complete ") || json.Valid(output) {
 		t.Fatalf("plain completion: %v: %s", err, output)
 	}
-	command = outputContractCommand(t, "configure", "profiles", "list")
+	command = outputContractCommand(t, "profiles", "list")
 	output, err = command.Output()
 	if err != nil || len(output) != 0 {
 		t.Fatalf("empty profile listing: %v: %s", err, output)

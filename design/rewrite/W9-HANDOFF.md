@@ -1,3 +1,113 @@
+## Continuation from db866b76a - production composition remains open
+
+This section supersedes the status below. W9 is CONTINUE. The worktree started
+clean at db866b76a. No Git writes or candidate installation were performed.
+
+### Implemented and deleted
+
+- Deleted the unused `opsview.Diagnose` / `RenderDoctor` facade: 1,652 production
+  lines. Its obsolete protocol-lockout, standalone-store, profile reclamation,
+  daemon sweep, permission and direct-store tests are removed. Those mutation
+  paths have no production caller. Sessionledger and controller code are intact.
+- Retained install scanning and queue tests. Ported toolchain provenance,
+  install-conflict timestamps/resolved paths/remedy quoting and gate-survey
+  assertions to the public doctor command. Its text output now retains those
+  machine findings. These tests do not establish controller cleanup.
+- Fixed migration selector exclusivity: `--version` cannot be combined with
+  explicit `--from` or `--to`.
+- Moved the existing Git unbinding to dispatch entry, before parsing, help and
+  checkout selection. Invariant: no invocation leaves inherited repository or
+  index bindings available to a child, while the gate index retains its launch
+  directory and unrelated identity variables survive. A 128-case generated
+  property covers the real dispatch boundary.
+- Fixed `TestDaemonLifecycleMissingAndCancelledRuntime` to supply deterministic
+  missing and failed runtimes. The real service resolver is not a missing
+  runtime fixture. Removed the 33-line orphan
+  `TestProcessLivenessRegressionDoesNotSleep`: its source file and the CLI
+  `processAlive` helper were already deleted, so there is no CLI liveness
+  implementation for that AST assertion to check.
+- Ported retained scaffold, empty-fleet, profiles, pin suggestions, credential
+  revocation, concurrency-key and public-error tests to the current grammar and
+  wire. Read-only pin checks now reach `gatherSDKPinWith` and real engine readers
+  instead of the deleted `repos update --check` surface.
+
+W9-owned production Go is **+9/-2, net +7 this pass**, and **-8,111 versus main**,
+within its -2,900 budget. The shared opsview cut makes this pass **-1,645 net
+production lines**. Test and contract declaration files are excluded.
+
+### Verification and acceptance
+
+All Go checks use GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache,
+GOMAXPROCS=4, and TMPDIR/GOTMPDIR under /tmp/sw-astra-W9. Tests use -p 4.
+
+- Whole-repository `go build -p 4 ./...` passes.
+- Scoped cmd/sparkwing and opsview vet passes. Commentcheck against main passes.
+- Full opsview tests pass. The daemon, public doctor, local/here host adapter,
+  local-service and schedule component selection passes.
+- Twelve migrated command regressions pass. Eighteen focused migration,
+  dispatch and checkout tests pass, including the generated Git property.
+- Existing `TestSurface*` and `TestHere*` acceptance components pass. No native
+  acceptance cell is newly complete or unskipped.
+- The broad socket-free short selection initially recorded 907 passing,
+  14 skipped and 17 failing top-level CLI tests. Its retained failures were
+  triaged and ported. This is not a claim that the full CLI suite is green.
+  Native socket tests remain sandbox-blocked. The CLI-subprocess output-contract
+  test was ported but not rerun after the grammar edit.
+
+### Production probes still fail; contracts and integration needed
+
+The tagged probes were rerun with:
+
+```
+go test -p 4 -tags rewrite_integration ./cmd/sparkwing -run '^TestReview(ProductionExecutionBindings|PublicDoctorSweepsAndWarnsForPrunedRun)$' -count=1
+```
+
+All three production factories still refuse. Public doctor leaves one pruned
+run's ledger entry and emits no `unrecorded_step_outcome` warning. These findings
+are open, not waived. No substitute factory was added to make the probes green.
+
+1. **W2/W8 local controller.** This HEAD has `wingd.NewLocalRuntime`, but its
+   required `LocalRuntimeConfig.Open` still has no concrete `LocalController`
+   implementation. `git grep 'wingd.LocalController' HEAD -- '*.go'` finds only
+   W9's refusal and test factories. Bind the sole store, credentials, queue,
+   reconciliation, maintenance and authorized API/UI under election.
+2. **W2/W3 native host.** `NewNativeHost` exists. Its store, source engines,
+   captured environments, process authority, router, logs, delegated execution,
+   compute activity and owner policies are still not assembled for the CLI.
+   W9's contract-tested `cliHostState` can consume the private C1-shaped
+   ReadSnapshot, ReadNode, TransitionRun and TransitionNode dependencies. Their
+   authenticated production transport is still absent. Public projections
+   cannot replace the private rows or discard transition extras.
+3. **W2/W8 schedules.** There is no local checkout/environment/proof/pin owner
+   or controller tick/dry-run operation to bind. Existing schedule managers and
+   native unit interfaces remain exercised with component fakes. The production
+   resolver remains an explicit refusal.
+4. **W2/W8 doctor.** `LocalLifecycle.Doctor(ctx, version)` still only checks
+   status and units. It cannot request a dry-run sweep. Add the controller-owned
+   cleanup operation with explicit dry-run input and independent recording
+   warnings. W9 will invoke and render that operation. The deleted facade must
+   not return as a second store owner.
+5. **W8 pin reader.** Two retained tests now expose failures through the real
+   engine reader. `TestSDKCheckRejectsFIFO` blocks until its existing five-second
+   subprocess bound. `TestSDKCheckRefusesOversizedModuleWithoutWriting` reads an
+   oversized module and includes its contents in the refusal instead of applying
+   the retained 1 MiB bound. Invariant: pin inspection reads bounded regular
+   files and never blocks on special files. The failure diagnostic is capped at
+   200 characters. No W8 implementation or contract was changed.
+
+The older source-bundle/publication, here/debug, inspection compiler and upgrade
+pin-location handoffs below remain the continuation inventory. This pass does
+not claim them closed. Lead-owned amendments and handoffs were not edited.
+
+Shared files touched: `internal/opsview/doctor.go` and its tests. All other code
+and test changes are under `cmd/sparkwing`. No API-removal caller remained
+outside those files. No production owner contract was changed.
+
+Friction: the concrete constructors named in the lead instruction are not at
+this HEAD. The missing names/commit were requested while independent work
+continued. Scratch /tmp/sw-astra-W9 is removed after final checks. The shared
+/tmp/sw-gocache remains. Natural-writing and diagnosing-bugs skills were used.
+
 ## Adversarial review remediation from 1813bdeb9
 
 This section supersedes conflicting status below. **Do not merge W9 yet.**

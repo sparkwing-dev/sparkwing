@@ -44,7 +44,11 @@ func (f *chainFixture) addRepo(t *testing.T, name, project string) string {
 func (f *chainFixture) registerRepos(t *testing.T, dirs ...string) {
 	t.Helper()
 	var b strings.Builder
-	b.WriteString("repos:\n")
+	if len(dirs) == 0 {
+		b.WriteString("repos: []\n")
+	} else {
+		b.WriteString("repos:\n")
+	}
 	for _, d := range dirs {
 		fmt.Fprintf(&b, "  - path: %s\n", d)
 	}
