@@ -24,7 +24,7 @@ type bootstrapReference struct {
 	JobUID types.UID `json:"job_uid"`
 }
 
-// Sync reconstructs ownership from Kubernetes and retires expired, terminal or cancelled Jobs.
+// Sync reconstructs Kubernetes ownership and retires stale Jobs and reservations.
 func (l *Launcher) Sync(ctx context.Context) error {
 	if err := l.validate(); err != nil {
 		return err
@@ -81,6 +81,64 @@ func (l *Launcher) Sync(ctx context.Context) error {
 			}
 		}
 	}
+	return errors.Join(append(errs, l.syncReservations(ctx))...)
+}
+
+func (l *Launcher) syncReservations(ctx context.Context) error {
+	nodes, err := l.Kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	var observations []CloudJobObservation
+	reservations := map[string]CloudNodeReservation{}
+	for _, node := range nodes.Items {
+		if node.Annotations[reservationNamespaceAnnotation] != l.Config.Namespace {
+			continue
+		}
+		var held CloudNodeReservation
+		var binding CloudJobBinding
+		if err := json.Unmarshal([]byte(node.Annotations[reservationAnnotation]), &held); err != nil {
+			return err
+		}
+		if err := json.Unmarshal([]byte(node.Annotations[bindingAnnotation]), &binding); err != nil {
+			return err
+		}
+		if held.NodeName != node.Name || held.NodeUID != string(node.UID) || held.Team != binding.Team || held.Award != binding.LeaseRef() || held.JobName != jobName(binding) || held.ReservationID == "" {
+			return errors.New("Cloud node reservation does not match its persisted award")
+		}
+		_, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).Get(ctx, held.JobName, metav1.GetOptions{})
+		if err == nil {
+			continue
+		}
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		observations = append(observations, CloudJobObservation{Binding: binding, JobName: held.JobName, NodeUID: held.NodeUID, ReservationID: held.ReservationID})
+		reservations[held.JobName] = held
+	}
+	if len(observations) == 0 {
+		return nil
+	}
+	retirements, err := l.retirements(ctx, observations)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for name, remove := range retirements {
+		if !remove {
+			continue
+		}
+		_, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).Get(ctx, name, metav1.GetOptions{})
+		if err == nil {
+			continue
+		}
+		if apierrors.IsNotFound(err) {
+			err = l.Boundary.Release(ctx, reservations[name])
+		}
+		if err != nil && !errors.Is(err, ErrContainersRunning) {
+			errs = append(errs, err)
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -130,7 +188,7 @@ func jobOwnership(job batchv1.Job) (CloudJobBinding, CloudNodeReservation, error
 	if err := json.Unmarshal([]byte(job.Annotations[reservationAnnotation]), &reservation); err != nil {
 		return binding, reservation, fmt.Errorf("Job %s has invalid reservation: %w", job.Name, err)
 	}
-	if job.Name != jobName(binding) || reservation.JobName != job.Name || reservation.Team != binding.Team || reservation.NodeName != job.Spec.Template.Spec.NodeName || reservation.NodeUID == "" || reservation.ReservationID == "" {
+	if job.Name != jobName(binding) || reservation.JobName != job.Name || reservation.Team != binding.Team || reservation.Award != binding.LeaseRef() || reservation.NodeName != job.Spec.Template.Spec.NodeName || reservation.NodeUID == "" || reservation.ReservationID == "" {
 		return binding, reservation, errors.New("Cloud Job ownership does not match its reservation")
 	}
 	return binding, reservation, nil

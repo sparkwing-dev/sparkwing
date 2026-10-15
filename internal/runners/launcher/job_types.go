@@ -7,6 +7,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
@@ -39,6 +40,20 @@ type CloudJobBinding struct {
 	ParentCapabilityExpiry         time.Time
 }
 
+// LeaseRef returns the awarded unit fence, including the eval lease generation.
+func (binding CloudJobBinding) LeaseRef() capability.LeaseRef {
+	lease := capability.LeaseRef{ID: binding.UnitID, Holder: binding.Holder, Generation: binding.Generation}
+	switch binding.Kind {
+	case CloudPlan:
+		lease.Kind = capability.UnitPlan
+	case CloudEval:
+		lease.Kind = capability.UnitEval
+	case CloudWork:
+		lease.Kind = capability.UnitNode
+	}
+	return lease
+}
+
 // CloudJobAward carries only a single-use bootstrap, never the launcher's root credential.
 type CloudJobAward struct {
 	Engine    *engine.Identity `json:"engine,omitempty"`
@@ -52,6 +67,7 @@ type CloudJobAward struct {
 // CloudNodeReservation is an exclusive placement fact held until the Job and DinD have stopped.
 type CloudNodeReservation struct {
 	NodeName, NodeUID, Team, JobName, ReservationID string
+	Award                                           capability.LeaseRef
 }
 
 // CloudNetworkEvidence comes from enforcement probes, not the presence of NetworkPolicy YAML.

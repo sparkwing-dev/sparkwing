@@ -18,9 +18,10 @@ import (
 // ErrNoDedicatedNode leaves the award unstarted when no exclusive placement is available.
 var ErrNoDedicatedNode = errors.New("no unoccupied team-dedicated Cloud node")
 
-const reservationNamespaceAnnotation = "sparkwing.dev/reservation-namespace"
-const reservationExpiryAnnotation = "sparkwing.dev/reservation-expiry"
-const reservationTaint = "sparkwing.dev/cloud-reserved"
+const (
+	reservationNamespaceAnnotation = "sparkwing.dev/reservation-namespace"
+	reservationTaint               = "sparkwing.dev/cloud-reserved"
+)
 
 // KubernetesBoundary persists exclusivity on the node under Kubernetes resource-version fencing.
 // Probe proves network enforcement and Clear removes prior Job state before the node can be reused.
@@ -37,8 +38,12 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 	if b.Kube == nil || b.Namespace == "" || b.Probe == nil || b.Clear == nil || binding.Team == "" || job == "" {
 		return CloudNodeReservation{}, CloudNetworkEvidence{}, errors.New("Cloud boundary requires Kubernetes, namespace, network probe, node cleanup, team and Job")
 	}
-	if !binding.ParentCapabilityExpiry.After(time.Now()) {
-		return CloudNodeReservation{}, CloudNetworkEvidence{}, errors.New("Cloud reservation requires a live parent capability expiry")
+	if _, err := cloudDeadline(time.Now(), binding); err != nil {
+		return CloudNodeReservation{}, CloudNetworkEvidence{}, err
+	}
+	lease := binding.LeaseRef()
+	if lease.Kind == "" || lease.ID == "" || lease.Holder == "" || lease.Generation <= 0 {
+		return CloudNodeReservation{}, CloudNetworkEvidence{}, errors.New("Cloud reservation requires a complete award fence")
 	}
 	nodes, err := b.Kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: TeamNodeLabel + "=" + TeamNodeValue(binding.Team)})
 	if err != nil {
@@ -57,7 +62,7 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 		}
 		evidence, err := b.Probe(ctx, reservation)
 		if err == nil {
-			err = validateBoundary(b.Namespace, binding.Team, job, reservation, evidence)
+			err = validateBoundary(b.Namespace, binding, job, reservation, evidence)
 		}
 		if err != nil {
 			return CloudNodeReservation{}, CloudNetworkEvidence{}, errors.Join(err, b.Release(ctx, reservation))
@@ -74,23 +79,23 @@ func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, 
 		if err := json.Unmarshal([]byte(raw), &held); err != nil {
 			return held, fmt.Errorf("node %s has a malformed Cloud reservation", node.Name)
 		}
-		if held.Team == team && held.JobName == job && held.NodeUID == string(node.UID) && held.NodeName == node.Name && held.ReservationID != "" && node.Annotations[reservationNamespaceAnnotation] == b.Namespace {
+		if held.Team == team && held.JobName == job && held.NodeUID == string(node.UID) && held.NodeName == node.Name && held.ReservationID != "" && held.Award == binding.LeaseRef() && node.Annotations[reservationNamespaceAnnotation] == b.Namespace {
 			return held, nil
 		}
-		var err error
-		node, err = b.recoverOrphan(ctx, node, held)
-		if err != nil {
-			return CloudNodeReservation{}, err
-		}
+		return CloudNodeReservation{}, ErrNoDedicatedNode
 	}
 	if err := b.vacant(ctx, node.Name); err != nil {
 		return CloudNodeReservation{}, err
 	}
-	r := CloudNodeReservation{NodeName: node.Name, NodeUID: string(node.UID), Team: team, JobName: job, ReservationID: rand.Text()}
+	r := CloudNodeReservation{NodeName: node.Name, NodeUID: string(node.UID), Team: team, JobName: job, ReservationID: rand.Text(), Award: binding.LeaseRef()}
 	if node.UID == "" {
 		return CloudNodeReservation{}, errors.New("Cloud node has no Kubernetes UID")
 	}
 	raw, err := json.Marshal(r)
+	if err != nil {
+		return CloudNodeReservation{}, err
+	}
+	bindingJSON, err := json.Marshal(binding)
 	if err != nil {
 		return CloudNodeReservation{}, err
 	}
@@ -99,7 +104,7 @@ func (b *KubernetesBoundary) reserveNode(ctx context.Context, node corev1.Node, 
 	}
 	node.Annotations[reservationAnnotation] = string(raw)
 	node.Annotations[reservationNamespaceAnnotation] = b.Namespace
-	node.Annotations[reservationExpiryAnnotation] = binding.ParentCapabilityExpiry.Format(time.RFC3339Nano)
+	node.Annotations[bindingAnnotation] = string(bindingJSON)
 	node.Spec.Taints = append(node.Spec.Taints, corev1.Taint{Key: reservationTaint, Value: r.ReservationID, Effect: corev1.TaintEffectNoSchedule})
 	if _, err = b.Kube.CoreV1().Nodes().Update(ctx, &node, metav1.UpdateOptions{}); err != nil {
 		return CloudNodeReservation{}, err
@@ -143,43 +148,12 @@ func (b *KubernetesBoundary) Release(ctx context.Context, reservation CloudNodeR
 	}
 	delete(node.Annotations, reservationAnnotation)
 	delete(node.Annotations, reservationNamespaceAnnotation)
-	delete(node.Annotations, reservationExpiryAnnotation)
+	delete(node.Annotations, bindingAnnotation)
 	node.Spec.Taints = slices.DeleteFunc(node.Spec.Taints, func(taint corev1.Taint) bool {
 		return taint.Key == reservationTaint && taint.Value == reservation.ReservationID
 	})
 	_, err = b.Kube.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
 	return err
-}
-
-func (b *KubernetesBoundary) recoverOrphan(ctx context.Context, node corev1.Node, held CloudNodeReservation) (corev1.Node, error) {
-	if node.Annotations[reservationNamespaceAnnotation] != b.Namespace {
-		return node, ErrNoDedicatedNode
-	}
-	expiry, err := time.Parse(time.RFC3339Nano, node.Annotations[reservationExpiryAnnotation])
-	if err != nil {
-		return node, fmt.Errorf("node %s has invalid reservation expiry: %w", node.Name, err)
-	}
-	if expiry.After(time.Now()) {
-		return node, ErrNoDedicatedNode
-	}
-	_, err = b.Kube.BatchV1().Jobs(b.Namespace).Get(ctx, held.JobName, metav1.GetOptions{})
-	if err == nil {
-		return node, ErrNoDedicatedNode
-	}
-	if !apierrors.IsNotFound(err) {
-		return node, err
-	}
-	if err = b.Release(ctx, held); err != nil {
-		return node, err
-	}
-	fresh, err := b.Kube.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
-	if err != nil {
-		return node, err
-	}
-	if fresh.UID != node.UID || fresh.Labels[TeamNodeLabel] != node.Labels[TeamNodeLabel] || fresh.Annotations[reservationAnnotation] != "" || !nodeReady(*fresh) {
-		return node, ErrNoDedicatedNode
-	}
-	return *fresh, nil
 }
 
 func (b *KubernetesBoundary) vacant(ctx context.Context, node string) error {

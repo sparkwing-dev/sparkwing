@@ -151,24 +151,23 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 	jobs := make([]controllerwire.LauncherJobRef, len(observations))
 	byJob, byAward := make(map[string]int), make(map[capability.LeaseRef]int)
 	for i, observation := range observations {
-		if observation.JobNamespace == "" || observation.JobUID == "" || observation.Binding.UnitID == "" || observation.JobName != jobName(observation.Binding) || observation.NodeUID == "" {
+		if observation.Binding.UnitID == "" || observation.JobName != jobName(observation.Binding) {
 			return nil, errors.New("Cloud observation is missing its persisted unit, Job or node identity")
 		}
 		if _, ok := byJob[observation.JobName]; ok {
 			return nil, errors.New("duplicate Cloud Job observation")
 		}
 		observed := controllerwire.LauncherObservation{
-			Award:   capability.LeaseRef{ID: observation.Binding.UnitID, Holder: observation.Binding.Holder, Generation: observation.Binding.Generation},
-			Job:     controllerwire.LauncherJobRef{Namespace: observation.JobNamespace, Name: observation.JobName, UID: observation.JobUID},
-			NodeUID: observation.NodeUID,
+			Award:         observation.Binding.LeaseRef(),
+			Job:           controllerwire.LauncherJobRef{Namespace: observation.JobNamespace, Name: observation.JobName, UID: observation.JobUID},
+			NodeUID:       observation.NodeUID,
+			ReservationID: observation.ReservationID,
 		}
-		switch observation.Binding.Kind {
-		case CloudPlan:
-			observed.Award.Kind = capability.UnitPlan
-		case CloudEval:
-			observed.Award.Kind = capability.UnitEval
-		case CloudWork:
-			observed.Award.Kind = capability.UnitNode
+		if observation.ReservationID != "" {
+			if observation.JobNamespace != "" || observation.JobUID != "" {
+				return nil, errors.New("reservation observation cannot carry a Job instance")
+			}
+			observed.Job = controllerwire.LauncherJobRef{}
 		}
 		if err := observed.Validate(); err != nil {
 			return nil, err
@@ -187,7 +186,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 	if err != nil {
 		return nil, err
 	}
-	if len(response.Awards)+len(response.Remove) != len(observations) {
+	if len(response.Awards)+len(response.Remove)+len(response.RemoveReservations) != len(observations) {
 		return nil, errors.New("controller sync omitted or added Cloud Job decisions")
 	}
 	states := make([]CloudJobState, len(observations))
@@ -199,7 +198,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		if err != nil {
 			return nil, err
 		}
-		fence := capability.LeaseRef{Kind: unit.Unit, ID: binding.UnitID, Holder: binding.Holder, Generation: binding.Generation}
+		fence := binding.LeaseRef()
 		i, ok := byAward[fence]
 		if !ok || states[i].Binding.UnitID != "" || !sameBinding(binding, observations[i].Binding) {
 			return nil, errors.New("controller sync returned duplicate or changed Cloud bindings")
@@ -208,8 +207,15 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 	}
 	for _, job := range response.Remove {
 		i, ok := byJob[job.Name]
-		if !ok || states[i].Binding.UnitID != "" || job != jobs[i] {
+		if !ok || observations[i].ReservationID != "" || states[i].Binding.UnitID != "" || job != jobs[i] {
 			return nil, errors.New("controller sync returned unknown or contradictory Cloud cleanup")
+		}
+		states[i] = CloudJobState{Binding: observations[i].Binding, Delete: true}
+	}
+	for _, reservation := range response.RemoveReservations {
+		i, ok := byAward[reservation.Award]
+		if !ok || states[i].Binding.UnitID != "" || observations[i].ReservationID == "" || reservation.NodeUID != observations[i].NodeUID || reservation.ReservationID != observations[i].ReservationID {
+			return nil, errors.New("controller sync returned unknown or contradictory reservation cleanup")
 		}
 		states[i] = CloudJobState{Binding: observations[i].Binding, Delete: true}
 	}

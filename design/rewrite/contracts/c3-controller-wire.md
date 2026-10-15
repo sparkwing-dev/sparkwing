@@ -207,6 +207,18 @@ awarded unit's generation; an eval uses its own lease generation, separately
 from the immutable source generation. The observed Job carries namespace, name
 and UID, and `node_uid` identifies its reserved node instance. Observations
 cannot replace the stored fence or authorize a cleanup by themselves.
+A reservation-only observation carries the same award LeaseRef, `node_uid` and
+`reservation_id`, and omits `job`. It cannot also carry a Job reference.
+`LauncherSyncResponse.RemoveReservations` returns `LauncherReservationRef` values
+with that exact award, NodeUID and ReservationID. The store proves the original
+bootstrap award belongs to the authenticated launcher's ancestry, even after
+expiry, cancellation, exchange or a later generation. Unknown, forged and foreign
+award fences refuse the whole response. A live award remains in `Awards`.
+The launcher persists the award and reservation on the node. Sync observes
+reservations even when no Job was created. It releases only the matching retired
+reservation after proving the named Job absent and every non-DaemonSet pod gone.
+Parent credential expiry alone never authorizes release. An unexpiring service
+root is valid when the award's execution deadline is bounded.
 `LauncherSyncResponse.Remove` is a list of `LauncherJobRef`, carrying the exact
 namespace, name and UID required as a Kubernetes deletion precondition. A name
 alone cannot identify an instance after replacement. Every transport, decoding
@@ -216,7 +228,7 @@ unit-ID/Job-name observation and string cleanup list are removed. W8 must retain
 award annotations and the actual Kubernetes Job UID, submit observations and
 delete with the UID precondition before releasing its reservation. W1/W2 must
 compare the reported award with stored ownership and reconcile only the
-authenticated launcher's awards. These native implementations remain open.
+authenticated launcher's awards. Store and launcher component tests exercise these paths. Native Kubernetes enforcement remains an acceptance obligation.
 Exchange presents the bootstrap in the authenticated
 transport and returns the exchanged ClaimedUnit once. The controller never mints
 replacement bootstraps from an observed Kubernetes Job. Lost bootstrap delivery

@@ -18,6 +18,10 @@ import (
 	ktesting "k8s.io/client-go/testing"
 )
 
+func boundaryBinding(team string) CloudJobBinding {
+	return CloudJobBinding{Kind: CloudPlan, UnitID: "plan", Team: team, RunID: "run", Holder: "holder", Generation: 1, OwnerDeadline: time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)}
+}
+
 func boundaryFixture() (*KubernetesBoundary, *fake.Clientset) {
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node", UID: "uid", ResourceVersion: "1", Labels: map[string]string{TeamNodeLabel: TeamNodeValue("team")}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
 	kube := fake.NewClientset(node)
@@ -57,7 +61,7 @@ func TestBoundaryCompetingLaunchersCannotShareNode(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _, err := b.Reserve(t.Context(), CloudJobBinding{Team: "team", ParentCapabilityExpiry: time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)}, job)
+			_, _, err := b.Reserve(t.Context(), boundaryBinding("team"), job)
 			if err == nil {
 				wins.Add(1)
 			} else if !errors.Is(err, ErrNoDedicatedNode) {
@@ -80,7 +84,7 @@ func TestBoundaryCompetingLaunchersCannotShareNode(t *testing.T) {
 
 func TestBoundaryRequiresTeardownAndNodeCleanup(t *testing.T) {
 	b, kube := boundaryFixture()
-	r, _, err := b.Reserve(t.Context(), CloudJobBinding{Team: "team", ParentCapabilityExpiry: time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)}, "job")
+	r, _, err := b.Reserve(t.Context(), boundaryBinding("team"), "job")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +109,7 @@ func TestBoundaryRequiresTeardownAndNodeCleanup(t *testing.T) {
 	if !cleared {
 		t.Fatal("node state was not cleared")
 	}
-	if _, _, err = b.Reserve(t.Context(), CloudJobBinding{Team: "team", ParentCapabilityExpiry: time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)}, "next"); err != nil {
+	if _, _, err = b.Reserve(t.Context(), boundaryBinding("team"), "next"); err != nil {
 		t.Fatal(err)
 	}
 	if err = b.Release(t.Context(), r); err == nil {
@@ -118,7 +122,7 @@ func TestBoundaryProbeFailureRefusesAndReleases(t *testing.T) {
 	b.Probe = func(context.Context, CloudNodeReservation) (CloudNetworkEvidence, error) {
 		return CloudNetworkEvidence{}, errors.New("escape probe failed")
 	}
-	if _, _, err := b.Reserve(t.Context(), CloudJobBinding{Team: "team", ParentCapabilityExpiry: time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)}, "job"); err == nil {
+	if _, _, err := b.Reserve(t.Context(), boundaryBinding("team"), "job"); err == nil {
 		t.Fatal("missing enforcement admitted work")
 	}
 	node, err := kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
@@ -132,23 +136,23 @@ func TestBoundaryProbeFailureRefusesAndReleases(t *testing.T) {
 
 func TestBoundaryRefusesOtherTeamAndCrossNamespaceReuse(t *testing.T) {
 	b, kube := boundaryFixture()
-	if _, _, err := b.Reserve(t.Context(), CloudJobBinding{Team: "other", ParentCapabilityExpiry: time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)}, "job"); !errors.Is(err, ErrNoDedicatedNode) {
+	if _, _, err := b.Reserve(t.Context(), boundaryBinding("other"), "job"); !errors.Is(err, ErrNoDedicatedNode) {
 		t.Fatalf("other team=%v", err)
 	}
-	if _, _, err := b.Reserve(t.Context(), CloudJobBinding{Team: "team", ParentCapabilityExpiry: time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)}, "job"); err != nil {
+	if _, _, err := b.Reserve(t.Context(), boundaryBinding("team"), "job"); err != nil {
 		t.Fatal(err)
 	}
 	other := *b
 	other.Kube = kube
 	other.Namespace = "elsewhere"
-	if _, _, err := other.Reserve(t.Context(), CloudJobBinding{Team: "team", ParentCapabilityExpiry: time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)}, "job"); !errors.Is(err, ErrNoDedicatedNode) {
+	if _, _, err := other.Reserve(t.Context(), boundaryBinding("team"), "job"); !errors.Is(err, ErrNoDedicatedNode) {
 		t.Fatalf("cross namespace=%v", err)
 	}
 }
 
-func TestBoundaryRecoversAnExpiredReservationWithoutAJob(t *testing.T) {
+func TestBoundaryCannotRecoverFromAnExpiryAnnotation(t *testing.T) {
 	b, kube := boundaryFixture()
-	binding := CloudJobBinding{Team: "team", ParentCapabilityExpiry: time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)}
+	binding := boundaryBinding("team")
 	if _, _, err := b.Reserve(t.Context(), binding, "orphan"); err != nil {
 		t.Fatal(err)
 	}
@@ -159,11 +163,11 @@ func TestBoundaryRecoversAnExpiredReservationWithoutAJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node.Annotations[reservationExpiryAnnotation] = "2000-01-01T00:00:00Z"
+	node.Annotations["sparkwing.dev/reservation-expiry"] = "2000-01-01T00:00:00Z"
 	if _, err = kube.CoreV1().Nodes().Update(t.Context(), node, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if r, _, err := b.Reserve(t.Context(), binding, "next"); err != nil || r.JobName != "next" {
-		t.Fatalf("recovery=%v,%v", r, err)
+	if _, _, err := b.Reserve(t.Context(), binding, "next"); !errors.Is(err, ErrNoDedicatedNode) {
+		t.Fatalf("annotation authorized recovery: %v", err)
 	}
 }

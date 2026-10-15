@@ -98,7 +98,7 @@ func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 	if err != nil {
 		return CloudJobResources{}, fmt.Errorf("reserve Cloud boundary: %w", err)
 	}
-	if err = validateBoundary(cfg.Namespace, b.Team, name, reservation, network); err != nil {
+	if err = validateBoundary(cfg.Namespace, b, name, reservation, network); err != nil {
 		return CloudJobResources{}, errors.Join(err, boundary.Release(ctx, reservation))
 	}
 	labels := map[string]string{"app.kubernetes.io/managed-by": managedByLauncher, JobLabel: name, TeamLabel: labelHash(b.Team)}
@@ -177,8 +177,8 @@ func validateAward(a CloudJobAward) error {
 	return nil
 }
 
-func validateBoundary(namespace, team, name string, r CloudNodeReservation, n CloudNetworkEvidence) error {
-	if r.NodeName == "" || r.NodeUID == "" || r.ReservationID == "" || r.Team != team || r.JobName != name {
+func validateBoundary(namespace string, binding CloudJobBinding, name string, r CloudNodeReservation, n CloudNetworkEvidence) error {
+	if r.NodeName == "" || r.NodeUID == "" || r.ReservationID == "" || r.Team != binding.Team || r.JobName != name || r.Award != binding.LeaseRef() {
 		return errors.New("Cloud boundary did not reserve a dedicated node for this team and Job")
 	}
 	if n.Namespace != namespace || n.NodeUID != r.NodeUID || n.PolicyRevision == "" || !n.DefaultDenyEgressEnforced || !n.RequiredDestinationsAllowed || !n.DaemonSetPortsInventoried || !n.EscapeProbePassed {
