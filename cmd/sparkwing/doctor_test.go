@@ -247,7 +247,7 @@ func TestDiagnose_FlagsPoisonedProfileWithoutRepair(t *testing.T) {
 	ctx := context.Background()
 	floor := float64(runtime.NumCPU())
 	withStore(t, p, func(st *store.Store) {
-		if err := st.RecordProfileObservation(ctx, "myrepo/ci", "", store.ProfileObservation{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "myrepo/ci", "", store.ProfileObservation{
 			CPUMeasured: true, PlanHash: "A", Contended: true, FloorCores: floor,
 		}); err != nil {
 			t.Fatal(err)
@@ -265,7 +265,7 @@ func TestDiagnose_FlagsPoisonedProfileWithoutRepair(t *testing.T) {
 		t.Errorf("FloorCores = %v, want %v", rep.PoisonedProfiles[0].FloorCores, floor)
 	}
 	withStore(t, p, func(st *store.Store) {
-		prof, err := st.GetPipelineProfile(ctx, "myrepo/ci", "")
+		prof, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "myrepo/ci", "")
 		if err != nil || prof == nil || prof.FloorCores != floor {
 			t.Fatalf("profile after diagnose = %+v (err %v), want the learned floor untouched", prof, err)
 		}

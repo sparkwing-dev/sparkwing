@@ -44,7 +44,7 @@ func issuanceServer(b *credentialBoundary, issuer *credentialIssuer) http.Handle
 func issuanceSession() *credentialBoundary {
 	b := authorityMember()
 	p := &b.snapshot.Authorities[0].Principal
-	p.Class, p.Authority = capability.CredentialSession, capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "account-session"}
+	p.Class, p.Authority = capability.CredentialSession, sessionReference(*p)
 	return b
 }
 

@@ -370,7 +370,7 @@ func TestDataReadHTTPRepoReadersAndOwner(t *testing.T) {
 				p.Capability.Data = &capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: "gh:12", ReadRefs: []string{"main"}, VerifiedDefaultOnly: true}
 				authority.Ref.Scope.Ref = "main"
 				if class == "session repo reader" {
-					p.Class, p.Authority.Kind = capability.CredentialSession, capability.AuthoritySession
+					p.Class, p.Authority = capability.CredentialSession, sessionReference(*p)
 				}
 				if class == "peer repo reader" {
 					p.Class, p.Authority = capability.CredentialPeer, capability.AuthorityRef{}

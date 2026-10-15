@@ -207,7 +207,7 @@ func TestQueueReadUsesVerifiedTransportIdentity(t *testing.T) {
 			p := &b.snapshot.Authorities[0].Principal
 			p.Class = class
 			if class == capability.CredentialSession {
-				p.Authority.Kind = capability.AuthoritySession
+				p.Authority = sessionReference(*p)
 			} else {
 				p.Authority = capability.AuthorityRef{}
 				p.Capability.Subject = capability.Subject{Kind: capability.SubjectLocal, ID: "uid:1000"}

@@ -1,26 +1,70 @@
 # pkg/projectconfig
 
-func CheckLegacy(startDir string) error
 type Config struct {
-	Defaults Defaults
-
-	Profiles map[string]*profile.Profile
-
-	Pipelines []pipelines.Pipeline
-	Sparks    []sparks.Library
+	Defaults  *Defaults
+	Pipelines []Pipeline
+	Sparks    []Spark
 }
+func (c *Config) Registry() *pipelines.Config
 type Defaults struct {
-	Args map[string]string
-
-	Guards pipelines.Guards
-
+	Args     map[string]string
+	Guards   *Guards
 	Requires []string
+	Prefers  []string
 }
 func Discover(startDir string) (path string, cfg *Config, err error)
-func DiscoverPipelines(startDir string) (path string, cfg *pipelines.Config, err error)
+type Events struct {
+	Push        *PushEvent
+	PullRequest *PullRequestEvent
+	Schedule    []Schedule
+	PreCommit   *Hook
+	PrePush     *Hook
+	PostCommit  *Hook
+}
 const Filename = "sparkwing.yaml"
+type Guards struct {
+	When   []string
+	Unless []string
+}
+type Hook struct{}
 func Load(path string) (*Config, error)
 func LoadSparksManifest(sparkwingDir string) (*sparks.Manifest, error)
 func Parse(raw []byte) (*Config, error)
+type Pipeline struct {
+	Name        string
+	Entrypoint  string
+	Description *string
+	Hidden      *bool
+	Source      *string
+	Profile     *string
+	Args        map[string]string
+	Guards      *Guards
+	Requires    []string
+	Prefers     []string
+	On          *Events
+}
 func PipelineSource(repoDir, name string) (string, error)
+type PullRequestEvent struct {
+	Actions  []string
+	Branches []string
+}
+type PushEvent struct {
+	Branches []string
+	Paths    []string
+}
+type Schedule struct {
+	Name    *string
+	Cron    string
+	Where   string
+	TZ      *string
+	Overlap *string
+	CatchUp *string
+	Args    map[string]string
+}
+type Spark struct {
+	Name    string
+	Source  string
+	Version string
+}
+func Validate(cfg Config) error
 func WriteSparksSection(path string, libs []sparks.Library) error

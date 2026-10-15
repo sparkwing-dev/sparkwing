@@ -179,7 +179,7 @@ func FuzzSourceReleaseHTTPAuditCannotChangeCredentialScope(f *testing.F) {
 func TestSourceMachineConsentHTTPUsesAccountAuthority(t *testing.T) {
 	b := authorityMember()
 	p := &b.snapshot.Authorities[0].Principal
-	p.Class, p.Authority = capability.CredentialSession, capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "account-session"}
+	p.Class, p.Authority = capability.CredentialSession, sessionReference(*p)
 	tx, _, h := sourceHTTPFixture(t, b)
 	w := authorityHTTP(h, b, "PUT", "/api/v1/tokens/machine/git-credentials", `{"enabled":true}`)
 	if w.Code != 200 || tx.consentAuthority != b.snapshot.Authorities[0].Principal.Authority || tx.consentMachine != "machine" || !tx.consentEnabled || tx.releases != 0 {

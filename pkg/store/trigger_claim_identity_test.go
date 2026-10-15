@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 // A trigger returned to the queue and taken by another consumer must
@@ -24,11 +25,11 @@ func TestTriggerClaim_ReclaimDropsPreviousClaimant(t *testing.T) {
 	}
 	expireTriggerClaim(t, s, "t1")
 
-	ids, err := store.Maintenance.ReapExpiredTriggers(s, ctx)
+	ids, err := teststore.ReapUnits(ctx, s)
 	if err != nil {
-		t.Fatalf("ReapExpiredTriggers: %v", err)
+		t.Fatalf("ReapUnits: %v", err)
 	}
-	if len(ids) != 1 || ids[0] != "t1" {
+	if len(ids) != 1 || ids[0].RunID != "t1" {
 		t.Fatalf("reaped = %v, want [t1]", ids)
 	}
 	if _, err := s.ClaimSpecificTrigger(ctx, "t1", time.Hour); err != nil {

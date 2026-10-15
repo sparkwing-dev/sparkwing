@@ -65,7 +65,7 @@ func TestDeploymentHTTPAuthorization(t *testing.T) {
 				case "run-bound operator":
 					p.Capability.Binding = capability.Binding{Kind: capability.BindingRun, RunID: "run"}
 				case "session":
-					p.Class, p.Authority.Kind, p.Capability.Subject.Kind = capability.CredentialSession, capability.AuthoritySession, capability.SubjectAccount
+					p.Class, p.Authority, p.Capability.Subject.Kind = capability.CredentialSession, sessionReference(*p), capability.SubjectAccount
 					r.Header.Del("Authorization")
 					r.AddCookie(&http.Cookie{Name: "console-session", Value: b.raw})
 					r.Header.Set("X-CSRF-Token", "session-csrf")

@@ -156,7 +156,7 @@ func TestDataCacheHTTPRepoReaderKeepsTrustedFallbackAndCannotCopy(t *testing.T) 
 		p.Capability.Grants = []capability.Grant{capability.DataRead}
 		p.Capability.Data = &capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: "gh:12", ReadRefs: []string{"main"}, VerifiedDefaultOnly: true}
 		if session {
-			p.Class, p.Authority.Kind = capability.CredentialSession, capability.AuthoritySession
+			p.Class, p.Authority = capability.CredentialSession, sessionReference(*p)
 		}
 		authority := blob.Authority{CapabilityRef: p.Authority.ID, Principal: blob.Principal(p.Capability.Subject.ID), Repo: "gh:12"}
 		f.data.ResolveAuthority = func(context.Context, capability.Authorized) (blob.Authority, error) { return authority, nil }

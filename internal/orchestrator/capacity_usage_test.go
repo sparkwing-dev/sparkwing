@@ -221,7 +221,7 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			recordRunProfile(ctx, localState{st: st}, "priced", "r1", nil, "", runCharge{}, false, start, start.Add(tc.runWall))
 
 			for _, want := range tc.wantNodes {
-				prof, err := st.GetPipelineProfile(ctx, "priced", want.id)
+				prof, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "priced", want.id)
 				if err != nil {
 					t.Fatalf("node %q profile: %v", want.id, err)
 				}
@@ -245,7 +245,7 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 				}
 			}
 
-			rollup, err := st.GetPipelineProfile(ctx, "priced", "")
+			rollup, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "priced", "")
 			if err != nil {
 				t.Fatalf("rollup profile: %v", err)
 			}
@@ -359,13 +359,13 @@ func TestRecordRunProfile_SubTickNodesAreNoLongerInvisible(t *testing.T) {
 	recordRunProfile(ctx, localState{st: st}, "brief", "r1", nil, "", runCharge{}, false, start, start.Add(time.Second))
 
 	for _, id := range []string{"a", "b"} {
-		prof, err := st.GetPipelineProfile(ctx, "brief", id)
+		prof, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "brief", id)
 		if err != nil || prof == nil {
 			t.Fatalf("node %q profile missing: %v", id, err)
 		}
 		assertCores(t, "node "+id+" SustainedCores", prof.SustainedCores, 0.5)
 	}
-	rollup, err := st.GetPipelineProfile(ctx, "brief", "")
+	rollup, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "brief", "")
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup missing: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestRecordRunProfile_RetriedNodeRetainsUsageWithoutLearning(t *testing.T) {
 	}
 	recordRunProfile(ctx, localState{st: st}, "retried", "r1", nil, "", runCharge{}, false, start, start.Add(2*time.Second))
 	for _, id := range []string{"", "flaky"} {
-		profile, err := st.GetPipelineProfile(ctx, "retried", id)
+		profile, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "retried", id)
 		if err != nil || (profile != nil && profile.SampleCount != 0) {
 			t.Fatalf("retried node qualified for learning: %+v, %v", profile, err)
 		}

@@ -91,9 +91,11 @@ membership, holder, token, reservation, and internal executor identifiers.
 Public event reads also omit claim generations from attempt-lifecycle
 payloads.
 
-The ordered event stream records `execution_attempt_started`, `agent_lease_lost`, pre-start requeue or
-post-start scheduling with availability, and exhaustion or another explicit
-no-retry reason. These payloads carry attribution, not credentials.
+The store records `job_started`, `job_retrying`, `job_requeued` and terminal job
+events in each transition's transaction. Owner recovery records `run_requeued`.
+A started lease lapse closes the attempt with `agent_lost` and consumes one
+disruption within the same run. An unstarted lapse consumes none. These payloads
+carry attribution, not credentials.
 
 Remote logs use immutable substreams keyed by claim generation and execution
 attempt. A stale append is rejected, while an append that had already passed

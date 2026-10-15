@@ -230,7 +230,7 @@ func TestCredentialInventoryHTTPReadersAndEmptyArrays(t *testing.T) {
 			p.Class = class
 			p.Capability.Grants = []capability.Grant{capability.RunsRead}
 			if class == capability.CredentialSession {
-				p.Authority.Kind = capability.AuthoritySession
+				p.Authority = sessionReference(*p)
 			} else if class == capability.CredentialPeer {
 				p.Authority = capability.AuthorityRef{}
 				p.Capability.Subject = capability.Subject{Kind: capability.SubjectLocal, ID: "uid:1000"}

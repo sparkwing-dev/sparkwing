@@ -50,7 +50,7 @@ func TestDiscoveryHTTPReadsConfiguredServices(t *testing.T) {
 				switch class {
 				case "session":
 					b.snapshot.Authorities[0].Principal.Class = capability.CredentialSession
-					b.snapshot.Authorities[0].Principal.Authority.Kind = capability.AuthoritySession
+					b.snapshot.Authorities[0].Principal.Authority = sessionReference(b.snapshot.Authorities[0].Principal)
 				case "machine":
 					b.snapshot.Authorities[0].Principal.Capability.Subject.Kind = capability.SubjectMachine
 				case "claim", "cancelled claim":

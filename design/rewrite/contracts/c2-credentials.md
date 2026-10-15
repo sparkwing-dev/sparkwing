@@ -79,9 +79,8 @@ The independent T1 creation expectation follows this correction.
 
 `CredentialIssuer` preserves C1's existing provision and delegation signatures.
 `Server.New` uses its store. `WithCredentialIssuer` injects that same contract
-for embedded controllers and tests. Session ancestry/digest/CSRF integration
-remains required before the default browser path is usable. No identity or
-CSRF fallback is added. Machine, service, bootstrap provisioning,
+for embedded controllers and tests. The default session digest and CSRF path is integrated with C1. Browser
+renewal, roleless sessions and console identity still need their final adapters. Machine, service, bootstrap provisioning,
 credential listing and rotation still require their final adapters.
 
 The old global token mint and old member-family mint are removed. The remaining
@@ -1672,17 +1671,32 @@ provenance and actual object transfers remain integration obligations.
 `Server.New` configures `capability.NewAuthenticator(Store)` and the store's
 `BindingChecker` for shared policy routes. `WithAuthorization` replaces those
 adapters for verified transports and tests. Account-session presentations name
-the controller audience explicitly. The default cookie reader supplies only the
-presentation. C1 still needs to populate the session presentation digest. Its
-current snapshot returns an empty digest, so the verifier refuses it. The
-controller tests supply that missing field through a reader fixture and retain
-real persistence for ancestry and membership.
+the controller audience. Their committed AuthorityRef.ID is the lowercase
+hex SHA-256 of the presentation, matching sessions.hash. The verifier compares
+that identity directly. Capability.Digest identifies bearer capabilities and
+is not a second session identity. This local C2 correction removes the
+controller's digest-patching test reader. Session authentication is exercised
+against the real persistence snapshot and current membership.
 
-The default has no CSRF verifier. Browser writes fail with `policy_missing`
-until `WithAuthorization` supplies one. C1's legacy session-CSRF code still
-queries `sparkwing_meta`, which the final schema replaces with sealed settings.
-No second CSRF key or plaintext setting is introduced here. Console and local
-peer identity adapters remain separate integration work.
+The default CSRF verifier rereads the live session through LookupSession,
+checks its authority, team and accountable subject, and validates the header,
+cookie and same-origin proof against its persisted-key-derived token.
+Cross-session tokens and caller-planted matching headers/cookies fail with
+forbidden. Ended or changed sessions fail with unauthenticated. Key/backend
+failures return unavailable without private diagnostics. WithSecretsCipher
+installs the store's SessionKeyCipher alongside the plan-secret opener.
+W1 owns sealed key persistence. No second key or plaintext setting is added.
+Console and local peer identity adapters, browser renewal/absolute lifetime
+integration and roleless OAuth sessions remain separate work.
+
+`BindingState.CancelReason` is a local C2 snapshot addition. W1 must populate
+it from the committed cancellation intent, with an existing job-specific
+request taking precedence over its run's request. W2 does not query SQL to
+fill it. Job cancellation now passes Outcome=cancelled and the requested
+reason in the existing TransitionExtra.Result. C1's request-only edge copies
+only the first cancellation intent and leaves the held row and attempt result
+intact. That contract is exercised against real SQLite and generated reasons.
+The prior cancellation-reason integration failure is closed.
 
 `RunTransactions.ReadOwnerSnapshot` uses C1's existing method for private
 scheduling reads. Revoked, expired and replaced owner fences refuse the read.

@@ -15,7 +15,7 @@ func (s *Server) handleGetBuildTrust(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	trust, err := s.store.TrustLocalBuilds(r.Context(), t.Team())
+	trust, err := t.TrustLocalBuilds(r.Context())
 	if err != nil {
 		s.writeInternalError(w, r, "read build trust", err)
 		return
@@ -33,7 +33,7 @@ func (s *Server) handlePutBuildTrust(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.SetTrustLocalBuilds(r.Context(), t.Team(), req.TrustLocalBuilds); err != nil {
+	if err := t.SetTrustLocalBuilds(r.Context(), req.TrustLocalBuilds); err != nil {
 		s.writeInternalError(w, r, "set build trust", err)
 		return
 	}

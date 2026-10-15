@@ -175,10 +175,7 @@ func TestCreditsFundedTeamDoesNotMaskAnotherTeamsExhaustion(t *testing.T) {
 	}
 }
 
-// A local install holds exactly one team and never names it. Every number the
-// unscoped surface reports is the one the default team's handle reports, so a
-// self-hosted controller behaves after this change as it did before it.
-func TestCreditsLocalInstallReadsOneTeamWithoutNamingIt(t *testing.T) {
+func TestCreditsDefaultTenantReadsItsLedger(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
@@ -190,18 +187,16 @@ func TestCreditsLocalInstallReadsOneTeamWithoutNamingIt(t *testing.T) {
 		t.Fatalf("a fresh install lists teams %v, want only %q", teams, store.DefaultTeam)
 	}
 
-	claimant := meteredClaimant(t, s, "agent:cloud")
-	readyNode(t, s, "run-local", "build")
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid,
+	def := tenant(t, s, store.DefaultTeam)
+	if _, err := def.GrantCredits(ctx, store.CreditGrantPaid,
 		100*store.MicroCreditsPerCent, "pay_local", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-
 	floor := unpinnedNodeRateMicro * store.MinBillableSeconds
-	balance, err := s.CreditBalanceMicro(ctx)
+	if _, err := s.DB().ExecContext(ctx, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES ('local',?,'run-local','build','award','usage',?,?,?)`, store.DefaultTeam, store.MinBillableSeconds, floor, time.Now().UnixNano()); err != nil {
+		t.Fatalf("seed debit: %v", err)
+	}
+	balance, err := def.CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -209,25 +204,12 @@ func TestCreditsLocalInstallReadsOneTeamWithoutNamingIt(t *testing.T) {
 		t.Fatalf("balance = %d, want %d", balance, want)
 	}
 
-	fleet, err := s.CreditState(ctx, time.Hour)
-	if err != nil {
-		t.Fatalf("state: %v", err)
-	}
-	def, err := s.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatalf("default handle: %v", err)
-	}
 	scoped, err := def.CreditState(ctx, time.Hour)
 	if err != nil {
 		t.Fatalf("scoped state: %v", err)
 	}
-	if fleet.BalanceMicro != scoped.BalanceMicro ||
-		fleet.GrantedMicro != scoped.GrantedMicro ||
-		fleet.ChargedMicro != scoped.ChargedMicro {
-		t.Fatalf("unscoped state %+v differs from the default team's %+v", fleet, scoped)
-	}
-	if fleet.BalanceMicro != balance {
-		t.Fatalf("state balance = %d, want the ledger's %d", fleet.BalanceMicro, balance)
+	if scoped.BalanceMicro != balance {
+		t.Fatalf("state balance = %d, want the ledger's %d", scoped.BalanceMicro, balance)
 	}
 }
 

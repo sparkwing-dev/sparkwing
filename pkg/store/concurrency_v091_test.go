@@ -11,7 +11,7 @@ import (
 
 func activeHolders(t *testing.T, s *store.Store, key string) int {
 	t.Helper()
-	st, err := s.GetConcurrencyState(ctxT(t), key)
+	st, err := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctxT(t), key)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return 0
@@ -43,7 +43,7 @@ func TestConcurrency_HeartbeatOnExpiredLeaseDoesNotRevive(t *testing.T) {
 	}
 
 	started := time.Now()
-	_, _, err := s.HeartbeatConcurrencySlot(ctxT(t), "k", "rA/n", time.Minute)
+	_, _, err := tenantFor(t, s, store.DefaultTeam).HeartbeatConcurrencySlot(ctxT(t), "k", "rA/n", time.Minute)
 	heartbeat := time.Since(started)
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("heartbeat on expired lease err = %v, want ErrLockHeld", err)
@@ -69,7 +69,7 @@ func TestConcurrency_ReacquireSupersededHolderDoesNotCrash(t *testing.T) {
 		t.Fatalf("B: want CancellingOthers, got %s", r.Kind)
 	}
 	releaseAndPromoteT(t, s, "k", "rB/n")
-	resp, err := s.AcquireConcurrencySlot(ctxT(t), store.AcquireSlotRequest{
+	resp, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(ctxT(t), store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
@@ -93,7 +93,7 @@ func TestConcurrency_ParkedWaiterDoesNotInvertEffectiveCapacity(t *testing.T) {
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("B: want Queued, got %s", r.Kind)
 	}
-	st, err := s.GetConcurrencyState(ctxT(t), "k")
+	st, err := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctxT(t), "k")
 	if err != nil {
 		t.Fatalf("GetConcurrencyState: %v", err)
 	}

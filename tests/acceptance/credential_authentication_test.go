@@ -215,3 +215,7 @@ func TestCredentialHTTPCancelDrainsReporting(t *testing.T) {
 	b.request(t, "/api/v1/runs/run/jobs/job/transition", `{"status":"cancelled"}`, 204, "")
 	b.request(t, "/api/v1/runs/run/jobs/job/log-manifest", `{}`, 204, "")
 }
+
+func sessionReference(p capability.Principal) capability.AuthorityRef {
+	return capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(p.Capability.Digest[:])}
+}

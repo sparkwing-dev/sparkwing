@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestRecordRunProfileMissingNodeEvidence(t *testing.T) {
@@ -46,7 +47,7 @@ func TestRecordRunProfileMissingNodeEvidence(t *testing.T) {
 			}
 			recordRunProfile(t.Context(), localState{st: st}, "coverage", "r1", &capacity.Pin{Cores: 2, MemoryBytes: 1024}, "", runCharge{}, false, start, start.Add(time.Second))
 			for _, id := range []string{"a", "b"} {
-				p, err := st.GetPipelineProfile(t.Context(), "coverage", id)
+				p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "coverage", id)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -59,7 +60,7 @@ func TestRecordRunProfileMissingNodeEvidence(t *testing.T) {
 				if mode == "exit" {
 					wantCPU = 0.1
 				}
-				p, err := st.GetPipelineProfile(t.Context(), "coverage", "c")
+				p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "coverage", "c")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -67,7 +68,7 @@ func TestRecordRunProfileMissingNodeEvidence(t *testing.T) {
 					t.Fatalf("node c profile=%+v", p)
 				}
 			}
-			p, err := st.GetPipelineProfile(t.Context(), "coverage", "")
+			p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "coverage", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -101,7 +102,7 @@ func TestRecordRunProfileMissingEvidencePreservesPinWithoutFloor(t *testing.T) {
 			}
 		}
 		recordRunProfile(t.Context(), localState{st: st}, "coverage", "r1", &capacity.Pin{Cores: 2, MemoryBytes: 1024}, "", runCharge{Cores: 2, MemoryBytes: 1024}, true, start, start.Add(time.Second))
-		p, err := st.GetPipelineProfile(t.Context(), "coverage", "")
+		p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "coverage", "")
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -110,7 +110,7 @@ func TestEngineRunDetailHTTP(t *testing.T) {
 			if identity == "session" || identity == "peer" {
 				b = jobViewBoundary("member")
 				p := &b.snapshot.Authorities[0].Principal
-				p.Class, p.Authority.Kind = capability.CredentialSession, capability.AuthoritySession
+				p.Class, p.Authority = capability.CredentialSession, sessionReference(*p)
 				if identity == "peer" {
 					p.Class, p.Authority = capability.CredentialPeer, capability.AuthorityRef{}
 					p.Capability.Subject = capability.Subject{Kind: capability.SubjectLocal, ID: "uid:1000"}

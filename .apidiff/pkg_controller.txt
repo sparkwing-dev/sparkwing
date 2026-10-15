@@ -184,7 +184,7 @@ type EngineController struct {
 func (s *EngineController) AcceptExpansion(ctx context.Context, authorized capability.Authorized, body controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error)
 func (s *EngineController) AcceptPlan(ctx context.Context, a capability.Authorized, body controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error)
 func (s *EngineController) Cancel(ctx context.Context, a capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error)
-func (s *EngineController) CancelJob(ctx context.Context, a capability.Authorized, _ controllerwire.CancelRequest) (controllerwire.Applied, error)
+func (s *EngineController) CancelJob(ctx context.Context, a capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error)
 func (s *EngineController) Claim(ctx context.Context, authorized capability.Authorized, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
 func (s *EngineController) Compatibility(ctx context.Context, engineVersion string) (controllerwire.Compatibility, error)
 func (s *EngineController) CreateRun(ctx context.Context, authorized capability.Authorized, body controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error)

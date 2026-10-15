@@ -378,7 +378,7 @@ func TestEnvelope_SimultaneousMemoNodesAcrossPipelinesRunOneBody(t *testing.T) {
 func TestEnvelope_ASkippedMemoLeaderLeavesItsFollowerToRun(t *testing.T) {
 	r := newEnvelopeRig(t, false)
 	groupKey := nodehost.ConcurrencyKey(nodeproto.ConcurrencySpec{Group: "memo-skip-grp"}, "", "")
-	if resp, err := r.st.AcquireConcurrencySlot(t.Context(), store.AcquireSlotRequest{
+	if resp, err := teststore.ForTeam(t, r.st, store.DefaultTeam).AcquireConcurrencySlot(t.Context(), store.AcquireSlotRequest{
 		Key: groupKey, HolderID: "other/x", RunID: "other", NodeID: "x", Capacity: 1, Policy: "queue",
 	}); err != nil || resp.Kind != store.AcquireGranted {
 		t.Fatalf("hold the group: %+v %v", resp, err)

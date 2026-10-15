@@ -167,7 +167,7 @@ func (s *Server) sessionPrincipal(ctx context.Context, raw string, now time.Time
 }
 
 func (s *Server) lookupSession(ctx context.Context, raw string, now time.Time) (*Principal, *store.Session, error) {
-	sess, err := s.store.LookupSessionAndRenew(ctx, raw, now, sessionTTL, s.sessionMaxLifetime)
+	sess, err := s.store.LookupSessionAndRenew(ctx, raw, sessionTTL, s.sessionMaxLifetime)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -179,10 +179,9 @@ func (s *Server) lookupSession(ctx context.Context, raw string, now time.Time) (
 	}
 	p := &Principal{
 		Name: sess.Principal, Kind: store.TokenKindUser, Team: sess.Team,
-		Authed: now, session: raw, signedInAt: sess.CreatedAt,
+		Authed: now, session: raw, signedInAt: sess.CreatedAt, Scopes: sess.Scopes,
 	}
 	if sess.AccountID == "" {
-		p.Scopes = sess.Scopes
 		return p, sess, nil
 	}
 	// safety: an account exists only under a multi-team license, so a session it opened stops
@@ -196,7 +195,6 @@ func (s *Server) lookupSession(ctx context.Context, raw string, now time.Time) (
 		return nil, nil, err
 	}
 	p.Role = string(role)
-	p.Scopes = ScopesForRole(role)
 	return p, sess, nil
 }
 
@@ -351,7 +349,7 @@ func (s *Server) oauthSignIn(ctx context.Context, name, code, verifier, redirect
 	s.observeSignUp(ctx, name, res, now)
 	acct := res.Account
 	raw, _, sess, err := s.store.CreateIdentityAccountSession(ctx, acct, acct.ActiveTeam,
-		profile.Provider, profile.Subject, s.sessionInitialTTL(), now)
+		profile.Provider, profile.Subject, s.sessionInitialTTL())
 	if err != nil {
 		if errors.Is(err, store.ErrIdentityUnlinked) {
 			return nil, "", refuse(http.StatusUnauthorized, "", "that sign-in changed while it was being verified; start again")

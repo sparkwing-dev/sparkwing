@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -184,7 +186,8 @@ func TestAuthenticationSessionLookupIncludesControllerAudience(t *testing.T) {
 		t.Run(string(class), func(t *testing.T) {
 			reader, presentation, _ := authenticationFixture()
 			presentation.Class = class
-			principal := capability.Principal{Class: class, Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "session"}, Capability: capability.Capability{
+			digest := sha256.Sum256([]byte(presentation.Raw))
+			principal := capability.Principal{Class: class, Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}, Capability: capability.Capability{
 				Digest: sha256.Sum256([]byte(presentation.Raw)), Audience: capability.Controller, Team: "a",
 				Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Binding: capability.Binding{Kind: capability.BindingNone},
 			}}
@@ -203,5 +206,27 @@ func TestAuthenticationSessionLookupIncludesControllerAudience(t *testing.T) {
 				t.Fatalf("session lookup = %+v", reader.lookup)
 			}
 		})
+	}
+}
+
+func TestAuthenticationSessionMatchesOnlyItsCommittedRowProperty(t *testing.T) {
+	property := func(value []byte, wrong bool) bool {
+		reader, presentation, route := authenticationFixture()
+		presentation.Class = capability.CredentialSession
+		presentation.Raw = base64.RawURLEncoding.EncodeToString(append([]byte("session-"), value...))
+		digest := sha256.Sum256([]byte(presentation.Raw))
+		stored := digest
+		if wrong {
+			stored[0] ^= 1
+		}
+		reader.snapshot.Authorities = []capability.AuthorityState{{MembershipValid: true, Principal: capability.Principal{
+			Class: capability.CredentialSession, Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(stored[:])},
+			Capability: capability.Capability{Digest: digest, Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Binding: capability.Binding{Kind: capability.BindingNone}},
+		}}}
+		_, err := capability.NewAuthenticator(reader).Authenticate(t.Context(), presentation, route)
+		return (err == nil) != wrong
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {
+		t.Fatal(err)
 	}
 }

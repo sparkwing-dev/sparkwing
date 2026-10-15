@@ -147,7 +147,7 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 		if input.Attempt.Set {
 			attempt := input.Attempt.Value
 			var exists int
-			err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM node_attempts WHERE team=? AND run_id=? AND node_id=? AND attempt=? AND generation=?", team, c.Binding.RunID, attempt.NodeID, attempt.Attempt, attempt.Generation).Scan(&exists)
+			err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM node_attempts WHERE team=? AND run_id=? AND node_id=? AND attempt=? AND generation=? AND finished_at IS NOT NULL", team, c.Binding.RunID, attempt.NodeID, attempt.Attempt, attempt.Generation).Scan(&exists)
 			if err != nil {
 				return a, err
 			}

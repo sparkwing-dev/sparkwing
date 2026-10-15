@@ -262,7 +262,7 @@ func TestCredentialMutationsHTTPSessionsRequireCSRFBeforeStorage(t *testing.T) {
 	for _, route := range credentialMutationRequests {
 		b := authorityMember()
 		p := &b.snapshot.Authorities[0].Principal
-		p.Class, p.Authority.Kind = capability.CredentialSession, capability.AuthoritySession
+		p.Class, p.Authority = capability.CredentialSession, sessionReference(*p)
 		r := httptest.NewRequest(route.method, route.path, strings.NewReader(route.body))
 		r.AddCookie(&http.Cookie{Name: "console-session", Value: b.raw})
 		r.Header.Set("Content-Type", "application/json")
@@ -416,7 +416,7 @@ func TestCredentialMutationsHTTPMemberTransports(t *testing.T) {
 		p := &b.snapshot.Authorities[0].Principal
 		p.Class = class
 		if class == capability.CredentialSession {
-			p.Authority.Kind = capability.AuthoritySession
+			p.Authority = sessionReference(*p)
 		} else if class == capability.CredentialPeer {
 			p.Authority = capability.AuthorityRef{}
 			p.Capability.Subject = capability.Subject{Kind: capability.SubjectLocal, ID: "uid:1000"}

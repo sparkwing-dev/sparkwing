@@ -236,7 +236,7 @@ func TestAuthorityMutationHTTPPreservesSessionActor(t *testing.T) {
 		b := authorityMember()
 		path := "/api/v1/tokens/target"
 		p := &b.snapshot.Authorities[0].Principal
-		p.Class, p.Authority.Kind = capability.CredentialSession, capability.AuthoritySession
+		p.Class, p.Authority = capability.CredentialSession, sessionReference(*p)
 		if console {
 			b, path = consoleBoundary(), "/api/v1/operator/tokens/target"
 		}
@@ -258,7 +258,7 @@ func TestAuthorityMutationHTTPRequiresCSRF(t *testing.T) {
 		t.Run(route[0]+route[1], func(t *testing.T) {
 			b := authorityMember()
 			p := &b.snapshot.Authorities[0].Principal
-			p.Class, p.Authority.Kind = capability.CredentialSession, capability.AuthoritySession
+			p.Class, p.Authority = capability.CredentialSession, sessionReference(*p)
 			if strings.Contains(route[1], "/operator/") {
 				b = consoleBoundary()
 			}
@@ -357,7 +357,7 @@ func TestAuthorityRevocationHTTPStopsDescendantsAcrossRouters(t *testing.T) {
 			}
 			if mutation == "token session" {
 				leaf := &victim.snapshot.Authorities[0].Principal
-				leaf.Class, leaf.Authority.Kind = capability.CredentialSession, capability.AuthoritySession
+				leaf.Class, leaf.Authority = capability.CredentialSession, sessionReference(*leaf)
 				leaf.Capability.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: "member"}
 				leaf.Capability.Grants = []capability.Grant{capability.RunsRead}
 				leaf.Capability.Binding = capability.Binding{Kind: capability.BindingNone}

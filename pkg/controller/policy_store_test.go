@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -15,8 +14,8 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -93,67 +92,87 @@ func TestServerPolicyNeverInfersAuthorityFromRequestHints(t *testing.T) {
 	}
 }
 
-type sessionDigestFixture struct{ store *store.Store }
-
-func (f sessionDigestFixture) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error) {
-	snapshot, err := f.store.ReadAuthentication(ctx, lookup, evidence)
-	if err == nil && lookup.Class == capability.CredentialSession && len(snapshot.Authorities) > 0 && snapshot.Authorities[0].Principal.Authority.ID == hex.EncodeToString(lookup.Digest[:]) {
-		snapshot.Authorities[0].Principal.Capability.Digest = lookup.Digest
-	}
-	return snapshot, err
-}
-
 func TestServerPolicySessionsCheckCommittedIdentityAndCSRF(t *testing.T) {
 	e, _ := engineRuntimeStore(t)
 	s := e.Store
 	engineSQL(t, s, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`)
 	engineSQL(t, s, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','member','editor',1)`)
-	raw := "private-account-session"
-	digest := sha256.Sum256([]byte(raw))
-	engineSQL(t, s, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,'member','runs.read,runs.control',1,?,'a','member')`, hex.EncodeToString(digest[:]), time.Now().Add(time.Hour).UnixNano())
-	server := New(s, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	authorization := server.authorization
-	authorization.Authenticator = capability.NewAuthenticator(sessionDigestFixture{s})
-	server.WithAuthorization(authorization)
-	authorization.CheckCSRF = func(r *http.Request, p capability.Principal) error {
-		if p.Authority.ID != hex.EncodeToString(digest[:]) || !validAPIRequestCSRF(r, "committed-session-csrf", server.cookiesSecure()) {
-			return &apierr.Error{Code: apierr.Forbidden, Message: "invalid CSRF token"}
-		}
-		return nil
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := New(s, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher)
+	raw, csrf, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, otherCSRF, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
+	if err != nil {
+		t.Fatal(err)
 	}
 	h := server.Handler()
-	request := func(method, path, sessionID, token, origin string) int {
+	request := func(method, path, sessionID, header, cookie, origin string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "https://controller.test"+path, strings.NewReader(`{"reason":"user requested"}`))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Origin", origin)
-		r.Header.Set(csrfHeaderName, token)
+		r.Header.Set(csrfHeaderName, header)
 		r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, server.cookiesSecure()), Value: sessionID})
-		r.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, server.cookiesSecure()), Value: token})
+		r.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, server.cookiesSecure()), Value: cookie})
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
-		return w.Code
+		return w
 	}
-	if got := request("GET", "/api/v1/runs/run/jobs", raw, "", ""); got != 200 {
-		t.Fatalf("account session read = %d", got)
+	if w := request("GET", "/api/v1/runs/run/jobs", raw, "", "", ""); w.Code != 200 {
+		t.Fatalf("account session read = %d %s", w.Code, w.Body.String())
 	}
-	if got := request("POST", "/api/v1/runs/run/cancel", raw, "committed-session-csrf", "https://controller.test"); got != 500 {
-		t.Fatalf("missing CSRF adapter = %d", got)
-	}
-	server.WithAuthorization(authorization)
-	h = server.Handler()
 	property := func(value []byte) bool {
 		forged := "forged-" + base64.RawURLEncoding.EncodeToString(value)
-		return request("POST", "/api/v1/runs/run/cancel", raw, forged, "https://controller.test") == 403 &&
-			request("POST", "/api/v1/runs/run/cancel", raw, "committed-session-csrf", "https://foreign.test") == 403
+		for _, tokens := range [][3]string{{forged, forged, "https://controller.test"}, {csrf, csrf, "https://foreign.test"}, {csrf, forged, "https://controller.test"}, {otherCSRF, otherCSRF, "https://controller.test"}, {csrf, csrf, ""}} {
+			if w := request("POST", "/api/v1/runs/run/cancel", raw, tokens[0], tokens[1], tokens[2]); w.Code != 403 {
+				return false
+			}
+		}
+		return true
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
 		t.Fatal(err)
 	}
-	if got := request("POST", "/api/v1/runs/run/cancel", raw, "committed-session-csrf", "https://controller.test"); got != 200 {
-		t.Fatalf("same-origin session mutation = %d", got)
+	run, err := e.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := run.ReadRun(t.Context(), "run")
+	if err != nil || before.CancelRequestedAt != nil {
+		t.Fatalf("CSRF refusal changed run: %+v %v", before, err)
+	}
+	for _, pair := range [][2]string{{raw, csrf}, {other, otherCSRF}} {
+		if w := request("POST", "/api/v1/runs/run/cancel", pair[0], pair[1], pair[1], "https://controller.test"); w.Code != 200 {
+			t.Fatalf("session mutation = %d %s", w.Code, w.Body.String())
+		}
+	}
+
+	for _, key := range []string{"missing", "wrong"} {
+		server.WithSecretsCipher(nil)
+		if key == "wrong" {
+			bytes := make([]byte, secrets.KeySize)
+			bytes[0] = 1
+			wrong, err := secrets.NewCipher(bytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			server.WithSecretsCipher(wrong)
+		}
+		if w := request("POST", "/api/v1/runs/run/cancel", raw, csrf, csrf, "https://controller.test"); w.Code != 503 || strings.Contains(w.Body.String(), raw) || strings.Contains(w.Body.String(), csrf) {
+			t.Fatalf("%s key response = %d %s", key, w.Code, w.Body.String())
+		}
+	}
+	server.WithSecretsCipher(cipher)
+	engineSQL(t, s, `UPDATE memberships SET role='reader' WHERE team='a' AND account_id='member'`)
+	if w := request("POST", "/api/v1/runs/run/cancel", raw, csrf, csrf, "https://controller.test"); w.Code != 403 {
+		t.Fatalf("demoted session = %d %s", w.Code, w.Body.String())
 	}
 	engineSQL(t, s, `DELETE FROM memberships WHERE team='a' AND account_id='member'`)
-	if got := request("GET", "/api/v1/runs/run/jobs", raw, "", ""); got != 401 {
-		t.Fatalf("removed session membership = %d", got)
+	if w := request("GET", "/api/v1/runs/run/jobs", raw, "", "", ""); w.Code != 401 {
+		t.Fatalf("removed session = %d %s", w.Code, w.Body.String())
 	}
 }

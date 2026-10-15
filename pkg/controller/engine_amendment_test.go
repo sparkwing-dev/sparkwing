@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -127,7 +128,7 @@ func TestEngineCancelJobKeepsLiveHolderAndRechecksOwner(t *testing.T) {
 		t.Fatalf("cancel job: %+v, %v", result, err)
 	}
 	row, err := tenant.ReadNode(t.Context(), store.NodeRef{RunID: "run", NodeID: "job"})
-	if err != nil || row.CapabilityPrefix != holder.Award.CapabilityPrefix || row.CancelRequestedAt == nil || row.Outcome != "" {
+	if err != nil || row.CapabilityPrefix != holder.Award.CapabilityPrefix || row.CancelRequestedAt == nil || row.CancelReason != "user_cancelled" || row.Outcome != "" {
 		t.Fatalf("held result rights: %+v, %v", row, err)
 	}
 	engineSQL(t, server.Store, `UPDATE triggers SET generation=generation+1 WHERE id='run'`)
@@ -209,5 +210,34 @@ func TestEngineBootstrapExchangeReturnsOriginalUnitOnce(t *testing.T) {
 				t.Fatal("bootstrap returned a second bearer")
 			}
 		})
+	}
+}
+
+func TestEngineCancellationIntentPreservesHolderProperty(t *testing.T) {
+	property := func(reason string) bool {
+		server, tenant := engineRuntimeStore(t)
+		owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
+		engineSQL(t, server.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
+		holder, err := server.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "runner", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run", NodeID: "job"}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		before, err := tenant.ReadNode(t.Context(), store.NodeRef{RunID: "run", NodeID: "job"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		first, err := server.CancelJob(t.Context(), owner, controllerwire.CancelRequest{Reason: reason})
+		if err != nil || !first.CancelRequested {
+			return false
+		}
+		row, err := tenant.ReadNode(t.Context(), store.NodeRef{RunID: "run", NodeID: "job"})
+		if err != nil || row.Status != before.Status || row.Attempt != before.Attempt || row.CapabilityPrefix != holder.Award.CapabilityPrefix || row.ClaimedBy != holder.Award.Holder || row.Generation != holder.Award.Generation || row.CancelReason != reason || row.Outcome != "" || row.FinishedAt != nil {
+			return false
+		}
+		replay, err := server.CancelJob(t.Context(), owner, controllerwire.CancelRequest{Reason: reason})
+		return err == nil && replay.Replayed && replay.StateSeq == first.StateSeq
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+		t.Fatal(err)
 	}
 }

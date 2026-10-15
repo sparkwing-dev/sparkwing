@@ -188,7 +188,7 @@ func forTeam(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 
 func session(t *testing.T, st *store.Store, acct store.Account, team store.Team) string {
 	t.Helper()
-	raw, _, _, err := st.CreateAccountSession(context.Background(), acct, team, time.Hour, time.Now().UTC())
+	raw, _, _, err := st.CreateAccountSession(context.Background(), acct, team, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

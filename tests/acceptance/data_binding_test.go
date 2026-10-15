@@ -625,7 +625,7 @@ func TestDataOwnerAndPublicationUploadsHaveNoSyntheticAttempt(t *testing.T) {
 func TestDataBindingRetainsOpaqueSessionAuthority(t *testing.T) {
 	a := dataAuthorized()
 	p, _ := policyFixture("local_run_publisher", "data", "controller", []capability.Grant{capability.DataWrite})
-	p.Class, p.Authority.Kind = capability.CredentialSession, capability.AuthoritySession
+	p.Class, p.Authority = capability.CredentialSession, sessionReference(p)
 	p.Capability.Data.RepositoryKey, p.Capability.Data.WriteRef = "gh:12", "manual:main"
 	a.Principal, a.Binding = p, p.Capability.Binding
 	a.Access = capability.AccessRule{Credential: capability.CredentialPublisher, Grants: []capability.Grant{capability.DataWrite}, Binding: capability.BindData, Liveness: capability.LiveCredential}

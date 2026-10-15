@@ -11,9 +11,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// CancelJob requests cancellation through the state writer. Held jobs keep their
-// existing result rights; the transaction sets their cancellation request only.
-func (s *EngineController) CancelJob(ctx context.Context, a capability.Authorized, _ controllerwire.CancelRequest) (controllerwire.Applied, error) {
+// CancelJob records cancellation intent while preserving held jobs and their result rights.
+func (s *EngineController) CancelJob(ctx context.Context, a capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error) {
 	tenant, err := s.runTransactions(ctx, a.Target.Team)
 	if err != nil {
 		return controllerwire.Applied{}, err
@@ -25,6 +24,7 @@ func (s *EngineController) CancelJob(ctx context.Context, a capability.Authorize
 	applied, err := tenant.TransitionNode(ctx, store.NodeTransition{
 		Ref: store.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID},
 		To:  store.NodeCancelled, Cause: store.CauseCancel, Actor: actor,
+		Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: body.Reason}},
 	})
 	return appliedResponse(applied), engineLookupError(err)
 }

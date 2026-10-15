@@ -29,7 +29,7 @@ func credentialSessionServer(t *testing.T) (*Server, string) {
 	engineSQL(t, s, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,'member','runs.read,runs.write',1,?,'a','member')`, hex.EncodeToString(digest[:]), time.Now().Add(time.Hour).UnixNano())
 	server := New(s, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	a := server.authorization
-	a.Authenticator = capability.NewAuthenticator(sessionDigestFixture{s})
+	a.Authenticator = capability.NewAuthenticator(s)
 	a.CheckCSRF = func(r *http.Request, _ capability.Principal) error {
 		if !validAPIRequestCSRF(r, "session-csrf", true) {
 			return &apierr.Error{Code: apierr.Forbidden, Message: "invalid CSRF token"}

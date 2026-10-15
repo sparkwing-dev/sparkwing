@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -169,11 +170,8 @@ func TestTriggerHost_AResumedRunKeepsAFinishedGeneratorsNodes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := store.Maintenance.RecoverExpiredNodeClaims(h.st, t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if triggers, err := store.Maintenance.ReapExpiredTriggers(h.st, t.Context()); err != nil || len(triggers) != 1 {
-		t.Fatalf("reaped triggers = %v, %v; want this run's", triggers, err)
+	if recovered, err := teststore.ReapUnits(t.Context(), h.st); err != nil || len(recovered) != 2 {
+		t.Fatalf("recovered units = %+v, %v; want node and trigger", recovered, err)
 	}
 	claimed, err := client.NewWithToken(h.url, nil, h.token).ClaimTriggerFor(t.Context(), nil, nil)
 	if err != nil || claimed == nil {

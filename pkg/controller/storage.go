@@ -88,7 +88,6 @@ func (s *Server) maintainStorage(ctx context.Context) {
 		s.logger.Error("prune storage commit receipts failed", "err", err)
 	}
 	s.maintainRetainedData(ctx)
-	s.maintainTeamStorage(ctx, now)
 	size, err := s.store.AsOperator().DatabaseSize(ctx)
 	if err != nil {
 		s.logger.Error("database size probe failed", "err", err)
@@ -118,8 +117,8 @@ func (s *Server) maintainRetainedData(ctx context.Context) {
 		s.logger.Error("storage retention failed", "err", err)
 		return
 	}
-	if retained.Runs > 0 || retained.Metrics > 0 || retained.Records > 0 {
-		s.logger.Info("expired retained data", "runs", retained.Runs, "metrics", retained.Metrics, "records", retained.Records)
+	if retained.Runs > 0 || retained.Metrics > 0 || retained.Records > 0 || retained.Invitations > 0 || retained.Sessions > 0 {
+		s.logger.Info("expired retained data", "runs", retained.Runs, "metrics", retained.Metrics, "records", retained.Records, "invitations", retained.Invitations, "sessions", retained.Sessions)
 	}
 	if _, err := operator.SealAbandonedLogStreams(ctx, lease, 5000); err != nil {
 		s.logger.Error("seal abandoned log streams failed", "err", err)

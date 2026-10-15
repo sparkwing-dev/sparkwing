@@ -28,7 +28,7 @@ W3 also owns finding 1's retained test port. `go test -p 4 -gcflags=-e ./interna
 
 **W1 scope clarification (lead).** When W1 removes a legacy store API (Store.AcceptPlan and its validator, StateStoreOld, old claim and trigger writers, offer rounds, old maintenance APIs), W1 migrates or deletes every remaining caller, including callers in W1b-owned test fixtures such as the output and log fixtures reached through dispatchRun. Keep each caller change minimal and list the files in your report. This overrides the "do not edit W1b's files" line for caller migration only. W1b does not reintroduce removed APIs.
 
-**W1: separate cancellation intent for W2.** W2's cancellation-reason persistence test fails because the store has no cancellation-intent field separate from the terminal reason. Add it to the store's authentication/cancellation snapshot (amendment A1-21), and finish the session digest and CSRF persistence W2 reads. W2 consumes it through the contract interface.
+**W1/W2: cancellation and session integration.** W2 now passes cancellation reasons through C1's existing request-only edge. The real held-job and event test passes, including a generated holder-preservation property. W2 added BindingState.CancelReason to C2. W1 still needs to project the first committed intent through ReadAuthentication, with job intent preceding run intent. W2 authenticates session presentations against their committed hashed AuthorityRef.ID and uses C1's sealed-key session lookup for the default CSRF verifier. The controller no longer patches a missing Capability.Digest. Browser renewal, roleless sessions and console/peer identity remain open.
 
 **W1: logical-record authorization for W2.** A live remote-cache authority calling Tenant.CheckDataAccess with DataLookup, RecordKind=memo, RecordName=hash and no Digest gets `invalid blob digest` before a record can be selected. Bound record/memo/depcache lookups call this interface before selecting digests. CopyMemo also checks DataRecord before its transactional hit. Resolve live selection authority through the existing contract and keep digest/member checks inside the record transaction. The SQLite probe and remaining integrations are recorded in [W2-cache-handoff.md](../W2-cache-handoff.md). W2's transport uses the existing methods with fakes while this integration remains open.
 
@@ -37,7 +37,38 @@ W3 also owns finding 1's retained test port. `go test -p 4 -gcflags=-e ./interna
 **W1: credential mutation transactions for W2.** C2 declares controller.CredentialWriter for the five migrated secret/git write routes. Its methods are Team() Team, WriteSecret(ctx, Authorized, Secret) error, RemoveSecret(ctx, Authorized, name, pipeline) error, WriteGitCredential(ctx, Authorized, GitCredential) (GitCredential, error), ConfirmGitCredentialFor(ctx, Authorized, host, fingerprint) (GitCredential, error), and RemoveGitCredential(ctx, Authorized, host) error. Recheck ancestry, current membership/team.admin or verified local authority, exact tenant and actor in each committing transaction. Use the store clock. Existing CreateOrReplaceSecret/DeleteSecret/PutGitCredential/ConfirmGitCredential/DeleteGitCredential accept no authority and remain unsuitable as production adapters. W2 tests with a fake writer over real SQLite. The production default refuses writes until Tenant implements the interface. C2's declaration is local. No C1 signature or implementation is changed. Team-scoped key rotation also needs a separate authority-bearing transaction because Store.RotateSecretValues/RotateGitCredentialSecrets walk every team. See [W2-mutations-handoff.md](../W2-mutations-handoff.md).
 
 **W1: credential maintenance adapters for W2.** The rotation and source-audit HTTP cutovers are done against C2's local interfaces. CredentialRotator requires Team() Team and RotateCredentials(ctx, Authorized, func(Secret) (string, error), func(GitCredential) (string, error)) (int, int, error). Recheck live team-admin or verified local authority, visit only that tenant's rows once serially, and commit both value-column rewrites together. Any error rolls back both tables. Return visited secret/git counts and preserve all other row fields. SourceAuditReader requires Team() Team and SourceReleaseAudits(ctx, limit) ([]capability.SourceReleaseAudit, error), newest first, decoding capability_prefix and nanosecond timestamps. This replaces the earlier request to adapt the legacy GitCredentialReleases projection. Missing adapters return policy_missing. The global Store rotation and legacy audit reader are not fallbacks. W2 tests with fakes and does not claim production transaction or audit-query coverage. See [W2-maintenance-handoff.md](../W2-maintenance-handoff.md).
+W1 continuation status: cancellation reasons now persist independently on runs and
+jobs and reach job, owner and eval renewal. Session digest lookup, nanosecond
+writes, current membership, capability-parent ceilings and sealed CSRF-key
+persistence are implemented. `CreateTokenSession` is removed. Session creation and
+lookup no longer accept caller clocks. See `../w1-session11-progress.md` for caller
+migrations and evidence. W2 has extended C2 `BindingState` with `CancelReason`. W1 must now populate
+that field through `ReadAuthentication`. OAuth/browser middleware and roleless-session
+representation remain integration points.
+
+W1's unit-reaper cut is complete. The unfenced node, agent-loss and trigger
+reapers and dispatcher-expiry helpers are removed. Remaining callers use the
+leased `ReapUnits` contract. The elected controller pass preserves remote runs,
+and the SQLite local-orphan cell proves unstarted requeue and started failure
+through reopening. See `../w1-session13-progress.md` for migrated callers, ports
+and verification. W1b still owns settlement wiring. Its unused `expiredClaim`
+and `settleExpiredClaimTx` helper can retire after this cut is merged.
 
 **DESIGN approved (lead, pending Korey's ratification): SDK planning diagnostic sanitization, W5 and W4.** Invariant: no declared secret argument value (default or supplied, pipeline or job scope) appears in any error the SDK returns from describe, argument resolution or planning: not in message, hint, details or detail keys, in any encoding. Each SDK collects the nonempty declared secret values once at its discovery/planning boundary and passes every outgoing canonical error through one sanitizer, which keeps codes and field paths. That replaces the describe-only replacement. Host masking still owns execution output and dynamic service values. Both SDKs carry a property test over thrown values, canonical errors, overlapping values, encodings and both argument scopes. W5 implements it in TypeScript; W4 implements the same in the Go SDK. No cross-area contract change.
 
+**Contract change needed, W1/W9/W3: attempt identity on job transitions.**
+Invariant: an execution report affects only the attempt it names, and replay of
+that report cannot consume another attempt. C1 `NodeTransition` and C3
+`JobTransitionRequest` carry claim generation but no source attempt ordinal.
+Two successive identical retry failures therefore hash identically. A direct
+store probe with retry budget two starts attempt four, then the next failure
+returns `Replayed:true, Attempt:4` instead of starting five. A delayed report
+also lacks an attempt fence after retry under the same claim. Carry the source
+attempt through the request and adapter, check it in the committing transaction,
+and include it in replay identity. Start, unstarted refusal and reaper semantics
+must remain explicit. W1 has not changed the foreign wire shape. The reproducer
+and command are in `../w1-session12-progress.md`.
+
 **DESIGN: W9 Windows release packaging for the TypeScript SDK (from W5 review finding 6).** Invariant: every published TypeScript SDK package contains working protocol bridges for win32-x64 and win32-arm64. The release workflow builds both `native/win32-*/protocol.node` artifacts on native Windows runners, runs TestNativeProtocol and TestNativeConformance on each, stamps the SDK version, and makes publication depend on package assembly. W5's proposal is in `sdk/typescript/IMPLEMENTATION.md`.
+
+**W2 continuation evidence.** Session verification/default CSRF and cancellation-reason delivery are covered in [W2-sessions-cancellation-handoff.md](../W2-sessions-cancellation-handoff.md). W1 can now project C2 BindingState.CancelReason. Native TypeScript setup and unrelated docs failures remain with their owners.

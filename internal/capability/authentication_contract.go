@@ -62,6 +62,7 @@ type BindingState struct {
 	LeaseExpiresAt time.Time
 	FinishedAt     *time.Time
 	RunCancelled   bool
+	CancelReason   string
 	RunFinished    bool
 	HereClaimed    bool
 	LogSealed      bool

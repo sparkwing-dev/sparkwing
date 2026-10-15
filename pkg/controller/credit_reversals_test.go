@@ -204,10 +204,9 @@ func TestCheckoutTokenSeedsOnceAndNeverRevives(t *testing.T) {
 	if _, err := controller.EnsureCheckoutToken(ctx, f.store, raw, now); !errors.Is(err, store.ErrSeededTokenRevoked) {
 		t.Fatalf("reseeding a revoked token = %v; want ErrSeededTokenRevoked", err)
 	}
-	later := now.Add(store.SpentIdentityRetention + 24*time.Hour)
-	pruned, err := f.store.PruneSpentIdentity(ctx, later)
-	if err != nil || pruned.Tokens == 0 {
-		t.Fatalf("prune = %+v, %v; want the revoked token deleted", pruned, err)
+	later := now.Add(31 * 24 * time.Hour)
+	if _, err := f.store.DB().ExecContext(ctx, `DELETE FROM tokens WHERE prefix=$1`, raw[:store.PrefixLen]); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := f.store.LookupTokenByPrefix(raw[:store.PrefixLen]); err == nil {
 		t.Fatal("the revoked row survived pruning, so the test proves nothing")

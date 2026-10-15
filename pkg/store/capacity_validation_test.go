@@ -28,24 +28,24 @@ func TestPipelineProfile_InvalidObservationLeavesProfileUnchanged(t *testing.T) 
 				st := storetest.Open(t)
 				ctx := context.Background()
 				if state == "existing" {
-					if err := st.UpsertProfilePin(ctx, "validation", "build", 2, 512<<20); err != nil {
+					if err := tenantFor(t, st, store.DefaultTeam).UpsertProfilePin(ctx, "validation", "build", 2, 512<<20); err != nil {
 						t.Fatal(err)
 					}
-					if err := st.RecordProfileObservation(ctx, "validation", "build", store.ProfileObservation{
+					if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "validation", "build", store.ProfileObservation{
 						Duration: time.Second, PeakCores: 1, SustainedCores: 0.5,
 						PeakMemoryBytes: 64 << 20, CPUMeasured: true,
 					}); err != nil {
 						t.Fatal(err)
 					}
 				}
-				before, err := st.GetPipelineProfile(ctx, "validation", "build")
+				before, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "validation", "build")
 				if err != nil || (before != nil) != (state == "existing") {
 					t.Fatalf("initial profile: %v, %v", before, err)
 				}
-				if err := st.RecordProfileObservation(ctx, "validation", "build", invalid); err == nil {
+				if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "validation", "build", invalid); err == nil {
 					t.Error("invalid observation was accepted")
 				}
-				after, err := st.GetPipelineProfile(ctx, "validation", "build")
+				after, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "validation", "build")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -60,12 +60,12 @@ func TestPipelineProfile_InvalidObservationLeavesProfileUnchanged(t *testing.T) 
 func TestPipelineProfile_ZeroObservationIsValid(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	if err := st.RecordProfileObservation(ctx, "zero", "build", store.ProfileObservation{
+	if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "zero", "build", store.ProfileObservation{
 		SustainedCores: 0, CPUMeasured: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	profile, err := st.GetPipelineProfile(ctx, "zero", "build")
+	profile, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "zero", "build")
 	if err != nil || profile == nil {
 		t.Fatalf("profile: %v, %v", profile, err)
 	}

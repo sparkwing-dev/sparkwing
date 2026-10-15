@@ -333,7 +333,7 @@ func TestCredentialRotationHTTPBodyCipherAndCSRF(t *testing.T) {
 			code = apierr.Unavailable
 		case "csrf":
 			p := &b.snapshot.Authorities[0].Principal
-			p.Class, p.Authority.Kind = capability.CredentialSession, capability.AuthoritySession
+			p.Class, p.Authority = capability.CredentialSession, sessionReference(*p)
 			code = apierr.Forbidden
 		}
 		r := httptest.NewRequest("POST", "/api/v1/secrets/rotate", strings.NewReader(body))
@@ -392,7 +392,7 @@ func TestCredentialMaintenanceHTTPMemberTransports(t *testing.T) {
 			p := &b.snapshot.Authorities[0].Principal
 			p.Class = class
 			if class == capability.CredentialSession {
-				p.Authority.Kind = capability.AuthoritySession
+				p.Authority = sessionReference(*p)
 			} else if class == capability.CredentialPeer {
 				p.Authority = capability.AuthorityRef{}
 				p.Capability.Subject = capability.Subject{Kind: capability.SubjectLocal, ID: "uid:1000"}

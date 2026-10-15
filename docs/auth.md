@@ -2,8 +2,10 @@
 
 The controller's shared policy routes use the store's authentication snapshot
 and binding checker by default. Each request reads current capability ancestry
-and account membership. Browser writes require a configured CSRF verifier and return `policy_missing`
-when it is absent. Verified local-peer and operator-console presentations need
+and account membership. Browser writes use the session-bound CSRF verifier by default. The header
+and cookie must match the token derived from the persisted encrypted key, and
+the request must come from the same origin. A forged or cross-session token
+returns `forbidden`. Session key failures return `unavailable`. Verified local-peer and operator-console presentations need
 their transport-specific adapters. Request headers and loopback addresses do
 not supply those identities.
 
@@ -30,7 +32,8 @@ declarations, environment, claim identities and execution settings. The old
 `POST /api/v1/runs/{run}/jobs/{job}/cancel` accepts `runs.control` from a
 member or `trigger.host` from the live owner of that run. The state transaction
 requests cancellation of held jobs and preserves the holder's result rights.
-The current job transition contract has no cancellation-reason field.
+The first cancellation reason is recorded separately from the holder's
+terminal result and reaches the holder on renewal.
 
 `GET /api/v1/runs/{run}/jobs/{job}/failure?generation=N` requires `data.read`
 and a declared recovery read edge to that source generation. It returns the

@@ -256,8 +256,8 @@ func accountBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservat
 	if err != nil {
 		return result, err
 	}
-	if result.ReservationID != reservation || result.BillableSeconds < 0 || (result.RefundUnstarted && (len(intervals) > 0 || result.BillableSeconds != 0)) || (!a.provenance.Metered && result.BillableSeconds != 0) {
-		return result, authorityError(apierr.Conflict, "invalid billing calculation")
+	if err := validateBillingCalculation(a, intervals, result); err != nil {
+		return result, err
 	}
 	if a.provenance.Metered {
 		if err := settleBillingChargesTx(ctx, tx, a, result, through, final); err != nil {
@@ -271,7 +271,14 @@ func accountBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservat
 	return result, err
 }
 
-func billingIntervalsTx(ctx context.Context, tx *storeTx, a billingAward, through time.Time, final bool) ([]capability.BillableInterval, error) {
+func validateBillingCalculation(a billingAward, intervals []capability.BillableInterval, result capability.BillingSettlement) error {
+	if result.ReservationID != a.provenance.ReservationID || result.BillableSeconds < 0 || (result.RefundUnstarted && (len(intervals) > 0 || result.BillableSeconds != 0)) || (!a.provenance.Metered && result.BillableSeconds != 0) {
+		return authorityError(apierr.Conflict, "invalid billing calculation")
+	}
+	return nil
+}
+
+func readBillingIntervalsTx(ctx context.Context, tx *storeTx, a billingAward, through time.Time, checkpoint bool) ([]capability.BillableInterval, error) {
 	rows, err := tx.QueryContext(ctx, "SELECT capability_prefix,billing_unit,started_at,finished_at,charged_through FROM billable_intervals WHERE team=? AND reservation_id=? ORDER BY started_at,id", a.team, a.provenance.ReservationID)
 	if err != nil {
 		return nil, err
@@ -288,6 +295,8 @@ func billingIntervalsTx(ctx context.Context, tx *storeTx, a billingAward, throug
 		i.End = through
 		if end.Valid {
 			i.End = time.Unix(0, end.Int64).UTC()
+		} else if checkpoint {
+			i.End = time.Unix(0, charged).UTC()
 		}
 		if charged > through.UnixNano() || i.End.Before(i.Start) || i.End.After(through) || i.CapabilityPrefix != a.prefix || i.Unit != a.provenance.Unit {
 			return nil, errors.Join(authorityError(apierr.Conflict, "persisted interval conflicts with settlement"), rows.Close())
@@ -295,6 +304,14 @@ func billingIntervalsTx(ctx context.Context, tx *storeTx, a billingAward, throug
 		intervals = append(intervals, i)
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	return intervals, nil
+}
+
+func billingIntervalsTx(ctx context.Context, tx *storeTx, a billingAward, through time.Time, final bool) ([]capability.BillableInterval, error) {
+	intervals, err := readBillingIntervalsTx(ctx, tx, a, through, false)
+	if err != nil {
 		return nil, err
 	}
 	if final {

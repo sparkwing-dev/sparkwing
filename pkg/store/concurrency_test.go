@@ -29,7 +29,7 @@ func acquireT(t *testing.T, s *store.Store, req store.AcquireSlotRequest) store.
 
 func acquireBareT(t *testing.T, s *store.Store, req store.AcquireSlotRequest) store.AcquireSlotResponse {
 	t.Helper()
-	resp, err := s.AcquireConcurrencySlot(ctxT(t), req)
+	resp, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(ctxT(t), req)
 	if err != nil {
 		t.Fatalf("AcquireConcurrencySlot(%+v): %v", req, err)
 	}
@@ -81,7 +81,7 @@ func TestConcurrencyHolderPreservesCost(t *testing.T) {
 		t.Fatalf("expected Granted, got %s", resp.Kind)
 	}
 
-	holder, err := s.ConcurrencyHolder(ctxT(t), "k-cost", "r1/n1", time.Now())
+	holder, err := tenantFor(t, s, store.DefaultTeam).ConcurrencyHolder(ctxT(t), "k-cost", "r1/n1", time.Now())
 	if err != nil {
 		t.Fatalf("ConcurrencyHolder: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestConcurrency_ResolveWaiterReapsTerminalHolderAndPromotes(t *testing.T) {
 	}
 	finishRunT(t, s, "r1")
 
-	res, err := s.ResolveWaiter(ctxT(t), "terminal-promote", "r2", "n1", "", "", "", false)
+	res, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctxT(t), "terminal-promote", "r2", "n1", "", "", "", false)
 	if err != nil {
 		t.Fatalf("ResolveWaiter: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestConcurrency_Skip(t *testing.T) {
 	if r2.Kind != store.AcquireSkipped {
 		t.Fatalf("r2: want Skipped got %s", r2.Kind)
 	}
-	state, err := s.GetConcurrencyState(ctxT(t), "k")
+	state, err := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctxT(t), "k")
 	if err != nil {
 		t.Fatalf("GetConcurrencyState: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestConcurrency_CancelOthersMarksOldestSuperseded(t *testing.T) {
 		t.Fatalf("r2: SupersededIDs = %v, want [r1/n1]", r2.SupersededIDs)
 	}
 
-	state, err := s.GetConcurrencyState(ctxT(t), "k")
+	state, err := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctxT(t), "k")
 	if err != nil {
 		t.Fatalf("GetConcurrencyState: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestConcurrency_CacheHitShortCircuits(t *testing.T) {
 	if r1.Kind != store.AcquireGranted {
 		t.Fatalf("r1: want Granted got %s", r1.Kind)
 	}
-	released, err := s.ReleaseConcurrencySlot(ctx, "k", "r1/n1", "success", "r1/n1", "hash-abc", time.Hour)
+	released, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, "k", "r1/n1", "success", "r1/n1", "hash-abc", time.Hour)
 	if err != nil || !released {
 		t.Fatalf("release: released=%v err=%v", released, err)
 	}
@@ -332,7 +332,7 @@ func TestConcurrency_BypassReadSkipsCacheHitButPreservesWrite(t *testing.T) {
 	if r1.Kind != store.AcquireGranted {
 		t.Fatalf("r1: want Granted got %s", r1.Kind)
 	}
-	released, err := s.ReleaseConcurrencySlot(ctx, "k", "r1/n1", "success", "r1/n1", "hash-abc", time.Hour)
+	released, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, "k", "r1/n1", "success", "r1/n1", "hash-abc", time.Hour)
 	if err != nil || !released {
 		t.Fatalf("release: released=%v err=%v", released, err)
 	}
@@ -346,7 +346,7 @@ func TestConcurrency_BypassReadSkipsCacheHitButPreservesWrite(t *testing.T) {
 		t.Fatalf("r2 with BypassRead: want Granted got %s", r2.Kind)
 	}
 
-	released2, err := s.ReleaseConcurrencySlot(ctx, "k", "r2/n1", "success", "r2/n1", "hash-abc", time.Hour)
+	released2, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, "k", "r2/n1", "success", "r2/n1", "hash-abc", time.Hour)
 	if err != nil || !released2 {
 		t.Fatalf("release r2: released=%v err=%v", released2, err)
 	}
@@ -397,18 +397,18 @@ func TestConcurrency_PromoteNextWaiters(t *testing.T) {
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
 	createLiveRunT(t, s, "r2")
-	released, err := s.ReleaseConcurrencySlot(ctx, "k", "r1/n1", "success", "", "", 0)
+	released, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, "k", "r1/n1", "success", "", "", 0)
 	if err != nil || !released {
 		t.Fatalf("release r1: released=%v err=%v", released, err)
 	}
-	promoted, err := s.PromoteNextWaiters(ctx, "k", 30*time.Second)
+	promoted, err := tenantFor(t, s, store.DefaultTeam).PromoteNextWaiters(ctx, "k", 30*time.Second)
 	if err != nil {
 		t.Fatalf("promote: %v", err)
 	}
 	if len(promoted) != 1 || promoted[0].RunID != "r2" {
 		t.Fatalf("promote: got %+v, want [r2]", promoted)
 	}
-	state, err := s.GetConcurrencyState(ctx, "k")
+	state, err := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
 	if err != nil {
 		t.Fatalf("state: %v", err)
 	}
@@ -444,18 +444,18 @@ func TestConcurrency_PromoteSkipsAndDeletesFinishedRunWaiter(t *testing.T) {
 	if err := s.FinishRun(ctx, "r2", "success", ""); err != nil {
 		t.Fatalf("finish r2: %v", err)
 	}
-	released, err := s.ReleaseConcurrencySlot(ctx, "k", "r1/n1", "success", "", "", 0)
+	released, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, "k", "r1/n1", "success", "", "", 0)
 	if err != nil || !released {
 		t.Fatalf("release r1: released=%v err=%v", released, err)
 	}
-	promoted, err := s.PromoteNextWaiters(ctx, "k", 30*time.Second)
+	promoted, err := tenantFor(t, s, store.DefaultTeam).PromoteNextWaiters(ctx, "k", 30*time.Second)
 	if err != nil {
 		t.Fatalf("promote: %v", err)
 	}
 	if len(promoted) != 1 || promoted[0].RunID != "r3" {
 		t.Fatalf("promote: got %+v, want [r3]", promoted)
 	}
-	state, err := s.GetConcurrencyState(ctx, "k")
+	state, err := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
 	if err != nil {
 		t.Fatalf("state: %v", err)
 	}
@@ -488,14 +488,14 @@ func TestConcurrency_CoalesceFollowersResolvedByLeader(t *testing.T) {
 			t.Fatalf("r%d: want Coalesced got %s", i, resp.Kind)
 		}
 	}
-	followers, err := s.ResolveCoalesceFollowers(ctx, "k", "r1", "n1")
+	followers, err := tenantFor(t, s, store.DefaultTeam).ResolveCoalesceFollowers(ctx, "k", "r1", "n1")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	if len(followers) != 3 {
 		t.Fatalf("expected 3 followers, got %d", len(followers))
 	}
-	state, err := s.GetConcurrencyState(ctx, "k")
+	state, err := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
 	if err != nil {
 		t.Fatalf("state: %v", err)
 	}
@@ -511,7 +511,7 @@ func TestConcurrency_HeartbeatReportsSuperseded(t *testing.T) {
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	_, superseded, err := s.HeartbeatConcurrencySlot(ctx, "k", "r1/n1", 10*time.Second)
+	_, superseded, err := tenantFor(t, s, store.DefaultTeam).HeartbeatConcurrencySlot(ctx, "k", "r1/n1", 10*time.Second)
 	if err != nil {
 		t.Fatalf("heartbeat: %v", err)
 	}
@@ -522,7 +522,7 @@ func TestConcurrency_HeartbeatReportsSuperseded(t *testing.T) {
 		Key: "k", HolderID: "r2/n1", RunID: "r2", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitCancelOthers,
 	})
-	_, superseded, err = s.HeartbeatConcurrencySlot(ctx, "k", "r1/n1", 10*time.Second)
+	_, superseded, err = tenantFor(t, s, store.DefaultTeam).HeartbeatConcurrencySlot(ctx, "k", "r1/n1", 10*time.Second)
 	if err != nil {
 		t.Fatalf("heartbeat after cancel: %v", err)
 	}

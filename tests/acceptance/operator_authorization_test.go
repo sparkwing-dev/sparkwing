@@ -47,6 +47,7 @@ func consoleBoundary() *credentialBoundary {
 			Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorConsole},
 		},
 	}
+	p.Authority = sessionReference(p)
 	b.snapshot.Authorities = []capability.AuthorityState{{Principal: p, MembershipValid: true}}
 	return b
 }

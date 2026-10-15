@@ -170,7 +170,7 @@ func matchesLookup(p Principal, key CredentialLookup) bool {
 	case CredentialBearer:
 		return p.Capability.Digest == key.Digest && p.Capability.Audience == key.Audience
 	case CredentialSession, CredentialConsole:
-		return p.Capability.Digest == key.Digest
+		return p.Authority.ID == hex.EncodeToString(key.Digest[:])
 	case CredentialPeer:
 		return p.Capability.Subject == key.Peer
 	case CredentialAnonymous:

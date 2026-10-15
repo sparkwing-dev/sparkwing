@@ -29,7 +29,7 @@ func (f consoleFixtureAuthority) Authenticate(ctx context.Context, presentation 
 			p.Capability.Grants = []capability.Grant{capability.OperatorLimits, capability.OperatorObjectStore}
 		}
 	} else {
-		session, err := f.server.store.LookupSession(ctx, presentation.Raw, time.Now())
+		session, err := f.server.store.LookupSession(ctx, presentation.Raw)
 		if err != nil {
 			return capability.Authenticated{}, &apierr.Error{Code: apierr.Unauthenticated}
 		}
@@ -68,7 +68,7 @@ func ConfigureConsoleFixture(s *Server) {
 			return capability.Presentation{Raw: raw, Class: capability.CredentialSession}, nil
 		},
 		CheckCSRF: func(r *http.Request, _ capability.Principal) error {
-			session, err := s.store.LookupSession(r.Context(), sessionCookie(r, s.cookiesSecure()), time.Now())
+			session, err := s.store.LookupSession(r.Context(), sessionCookie(r, s.cookiesSecure()))
 			if err != nil || !validAPIRequestCSRF(r, session.CSRFToken, s.cookiesSecure()) {
 				return &apierr.Error{Code: apierr.Forbidden, Message: "invalid CSRF token"}
 			}
@@ -79,7 +79,7 @@ func ConfigureConsoleFixture(s *Server) {
 
 // ConsoleFixtureRequest presents the existing fixture session as a browser would.
 func ConsoleFixtureRequest(s *Server, r *http.Request, raw string) error {
-	session, err := s.store.LookupSession(r.Context(), raw, time.Now())
+	session, err := s.store.LookupSession(r.Context(), raw)
 	if err != nil {
 		return err
 	}
