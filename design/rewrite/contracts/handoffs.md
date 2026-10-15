@@ -37,6 +37,13 @@ passes controlled-clock and race regressions with in-memory connections. See
 [the continuation report](../W8-DASHBOARD-ACTIVITY.md). This advances A1-40
 without supplying native or final store/controller composition evidence.
 
+The local HTTP serving scope now cancels its request contexts on listener
+failure as well as caller cancellation. Hijacked handlers finish before the
+runtime closes its store and releases the home election. In-memory HTTP and
+runtime regressions cover that exit and preserve the listener error. The shared
+controller/store factory remains an integration point. See
+[the HTTP exit report](../W8-HTTP-EXIT.md).
+
 The approved cancellation code is unchanged and both original regressions pass.
 New preparation and HTTP properties exercise fake foreign contracts and in-memory
 connections. Native cells remain blocked. See [the W8 audit](../W8-AMENDMENTS-1.md).

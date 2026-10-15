@@ -106,6 +106,8 @@ func serveLocalHTTP(ctx context.Context, listener net.Listener, handler http.Han
 	if listener == nil || handler == nil {
 		return errors.New("wingd: controller HTTP requires a listener and shared handler")
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	var connections, handlers sync.WaitGroup
 	var hijacked sync.Map
 	server := &http.Server{
@@ -128,19 +130,15 @@ func serveLocalHTTP(ctx context.Context, listener net.Listener, handler http.Han
 			handler.ServeHTTP(w, r)
 		}),
 	}
-	served, shutdown := make(chan struct{}), make(chan error, 1)
+	shutdown := make(chan error, 1)
 	go func() {
-		select {
-		case <-ctx.Done():
-			drain, cancel := context.WithTimeout(context.WithoutCancel(ctx), APIDrainWindow)
-			defer cancel()
-			shutdown <- server.Shutdown(drain)
-		case <-served:
-			shutdown <- nil
-		}
+		<-ctx.Done()
+		drain, cancel := context.WithTimeout(context.WithoutCancel(ctx), APIDrainWindow)
+		defer cancel()
+		shutdown <- server.Shutdown(drain)
 	}()
 	err := server.Serve(localHTTPConnections{Listener: listener, hijacked: &hijacked, observe: observe})
-	close(served)
+	cancel()
 	drainErr := <-shutdown
 	closeErr := server.Close()
 	connections.Wait()

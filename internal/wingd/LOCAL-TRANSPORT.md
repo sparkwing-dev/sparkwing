@@ -24,9 +24,11 @@ before application traffic starts. `APIConn.PeerIdentity` returns a snapshot.
 runtime serves them through `LocalHTTP`, which carries `APIConn` identity in
 each API request context. The route authorizer reads `LocalPeer(request.Context())`.
 Request headers and remote addresses cannot replace that identity. Dashboard
-handlers retain their browser authentication. Shutdown cancels request contexts,
+handlers retain their browser authentication. Every HTTP serving exit cancels
+its request contexts, including listener failure with hijacked handlers. Shutdown
 uses `APIDrainWindow` for graceful drain, closes remaining HTTP connections and
-joins handlers before the runtime closes its store. `TestLocalHTTP` and
+joins handlers before the runtime closes its store. Listener failures remain
+observable after handler cleanup and store close. `TestLocalHTTP` and
 `FuzzLocalHTTPIdentity` cover this composition with in-memory connections.
 
 The runtime counts accepted dashboard connections until close, including
