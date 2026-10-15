@@ -201,7 +201,6 @@ var Routes = []RoutePolicy{
 	route("GET", "/api/v1/operator/waitlist", OwnerDeployment, RetrySafe, console()),
 	route("POST", "/api/v1/operator/waitlist/approve", OwnerDeployment, RetryIdempotencyKey, console()),
 	route("DELETE", "/api/v1/operator/github-app/installations/{installation}", OwnerDeployment, RetrySafe, console()),
-	route("POST", "/api/v1/operator/maintenance/reconcile-orphans", OwnerDeployment, RetryIdempotencyKey, console()),
 	route("PUT", "/api/v1/operator/credits/settings", OwnerDeployment, RetrySafe, console()),
 	route("POST", "/api/v1/operator/runners/{runner}/metered", OwnerDeployment, RetryIdempotencyKey, console()),
 	externalRoute("GET", "/api/v1/health", AuthPublic, OwnerNone, RetrySafe),

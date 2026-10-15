@@ -26,7 +26,8 @@ claim wire. Members require `runs.read`; bound claims require `source.read`
 or `trigger.host` for their run. Bare machine roots cannot use this read.
 
 Embedded controllers must configure the shared authorization adapters and
-`EngineController.ReadRunStatus`. The reader supplies one committed snapshot,
+`EngineController.ReadRunStatus` when overriding the default
+`Tenant.ReadRunView` adapter. The reader supplies one committed snapshot,
 complete attempt history and validated log subjects for the selected team and
 run. Missing wiring refuses the request with `policy_missing`.
 

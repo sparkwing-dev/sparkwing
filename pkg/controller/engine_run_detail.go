@@ -36,10 +36,17 @@ func (s *EngineController) handleRunDetail(w http.ResponseWriter, r *http.Reques
 // RunDetail projects shared display inputs and public status without exposing
 // execution seals. Local, remote and dashboard reads use the same projection.
 func (s *EngineController) RunDetail(ctx context.Context, a capability.Authorized) (controllerwire.RunDetail, error) {
-	if s.ReadRunStatus == nil || a.Target.Team == "" || a.Target.RunID == "" {
+	if a.Target.Team == "" || a.Target.RunID == "" {
 		return controllerwire.RunDetail{}, missingEndpointPolicy()
 	}
-	facts, err := s.ReadRunStatus(ctx, store.Team(a.Target.Team), a.Target.RunID)
+	read := s.ReadRunStatus
+	if read == nil {
+		if s.Store == nil {
+			return controllerwire.RunDetail{}, missingEndpointPolicy()
+		}
+		read = s.readStoredRunStatus
+	}
+	facts, err := read(ctx, store.Team(a.Target.Team), a.Target.RunID)
 	if err != nil {
 		if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
 			return controllerwire.RunDetail{}, &apierr.Error{Code: apierr.NotFound, Message: "team is not registered"}
@@ -52,7 +59,7 @@ func (s *EngineController) RunDetail(ctx context.Context, a capability.Authorize
 func runDetailResponse(target capability.Target, facts RunStatusFacts) (controllerwire.RunDetail, error) {
 	run := facts.Snapshot.Run
 	if run.ID != target.RunID || string(run.Team) != target.Team || facts.Snapshot.StoreNow.IsZero() ||
-		run.Request.RunID != run.ID || run.Request.Request.Team != target.Team {
+		run.Request.RunID == "" || run.Request.RunID != run.ID && run.Lineage.RetryOf == "" || run.Request.Request.Team != target.Team {
 		return controllerwire.RunDetail{}, errors.New("invalid persisted run status")
 	}
 	detail := controllerwire.RunDetail{
@@ -63,7 +70,7 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 		FinishedAt: run.FinishedAt, CancelRequestedAt: run.CancelRequestedAt,
 	}
 	if run.Spec != nil {
-		if run.Spec.Request.RunID != run.ID || run.Spec.Request.Request.Team != target.Team || run.Spec.Request.Hash != run.Request.Hash {
+		if run.Spec.Request.RunID != run.Request.RunID || run.Spec.Request.Request.Team != target.Team || run.Spec.Request.Hash != run.Request.Hash {
 			return controllerwire.RunDetail{}, errors.New("invalid persisted run seals")
 		}
 		detail.Inputs = runspec.DisplaySpec(*run.Spec)
@@ -103,6 +110,7 @@ func runDetailResponse(target capability.Target, facts RunStatusFacts) (controll
 			return controllerwire.RunDetail{}, errors.New("invalid persisted status log source")
 		}
 	}
+	detail.Inputs.Lineage = run.Lineage
 	return detail, nil
 }
 
@@ -130,4 +138,16 @@ func statusAttempts(target capability.Target, nodes map[string]store.NodeRow, ro
 		})
 	}
 	return result, nil
+}
+
+func (s *EngineController) readStoredRunStatus(ctx context.Context, team store.Team, run string) (RunStatusFacts, error) {
+	tenant, err := s.Store.ForTeam(ctx, team)
+	if err != nil {
+		return RunStatusFacts{}, err
+	}
+	view, err := tenant.ReadRunView(ctx, run)
+	if err != nil {
+		return RunStatusFacts{}, err
+	}
+	return RunStatusFacts{Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs}, nil
 }

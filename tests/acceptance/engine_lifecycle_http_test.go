@@ -118,8 +118,8 @@ func TestEngineLifecycleHTTP(t *testing.T) {
 						t.Fatalf("cancel = %+v", f.runChange)
 					}
 				case "owner renewal", "job renewal":
-					if f.renewActor.Authority != p.Authority || f.renewActor.Holder != "runner" || f.renewActor.Generation != 4 {
-						t.Fatalf("renewal actor = %+v", f.renewActor)
+					if f.renewPrefix != p.Authority.ID || !f.renewExecuting {
+						t.Fatalf("renewal actor = %+v", f.renewPrefix)
 					}
 					var response controllerwire.RenewalResponse
 					if json.Unmarshal(w.Body.Bytes(), &response) != nil || response.ExpiresAt != f.beat.ExpiresAt || !response.CancelRequested || !response.Watched || len(response.WatchedJobs) != 1 {

@@ -35,8 +35,8 @@ type engineTransactions struct {
 	nodeChange        store.NodeTransition
 	runChange         store.RunTransition
 	finish            store.FinishRunRequest
-	renewActor        store.Actor
-	renewRef          store.NodeRef
+	renewPrefix       string
+	renewExecuting    bool
 	beat              store.LeaseBeat
 	applied           store.Applied
 	annotation        store.AnnotationWrite
@@ -56,6 +56,10 @@ type engineTransactions struct {
 	failureGeneration int64
 	failureActor      store.Actor
 	failureReads      int
+}
+
+func (f *engineTransactions) ReconcileNode(context.Context, store.ReconcileRequest) (store.ReconciledNode, error) {
+	return store.ReconciledNode{}, f.err
 }
 
 func (f *engineTransactions) ReadFailure(_ context.Context, source store.NodeRef, generation int64, actor store.Actor) (*nodeproto.JobFailure, error) {
@@ -123,16 +127,14 @@ func (f *engineTransactions) FinishRunAndUnit(_ context.Context, finish store.Fi
 	return f.applied, f.err
 }
 
-func (f *engineTransactions) RenewOwner(_ context.Context, actor store.Actor) (store.LeaseBeat, error) {
-	f.renewActor = actor
+func (f *engineTransactions) RenewUnit(_ context.Context, prefix string, executing bool) (store.LeaseBeat, error) {
+	f.renewPrefix, f.renewExecuting = prefix, executing
 	f.writes++
 	return f.beat, f.err
 }
 
-func (f *engineTransactions) RenewNodeClaim(_ context.Context, ref store.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
-	f.renewRef, f.renewActor = ref, actor
-	f.writes++
-	return f.beat, f.err
+func (f *engineTransactions) ReadOwnerSnapshot(ctx context.Context, _ capability.AuthorityRef, run string) (store.RunSnapshot, error) {
+	return f.ReadSnapshot(ctx, run)
 }
 
 func (f *engineTransactions) AdmitRun(_ context.Context, request store.IntakeRequest) (store.AdmissionResult, error) {
@@ -171,6 +173,7 @@ func (f *engineTransactions) AcceptExpansion(_ context.Context, request store.Ex
 func fakeEngine(t *testing.T, f *engineTransactions) *controller.EngineController {
 	t.Helper()
 	return &controller.EngineController{
+		Units: f,
 		ResolveTenant: func(_ context.Context, team store.Team) (controller.RunTransactions, error) {
 			if team != "team" {
 				t.Fatalf("resolved tenant %q", team)

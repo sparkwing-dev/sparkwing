@@ -85,10 +85,11 @@ func sightAgents(registered []store.RegisteredAgent, online map[string]runnerPre
 	out := make([]agentSighting, 0, len(registered))
 	for _, a := range registered {
 		sighting := agentSighting{RegisteredAgent: a}
-		if p, ok := online[a.TokenPrefix]; ok {
+		if p, ok := online[a.CapabilityPrefix]; ok {
 			sighting.online = true
-			profile := p.profile
+			profile := a.Profile
 			profile.Name, profile.Class, profile.Labels = a.Name, match.ClassAgent, match.SelfAsserted(p.Labels)
+			profile.OS, profile.Arch = p.profile.OS, p.profile.Arch
 			sighting.Profile = profile
 		}
 		out = append(out, sighting)
@@ -98,13 +99,13 @@ func sightAgents(registered []store.RegisteredAgent, online map[string]runnerPre
 
 func claimAttention(n store.WaitingNode, agents []agentSighting, cloud bool) string {
 	repo := n.Repo
-	demand := match.Demand{Selector: n.Selector, Repo: &repo, Request: n.Request}
+	demand := match.Demand{Selector: n.Selector, Repo: &repo, Request: n.Request, AllowedPools: n.AllowedPools}
 	var offline []agentSighting
 	var refused []string
 	profiles := make([]match.Profile, 0, len(agents)+1)
 	for _, a := range agents {
 		profiles = append(profiles, a.Profile)
-		verdict := match.EvaluateOld(a.Profile, demand)
+		verdict := match.Evaluate(a.Profile, demand)
 		switch {
 		case verdict.OK() && a.online:
 			return ""
@@ -116,7 +117,7 @@ func claimAttention(n store.WaitingNode, agents []agentSighting, cloud bool) str
 	}
 	if cloud {
 		runner := match.Profile{Class: match.ClassCloud, Location: "cloud", Labels: match.ToolLabels(match.CloudTools)}
-		if match.EvaluateOld(runner, demand).OK() {
+		if match.Evaluate(runner, demand).OK() {
 			return ""
 		}
 		profiles = append(profiles, runner)

@@ -104,12 +104,6 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	}
 	defer func() { _ = closer.Close() }()
 
-	if st := localStore(b); st != nil {
-		if _, err := ReconcileOrphanedLocalRuns(ctx, st, 0); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: reconcile orphaned local runs: %v\n", err)
-		}
-	}
-
 	filter, clientFilter, pager, err := runsQueryFor(opts)
 	if err != nil {
 		return err
@@ -446,12 +440,6 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 		return err
 	}
 	defer func() { _ = closer.Close() }()
-
-	if st := localStore(b); st != nil {
-		if _, err := ReconcileOrphanedLocalRuns(ctx, st, 0); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: reconcile orphaned local runs: %v\n", err)
-		}
-	}
 
 	storeLabel := SharedStoreLabel
 	if mergesStandalone(b, paths, opts.Profile) {

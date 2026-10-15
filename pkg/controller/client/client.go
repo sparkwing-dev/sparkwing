@@ -1287,12 +1287,6 @@ func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error 
 	return c.post(ctx, path, nil, http.StatusNoContent, nil)
 }
 
-func (c *Client) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/auto-retry/reset",
-		url.PathEscape(runID), url.PathEscape(nodeID))
-	return c.post(ctx, path, nil, http.StatusNoContent, nil)
-}
-
 // RevokeNodeReady atomically clears ready_at IFF the node is not
 // currently claimed. Returns true on success; false means a warm
 // runner claimed the node in the meantime.

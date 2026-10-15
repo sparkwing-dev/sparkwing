@@ -211,7 +211,6 @@ func CredentialRoutes() []CredentialRouteExpectation {
 		{"GET", "/api/v1/operator/waitlist", "controller", "deployment", "capability", []string{"operator_console_session|operator.console|none|credential"}},
 		{"POST", "/api/v1/operator/waitlist/approve", "controller", "deployment", "capability", []string{"operator_console_session|operator.console|none|credential"}},
 		{"DELETE", "/api/v1/operator/github-app/installations/{installation}", "controller", "deployment", "capability", []string{"operator_console_session|operator.console|none|credential"}},
-		{"POST", "/api/v1/operator/maintenance/reconcile-orphans", "controller", "deployment", "capability", []string{"operator_console_session|operator.console|none|credential"}},
 		{"PUT", "/api/v1/operator/credits/settings", "controller", "deployment", "capability", []string{"operator_console_session|operator.console|none|credential"}},
 		{"POST", "/api/v1/operator/runners/{runner}/metered", "controller", "deployment", "capability", []string{"operator_console_session|operator.console|none|credential"}},
 		{"GET", "/api/v1/health", "controller", "none", "public", nil},

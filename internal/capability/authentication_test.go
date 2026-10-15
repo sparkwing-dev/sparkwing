@@ -178,3 +178,30 @@ func requireAuthenticationCode(t *testing.T, err error, code apierr.Code) {
 		t.Fatalf("error = %v, want %s", err, code)
 	}
 }
+
+func TestAuthenticationSessionLookupIncludesControllerAudience(t *testing.T) {
+	for _, class := range []capability.CredentialClass{capability.CredentialSession, capability.CredentialConsole} {
+		t.Run(string(class), func(t *testing.T) {
+			reader, presentation, _ := authenticationFixture()
+			presentation.Class = class
+			principal := capability.Principal{Class: class, Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "session"}, Capability: capability.Capability{
+				Digest: sha256.Sum256([]byte(presentation.Raw)), Audience: capability.Controller, Team: "a",
+				Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "member"}, Binding: capability.Binding{Kind: capability.BindingNone},
+			}}
+			if class == capability.CredentialConsole {
+				principal.Capability.Subject.Kind = capability.SubjectOperator
+			}
+			reader.snapshot.Authorities = []capability.AuthorityState{{Principal: principal, MembershipValid: true}}
+			route, ok := capability.LookupRoute("GET", "/api/v1/runs")
+			if !ok {
+				t.Fatal("run collection policy is absent")
+			}
+			if _, err := capability.NewAuthenticator(reader).Authenticate(t.Context(), presentation, route); err != nil {
+				t.Fatal(err)
+			}
+			if reader.lookup.Audience != capability.Controller || reader.lookup.Digest != principal.Capability.Digest {
+				t.Fatalf("session lookup = %+v", reader.lookup)
+			}
+		})
+	}
+}

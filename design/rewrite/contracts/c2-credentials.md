@@ -80,8 +80,8 @@ including A58, A59, A66, A68, A72 and A73. The Go files declare the target
 interfaces. The policy evaluator, authentication verifier, HTTP policy router,
 delegation validator, data/source checks, billing calculation, payment verifier
 and error codec are implemented. Filesystem and S3 object signers implement the
-signing boundary. Persistent issuance and authentication reads still need the
-store implementation. The Stripe callback, migrated engine and operator endpoints use this table in the existing
+signing boundary. Authentication reads use the store snapshot implementation. Root-origin
+provisioning still needs its remaining trusted adapters. The Stripe callback, migrated engine and operator endpoints use this table in the existing
 controller. Four credential/membership mutations, the member directory, three
 credential discovery routes and both public OIDC metadata routes also use this
 table. Five pipeline sizing routes also use this policy. The remaining routes have not switched to it.
@@ -216,7 +216,7 @@ All capability names below are in `internal/capability`.
 | `controller.AuthorityRevoker`, `EngineController.ResolveOperator` | Reuse C1's existing RevokeAuthority transaction through the tenant or deployment scope. The optional resolver supports embedded controllers and fakes without another issuer or persistence owner. |
 | `controller.RunTransactions`, `EngineController.ResolveTenant`, `EngineController.ResolveRunTeam`, `Server.WithEngineController` | Supply final intake/sealing transactions and resource ownership. Production uses the existing store methods. Embedded controllers and tests may supply the same contracts without SQL or alternate authorization. |
 | `controller.SizingReader`, `controller.SizingStore`, `Server.WithSizingStore` | Supply tenant sizing reads and authority-bearing measurement transactions. Default reads use `Tenant.GetPipelineProfile`. Writes require the explicit adapter and fail closed when it is absent. |
-| `controller.RunStatusFacts`, `EngineController.ReadRunStatus` | Supply one committed snapshot, complete attempt history and validated log subjects for the authorized team/run. Verified engine policy supplies notices. An absent adapter refuses status reads. No C1 signature changes. |
+| `controller.RunStatusFacts`, `EngineController.ReadRunStatus` | Supply one committed snapshot, complete attempt history and validated log subjects for the authorized team/run. Verified engine policy supplies notices. The default uses Tenant.ReadRunView. No C1 signature changes. |
 
 The exported data tables are `Grants`, `AwardPolicies`, `LivenessPolicies`,
 `Routes`, `BootstrapGrants`, `BootstrapUnits`, `UnitBillingMappings`,
@@ -620,7 +620,7 @@ SQLite, with and without the dashboard wrapper. Console handlers receive `Author
 and use its subject ID for attribution. They no longer read the legacy principal.
 
 Five deployment-admin entry points are removed: account/team deletion, GitHub App
-installation unbinding, orphan reconciliation and credit-settings writes. Their
+installation unbinding and credit-settings writes. Their
 replacements live under `/api/v1/operator`. No aliases remain. The handler-policy
 lint checks every function that takes `capability.Authorized`. Legacy handlers still
 need migration before that lint can cover the complete server.
@@ -1329,13 +1329,12 @@ selectors cannot reveal secret arguments. Missing or invalid classification
 redacts all argument values, including on terminal runs.
 
 `EngineController.ReadRunStatus` supplies `RunStatusFacts` for embedded
-controllers and tests. The adapter must read the snapshot, complete attempt
-history and validated log subjects from one committed persistence read.
-`RunSnapshot` alone lacks history and subjects, so the controller refuses the
-read until this adapter is installed. No C1/C3 signature changed. W1 must supply
-the consistent read, including valid `LogSubject` values. W8 supplies notices
-from verified engine policy. W9 must migrate status consumers to `RunDetail`
-and execution consumers to the private award wire.
+controllers and tests. Its default reads `Tenant.ReadRunView`, which supplies
+the snapshot, complete attempt history and tagged log subjects in one committed
+read. Status validation and display projection remain shared. Retry reads keep
+the original request/spec seals and use the current run's invocation lineage.
+W8 still supplies notices from verified engine policy. W9 must migrate status
+consumers to `RunDetail` and execution consumers to the private award wire.
 
 Returned facts must match the selected run/team, both seals, the job set and
 attempt fences. Scope or read failures produce one canonical error before any
@@ -1375,6 +1374,38 @@ missing/dead/wrong authority, exact methods, invalid selectors, metadata scope,
 backend errors, byte caps, read-set omission and unsigned presence queries.
 They are component evidence. Native topology, SQL read-edge races, persistent
 provenance and actual object transfers remain integration obligations.
+
+### Store adapter integration
+
+`Server.New` configures `capability.NewAuthenticator(Store)` and the store's
+`BindingChecker` for shared policy routes. `WithAuthorization` replaces those
+adapters for verified transports and tests. Account-session presentations name
+the controller audience explicitly. The default cookie reader supplies only the
+presentation. C1 still needs to populate the session presentation digest. Its
+current snapshot returns an empty digest, so the verifier refuses it. The
+controller tests supply that missing field through a reader fixture and retain
+real persistence for ancestry and membership.
+
+The default has no CSRF verifier. Browser writes fail with `policy_missing`
+until `WithAuthorization` supplies one. C1's legacy session-CSRF code still
+queries `sparkwing_meta`, which the final schema replaces with sealed settings.
+No second CSRF key or plaintext setting is introduced here. Console and local
+peer identity adapters remain separate integration work.
+
+`RunTransactions.ReadOwnerSnapshot` uses C1's existing method for private
+scheduling reads. Revoked, expired and replaced owner fences refuse the read.
+A cancellation committed after authentication stays visible for draining.
+`EngineController.Units` accepts `UnitRenewer` for embedded controllers and
+tests. Its default uses `Store.RenewUnit`. The executing observation reaches
+that transaction for trigger, plan, eval and job units. It cannot start a job
+without the job's start transition. RenewOwner/RenewNodeClaim are removed from
+the W2 RunTransactions interface because the unified operation owns this path.
+
+The retired orphan-reconciliation route and policy row are removed with their
+legacy client and handler. The canonical acceptance inventory and generated API
+reference follow the actual registrations. The merge's duplicate converters,
+actor builder and public status projector are removed. Their surviving tests
+use W2's existing adapters and projections.
 
 ## Contract interpretations
 
@@ -1431,9 +1462,8 @@ Amendment 1 ratifies the interpretations below. They are not approval gates.
    policy gate is implemented, but it cannot establish that transaction
    guarantee. No C1 signature was changed in this cutover.
 
-8. **Local orphan reconciliation.** The shared HTTP client uses the console-only
-   maintenance path. W3/W8's automatic local maintenance must use its internal
-   store boundary rather than a deployment or local-peer credential on that path.
+8. **Local recovery.** The retired orphan-reconciliation HTTP endpoint and its
+   client are deleted. Local maintenance uses the internal store boundary.
 
 9. **Sizing transactions.** C1 must supply the authority-bearing sizing writer
    described above, including transactional revocation, membership, exact

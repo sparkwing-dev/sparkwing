@@ -37,6 +37,10 @@ func (f *snapshotTransactions) ReadSnapshot(_ context.Context, run string) (stor
 	return f.snapshot, f.readErr
 }
 
+func (f *snapshotTransactions) ReadOwnerSnapshot(ctx context.Context, _ capability.AuthorityRef, run string) (store.RunSnapshot, error) {
+	return f.ReadSnapshot(ctx, run)
+}
+
 func snapshotFixture(b *credentialBoundary) *snapshotTransactions {
 	return &snapshotTransactions{
 		snapshot: store.RunSnapshot{

@@ -74,7 +74,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `DELETE` | `/api/v1/operator/github-app/installations/{installation}` | `operator` |
 | `GET` | `/api/v1/operator/limits` | `operator.limits` or `operator` |
 | `PUT` | `/api/v1/operator/limits` | `operator.limits` or `operator` |
-| `POST` | `/api/v1/operator/maintenance/reconcile-orphans` | `operator` |
 | `GET` | `/api/v1/operator/object-store` | `operator.object_store` or `operator` |
 | `GET` | `/api/v1/operator/object-store/breaker` | `operator.object_store` or `operator` |
 | `PUT` | `/api/v1/operator/object-store/quotas/{team}` | `operator.object_store` or `operator` |
@@ -134,17 +133,10 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/activity` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/attempt` | `claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset` | `runs.state` |
-| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce` | `runs.control` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce/consume` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim/input` | `claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/debug-pause` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/deps` | `runs.state` |
-| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatch` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatch` | `nodes.claim` |
-| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatches` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-finish` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-start` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finalize-ready` | `runs.state` |

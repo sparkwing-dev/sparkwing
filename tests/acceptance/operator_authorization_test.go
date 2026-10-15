@@ -33,7 +33,6 @@ var consoleRequests = [][2]string{
 	{"GET", "/api/v1/operator/waitlist"},
 	{"POST", "/api/v1/operator/waitlist/approve"},
 	{"DELETE", "/api/v1/operator/github-app/installations/123"},
-	{"POST", "/api/v1/operator/maintenance/reconcile-orphans"},
 	{"PUT", "/api/v1/operator/credits/settings"},
 }
 

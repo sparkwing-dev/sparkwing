@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -24,9 +25,16 @@ func (s *EngineController) handleSnapshot(w http.ResponseWriter, r *http.Request
 // Snapshot takes one committed read and its shared scheduling projection. Empty
 // generators survive, and no separate read can mix job state from another instant.
 func (s *EngineController) Snapshot(ctx context.Context, authorized capability.Authorized) (controllerwire.ScheduleSnapshot, error) {
-	snapshot, err := s.readRunSnapshot(ctx, authorized)
+	tenant, err := s.runTransactions(ctx, authorized.Target.Team)
 	if err != nil {
 		return controllerwire.ScheduleSnapshot{}, err
+	}
+	snapshot, err := tenant.ReadOwnerSnapshot(ctx, authorized.Principal.Authority, authorized.Target.RunID)
+	if err != nil {
+		return controllerwire.ScheduleSnapshot{}, engineLookupError(err)
+	}
+	if snapshot.Run.ID != authorized.Target.RunID || string(snapshot.Run.Team) != authorized.Target.Team || snapshot.StoreNow.IsZero() {
+		return controllerwire.ScheduleSnapshot{}, errors.New("invalid persisted run snapshot")
 	}
 	project := s.ProjectScheduling
 	if project == nil {
@@ -40,6 +48,9 @@ func (s *EngineController) Snapshot(ctx context.Context, authorized capability.A
 }
 
 func schedulingResponse(snapshot store.RunSnapshot, graph store.ScheduleSnapshot) (controllerwire.ScheduleSnapshot, error) {
+	if graph.GuardRefusal != "" && !graph.CancelRequested {
+		return controllerwire.ScheduleSnapshot{}, &apierr.Error{Code: apierr.Unavailable, Message: "schedule transport cannot represent the sealed guard refusal"}
+	}
 	expansions, err := snapshotExpansions(snapshot)
 	if err != nil {
 		return controllerwire.ScheduleSnapshot{}, err

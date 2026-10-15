@@ -29,7 +29,7 @@ const CompileLogNode = "_compile"
 // Plan limits. A submitted plan above a cap is refused, and a resource or
 // retry request above its ceiling is clamped to it.
 const (
-	MaxPlanBytes      = MaxNodeDispatchEnvelope
+	MaxPlanBytes      = 4 << 20
 	MaxPlanNodes      = 1000
 	MaxNodeIDBytes    = 200
 	MaxNodeRetries    = 10

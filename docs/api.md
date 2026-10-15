@@ -148,9 +148,8 @@ reach the controller as routes too -- `/api/v1/runs/{id}/pending-triggers`
 and `/api/v1/triggers/{id}/claim` for the child-trigger loop,
 `/api/v1/pipelines/{name}/sizing/observations`, `/contention`, and
 `/waits` for the capacity profile, `/api/v1/runs/{id}/nodes/{nodeID}/usage`
-for a reaped process's accounting, and
-`/api/v1/maintenance/reconcile-orphans` for the sweep that closes runs
-whose orchestrator died.
+for a reaped process's accounting. Owner recovery runs under the elected
+reaper lease, independently of reads.
 
 A capacity write names a pipeline rather than a run, so it is bound to a
 live claim on a run of that pipeline: a node claim for a runner executing

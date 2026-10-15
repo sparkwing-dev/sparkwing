@@ -25,15 +25,15 @@ type RunTransactions interface {
 	AdmitRun(context.Context, store.IntakeRequest) (store.AdmissionResult, error)
 	ReadRun(context.Context, string) (store.RunRow, error)
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
+	ReadOwnerSnapshot(context.Context, capability.AuthorityRef, string) (store.RunSnapshot, error)
 	ReadNode(context.Context, store.NodeRef) (store.NodeRow, error)
+	ReconcileNode(context.Context, store.ReconcileRequest) (store.ReconciledNode, error)
 	ReadFailure(context.Context, store.NodeRef, int64, store.Actor) (*nodeproto.JobFailure, error)
 	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
 	AcceptExpansion(context.Context, store.ExpansionSubmission) (store.AcceptedExpansion, error)
 	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
 	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
 	FinishRunAndUnit(context.Context, store.FinishRunRequest) (store.Applied, error)
-	RenewOwner(context.Context, store.Actor) (store.LeaseBeat, error)
-	RenewNodeClaim(context.Context, store.NodeRef, store.Actor) (store.LeaseBeat, error)
 	WriteAnnotation(context.Context, store.AnnotationWrite) error
 	WriteSummary(context.Context, store.SummaryWrite) error
 	RecordStep(context.Context, store.StepReport) error
@@ -65,7 +65,8 @@ func (s *EngineController) runTransactions(ctx context.Context, team string) (Ru
 // authenticated delivery ID through the separate store boundary.
 func IntakeForStore(a capability.Authorized, body controllerwire.CreateRunRequest) (store.IntakeRequest, error) {
 	p := a.Principal
-	if p.Authority.ID == "" || a.Target.Team == "" {
+	if p.Authority.ID == "" || a.Target.Team == "" || p.Capability.Team != a.Target.Team ||
+		(body.Request.Team != "" && body.Request.Team != a.Target.Team) {
 		return store.IntakeRequest{}, missingEndpointPolicy()
 	}
 	request := body.Request
@@ -106,6 +107,9 @@ func (s *EngineController) CreateRun(ctx context.Context, authorized capability.
 // and masked message enter the same transaction as a successful expansion.
 func ExpansionForStore(a capability.Authorized, body controllerwire.ExpansionSubmission) (store.ExpansionSubmission, error) {
 	if a.Target.RunID == "" || a.Target.NodeID == "" || a.Target.UnitSourceGeneration <= 0 || a.Principal.Authority.ID == "" {
+		return store.ExpansionSubmission{}, missingEndpointPolicy()
+	}
+	if a.Binding.RunID != a.Target.RunID || a.Binding.NodeID != a.Target.NodeID {
 		return store.ExpansionSubmission{}, missingEndpointPolicy()
 	}
 	if body.SourceGeneration <= 0 {

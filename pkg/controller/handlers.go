@@ -103,35 +103,6 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
 }
 
-func dispatchEnvAllowed(r *http.Request) bool {
-	p, ok := PrincipalFromContext(r.Context())
-	if !ok {
-		return true
-	}
-	return p.HasScope(ScopeAdmin)
-}
-
-func dispatchForResponse(r *http.Request, d *store.NodeDispatch) *store.NodeDispatch {
-	if d == nil || dispatchEnvAllowed(r) {
-		return d
-	}
-	// safety: the captured environment is admin-only; every reader still sees which keys it lost.
-	stripped := *d
-	stripped.EnvJSON = nil
-	return &stripped
-}
-
-func dispatchesForResponse(r *http.Request, in []*store.NodeDispatch) []*store.NodeDispatch {
-	if dispatchEnvAllowed(r) {
-		return in
-	}
-	out := make([]*store.NodeDispatch, 0, len(in))
-	for _, d := range in {
-		out = append(out, dispatchForResponse(r, d))
-	}
-	return out
-}
-
 func nodeForResponse(node *store.Node) *store.Node {
 	return api.PublicNode(node)
 }
@@ -1253,10 +1224,8 @@ const (
 	// safety: a secret value is caller data, so it gets its own ceiling
 	// rather than an exemption from the shared decode path.
 	maxSecretJSONBody = 8 << 20
-	// safety: a plan snapshot is stored verbatim rather than decoded, so it
-	// needs a ceiling of its own; it matches the store's envelope ceiling
-	// because both bound one blob on a run's row.
-	maxPlanSnapshotBody = store.MaxNodeDispatchEnvelope
+	// safety: a plan snapshot is stored verbatim, so decoding does not bound its size.
+	maxPlanSnapshotBody = store.MaxPlanBytes
 )
 
 func decodeJSON(r *http.Request, v any) error {
@@ -1328,44 +1297,14 @@ func (s *Server) writeInternalError(w http.ResponseWriter, r *http.Request, oper
 	writeError(w, http.StatusInternalServerError, err)
 }
 
-func (s *Server) handleWriteNodeDispatch(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
 	tenant, ok := s.requestTenant(w, r)
 	if !ok {
 		return
 	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	var d store.NodeDispatch
-	if err := decodeJSON(r, &d); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	d.RunID = runID
-	d.NodeID = nodeID
-	if err := tenant.WriteNodeDispatch(r.Context(), d); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusCreated)
-}
-
-func (s *Server) handleGetNodeDispatch(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	seq := -1
-	if v := r.URL.Query().Get("seq"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid seq: %w", err))
-			return
-		}
-		seq = n
-	}
-	d, err := tenant.GetNodeDispatch(r.Context(), runID, nodeID, seq)
+	n, err := tenant.GetNode(r.Context(), runID, nodeID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -1374,25 +1313,12 @@ func (s *Server) handleGetNodeDispatch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, dispatchForResponse(r, d))
-}
-
-func (s *Server) handleListNodeDispatches(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	out, err := tenant.ListNodeDispatches(r.Context(), runID, nodeID)
+	public, err := s.publicNodesWithExecutionLocation(r.Context(), []*store.Node{n})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if out == nil {
-		out = []*store.NodeDispatch{}
-	}
-	writeJSON(w, http.StatusOK, dispatchesForResponse(r, out))
+	writeJSON(w, http.StatusOK, public[0])
 }
 
 type claimNodeReq struct {
@@ -1751,26 +1677,6 @@ func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 	if err := tenant.MarkNodeReady(ctx, runID, nodeID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) handleResetNodeForAutoRetry(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	if err := tenant.ResetNodeForAutoRetry(r.Context(), r.PathValue("id"), r.PathValue("nodeID")); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		if errors.Is(err, store.ErrLockHeld) {
-			writeError(w, http.StatusConflict, err)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)

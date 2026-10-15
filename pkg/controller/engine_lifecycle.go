@@ -78,23 +78,25 @@ func (s *EngineController) Retry(ctx context.Context, a capability.Authorized, b
 		Request: runspec.Request{Version: 1, Team: a.Target.Team, Lineage: runspec.Lineage{RetryOf: a.Target.RunID}}})
 }
 
-// Renew uses the store clock and the authorized owner or job fence. Owner renewal
-// also covers its self-claimed jobs and concurrency holders in the same transaction.
-func (s *EngineController) Renew(ctx context.Context, a capability.Authorized, _ controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error) {
-	tenant, err := s.runTransactions(ctx, a.Target.Team)
-	if err != nil {
-		return controllerwire.RenewalResponse{}, err
-	}
-	actor := engineActor(a)
-	var beat store.LeaseBeat
-	switch a.Principal.Capability.Unit {
-	case capability.UnitTrigger:
-		beat, err = tenant.RenewOwner(ctx, actor)
-	case capability.UnitNode:
-		beat, err = tenant.RenewNodeClaim(ctx, store.NodeRef{RunID: a.Target.RunID, NodeID: a.Target.NodeID}, actor)
-	default:
+// UnitRenewer preserves the store's atomic unit liveness and execution-start boundary.
+type UnitRenewer interface {
+	RenewUnit(context.Context, string, bool) (store.LeaseBeat, error)
+}
+
+// Renew renews the authenticated unit and records execution using the store clock.
+func (s *EngineController) Renew(ctx context.Context, a capability.Authorized, body controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error) {
+	p := a.Principal
+	if p.Authority.Kind != capability.AuthorityCapability || p.Authority.ID == "" || p.Authority.ID != p.Capability.Prefix {
 		return controllerwire.RenewalResponse{}, missingEndpointPolicy()
 	}
+	units := s.Units
+	if units == nil && s.Store != nil {
+		units = s.Store
+	}
+	if units == nil {
+		return controllerwire.RenewalResponse{}, missingEndpointPolicy()
+	}
+	beat, err := units.RenewUnit(ctx, p.Authority.ID, body.Executing)
 	if err != nil {
 		return controllerwire.RenewalResponse{}, engineLookupError(err)
 	}

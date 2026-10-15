@@ -674,4 +674,136 @@ data adapters and a cold fuzz-instrumented build. There are no new policy
 questions. No Git write, Sparkwing binary or pipeline ran. Scratch is removed
 after verification. W2 remains incomplete.
 
+## Integration merge and store adapters
+
+All 11 unmerged paths have resolved file contents or an accepted deletion.
+The index still lists them as unmerged because Git metadata is read-only and
+the swarm brief reserves Git writes for the lead. Stage those paths after
+review. No conflict marker remains. W2's implementations supply behavior and
+validation. The merged C1 types and interfaces supply persistence shapes.
+
+The retired maintenance handler, client and retry classification are removed
+with the integration branch's orphan-maintenance deletion. The route policy,
+independent acceptance inventory, operator tests, OpenAPI and generated reference
+also remove that endpoint. Old dispatcher helpers are discarded with C1's
+NodeDispatch deletion. No deleted API is restored.
+
+The constructor now connects migrated policy routes to the real store's
+AuthenticationReader and BindingChecker. A real persisted member capability
+works without WithAuthorization. Removing its membership or revoking it ends
+access on the next request. Generated header, query and loopback-address hints
+cannot supply missing authority. No auth cache is added.
+
+Session lookup explicitly names the controller audience. C1's session
+snapshot still omits Capability.Digest, so the real session verifier refuses it.
+The session controller test uses a reader fixture for that one missing field,
+while retaining real store ancestry and membership. CSRF uses an injected
+verifier in that test. Generated planted cookie/header values and foreign
+origins are refused. The default has no CSRF verifier and refuses browser writes.
+C1's old CSRF implementation still queries the deleted sparkwing_meta table.
+Session creation also retains legacy time units. These remain real integration
+points, not passing default-session evidence.
+
+Private scheduling uses Tenant.ReadOwnerSnapshot. The store rechecks owner
+ancestry, holder, generation and lease in the same read. Existing examples and
+64 generated replacement fences refuse stale owners without returning state.
+Scheduling keeps W2's complete topology validation and the integration branch's
+refusal for an unrepresentable sealed guard.
+
+Run detail defaults to Tenant.ReadRunView and keeps W2's display and scope
+validation. Retry reads retain the original two seals and show the current
+invocation lineage. The display property now exercises this actual projection,
+including 256 generated private inputs. Complete persisted history and tagged
+logs are exercised against SQLite. Engine policy notices still need W8 wiring.
+
+Unit renewal uses Store.RenewUnit, preserving executing for all four kinds.
+A job cannot start through a heartbeat. EngineController.Units accepts the same
+UnitRenewer contract for fakes. RunTransactions uses C1's existing
+ReadOwnerSnapshot and ReconcileNode methods and drops its split renewal methods.
+No C1 signature changed. Reconciliation and private-award helpers from the
+integration branch remain. Claim HTTP registration, sync and the remaining
+legacy credential/data/log routes still need their W2 cutovers.
+
+Removed 36 lines of legacy maintenance implementation and 222 lines of duplicate
+incoming engine implementation (184 converter lines plus the 38-line status
+projector). The duplicate converter fixture loses 128 lines. Its overlapping
+checks remain in the existing W2 intake, lifecycle and expansion acceptance
+tests. The private-award test remains. Expansion replay and display properties
+now call W2's sole implementations. No complete parked T1 test port or native
+acceptance cell is claimed in this continuation.
+
+### Amendment status changes
+
+| Rows | New evidence and remaining work |
+| --- | --- |
+| A1-08/09, 19, 26, 55 | Merged Claim uses C1 matching/enrollment and runner-policy interfaces. Profile and software-policy fakes pass its real SQLite tests. Final HTTP registration and production enrollment/software-policy wiring remain. |
+| A1-14/15 | Real recovery-failure reads pass. Holder cancellation preserves ownership. Its reason remains blocked by the C1 contract gap below. |
+| A1-16/17, 38 | The merged reconciliation/award/exchange implementation builds with W2's projections. Plan/job bootstrap exchange tests pass. Sync and final HTTP delivery remain. |
+| A1-20/21/22/23 | Store-backed capability authentication is connected. Session audience is fixed. Session digest, CSRF, console/peer facts, result-replay snapshots and full route cutover remain. Provisioning still needs the nonmember root-origin adapters. |
+| A1-24/25/27/28/29/31/34/35 | C1 has additional implementations, but production data authority, live blob reads, download charging, plan secret opening and payment configuration still need integration. No W2 SQL is added. |
+| A1-39/40/49/53 | Local/native transport, unified runner delivery and complete native acceptance remain with their owners and T1. |
+
+Other amendment dispositions in the earlier sections remain applicable.
+
+### Contract changes needed and failing checks
+
+C1 NodeTransition still has no cancellation-intent reason field. The retained
+TestEngineCancelJobKeepsLiveHolderAndRechecksOwner fails because its event lacks
+user_cancelled. Passing a NodeResult would overwrite the held job's failure and
+result metadata, so that alternative is refused. Add a separate intent field
+and consume it in the state event without touching result columns.
+
+The required commentcheck against main fails on two incoming W1 comments:
+pkg/store/state_materialize.go:15 and pkg/store/state_result_records.go:9.
+No W2 comment is reported. No store file was edited here.
+
+The full API snapshot comparison retains seven pre-existing baseline differences:
+pkg_controller_client, pkg_match, pkg_projectconfig, pkg_storage,
+pkg_storage_storeurl, pkg_store and sparkwing. Only pkg_controller is refreshed.
+Legacy controller tests selected by the overly broad TestAuthenticate expression
+also fail because they create rows in the removed tokens table. The legacy
+credential subsystem and its tests still need their hard cut.
+
+### Verification and shared files
+
+Whole-repository build, scoped vet, full capability/API-error/executable
+acceptance tests, API route/spec/reference tests, focused docs symbol/mirror
+checks and daemon route/retry inventories pass. Focused engine/policy/signer
+checks pass with the known cancellation-reason test excluded by invocation.
+That test is unchanged and remains red when selected. Git diff --check passes.
+Native topologies, Postgres, actual signed transfers and Sparkwing pipelines
+were not run. No full native T1 cell is activated.
+
+Use GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-astra-W2/cache,
+GOTMPDIR=/tmp/sw-astra-W2/tmp, TMPDIR=/tmp/sw-astra-W2/tmp and at most -p 4.
+
+```sh
+go build -p 4 ./...
+go vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./pkg/controller/client ./tests/acceptance ./internal/acceptance ./internal/apiroutes
+go test -p 4 ./internal/capability ./internal/apierr ./tests/acceptance ./internal/acceptance ./internal/apiroutes ./internal/apispec ./internal/apiref
+go test -p 4 ./pkg/controller -run '^TestServerPolicy|^TestEngine|^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$' -skip '^TestEngineCancelJobKeepsLiveHolderAndRechecksOwner$'
+go test -p 4 ./internal/orchestrator -run '^TestEveryControllerRouteIsClassified$|^TestReadRouteListCarriesNoDuplicates$|^TestHostedRetryPolicy_'
+go test -p 4 ./pkg/docs -run '^TestDocsNameOnlySymbolsThatExist$|^TestPkgDocsContentMatchesDocsRoot$|^TestEmbeddedChangelogMatchesRoot$'
+go run ./internal/commentcheck -base main .
+```
+
+Shared edits outside the W2 implementation are
+internal/orchestrator/hosted_retry.go,
+internal/orchestrator/wingd_api_routes_test.go,
+pkg/controller/client/coordination.go,
+internal/acceptance/credential_routes.go,
+tests/acceptance/engine_transactions_test.go,
+tests/acceptance/engine_lifecycle_http_test.go,
+tests/acceptance/engine_snapshot_http_test.go,
+tests/acceptance/operator_authorization_test.go,
+api/openapi.yaml, docs/api-reference.md, docs/auth.md,
+docs/migrations/_unreleased.md, CHANGELOG.md, their generated mirrors and
+.apidiff/pkg_controller.txt. Other staged integration changes are not claimed
+as this worker's edits.
+
+Friction was the read-only merge index, duplicate incoming implementations,
+session/CSRF projections and the missing cancellation-intent field. No new
+issuer, setting, credential store or service was added. Scratch is removed
+after verification. No Git write or Sparkwing binary ran. W2 remains incomplete.
+
 <!-- design:end -->

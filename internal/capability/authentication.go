@@ -142,6 +142,7 @@ func credentialLookup(p Presentation) (CredentialLookup, error) {
 		}
 		key.Digest = sha256.Sum256([]byte(p.Raw))
 	case CredentialSession, CredentialConsole:
+		key.Audience = Controller
 		if p.Raw == "" || strings.TrimSpace(p.Raw) != p.Raw {
 			return key, unauthenticated()
 		}
