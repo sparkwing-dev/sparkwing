@@ -2,11 +2,94 @@
 
 STATUS: CONTINUE
 
-This replaces accumulated session notes with the current working state at
-a54e7aff3. Prior evidence remains in Git history and the lead's session logs.
-No Git write, candidate installation or Sparkwing executable ran.
+Current branch: 9b73e2fa5. The previous implementation below is committed.
+This continuation changed only this report. No Git write, candidate installation
+or Sparkwing executable ran.
 
-## This continuation
+## Current continuation: owner implementations are still missing
+
+No source change or new test port was needed for the named test failures.
+`TestDaemonLifecycleMissingAndCancelledRuntime` is fixed and passes in the short
+suite. `TestProcessLivenessRegressionDoesNotSleep` and the legacy opsview sweep
+facade are already deleted. The retained CLI and opsview tests are green under
+the diagnostic selection below. Their completed work was not repeated.
+
+The two 12:35 findings remain open. The unchanged production probes fail:
+
+- Local run stops at `resolveLocalRunRuntime`'s missing owner binding.
+- Local controller stops at `openLocalController`'s missing elected factory.
+- Schedules install stops at `resolveLocalScheduleServices`' missing local service.
+- Doctor returns `controller_checked:true`, leaves one session record for the
+  pruned run, and emits no `unrecorded_step_outcome` warning.
+
+These failures occur before socket binding. The constructors on this branch do
+not supply the missing operations. `NewLocalRuntime` requires `Open`.
+`NewNativeHost` requires private state, process authority, source, storage and
+logging dependencies. Existing W9 composition tests already invoke that real
+constructor with declared fake boundaries. Adding another factory wrapper or
+another copy of those fakes would not connect production.
+
+### Contract changes or implementations needed in other areas
+
+1. **W2/W8 local controller:** provide the implementation returned by
+   `LocalRuntimeConfig.Open`, including `RunStore`, `Reconcile`,
+   `Run(ctx, activityChanged)`, `TypeSafeAPIKey`, `HTTP` and `Close`. The only
+   production `LocalController` references are its declaration and consumers.
+   `controller.Server.HTTP` supplies handlers, but `ServeWith` owns private
+   worker startup and reconciliation and also starts its own TCP listener. It
+   cannot substitute for W8's elected runtime and activity reporting.
+2. **W2 local peer credentials:** connect the verified peer presentation to
+   production authority. `policyStoreReader.ReadAuthentication` forwards
+   `CredentialPeer` to `Store.ReadAuthentication`, whose authority lookup accepts
+   only bearer and session classes. A concrete HTTP handler alone cannot make
+   the local API usable. The CLI must not grant itself a replacement token.
+3. **W2/W3 private host operations:** supply authenticated C1-shaped
+   `ReadSnapshot`, `ReadNode`, `TransitionRun` and `TransitionNode`, and the
+   captured-environment, process-delegation, data/log and owner-policy bindings.
+   `cliHostState` already adapts the declared plan, step, finish and renewal wire.
+   The public scheduling snapshot does not contain the private host state.
+4. **W2/W8 local schedules:** expose controller-owned checkout/environment
+   registration, proof/pin transactions and tick with dry-run input. The current
+   `ScheduleRepositoryManager` carries remote repository declarations. No local
+   registration, pin or tick operation exists on its contract or C2 route table.
+5. **W8 doctor:** expose a controller-owned sweep with dry-run input and findings.
+   `LocalLifecycle.Doctor(ctx, version)` only inspects status and managed units.
+   It cannot receive dry-run or invoke a sweep. The owner must turn failures from
+   recording otherwise successful cleanup into `unrecorded_step_outcome`
+   warnings, while preserving sweep failures as errors. W9 can then forward
+   dry-run and render those findings through the public command.
+
+The brief requires stopping a piece when it needs a foreign contract change.
+These requests are recorded here rather than adding W2/W3/W8 behavior in the CLI.
+The remaining assignment audit below still applies. No new product decision is
+requested, and no foreign contract or lead-owned file changed.
+
+### Fresh verification
+
+All commands used GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache, TMPDIR/GOTMPDIR=/tmp/sw-astra-W9 and GOMAXPROCS=4.
+
+- Whole-repository `go build -p 4 ./...` passes.
+- Scoped `go vet -p 4` passes for cmd/sparkwing, opsview, clisurface,
+  controllerwire and controller/client.
+- Full opsview, clisurface, controllerwire and controller/client suites pass.
+- `go test -p 4 ./tests/acceptance -run '^TestSurface' -count=1` passes.
+  Existing fake-backed cells remain component evidence. No native cell was
+  unskipped or newly completed.
+- Short CLI diagnostic: **956 pass, 15 skip, 0 fail** at top level, using the
+  socket-test exclusion expression recorded below. No assertion or skip changed.
+- `go run ./internal/commentcheck -base main .` passes across 2,130 files.
+- The production probe command recorded below still fails on the four owner
+  gaps above. Its failures are retained and are not treated as passing acceptance.
+
+This continuation added and deleted **0 production Go lines** and touched no
+shared source file. W9's delta against main remains **+15,606 / -23,758, net
+-8,152**, within its -2,900 budget. No API was removed and no caller migration
+was needed. No new test was ported or deleted. Scratch is removed at session end.
+The shared build cache is retained. Overwing discovery worked and reported a
+stale installed binary. Native socket execution remains unavailable here.
+
+## Previous implementation
 
 Fixed the last two retained short CLI failures without changing their
 expectations. TestSDKCheckRejectsFIFO now returns a refusal rather than blocking.
