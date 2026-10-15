@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 // A cache grant minted before the deletion keeps writing into the team's
@@ -142,7 +143,7 @@ func TestDeleteTeamRefusesAnOpenCheckoutOrADisputeHold(t *testing.T) {
 	}
 
 	f.createTeam(&owner, "held")
-	if _, err := f.store.HoldTeamForDispute(context.Background(), "held", "dp_held", "", "dispute opened", time.Now()); err != nil {
+	if _, err := teststore.ForTeam(t, f.store, "held").HoldForDispute(context.Background(), "dp_held", "", "dispute opened", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if code := f.call("DELETE", "/api/v1/team", owner.auth, map[string]string{"confirm_slug": "held"}, &refused); code != http.StatusConflict ||

@@ -194,8 +194,20 @@ func TestOperatorHTTPCommitsAuthorizedActions(t *testing.T) {
 			for range 2 {
 				call("POST", base+"/grants", `{"amount_cents":100,"reason":"promotion","key":"grant-once"}`, 201)
 			}
-			call("POST", base+"/freeze", `{"reason":"review"}`, 200)
-			call("POST", base+"/unfreeze", `{"reason":"resolved"}`, 200)
+			var frozen struct {
+				Holds []string `json:"holds"`
+			}
+			if err := json.Unmarshal(call("POST", base+"/freeze", `{"reason":"review"}`, 200), &frozen); err != nil {
+				t.Fatal(err)
+			}
+			if len(frozen.Holds) != 1 {
+				t.Fatalf("holds=%v", frozen.Holds)
+			}
+			release, err := json.Marshal(map[string]string{"hold": frozen.Holds[0], "reason": "resolved"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			call("POST", base+"/unfreeze", string(release), 200)
 			tenant, err := st.ForTeam(context.Background(), "customer")
 			if err != nil {
 				t.Fatal(err)

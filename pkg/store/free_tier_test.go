@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func setFreeAllowance(t *testing.T, st *store.Store, bytes int64) {
@@ -62,7 +63,7 @@ func TestTriggersAreNeverRefusedForBilling(t *testing.T) {
 	}
 	held := teamHandle(t, st, "held")
 	fund(t, held)
-	if _, err := st.HoldTeamForDispute(ctx, "held", "dp_1", "pay-held", "dispute", time.Now()); err != nil {
+	if _, err := teststore.ForTeam(t, st, "held").HoldForDispute(ctx, "dp_1", "pay-held", "dispute", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := startRun(held, "t-held"); err != nil {

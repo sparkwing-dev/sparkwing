@@ -9,17 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// PaidGrantTeam resolves a provider payment through its committed checkout or
-// card grant. Checkout payments use the configured test/live mode.
-func (s *Store) PaidGrantTeam(ctx context.Context, paymentID string) (team Team, found bool, err error) {
-	err = s.inTx(ctx, func(tx *storeTx) error {
-		grant, ok, err := paidGrantForPaymentTx(ctx, tx, paymentID)
-		team, found = grant.Team, ok
-		return err
-	})
-	return team, found, err
-}
-
 // safety: provider payment IDs identify the payer before any tenant is known.
 // Grant references are ledger identities; only the persisted checkout can link them.
 func paidGrantForPaymentTx(ctx context.Context, tx *storeTx, paymentID string) (CreditGrant, bool, error) {

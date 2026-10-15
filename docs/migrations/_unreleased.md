@@ -811,10 +811,13 @@ that keep the logs service running.
   console-only `/api/v1/operator/runners/{runner}/metered` with an explicit
   boolean `metered`. The runner selector is the enrolled root's public
   capability prefix. The response contains `runner` and `metered`.
-- **Go:** pass the actor, the reason and the one hold's id to
-  `Store.ReleaseCreditFreezes`, which refuses an empty id; a
-  caller of the removed `Store.DisputeTeam` reads the team from the hold it
-  holds, or from `Tenant.CreditFreeze`.
+- **Go:** select the registered team with `Store.ForTeam`. Use
+  `Tenant.HoldForDispute` and `Tenant.ReleaseCreditFreezes` for its dispute holds.
+  A release requires the actor, reason and one hold ID. An empty ID is refused.
+  Use `Operator.PaymentTeam` and `Operator.ReversePayment` for payment lookup and
+  refunds. Their raw Store methods and `Store.PaidGrantTeam` are removed.
+  A caller of the removed `Store.DisputeTeam` reads the team from its hold
+  or from `Tenant.CreditFreeze`.
 
 ## Password users are removed
 

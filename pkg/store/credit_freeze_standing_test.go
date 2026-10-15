@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 // A team held over a disputed payment keeps nothing that payment bought: it
@@ -33,7 +34,7 @@ func TestAFrozenTeamIsNeitherFundedNorExemptFromTheMemberLimit(t *testing.T) {
 		t.Fatalf("a member of a paid team = %v", err)
 	}
 
-	if _, err := st.HoldTeamForDispute(ctx, team, "dp_frozen", "", "dispute opened", time.Now()); err != nil {
+	if _, err := teststore.ForTeam(t, st, team).HoldForDispute(ctx, "dp_frozen", "", "dispute opened", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got := standing(t, st, team); got.Tier == store.TeamTierFunded {
@@ -43,7 +44,7 @@ func TestAFrozenTeamIsNeitherFundedNorExemptFromTheMemberLimit(t *testing.T) {
 		t.Fatalf("a member past the free limit of a frozen paid team = %v, want ErrTeamFull", err)
 	}
 
-	if _, err := st.ReleaseCreditFreezes(ctx, team, "dp_frozen", "", "", time.Now()); err != nil {
+	if _, err := teststore.ForTeam(t, st, team).ReleaseCreditFreezes(ctx, "dp_frozen", "", "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got := standing(t, st, team); got.Tier != store.TeamTierFunded {
@@ -66,7 +67,7 @@ func TestAFrozenTeamsEventsAreHeldToTheFreeShare(t *testing.T) {
 	if err := appendBytes(acme, "r1", 500); err != nil {
 		t.Fatalf("a funded team's write past the share: %v", err)
 	}
-	if _, err := st.HoldTeamForDispute(ctx, "acme", "dp_ev", "", "dispute opened", time.Now()); err != nil {
+	if _, err := teststore.ForTeam(t, st, "acme").HoldForDispute(ctx, "dp_ev", "", "dispute opened", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got := standing(t, st, "acme"); got.Tier == store.TeamTierFunded {

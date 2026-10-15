@@ -931,6 +931,17 @@ is removed. Verified failure and expiry events own those outcomes.
 `CreditGrantRequest` carries no checkout session. Only verified payment
 settlement writes the checkout's paid timestamp and grant association.
 
+`Operator.ReversePayment` and `Operator.PaymentTeam` resolve provider payment
+identity across teams. Their raw Store methods are removed. The unused public
+PaidGrantTeam lookup is removed. The operator lookup and reversal share the
+existing transaction-local grant resolver and configured test/live mode.
+`Tenant.HoldForDispute` and `Tenant.ReleaseCreditFreezes` own dispute holds and
+named releases. Their private mutation owners derive the team from the tenant
+handle. There is no caller-selected team argument. A dispute stays bound to its
+first team and payment after release, and replay cannot restore its hold.
+`Tenant.HoldByOperator` and `Tenant.ReleaseOperatorHolds` use those same owners.
+Console HTTP and break-glass callers retain their authenticated tenant selection.
+
 The raw `paid` grant path and `POST /api/v1/credits/grants` are removed.
 `Tenant.GrantCredits` and `Tenant.RecordCreditGrant`
 refuse caller-selected paid credit before opening a ledger transaction.

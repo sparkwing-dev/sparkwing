@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **store (Breaking):** Refunds and payment lookups use `Operator`. Dispute holds and releases use the selected `Tenant`. The raw Store methods are removed. See [migration guide](docs/migrations/_unreleased.md#operator-powers-need-the-operator-console).
 - **store (Breaking):** Remove `Store.BinaryObject`, `Store.CommittedObjectFor` and `Store.SourceBoundToRun`.
   Logical blob records replace the unused binary lookup APIs. See [migration guide](docs/migrations/_unreleased.md#legacy-binary-lookups).
 - **controller (Breaking):** OAuth browser callbacks verify proof through the shared route policy

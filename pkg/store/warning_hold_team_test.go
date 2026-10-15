@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
@@ -120,7 +121,7 @@ func TestSharedFraudWarningHoldsEveryTeam(t *testing.T) {
 					t.Fatalf("refund balance=%d error=%v", balance, err)
 				}
 			}
-			if n, err := s.ReleaseCreditFreezes(ctx, "first", ids["first"], "", "", now); err != nil || n != 1 {
+			if n, err := teststore.ForTeam(t, s, "first").ReleaseCreditFreezes(ctx, ids["first"], "", "", now); err != nil || n != 1 {
 				t.Fatalf("release=%d error=%v", n, err)
 			}
 			if err := settle("first"); err != nil {
@@ -157,7 +158,7 @@ func TestWarningHoldRetainsLegacyReleaseAndUnrelatedDispute(t *testing.T) {
 			if err != nil || len(work) != 2 {
 				t.Fatalf("work=%v error=%v", work, err)
 			}
-			if _, err := s.HoldTeamForDispute(ctx, "first", "issfr_legacy", "pi_first", "existing hold", now); err != nil {
+			if _, err := teststore.ForTeam(t, s, "first").HoldForDispute(ctx, "issfr_legacy", "pi_first", "existing hold", now); err != nil {
 				t.Fatal(err)
 			}
 			if mode != "unrelated-dispute" {
@@ -166,7 +167,7 @@ func TestWarningHoldRetainsLegacyReleaseAndUnrelatedDispute(t *testing.T) {
 				}
 			}
 			if mode == "legacy-released" {
-				if _, err := s.ReleaseCreditFreezes(ctx, "first", "issfr_legacy", "", "", now); err != nil {
+				if _, err := teststore.ForTeam(t, s, "first").ReleaseCreditFreezes(ctx, "issfr_legacy", "", "", now); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -204,7 +205,7 @@ func TestWarningHoldRetainsLegacyReleaseAndUnrelatedDispute(t *testing.T) {
 				}
 				for _, id := range first.Disputes {
 					if id != "issfr_legacy" {
-						if n, err := s.ReleaseCreditFreezes(ctx, "first", id, "", "", now); err != nil || n != 1 {
+						if n, err := teststore.ForTeam(t, s, "first").ReleaseCreditFreezes(ctx, id, "", "", now); err != nil || n != 1 {
 							t.Fatalf("release=%d error=%v", n, err)
 						}
 					}

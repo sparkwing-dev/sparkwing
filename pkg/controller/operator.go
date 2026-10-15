@@ -210,7 +210,7 @@ func (s *Server) handleOperatorUnfreeze(w http.ResponseWriter, r *http.Request, 
 	}
 	if hold := strings.TrimSpace(req.Hold); hold != "" {
 		var n int64
-		n, err = s.store.ReleaseCreditFreezes(r.Context(), t.Team(), hold, authorized.Principal.Capability.Subject.ID, req.Reason, time.Now())
+		n, err = t.ReleaseCreditFreezes(r.Context(), hold, authorized.Principal.Capability.Subject.ID, req.Reason, time.Now())
 		if err == nil && n == 0 {
 			return &apierr.Error{Code: apierr.NotFound, Message: "team does not hold the named hold"}
 		}

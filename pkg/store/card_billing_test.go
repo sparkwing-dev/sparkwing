@@ -317,11 +317,11 @@ func TestAPartialReversalTakesOnlyItsAmount(t *testing.T) {
 	ctx := context.Background()
 	acme := teamHandle(t, s, "acme")
 	payTeam(t, acme, "pi_1", 25)
-	first, err := s.ReversePayment(ctx, "pi_1", "re_1", "billing", dollarsMicro(10))
+	first, err := s.AsOperator().ReversePayment(ctx, "pi_1", "re_1", "billing", dollarsMicro(10))
 	if err != nil || first.Grant.AmountMicro != -dollarsMicro(10) {
 		t.Fatalf("partial = %+v, %v", first, err)
 	}
-	rest, err := s.ReversePayment(ctx, "pi_1", "re_2", "billing", dollarsMicro(100))
+	rest, err := s.AsOperator().ReversePayment(ctx, "pi_1", "re_2", "billing", dollarsMicro(100))
 	if err != nil || rest.Grant.AmountMicro != -dollarsMicro(15) || rest.ReversedMicro != dollarsMicro(25) {
 		t.Fatalf("the rest = %+v, %v; want $15, capped at what is left", rest, err)
 	}
@@ -526,7 +526,7 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 				t.Fatalf("pay-now after settlement = %v, want ErrNoPayableCharge", err)
 			}
 			for range 2 {
-				if _, err := s.ReversePayment(ctx, "pi_recovery", "re_unapplied", "billing",
+				if _, err := s.AsOperator().ReversePayment(ctx, "pi_recovery", "re_unapplied", "billing",
 					tc.unapplied*store.MicroCreditsPerCent); err != nil {
 					t.Fatalf("reverse the unapplied rest: %v", err)
 				}
@@ -534,7 +534,7 @@ func TestAWarnedCardRepaysTheDebtOnPayNow(t *testing.T) {
 					t.Fatalf("balance = %d, %v; want returning the unapplied rest to leave the repayment", bal, err)
 				}
 			}
-			if _, err := s.ReversePayment(ctx, "pi_recovery", "re_rest", "billing",
+			if _, err := s.AsOperator().ReversePayment(ctx, "pi_recovery", "re_rest", "billing",
 				tc.repaid*store.MicroCreditsPerCent+1); err != nil {
 				t.Fatalf("reverse the rest: %v", err)
 			}
@@ -1073,7 +1073,7 @@ func TestOnlyTheQueuesOwnRefundMovesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	paid := int64(1_000) * store.MicroCreditsPerCent
-	if _, err := s.ReversePayment(ctx, "pi_dup", "re_operator", "card", paid*4/10); err != nil {
+	if _, err := s.AsOperator().ReversePayment(ctx, "pi_dup", "re_operator", "card", paid*4/10); err != nil {
 		t.Fatal(err)
 	}
 	if moved, err := s.ReportCardRefund(ctx, "", "re_operator", "succeeded", now); err != nil || moved {
@@ -1089,7 +1089,7 @@ func TestOnlyTheQueuesOwnRefundMovesIt(t *testing.T) {
 	if moved, err := s.ReportCardRefund(ctx, "pi_dup-0", "re_ours", "succeeded", now); err != nil || !moved {
 		t.Fatalf("our refund's success = %v, %v", moved, err)
 	}
-	rev, err := s.ReversePayment(ctx, "pi_dup", "re_ours", "card", paid)
+	rev, err := s.AsOperator().ReversePayment(ctx, "pi_dup", "re_ours", "card", paid)
 	if err != nil || rev.ReversedMicro != paid {
 		t.Fatalf("reversal of ours = %+v, %v; want the two reversals to total exactly the payment", rev, err)
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func dollarsMicro(n int64) int64 { return n * 100 * store.MicroCreditsPerCent }
@@ -115,10 +116,10 @@ func TestAutomaticTrustRuleBoundaries(t *testing.T) {
 	held := teamHandle(t, s, "held")
 	paidAt = payTeam(t, held, "pi_held", 50)
 	spend(t, s, "held", "ch_held", 5_000)
-	if _, err := s.HoldTeamForDispute(ctx, "held", "dp_1", "pi_held", "dispute", paidAt); err != nil {
+	if _, err := teststore.ForTeam(t, s, "held").HoldForDispute(ctx, "dp_1", "pi_held", "dispute", paidAt); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ReleaseCreditFreezes(ctx, "held", "dp_1", "", "", paidAt); err != nil {
+	if _, err := teststore.ForTeam(t, s, "held").ReleaseCreditFreezes(ctx, "dp_1", "", "", paidAt); err != nil {
 		t.Fatal(err)
 	}
 	if billingStanding(t, held, paidAt.Add(store.AutoTrustPaymentAge)).Trusted {
@@ -128,7 +129,7 @@ func TestAutomaticTrustRuleBoundaries(t *testing.T) {
 	reversed := teamHandle(t, s, "reversed")
 	paidAt = payTeam(t, reversed, "pi_rev", 50)
 	spend(t, s, "reversed", "ch_rev", 5_000)
-	if _, err := s.ReversePayment(ctx, "pi_rev", "re_1", "ops", 0); err != nil {
+	if _, err := s.AsOperator().ReversePayment(ctx, "pi_rev", "re_1", "ops", 0); err != nil {
 		t.Fatal(err)
 	}
 	if billingStanding(t, reversed, paidAt.Add(store.AutoTrustPaymentAge)).Trusted {

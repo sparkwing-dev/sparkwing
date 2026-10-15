@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 // A team cannot be deleted while money is in flight for it: an unexpired
@@ -45,14 +46,14 @@ func TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds(t *testing.T) {
 	}
 
 	held := tenant(t, st, "held")
-	if _, err := st.HoldTeamForDispute(ctx, "held", "dp_held", "", "dispute opened", now); err != nil {
+	if _, err := teststore.ForTeam(t, st, "held").HoldForDispute(ctx, "dp_held", "", "dispute opened", now); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err = held.RequestDeletion(ctx, owner.Account.ID, now)
 	if !errors.Is(err, store.ErrTeamFrozen) || !strings.Contains(err.Error(), "contact support") {
 		t.Fatalf("deleting a held team = %v, want ErrTeamFrozen naming the remedy", err)
 	}
-	if _, err := st.ReleaseCreditFreezes(ctx, "held", "dp_held", "", "", now); err != nil {
+	if _, err := teststore.ForTeam(t, st, "held").ReleaseCreditFreezes(ctx, "dp_held", "", "", now); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := held.RequestDeletion(ctx, owner.Account.ID, now); err != nil {

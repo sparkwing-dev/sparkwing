@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func countWhere(t *testing.T, st *store.Store, table, where string) int {
@@ -75,10 +76,10 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	if _, err := acme.OpenCreditCheckout(ctx, store.MicroCreditsPerCredit, now.Add(-2*time.Hour), time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.HoldTeamForDispute(ctx, "acme", "dp_acme", "", "dispute opened", now); err != nil {
+	if _, err := teststore.ForTeam(t, st, "acme").HoldForDispute(ctx, "dp_acme", "", "dispute opened", now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.ReleaseCreditFreezes(ctx, "acme", "dp_acme", "", "", now); err != nil {
+	if _, err := teststore.ForTeam(t, st, "acme").ReleaseCreditFreezes(ctx, "dp_acme", "", "", now); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range []string{"credit_checkouts", "credit_freezes"} {
