@@ -71,8 +71,8 @@ func TestBootstrapExchangesOnceBeforeDispatchingOriginalUnit(t *testing.T) {
 					t.Fatal("cancelled lookup returned authority")
 				}
 				return bootstrapController{exchange: func(ctx context.Context) (controllerwire.ExchangeResponse, error) {
-					if ctx != t.Context() {
-						t.Fatal("exchange changed caller context")
+					if ctx.Err() != nil {
+						t.Fatal("exchange lost live caller context")
 					}
 					events = append(events, "exchange")
 					return controllerwire.ExchangeResponse{Claim: unit}, nil
@@ -80,7 +80,7 @@ func TestBootstrapExchangesOnceBeforeDispatchingOriginalUnit(t *testing.T) {
 			}
 			host.Host = bootstrapUnitHost(func(ctx context.Context, got controllerwire.ClaimedUnit) error {
 				events = append(events, "host")
-				if ctx != t.Context() || !reflect.DeepEqual(got, unit) {
+				if ctx.Err() != nil || !reflect.DeepEqual(got, unit) {
 					t.Fatal("host lost the exchanged unit, runner, engine or source fence")
 				}
 				return failure

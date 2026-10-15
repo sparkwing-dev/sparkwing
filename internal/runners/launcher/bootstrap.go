@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -22,7 +23,7 @@ type BootstrapHost struct {
 }
 
 // Run presents a bootstrap once and leaves renewal, source acquisition and execution to Host.
-func (h BootstrapHost) Run(ctx context.Context, award CloudJobAward) error {
+func (h BootstrapHost) Run(ctx context.Context, award CloudJobAward) (result error) {
 	if err := context.Cause(ctx); err != nil {
 		return err
 	}
@@ -36,6 +37,13 @@ func (h BootstrapHost) Run(ctx context.Context, award CloudJobAward) error {
 	if err != nil {
 		return err
 	}
+	deadline, err := cloudDeadline(time.Now(), award.Binding)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	defer func() { result = errors.Join(result, context.Cause(ctx)) }()
 	binding, bootstrap := award.Binding, string(award.Bootstrap)
 	open := h.NewController
 	if open == nil {
@@ -84,5 +92,5 @@ func (h BootstrapHost) Run(ctx context.Context, award CloudJobAward) error {
 	if unit.Execution == nil || !unit.Execution.Resources.Set || !unit.Execution.Resources.Value.Cores.Set || !unit.Execution.Resources.Value.MemoryBytes.Set || unit.Execution.Resources.Value.Cores.Value != award.CPUCores || unit.Execution.Resources.Value.MemoryBytes.Value != award.Memory {
 		return errors.New("Cloud exchange changed awarded execution resources")
 	}
-	return errors.Join(h.Host.Host(ctx, unit), context.Cause(ctx))
+	return h.Host.Host(ctx, unit)
 }

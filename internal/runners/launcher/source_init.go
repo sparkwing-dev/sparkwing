@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
@@ -39,15 +38,9 @@ func (s SourceInit) Run(ctx context.Context, award CloudJobAward, destination st
 	if err != nil {
 		return err
 	}
-	deadline, err := limits.JobDeadline(time.Now(), captured.Binding.OwnerDeadline, captured.Binding.AttemptDeadline)
+	deadline, err := cloudDeadline(time.Now(), captured.Binding)
 	if err != nil {
 		return err
-	}
-	if deadline.IsZero() || captured.Binding.ParentCapabilityExpiry.Before(deadline) {
-		deadline = captured.Binding.ParentCapabilityExpiry
-	}
-	if !deadline.After(time.Now()) {
-		return limits.ErrNoTime
 	}
 	ctx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()

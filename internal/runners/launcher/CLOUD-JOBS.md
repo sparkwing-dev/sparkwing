@@ -162,6 +162,11 @@ source generation, deadlines, engine and resources. Missing authority, a repeate
 bootstrap or changed execution inputs fail before the unit host runs. Cancellation
 before or after exchange also prevents dispatch. The unit host receives the complete
 exchanged claim and owns renewal, source acquisition and execution.
+Job construction, source initialization and bootstrap execution share one award
+deadline calculation. It uses `limits.JobDeadline` and the parent capability
+expiry. Exchange and host dispatch run under that deadline and any earlier caller
+deadline. Expired awards fail before transport construction. Expiry during
+exchange prevents dispatch, and expiry during hosting cancels and joins the host.
 The exchanged source must match the private projection used by fetch-source,
 including repository, remote, commit, pipeline directory, default branch, bundle,
 checkout policy and accepted engine. A matching run and generation alone cannot
