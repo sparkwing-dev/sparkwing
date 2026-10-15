@@ -9,6 +9,13 @@ returns `forbidden`. Session key failures return `unavailable`. Verified local-p
 their transport-specific adapters. Request headers and loopback addresses do
 not supply those identities.
 
+The default tenant adapters recheck secret and git-credential writes in their
+committing transactions. They use current team-admin membership and the store
+clock. Secret reads select the pipeline from the claim's bound run, check its
+sealed declarations and reserved pools, and commit a release audit before
+returning the stored envelope. Omitting the run selector does not remove the
+claim's binding. Members may read only unmasked values in their own team.
+
 `GET /api/v1/queue` uses the shared capability policy. A member or verified
 local peer needs `runs.read` for its active team. Queue groups and advertised
 runner headroom belong to that team. Machine roots and work claims cannot read

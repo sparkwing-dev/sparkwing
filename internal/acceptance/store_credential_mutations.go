@@ -1,0 +1,46 @@
+package acceptance
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+func checkStoreCredentialMutations(ctx context.Context, s *store.Store, owner store.Actor) error {
+	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return err
+	}
+	p, err := s.ResolveAuthority(ctx, owner.Authority)
+	if err != nil {
+		return err
+	}
+	a := capability.Authorized{Principal: p, Target: capability.Target{Team: string(store.DefaultTeam), SecretName: "CONFIG", Pipeline: "build"}, Access: capability.AccessRule{Credential: capability.CredentialMember, Grants: []capability.Grant{capability.TeamAdmin}, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
+	if err := tenant.WriteSecret(ctx, a, store.Secret{Name: "CONFIG", Value: "stored-envelope", Pipeline: "build"}); err != nil {
+		return err
+	}
+	row, err := tenant.ReadSecret(ctx, a)
+	if err != nil || row == nil || row.Value != "stored-envelope" || row.Principal != "owner" || row.CreatedAt.IsZero() {
+		return fmt.Errorf("current session secret transaction: %+v, %v", row, err)
+	}
+	git, err := tenant.WriteGitCredential(ctx, a, store.GitCredential{Host: "git.example.test", Kind: store.GitCredentialHTTPS, Secret: "stored-envelope"})
+	if err != nil || git.Team != store.DefaultTeam || git.CreatedBy != "owner" || git.ConfirmedAt == nil {
+		return fmt.Errorf("current session git transaction: %+v, %v", git, err)
+	}
+	if err := tenant.RemoveSecret(ctx, a, "CONFIG", "build"); err != nil {
+		return err
+	}
+	if err := tenant.RemoveGitCredential(ctx, a, git.Host); err != nil {
+		return err
+	}
+	if err := tenant.RemoveSecret(ctx, a, "CONFIG", "build"); !errors.Is(err, store.ErrNotFound) {
+		return fmt.Errorf("missing secret deletion: %v", err)
+	}
+	if err := tenant.RemoveGitCredential(ctx, a, git.Host); !errors.Is(err, store.ErrNotFound) {
+		return fmt.Errorf("missing git deletion: %v", err)
+	}
+	return nil
+}

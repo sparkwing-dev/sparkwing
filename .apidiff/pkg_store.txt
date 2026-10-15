@@ -1020,7 +1020,6 @@ var ErrRunAnnotationLimit = errors.New("store: a run holds at most 1000 annotati
 var ErrRunnerTokenLimit = errors.New("store: this team holds as many machine tokens as a team may")
 var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argument is supplied")
 var ErrSecretLimit = errors.New("store: secret limit reached")
-var ErrSecretUndeclared = errors.New("store: the run's pipeline does not declare this secret")
 var ErrSeededTokenRevoked = errors.New("tokens: this provisioned credential was revoked; replace it")
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrSlotUndeclared = errors.New("store: the run's accepted plan declares no such slot for this node")
@@ -3160,6 +3159,7 @@ func (t *Tenant) CommitBlobUpload(ctx context.Context, request VerifiedUploadCom
 func (t *Tenant) CommitRecord(ctx context.Context, request blob.CommitRecordRequest) (blob.Record, error)
 func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) ConfirmGitCredential(ctx context.Context, host, fingerprint string, now time.Time) (GitCredential, error)
+func (t *Tenant) ConfirmGitCredentialFor(ctx context.Context, a capability.Authorized, host, fingerprint string) (GitCredential, error)
 func (t *Tenant) CopyMemo(ctx context.Context, request blob.CopyMemoRequest) (blob.MemoHit, error)
 func (t *Tenant) CountPendingTriggers(ctx context.Context) (int, error)
 func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
@@ -3308,6 +3308,7 @@ func (t *Tenant) ReadNode(ctx context.Context, ref NodeRef) (NodeRow, error)
 func (t *Tenant) ReadOwnerSnapshot(ctx context.Context, authority capability.AuthorityRef, runID string) (RunSnapshot, error)
 func (t *Tenant) ReadRun(ctx context.Context, runID string) (RunRow, error)
 func (t *Tenant) ReadRunView(ctx context.Context, runID string) (RunView, error)
+func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secret, error)
 func (t *Tenant) ReadSnapshot(ctx context.Context, runID string) (RunSnapshot, error)
 func (t *Tenant) ReadStateEvents(ctx context.Context, runID string, after int64, limit int) ([]StateEvent, error)
 func (t *Tenant) ReadableBlobs(ctx context.Context, request blob.HasManyRequest) (blob.Presence, error)
@@ -3323,14 +3324,15 @@ func (t *Tenant) RecordStep(ctx context.Context, report StepReport) error
 func (t *Tenant) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
 func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
 func (t *Tenant) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
-func (t *Tenant) ReleaseClaimSecret(ctx context.Context, tok ClaimToken, name string, now time.Time) (_ *Secret, err error)
 func (t *Tenant) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (t *Tenant) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (t *Tenant) ReleaseGitCredential(ctx context.Context, tok ClaimToken, rel GitCredentialRelease, now time.Time) (_ GitCredential, _ SourceSpend, err error)
 func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string, now time.Time) (int64, error)
 func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capability.Authorized) (GitCredential, capability.SourceReleaseAudit, error)
+func (t *Tenant) RemoveGitCredential(ctx context.Context, a capability.Authorized, host string) error
 func (t *Tenant) RemoveGitHubRunnerBinding(ctx context.Context, repositoryID int64, now time.Time) (revoked []string, err error)
 func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string, now time.Time) ([]string, error)
+func (t *Tenant) RemoveSecret(ctx context.Context, a capability.Authorized, name, pipeline string) error
 func (t *Tenant) Rename(ctx context.Context, displayName string, now time.Time) (TeamInfo, error)
 func (t *Tenant) RenameGitHubAppAutomation(ctx context.Context, installation, repository int64, name string) error
 func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installation, repositoryID int64, name string) error
@@ -3407,6 +3409,8 @@ func (t *Tenant) WithdrawGitHubAppAutomation(ctx context.Context, installation, 
 func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64, now time.Time) (int64, error)
 func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, now time.Time) (int64, error)
 func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite) error
+func (t *Tenant) WriteGitCredential(ctx context.Context, a capability.Authorized, row GitCredential) (GitCredential, error)
+func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, row Secret) error
 func (t *Tenant) WriteSummary(ctx context.Context, summary SummaryWrite) error
 func TierQuota(tier string) (StorageQuota, bool)
 type Token struct {
@@ -3730,8 +3734,6 @@ func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheL
 func (r *blobRecords) LookupMemo(ctx context.Context, request blob.MemoLookup) (blob.MemoHit, error)
 func (r *blobRecords) LookupRecord(ctx context.Context, request blob.RecordLookup) (blob.RecordLookupResult, error)
 func (values planSecretValues) ContainsSecret(identifier string) bool
-func (e secretUndeclaredError) Error() string
-func (e secretUndeclaredError) Is(target error) bool
 func (sharedBlobRules) AuthorizeEdge(edge blob.EdgeRequest) error
 func (sharedBlobRules) RecordNamespace(key blob.RecordKey) (string, error)
 func (sharedDelegationContracts) ValidateDelegation(parent capability.Principal, child capability.DelegateSpec, now time.Time) error

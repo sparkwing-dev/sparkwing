@@ -2,10 +2,6 @@
 {{- $runnerImage := include "sparkwing-runner-bundle.image" (dict "img" .Values.runner.image "root" .) -}}
 {{- $goCache := .Values.runner.goCache.persistence.enabled -}}
 {{- $agentToken := and .Values.controller.tokenSecret.name .Values.controller.tokenSecret.key -}}
-{{- $gitcache := .Values.runner.gitcacheUrl -}}
-{{- if .Values.cache.enabled -}}
-{{- $gitcache = printf "http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace -}}
-{{- end -}}
 {{- $goCacheMounts := list (dict "name" "go-cache" "mountPath" "/tmp/sparkwing/gocache" "subPath" "gocache") (dict "name" "go-cache" "mountPath" "/tmp/sparkwing/gomodcache" "subPath" "gomodcache") -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -86,18 +82,11 @@ spec:
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           command:
-            - /usr/local/bin/runner-entrypoint.sh
             - /usr/local/bin/sparkwing-runner
           args:
-            - runner
+            - warm
             {{- if $controllerURL }}
             - {{ printf "--controller=%s" $controllerURL | quote }}
-            {{- end }}
-            {{- with $gitcache }}
-            - {{ printf "--gitcache=%s" . | quote }}
-            {{- end }}
-            {{- if and .Values.cache.enabled (not .Values.cache.dependencyProxy.enabled) }}
-            - --dependency-proxy=off
             {{- end }}
             {{- if $agentToken }}
             - --credentials-dir=/etc/sparkwing/credentials
@@ -112,40 +101,14 @@ spec:
             {{- end }}
             {{- if .Values.runner.alsoClaimTriggers }}
             - --also-claim-triggers
-            {{- if eq .Values.runner.triggerRunner.kind "warm" }}
-            - --claim-nodes=false
-            {{- end }}
-            {{- if ne .Values.runner.triggerRunner.kind "inprocess" }}
-            - {{ printf "--trigger-runner=%s" .Values.runner.triggerRunner.kind | quote }}
-            - {{ printf "--trigger-runner-namespace=%s" .Release.Namespace | quote }}
-            - {{ printf "--trigger-runner-image=%s" $runnerImage | quote }}
-            - {{ printf "--trigger-runner-sa=%s" (include "sparkwing-runner-bundle.serviceAccountName" .) | quote }}
-            - {{ printf "--trigger-runner-image-pull-policy=%s" .Values.runner.image.pullPolicy | quote }}
-            {{- range .Values.runner.triggerRunner.labels }}
-            - {{ printf "--trigger-runner-label=%s" . | quote }}
-            {{- end }}
-            {{- if .Values.cache.enabled }}
-            - {{ printf "--trigger-artifact-store=http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace | quote }}
-            {{- end }}
-            {{- end }}
-            {{- end }}
-            {{- with .Values.runner.jobCeiling.cpu }}
-            - {{ printf "--cpu-ceiling=%v" . | quote }}
-            {{- end }}
-            {{- with .Values.runner.jobCeiling.memory }}
-            - {{ printf "--memory-ceiling=%v" . | quote }}
-            {{- end }}
-            {{- with .Values.runner.jobDeadline }}
-            - {{ printf "--deadline=%v" . | quote }}
-            {{- end }}
-            {{- if .Values.runner.teamNodes }}
-            - --team-nodes
+            {{- else }}
+            - --also-claim-triggers=false
             {{- end }}
             {{- if gt (int .Values.runner.maxClaimsBeforeRestart) 0 }}
             - {{ printf "--max-claims-before-restart=%d" (int .Values.runner.maxClaimsBeforeRestart) | quote }}
             {{- end }}
             {{- with .Values.runner.goCache.warmModules }}
-            - {{ printf "--warm-modules=%s" (join "," .) | quote }}
+            - {{ printf "--warm-module=%s" (join "," .) | quote }}
             {{- end }}
           {{- if gt (int .Values.runner.metricsPort) 0 }}
           ports:
@@ -161,18 +124,6 @@ spec:
               value: /tmp/sparkwing/gocache
             - name: GOMODCACHE
               value: /tmp/sparkwing/gomodcache
-            {{- with $gitcache }}
-            {{- /* The SDK's clone and dependency-cache helpers in each node read it. */}}
-            - name: SPARKWING_GITCACHE_URL
-              value: {{ . | quote }}
-            {{- end }}
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            {{- with (include "sparkwing-runner-bundle.runnerDependencyProxyEnv" .) }}
-            {{- . | nindent 12 }}
-            {{- end }}
             {{- with .Values.runner.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

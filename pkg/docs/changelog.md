@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **store (Breaking):** Credential mutations and secret reads recheck current authority in their committing transactions
+  The default tenant adapters enforce administration, declaration and pool checks. Secret release commits its audit before returning a row. `ReleaseClaimSecret` is removed. See [migration guide](docs/migrations/_unreleased.md#secret-release-uses-current-authority).
 - **controller (Breaking):** OAuth browser callbacks verify proof through the shared route policy
   Start and callback require the configured provider and redirect. Callback refuses ambiguous flow cookies or query selectors before provider access. Refusals return canonical errors without upstream diagnostics or credentials. See [migration guide](docs/migrations/_unreleased.md#oauth-browser-callbacks).
 - **controller (Breaking):** Machine enrollment and deployment service issuance use the capability issuer and shared route policy
@@ -210,6 +212,7 @@ unlock.
 - **controller:** Queue depth counts a held job once when it has no readiness timestamp; runner activity uses the store clock
 - **controller:** Accept Session authorization headers on policy routes and enforce the configured session lifetime
   Dashboard requests and browser logout no longer renew sessions before a failed CSRF check. Browser logout returns canonical errors and deletes only the verified session.
+- **runner enrollment:** failed enrollment revokes its newly minted credential, removes its new private files and service registration, and restores the previous runner settings. Machine startup reads the credential file named by `runner.credentials_dir` once.
 - **store:** Replaying an output or manifest commit accepts the same expiry instant in another timezone and preserves omitted metadata across restarts
 - **store:** Blob collection checks the persisted maintenance lease on empty passes and while tombstones are within their grace period. Expired and superseded collectors return a fence error.
 - **store:** HasMany returns a budget error when its final read reaches the deadline, with no partial presence result.

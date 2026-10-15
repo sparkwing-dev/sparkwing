@@ -1,5 +1,16 @@
 # Migrating to the next release
 
+## Secret release uses current authority
+
+`Tenant.ReleaseClaimSecret` and `ErrSecretUndeclared` are removed. Use
+`Tenant.ReadSecret(ctx, authorized)` through the controller's `SecretReader`
+interface. It checks the current claim and accepted declaration and commits
+the release audit with selection. Undeclared reads return the canonical
+`forbidden` error with reason `secret_undeclared`. The caller supplies no clock.
+The default tenant also implements `CredentialWriter` for secret and
+git-credential mutations. Verified local peer presentations still need the
+transport's authority adapter.
+
 ## Queue reads use explicit store owners
 
 `CountPendingNodes`, `CountNodesByQueueState` and `CountActiveRunners` move

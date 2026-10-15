@@ -2,7 +2,10 @@ package wingd
 
 import (
 	"context"
+	"fmt"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // safety: KeepAliveReason separates the four activity holds from the explicit --stay policy.
@@ -29,7 +32,10 @@ type LocalActivity struct {
 // safety: MayExitIdle requires every activity count to be zero and --stay to be false.
 // The idle interval is limits.LocalControllerIdleTimeout; a local run has no execution deadline.
 func MayExitIdle(now time.Time, activity LocalActivity, stay bool) bool {
-	panic("unimplemented: c4-surface-config")
+	return !stay && !activity.IdleSince.IsZero() &&
+		activity.Runs == 0 && activity.QueuedTriggers == 0 &&
+		activity.HeldLeases == 0 && activity.DashboardConnections == 0 &&
+		now.Sub(activity.IdleSince) >= limits.LocalControllerIdleTimeout
 }
 
 // safety: LocalPlatformPolicy keeps Windows SID authentication and daemon schedules explicit.
@@ -61,7 +67,23 @@ type LocalPeerIdentity struct {
 
 // safety: LocalSubject checks the peer against the controller's OS account before minting local authority.
 func LocalSubject(peer, owner LocalPeerIdentity) (string, error) {
-	panic("unimplemented: c4-surface-config")
+	if peer.GOOS != owner.GOOS {
+		return "", fmt.Errorf("wingd: peer platform does not match controller platform")
+	}
+	switch peer.GOOS {
+	case "linux", "darwin":
+		if peer.UID == nil || owner.UID == nil || *peer.UID != *owner.UID {
+			return "", fmt.Errorf("wingd: local access requires the controller account's kernel UID")
+		}
+		return fmt.Sprintf("local:%d", *peer.UID), nil
+	case "windows":
+		if peer.SID == "" || owner.SID == "" || peer.SID != owner.SID {
+			return "", fmt.Errorf("wingd: local access requires the controller account's client SID")
+		}
+		return "local:" + peer.SID, nil
+	default:
+		return "", fmt.Errorf("wingd: unsupported local platform %q", peer.GOOS)
+	}
 }
 
 // safety: LocalStartOptions carries spawn plumbing in arguments rather than environment variables.
@@ -75,14 +97,19 @@ type LocalStartOptions struct {
 // safety: LocalRuntime uses the same pkg/controller implementation, route policy and state owner.
 // It owns state.db, admission, queue, trigger consumer, reaper and UI; the CLI still hosts local runs.
 // Startup fails orphaned started local runs rather than requeueing them. Private files use fssecure.
-// Each runtime is bound to one Home before opening state. AwaitReady waits for API readiness
-// and startup reconciliation. Drain waits for admission drain, finalization and shutdown.
-// Cancelling Run or AwaitReady must terminate their work and finish cleanup.
+// Each runtime is bound to one home at construction; Run must reject another home before opening it.
+// Run and AwaitReady must finish cleanup and return when their contexts are cancelled.
 type LocalRuntime interface {
 	Run(context.Context, LocalStartOptions) error
+	// AwaitReady waits for the next active Run's API, store and startup reconciliation.
+	// A completed previous Run cannot satisfy a new readiness request.
 	AwaitReady(context.Context) (LocalStatus, error)
 	Status(context.Context) (LocalStatus, error)
 	SetStay(context.Context, bool) error
+	// EnsureDashboard starts the UI on an already-ready owner, reusing an identical address.
+	// A different address is refused until the controller is stopped and restarted.
+	EnsureDashboard(context.Context, string) error
+	// Drain returns after the admission drain and controller shutdown complete.
 	Drain(context.Context) error
 }
 
@@ -159,5 +186,5 @@ type LocalLifecycle interface {
 
 // safety: NewLocalLifecycle keeps service management outside controller request handling.
 func NewLocalLifecycle(runtime LocalRuntime, units ManagedUnitManager) LocalLifecycle {
-	panic("unimplemented: c4-surface-config")
+	return &localLifecycle{runtime: runtime, units: units, gate: make(chan struct{}, 1)}
 }

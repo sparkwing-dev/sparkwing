@@ -33,13 +33,7 @@ func (r *frameReader) read() (wingwire.Message, error) {
 }
 
 func dial(ctx context.Context, sock string, timeout time.Duration) (net.Conn, error) {
-	// safety: a socket directory this user does not own can hold an impostor
-	// daemon, so refuse before a handshake reveals anything to it.
-	if err := wingd.ValidateSocketDir(sock); err != nil {
-		return nil, err
-	}
-	d := net.Dialer{Timeout: timeout}
-	return d.DialContext(ctx, "unix", sock)
+	return wingd.DialSocket(ctx, sock, timeout)
 }
 
 func sleep(ctx context.Context, d time.Duration) error {

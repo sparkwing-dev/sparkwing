@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
 var errPeerClosed = errors.New("wingd: peer closed connection")
@@ -14,7 +15,7 @@ func (d *Daemon) elect() (bool, error) {
 	if err := d.layout.ensureDir(); err != nil {
 		return false, err
 	}
-	f, err := os.OpenFile(d.layout.lock, os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := fssecure.OpenFile(d.layout.lock, os.O_CREATE|os.O_RDWR)
 	if err != nil {
 		return false, fmt.Errorf("wingd: open lock %s: %w", d.layout.lock, err)
 	}
@@ -45,7 +46,7 @@ func LockHeld(home string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	f, err := os.OpenFile(l.lock, os.O_RDWR, 0o600)
+	f, err := fssecure.OpenFile(l.lock, os.O_RDWR)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
@@ -65,28 +66,14 @@ func LockHeld(home string) (bool, error) {
 }
 
 func (d *Daemon) bindListener() (net.Listener, error) {
-	return bindSocket(d.layout.sock)
+	return d.bind(d.layout.sock)
 }
 
-func bindSocket(path string) (net.Listener, error) {
-	if err := ValidateSocketPath(path); err != nil {
-		return nil, err
+func (d *Daemon) bind(path string) (net.Listener, error) {
+	if d.listen != nil {
+		return d.listen(path)
 	}
-	if err := ensureSocketDir(filepath.Dir(path)); err != nil {
-		return nil, err
-	}
-	_ = os.Remove(path)
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		return nil, fmt.Errorf("wingd: listen %s: %w", path, err)
-	}
-	// safety: the bound socket inherits the process umask, which can leave it
-	// connectable by other accounts on platforms that honor socket modes.
-	if err := os.Chmod(path, 0o600); err != nil {
-		_ = ln.Close()
-		return nil, fmt.Errorf("wingd: restrict socket %s: %w", path, err)
-	}
-	return ln, nil
+	return bindSocket(path)
 }
 
 type SocketPreparation uint8
@@ -108,7 +95,7 @@ func ClaimDaemonStart(home string) (release func(), claimed bool, err error) {
 	if err := l.ensureDir(); err != nil {
 		return nil, false, err
 	}
-	f, err := os.OpenFile(l.start, os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := fssecure.OpenFile(l.start, os.O_CREATE|os.O_RDWR)
 	if err != nil {
 		return nil, false, err
 	}
@@ -130,7 +117,7 @@ func PrepareDaemonSocket(home string) (SocketPreparation, error) {
 	if err := l.ensureDir(); err != nil {
 		return SocketPreparationUnknown, err
 	}
-	f, err := os.OpenFile(l.lock, os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := fssecure.OpenFile(l.lock, os.O_CREATE|os.O_RDWR)
 	if err != nil {
 		return SocketPreparationUnknown, err
 	}

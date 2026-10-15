@@ -22,7 +22,7 @@ func silentAfterReconnect(t *testing.T, home string) (queuedAgain <-chan struct{
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatalf("mkdir socket dir: %v", err)
 	}
-	ln, err := net.Listen("unix", sock)
+	ln, err := wingd.ListenSocket(sock)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}

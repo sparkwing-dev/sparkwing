@@ -1,7 +1,6 @@
 package depcache
 
 import (
-	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engine/npmcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 )
 
@@ -125,7 +125,7 @@ func TestResolveNpmCacheWindowsUppercaseEnvironment(t *testing.T) {
 }
 
 func TestResolveNpmCacheUsesProjectNpmrc(t *testing.T) {
-	if _, err := NpmCacheCommand(context.Background(), goruntime.GOOS, exec.LookPath); err != nil {
+	if _, err := npmcmd.Command("config", "get", "cache"); err != nil {
 		t.Skipf("npm not installed: %v", err)
 	}
 	t.Setenv("npm_config_cache", "")
@@ -140,7 +140,7 @@ func TestResolveNpmCacheUsesProjectNpmrc(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".npmrc"), []byte("cache="+filepath.ToSlash(want)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	probe, probeErr := NpmCacheCommand(t.Context(), goruntime.GOOS, exec.LookPath)
+	probe, probeErr := npmcmd.Command("config", "get", "cache")
 	if probeErr != nil {
 		t.Fatal(probeErr)
 	}

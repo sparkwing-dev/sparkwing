@@ -311,8 +311,10 @@ func TestCredentialMutationsHTTPTransactionBoundary(t *testing.T) {
 						t.Fatal(err)
 					}
 					code, writes = apierr.PolicyMissing, 0
-				case "nil", "default":
+				case "nil":
 					writer, code, writes = nil, apierr.PolicyMissing, 0
+				case "default":
+					writer, code, writes = nil, apierr.Unauthenticated, 0
 				}
 				server := mutationServerConfig(s, cipher, b).WithCredentialWriter(func(_ context.Context, team store.Team) (controller.CredentialWriter, error) {
 					if team != "team" {

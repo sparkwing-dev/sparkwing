@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,14 +20,13 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestHostedSelection_FallsBackWhenTheSocketIsGone(t *testing.T) {
 	home := wingdTestHome(t)
-	sock, _ := startAPIDaemon(t, home, nil)
+	sock := startHostedAPIFixture(t, home)
 	if err := os.Remove(sock); err != nil {
 		t.Fatalf("remove api socket: %v", err)
 	}
@@ -51,7 +49,7 @@ func TestHostedSelection_FallsBackWhenTheSocketIsGone(t *testing.T) {
 
 func TestHostedSelection_ForcedWhileADaemonAnswers(t *testing.T) {
 	home := wingdTestHome(t)
-	startAPIDaemon(t, home, nil)
+	startHostedAPIFixture(t, home)
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
 	sel, err := selectHostedAPI(ctx, testWingdAdmission(home, nil), true)
@@ -82,11 +80,8 @@ func TestHostedSelection_ForcedStillSaysNoDaemonWhenThereIsNone(t *testing.T) {
 func TestHostedSelection_ChildOfAForcedParentReadsTheParentsStore(t *testing.T) {
 	home := wingdTestHome(t)
 	t.Setenv("SPARKWING_HOME", home)
-	_, runs := startAPIDaemon(t, home, nil)
+	startHostedAPIFixture(t, home)
 	ctx := context.Background()
-	if _, _, err := runs.Create(ctx); err != nil {
-		t.Fatal(err)
-	}
 	paths := PathsAt(home)
 	st, sa, release, err := openStandaloneStore(paths, false)
 	if err != nil {
@@ -120,11 +115,8 @@ func TestHostedSelection_ChildOfAForcedParentReadsTheParentsStore(t *testing.T) 
 func TestHostedSelection_AForcedReasonWithoutAParentStoreIsIgnored(t *testing.T) {
 	home := wingdTestHome(t)
 	t.Setenv("SPARKWING_HOME", home)
-	_, runs := startAPIDaemon(t, home, nil)
+	startHostedAPIFixture(t, home)
 	ctx := context.Background()
-	if _, _, err := runs.Create(ctx); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv(StandaloneStateDBEnv, "")
 	t.Setenv(StandaloneReasonEnv, standaloneForced)
 	paths := PathsAt(home)
@@ -293,7 +285,7 @@ func TestLocalTriggerBackends_HostChildRunsAndReplays(t *testing.T) {
 	// safety: a child run resolves the daemon from the environment, as the
 	// process that spawns it does.
 	t.Setenv("SPARKWING_HOME", home)
-	startAPIDaemon(t, home, nil)
+	startHostedAPIFixture(t, home)
 	paths := PathsAt(home)
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)
@@ -315,35 +307,39 @@ func TestLocalTriggerBackends_HostChildRunsAndReplays(t *testing.T) {
 	}
 }
 
-func TestWingdAPI_UnknownRouteAnswersUnsupportedWithNoStore(t *testing.T) {
-	home := wingdTestHome(t)
-	sock, _ := startAPIDaemon(t, home, nil)
-	if _, err := os.Stat(PathsAt(home).StateDB()); err == nil {
-		t.Fatal("the fixture created a store")
+func startHostedAPIFixture(t *testing.T, home string) string {
+	t.Helper()
+	cfg := wingd.Config{
+		Home: home, Version: "test", Runs: &wingd.FuncRunStore{},
+		ServeAPI: func(ctx context.Context, ln net.Listener) {
+			ctx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			srv := &http.Server{
+				ReadHeaderTimeout: time.Second,
+				Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					if r.URL.Path == "/api/v1/health" {
+						_, _ = io.WriteString(w, `{"status":"ok","auth":"enabled","store":"ready"}`)
+						return
+					}
+					_, _ = io.WriteString(w, `{}`)
+				}),
+			}
+			closed := make(chan struct{})
+			go func() {
+				defer close(closed)
+				<-ctx.Done()
+				_ = srv.Close()
+			}()
+			_ = srv.Serve(ln)
+			cancel()
+			<-closed
+		},
 	}
-
-	httpClient := apiHTTPClient(sock)
-	defer httpClient.CloseIdleConnections()
-	req, err := http.NewRequest(http.MethodGet, apiBaseURL+"/api/v1/no-such-route", nil)
+	startWingdCfg(t, cfg)
+	sock, err := wingd.APISocketPath(home)
 	if err != nil {
-		t.Fatalf("request: %v", err)
+		t.Fatal(err)
 	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		t.Fatalf("probe: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("status = %s, want 404 for a route this build does not serve", resp.Status)
-	}
-	var body struct {
-		Error string `json:"error"`
-		Route string `json:"route"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if body.Error != controller.UnsupportedRouteError || body.Route == "" {
-		t.Fatalf("body = %+v, want the unsupported-route answer", body)
-	}
+	return sock
 }

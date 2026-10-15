@@ -15,6 +15,27 @@ and the leased blob-maintenance pass.
 
 ## Amendment 1: authority and execution seams
 
+`Tenant.WriteSecret`, `RemoveSecret`, `WriteGitCredential`,
+`ConfirmGitCredentialFor` and `RemoveGitCredential` implement C2's credential
+mutation adapter. Each transaction rechecks the selected team-admin alternative,
+current ancestry and membership, derives the actor from persisted authority,
+and uses the store clock. Existing enrollment limits are serialized under the
+team lock. Confirmation checks the current row's fingerprint. A replacement
+retains confirmation only for the same SSH fingerprint. Failed writes return
+no credential and roll back the transaction.
+
+`Tenant.ReadSecret` implements C2's authority-bearing read adapter. Members
+may read unmasked rows within their tenant. Claims derive the pipeline from
+their bound run even when the request omits its run selector. They require
+the sealed declaration, current lease and generation, no cancellation and the
+selected row's pool authorization. Pipeline rows precede shared team rows.
+Each release commits `secret_released` before returning the stored envelope.
+An audit or final authority failure returns no row. Claim-wide authority has
+attempt zero and remains valid across execution starts. A nonzero attempt
+binding is limited to that attempt. `Tenant.ReleaseClaimSecret` and its legacy
+undeclared-secret error are removed. Verified local peer transport integration
+remains with C2.
+
 
 `Tenant.RotateCredentials` implements the credential-maintenance transaction.
 It reloads persisted account authority and current team-admin membership, selects

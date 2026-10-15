@@ -12,15 +12,13 @@ package agentconfig
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -86,16 +84,14 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("%s has no runner section; `sparkwing cluster runners add` writes one: %w", path, os.ErrNotExist)
 	}
 	if cfg.CredentialsDir != "" {
-		file, err := fssecure.OpenPrivateConfig(filepath.Join(cfg.CredentialsDir, "agent-token"))
+		dir, err := credentials.Open(cfg.CredentialsDir)
 		if err != nil {
 			return nil, err
 		}
-		defer file.Close()
-		token, err := io.ReadAll(file)
+		cfg.Token, err = dir.ReadPrivate("agent-token")
 		if err != nil {
 			return nil, err
 		}
-		cfg.Token = strings.TrimSpace(string(token))
 		if cfg.Token == "" {
 			return nil, errors.New("runner credential file is empty")
 		}

@@ -105,6 +105,17 @@ func (t *Tenant) PutGitCredential(ctx context.Context, c GitCredential, now time
 	if err := t.lockTeamTx(ctx, tx); err != nil {
 		return GitCredential{}, err
 	}
+	out, err := t.putGitCredentialTx(ctx, tx, c, now)
+	if err != nil {
+		return GitCredential{}, err
+	}
+	return out, tx.Commit()
+}
+
+func (t *Tenant) putGitCredentialTx(ctx context.Context, tx *storeTx, c GitCredential, now time.Time) (GitCredential, error) {
+	if c.Host == "" || c.Secret == "" || (c.Kind != GitCredentialSSH && c.Kind != GitCredentialHTTPS) {
+		return GitCredential{}, ErrInvalidInput
+	}
 	at := now.UTC().UnixNano()
 	prev, err := scanGitCredential(tx.QueryRowContext(ctx,
 		`SELECT `+gitCredentialCols+` FROM git_credentials WHERE team = ? AND host = ?`, string(t.team), c.Host))
@@ -154,7 +165,7 @@ func (t *Tenant) PutGitCredential(ctx context.Context, c GitCredential, now time
 	if err != nil {
 		return GitCredential{}, err
 	}
-	return out, tx.Commit()
+	return out, nil
 }
 
 // ConfirmGitCredential marks the team's ssh credential for host usable,

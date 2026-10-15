@@ -142,6 +142,9 @@ func checkStoreSessions(ctx context.Context, root string) (err error) {
 	if retained != 0 {
 		return errors.New("expired session returned after reopening")
 	}
+	if err := checkStoreCredentialMutations(ctx, s, owner); err != nil {
+		return err
+	}
 	return checkRolelessStoreSession(ctx, s)
 }
 

@@ -10,10 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// A generated node's recorded spec is admitted beside its run's plan: its
-// pipeline references resolve under its claim as a planned node's do, while a
-// pipeline it does not name, a spec that hashes otherwise than its row, and a
-// secret the pipeline never declared stay refused.
 func TestAGeneratedNodesRecordedSpecIsAdmitted(t *testing.T) {
 	ctx, now := context.Background(), time.Now()
 	s := storetest.Open(t)
@@ -56,12 +52,5 @@ func TestAGeneratedNodesRecordedSpecIsAdmitted(t *testing.T) {
 	forgedTok := store.ClaimToken{Team: store.DefaultTeam, Kind: store.ClaimTokenNode, RunID: "hosted", NodeID: "forged"}
 	if _, err := s.ResolveClaimInput(ctx, forgedTok, store.ClaimInputRequest{Kind: store.ClaimInputLastRun, Pipeline: "build", Node: "build"}, now); !errors.Is(err, store.ErrInputUndeclared) {
 		t.Fatalf("a spec whose hash is not its row's = %v, want ErrInputUndeclared", err)
-	}
-	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tenant.ReleaseClaimSecret(ctx, tok, "EXTRA_GENERATED_SECRET", now); !errors.Is(err, store.ErrSecretUndeclared) {
-		t.Fatalf("undeclared secret = %v, want ErrSecretUndeclared", err)
 	}
 }
