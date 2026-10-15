@@ -22,6 +22,14 @@ unlock.
 
 ### Fixed
 
+- **repos update:** Honor checkout selection, explicit previews and fleet confirmation
+  Updates apply to the current checkout by default. `--dry-run` previews it;
+  `--all-repos --yes` applies across the fleet. A sibling directory whose name
+  starts with a registered checkout's name cannot select that checkout.
+- **cli:** Accept the documented example and spark selectors
+  `examples --example` and sparks add/remove `--spark` reach their handlers.
+  Plain output prints names or the selected example's source. Scaffold tips
+  and generated project instructions use the current commands and flags.
 - **cli intake:** Preserve output selections and their origins through sealing
   Detached receipts honor `-o`, `--output`, `--sw-output` and `SPARKWING_LOG_FORMAT`.
 - **pipeline selection:** Read trigger profile pins and run help from the selected revisions

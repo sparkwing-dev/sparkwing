@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -11,7 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
-	flag "github.com/spf13/pflag"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 
@@ -27,31 +26,18 @@ type templateDetailJSON struct {
 }
 
 func runExamples(args []string) error {
-	fs := flag.NewFlagSet(cmdExamples.Path, flag.ContinueOnError)
-	var output, category, cloud, name string
-	var body bool
-	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json")
-	fs.StringVar(&category, "category", "", "filter the list by applicability category")
-	fs.StringVar(&cloud, "cloud", "", "filter the list by cloud (aws | gcp); cloud-agnostic templates always match")
-	fs.StringVar(&name, "name", "", "show full detail for one template instead of the list")
-	fs.BoolVar(&body, "body", false, "with --name, also print the rendered pipeline body")
-	if err := parseAndCheck(cmdExamples, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
+	inv, err := clisurface.Parse("sparkwing", append([]string{"examples"}, args...))
+	if err != nil {
 		return err
 	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("examples: unexpected positional %q", fs.Arg(0))
+	output := inv.Output(color.IsInteractiveStdout())
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, output)
 	}
-	if body && name == "" {
-		return errors.New("examples: --body requires --name <example>")
+	if name := inv.Value("example"); name != "" {
+		return showTemplateDetail(name, inv.Bool("body"), output)
 	}
-
-	if name != "" {
-		return showTemplateDetail(name, body, output)
-	}
-	return listTemplates(category, cloud, output)
+	return listTemplates(inv.Value("category"), inv.Value("cloud"), output)
 }
 
 func listTemplates(category, cloud, output string) error {
@@ -74,6 +60,13 @@ func listTemplates(category, cloud, output string) error {
 		}
 
 		return ndjson.Write(os.Stdout, manifests)
+	case "plain":
+		for _, t := range filtered {
+			if _, err := fmt.Fprintln(os.Stdout, t.Manifest.Name); err != nil {
+				return err
+			}
+		}
+		return nil
 	case "pretty", "":
 		if len(filtered) == 0 {
 			fmt.Println("no templates match the given filters")
@@ -90,7 +83,7 @@ func listTemplates(category, cloud, output string) error {
 		renderTemplateList(filtered)
 		return nil
 	default:
-		return fmt.Errorf("unknown output format %q (valid: pretty, json)", output)
+		return fmt.Errorf("unknown output format %q (valid: pretty, json, plain)", output)
 	}
 }
 
@@ -164,10 +157,10 @@ func groupTemplatesByCategory(list []templates.Template) []templateCategoryGroup
 func printTemplateListFooter(shown, categories int) {
 	fmt.Println()
 	printAlignedSteps([]InfoNextStep{
-		{Command: "sparkwing docs search -q <what you are doing>", Purpose: "usually the faster way in than this list"},
-		{Command: "sparkwing examples --name <example> --body", Purpose: "read one in full"},
+		{Command: "sparkwing docs search --search <what you are doing>", Purpose: "usually the faster way in than this list"},
+		{Command: "sparkwing examples --example <example> --body", Purpose: "read one in full"},
 		{Command: "sparkwing examples --category <c> --cloud <aws|gcp>", Purpose: "narrow the list"},
-		{Command: "sparkwing pipeline new --name <n> --template <shape>", Purpose: "start a pipeline (a shape, not an example)"},
+		{Command: "sparkwing pipeline new --pipeline <n> --template <shape>", Purpose: "start a pipeline (a shape, not an example)"},
 	})
 	fmt.Printf("\n%s\n", color.Dim(fmt.Sprintf("%s across %s -- working pipelines to read, not starting points",
 		countNoun(shown, "example", "examples"), countNoun(categories, "category", "categories"))))
@@ -215,11 +208,18 @@ func showTemplateDetail(name string, body bool, output string) error {
 		}
 		enc := json.NewEncoder(os.Stdout)
 		return enc.Encode(out)
+	case "plain":
+		if body {
+			_, err = fmt.Fprintln(os.Stdout, rendered)
+		} else {
+			_, err = fmt.Fprintln(os.Stdout, tmpl.Manifest.Name)
+		}
+		return err
 	case "pretty", "":
 		printTemplateDetail(tmpl, rendered, body)
 		return nil
 	default:
-		return fmt.Errorf("unknown output format %q (valid: pretty, json)", output)
+		return fmt.Errorf("unknown output format %q (valid: pretty, json, plain)", output)
 	}
 }
 
@@ -273,10 +273,10 @@ func printTemplateDetail(tmpl templates.Template, rendered string, body bool) {
 func printExampleFooter(body bool) {
 	fmt.Println()
 	if !body {
-		fmt.Printf("%s sparkwing examples --name <name> --body\n",
+		fmt.Printf("%s sparkwing examples --example <name> --body\n",
 			color.Dim("read the code:"))
 	}
-	fmt.Printf("%s sparkwing pipeline new --name <name> --template <shape>  (%s)\n",
+	fmt.Printf("%s sparkwing pipeline new --pipeline <name> --template <shape>  (%s)\n",
 		color.Dim("start your own:"), strings.Join(builtinShapeNames(), " | "))
 }
 

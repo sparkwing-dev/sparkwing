@@ -1,3 +1,129 @@
+## Continuation from 47449fbd8 - command handlers and rendered guidance
+
+W9 remains CONTINUE. The worktree started clean at 47449fbd8. Lead findings
+1 and 7 remain open. No worktree Git metadata write, candidate install or
+Sparkwing executable ran. Tests invoke command handlers in the package test binary.
+
+### Implemented and deleted
+
+- Invariant: accepted example and spark selectors reach their handlers.
+  Examples now consume the shared parser's `--example`; sparks add/remove use
+  `--spark`. These three handlers no longer have separate pflag declarations.
+  `--body` requires its example, add requires source, and remove requires spark.
+  Retired `--name` is rejected before file effects. The public command tests
+  failed on unknown final selectors before the fixes and pass afterward.
+- Added the advertised plain outputs. Examples list names; selected bodies emit
+  source only. Spark mutations emit a name in plain mode and a typed receipt in
+  JSON. Real project-file tests preserve unrelated pipeline declarations, and
+  duplicate/missing/retired selector failures leave the file unchanged.
+- Fixed rendered scaffold and example guidance, generated project README/YAML,
+  schedule installation tips and repository upgrade advice. Their emitted
+  commands are checked against the live parser. Removed the unused non-terse
+  bootstrap option and branch, plus the obsolete mapping-form schedule example.
+  Shape summaries use jobs. No retired command alias was added.
+- Invariant: repository updates select only the current checkout unless the
+  caller selects the fleet. The handler now applies by default, honors explicit
+  `--dry-run`, and requires `--all-repos --yes` for fleet application. Removed its
+  old apply/check/repo flag parser and the shared-schema pin-divergence warnings.
+  In-place preview uses the existing read-only SDK check. A generated 32-case
+  property rejects sibling directory names that start with a registered path.
+  Command-level confirmation refusal and stamped-build preview startup tests
+  pass. The real fleet updater remains behind a test seam; native mutation was
+  not exercised. Default/preview/fleet tests failed before these fixes.
+- Ported the template footer and sparks update/subdirectory tests to the final
+  grammar. The already-fixed daemon missing/cancelled fixture still passes.
+  The deleted liveness source-scan test and opsview sweep facade remain deleted.
+
+Production Go versus HEAD: **138 added, 156 removed, net -18**. W9 versus main:
+**-8,129**, within the -2,900 budget. Tests, testdata and contract declarations
+are excluded. No production file was removed this pass. No API caller outside
+cmd/sparkwing required migration.
+
+### Verification
+
+Go checks use GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache,
+GOMAXPROCS=4 and TMPDIR/GOTMPDIR under /tmp/sw-astra-W9. Tests use -p 4.
+
+- Repository `go build -p 4 ./...`, scoped CLI/clisurface/controllerwire/client/
+  opsview vet, and commentcheck against main pass. Full clisurface,
+  controllerwire, controller/client, opsview and doccheck package tests pass.
+- The broad short CLI diagnostic selection reports **927 pass, 15 skip,
+  2 fail** at top level. The separately added preview-startup regression also
+  passes. Nineteen socket-based tests were excluded from that selection because
+  this sandbox cannot bind sockets. No repository test skip was added.
+- Remaining failures are W8's pin reader: TestSDKCheckRejectsFIFO is killed by
+  its existing five-second subprocess bound; TestSDKCheckRefusesOversizedModuleWithoutWriting
+  reports a 1,048,606-byte parse refusal instead of the retained regular-file
+  bound. No W8 production file or contract changed.
+- Focused CLI command tests pass with:
+  `go test -p 4 ./cmd/sparkwing -run '^Test(RepositoryUpdate|Sparks|Examples|ScaffoldGuidance|GroupTemplates|RenderTemplateList|UnifiedSDK|Builtin|Shapes|On|EveryTrigger|MultiTrigger|DaemonLifecycleMissingAndCancelledRuntime)' -count=1`.
+- Existing `go test -p 4 ./tests/acceptance -run '^(TestSurface|TestHere)' -count=1`
+  components pass. No native acceptance cell or archived T1 port is newly
+  complete or unskipped. No native placement claim is made.
+- CLI reference files were regenerated through the existing command generator
+  in a temporary test entrypoint, then that entrypoint was deleted. Source docs,
+  changelog and embedded mirrors match. Whitespace checks pass.
+
+Reproduce the broad selection with `go test -p 4 -short ./cmd/sparkwing -count=1`
+and this skip expression:
+
+```
+^(TestDocsMigrationsValidatesWebBoundsBeforeFetching|TestDownloadAndInstall_.*|TestDownloadFile_BoundsBodySize|TestMaterialize_ColdCacheContactsNoController|TestResolveSparks_WithManifest_WritesOverlay|TestRunDocsListVersions_Web.*|TestRunDocsMigrations_VersionWebFetches|TestRunDocsRead_Web.*|TestRunUpdateBinary_Failure_SpawnsNoGo|TestRun_PinnedPipelineRunsWithTheNetworkDenied)$
+```
+
+### Production integration and foreign contracts still open
+
+The production probes were run without replacing their production factories:
+
+```
+go test -p 4 -tags rewrite_integration ./cmd/sparkwing -run '^TestReview(ProductionExecutionBindings|PublicDoctorSweepsAndWarnsForPrunedRun)$' -count=1
+```
+
+Local run, controller and schedules still return their explicit integration
+refusals. Public doctor leaves the pruned run's ledger entry and emits no
+unrecorded_step_outcome warning. Findings 1 and 7 are not fixed or waived.
+
+At this HEAD, NewNativeHost exists but requires private state, engine/source,
+captured-environment, delegated-process, router, log/storage and owner-policy
+bindings. NewLocalRuntime still requires Open, and no production implementation
+of wingd.LocalController supplies the elected store/queue/reconciliation/API/UI.
+LocalLifecycle.Doctor still accepts only context/version; it cannot request a
+controller-owned dry-run sweep or return independent recording warnings.
+The constructor/integration commit was requested while independent work continued.
+
+Foreign requests remain: W2/W8's elected controller and local peer authority;
+W2/W3's private ReadSnapshot/ReadNode/TransitionRun/TransitionNode transport and
+native host composition; W2/W8's local schedule source/environment/proof/pin/tick
+owner; and the controller-owned doctor sweep with explicit dry-run and recording
+warnings. Existing component fakes remain evidence only at those contracts.
+Do not reopen a second writing store or resurrect the deleted sweep facade.
+
+Prior A1-50 here reasons, source bundles, captured-value submission, remote-cache,
+publication and debug-release contracts remain open. W8's inspection compiler
+controls/sparks overlay and upgrade pipeline-directory requests remain open.
+W1b's materialization path was left untouched. Native Windows/Darwin, storage,
+HTTP/api.sock, placement and real-repository QA remain with T1/lead.
+
+### Scope, assumptions and friction
+
+C4 documents only these W9-owned grammar/output changes. Foreign contracts and
+lead-owned handoffs/amendments are unchanged. Other than the W9-owned source and
+tests, edits are CHANGELOG.md, docs/cli.md, docs/sparks.md, generated cli-pipeline
+reference, their pkg/docs mirrors and this report. No foreign implementation
+file changed. Natural-writing and diagnosing-bugs skills were used.
+
+Mechanisms added: one callback seam around the existing fleet reader/updater,
+because selection, preview and confirmation must be tested before real Git
+mutation; and one shared spark receipt renderer used by add and remove. Neither
+adds an updater, storage owner, flag, timeout, environment variable or alias.
+Removing the seam only removes fake-boundary command tests. The renderer
+replaces the duplicated mutation messages.
+
+Friction remains the absent native composition/sweep adapters, the two W8 pin
+reader failures and socket restrictions. The lead owns independent review,
+commits, gates and native verification. Scratch is removed after final checks;
+/tmp/sw-gocache is kept. Git identity remains Korey's with no core.worktree override.
+
 ## Continuation from f3f6b5508 - retained command tests
 
 This section supersedes the verification counts below. W9 remains CONTINUE.
