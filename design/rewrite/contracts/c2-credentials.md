@@ -183,7 +183,7 @@ GET and POST `/login` use PolicyRouter with AuthBrowserFlow. The bounded form
 requires same-origin proof, one CSRF cookie and one matching form token. It
 accepts one token, optional next and csrf_token. Unknown or duplicate fields,
 Authorization headers and duplicate session cookies fail. Only a live, unbound
-controller account capability can open a session. The existing
+controller account capability without a data scope can open a session. The existing
 CreateCapabilitySession transaction rechecks that parent and preserves its
 ancestry. The response handler ends the prior session and sets private cookies.
 The old admin-token/argon2 login and its middleware registration are deleted.
@@ -2920,10 +2920,13 @@ tagged authority. `ValidateAuthority` returns the shortest expiry, revocation
 grace deadline or binding deadline in the complete live ancestry as the leaf's
 effective expiry. Omitted delegation expiry inherits that ceiling.
 
-The store uses the same origin predicate in `checkMemberProvision` and
-`SetSourceMachineConsent` after resolving authority inside each committing
-transaction. The native committing-origin property covers detached-root
-issuance and both consent directions for generated capability-derived sessions.
+The store uses the same origin predicate in `checkMemberProvision`, machine
+provisioning and `SetSourceMachineConsent` after resolving authority inside each
+committing transaction. Machine provisioning also accepts deployment authority
+and restricts grants to `nodes.claim` and `triggers.claim`. The native
+committing-origin property covers detached member and machine roots and both
+consent directions for generated capability-derived sessions. The session
+creation transaction and browser verifier refuse credentials with a data scope.
 
 
 ## Canonical dashboard source and pause resume
