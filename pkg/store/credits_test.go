@@ -1005,12 +1005,12 @@ func TestCreditSettingsBoundTheRateSoTheLedgerCannotOverflow(t *testing.T) {
 			t.Errorf("%s was accepted as a rate: %v", name, err)
 		}
 	}
-	rate, err := s.CreditRateMicroPerSecond(ctx)
+	settings, err := s.CreditSettings(ctx)
 	if err != nil {
 		t.Fatalf("read rate: %v", err)
 	}
-	if rate != store.MaxCreditRateMicro {
-		t.Fatalf("rate = %d; a refused write moved it", rate)
+	if settings.RateMicroPerSecond != store.MaxCreditRateMicro {
+		t.Fatalf("rate = %d; a refused write moved it", settings.RateMicroPerSecond)
 	}
 }
 

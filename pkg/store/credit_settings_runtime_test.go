@@ -62,14 +62,8 @@ func TestStoreDataCreditSettingsUseFinalSchemaAndSurviveRestart(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("reopened settings=%+v, want %+v: %v", got, want, err)
 	}
-	for _, read := range []func() (int64, error){
-		func() (int64, error) { return s.CreditRateMicroPerSecond(t.Context()) },
-		func() (int64, error) { return s.CreditGraceSeconds(t.Context()) },
-		func() (int64, error) { return s.WarmCPUClassCores(t.Context()) },
-	} {
-		if _, err := read(); err != nil {
-			t.Fatal(err)
-		}
+	if got, err := s.WarmCPUClassCores(t.Context()); err != nil || got != warm {
+		t.Fatalf("warm CPU class=%d, want %d: %v", got, warm, err)
 	}
 }
 
@@ -98,11 +92,6 @@ func TestStoreDataCreditSettingsCorruptionNeverChoosesAnotherPrice(t *testing.T)
 			if _, err := s.CreditSettings(t.Context()); !errors.Is(err, ErrInvalidCreditSetting) {
 				t.Fatalf("corrupt setting read as defaults: %v", err)
 			}
-			if tc.key == metaKeyCreditRateMicro {
-				if _, err := s.CreditRateMicroPerSecond(t.Context()); !errors.Is(err, ErrInvalidCreditSetting) {
-					t.Fatalf("scalar read hid corruption: %v", err)
-				}
-			}
 		})
 	}
 }
@@ -130,7 +119,7 @@ func TestStoreDataCreditSettingsCannotReplaceSealedValues(t *testing.T) {
 	s := authorityStore(t)
 	original := []byte(`20000`)
 	rewriteSchemaExec(t, s.db, "INSERT INTO settings(key,value,sealed) VALUES (?,?,1)", metaKeyCreditRateMicro, original)
-	if _, err := s.CreditRateMicroPerSecond(t.Context()); !errors.Is(err, ErrInvalidCreditSetting) {
+	if _, err := s.CreditSettings(t.Context()); !errors.Is(err, ErrInvalidCreditSetting) {
 		t.Fatalf("sealed price read=%v", err)
 	}
 	rate, grace := int64(30000), int64(0)

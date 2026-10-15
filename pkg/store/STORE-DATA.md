@@ -104,6 +104,10 @@ that transaction's receipt, reference, revocation and holder changes and leave
 commit or rollback to the caller. `Tenant` uses the same checks. Supplied
 principal fields cannot widen persisted capability authority.
 
+`ReadableBlobs` returns each readable digest once in request order, including
+large requests. It checks the budget after its final read and returns an empty
+presence result with `blob.ErrBudget` when the deadline has passed.
+
 `MarkBlobTombstones` and `CollectBlobTombstones` require the maintenance lease.
 Records and live receipts root the graph, including transitive manifest members.
 Collection waits `limits.BlobGCGrace`, takes the same blob lock as writers,

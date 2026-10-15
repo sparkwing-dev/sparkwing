@@ -855,18 +855,6 @@ func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, e
 	return out, tx.Commit()
 }
 
-// CreditRateMicroPerSecond returns the price of one cloud runner second in
-// micro-credits. A controller that never set one reads the default.
-func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error) {
-	return s.creditSetting(ctx, metaKeyCreditRateMicro, DefaultCreditRateMicro)
-}
-
-// CreditGraceSeconds returns how long a node keeps running once it has
-// consumed the reservation its claim paid for with the balance at zero.
-func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error) {
-	return s.creditSetting(ctx, metaKeyCreditGraceSecs, DefaultCreditGraceSeconds)
-}
-
 // CreditSettings are the values the ledger prices work with. Every one of
 // them is the deployment's, so a controller serving many teams prices them
 // all the same way.

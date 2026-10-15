@@ -2,8 +2,10 @@
 
 ## Rate-table presence uses the settings snapshot
 
-`Store.CreditRateTableSet` is removed. Read `CreditSettings.RateTableSet` so the
-presence flag and prices come from the same settings snapshot.
+`Store.CreditRateTableSet`, `Store.CreditRateMicroPerSecond` and
+`Store.CreditGraceSeconds` are removed. Read `CreditSettings.RateTableSet`,
+`CreditSettings.RateMicroPerSecond` and `CreditSettings.GraceSeconds` from the
+same settings snapshot.
 
 ## Abandoned logs use tagged streams
 

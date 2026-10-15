@@ -1,8 +1,78 @@
 # W1b handoff
 
-Continues `4bc561ec9`. W1b remains incomplete. This continuation is uncommitted.
+Continues `dd33fc542`. W1b remains incomplete. This continuation is uncommitted.
 The lead owns review, commits, pipelines and native integration. W1 implementation
 files are unchanged. No Git write or candidate Sparkwing runtime was used.
+
+## Current continuation
+
+Fixed HasMany completing its final read after the deadline and returning success.
+`readableBlobsTx` checks the deadline after the full scan and discards presence
+on `blob.ErrBudget`. A generated test first failed on the old implementation.
+It advances the store clock through 160 generated deadline/duplicate cases.
+The invariant is that a successful presence response finishes within its budget.
+This adds three production lines and no new mechanism or configuration.
+
+The new `storage-hasmany-large-budget/store-data-sqlite` acceptance cell passes.
+It queries 1,025 distinct digests plus duplicates, in forward and reverse order
+after reopening. All 257 readable digests appear once in request order. Unrelated,
+foreign and absent digests remain hidden. Upload counters stay at 257 bytes and
+objects, with no download or egress charge. Physical verification and native
+placements remain separate integrations.
+
+Added a trigger/plan owner-receipt property and job-read regression. The invariant
+is that owner upload authority cannot transfer through a forged identity or an
+unrelated job. Each owner uploads before any job attempt, reopens, retains its
+tagged receipt without a synthetic job, rejects 96 generated identity forgeries,
+and refuses presence/download/reference access to a newly awarded job in its run.
+
+Removed `Store.CreditRateMicroPerSecond` and `Store.CreditGraceSeconds`,
+**12 production Go lines**, including their comments and blank lines. Their
+remaining test callers read the existing `CreditSettings` snapshot. Deleted obsolete
+scalar-reader assertions. No whole test or archived T1 inventory row was removed.
+No additional T1 row is claimed closed. No foreign contract shape, schema, limit
+or environment variable changed. No human question or new mechanism was added.
+
+Verification uses the environment listed below. Whole-repository build and vet
+over store, controller, both acceptance trees and their subpackages pass.
+The store selection passed **143 top-level tests / 382 cases** without skips.
+A final focused run passed the new properties, changed settings tests and rate
+tests after the final test edit. Both acceptance packages passed **20 top-level
+tests / 203 cases**, including **10 SQLite cells**, with **2,995 native/platform
+skips**. The new cell ran its actual assertions.
+
+Documentation mirror tests, `sync-docs.sh --check`, session-only commentcheck,
+session-only sleepcheck and diff whitespace checks pass. Required
+`commentcheck -base main` still reports the inherited detached HereBearer comment
+in `internal/controllerwire/contracts.go`. The SQL-scope guard still reports the
+same ten inherited findings below. Both tenant writer guards pass in that run.
+
+Three selected legacy controller tests fail in fixture setup at
+`pkg/controller/credits_test.go:42` because they insert into removed `tokens`.
+The changed assertions are not reached. They are
+`TestCreditSettings_ReadsTheDefaultsAndSetsEachValue`,
+`TestCreditSettings_RefusesAWriteWhoseOtherFieldIsBad` and the unchanged
+`TestCreditSettings_LeavesUnnamedValuesAlone`. Store tests cover the settings
+behavior through the final schema. Full legacy store tests, PostgreSQL, race,
+providers, native transports, candidates and pipelines were not run.
+
+Shared Go changes are `internal/acceptance/store_data.go`, new
+`internal/acceptance/store_presence_large.go` and two caller replacements in
+`pkg/controller/credits_test.go`. Other shared changes are `c1-data.md`, the
+migration guide, `CHANGELOG.md`, generated documentation mirrors and the two
+deleted API snapshot declarations. Owned files are the two new property-test
+files, `blob_read_authority.go`, `credits.go`, three billing test files and
+`STORE-DATA.md`.
+
+Remaining work is the integration and legacy retirement listed below. The local
+W2 billing calculator and payment verifier remain stubs. W1 issuance still writes
+unmetered billing rows directly. W1/W2 must connect their real paths to the
+existing transactional billing owner before the old claim-credit code can go.
+No W1 file was edited. Friction was cold compilation, the foreign fixture/guard
+failures and a typed-principal compile correction in the new test. Scratch is
+removed after verification. Git identity and worktree configuration are unchanged.
+
+## Previous continuation (committed in dd33fc542)
 
 ## Unit
 

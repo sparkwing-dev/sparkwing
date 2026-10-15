@@ -922,12 +922,12 @@ func TestCreditSettings_ReadsTheDefaultsAndSetsEachValue(t *testing.T) {
 	if view.RateMicroPerSecond != 30_000 || view.GraceSeconds != 0 || view.MaxChargeSeconds != 45 {
 		t.Fatalf("settings after the write = %+v", view)
 	}
-	grace, err := f.store.CreditGraceSeconds(context.Background())
+	settings, err := f.store.CreditSettings(context.Background())
 	if err != nil {
 		t.Fatalf("read grace: %v", err)
 	}
-	if grace != 0 {
-		t.Fatalf("stored grace = %d, want 0", grace)
+	if settings.GraceSeconds != 0 {
+		t.Fatalf("stored grace = %d, want 0", settings.GraceSeconds)
 	}
 }
 
@@ -993,12 +993,12 @@ func TestCreditSettings_RefusesAWriteWhoseOtherFieldIsBad(t *testing.T) {
 	if status != http.StatusBadRequest {
 		t.Fatalf("mixed write = %d, want 400", status)
 	}
-	grace, err := f.store.CreditGraceSeconds(context.Background())
+	settings, err := f.store.CreditSettings(context.Background())
 	if err != nil {
 		t.Fatalf("read grace: %v", err)
 	}
-	if grace != store.DefaultCreditGraceSeconds {
-		t.Fatalf("grace = %d; the good half of a refused write was applied", grace)
+	if settings.GraceSeconds != store.DefaultCreditGraceSeconds {
+		t.Fatalf("grace = %d; the good half of a refused write was applied", settings.GraceSeconds)
 	}
 }
 

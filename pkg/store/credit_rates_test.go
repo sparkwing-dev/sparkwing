@@ -166,12 +166,12 @@ func TestSetRateTableWritesTheFourCorePriceToTheSingleRate(t *testing.T) {
 	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
-	rate, err := s.CreditRateMicroPerSecond(ctx)
+	settings, err := s.CreditSettings(ctx)
 	if err != nil {
 		t.Fatalf("read the single rate: %v", err)
 	}
-	if rate != 20_000 {
-		t.Fatalf("single rate = %d, want the four-core price 20000", rate)
+	if settings.RateMicroPerSecond != 20_000 {
+		t.Fatalf("single rate = %d, want the four-core price 20000", settings.RateMicroPerSecond)
 	}
 
 	single := int64(21_000)
@@ -635,15 +635,14 @@ func TestATableWithoutAFourCoreClassLeavesTheScalarAlone(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
-	rate, err := s.CreditRateMicroPerSecond(ctx)
+	settings, err := s.CreditSettings(ctx)
 	if err != nil {
 		t.Fatalf("read the single rate: %v", err)
 	}
-	if rate != store.DefaultCreditRateMicro {
-		t.Fatalf("single rate = %d, want the default it was left at", rate)
+	if settings.RateMicroPerSecond != store.DefaultCreditRateMicro {
+		t.Fatalf("single rate = %d, want the default it was left at", settings.RateMicroPerSecond)
 	}
-	settings, err := s.CreditSettings(ctx)
-	if err != nil || !settings.RateTableSet {
+	if !settings.RateTableSet {
 		t.Fatalf("RateTableSet = %v, %v; want true", settings.RateTableSet, err)
 	}
 }

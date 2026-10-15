@@ -263,6 +263,15 @@ verified receipts, deduplicated replica charging and persistence after reopening
 Presence metadata consumes neither download nor egress bytes. Physical verification,
 job-holder transports and native placements remain integration obligations.
 
+The `storage-hasmany-large-budget/store-data-sqlite` proof checks 1,025 distinct
+digests and their duplicates across reopening. All 257 readable digests appear
+once in request order. Unrelated and foreign bytes remain hidden. Presence reads
+leave upload, download and egress accounting unchanged. Generated store tests
+advance the injected clock across the final read and require an empty budget
+error once the deadline is reached. Trigger/plan owner receipt properties also
+check forged identities and refusal to transfer the receipt to a job in the same
+run. Physical stream verification and native placements remain separate proofs.
+
 The `storage-log-segments-and-fallback/store-data-sqlite` proof exercises
 immutable job segments, transactional rollback of a gapped batch, reopening,
 offset reads, final incomplete seals, exact replay, retained-byte accounting,
@@ -378,6 +387,8 @@ rows return errors. A settings batch and its returned snapshot commit together.
 Rate-table reads use one snapshot so a concurrent update cannot mix its scalar
 price with another table. Operator table authority is checked under the shared
 advisory lock before any settings write.
+`Store.CreditRateMicroPerSecond` and `Store.CreditGraceSeconds` are removed.
+Their callers read the existing `CreditSettings` snapshot fields.
 
 `CreditSettings` supplies max-charge seconds, the storage price, the free storage
 allowance and rate-table presence. Their unused Store getters are removed.
