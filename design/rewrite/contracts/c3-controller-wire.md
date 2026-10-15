@@ -304,6 +304,23 @@ Only `member` metadata permits automatic connection-token revocation. Principal
 spelling never supplies credential kind. A lookup/revocation failure retains the
 saved connection. Machine credentials require explicit `--keep-token`.
 
+Runner enrollment uses `TokenManager.CreateToken` with kind `runner`, a display
+principal, the exact runner grants and a stable idempotency key. Removal uses
+`ReadToken` and confirmed `RevokeToken`. Only explicit runner metadata permits
+removal. A principal prefix never supplies kind. The CLI checks the enrolled
+controller and optional name before touching its service. JSON receipts contain
+metadata and service results, never the bearer. Failure after issuance names the
+live prefix and final revoke command on stderr. The previous legacy Client token
+creation, lookup and revocation APIs and their untyped models are deleted.
+
+W6/W8 must still compose the final runner machine schema, private credentials
+directory and supervised start/refresh. The CLI retains its older file/service
+plumbing until that integration. `--reserved-for` additionally needs W2's
+team-admin registration/provisioning request contract. `TokenCreate` has no pool
+request field. The CLI refuses that proposal as `policy_missing` before issuance
+rather than minting an unreserved root. This is an unfinished contract seam,
+not a feature cut or a new provisioning rule. No C2 contract changed here.
+
 ### Schedule management
 
 `ScheduleManager` uses existing C2 `/api/v1/schedules` routes for both api.sock

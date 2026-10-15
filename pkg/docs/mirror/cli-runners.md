@@ -27,7 +27,7 @@ Manage runners
 
 Register a runner
 
-Use team credentials; only a team admin sets --reserved-for. --repos is the explicit allow-list spelling exception.
+Use team credentials. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports credential metadata and service state without the bearer. Plain emits the runner name.
 
 ### Flags
 
@@ -37,10 +37,10 @@ Use team credentials; only a team admin sets --reserved-for. --repos is the expl
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--runner RUNNER` | Runner name or selection. |
+| `--runner RUNNER` | Runner name or selection. (required) |
 | `--repos PATTERN` | repos Repeatable; comma-separated values are accepted. |
 | `--label LABEL` | label Repeatable; comma-separated values are accepted. |
-| `--max-concurrent N` | max concurrent |
+| `--max-concurrent N` | max concurrent Must be at least one. |
 | `--contribution SPEC` | contribution |
 | `--config PATH` | config |
 | `--force` | Replace an existing object. |
@@ -68,6 +68,8 @@ Read the same runner details from the local controller or a selected profile. JS
 ## `sparkwing runners remove`
 
 Remove a runner
+
+Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. JSON retains confirmed revocation. Plain emits the runner name.
 
 ### Flags
 

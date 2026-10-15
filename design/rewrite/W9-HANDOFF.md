@@ -1,9 +1,10 @@
 # W9 continuation handoff
 
-W9 remains incomplete. This continuation starts at `297a12166`. Earlier work
-is committed. This continuation is uncommitted for the lead to review and
-commit. No Sparkwing executable, service, repository Git metadata, external file
-or harness memory was changed. The assigned environment was reused.
+W9 remains incomplete. This continuation starts at `83dd6fcd6`. Earlier work is
+committed. This continuation is uncommitted for the lead to review and commit.
+No Sparkwing executable, service, external file or repository Git metadata was
+changed. The assigned environment was reused. Scratch is removed before the
+final report.
 
 ## Earlier work retained
 
@@ -13,136 +14,112 @@ transport, public run observations, listing/prune/log/review adapters,
 statistics, sizing reads, pools, separate team/deployment token managers,
 dashboard lifecycle adapters, staged upgrade verification, typed secrets,
 runner observations and confirmed member-token revocation for profile removal.
-Do not redo these. Their native owner integrations remain unfinished.
 
-## This continuation
+The previous continuation supplies typed schedule management and repository
+installation/withdrawal over the final `/schedules` routes. It preserves exact
+empty/zero overrides, resolves selections before mutations, retains authoritative
+upcoming/history projections and uses idempotent immediate-run requests. Wire
+models moved from `internal/api` to `internal/controllerwire`. Production CLI
+schedule management no longer uses `/crons`. Local install/pin/tick still uses
+the older runtime. Do not redo these completed pieces.
 
-### Schedule client and CLI
+## This continuation: runner credential integration
 
-`ScheduleManager` uses the existing final C2 schedule routes through the same
-profile/api.sock connection transport. It implements list, selected detail,
-pause, resume, override, reset, immediate run and selected deletion. Remote
-repository installation and withdrawal now use `ScheduleRepositoryManager` on
-`/api/v1/schedules/repos`. The CLI no longer sends schedule requests to `/crons`.
+Runner add/remove now parse the shared `clisurface` grammar. Repeated and
+comma-separated `--label` and `--repos` values survive. The registry records the
+already-required runner name and existing positive concurrency requirement.
 
-The final `schedules` dispatcher accepts repeatable/comma-list `--schedule`
-selectors. It resolves every selector before the first mutation and deduplicates
-canonical IDs. A selection failure mutates nothing. Subsequent mutations are
-sequential, without cross-schedule atomicity. Local pinning has the same
-selection preflight but still uses the older local runtime after selection.
+Enrollment uses `TokenManager.CreateToken` in the team namespace. It requests
+kind `runner`, a display principal and the exact existing runner grants
+`nodes.claim`, `triggers.claim`, `runs.state`, with one idempotency key. The
+permission name `triggers.claim` remains part of C2 even though its public route
+is the runner run queue. No grant was renamed or widened.
 
-Reads retain separate declarations, overrides, effective cadence, binary pin,
-timer health and fire history. JSON listing emits compact selection metadata,
-excluding arguments/history/binary paths. Selected JSON retains complete safe
-controller detail. Plain emits schedule IDs or the new run ID. Pretty detail
-retains declared/override/effective values and reports stale overrides. Upcoming
-instants come from the controller, not a calculation against the CLI clock.
-Timer reports preserve failure status after rendering the diagnosis.
+Removal validates the enrolled controller and optional runner name before any
+service action. It reads explicit kind from `TokenManager.ReadToken`, stops the
+service and then uses confirmed `RevokeToken`. Principal spelling supplies no
+kind. An `agent:NAME` principal cannot cause a member credential to be revoked.
+Stop failure leaves the credential live. Revocation failure emits no success
+receipt and retains the saved config.
 
-Overrides preserve unset, explicit empty zone, zero catch-up, empty values and
-an empty argument map. `--arg=` clears the argument map. Duplicate names,
-invalid cadence/time zones/durations, mixed report modes and conflicting scopes
-fail before connection resolution. `ScheduleOverride.Validate` is shared by
-CLI and HTTP callers. The client requires confirmation of pause, reset and
-supplied override fields. It validates observations and canonical aliases.
-Immediate run retains one header idempotency key across retries and returns
-both the canonical run ID and replay result.
+JSON receipts include safe metadata and service status, without a raw bearer or
+mixed pretty progress. Plain emits the runner name. Failure after issuance names
+the live prefix and final revoke command on stderr. The existing file/service
+plumbing remains until W6/W8 composition. It still writes `agent:` with a token
+and renders the older service command. This is not accepted native-runner proof.
 
-The installer recognizes final `--all-repos`, `--schedule` and `--unpinned`
-spellings. Its local compiler/arming/timer and pin paths remain legacy runtime
-integration. `__tick` still opens the old store path. These are unfinished,
-not accepted proof of the sole-controller ownership rule.
-
-### Wire ownership and callers
-
-Schedule response definitions moved from `internal/api/crons.go` to
-`internal/controllerwire/schedules.go`. Callers migrated directly. No aliases
-or forwarding shims were added. The redundant run envelope was consolidated
-into `ScheduleRun`. Only the W9 C3 contract was extended. No C2 route or
-permission alternative changed.
-
-The older `client.Client` cron API remains because W2's legacy controller tests
-and the legacy client integration suite still call it. Production CLI callers
-use the new typed managers. Delete those old APIs with their remaining callers
-when W2's final scheduler routes are integrated.
-
-Vet also found two stale `NodeLogs.Grep` calls left by an earlier W9 API cut.
-`pkg/controller/log_segments_internal_test.go` now exercises its existing HTTP
-endpoint directly, keeping line-number and match-limit assertions. No removed
-production API was restored. The test compiles; its socket-backed execution is
-left to the lead.
-
-### Documentation
-
-Replaced the 532-line old crons guide with `docs/schedules.md`, updated links and
-sidebar, and synced embedded copies. The new guide covers implemented client
-behavior and puts unfinished installation/timer intent in a design region.
-The C3 notes document request/response shapes, field presence and real server
-obligations. The changelog and client API snapshot are updated. Unrelated stale
-API snapshots produced by the generator were restored to their original bytes.
+`--reserved-for` has no registration/provisioning request in the supplied
+contracts. `TokenCreate` cannot request pool reservations. The CLI returns
+`policy_missing` before issuance for that selection. W2 must provide the
+team-admin registration seam. This is an incomplete integration, not an approved
+feature cut. No C2/W6/W8 contract was changed.
 
 ## Deleted
 
-This continuation removes **2,225 tracked Go lines gross** against its starting
-HEAD (`git diff --numstat -- '*.go'`). That count includes moved definitions and
-replaced tests, not a net-reduction claim. Entire removed Go files:
+This continuation deletes **316 tracked Go lines gross** against its starting
+HEAD, including replaced handlers and test fixture code. This is not a net
+reduction claim. The hard API cut removes 53 lines from client/admin.go:
+`Client.CreateToken`, `Client.LookupToken`, `Client.RevokeToken`,
+`CreateTokenRequest`, `CreatedToken` and `TokenInfo`. Their final production CLI
+caller moved to TokenManager. No outside-package caller migration was needed.
+The legacy mint wrappers, principal-kind inference, duplicate flag parser and
+unstructured credential reply decoding are removed from the runner CLI.
 
-- `cmd/sparkwing/crons_view.go`: 472 lines.
-- `internal/api/crons.go`: 149 lines, moved into the wire owner.
+The 1,610-line authentication guide is replaced with a 335-line page named
+Authentication design and an implemented credential-management guide. Historical
+section anchors remain. The design retains account, payment, billing, secret,
+claim and storage concerns while deleting obsolete token families, cache-service
+credentials, admin bypasses, Argon2 capability lookup and removed CLI examples.
+Target guarantees are marked as design. The new reference documents the client
+surface separately. Grant-vocabulary drift is checked against capability.Grants,
+and examples parse through the shared grammar. Embedded copies, sidebar, runner
+command reference, changelog and the client API snapshot are updated.
 
-The rest removes replaced local/remote schedule handlers, the old dispatcher,
-dead time-formatting helpers and superseded tests. Installer/tick/launcher
-regressions remain where their implementation is still active. Legacy
-catch-up-clamping CLI assertions were removed under the frozen refusal policy.
-The scheduler's old clamping implementation remains an integration obligation.
+## Tests and acceptance
 
-## Acceptance and tests
+`TestSurfaceRunnerEnrollmentCredentialTransport` passes for api.sock and remote
+connection fixtures through the real authenticated HTTP client. It covers typed
+runner issuance, exact grants, header idempotency key, server-derived metadata,
+selected metadata read and confirmed revocation. It is a transport proof. It
+does not prove actual issuer authority or native enrollment.
 
-`TestSurfaceSchedulesTransport` passes for api.sock and remote URL fixtures
-through the real authenticated HTTP transport. It covers selection escaping,
-explicit zero history, pause/resume, empty/zero override presence, reset,
-idempotent run results and already-absent deletion. This supplements the earlier
-surface grammar, run, log, sizing, pool, credential, secret and runner cells.
+Ported all 16 original runner/prefix tests to final flag spellings and a fake
+TokenManager, retaining real private-file writes and fake service execution.
+They retain preflight-before-mint, symlink/overwrite refusal, force replacement,
+contribution/repository validation, raw-token non-disclosure, manual supervision,
+service failure recovery and non-runner-kind refusal. Nine further tests cover
+repeatable selection, idempotency input, JSON receipts, controller/name
+preflight, pool-contract refusal, stop-before-revoke, stop failure, revocation
+failure and refused issuance. T1's parked source inventory assigns no original
+function directly to W9. Native product surface cells remain skipped.
 
-Native product cells remain skipped. No fake-backed cell was relabelled native.
-T1's parked source inventory assigns no original test directly to W9.
-
-Ported schedule UI/transport regressions cover NDJSON/plain outputs,
-declaration-versus-override detail, pin/override drift metadata, health failure
-status, authoritative upcoming instants, selector aliases, pause/resume,
-argument replacement/reset and immediate-run receipts. Added malformed-response,
-selection-before-mutation, alias deduplication, exact zero/empty input and
-idempotency retry cases. Persistence, authority and scheduler timing are not
-proved by these fakes.
-
-All Go commands use `GOWORK=off GOFLAGS=-buildvcs=false`, `GOCACHE` under
-`/tmp/sw-astra-W9/cache`, and `GOTMPDIR`/`TMPDIR` under `/tmp/sw-astra-W9/tmp`.
-Recreate those children to repeat the commands. Tests use `-p 4` at most.
-
-Passed:
+Passed on this continuation:
 
 - Whole-repository `go build -p 4 ./...`.
-- `go vet -p 4` for cmd/sparkwing, clisurface, controllerwire, internal/crons,
-  controller/client, controller, localws and tests/acceptance.
-- Full clisurface, controllerwire and tests/acceptance package suites, retaining
-  the skipped native product scenarios.
-- CLI/client tests selected by `^TestScheduleManagement|^TestScheduleManager|
-  ^TestScheduleRepository|^TestCommandReferenceMatchesRegistry|
-  ^TestSecretManagement|^TestRunnerListing|^TestRunnerReader|^TestToken|
-  ^TestPool|^TestRunStatistics|^TestSizing|^TestEngine|^TestLogReader`.
-- `TestPkgDocsContentMatchesDocsRoot`, `TestEmbeddedChangelogMatchesRoot`,
-  `sync-docs.sh --check`, commentcheck, sleepcheck and `git diff --check`.
+- `go vet -p 4` for cmd/sparkwing, clisurface, controllerwire,
+  controller/client, tests/acceptance and pkg/docs.
+- Full clisurface, controllerwire and tests/acceptance suites, retaining pending
+  native product scenarios.
+- Focused CLI/client tests matching `^TestRunners|^TestTokenPrefix|^TestAuthGuide|
+  ^TestCredential|^TestTokenCommands|^TestProfile|
+  ^TestCommandReferenceMatchesRegistry`.
+- Pkg/docs mirror/changelog/link-rendering checks, sync-docs --check, commentcheck,
+  sleepcheck and git diff --check.
 
-Attempted and failed:
+An initial command-reference drift failure was corrected by regenerating the
+reference from the test renderer. No product executable ran. The temporary
+renderer test is deleted. API generation ran into scratch and only the client
+snapshot was copied back, so unrelated snapshots did not change.
 
-- Full `internal/crons` suite. Its legacy arming paths fail the final schema's
-  `NOT NULL cron_schedules.repo_key` constraint. Git-backed fixture tests also
-  fail because inherited commit signing needs the read-only machine GPG home.
-  No global Git setting was changed. This suite is not a pass.
+Go verification uses GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-astra-W9/cache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W9/tmp.
+Recreate those children to repeat checks. Tests use -p 4 at most. Pipelines,
+full legacy CLI/client suites, server/socket/service execution and native
+Linux/macOS/Windows surface cells remain for the lead.
 
-The lead owns pipelines, full legacy package suites, socket-backed controller
-and localws tests, native Linux/macOS/Windows surface cells and launch QA. The
-updated controller grep test was compile/vet checked, not socket executed.
+The preceding session's internal/crons suite failed the final schema's
+cron_schedules.repo_key requirement and inherited GPG signing in Git fixtures.
+That suite was not rerun here and remains unverified.
 
 ## Work still required
 
@@ -151,64 +128,54 @@ updated controller grep test was compile/vet checked, not socket executed.
    Detached execution still starts the removed consumer entrypoint. Move it to
    the local-controller queue, then delete consumer/process helpers.
 2. Compose W8 lifecycle/runtime/managed units/logs. Finish hidden wingd arguments,
-   update refresh/restart, doctor, schedule local install/pin/uninstall and
-   `__tick`. Delete the direct-store schedule paths after this composition.
-3. Implement W2's final schedule projections and transaction adapters, including
-   aliases, requested history/upcoming counts, masked arguments, empty/zero
-   override presence, no clamping and idempotent immediate launch. Migrate W1's
-   legacy scheduler repository identity writes to the final schema. Then port
-   the remaining legacy cron integration tests and delete the old Client API.
-4. Migrate runner enrollment/service config, remaining runner token callers,
-   queue, cache warm, legacy client APIs and other management paths.
+   update refresh/restart, doctor, local schedule install/pin/uninstall and
+   __tick. Delete direct-store schedule paths after composition.
+3. Implement W2's final schedule projections and W1 identity writes, including
+   aliases, requested history/upcoming, masked arguments, empty/zero override
+   presence, no clamping and idempotent launch. Port the remaining legacy cron
+   integration tests and delete the old Client cron API with its callers.
+4. Compose W6's complete machine schema, private credential directory and W8's
+   native runner service/start/refresh. Delete agentFileConfig, agentconfig and
+   agentservice use in the CLI. The typed credential portion is now finished.
+   Integrate W2's runner registration, grants and --reserved-for proposal.
 5. Replace profile.Load/Save and connection selection with W6's final machine
    parsing/persistence. Profile scope enrollment remains a W2 gap.
-6. Finish the other guides, scripts, examples and runtime tests still using
-   removed vocabulary/schemas. Auth.md still needs its remaining migration.
-7. Execute every native surface cell and launch QA after owner implementations.
+6. Migrate queue, cache warm, remaining legacy client APIs and management paths.
+   Finish remaining guides, scripts, examples and runtime tests that still use
+   removed vocabulary/schemas. Auth's obsolete guide is replaced here.
+7. Execute every native surface cell and launch QA after owner integration.
 
 ## Contract changes needed in other areas
 
-Existing gaps remain:
-
-- W1/W2: retry failed/all job selection and an authorized sizing-reset operation
-  that clears learned samples/floors while retaining explicit pins.
+- W1/W2: failed/all job retry selection and an authorized sizing reset that
+  clears learned samples/floors while retaining explicit resource pins.
 - W2: ordered mixed trigger/job claims, profile scope enrollment, run-scoped
   annotations and ordinary-member annotation authorization.
+- W2: explicit team-admin runner registration/provisioning with requested pool
+  reservations. TokenCreate has no such proposal field. Issuer metadata must
+  retain granted reservations and repository authority separately from labels.
 - W8: runtime/unit construction, canonical logs, access-policy/install-force
   fields and effective endpoints. ManagedUnitManager has no schedule
-  installation/uninstallation method, and LocalRuntime exposes only Run.
-  The stable tick has no declared way to request one scheduler pass from the
-  sole local controller. W8 must supply those seams before W9 can replace
-  local timer/pin/tick plumbing. No W8 contract was changed here.
+  install/uninstall method. LocalRuntime exposes only Run. A stable tick needs
+  one controller-owned scheduler-pass seam. Runner enrollment also needs its
+  final machine config/private-file and supervised-unit composition.
 
-Real integration also needs W2's other C3 projections and apierr.DecodeInner,
+Real integration also needs W2's C3 server projections and apierr.DecodeInner,
 W1/W2 encrypted/restricted-secret persistence and enforcement, W7 persisted
-log/cursor/final completeness and W3/W6/W8 host composition. No new product
-restriction, environment variable, service or timeout was introduced. No new
-human decision is requested.
+logs/cursors/final completeness and W3/W6/W8 hosting. These are not reasons to
+restore the removed APIs. No new human decision, environment variable, service,
+timeout or product restriction is proposed.
 
 ## Shared files and friction
 
-Minimal production callers outside W9 changed only to import the moved wire
-models:
+No W1-W8 production file changed this continuation. No outside-package caller
+migration was necessary for the removed token client methods. Shared changes are
+CHANGELOG.md, .apidiff/pkg_controller_client.txt, the C3 notes, this handoff,
+tests/acceptance/runner_credentials_contract_test.go, pkg/docs/changelog.md and
+the generated documentation mirrors. Other source changes are W9-owned.
 
-- `internal/crons/view.go`
-- `pkg/controller/crons.go`
-- `pkg/localws/crons.go`
-
-Shared tests migrated for those wire models:
-`pkg/controller/crons_test.go`, `pkg/controller/crons_team_test.go`.
-The earlier removed API's caller fix is
-`pkg/controller/log_segments_internal_test.go`.
-The replaced shared definition is `internal/api/crons.go` (deleted).
-
-Other shared changes are tests/acceptance/schedules_contract_test.go, README.md
-(schedule-guide link), CHANGELOG.md, .apidiff/pkg_controller_client.txt, the C3
-contract, this handoff, pkg/docs/changelog.md and generated doc mirrors. All
-other production changes are in W9-owned packages.
-
-Friction: the legacy scheduler does not satisfy the final schema, Git fixture
-signing cannot access the machine GPG agent, sockets/native processes remain
-outside the worker verification path, and the final runtime contracts lack the
-schedule install/tick seams above. Git identity remains Korey Gambill and
-core.worktree is unset. Scratch is deleted before the final report.
+Friction: final runner provisioning and machine/native lifecycle seams are
+unfinished. Native execution is outside this worker's authorized verification
+path. Discovery tools report an older installed Overwing binary, but standards
+matching/showing worked. Git identity remains Korey Gambill and core.worktree is
+unset. The lead owns review, commits, pipelines and landing.

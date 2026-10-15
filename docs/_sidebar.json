@@ -42,6 +42,7 @@
         "security",
         "hotfix-runner",
         "threat-model",
+        "credentials",
         "auth",
         "oidc",
         "limits",

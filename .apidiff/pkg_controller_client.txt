@@ -84,7 +84,6 @@ func (c *Client) CreateNode(ctx context.Context, n store.Node) error
 func (c *Client) CreateRun(ctx context.Context, r store.Run) error
 func (c *Client) CreateSecret(ctx context.Context, name, value string, masked bool) error
 func (c *Client) CreateSecretForPipeline(ctx context.Context, name, value, pipeline string, masked, shared bool) error
-func (c *Client) CreateToken(ctx context.Context, req CreateTokenRequest) (*CreatedToken, error)
 func (c *Client) CreateTrigger(ctx context.Context, req TriggerRequest) (*TriggerResponse, error)
 func (c *Client) DeleteCronRepo(ctx context.Context, repoURL string) (*CronRepoDeleteResponse, error)
 func (c *Client) DeleteRun(ctx context.Context, runID string) error
@@ -162,7 +161,6 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error)
 func (c *Client) ListTriggers(ctx context.Context, f store.TriggerFilter) ([]*store.Trigger, error)
 func (c *Client) LogSegment(ctx context.Context, runID, nodeID string, req store.LogSegmentRequest) (store.LogSegmentGrant, error)
-func (c *Client) LookupToken(ctx context.Context, prefix string) (json.RawMessage, error)
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (c *Client) NewLogSegmentUploader(base context.Context, runID, nodeID string) *LogSegmentUploader
 func (c *Client) NodeLogs() NodeLogs
@@ -188,7 +186,6 @@ func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 func (c *Client) ResumeCron(ctx context.Context, name string) (*controllerwire.ScheduleView, error)
 func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (string, error)
 func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
-func (c *Client) RevokeToken(ctx context.Context, prefix string) error
 func (c *Client) RunCronNow(ctx context.Context, name string) (*controllerwire.ScheduleRun, error)
 func (c *Client) RunnerIdentity() string
 func (c *Client) SealLog(ctx context.Context, runID, nodeID string, m logseg.Manifest) error
@@ -226,16 +223,6 @@ type ConcurrencyState struct {
 	UsedCost          int
 	Holders           []WaiterHolder
 	Waiters           []StateWaiter
-}
-type CreateTokenRequest struct {
-	Kind      string
-	Principal string
-	Scopes    []string
-	TTLSecs   int64
-}
-type CreatedToken struct {
-	Token    string
-	Metadata json.RawMessage
 }
 type CronOverrideRequest struct {
 	Cron    string
@@ -453,15 +440,6 @@ type TokenDeadError struct {
 }
 func (e *TokenDeadError) Error() string
 func (e *TokenDeadError) Explain(token, remedy string) string
-type TokenInfo struct {
-	Prefix     string
-	Kind       string
-	Principal  string
-	Scopes     []string
-	Metered    bool
-	LastUsedAt *int64
-	RevokedAt  *int64
-}
 func TokenPrefix(token string) string
 type TriggerMeta struct {
 	Source string

@@ -353,11 +353,11 @@ func Registry() []Command {
 			{Name: "target", Argument: "TARGET"},
 		}},
 		{Path: "sparkwing runners", Flags: []Flag{}},
-		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Use team credentials; only a team admin sets --reserved-for. --repos is the explicit allow-list spelling exception."}, Flags: []Flag{
-			{Name: "runner", Argument: "RUNNER"},
+		{Path: "sparkwing runners add", Authority: TeamCredential, Rules: []string{"Use team credentials. --reserved-for requires team-admin runner registration support. --repos accepts repeatable, comma-separated patterns. JSON reports credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
+			{Name: "runner", Argument: "RUNNER", Required: true},
 			{Name: "repos", Argument: "PATTERN", Repeatable: true, CommaList: true},
 			{Name: "label", Argument: "LABEL", Repeatable: true, CommaList: true},
-			{Name: "max-concurrent", Argument: "N"},
+			{Name: "max-concurrent", Argument: "N", Minimum: 1, HasMinimum: true},
 			{Name: "contribution", Argument: "SPEC"},
 			{Name: "config", Argument: "PATH"},
 			{Name: "force"},
@@ -369,7 +369,7 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 			{Name: "quiet", Short: "q"},
 		}},
-		{Path: "sparkwing runners remove", Authority: TeamCredential, Flags: []Flag{
+		{Path: "sparkwing runners remove", Authority: TeamCredential, Rules: []string{"Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. JSON retains confirmed revocation. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "config", Argument: "PATH"},
 			{Name: "no-service"},
 			{Name: "profile", Argument: "NAME"},
