@@ -201,23 +201,21 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		if l.Config.MaxClaims > 0 && claimed >= l.Config.MaxClaims {
 			return nil, nil
 		}
-		for len(active) >= l.Config.MaxConcurrent {
+		if len(active) >= l.Config.MaxConcurrent {
 			select {
 			case result := <-results:
 				finish(result)
 				idleSince = time.Now()
 			case <-policyRefresh.C:
-				if err := l.CheckVersion(claims, l.Config.Version); err != nil {
-					if ctx.Err() == nil && policyInterrupted(claims, err) {
-						return nil, nil
-					}
-					return fmt.Errorf("runner version policy: %w", err), nil
+				if stop, err := l.checkPolicy(claims); stop {
+					return err, nil
 				}
 			case <-drain:
 				return nil, nil
 			case <-ctx.Done():
 				return nil, context.Cause(ctx)
 			}
+			continue
 		}
 		select {
 		case <-drain:
@@ -230,11 +228,8 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		if len(active) == 0 && l.Config.IdleExit > 0 && time.Since(idleSince) >= l.Config.IdleExit {
 			return nil, nil
 		}
-		if err := l.CheckVersion(claims, l.Config.Version); err != nil {
-			if ctx.Err() == nil && policyInterrupted(claims, err) {
-				return nil, nil
-			}
-			return fmt.Errorf("runner version policy: %w", err), nil
+		if stop, err := l.checkPolicy(claims); stop {
+			return err, nil
 		}
 		outcome := l.claimWhileHosting(claims, policyRefresh.C, results, finish, func() time.Duration {
 			return l.lifecycleWait(limits.VersionIndexRefresh, idleSince, len(active) == 0)
@@ -278,12 +273,9 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			case <-timer.C:
 				break pollWait
 			case <-policyRefresh.C:
-				if err := l.CheckVersion(claims, l.Config.Version); err != nil {
+				if stop, err := l.checkPolicy(claims); stop {
 					timer.Stop()
-					if ctx.Err() == nil && policyInterrupted(claims, err) {
-						return nil, nil
-					}
-					return fmt.Errorf("runner version policy: %w", err), nil
+					return err, nil
 				}
 			case <-drain:
 				timer.Stop()
@@ -318,71 +310,72 @@ type claimOutcome struct {
 	stopErr  error
 }
 
-func (l *Loop) claimWhileHosting(ctx context.Context, refresh <-chan time.Time, results <-chan unitResult, finish func(unitResult), wait func() time.Duration) (outcome claimOutcome) {
+func (l *Loop) claimWhileHosting(ctx context.Context, refresh <-chan time.Time, results <-chan unitResult, finish func(unitResult), wait func() time.Duration) claimOutcome {
 	claimCtx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
+	defer cancel()
+	done := make(chan claimOutcome, 1)
 	request := l.request()
-	var response controllerwire.ClaimResponse
-	var err error
 	go func() {
-		defer close(done)
-		response, err = l.Controller.Claim(claimCtx, request)
-	}()
-	// safety: a committed award and an independent stop reason both survive request cancellation.
-	defer func() {
-		cancel()
-		<-done
-		outcome.response, outcome.err = response, err
-		outcome.stopped = outcome.stopped || ctx.Err() != nil
+		response, err := l.Controller.Claim(claimCtx, request)
+		done <- claimOutcome{response: response, err: err}
 	}()
 	timer := time.NewTimer(wait())
 	defer timer.Stop()
 	for {
+		var stopErr error
 		select {
-		case <-done:
-			return claimOutcome{}
+		case outcome := <-done:
+			outcome.stopped = ctx.Err() != nil
+			return outcome
 		case result := <-results:
 			finish(result)
 			timer.Reset(wait())
+			continue
 		case <-refresh:
-			if err := l.CheckVersion(ctx, l.Config.Version); err != nil {
-				if policyInterrupted(ctx, err) {
-					return claimOutcome{stopped: true}
-				}
-				return claimOutcome{stopped: true, stopErr: fmt.Errorf("runner version policy: %w", err)}
+			stop, err := l.checkPolicy(ctx)
+			if !stop {
+				continue
 			}
+			stopErr = err
 		case <-timer.C:
-			remaining := wait()
-			if remaining <= 0 {
-				return claimOutcome{stopped: true}
+			if remaining := wait(); remaining > 0 {
+				timer.Reset(remaining)
+				continue
 			}
-			timer.Reset(remaining)
 		case <-ctx.Done():
-			return claimOutcome{stopped: true}
 		}
+		cancel()
+		outcome := <-done
+		outcome.stopped, outcome.stopErr = true, stopErr
+		return outcome
 	}
+}
+
+func (l *Loop) checkPolicy(ctx context.Context) (bool, error) {
+	err := l.CheckVersion(ctx, l.Config.Version)
+	if err == nil || policyInterrupted(ctx, err) {
+		return err != nil, nil
+	}
+	return true, fmt.Errorf("runner version policy: %w", err)
 }
 
 func policyInterrupted(ctx context.Context, err error) bool {
 	if ctx.Err() == nil || err == nil {
 		return false
 	}
-	if err == ctx.Err() || err == context.Cause(ctx) {
-		return true
-	}
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		parts := joined.Unwrap()
-		if len(parts) == 0 {
-			return false
-		}
 		for _, part := range parts {
 			if !policyInterrupted(ctx, part) {
 				return false
 			}
 		}
-		return true
+		return len(parts) > 0
 	}
-	return policyInterrupted(ctx, errors.Unwrap(err))
+	if wrapped := errors.Unwrap(err); wrapped != nil {
+		return policyInterrupted(ctx, wrapped)
+	}
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func (l *Loop) request() controllerwire.ClaimRequest {

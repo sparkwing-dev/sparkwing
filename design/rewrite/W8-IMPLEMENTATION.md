@@ -1,5 +1,49 @@
 # W8 implementation handoff
 
+## Continuation: approved cancellation classification
+
+The approved pending-claim outcomes and cancellation classification are implemented.
+W8 remains incomplete at the real-integration boundaries listed below. All 26
+assigned amendment rows and the W8 handoffs retain the audited scope in
+W8-AMENDMENTS-1.md. The two approved pending-claim entries are complete.
+
+Invariant: every returned committed award is adopted and joined, independent
+stop reasons remain observable, and classifying cancellation accepts arbitrary
+error values without panic. Claim results cross one channel. A stop cancels and
+receives that result before returning the award and stop reason independently.
+One policy helper serves all four policy-check sites. Its classifier traverses
+wraps and joins before testing leaves with errors.Is and the two context
+sentinels. Run's existing joining defer retains the caller's original cause.
+
+The retained arbitrary-cause regression failed before the change and passes
+with it. The property now covers direct causes, nested wraps and joins,
+independent denials, committed awards, host failures, drain, cancellation and
+deadlines with comparable and slice-backed custom causes.
+
+A race check also exposed an existing capacity-wait exit that could request
+another claim after caller cancellation. The untouched source reproduced the
+failure 16 times in 100 runs through a Go overlay. Capacity events now return
+to the existing outer cancellation/drain/claim-count checks. The same 100-run
+race probe passes. No new cancellation gate or stop owner was added.
+
+The pending wait shrinks from 44 to 40 physical lines. Counting its policy
+classifier, the common policy helper and the three Run policy sites, the stop
+path shrinks from 84 to 75 lines. loop.go shrinks from 408 to 401 lines after
+the capacity fix. The diff removes 49 production lines and adds 42. Whole old
+files deleted in this continuation: zero. Earlier legacy cuts remain deleted.
+New T1 inventory ports: zero. No other package caller or public API changed.
+
+The fresh source review found no actionable issue in the outcome handoff,
+classification, capacity correction or property extensions. Final verification
+and the remaining integration points are recorded in W8-AMENDMENTS-1.md.
+
+The only merge conflict was contracts/handoffs.md. Its working contents retain
+both W8's earlier evidence and the lead's new approval. The index remains
+unmerged because SWARM-BRIEF prohibits worker Git writes. The lead must stage
+the resolved file and finish the merge. No other area's implementation changed.
+
+## Earlier pending-claim evidence (superseded)
+
 W8 remains incomplete. The approved pending-claim outcome redesign is implemented.
 `TestLoopPendingAwardPreservesPolicyDenial` now passes. The final runner suite has
 retained failing regressions in interruption classification, described below.

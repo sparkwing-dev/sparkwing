@@ -119,3 +119,16 @@ focused local-controller/component suites pass without the overlay. No runtime
 change was applied. The interruption DESIGN still needs the lead's decision.
 The committed outcome property also passed 60,631 fuzz executions without the
 overlay.
+
+**DESIGN approved (lead): W8 cancellation classification (third finding in the pending-claim mechanism).** Invariant: classifying a stop reason never panics and never confuses a caller's cancellation cause with a denial. Recognise cancellation only with `errors.Is(err, context.Canceled)` / `errors.Is(err, context.DeadlineExceeded)` (ctx.Err's comparable sentinels); never compare against `context.Cause(ctx)` with `==`. Run's joining defer returns the caller's arbitrary cause unchanged. Test nested wraps and joins, independent denials, and comparable and non-comparable custom causes, including a property test. Three bugs in one mechanism means it is too clever: while fixing this, cut the pending-claim stop logic to the smallest form that satisfies the approved outcome representation, and report the line count before and after.
+
+W8 completed the approved pending-claim cancellation classification. One policy
+helper traverses wraps and joins, tests only context cancellation/deadline
+sentinels at leaves, and preserves independent denials. The original
+arbitrary-cause regression and expanded property pass with committed awards,
+caller cancellation/deadlines and comparable/non-comparable custom causes.
+The policy/claim stop path shrinks from 84 to 75 lines, the pending wait from
+44 to 40, and loop.go from 408 to 401 including a capacity-wait correction that
+returns to the existing stop checks. This supersedes W8's pending DESIGN status
+above. W3's shared run/plan/eval identity construction remains open. See
+../W8-AMENDMENTS-1.md for verification and remaining real-integration points.

@@ -6,19 +6,17 @@ This snapshot covers every amendment-1 row whose action column names W8. A
 component pass proves its named boundary. It does not activate a native catalog
 cell or establish an HTTP, Cloud or OS deployment proof.
 
-The approved pending-claim outcomes are implemented. A1-08/39/55 now keep
-awards and stop results independent through both Loop and ManagedRunner. The
-original policy-denial regression passes. The final review found a second
-interruption-classification bug with a non-comparable cancellation cause.
-The failing regression is retained under the DESIGN decision below. All 26
-assigned rows and W8 handoffs were rechecked. Other integration dependencies
-remain below. Earlier merge-resolution sections describe previous sessions.
+The approved pending-claim outcomes and cancellation classification are
+implemented. A1-08/39/55 preserve awards and independent stop results through
+Loop and ManagedRunner. The policy-denial and arbitrary-cause regressions pass.
+All 26 assigned rows and W8 handoffs were rechecked. Foreign implementations
+and native evidence remain integration work as recorded in the table.
 
-The proposed interruption redesign passes the full runner suite and 64,397 fuzz
-executions through a temporary Go overlay. Both retained regressions still fail
-in the working tree because the separate DESIGN has no lead decision. This
-continuation changes only these reports and the W8 handoff. It adds no production
-code, contract surface or T1 port and activates no native acceptance cell.
+The final source review found no actionable issue. The policy/claim stop path
+shrinks from 84 to 75 physical lines. The pending wait alone shrinks from 44 to
+40, and loop.go from 408 to 401 after the capacity-wait cancellation correction.
+The diff removes 49 production lines and adds 42. No public API, foreign caller,
+new T1 port or native acceptance cell changed.
 
 | Amendment | W8 action and remaining integration |
 | --- | --- |
@@ -47,7 +45,7 @@ code, contract surface or T1 port and activates no native acceptance cell.
 | A1-51 | W8's retired cluster v1 host paths stay deleted. Shared Go/TS corpus parity, remaining orchestrator fixtures and generated references remain W3/W4/W5/W9 work. |
 | A1-52 | The install result has no preload. Windows npm shim argv uses Node through the shared npmcmd helper and process-group runner. Windows execution and the packaged TS bridge still need native evidence. No Linux fixture is counted as Windows proof. |
 | A1-53 | Native catalog cells stay blocked. Component acceptance passes only its component suite. No native driver or real-repository QA was available in this sandbox. |
-| A1-55 | A here loop with RunID and omitted Kinds now requests only its trigger, matching the shared client's named route contract. A component checks the request, unchanged award and no retry after a lost response. A fuzz property checks request selection and foreign-run refusal. Successful policy refreshes retain the pending request. A controlled-clock component and a second fuzz property prove that delayed delivery and response loss never replay that claim. Independent outcome handling now preserves the award and stop result. The interruption-classification DESIGN below remains open. Native claim/reclaim, requester ancestry and HTTP response-loss evidence remain integration obligations. |
+| A1-55 | A here loop with RunID and omitted Kinds now requests only its trigger, matching the shared client's named route contract. A component checks the request, unchanged award and no retry after a lost response. A fuzz property checks request selection and foreign-run refusal. Successful policy refreshes retain the pending request. A controlled-clock component and a second fuzz property prove that delayed delivery and response loss never replay that claim. Independent outcome handling now preserves the award and stop result. The approved interruption classification is implemented and its regression/property pass. Native claim/reclaim, requester ancestry and HTTP response-loss evidence remain integration obligations. |
 
 ## Merge resolution
 
@@ -400,3 +398,71 @@ The approved outcome representation and the other 26-row integration limits
 remain unchanged. No other area's contract needs to change.
 
 <!-- design:end -->
+
+## Continuation: approved cancellation classification implemented
+
+The two approved W8 pending-claim designs in contracts/handoffs.md are complete.
+The earlier interruption DESIGN status is superseded. Cancellation-only error
+trees drain cleanly. A denial in any joined branch remains observable. Arbitrary
+caller causes reach Run's existing joining defer without equality comparisons.
+The property covers deadline and explicit cancellation with comparable and
+slice-backed causes, direct causes, nested wraps/joins and optional awards.
+
+The capacity-wait correction reuses the existing outer stop checks. Its original
+race failure reproduces 16/100 times with the untouched source overlay and passes
+100/100 after the correction. The fresh reviewer found no actionable issue in
+either runtime change. The review was source-based, not native execution.
+
+Real integration remains open for W3 source/projections, lease keeper, host and
+process construction, run/plan/eval identities and bound storage; W9 engine/data
+HTTP clients, final factories and launcher grammar; W1/W2 plan/eval resources,
+SyncLauncher and the elected local-controller service adapter; W3/W7 workspace-off
+binary-cache hashing; and T1/lead deployed Cloud network/cleanup, native Windows
+and macOS, full placement and real-repository proofs. These boundaries retain
+contract-based fake components. No foreign contract change was made.
+
+Shared file touched: contracts/handoffs.md. No other area's code or caller was
+migrated. The working-file merge conflict is resolved, but its index still needs
+the lead's stage/merge commit because worker Git writes are prohibited.
+No new product decision or contract amendment is requested.
+
+### Verification for the cancellation continuation
+
+Commands use go -C with this worktree, GOWORK=off, GOFLAGS=-buildvcs=false,
+GOMAXPROCS=4 and GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W8. Tests use -p 4.
+
+| Check | Result |
+| --- | --- |
+| Whole-repository build -p 4 ./... | Passed after the final runtime edit. |
+| W8/acceptance vet | Passed after the final runtime edit. |
+| Full internal/runners suite | Passed, including the original policy-denial and arbitrary-cause regressions. |
+| Loop/Managed race selection | Passed after the capacity correction. The capacity regression also passed 100 race runs. |
+| FuzzLoopPendingClaimStopOutcomes, 10s, parallel=4 | Passed 28,066 executions on the final runtime. |
+| FuzzLoopPendingPolicyInterruption, 10s, parallel=4 | Passed 58,400 executions on the final runtime. The corpus includes twenty explicit seeds. |
+| Engine, npmcmd, sdkinstall, launcher and runner-service suites | Passed. |
+| W8 and Cloud component acceptance | Passed, including real EngineController/SQLite runner and bootstrap boundaries with fake foreign host/source/keeper ports. |
+| Focused local runtime, lifecycle, dashboard, managed units and clients | Passed. |
+| Cluster suite | Passed with its previously blocked metrics-listener test excluded. |
+| commentcheck -base main . | Passed across 1,176 files. |
+| sleepcheck -base HEAD ., gofmt and git diff --check | Passed. |
+
+The combined final selector also matched two native wingd tests through Loop:
+TestDaemon_AcceptLoopClosesAForeignConnection and
+TestHeadroomSamplerLoopAdmitsAfterExternalCPUDrops. Both could not run because
+the sandbox rejects Unix-socket setsockopt. Their fixtures removed the temporary
+socket directories. This is unexecuted native evidence, not a passing daemon
+suite. Native Windows/macOS, deployment probes, full placement cells and real
+repository QA remain untested here. No native catalog cell was unskipped.
+
+No public docs impact: these changes implement the approved internal stop/error
+contract and preserve the CLI grammar, settings and error wording. The source
+contract handoff and worker reports carry the behavior and verification update.
+No foreign public contract, caller migration or additional T1 port was needed.
+
+Friction: initial bootstrap ran installed sparkwing info --for-agent before the
+brief's no-binaries instruction was read. It printed discovery context. No
+further Sparkwing binary or pipeline ran. Overwing standards remained usable
+while reporting its installed binary behind source. Worker Git writes are
+prohibited, so the lead must finish the already-resolved working-file merge.
+No deployment or release ran. Git config has no local user identity or
+core.worktree override. Check processes finished and worker scratch was removed.
