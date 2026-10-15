@@ -8,7 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// SetResultBlobRecords configures transactional result verification before the store is shared.
+// SetResultBlobRecords configures verified manifests for records and results before the store is shared.
 func (s *Store) SetResultBlobRecords(manifests BlobManifestReader) {
 	s.resultRecords = &blobRecords{manifests: manifests, rules: sharedBlobRules{}}
 }

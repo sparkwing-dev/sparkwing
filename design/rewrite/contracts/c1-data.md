@@ -7,10 +7,14 @@
 `Server.WithDataObjects` installs `storage.BlobManifests{Objects: objects}` through
 `Store.SetResultBlobRecords` before serving or sharing the store. Terminal
 output and manifest attachments use that backend inside the live tenant
-transaction. The controller property test drives real claim/start, upload
+transaction. `Tenant.CommitRecord`, `LookupRecord`, `LookupMemo`, `LookupDepcache`
+and `CopyMemo` use the configured verified manifest reader too. An explicit
+`BlobRecords` reader overrides it. Without either reader, manifest operations
+fail. The controller property test drives real claim/start, upload
 reservation/settlement, record commit and terminal transitions. Corrupt physical
-manifest bytes refuse completion. Restoring them allows completion and exact
-replay. Authenticated data binding remains C2's separate contract.
+manifest bytes refuse record reads and completion. Restoring them allows
+completion and exact replay. Authenticated data binding remains C2's separate
+contract.
 
 The legacy `AttemptReport.OutputFrom`, `Store.FinishNodeCopyingOutput` and
 their `node_outputs` copy branches are removed. Host memo materialization

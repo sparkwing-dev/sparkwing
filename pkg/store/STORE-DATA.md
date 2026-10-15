@@ -1,5 +1,12 @@
 # Store data persistence
 
+`SetResultBlobRecords` supplies verified manifests to tenant record commits,
+lookups, memo copies and terminal result attachment. `BlobRecords` uses that
+configured reader when its caller omits one. The controller's `WithDataObjects`
+installs it before sharing the store. Physical manifest corruption refuses a
+required record read and a terminal attachment. Memo and depcache retain their
+existing cache-miss rules.
+
 `Tenant.StorageStanding` reads policy, retained events, unique blobs, tagged log
 bytes and live upload holds in one snapshot. It shares the blob/log inventory
 reader with storage billing. Committed and aborted tickets contribute no holds.

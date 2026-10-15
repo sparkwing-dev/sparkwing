@@ -40,9 +40,11 @@ type blobRecords struct {
 	rules     blobRecordRules
 }
 
-// BlobRecords binds transactional records to the controller's verified manifest reader.
-// Output-only consumers may omit the reader; manifest operations then fail explicitly.
+// BlobRecords uses the supplied manifest reader or the store's configured reader.
 func (t *Tenant) BlobRecords(manifests BlobManifestReader) blob.RecordStore {
+	if configured, ok := t.s.resultRecords.(*blobRecords); manifests == nil && ok {
+		manifests = configured.manifests
+	}
 	return &blobRecords{tenant: t, manifests: manifests, rules: sharedBlobRules{}}
 }
 
