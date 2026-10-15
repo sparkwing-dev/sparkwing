@@ -22,51 +22,15 @@ import (
 )
 
 func TestTrigger_Validation(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	srvController := controller.New(st, nil)
-	srv := httptest.NewServer(srvController.Handler())
-	defer srv.Close()
-
-	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]string{})
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status=%d want 400", resp.StatusCode)
-	}
-	_ = resp.Body.Close()
-
-	resp2 := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
-		"pipeline": "demo",
-		"unknown":  true,
-	})
-	if resp2.StatusCode != http.StatusBadRequest {
-		t.Errorf("unknown field status=%d want 400", resp2.StatusCode)
-	}
-	_ = resp2.Body.Close()
-}
-
-func TestTrigger_MissingSource400(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	srvController := controller.New(st, nil)
-	srv := httptest.NewServer(srvController.Handler())
-	defer srv.Close()
-
-	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
-		"pipeline": "demo",
-	})
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status=%d want 400 (missing trigger.source)", resp.StatusCode)
+	f := newBrowserFixture(t, nil)
+	for _, body := range []string{`{}`, `{"request":{"team":"default","pipeline":"demo"},"unknown":true}`} {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/runs", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+f.token)
+		request.Header.Set("Content-Type", "application/json")
+		response := f.serve(request)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("body %s: status=%d want 400: %s", body, response.Code, response.Body)
+		}
 	}
 }
 

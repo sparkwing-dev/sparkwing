@@ -163,6 +163,10 @@ record. The failure contains its canonical error, job and stage.
 
 Fetch logs separately with `sparkwing runs logs --run RUN`.
 
+Controller log reads use the same configured object backend as signed uploads.
+Each read rechecks the authenticated actor and its holder/generation before
+fetching committed bytes. Log streams return `Cache-Control: no-store`.
+
 ## Log completeness
 
 A log page contains `records`, `next_cursor`, `truncated` and `complete`.

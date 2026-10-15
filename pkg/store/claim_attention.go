@@ -21,6 +21,11 @@ const runAttentionColumn = `COALESCE((SELECT n.attention_reason FROM nodes n
    AND n.` + nodeNotDone + ` AND n.attention_reason != ''
  ORDER BY n.node_id LIMIT 1), '')`
 
+type runnerPoll struct {
+	UnitDemand
+	ObservedAt time.Time `json:"observed_at"`
+}
+
 // RecordRunnerPoll stores a live machine's advertised capacity and labels with the store clock.
 func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error {
 	if !validMatchingResources(observation.Capacity) || !validMatchingResources(observation.Available) {
@@ -31,10 +36,6 @@ func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) er
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(observation)
-	if err != nil {
-		return err
-	}
 	return s.inTx(ctx, func(tx *storeTx) error {
 		principal, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: observation.CapabilityPrefix})
 		if err != nil {
@@ -42,6 +43,10 @@ func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) er
 		}
 		if !registeredClaimant(principal.Capability) {
 			return authorityError(apierr.Forbidden, "runner observations require an unbound machine claimant")
+		}
+		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now()})
+		if err != nil {
+			return err
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, raw, body, tx.now().UnixNano(), principal.Capability.Team, observation.CapabilityPrefix)
 		return err

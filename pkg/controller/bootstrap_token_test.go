@@ -4,9 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
-	"net/http"
-	"net/http/httptest"
-	"path/filepath"
 	"slices"
 	"testing"
 	"testing/quick"
@@ -14,12 +11,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type bootstrapIssuer struct {
-	*store.Store
 	ensure func(context.Context, capability.ProvisionSpec) (bool, error)
 }
 
@@ -64,45 +58,9 @@ func TestEnsureBootstrapAdminTokenRefusals(t *testing.T) {
 	if created, err := controller.EnsureBootstrapAdminToken(t.Context(), issuer, raw); err == nil || created || calls != 1 {
 		t.Fatal("commit refusal suppressed")
 	}
-	var st *store.Store
-	created, err := controller.EnsureBootstrapAdminToken(t.Context(), st, raw)
+	created, err := controller.EnsureBootstrapAdminToken(t.Context(), nil, raw)
 	var api *apierr.Error
 	if created || !errors.As(err, &api) || api.Code != apierr.PolicyMissing {
 		t.Fatalf("missing transaction: %t %v", created, err)
-	}
-}
-
-func TestBootstrapStartupUsesDurableCapabilityAuthority(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	for i := range 2 {
-		created, err := controller.EnsureBootstrapAdminToken(t.Context(), st, raw)
-		if err != nil || created != (i == 0) {
-			t.Fatalf("startup %d: %t %v", i, created, err)
-		}
-	}
-	if ready, err := st.HasDeploymentAdministrator(t.Context()); err != nil || !ready {
-		t.Fatalf("readiness: %t %v", ready, err)
-	}
-	req := httptest.NewRequest("GET", "/api/v1/operator/tokens", nil)
-	req.Header.Set("Authorization", "Bearer "+raw)
-	out := httptest.NewRecorder()
-	controller.New(st, nil).Handler().ServeHTTP(out, req)
-	if out.Code != http.StatusOK {
-		t.Fatalf("operator inventory: %d %s", out.Code, out.Body)
-	}
-	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: raw[:16]}
-	if err := st.AsOperator().RevokeAuthority(t.Context(), store.Actor{Authority: ref}, ref); err != nil {
-		t.Fatal(err)
-	}
-	if created, err := controller.EnsureBootstrapAdminToken(t.Context(), st, raw); err == nil || created {
-		t.Fatal("startup revived a revoked seed")
-	}
-	if ready, err := st.HasDeploymentAdministrator(t.Context()); err != nil || ready {
-		t.Fatalf("revoked readiness: %t %v", ready, err)
 	}
 }

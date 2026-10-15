@@ -551,7 +551,7 @@ export async function triggerRun(
         requested_args: args || {},
         ...(git ? {
           git: { repository: { display: git.repo_url }, ref: git.branch },
-          source: { ref: git.repo_url },
+          source: { ref: git.branch, location: { remote_url: git.repo_url, pipeline_dir: ".sparkwing" } },
         } : {}),
       },
     }),

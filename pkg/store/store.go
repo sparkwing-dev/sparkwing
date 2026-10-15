@@ -1124,39 +1124,6 @@ func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []s
 	return t.s.getLatestRun(ctx, oneTeam(t.team), pipeline, statuses, maxAge)
 }
 
-func (s *Store) getLatestRun(ctx context.Context, scope teamScope, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
-	if pipeline == "" {
-		return nil, errors.New("GetLatestRun: pipeline is required")
-	}
-	where := "WHERE pipeline = ?"
-	args := []any{pipeline}
-	if !scope.all {
-		if scope.team == "" {
-			return nil, ErrNoTeam
-		}
-		where += " AND team = ?"
-		args = append(args, string(scope.team))
-	}
-	if len(statuses) > 0 {
-		ph := make([]string, len(statuses))
-		for i, st := range statuses {
-			ph[i] = "?"
-			args = append(args, st)
-		}
-		where += " AND status IN (" + strings.Join(ph, ",") + ")"
-	}
-	if maxAge > 0 {
-		where += " AND COALESCE(finished_at, started_at) >= ?"
-		args = append(args, time.Now().Add(-maxAge).UnixNano())
-	}
-	q := `
-SELECT ` + runColumns + `
-  FROM runs ` + where + `
- ORDER BY started_at DESC
- LIMIT 1`
-	return scanRun(s.queryRow(ctx, q, args...))
-}
-
 // DeleteRun removes one tenant run and its retained operational data.
 func (t *Tenant) DeleteRun(ctx context.Context, runID string) error {
 	tx, err := t.s.beginTx(ctx)
@@ -2148,46 +2115,6 @@ type DebugPause struct {
 	ReleaseKind string     `json:"release_kind,omitempty"`
 }
 
-// CreateDebugPause inserts (or upserts) an open pause row in the default team.
-func (s *Store) CreateDebugPause(ctx context.Context, p DebugPause) error {
-	return s.defaultTenant().CreateDebugPause(ctx, p)
-}
-
-// CreateDebugPause inserts (or upserts) an open pause row on one of t's
-// runs. A run of another team reads as [ErrNotFound].
-func (t *Tenant) CreateDebugPause(ctx context.Context, p DebugPause) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, p.RunID); err != nil {
-		return err
-	}
-	res, err := tx.ExecContext(ctx, `
-INSERT INTO debug_pauses (team, run_id, node_id, reason, paused_at, expires_at)
-VALUES (?,?,?,?,?,?)
-ON CONFLICT(run_id, node_id, reason) DO UPDATE SET
-    paused_at = excluded.paused_at,
-    expires_at = excluded.expires_at,
-    released_at = NULL,
-    released_by = '',
-    release_kind = ''
-  WHERE debug_pauses.team = excluded.team`,
-		string(t.team), p.RunID, p.NodeID, p.Reason,
-		p.PausedAt.UnixNano(), p.ExpiresAt.UnixNano())
-	if err != nil {
-		return err
-	}
-	if n, err := res.RowsAffected(); err != nil || n == 0 {
-		if err != nil {
-			return err
-		}
-		return notFound("run", p.RunID)
-	}
-	return tx.Commit()
-}
-
 // GetActiveDebugPause returns the open pause for a node of the default team, if any.
 func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error) {
 	return s.defaultTenant().GetActiveDebugPause(ctx, runID, nodeID)
@@ -2224,32 +2151,6 @@ SELECT run_id, node_id, reason, paused_at, expires_at, released_at, released_by,
 		out = append(out, p)
 	}
 	return out, rows.Err()
-}
-
-// ReleaseDebugPause closes the open pause of a default-team node; ErrNotFound when none.
-func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error {
-	return s.defaultTenant().ReleaseDebugPause(ctx, runID, nodeID, releasedBy, kind)
-}
-
-// ReleaseDebugPause closes the open pause of a node of one of t's runs;
-// ErrNotFound when none.
-func (t *Tenant) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error {
-	res, err := t.s.exec(ctx, `
-UPDATE debug_pauses
-   SET released_at = ?, released_by = ?, release_kind = ?
- WHERE team = ? AND run_id = ? AND node_id = ? AND released_at IS NULL`,
-		time.Now().UnixNano(), releasedBy, kind, string(t.team), runID, nodeID)
-	if err != nil {
-		return err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return notFound("debug pause", runID+"/"+nodeID)
-	}
-	return nil
 }
 
 func scanDebugPause(rs rowScanner) (*DebugPause, error) {
@@ -2380,8 +2281,6 @@ type ClaimIdentity struct {
 	TokenPrefix string
 }
 
-func (c ClaimIdentity) bound() bool { return c.TokenPrefix != "" }
-
 // CreateTrigger inserts a new trigger with status='pending'.
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 	tx, err := s.beginTx(ctx)
@@ -2465,40 +2364,6 @@ type SpawnedChild struct {
 	ChildRunID   string `json:"child_run_id"`
 }
 
-// GetRunAncestorPipelines walks parent_run_id links inside t's team; an
-// ancestor in another team ends the walk as a missing one does. See
-// [Tenant.GetRunAncestorPipelines].
-func (t *Tenant) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error) {
-	if runID == "" {
-		return nil, nil
-	}
-	var out []string
-	cur := runID
-	const maxDepth = 64
-	for range maxDepth {
-		var parent sql.NullString
-		var pipeline string
-		err := t.s.queryRow(
-			ctx,
-			`SELECT pipeline, parent_run_id FROM runs WHERE team = ? AND id = ?`, string(t.team), cur,
-		).Scan(&pipeline, &parent)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return out, nil
-			}
-			return nil, err
-		}
-		if cur != runID {
-			out = append(out, pipeline)
-		}
-		if !parent.Valid || parent.String == "" {
-			return out, nil
-		}
-		cur = parent.String
-	}
-	return out, nil
-}
-
 // GetTrigger returns one tenant trigger.
 func (t *Tenant) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 	var tr Trigger
@@ -2550,34 +2415,6 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		}
 	}
 	return &tr, nil
-}
-
-// FindSpawnedChildTriggerID returns the most-recent child trigger
-// for (parentRunID, parentNodeID, pipeline), or "".
-func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error) {
-	return s.defaultTenant().FindSpawnedChildTriggerID(ctx, parentRunID, parentNodeID, pipeline)
-}
-
-// FindSpawnedChildTriggerID is [Store.FindSpawnedChildTriggerID] confined to t's team.
-func (t *Tenant) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error) {
-	if parentRunID == "" || parentNodeID == "" || pipeline == "" {
-		return "", nil
-	}
-	var id string
-	err := t.s.queryRow(
-		ctx, `
-SELECT id FROM triggers
- WHERE team = ? AND parent_run_id = ? AND parent_node_id = ? AND pipeline = ?
- ORDER BY created_at DESC
- LIMIT 1`, string(t.team), parentRunID, parentNodeID, pipeline,
-	).Scan(&id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", nil
-		}
-		return "", err
-	}
-	return id, nil
 }
 
 // TriggerFilter narrows ListTriggers; zero value matches all.
@@ -2749,60 +2586,6 @@ var ErrLockHeld = errors.New("held by another holder")
 
 // ErrConcurrencySuperseded signals a concurrency holder was superseded.
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
-
-// NodeMetering says whether the credential that claimed a node was metered.
-type NodeMetering int
-
-const (
-	// MeteringUnknown means the claiming credential is no longer on file, so
-	// the node is attributed to neither side rather than guessed at.
-	MeteringUnknown NodeMetering = iota
-	// MeteringFree is a credential the operator never marked metered.
-	MeteringFree
-	// MeteringPaid is a metered credential, whose work the ledger bills.
-	MeteringPaid
-)
-
-// NodeSettlement is what one node's own row says about settling it: how long it
-// ran, the credential that claimed it, how that credential was metered, and
-// whether a credit reservation is still open against it.
-type NodeSettlement struct {
-	Seconds          float64
-	ClaimTokenPrefix string
-	Metering         NodeMetering
-	// ChargeWindowOpen reports a reservation the ledger has not released. It
-	// stays true for a node whose claiming credential was revoked, so a
-	// terminal node always has something to settle against.
-	ChargeWindowOpen bool
-}
-
-// NodeSettlement returns the tenant job's legacy credit settlement.
-func (t *Tenant) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error) {
-	var out NodeSettlement
-	var startedAt, finishedAt sql.NullInt64
-	var chargedThrough int64
-	var metered sql.NullBool
-	err := t.s.queryRow(ctx,
-		`SELECT started_at, finished_at, claim_token_prefix, credit_charged_through,
-                        (SELECT metered FROM tokens WHERE tokens.team = nodes.team AND prefix = nodes.claim_token_prefix)
-                   FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`,
-		string(t.team), runID, nodeID,
-	).Scan(&startedAt, &finishedAt, &out.ClaimTokenPrefix, &chargedThrough, &metered)
-	if err != nil {
-		return out, err
-	}
-	out.ChargeWindowOpen = chargedThrough != 0
-	if metered.Valid {
-		out.Metering = MeteringFree
-		if metered.Bool {
-			out.Metering = MeteringPaid
-		}
-	}
-	if startedAt.Valid && finishedAt.Valid && finishedAt.Int64 > startedAt.Int64 {
-		out.Seconds = time.Duration(finishedAt.Int64 - startedAt.Int64).Seconds()
-	}
-	return out, nil
-}
 
 // NodeStatusApprovalPending = nodes.status while waiting on a human.
 const NodeStatusApprovalPending = "approval_pending"

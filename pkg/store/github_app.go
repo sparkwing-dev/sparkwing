@@ -174,21 +174,7 @@ func (t *Tenant) UnbindGitHubAppInstallation(ctx context.Context, installation i
 		return err
 	}
 	defer rollbackOrLog(tx)
-	res, err := tx.ExecContext(ctx, `DELETE FROM github_app_installations WHERE team = ? AND installation_id = ?`,
-		string(t.team), installation)
-	if err != nil {
-		return err
-	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return ErrNotFound
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM github_app_triggers WHERE team = ? AND installation_id = ?`,
-		string(t.team), installation); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
-		WHERE team = ? AND github_installation_id = ? AND declared = 1`,
-		time.Now().UnixNano(), string(t.team), installation); err != nil {
+	if err := t.unbindGitHubAppInstallationTx(ctx, tx, installation); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -632,4 +618,25 @@ func (t *Tenant) githubCommitTriggerIDs(ctx context.Context, repo GitHubRepo, sh
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+func (t *Tenant) unbindGitHubAppInstallationTx(ctx context.Context, tx *storeTx, installation int64) error {
+	res, err := tx.ExecContext(ctx, `DELETE FROM github_app_installations WHERE team = ? AND installation_id = ?`,
+		string(t.team), installation)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM github_app_triggers WHERE team = ? AND installation_id = ?`,
+		string(t.team), installation); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
+		WHERE team = ? AND github_installation_id = ? AND declared = 1`,
+		tx.now().UnixNano(), string(t.team), installation); err != nil {
+		return err
+	}
+	return nil
 }

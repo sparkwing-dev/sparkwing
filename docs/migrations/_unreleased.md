@@ -2021,8 +2021,8 @@ have no forwarding aliases. Keep provider retries enabled until settlement can
 commit their outcomes.
 
 Replace `swu_` bootstrap credentials with a `swk_` controller capability
-presentation. `EnsureBootstrapAdminToken` now takes a context, transactional
-issuer and raw presentation. It requires `BootstrapAdminIssuer` and forwards a
+presentation. `EnsureBootstrapAdminToken` takes a context, `BootstrapAdminIssuer`
+and raw presentation. It forwards a
 trusted `ProvisionSpec.Seed` to its once-only transaction. It no longer calls
 `CreateTokenIfNoneExist` or accepts a caller clock. `Store.EnsureBootstrapCapability`
 commits the seed through `Store.Issue` and closes the persisted deployment gate.
@@ -2269,3 +2269,21 @@ removed with their unused legacy decoder and memo-key builder. Current data
 reads use the authorized record and read-set interfaces. `Tenant.OwnsRun`,
 `ListPendingTriggersForParent` and `RunExceedsWallClock` are removed. Current
 snapshots, child invocation relations and sealed limits supply those facts.
+
+
+## Ordered placement and unused store APIs
+
+`ClaimPlacement.Preferences` replaces `DefaultPrefers`, `Hold` and `Live`.
+Supply an ordered slice of `PlacementPreference{Prefers, Hold}` values. An empty
+`Prefers` step admits everyone. Each hold adds to the prior steps' holds from
+the job's ready time. A later runner waits only while a live, eligible earlier
+runner has an unexpired hold. The existing local-first controller flags still
+configure two steps. An explicit job preference uses the first configured hold.
+Runner liveness uses the accepted poll timestamp rather than other credential
+activity. `RunnerPresence` is removed.
+
+`Store` and `Tenant` lose `CreateDebugPause`, `ReleaseDebugPause` and
+`FindSpawnedChildTriggerID`. `Tenant.GetRunAncestorPipelines`, `NodeSettlement`
+and `NodeMetering` are removed too. Pause resume uses the authorized tenant
+transaction. Child admission and lineage use sealed intake and the run snapshot.
+Current awards retain immutable metering and settlement facts.

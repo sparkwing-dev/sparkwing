@@ -14,6 +14,8 @@ type LauncherSyncReader interface {
 	ReadLauncherSync(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
 }
 
+var _ LauncherSyncReader = storeLauncherSync{}
+
 func (s *EngineController) syncLauncher(ctx context.Context, a capability.Authorized, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
 	reader := s.Launcher
 	if reader == nil && s.Store != nil {

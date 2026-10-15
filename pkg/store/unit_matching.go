@@ -109,10 +109,6 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	if !validMatchingResources(profile.Capacity) || !validMatchingResources(request.Available) || !validMatchingResources(demand.Request) {
 		return profile, demand, authorityError(apierr.BadRequest, "invalid claim resources")
 	}
-	if unit.Kind == capability.UnitNode && len(demand.Prefers) == 0 {
-		placement, _ := ClaimPlacementFromContext(ctx)
-		demand.Prefers = slices.Clone(placement.DefaultPrefers)
-	}
 	return profile, demand, nil
 }
 

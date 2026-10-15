@@ -82,16 +82,22 @@ stores observed capacity, labels and the store timestamp on the capability row.
 `capabilities.claim_observation_json` holds the observations. It carries no bearer.
 The observation never supplies granted identity, pools or repository authority.
 
-`WithClaimPlacement` supplies the configured default preference, hold and
-liveness to `ClaimUnit`. Named, queued and reconciled job claims use that policy.
-An explicit job preference precedes the configured default. Within the hold
-from `ready_at`, a nonpreferred claimant waits only while a recent runner poll
-resolves to live same-team authority with job-claim rights, matching repository,
-selectors and pools, and enough free capacity. Both preference scoring and
-eligibility use `match.Evaluate`. Fallback becomes eligible at the hold deadline.
-Held polls leave the job, award rows and event sequence unchanged. Successful
-awards record the placement reason. The controller passes configuration and
-records machine observations through its existing shared claim routes.
+`ClaimPlacement.Preferences` is an ordered list of `PlacementPreference` values.
+Each step has matcher `Prefers` terms and a `Hold`. An empty term list matches
+every eligible runner. Holds accumulate from the job's persisted `ready_at` on
+the store clock. A later claimant waits only if a live, eligible earlier runner
+has time left in its cumulative hold. Earlier preferences remain eligible after
+their hold expires. An explicit job preference replaces the configured list
+with that preference and everyone else, using the first configured hold.
+The existing controller flags configure this two-step case.
+
+Named, queued and reconciled job claims use the same policy and matcher.
+The store rechecks the earlier runner's ancestry, tenant, job-claim rights,
+repository, selectors, pools and available capacity. Poll JSON records its own
+store-clock `observed_at`. Other credential activity cannot refresh that poll.
+Held claims leave the job, awards and event sequence unchanged. The removed
+`RunnerPresence` and caller-supplied `Live` list have no consumers. Liveness
+comes from accepted persisted polls.
 
 ## Seeded bootstrap and legacy execution retirement
 

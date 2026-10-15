@@ -171,6 +171,10 @@ type DataTransactions interface {
 	CommitBlobUpload(context.Context, store.VerifiedUploadCommit) (blob.Receipt, error)
 	AbortBlobUpload(context.Context, blob.Authority, string) error
 }
+type DebugPauseResumer interface {
+	Team() store.Team
+	ResumeAuthorizedDebugPause(context.Context, capability.Authorized) error
+}
 const DefaultLiveLogIdleTimeout = 10 * time.Minute
 const DefaultLiveLogMaxNodes = 1024
 const DefaultLiveLogNodeBytes = 512 << 10
@@ -218,7 +222,7 @@ func (s *EngineController) RunDetail(ctx context.Context, a capability.Authorize
 func (s *EngineController) Snapshot(ctx context.Context, authorized capability.Authorized) (controllerwire.ScheduleSnapshot, error)
 func (s *EngineController) SyncLauncher(ctx context.Context, authorized capability.Authorized, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
 func (s *EngineController) TransitionJob(ctx context.Context, a capability.Authorized, body controllerwire.JobTransitionRequest) (controllerwire.Applied, error)
-func EnsureBootstrapAdminToken(ctx context.Context, issuer CredentialIssuer, raw string) (bool, error)
+func EnsureBootstrapAdminToken(ctx context.Context, issuer BootstrapAdminIssuer, raw string) (bool, error)
 const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
 func ExpansionForStore(a capability.Authorized, body controllerwire.ExpansionSubmission) (store.ExpansionSubmission, error)
 type FloodPolicy struct {
@@ -377,6 +381,10 @@ func (router *PolicyRouter) ServeHTTP(w http.ResponseWriter, r *http.Request)
 func (router *PolicyRouter) Validate() error
 func PullRequestForTrigger(env map[string]string) *sparkwing.PullRequest
 const PurchaseLimitCode = "purchase_limit"
+type QueuePriorityWriter interface {
+	Team() store.Team
+	SetAuthorizedGroupPriority(context.Context, capability.Authorized, string, controllerwire.QueuePriorityWrite) (controllerwire.QueuePriorityResult, error)
+}
 type QueueReader interface {
 	Team() store.Team
 	ListConcurrencyStates(context.Context) ([]*store.ConcurrencyState, error)
@@ -513,6 +521,7 @@ func (s *Server) WithOperatorAccounts(ids []string) *Server
 func (s *Server) WithOperatorSettingsWriter(writer OperatorSettingsWriter) *Server
 func (s *Server) WithPayments(verifier capability.PaymentAuthenticator, ledger PaymentSettler) *Server
 func (s *Server) WithPeerIdentity(fn func(*http.Request) capability.Subject) *Server
+func (s *Server) WithQueuePriorityWriter(resolve func(context.Context, store.Team) (QueuePriorityWriter, error)) *Server
 func (s *Server) WithQueueReader(resolve func(context.Context, store.Team) (QueueReader, error)) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
@@ -637,6 +646,7 @@ func (creditsCollector) Collect(ch chan<- prometheus.Metric)
 func (creditsCollector) Describe(ch chan<- *prometheus.Desc)
 func (l cronLauncher) Active(ctx context.Context, sched store.CronSchedule, runID string, staleAfter time.Duration) (bool, error)
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error)
+func (d dataStoreAccess) CheckDataAccess(ctx context.Context, authorized capability.Authorized, target capability.DataTarget) error
 func (r *flowRefusal) Error() string
 func (r *flushingStatusRecorder) Flush()
 func (g githubProvider) AuthorizeURL(state, verifier, redirectURI string) string
@@ -665,6 +675,7 @@ func (c planSecretCipher) OpenPlanSecret(ctx context.Context, team store.Team, s
 func (a policyStoreAuthenticator) Authenticate(ctx context.Context, presentation capability.Presentation, route capability.RoutePolicy) (capability.Authenticated, error)
 func (b policyStoreBindings) CheckBinding(ctx context.Context, p capability.Principal, rule capability.BindingRule, target capability.Target) error
 func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error)
+func (p proposedLogSegments) ReadLogSegments(context.Context, store.Actor, blob.LogReadRequest) (store.LogSegments, error)
 func (mux *registeredMux) Handle(pattern string, handler http.Handler)
 func (mux *registeredMux) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request))
 func (l segmentLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID string) (logseg.Completeness, bool, error)

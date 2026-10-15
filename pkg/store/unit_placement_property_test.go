@@ -17,7 +17,7 @@ import (
 
 func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) {
 	random := rand.New(rand.NewPCG(213, 611))
-	for _, problem := range []string{"live", "stale", "revoked", "expired", "foreign", "repository", "grant", "capacity", "hard_selector", "deadline", "preferred_claimant", "granted_name", "unknown_capacity"} {
+	for _, problem := range []string{"live", "stale", "stale_activity", "revoked", "expired", "foreign", "repository", "grant", "capacity", "hard_selector", "deadline", "preferred_claimant", "granted_name", "unknown_capacity"} {
 		for i := range 6 {
 			t.Run(fmt.Sprintf("%s/%d", problem, i), func(t *testing.T) {
 				s, request := unitClaimFixture(t)
@@ -28,10 +28,10 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 					preferred = "name=preferred"
 					request.Labels = []string{preferred}
 				}
-				policy := ClaimPlacement{Hold: 3 * time.Minute, Liveness: time.Minute}
+				policy := ClaimPlacement{Preferences: []PlacementPreference{{Hold: 3 * time.Minute}, {}}, Liveness: time.Minute}
 				execution := runspec.JobExecutionSettings{Resources: runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Value: runspec.Resources{Cores: runspec.Setting[float64]{Optional: runspec.Optional[float64]{Value: 4, Set: true}}}, Set: true}}}
 				if i%2 == 0 {
-					policy.DefaultPrefers = []string{preferred}
+					policy.Preferences[0].Prefers = []string{preferred}
 				} else {
 					execution.Prefers = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Value: []string{preferred}, Set: true}}
 				}
@@ -73,12 +73,15 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 					t.Fatal(err)
 				}
 				switch problem {
-				case "stale":
+				case "stale", "stale_activity":
 					now = now.Add(policy.Liveness + time.Nanosecond)
+					if problem == "stale_activity" {
+						rewriteSchemaExec(t, s.db, `UPDATE capabilities SET last_used_at=? WHERE prefix=?`, now.UnixNano(), root.Prefix)
+					}
 				case "expired":
 					now = expires
 				case "deadline":
-					now = now.Add(policy.Hold)
+					now = now.Add(policy.Preferences[0].Hold)
 				case "revoked":
 					member := authorityMember(t, s, "owner", RoleOwner)
 					if err := (&Tenant{s: s, team: "a"}).RevokeAuthority(t.Context(), member, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Prefix}); err != nil {
@@ -124,5 +127,83 @@ func TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty(t *testing.T) 
 				}
 			})
 		}
+	}
+}
+
+func TestOrderedPlacementPreferencesHoldOnlyForLiveEarlierRunnersProperty(t *testing.T) {
+	random := rand.New(rand.NewPCG(318, 910))
+	for i := range 96 {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			s, request := unitClaimFixture(t)
+			start := s.now()
+			now := start
+			s.clock = func() time.Time { return now }
+			order := []string{"runner", "earlier-a", "earlier-b"}
+			random.Shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] })
+			preferences := make([]PlacementPreference, 0, 4)
+			rank := 0
+			for j, name := range order {
+				preferences = append(preferences, PlacementPreference{Prefers: []string{"name=" + name}, Hold: time.Duration(random.IntN(31)) * time.Second})
+				if name == "runner" {
+					rank = j
+				}
+			}
+			preferences = append(preferences, PlacementPreference{})
+			elapsed := time.Duration(random.IntN(100)) * time.Second
+			if i%3 == 0 {
+				elapsed = 0
+				for j := range rank {
+					elapsed += preferences[j].Hold
+				}
+				if i%2 == 0 && elapsed > 0 {
+					elapsed -= time.Nanosecond
+				}
+			}
+			now = start.Add(elapsed)
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET ready_at=?`, start.UnixNano())
+			deadline := time.Duration(0)
+			wantHeld := false
+			for j, name := range order {
+				deadline += preferences[j].Hold
+				if name == "runner" {
+					continue
+				}
+				root := authorityRoot(name, "a")
+				authorityPersist(t, s, root)
+				live := random.IntN(2) == 0
+				if live {
+					observation := UnitDemand{CapabilityPrefix: name, Labels: []string{"name=runner", "class=cloud"}, Capacity: match.Resources{Cores: 8}, Available: match.Resources{Cores: 8}}
+					if err := s.RecordRunnerPoll(t.Context(), observation); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if live && j < rank && elapsed < deadline {
+					wantHeld = true
+				}
+			}
+			request.Labels = []string{"name=" + order[0], "class=cloud"}
+			if i%2 == 0 {
+				request.Target, request.Kinds = nil, []capability.UnitKind{capability.UnitNode}
+			}
+			tenant := &Tenant{s: s, team: "a"}
+			before, err := tenant.ReadNode(t.Context(), NodeRef{"run", "job"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			claim, err := s.ClaimUnit(WithClaimPlacement(t.Context(), ClaimPlacement{Preferences: preferences, Liveness: time.Minute}), request)
+			if wantHeld {
+				var refused *apierr.Error
+				if !errors.Is(err, ErrNotFound) && (!errors.As(err, &refused) || refused.Code != apierr.LockHeld) {
+					t.Fatalf("order=%v rank=%d elapsed=%s: %+v %v", order, rank, elapsed, claim, err)
+				}
+				after, err := tenant.ReadNode(t.Context(), NodeRef{"run", "job"})
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatalf("held poll changed node: %v", err)
+				}
+				rewriteSchemaCount(t, s.db, "billing_awards", 0)
+			} else if err != nil || claim.Award.Holder != "runner" {
+				t.Fatalf("order=%v rank=%d elapsed=%s: %+v %v", order, rank, elapsed, claim, err)
+			}
+		})
 	}
 }

@@ -31,9 +31,9 @@ func (s *Server) consoleWriter() (ConsoleWriter, error) {
 		return s.consoleWrites, nil
 	}
 	if s.store != nil {
-		if writer, ok := any(s.store.AsOperator()).(ConsoleWriter); ok {
-			return writer, nil
-		}
+		return s.store.AsConsole(s.operatorAccount), nil
 	}
 	return nil, missingEndpointPolicy()
 }
+
+var _ ConsoleWriter = (*store.Console)(nil)

@@ -51,8 +51,9 @@ dispute holds and closed-dispute outcomes keep the existing ledger rules.
 Unknown payments must never become metadata-selected grants. Checkout and
 payment-intent events for one payment must not credit it twice. W2's shared
 HTTP route forwards VerifiedPaymentEvent and acknowledges only after commit.
-The existing Store implementation refuses non-checkout kinds. No fallback to
-raw financial methods is added.
+Store.SettlePayment dispatches non-checkout kinds through W1b's transaction
+owners. Their final receipt/correlation schema and trusted setup association
+writer remain W1 integration work. No raw financial fallback is added.
 
 ProvisionSpec gains Seed, excluded from JSON in both directions.
 ValidateProvisionSeed permits a supplied presentation only for
@@ -60,26 +61,25 @@ ProvisionBootstrap and only in the strict swk_ reference encoding. W1 must call
 it in Issue and reject a supplied seed on every other origin.
 controller.BootstrapAdminIssuer declares
 EnsureBootstrapCapability(ctx, ProvisionSpec) (created bool, error).
-EnsureBootstrapAdminToken now accepts context, CredentialIssuer and raw seed.
+EnsureBootstrapAdminToken accepts context, BootstrapAdminIssuer and raw seed.
 It fixes the unbound operator subject bootstrap:admin and grants only
 operator.tokens, operator.limits and operator.object_store. It forwards no
 caller clock and never calls the legacy token table. Empty input is a no-op.
 Missing BootstrapAdminIssuer returns policy_missing before any issuance.
 
-W1 must implement that interface as one gated Store.Issue transaction. Lock
-the deployment bootstrap gate, refuse a second admin credential, and store
-only the seeded presentation's digest under its indexed prefix. An existing
-seed is a no-op while live and must never be revived after revocation.
-Race and restart checks belong to that transaction. A configured seed refuses
-startup until this adapter exists. W2's tests use a fake transaction and do
-not claim durable once-only bootstrap evidence.
+Store implements the interface as one gated Store.Issue transaction. It locks
+the deployment bootstrap gate and commits the settings marker with the seeded
+root. Only the presentation digest and indexed prefix persist. Reusing a seed
+is a no-op, including after revocation. Native SQLite issuance, readiness and
+revocation properties exercise this adapter. Restart and concurrent native
+topology evidence remain with the acceptance driver.
 
 EnableAuthFromStore always installs credential verification. It no longer
 consults ListTokens or opens legacy private routes when that read is empty or
-fails. The remaining legacy credential verifier still needs its final route
-cut. The controller's --require-auth readiness check consumes
+fails. The legacy credential verifier and routes are removed. The controller's
+--require-auth readiness check consumes
 HasDeploymentAdministrator(ctx) (bool, error), refusing a missing reader.
-W1 must implement that read under its store clock with complete live ancestry.
+Store implements that read under its store clock with complete live ancestry.
 A deployment administrator is an unbound controller operator/service capability
 in the deployment scope with operator.tokens. The public health handler pings the opened
 database rather than calling the legacy run-list query. License-before,
@@ -90,9 +90,27 @@ Server.HTTP and EngineController.SyncLauncher were already implemented before
 this continuation. Their in-process tests pass. Local HTTP supplies shared
 API/dashboard handlers and consumes Wingd's verified peer context. Sync passes
 the authenticated authority and cloned observations to LauncherSyncReader,
-then strips bearer material from a copied response. W1 still must supply
-ReadLauncherSync and the local authority snapshot and mutation transactions.
+then strips bearer material from a copied response. Operator.ReadLauncherSync now supplies the native snapshot. Verified peer reads
+use the default-tenant local snapshot. Authority-bearing local mutations remain
+C1 integration work.
 No native launcher or peer matrix cell is inferred from those component tests.
+
+
+### Native log read composition
+
+Log signing, commits and dashboard reads use the configured data object backend.
+Reads retain the shared engine actor projection, including the authenticated
+holder and generation. Store.ReadLogSegments rechecks current authority before
+physical I/O. A refused request produces no log bytes and no egress charge.
+Stream responses use Cache-Control: no-store. HEAD remains unregistered.
+Segment commits carry decoded Size separately from compressed StoredBytes and
+Digest. Both byte counts participate in immutable replay.
+
+The retained egress tests now use native awards, sealed account sessions and
+committed tagged segments. Generated mutations cover foreign paths, stale
+holder/generation, unknown presentations and membership loss. Native root
+revocation prevents the next read before object I/O. The object bytes are fake
+in these HTTP tests. Native topology evidence remains with T1.
 
 ### Legacy execution credential cut
 
@@ -195,9 +213,10 @@ or a credential class. Explicit headers and session cookies take precedence
 and never fall back to the peer. The shared AuthenticationReader receives the
 verified subject through CredentialLookup.Peer. Its snapshot and relational
 checker derive authority. The api.sock caller now supplies its kernel-verified
-uid through this interface. C1 does not yet implement that peer snapshot or
-transactional local authority. Component tests use the existing interfaces and
-fakes. Native Windows still refuses api.sock without SID verification.
+uid through this interface. Store now returns its default-tenant peer snapshot
+and checks native BindNone relations. Transactional local mutation authority
+remains separate. The shared local HTTP test covers the default store adapter
+and injected component adapter. Native Windows still refuses api.sock without SID verification.
 
 Real SQLite login and console HTTP tests cover successful sessions, narrowed
 grants, revocation, failed browser proofs, private errors, safe redirects,
@@ -1301,6 +1320,11 @@ artifacts and depcache, never write through that opt-in, and never fetch
 pipeline binaries. Published data stays local provenance under
 `trust_local_builds`. Only trusted cloud builders assert cloud provenance.
 
+Generic record HTTP selectors and public response metadata preserve that namespace:
+`manual:<ref>` decodes to RefScope{Ref: <ref>, Verified: false}, and a plain ref
+decodes to Verified: true. Neither selector inherits the current write's trust.
+The existing read-grant check still precedes record lookup.
+
 Signing follows authorization and atomic quota reservation. PUT signing binds
 size and SHA-256; commit verifies them before the immutable key becomes live.
 Data GET URLs last 60 seconds. Logs use batches of sixteen segment PUT URLs
@@ -2254,10 +2278,9 @@ renewing and removes a session that has exceeded it or has a future creation
 time. Default console-session proof and the verified peer transport adapter are implemented above.
 Roleless OAuth, C1 peer authority and remaining legacy session consumers stay open.
 
-`BindingState.CancelReason` is a local C2 snapshot addition. W1 must populate
-it from the committed cancellation intent, with an existing job-specific
-request taking precedence over its run's request. W2 does not query SQL to
-fill it. Job cancellation now passes Outcome=cancelled and the requested
+`BindingState.CancelReason` reads committed cancellation intent in the native
+store snapshot, with an existing job-specific request taking precedence over
+its run's request. The controller consumes that snapshot without a SQL query. Job cancellation now passes Outcome=cancelled and the requested
 reason in the existing TransitionExtra.Result. C1's request-only edge copies
 only the first cancellation intent and leaves the held row and attempt result
 intact. That contract is exercised against real SQLite and generated reasons.
@@ -2325,8 +2348,9 @@ Amendment 1 ratifies the interpretations below. They are not approval gates.
 
 7. **Console mutation rechecks.** The console's nine business mutations now use
    `controller.ConsoleWriter`, receiving the verified `Authorized` value. A
-   missing adapter returns `policy_missing`. C1 must implement the direct-session,
-   revocation and actor checks inside each committing transaction. The prior
+   missing adapter returns `policy_missing`. Store.AsConsole implements the
+   direct-session, revocation and actor checks inside each committing transaction.
+   Its configured-operator callback reads the server's live account gate. The prior
    raw store methods are no longer HTTP fallbacks. Deployment-settings writes
    still need their separate authority-bearing contract. No C1 signature was
    changed in this cutover.
@@ -2715,10 +2739,12 @@ ConsoleUnfreeze (hold and reason to TeamCreditFreeze), ConsoleDeleteAccount
 (account IDs, oldest and replay key to []Account), ConsoleSetCreditSettings
 (CreditSettingsUpdate to CreditSettings), and ConsoleUnbindGitHubInstallation
 (installation ID to Team). Each also returns error. WithConsoleWriter injects it.
-The default discovers it only on Store.AsOperator and refuses its absence.
+The default uses Store.AsConsole with the server's live configured-operator gate.
+The concrete adapter has compile-time ConsoleWriter conformance.
 
-C1 rechecks the hashed direct account-session authority with no capability parent,
-current configured console authorization and operator.console inside every write.
+The production Console rechecks the hashed direct account-session authority with
+no capability parent and current configured console authorization inside every
+write. It requires the console-tagged Authorized subject to match that session.
 The committing adapter owns the trusted configured-operator gate. Derive all audit
 actors from that authority, use the store clock, select the target from Authorized,
 and preserve the existing business validation, ledger deduplication and audit effects.
@@ -2730,8 +2756,13 @@ atomically. App unbind resolves installation ownership inside its transaction.
 Waitlist approval commits one selected batch and its replay record together,
 rejects a changed body under the same key, and returns only newly admitted accounts
 for notification. A repeated completed request never selects the next oldest batch.
-Errors produce no approval notification. W1 supplies these transactions. C2 tests
-use fakes and do not prove the persistence rechecks.
+Errors and completed replays produce no approval notification. The approval
+marker stores only the request digest under a hash of operator account and key
+in settings. A changed body conflicts. The marker and selected batch commit
+together. Native HTTP tests exercise all nine writes through the default
+composition. A generated property refuses derived, expired, revoked, missing
+and substituted sessions before any write. Delisting before commit rolls back
+the operation and its audit.
 
 TestGitHubBrowserConnectionAuthorityProperty and StateProperty generate hostile
 selectors, authority, cookie, form and signed-state cases. ProviderAndReplay runs
@@ -2889,7 +2920,109 @@ tagged authority. `ValidateAuthority` returns the shortest expiry, revocation
 grace deadline or binding deadline in the complete live ancestry as the leaf's
 effective expiry. Omitted delegation expiry inherits that ceiling.
 
-W1 must use the same origin predicate in `checkMemberProvision` and
-`SetSourceMachineConsent` after resolving authority inside the committing
-transaction. The controller checks do not replace those store gates. The
-native bypass reproduction is preserved in `W2-review-reproductions.patch`.
+The store uses the same origin predicate in `checkMemberProvision` and
+`SetSourceMachineConsent` after resolving authority inside each committing
+transaction. The native committing-origin property covers detached-root
+issuance and both consent directions for generated capability-derived sessions.
+
+
+## Canonical dashboard source and pause resume
+
+Dashboard triggers send `source.location.remote_url`, the `.sparkwing` pipeline
+directory and the selected source ref. The controller derives repository identity
+from that acquisition location before invoking `AdmitRun`. GitHub identity comes
+from the selected team's live App installation and its current repository API
+response. A display name or persisted runner-enrollment slug cannot supply a
+numeric identity because repositories can move or names can be reused. Missing
+GitHub resolution returns `unavailable`. A supplied key that differs from the
+resolved identity returns `forbidden`. Other providers use C4's canonical remote
+identity. Credential-bearing remotes are refused. This lookup attaches no App
+provenance and grants no pool or source authority.
+
+The first-seal policy remains `IntakePolicy.ResolveIntake`. Its C1/C4 composition
+must supply resolved options, operator ceilings, verified source location,
+repository authority and checkout SHA. The controller source test uses a fake C1
+transaction behind that existing interface. GitHub metadata transport is also
+fake, while installation ownership is stored in SQLite.
+
+`POST /api/v1/runs/{run}/jobs/{job}/resume` requires one JSON object with no actor
+fields. `DebugPauseResumer` declares `Team()` and
+`ResumeAuthorizedDebugPause(context.Context, capability.Authorized) error`.
+`Tenant` implements it. The committing transaction reloads current ancestry and
+membership, repeats native route authorization, locks the run and verifies the
+job. It closes open pauses with the current subject and store clock, clears only
+`status_detail=paused` and appends one `debug.resumed` event. It preserves job
+status, attempt, generation and claim authority. A repeated resume writes no
+second event. Missing jobs return `not_found`. Foreign or changed authority
+cannot close a pause. The legacy release HTTP route and its anonymous fallback
+have no handler.
+
+`TestResumeDebugPauseCurrentAuthorityProperty` generates changed membership and
+foreign selectors against the concrete transaction. The HTTP port verifies
+principal attribution, repeat delivery, missing jobs, strict body decoding and
+revoked credentials. `TestIntakeSourceNumericIdentityProperty` varies display
+text and a forged numeric key through the real router and source resolver.
+Existing `CreateAuthorizedDebugPause` and `ResolveAuthorizedApproval` contracts
+still need their C1 committing adapters and public diagnostic masking.
+
+
+## Native bootstrap, data and controller attempt snapshots
+
+Store.EnsureBootstrapCapability sends the configured bootstrap seed through
+Store.Issue in a locked transaction. The settings marker commits with the root
+and survives revocation. Only the fixed bootstrap subject and administration
+grants accept a seed. Store.HasDeploymentAdministrator resolves complete live
+ancestry. A future rotation deadline stays live until that deadline in both
+authentication and native reads.
+
+WithDataObjects supplies concrete store authority, access, metadata and download
+charging adapters. Tenant.ResolveDataAuthority derives sealed repository and
+exact uploader identity. ChargeDataDownload rechecks the read edge and object
+size in the charging transaction. Cancellation closes sensitive blob access
+without ending holder result rights. Logical-record selection checks live scope
+before selecting a digest. Its record transaction checks the selected record
+and every reference edge. Caller presentation fields do not select another
+persisted authority.
+
+A controller work capability with attempt zero covers its holder generation.
+Authentication projects its current attempt and claim data scope from the same
+committed BindingState.Current after checking run, job, generation and holder.
+Node-host credentials and controller delegates with a nonzero attempt retain
+exact attempt fencing. The projection copies the scope and never changes the
+persisted capability. Native HTTP claim, start and incremental log commits
+exercise this boundary.
+
+ReadAuthentication projects separate cancellation intent from the committed run
+and job rows. Job intent takes precedence, including an empty job reason. It
+does not substitute terminal result reasons.
+
+The native launcher snapshot checks the exact observed award against current
+unit ownership and launcher ancestry. It returns immutable execution inputs
+without bearers, or the exact supplied Kubernetes instance for cleanup. Sync
+preserves holder result rights. The legacy SyncLaunchJobs implementation is
+deleted. W8 owns real Kubernetes correlation and teardown evidence.
+
+
+## Native console and queue-priority adapters
+
+Console finance operations share the existing ledger transaction helpers.
+Account selection resolves an exact ID or unique email in the deletion
+transaction. Native deletion revokes capability envelopes and advances their
+revocation generations. Team deletion uses the shared run and job transitions
+to record cancellation intent. Its internal deletion actor exists only while
+that transaction holds the selected team's deletion scope. A wire actor cannot
+create that scope. Live jobs retain their holder and attempt while draining.
+Global account audit events use nullable team ownership from the final schema,
+with a deterministic primary key preserving kind/subject deduplication.
+
+PUT /api/v1/queue/groups/{group}/priority is registered under its existing policy.
+It validates controllerwire.QueuePriorityWrite, preserves explicit zero and
+passes the Idempotency-Key through controller.QueuePriorityWriter. That local
+interface declares Team() and SetAuthorizedGroupPriority(context.Context,
+capability.Authorized, string, controllerwire.QueuePriorityWrite)
+(controllerwire.QueuePriorityResult, error). WithQueuePriorityWriter supplies a
+tenant resolver. A missing or foreign tenant writer returns policy_missing.
+The transaction owns current authority, stable run/number resolution, rank and
+position selection, exact retry identity and unchanged holder leases. C1 has
+not declared persisted integer priority or an ordering transaction. The HTTP
+property uses a fake for that boundary and claims no persisted ranking evidence.

@@ -23,7 +23,7 @@ func (s *Server) claimEndpoints() []Endpoint {
 		{Method: "POST", Pattern: "/api/v1/claims/exchange", Authentication: capability.AuthCapability, Decode: authorityTarget, ResolveTarget: ownUnitTarget, Handle: e.handleExchange},
 		{Method: "POST", Pattern: "/api/v1/claims/{claim}/heartbeat", Authentication: capability.AuthCapability, Decode: claimIDTarget, ResolveTarget: ownUnitTarget, Handle: e.handleRenewal},
 		{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/reconcile", Authentication: capability.AuthCapability, Decode: e.runTarget, Handle: func(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-			ctx := store.WithClaimPlacement(r.Context(), store.ClaimPlacement{DefaultPrefers: s.placement.defaultPrefers, Hold: s.placement.hold, Liveness: s.placement.liveness})
+			ctx := store.WithClaimPlacement(r.Context(), store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: s.placement.defaultPrefers, Hold: s.placement.hold}, {}}, Liveness: s.placement.liveness})
 			return e.handleReconcile(w, r.WithContext(ctx), a)
 		}},
 	}
@@ -72,10 +72,14 @@ func decodeClaimRequest(r *http.Request) (controllerwire.ClaimRequest, error) {
 		return body, err
 	}
 	if run := r.PathValue("run"); run != "" {
-		if body.RunID != "" && body.RunID != run || body.JobID != "" || len(body.Kinds) != 1 || body.Kinds[0] != capability.UnitTrigger {
-			return body, invalidEngineBody("named trigger claim must select its path run and trigger kind")
+		kind, job := capability.UnitTrigger, r.PathValue("job")
+		if job != "" {
+			kind = capability.UnitNode
 		}
-		body.RunID = run
+		if body.RunID != "" && body.RunID != run || body.JobID != "" && body.JobID != job || len(body.Kinds) != 1 || body.Kinds[0] != kind {
+			return body, invalidEngineBody("named claim must select its path and unit kind")
+		}
+		body.RunID, body.JobID = run, job
 	}
 	if _, err := engineClaimTarget(body); err != nil {
 		return body, err
@@ -93,7 +97,7 @@ func (s *Server) claimHandler(engine *EngineController) func(http.ResponseWriter
 		if !ok {
 			return nil
 		}
-		ctx := store.WithClaimPlacement(r.Context(), store.ClaimPlacement{DefaultPrefers: s.placement.defaultPrefers, Hold: s.placement.hold, Liveness: s.placement.liveness})
+		ctx := store.WithClaimPlacement(r.Context(), store.ClaimPlacement{Preferences: []store.PlacementPreference{{Prefers: s.placement.defaultPrefers, Hold: s.placement.hold}, {}}, Liveness: s.placement.liveness})
 		response, err := engine.Claim(ctx, a, body)
 		if response.Claim != nil {
 			s.recordQueueActivity(time.Now())

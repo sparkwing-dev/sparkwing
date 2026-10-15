@@ -12,6 +12,9 @@ import (
 )
 
 func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) (capability.Capability, error) {
+	if err := capability.ValidateProvisionSeed(spec); err != nil {
+		return capability.Capability{}, err
+	}
 	c := capability.Capability{
 		Team: spec.Team, Subject: spec.Subject, Audience: capability.Controller,
 		Grants: slices.Clone(spec.Grants), Binding: spec.Binding, Issuance: capability.Delegate,
@@ -145,7 +148,7 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 
 func checkMemberProvision(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec, p capability.Principal) error {
 	c := p.Capability
-	session := p.Class == capability.CredentialSession || tx.rotatingRoot != nil && p.Class == capability.CredentialBearer && c.Unit == "" && c.Binding.Kind == capability.BindingNone
+	session := p.DirectAccountSession() || tx.rotatingRoot != nil && p.Class == capability.CredentialBearer && c.Unit == "" && c.Binding.Kind == capability.BindingNone
 	owner := c.Subject == spec.Subject || tx.rotatingRoot != nil && c.Subject.Kind == capability.SubjectAccount && slices.Contains(c.Grants, capability.TeamAdmin)
 	if spec.Authority == nil || !session || !owner || spec.Subject.Kind != capability.SubjectAccount || spec.Team != c.Team || spec.Metered || len(spec.ReservedPools) != 0 || spec.Binding != (capability.Binding{Kind: capability.BindingNone}) || spec.Data != nil || len(spec.Repositories) != 0 || spec.RegistrationID != "" {
 		return authorityError(apierr.Forbidden, "member provisioning exceeds current account authority")

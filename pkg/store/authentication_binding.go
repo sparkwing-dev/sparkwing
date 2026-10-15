@@ -14,10 +14,14 @@ func authenticationBindingTx(ctx context.Context, tx *storeTx, c capability.Capa
 		return out, nil
 	}
 	var cancel, finished sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT cancel_requested_at,finished_at,cancel_reason FROM runs WHERE team=? AND id=?`, c.Team, c.Binding.RunID).Scan(&cancel, &finished, &out.CancelReason); err != nil {
+	var reason string
+	if err := tx.QueryRowContext(ctx, `SELECT cancel_requested_at,cancel_reason,finished_at FROM runs WHERE team=? AND id=?`, c.Team, c.Binding.RunID).Scan(&cancel, &reason, &finished); err != nil {
 		return out, err
 	}
 	out.RunCancelled, out.RunFinished = cancel.Valid, finished.Valid
+	if cancel.Valid {
+		out.CancelReason = reason
+	}
 	switch c.Binding.Kind {
 	case capability.BindingTrigger:
 		if err := authenticationOwnerTx(ctx, tx, c, &out); err != nil {
@@ -73,10 +77,10 @@ func authenticationNodeTx(ctx context.Context, tx *storeTx, c capability.Capabil
 		return err
 	}
 	out.FinishedAt = stateTime(finished)
+	out.RunCancelled = out.RunCancelled || cancelled.Valid
 	if cancelled.Valid {
 		out.CancelReason = reason
 	}
-	out.RunCancelled = out.RunCancelled || cancelled.Valid
 	if lease.Valid {
 		out.LeaseExpiresAt = *stateTime(lease)
 	}

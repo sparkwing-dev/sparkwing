@@ -124,6 +124,7 @@ func (s *Store) queryRowNoCtx(q string, args ...any) *sql.Row {
 }
 
 type storeTx struct {
+	deletingTeam Team
 	tx           *sql.Tx
 	dialect      Dialect
 	store        *Store

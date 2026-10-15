@@ -279,6 +279,19 @@ func (t *Tenant) RecordCreditGrant(
 func (s *Store) recordCreditGrant(
 	ctx context.Context, team Team, req CreditGrantRequest,
 ) (_ CreditGrantResult, err error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return CreditGrantResult{}, err
+	}
+	defer rollbackOrLog(tx)
+	out, err := recordCreditGrantTx(ctx, tx, team, req)
+	if err != nil {
+		return CreditGrantResult{}, err
+	}
+	return out, tx.Commit()
+}
+
+func recordCreditGrantTx(ctx context.Context, tx *storeTx, team Team, req CreditGrantRequest) (_ CreditGrantResult, err error) {
 	if err := req.validate(); err != nil {
 		return CreditGrantResult{}, err
 	}
@@ -286,17 +299,13 @@ func (s *Store) recordCreditGrant(
 	if err != nil {
 		return CreditGrantResult{}, err
 	}
-	now := s.now().UTC()
+	now := tx.now()
 	grant := CreditGrant{
 		ID: id, Team: team, Kind: req.Kind, AmountMicro: req.AmountMicro,
 		Reference: req.Reference, Reverses: req.Reverses,
 		CreatedBy: req.CreatedBy, CreatedAt: now,
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return CreditGrantResult{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
+
 	// safety: the lock is what makes the reference check and the insert one
 	// step, so two deliveries of the same payment cannot both find nothing.
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
@@ -311,7 +320,7 @@ func (s *Store) recordCreditGrant(
 			if err := sameGrantTerms(existing, team, req); err != nil {
 				return CreditGrantResult{}, err
 			}
-			return CreditGrantResult{Grant: existing}, tx.Commit()
+			return CreditGrantResult{Grant: existing}, nil
 		}
 	}
 	if req.Kind == CreditGrantReversal {
@@ -358,9 +367,6 @@ func (s *Store) recordCreditGrant(
 		if err := clearTeamCreditExhaustedTx(ctx, tx, team, now.UnixNano()); err != nil {
 			return CreditGrantResult{}, err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return CreditGrantResult{}, err
 	}
 	return CreditGrantResult{Grant: grant, Created: true}, nil
 }

@@ -28,9 +28,18 @@ func (t *Tenant) CheckDataAccess(ctx context.Context, authorized capability.Auth
 
 func (tx *storeTx) CheckDataAccess(ctx context.Context, authorized capability.Authorized, target capability.DataTarget) error {
 	c := authorized.Principal.Capability
-	if c.Prefix == "" || c.Team == "" {
+	ref := authorized.Principal.Authority
+	if ref.Kind != capability.AuthorityCapability || ref.ID == "" || c.Prefix != ref.ID || c.Team == "" {
 		return authorityError(apierr.Forbidden, "data route requires tenant capability authority")
 	}
+	p, err := tx.ResolveAuthority(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if p.Capability.Team != c.Team {
+		return bindingRefusal()
+	}
+	c = p.Capability
 	team := Team(c.Team)
 	input := blob.Authority{CapabilityRef: c.Prefix}
 	if target.RunID != "" && target.NodeID != "" && target.Attempt > 0 && target.Generation > 0 {

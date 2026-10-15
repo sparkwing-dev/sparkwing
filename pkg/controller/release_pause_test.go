@@ -1,154 +1,83 @@
 package controller
 
 import (
-	"bytes"
-	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func newPauseTestServer(t *testing.T) (*Server, string, *store.Store) {
+func pauseHTTPFixture(t *testing.T) (*Server, string) {
 	t.Helper()
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
+	s, session := credentialSessionServer(t)
+	engineSQL(t, s.store, `UPDATE sessions SET scopes='runs.read,runs.control'`)
+	engineSQL(t, s.store, `INSERT INTO nodes(team,run_id,node_id,status,status_detail,spec_json,execution_json) VALUES ('a','run','job','pending','paused',?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
+	engineSQL(t, s.store, `INSERT INTO debug_pauses(team,run_id,node_id,reason,paused_at,expires_at) VALUES ('a','run','job','manual',1,?)`, time.Now().Add(time.Hour).UnixNano())
+	return s, session
+}
+
+func resumeHTTP(s *Server, session, path, body string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest("POST", "https://controller.test"+path, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Origin", "https://controller.test")
+	r.Header.Set(csrfHeaderName, "session-csrf")
+	r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session})
+	r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "session-csrf"})
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	return w
+}
+
+func TestResumeDebugPauseCommitsPrincipalAndReplays(t *testing.T) {
+	s, session := pauseHTTPFixture(t)
+	for range 2 {
+		w := resumeHTTP(s, session, "/api/v1/runs/run/jobs/job/resume", `{}`)
+		if w.Code != 204 {
+			t.Fatalf("resume HTTP %d: %s", w.Code, w.Body)
+		}
+	}
+	tenant, err := s.store.ForTeam(t.Context(), "a")
 	if err != nil {
-		t.Fatalf("store open: %v", err)
+		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
-
-	now := time.Now().UTC()
-	raw, _, err := st.CreateToken("alice", store.TokenKindUser,
-		[]string{"runs.control"}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
+	pauses, err := tenant.ListDebugPauses(t.Context(), "run")
+	if err != nil || len(pauses) != 1 || pauses[0].ReleasedAt == nil || pauses[0].ReleasedBy != "member" || pauses[0].ReleaseKind != store.PauseReleaseManual {
+		t.Fatalf("pauses=%+v err=%v", pauses, err)
 	}
-
-	srv := New(st, nil)
-	return srv, raw, st
-}
-
-func seedActivePause(t *testing.T, st *store.Store, runID, nodeID string) {
-	t.Helper()
-	ctx := context.Background()
-	if err := st.CreateRun(ctx, store.Run{
-		ID: runID, Pipeline: "p", Status: "running",
-		StartedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
+	node, err := tenant.ReadNode(t.Context(), store.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil || node.Status != store.StatusPending || node.StatusDetail != "" {
+		t.Fatalf("job=%+v err=%v", node, err)
 	}
-	if err := st.CreateNode(ctx, store.Node{
-		RunID: runID, NodeID: nodeID, Status: "paused",
-	}); err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-	if err := st.CreateDebugPause(ctx, store.DebugPause{
-		RunID:     runID,
-		NodeID:    nodeID,
-		Reason:    "manual",
-		PausedAt:  time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
-	}); err != nil {
-		t.Fatalf("CreateDebugPause: %v", err)
+	var count int
+	if err := s.store.DB().QueryRow(`SELECT COUNT(*) FROM events WHERE kind='debug.resumed'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("events=%d err=%v", count, err)
 	}
 }
 
-func assertReleasedBy(t *testing.T, st *store.Store, runID, nodeID, want string) {
-	t.Helper()
-	rows, err := teststore.ForTeam(t, st, store.DefaultTeam).ListDebugPauses(context.Background(), runID)
-	if err != nil {
-		t.Fatalf("ListDebugPauses: %v", err)
+func TestResumeDebugPauseRejectsForgedActorsAndDeadCredentials(t *testing.T) {
+	s, session := pauseHTTPFixture(t)
+	if w := resumeHTTP(s, "", "/api/v1/runs/run/jobs/job/resume", `{}`); w.Code != 401 {
+		t.Fatalf("unauthenticated HTTP %d %s", w.Code, w.Body)
 	}
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 pause row, got %d", len(rows))
+	for _, body := range []string{`{"released_by":"other"}`, `{"team":"b"}`, `{"release_kind":"manual"}`, `null`, ``} {
+		if w := resumeHTTP(s, session, "/api/v1/runs/run/jobs/job/resume", body); w.Code != 400 {
+			t.Fatalf("body %q: HTTP %d %s", body, w.Code, w.Body)
+		}
 	}
-	if rows[0].ReleasedAt == nil {
-		t.Fatalf("expected released_at to be set")
+	if w := resumeHTTP(s, session, "/api/v1/runs/run/jobs/missing/resume", `{}`); w.Code != 404 {
+		t.Fatalf("missing HTTP %d %s", w.Code, w.Body)
 	}
-	if rows[0].ReleasedBy != want {
-		t.Fatalf("released_by=%q want %q", rows[0].ReleasedBy, want)
+	digest := sha256.Sum256([]byte(session))
+	engineSQL(t, s.store, `UPDATE sessions SET revoked_at=1 WHERE hash=?`, hex.EncodeToString(digest[:]))
+	if w := resumeHTTP(s, session, "/api/v1/runs/run/jobs/job/resume", `{}`); w.Code != 401 {
+		t.Fatalf("revoked HTTP %d %s", w.Code, w.Body)
 	}
-}
-
-func TestReleaseDebugPause_RecordsAuthPrincipal(t *testing.T) {
-	srv, raw, st := newPauseTestServer(t)
-	seedActivePause(t, st, "run-1", "node-a")
-
-	req := httptest.NewRequest(http.MethodPost,
-		"/api/v1/runs/run-1/nodes/node-a/release", nil)
-	req.Header.Set("Authorization", "Bearer "+raw)
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status=%d body=%s want 204", rec.Code, rec.Body.String())
+	if w := resumeHTTP(s, session, "/api/v1/runs/run/nodes/job/release", `{}`); w.Code != 404 {
+		t.Fatalf("retired HTTP %d %s", w.Code, w.Body)
 	}
-	assertReleasedBy(t, st, "run-1", "node-a", "alice")
-}
-
-func TestReleaseDebugPause_AuthOverridesBody(t *testing.T) {
-	srv, raw, st := newPauseTestServer(t)
-	seedActivePause(t, st, "run-2", "node-b")
-
-	body := bytes.NewReader([]byte(`{"released_by":"mallory","release_kind":"manual"}`))
-	req := httptest.NewRequest(http.MethodPost,
-		"/api/v1/runs/run-2/nodes/node-b/release", body)
-	req.Header.Set("Authorization", "Bearer "+raw)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status=%d body=%s want 204", rec.Code, rec.Body.String())
-	}
-	assertReleasedBy(t, st, "run-2", "node-b", "alice")
-}
-
-func TestReleaseDebugPause_Unauthenticated(t *testing.T) {
-	srv, _, st := newPauseTestServer(t)
-	seedActivePause(t, st, "run-3", "node-c")
-
-	req := httptest.NewRequest(http.MethodPost,
-		"/api/v1/runs/run-3/nodes/node-c/release", nil)
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status=%d want 401", rec.Code)
-	}
-
-	rows, err := teststore.ForTeam(t, st, store.DefaultTeam).ListDebugPauses(context.Background(), "run-3")
-	if err != nil {
-		t.Fatalf("ListDebugPauses: %v", err)
-	}
-	if len(rows) != 1 || rows[0].ReleasedAt != nil {
-		t.Fatalf("pause should still be open after 401")
-	}
-}
-
-func TestReleaseDebugPause_AuthDisabledFallback(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatalf("store open: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-
-	srv := New(st, nil)
-	seedActivePause(t, st, "run-4", "node-d")
-
-	req := httptest.NewRequest(http.MethodPost,
-		"/api/v1/runs/run-4/nodes/node-d/release", nil)
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status=%d body=%s want 204", rec.Code, rec.Body.String())
-	}
-	assertReleasedBy(t, st, "run-4", "node-d", "anonymous")
 }

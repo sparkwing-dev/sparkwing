@@ -80,7 +80,7 @@ func TestBlobOwnerReceiptCannotTransferToAJob(t *testing.T) {
 			if err != nil || len(presence.Present) != 0 {
 				t.Fatalf("job inherited its owner's receipt: %+v: %v", presence, err)
 			}
-			authorized := capability.Authorized{Principal: capability.Principal{Capability: issued.Capability}}
+			authorized := dataAccessAuthority(t, s, issued.Capability.Prefix)
 			for _, operation := range []capability.DataOperation{capability.DataDownload, capability.DataRecord} {
 				if err := tenant.CheckDataAccess(t.Context(), authorized, capability.DataTarget{Operation: operation, Digest: string(ticket.Blob.Digest)}); !errors.Is(err, blob.ErrDigestNotReadable) {
 					t.Fatalf("job inherited owner authority through %s: %v", operation, err)

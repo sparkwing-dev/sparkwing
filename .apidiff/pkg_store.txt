@@ -358,13 +358,8 @@ type ClaimIdentity struct {
 }
 const ClaimMembershipHeader = "X-Sparkwing-Claim-Membership"
 type ClaimPlacement struct {
-	DefaultPrefers []string
-
-	Hold time.Duration
-
-	Liveness time.Duration
-
-	Live []RunnerPresence
+	Preferences []PlacementPreference
+	Liveness    time.Duration
 }
 func ClaimPlacementFromContext(ctx context.Context) (ClaimPlacement, bool)
 const ClaimPollAfterHeader = "X-Sparkwing-Poll-After"
@@ -479,6 +474,17 @@ type ConcurrencyWaiter struct {
 
 	Position int
 }
+type Console struct {
+}
+func (c *Console) ConsoleApproveWaitlist(ctx context.Context, a capability.Authorized, ids []string, oldest int, key string) ([]Account, error)
+func (c *Console) ConsoleDeleteAccount(ctx context.Context, a capability.Authorized) (AccountDeletion, error)
+func (c *Console) ConsoleDeleteTeam(ctx context.Context, a capability.Authorized) (TeamDeletion, error)
+func (c *Console) ConsoleFreeze(ctx context.Context, a capability.Authorized, reason string) (TeamCreditFreeze, error)
+func (c *Console) ConsoleGrantCredit(ctx context.Context, a capability.Authorized, req CreditGrantRequest) (CreditGrantResult, error)
+func (c *Console) ConsoleSetBillingTrust(ctx context.Context, a capability.Authorized, change BillingTrustChange) (BillingStanding, error)
+func (c *Console) ConsoleSetCreditSettings(ctx context.Context, a capability.Authorized, up CreditSettingsUpdate) (CreditSettings, error)
+func (c *Console) ConsoleUnbindGitHubInstallation(ctx context.Context, a capability.Authorized, installation int64) (Team, error)
+func (c *Console) ConsoleUnfreeze(ctx context.Context, a capability.Authorized, hold, reason string) (TeamCreditFreeze, error)
 type ControllerRun struct {
 	Team  Team
 	RunID string
@@ -1282,9 +1288,6 @@ type MembershipUpdate struct {
 	AccountID string
 	Role      *Role
 }
-const MeteringFree
-const MeteringPaid
-const MeteringUnknown NodeMetering = iota
 const MetricCommand MetricKind = "command"
 const MetricInterval MetricKind = "interval"
 type MetricKind string
@@ -1439,7 +1442,6 @@ func NodeEvents() []StateEventRule
 const NodeFailed NodeState = "failed"
 const NodeLogSealGrace = 60 * time.Second
 const NodeMemoized NodeState = "memoized"
-type NodeMetering int
 const NodePending NodeState = "pending"
 const NodeReady NodeState = "ready"
 type NodeRef struct {
@@ -1486,13 +1488,6 @@ type NodeRow struct {
 	ManifestRecord        *blob.RecordKey
 }
 const NodeRunning NodeState = "running"
-type NodeSettlement struct {
-	Seconds          float64
-	ClaimTokenPrefix string
-	Metering         NodeMetering
-
-	ChargeWindowOpen bool
-}
 const NodeSkipped NodeState = "skipped"
 type NodeState string
 type NodeStatus string
@@ -1728,6 +1723,10 @@ type PipelineSummary struct {
 }
 const PlacementFallback = "fallback"
 const PlacementNone = "none"
+type PlacementPreference struct {
+	Prefers []string
+	Hold    time.Duration
+}
 const PlacementPreferred = "preference"
 type PlanAcceptance struct {
 	RunID string
@@ -1743,6 +1742,15 @@ const PolicyAdmissionFail OwnerPolicyKind = "admission_fail"
 const PolicyAdmissionSkip OwnerPolicyKind = "admission_skip"
 const PolicyApprovalBypass OwnerPolicyKind = "approval_bypass"
 const PolicyQueueTimeout OwnerPolicyKind = "admission_queue_timeout"
+type PoolAccessRule struct {
+	ID             string
+	Pool           string
+	RepositoryKey  string
+	Branch         string
+	Source         string
+	Route          string
+	InstallationID int64
+}
 const PoolHeartbeatInterval = 3 * time.Second
 const PrefixLen = 12
 type ProfileObservation struct {
@@ -2053,19 +2061,6 @@ type RunView struct {
 	Logs     []blob.LogSubject
 }
 const RunnerIdentityHeader = "X-Sparkwing-Runner"
-type RunnerPresence struct {
-	Name string
-
-	Labels []string
-
-	Profile match.Profile
-
-	FreeSlots int
-
-	Available match.Resources
-
-	TokenPrefix string
-}
 const RunnerTokenLifetime = 90 * 24 * time.Hour
 type ScheduleDecision struct {
 	Nodes   []NodeDecision
@@ -2501,6 +2496,7 @@ func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUs
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, actor string, now time.Time) ([]Account, error)
 func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, actor string, now time.Time) ([]Account, error)
+func (s *Store) AsConsole(allowed func(string) bool) *Console
 func (s *Store) AsOperator() *Operator
 func (s *Store) AuthGenerations(ctx context.Context, authority capability.AuthorityRef, team string) (capability.AuthGenerations, error)
 func (s *Store) BindGitHubAppDeliveryEvent(ctx context.Context, digest, event, delivery string, now time.Time) (bool, error)
@@ -2515,7 +2511,6 @@ func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, 
 func (s *Store) ConsumeIdentityLinkState(ctx context.Context, nonce string, expires, now time.Time) (bool, error)
 func (s *Store) CreateAccountSession(ctx context.Context, acct Account, team Team, ttl time.Duration) (string, string, *Session, error)
 func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl time.Duration) (string, *Session, error)
-func (s *Store) CreateDebugPause(ctx context.Context, p DebugPause) error
 func (s *Store) CreateIdentityAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error)
 func (s *Store) CreateNode(ctx context.Context, n Node) error
 func (s *Store) CreateRun(ctx context.Context, r Run) error
@@ -2536,7 +2531,6 @@ func (s *Store) EnsureBootstrapCapability(ctx context.Context, spec capability.P
 func (s *Store) EventLimits(ctx context.Context) (_ EventLimits, err error)
 func (s *Store) ExchangeCapability(ctx context.Context, spec capability.ExchangeSpec) (capability.Issued, error)
 func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
-func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
 func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error
 func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error
@@ -2572,7 +2566,6 @@ func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) 
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
 func (s *Store) RecordLocalOutput(ctx context.Context, runID, nodeID string, ref OutputRef, now time.Time) (err error)
 func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error
-func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPrefix string) error
 func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error)
 func (s *Store) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error)
@@ -2675,6 +2668,7 @@ func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInst
 func (t *Tenant) BlobRecords(manifests BlobManifestReader) blob.RecordStore
 func (t *Tenant) BusinessEvents(ctx context.Context, kind string) (_ []BusinessEvent, err error)
 func (t *Tenant) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
+func (t *Tenant) ChargeDataDownload(ctx context.Context, authority blob.Authority, metadata blob.Blob, charge DownloadCharge) (DownloadCharged, error)
 func (t *Tenant) ChargeDownload(ctx context.Context, c DownloadCharge) (_ DownloadCharged, err error)
 func (t *Tenant) CheckDataAccess(ctx context.Context, authorized capability.Authorized, target capability.DataTarget) error
 func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time) error
@@ -2685,7 +2679,6 @@ func (t *Tenant) ConfirmGitCredentialFor(ctx context.Context, a capability.Autho
 func (t *Tenant) CopyMemo(ctx context.Context, request blob.CopyMemoRequest) (blob.MemoHit, error)
 func (t *Tenant) CountPendingTriggers(ctx context.Context) (int, error)
 func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
-func (t *Tenant) CreateDebugPause(ctx context.Context, p DebugPause) error
 func (t *Tenant) CreateGitHubAutomationTriggerWithRun(ctx context.Context, trig Trigger, run Run, grant GitHubAppAutomation) error
 func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, role Role, now time.Time) (Invitation, error)
 func (t *Tenant) CreateRun(ctx context.Context, r Run) error
@@ -2707,10 +2700,11 @@ func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string
 func (t *Tenant) DeleteGitHubAppAutomation(ctx context.Context, repository int64) error
 func (t *Tenant) DeleteGitHubAppTrigger(ctx context.Context, repositoryID int64, pipeline string) error
 func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time) error
+func (t *Tenant) DeletePoolAccess(ctx context.Context, actor Actor, pool, id string) (bool, error)
 func (t *Tenant) DeleteRun(ctx context.Context, runID string) error
+func (t *Tenant) DeleteRunner(ctx context.Context, actor Actor, name string) (bool, error)
 func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) (err error)
 func (t *Tenant) EgressUsage(ctx context.Context, period string) (EgressUsage, error)
-func (t *Tenant) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (t *Tenant) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
 func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey string) (*Trigger, error)
 func (t *Tenant) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error
@@ -2724,7 +2718,6 @@ func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []s
 func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, error)
 func (t *Tenant) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*PipelineProfile, error)
 func (t *Tenant) GetRun(ctx context.Context, runID string) (*Run, error)
-func (t *Tenant) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error)
 func (t *Tenant) GetSecretForPipeline(name, pipeline string) (*Secret, error)
 func (t *Tenant) GetSecretRow(name, pipeline string) (*Secret, error)
 func (t *Tenant) GetTrigger(ctx context.Context, id string) (*Trigger, error)
@@ -2776,20 +2769,22 @@ func (t *Tenant) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (t *Tenant) MemberRole(ctx context.Context, accountID string) (Role, error)
 func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error)
 func (t *Tenant) NodeIsAncestor(ctx context.Context, runID, ancestor, node string) (found bool, err error)
-func (t *Tenant) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error)
 func (t *Tenant) OldestWaitingReadyNodeForPrincipal(
 	ctx context.Context, principal string,
 ) (runID, nodeID string, err error)
 func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now time.Time, hold time.Duration) (_ string, err error)
+func (t *Tenant) PrepareLogWrite(ctx context.Context, subject blob.LogSubject, actor Actor) (string, error)
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (t *Tenant) PutGitHubAppAutomation(ctx context.Context, a GitHubAppAutomation, now time.Time) error
 func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, now time.Time) (GitHubAppTrigger, error)
 func (t *Tenant) ReadBlob(ctx context.Context, authority blob.Authority, digest blob.Digest) (blob.Blob, error)
 func (t *Tenant) ReadCapability(ctx context.Context, a capability.Authorized) (capability.Metadata, error)
+func (t *Tenant) ReadDataBlob(ctx context.Context, authority blob.Authority, digest blob.Digest) (blob.Blob, error)
 func (t *Tenant) ReadFailure(ctx context.Context, source NodeRef, generation int64, actor Actor) (*nodeproto.JobFailure, error)
 func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.LogReadRequest) (LogSegments, error)
 func (t *Tenant) ReadNode(ctx context.Context, ref NodeRef) (NodeRow, error)
 func (t *Tenant) ReadOwnerSnapshot(ctx context.Context, authority capability.AuthorityRef, runID string) (RunSnapshot, error)
+func (t *Tenant) ReadPoolAccess(ctx context.Context) ([]PoolAccessRule, map[string][]string, error)
 func (t *Tenant) ReadRun(ctx context.Context, runID string) (RunRow, error)
 func (t *Tenant) ReadRunView(ctx context.Context, runID string) (RunView, error)
 func (t *Tenant) ReadSecret(ctx context.Context, a capability.Authorized) (*Secret, error)
@@ -2808,7 +2803,6 @@ func (t *Tenant) RecordStep(ctx context.Context, report StepReport) error
 func (t *Tenant) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
 func (t *Tenant) RegisterGitHubRunner(ctx context.Context, a capability.Authorized, row GitHubRunnerBinding) (GitHubRunnerBinding, error)
 func (t *Tenant) ReleaseCreditFreezes(ctx context.Context, disputeID, actor, reason string, now time.Time) (int64, error)
-func (t *Tenant) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string, now time.Time) (int64, error)
 func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capability.Authorized) (GitCredential, capability.SourceReleaseAudit, error)
 func (t *Tenant) RemoveGitCredential(ctx context.Context, a capability.Authorized, host string) error
@@ -2828,6 +2822,8 @@ func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (Pro
 func (t *Tenant) ResolveBlobAuthority(ctx context.Context, selector blob.Authority, grant capability.Grant) (blob.Authority, error)
 func (t *Tenant) ResolveCapacityWaiter(ctx context.Context, key string, binding CapacityBinding, actor Actor) (WaiterResolution, error)
 func (t *Tenant) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) (err error)
+func (t *Tenant) ResolveDataAuthority(ctx context.Context, authorized capability.Authorized) (blob.Authority, error)
+func (t *Tenant) ResumeAuthorizedDebugPause(ctx context.Context, authorized capability.Authorized) error
 func (t *Tenant) RetryRunEffect(ctx context.Context, delivery EffectDelivery, nextAt time.Time) error
 func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error
 func (t *Tenant) RevokeGitHubRunner(ctx context.Context, a capability.Authorized, repositoryID int64) error
@@ -2868,8 +2864,10 @@ func (t *Tenant) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, 
 func (t *Tenant) WithdrawGitHubAppAutomation(ctx context.Context, installation, repository int64) error
 func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64, now time.Time) (int64, error)
 func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, now time.Time) (int64, error)
+func (t *Tenant) WriteActivity(ctx context.Context, ref NodeRef, actor Actor, detail string) error
 func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite) error
 func (t *Tenant) WriteGitCredential(ctx context.Context, a capability.Authorized, row GitCredential) (GitCredential, error)
+func (t *Tenant) WritePoolAccess(ctx context.Context, actor Actor, id string, rules []PoolAccessRule) (bool, error)
 func (t *Tenant) WriteSecret(ctx context.Context, a capability.Authorized, row Secret) error
 func (t *Tenant) WriteSummary(ctx context.Context, summary SummaryWrite) error
 func TierQuota(tier string) (StorageQuota, bool)

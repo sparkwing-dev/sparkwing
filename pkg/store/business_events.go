@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -72,11 +74,21 @@ func RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error {
 	if err != nil {
 		return err
 	}
+	var team any = string(ev.Team)
+	if ev.Team == "" {
+		identity, err := json.Marshal([]string{ev.Kind, ev.SubjectID})
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(identity)
+		id = "global:" + hex.EncodeToString(sum[:])
+		team = nil
+	}
 	_, err = tx.Exec(`
 		INSERT INTO business_events (id, ts, team, account, kind, subject_id, actor, attrs)
-		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?)
-		ON CONFLICT (team, kind, subject_id) DO NOTHING`,
-		id, ev.At.UnixNano(), string(ev.Team), ev.Account, ev.Kind, ev.SubjectID,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT DO NOTHING`,
+		id, ev.At.UnixNano(), team, ev.Account, ev.Kind, ev.SubjectID,
 		truncate(ev.Actor, 200), string(attrs))
 	return err
 }

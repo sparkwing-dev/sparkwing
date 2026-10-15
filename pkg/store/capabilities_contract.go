@@ -332,8 +332,7 @@ func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityR
 		node.principal.Class = capability.CredentialSession
 	}
 	c := node.principal.Capability
-	now := tx.now()
-	if c.RevokedAt != nil && !now.Before(*c.RevokedAt) || c.ExpiresAt != nil && !now.Before(*c.ExpiresAt) {
+	if c.RevokedAt != nil && !tx.now().Before(*c.RevokedAt) || c.ExpiresAt != nil && !tx.now().Before(*c.ExpiresAt) || c.Binding.Deadline != nil && !tx.now().Before(*c.Binding.Deadline) {
 		return node, authorityError(apierr.Unauthenticated, "authority has ended")
 	}
 	if c.Subject.Kind == capability.SubjectAccount {
@@ -387,8 +386,8 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 	now := tx.now()
 	for _, node := range chain {
 		c := node.principal.Capability
-		if c.ExpiresAt != nil && !now.Before(*c.ExpiresAt) || c.RevokedAt != nil && !now.Before(*c.RevokedAt) {
-			return nil, authorityError(apierr.Unauthenticated, "authority ended while ancestry was locked")
+		if c.ExpiresAt != nil && !now.Before(*c.ExpiresAt) || c.RevokedAt != nil && !now.Before(*c.RevokedAt) || c.Binding.Deadline != nil && !now.Before(*c.Binding.Deadline) {
+			return nil, authorityError(apierr.Unauthenticated, "authority expired while ancestry was locked")
 		}
 	}
 	for i := len(chain) - 2; i >= 0; i-- {

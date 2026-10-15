@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -12,25 +13,49 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
+func placementRank(profile match.Profile, demand match.Demand, preferences []PlacementPreference) int {
+	for i, preference := range preferences {
+		demand.Prefers = preference.Prefers
+		verdict := match.Evaluate(profile, demand)
+		if verdict.OK() && (len(preference.Prefers) == 0 || verdict.PreferenceScore > 0) {
+			return i
+		}
+	}
+	return len(preferences)
+}
+
 func unitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, claimant match.Profile, demand match.Demand) (placementDecision, error) {
 	decision := placementDecision{reason: PlacementNone}
-	if unit.Kind != capability.UnitNode || len(demand.Prefers) == 0 {
+	if unit.Kind != capability.UnitNode {
 		return decision, nil
 	}
-	decision.reason = PlacementPreferred
-	if match.Evaluate(claimant, demand).PreferenceScore > 0 {
-		return decision, nil
-	}
-	decision.reason = PlacementFallback
 	policy, _ := ClaimPlacementFromContext(ctx)
-	if policy.Hold <= 0 {
+	preferences := policy.preferencesFor(demand.Prefers)
+	if len(preferences) == 0 || len(preferences[0].Prefers) == 0 {
 		return decision, nil
+	}
+	rank := placementRank(claimant, demand, preferences)
+	decision.reason = PlacementFallback
+	if rank == 0 && len(preferences[0].Prefers) != 0 {
+		decision.reason = PlacementPreferred
 	}
 	var since sql.NullInt64
 	if err := tx.QueryRowContext(ctx, `SELECT ready_at FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, unit.RunID, unit.NodeID).Scan(&since); err != nil {
 		return decision, err
 	}
-	if !since.Valid || !tx.now().Before(time.Unix(0, since.Int64).Add(policy.Hold)) {
+	if !since.Valid {
+		return decision, nil
+	}
+	deadline := time.Unix(0, since.Int64)
+	held := make([]bool, len(preferences))
+	for i, preference := range preferences {
+		if preference.Hold < 0 {
+			return decision, authorityError(apierr.BadRequest, "placement hold must not be negative")
+		}
+		deadline = deadline.Add(preference.Hold)
+		held[i] = i < rank && tx.now().Before(deadline)
+	}
+	if !slices.Contains(held, true) {
 		return decision, nil
 	}
 	live, err := placementRunnersTx(ctx, tx, team, policy)
@@ -38,21 +63,7 @@ func unitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 		return decision, err
 	}
 	for _, runner := range live {
-		if runner.FreeSlots < 1 {
-			continue
-		}
-		chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: runner.TokenPrefix}, false)
-		if err == nil && (chain[0].principal.Capability.Team != string(team) || !registeredClaimant(chain[0].principal.Capability)) {
-			continue
-		}
-		if err == nil {
-			_, err = claimKinds(chain[0].principal.Capability, UnitDemand{Target: &unit})
-		}
-		var profile match.Profile
-		var required match.Demand
-		if err == nil {
-			profile, required, err = readMatchingInputsTx(ctx, tx, UnitDemand{CapabilityPrefix: runner.TokenPrefix, Labels: runner.Labels, OS: runner.Profile.OS, Arch: runner.Profile.Arch, Capacity: runner.Profile.Capacity, Available: runner.Available}, unit, false)
-		}
+		profile, required, err := placementRunnerTx(ctx, tx, team, unit, runner)
 		if err != nil {
 			var denied *apierr.Error
 			if errors.As(err, &denied) && (denied.Code == apierr.Unauthenticated || denied.Code == apierr.Forbidden) {
@@ -63,7 +74,8 @@ func unitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 		if profile.Capacity.Cores == 0 && profile.Capacity.MemoryBytes == 0 {
 			continue
 		}
-		if verdict := match.Evaluate(profile, required); verdict.OK() && verdict.PreferenceScore > 0 && match.Fits(profile.Capacity, runner.Available, required.Request).OK() {
+		earlier := placementRank(profile, required, preferences)
+		if earlier < len(held) && held[earlier] && match.Fits(profile.Capacity, runner.Available, required.Request).OK() {
 			decision.hold = true
 			break
 		}
@@ -71,8 +83,23 @@ func unitPlacementTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, 
 	return decision, nil
 }
 
-func placementRunnersTx(ctx context.Context, tx *storeTx, team Team, policy ClaimPlacement) ([]RunnerPresence, error) {
-	live := append([]RunnerPresence{}, policy.Live...)
+func placementRunnerTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, runner UnitDemand) (match.Profile, match.Demand, error) {
+	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: runner.CapabilityPrefix}, false)
+	if err != nil {
+		return match.Profile{}, match.Demand{}, err
+	}
+	c := chain[0].principal.Capability
+	if c.Team != string(team) || !registeredClaimant(c) {
+		return match.Profile{}, match.Demand{}, bindingRefusal()
+	}
+	if _, err := claimKinds(c, UnitDemand{Target: &unit}); err != nil {
+		return match.Profile{}, match.Demand{}, err
+	}
+	return readMatchingInputsTx(ctx, tx, runner, unit, false)
+}
+
+func placementRunnersTx(ctx context.Context, tx *storeTx, team Team, policy ClaimPlacement) ([]UnitDemand, error) {
+	var live []UnitDemand
 	if policy.Liveness > 0 {
 		rows, err := tx.QueryContext(ctx, `SELECT prefix,claim_observation_json FROM capabilities WHERE team=? AND last_used_at>=? AND claim_observation_json IS NOT NULL`, team, tx.now().Add(-policy.Liveness).UnixNano())
 		if err != nil {
@@ -81,14 +108,18 @@ func placementRunnersTx(ctx context.Context, tx *storeTx, team Team, policy Clai
 		for rows.Next() {
 			var prefix string
 			var body []byte
-			var observation UnitDemand
+			var observation runnerPoll
 			if err := rows.Scan(&prefix, &body); err != nil {
 				return nil, errors.Join(err, rows.Close())
 			}
 			if err := json.Unmarshal(body, &observation); err != nil {
 				return nil, errors.Join(err, rows.Close())
 			}
-			live = append(live, RunnerPresence{TokenPrefix: prefix, Labels: observation.Labels, Profile: match.Profile{OS: observation.OS, Arch: observation.Arch, Capacity: observation.Capacity}, Available: observation.Available, FreeSlots: 1})
+			if observation.ObservedAt.Before(tx.now().Add(-policy.Liveness)) || observation.ObservedAt.After(tx.now()) {
+				continue
+			}
+			observation.CapabilityPrefix = prefix
+			live = append(live, observation.UnitDemand)
 		}
 		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 			return nil, err

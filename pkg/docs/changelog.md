@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Use ordered placement preferences with per-step holds on the store clock. Existing local-first flags configure the preferred runner and everyone else. Only accepted polls refresh placement liveness. Remove unused raw debug-pause writers, ancestor and child-trigger lookups, and legacy node settlement. See [migration guide](docs/migrations/_unreleased.md#ordered-placement-and-unused-store-apis).
+
 - **store (Breaking):** Remove raw plan, step, annotation, summary, activity and approval writers, the old cross-run input resolver and unused `StateStoreOld`. Use sealed acceptance and fenced tenant transitions. Closing an attempt now closes its unfinished steps in the same transaction. See [migration guide](docs/migrations/_unreleased.md#fenced-store-metadata-and-approval-transitions).
 
 - **store (Breaking):** Remove legacy execution-attempt writers and the unused GitHub runner scope matcher. Attempt history requires an explicit tenant and reads committed node transitions. Cloud awards are always metered, including awards from unmetered launcher credentials. Verified non-checkout payment events use the final receipt and correlation schema. See [migration guide](docs/migrations/_unreleased.md#execution-attempts-and-cloud-metering).
@@ -124,6 +126,11 @@ unlock.
 - **controller (Breaking):** Dashboard token sign-in uses account capabilities and parented sessions
   Console access requires a configured operator account’s direct sign-in session, with session-bound CSRF on writes. Embedded controllers supply verified uid or SID subjects with `WithPeerIdentity`, replacing `WithPeerPrincipal`.
 ### Fixed
+
+- **controller:** Preserve manual ref namespaces in data record queries and responses. A record written under `manual:<ref>` can be selected with the same ref, and lookups keep verified and manual read grants separate.
+
+- **controller:** Read committed logs through the configured data backend and retain the claim's holder fence
+  Native claim and account-session reads share the egress meter. Log streams use `Cache-Control: no-store`.
 
 - **repos update:** Honor checkout selection, explicit previews and fleet confirmation
   Updates apply to the current checkout by default. `--dry-run` previews it;
