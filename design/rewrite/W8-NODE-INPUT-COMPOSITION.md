@@ -101,4 +101,43 @@ Overwing discovery worked while reporting its installed binary behind source.
 Git config has no local identity or core.worktree override.
 All check sessions finished. The worker scratch directory was deleted.
 
+## Integration checkpoint
+
+The continuation starts from 18286f13a and changes only this report. The
+cancellation implementation is already present. Both original regressions and
+the interruption property's seeds pass. Counting the three policy call sites
+and their helpers confirms 84 -> 75 physical lines. The pending wait remains
+44 -> 40 and loop.go remains 408 -> 401.
+
+All 26 assigned amendment rows and the W8 handoffs retain the dispositions above.
+The declared source, keeper and controller-client defaults are already called
+by W8 production code and exercised through contract fakes. Further composition
+requires these existing foreign contract requests to be completed:
+
+- W3 must declare shared RunHost/NodeHost construction, run/plan/eval identity
+  inputs and plan/eval operations. Bound routes, storage and generated-code
+  replay still need their shared constructors.
+- W1/W2 must provide the local store activity/recovery projection and the shared
+  controller, queue and maintenance composition consumed by LocalRuntimeConfig.Open.
+- W9 must resolve the recorded launcher image/deadline and plan-without-job
+  grammar, plus the source-init/runtime handoff. W3/W7 must expose workspace-off
+  binary-cache hashing.
+
+The source and keeper bodies, EngineClient/DataClient and SyncLauncher remain
+their owners' panic stubs. Native placement, platform, Cloud enforcement/cleanup and real-repo
+evidence remain open. No foreign contract was changed.
+
+Whole-repository build, W8/acceptance vet, full runners/... and engine/... suites,
+both acceptance packages, focused cluster/local-runtime/client suites and
+commentcheck pass. Acceptance takes 61.203 seconds. Commentcheck covers 1,192
+files. Tests use -p 4 and the temporary cache settings above. The focused local
+selection uses in-memory listeners. No native catalog cell was activated and no
+test was newly ported.
+
+Production changes, deleted legacy lines/files, shared-file edits and foreign
+caller migrations are all zero in this continuation. The earlier deletions
+remain in place. No new mechanism or product decision is introduced. No Git
+write or Sparkwing binary ran. The worker scratch directory is removed after
+checks. The lead retains commits, independent review and native verification.
+
 STATUS: CONTINUE
