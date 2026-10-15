@@ -250,6 +250,11 @@ func deriveKey(name, scope, lockPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read key file %s: %w", lockPath, err)
 	}
+	return Key(name, scope, data)
+}
+
+// Key derives a platform-specific directory-cache key from captured lockfile bytes.
+func Key(name, scope string, data []byte) (string, error) {
 	h := sha256.New()
 	h.Write([]byte(scope))
 	h.Write([]byte{0})

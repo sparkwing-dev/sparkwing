@@ -349,24 +349,38 @@ func TestBlobUploadIndependentClientsRaceAndReplay(t *testing.T) {
 }
 
 func TestBlobUploadExpiredReservationFreesCapacity(t *testing.T) {
-	s, tenant, request := uploadFixture(t)
-	rewriteSchemaExec(t, s.db, "UPDATE storage_quotas SET max_bytes_per_month=3 WHERE team='a'")
-	if _, err := tenant.ReserveBlobUpload(t.Context(), request); err != nil {
-		t.Fatal(err)
+	for _, size := range []int64{0, 3} {
+		t.Run(map[int64]string{0: "empty", 3: "bytes"}[size], func(t *testing.T) {
+			s, tenant, request := uploadFixture(t)
+			if err := tenant.SetStorageQuota(t.Context(), StorageQuota{MaxObjectsPerRun: 1, MaxBytesPerMonth: 3}); err != nil {
+				t.Fatal(err)
+			}
+			request.Intent.Size = size
+			first, err := tenant.ReserveBlobUpload(t.Context(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.ID = "new_ticket"
+			if _, err := tenant.ReserveBlobUpload(t.Context(), request); !errors.Is(err, ErrStorageQuota) {
+				t.Fatalf("overlapping reservation accepted: %v", err)
+			}
+			now := request.ExpiresAt
+			s.clock = func() time.Time { return now }
+			rewriteSchemaExec(t, s.db, "UPDATE nodes SET lease_expires_at=? WHERE team='a'", now.Add(time.Hour).UnixNano())
+			request.ExpiresAt = now.Add(time.Minute)
+			if _, err := tenant.ReserveBlobUpload(t.Context(), request); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tenant.CommitBlobUpload(t.Context(), verifiedUpload(first, request.Intent.Authority)); !errors.Is(err, ErrLockHeld) {
+				t.Fatalf("expired ticket committed: %v", err)
+			}
+			assertBlobUsage(t, s, 0, size, 0, 0)
+			if err := tenant.AbortBlobUpload(t.Context(), request.Intent.Authority, first.ID); err != nil {
+				t.Fatal(err)
+			}
+			assertBlobUsage(t, s, 0, size, 0, 0)
+		})
 	}
-	now := request.ExpiresAt
-	s.clock = func() time.Time { return now }
-	rewriteSchemaExec(t, s.db, "UPDATE nodes SET lease_expires_at=? WHERE team='a'", request.ExpiresAt.Add(time.Hour).UnixNano())
-	request.ID = "new_ticket"
-	request.ExpiresAt = request.ExpiresAt.Add(time.Minute)
-	if _, err := tenant.ReserveBlobUpload(t.Context(), request); err != nil {
-		t.Fatal(err)
-	}
-	assertBlobUsage(t, s, 0, 3, 0, 0)
-	if err := tenant.AbortBlobUpload(t.Context(), request.Intent.Authority, "ticket_a"); err != nil {
-		t.Fatal(err)
-	}
-	assertBlobUsage(t, s, 0, 3, 0, 0)
 }
 
 func TestBlobUploadEmptyCommitAndExpiredReplay(t *testing.T) {

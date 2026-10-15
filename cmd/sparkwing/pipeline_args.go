@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
@@ -39,6 +40,7 @@ func (r *pipelineRun) describedPipeline(pipelineName string) (nodeproto.Pipeline
 		}
 		schemas = doc.Pipelines
 	}
+	r.pipeline = nodehost.PipelineIdentity{Invoked: identity.Name, Entrypoint: identity.Entrypoint}
 	return boundPipelineSchema(schemas, identity)
 }
 

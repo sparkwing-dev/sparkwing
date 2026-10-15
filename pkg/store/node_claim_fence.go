@@ -277,26 +277,6 @@ func (s *Store) assertRunMutationFenceTx(ctx context.Context, tx *storeTx, team 
 	return err
 }
 
-func (s *Store) assertRunHeartbeatFenceTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
-	if fence, ok := NodeClaimFenceFromContext(ctx); ok {
-		if _, err := lockTeamRunRowTx(ctx, tx, team, runID); err != nil {
-			return err
-		}
-		var held int
-		err := tx.QueryRowContext(ctx, `SELECT 1 FROM nodes
-	WHERE team = ? AND run_id = ? AND claimed_by = ? AND claim_principal = ? AND claim_token_prefix = ?
-	  AND claim_membership_id = ? AND reservation_id = ? AND claim_generation = ?
-	  AND `+nodeClaimLiveSQL("")+s.forUpdate(), string(team), runID, fence.HolderID,
-			fence.Claimant.Principal, fence.Claimant.TokenPrefix, fence.MembershipID,
-			fence.ReservationID, fence.ClaimGeneration, time.Now().UnixNano()).Scan(&held)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrLockHeld
-		}
-		return err
-	}
-	return s.assertRunMutationFenceTx(ctx, tx, team, runID)
-}
-
 func fencedRows(result rowsAffected, fenced bool) error {
 	if !fenced {
 		return nil

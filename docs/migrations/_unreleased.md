@@ -145,6 +145,11 @@ native runtime and machine-reader integration.
 and a batch limit to `Store.ReapUnits`. Results identify the team, run and unit.
 Lease loss requeues unfinished remote work within the same run. Started local
 owners fail in place. Unstarted owners consume no execution attempt or disruption.
+`Store.RequeueUnstartedClaim` and `Tenant.RequeueUnstartedClaim` are removed.
+Expired owner awards use the same leased pass. An unstarted owner requeues
+without a disruption, and a replacement award advances its generation.
+The former holder cannot renew, finish or accept a plan for the replacement.
+
 ## Build trust uses tenant handles
 
 `Store.TrustLocalBuilds` and `Store.SetTrustLocalBuilds` are removed. Obtain a
@@ -275,8 +280,8 @@ that keep the logs service running.
 
 - **Controller:** drop `--logs-url` and `--logs-archive-store`, and delete
   the `logs-delete-token` file from `--credentials-dir` (or the
-  `controller.credentialsSecret` key); nothing reads it. The storage pass
-  counts and prunes logs from the segments, and deleting a team deletes its
+  `controller.credentialsSecret` key). Nothing reads it. Leased maintenance
+  bills committed blob and tagged-log inventory. Deleting a team deletes its
   segments.
 - **Runners and agents:** drop `--logs` from `sparkwing-runner runner` and
   `launch`, `--trigger-runner-logs-url` from `runner`, and the `logs:` key
@@ -315,7 +320,7 @@ that keep the logs service running.
   `credits.grant` route.
 - **After:** those powers answer only a listed operator's own signed-in
   console session (`--operator-accounts`). The four admin routes above are
-  removed. `POST /api/v1/credits/grants` records `paid` grants only and
+  removed. `POST /api/v1/credits/grants` is removed.
   `POST /api/v1/credits/freezes` holds by `payment_id` and `dispute_id`
   only; the `reverses`, `team` and `release` fields are gone and are
   refused as unknown. Every `credits.grant` route answers `403` to an
@@ -509,9 +514,8 @@ To upgrade:
    `OfferExecutorClaim` and `HeartbeatExecutor`, and calls `ClaimNode` where
    it called `ClaimNodeAs`. Code embedding `pkg/store` renames
    `Tenant.ListLegacyAgentClaims` to `ListAgentClaims`, `LegacyAgentClaim` to
-   `AgentClaim`, `FinalizeExecutorClaimRound` to `FinalizeClaimRound` and
-   `ExecutorClaimRoundResult` to `ClaimRoundResult`, and drops the executor,
-   offer and scheduling-summary methods.
+   `AgentClaim`, and drops the executor, offer and scheduling-summary methods.
+   Claim-round finalization is removed entirely.
 
 **Edge cases:**
 
@@ -629,11 +633,9 @@ To upgrade:
   `cache-grant-key`. For its own calls (the git-cache proxy, team purges, and
   the new `POST /api/v1/cache/store-ceiling/measure` and `thaw` routes) the
   controller signs a five-minute operator grant with its own
-  `cache-grant-key` credential. The cache authenticates to the controller's
-  counter routes with a `service` token holding only the new operator-only
-  `storage.count` scope, read from the file `controller-token` under
-  `--credentials-dir`; a cache with `--controller` refuses to start without
-  it. A cache refuses to start without `cache-grant-key` unless
+  `cache-grant-key` credential. The controller's service-token storage and
+  download counter routes are removed. Remove the cache's `controller-token`
+  credential. A cache refuses to start without `cache-grant-key` unless
   `--allow-unauthenticated` is set. The controller ignores
   `SPARKWING_CACHE_TOKEN`, and so does every client. The runner-bundle chart
   drops `cache.tokenSecret`, refuses to render while it is set, and requires
@@ -641,19 +643,7 @@ To upgrade:
   `cache.allowUnauthenticated=true`. A person reaches the cache only through
   the controller with an `admin` bearer.
 - **Operator steps:**
-  1. If the cache runs with `--controller`, mint its counter token as the
-     operator and store it in a Secret:
-
-     ```bash
-     sparkwing cluster tokens create --type service --principal cache \
-       --scope storage.count --profile prod
-     kubectl -n sparkwing create secret generic sparkwing-cache-controller-token \
-       --from-literal=token=<the sws_ token>
-     ```
-
-     Mount it as the file `controller-token` in the cache's
-     `--credentials-dir`, beside `cache-grant-key`. The charts do not start
-     the cache with `--controller`, so a chart install skips this step.
+  1. Remove the cache's `controller-token` credential.
   2. Make sure the cache and the controller hold the same grant key:
      `cache.grantKeySecret` in the runner-bundle chart (the full chart mounts
      it into the controller's credentials directory too), or the

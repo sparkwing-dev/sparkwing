@@ -119,6 +119,11 @@ including `{}` when empty. `run` requires `run_id` and `pipeline`. Its pipeline
 name is the invoked name, which may be a project alias for the SDK entrypoint.
 Optional context includes `git`, `trigger`, `started_at`, `dry_run` and `no_memo`.
 
+The host resolves a project alias before selecting its argument schema. An alias
+`deploy-prod` targeting `Deploy` uses `Deploy`'s pipeline and job flags. Initial
+planning and execution replan send `Deploy` as `plan.pipeline` and keep
+`deploy-prod` in `run.pipeline`.
+
 Planning occurs at most once per process. Execution processes reconstruct the
 plan from the accepted inputs and compare job declarations with the accepted
 hash. A changed declaration fails with `plan_drift` before execution. Generated
@@ -256,6 +261,9 @@ has stopped. That operation also receives its own reply.
 Bound SDK calls use the URL and bearer supplied by hello. Every request carries
 `Authorization: Bearer <bearer>`. Identifiers are opaque path segments, escaped
 before transport. The host derives run, job and claim authority from the bearer.
+Hello supplies the protocol negotiation. HTTP failures use the canonical error
+envelope, including its code and masked details. A failed child embeds the inner
+error object in its `error` member.
 
 <!-- node-routes:start -->
 | Method | Path | Request | Response |

@@ -175,6 +175,9 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 		}
 		return RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: checkout.result.Team, Kind: kind, SubjectID: checkout.result.CheckoutID, Actor: "payment_provider", Attrs: map[string]any{"session_id": event.CheckoutID, "payment_mode": event.Mode, "event_id": event.EventID}})
 	}
+	if err := refuseWarnedPaymentTx(ctx, tx, event.PaymentID); err != nil {
+		return err
+	}
 	grant, err := newCreditID("paid")
 	if err != nil {
 		return err

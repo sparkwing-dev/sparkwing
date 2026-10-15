@@ -300,11 +300,12 @@ type ClaimAward struct {
 
 // NodeTransition has no caller-selected event kind or clock; the edge determines both.
 type NodeTransition struct {
-	Ref   NodeRef
-	To    NodeState
-	Actor Actor
-	Cause TransitionCause
-	Extra TransitionExtra
+	Ref           NodeRef
+	To            NodeState
+	Actor         Actor
+	Cause         TransitionCause
+	SourceAttempt *int64
+	Extra         TransitionExtra
 }
 
 // Applied distinguishes an identical replay from a state change or a cooperative cancellation request.
@@ -393,6 +394,9 @@ func nodeState(row NodeRow) (NodeState, error) {
 
 // safety: holder rights and replay digest are rechecked under locks using the store clock before any status write.
 func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change NodeTransition, now time.Time) (Applied, error) {
+	if err := validateSourceAttempt(change); err != nil {
+		return Applied{}, err
+	}
 	if err := prepareStateActorTx(ctx, tx, team, change.Ref.RunID, change.Actor, now); err != nil {
 		return Applied{}, err
 	}
@@ -432,6 +436,9 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 		}
 		return Applied{Replayed: true, CancelRequested: row.CancelRequestedAt != nil && row.Status != StatusDone, StateSeq: row.StateSeq, Generation: row.Generation, Attempt: row.Attempt}, nil
 	}
+	if change.SourceAttempt != nil && *change.SourceAttempt != row.Attempt {
+		return Applied{}, holderRefusal()
+	}
 	refusal := func(reason IllegalTransitionReason) (Applied, error) {
 		return Applied{}, &ErrIllegalTransition{From: string(from), To: string(change.To), Actor: change.Actor.Kind, Reason: reason}
 	}
@@ -455,6 +462,7 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 	if err := attachNodeResultRecordsTx(ctx, tx, team, row, change); err != nil {
 		return Applied{}, err
 	}
+	previous := row
 	if err := applyNodeEdgeTx(ctx, tx, team, &row, change, *edge, now); err != nil {
 		return Applied{}, err
 	}
@@ -496,7 +504,22 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 	if err := appendStateEventTx(ctx, tx, team, change.Ref, kind, row.StateSeq, change.Extra.Result, now); err != nil {
 		return Applied{}, err
 	}
+	if err := transitionNodeBillingTx(ctx, tx, team, previous, change, *edge, now); err != nil {
+		return Applied{}, err
+	}
 	return Applied{CancelRequested: edge.RequestOnly, StateSeq: row.StateSeq, Generation: row.Generation, Attempt: row.Attempt}, nil
+}
+
+func validateSourceAttempt(change NodeTransition) error {
+	required := change.Actor.Kind == ActorHolder && slices.Contains([]TransitionCause{CauseStart, CauseRetry, CauseReport, CauseRelease}, change.Cause)
+	if required {
+		if change.SourceAttempt == nil || *change.SourceAttempt < 0 {
+			return authorityError(apierr.BadRequest, "holder transition requires a nonnegative source attempt")
+		}
+	} else if change.SourceAttempt != nil {
+		return authorityError(apierr.BadRequest, "source attempt is only valid for holder execution transitions")
+	}
+	return nil
 }
 
 func validateRecordedFailure(ref NodeRef, failure *nodeproto.JobFailure) error {

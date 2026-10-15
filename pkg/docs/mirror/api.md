@@ -67,6 +67,9 @@ requires a fresh trigger request. See [Here runners](hotfix-runner.md).
 | `GET /api/v1/runs/{run}/snapshot` | Run selector | `ScheduleSnapshot` |
 | `POST /api/v1/runs/{run}/jobs/{job}/reconcile` | `ReconcileRequest` | `ReconcileResponse` |
 | `POST /api/v1/runs/{run}/jobs/{job}/transition` | `JobTransitionRequest` | `Applied` |
+| `POST /api/v1/runs/{run}/jobs/{job}/steps/start` | `StepReportRequest` with state `running` | `StepRecorded` |
+| `POST /api/v1/runs/{run}/jobs/{job}/steps/finish` | `StepReportRequest` with state `passed`, `failed` or `cancelled` | `StepRecorded` |
+| `POST /api/v1/runs/{run}/jobs/{job}/steps/skip` | `StepReportRequest` with state `skipped` | `StepRecorded` |
 | `POST /api/v1/runs/{run}/jobs/{job}/expansion` | `ExpansionSubmission` | `ExpansionAccepted` |
 | `POST /api/v1/runs/{run}/finish` | `FinishRequest` | `Applied` |
 | `POST /api/v1/runs/{run}/retry` | `RetryRequest` | `CreateRunResponse` |
@@ -87,12 +90,38 @@ A snapshot is one consistent scheduling read. Generator replay uses the exact
 accepted body and source fence, including empty expansions. The persisted topology
 stays authoritative. Held jobs receive a cancellation request while their current
 holder retains result rights. A result replay compares the actor, operation,
-fence and body digest. Source-attempt fencing remains an integration requirement.
+fence and body digest. Holder start, retry, report and unstarted release include
+`source_attempt`. Initial start uses zero. Later reports use the captured ordinal
+returned by `Applied.attempt`. Omission and explicit zero remain distinct.
+Other actors and causes omit the field. The store refuses a mismatched ordinal
+and replays an identical transition without consuming another attempt.
+
+Step reports carry a positive `source_attempt`, step ID, state, optional masked
+error and optional start/finish timestamps. They carry no actor or claim fence.
+The controller derives those from authorization and current state, compares the
+source ordinal, and commits through the store's attempt-fenced step writer.
+The host waits for `{"recorded":true}` before emitting its step diagnostic.
+Native step route and executor bindings still require integration.
 
 A reported job result carries `failure: {job, stage, error}` when it has a
 structured failure. The inner error retains its code, message, hint and details.
 Recovery reads that same persisted failure. An outcome or reason cannot replace
 its stage. The error-only result field is removed.
+
+## Launcher reconciliation
+
+`POST /api/v1/launcher/sync` accepts `LauncherSyncRequest`. Each observation
+contains `award: {kind, id, holder, generation}`, `job: {namespace, name, uid}`,
+and the reserved `node_uid`. The award generation identifies the unit award,
+including an eval's own lease. It does not replace that eval's source generation.
+The server compares observations with this launcher's stored awards.
+
+The response contains held `awards` without bearer material and a `remove` list
+of exact Job instances. Each removal carries namespace, name and UID. The
+launcher must use that UID as a Kubernetes deletion precondition because a new
+Job can reuse the name. A failed transport, decode or validation returns no
+partial sync result. Native observation, reconciliation and cleanup bindings
+still require integration.
 
 ## Logs and stored data
 

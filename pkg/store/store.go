@@ -101,6 +101,7 @@ type Store struct {
 	intake           intakeContracts
 	intakePolicy     IntakePolicy
 	plans            planContracts
+	billing          billingCalculator
 	planSecretOpener PlanSecretOpener
 	delegation       delegationContracts
 	provisions       ProvisionPolicy
@@ -692,11 +693,6 @@ type Run struct {
 	AnnotationCount int      `json:"annotation_count,omitempty"`
 	TopAnnotation   string   `json:"top_annotation,omitempty"`
 	Annotations     []string `json:"annotations,omitempty"`
-	// LastHeartbeatAt is the most recent run-level liveness ping from
-	// the dispatching orchestrator. NULL for rows that predate the
-	// column or come from backends that don't ping it (local + S3
-	// modes use per-node heartbeats for orphan detection instead).
-	LastHeartbeatAt *time.Time `json:"last_heartbeat_at,omitempty"`
 	// NeedsAttention says why a ready node of the run waits with no agent
 	// able to claim it; empty when none does.
 	NeedsAttention string `json:"needs_attention,omitempty"`
@@ -790,10 +786,6 @@ func (s *Store) createRunTx(ctx context.Context, tx *storeTx, team Team, r Run) 
 	if created.IsZero() {
 		created = r.StartedAt
 	}
-	var heartbeat sql.NullInt64
-	if r.Status == runStatusRunning {
-		heartbeat = sql.NullInt64{Int64: time.Now().UnixNano(), Valid: true}
-	}
 	// safety: a terminal run with no finish time is indistinguishable from an
 	// earlier attempt's leftover row, and every caller that reads one to decide
 	// whether work ended reads it wrongly.
@@ -812,8 +804,8 @@ func (s *Store) createRunTx(ctx context.Context, tx *storeTx, team Team, r Run) 
 	// primary key on id; a (team, id) target would race that key's own
 	// violation on a same-team re-create.
 	res, err := tx.ExecContext(ctx, `
-INSERT INTO runs (team, id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at, created_principal)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO runs (team, id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, created_principal)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
     pipeline        = excluded.pipeline,
     status          = excluded.status,
@@ -835,7 +827,6 @@ ON CONFLICT(id) DO UPDATE SET
     replay_of_run_id  = excluded.replay_of_run_id,
     replay_of_node_id = excluded.replay_of_node_id,
     invocation_json   = excluded.invocation_json,
-    last_heartbeat_at = COALESCE(excluded.last_heartbeat_at, runs.last_heartbeat_at),
     created_principal = CASE WHEN runs.created_principal = '' THEN excluded.created_principal ELSE runs.created_principal END
 WHERE runs.team = excluded.team AND runs.status = '`+runStatusPending+`' AND runs.finished_at IS NULL`,
 		string(team), r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
@@ -843,7 +834,7 @@ WHERE runs.team = excluded.team AND runs.status = '`+runStatusPending+`' AND run
 		r.DeclaredRepo, r.RepoURL, r.GithubOwner, r.GithubRepo,
 		r.RetryOf, r.RetriedAs, r.RetrySource,
 		r.ReplayOfRunID, r.ReplayOfNodeID,
-		invocationJSON, heartbeat, creatingPrincipal(ctx),
+		invocationJSON, creatingPrincipal(ctx),
 	)
 	if err != nil {
 		return err
@@ -956,15 +947,6 @@ func (s *Store) FinishRunsIfActive(ctx context.Context, runIDs []string, status,
 	return s.defaultTenant().FinishRunsIfActive(ctx, runIDs, status, errMsg)
 }
 
-// TouchRunHeartbeat stamps last_heartbeat_at=now for the run row. The
-// dispatching orchestrator calls this on a ticker while the run is
-// active so the controller's reaper can detect a fully-orphaned run
-// (laptop closed, network gone, process killed) and flip it to
-// failed instead of leaving status='running' forever.
-func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error {
-	return s.defaultTenant().TouchRunHeartbeat(ctx, runID)
-}
-
 // UpdatePlanSnapshot replaces the stored plan JSON for a run.
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
 	return s.updatePlanSnapshot(ctx, DefaultTeam, runID, snapshot)
@@ -1030,7 +1012,7 @@ func (t *Tenant) SetRetriedAs(ctx context.Context, runID, newID string) error {
 
 // safety: every run read shares this list, because a column added to runs
 // has to reach each of them and scanRun together or the scan misaligns.
-const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at, admission, ` + runAttentionColumn
+const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, admission, ` + runAttentionColumn
 
 // GetRun fetches a single default-team run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
@@ -1385,7 +1367,7 @@ func scanRun(rs rowScanner) (*Run, error) {
 	var r Run
 	var argsJSON, planJSON, invocationJSON, annotationsJSON []byte
 	var createdNS, startedNS int64
-	var finishedNS, heartbeatNS sql.NullInt64
+	var finishedNS sql.NullInt64
 	var parent sql.NullString
 	err := rs.Scan(&r.ID, &r.Pipeline, &r.Status, &r.TriggerSource,
 		&r.GitBranch, &r.GitSHA, &argsJSON, &planJSON, &r.Error,
@@ -1394,7 +1376,7 @@ func scanRun(rs rowScanner) (*Run, error) {
 		&r.RetryOf, &r.RetriedAs, &r.RetrySource,
 		&r.ReplayOfRunID, &r.ReplayOfNodeID, &invocationJSON,
 		&r.AnnotationCount, &r.TopAnnotation, &annotationsJSON,
-		&heartbeatNS, &r.Admission, &r.NeedsAttention)
+		&r.Admission, &r.NeedsAttention)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound("run", "")
@@ -1410,10 +1392,6 @@ func scanRun(rs rowScanner) (*Run, error) {
 	if finishedNS.Valid {
 		t := time.Unix(0, finishedNS.Int64)
 		r.FinishedAt = &t
-	}
-	if heartbeatNS.Valid {
-		t := time.Unix(0, heartbeatNS.Int64)
-		r.LastHeartbeatAt = &t
 	}
 	if parent.Valid {
 		r.ParentRunID = parent.String
@@ -1666,41 +1644,6 @@ UPDATE nodes SET status = ?, started_at = ?
 		return err
 	}
 	return fencedRows(res, fenced)
-}
-
-// SetNodeStatus updates only the status column.
-func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
-	return s.defaultTenant().SetNodeStatus(ctx, runID, nodeID, status)
-}
-
-// SetNodeStatus is [Store.SetNodeStatus] confined to t's team.
-func (t *Tenant) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
-		return err
-	}
-	var found int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(),
-		string(t.team), runID, nodeID).Scan(&found)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	res, err := tx.ExecContext(ctx, `UPDATE nodes SET status = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
-		status, string(t.team), runID, nodeID)
-	if err != nil {
-		return err
-	}
-	if err := fencedRows(res, hasClaimFence(ctx)); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 // UpdateNodeDeps rewrites a node's stored dependency list.
@@ -2464,9 +2407,7 @@ WHERE team = ? AND run_id = ? AND node_id = ? AND step_id = ?`,
 	return tx.Commit()
 }
 
-// MarkNodeReady opens the node's offer round with the highest attainable
-// executor priority from the same transaction that snapshots its requirements.
-// The node is opened in its run's own team, where CreateNode wrote it.
+// MarkNodeReady publishes a job to its team's queue.
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 	t, err := s.runTenant(ctx, runID)
 	if err != nil {
@@ -2475,110 +2416,31 @@ func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 	return t.MarkNodeReady(ctx, runID, nodeID)
 }
 
-// MarkNodeReady is [Store.MarkNodeReady] confined to t's team.
+// MarkNodeReady publishes a job to the tenant's queue.
 func (t *Tenant) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackOrLog(tx)
 	node := &Node{}
 	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
-  FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID), node); err != nil {
+ FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID), node); err != nil {
 		return err
 	}
-	opened := node.OfferStartedAt != nil
-	var summary claimRoundSummary
-	if !opened {
-		summary, err = claimRoundSummaryTx(ctx, tx, runID, nodeID)
-		if err != nil {
-			return err
-		}
-	}
-	now := time.Now()
-	class, err := readyCPUClassTx(ctx, tx, summary.Resources)
+	charge, err := nodeChargeTx(ctx, tx, runID, nodeID)
 	if err != nil {
 		return err
 	}
-	offerStart := now
-	if !opened {
-		idle, err := t.s.offerRoundIdleTx(ctx, tx, runID, summary, class, now)
-		if err != nil {
-			return err
-		}
-		if idle {
-			offerStart = now.Add(-nodeClaimOfferWindow)
-		}
-	}
-	res, err := tx.ExecContext(
-		ctx,
-		`UPDATE nodes SET ready_at = COALESCE(ready_at, ?),
-		                  placement_hold_from = COALESCE(placement_hold_from, ?),
-		                  offer_started_at = COALESCE(offer_started_at, ?),
-		                  credit_cpu_class = ?
-		  WHERE team = ? AND run_id = ? AND node_id = ?`,
-		now.UnixNano(), now.UnixNano(), offerStart.UnixNano(), class, string(t.team), runID, nodeID,
-	)
+	class, err := readyCPUClassTx(ctx, tx, charge)
 	if err != nil {
 		return err
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
+	now := tx.now().UnixNano()
+	if _, err := tx.ExecContext(ctx, `UPDATE nodes SET ready_at=COALESCE(ready_at,?), placement_hold_from=COALESCE(placement_hold_from,?), credit_cpu_class=? WHERE team=? AND run_id=? AND node_id=?`, now, now, class, t.team, runID, nodeID); err != nil {
 		return err
-	}
-	if n == 0 {
-		return notFound("node", runID+"/"+nodeID)
-	}
-	if !opened {
-		if _, err := appendEventTx(ctx, tx, t.team, runID, nodeID, "executor_offer_round_opened", map[string]any{
-			"deadline":               offerStart.Add(nodeClaimOfferWindow),
-			"hard_capabilities":      summary.HardCapabilities,
-			"preferred_capabilities": summary.PreferredCapabilities,
-			"resources":              summary.Resources,
-			"slots":                  summary.Slots,
-			"run_priority":           summary.RunPriority,
-		}, now); err != nil {
-			return err
-		}
 	}
 	return tx.Commit()
-}
-
-// RevokeNodeReady cancels an unclaimed offer round.
-func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
-	return s.defaultTenant().RevokeNodeReady(ctx, runID, nodeID)
-}
-
-// RevokeNodeReady is [Store.RevokeNodeReady] confined to t's team.
-func (t *Tenant) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	res, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET ready_at = NULL, placement_hold_from = NULL, offer_started_at = NULL
-		  WHERE team = ? AND run_id = ? AND node_id = ?
-		    AND claimed_by IS NULL AND `+nodeNotDone,
-		string(t.team), runID, nodeID,
-	)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	if n == 0 {
-		if err := tx.Commit(); err != nil {
-			return false, err
-		}
-		return false, nil
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 // ClaimNextReadyNode flips the oldest claimable node to holderID with
@@ -2694,11 +2556,11 @@ func (s *Store) warmClassFilter(ctx context.Context, claimant ClaimIdentity) (wa
 	if err != nil || !metered {
 		return warmClassFilter{}, err
 	}
-	table, err := s.CreditRateTable(ctx)
+	table, err := s.AsOperator().CreditRateTable(ctx)
 	if err != nil {
 		return warmClassFilter{}, err
 	}
-	cores, err := s.WarmCPUClassCores(ctx)
+	cores, err := s.AsOperator().WarmCPUClassCores(ctx)
 	if err != nil {
 		return warmClassFilter{}, err
 	}
@@ -3025,22 +2887,6 @@ func (t *Tenant) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail s
 	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
 		`UPDATE nodes SET status_detail = ?, last_heartbeat = ?
 		  WHERE team = ? AND run_id = ? AND node_id = ?`, detail, time.Now().UnixNano(), string(t.team), runID, nodeID)
-	if err != nil {
-		return err
-	}
-	return fencedRows(res, fenced)
-}
-
-// TouchNodeHeartbeat stamps last_heartbeat=now.
-func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
-	return s.defaultTenant().TouchNodeHeartbeat(ctx, runID, nodeID)
-}
-
-// TouchNodeHeartbeat is [Store.TouchNodeHeartbeat] confined to t's team.
-func (t *Tenant) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
-	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
-		`UPDATE nodes SET last_heartbeat = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
-		time.Now().UnixNano(), string(t.team), runID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -3892,37 +3738,6 @@ func (t *Tenant) FinishRunAtGeneration(ctx context.Context, runID string, seq in
 		return false, err
 	}
 	return true, nil
-}
-
-// RequeueUnstartedClaim returns a lapsed claim to the pending queue only
-// while its run has not started -- no run row, or one still pending.
-//
-// The run-status guard is what keeps recovery from becoming duplication.
-// A run that reached `running` has a process behind it that the lease
-// alone cannot see, so requeueing it would put a second copy of live
-// work on the queue; that case belongs to the orphan reaper, which
-// judges by heartbeat. The run's status is a correlated subquery inside
-// the requeue's own WHERE rather than a read before it, which narrows
-// the window a run can start in from a round trip to a single
-// statement. It does not close it: the subquery reads that statement's
-// snapshot, so a run that commits its start afterwards is invisible
-// here, and nothing this function locks would make it visible -- the
-// consumer that starts a run does not touch the trigger row. A run with
-// no row at all reads as not started, which is also what an unclaimed
-// trigger looks like before its consumer gets that far.
-func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error) {
-	return s.defaultTenant().RequeueUnstartedClaim(ctx, id)
-}
-
-// RequeueUnstartedClaim is [Store.RequeueUnstartedClaim] confined to t's team.
-func (t *Tenant) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error) {
-	return t.endTriggerClaim(ctx, id, true,
-		`UPDATE triggers
-		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL,
-		        claim_principal = '', claim_token_prefix = ''
-		  WHERE team = ? AND id = ? AND status = ?
-		    AND COALESCE((SELECT status FROM runs WHERE runs.team = triggers.team AND runs.id = triggers.id), ?) = ?`,
-		triggerStatusPending, string(t.team), id, triggerStatusClaimed, runStatusPending, runStatusPending)
 }
 
 // ReleaseClaimAtGeneration returns a claimed trigger to the pending

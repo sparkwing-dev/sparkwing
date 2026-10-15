@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -122,7 +123,7 @@ func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
 	var downstream atomic.Bool
 	go func() {
 		<-out
-		cancel(&CancelError{Reason: "cancelled by operator"})
+		cancel(&lease.CancelError{Reason: "cancelled by operator"})
 	}()
 	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
 		{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "test", Needs: deps("build"), Steps: []nodeproto.StepSpec{{ID: "body"}}},

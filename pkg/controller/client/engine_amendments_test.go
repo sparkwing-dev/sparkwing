@@ -117,8 +117,8 @@ func TestEngineClientRecoveryAndLauncherMethods(t *testing.T) {
 		{"cancel-job", "POST", "/api/v1/runs/r1/jobs/source%2Fbuild/cancel", controllerwire.Applied{CancelRequested: true, Attempt: 4, Generation: 3}, func(c controllerwire.Controller) (any, error) {
 			return c.CancelJob(t.Context(), "r1", "source/build", controllerwire.CancelRequest{Reason: "owner cancelled"})
 		}},
-		{"launcher-sync", "POST", "/api/v1/launcher/sync", controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{}, Remove: []string{"stale-job"}}, func(c controllerwire.Controller) (any, error) {
-			return c.SyncLauncher(t.Context(), controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{{UnitID: "unit-1", JobName: "kube-job", NodeUID: "node-1"}}})
+		{"launcher-sync", "POST", "/api/v1/launcher/sync", controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{}, Remove: []controllerwire.LauncherJobRef{{Namespace: "ci", Name: "stale-job", UID: "stale-instance"}}}, func(c controllerwire.Controller) (any, error) {
+			return c.SyncLauncher(t.Context(), controllerwire.LauncherSyncRequest{Observed: []controllerwire.LauncherObservation{{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: "unit-1", Holder: "launcher", Generation: 3}, Job: controllerwire.LauncherJobRef{Namespace: "ci", Name: "kube-job", UID: "job-instance"}, NodeUID: "node-1"}}})
 		}},
 		{"exchange", "POST", "/api/v1/claims/exchange", controllerwire.ExchangeResponse{Claim: controllerwire.ClaimedUnit{RunID: "r1", Capability: "private-exchanged", Unit: capability.UnitNode}}, func(c controllerwire.Controller) (any, error) { return c.Exchange(t.Context()) }},
 	} {
@@ -136,7 +136,7 @@ func TestEngineClientRecoveryAndLauncherMethods(t *testing.T) {
 				}
 				if tt.name == "launcher-sync" {
 					var input controllerwire.LauncherSyncRequest
-					if err := json.NewDecoder(req.Body).Decode(&input); err != nil || !reflect.DeepEqual(input.Observed, []controllerwire.LauncherObservation{{UnitID: "unit-1", JobName: "kube-job", NodeUID: "node-1"}}) {
+					if err := json.NewDecoder(req.Body).Decode(&input); err != nil || !reflect.DeepEqual(input.Observed, []controllerwire.LauncherObservation{{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: "unit-1", Holder: "launcher", Generation: 3}, Job: controllerwire.LauncherJobRef{Namespace: "ci", Name: "kube-job", UID: "job-instance"}, NodeUID: "node-1"}}) {
 						t.Fatalf("launcher observations changed: %+v %v", input, err)
 					}
 				}

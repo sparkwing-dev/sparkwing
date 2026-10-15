@@ -221,14 +221,6 @@ type creditHistoryJSON struct {
 	Charges []creditChargeJSON `json:"charges"`
 }
 
-type createGrantReq struct {
-	Kind        string `json:"kind"`
-	AmountMicro int64  `json:"amount_micro"`
-	Reference   string `json:"reference,omitempty"`
-	// safety: The checkout service names the team its checkout session was for.
-	Team string `json:"team,omitempty"`
-}
-
 func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
 	tenant, ok := s.requestTenant(w, r)
 	if !ok {
@@ -286,7 +278,7 @@ func (s *Server) writeCreditState(w http.ResponseWriter, r *http.Request, tenant
 }
 
 func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.store.CreditSettings(r.Context())
+	settings, err := s.store.AsOperator().CreditSettings(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -300,7 +292,7 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	settings, err := s.store.SetOperatorCreditSettings(r.Context(), body.update())
+	settings, err := s.store.AsOperator().SetOperatorCreditSettings(r.Context(), body.update())
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidCreditSetting) {
 			writeError(w, http.StatusBadRequest, err)
@@ -339,75 +331,6 @@ func creditRateTableToJSON(table store.CreditRateTable) []creditRateJSON {
 		out = append(out, creditRateJSON{Cores: entry.Cores, MicroPerSecond: entry.MicroPerSecond})
 	}
 	return out
-}
-
-func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
-	var req createGrantReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	// safety: this route records a verified payment and nothing else; an
-	// operator's free grant goes through the console, and a refund through
-	// /api/v1/credits/reversals.
-	if req.Kind != store.CreditGrantPaid {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("kind must be %s", store.CreditGrantPaid))
-		return
-	}
-	if req.AmountMicro <= 0 {
-		writeError(w, http.StatusBadRequest, errors.New("amount_micro must be positive"))
-		return
-	}
-	// safety: on a controller serving several teams an unnamed grant would fund
-	// whichever team the caller's token acts for, which is never the team a
-	// payment was for, so the team is required there.
-	if req.Team == "" && s.MultiTeam() {
-		writeError(w, http.StatusBadRequest, errors.New("team is required: name the team whose balance the grant funds"))
-		return
-	}
-	if req.Team == "" {
-		req.Team = string(store.DefaultTeam)
-	}
-	tenant, ok := s.namedTenant(w, r, req.Team)
-	if !ok {
-		return
-	}
-	who := principalName(r)
-	res, err := tenant.RecordCreditGrant(r.Context(), store.CreditGrantRequest{
-		Kind: req.Kind, AmountMicro: req.AmountMicro,
-		Reference: req.Reference, CreatedBy: who,
-	})
-	if errors.Is(err, store.ErrCreditGrantConflict) {
-		writeError(w, http.StatusConflict, err)
-		return
-	}
-	if errors.Is(err, store.ErrPaymentWarned) {
-		s.logger.Warn("billing alert: a warned payment was not granted", "alert", "payment_warned",
-			"team", string(tenant.Team()), "reference", req.Reference)
-		writeJSON(w, http.StatusConflict, codedErrorJSON{Error: err.Error(), Code: PaymentWarnedCode})
-		return
-	}
-	if s.writeBalanceCapRefusal(w, err) {
-		s.logger.Warn("credit grant refused at the team balance cap", "team", string(tenant.Team()),
-			"kind", req.Kind, "amount_micro", req.AmountMicro, "reference", req.Reference, "err", err)
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if !res.Created {
-		// safety: a payment webhook redelivers until it sees a 2xx, so the
-		// reference it already granted answers with the row it wrote.
-		s.logger.Info("credits already granted for this reference",
-			"kind", res.Grant.Kind, "reference", res.Grant.Reference, "grant_id", res.Grant.ID)
-		writeJSON(w, http.StatusOK, creditGrantToJSON(res.Grant))
-		return
-	}
-	s.logger.Info("credits granted", "team", string(tenant.Team()),
-		"kind", res.Grant.Kind, "amount_micro", res.Grant.AmountMicro,
-		"reference", res.Grant.Reference, "reverses", res.Grant.Reverses, "by", who)
-	writeJSON(w, http.StatusCreated, creditGrantToJSON(res.Grant))
 }
 
 func (s *Server) handleCreditsHistory(w http.ResponseWriter, r *http.Request) {
@@ -595,12 +518,8 @@ func (s *Server) noteCreditsBlocked(r *http.Request, shortfall *store.Insufficie
 // trigger claim gets when it names no node runner that claims each node.
 const MeteredInProcessNodesCode = "metered_inprocess_nodes"
 
-// safety: credits are charged on node claims, and a trigger holder that runs
-// nodes in its own process never makes one, so a metered credential claims a
-// trigger only when it runs the nodes through k8s Jobs or warm capacity,
-// which claim each node themselves.
 func (s *Server) refuseMeteredInProcessNodes(w http.ResponseWriter, r *http.Request, nodeRunner string) bool {
-	if nodeRunner == "k8s" || nodeRunner == "warm" {
+	if nodeRunner == "k8s" {
 		return false
 	}
 	prefix, err := s.meteredTokenPrefix(r)
@@ -614,7 +533,7 @@ func (s *Server) refuseMeteredInProcessNodes(w http.ResponseWriter, r *http.Requ
 	p, _ := PrincipalFromContext(r.Context())
 	writeAuthError(w, http.StatusForbidden, authErrorBody{
 		Code: MeteredInProcessNodesCode, Principal: p.label(),
-		Message: store.ErrMeteredInProcessNodes.Error() + "; run the trigger runner as k8s or warm",
+		Message: store.ErrMeteredInProcessNodes.Error() + "; run the trigger runner as k8s",
 	})
 	return true
 }

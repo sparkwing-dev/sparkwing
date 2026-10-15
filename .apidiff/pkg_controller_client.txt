@@ -74,7 +74,6 @@ func (c *Client) ClaimSpecificTrigger(ctx context.Context, id string, lease time
 func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error)
 func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error)
 func (c *Client) Close() error
-func (c *Client) ComputeLimits(ctx context.Context) (json.RawMessage, error)
 func (c *Client) ConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error)
 func (c *Client) CreateApproval(ctx context.Context, a store.Approval) error
 func (c *Client) CreateDebugPause(ctx context.Context, p store.DebugPause) error
@@ -112,7 +111,6 @@ func (c *Client) EnqueueTriggerWithEnv(
 	branch string,
 	triggerEnv map[string]string,
 ) (string, error)
-func (c *Client) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ClaimRoundResult, error)
 func (c *Client) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (c *Client) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
 func (c *Client) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, finish store.ExecutionAttemptFinish) error
@@ -156,7 +154,6 @@ func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (c *Client) NewLogSegmentUploader(base context.Context, runID, nodeID string) *LogSegmentUploader
 func (c *Client) NodeLogs() NodeLogs
 func (c *Client) OIDCToken(ctx context.Context, runID, audience string) (*OIDCToken, error)
-func (c *Client) ObjectStoreBreakerState(ctx context.Context) (*ObjectStoreBreaker, error)
 func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*WaiterHolder, error)
 func (c *Client) PollAdvice() time.Duration
 func (c *Client) ReadNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (*LiveLogChunk, error)
@@ -166,15 +163,11 @@ func (c *Client) RecordWaitObservation(ctx context.Context, pipeline string, wai
 func (c *Client) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (c *Client) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error
 func (c *Client) ReportAttempt(ctx context.Context, runID, nodeID string, report store.AttemptReport) error
-func (c *Client) ResetObjectStoreBreaker(ctx context.Context) (*ObjectStoreBreaker, error)
 func (c *Client) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error)
 func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (*WaiterResolution, error)
-func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (c *Client) RunnerIdentity() string
 func (c *Client) SealLog(ctx context.Context, runID, nodeID string, m logseg.Manifest) error
-func (c *Client) SetComputeLimits(ctx context.Context, limits map[string]int64) (json.RawMessage, error)
 func (c *Client) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
-func (c *Client) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 func (c *Client) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
 func (c *Client) SetPipelinePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (c *Client) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
@@ -184,10 +177,7 @@ func (c *Client) StartClaimExecution(ctx context.Context, runID, nodeID string) 
 func (c *Client) StartNode(ctx context.Context, runID, nodeID string) error
 func (c *Client) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (c *Client) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (io.ReadCloser, error)
-func (c *Client) SubmitPlan(ctx context.Context, runID string, plan []byte) error
 func (c *Client) Token() string
-func (c *Client) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
-func (c *Client) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (c *Client) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 func (c *Client) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (c *Client) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
@@ -264,8 +254,10 @@ const MaxPollAdvice = 8 * time.Second
 const MaxUnavailableWait = 5 * time.Second
 func New(baseURL string, httpClient *http.Client) *Client
 func NewDataClient(options EngineOptions) (blob.DataSigner, blob.RecordStore, error)
+func NewDebugReader(options EngineOptions) (controllerwire.DebugReader, error)
 func NewEngineClient(options EngineOptions) (controllerwire.Controller, error)
 func NewLogReader(options EngineOptions) (controllerwire.LogReader, error)
+func NewOperatorManager(options EngineOptions) (controllerwire.OperatorManager, error)
 func NewPacer(floor time.Duration) *Pacer
 func NewPoolManager(options EngineOptions) (controllerwire.PoolManager, error)
 func NewQueueManager(options EngineOptions) (controllerwire.QueueManager, error)
@@ -290,47 +282,6 @@ func (l NodeLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadClos
 type OIDCToken struct {
 	Token     string
 	ExpiresAt time.Time
-}
-type ObjectStoreBreaker struct {
-	Enabled bool
-	Reset   string
-	Tripped bool
-	Classes []ObjectStoreClassState
-	Ceiling ObjectStoreCeiling
-	Cleared []string
-	Thawed  bool
-}
-type ObjectStoreCeiling struct {
-	Enforced     bool
-	MaxBytes     int64
-	MaxObjects   int64
-	WarnBytes    int64
-	WarnObjects  int64
-	Bytes        int64
-	Objects      int64
-	CountedAt    time.Time
-	ReconciledAt time.Time
-	Reconcile    string
-	Warning      bool
-	Frozen       bool
-	Thawed       bool
-	FrozenAt     time.Time
-	FrozenReason string
-	Freezes      uint64
-	Refused      uint64
-}
-type ObjectStoreClassState struct {
-	Class         string
-	PerMinute     int
-	PerDay        int
-	MinuteUsed    int
-	DayUsed       int
-	Allowed       uint64
-	Refused       uint64
-	Trips         uint64
-	Tripped       bool
-	TrippedAt     time.Time
-	TrippedWindow string
 }
 type Pace struct {
 	Wait time.Duration
@@ -494,8 +445,12 @@ func (c *engineClient) ListSchedules(ctx context.Context, q controllerwire.Sched
 func (c *engineClient) ListSecrets(ctx context.Context) (controllerwire.Secrets, error)
 func (c *engineClient) ListSizing(ctx context.Context, q controllerwire.SizingQuery) (controllerwire.SizingPage, error)
 func (c *engineClient) OverrideSchedule(ctx context.Context, name string, input controllerwire.ScheduleOverride) (controllerwire.ScheduleView, error)
+func (c *engineClient) ReadDebugJob(ctx context.Context, run, job string) (controllerwire.DebugJob, error)
+func (c *engineClient) ReadDebugPause(ctx context.Context, run, job string) (controllerwire.DebugPauseResult, error)
 func (c *engineClient) ReadFailure(ctx context.Context, run, job string, generation int64) (*nodeproto.JobFailure, error)
 func (c *engineClient) ReadLogs(ctx context.Context, run string, q controllerwire.LogQuery) (controllerwire.LogPage, error)
+func (c *engineClient) ReadObjectStoreBreaker(ctx context.Context) (controllerwire.ObjectStoreBreaker, error)
+func (c *engineClient) ReadOperatorLimits(ctx context.Context) (controllerwire.OperatorLimits, error)
 func (c *engineClient) ReadQueue(ctx context.Context) (wingwire.QueueState, error)
 func (c *engineClient) ReadQueueGroup(ctx context.Context, group string) (controllerwire.QueueGroup, error)
 func (c *engineClient) ReadReceipt(ctx context.Context, run string) (controllerwire.Receipt, error)
@@ -505,8 +460,10 @@ func (c *engineClient) ReadSecret(ctx context.Context, selector controllerwire.S
 func (c *engineClient) ReadSnapshot(ctx context.Context, run string) (controllerwire.ScheduleSnapshot, error)
 func (c *engineClient) ReadSteps(ctx context.Context, run string) (controllerwire.RunSteps, error)
 func (c *engineClient) ReconcileJob(ctx context.Context, run, job string, input controllerwire.ReconcileRequest) (controllerwire.ReconcileResponse, error)
+func (c *engineClient) RecordStep(ctx context.Context, run, job string, input controllerwire.StepReportRequest) error
 func (c *engineClient) Renew(ctx context.Context, claim string, input controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error)
 func (c *engineClient) ReplaceSchedules(ctx context.Context, input controllerwire.ScheduleRepoRequest) (controllerwire.ScheduleRepoWritten, error)
+func (c *engineClient) ResetObjectStoreBreaker(ctx context.Context, key string) (controllerwire.ObjectStoreBreaker, error)
 func (c *engineClient) ResetSchedule(ctx context.Context, name string) (controllerwire.ScheduleView, error)
 func (c *engineClient) ResetSizing(context.Context, controllerwire.SizingReset) (controllerwire.SizingResetSummary, error)
 func (c *engineClient) ResolveApproval(ctx context.Context, run, job string, input controllerwire.ApprovalDecision) (controllerwire.ApprovalResult, error)
@@ -518,6 +475,7 @@ func (c *engineClient) SetGroupPriority(ctx context.Context, group string, input
 func (c *engineClient) SetSchedulePaused(ctx context.Context, name string, pause bool) (controllerwire.ScheduleView, error)
 func (c *engineClient) SyncLauncher(ctx context.Context, input controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
 func (c *engineClient) TransitionJob(ctx context.Context, run, job string, input controllerwire.JobTransitionRequest) (controllerwire.Applied, error)
+func (c *engineClient) WriteOperatorLimits(ctx context.Context, input controllerwire.OperatorLimitsWrite) (controllerwire.OperatorLimits, error)
 func (c *engineClient) WriteSecret(ctx context.Context, input controllerwire.SecretWrite) (controllerwire.SecretWritten, error)
 func (c *tokenManager) CreateToken(ctx context.Context, input controllerwire.TokenCreate) (controllerwire.TokenCreated, error)
 func (c *tokenManager) ListTokens(ctx context.Context, q controllerwire.TokenQuery) (controllerwire.Tokens, error)

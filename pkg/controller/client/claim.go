@@ -39,11 +39,6 @@ func (c *Client) StartClaimExecution(ctx context.Context, runID, nodeID string) 
 	return out.SpecHash, err
 }
 
-// SubmitPlan submits a planning claim's plan document for runID.
-func (c *Client) SubmitPlan(ctx context.Context, runID string, plan []byte) error {
-	return c.post(ctx, "/api/v1/runs/"+url.PathEscape(runID)+"/plan", json.RawMessage(plan), http.StatusOK, nil)
-}
-
 // ReportAttempt reports the end of the calling claim's attempt at its node.
 func (c *Client) ReportAttempt(ctx context.Context, runID, nodeID string, report store.AttemptReport) error {
 	return c.post(ctx, claimNodePath(runID, nodeID, "attempt"), report, http.StatusOK, nil)

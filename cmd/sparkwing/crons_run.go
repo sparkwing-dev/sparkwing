@@ -42,6 +42,7 @@ func runCronsTick(args []string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), cronsTickTimeout)
 	defer cancel()
+	session.svc.Schedules = nil
 	report, err := session.svc.Tick(ctx, *dryRun)
 	switch {
 	case errors.Is(err, crons.ErrTickRunning):

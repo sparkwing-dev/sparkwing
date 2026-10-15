@@ -241,10 +241,6 @@ func (s *Server) claimBudgeted(next http.Handler) http.Handler {
 	})
 }
 
-// safety: the gate holds a runner to the interval this controller suggested it,
-// so it guards only the two routes that carry the suggestion. A route naming
-// the trigger or node it wants is no idle poll, and the preparation half of an
-// offer round would otherwise charge one round twice.
 func (s *Server) idlePollBudgeted(next http.Handler) http.Handler {
 	budgeted := s.claimBudgeted(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

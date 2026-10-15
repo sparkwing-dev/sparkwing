@@ -263,7 +263,7 @@ func (r *envelopeRig) start(runID, pipeline string, args map[string]string, twea
 			Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: masker},
 		},
 		Pipeline: pipeline, Args: args, Run: nodeproto.RunContext{RunID: runID},
-		State: r.st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
+		State: r.st, Logger: slog.New(slog.DiscardHandler),
 		Attempts: &nodehost.Attempts{
 			Routes: r.routes, Resolver: noEnvelopeSecrets{}, Masker: masker,
 			OpenLog: func(context.Context, string, string) (nodehost.NodeLog, error) { return discardNodeLog{}, nil },
@@ -471,12 +471,9 @@ func TestEnvelope_WeightedCostsShareABoxGroupAcrossRuns(t *testing.T) {
 	}
 }
 
-// Nodes waiting on a group hold no worker. With three workers, one grouped
-// node running, two queued on its group and an independent node running,
-// that node's dependent still finds a worker.
-func TestEnvelope_QueuedGroupNodesLeaveWorkersForIndependentWork(t *testing.T) {
+func TestEnvelope_QueuedGroupNodesDoNotBlockIndependentWork(t *testing.T) {
 	r := newEnvelopeRig(t, false)
-	res := r.start("workers", "envelope-a", r.args("workers"), func(cfg *nodehost.Config) { cfg.Workers = 3 })
+	res := r.start("workers", "envelope-a", r.args("workers"), nil)
 	var grouped, pre *gateArrival
 	for grouped == nil || pre == nil {
 		switch a := r.gate.next(t); {

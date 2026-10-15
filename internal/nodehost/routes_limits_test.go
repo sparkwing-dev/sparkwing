@@ -34,7 +34,7 @@ func TestForwardsPastTheNodesLimitAre429AndFreedOnDisconnect(t *testing.T) {
 		case <-release:
 		case <-r.Context().Done():
 		}
-		answer(http.StatusNotFound, map[string]string{"error": "no key"})(w, r)
+		answer(http.StatusServiceUnavailable, map[string]string{"error": "no key"})(w, r)
 	})
 	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c.fakeController))
 	other, _ := admitClaim(t, s, "notify", claimFor(t, c.fakeController))
@@ -49,10 +49,10 @@ func TestForwardsPastTheNodesLimitAre429AndFreedOnDisconnect(t *testing.T) {
 	}
 	before := len(c.asked())
 	big := `{"pipeline":"build","args":{"a":"` + strings.Repeat("x", 1<<20) + `"}}`
-	wantRefusal(t, ask(t, s, http.MethodPost, "/node/v1/children", bearer, big), http.StatusTooManyRequests, "too_many_requests")
-	wantRefusal(t, ask(t, s, http.MethodPost, "/node/v1/oidc-token", bearer, `{"audience":"a"}`), http.StatusTooManyRequests, "too_many_requests")
-	wantRefusal(t, ask(t, s, http.MethodGet, "/node/v1/nodes/build/output", bearer, ""), http.StatusTooManyRequests, "too_many_requests")
-	wantRefusal(t, ask(t, s, http.MethodGet, "/node/v1/pipelines/p/latest?node=n", bearer, ""), http.StatusTooManyRequests, "too_many_requests")
+	wantRefusal(t, ask(t, s, http.MethodPost, "/node/v1/children", bearer, big), http.StatusTooManyRequests, "rate_limited")
+	wantRefusal(t, ask(t, s, http.MethodPost, "/node/v1/oidc-token", bearer, `{"audience":"a"}`), http.StatusTooManyRequests, "rate_limited")
+	wantRefusal(t, ask(t, s, http.MethodGet, "/node/v1/jobs/build/output", bearer, ""), http.StatusTooManyRequests, "rate_limited")
+	wantRefusal(t, ask(t, s, http.MethodGet, "/node/v1/pipelines/p/latest?job=n", bearer, ""), http.StatusTooManyRequests, "rate_limited")
 	if asked := c.asked()[before:]; len(asked) != 0 {
 		t.Fatalf("a refused request reached the controller: %v", asked)
 	}
@@ -64,13 +64,13 @@ func TestForwardsPastTheNodesLimitAre429AndFreedOnDisconnect(t *testing.T) {
 		<-done
 	}
 	close(release)
-	if got := <-done; got != http.StatusNotFound {
+	if got := <-done; got != http.StatusServiceUnavailable {
 		t.Fatalf("another node's request answered %d while this node was full", got)
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		got := ask(t, s, http.MethodPost, "/node/v1/oidc-token", bearer, `{"audience":"a"}`)
-		if got.status == http.StatusNotFound {
+		if got.status == http.StatusServiceUnavailable {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -114,7 +114,7 @@ func TestANodeHoldsOneOutputAtATime(t *testing.T) {
 	})
 	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c))
 	read := func(ctx context.Context, status chan<- int) {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, s.URL()+"/node/v1/nodes/build/output", nil)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, s.URL()+"/node/v1/jobs/build/output", nil)
 		req.Header.Set("Authorization", "Bearer "+bearer)
 		req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
 		resp, err := http.DefaultClient.Do(req)

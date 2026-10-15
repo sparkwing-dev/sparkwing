@@ -19,7 +19,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func (h *hostedTrigger) hostInCheckout(t *testing.T, dir string) error {
@@ -84,44 +83,6 @@ func TestTriggerHost_TheCheckoutsGuardRefusesTheRun(t *testing.T) {
 	}
 }
 
-// safety: a controller-dispatched run's planning claim and each node's Job layer the checkout's arguments under
-// the run row's alike, so the node plans as the claim did; the claim refuses what a guard rejects.
-func TestLaunchedNode_LayersTheCheckoutsYAMLArgsAndGuards(t *testing.T) {
-	t.Setenv("GORACE", "atexit_sleep_ms=0")
-	dir := t.TempDir()
-	entry := filepath.Join(dir, "entry")
-	r := newLaunchedRun(t, map[string]string{"envout": filepath.Join(dir, "env")})
-	yaml := "pipelines:\n  - name: podnode\n    entrypoint: Podnode\n    args:\n      ranged: " + entry + "\n"
-	if err := os.MkdirAll(filepath.Join(r.src, ".sparkwing"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(r.src, ".sparkwing", "sparkwing.yaml"), []byte(yaml), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.host(t, store.PlanNodeID); err != nil {
-		t.Fatalf("plan: %v", err)
-	}
-	if _, err := r.host(t, "prep"); err != nil {
-		t.Fatalf("host prep: %v", err)
-	}
-	if n := r.node(t, "prep"); n.Outcome != string(sparkwing.Success) {
-		t.Fatalf("prep = %s/%s (%s), want success planned as the claim planned", n.Status, n.Outcome, n.Error)
-	}
-	if got, err := os.ReadFile(entry); err != nil || strings.TrimSpace(string(got)) != "prep" {
-		t.Fatalf("the entry's ranged file = %q (%v), want prep's line", got, err)
-	}
-
-	refused := r.another(t, "run-guarded", map[string]string{"envout": filepath.Join(dir, "env"), "group": "true"})
-	guarded := "pipelines:\n  - name: podnode\n    entrypoint: Podnode\n    guards:\n      reject: [\"arg:group=true\"]\n"
-	if err := os.WriteFile(filepath.Join(r.src, ".sparkwing", "sparkwing.yaml"), []byte(guarded), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	refused.bin = r.bin
-	if _, err := refused.host(t, store.PlanNodeID); err == nil || !strings.Contains(err.Error(), "rejected by guard") {
-		t.Fatalf("plan = %v, want the guard's refusal", err)
-	}
-}
-
 // safety: a guard judges the arguments the run plans with, so leaving out a flag whose SDK default the guard rejects
 // does not slip past it, on the runner host and on the launcher's planning claim alike.
 func TestTriggerHost_AGuardJudgesTheSDKsDefaults(t *testing.T) {
@@ -134,21 +95,6 @@ func TestTriggerHost_AGuardJudgesTheSDKsDefaults(t *testing.T) {
 	}
 	if _, err := os.Stat(ranged); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a node ran past the guard: %v", err)
-	}
-}
-
-func TestLaunchedNode_AGuardJudgesTheSDKsDefaults(t *testing.T) {
-	t.Setenv("GORACE", "atexit_sleep_ms=0")
-	r := newLaunchedRun(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env")})
-	yaml := "pipelines:\n  - name: podnode\n    entrypoint: Podnode\n    guards:\n      reject: [\"arg:stage=prod\"]\n"
-	if err := os.MkdirAll(filepath.Join(r.src, ".sparkwing"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(r.src, ".sparkwing", "sparkwing.yaml"), []byte(yaml), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.host(t, store.PlanNodeID); err == nil || !strings.Contains(err.Error(), "rejected by guard") {
-		t.Fatalf("plan = %v, want the guard's refusal of the default stage", err)
 	}
 }
 

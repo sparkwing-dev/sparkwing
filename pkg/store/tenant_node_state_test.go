@@ -99,10 +99,8 @@ func TestTenantNodeWritesStayInTheRunsTeam(t *testing.T) {
 
 	writes := map[string]func(*store.Tenant) error{
 		"StartNode":               func(tn *store.Tenant) error { return tn.StartNode(ctx, "run-a", "build") },
-		"SetNodeStatus":           func(tn *store.Tenant) error { return tn.SetNodeStatus(ctx, "run-a", "build", "running") },
 		"UpdateNodeDeps":          func(tn *store.Tenant) error { return tn.UpdateNodeDeps(ctx, "run-a", "build", []string{"lint"}) },
 		"UpdateNodeActivity":      func(tn *store.Tenant) error { return tn.UpdateNodeActivity(ctx, "run-a", "build", "compiling") },
-		"TouchNodeHeartbeat":      func(tn *store.Tenant) error { return tn.TouchNodeHeartbeat(ctx, "run-a", "build") },
 		"AppendNodeAnnotation":    func(tn *store.Tenant) error { return tn.AppendNodeAnnotation(ctx, "run-a", "build", "note") },
 		"SetNodeSummary":          func(tn *store.Tenant) error { return tn.SetNodeSummary(ctx, "run-a", "build", "# done") },
 		"SetNodeArtifactManifest": func(tn *store.Tenant) error { return tn.SetNodeArtifactManifest(ctx, "run-a", "build", "sha256:x") },
@@ -242,7 +240,6 @@ func TestTenantTriggersStayInTheirTeam(t *testing.T) {
 	for name, end := range map[string]func() (bool, error){
 		"FinishTriggerAtGeneration": func() (bool, error) { return globex.FinishTriggerAtGeneration(ctx, "trig-a", 0) },
 		"ReleaseClaimAtGeneration":  func() (bool, error) { return globex.ReleaseClaimAtGeneration(ctx, "trig-a", 0) },
-		"RequeueUnstartedClaim":     func() (bool, error) { return globex.RequeueUnstartedClaim(ctx, "trig-a") },
 	} {
 		if ended, err := end(); err != nil || ended {
 			t.Errorf("globex.%s = %v, %v, want nothing ended", name, ended, err)

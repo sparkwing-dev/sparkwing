@@ -3,48 +3,20 @@ package store
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 )
 
-// DefaultConcurrencyCacheCap bounds the rows retained in
-// concurrency_cache when a maintenance pass evicts by LRU. It matches the
-// controller's default cap so a daemonless box and a controller agree on
-// how large the cache may grow.
-const DefaultConcurrencyCacheCap = 10_000
-
-// ConcurrencyMaintenanceResult reports what one janitorial pass over the
-// concurrency tables touched. Counts are zero when a pass ran but found
-// nothing to do.
+// ConcurrencyMaintenanceResult counts only committed maintenance work.
 type ConcurrencyMaintenanceResult struct {
-	Reconciled   int                 `json:"reconciled"`
 	StaleHolders []ConcurrencyHolder `json:"stale_holders,omitempty"`
 	Promoted     int                 `json:"promoted"`
-	CacheExpired int64               `json:"cache_expired"`
 	StaleWaiters []ConcurrencyWaiter `json:"stale_waiters,omitempty"`
-	CacheEvicted int64               `json:"cache_evicted"`
-	// CacheOrphaned counts memo entries dropped because the run that
-	// produced their output is gone. Such an entry can only fail the
-	// node that hits it, since fetching the output needs the origin's
-	// node row.
-	CacheOrphaned int64 `json:"cache_orphaned"`
 }
 
-// ConcurrencyMaintenanceOptions tunes a maintenance pass. Zero values fall
-// back to package defaults.
+// ConcurrencyMaintenanceOptions preserves promotion and abandoned-waiter policy.
 type ConcurrencyMaintenanceOptions struct {
-	// Lease is the promotion lease handed to waiters reclaimed during the
-	// pass. Zero uses DefaultConcurrencyLease.
-	Lease time.Duration
-	// WaiterMaxAge is the age at which maintenance may reclaim a waiter
-	// whose owning run is missing, terminal, or no longer heartbeating.
-	// Live running runs keep their waiters until they are promoted,
-	// cancelled, or the queue policy times out. Zero uses twice
-	// DefaultConcurrencyLease.
+	Lease        time.Duration
 	WaiterMaxAge time.Duration
-	// CacheCap is the row ceiling for concurrency_cache after LRU eviction.
-	// Zero uses DefaultConcurrencyCacheCap.
-	CacheCap int
 }
 
 func (o *ConcurrencyMaintenanceOptions) withDefaults() {
@@ -54,69 +26,71 @@ func (o *ConcurrencyMaintenanceOptions) withDefaults() {
 	if o.WaiterMaxAge <= 0 {
 		o.WaiterMaxAge = 2 * DefaultConcurrencyLease
 	}
-	if o.CacheCap <= 0 {
-		o.CacheCap = DefaultConcurrencyCacheCap
-	}
 }
 
-// MaintainConcurrency runs the full controller-free janitorial pass over
-// the concurrency tables: reconcile keys with idle capacity, reap
-// lease-expired holders and promote the next waiters, sweep expired,
-// orphaned and over-cap cache rows, and drop stale or orphaned waiters. It touches only
-// finished or expired rows, so it is safe to run alongside live runs and
-// idempotent under racing processes hitting the same tables.
-//
-// Each step runs independently; a failure in one is collected and the
-// remaining steps still run, so a single wedged table can't block the rest
-// of the sweep. The returned result reports what every step that succeeded
-// touched, alongside the joined error.
-func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error) {
+// MaintainConcurrency sweeps capacity atomically under the elected reaper fence.
+func (o *Operator) MaintainConcurrency(ctx context.Context, lease SingletonLease, opts ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error) {
 	opts.withDefaults()
-	var res ConcurrencyMaintenanceResult
-	var errs []error
-
-	if dropped, err := s.reapStaleConcurrencyWaiters(ctx, opts.WaiterMaxAge); err != nil {
-		errs = append(errs, fmt.Errorf("reap stale waiters: %w", err))
-	} else {
-		res.StaleWaiters = dropped
+	tx, err := o.s.beginTx(ctx)
+	if err != nil {
+		return ConcurrencyMaintenanceResult{}, err
 	}
-
-	if n, err := s.reconcileConcurrencyKeys(ctx, opts.Lease); err != nil {
-		errs = append(errs, fmt.Errorf("reconcile keys: %w", err))
-	} else {
-		res.Reconciled = n
+	defer rollbackOrLog(tx)
+	if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper", tx.now()); err != nil {
+		return ConcurrencyMaintenanceResult{}, err
 	}
-
-	if stale, err := s.reapStaleConcurrencyHolders(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("reap stale holders: %w", err))
-	} else {
-		res.StaleHolders = stale
-		for _, h := range stale {
-			if promoted, err := (&Tenant{s: s, team: h.team}).PromoteNextWaiters(ctx, h.Key, opts.Lease); err != nil {
-				errs = append(errs, fmt.Errorf("promote after reaping holder on %q: %w", h.Key, err))
-			} else {
-				res.Promoted += len(promoted)
-			}
+	keys, err := lockMaintenanceCapacityTx(ctx, tx)
+	if err != nil {
+		return ConcurrencyMaintenanceResult{}, err
+	}
+	var result ConcurrencyMaintenanceResult
+	for _, key := range keys {
+		waiters, err := reapStaleConcurrencyWaitersTx(ctx, tx, key.team, key.key, opts.WaiterMaxAge)
+		if err != nil {
+			return ConcurrencyMaintenanceResult{}, err
+		}
+		result.StaleWaiters = append(result.StaleWaiters, waiters...)
+		holders, err := reapStaleConcurrencyHoldersTx(ctx, tx, key.team, key.key)
+		if err != nil {
+			return ConcurrencyMaintenanceResult{}, err
+		}
+		result.StaleHolders = append(result.StaleHolders, holders...)
+		now := tx.now()
+		promoted, err := txPromoteWaiters(ctx, tx, key.team, key.key, now.UnixNano(), now.Add(opts.Lease).UnixNano())
+		if err != nil {
+			return ConcurrencyMaintenanceResult{}, err
+		}
+		result.Promoted += len(promoted)
+	}
+	for _, key := range keys {
+		if err := txCheckConcurrencyInvariants(ctx, tx, key.team, key.key, tx.now().UnixNano()); err != nil {
+			return ConcurrencyMaintenanceResult{}, err
 		}
 	}
-
-	if n, err := s.sweepExpiredConcurrencyCache(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("sweep expired cache: %w", err))
-	} else {
-		res.CacheExpired = n
+	if err := assertSingletonLeaseTx(ctx, tx, lease, "controller.reaper", tx.now()); err != nil {
+		return ConcurrencyMaintenanceResult{}, err
 	}
-
-	if n, err := s.sweepOrphanedConcurrencyCache(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("sweep orphaned cache: %w", err))
-	} else {
-		res.CacheOrphaned = n
+	if err := tx.Commit(); err != nil {
+		return ConcurrencyMaintenanceResult{}, err
 	}
+	return result, nil
+}
 
-	if n, err := s.sweepLRUConcurrencyCache(ctx, opts.CacheCap); err != nil {
-		errs = append(errs, fmt.Errorf("sweep lru cache: %w", err))
-	} else {
-		res.CacheEvicted = n
+func lockMaintenanceCapacityTx(ctx context.Context, tx *storeTx) ([]concurrencyKey, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT team,key FROM concurrency_entries e
+WHERE EXISTS (SELECT 1 FROM concurrency_waiters w WHERE w.team=e.team AND w.key=e.key)
+OR EXISTS (SELECT 1 FROM concurrency_holders h WHERE h.team=e.team AND h.key=e.key AND (h.lease_expires_at<=? OR EXISTS (SELECT 1 FROM runs r WHERE r.team=h.team AND r.id=h.run_id AND r.finished_at IS NOT NULL)))
+ORDER BY team,key`+tx.forUpdate(), tx.now().UnixNano())
+	if err != nil {
+		return nil, err
 	}
-
-	return res, errors.Join(errs...)
+	var keys []concurrencyKey
+	for rows.Next() {
+		var key concurrencyKey
+		if err := rows.Scan(&key.team, &key.key); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		keys = append(keys, key)
+	}
+	return keys, errors.Join(rows.Err(), rows.Close())
 }

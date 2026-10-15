@@ -16,7 +16,14 @@ type planValidator struct {
 	closures     map[string]string
 	generators   map[string]string
 	capabilities map[PlanCapability]bool
+	concurrency  map[string]concurrencyDefinition
 	newJobs      []string
+}
+
+type concurrencyDefinition struct {
+	capacity int
+	scope    string
+	onLimit  string
 }
 
 func validatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, error) {
@@ -43,6 +50,7 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, erro
 		context: context, paths: map[string]string{}, jobs: map[string]JobSpec{},
 		closures: map[string]string{}, generators: map[string]string{},
 		capabilities: map[PlanCapability]bool{},
+		concurrency:  map[string]concurrencyDefinition{},
 	}
 	for _, row := range CapabilityTable() {
 		if _, exists := v.capabilities[row.Feature]; exists {
@@ -274,6 +282,33 @@ func (v *planValidator) validateConcurrency(specs []ConcurrencySpec, path string
 		}
 		if spec.QueueTimeoutMS != nil && *spec.QueueTimeoutMS < 0 || spec.CancelTimeoutMS != nil && *spec.CancelTimeoutMS < 0 {
 			return planInvalid(at, "timeout is negative")
+		}
+		if v.context.Expansion {
+			definition := concurrencyDefinition{capacity: 1, scope: "global", onLimit: "queue"}
+			if spec.Capacity != nil {
+				definition.capacity = *spec.Capacity
+			}
+			if spec.Scope != nil {
+				definition.scope = *spec.Scope
+			}
+			if spec.OnLimit != nil {
+				definition.onLimit = *spec.OnLimit
+			}
+			if existing, ok := v.concurrency[spec.Group]; ok {
+				field := ""
+				switch {
+				case existing.capacity != definition.capacity:
+					field = "capacity"
+				case existing.scope != definition.scope:
+					field = "scope"
+				case existing.onLimit != definition.onLimit:
+					field = "on_limit"
+				}
+				if field != "" {
+					return planInvalid(at+"."+field, "concurrency group definition conflicts with another membership")
+				}
+			}
+			v.concurrency[spec.Group] = definition
 		}
 	}
 	return nil

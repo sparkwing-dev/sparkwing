@@ -133,13 +133,23 @@ func (c *engineClient) ReadFailure(ctx context.Context, run, job string, generat
 
 func (c *engineClient) SyncLauncher(ctx context.Context, input controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
 	var result controllerwire.LauncherSyncResponse
+	for _, observed := range input.Observed {
+		if err := observed.Validate(); err != nil {
+			return result, err
+		}
+	}
 	err := c.request(ctx, "POST", "/api/v1/launcher/sync", "/api/v1/launcher/sync", "", input, &result)
 	if err != nil {
-		return result, err
+		return controllerwire.LauncherSyncResponse{}, err
 	}
 	for _, award := range result.Awards {
 		if award.Capability != "" {
 			return controllerwire.LauncherSyncResponse{}, &apierr.Error{Code: apierr.ProtocolError, Message: "launcher sync returned private bearer material"}
+		}
+	}
+	for _, job := range result.Remove {
+		if err := job.Validate(); err != nil {
+			return controllerwire.LauncherSyncResponse{}, &apierr.Error{Code: apierr.ProtocolError, Message: "launcher cleanup requires a complete Job instance"}
 		}
 	}
 	return result, nil

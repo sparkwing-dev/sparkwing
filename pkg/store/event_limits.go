@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 )
 
 // Event size limits, named so a refusal says which one it hit.
@@ -115,49 +116,38 @@ func eventLimitsTx(ctx context.Context, tx *storeTx) (EventLimits, error) {
 	return EventLimits{MaxBytesPerEvent: perEvent, MaxBytesPerRun: perRun, MaxEventsPerRun: events}, nil
 }
 
-// safety: the run's stored totals are read under the run's event-sequence
-// lock, the one every append takes, so two appends cannot both read room
-// that only one of them fits in. The totals are counters on the run row that
-// every append bumps, so the check costs one row read however long the run.
-func refuseEventOverLimitsTx(ctx context.Context, tx *storeTx, principal, runID string, size int64) error {
+func refuseEventOverLimitsTx(ctx context.Context, tx *storeTx, team Team, runID string, size int64) error {
 	limits, err := eventLimitsTx(ctx, tx)
 	if err != nil {
 		return err
 	}
 	if limits.MaxBytesPerEvent > 0 && size > limits.MaxBytesPerEvent {
 		return &StorageQuotaError{
-			Principal: principal, Limit: StorageLimitEventBytes, Unit: "bytes",
+			Principal: string(team), Limit: StorageLimitEventBytes, Unit: "bytes",
 			Allowed: limits.MaxBytesPerEvent, Requested: size,
 		}
 	}
-	if limits.MaxBytesPerRun <= 0 && limits.MaxEventsPerRun <= 0 {
-		return nil
-	}
-	team, err := creditTeamForRunTx(ctx, tx, runID)
-	if err != nil {
-		return err
-	}
-	if err := lockEventSequenceTx(ctx, tx, team, runID); err != nil {
-		return err
-	}
 	var storedBytes, storedEvents int64
 	err = tx.QueryRowContext(ctx,
-		`SELECT event_bytes, event_count FROM runs WHERE id = ?`, runID).Scan(&storedBytes, &storedEvents)
+		`SELECT event_bytes, event_count FROM runs WHERE team = ? AND id = ?`, team, runID).Scan(&storedBytes, &storedEvents)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("run", runID)
 	}
 	if err != nil {
 		return err
 	}
-	if limits.MaxBytesPerRun > 0 && storedBytes+size > limits.MaxBytesPerRun {
+	if storedBytes < 0 || storedEvents < 0 || size > math.MaxInt64-storedBytes || storedEvents == math.MaxInt64 {
+		return fmt.Errorf("%w: event accounting overflow", ErrInvalidInput)
+	}
+	if limits.MaxBytesPerRun > 0 && size > limits.MaxBytesPerRun-storedBytes {
 		return &StorageQuotaError{
-			Principal: principal, Limit: StorageLimitEventBytesPerRun, Unit: "bytes",
+			Principal: string(team), Limit: StorageLimitEventBytesPerRun, Unit: "bytes",
 			Used: storedBytes, Allowed: limits.MaxBytesPerRun, Requested: size,
 		}
 	}
 	if limits.MaxEventsPerRun > 0 && storedEvents+1 > limits.MaxEventsPerRun {
 		return &StorageQuotaError{
-			Principal: principal, Limit: StorageLimitEventsPerRun, Unit: "events",
+			Principal: string(team), Limit: StorageLimitEventsPerRun, Unit: "events",
 			Used: storedEvents, Allowed: limits.MaxEventsPerRun, Requested: 1,
 		}
 	}

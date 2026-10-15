@@ -131,8 +131,8 @@ func TestWingdAPIReadsDoNotWaitOnAForeignWriter(t *testing.T) {
 			_, err := c.ListRuns(ctx, store.RunFilter{Statuses: []string{"pending"}, Limit: 50})
 			return err
 		})
-		loop("nodebeat", 5*time.Second, func(ctx context.Context) error {
-			return c.TouchNodeHeartbeat(ctx, runID, "n0")
+		loop("nodeactivity", 5*time.Second, func(ctx context.Context) error {
+			return c.UpdateNodeActivity(ctx, runID, "n0", "running")
 		})
 		loop("slotbeat", 2*time.Second, func(ctx context.Context) error {
 			_, _, err := conc.HeartbeatSlot(ctx, key, holder, 30*time.Second)
@@ -151,10 +151,10 @@ func TestWingdAPIReadsDoNotWaitOnAForeignWriter(t *testing.T) {
 	wg.Wait()
 	<-held
 
-	for _, kind := range []string{"runpoll", "nodebeat", "slotbeat", "admission"} {
+	for _, kind := range []string{"runpoll", "nodeactivity", "slotbeat", "admission"} {
 		col.report(t, kind)
 	}
-	for _, kind := range []string{"runpoll", "nodebeat", "slotbeat", "admission"} {
+	for _, kind := range []string{"runpoll", "nodeactivity", "slotbeat", "admission"} {
 		if n, errs := col.outcome(kind); n == 0 {
 			t.Errorf("%s produced no samples, so the ceiling below proves nothing", kind)
 		} else if errs > 0 {

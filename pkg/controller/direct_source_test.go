@@ -34,7 +34,7 @@ func TestSourceUploadUserBearerReservesBeforeRun(t *testing.T) {
 	})
 	user := f.ghUser(650, "source-owner")
 	allowance := int64(1 << 30)
-	if _, err := f.store.SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageFreeAllowanceBytes: &allowance}); err != nil {
+	if _, err := f.store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageFreeAllowanceBytes: &allowance}); err != nil {
 		t.Fatal(err)
 	}
 	team, err := f.store.ForTeam(t.Context(), store.Team(user.team))
@@ -242,7 +242,7 @@ func TestSourceUploadReleasesReservationWhenPresigningFails(t *testing.T) {
 	})
 	user := f.ghUser(651, "source-owner")
 	allowance := int64(1 << 30)
-	if _, err := f.store.SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageFreeAllowanceBytes: &allowance}); err != nil {
+	if _, err := f.store.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageFreeAllowanceBytes: &allowance}); err != nil {
 		t.Fatal(err)
 	}
 	team, err := f.store.ForTeam(t.Context(), store.Team(user.team))

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -121,14 +123,15 @@ func newHarness(t *testing.T, now time.Time) *harness {
 	launcher.now = c.now
 	return &harness{
 		svc: &Service{
-			Store:    st,
-			Launcher: launcher,
-			Now:      c.now,
-			Host:     "test-host",
-			Version:  "test",
-			LockPath: filepath.Join(home, "crons.lock"),
-			PinRoot:  filepath.Join(home, "crons"),
-			ArmedBy:  "tester@test-host",
+			Store:     st,
+			Schedules: teststore.ForTeam(t, st, store.DefaultTeam),
+			Launcher:  launcher,
+			Now:       c.now,
+			Host:      "test-host",
+			Version:   "test",
+			LockPath:  filepath.Join(home, "crons.lock"),
+			PinRoot:   filepath.Join(home, "crons"),
+			ArmedBy:   "tester@test-host",
 		},
 		store: st, launcher: launcher, clock: c, home: home,
 	}
@@ -289,7 +292,7 @@ func TestArmCreatesThenRefreshesWithoutClobberingState(t *testing.T) {
 		t.Fatalf("first arm: %+v", report)
 	}
 	id := ScheduleID(root, "every-minute", "")
-	sched, err := h.store.GetCronSchedule(ctx, id)
+	sched, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, id)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -308,7 +311,7 @@ func TestArmCreatesThenRefreshesWithoutClobberingState(t *testing.T) {
 	}
 	h.clock.set(at(t, "2026-01-01T02:00:30Z"))
 	cursor := at(t, "2026-01-01T01:59:00Z")
-	if err := h.store.ResolveCronDue(ctx, id, cursor, nil, nil, h.clock.now()); err != nil {
+	if err := teststore.ForTeam(t, h.store, store.DefaultTeam).ResolveCronDue(ctx, id, cursor, nil, nil, h.clock.now()); err != nil {
 		t.Fatalf("ResolveCronDue: %v", err)
 	}
 
@@ -331,7 +334,7 @@ func TestArmCreatesThenRefreshesWithoutClobberingState(t *testing.T) {
 	if report.Armed != 0 || report.Refreshed != 1 {
 		t.Fatalf("re-arm: %+v", report)
 	}
-	sched, err = h.store.GetCronSchedule(ctx, id)
+	sched, err = teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, id)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -370,7 +373,7 @@ func TestArmWithdrawsASchedulTheRepoStoppedDeclaring(t *testing.T) {
 	if report.Withdrawn != 1 || len(report.Withdrawals) != 1 || report.Withdrawals[0] != "svc/nightly" {
 		t.Fatalf("withdrawal: %+v", report)
 	}
-	sched, err := h.store.GetCronSchedule(ctx, ScheduleID(root, "nightly", ""))
+	sched, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(root, "nightly", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -390,7 +393,7 @@ func TestArmWritesNothingWhenTheProofFails(t *testing.T) {
 	if !errors.Is(err, proofErr) {
 		t.Fatalf("Arm error = %v, want the proof's", err)
 	}
-	rows, err := h.store.ListCronSchedules(ctx)
+	rows, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronSchedules(ctx)
 	if err != nil {
 		t.Fatalf("ListCronSchedules: %v", err)
 	}
@@ -423,7 +426,7 @@ func TestDisarmRemovesEverySchedulOfTheRepo(t *testing.T) {
 	if removed != 2 {
 		t.Fatalf("Disarm removed %d, want 2", removed)
 	}
-	rows, err := h.store.ListCronSchedules(ctx)
+	rows, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronSchedules(ctx)
 	if err != nil {
 		t.Fatalf("ListCronSchedules: %v", err)
 	}
@@ -481,14 +484,14 @@ func TestRefreshUpdatesWithdrawsAndReportsAMissingCheckout(t *testing.T) {
 	if report.Withdrawn != 1 {
 		t.Errorf("Withdrawn = %d, want only the dropped pipeline", report.Withdrawn)
 	}
-	changed, err := h.store.GetCronSchedule(ctx, ScheduleID(edited, "every-minute", ""))
+	changed, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(edited, "every-minute", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
 	if changed.Cron != "0 4 * * *" {
 		t.Errorf("edited cron = %q", changed.Cron)
 	}
-	vanished, err := h.store.GetCronSchedule(ctx, ScheduleID(gone, "every-minute", ""))
+	vanished, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(gone, "every-minute", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -511,7 +514,7 @@ func TestRefreshWritesNothingWhenTheDeclarationIsUnchanged(t *testing.T) {
 	if report.Updated != 0 {
 		t.Errorf("Updated = %d, want none: nothing in the repo moved", report.Updated)
 	}
-	stored, err := h.store.GetCronSchedule(ctx, armed.ID)
+	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, armed.ID)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -536,7 +539,7 @@ func TestRefreshWritesNothingWhenTheDeclarationIsUnchanged(t *testing.T) {
 	if report.Updated != 1 {
 		t.Fatalf("Updated = %d, want the edited cadence stored", report.Updated)
 	}
-	if stored, err = h.store.GetCronSchedule(ctx, armed.ID); err != nil || stored.Cron != "0 4 * * *" {
+	if stored, err = teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, armed.ID); err != nil || stored.Cron != "0 4 * * *" {
 		t.Fatalf("edited row = %+v (err %v)", stored, err)
 	}
 }
@@ -547,7 +550,7 @@ func armOne(t *testing.T, h *harness, root string) store.CronSchedule {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	sched, err := h.store.GetCronSchedule(ctx, ScheduleID(root, "every-minute", ""))
+	sched, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(root, "every-minute", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -593,7 +596,7 @@ func TestTickFiresADueScheduleAndRecordsIt(t *testing.T) {
 	if got := h.launcher.launches(); len(got) != 1 || got[0] != "every-minute@2026-01-01T00:01:00Z" {
 		t.Fatalf("launched %v", got)
 	}
-	stored, err := h.store.GetCronSchedule(ctx, sched.ID)
+	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -606,14 +609,14 @@ func TestTickFiresADueScheduleAndRecordsIt(t *testing.T) {
 	if stored.NextDueAt == nil || !stored.NextDueAt.Equal(at(t, "2026-01-01T00:02:00Z")) {
 		t.Errorf("next due = %v", stored.NextDueAt)
 	}
-	fires, err := h.store.ListCronFires(ctx, sched.ID, 0)
+	fires, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronFires(ctx, sched.ID, 0)
 	if err != nil {
 		t.Fatalf("ListCronFires: %v", err)
 	}
 	if len(fires) != 1 || fires[0].Outcome != store.CronOutcomeFired || fires[0].RunID != "run-1" {
 		t.Fatalf("fires: %+v", fires)
 	}
-	tick, err := h.store.GetCronTick(ctx)
+	tick, err := h.store.AsOperator().GetCronTick(ctx)
 	if err != nil {
 		t.Fatalf("GetCronTick: %v", err)
 	}
@@ -646,7 +649,7 @@ func TestTickSkipsWhenThePreviousRunIsStillGoing(t *testing.T) {
 	if len(h.launcher.launches()) != 1 {
 		t.Fatalf("a skipped instant launched: %v", h.launcher.launches())
 	}
-	stored, err := h.store.GetCronSchedule(ctx, sched.ID)
+	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -718,7 +721,7 @@ func TestTickFiresAgainWhenACatchUpAboveTheCeilingWouldWedgeASkip(t *testing.T) 
 	if len(staleAfter) != 1 || staleAfter[0] != cronspec.MaxCatchUp {
 		t.Fatalf("Active was given %v, want the ceiling %v", staleAfter, cronspec.MaxCatchUp)
 	}
-	stored, err := h.store.GetCronSchedule(ctx, sched.ID)
+	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -778,7 +781,7 @@ func TestTickRecordsACatchUpBacklogAsOneMissAndAdvancesTheCursor(t *testing.T) {
 	if report.Missed != 1 || report.Fired != 1 {
 		t.Fatalf("catch-up: %+v", report)
 	}
-	fires, err := h.store.ListCronFires(ctx, sched.ID, 0)
+	fires, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronFires(ctx, sched.ID, 0)
 	if err != nil {
 		t.Fatalf("ListCronFires: %v", err)
 	}
@@ -800,7 +803,7 @@ func TestTickRecordsACatchUpBacklogAsOneMissAndAdvancesTheCursor(t *testing.T) {
 	if !missed.DueAt.Equal(at(t, "2026-01-01T00:59:00Z")) {
 		t.Errorf("the missed row should carry the newest missed instant, got %v", missed.DueAt)
 	}
-	stored, err := h.store.GetCronSchedule(ctx, sched.ID)
+	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -830,7 +833,7 @@ func TestTickAdvancesAPausedScheduleWithoutFiring(t *testing.T) {
 	if len(h.launcher.launches()) != 0 {
 		t.Fatalf("a paused schedule launched: %v", h.launcher.launches())
 	}
-	stored, err := h.store.GetCronSchedule(ctx, sched.ID)
+	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -840,7 +843,7 @@ func TestTickAdvancesAPausedScheduleWithoutFiring(t *testing.T) {
 	if !stored.CursorAt.Equal(at(t, "2026-01-01T00:05:00Z")) {
 		t.Fatalf("cursor = %v, want the latest instant that came due", stored.CursorAt)
 	}
-	fires, err := h.store.ListCronFires(ctx, sched.ID, 0)
+	fires, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronFires(ctx, sched.ID, 0)
 	if err != nil {
 		t.Fatalf("ListCronFires: %v", err)
 	}
@@ -872,7 +875,7 @@ func TestResumeDoesNotReplayThePauseWindow(t *testing.T) {
 	if report.Fired != 1 || len(h.launcher.launches()) != 1 {
 		t.Fatalf("tick: %+v, launches %v", report, h.launcher.launches())
 	}
-	fires, err := h.store.ListCronFires(ctx, sched.ID, 0)
+	fires, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronFires(ctx, sched.ID, 0)
 	if err != nil {
 		t.Fatalf("ListCronFires: %v", err)
 	}
@@ -898,7 +901,7 @@ func TestTickNeverFiresAnUndeclaredSchedule(t *testing.T) {
 	if report.Evaluated != 0 || report.Fired != 0 {
 		t.Fatalf("an undeclared schedule fired: %+v", report)
 	}
-	stored, err := h.store.GetCronSchedule(ctx, sched.ID)
+	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -934,7 +937,7 @@ func TestTickRecordsALauncherFailureAndKeepsGoing(t *testing.T) {
 		t.Fatalf("both launches failed, report: %+v", report)
 	}
 	for _, id := range []string{first, second} {
-		stored, gerr := h.store.GetCronSchedule(ctx, id)
+		stored, gerr := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, id)
 		if gerr != nil {
 			t.Fatalf("GetCronSchedule: %v", gerr)
 		}
@@ -944,7 +947,7 @@ func TestTickRecordsALauncherFailureAndKeepsGoing(t *testing.T) {
 		if !stored.CursorAt.Equal(at(t, "2026-01-01T00:01:00Z")) {
 			t.Errorf("%s cursor = %v; a failure must still move it", id, stored.CursorAt)
 		}
-		fires, ferr := h.store.ListCronFires(ctx, id, 0)
+		fires, ferr := teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronFires(ctx, id, 0)
 		if ferr != nil {
 			t.Fatalf("ListCronFires: %v", ferr)
 		}
@@ -982,21 +985,21 @@ func TestDryRunEvaluatesAndWritesNothing(t *testing.T) {
 	if len(h.launcher.launches()) != 0 {
 		t.Fatalf("a dry run launched %v", h.launcher.launches())
 	}
-	stored, err := h.store.GetCronSchedule(ctx, sched.ID)
+	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
 	if !stored.CursorAt.Equal(sched.CursorAt) {
 		t.Errorf("a dry run moved the cursor to %v", stored.CursorAt)
 	}
-	fires, err := h.store.ListCronFires(ctx, sched.ID, 0)
+	fires, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronFires(ctx, sched.ID, 0)
 	if err != nil {
 		t.Fatalf("ListCronFires: %v", err)
 	}
 	if len(fires) != 0 {
 		t.Errorf("a dry run recorded %d fire(s)", len(fires))
 	}
-	tick, err := h.store.GetCronTick(ctx)
+	tick, err := h.store.AsOperator().GetCronTick(ctx)
 	if err != nil {
 		t.Fatalf("GetCronTick: %v", err)
 	}
@@ -1070,7 +1073,7 @@ func TestRunNowLaunchesWithoutMovingTheCursor(t *testing.T) {
 	if runID != "run-1" {
 		t.Fatalf("run id = %q", runID)
 	}
-	stored, err := h.store.GetCronSchedule(ctx, sched.ID)
+	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, sched.ID)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -1080,7 +1083,7 @@ func TestRunNowLaunchesWithoutMovingTheCursor(t *testing.T) {
 	if stored.LastRunID != runID || stored.LastOutcome != store.CronOutcomeFired {
 		t.Errorf("RunNow did not stamp the row: %+v", stored)
 	}
-	fires, err := h.store.ListCronFires(ctx, sched.ID, 0)
+	fires, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronFires(ctx, sched.ID, 0)
 	if err != nil {
 		t.Fatalf("ListCronFires: %v", err)
 	}
@@ -1200,7 +1203,7 @@ func TestHealthIsUnhealthyWhenTheLastTickReportedAnError(t *testing.T) {
 	timer := fakeTimerHost(t, h.home, true)
 
 	h.clock.set(at(t, "2026-01-01T00:01:05Z"))
-	if err := h.store.RecordCronTick(ctx, store.CronTick{
+	if err := h.store.AsOperator().RecordCronTick(ctx, store.CronTick{
 		At: h.clock.now(), Host: "test-host", Error: "svc/every-minute: consumer will not start",
 	}); err != nil {
 		t.Fatalf("RecordCronTick: %v", err)

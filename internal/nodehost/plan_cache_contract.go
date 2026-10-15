@@ -2,7 +2,11 @@ package nodehost
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -94,14 +98,110 @@ type PlanCache interface {
 // Different engine/SDK, code, project, args, env, runner, checkout or context means
 // a different key. Ineligible inputs bypass cache lookup and execute planning.
 func PlanCacheIdentity(inputs PlanCacheInputs) (PlanCacheKey, PlanCacheEligibility, error) {
-	panic("unimplemented: c3-plan-cache")
+	if reason := planCacheIneligible(inputs); reason != "" {
+		return PlanCacheKey{}, PlanCacheEligibility{Reason: reason}, nil
+	}
+	raw, err := json.Marshal(inputs)
+	if err != nil {
+		return PlanCacheKey{}, PlanCacheEligibility{}, err
+	}
+	digest := sha256.Sum256(raw)
+	return PlanCacheKey{
+		Version: inputs.Version, Team: inputs.Team, Repository: inputs.Repository,
+		Digest: runspec.Hash(hex.EncodeToString(digest[:])),
+	}, PlanCacheEligibility{Eligible: true}, nil
+}
+
+func planCacheIneligible(inputs PlanCacheInputs) string {
+	if inputs.Version <= 0 {
+		return "cache format version is absent"
+	}
+	for _, field := range []struct{ name, value string }{
+		{"team", inputs.Team},
+		{"repository", string(inputs.Repository)},
+		{"pipeline", inputs.Pipeline},
+		{"entrypoint", inputs.Entrypoint},
+		{"SDK kind", string(inputs.Engine.Pin.SDK)},
+		{"SDK version", inputs.Engine.Pin.Version},
+		{"SDK manifest", inputs.Engine.Pin.Manifest},
+		{"engine version", inputs.Engine.Version},
+		{"secret registry version", inputs.SecretVersion},
+	} {
+		if field.value == "" || !utf8.ValidString(field.value) {
+			return field.name + " is absent or invalid"
+		}
+	}
+	if !utf8.ValidString(inputs.Engine.Pin.Lockfile) {
+		return "SDK lockfile is invalid"
+	}
+	for _, field := range []struct {
+		name  string
+		value runspec.Hash
+	}{
+		{"SDK inputs", runspec.Hash(inputs.Engine.Pin.InputsDigest)},
+		{"engine manifest", runspec.Hash(inputs.Engine.ManifestDigest)},
+		{"source", inputs.SourceDigest},
+		{"entry", inputs.EntryDigest},
+		{"project", inputs.ProjectDigest},
+		{"args", inputs.ArgsDigest},
+		{"environment", inputs.EnvironmentDigest},
+		{"run context", inputs.RunContextDigest},
+		{"runner", inputs.RunnerDigest},
+		{"checkout", inputs.CheckoutDigest},
+		{"describe", inputs.DescribeDigest},
+	} {
+		if !planCacheDigestValid(field.value) {
+			return field.name + " digest is absent or invalid"
+		}
+	}
+	return ""
+}
+
+func planCacheDigestValid(digest runspec.Hash) bool {
+	if len(digest) != sha256.Size*2 {
+		return false
+	}
+	for _, c := range digest {
+		if !(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidatePlanCacheHit checks identity and digest, then calls nodeproto.ValidatePlan
 // with the current secret matcher and placement. It refuses expansions and replays
 // neither stored settings nor old acceptance authority. Acceptance is still mandatory.
 func ValidatePlanCacheHit(entry PlanCacheEntry, inputs PlanCacheInputs, validation nodeproto.ValidationContext) (ValidatedPlanHit, error) {
-	panic("unimplemented: c3-plan-cache")
+	return validatePlanCacheHit(entry, inputs, validation, (PlanningFunctions{}).defaults())
+}
+
+func validatePlanCacheHit(entry PlanCacheEntry, inputs PlanCacheInputs, validation nodeproto.ValidationContext, functions PlanningFunctions) (ValidatedPlanHit, error) {
+	if err := initialPlanningContext(validation); err != nil {
+		return ValidatedPlanHit{}, err
+	}
+	if err := planCacheEntryIdentity(entry); err != nil {
+		return ValidatedPlanHit{}, err
+	}
+	key, eligible, err := PlanCacheIdentity(inputs)
+	if err != nil {
+		return ValidatedPlanHit{}, err
+	}
+	if !eligible.Eligible || key != entry.Key {
+		return ValidatedPlanHit{}, errors.New("plan cache entry does not match current planning inputs")
+	}
+	canonical, hash, err := canonicalPlanningDocument(entry.Plan, functions.Hash)
+	if err != nil {
+		return ValidatedPlanHit{}, err
+	}
+	if hash != entry.PlanHash {
+		return ValidatedPlanHit{}, errors.New("plan cache plan hash mismatch")
+	}
+	plan, err := functions.Validate(entry.Plan, validation)
+	if err != nil {
+		return ValidatedPlanHit{}, err
+	}
+	return ValidatedPlanHit{Key: key, Plan: plan, CanonicalPlan: canonical, PlanHash: hash}, nil
 }
 
 // PlanningInput supplies the same cache boundary to local, runner, here, Actions

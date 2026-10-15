@@ -18,12 +18,13 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
+
+const goEnvFile = "sparkwing-go.env"
 
 // safety: this runs as a launcher Job's init container, before any pipeline
 // code; the GitHub token it is issued lives only in this process and the git
@@ -149,7 +150,7 @@ func fetchSource(ctx context.Context, ctrl sourceCredentials, runID, dest, modCa
 		// must not ask a public proxy or checksum database about them.
 		goEnv := "GOPRIVATE=" + strings.Join(ids, ",") + "\n"
 		// #nosec G703 -- beside the SPARKWING_SOURCE_DIR the launcher Job set
-		if err := os.WriteFile(filepath.Join(filepath.Dir(dest), orchestrator.GoEnvFile), []byte(goEnv), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(filepath.Dir(dest), goEnvFile), []byte(goEnv), 0o644); err != nil {
 			return fmt.Errorf("fetch-source: %w", err)
 		}
 	}

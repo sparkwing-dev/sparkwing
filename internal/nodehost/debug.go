@@ -10,7 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Debug selects the operator pauses for a run.
+// Debug says where a run pauses for an operator. The zero value pauses nowhere.
 type Debug struct {
 	// PauseBefore and PauseAfter name the nodes to hold before they start and
 	// after they end, as --sw-pause-before and --sw-pause-after.
@@ -72,7 +72,7 @@ func debugPause(ctx context.Context, d Debug, n *NodeRun, reason string) bool {
 		run.Logger.Error("nodehost: debug pause", "run", run.ID, "node", id, "reason", reason, "err", err)
 		return true
 	}
-	debugSetStatus(writeCtx, n, "paused")
+	debugSetDetail(writeCtx, n, "paused")
 	debugEvent(writeCtx, n, "node_paused", map[string]any{"reason": reason, "expires_at": p.ExpiresAt})
 
 	ticker := time.NewTicker(debugPausePoll)
@@ -101,15 +101,14 @@ func debugPause(ctx context.Context, d Debug, n *NodeRun, reason string) bool {
 		case <-deadline.C:
 		}
 	}
-	// safety: pending is safe both ways: the chain's StartNode promotes it and the scheduler's finish overwrites it.
-	debugSetStatus(writeCtx, n, "pending")
+	debugSetDetail(writeCtx, n, "")
 	debugEvent(writeCtx, n, "node_resumed", nil)
 	return true
 }
 
-func debugSetStatus(ctx context.Context, n *NodeRun, status string) {
-	if err := n.Run.State.SetNodeStatus(ctx, n.Run.ID, n.Plan.ID, status); err != nil {
-		n.Run.Logger.Warn("nodehost: debug pause status", "run", n.Run.ID, "node", n.Plan.ID, "status", status, "err", err)
+func debugSetDetail(ctx context.Context, n *NodeRun, detail string) {
+	if err := n.Run.State.UpdateNodeActivity(ctx, n.Run.ID, n.Plan.ID, detail); err != nil {
+		n.Run.Logger.Warn("nodehost: debug pause detail", "run", n.Run.ID, "node", n.Plan.ID, "detail", detail, "err", err)
 	}
 }
 

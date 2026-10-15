@@ -27,7 +27,7 @@ func TestEngineReportedFailureReachesRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor := capability.Authorized{Principal: principal, Binding: claim.Claim.Binding, Target: owner.Target}
-	if _, err := server.TransitionJob(t.Context(), executor, controllerwire.JobTransitionRequest{To: "running", Cause: "start"}); err != nil {
+	if _, err := server.TransitionJob(t.Context(), executor, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: new(int64(0))}); err != nil {
 		t.Fatal(err)
 	}
 	for _, raw := range []string{
@@ -40,7 +40,7 @@ func TestEngineReportedFailureReachesRecovery(t *testing.T) {
 		if err := json.Unmarshal([]byte(raw), &failure); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := server.TransitionJob(t.Context(), executor, controllerwire.JobTransitionRequest{To: "failed", Cause: "report", Result: &controllerwire.JobResult{Outcome: "failed", Failure: &failure}}); err == nil {
+		if _, err := server.TransitionJob(t.Context(), executor, controllerwire.JobTransitionRequest{To: "failed", Cause: "report", SourceAttempt: new(int64(1)), Result: &controllerwire.JobResult{Outcome: "failed", Failure: &failure}}); err == nil {
 			t.Fatalf("invalid failure committed: %s", raw)
 		}
 	}
@@ -48,6 +48,7 @@ func TestEngineReportedFailureReachesRecovery(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"to":"failed","cause":"report","result":{"outcome":"failed","reason":"step_failed","failure":{"job":"job","stage":"step:verify","error":{"code":"future_failure","message":"masked failure","hint":"retry verification","details":{"exit_code":7}}}}}`), &report); err != nil {
 		t.Fatal(err)
 	}
+	report.SourceAttempt = new(int64(1))
 	first, err := server.TransitionJob(t.Context(), executor, report)
 	if err != nil || first.StateSeq != 3 {
 		t.Fatalf("report: %+v, %v", first, err)

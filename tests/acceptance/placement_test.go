@@ -7,6 +7,11 @@ import (
 )
 
 func TestPlacement(t *testing.T) {
+	t.Run("placement-ordered-matching/store-sqlite", func(t *testing.T) {
+		if err := acceptance.CheckStoreQueueOrder(t.Context(), t.TempDir()); err != nil {
+			t.Fatal(err)
+		}
+	})
 	t.Run("placement-granted-identity-and-capacity/store-sqlite", func(t *testing.T) {
 		if err := acceptance.CheckStoreClaimMatching(t.Context(), t.TempDir()); err != nil {
 			t.Fatal(err)

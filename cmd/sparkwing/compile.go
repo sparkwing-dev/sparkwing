@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -33,6 +34,7 @@ type pipelineRun struct {
 	uncachedBinary string
 	entry          pipelineentry.Command
 	typescript     bool
+	pipeline       nodehost.PipelineIdentity
 }
 
 func newPipelineRun(sparkwingDir string, opts compileOptions) *pipelineRun {

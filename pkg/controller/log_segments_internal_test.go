@@ -342,9 +342,6 @@ func TestCapabilitiesAdvertiseLogSegments(t *testing.T) {
 	}
 }
 
-// A viewer holding a node's stream open marks it watched; the node's
-// claim heartbeat and its run heartbeat report it, and a heartbeat that
-// does not ask keeps its old 204.
 func TestHeartbeatsReportWhatAViewerWatches(t *testing.T) {
 	f := newLogSegmentFixture(t)
 	tok := f.claim(t, "a", store.ClaimTokenWork)
@@ -364,24 +361,6 @@ func TestHeartbeatsReportWhatAViewerWatches(t *testing.T) {
 	f.srv.liveLogs.Watch("run-d", "a")
 	if !beat() {
 		t.Fatal("a viewed node reads unwatched")
-	}
-
-	admin := f.admin(t)
-	runBeat := func(ask bool) (int, []byte) {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run-d/heartbeat", nil)
-		req.Header.Set("Authorization", "Bearer "+admin)
-		if ask {
-			req.Header.Set(store.LogWatchHeader, "1")
-		}
-		rec := httptest.NewRecorder()
-		f.handler.ServeHTTP(rec, req)
-		return rec.Code, rec.Body.Bytes()
-	}
-	if code, body := runBeat(false); code != http.StatusNoContent {
-		t.Fatalf("run heartbeat that did not ask: %d %s", code, body)
-	}
-	if code, body := runBeat(true); code != http.StatusOK || !strings.Contains(string(body), `"watched_nodes":["a"]`) {
-		t.Fatalf("run heartbeat that asked: %d %s", code, body)
 	}
 }
 
@@ -438,11 +417,11 @@ func TestLogSegmentsChargeTheTeamsLogStorageOnce(t *testing.T) {
 	}), pub, now, nil))
 	tok := f.claim(t, "a", store.ClaimTokenWork)
 	committed := func() int64 {
-		marks, err := f.st.StorageMarks(t.Context(), store.StorageLogs)
-		if err != nil {
+		var used int64
+		if err := f.st.DB().QueryRowContext(t.Context(), "SELECT used_bytes FROM team_storage WHERE team=? AND store=?", store.DefaultTeam, store.StorageLogs).Scan(&used); err != nil {
 			t.Fatal(err)
 		}
-		return marks[store.DefaultTeam]
+		return used
 	}
 	for _, step := range []struct {
 		n    int
@@ -687,97 +666,6 @@ func TestAnEndedClaimFinishesOnlyItsOwnLogWithinTheGrace(t *testing.T) {
 	}
 }
 
-// The storage pass counts what a team's log segments hold, from a
-// listing of the bucket, so a count left wrong by a failed commit heals.
-func TestStoragePassCountsLogSegments(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	s, _ := f.sink(t, tok, "a")
-	for i := 1; i <= 4; i++ {
-		if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := s.Close(ctx, logseg.End{}); err != nil {
-		t.Fatal(err)
-	}
-	counted, err := f.srv.logObjects().measure(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	keys, err := f.srv.logObjects().List(ctx, rec.Prefix)
-	if err != nil || len(keys) < 2 {
-		t.Fatalf("objects = %v, %v", keys, err)
-	}
-	var want int64
-	for _, k := range keys {
-		body, err := f.srv.logObjects().Get(ctx, k)
-		if err != nil {
-			t.Fatal(err)
-		}
-		n, _ := io.Copy(io.Discard, body)
-		_ = body.Close()
-		want += n
-	}
-	if counted[store.DefaultTeam] != want {
-		t.Fatalf("measured %d bytes for the team, want %d", counted[store.DefaultTeam], want)
-	}
-	f.srv.WithStoragePass(nil)
-	if ran, err := f.srv.RunStoragePass(ctx); err != nil || !ran {
-		t.Fatalf("storage pass = %v, %v", ran, err)
-	}
-	usage, err := f.st.TeamStorage(ctx, store.DefaultTeam)
-	if err != nil || usage[store.StorageLogs].UsedBytes != want {
-		t.Fatalf("reconciled log storage = %+v, %v; want %d used", usage[store.StorageLogs], err, want)
-	}
-}
-
-// A team past its free log share loses its finished runs' segments and
-// records, and never a run still going.
-func TestPruningATeamOverItsShareDeletesOnlyFinishedRunsSegments(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	s, _ := f.sink(t, tok, "a")
-	for i := 1; i <= 4; i++ {
-		if err := s.Append([]byte(logLine(i)), "", 0, 0); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := s.Close(ctx, logseg.End{}); err != nil {
-		t.Fatal(err)
-	}
-	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	objs := f.srv.logObjects()
-	over := store.TeamOverShare{Team: store.DefaultTeam, OverBytes: 1}
-	if _, err := f.srv.pruneTeamSegments(ctx, objs, over); err != nil {
-		t.Fatal(err)
-	}
-	if keys, err := objs.List(ctx, rec.Prefix); err != nil || len(keys) == 0 {
-		t.Fatalf("a running run's segments after the prune = %v, %v; want them kept", keys, err)
-	}
-	if _, err := f.st.DB().ExecContext(ctx, `UPDATE runs SET status = 'success' WHERE id = 'run-d'`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.srv.pruneTeamSegments(ctx, objs, over); err != nil {
-		t.Fatal(err)
-	}
-	if keys, err := objs.List(ctx, rec.Prefix); err != nil || len(keys) != 0 {
-		t.Fatalf("a finished run's segments after the prune = %v, %v; want none", keys, err)
-	}
-	if recs, err := f.st.RunNodeLogs(ctx, store.DefaultTeam, "run-d"); err != nil || len(recs) != 0 {
-		t.Fatalf("log records after the prune = %v, %v; want none", recs, err)
-	}
-}
-
 // A sealed log that lost a segment, or holds other bytes under its key,
 // must not read, or report, as whole: the reader gets the lines before
 // the gap and a loss marker, and completeness says incomplete.
@@ -913,42 +801,6 @@ func TestTheLiveRingStartsOverForANewAttempt(t *testing.T) {
 	chunk, ok := f.srv.liveLogs.Read("run-d", "a", 0)
 	if !ok || string(chunk.Data) != "second attempt\n" {
 		t.Fatalf("live ring after a second attempt = %q, %v; want only the second attempt's line", chunk.Data, ok)
-	}
-}
-
-// Pruning stops once the bytes it actually deleted cover the overage, even
-// for attempts never charged: the oldest finished run goes, the next stays.
-func TestPruningCountsTheBytesItDeletes(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	objs := f.srv.logObjects()
-	base := time.Now().Add(-time.Hour)
-	prefixes := map[string]string{}
-	for i, runID := range []string{"r-old", "r-new"} {
-		at := base.Add(time.Duration(i) * time.Minute)
-		if err := f.st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "demo", Status: "success", StartedAt: at}); err != nil {
-			t.Fatal(err)
-		}
-		prefix := "logs/r90/teams/default/runs/" + runID + "/a/a1-g1/"
-		if _, err := f.st.OpenNodeLog(ctx, store.NodeLog{Team: store.DefaultTeam, RunID: runID, NodeID: "a", Attempt: 1, Generation: 1, Prefix: prefix}, at); err != nil {
-			t.Fatal(err)
-		}
-		if err := objs.putIfAbsent(ctx, logseg.SegmentKey(prefix, 1), bytes.Repeat([]byte("x"), 100)); err != nil {
-			t.Fatal(err)
-		}
-		prefixes[runID] = prefix
-	}
-	freed, err := f.srv.pruneTeamSegments(ctx, objs, store.TeamOverShare{Team: store.DefaultTeam, OverBytes: 50})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if freed != 100 {
-		t.Fatalf("freed %d bytes, want the 100 the oldest run held", freed)
-	}
-	for runID, want := range map[string]int{"r-old": 0, "r-new": 1} {
-		if left, err := objs.List(ctx, prefixes[runID]); err != nil || len(left) != want {
-			t.Fatalf("%s holds %v after the prune, %v; want %d object(s)", runID, left, err, want)
-		}
 	}
 }
 
@@ -1091,45 +943,5 @@ func TestNodeLogSettlesOnlyWithNoRetryToCome(t *testing.T) {
 		if !settled() {
 			t.Fatalf("a node done with outcome %s reads as unsettled", outcome)
 		}
-	}
-}
-
-// A node's after-run work, such as hooks, cache saves and artifact
-// publication, can outlast its attempt by more than the seal grace, so the
-// ended claim's tail runs from the node's end when that is later.
-func TestAnEndedClaimsTailRunsFromTheNodesLaterEnd(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	s, up := f.sink(t, tok, "a")
-	const first = "a line long enough to cut a segment\n"
-	if err := s.Append([]byte(first), "", 0, 0); err != nil {
-		t.Fatal(err)
-	}
-	<-up.stored
-	wantPost(t, f.dispatchRouteFixture, attemptPath, tok, `{"outcome":"success"}`, http.StatusOK, "")
-	set := func(q string, at time.Time) {
-		t.Helper()
-		if _, err := f.st.DB().ExecContext(ctx, q, at.UnixNano()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	set(`UPDATE node_execution_attempts SET finished_at = ? WHERE run_id = 'run-d' AND node_id = 'a'`, time.Now().Add(-2*logseg.SealGrace))
-	set(`UPDATE nodes SET finished_at = ? WHERE run_id = 'run-d' AND node_id = 'a'`, time.Now())
-	if err := s.Append([]byte("after-run hook line\n"), "", 0, 0); err != nil {
-		t.Fatal(err)
-	}
-	m, err := s.Close(ctx, logseg.End{})
-	if err != nil || m.Status != logseg.StatusComplete || m.Lines != 2 {
-		t.Fatalf("seal within the grace of the node's end = %+v, %v", m, err)
-	}
-	if got, err := f.srv.dashboardLogs(store.DefaultTeam).Read(ctx, "run-d", "a", storage.ReadOpts{}); err != nil ||
-		string(got) != first+"after-run hook line\n" {
-		t.Fatalf("read %q, %v", got, err)
-	}
-
-	set(`UPDATE nodes SET finished_at = ? WHERE run_id = 'run-d' AND node_id = 'a'`, time.Now().Add(-logseg.SealGrace))
-	if code, raw := f.do(t, http.MethodPost, "/api/v1/runs/run-d/nodes/a/log-segments", tok, signRequest(2, []byte("late"))); code != http.StatusForbidden {
-		t.Fatalf("a request past the grace of both ends: %d %s, want 403", code, raw)
 	}
 }

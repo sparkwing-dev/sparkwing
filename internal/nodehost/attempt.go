@@ -7,12 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -78,6 +78,11 @@ func (a *Attempts) process(ctx context.Context, base SessionConfig, n *NodeRun, 
 // cannot register a cleanup that never runs.
 func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, body nodeProcessBody) Result {
 	run, id := n.Run, n.Plan.ID
+	base.Masker = a.Masker
+	env, cleanupEnv, err := attemptEnvironments(base, n)
+	if err != nil {
+		return failed(err)
+	}
 	// safety: a node's eval processes and its attempts each open its log, so OpenLog must append.
 	nlog, err := a.OpenLog(ctx, run.ID, id)
 	if err != nil {
@@ -96,6 +101,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	bearer, revoke, err := a.Routes.Admit(Node{
 		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim, Local: a.Local, Refs: n.Plan.References,
 		Children: a.Children, Pause: n.Pause, Hold: n.Hold, Output: n.memoOutput,
+		Job: n.Plan, Sink: sink,
 	})
 	if err != nil {
 		return failed(fmt.Errorf("admit node %s: %w", id, err))
@@ -104,9 +110,8 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	a.Masker.Register(bearer)
 	cfg := base
 	cfg.Sink, cfg.Masker = sink, a.Masker
-	cfg.Env = attemptEnv(base.Env, n.Plan.Env)
+	cfg.Env = env
 	cfg.Binding = &nodeproto.ProcessBinding{RunID: run.ID, JobID: id, Routes: nodeproto.ProcessRoutes{URL: a.Routes.URL(), Bearer: bearer}}
-	cfg.Env = append(withoutRunnerEnv(cfg.Env), dryRunEnv(n)...)
 	res := Result{}
 	sess, err := StartSession(ctx, cfg)
 	if err == nil {
@@ -133,7 +138,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	revoke()
 	out := NewLineWriter(sink, LevelInfo, a.Masker)
 	// safety: a cancelled node's cleanups still run, each bounded by CleanupTimeout.
-	if err := a.Routes.RunCleanups(context.WithoutCancel(ctx), bearer, CleanupScope{Dir: cfg.Dir, Env: cfg.Env, Log: out}); err != nil {
+	if err := a.Routes.RunCleanups(context.WithoutCancel(ctx), bearer, CleanupScope{Dir: cfg.Dir, Env: cleanupEnv, Log: out}); err != nil {
 		run.Logger.Warn("nodehost: node cleanups", "run", run.ID, "node", id, "err", err)
 	}
 	out.Flush()
@@ -155,7 +160,7 @@ func nodeReplan(ctx context.Context, sess *Session, n *NodeRun) error {
 	}
 	rc := run.Context
 	var raw json.RawMessage
-	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: run.Pipeline, Args: args, Run: &rc}, &raw)
+	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: cmp.Or(run.Entrypoint, run.Pipeline), Args: args, Run: &rc}, &raw)
 	switch {
 	case err != nil:
 		return err
@@ -194,59 +199,31 @@ func failed(err error) Result {
 	return Result{Outcome: sparkwing.Failed, Err: err, Reason: reason}
 }
 
-// safety: sparks-core echoes mutating commands instead of running them only when it sees SPARKWING_DRY_RUN.
-func dryRunEnv(n *NodeRun) []string {
-	if n.Run.Context.DryRun {
-		return []string{"SPARKWING_DRY_RUN=1"}
+func planSession(cfg Config) (SessionConfig, error) {
+	s := cfg.Session
+	if cfg.Attempts != nil {
+		s.Masker = cfg.Attempts.Masker
 	}
-	return nil
-}
-
-// safety: a runner variable the host leaves unset must not survive from the caller's or the plan's env, or a
-// node in a launcher Job could report the labels a pipeline wrote, such as local.
-func withoutRunnerEnv(env []string) []string {
-	return slices.DeleteFunc(env, func(kv string) bool {
-		return strings.HasPrefix(strings.ToUpper(kv), "SPARKWING_RUNNER_")
-	})
-}
-
-// safety: the plan process sees the dry-run switch its node processes see, so plan code that reads it plans
-// the run each later process plans again, and no attempt fails with plan_drift.
-func planSession(cfg Config) SessionConfig {
-	s := dryRunSession(cfg.Session, cfg.Run.DryRun)
 	s.Binding = nil
-	return s
+	var err error
+	s.Env, err = buildSessionEnvironment(s, procenv.Plan, sdkRuntime(cfg.Run, s.Runner))
+	return s, err
 }
 
-func dryRunSession(s SessionConfig, dryRun bool) SessionConfig {
-	if dryRun {
-		base := s.Env
-		if base == nil {
-			base = engineenv.Minimal()
-		}
-		s.Env = append(slices.Clone(base), "SPARKWING_DRY_RUN=1")
-	}
-	return s
-}
-
-// safety: body environment is applied by the SDK after planning; only startup values reach process initialization.
-func attemptEnv(base []string, nodeEnv map[string]nodeproto.EnvValue) []string {
+func buildSessionEnvironment(cfg SessionConfig, kind procenv.Kind, runtime procenv.Runtime) ([]string, error) {
+	base := cfg.Env
 	if base == nil {
 		base = engineenv.Minimal()
 	}
-	env := make([]string, 0, len(base)+len(nodeEnv)+4)
-	env = append(env, engineenv.Strip(base)...)
-	keys := make([]string, 0, len(nodeEnv))
-	for k, v := range nodeEnv {
-		if v.Startup {
-			keys = append(keys, k)
-		}
-	}
-	slices.Sort(keys)
-	for _, k := range keys {
-		env = append(env, k+"="+nodeEnv[k].Value)
-	}
-	return env
+	return procenv.Build(kind, procenv.Base{Local: true, Captured: base, Masker: cfg.Masker}, runtime)
+}
+
+func attemptEnvironments(cfg SessionConfig, n *NodeRun) ([]string, []string, error) {
+	runtime := sdkRuntime(n.Run.Context, cfg.Runner)
+	runtime.RunID, runtime.JobID = n.Run.ID, n.Plan.ID
+	return projectJobEnvironment(procenv.Attempt, n.Plan.Env, runtime, true, nil, func(kind procenv.Kind, runtime procenv.Runtime) ([]string, error) {
+		return buildSessionEnvironment(cfg, kind, runtime)
+	})
 }
 
 // LineWriter masks what is written to it as one text stream and hands each
@@ -254,7 +231,7 @@ func attemptEnv(base []string, nodeEnv map[string]nodeproto.EnvValue) []string {
 // limit goes in pieces, masked whole across them. Call Flush once writing
 // ends. It is unlocked, so one goroutine writes at a time.
 type LineWriter struct {
-	sink   *LogSink
+	sink   interface{ Text(string, string) }
 	level  string
 	stream *secrets.Stream
 	buf    []byte

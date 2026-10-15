@@ -57,20 +57,26 @@ func openCrons(nowRFC string) (*cronsSession, func(), error) {
 			slog.Default().Warn("close runs store", "path", paths.StateDB(), "error", cerr)
 		}
 	}
+	tenant, err := st.ForTeam(context.Background(), store.DefaultTeam)
+	if err != nil {
+		release()
+		return nil, nil, err
+	}
 	host, err := os.Hostname()
 	if err != nil {
 		host = ""
 	}
 	session := &cronsSession{
 		svc: &crons.Service{
-			Store:    st,
-			Launcher: cronsLauncher(st, paths),
-			Now:      clock,
-			Host:     host,
-			Version:  installedVersion(),
-			LockPath: filepath.Join(paths.Root, cronsLockFile),
-			PinRoot:  filepath.Join(paths.Root, cronsPinDir),
-			ArmedBy:  armedBy(host),
+			Store:     st,
+			Schedules: tenant,
+			Launcher:  cronsLauncher(st, paths),
+			Now:       clock,
+			Host:      host,
+			Version:   installedVersion(),
+			LockPath:  filepath.Join(paths.Root, cronsLockFile),
+			PinRoot:   filepath.Join(paths.Root, cronsPinDir),
+			ArmedBy:   armedBy(host),
 		},
 		store: st,
 		paths: paths,

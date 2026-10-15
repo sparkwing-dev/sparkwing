@@ -327,7 +327,7 @@ func TestOpenStandaloneStores_OlderSchemaBecomesACountedNote(t *testing.T) {
 	p := homeWithBothStores(t)
 	seedRuns(t, filepath.Join(p.StandaloneSchemaDir(20), "state.db"),
 		runAt("aged-one", "gamma", "success", 40), runAt("aged-two", "gamma", "failed", 41))
-	dropColumn(t, filepath.Join(p.StandaloneSchemaDir(20), "state.db"), "runs", "last_heartbeat_at")
+	dropColumn(t, filepath.Join(p.StandaloneSchemaDir(20), "state.db"), "runs", "request_hash")
 
 	stores := orchestrator.OpenStandaloneStores(context.Background(), p)
 	defer func() { _ = stores.Close() }()

@@ -167,6 +167,31 @@ func TestPaymentWarningFindsCheckoutTeam(t *testing.T) {
 	}
 }
 
+func TestAWarnedPurchaseIsNotGranted(t *testing.T) {
+	for _, actionable := range []bool{false, true} {
+		t.Run(map[bool]string{false: "informational", true: "actionable"}[actionable], func(t *testing.T) {
+			s, event := paymentFixture(t, capability.PaymentTest)
+			if _, err := s.RecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Actionable: actionable}, s.now()); err != nil {
+				t.Fatal(err)
+			}
+			_, err := s.settlePaymentFacts(t.Context(), event)
+			if actionable {
+				if !errors.Is(err, ErrPaymentWarned) {
+					t.Fatalf("warned checkout granted: %v", err)
+				}
+				rewriteSchemaCount(t, s.db, "credit_grants", 0)
+				rewriteSchemaCount(t, s.db, "payment_events", 0)
+				var unchanged int
+				if err := s.db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM credit_checkouts WHERE payment_id='' AND paid_at IS NULL AND grant_id IS NULL").Scan(&unchanged); err != nil || unchanged != 1 {
+					t.Fatalf("warned checkout mutated: %d, %v", unchanged, err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestPaymentRefundIndependentClientsCannotOverReverse(t *testing.T) {
 	for _, sameReference := range []bool{false, true} {
 		t.Run(map[bool]string{false: "distinct_references", true: "same_reference"}[sameReference], func(t *testing.T) {

@@ -48,6 +48,10 @@ func checkStoreUploadBoundary(ctx context.Context, root string, crash StoreUploa
 	if err != nil {
 		return err
 	}
+	standing, err := tenant.StorageStanding(ctx)
+	if err != nil || standing.BlobBytes != 0 || standing.ReservedBlobBytes != 3 {
+		return fmt.Errorf("upload hold missing from standing: %+v: %v", standing, err)
+	}
 	request.ID = "aborted"
 	request.Intent.Digest = blob.Digest(strings.Repeat("b", 64))
 	if _, err := tenant.ReserveBlobUpload(ctx, request); !errors.Is(err, store.ErrStorageQuota) {
@@ -151,6 +155,10 @@ func checkStoreUploadBoundary(ctx context.Context, root string, crash StoreUploa
 	}
 	if held != 0 {
 		return fmt.Errorf("upload settlement leaked %d holds", held)
+	}
+	standing, err = tenant.StorageStanding(ctx)
+	if err != nil || standing.BlobBytes != 3 || standing.ReservedBlobBytes != 0 || standing.LogBytes != 0 {
+		return fmt.Errorf("reopened standing double-counted upload settlement: %+v: %v", standing, err)
 	}
 	return nil
 }

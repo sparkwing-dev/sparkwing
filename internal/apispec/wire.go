@@ -96,6 +96,9 @@ func wireOperations() map[string]wireOperation {
 	for _, path := range []string{"/api/v1/runners/claim", "/api/v1/launcher/claim", "/api/v1/runs/{run}/claim", "/api/v1/runs/{run}/jobs/{job}/claim"} {
 		result["POST "+path] = operation("Claim work without automatic replay", wire.ClaimRequest{}, wire.ClaimResponse{})
 	}
+	for _, action := range []string{"start", "finish", "skip"} {
+		result["POST /api/v1/runs/{run}/jobs/{job}/steps/"+action] = operation("Persist an attempt-fenced step report", wire.StepReportRequest{}, wire.StepRecorded{})
+	}
 	for _, path := range []string{"/api/v1/tokens", "/api/v1/operator/tokens"} {
 		result["GET "+path] = operation("List credential metadata", nil, wire.Tokens{}, query("kind", "string"), query("include_revoked", "boolean"))
 		result["POST "+path] = operation("Issue a credential", wire.TokenCreate{}, wire.TokenCreated{})

@@ -1,9 +1,173 @@
 # W9 handoff
 
-W9 remains incomplete. This continuation started clean at 2593f01f8. The lead
-owns commits, independent review, pipelines and native integration. Only the
-required installed-tool discovery ran. No install, service-management command, pipeline,
-release or Git write ran. Earlier work remains in Git history.
+W9 remains incomplete. The lead owns staging, commits, review, pipelines and native
+integration. This continuation began mid-merge at 0928e54ad. No Git write,
+Sparkwing binary, install, service-management command or release ran.
+
+## This continuation (session 8)
+
+The contents of all 33 conflicted paths are resolved. The merge index remains
+unmerged because SWARM-BRIEF prohibits Git writes and the worktree metadata is
+read-only. The lead must stage the resolved files and deletions. The lead-owned
+handoffs.md is byte-identical to stage 3, the integration branch. No amendment or
+handoff entry was edited. Generated OpenAPI and the client API snapshot were
+regenerated from the merged source. The final command-reference drift test
+passes without running a Sparkwing binary.
+
+W9's final command grammar, schema-based risk gate and deleted legacy docs/tests
+win their conflict hunks. Tenant schedule fixtures and W3's lease keeper changes
+survive. CLI description captures the validated alias/entrypoint pair once and
+passes it into W3's PipelineIdentity. The real Go SDK alias fixture proves the
+required pipeline/job arguments and invoked alias reach planning. The shared
+npm resolver remains pipelineentry.NPMCommand. Its one incoming nodehost caller
+was migrated instead of restoring a second resolver. One incoming controller
+log test needed its missing io import. The contention fixture now names its
+runpoll and nodeactivity samples consistently.
+
+The source-attempt handoff is implemented in W9's wire and the existing W2
+store adapter. JobTransitionRequest.SourceAttempt is an optional *int64.
+Omission differs from explicit zero. The adapter forwards the field unchanged
+to C1. Holder start, retry, report and release use the captured ordinal, with
+zero for an initial start. C1 retains validation and replay ownership. The
+controller lifecycle/failure fixtures and the failure transport acceptance
+component now supply the source ordinal. No store or authorization contract
+changed.
+
+Invariant: an execution report affects only its named attempt, and replay cannot
+consume another attempt. The real SQLite controller adapter test covers absent,
+negative and mismatched starts, identical retries, replay without another ordinal,
+a new identical failure under the next ordinal, and delayed retry/result refusal.
+Generated wire/adapter properties preserve explicit zero, absence and full int64
+ordinals. This proves the adapter and C1 transaction together. Native HTTP route
+registration and W3's remote caller still need integration.
+
+The typed-step handoff now has StepReportRequest, StepRecorded and
+Controller.RecordStep. Running, passed/failed/cancelled and skipped reports select
+the existing C2 start, finish and skip routes. Reports retain a positive source
+ordinal, masked diagnostic text and optional nanosecond timestamps. They carry
+no actor, team, holder or generation. Success requires recorded:true after
+persistence. False/missing/malformed acknowledgements fail. Exact-body retries
+retain the source ordinal and timestamps, and authority refusals stay canonical.
+
+Invariant: step input cannot change its declared route or introduce writer
+authority, and it retains the observed attempt. The generated client property
+covers adversarial selectors, states, IDs and ordinals. The HTTP/api.sock
+acceptance component covers all five states with transport fakes. W2 must derive
+the actor and current target generation/attempt, compare source_attempt, call
+C1 RecordStep and acknowledge only after persistence. C1 rechecks those fields
+in its transaction. W3 must bind its remote NodeTransitionStore.RecordStep to
+this client. No foreign writer or route interface was changed by W9.
+
+The launcher-correlation handoff now uses capability.LeaseRef as the complete
+observed award tuple (kind, ID, holder, generation), plus the Job namespace,
+name and UID and the reserved node UID. Eval reports its own award generation,
+separately from its source generation. Remove is a typed LauncherJobRef list.
+Each removal requires namespace, name and UID for a Kubernetes UID deletion
+precondition. The client refuses incomplete observations, name-only cleanup and
+sync awards containing a raw bearer. The old UnitID/JobName-only observation
+and string cleanup list have no adapter or alternate spelling.
+
+Invariant: a sync observation retains the exact award, and cleanup names one
+Kubernetes Job instance rather than any replacement reusing its name. The
+HTTP/api.sock acceptance component demonstrates two instances with the same
+name and different UIDs. The generated property exercises unit kinds,
+generations and opaque instance identities. Native collection, reconciliation
+and Kubernetes deletion remain unverified.
+
+Invariant: no SyncLauncher result exposes a raw bearer, even when decoding
+fails. The new generated test reproduced a partial-decode leak using a complete
+award with private capability material and a malformed owner deadline. The
+decoder populated the award before failing on time parsing. SyncLauncher now
+returns an empty result on every request error, before exposing any decoded
+state. The same return boundary covers every malformed-field failure rather
+than special-casing the timestamp. The reproduced seed and generated cases pass.
+
+These are W9-local C3 contract repairs requested by the handoffs. C3 records the
+changed signatures, exact messages and remaining owner bindings. The new API
+guide text and generated OpenAPI describe them. No grant, service, environment
+variable, customer cap, deadline or compatibility path was added.
+
+### Remaining owner work
+
+- W1/W2 must implement SyncLauncher against current ownership, scoped to the
+  authenticated launcher. W8 must retain the award tuple with the actual Job
+  UID, collect observations and delete with the UID precondition before node
+  release. EngineController.SyncLauncher remains a panic stub.
+- W2/W3 must bind typed step persistence and native executor delivery as described
+  above. W3 must send SourceAttempt on its remote transitions and consume
+  Applied.Attempt. The wire and store adapter no longer block that transport.
+- W6 must declare sealed StartAt/StopAt/Only options before W9 can carry them
+  through intake. runspec.Options still has no representation. W9 did not alter
+  that foreign contract or reconstruct these options from mutable invocation data.
+- The prior public trigger, local/detached host, here, cache/publication, native
+  lifecycle/timer, debug resume and acceptance work below remains unfinished.
+  Source acquisition and native host constructors now have W3 implementations
+  in the integration merge. Earlier statements calling those entire packages
+  stubs are superseded. The public CLI still needs their composition. Engine,
+  local lifecycle and remote cache entry points still include declared stubs.
+
+### Verification and scope
+
+Whole-repository build, scoped vet, focused engine/controller/client/CLI tests,
+full clisurface/controllerwire/apispec/apiref/doccheck tests, command-reference
+and embedded-doc drift, commentcheck and sleepcheck pass. The real alias fixture
+runs the Go SDK through describe and planning. No native W9 matrix cell was
+unskipped. New acceptance evidence is the step and launcher transport components,
+plus the extended failure-report component. T1's parked inventory assigns no
+original test directly to W9.
+
+Five generated-case checks passed 46,132 cases: source-attempt transport
+13,135, source-attempt store projection 14,398, step routing/ordinal 7,352,
+launcher award/instance preservation 11,234, and bearer refusal across complete
+and partial decoding 13. The earlier step property run passed 5,348 cases before
+its selector oracle was strengthened. No failed generated corpus remains.
+
+Retained fixtures migrated are TestEngineJobLifecycleRenewsAndReplaysUnderStoreFences,
+TestEngineOwnerReconcilesExecutesAndFinishes,
+TestEngineReportedFailureReachesRecovery,
+TestSurfaceJobFailureReportTransport and
+TestEngineClientRecoveryAndLauncherMethods. The real-store retry-ordinal test
+adds the delayed-report and identical-failure boundary behind the source-attempt
+handoff. The merged native alias test is retained and passes.
+
+The default-team caller inventory initially failed on exactly four stale W9
+entries (retired capacity/profile callers and runCronsShow). Removing those
+entries makes TestDefaultTeamTwinsAreCalledOnlyWhereTheDefaultTeamIsMeant pass.
+The earlier report's 18 unrelated stale entries no longer describe this merged
+tree.
+
+All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE/GOTMPDIR/TMPDIR below /tmp/sw-astra-W9, and test -p 4 at most.
+Scratch is deleted before the final report. The lead owns independent review and
+native platform/backend/placement QA.
+
+### Deletion and shared files
+
+The old launcher wire shape loses three field lines, and the caller inventory
+loses four stale test lines. No additional legacy runtime is deleted. The merge
+preserves W9's earlier deletions of
+cmd/sparkwing/doctor_test.go, cmd/sparkwing/runs_standalone_test.go,
+docs/cli-cluster.md, docs/gitcache.md and their embedded mirrors.
+
+Beyond W9-owned implementation and docs, shared edits are
+pkg/controller/engine_store.go (the SourceAttempt assignment),
+engine_store_runtime_test.go and engine_failure_report_test.go (source ordinals),
+engine_attempt_wire_test.go (projection and real store proof),
+log_segments_internal_test.go (missing io import),
+internal/nodehost/cache_directory.go (the sole removed-resolver caller),
+internal/orchestrator/wingd_api_contention_test.go (sample labels),
+pkg/controller/crons_team_test.go (merged imports),
+pkg/store/default_team_callers_test.go (conflict resolution and four stale rows),
+internal/depcache/depcache.go and depcache_npm_test.go (merge resolution),
+internal/apispec/wire.go (step message bindings),
+tests/acceptance/{job_failure,step_report,launcher_sync}_contract_test.go,
+api/openapi.yaml, .apidiff/pkg_controller_client.txt, CHANGELOG.md and the
+generated documentation mirrors. handoffs.md only takes stage 3 unchanged.
+
+Frictions: Git staging is unavailable under the explicit no-write rule. The
+installed overwing reports a stale binary. No Sparkwing pipeline or CLI binary
+was run, including gen-cli-docs.sh, because the swarm brief forbids them. The
+registry reference test supplies the generated CLI documentation check instead.
 
 ## This continuation (session 7)
 
@@ -247,14 +411,19 @@ Native selected-engine process-tree cancellation remains unverified.
 
 - W6/W1/W2: a typed here reason must survive immutable intake and replay.
   CreateRunRequest, IntakeRequest and runspec.Request still lack it.
-- W1/W3/W9: job transitions need the source attempt ordinal in the wire request,
-  committing transaction and replay identity. The existing handoff still applies.
+- W3/W2: native job transitions must send the captured source ordinal through
+  W9's completed wire/store adapter and consume Applied.Attempt. C1's committing
+  transaction and the shared adapter preserve that ordinal and its replay identity.
 - W6: remove the retired SPARKWING_TOOLCHAIN_ACTIVE CLI inheritance allowance,
   retaining its protocol deny classification. procenv.Git is declared, but Build rejects it. Git fixtures inject the
   declared builder boundary. W9 has no alternate environment filter.
-- W3/W8: source acquisition, exact-engine resolution/InstallSDK, shared host
-  constructors, execution-input identity through hello and local lifecycle are
-  declared stubs. Inspection fakes do not establish their native behavior.
+- W3/W8: the implemented source acquisition and shared host constructors still
+  need native CLI composition. Exact-engine resolution/InstallSDK and the local
+  lifecycle entry points remain stubs. Execution-input identity through the
+  public placements still needs native evidence.
+- W6/W9: seal retained step-window selections in runspec.Options before adapting
+  StartAt/StopAt/Only. W2/W3 must bind typed remote step reports. W1/W2/W8 must
+  bind launcher reconciliation and UID-preconditioned cleanup to the new W9 wire.
 - W1/W2/W7: authorize pre-intake source_bundle upload and publication result-copy
   operations. Existing upload identities require a live owner/publication/job.
 - W1/W2: retain RetryRequest.Mode in intake, replay and successful-job reuse.
@@ -284,7 +453,7 @@ acceptance from component tests.
 
 | Assignments | W9 result and remaining integration |
 | --- | --- |
-| A1-03/08/09/13-18/22/38/55 | Final error/claim/execution/failure/expansion/cloud wire retained. Native owners and source-attempt fencing remain. |
+| A1-03/08/09/13-18/22/38/55 | Final error/claim/execution/failure/expansion/cloud wire retained. Source-attempt wire/store mapping, typed step reports and award/Job-instance sync wire are complete. Native owners, step delivery and launcher reconciliation remain. |
 | A1-10/11/19; identity and alias handoffs | Separate commits, preflight and selected-engine inspection added. Native source/engine/host construction and hello remain. |
 | A1-20/39/40/41/49 | Credential, runner and lifecycle adapters retained. Native provisioning, shared runner, local runtime, services and timers remain. |
 | A1-29/30/34/37/50 | Signed-data, local-cache, here and prepared-intake components retained. Public cutover, cache/publication and old runtime/client removal remain. |

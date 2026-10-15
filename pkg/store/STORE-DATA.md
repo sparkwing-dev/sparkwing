@@ -1,5 +1,82 @@
 # Store data persistence
 
+`Tenant.StorageStanding` reads policy, retained events, unique blobs, tagged log
+bytes and live upload holds in one snapshot. It shares the blob/log inventory
+reader with storage billing. Committed and aborted tickets contribute no holds.
+Expired holds disappear from the report without a maintenance write. Historical
+usage, raw storage counters and other tenants cannot change retained byte totals.
+Corrupt inventory or an overflowing total returns an error and no partial report.
+The controller's team storage report consumes this snapshot.
+
+`Tenant.AppendEventCharged` replaces the raw Store event writer. Its trusted
+replica identity comes from the controller. The method accepts no principal,
+team or clock. It locks the tenant's run and commits the event, retained run
+counters, shared storage admission and additive replica usage together. Event
+bytes include the kind and payload. Events consume monthly and lifetime run
+bytes alongside pending uploads, without consuming object capacity. Monthly
+admission resets with the store clock. Run capacity survives month changes.
+The existing event caps, free share, funding and claim fences remain in force.
+Usage is recorded even when no quota is configured. Failed writes and overflow
+return no sequence and roll back every accounting row.
+
+Download accounting uses `Tenant.ChargeDownload`. The raw Store method is
+removed. The request accepts a trusted replica ID and the existing cap policy,
+with no team or caller clock. The tenant owns the team and the store owns time.
+The shared download quota row serializes admission with reservations. Admission
+and additive replica reports commit together. Unexpired holds consume capacity.
+Expired holds release before charging. Midnight resets admission but retains
+the earlier day's report. The download that crosses a cap finishes, and bytes
+already delivered can still be recorded. A zero-byte check records no bytes.
+Overflow and write failures roll the entire charge back.
+
+The controller's signed downloads and delivered-byte middleware use the tenant
+method and their existing lease-holder identity for replica accounting. Log and
+live-log reads stay exempt. The SQLite replica acceptance proof races real
+charges through independent clients and checks the exhausted cap after reopening.
+The signed-data capability adapter and native PostgreSQL path remain integration
+work.
+
+Egress writes use `Tenant.AddUsage` with the authenticated team, trusted replica
+identity and UTC day. The controller records actual successful-response bytes
+when the request ends, including partial writes and requests whose context was
+cancelled. An absent in-memory meter still records tenant usage. Logs consume
+egress bytes while remaining exempt from download caps. A failed write is logged
+as an error. Process termination before a request ends can lose its egress sample.
+
+`Tenant.EgressUsage` sums replicas for one UTC day or month.
+`Operator.EgressUsageAcrossTeams` supplies team aggregates for alarm restoration.
+Neither report exposes principal identities. `Operator.PruneEgressUsage` preserves
+thirteen months under the existing maintenance lease and store clock. The raw
+Store high-water-mark writer, reader, unleased prune and controller timer flush
+are removed. Deleting an account leaves tenant egress counters unchanged.
+
+`Store.StorageStandingFor`, `Store.TeamStorage`, `TeamStorageUsage` and
+`Store.ReconcileFreeEventBytes` are removed. `free_slots` retains slot ownership
+and its timestamp. Its duplicate event-byte column and writer are removed.
+Event storage admission reads retained run counters under its existing free-tier
+lock. Run deletion releases retained event bytes without a repair pass. The
+financial storage usage counters survive deletion and remain separate.
+`Store.ReleaseExpiredStorage` and its unleased cross-team scan are removed.
+Final upload expiry uses quota admission and leased blob maintenance. Empty
+uploads reserve object capacity too, and expired tickets cannot commit.
+
+The raw paid-credit grant path is removed. `Tenant.GrantCredits` and
+`Tenant.RecordCreditGrant` accept no `paid` kind.
+Paid checkout credit uses `Store.SettlePayment`, which derives the team and
+amount from the committed checkout. Actionable fraud warnings refuse that
+transaction before a grant or event receipt commits. C2's verified-event
+implementation and controller adapter remain integration dependencies.
+
+The service-token storage and download counter routes are removed.
+`Store.RenewStorage` and its rolling block replay helpers are removed with them.
+Final upload tickets retain atomic reserve, verified commit, abort and replay.
+Legacy direct uploads and node logs still use the internal raw reservation code.
+Their consumer cutovers and old cache RPC client removal remain open.
+
+`SetFreeTeamSlots` persists checked JSON in the final settings table. Negative
+values and sealed rows refuse updates. The policy survives reopening, and an
+unreadable slot source cannot open the controller's signup gate.
+
 Build trust uses `Tenant.TrustLocalBuilds` and `Tenant.SetTrustLocalBuilds`.
 Their raw Store methods are removed. Missing policy defaults to false, invalid
 flags return an error, and writes cannot change another tenant's opt-in.
@@ -27,7 +104,15 @@ Open intervals stop at `charged_through` in reports. Closed intervals use their
 persisted finish time. This keeps a late disruption from refunding time that a
 report counted only because the reaper had not run yet.
 Grant requests use `Tenant.RecordCreditGrant`. Its raw Store twin is removed.
-Rate-table writes use `SetCreditSettings` with `CreditSettingsUpdate.RateTable`.
+Deployment price and policy reads use `Operator.CreditSettings`,
+`Operator.CreditRateTable` and `Operator.WarmCPUClassCores`.
+Rate-table writes use `Operator.SetCreditSettings` with `CreditSettingsUpdate.RateTable`.
+The operator-facing setter is `Operator.SetOperatorCreditSettings`, which
+preserves a stored table against a scalar override. The raw Store methods are
+removed. The transaction owners, defaults, validation and prices are unchanged.
+`Store.GrantCredits`, `Store.ListCreditCharges` and `Store.AppendEventOnce` are
+removed too. Each caller must select a Tenant for its grants, charge history
+and idempotent events.
 The separate `SetCreditRateTable` wrapper is removed.
 `recordBillingAwardTx` stores immutable provenance and a reservation charge. The
 charge snapshots the CPU class, rate and card fingerprint. Its caller must pass
@@ -43,13 +128,24 @@ the reservation and use separate interval keys.
 
 `chargeBillingAwardTx` charges new elapsed compute during renewal without
 closing the interval. `settleBillingAwardTx` closes open intervals and settles
-once. A reaper passes the persisted lease lapse. Both call C2's `SettleBilling`
-for per-unit minimums and elapsed seconds. Settlement reads the award and ledger,
+once. A reaper passes the persisted lease lapse. Metered settlement calls C2's `SettleBilling`
+for per-unit minimums and elapsed seconds. Unmetered checkpoint and final
+settlement return zero cost without invoking a calculator or writing a charge.
+Final settlement still closes the immutable award, and exact replay returns
+that zero result after claimant pruning. Settlement reads the award and ledger,
 so deleting a run or revoking its claimant cannot change its payer or rate.
 Refunds retain the reservation's card and spend day. Callers keep renewal,
 transition and accounting in one transaction. They apply the existing spend
 policy to the resulting balance. A pause cannot precede the interval's last
 charged checkpoint.
+
+The unused expired-claim settlement adapter is removed. Reapers must use the
+immutable award and interval helpers in their state transaction. Generated
+SQLite tests settle through an earlier persisted lapse after database reopening,
+race two settlement connections, and replay the committed result. The original
+rate, CPU class, card and refund day survive claimant pruning and pricing/card
+changes. C2 calculation is a contract fake in these tests. Claim/start/reaper
+wiring and native execution remain integration obligations.
 
 `SettlePayment` resolves the team and credit amount from a committed checkout.
 Provider mode, event identity, signed amount, currency and payment identity must
@@ -160,9 +256,17 @@ that transaction's receipt, reference, revocation and holder changes and leave
 commit or rollback to the caller. `Tenant` uses the same checks. Supplied
 principal fields cannot widen persisted capability authority.
 
-Record commits and lookups recheck live authority after verified manifest I/O.
-A read that crosses the job lease, leaf capability or ancestor expiry returns
-no authorized result. It cannot publish a record or attach memo outputs.
+Record publication uses one transaction-local mutation owner for CommitRecord
+and CopyMemo. Both prepare every namespace and verified manifest before the
+owner takes the sorted blob locks. It checks existence, edge authority and
+immutable destinations, then reloads current writer ancestry and holder authority
+against the store clock. That final recheck is the mutation boundary. Only that
+owner persists the complete record/member batch and clears its tombstones.
+Commit or rollback remains with the caller. Failed commits return no record or
+memo hit. Immutable replay retains its persisted metadata.
+
+Lookups recheck live authority after verified manifest I/O. A read that crosses
+the job lease, leaf capability or ancestor expiry returns no authorized result.
 SQLite checks exercise both data binding rules through `Store.CheckBinding`
 and through the transaction that owns receipt changes.
 
@@ -195,6 +299,9 @@ segments after the writer ends. Log incompleteness never changes the job result.
 Segment replay counts retained bytes once. Refused content and byte-limit
 violations preserve the committed inventory. Run deletion cascades streams and
 segments. A later job finish cannot extend an attempt's persisted tail grace.
+Generated tests check reads, segment commits, final seals and leased maintenance
+on both sides of that grace boundary. A historical reader keeps the same bytes,
+and maintenance preserves the job's successful result and finish time.
 The unused raw `Store.RunFinished` pruning query is removed. Leased retention
 and tagged-stream maintenance own log lifetime.
 
@@ -205,3 +312,10 @@ unit fence is gone. Eval also checks the source generation. The bounded batch
 locks runs and rechecks the maintenance fence before writing. Any error rolls
 the batch back. Existing final seals remain immutable. Publication streams keep
 their publisher's final-commit contract because publication has no lease.
+
+The independent bucket-listing storage pass is removed with its mark/reconcile
+APIs, raw download-day pruning, legacy receipt pruning and free-share log row
+selection. The controller's maintenance timer uses the existing singleton lease,
+final retention, tagged-stream sealing and committed-inventory billing. Physical
+bucket bytes cannot overwrite replica counters or become retained billing facts.
+Allowance-driven physical eviction still requires the final record/log adapter.

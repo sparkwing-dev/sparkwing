@@ -137,7 +137,7 @@ func checkStoreLogBoundary(ctx context.Context, root string) (err error) {
 
 func checkStoreTerminalLogReads(ctx context.Context, db *sql.DB, tenant *store.Tenant, commit store.SegmentCommit, request blob.LogReadRequest) error {
 	finished := time.Now().Add(-2 * limits.LogSealGrace).UnixNano()
-	if _, err := db.ExecContext(ctx, "UPDATE nodes SET status='done',outcome='success',finished_at=?,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team=? AND run_id='logs'", finished, store.DefaultTeam); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE nodes SET status='done',outcome='success',finished_at=?,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team=? AND run_id='logs'", time.Now().UnixNano(), store.DefaultTeam); err != nil {
 		return err
 	}
 	if _, err := db.ExecContext(ctx, "UPDATE node_attempts SET finished_at=?,outcome='success' WHERE team=? AND run_id='logs'", finished, store.DefaultTeam); err != nil {

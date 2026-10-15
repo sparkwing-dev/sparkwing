@@ -1678,6 +1678,10 @@ components:
             - format: date-time
               type: string
             - type: "null"
+        source_attempt:
+          anyOf:
+            - type: integer
+            - type: "null"
         to:
           type: string
       required:
@@ -1685,18 +1689,33 @@ components:
         - cause
       type: object
       x-sparkwing-go-type: controllerwire.JobTransitionRequest
+    internal.controllerwire.LauncherJobRef:
+      additionalProperties: true
+      properties:
+        name:
+          type: string
+        namespace:
+          type: string
+        uid:
+          type: string
+      required:
+        - namespace
+        - name
+        - uid
+      type: object
+      x-sparkwing-go-type: controllerwire.LauncherJobRef
     internal.controllerwire.LauncherObservation:
       additionalProperties: true
       properties:
-        job_name:
-          type: string
+        award:
+          $ref: '#/components/schemas/internal.capability.LeaseRef'
+        job:
+          $ref: '#/components/schemas/internal.controllerwire.LauncherJobRef'
         node_uid:
           type: string
-        unit_id:
-          type: string
       required:
-        - unit_id
-        - job_name
+        - award
+        - job
         - node_uid
       type: object
       x-sparkwing-go-type: controllerwire.LauncherObservation
@@ -1725,7 +1744,7 @@ components:
         remove:
           anyOf:
             - items:
-                type: string
+                $ref: '#/components/schemas/internal.controllerwire.LauncherJobRef'
               type: array
             - type: "null"
       required:
@@ -3532,6 +3551,42 @@ components:
         - status
       type: object
       x-sparkwing-go-type: controllerwire.StepDetail
+    internal.controllerwire.StepRecorded:
+      additionalProperties: true
+      properties:
+        recorded:
+          type: boolean
+      required:
+        - recorded
+      type: object
+      x-sparkwing-go-type: controllerwire.StepRecorded
+    internal.controllerwire.StepReportRequest:
+      additionalProperties: true
+      properties:
+        error:
+          type: string
+        finished_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        source_attempt:
+          type: integer
+        started_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        state:
+          type: string
+        step_id:
+          type: string
+      required:
+        - step_id
+        - state
+        - source_attempt
+      type: object
+      x-sparkwing-go-type: controllerwire.StepReportRequest
     internal.controllerwire.TickView:
       additionalProperties: true
       properties:
@@ -10850,7 +10905,6 @@ paths:
         retry: exact_body
   /api/v1/runs/{run}/jobs/{job}/steps/finish:
     post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: run
@@ -10862,14 +10916,26 @@ paths:
           required: true
           schema:
             type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.StepReportRequest'
+        required: true
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.StepRecorded'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: POST /api/v1/runs/{run}/jobs/{job}/steps/finish
+      summary: Persist an attempt-fenced step report
       x-sparkwing-policy:
         method: POST
         path: /api/v1/runs/{run}/jobs/{job}/steps/finish
@@ -10893,10 +10959,8 @@ paths:
             binding: data
             liveness: credential
         retry: exact_body
-      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/jobs/{job}/steps/skip:
     post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: run
@@ -10908,14 +10972,26 @@ paths:
           required: true
           schema:
             type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.StepReportRequest'
+        required: true
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.StepRecorded'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: POST /api/v1/runs/{run}/jobs/{job}/steps/skip
+      summary: Persist an attempt-fenced step report
       x-sparkwing-policy:
         method: POST
         path: /api/v1/runs/{run}/jobs/{job}/steps/skip
@@ -10939,10 +11015,8 @@ paths:
             binding: data
             liveness: credential
         retry: exact_body
-      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/jobs/{job}/steps/start:
     post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - in: path
           name: run
@@ -10954,14 +11028,26 @@ paths:
           required: true
           schema:
             type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.StepReportRequest'
+        required: true
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.StepRecorded'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: POST /api/v1/runs/{run}/jobs/{job}/steps/start
+      summary: Persist an attempt-fenced step report
       x-sparkwing-policy:
         method: POST
         path: /api/v1/runs/{run}/jobs/{job}/steps/start
@@ -10985,7 +11071,6 @@ paths:
             binding: data
             liveness: credential
         retry: exact_body
-      x-sparkwing-wire: undocumented
   /api/v1/runs/{run}/jobs/{job}/steps/summary:
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.

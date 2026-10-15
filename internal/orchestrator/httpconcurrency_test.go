@@ -48,9 +48,6 @@ func createHTTPLiveRun(t *testing.T, st *store.Store, runID string) {
 	}); err != nil {
 		t.Fatalf("CreateRun(%s): %v", runID, err)
 	}
-	if err := st.TouchRunHeartbeat(context.Background(), runID); err != nil {
-		t.Fatalf("TouchRunHeartbeat(%s): %v", runID, err)
-	}
 }
 
 func acquireHTTPLive(t *testing.T, st *store.Store, b *orchestrator.HTTPConcurrency, req store.AcquireSlotRequest) store.AcquireSlotResponse {

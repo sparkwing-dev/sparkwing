@@ -103,10 +103,11 @@ func chargeRetainedTeamTx(ctx context.Context, tx *storeTx, team Team) (*CreditC
 		return nil, err
 	}
 	now := tx.now()
-	bytes, oldest, err := retainedStorageSampleTx(ctx, tx, team)
+	inventory, err := retainedStorageSampleTx(ctx, tx, team)
 	if err != nil {
 		return nil, err
 	}
+	bytes := inventory.blobs + inventory.logs
 	if through == 0 || bytes == 0 {
 		if err := stampRetainedWatermarksTx(ctx, tx, team, now.UnixNano()); err != nil {
 			return nil, err
@@ -129,7 +130,7 @@ func chargeRetainedTeamTx(ctx context.Context, tx *storeTx, team Team) (*CreditC
 	}
 	bytes = max(bytes-free, 0)
 	// safety: after an idle gap, fresh bytes cannot be billed before they existed.
-	seconds := min(gap, max((now.UnixNano()-oldest)/int64(time.Second), 0))
+	seconds := min(gap, max((now.UnixNano()-inventory.oldest)/int64(time.Second), 0))
 	amount, err := storageChargeMicro(bytes, rate, seconds)
 	if err != nil {
 		return nil, err
@@ -172,28 +173,36 @@ func stampRetainedWatermarksTx(ctx context.Context, tx *storeTx, team Team, thro
 	return nil
 }
 
-func retainedStorageSampleTx(ctx context.Context, tx *storeTx, team Team) (bytes, oldest int64, err error) {
-	rows, err := tx.QueryContext(ctx, "SELECT size,created_at FROM blobs WHERE team=? UNION ALL SELECT stored_bytes,created_at FROM log_streams WHERE team=?", team, team)
+type retainedStorageInventory struct {
+	blobs, logs, oldest int64
+}
+
+func retainedStorageSampleTx(ctx context.Context, tx *storeTx, team Team) (out retainedStorageInventory, err error) {
+	rows, err := tx.QueryContext(ctx, "SELECT size,created_at,0 FROM blobs WHERE team=? UNION ALL SELECT stored_bytes,created_at,1 FROM log_streams WHERE team=?", team, team)
 	if err != nil {
-		return 0, 0, err
+		return out, err
 	}
 	defer closeRowsInto(rows, &err)
-	oldest = tx.now().UnixNano()
+	out.oldest = tx.now().UnixNano()
 	for rows.Next() {
-		var size, created int64
-		if err := rows.Scan(&size, &created); err != nil {
-			return 0, 0, err
+		var size, created, log int64
+		if err := rows.Scan(&size, &created, &log); err != nil {
+			return retainedStorageInventory{}, err
 		}
 		if size == 0 {
 			continue
 		}
-		if size < 0 || bytes > math.MaxInt64-size || created <= 0 {
-			return 0, 0, errors.New("storage: invalid retained byte inventory")
+		if size < 0 || out.blobs+out.logs > math.MaxInt64-size || created <= 0 {
+			return retainedStorageInventory{}, errors.New("storage: invalid retained byte inventory")
 		}
-		bytes += size
-		oldest = min(oldest, created)
+		if log == 1 {
+			out.logs += size
+		} else {
+			out.blobs += size
+		}
+		out.oldest = min(out.oldest, created)
 	}
-	return bytes, oldest, rows.Err()
+	return out, rows.Err()
 }
 
 func retainedAllowanceTx(ctx context.Context, tx *storeTx, team Team) (int64, error) {

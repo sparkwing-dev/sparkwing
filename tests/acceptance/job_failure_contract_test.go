@@ -15,7 +15,7 @@ func TestSurfaceJobFailureReportTransport(t *testing.T) {
 	for _, endpoint := range []string{"http://api.sock", "https://controller.example"} {
 		t.Run(endpoint, func(t *testing.T) {
 			var report controllerwire.JobTransitionRequest
-			body := `{"to":"failed","cause":"report","result":{"outcome":"failed","reason":"step_failed","failure":{"job":"build","stage":"step:verify","error":{"code":"future_failure","message":"masked failure","hint":"retry verification","details":{"exit_code":7}}}}}`
+			body := `{"to":"failed","cause":"report","source_attempt":1,"result":{"outcome":"failed","reason":"step_failed","failure":{"job":"build","stage":"step:verify","error":{"code":"future_failure","message":"masked failure","hint":"retry verification","details":{"exit_code":7}}}}}`
 			if err := json.Unmarshal([]byte(body), &report); err != nil {
 				t.Fatal(err)
 			}
@@ -26,7 +26,8 @@ func TestSurfaceJobFailureReportTransport(t *testing.T) {
 					t.Fatalf("unexpected report: %s %s", req.Method, req.URL)
 				}
 				var got struct {
-					Result struct {
+					SourceAttempt *int64 `json:"source_attempt"`
+					Result        struct {
 						Failure struct {
 							Job, Stage string
 							Error      struct {
@@ -39,6 +40,9 @@ func TestSurfaceJobFailureReportTransport(t *testing.T) {
 				}
 				if err := json.NewDecoder(req.Body).Decode(&got); err != nil {
 					t.Fatal(err)
+				}
+				if got.SourceAttempt == nil || *got.SourceAttempt != 1 {
+					t.Fatal("report lost its source attempt")
 				}
 				failure := got.Result.Failure
 				if failure.Job != "build" || failure.Stage != "step:verify" || failure.Error.Code != "future_failure" || failure.Error.Message != "masked failure" || failure.Error.Hint != "retry verification" || failure.Error.Details["exit_code"] != 7 || got.Result.Error != nil {

@@ -12,8 +12,28 @@ stage, error and size before committing it with the result. Report replay
 includes that complete failure. Recovery reads preserve its code, message,
 hint and details, including unknown additive codes. No stage is inferred from
 an outcome, reason or error string. Native hosts still need to report through
-this boundary. The separate source-attempt fencing handoff remains open because
-C1 `NodeTransition` has no source-attempt field.
+this boundary.
+
+`JobTransitionRequest.SourceAttempt` carries C1's optional source ordinal without
+collapsing omitted and explicit zero. Holder start, retry, report and unstarted
+release require it. Initial start uses zero. Later reports use the captured
+ordinal returned by `Applied.Attempt`. Other actors and causes omit it. The
+adapter forwards it unchanged to `NodeTransition.SourceAttempt`; C1 checks the
+locked row and includes it in immutable replay. Native hosts must send the
+captured ordinal rather than read a newer attempt before reporting.
+
+`Controller.RecordStep` accepts `StepReportRequest` on the existing C2 routes.
+State `running` selects `steps/start`, `skipped` selects `steps/skip`, and `passed`,
+`failed` or `cancelled` selects `steps/finish`. A positive `source_attempt` names
+the observed attempt. The body contains no actor, holder, team or generation.
+W2 derives those fields from authorization and current state, compares the source
+ordinal with that state, and calls C1 `RecordStep` with the derived
+`AttemptIdentity`. C1 rechecks that identity in the committing transaction.
+`error` is already masked text. Optional start and finish timestamps retain
+nanosecond precision. Success is `StepRecorded{recorded:true}` after persistence.
+False, absent or malformed acknowledgements fail. Exact-body retries retain the
+original source ordinal and timestamps. W2's native route/store binding and W3's
+remote executor adapter remain open.
 
 `ReuseSource.Result` transports C1's materialized-result source as
 `{run_id, job_id, state_seq}`. It identifies the exact persisted terminal state
@@ -137,7 +157,23 @@ authorization, quota, signing or transaction behavior.
 ClaimedUnit includes accepted engine, source generation and owner/attempt/parent
 expiry deadlines. Its sealed request carries Source.Location. CloudJobAward consumes
 that immutable source projection. SyncLauncher returns held awards and stale Job
-identities without raw bearers. Exchange presents the bootstrap in the authenticated
+identities without raw bearers. `LauncherObservation.Award` is the existing
+`capability.LeaseRef` tuple of kind, ID, holder and generation. This is the
+awarded unit's generation; an eval uses its own lease generation, separately
+from the immutable source generation. The observed Job carries namespace, name
+and UID, and `node_uid` identifies its reserved node instance. Observations
+cannot replace the stored fence or authorize a cleanup by themselves.
+`LauncherSyncResponse.Remove` is a list of `LauncherJobRef`, carrying the exact
+namespace, name and UID required as a Kubernetes deletion precondition. A name
+alone cannot identify an instance after replacement. Every transport, decoding
+or validation error returns an empty sync result, so a partial decode cannot
+expose private bearer material. The old unfenced
+unit-ID/Job-name observation and string cleanup list are removed. W8 must retain
+award annotations and the actual Kubernetes Job UID, submit observations and
+delete with the UID precondition before releasing its reservation. W1/W2 must
+compare the reported award with stored ownership and reconcile only the
+authenticated launcher's awards. These native implementations remain open.
+Exchange presents the bootstrap in the authenticated
 transport and returns the exchanged ClaimedUnit once. The controller never mints
 replacement bootstraps from an observed Kubernetes Job. Lost bootstrap delivery
 recovers through lease expiry and re-award.
@@ -184,6 +220,8 @@ one envelope and use `apierr.DecodeInner`.
 | `ClaimRequest`, `ClaimResponse`, `ClaimedUnit` | Queue or named selection and a server-derived unit award. Granted identity, pools and billing never come from the request. Runner software version is checked by `engine.EvaluateRunner` before new awards; draining renewals stay available. |
 | `RenewalRequest`, `RenewalResponse` | Shared keeper activity, expiry, cancellation and watched jobs. |
 | `JobResult`, `JobTransitionRequest`, `Applied` | One transition/report boundary, authorized output records and replay result. |
+| `StepReportRequest`, `StepRecorded` | Attempt-specific step state and acknowledged persistence on the C2 start/finish/skip routes. |
+| `LauncherObservation`, `LauncherJobRef`, `LauncherSyncRequest`, `LauncherSyncResponse` | Award-fenced observations and UID-preconditioned Kubernetes cleanup identities. |
 | `ExpansionSubmission`, `ExpansionAccepted`, `ExpandedJob` | Exactly one success body or structured failure and the persisted topology/settings. |
 | `ReuseSource`, `ReconcileRequest`, `ReconcileResponse` | C1 reconciliation over a proposed source, with persisted source outcome and committed claim. |
 | `FinishRequest`, `CancelRequest`, `RetryRequest` | Owner finish, cooperative cancellation and retry lineage. |

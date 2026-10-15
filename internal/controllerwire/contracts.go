@@ -119,11 +119,11 @@ type ClaimResponse struct {
 	Claim *ClaimedUnit `json:"claim,omitempty"`
 }
 
-// LauncherObservation reports Kubernetes identity only; it cannot replace the stored claim fence.
+// LauncherObservation compares an immutable award and Kubernetes instance against stored ownership.
 type LauncherObservation struct {
-	UnitID  string `json:"unit_id"`
-	JobName string `json:"job_name"`
-	NodeUID string `json:"node_uid"`
+	Award   capability.LeaseRef `json:"award"`
+	Job     LauncherJobRef      `json:"job"`
+	NodeUID string              `json:"node_uid"`
 }
 
 // LauncherSyncRequest reconciles observed Jobs against the launcher's current awards.
@@ -134,8 +134,8 @@ type LauncherSyncRequest struct {
 // LauncherSyncResponse contains immutable execution inputs and cleanup identities, never new bearers.
 // Awards have an empty Capability. Lost bootstrap material recovers through lease expiry and re-award.
 type LauncherSyncResponse struct {
-	Awards []ClaimedUnit `json:"awards"`
-	Remove []string      `json:"remove"`
+	Awards []ClaimedUnit    `json:"awards"`
+	Remove []LauncherJobRef `json:"remove"`
 }
 
 // ExchangeResponse returns the original unit with its exchanged in-memory authority once.
@@ -172,10 +172,11 @@ type JobResult struct {
 // JobTransitionRequest is the single report/transition body. The adapter derives
 // actor and claim fences from C2; the store derives events and its clock.
 type JobTransitionRequest struct {
-	To      string     `json:"to"`
-	Cause   string     `json:"cause"`
-	Result  *JobResult `json:"result,omitempty"`
-	RetryAt *time.Time `json:"retry_at,omitempty"`
+	To            string     `json:"to"`
+	Cause         string     `json:"cause"`
+	SourceAttempt *int64     `json:"source_attempt,omitempty"`
+	Result        *JobResult `json:"result,omitempty"`
+	RetryAt       *time.Time `json:"retry_at,omitempty"`
 }
 
 type Applied struct {
@@ -386,6 +387,7 @@ type Controller interface {
 	Exchange(context.Context) (ExchangeResponse, error)
 	Renew(context.Context, string, RenewalRequest) (RenewalResponse, error)
 	TransitionJob(context.Context, string, string, JobTransitionRequest) (Applied, error)
+	RecordStep(context.Context, string, string, StepReportRequest) error
 	ReconcileJob(context.Context, string, string, ReconcileRequest) (ReconcileResponse, error)
 	AcceptExpansion(context.Context, string, string, ExpansionSubmission) (ExpansionAccepted, error)
 	Finish(context.Context, string, FinishRequest) (Applied, error)

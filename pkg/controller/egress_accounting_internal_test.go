@@ -1,0 +1,134 @@
+package controller
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/egress"
+)
+
+func TestControllerEgressUsesAuthenticatedTenantAndReplica(t *testing.T) {
+	engine, _ := engineRuntimeStore(t)
+	if err := engine.Store.AsOperator().CreateTeam(t.Context(), "b"); err != nil {
+		t.Fatal(err)
+	}
+	first := New(engine.Store, nil).WithEgressMeter(egress.New(egress.Config{}))
+	second := New(engine.Store, nil)
+	for _, server := range []*Server{first, second} {
+		for _, class := range []egress.Class{egress.ClassArtifact, egress.ClassLog, egress.ClassLogStream} {
+			r := storeDataRequest(http.MethodGet, "/data?team=b&replica=forged", "", Principal{Name: "shared", Team: "a", Scopes: []string{ScopeAdmin}})
+			response := httptest.NewRecorder()
+			server.meterOn(class, egress.SlotNone, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte("bytes"))
+			})).ServeHTTP(response, r)
+			if response.Code != http.StatusOK {
+				t.Fatalf("response=%d: %s", response.Code, response.Body)
+			}
+		}
+		var bytes int64
+		if err := engine.Store.DB().QueryRow("SELECT SUM(bytes) FROM egress_usage WHERE team='a' AND replica_id=?", server.leaseHolder).Scan(&bytes); err != nil || bytes != 15 {
+			t.Fatalf("replica=%s bytes=%d: %v", server.leaseHolder, bytes, err)
+		}
+	}
+	tenant, err := engine.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage, err := tenant.EgressUsage(t.Context(), time.Now().UTC().Format("2006-01"))
+	if err != nil || usage.Bytes != 30 {
+		t.Fatalf("team usage=%+v: %v", usage, err)
+	}
+	foreign, err := engine.Store.ForTeam(t.Context(), "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage, err = foreign.EgressUsage(t.Context(), time.Now().UTC().Format("2006-01"))
+	if err != nil || usage.Bytes != 0 {
+		t.Fatalf("foreign usage=%+v: %v", usage, err)
+	}
+}
+
+type shortEgressWriter struct {
+	*httptest.ResponseRecorder
+}
+
+func (w shortEgressWriter) Write(p []byte) (int, error) {
+	n, _ := w.ResponseRecorder.Write(p[:min(len(p), 2)])
+	return n, errors.New("client disconnected")
+}
+
+func TestControllerEgressCountsDeliveredBytesAndResumesAlarm(t *testing.T) {
+	engine, _ := engineRuntimeStore(t)
+	s := New(engine.Store, nil).WithEgressMeter(egress.New(egress.Config{GlobalDailyAlarmBytes: 2}))
+	for _, tc := range []struct {
+		method string
+		status int
+	}{
+		{http.MethodGet, http.StatusOK},
+		{http.MethodHead, http.StatusOK},
+		{http.MethodGet, http.StatusForbidden},
+	} {
+		r := storeDataRequest(tc.method, "/logs", "", Principal{Name: "account", Team: "a", Scopes: []string{ScopeAdmin}})
+		ctx, cancel := context.WithCancel(r.Context())
+		r = r.WithContext(ctx)
+		s.meteredStream(egress.ClassLogStream, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(tc.status)
+			_, _ = w.Write([]byte("long response"))
+			cancel()
+		})).ServeHTTP(shortEgressWriter{httptest.NewRecorder()}, r)
+		cancel()
+	}
+	restarted := New(engine.Store, nil).WithEgressMeter(egress.New(egress.Config{GlobalDailyAlarmBytes: 2}))
+	restarted.loadEgressUsage(t.Context())
+	state := restarted.egress.State()
+	if state.GlobalDayBytes != 2 || state.GlobalMonthBytes != 2 || !state.Alarm {
+		t.Fatalf("restored=%+v", state)
+	}
+	if state.Persisted {
+		t.Fatal("controller retained the principal flush path")
+	}
+}
+
+func TestControllerEgressFailuresAreLoud(t *testing.T) {
+	engine, _ := engineRuntimeStore(t)
+	s := New(engine.Store, nil)
+	var logs strings.Builder
+	s.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	if _, err := engine.Store.DB().Exec("CREATE TRIGGER refuse_egress BEFORE INSERT ON egress_usage BEGIN SELECT RAISE(ABORT,'storage unavailable'); END"); err != nil {
+		t.Fatal(err)
+	}
+	r := storeDataRequest(http.MethodGet, "/logs", "", Principal{Name: "account", Team: "a", Scopes: []string{ScopeAdmin}})
+	s.metered(egress.ClassLog, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("sent"))
+	})).ServeHTTP(httptest.NewRecorder(), r)
+	if !strings.Contains(logs.String(), "record delivered egress failed") {
+		t.Fatalf("missing accounting failure: %s", logs.String())
+	}
+	var rows int
+	if err := engine.Store.DB().QueryRow("SELECT COUNT(*) FROM egress_usage").Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("failed counter left %d rows: %v", rows, err)
+	}
+}
+
+func TestControllerEgressRestoresTotalsBeyondMeterCardinality(t *testing.T) {
+	engine, _ := engineRuntimeStore(t)
+	count := egress.MaxPrincipals + 2
+	if _, err := engine.Store.DB().Exec(`WITH RECURSIVE numbers(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM numbers WHERE n<?) INSERT INTO teams(name,created_at,updated_at) SELECT 'egress-'||n,1,1 FROM numbers`, count); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Store.DB().Exec("INSERT INTO egress_usage(team,period,replica_id,bytes,updated_at) SELECT name,?,'replica',1,1 FROM teams WHERE name LIKE 'egress-%'", time.Now().UTC().Format("2006-01-02")); err != nil {
+		t.Fatal(err)
+	}
+	s := New(engine.Store, nil).WithEgressMeter(egress.New(egress.Config{GlobalDailyAlarmBytes: int64(count)}))
+	s.loadEgressUsage(t.Context())
+	state := s.egress.State()
+	if state.GlobalDayBytes != int64(count) || state.GlobalMonthBytes != int64(count) || !state.Alarm {
+		t.Fatalf("restored day=%d month=%d alarm=%t, want %d and alarm", state.GlobalDayBytes, state.GlobalMonthBytes, state.Alarm, count)
+	}
+}

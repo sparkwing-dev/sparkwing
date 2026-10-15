@@ -299,7 +299,7 @@ func TestControllerCrons_ASecondLaunchOfOneDueInstantReachesTheFirstRun(t *testi
 	f.push(cronPushBody())
 
 	ctx := context.Background()
-	svc := &crons.Service{Store: f.store}
+	svc := &crons.Service{Store: f.store, Schedules: teststore.ForTeam(t, f.store, store.DefaultTeam)}
 	sched, err := svc.Resolve(ctx, "acme/widgets/nightly")
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -486,7 +486,7 @@ func TestControllerCrons_DetailServesTheWholeRetainedHistory(t *testing.T) {
 		fire := &store.CronFire{
 			DueAt: at, DecidedAt: at, Outcome: store.CronOutcomeMissed, Detail: "seeded",
 		}
-		if err := f.store.ResolveCronDue(ctx, id, at, nil, fire, at); err != nil {
+		if err := teststore.ForTeam(t, f.store, store.DefaultTeam).ResolveCronDue(ctx, id, at, nil, fire, at); err != nil {
 			t.Fatalf("seed fire %d: %v", i, err)
 		}
 	}

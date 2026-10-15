@@ -81,10 +81,10 @@ func TestCreditLedgerTotals_SplitsGrantsAndCharges(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, 5_000_000, "trial", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 5_000_000, "trial", "admin"); err != nil {
 		t.Fatalf("free grant: %v", err)
 	}
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 20_000_000, "invoice-1", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid, 20_000_000, "invoice-1", "admin"); err != nil {
 		t.Fatalf("paid grant: %v", err)
 	}
 
@@ -156,7 +156,7 @@ func TestCreditLedgerTotals_SettledSecondsNeverFallUnderConcurrentClaimsOnPostgr
 	s := storetest.OpenPostgres(t)
 	ctx := context.Background()
 
-	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, 100_000_000_000, "invoice", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 100_000_000_000, "invoice", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	claimant := meteredClaimant(t, s, "pool")
@@ -241,7 +241,7 @@ func TestCreditLedgerTotals_SettledSecondsNeverFallUnderConcurrentClaimsOnPostgr
 func assertSettledSecondsNeverFall(t *testing.T, s *store.Store) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 200_000_000, "invoice", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid, 200_000_000, "invoice", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	claimant := meteredClaimant(t, s, "pool")
@@ -308,7 +308,7 @@ func TestNodeSettlement_ReadsTheNodesOwnClaimCredential(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 20_000_000, "invoice", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid, 20_000_000, "invoice", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	claimant := meteredClaimant(t, s, "pool")

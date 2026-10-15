@@ -172,7 +172,7 @@ func TestRenewUnitNodeRequiresCommittedStart(t *testing.T) {
 	}
 	tenant := &Tenant{s: s, team: claim.Team}
 	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{claim.RunID, claim.NodeID}, To: NodeRunning, Cause: CauseStart, Actor: actor}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{claim.RunID, claim.NodeID}, To: NodeRunning, Cause: CauseStart, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
 		t.Fatal(err)
 	}
 	*now = now.Add(time.Second)

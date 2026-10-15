@@ -3,45 +3,51 @@ package nodehost
 import (
 	"context"
 	"errors"
-	"fmt"
-	"net/http"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// safety: a stalled backend must not hold a node's request open.
 const resolveTimeout = 10 * time.Second
 
-func (s *Server) serveSecret(w http.ResponseWriter, r *http.Request, g *grant) {
-	name := r.PathValue("name")
-	if !g.declared[name] {
-		// safety: a read of a name the pipeline never declared is a probe, so
-		// it is audited and refused without reaching the secret source.
-		s.logger.Warn("audit", "event", "secret_undeclared", "run", g.RunID, "node", g.NodeID, "secret", name)
-		s.writeError(w, http.StatusForbidden, "secret_undeclared",
-			fmt.Sprintf("node %q read secret %q, which its pipeline does not declare; declare it in the pipeline's secrets", g.NodeID, name))
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), resolveTimeout)
+func (g *grant) secret(ctx context.Context, name string) (string, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, resolveTimeout)
 	defer cancel()
-	//nolint:contextcheck // revoking the grant must end the read, not just the request's own context.
-	defer context.AfterFunc(g.ctx, cancel)()
 	value, masked, err := g.Resolver.Resolve(ctx, name)
-	switch {
-	case errors.Is(err, secretsource.ErrMissing), errors.Is(err, secrets.ErrSecretMissing):
-		s.writeError(w, http.StatusNotFound, "secret_not_found", fmt.Sprintf("secret %q is not set", name))
-		return
-	case err != nil:
-		// safety: a backend error can quote backend URLs and replies, so only its type is logged.
-		s.logger.Warn("node secret read failed", "run", g.RunID, "node", g.NodeID, "secret", name,
-			"err_type", fmt.Sprintf("%T", err))
-		s.writeError(w, http.StatusBadGateway, "secret_unavailable", fmt.Sprintf("secret %q could not be read", name))
-		return
+	if errors.Is(err, secretsource.ErrMissing) || errors.Is(err, secrets.ErrSecretMissing) {
+		return "", false, executorError(apierr.NotFound, "secret is not set")
 	}
-	if masked {
-		g.Masker.Register(value)
+	if err != nil {
+		return "", false, serviceUnavailable()
 	}
-	s.writeJSON(w, http.StatusOK, map[string]any{"value": value, "masked": masked})
+	return value, masked, nil
+}
+
+func (g *grant) annotation(_ context.Context, _ capability.Authorized, request nodeproto.AnnotationRequest) error {
+	if g.Sink == nil {
+		return serviceUnavailable()
+	}
+	record := sparkwing.LogRecord{Level: request.Level, Event: "job_annotation", Msg: request.Message, Step: request.Step, Attrs: map[string]any{"file": request.File, "line": request.Line, "end_line": request.EndLine, "column": request.Column}}
+	if err := g.Sink.persist(record); err != nil {
+		return err
+	}
+	g.Sink.emit(record)
+	return nil
+}
+
+func (g *grant) summary(_ context.Context, _ capability.Authorized, request nodeproto.SummaryRequest) error {
+	if g.Sink == nil {
+		return serviceUnavailable()
+	}
+	record := sparkwing.LogRecord{Level: "info", Event: "job_summary", Msg: request.Markdown, Step: request.Step}
+	if err := g.Sink.persist(record); err != nil {
+		return err
+	}
+	g.Sink.emit(record)
+	return nil
 }

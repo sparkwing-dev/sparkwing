@@ -95,14 +95,14 @@ func runDryRunFixtureIn(t *testing.T, dir string, opts Options, flags map[string
 func TestHostedDryRunReachesThePlanAndEveryNode(t *testing.T) {
 	t.Setenv("SPARKWING_DRY_RUN", "")
 	plan, node := runDryRunFixture(t, Options{DryRun: true})
-	if plan != "1" || node != "dry 1" {
+	if plan != "true" || node != "dry true" {
 		t.Errorf("plan saw SPARKWING_DRY_RUN=%q, node %q; plan code must see what its nodes see or they plan differently", plan, node)
 	}
 }
 
 func TestHostedRunInsideADryRunNodeIsADryRun(t *testing.T) {
-	t.Setenv("SPARKWING_DRY_RUN", "1")
-	if _, node := runDryRunFixture(t, Options{}); node != "dry 1" {
+	t.Setenv("SPARKWING_DRY_RUN", "true")
+	if _, node := runDryRunFixture(t, Options{}); node != "dry true" {
 		t.Errorf("a run started inside a dry-run node saw %q; its steps ran for real", node)
 	}
 }

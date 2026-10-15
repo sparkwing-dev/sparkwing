@@ -2,12 +2,61 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"maps"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
+
+func TestPipelineAliasResolvesBeforeArgumentParsing(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	dir := filepath.Join(t.TempDir(), ".sparkwing")
+	writeRepoFile(t, filepath.Join(dir, "go.mod"), "module fixture\n\ngo 1.26\n")
+	writeRepoFile(t, filepath.Join(dir, "sparkwing.yaml"), "pipelines:\n  - name: deploy-prod\n    entrypoint: Deploy\n")
+	repo, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	bin := filepath.Join(t.TempDir(), "pipeline-alias")
+	if out, err := exec.CommandContext(ctx, "go", "-C", repo, "build", "-o", bin, "./internal/nodehost/testdata/pipelinealias").CombinedOutput(); err != nil {
+		t.Fatalf("compile alias fixture: %v\n%s", err, out)
+	}
+	run := pipelineRun{ctx: ctx, sparkwingDir: dir, entry: pipelineentry.Binary(bin)}
+	schema, err := run.describedPipeline("deploy-prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := parsePipelineArgs(schema, []string{"--target", "production", "--image", "release"})
+	if err != nil || args["target"] != "production" || args["image"] != "release" || run.pipeline.Invoked != "deploy-prod" || run.pipeline.Entrypoint != "Deploy" {
+		t.Fatalf("selection=%+v args=%v error=%v", run.pipeline, args, err)
+	}
+	var help bytes.Buffer
+	printPipelineHelp(&help, schema)
+	if !strings.Contains(help.String(), "sparkwing run deploy-prod --target <string> --image <string>") {
+		t.Fatal("alias help lost its required pipeline or job flags:", help.String())
+	}
+	planned, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{
+		Entry: run.entry, Dir: filepath.Dir(dir), Engine: nodeproto.EngineIdentity{Version: "test"},
+		Runner:     nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
+		Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: secrets.NewMasker()},
+	}, nodehost.PlanRequest{Pipeline: run.pipeline.Invoked, Entrypoint: run.pipeline.Entrypoint, Args: args, Run: nodeproto.RunContext{RunID: "alias-run", Pipeline: run.pipeline.Invoked}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(planned.Doc.Jobs) != 1 || planned.Doc.Jobs[0].Env["INVOKED"].Value != "deploy-prod" || planned.Doc.Jobs[0].Env["TARGET"].Value != "production" {
+		t.Fatalf("author code received different pipeline identity or arguments: %+v", planned.Doc.Jobs)
+	}
+}
 
 var argsFixture = nodeproto.PipelineDescription{
 	Name: "deploy",
