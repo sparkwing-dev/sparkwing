@@ -1,5 +1,12 @@
 # C3 protocol and SDK contract
 
+[The native input cut](../w3-native-input-cut-progress.md) moves here resume to
+the same awarded-input constructor as runner hosting. RunInput.SealedRequest
+contains the sealed request's Request payload. Retries retain the original
+request and spec while RunInput.RunID names the newly awarded run. Preparation
+cannot replace its owner fence or granted runner. The legacy placement cut
+remains open.
+
 [The consumer lease cut](../w3-consumer-lease-cut-progress.md) removes the local
 consumer's heartbeat loop and unused runner-host helpers. The consumer now uses
 the shared keeper. Native placement migration and legacy scheduler deletion

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -165,6 +164,8 @@ func runHereAward(ctx context.Context, options client.EngineOptions, run string,
 		return completion, incompleteHereHandoff(run, err)
 	}
 	session.input.RunID, session.input.SealedRequest, session.input.RequestHash, session.input.Accepted = input.RunID, input.SealedRequest, input.RequestHash, input.Accepted
+	session.input.Owner.Kind, session.input.Owner.Owner = input.Owner.Kind, input.Owner.Owner
+	session.input.GrantedRunner = input.GrantedRunner
 	completion, runErr := session.host.Run(ctx, session.input)
 	if err := errors.Join(runErr, ctx.Err()); err != nil {
 		return completion, incompleteHereHandoff(run, err)
@@ -184,10 +185,6 @@ func hereRunInput(run string, award controllerwire.ClaimedUnit) (nodehost.RunInp
 	if err != nil || award.Request.Version != 1 || award.Request.Request.Version != 1 || award.Request.RunID == "" || award.Request.Hash == "" || hash != award.Request.Hash {
 		return input, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an invalid here request seal"}
 	}
-	input.SealedRequest, err = json.Marshal(award.Request)
-	if err != nil {
-		return input, err
-	}
 	if award.Accepted != nil {
 		accepted := award.Accepted
 		_, sealErr := runspec.CheckSeal(accepted.Spec, accepted.Spec)
@@ -195,18 +192,8 @@ func hereRunInput(run string, award controllerwire.ClaimedUnit) (nodehost.RunInp
 		if sealErr != nil || planErr != nil || planHash != accepted.PlanHash || accepted.Spec.Request.Hash != award.Request.Hash || accepted.Spec.PlanHash != accepted.PlanHash {
 			return input, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned inconsistent here seals"}
 		}
-		body, err := json.Marshal(accepted.Spec)
-		if err != nil {
-			return input, err
-		}
-		input.Accepted = &nodehost.AcceptedRun{RunID: run, Spec: body, SpecHash: string(accepted.Spec.Hash), PlanHash: string(accepted.PlanHash)}
-		decoder := json.NewDecoder(bytes.NewReader(accepted.Plan))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&input.Accepted.Plan); err != nil {
-			return input, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an invalid accepted here plan"}
-		}
 	}
-	return input, nil
+	return nodehost.NewRunInput(award)
 }
 
 func runHereResumeCommand(ctx context.Context, flags triggerFlags, out io.Writer,

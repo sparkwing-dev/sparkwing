@@ -15,7 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -39,10 +38,6 @@ type Options struct {
 	Git *sparkwing.Git
 
 	Delegate sparkwing.Logger
-
-	Runner runner.Runner
-
-	ProcessPerNode bool
 
 	ParentRunID string
 
@@ -83,8 +78,6 @@ type Options struct {
 	PipelineYAML *pipelines.Pipeline
 
 	MaxParallel int
-
-	DispatchWaitTimeout time.Duration
 
 	State storage.StateStoreOld
 

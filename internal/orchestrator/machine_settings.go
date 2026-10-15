@@ -43,14 +43,6 @@ var boxIDSetting = sync.OnceValues(func() (string, error) {
 	return strings.TrimSpace(s.BoxID), nil
 })
 
-// SetTestBoxID makes the box scope read id in place of machine.box_id until
-// the test ends.
-func SetTestBoxID(t interface{ Cleanup(func()) }, id string) {
-	original := boxIDSetting
-	t.Cleanup(func() { boxIDSetting = original })
-	boxIDSetting = func() (string, error) { return id, nil }
-}
-
 var warnBoxIDOnce sync.Once
 
 func boxHostID() string {
