@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
@@ -17,31 +16,38 @@ func TestCacheExcludedCounts_CountsCacheDominantRunsPerPipeline(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
+	number := 0
 
 	run := func(pipeline, runID string, outcomes ...string) {
 		t.Helper()
-		if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: pipeline, Status: "done", StartedAt: time.Now()}); err != nil {
+		number++
+		_, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `INSERT INTO runs
+ (team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days)
+ VALUES (?,?,?,?,'success',?,'request',1,'gh:1','host','execute',?,'fixture',1,2,'r30',30)`), store.DefaultTeam, runID, number, pipeline, []byte(`{}`), []byte(`[]`))
+		if err != nil {
 			t.Fatal(err)
 		}
 		for i, oc := range outcomes {
 			nodeID := fmt.Sprintf("n%d", i)
-			if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
-				t.Fatal(err)
-			}
+			status := "pending"
+			var finished any
 			if oc != "" {
-				if err := st.FinishNode(ctx, runID, nodeID, oc, "", nil); err != nil {
-					t.Fatal(err)
-				}
+				status, finished = "done", int64(2)
+			}
+			_, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `INSERT INTO nodes
+ (team,run_id,node_id,status,outcome,finished_at,spec_json,execution_json) VALUES (?,?,?,?,?,?,?,?)`), store.DefaultTeam, runID, nodeID, status, oc, finished, []byte(`{}`), []byte(`{}`))
+			if err != nil {
+				t.Fatal(err)
 			}
 		}
 	}
 
-	run("alpha", "a1", "cached", "cached")
-	run("alpha", "a2", "cached", "success")
-	run("beta", "b1", "cached")
+	run("alpha", "a1", "memoized", "memoized")
+	run("alpha", "a2", "memoized", "success")
+	run("beta", "b1", "memoized")
 	run("beta", "b2", "success", "success")
 
-	counts, err := st.CacheExcludedCounts(ctx, "", "cached", 0.9)
+	counts, err := tenantFor(t, st, store.DefaultTeam).CacheExcludedCounts(ctx, "", "memoized", 0.9)
 	if err != nil {
 		t.Fatalf("CacheExcludedCounts: %v", err)
 	}
@@ -52,7 +58,7 @@ func TestCacheExcludedCounts_CountsCacheDominantRunsPerPipeline(t *testing.T) {
 		t.Errorf("beta count = %d, want 1", counts["beta"])
 	}
 
-	scoped, err := st.CacheExcludedCounts(ctx, "alpha", "cached", 0.9)
+	scoped, err := tenantFor(t, st, store.DefaultTeam).CacheExcludedCounts(ctx, "alpha", "memoized", 0.9)
 	if err != nil {
 		t.Fatalf("scoped CacheExcludedCounts: %v", err)
 	}

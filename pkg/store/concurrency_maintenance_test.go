@@ -293,7 +293,7 @@ func TestMaintainConcurrency_PreservesAgedWaiterForLiveRun(t *testing.T) {
 	if got := waiterCount(t, s, "k"); got != 1 {
 		t.Fatalf("waiters = %d, want live waiter retained", got)
 	}
-	resolution, err := s.ResolveWaiter(ctx, "k", "queued", "", "", "", "", false)
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "k", "queued", "", "", "", "", false)
 	if err != nil {
 		t.Fatalf("ResolveWaiter: %v", err)
 	}

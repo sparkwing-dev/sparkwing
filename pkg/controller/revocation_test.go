@@ -172,9 +172,9 @@ func TestRevokeToken_EndsTheDashboardSessionsItOpened(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
-	rawSession, _, err := f.store.CreateTokenSession(t.Context(), tok.Prefix, tok.Principal, tok.Team, time.Hour, now)
+	rawSession, _, err := f.store.CreateCapabilitySession(t.Context(), tok.Prefix, time.Hour)
 	if err != nil {
-		t.Fatalf("CreateTokenSession: %v", err)
+		t.Fatalf("CreateCapabilitySession: %v", err)
 	}
 	sessionStatus := func() int {
 		t.Helper()

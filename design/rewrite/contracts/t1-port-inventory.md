@@ -8,6 +8,25 @@ The primary inventory has 74 changed or added functions: 6 lifecycle, 6 state-ma
 
 ## Source snapshots
 
+The unfenced node/trigger reapers and their dispatcher-expiry helpers are removed.
+`pkg/controller/reaper_test.go:TestReaperRecoversExpiredOwnerAndKeepsLiveOwner`
+replaces its private ticker-based reaper with the real elected controller pass.
+It reverses the old assertion that a remote owner loss fails the run.
+`pkg/store/reaper_fence_property_test.go:TestReaperFenceProperty` generates forged
+holders and generations, exact expiry and takeover. Refusals change no snapshot.
+`recovery_test.go:TestRecovery/recovery-local-orphans/store-sqlite` ports local
+orphan persistence through repeat passes and reopening. Existing same-run owner,
+attempt, cancellation and bounded-reaper tests retain the other recovery assertions.
+Native heartbeat and process-termination proofs remain required.
+The two legacy `TestLease_Reaper*` tests are replaced by that controller pass and
+the final owner/reclaim tests. `TestExpiry_ALapsedClaimRetriesThroughSettle` is
+deleted because disruptions no longer consume application retries. Its ordinal,
+stale-report and exhaustion checks live in the unstarted/started-lapse SQLite
+cells and final unit-reaper tests. The private-pass error-suppression test
+`TestExpiry_ADispatchFailureDoesNotBlockTheOrchestratorPass` is deleted with those
+passes. `TestOwnerRequeueRollsBackWhenEventCannotCommit` instead requires a loud
+error and transactional rollback through the sole reaper.
+
 The SQLite store proofs
 `recovery_test.go:TestRecovery/recovery-cancel-beats-loss/store-sqlite` and
 `recovery_test.go:TestRecovery/recovery-reconciler-waits-and-reclaims/store-sqlite` port
@@ -17,6 +36,72 @@ They check the final store transactions, persisted attempts and events, reopenin
 and racing reconciliations.
 Enrollment is a contract fake. Native owner processes and HTTP remain required
 by the existing placement cells.
+
+`recovery_test.go:TestRecovery/recovery-unstarted-lapse/store-sqlite` exercises
+five unstarted job lapses, reopening after each requeue. Attempts, disruptions
+and application retries stay zero. Each next award advances generation. The
+first execution then starts attempt one. Old holders cannot finish the job,
+and the five lapses create no sibling run. This adds coverage to the existing
+recovery ports without completing the native process cells.
+
+`recovery_test.go:TestRecovery/recovery-started-lapse-cap/store-sqlite` exercises
+three started job lapses with reopening after each loss. Generations advance,
+attempts retain ordinals one through three, and application retries stay zero.
+Each lost attempt closes with agent_lost. The third loss fails the job and
+reconciliation keeps it terminal without another claim. The proof checks exact
+events and refuses stale reports after every loss. It adds coverage without a
+new archived source-function identity or native process evidence.
+
+`recovery_test.go:TestRecovery/recovery-concurrency-continuous-adoption/store-sqlite`
+checks node and plan capacity through owner loss, remote renewal, reopening and
+successor adoption. Node and run terminal transactions release their own groups.
+Each release admits exactly one queued competitor. Enrollment is a contract fake.
+Native processes and placement transports remain required.
+
+`recovery_test.go:TestRecovery/recovery-application-retry-ordinal/store-sqlite`
+adds persistence evidence for a failed attempt followed by a successful retry.
+It checks the unchanged holder, generation and lease, zero disruptions, distinct
+attempt ordinals, terminal replay and exactly one retry event. Native process
+continuity remains required. The old local
+`TestReapExpiredNodeClaims_KeepsTheClaimGeneration` fixture is deleted because
+the active unstarted-lapse and reconciler cells already check exact generation
+preservation on reaping and advancement on each next award.
+
+`pkg/store/maintenance_identity_test.go` ports the preservation assertions from
+`TestPruneSpentIdentityKeepsWhatStillAdmits` to the final leased API. It covers
+bounded invitation cleanup, expiry and repeated passes. The generated session
+property preserves live sessions and capability-parent rows. Rollback and expired
+maintenance fences leave both tables unchanged. Token-table assertions are
+removed with that table. Capability expiry remains covered by the final retention
+and ancestry tests. The invitation API proof checks nanosecond persistence for
+creation, listing, email delivery, acceptance and withdrawal.
+
+`pkg/store/concurrency_admission_runtime_test.go:TestHolderLivenessUsesStoreClock`
+replaces `TestConcurrencyGuard_CanonicalSQLSitesOnly` from design-found-hotfixes.
+Acquisition uses the injected clock. Expired capacity stops counting, heartbeat
+and adoption cannot revive it, and reacquisition creates a new lease. The
+96-case `TestConcurrencyExpiredCapacityNeverRevivesProperty` varies lease length
+and exact-expiry boundaries. The old source-count assertion is deleted.
+
+`placement_test.go:TestPlacement/placement-granted-identity-and-capacity/store-sqlite`
+extends the existing package ports into active SQLite acceptance. It checks
+named and queued claims for capacity, authenticated name, self-asserted labels,
+repository enrollment, metering and granted pool toleration. Matcher, authority,
+claims, events and billing-award persistence are real. Enrollment is a contract
+fake. Refusals must come from matching, leave no events or billing awards, and
+permit a subsequent claim when the missing requirement is supplied. Metered
+success and launcher settlement remain outside this proof.
+
+The archived cases exercised by that cell are
+TestQueueClaimNeverTakesANodeLargerThanTheRunnersCapacity,
+TestQueueClaimBindsNameToTheTokenPrincipal,
+TestNamedClaimAppliesTheClaimantsProfile,
+TestNamedClaimOfAMeteredAgentObeysItsAcceptList,
+TestNamedClaimFromADispatcherThatSendsNoLabels,
+TestPlacementToday_TriggerClaimMatchesNoLabels and
+TestPlacementToday_SelfAssertedLabelsSatisfyRequires from the placement snapshot.
+The package ports already replaced their old fixtures. This continuation adds
+no new archived source-function identity to the inventory.
 
 `credentials_test.go:TestCredentials/credentials-operator-console-split/store-sqlite`
 checks trusted bootstrap/service issuance, rejection of console grants and
@@ -120,7 +205,7 @@ The final three comparisons include all changes since the recorded merge base. E
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/controller/github_runners_test.go` | `TestGitHubRunnerCredentialReadsOnlyAClaimedPipelinesProfile` | `TestGitHubRunnerCredentialReadsOnlyAClaimedPipelinesProfile` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/github_actions`. No claim and another pipeline are denied. An authorized missing sizing record returns not-found. Use `pipelineOfBoundRun` on the final sizing route. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/controller/log_segments_internal_test.go` | `TestTriggerFencedLogWritesRefuseALiveHolder` | `TestTriggerFencedLogWritesRefuseALiveHolder` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/log_mutations`. A competing holder cannot append, sign or seal logs. Delete the unfenced-admin bypass. Recheck after request-body consumption and before mutation. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/controller/runner_scopes_test.go` | `TestRunnerScopes_ProfileWritesAreScopedToTheClaimedPipeline` | `TestRunnerScopes_ProfileWritesAreScopedToTheClaimedPipeline` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/read_and_write`. Exact sealed repo and pipeline bind observations and pins. Delete shared bare-key authority. |
-| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/store/concurrency_guard_test.go` | `TestConcurrencyGuard_CanonicalSQLSitesOnly` | `TestConcurrencyGuard_CanonicalSQLSitesOnly` | Replace | `pkg/store/concurrency_test.go:TestHolderLivenessUsesStoreClock`. Keep canonical liveness behavior. Old textual counts of 21 node helper calls and 11 trigger helper calls are not target requirements. |
+| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/store/concurrency_guard_test.go` | `TestConcurrencyGuard_CanonicalSQLSitesOnly` | `TestConcurrencyGuard_CanonicalSQLSitesOnly` | Replace | Implemented in `pkg/store/concurrency_admission_runtime_test.go:TestHolderLivenessUsesStoreClock` and `pkg/store/concurrency_scope_property_test.go:TestConcurrencyExpiredCapacityNeverRevivesProperty`. Canonical liveness uses the injected store clock. Expired capacity cannot renew or adopt. The old source-count test is deleted. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/store/controller_dispatch_test.go` | `TestReportAttempt_ARecoveryNodeWaitsOnItsOwnDeps` | `TestReportAttempt_ARecoveryNodeWaitsOnItsOwnDeps` | Keep | `lifecycle_test.go:TestLifecycle/lifecycle-dependency-verdicts/controller` and `pkg/store/decide_test.go:TestRecoveryDependencies`. Success of an own dependency releases recovery. Failure cancels it. A successful recovery does not erase the original run failure. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/store/node_claim_fence_holder_test.go` | `TestTriggerFencedNodeWritesRefuseALiveHolder` | `TestTriggerFencedNodeWritesRefuseALiveHolder` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/node_mutations` and `recovery_test.go:TestRecovery/recovery-reconciler-waits-and-reclaims`. Refuse competing live writes and terminal reversal. Reverse the last old assertion allowing the host to finish after lease lapse. The reaper and reconciler own that recovery. Delete host lifecycle-event append and `ResetNodeForAutoRetry`. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/store/profile_claim_test.go` | `TestPrincipalHoldsProfileClaimMatchesTheClaimedRunsExactKey` | `TestPrincipalHoldsProfileClaimMatchesTheClaimedRunsExactKey`, subtests `build`, `ci/build`, `3:abcbuild` | Replace | `pkg/store/capability_test.go:TestSizingBinding` and `credentials_test.go:TestCredentials/credentials-holder-mutation-races/pipeline_names`. Preserve full pipeline names and exact repo identity. Delete authorization through bare shared profile keys. |
@@ -145,7 +230,7 @@ The final three comparisons include all changes since the recorded merge base. E
 | `service-credits` | Replace with the final billing/service authority. It must not grant unrelated operator-console powers. |
 | `service-launch` | Keep a launcher service root that can Award across teams through the fixed table. |
 | `service-storage` | Drop `storage.count`. There is no cache service or cache audience. |
-| `session` | Keep account-session role checks through the same route policy. |
+| `session` | Store/component evidence: `TestSessionMembershipChangesApplyWithoutCachedGrantsProperty`, `TestSessionRoutePreservesCapabilityScopeProperty` and `TestCredentials/credentials-session-digest-csrf/store-sqlite` check current roles, capability ceilings, digest lookup and sealed CSRF persistence. Native route-matrix evidence remains required. |
 | `member` | Keep team-member grants. A member does not gain work-claim grants directly. |
 | `machine` | Keep machine root claim scopes. Secret/source/data/OIDC access requires a live award. |
 | `machine+trigger` | Replace caller-supplied trigger fence with the awarded trigger capability. A root plus forged headers gains nothing. |

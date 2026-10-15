@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -15,13 +17,13 @@ func TestController_QueueStateViewUnifiesKeys(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: "deploy-prod", HolderID: "holder", RunID: "run-a", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	}); err != nil {
 		t.Fatalf("acquire holder: %v", err)
 	}
-	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: "deploy-prod", HolderID: "waiter", RunID: "run-b", NodeID: "n2",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	}); err != nil {

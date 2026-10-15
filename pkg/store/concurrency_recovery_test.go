@@ -26,7 +26,7 @@ func TestConcurrency_ReleaseAndNotifyIsAtomic(t *testing.T) {
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
 
-	released, followers, promoted, err := s.ReleaseAndNotify(ctx, "k", "leader", "success", "", "", 0, 0)
+	released, followers, promoted, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", "leader", "success", "", "", 0, 0)
 	if err != nil {
 		t.Fatalf("release: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestConcurrency_ReleaseAndNotifyIsAtomic(t *testing.T) {
 		t.Fatalf("expected w1 promoted, got %+v", promoted)
 	}
 
-	state, _ := s.GetConcurrencyState(ctx, "k")
+	state, _ := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
 	if len(state.Holders) != 1 || state.Holders[0].HolderID != "w1" {
 		t.Fatalf("holders = %+v", state.Holders)
 	}
@@ -68,7 +68,7 @@ func TestConcurrency_ReconcileRecoversOrphanedQueue(t *testing.T) {
 		t.Fatalf("manual drop: %v", err)
 	}
 
-	state, _ := s.GetConcurrencyState(ctx, "k")
+	state, _ := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
 	if len(state.Holders) != 0 || len(state.Waiters) != 1 {
 		t.Fatalf("setup: expected 0 holders + 1 waiter, got %+v", state)
 	}
@@ -81,7 +81,7 @@ func TestConcurrency_ReconcileRecoversOrphanedQueue(t *testing.T) {
 		t.Fatalf("expected 1 waiter promoted, got %d", promoted)
 	}
 
-	state, _ = s.GetConcurrencyState(ctx, "k")
+	state, _ = tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
 	if len(state.Holders) != 1 || state.Holders[0].HolderID != "w1" {
 		t.Fatalf("post-reconcile holders: %+v", state.Holders)
 	}
@@ -105,14 +105,14 @@ func TestConcurrency_ResolveWaiterPromotesOrphanedQueue(t *testing.T) {
 		t.Fatalf("manual drop: %v", err)
 	}
 
-	resolution, err := s.ResolveWaiter(ctx, "k", "r1", "n", "", "", "", false)
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "k", "r1", "n", "", "", "", false)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "w1" {
 		t.Fatalf("resolution = %+v", resolution)
 	}
-	state, _ := s.GetConcurrencyState(ctx, "k")
+	state, _ := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
 	if len(state.Holders) != 1 || state.Holders[0].HolderID != "w1" {
 		t.Fatalf("holders = %+v", state.Holders)
 	}
@@ -143,7 +143,7 @@ func TestConcurrency_ResolveWaiterSkipsAbandonedFIFOHead(t *testing.T) {
 		t.Fatalf("manual drop: %v", err)
 	}
 
-	resolution, err := s.ResolveWaiter(ctx, "k", "live", "n", "", "", "", false)
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "k", "live", "n", "", "", "", false)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestConcurrency_ResolveWaiterSkipsAbandonedFIFOHead(t *testing.T) {
 	if holderExists(t, s, "k", "abandoned") {
 		t.Fatalf("abandoned FIFO head was promoted into a holder")
 	}
-	state, _ := s.GetConcurrencyState(ctx, "k")
+	state, _ := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
 	if len(state.Waiters) != 0 {
 		t.Fatalf("waiters = %+v", state.Waiters)
 	}
@@ -187,7 +187,7 @@ func TestConcurrency_PromoteUsesRunningRunCreatedBeforeHeartbeatLoop(t *testing.
 		"k", "leader"); err != nil {
 		t.Fatalf("manual drop: %v", err)
 	}
-	promoted, err := s.PromoteNextWaiters(ctx, "k", store.DefaultConcurrencyLease)
+	promoted, err := tenantFor(t, s, store.DefaultTeam).PromoteNextWaiters(ctx, "k", store.DefaultConcurrencyLease)
 	if err != nil {
 		t.Fatalf("promote: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestConcurrency_PromotePreservesFreshRunningRunWithNullHeartbeat(t *testing
 		"k", "leader"); err != nil {
 		t.Fatalf("manual drop: %v", err)
 	}
-	promoted, err := s.PromoteNextWaiters(ctx, "k", store.DefaultConcurrencyLease)
+	promoted, err := tenantFor(t, s, store.DefaultTeam).PromoteNextWaiters(ctx, "k", store.DefaultConcurrencyLease)
 	if err != nil {
 		t.Fatalf("promote: %v", err)
 	}
@@ -255,14 +255,14 @@ func TestConcurrency_ResolveWaiterPromotesOrphanedPlanQueue(t *testing.T) {
 		t.Fatalf("manual drop: %v", err)
 	}
 
-	resolution, err := s.ResolveWaiter(ctx, "k", "waiter", "", "", "", "", false)
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "k", "waiter", "", "", "", "", false)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "waiter/-" {
 		t.Fatalf("resolution = %+v", resolution)
 	}
-	state, _ := s.GetConcurrencyState(ctx, "k")
+	state, _ := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
 	if len(state.Holders) != 1 || state.Holders[0].RunID != "waiter" || state.Holders[0].NodeID != "" {
 		t.Fatalf("holders = %+v", state.Holders)
 	}
@@ -277,7 +277,7 @@ func TestConcurrency_ResolveWaiterSeesAlreadyPromotedHolder(t *testing.T) {
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
 
-	resolution, err := s.ResolveWaiter(ctx, "k", "waiter", "n", "", "", "", false)
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "k", "waiter", "n", "", "", "", false)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestConcurrency_CoalesceFollowerPromotesWhenLeaderRunEndsWithoutNodeVerdict
 		t.Fatalf("FinishRun: %v", err)
 	}
 
-	resolution, err := s.ResolveWaiter(ctx, "cache-cancelled-run", "follower", "node", "same-content", "leader", "node", false)
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "cache-cancelled-run", "follower", "node", "same-content", "leader", "node", false)
 	if err != nil {
 		t.Fatalf("ResolveWaiter: %v", err)
 	}
@@ -358,7 +358,7 @@ func TestConcurrency_CoalesceFollowerWaitsForLiveLeaderWithoutNodeVerdict(t *tes
 		t.Fatalf("follower: want Coalesced got %s", follower.Kind)
 	}
 
-	resolution, err := s.ResolveWaiter(ctx, "cache-live-leader", "follower", "node", "same-content", "leader", "node", false)
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "cache-live-leader", "follower", "node", "same-content", "leader", "node", false)
 	if err != nil {
 		t.Fatalf("ResolveWaiter: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterCancelledLeaderRelease(t *test
 		t.Fatalf("follower: want Coalesced got %s", follower.Kind)
 	}
 
-	released, followers, _, err := s.ReleaseAndNotify(ctx, "cache-cancelled-release", "leader/node", "cancelled", "", "same-content", time.Hour, 0)
+	released, followers, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "cache-cancelled-release", "leader/node", "cancelled", "", "same-content", time.Hour, 0)
 	if err != nil {
 		t.Fatalf("ReleaseAndNotify: %v", err)
 	}
@@ -408,7 +408,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterCancelledLeaderRelease(t *test
 		t.Fatalf("cancelled leader must not resolve cached followers instead of resolving followers, got %+v", followers)
 	}
 
-	resolution, err := s.ResolveWaiter(ctx, "cache-cancelled-release", "follower", "node", "same-content", "leader", "node", false)
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "cache-cancelled-release", "follower", "node", "same-content", "leader", "node", false)
 	if err != nil {
 		t.Fatalf("ResolveWaiter: %v", err)
 	}
@@ -452,7 +452,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterFailedLeaderRelease(t *testing
 	if err := s.FinishNode(ctx, "leader", "node", "failed", "command terminated", nil); err != nil {
 		t.Fatalf("FinishNode: %v", err)
 	}
-	released, followers, _, err := s.ReleaseAndNotify(ctx, "cache-failed-release", "leader/node", "failed", "", "same-content", time.Hour, 0)
+	released, followers, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "cache-failed-release", "leader/node", "failed", "", "same-content", time.Hour, 0)
 	if err != nil {
 		t.Fatalf("ReleaseAndNotify: %v", err)
 	}
@@ -463,7 +463,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterFailedLeaderRelease(t *testing
 		t.Fatalf("failed leader must not resolve followers, got %+v", followers)
 	}
 
-	resolution, err := s.ResolveWaiter(ctx, "cache-failed-release", "follower", "node", "same-content", "leader", "node", false)
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "cache-failed-release", "follower", "node", "same-content", "leader", "node", false)
 	if err != nil {
 		t.Fatalf("ResolveWaiter: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterSkippedLeaderRelease(t *testin
 	if err := s.FinishNode(ctx, "leader", "node", "skipped", "", nil); err != nil {
 		t.Fatalf("FinishNode: %v", err)
 	}
-	released, followers, _, err := s.ReleaseAndNotify(ctx, "cache-skipped-release", "leader/node", "skipped", "", "same-content", time.Hour, 0)
+	released, followers, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "cache-skipped-release", "leader/node", "skipped", "", "same-content", time.Hour, 0)
 	if err != nil {
 		t.Fatalf("ReleaseAndNotify: %v", err)
 	}
@@ -518,7 +518,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterSkippedLeaderRelease(t *testin
 		t.Fatalf("skipped leader must not resolve followers, got %+v", followers)
 	}
 
-	resolution, err := s.ResolveWaiter(ctx, "cache-skipped-release", "follower", "node", "same-content", "leader", "node", false)
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "cache-skipped-release", "follower", "node", "same-content", "leader", "node", false)
 	if err != nil {
 		t.Fatalf("ResolveWaiter: %v", err)
 	}
@@ -557,7 +557,7 @@ func TestConcurrency_CoalesceFollowerSurvivesMaintenanceAfterCancelledLeaderRele
 		t.Fatalf("follower: want Coalesced got %s", follower.Kind)
 	}
 
-	released, followers, _, err := s.ReleaseAndNotify(ctx, "cache-cancelled-leader-maintenance", "leader/node", "cancelled", "", "same-content", time.Hour, 0)
+	released, followers, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "cache-cancelled-leader-maintenance", "leader/node", "cancelled", "", "same-content", time.Hour, 0)
 	if err != nil {
 		t.Fatalf("ReleaseAndNotify: %v", err)
 	}
@@ -575,7 +575,7 @@ func TestConcurrency_CoalesceFollowerSurvivesMaintenanceAfterCancelledLeaderRele
 		t.Fatalf("live follower should survive maintenance, dropped %+v", dropped)
 	}
 
-	resolution, err := s.ResolveWaiter(ctx, "cache-cancelled-leader-maintenance", "follower", "node", "same-content", "leader", "node", false)
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "cache-cancelled-leader-maintenance", "follower", "node", "same-content", "leader", "node", false)
 	if err != nil {
 		t.Fatalf("ResolveWaiter: %v", err)
 	}
@@ -625,7 +625,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterLeaderAgentLost(t *testing.T) 
 		t.Fatalf("manual drop: %v", err)
 	}
 
-	resolution, err := s.ResolveWaiter(ctx, "cache-agent-lost-leader", "follower", "node", "same-content", "leader", "node", false)
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "cache-agent-lost-leader", "follower", "node", "same-content", "leader", "node", false)
 	if err != nil {
 		t.Fatalf("ResolveWaiter: %v", err)
 	}
@@ -669,7 +669,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterLeaderAgentLostRelease(t *test
 	if err := s.FinishNodeWithReason(ctx, "leader", "node", "failed", "runner heartbeat expired", nil, store.FailureAgentLost, nil); err != nil {
 		t.Fatalf("FinishNodeWithReason: %v", err)
 	}
-	released, followers, _, err := s.ReleaseAndNotify(ctx, "cache-agent-lost-release", "leader/node", "failed", "", "same-content", time.Hour, 0)
+	released, followers, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "cache-agent-lost-release", "leader/node", "failed", "", "same-content", time.Hour, 0)
 	if err != nil {
 		t.Fatalf("ReleaseAndNotify: %v", err)
 	}
@@ -680,7 +680,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterLeaderAgentLostRelease(t *test
 		t.Fatalf("agent-lost leader must not resolve cached followers, got %+v", followers)
 	}
 
-	resolution, err := s.ResolveWaiter(ctx, "cache-agent-lost-release", "follower", "node", "same-content", "leader", "node", false)
+	resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "cache-agent-lost-release", "follower", "node", "same-content", "leader", "node", false)
 	if err != nil {
 		t.Fatalf("ResolveWaiter: %v", err)
 	}
@@ -699,7 +699,7 @@ func TestConcurrency_CoalesceFollowerRejectsNonReusableCompletedOutcomes(t *test
 				t.Fatalf("FinishNode: %v", err)
 			}
 
-			resolution, err := s.ResolveWaiter(ctx, "cache-canonical-outcome", "follower", "node", "same-content", "leader", "node", false)
+			resolution, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctx, "cache-canonical-outcome", "follower", "node", "same-content", "leader", "node", false)
 			if err != nil {
 				t.Fatalf("ResolveWaiter: %v", err)
 			}
@@ -739,7 +739,7 @@ func TestConcurrency_WaiterReaperDropsOrphanFollowers(t *testing.T) {
 	if len(dropped) != 1 || dropped[0].RunID != "r1" {
 		t.Fatalf("expected r1 dropped, got %+v", dropped)
 	}
-	state, _ := s.GetConcurrencyState(ctx, "k")
+	state, _ := tenantFor(t, s, store.DefaultTeam).GetConcurrencyState(ctx, "k")
 	if len(state.Waiters) != 0 {
 		t.Fatalf("waiter should have been reaped, got %+v", state.Waiters)
 	}

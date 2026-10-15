@@ -900,16 +900,3 @@ func (s *Store) everHeldCredits(ctx context.Context, team Team) (_ bool, err err
 	}
 	return held, tx.Commit()
 }
-
-// RunFinished reports whether team's run ended, so its logs may be pruned. A
-// run still going, or one no longer recorded, is not finished; retention
-// removes the logs of a run nobody records.
-func (s *Store) RunFinished(ctx context.Context, team Team, runID string) (bool, error) {
-	var status string
-	err := s.queryRow(ctx, `SELECT status FROM runs WHERE team = ? AND id = ?`,
-		string(NormalizeTeam(team)), runID).Scan(&status)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return err == nil && isTerminalRunStatus(status), err
-}

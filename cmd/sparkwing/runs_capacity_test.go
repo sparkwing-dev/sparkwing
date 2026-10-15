@@ -36,7 +36,7 @@ func TestRunCapacityReset_DropsProfileAndReportsCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 3; i++ {
-		if err := st.RecordProfileObservation(ctx, "build", "", store.ProfileObservation{Duration: time.Second, PeakCores: 2, CPUMeasured: true}); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "build", "", store.ProfileObservation{Duration: time.Second, PeakCores: 2, CPUMeasured: true}); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
@@ -56,7 +56,7 @@ func TestRunCapacityReset_DropsProfileAndReportsCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st2.Close() }()
-	prof, err := st2.GetPipelineProfile(ctx, "build", "")
+	prof, err := teststore.ForTeam(t, st2, store.DefaultTeam).GetPipelineProfile(ctx, "build", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,13 +81,13 @@ func TestRunCapacityReset_ClearsAFloorWithNoSamplesBehindIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RecordProfileObservation(ctx, "myrepo/ci", "", store.ProfileObservation{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "myrepo/ci", "", store.ProfileObservation{
 		CPUMeasured: true, PlanHash: "A", Contended: true,
 		FloorCores: 6.5, FloorMemoryBytes: 7 << 30,
 	}); err != nil {
 		t.Fatalf("seed floor: %v", err)
 	}
-	seeded, err := st.GetPipelineProfile(ctx, "myrepo/ci", "")
+	seeded, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "myrepo/ci", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestRunCapacityReset_ClearsAFloorWithNoSamplesBehindIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st2.Close() }()
-	prof, err := st2.GetPipelineProfile(ctx, "myrepo/ci", "")
+	prof, err := teststore.ForTeam(t, st2, store.DefaultTeam).GetPipelineProfile(ctx, "myrepo/ci", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestRunCapacityReset_ReachesEveryEncodingOfOneName(t *testing.T) {
 	}
 	encoded := store.JoinProfileKey("sample-repo", "ci")
 	for _, key := range []string{"sample-repo/ci", encoded} {
-		if err := st.RecordProfileObservation(ctx, key, "", store.ProfileObservation{Duration: time.Second, PeakCores: 2, CPUMeasured: true}); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).RecordProfileObservation(ctx, key, "", store.ProfileObservation{Duration: time.Second, PeakCores: 2, CPUMeasured: true}); err != nil {
 			t.Fatalf("seed %s: %v", key, err)
 		}
 	}
@@ -176,7 +176,7 @@ func TestRunCapacityReset_ReachesEveryEncodingOfOneName(t *testing.T) {
 	}
 	defer func() { _ = st2.Close() }()
 	for _, key := range []string{"sample-repo/ci", encoded} {
-		prof, err := st2.GetPipelineProfile(ctx, key, "")
+		prof, err := teststore.ForTeam(t, st2, store.DefaultTeam).GetPipelineProfile(ctx, key, "")
 		if err != nil {
 			t.Fatal(err)
 		}

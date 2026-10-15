@@ -47,7 +47,7 @@ func TestRecordRunProfile_AggregatesNodeMetricsIntoProfiles(t *testing.T) {
 	pin := &capacity.Pin{Cores: 1}
 	recordRunProfile(ctx, localState{st: st}, "demo", "r1", pin, "", runCharge{}, false, start, start.Add(6*time.Second))
 
-	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
+	rollup, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "")
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestRecordRunProfile_AggregatesNodeMetricsIntoProfiles(t *testing.T) {
 		t.Errorf("rollup PinnedCores = %v, want the persisted pin 1", rollup.PinnedCores)
 	}
 
-	node, err := st.GetPipelineProfile(ctx, "demo", "build")
+	node, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "build")
 	if err != nil || node == nil {
 		t.Fatalf("node profile missing: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestRecordRunProfile_ContendedCeilingHitEscalatesFloor(t *testing.T) {
 
 	recordRunProfile(ctx, localState{st: st}, "demo", "r1", nil, "A", runCharge{Cores: 4}, true, start, start.Add(time.Second))
 
-	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
+	rollup, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "")
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestRecordRunProfile_ContendedBelowCeilingSetsFloorOnly(t *testing.T) {
 
 	recordRunProfile(ctx, localState{st: st}, "demo", "r1", nil, "A", runCharge{Cores: 8}, true, start, start.Add(time.Second))
 
-	rollup, _ := st.GetPipelineProfile(ctx, "demo", "")
+	rollup, _ := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "")
 	if rollup.FloorCores != 1 {
 		t.Errorf("FloorCores = %v, want 1 (measured peak; no ceiling escalation)", rollup.FloorCores)
 	}
@@ -174,14 +174,14 @@ func TestRecordRunProfile_CapsCPUProfileAtHostCapacity(t *testing.T) {
 
 	recordRunProfile(ctx, localState{st: st}, "demo", "r1", nil, "", runCharge{}, false, start, start.Add(time.Second))
 
-	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
+	rollup, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "")
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
 	if want := float64(runtime.NumCPU()); rollup.PeakCores != want {
 		t.Errorf("rollup PeakCores = %v, want host capacity %v", rollup.PeakCores, want)
 	}
-	node, err := st.GetPipelineProfile(ctx, "demo", "build")
+	node, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "build")
 	if err != nil || node == nil {
 		t.Fatalf("node profile missing: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestRecordRunProfile_RollupSumsDistinctNodeIntervals(t *testing.T) {
 
 	recordRunProfile(ctx, localState{st: st}, "fan", "r1", nil, "", runCharge{}, false, start, start.Add(4*time.Second))
 
-	rollup, err := st.GetPipelineProfile(ctx, "fan", "")
+	rollup, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "fan", "")
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestRecordRunProfile_RollupSumsDistinctNodeIntervals(t *testing.T) {
 	}
 
 	for _, nodeID := range []string{"fan-a", "fan-b"} {
-		node, err := st.GetPipelineProfile(ctx, "fan", nodeID)
+		node, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "fan", nodeID)
 		if err != nil || node == nil {
 			t.Fatalf("node %q profile missing: %v", nodeID, err)
 		}
@@ -297,7 +297,7 @@ func TestRecordRunProfile_ClearsStoredPinWhenPlanDeclaresNone(t *testing.T) {
 	createMeasuredRun("r2")
 	recordRunProfile(ctx, localState{st: st}, "demo", "r2", nil, "", runCharge{}, false, start, start.Add(time.Second))
 
-	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
+	rollup, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "")
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestRecordRunProfile_DurationExcludesQueueWait(t *testing.T) {
 	execStart := submit.Add(queueWait)
 	recordRunProfile(ctx, localState{st: st}, "demo", "r1", nil, "", runCharge{}, false, execStart, execStart.Add(execTime))
 
-	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
+	rollup, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "")
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
@@ -391,7 +391,7 @@ func TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks(t *testing.T)
 	measured("r1")
 	measured("r2")
 	measured("r3")
-	before, err := st.GetPipelineProfile(ctx, "demo", "")
+	before, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "")
 	if err != nil || before == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
@@ -399,7 +399,7 @@ func TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks(t *testing.T)
 	for i := 0; i < 5; i++ {
 		cachedRun(fmt.Sprintf("c%d", i))
 	}
-	after, err := st.GetPipelineProfile(ctx, "demo", "")
+	after, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "")
 	if err != nil || after == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
@@ -414,7 +414,7 @@ func TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks(t *testing.T)
 		t.Errorf("P50Duration moved from %s to %s after a cached burst", before.P50Duration, after.P50Duration)
 	}
 
-	counts, err := st.CacheExcludedCounts(ctx, "demo", string(sparkwing.Memoized), capacity.CacheDominantFraction)
+	counts, err := teststore.ForTeam(t, st, store.DefaultTeam).CacheExcludedCounts(ctx, "demo", string(sparkwing.Memoized), capacity.CacheDominantFraction)
 	if err != nil {
 		t.Fatalf("CacheExcludedCounts: %v", err)
 	}
@@ -462,7 +462,7 @@ func TestRecordRunProfile_CacheDominantRunStillFoldsItsExecutedNodes(t *testing.
 
 	recordRunProfile(ctx, localState{st: st}, "gate", "land1", nil, "", runCharge{}, false, start, start.Add(20*time.Second))
 
-	node, err := st.GetPipelineProfile(ctx, "gate", "build")
+	node, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "gate", "build")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -472,7 +472,7 @@ func TestRecordRunProfile_CacheDominantRunStillFoldsItsExecutedNodes(t *testing.
 	if node.PeakCores < 1.9 || node.PeakCores > 2.1 {
 		t.Errorf("executed node PeakCores = %v, want ~2.0", node.PeakCores)
 	}
-	rollup, err := st.GetPipelineProfile(ctx, "gate", "")
+	rollup, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "gate", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,7 +514,7 @@ func TestRecordRunProfile_MixedRunBelowThresholdStillFolds(t *testing.T) {
 
 	recordRunProfile(ctx, localState{st: st}, "demo", "r1", nil, "", runCharge{}, false, start, start.Add(20*time.Second))
 
-	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
+	rollup, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "")
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing for a below-threshold mixed run: %v", err)
 	}
@@ -544,7 +544,7 @@ func TestRecordRunProfile_NoSamplesWritesNothing(t *testing.T) {
 	}
 	recordRunProfile(ctx, localState{st: st}, "demo", "r1", nil, "", runCharge{}, false, start, start.Add(time.Second))
 
-	if rollup, _ := st.GetPipelineProfile(ctx, "demo", ""); rollup != nil {
+	if rollup, _ := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", ""); rollup != nil {
 		t.Errorf("expected no profile for a run with no samples, got %+v", rollup)
 	}
 }
@@ -568,7 +568,7 @@ func TestRecordRunProfilePartialKeepsExactUsageAndRaisesOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"build", ""} {
-		if err := st.RecordProfileObservation(ctx, "demo", id, store.ProfileObservation{CPUMeasured: true, Duration: time.Minute, PeakCores: 1, SustainedCores: 1, PeakMemoryBytes: 1000}); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "demo", id, store.ProfileObservation{CPUMeasured: true, Duration: time.Minute, PeakCores: 1, SustainedCores: 1, PeakMemoryBytes: 1000}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -583,7 +583,7 @@ func TestRecordRunProfilePartialKeepsExactUsageAndRaisesOnly(t *testing.T) {
 	}
 	recordRunProfile(ctx, localState{st: st}, "demo", "partial", nil, "", runCharge{}, false, start, start.Add(time.Second))
 	for _, id := range []string{"build", ""} {
-		p, err := st.GetPipelineProfile(ctx, "demo", id)
+		p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", id)
 		if err != nil {
 			t.Fatal(err)
 		}

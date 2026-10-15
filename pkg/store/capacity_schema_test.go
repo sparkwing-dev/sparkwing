@@ -18,20 +18,20 @@ func TestRecordProfileObservation_IgnoresLegacySamples(t *testing.T) {
 	legacy := `[{"d":19100000000,"c":3.0,"m":0},{"d":19000000000,"c":3.0,"m":0}]`
 	if _, err := st.exec(ctx, `
 INSERT INTO pipeline_profiles
-    (pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, updated_at, samples_json)
-VALUES (?, '', 19100, 19100, 3.0, 0, 2, ?, ?)`,
-		"demo", time.Now().UnixNano(), legacy); err != nil {
+    (team, pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, updated_at, samples_json)
+VALUES (?, ?, '', 19100, 19100, 3.0, 0, 2, ?, ?)`,
+		DefaultTeam, "demo", time.Now().UnixNano(), legacy); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+	if err := st.defaultTenant().RecordProfileObservation(ctx, "demo", "", ProfileObservation{
 		CPUMeasured: true,
 		Duration:    10 * time.Second, PeakCores: 3.0,
 	}); err != nil {
 		t.Fatalf("RecordProfileObservation: %v", err)
 	}
 
-	prof, err := st.GetPipelineProfile(ctx, "demo", "")
+	prof, err := st.defaultTenant().GetPipelineProfile(ctx, "demo", "")
 	if err != nil || prof == nil {
 		t.Fatalf("profile missing: %v", err)
 	}

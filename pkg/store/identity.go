@@ -718,7 +718,7 @@ func (s *Store) AccountMemberships(ctx context.Context, accountID string) (_ []M
 func (s *Store) OpenInvitationsForEmail(ctx context.Context, email string, now time.Time) (_ []Invitation, err error) {
 	rows, err := s.query(ctx, invitationSelect+`
 		WHERE i.email = ? AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
-		ORDER BY i.created_at`, NormalizeEmail(email), now.UTC().Unix())
+		ORDER BY i.created_at`, NormalizeEmail(email), now.UTC().UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -745,7 +745,7 @@ func scanInvitations(rows *sql.Rows) ([]Invitation, error) {
 			return nil, err
 		}
 		inv.Team, inv.Role = Team(team), Role(role)
-		inv.CreatedAt, inv.ExpiresAt = time.Unix(created, 0).UTC(), time.Unix(expires, 0).UTC()
+		inv.CreatedAt, inv.ExpiresAt = time.Unix(0, created).UTC(), time.Unix(0, expires).UTC()
 		out = append(out, inv)
 	}
 	return out, rows.Err()
@@ -802,7 +802,7 @@ func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID st
 	if !acct.EmailVerified || acct.Email != email {
 		return none, ErrEmailMismatch
 	}
-	if accepted.Valid || withdrawn.Valid || expires <= at {
+	if accepted.Valid || withdrawn.Valid || expires <= now.UnixNano() {
 		return none, ErrInvitationClosed
 	}
 	// safety: the gate row is locked before the member count and the admission
@@ -819,7 +819,7 @@ func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID st
 	// take it.
 	res, err := tx.ExecContext(ctx, `
 		UPDATE invitations SET accepted_at = ?, accepted_by = ?
-		WHERE id = ? AND team = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`, at, accountID, invitationID, team)
+		WHERE id = ? AND team = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`, now.UnixNano(), accountID, invitationID, team)
 	if err != nil {
 		return none, err
 	}
@@ -895,54 +895,28 @@ func (s *Store) SetActiveTeam(ctx context.Context, accountID string, team Team, 
 	return err
 }
 
-// CreateAccountSession opens a browser session for an account in team. The
-// session stores no scopes: they come from the account's membership on every
-// request, so a demoted account loses them on its next request rather than
-// at session expiry. An empty team is the session of an account that belongs
-// to no team yet, such as one on the waitlist; it authorizes no team route.
-func (s *Store) CreateAccountSession(
-	ctx context.Context, acct Account, team Team, ttl time.Duration, now time.Time,
-) (rawSession, csrfToken string, sess *Session, err error) {
-	if acct.ID == "" {
-		return "", "", nil, errors.New("sessions: account required")
-	}
-	if ttl <= 0 {
-		return "", "", nil, errors.New("sessions: ttl must be positive")
-	}
-	rawSession, err = newSessionID()
-	if err != nil {
-		return "", "", nil, err
-	}
-	if csrfToken, err = s.deriveCSRFToken(ctx, rawSession); err != nil {
-		return "", "", nil, err
-	}
-	expires := now.Add(ttl).UTC()
-	if _, err := s.exec(ctx, `
-		INSERT INTO sessions (hash, team, principal, scopes, account_id, created_at, expires_at)
-		VALUES (?, ?, ?, '', ?, ?, ?)`,
-		sessionDigest(rawSession), string(team), acct.Email, acct.ID, now.UTC().Unix(), expires.Unix()); err != nil {
-		return "", "", nil, fmt.Errorf("sessions: insert: %w", err)
-	}
-	return rawSession, csrfToken, &Session{
-		ID: rawSession, Principal: acct.Email, Team: team, AccountID: acct.ID,
-		CSRFToken: csrfToken, CreatedAt: now.UTC(), ExpiresAt: expires,
-	}, nil
+// CreateAccountSession opens a session for a current team member.
+func (s *Store) CreateAccountSession(ctx context.Context, acct Account, team Team, ttl time.Duration) (string, string, *Session, error) {
+	return s.createAccountSession(ctx, acct, team, "", "", ttl)
 }
 
-// CreateIdentityAccountSession opens a session only while the named provider
-// identity still belongs to acct. It serializes with unlink's session
-// revocation on the account row.
-func (s *Store) CreateIdentityAccountSession(
-	ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration, now time.Time,
-) (rawSession, csrfToken string, sess *Session, err error) {
-	if acct.ID == "" || provider == "" || subject == "" || ttl <= 0 {
-		return "", "", nil, fmt.Errorf("%w: account, provider, subject, and positive ttl required", ErrInvalidInput)
+// CreateIdentityAccountSession opens a session while the provider identity remains linked.
+func (s *Store) CreateIdentityAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error) {
+	if provider == "" || subject == "" {
+		return "", "", nil, fmt.Errorf("%w: provider and subject required", ErrInvalidInput)
 	}
-	rawSession, err = newSessionID()
+	return s.createAccountSession(ctx, acct, team, provider, subject, ttl)
+}
+
+func (s *Store) createAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error) {
+	if acct.ID == "" || ttl <= 0 {
+		return "", "", nil, fmt.Errorf("%w: account and positive ttl required", ErrInvalidInput)
+	}
+	raw, err := newSessionID()
 	if err != nil {
 		return "", "", nil, err
 	}
-	csrfToken, err = s.deriveCSRFToken(ctx, rawSession)
+	csrf, err := s.deriveCSRFToken(ctx, raw)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -954,28 +928,40 @@ func (s *Store) CreateIdentityAccountSession(
 	if err := lockAccountTx(ctx, tx, acct.ID); err != nil {
 		return "", "", nil, err
 	}
-	var linked string
-	err = tx.QueryRowContext(ctx, `SELECT account_id FROM identities WHERE provider = ? AND subject = ? AND account_id = ?`,
-		provider, subject, acct.ID).Scan(&linked)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", nil, ErrIdentityUnlinked
+	if provider != "" {
+		var linked string
+		err := tx.QueryRowContext(ctx, `SELECT account_id FROM identities WHERE provider=? AND subject=? AND account_id=?`, provider, subject, acct.ID).Scan(&linked)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", nil, ErrIdentityUnlinked
+		}
+		if err != nil {
+			return "", "", nil, err
+		}
 	}
-	if err != nil {
+	var role Role
+	if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`+tx.forShare(), team, acct.ID).Scan(&role); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			err = ErrNotMember
+		}
 		return "", "", nil, err
 	}
-	expires := now.Add(ttl).UTC()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (hash, team, principal, scopes, account_id, created_at, expires_at)
-		VALUES (?, ?, ?, '', ?, ?, ?)`, sessionDigest(rawSession), string(team), acct.Email, acct.ID,
-		now.UTC().Unix(), expires.Unix()); err != nil {
-		return "", "", nil, fmt.Errorf("sessions: insert: %w", err)
+	if !role.Valid() {
+		return "", "", nil, ErrNotMember
+	}
+	var email string
+	if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, acct.ID).Scan(&email); err != nil {
+		return "", "", nil, err
+	}
+	now := tx.now()
+	expires := now.Add(ttl)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,created_at,expires_at)
+ VALUES (?,?,?,'',?,?,?)`, sessionDigest(raw), team, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
+		return "", "", nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return "", "", nil, err
 	}
-	return rawSession, csrfToken, &Session{
-		ID: rawSession, Principal: acct.Email, Team: team, AccountID: acct.ID,
-		CSRFToken: csrfToken, CreatedAt: now.UTC(), ExpiresAt: expires,
-	}, nil
+	return raw, csrf, &Session{ID: raw, Principal: email, Team: team, AccountID: acct.ID, Scopes: ScopesForRole(role), CSRFToken: csrf, CreatedAt: now, ExpiresAt: expires}, nil
 }
 
 // SwitchSessionTeam moves an account's session from one team to another. It
@@ -983,12 +969,16 @@ func (s *Store) CreateIdentityAccountSession(
 // concurrent switch is reported rather than moved twice.
 func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID string, from, to Team) error {
 	res, err := s.exec(ctx,
-		`UPDATE sessions SET team = ? WHERE hash = ? AND account_id = ? AND team = ?`,
-		string(to), sessionDigest(rawSession), accountID, string(from))
+		`UPDATE sessions SET team = ? WHERE hash = ? AND account_id = ? AND team = ?
+ AND capability_prefix='' AND revoked_at IS NULL AND expires_at>?
+ AND EXISTS (SELECT 1 FROM memberships WHERE team=? AND account_id=?)`,
+		string(to), sessionDigest(rawSession), accountID, string(from), s.now().UnixNano(), to, accountID)
 	if err != nil {
 		return err
 	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
 		return ErrNotFound
 	}
 	return nil
@@ -1188,7 +1178,7 @@ func (t *Tenant) withdrawInvitationsIssuedByTx(ctx context.Context, tx *storeTx,
 		UPDATE invitations SET withdrawn_at = ?
 		WHERE team = ? AND invited_by = ? AND accepted_at IS NULL AND withdrawn_at IS NULL
 		  AND role IN (`+placeholders(len(above))+`)`,
-		append([]any{now.UTC().Unix(), string(t.team), accountID}, above...)...)
+		append([]any{now.UTC().UnixNano(), string(t.team), accountID}, above...)...)
 	return err
 }
 
@@ -1299,7 +1289,7 @@ func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, ro
 	if !actor.AtLeast(role) {
 		return Invitation{}, ErrRoleAboveOwn
 	}
-	at := now.UTC().Unix()
+	at := now.UTC().UnixNano()
 	var open, today int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM invitations
@@ -1308,7 +1298,7 @@ func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, ro
 		return Invitation{}, err
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM invitations WHERE team = ? AND created_at > ?`,
-		string(t.team), at-int64((24*time.Hour).Seconds())).Scan(&today); err != nil {
+		string(t.team), now.Add(-24*time.Hour).UnixNano()).Scan(&today); err != nil {
 		return Invitation{}, err
 	}
 	if open >= MaxOpenInvitations || today >= MaxInvitationsPerDay {
@@ -1337,12 +1327,12 @@ func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, ro
 	}
 	inv := Invitation{
 		ID: id, Team: t.team, Email: email, Role: role, InvitedBy: actorID,
-		CreatedAt: time.Unix(at, 0).UTC(), ExpiresAt: time.Unix(at, 0).UTC().Add(invitationTTL),
+		CreatedAt: now.UTC(), ExpiresAt: now.UTC().Add(invitationTTL),
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO invitations (id, team, email, role, invited_by, created_at, expires_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		inv.ID, string(t.team), inv.Email, string(inv.Role), actorID, at, inv.ExpiresAt.Unix()); err != nil {
+		inv.ID, string(t.team), inv.Email, string(inv.Role), actorID, at, inv.ExpiresAt.UnixNano()); err != nil {
 		if isUniqueViolation(err) {
 			return Invitation{}, ErrInvitationOpen
 		}
@@ -1355,7 +1345,7 @@ func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, ro
 func (t *Tenant) Invitations(ctx context.Context, now time.Time) (_ []Invitation, err error) {
 	rows, err := t.s.query(ctx, invitationSelect+`
 		WHERE i.team = ? AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
-		ORDER BY i.created_at`, string(t.team), now.UTC().Unix())
+		ORDER BY i.created_at`, string(t.team), now.UTC().UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -1374,7 +1364,7 @@ func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time)
 	res, err := t.s.exec(ctx, `
 		UPDATE invitations SET withdrawn_at = ?
 		WHERE team = ? AND id = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`,
-		now.UTC().Unix(), string(t.team), id)
+		now.UTC().UnixNano(), string(t.team), id)
 	if err != nil {
 		return err
 	}

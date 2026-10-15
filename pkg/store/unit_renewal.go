@@ -133,6 +133,6 @@ func renewEvalTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef, acto
 	if err != nil {
 		return err
 	}
-	*beat = LeaseBeat{ExpiresAt: expiry, CancelRequested: run.CancelRequestedAt != nil}
+	*beat = LeaseBeat{ExpiresAt: expiry, CancelRequested: run.CancelRequestedAt != nil, CancelReason: run.CancelReason}
 	return nil
 }

@@ -1,5 +1,10 @@
 # W1 store handoff
 
+The latest continuation is in [w1-session9-progress.md](w1-session9-progress.md).
+It retires the eight remaining raw profile APIs and adds the started-lapse cap
+SQLite proof. Earlier matching, unstarted-lapse and dashboard work remains in
+[w1-session8-progress.md](w1-session8-progress.md).
+
 W1 remains incomplete. This continuation starts from 5ede4a650. The inherited
 work is committed, and this continuation is left for the lead to review and
 commit. There are no unmerged index entries. W1b implementation files are

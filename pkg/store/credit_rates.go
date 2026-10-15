@@ -281,15 +281,6 @@ func creditRateTable(raw string, rate int64) (CreditRateTable, error) {
 	return out, nil
 }
 
-// SetCreditRateTable prices every cpu class the cluster offers and writes the
-// four-core price to credit_rate_micro_per_second, so a binary that reads only
-// that setting still bills a four-core node correctly. Charges already written
-// keep the class and rate they were charged at.
-func (s *Store) SetCreditRateTable(ctx context.Context, table CreditRateTable) (err error) {
-	_, err = s.SetCreditSettings(ctx, CreditSettingsUpdate{RateTable: &table})
-	return err
-}
-
 func addCreditRateTableWrites(writes map[string]string, table CreditRateTable) error {
 	if err := table.Validate(); err != nil {
 		return err

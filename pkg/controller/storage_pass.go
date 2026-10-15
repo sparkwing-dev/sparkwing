@@ -59,9 +59,6 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 	if _, err := s.store.ReleaseExpiredStorage(ctx, now); err != nil {
 		errs = append(errs, fmt.Errorf("release expired reservations: %w", err))
 	}
-	if err := s.pruneExpiredOutputs(ctx, now); err != nil {
-		errs = append(errs, fmt.Errorf("prune expired outputs: %w", err))
-	}
 	for _, kind := range []store.StorageKind{store.StorageCache, store.StorageLogs} {
 		bucket := p.stores[kind]
 		var segments logObjectStore

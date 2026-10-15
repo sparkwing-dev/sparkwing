@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type dispatchRun struct {
@@ -167,7 +168,7 @@ func TestAcceptPlan_OnePlanPerRun(t *testing.T) {
 		time.Now().Add(-time.Second).UnixNano(), f.run, store.PlanNodeID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.ReapExpiredNodeClaims(ctx); err != nil {
+	if _, err := teststore.ReapUnits(ctx, f.s); err != nil {
 		t.Fatal(err)
 	}
 	live := f.claim(t, store.PlanNodeID, store.ClaimTokenPlan)

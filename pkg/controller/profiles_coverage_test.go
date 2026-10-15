@@ -58,7 +58,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 					t.Fatalf("cache fixture=%+v, %v", n, err)
 				}
 			}
-			if err := st.UpsertProfilePin(t.Context(), "coverage", "", 2, 1024); err != nil {
+			if err := teststore.ForTeam(t, st, store.DefaultTeam).UpsertProfilePin(t.Context(), "coverage", "", 2, 1024); err != nil {
 				t.Fatal(err)
 			}
 			tenant, err := st.ForTeam(t.Context(), store.DefaultTeam)
@@ -67,7 +67,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 			}
 			New(st, nil).foldRunProfiles(t.Context(), tenant, &run)
 			for _, id := range []string{"a"} {
-				p, err := st.GetPipelineProfile(t.Context(), "coverage", id)
+				p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "coverage", id)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -76,7 +76,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 				}
 			}
 			if mode == "zero" {
-				p, err := st.GetPipelineProfile(t.Context(), "coverage", "c")
+				p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "coverage", "c")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -84,7 +84,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 					t.Fatalf("measured-zero node profile=%+v", p)
 				}
 			}
-			p, err := st.GetPipelineProfile(t.Context(), "coverage", "")
+			p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "coverage", "")
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -1,75 +1,52 @@
 # sparkwing
 
-type Admission struct {
-	Cores       float64
-	MemoryBytes int64
-}
 const AdmissionBatch AdmissionClass = "batch"
 type AdmissionClass string
 const AdmissionCritical AdmissionClass = "critical"
 const AdmissionInteractive AdmissionClass = "interactive"
 const AdmissionNormal AdmissionClass = "normal"
-func Admitted(ctx context.Context) (Admission, bool)
 type AfterRunFn func(ctx context.Context, err error)
-func Annotate(ctx context.Context, msg string)
+func Annotate(ctx context.Context, annotation Annotation)
+type Annotation struct {
+	Level   string
+	Message string
+	File    string
+	Line    int
+	Column  int
+	EndLine int
+}
+type Approval struct {
+}
+func (a *Approval) ContinueOnError() *Approval
+func (a *Approval) ID() string
+func (a *Approval) Needs(deps ...Dep) *Approval
+func (a *Approval) NeedsGenerated(generators ...*Generator) *Approval
+func (a *Approval) NeedsIfPresent(deps ...Dep) *Approval
+func (a *Approval) OnFailure(id string, body any) *JobNode
+func (a *Approval) Optional() *Approval
+func (a *Approval) SkipIf(predicate SkipPredicate, opts ...SkipOption) *Approval
 const ApprovalApprove ApprovalTimeoutPolicy = "approve"
 type ApprovalConfig struct {
-	Message string
-
-	Timeout time.Duration
-
-	OnExpiry ApprovalTimeoutPolicy
+	Message   string
+	Timeout   time.Duration
+	OnTimeout ApprovalTimeoutPolicy
 }
 const ApprovalDeny ApprovalTimeoutPolicy = "deny"
 const ApprovalFail ApprovalTimeoutPolicy = "fail"
-type ApprovalGate struct {
-}
-func (g *ApprovalGate) AfterRun(fn AfterRunFn) *ApprovalGate
-func (g *ApprovalGate) BeforeRun(fn BeforeRunFn) *ApprovalGate
-func (g *ApprovalGate) ContinueOnError() *ApprovalGate
-func (g *ApprovalGate) ID() string
-func (g *ApprovalGate) Job() *JobNode
-func (g *ApprovalGate) Needs(deps ...Dep) *ApprovalGate
-func (g *ApprovalGate) NeedsOptional(deps ...Dep) *ApprovalGate
-func (g *ApprovalGate) OnFailure(id string, x any) *ApprovalGate
-func (g *ApprovalGate) Optional() *ApprovalGate
-func (g *ApprovalGate) SkipIf(fn SkipPredicate, opts ...SkipOption) *ApprovalGate
 type ApprovalTimeoutPolicy string
 type AwaitOption func(*awaitConfig)
-type AwaitRequest struct {
-	Pipeline string
-	NodeID   string
-	Args     map[string]string
-	Timeout  time.Duration
-
-	Repo string
-
-	Branch string
-}
+func Backoff(d time.Duration) RetryOption
 type Base struct{}
 func Bash(ctx context.Context, line string) *Cmd
 type BeforeRunFn func(ctx context.Context) error
-func BindPipelinesFromYAML(cfg interface {
-	EachPipeline(func(name, entrypoint string))
-},
-)
-func BoxToolBudget(tool string, grantableCores float64, queueTimeout time.Duration) *ConcurrencyGroup
-type CacheKey string
-func (k CacheKey) IsNoCache() bool
-type CacheKeyFn func(ctx context.Context) (CacheKey, error)
-const Cached Outcome = "cached"
 const CancelOthers OnLimit = "cancel_others"
 const Cancelled Outcome = "cancelled"
 type Checkout struct {
-	Depth int
-
-	FullHistory bool
-
-	Tags bool
-
-	Submodules bool
-
-	LFS bool
+	Depth       *int
+	FullHistory *bool
+	Tags        *bool
+	Submodules  *bool
+	LFS         *bool
 }
 type Cmd struct {
 }
@@ -82,7 +59,7 @@ func (c *Cmd) Lines() ([]string, error)
 func (c *Cmd) MustBeEmpty(reason string) error
 func (c *Cmd) Run() (ExecResult, error)
 func (c *Cmd) String() (string, error)
-const CollectAll ParallelFailurePolicy = "collect-all"
+const CollectAll ParallelFailurePolicy = "collect_all"
 type ConcurrencyGroup struct {
 }
 func (g *ConcurrencyGroup) Limit() ConcurrencyLimit
@@ -99,66 +76,16 @@ type ConcurrencyLimit struct {
 
 	CancelTimeout time.Duration
 }
-func Config(ctx context.Context, name string) (string, error)
-type ConsumeEdge struct {
-	Producer string
-	Into     string
-}
 type ConsumeOption func(*consumeEdge)
 func Cores(n float64) ResourceHint
-func CurrentRuntime() RuntimeConfig
 func Debug(ctx context.Context, format string, args ...any)
-func DebugEnabled() bool
-const DefaultCacheTTL = 7 * 24 * time.Hour
 type Dep interface {
 	depID() string
 }
-type DescribeArg struct {
-	Name     string
-	GoName   string
-	Short    string
-	Type     string
-	Required bool
-	Desc     string
-	Default  string
-	Enum     []string
-	Secret   bool
-
-	JobID string
-}
-func (a DescribeArg) CheckEnum(raw string) error
-type DescribePipeline struct {
-	Name     string
-	Short    string
-	Help     string
-	Examples []Example
-	Args     []DescribeArg
-
-	EnvVars []EnvVarDoc
-
-	Extra bool
-
-	Risks []string
-
-	RisksBySteps []DescribeStepRisks
-
-	Secrets pipelines.SecretsField
-}
-type DescribeStepRisks struct {
-	NodeID string
-	StepID string
-	Labels []string
-}
 func Dir(path string, key KeySource) DirCache
-type DirCache struct {
-}
-const EnvGitHubEventName = "GITHUB_EVENT_NAME"
-const EnvPRAction = "GITHUB_PR_ACTION"
-const EnvPRBaseRef = "GITHUB_BASE_REF"
-const EnvPRBaseSHA = "GITHUB_BASE_SHA"
-const EnvPRHeadRef = "GITHUB_HEAD_REF"
-const EnvPRHeadSHA = "GITHUB_HEAD_SHA"
-const EnvPRNumber = "GITHUB_PR_NUMBER"
+type DirCache struct{}
+func (c DirCache) Key(workdir string) (string, error)
+type EnvOption func(*envOptions)
 type EnvVarDoc struct {
 	Name        string
 	Description string
@@ -167,19 +94,11 @@ type EnvVarDoc struct {
 type EnvVarDocer interface {
 	EnvVars() []EnvVarDoc
 }
-var ErrLintCacheWorkdirMismatch = errors.New("lint cache archive was produced at a different workdir")
 var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd")
 var ErrOIDCUnavailable = errors.New("sparkwing: no controller issues OIDC tokens for this run")
 var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
-var ErrSecretMissing = secretsource.ErrMissing
+var ErrSecretMissing = errors.New("secret missing")
 func Error(ctx context.Context, format string, args ...any)
-const EventNodeAnnotation = "node_annotation"
-const EventNodeSummary = "node_summary"
-const EventPullRequest = "pull_request"
-const EventStepEnd = "step_end"
-const EventStepSkipped = "step_skipped"
-const EventStepStart = "step_start"
-const EventWorkFailFast = "work_fail_fast"
 type Example struct {
 	Comment string
 	Command string
@@ -206,14 +125,8 @@ type ExecResult struct {
 	ExitCode int
 }
 const ExitNotStarted = -1
-type ExpandGenerator func(ctx context.Context) []*JobNode
-type Expansion struct {
-	Source *JobNode
-	Group  *JobGroup
-	Gen    ExpandGenerator
-}
 const Fail OnLimit = "fail"
-const FailFast ParallelFailurePolicy = "fail-fast"
+const FailFast ParallelFailurePolicy = "fail_fast"
 const Failed Outcome = "failed"
 type Failure struct {
 	Stage FailureStage
@@ -223,6 +136,10 @@ type Failure struct {
 type FailureRecoveryFn func(ctx context.Context, f Failure) error
 type FailureStage int
 func (s FailureStage) String() string
+type GenerateFn func(context.Context, *Plan) error
+type Generator struct {
+}
+func (g *Generator) ID() string
 type Git struct {
 	SHA           string
 	Branch        string
@@ -253,130 +170,68 @@ type InputError struct {
 }
 func (e *InputError) Error() string
 func (e *InputError) Unwrap() error
-type InputField struct {
-	Name        string
-	Short       string
-	GoName      string
-	Type        string
-	Default     string
-	Description string
-	Required    bool
-	Secret      bool
-	Enum        []string
-}
-func (f InputField) IsExtraBag() bool
-type InputSchema struct {
-	Fields []InputField
-	Extra  bool
-}
 func Inputs[T any](ctx context.Context) T
-func InspectPipelineSecrets(ctx context.Context, reg *Registration, yamlEntry *pipelines.Pipeline) ([]SecretField, error)
 func Into(prefix string) ConsumeOption
 func IsDryRun(ctx context.Context) bool
 func Job(p *Plan, id string, x any) *JobNode
-func JobApproval(p *Plan, id string, cfg ApprovalConfig) *ApprovalGate
 func JobFanOut[T any](p *Plan, name string, items []T, fn func(T) (string, any)) *JobGroup
-func JobFanOutDynamic[T any](p *Plan, name string, source *JobNode, fn func(T) (string, any)) *JobGroup
 type JobGroup struct {
 }
 func (g *JobGroup) AfterRun(fn AfterRunFn) *JobGroup
+func (g *JobGroup) Artifacts(globs ...string) *JobGroup
 func (g *JobGroup) BeforeRun(fn BeforeRunFn) *JobGroup
-func (g *JobGroup) CacheDir(caches ...DirCache) *JobGroup
+func (g *JobGroup) Cache(caches ...DirCache) *JobGroup
 func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup
 func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup
 func (g *JobGroup) ContinueOnError() *JobGroup
-func (g *JobGroup) Dynamic() bool
-func (g *JobGroup) Env(key, value string) *JobGroup
-func (g *JobGroup) Err() error
+func (g *JobGroup) Env(key, value string, opts ...EnvOption) *JobGroup
 func (g *JobGroup) Inline() *JobGroup
 func (g *JobGroup) Members() []*JobNode
-func (g *JobGroup) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobGroup
+func (g *JobGroup) Memo(key MemoKeyFn, opts ...MemoOption) *JobGroup
 func (g *JobGroup) Name() string
 func (g *JobGroup) Needs(deps ...Dep) *JobGroup
-func (g *JobGroup) NeedsOptional(deps ...Dep) *JobGroup
+func (g *JobGroup) NeedsGenerated(generators ...*Generator) *JobGroup
+func (g *JobGroup) NeedsIfPresent(deps ...Dep) *JobGroup
 func (g *JobGroup) NeedsTools(names ...string) *JobGroup
 func (g *JobGroup) NoProgressTimeout(d time.Duration) *JobGroup
 func (g *JobGroup) Optional() *JobGroup
-func (g *JobGroup) Outputs(globs ...string) *JobGroup
 func (g *JobGroup) Prefers(labels ...string) *JobGroup
-func (g *JobGroup) Ready() <-chan struct{}
 func (g *JobGroup) Requires(labels ...string) *JobGroup
 func (g *JobGroup) Resources(hints ...ResourceHint) *JobGroup
 func (g *JobGroup) Retry(attempts int, opts ...RetryOption) *JobGroup
 func (g *JobGroup) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobGroup
 func (g *JobGroup) Timeout(d time.Duration) *JobGroup
 func (g *JobGroup) Verify(fn VerifyFn) *JobGroup
-func (g *JobGroup) WhenRunner(labels ...string) *JobGroup
 type JobNode struct {
 }
 func (n *JobNode) AfterRun(fn AfterRunFn) *JobNode
-func (n *JobNode) AfterRunHooks() []AfterRunFn
-func (n *JobNode) ApprovalConfig() *ApprovalConfig
+func (n *JobNode) Artifacts(globs ...string) *JobNode
 func (n *JobNode) BeforeRun(fn BeforeRunFn) *JobNode
-func (n *JobNode) BeforeRunHooks() []BeforeRunFn
-func (n *JobNode) CacheDir(caches ...DirCache) *JobNode
+func (n *JobNode) Cache(caches ...DirCache) *JobNode
 func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode
-func (n *JobNode) ConcurrencyCost() int
-func (n *JobNode) ConcurrencyGroupRef() *ConcurrencyGroup
-func (n *JobNode) ConsumeEdges() []ConsumeEdge
 func (n *JobNode) Consumes(producer *JobNode, opts ...ConsumeOption) *JobNode
 func (n *JobNode) ContinueOnError() *JobNode
-func (n *JobNode) DepIDs() []string
-func (n *JobNode) DirCaches() []DirCache
-func (n *JobNode) Env(key, value string) *JobNode
-func (n *JobNode) EnvMap() map[string]string
+func (n *JobNode) Env(key, value string, opts ...EnvOption) *JobNode
+func (n *JobNode) Generate(fn GenerateFn) *Generator
 func (n *JobNode) ID() string
 func (n *JobNode) Inline() *JobNode
-func (n *JobNode) IsApproval() bool
-func (n *JobNode) IsContinueOnError() bool
-func (n *JobNode) IsInline() bool
-func (n *JobNode) IsOptional() bool
-func (n *JobNode) Job() Workable
-func (n *JobNode) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobNode
-func (n *JobNode) MemoizeConfig() *MemoizeConfig
+func (n *JobNode) Memo(key MemoKeyFn, opts ...MemoOption) *JobNode
 func (n *JobNode) Needs(deps ...Dep) *JobNode
-func (n *JobNode) NeedsGroups() []*JobGroup
-func (n *JobNode) NeedsOptional(deps ...Dep) *JobNode
+func (n *JobNode) NeedsGenerated(generators ...*Generator) *JobNode
+func (n *JobNode) NeedsIfPresent(deps ...Dep) *JobNode
 func (n *JobNode) NeedsTools(names ...string) *JobNode
 func (n *JobNode) NoProgressTimeout(d time.Duration) *JobNode
-func (n *JobNode) NoProgressTimeoutDuration() time.Duration
 func (n *JobNode) OnFailure(id string, x any) *JobNode
-func (n *JobNode) OnFailureNode() *JobNode
 func (n *JobNode) Optional() *JobNode
-func (n *JobNode) OptionalDepIDs() []string
-func (n *JobNode) OutputGlobs() []string
-func (n *JobNode) OutputType() reflect.Type
-func (n *JobNode) Outputs(globs ...string) *JobNode
-func (n *JobNode) PipelineRefs() []RefTarget
 func (n *JobNode) Prefers(labels ...string) *JobNode
-func (n *JobNode) PrefersLabels() []string
 func (n *JobNode) Requires(labels ...string) *JobNode
-func (n *JobNode) RequiresLabels() []string
-func (n *JobNode) ResourceHints() *ResourceHints
 func (n *JobNode) Resources(hints ...ResourceHint) *JobNode
-func (n *JobNode) ResultStep() *WorkStep
 func (n *JobNode) Retry(attempts int, opts ...RetryOption) *JobNode
-func (n *JobNode) RetryConfig() RetryConfig
 func (n *JobNode) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobNode
-func (n *JobNode) SkipIfBudget() time.Duration
-func (n *JobNode) SkipPredicates() []SkipPredicate
 func (n *JobNode) Timeout(d time.Duration) *JobNode
-func (n *JobNode) TimeoutDuration() time.Duration
-func (n *JobNode) Verifier() VerifyFn
 func (n *JobNode) Verify(fn VerifyFn) *JobNode
-func (n *JobNode) WhenRunner(labels ...string) *JobNode
-func (n *JobNode) WhenRunnerLabels() []string
-func (n *JobNode) Work() *Work
-func Key(parts ...any) CacheKey
 func KeyFromFile(path string) KeySource
-type KeySource struct {
-}
-func LintCacheBlobKey() string
-type LintWarning struct {
-	NodeID string
-	Code   string
-	Msg    string
-}
+type KeySource struct{}
 type LogRecord struct {
 	TS    time.Time
 	Level string
@@ -390,83 +245,46 @@ type Logger interface {
 	Log(level, msg string)
 	Emit(rec LogRecord)
 }
-func LoggerFromContext(ctx context.Context) Logger
-func Lookup(name string) (*Registration, bool)
+func Main()
+func Mask(ctx context.Context, value string) error
 func MaxAge(d time.Duration) RefOption
-const MaxCacheTTL = 35 * 24 * time.Hour
-type MemoizeConfig struct {
-	Key CacheKeyFn
-
-	TTL time.Duration
-}
-type MemoizeOption func(*MemoizeConfig)
+func MemoKey(parts ...any) MemoValue
+type MemoKeyFn func(context.Context) (MemoValue, error)
+type MemoOption func(*memoOptions)
+func MemoTTL(d time.Duration) MemoOption
+type MemoValue string
+const Memoized Outcome = "memoized"
 func MemoryGB(n float64) ResourceHint
-func MustConfig(ctx context.Context, name string) string
 func MustSecret(ctx context.Context, name string) string
+func MustVariable(ctx context.Context, name string) string
 func NewConcurrencyGroup(name string, limit ConcurrencyLimit) *ConcurrencyGroup
 func NewGit(workDir, sha, branch, defaultBranch, repo, repoURL string) *Git
 func NewGitFromTree(ctx context.Context, workDir string) (*Git, error)
 func NewPlan() *Plan
-func NewSecretResolverFromSpec(_ context.Context, spec backends.Spec) (SecretResolver, error)
 func NewWork() *Work
-const NoCache CacheKey = "ck:nocache"
 type NoInputs struct{}
-func NodeFromContext(ctx context.Context) string
-func NpmCache() DirCache
+const NoMemo MemoValue = "memo:none"
+func Npm() DirCache
 func OIDCToken(ctx context.Context, audience string) (string, error)
-type OIDCTokenSource func(ctx context.Context, audience string) (string, error)
 type OnLimit string
 type Outcome string
 func (o Outcome) OK() bool
 func (o Outcome) Terminal() bool
 type ParallelFailurePolicy string
 func Path(parts ...string) string
-const Paused = "paused"
 type Pipeline[T any] interface {
 	Plan(ctx context.Context, plan *Plan, in T, rc RunContext) error
 }
-type PipelineAwaiter interface {
-	Await(ctx context.Context, req AwaitRequest) (*ResolvedPipelineRef, error)
-}
-type PipelineAwaiterFunc func(ctx context.Context, req AwaitRequest) (*ResolvedPipelineRef, error)
-func (f PipelineAwaiterFunc) Await(ctx context.Context, req AwaitRequest) (*ResolvedPipelineRef, error)
-type PipelineResolver interface {
-	resolve(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*ResolvedPipelineRef, error)
-}
-type PipelineResolverFunc func(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*ResolvedPipelineRef, error)
 func PipelineSecrets[T any](ctx context.Context) *T
 type Plan struct {
 }
 func (p *Plan) AdmissionClass(class AdmissionClass) *Plan
-func (p *Plan) AdmissionClassValue() AdmissionClass
-func (p *Plan) Checkout(c Checkout) *Plan
-func (p *Plan) CheckoutValue() *Checkout
+func (p *Plan) Approval(id string, cfg ApprovalConfig) *Approval
+func (p *Plan) Checkout(config Checkout) *Plan
 func (p *Plan) ClaimWait(d time.Duration) *Plan
-func (p *Plan) ClaimWaitValue() time.Duration
 func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan
-func (p *Plan) ConcurrencyCost() int
-func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup
-func (p *Plan) Expansions() []Expansion
-func (p *Plan) GroupSourceIDs(id string) []string
-func (p *Plan) Inputs() any
-func (p *Plan) IsDynamicNode(id string) bool
-func (p *Plan) Job(id string) *JobNode
-func (p *Plan) JobArgs() []DescribeArg
-func (p *Plan) JobGroupNames(id string) []string
-func (p *Plan) LintWarnings() []LintWarning
-func (p *Plan) Nodes() []*JobNode
-func (p *Plan) PlanConcurrency() []PlanConcurrency
 func (p *Plan) Priority(n int) *Plan
-func (p *Plan) PriorityValue() int
-func (p *Plan) ResourceHints() *ResourceHints
 func (p *Plan) Resources(hints ...ResourceHint) *Plan
-type PlanConcurrency struct {
-	Group *ConcurrencyGroup
-	Cost  int
-}
-type PrefersProvider interface {
-	Prefers() []string
-}
 type Produces[T any] struct{}
 type PullRequest struct {
 	Number int
@@ -479,11 +297,10 @@ type PullRequest struct {
 
 	HeadSHA string
 }
-func PullRequestFromEnv(env map[string]string) *PullRequest
 const Queue OnLimit = "queue"
 func ReadFile(path string) ([]byte, error)
 type Ref[T any] struct {
-	NodeID string
+	JobID string
 
 	Pipeline string
 
@@ -493,63 +310,21 @@ func (r Ref[T]) Get(ctx context.Context) T
 func (r Ref[T]) Job() string
 func (r Ref[T]) TryGet(ctx context.Context) (T, bool)
 type RefOption func(*refOpts)
-type RefTarget struct {
-	Pipeline string
-	NodeID   string
-}
 func RefTo[T any](n *JobNode) Ref[T]
 func RefToLastRun[T any](pipeline, nodeID string, opts ...RefOption) Ref[T]
 func Register[T any](name string, factory func() Pipeline[T])
 func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T])
-func Registered() []string
-type Registration struct {
-	Name string
-
-	InputType reflect.Type
-
-	Schema InputSchema
-
-	Invoke func(ctx context.Context, args map[string]string, rc RunContext) (*Plan, error)
-}
-func (r *Registration) Instance() any
-func (r *Registration) SecretArgNames() []string
-func (r *Registration) SecretValues(args map[string]string) []string
-type RequiresProvider interface {
-	Requires() []string
-}
-type ResolvedPipelineRef struct {
-	RunID string
-	Data  []byte
-}
 type ResourceHint func(*ResourceHints)
 type ResourceHints struct {
 	Cores float64
 
 	MemoryBytes int64
 }
-type ResourceReporter func(ResourceSample)
-type ResourceSample struct {
-	CPUMillicores int64
-
-	MemoryBytes int64
-
-	CPUTime time.Duration
-}
-func RestoreLintCache(ctx context.Context, gcURL string) (bool, int64, error)
-func RetryAuto() RetryOption
-func RetryBackoff(d time.Duration) RetryOption
 type RetryConfig struct {
 	Attempts int
 	Backoff  time.Duration
-	Auto     bool
 }
 type RetryOption func(*RetryConfig)
-type RiskBlockedError struct {
-	Pipeline      string
-	StepID        string
-	MissingLabels []string
-}
-func (e *RiskBlockedError) Error() string
 func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts ...AwaitOption) (Out, error)
 type RunContext struct {
 	RunID string
@@ -562,11 +337,10 @@ type RunContext struct {
 
 	StartedAt time.Time
 
-	NoCache bool
+	NoMemo bool
 
 	DryRun bool
 }
-func RunWork(ctx context.Context, w *Work) (any, error)
 func Runner(ctx context.Context) *RunnerInfo
 type RunnerInfo struct {
 	Name string
@@ -576,95 +350,25 @@ type RunnerInfo struct {
 	Labels []string
 }
 func (r *RunnerInfo) HasLabel(term string) bool
-type RuntimeConfig struct {
-	WorkDir string
-
-	Git *Git
-}
-var RuntimePlumbing = struct {
-	Keys runtimePlumbingKeys
-	Fns  runtimePlumbingFns
-}{
-	Keys: runtimePlumbingKeys{
-		DryRun:           dryRunKey{},
-		Runner:           runnerCtxKey{},
-		StepRange:        stepRangeKey{},
-		JSONRefResolver:  keyJSONRefResolver,
-		PipelineResolver: keyPipelineResolver,
-		PipelineAwaiter:  keyPipelineAwaiter,
-		Inputs:           keyInputs,
-		PipelineSecrets:  keyPipelineSecrets,
-		SecretResolver:   keySecretResolver,
-		Logger:           keyLogger,
-		Node:             keyNode,
-		Admission:        keyAdmission,
-		OIDCTokenSource:  oidcTokenSourceKey{},
-	},
-	Fns: runtimePlumbingFns{
-		PlanInsertExpanded: (*Plan).insertExpanded,
-		JobGroupFinalize:   (*JobGroup).finalize,
-		WorkStepFn:         func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
-		WorkStepMarkDone:   (*WorkStep).markDone,
-		WorkRunStep:        runStep,
-		NodeDirCaches:      dirCacheSpecs,
-	},
-}
-const Satisfied Outcome = "satisfied"
-func SaveLintCache(ctx context.Context, gcURL, token string) (int64, error)
 type Scope string
 const ScopeBox Scope = "box"
 const ScopeGlobal Scope = "global"
 const ScopeRun Scope = "run"
 func Secret(ctx context.Context, name string) (string, error)
-type SecretField struct {
-	Name string
-
-	GoField string
-
-	Required bool
-
-	DeclaredIn string
-
-	Resolved bool
-
-	Note string
-}
-type SecretResolver interface {
-	Resolve(ctx context.Context, name string) (value string, masked bool, err error)
-}
-type SecretResolverFunc func(ctx context.Context, name string) (value string, masked bool, err error)
-func (f SecretResolverFunc) Resolve(ctx context.Context, name string) (string, bool, error)
 type SecretsProvider interface {
 	Secrets() any
 }
-func SetGit(g *Git)
-func SetWorkDir(dir string)
 type ShortHelpProvider interface {
 	ShortHelp() string
 }
 const Skip OnLimit = "skip"
-func SkipArgResolve(ctx context.Context) context.Context
 func SkipBudget(d time.Duration) SkipOption
 type SkipOption func(*JobNode)
 type SkipPredicate func(ctx context.Context) bool
 const Skipped Outcome = "skipped"
-const SkippedConcurrent Outcome = "skipped-concurrent"
-type SparkwingFlagDoc struct {
-	Name string
-
-	Short string
-
-	Argument string
-
-	Desc string
-
-	Group string
-
-	Hot bool
-}
-func SparkwingFlagDocs() []SparkwingFlagDoc
 const StageAction FailureStage = iota
 const StageVerify
+func Startup() EnvOption
 func Step(w *Work, id string, fn any) *WorkStep
 type StepError struct {
 	StepID string
@@ -672,7 +376,6 @@ type StepError struct {
 }
 func (e *StepError) Error() string
 func (e *StepError) Unwrap() error
-func StepFromContext(ctx context.Context) string
 func StepGet[T any](ctx context.Context, step *WorkStep) T
 type StepGroup struct {
 }
@@ -683,50 +386,30 @@ func (g *StepGroup) SkipIf(fn SkipPredicate) *StepGroup
 const Success Outcome = "success"
 func Summary(ctx context.Context, markdown string)
 const Superseded Outcome = "superseded"
-func TTL(d time.Duration) MemoizeOption
-func ToolCacheDir(tool string) string
-func ToolCostCenticores(cores float64) int
-func ToolSlot(ctx context.Context, g *ConcurrencyGroup, cost ...int) (release func(), granted bool)
-type ToolSlotProvider func(ctx context.Context, group *ConcurrencyGroup, cost int) (release func(), err error)
 type TriggerInfo struct {
 	Source string
 	User   string
 
 	PullRequest *PullRequest
 }
+func Variable(ctx context.Context, name string) (string, error)
 type VerifyError struct{ Err error }
 func (e *VerifyError) Error() string
 func (e *VerifyError) Unwrap() error
 type VerifyFn func(ctx context.Context) error
 func Warn(ctx context.Context, format string, args ...any)
-type WhenRunnerProvider interface {
-	WhenRunner() []string
-}
 type WithArgs[T any] struct {
 }
 func (w *WithArgs[T]) Args(ctx context.Context) T
-func (w *WithArgs[T]) ArgsType() reflect.Type
-func (w *WithArgs[T]) BindFromAny(val any) error
 func WithCommandEnv(ctx context.Context, env map[string]string) context.Context
-func WithFailure(ctx context.Context, f Failure) context.Context
 func WithFreshArgs(args map[string]string) AwaitOption
 func WithFreshBranch(branch string) AwaitOption
 func WithFreshInputs[T any](in T) AwaitOption
 func WithFreshRepo(repo string) AwaitOption
 func WithFreshTimeout(d time.Duration) AwaitOption
-func WithResourceReporter(ctx context.Context, fn ResourceReporter) context.Context
-func WithSecretResolver(ctx context.Context, r SecretResolver) context.Context
-func WithStep(ctx context.Context, stepID string) context.Context
-func WithToolSlotProvider(ctx context.Context, p ToolSlotProvider) context.Context
 type Work struct {
 }
-func (w *Work) Groups() []*StepGroup
-func (w *Work) ParallelFailurePolicy() ParallelFailurePolicy
-func (w *Work) ParallelFailures(policy ParallelFailurePolicy) *Work
-func (w *Work) PreviewSkipForRange(startAt, stopAt string) map[string]string
-func (w *Work) StepByID(id string) *WorkStep
-func (w *Work) Steps() []*WorkStep
-func (w *Work) TopologicalStepOrder() []string
+func (w *Work) FailurePolicy(policy ParallelFailurePolicy) *Work
 type WorkDep interface {
 	workDepID() string
 }
@@ -734,33 +417,32 @@ func WorkDir() string
 type WorkStep struct {
 }
 func (s *WorkStep) ContinueOnError() *WorkStep
-func (s *WorkStep) DepIDs() []string
 func (s *WorkStep) DryRun(fn func(ctx context.Context) error) *WorkStep
 func (s *WorkStep) Finally() *WorkStep
-func (s *WorkStep) HasDryRun() bool
 func (s *WorkStep) ID() string
-func (s *WorkStep) IsContinueOnError() bool
-func (s *WorkStep) IsFinally() bool
-func (s *WorkStep) IsOptional() bool
-func (s *WorkStep) IsSafeWithoutDryRun() bool
 func (s *WorkStep) Needs(deps ...WorkDep) *WorkStep
 func (s *WorkStep) Optional() *WorkStep
-func (s *WorkStep) Output() any
-func (s *WorkStep) OutputType() reflect.Type
 func (s *WorkStep) Risk(labels ...string) *WorkStep
-func (s *WorkStep) Risks() []string
 func (s *WorkStep) SafeWithoutDryRun() *WorkStep
 func (s *WorkStep) SkipIf(fn SkipPredicate) *WorkStep
-func (s *WorkStep) SkipPredicates() []SkipPredicate
 type Workable interface {
 	Work(w *Work) (*WorkStep, error)
 }
 func WriteFile(path string, data []byte) error
 
 # methods on un-declared receiver types (likely a bug)
-func (a *approvalJob) Work(w *Work) (*WorkStep, error)
-func (c *countReader) Read(p []byte) (int, error)
+func (s combinedSecrets) ContainsSecret(id string) bool
 func (c *jobFn) Work(w *Work) (*WorkStep, error)
 func (nopLogger) Emit(LogRecord)
 func (nopLogger) Log(level, msg string)
+func (l protocolLogger) Emit(r LogRecord)
+func (l protocolLogger) Log(level, message string)
 func (c *recoveryFn) Work(w *Work) (*WorkStep, error)
+func (sdkOperations) Context(ctx context.Context, rc nodeproto.RunContext, runner nodeproto.RunnerIdentity, s sdkserve.Services) context.Context
+func (sdkOperations) Describe(ctx context.Context) (nodeproto.DescribeDoc, error)
+func (sdkOperations) Document(plan any) nodeproto.PlanDoc
+func (sdkOperations) Eval(ctx context.Context, built any, req nodeproto.Request) (result nodeproto.EvalResult, err error)
+func (sdkOperations) Plan(ctx context.Context, name string, args map[string]string, run nodeproto.RunContext) (built any, document nodeproto.PlanDoc, failure error)
+func (sdkOperations) Prepare(built any, request nodeproto.Request) error
+func (sdkOperations) RunStep(ctx context.Context, built any, req nodeproto.Request) (result nodeproto.RunResult, err error)
+func (s secretSet) ContainsSecret(id string) bool

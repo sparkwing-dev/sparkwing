@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func billingFrom(t *testing.T, s *store.Store, runID, nodeID string) int64 {
@@ -45,7 +46,7 @@ func dispatchedClaim(t *testing.T, s *store.Store, claimant store.ClaimIdentity,
 
 func mustBalance(t *testing.T, s *store.Store) int64 {
 	t.Helper()
-	b, err := s.CreditBalanceMicro(context.Background())
+	b, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(context.Background())
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -256,7 +257,7 @@ func TestReapBeforeExecutionKeepsTheSetupTheClaimBilled(t *testing.T) {
 	}
 	expireNodeLease(t, s, n.RunID, n.NodeID, time.Now().Add(-time.Minute))
 	before := mustBalance(t, s)
-	if _, err := s.ReapExpiredNodeClaims(ctx); err != nil {
+	if _, err := teststore.ReapUnits(ctx, s); err != nil {
 		t.Fatalf("reap: %v", err)
 	}
 	if got := mustBalance(t, s); got != before {

@@ -525,7 +525,11 @@ func TestTeamOwnerCanChooseWhetherCloudTrustsLocalBinaries(t *testing.T) {
 		map[string]bool{"trust_local_builds": true}, &answer); code != http.StatusOK || !answer.TrustLocalBuilds {
 		t.Fatalf("enable trust = %d %+v", code, answer)
 	}
-	trust, err := f.store.TrustLocalBuilds(t.Context(), store.Team(olga.team))
+	tenant, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	trust, err := tenant.TrustLocalBuilds(t.Context())
 	if err != nil || !trust {
 		t.Fatalf("stored trust = %v, %v", trust, err)
 	}

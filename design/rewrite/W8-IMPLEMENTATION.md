@@ -1,78 +1,96 @@
 # W8 implementation handoff
 
-W8 remains incomplete. The continuation from `1f6989265` rechecked all 26 assigned
-amendment rows and the W8 handoffs. Their source, host, controller and deployment
-dependencies remain. Earlier merge instructions in this file are historical.
+W8 remains incomplete. This continuation from `0b8a9389a` resolved the three
+working-file merge conflicts and rechecked all 26 assigned amendment rows and
+the W8 handoffs. The lead must stage the conflict resolutions under the brief's
+no-Git-write rule.
 
-The default here loop now requests only its named trigger because the shared
-client selects `/runs/{run}/claim` only for one trigger kind. Previously it sent
-both trigger and node kinds. Ordinary runners retain mixed claims, and explicit
-kind selections retain their behavior. No API, caller, setting, environment
-variable or customer timeout changed.
+The loop now retains a pending claim across successful version-policy refreshes.
+Previously each refresh cancelled the request and started another claim. The
+new controlled-clock here component reproduced three requests through the old
+loop. The revised component passes with one request. A property test passed
+41,650 cases over run bytes, here/ordinary selection, refresh counts and delivered
+or lost responses. This is component evidence against a fake controller.
 
-`TestHereRunnerNamedClaimW8Components` failed on the mixed-kind request before
-the fix. Its two cases now prove named selection, unchanged award delivery and
-no second claim after a lost response, using the real loop with fake transport
-and host. `FuzzLoopHereSelection` passed 25,326 generated cases over arbitrary
-run bytes, valid awards and foreign-run awards. Its invariant is that default
-here requests select only the named trigger and foreign awards never reach the
-host. These are component proofs. Real HTTP, requester ancestry and server
-reclaim-window evidence remain separate integrations.
+**DESIGN: pending-claim outcomes.** The independent review found a second bug in
+the same mechanism. If policy refusal cancels a pending request and that request
+returns a committed award, the deferred recovery clears the policy error.
+MaxClaims=1 then drains the award and returns success. The invariant is that a
+committed award remains owned while every independent stop reason remains
+observable. `TestLoopPendingAwardPreservesPolicyDenial` reproduces hosted=1 with
+a nil error. It is retained as a failing package test. The brief's two-strike
+rule stops further runtime changes pending the lead's decision.
 
-No native catalog cell was activated and no T1 inventory test was newly ported.
-Legacy code deleted: **0 lines**. One default initializer was replaced. The
-existing sizing inventory port remains in place.
+The proposed redesign returns the award and stop reason independently from the
+pending request. Run adopts any returned award before applying the stop reason,
+then joins the held hosts and returns that reason. The joining defer must never
+replace it with success. Existing cancellation, idle, claim-deadline and version
+checks remain the same owners. No public API, setting, timer, environment
+variable or production mechanism was added. Undo restores the changed select
+cases and their regression tests together.
 
-Verification used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
-`-p 4` and private cache/temp directories under `/tmp/sw-astra-W8`:
+All three modify/delete conflicts retain W8's deletions:
 
-- Whole-repository build and vet for cluster, runners, engine, wingd and both acceptance packages passed.
-- Full runner, launcher and engine suites passed. W8 component acceptance and the Cloud builder components passed in 2.026 seconds.
-- Cluster passed with only its socket-based metrics listener test excluded. Focused local lifecycle, managed-unit and identity tests passed in wingd and its client.
-- Required `commentcheck -base main` passed across 1,052 files. `sleepcheck -base HEAD` and `git diff --check` passed.
-- `sleepcheck -base main` failed on three inherited waits in untouched files: `internal/limits/deadline_test.go:58,66` and `sparkwing/sparkwingtest/host_test.go:214`. Those W6/W4 files remain unchanged.
+- internal/orchestrator/wingd_runstore_test.go, 549 incoming lines.
+- internal/runners/k8s/k8s_test.go, 1,567 incoming lines.
+- internal/runners/k8s/profile_cpu_policy_test.go, 64 incoming lines.
 
-The focused acceptance command is
+The 2,180 incoming legacy test lines exercise removed implementations. Their
+files are absent. The index still lists those three paths because workers may
+not write Git metadata. New legacy implementation deletions: 0 lines. New T1
+inventory ports: none. The prior sizing port remains. No native catalog cell
+was activated.
+
+Verification used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4 and
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W8:
+
+- Whole-repository build after the runtime change passed.
+- Vet passed for cluster, runners, engine, wingd and both acceptance packages.
+- Runner, launcher, engine and cluster suites passed before the review regression
+  was added. Cluster excluded only TestStartMetricsListener_ServesMetrics because
+  sockets are unavailable. The final runner suite has the known failing test above.
+- Focused W8 components, Cloud builder components and local/managed lifecycle
+  checks passed. The acceptance package took 2.560 seconds.
+- The pending-claim property passed 41,650 fuzz executions in five seconds.
+- Commentcheck against main passed across 1,175 files. Sleepcheck against HEAD,
+  gofmt and git diff --check passed.
+
+The failure is reproducible with
+`go -C /home/bombuntu/.xwing/envs/1086/sparkwing test -p 4 ./internal/runners -run '^TestLoopPendingAwardPreservesPolicyDenial$' -count=1 -timeout=1m`.
+The acceptance command is
 `go -C /home/bombuntu/.xwing/envs/1086/sparkwing test -p 4 ./tests/acceptance ./internal/acceptance ./internal/wingd ./internal/wingd/client -run 'W8|^TestLauncherCloud|^TestLocal|^TestManaged' -count=1 -timeout=3m`.
-The package command is
-`go -C /home/bombuntu/.xwing/envs/1086/sparkwing test -p 4 ./internal/cluster ./internal/runners/... ./internal/engine/... -skip '^TestStartMetricsListener_ServesMetrics$' -count=1 -timeout=3m`.
-The fuzz command is
-`go -C /home/bombuntu/.xwing/envs/1086/sparkwing test -p 4 ./internal/runners -run '^$' -fuzz '^FuzzLoopHereSelection$' -fuzztime=3s`.
+The property command is
+`go -C /home/bombuntu/.xwing/envs/1086/sparkwing test -p 4 ./internal/runners -run '^$' -fuzz '^FuzzLoopPendingClaimNoReplay$' -fuzztime=5s -parallel=4 -timeout=1m`.
 
-Existing contract requests remain open for W3's host/process construction and
-run/plan/eval identity inputs, the cache owner's workspace-off key operation,
-and W9's plan-without-job and launch grammar. Controller plan/eval resources,
-launcher sync and the production clients/local services remain implementation dependencies.
-W8's deployment probe/cleanup adapters and native Windows/Cloud evidence remain
-open. No new product question or mechanism was introduced.
-
-Changed W8 files are this report, `W8-AMENDMENTS-1.md`,
-`internal/runners/loop.go`, `internal/runners/loop_test.go` and
-`internal/runners/service/RUNNER-SERVICE.md`. The only shared file is
-`tests/acceptance/here_runner_w8_test.go`. No production caller or other area's
-contract changed. No mechanism was added.
-
-No Sparkwing binary, pipeline, Git write, deployment or release ran. The sandbox
-prevents socket and native Windows/Cloud checks. All check processes finished,
-Git config has no identity/worktree override, and worker scratch was deleted.
+Remaining cross-area contract requests are unchanged:
 
 | Owner | Remaining boundary | Evidence in this checkout |
 | --- | --- | --- |
-| W3 | Declare host construction, delegated node routes, generated-code replay loading and run/plan/eval execution identity inputs. | `RunHost` and `NodeHost` are interfaces without final constructors. `RunInput` has no granted runner field. Plan/eval inputs and their shared process constructor are undeclared. |
-| W3/W9 | Implement the declared source, keeper, remote owner and HTTP/data clients, then bind the installed runner and Cloud entrypoints. | `source.Acquire`, `source.ForRequest`, `source.ForExecution`, `lease.Keeper.Run`, `RemoteOwnerStore`, `NewEngineClient` and `NewDataClient` still panic. W8 already consumes these interfaces through component fakes. |
-| W1/W2/W9 | Supply Cloud plan/eval resources and launcher sync, the elected local controller services/activity, and CLI composition. | `EngineController.SyncLauncher` still panics. Plan/eval claims clear `Execution`. `LocalRuntimeConfig.Open` has no production shared-controller implementation. Bootstrap grammar requires a job for plans. Launch grammar lacks the required Docker image and leaves deadline plumbing undefined. |
-| W3/W7 | Declare workspace-off binary-cache hashing. | `sdkinstall` builds with `GOWORK=off`, while `bincache.PipelineCacheKey` follows the ambient workspace. The existing request remains open. |
-| W8/T1/lead | Run native Windows transport tests and a distinct-account refusal, deployment probes/node cleanup and native placement/real-repository acceptance. | Windows transport and property tests cross-compile for amd64/arm64 but cannot execute on Linux. `KubernetesBoundary` requires deployment-owned Probe/Clear implementations. Native catalog cells remain skipped. |
+| W3 | Host construction, delegated node routes, generated-code replay loading and run/plan/eval execution identity inputs. | RunHost/NodeHost are interfaces without final constructors. RunInput lacks granted runner identity. The shared process constructor remains undeclared. |
+| W3/W9 | Source, keeper, remote owner and HTTP/data implementations, followed by runner/Cloud composition. | source.Acquire/ForRequest/ForExecution, lease.Keeper.Run, RemoteOwnerStore, NewEngineClient and NewDataClient still panic. W8 consumes these interfaces through component fakes. |
+| W1/W2/W9 | Cloud plan/eval resources, launcher sync, local controller services/activity and CLI composition. | SyncLauncher still panics. Plan/eval claims clear Execution. LocalRuntimeConfig.Open has no production shared-controller implementation. W9 grammar still requires a job for plan units and lacks the required launcher Docker image/deadline plumbing. |
+| W3/W7 | Workspace-off binary-cache hashing. | sdkinstall builds with GOWORK=off, while PipelineCacheKey follows the ambient workspace. |
+| W8/T1/lead | Cloud probes, reservation cleanup, native Windows identity and full placement/real-repository QA. | KubernetesBoundary still needs deployment-owned Probe/Clear callbacks. Native catalog cells remain blocked. |
 
-Missing shared implementations remain behind their declared interfaces and fake
-component proofs. Missing shared declarations prevent the remaining W8
-composition because the swarm brief forbids changing another area's contract.
-The existing node-award constructor, private Cloud award transport and real
-controller/SQLite components remain implemented. Installed execution, actual
-hello and native deployment proofs remain open.
+The W8 execution-identity slice in handoffs.md remains done at its node-award
+boundary. Actual hello, run/plan/eval inputs and the shared constructor remain
+with W3. Missing declarations stop those pieces under the contract rule. W8
+continues to test declared interfaces with fakes and retains the real
+EngineController/SQLite components already implemented.
 
-The opening section records current verification and changed files. The sections
-below retain historical evidence.
+Shared files touched are tests/acceptance/here_runner_w8_test.go and the retained
+deletion of internal/orchestrator/wingd_runstore_test.go. Other changed files
+are internal/runners/loop.go, loop_test.go, service/RUNNER-SERVICE.md and the two
+W8 reports. No production caller outside W8 or other area's contract changed.
+
+Friction: the sandbox prevents socket and native Cloud/Windows proofs. The
+reviewer mistakenly invoked installed `sparkwing info --for-agent` once despite
+the brief. It printed discovery context and exited zero. No state mutation was
+observed, but its absence is unverified. No further Sparkwing binary, pipeline,
+Git write, deployment or release ran. Git config has no local user identity or
+core.worktree override. All check processes finished and /tmp/sw-astra-W8 was deleted.
+
+The sections below retain historical evidence.
 
 ## Completed before this continuation
 

@@ -337,9 +337,15 @@ func (l *Loop) claimWhileHosting(ctx context.Context, refresh <-chan time.Time, 
 			finish(result)
 			timer.Reset(wait())
 		case <-refresh:
-			return controllerwire.ClaimResponse{}, nil, true
+			if err := l.CheckVersion(ctx, l.Config.Version); err != nil {
+				return controllerwire.ClaimResponse{}, fmt.Errorf("runner version policy: %w", err), false
+			}
 		case <-timer.C:
-			return controllerwire.ClaimResponse{}, nil, true
+			remaining := wait()
+			if remaining <= 0 {
+				return controllerwire.ClaimResponse{}, nil, true
+			}
+			timer.Reset(remaining)
 		case <-ctx.Done():
 			return controllerwire.ClaimResponse{}, context.Cause(ctx), false
 		}

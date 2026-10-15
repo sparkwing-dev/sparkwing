@@ -27,6 +27,10 @@ and omitted Kinds requests only its trigger, selecting the shared client's named
 error without retrying for another one-time bearer. Claim windows and reclaim
 authority remain server decisions.
 
+Successful version-policy refreshes keep a pending claim on its original request.
+Policy refusal, drain and lifecycle deadlines cancel and join that request.
+A committed award returned during cancellation still drains through its host.
+
 Hosting accepts direct trigger, here and work awards with matching unit purposes
 and claim fences. Bootstrap credentials require the Cloud exchange path. Renewal,
 source preparation and execution share the earliest binding, owner or parent

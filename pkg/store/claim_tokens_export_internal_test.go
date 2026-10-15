@@ -36,9 +36,6 @@ func SettleForTest(ctx context.Context, s *Store, team Team, runID string, now t
 	return tx.Commit()
 }
 
-// MaxExpiredClaimRunsPerPass is how many runs one expired-claim pass recovers.
-const MaxExpiredClaimRunsPerPass = maxExpiredClaimRunsPerPass
-
 // ChargeNodeCreditsForTest bills the seconds the node has run since its
 // previous charge, as a heartbeat's renewal does.
 func ChargeNodeCreditsForTest(ctx context.Context, s *Store, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error) {

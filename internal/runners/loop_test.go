@@ -460,6 +460,101 @@ func TestLoopLongPollDoesNotDelayLifecycleOrPolicy(t *testing.T) {
 	t.Run("blocked_transport", func(t *testing.T) { testLoopLifecycleDeadline(t, true) })
 }
 
+func TestLoopPendingClaimSurvivesPolicyRefresh(t *testing.T) {
+	for _, here := range []bool{false, true} {
+		for _, awarded := range []bool{false, true} {
+			testPendingClaimRefresh(t, "run", here, 2, awarded)
+		}
+	}
+}
+
+func TestLoopPendingAwardPreservesPolicyDenial(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		denied := errors.New("runner version revoked")
+		checks, hosted := 0, 0
+		loop := Loop{
+			Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, MaxClaims: 1},
+			CheckVersion: func(context.Context, string) error {
+				checks++
+				if checks > 1 {
+					return denied
+				}
+				return nil
+			},
+			Controller: claimFunc(func(ctx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				<-ctx.Done()
+				return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitTrigger, UnitID: "committed", RunID: "run", Capability: "private"}}, nil
+			}),
+			Host: hostFunc(func(ctx context.Context, _ controllerwire.ClaimedUnit) error {
+				hosted++
+				return ctx.Err()
+			}),
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 2*limits.VersionIndexRefresh)
+		defer cancel()
+		err := loop.Run(ctx)
+		if hosted != 1 || !errors.Is(err, denied) {
+			t.Fatalf("hosted=%d error=%v, want committed award drained and policy denial returned", hosted, err)
+		}
+	})
+}
+
+func FuzzLoopPendingClaimNoReplay(f *testing.F) {
+	f.Add("run", true, uint8(2), false)
+	f.Add("run/other:\x00", false, uint8(3), true)
+	f.Fuzz(func(t *testing.T, run string, here bool, refreshes uint8, awarded bool) {
+		testPendingClaimRefresh(t, "run:"+run, here, int(refreshes%4)+1, awarded)
+	})
+}
+
+func testPendingClaimRefresh(t *testing.T, run string, here bool, refreshes int, awarded bool) {
+	t.Helper()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*limits.VersionIndexRefresh)
+		defer cancel()
+		respond := make(chan struct{})
+		lost := errors.New("committed claim response lost")
+		claims, checks, hosted := 0, 0, 0
+		loop := Loop{
+			Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 1, MaxClaims: 1},
+			CheckVersion: func(context.Context, string) error {
+				checks++
+				if checks == refreshes+1 {
+					close(respond)
+				}
+				return nil
+			},
+			Controller: claimFunc(func(ctx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				claims++
+				if claims != 1 {
+					return controllerwire.ClaimResponse{}, errors.New("uncertain claim replayed")
+				}
+				select {
+				case <-respond:
+					if awarded {
+						return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitTrigger, UnitID: "unit", RunID: run, Capability: "private"}}, nil
+					}
+					return controllerwire.ClaimResponse{}, lost
+				case <-ctx.Done():
+					return controllerwire.ClaimResponse{}, ctx.Err()
+				}
+			}),
+			Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { hosted++; return nil }),
+		}
+		if here {
+			loop.Config.RunID = run
+		}
+		err := loop.Run(ctx)
+		wantHosted := 0
+		if awarded {
+			wantHosted = 1
+		}
+		if (awarded && err != nil) || (!awarded && !errors.Is(err, lost)) || claims != 1 || hosted != wantHosted || checks != refreshes+1 {
+			t.Fatalf("here=%v awarded=%v error=%v claims=%d hosted=%d checks=%d", here, awarded, err, claims, hosted, checks)
+		}
+	})
+}
+
 func testLoopLifecycleDeadline(t *testing.T, blocked bool) {
 	for _, name := range []string{"idle", "claim_deadline", "policy"} {
 		t.Run(name, func(t *testing.T) {

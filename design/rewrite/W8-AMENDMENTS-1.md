@@ -6,11 +6,12 @@ This snapshot covers every amendment-1 row whose action column names W8. A
 component pass proves its named boundary. It does not activate a native catalog
 cell or establish an HTTP, Cloud or OS deployment proof.
 
-The continuation from `1f6989265` found no pending merge or new amendment.
-All 26 assigned rows and the W8 handoffs retain the dependencies recorded here.
-W8 also corrected the here loop's default claim selection to match the declared
-named trigger route. The prior launcher grammar requests remain in handoffs.md.
-The merge-resolution sections below describe earlier sessions.
+The continuation from `0b8a9389a` retains W8's deletion of three conflicted
+legacy test files. All 26 assigned rows and the W8 handoffs were rechecked.
+A1-08/39/55 keep a pending claim intact across successful policy refreshes.
+Their outcome handling remains under the DESIGN handoff below.
+The prior contract and integration dependencies remain below. Earlier
+merge-resolution sections describe previous sessions.
 
 | Amendment | W8 action and remaining integration |
 | --- | --- |
@@ -39,7 +40,7 @@ The merge-resolution sections below describe earlier sessions.
 | A1-51 | W8's retired cluster v1 host paths stay deleted. Shared Go/TS corpus parity, remaining orchestrator fixtures and generated references remain W3/W4/W5/W9 work. |
 | A1-52 | The install result has no preload. Windows npm shim argv uses Node through the shared npmcmd helper and process-group runner. Windows execution and the packaged TS bridge still need native evidence. No Linux fixture is counted as Windows proof. |
 | A1-53 | Native catalog cells stay blocked. Component acceptance passes only its component suite. No native driver or real-repository QA was available in this sandbox. |
-| A1-55 | A here loop with RunID and omitted Kinds now requests only its trigger, matching the shared client's named route contract. A component checks the request, unchanged award and no retry after a lost response. A fuzz property checks request selection and foreign-run refusal. Native claim/reclaim, requester ancestry and HTTP response-loss evidence remain integration obligations. |
+| A1-55 | A here loop with RunID and omitted Kinds now requests only its trigger, matching the shared client's named route contract. A component checks the request, unchanged award and no retry after a lost response. A fuzz property checks request selection and foreign-run refusal. Successful policy refreshes retain the pending request. A controlled-clock component and a second fuzz property prove that delayed delivery and response loss never replay that claim. The review regression below leaves pending-claim outcome handling incomplete. Native claim/reclaim, requester ancestry and HTTP response-loss evidence remain integration obligations. |
 
 ## Merge resolution
 
@@ -328,5 +329,54 @@ checks, W8 components and commentcheck pass. The here property passed 25,326 fuz
 executions. Sleepcheck against HEAD passes. Against main it finds three inherited
 waits in untouched W6/W4 tests: limits/deadline_test.go:58,66 and
 sparkwing/sparkwingtest/host_test.go:214. Those files remain with their owners.
+
+## Continuation: pending claims during policy refresh
+
+A1-08/39/55 require the claim request to remain unique while its response is
+uncertain. The loop cancelled a pending request at each successful policy
+refresh, then requested another award. TestHereRunnerNamedClaimW8Components's
+new response_lost_after_refresh case reproduced three requests through an
+overlay of the old loop. TestLoopPendingClaimSurvivesPolicyRefresh also failed
+on a second request.
+
+The loop now checks policy while the original request stays pending. Its
+lifecycle timer interrupts only after an actual idle or claim deadline.
+Existing tests retain prompt policy refusal, drain, joined cancellation and
+ownership of awards returned during cancellation. The property test varies run
+bytes, here versus ordinary selection, refresh count and delivered versus lost
+responses. It asserts one request and exactly the expected host delivery.
+
+The three modify/delete conflicts keep these deletions:
+
+- internal/orchestrator/wingd_runstore_test.go, 549 incoming lines.
+- internal/runners/k8s/k8s_test.go, 1,567 incoming lines.
+- internal/runners/k8s/profile_cpu_policy_test.go, 64 incoming lines.
+
+These 2,180 incoming test lines exercised removed implementations. Their
+working files are absent. The lead must stage the resolutions because the
+brief forbids Git writes. No production API, caller or other area's contract
+changed. No mechanism, setting, environment variable or timeout was added.
+Undo restores the pending-claim select cases and their tests together.
+
+The complete remaining execution-identity handoff in contracts/handoffs.md still
+needs W3's run/plan/eval identity inputs and shared process constructor. Native
+catalog cells and new T1 inventory ports remain unclaimed. Component coverage
+uses the declared source, keeper, controller and host interfaces with fakes.
+
+## DESIGN: pending-claim outcomes
+
+The review found a second bug after the policy-refresh correction. The invariant
+is that a committed award remains owned while every independent stop reason
+remains observable. When a policy refusal cancels a request and the controller
+returns its committed award, claimWhileHosting's defer clears the policy error.
+With MaxClaims=1, Run drains the award and returns nil.
+TestLoopPendingAwardPreservesPolicyDenial reproduces that result and remains a
+failing package test.
+
+The proposed redesign returns award and stop reason independently. Run adopts
+any returned award before applying the stop reason. It joins hosted work and
+returns that reason. Deferred claim recovery must not clear it. The brief's
+two-strike rule leaves that redesign for the lead's decision. No second runtime
+patch was made. No other area's contract must change for this proposal.
 
 <!-- design:end -->

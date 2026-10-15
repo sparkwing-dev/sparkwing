@@ -164,7 +164,7 @@ func (s *Server) tokenSignIn(r *http.Request, raw string) (string, *store.Sessio
 	if p.Kind != store.TokenKindUser || !p.HasScope(ScopeAdmin) {
 		return "", nil, errNotOperatorToken
 	}
-	rawSession, sess, err := s.store.CreateTokenSession(r.Context(), p.TokenPrefix, p.Name, p.Team, s.sessionInitialTTL(), time.Now().UTC())
+	rawSession, sess, err := s.store.CreateCapabilitySession(r.Context(), p.TokenPrefix, s.sessionInitialTTL())
 	if err != nil {
 		return "", nil, err
 	}

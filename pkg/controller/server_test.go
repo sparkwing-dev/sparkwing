@@ -151,7 +151,7 @@ func TestController_ConcurrencyStateOmitsQueueArrivedAtForImmediateHolder(t *tes
 	defer cleanup()
 	ctx := context.Background()
 
-	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: "state-immediate-slot", HolderID: "holder", RunID: "holder", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	}); err != nil {
@@ -189,19 +189,19 @@ func TestController_ConcurrencyStateIncludesQueueArrivedAtForPromotedHolder(t *t
 			t.Fatalf("seed run %s: %v", id, err)
 		}
 	}
-	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: "state-promoted-slot", HolderID: "leader", RunID: "leader", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	}); err != nil {
 		t.Fatalf("acquire leader: %v", err)
 	}
-	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: "state-promoted-slot", HolderID: "waiter", RunID: "waiter", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	}); err != nil {
 		t.Fatalf("acquire waiter: %v", err)
 	}
-	if _, _, _, err := st.ReleaseAndNotify(ctx,
+	if _, _, _, err := teststore.ForTeam(t, st, store.DefaultTeam).ReleaseAndNotify(ctx,
 		"state-promoted-slot", "leader", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
 		t.Fatalf("release leader: %v", err)
 	}
