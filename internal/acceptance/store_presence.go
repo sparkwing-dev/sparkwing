@@ -63,7 +63,7 @@ func checkStorePresenceBoundary(ctx context.Context, root string) (err error) {
 		if err != nil || !slices.Equal(presence.Present, want) {
 			return fmt.Errorf("presence for %s=%+v, want %v: %v", request.Intent.Identity.Attempt.Value.NodeID, presence, want, err)
 		}
-		return checkStorePresenceAccess(ctx, tenant, request.Intent.Authority, query.Digests, want)
+		return checkStorePresenceAccess(ctx, s, tenant, request.Intent.Authority, query.Digests, want)
 	}
 	if err := check([]blob.Digest{first.Blob.Digest}); err != nil {
 		return err
@@ -121,9 +121,10 @@ func checkStorePresenceBoundary(ctx context.Context, root string) (err error) {
 	return checkStorePresenceUsage(ctx, tenant, s.DB())
 }
 
-func checkStorePresenceAccess(ctx context.Context, tenant *store.Tenant, authority blob.Authority, digests, present []blob.Digest) error {
+func checkStorePresenceAccess(ctx context.Context, s *store.Store, tenant *store.Tenant, authority blob.Authority, digests, present []blob.Digest) error {
 	a := authority.Attempt.Value
 	authorized := capability.Authorized{Principal: capability.Principal{Capability: capability.Capability{Prefix: authority.CapabilityRef, Team: a.Team}}}
+	authorized.Principal.Authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: authority.CapabilityRef}
 	for _, operation := range []capability.DataOperation{capability.DataDownload, capability.DataHasMany, capability.DataLookup} {
 		for _, digest := range digests {
 			target := capability.DataTarget{Operation: operation, Digest: string(digest), RunID: a.RunID, NodeID: a.NodeID, Attempt: a.Attempt, Generation: a.Generation}
@@ -134,6 +135,13 @@ func checkStorePresenceAccess(ctx context.Context, tenant *store.Tenant, authori
 				}
 			} else if !errors.Is(err, blob.ErrDigestNotReadable) {
 				return fmt.Errorf("%s exposed unreadable digest: %v", operation, err)
+			}
+			for _, rule := range []capability.BindingRule{capability.BindData, capability.BindReadSet} {
+				selected := capability.Target{Team: a.Team, RunID: a.RunID, NodeID: a.NodeID, Data: &target}
+				err := s.CheckBinding(ctx, authorized.Principal, rule, selected)
+				if slices.Contains(present, digest) && err != nil || !slices.Contains(present, digest) && !errors.Is(err, blob.ErrDigestNotReadable) {
+					return fmt.Errorf("%s/%s binding exposed the wrong read set: %v", operation, rule, err)
+				}
 			}
 		}
 	}
@@ -146,10 +154,10 @@ func seedStorePresenceAttempts(ctx context.Context, db *sql.DB) (store.UploadRes
 		return request, err
 	}
 	for _, job := range []string{"a", "b", "unrelated"} {
-		if _, err := db.ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,attempt,generation,spec_json,execution_json) VALUES (?,'upload',?,'pending',1,7,?,?)`, store.DefaultTeam, job, []byte(`{}`), []byte(`{}`)); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,attempt,generation,spec_json,execution_json) VALUES (?,'upload',?,'done','success',2,1,7,?,?)`, store.DefaultTeam, job, []byte(`{}`), []byte(`{}`)); err != nil {
 			return request, err
 		}
-		if _, err := db.ExecContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES (?,'upload',?,1,7,'publisher','upload-boundary','local','publisher','local',1)`, store.DefaultTeam, job); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome) VALUES (?,'upload',?,1,7,'publisher','upload-boundary','local','publisher','local',1,2,'success')`, store.DefaultTeam, job); err != nil {
 			return request, err
 		}
 	}

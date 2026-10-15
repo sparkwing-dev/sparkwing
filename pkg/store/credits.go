@@ -387,7 +387,7 @@ func (req CreditGrantRequest) validate() error {
 func (s *Store) GrantCredits(
 	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
 ) (*CreditGrant, error) {
-	return grantCredits(ctx, s.RecordCreditGrant, kind, amountMicro, reference, createdBy)
+	return grantCredits(ctx, s.defaultTenant().RecordCreditGrant, kind, amountMicro, reference, createdBy)
 }
 
 // GrantCredits adds credits to t's balance and returns the row it holds for
@@ -413,21 +413,7 @@ func grantCredits(
 	return &grant, nil
 }
 
-// RecordCreditGrant writes req against the default team's balance and reports
-// whether it wrote a new row. It refuses a reversal whose Reverses names no
-// paid grant of that team, so a refund can only take back a payment the
-// team's ledger recorded, and a free grant that would lift the balance above
-// [MaxTeamBalanceMicro] with a [CreditBalanceCapError]; a paid grant is never
-// held to the cap, because its payment already went through. A reversal may take the balance below zero; the
-// claim path then refuses that team's new metered work.
-func (s *Store) RecordCreditGrant(
-	ctx context.Context, req CreditGrantRequest,
-) (CreditGrantResult, error) {
-	return s.recordCreditGrant(ctx, DefaultTeam, req)
-}
-
-// RecordCreditGrant writes req against t's balance and reports whether it
-// wrote a new row. It reads the same as [Store.RecordCreditGrant] otherwise.
+// RecordCreditGrant writes a tenant grant or payment-linked reversal and reports whether it was created.
 func (t *Tenant) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
 ) (CreditGrantResult, error) {
@@ -615,16 +601,6 @@ func creditGrantByReferenceTx(
 	return g, true, nil
 }
 
-// CreditBalanceMicro returns the default team's grants minus its charges, in
-// micro-credits. A controller that was never granted anything reads zero.
-//
-// safety: the unscoped twin reads [DefaultTeam] because a local install holds
-// exactly that one team; summing every team would let a funded team pay for
-// an unfunded one's work.
-func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error) {
-	return s.creditBalanceMicro(ctx, DefaultTeam)
-}
-
 // CreditBalanceMicro returns t's grants minus t's charges, in micro-credits.
 // Another team's grants are not in it, so a team that has spent its own
 // grants reads an empty balance however well funded its neighbors are.
@@ -686,15 +662,6 @@ func lockCreditLedgerTx(ctx context.Context, tx *storeTx) error {
 	return err
 }
 
-// CreditState reports the default team's ledger together with the rate, the
-// grace period, and the credits it burned over window.
-//
-// safety: the unscoped twin reads [DefaultTeam] for the same reason
-// [Store.CreditBalanceMicro] does.
-func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditState, error) {
-	return s.creditState(ctx, DefaultTeam, window)
-}
-
 // CreditState reports t's ledger together with the rate, the grace period,
 // and the credits t burned over window. The rate, the grace period and the
 // charge cap are the deployment's and are the same for every team.
@@ -727,7 +694,7 @@ func (s *Store) creditState(ctx context.Context, team Team, window time.Duration
 		var burn sql.NullInt64
 		if err := s.queryRow(ctx,
 			`SELECT SUM(amount_micro) FROM credit_charges WHERE team = ? AND charged_at >= ?`,
-			string(team), time.Now().Add(-window).UnixNano()).Scan(&burn); err != nil {
+			string(team), s.now().Add(-window).UnixNano()).Scan(&burn); err != nil {
 			return out, err
 		}
 		out.BurnMicro = burn.Int64
@@ -779,92 +746,8 @@ type CreditLedgerTotals struct {
 	// StorageMicro is what retained bytes billed, which is the part of the
 	// ledger's spend that bought no runner time.
 	StorageMicro int64
-	// SettledSeconds is the runner seconds the ledger has finished charging
-	// for: every charge row less the part of an open reservation a finish
-	// would still refund. A reservation enters this total after execution
-	// starts and as the node consumes it, so the figure only ever grows and a
-	// caller may export it as a counter.
+	// SettledSeconds excludes the refundable part of unsettled awards.
 	SettledSeconds int64
-}
-
-// CreditLedgerTotals reports the ledger's lifetime sums under one repeatable
-// read, so the grant, charge and reservation figures agree with each other
-// even while claims land. A controller exports them as metrics, where they
-// survive a restart the way an in-process counter does not.
-//
-// Both sums scan a covering index over a table that is never pruned, so a
-// caller samples them on a slow timer rather than on every sweep.
-func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error) {
-	var out CreditLedgerTotals
-	tx, err := s.beginSnapshotReadTx(ctx)
-	if err != nil {
-		return out, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
-                        COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
-                        -COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0)
-                   FROM credit_grants`,
-		CreditGrantFree, CreditGrantPaid, CreditGrantReversal,
-	).Scan(&out.GrantedFreeMicro, &out.GrantedPaidMicro, &out.ReversedMicro); err != nil {
-		return out, err
-	}
-	// safety: a storage row bills bytes rather than runner time, so its
-	// interval stays out of the seconds total the cloud placement series is.
-	var settled, charged int64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
-                        COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
-                        COALESCE(SUM(CASE WHEN kind = ? THEN -amount_micro ELSE 0 END), 0),
-                        COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
-                        COALESCE(SUM(amount_micro), 0),
-                        COALESCE(SUM(CASE WHEN kind = ? THEN 0 ELSE seconds END), 0)
-                   FROM credit_charges`,
-		CreditChargeReservation, CreditChargeUsage, CreditChargeRefund,
-		CreditChargeStorage, CreditChargeStorage,
-	).Scan(&out.ReservedMicro, &out.ChargedMicro, &out.RefundedMicro, &out.StorageMicro,
-		&settled, &charged); err != nil {
-		return out, err
-	}
-
-	// safety: counting a reservation whole would make the seconds total fall
-	// by its refund, so a reservation a finish could still return is held
-	// back: a node's until its machine starts on it, a trigger's until its
-	// claim settles. Past that point the minimum is consumed rather than
-	// refunded; only a setup the platform fails returns billed seconds, and
-	// that is the one refund that lowers this total.
-	var refundable int64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(CASE WHEN credit_billing_from = 0 AND execution_started_at IS NULL
-	                                  THEN ? ELSE 0 END), 0)
-	                   FROM nodes WHERE credit_charged_through != 0`,
-		int64(MinBillableSeconds)).Scan(&refundable); err != nil {
-		return out, err
-	}
-	var triggerRefundable int64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(COUNT(*), 0) * ? FROM triggers WHERE credit_reserved_at != 0`,
-		int64(MinBillableSeconds)).Scan(&triggerRefundable); err != nil {
-		return out, err
-	}
-	out.SettledSeconds = charged - refundable - triggerRefundable
-
-	out.BalanceMicro = out.GrantedFreeMicro + out.GrantedPaidMicro - out.ReversedMicro - settled
-	return out, tx.Commit()
-}
-
-// CreditRateMicroPerSecond returns the price of one cloud runner second in
-// micro-credits. A controller that never set one reads the default.
-func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error) {
-	return s.creditSetting(ctx, metaKeyCreditRateMicro, DefaultCreditRateMicro)
-}
-
-// CreditGraceSeconds returns how long a node keeps running once it has
-// consumed the reservation its claim paid for with the balance at zero.
-func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error) {
-	return s.creditSetting(ctx, metaKeyCreditGraceSecs, DefaultCreditGraceSeconds)
 }
 
 // CreditSettings are the values the ledger prices work with. Every one of
@@ -1274,12 +1157,6 @@ func clearTeamCreditExhaustedTx(ctx context.Context, tx *storeTx, team Team, now
 		  WHERE name = ? AND credit_exhausted_at != 0`,
 		nowNS, string(team))
 	return err
-}
-
-// ListCreditGrants returns the default team's grants newest first, at most
-// limit rows and never more than [CreditHistoryMaxLimit].
-func (s *Store) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGrant, err error) {
-	return s.defaultTenant().ListCreditGrants(ctx, limit)
 }
 
 // ListCreditCharges returns the default team's charges newest first, at most

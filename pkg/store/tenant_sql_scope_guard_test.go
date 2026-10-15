@@ -166,7 +166,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).CountActiveRunners":     "an operational gauge of the deployment's live runners across every team",
 	"(*Store).CountNodesByQueueState": "an operational gauge of the deployment's node queue across every team",
 	"(*Store).CountPendingNodes":      "an operational gauge of the deployment's ready nodes across every team",
-	"(*Store).CreditLedgerTotals": "the credit sampler reports the deployment's ledger totals, which sum every team's " +
+	"(*Store).creditLedgerTotalsWith": "the credit sampler reports the deployment's ledger totals, which sum every team's " +
 		"grants, charges and reservations and name none",
 	"(*Operator).ListStorageQuotas": "the operator's storage report lists every team's quota, each keyed by its team " +
 		"principal",

@@ -286,8 +286,19 @@ enrollment and GitHub App issuance path remain separate integrations.
 
 ### Upload and record persistence
 
+`Tenant.TrustLocalBuilds` and `Tenant.SetTrustLocalBuilds` own the team's
+local binary execution opt-in. Their raw Store methods are removed. An absent
+row means false. Read errors or invalid stored flags cannot enable trust.
+Enabling trust does not change upload or record provenance. The controller's
+membership checks own who may read or change this policy. W7's
+`blob.CheckBinaryExecution` and W3's execution adapter must enforce the policy
+against the committed binary and digest.
+
 `blob.Authority.Upload` contains C2's resolved tagged uploader. W1 rechecks it
-against the exact job/attempt/generation, owner lease or published attempt.
+against the exact job/attempt/generation, owner lease or imported terminal
+published attempt. Attempt-scoped publication requires a persisted finish time
+through the shared authority resolver for upload admission, ticket lookup,
+commit, abort, data access and log commits.
 `RecordLookup.VerifiedDefaultOnly` selects only the authorized repository's
 verified default-branch entries before required bytes or member metadata are read.
 An excluded record is a miss. The evidence retains the App event key, SHA and
@@ -307,6 +318,22 @@ client-selected field. The ticket ID also binds the persisted quota reservation.
 Existing CAS bytes grant no receipt. Failed settlement grants no edge. Abort or
 leased retention releases uncommitted reservations without deleting a live blob.
 
+The `storage-cas-integrity/store-data-sqlite` proof refuses mismatched verified
+size, digest and tenant evidence. It reopens an expired interrupted upload,
+reserves a replacement under the same capacity, rolls back a receipt failure,
+then commits and replays the replacement. After reopening again, only the new
+uploader can read the digest and usage counts one blob. Authority and physical
+verification are contract fixtures. Native transfer integrity and EOF checks
+remain separate integration proofs.
+
+The `storage-owner-receipts-and-stream-verification/store-data-sqlite` proof
+commits trigger and plan uploads before jobs exist. It checks failed verification,
+exact tagged receipt replay, reopening and refusal to transfer the receipt or
+ticket to a job in the same run. Award issuance and physical verification are
+contract fixtures. Generated eval tests check both source and unit fences under
+explicit fake write authority. C2's issued eval grant table remains read-only.
+The native cell still requires signed transfer and stream EOF verification.
+
 Upload tickets reserve monthly bytes, lifetime run bytes and lifetime run objects
 in the existing quota tables. Each dimension has its own durable reservation.
 The aggregate keys are `storage`, `storage.run.bytes:<run>` and
@@ -323,6 +350,11 @@ an object reservation. The legacy `SetNodeArtifactManifestCharged` methods are
 removed with the legacy manifest-pointer endpoint. W7/W9 wire final publication
 and member validation through the record and result contracts. No manifest
 column or mutable pointer route is restored to the final schema.
+
+Record commits normalize expiry instants to UTC and clear values in unset optional
+expiry and manifest fields. Returned metadata matches persisted metadata across
+replay and reopening. A different expiry instant still conflicts with an immutable
+output or manifest record.
 
 The `storage-quota-settlement-crash-replay/store-data-sqlite` proof exercises
 upload admission, commit, abort and deduplication. Child processes exit without
@@ -566,6 +598,14 @@ the exact persisted attempt or publication binding. A refused attachment rolls
 back state, attempt closure and events. An exact result replay does not reattach
 records.
 
+`Store.SetResultBlobRecords` configures the blob implementation of
+`nodeResultRecords` before the store is shared. Attachment verifies exact
+destination result keys and all required bytes in the state transaction through
+the existing record reader. It requires `data.write`, rechecks live authority
+after manifest I/O, and preserves caller-owned commit and rollback. Missing,
+expired or corrupt records prevent the result and its event from committing.
+No synthetic attempt represents an unexecuted job or a published import.
+
 `IntakePolicy` resolves request options through C4 and supplies server ceilings,
 repository authority, verified App delivery facts and log retention. The store
 requires it before admission and rechecks the caller in the intake transaction.
@@ -600,8 +640,25 @@ The `storage-hasmany-read-set/store-data-sqlite` proof uses exact imported job
 attempts under a preseeded publication capability. It checks hidden unrelated and
 foreign existence, budget expiry, reservation and failed-commit refusal, independent
 verified receipts, deduplicated replica charging and persistence after reopening.
+Both `BindData` and `BindReadSet` dispatch through `Store.CheckBinding` to the
+transactional data checker in this SQLite proof. Generated store tests also
+check uncommitted receipt changes and caller-supplied principal forgeries.
 Presence metadata consumes neither download nor egress bytes. Physical verification,
 job-holder transports and native placements remain integration obligations.
+
+The `storage-hasmany-large-budget/store-data-sqlite` proof checks 1,025 distinct
+digests and their duplicates across reopening. All 257 readable digests appear
+once in request order. Unrelated and foreign bytes remain hidden. Presence reads
+leave upload, download and egress accounting unchanged. Generated store tests
+advance the injected clock across the final read and require an empty budget
+error once the deadline is reached. Trigger/plan owner receipt properties also
+check forged identities and refusal to transfer the receipt to a job in the same
+run. Physical stream verification and native placements remain separate proofs.
+
+Record commits and lookups recheck live authority after verified manifest I/O.
+Generated tests cross the job lease, leaf capability and ancestor expiry during
+that read through CommitRecord, LookupRecord, LookupMemo, LookupDepcache and
+CopyMemo. Refusals return no read set and persist no output or manifest record.
 
 The `storage-log-segments-and-fallback/store-data-sqlite` proof exercises
 immutable job segments, transactional rollback of a gapped batch, reopening,
@@ -724,6 +781,8 @@ rows return errors. A settings batch and its returned snapshot commit together.
 Rate-table reads use one snapshot so a concurrent update cannot mix its scalar
 price with another table. Operator table authority is checked under the shared
 advisory lock before any settings write.
+`Store.CreditRateMicroPerSecond` and `Store.CreditGraceSeconds` are removed.
+Their callers read the existing `CreditSettings` snapshot fields.
 
 `CreditSettings` supplies max-charge seconds, the storage price, the free storage
 allowance and rate-table presence. Their unused Store getters are removed.
@@ -782,6 +841,14 @@ bytes independently of their originating run. Upload-ticket expiry releases
 quota through the leased final retention pass. Physical GC wiring remains with
 the storage adapter.
 
+`Store.ExpiredOutputRuns`, `Store.ReleaseRunOutputs`, `Store.ForgetRunOutputs`,
+`ExpiredOutputRun` and the store's duplicate `OutputRetention` constant are removed
+with the controller's output-key sweep. Leased record expiry and reachability GC
+own output lifetime. A copied output and its transitive manifest members survive
+source-run deletion and reopening. Their bytes become collectible after the last
+copy disappears. Copies add no upload usage. The SQLite retention proof checks
+both deletion stages, and generated store tests race memo copying with collection.
+
 Usage rows are additive per team, period and replica. Reporting sums rows.
 Admission takes a shared team/quota lock and records each reservation durably;
 settlement is idempotent by reservation ID. Log reads meter egress exactly and
@@ -802,8 +869,32 @@ resuming billing starts a new interval. Storage charges remain runless.
 
 The `billing-ledger-survives-retention/store-data-sqlite` acceptance proof
 checks a real storage debit and preserves every financial row across leased
-retention and reopening. It does not exercise provider verification or native
-placements. The controller's billing caller uses this operator method. W1's
+retention and reopening. Tenant billing state, grant history and charge history
+exclude a neighboring team's ledger and survive the same retention and restart.
+Both history methods retain tenant attribution. Charge history reads the final
+capability column into CreditCharge.TokenPrefix and preserves the original
+run, job and awarded capability after those operational rows expire.
+`Tenant.CreditUsageByRun` nets reservations, usage and refunds, excluding storage
+and runless charges. Its per-run rows survive operational run retention and
+reopening alongside the tenant balance and history.
+`Store.CreditLedgerTotals` reads deployment-wide financial totals in one snapshot.
+For each open metered award it uses C2's billing calculator and the immutable
+intervals to subtract refundable seconds from the ledger's net compute seconds.
+Consumption beyond already charged seconds waits for a billing checkpoint.
+Open intervals stop at their persisted charged checkpoint for reporting. Closed
+intervals use their finish time. A delayed reaper cannot add unconfirmed time.
+Reporting cannot advance charged checkpoints or close intervals. Operational
+run, node, trigger and credential rows do not control these totals. Settled and
+unmetered awards need no calculator call. Generated store tests use a contract
+fake while C2's production calculator remains unimplemented. The retention proof
+also checks exact deployment totals across pruning and reopening, with storage
+seconds excluded. The unused `Store.RunFinished` pruning query is removed.
+`Tenant.CreditState` and `Tenant.ListCreditGrants` own these reads. Their raw
+Store twins are removed. Burn windows use the store clock.
+Balances use `Tenant.CreditBalanceMicro`. Its raw Store twin is removed.
+`Tenant.RecordCreditGrant` owns grant requests. Its raw Store twin is removed.
+The proof does not exercise provider verification or native placements.
+The controller's billing caller uses this operator method. W1's
 maintenance coordinator owns the shared retention, quota and GC ordering.
 
 ### Storage policy and reports
@@ -903,6 +994,10 @@ still repeat their locking checks before persisting a receipt or reference.
 The `storage-reachability-and-retention-tails/store-data-sqlite` proof exercises
 leased record expiry, newest-success output pins, receipt roots, transitive
 members, persisted tombstones, grace and failed physical deletion. Collection
+requires the persisted maintenance fence even when no tombstones are ready.
+The proof refuses forged fences before and after reopening, then refuses an
+expired or superseded generation on an empty inventory. A same-holder takeover
+must acquire a new generation before collection resumes. Collection
 rechecks references added after marking, then removes tails after their last
 root disappears. An old source bundle survives its originating run and becomes
 collectible only after its record expires and the tombstone grace passes.

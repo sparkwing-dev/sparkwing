@@ -47,6 +47,9 @@ func checkStoreReachabilityBoundary(ctx context.Context, root string) (err error
 	if err != nil {
 		return err
 	}
+	if err := checkStoreGCFences(ctx, operator, lease); err != nil {
+		return err
+	}
 	retained, err := operator.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 100})
 	if err != nil || retained.Runs != 0 || retained.Records != 1 || retained.PinnedOutputs != 1 {
 		return fmt.Errorf("pinned output and expired record retention=%+v: %v", retained, err)
@@ -63,6 +66,9 @@ func checkStoreReachabilityBoundary(ctx context.Context, root string) (err error
 	}
 	s = reopened
 	operator = s.AsOperator()
+	if err := checkStoreGCFences(ctx, operator, lease); err != nil {
+		return err
+	}
 	calls := 0
 	refusal := errors.New("physical deletion unavailable")
 	deleter := storeBoundaryDeleter(func(context.Context, blob.Blob) error { calls++; return refusal })
@@ -102,20 +108,71 @@ func checkStoreReachabilityBoundary(ctx context.Context, root string) (err error
 	if _, err := s.DB().ExecContext(ctx, "DELETE FROM runs WHERE team=? AND id='upload'", store.DefaultTeam); err != nil {
 		return err
 	}
-	if n, err := operator.MarkBlobTombstones(ctx, lease, 100); err != nil || n != 5 {
-		return fmt.Errorf("unreferenced tail marks=%d, want 5: %v", n, err)
+	if n, err := operator.MarkBlobTombstones(ctx, lease, 100); err != nil || n != 1 {
+		return fmt.Errorf("source deletion marks=%d, want 1 while copied outputs remain: %v", n, err)
 	}
 	if _, err := s.DB().ExecContext(ctx, "UPDATE blob_tombstones SET marked_at=?", old); err != nil {
 		return err
 	}
 	deleter = storeBoundaryDeleter(func(context.Context, blob.Blob) error { return nil })
-	if n, err := operator.CollectBlobTombstones(ctx, lease, 100, deleter); err != nil || n != 5 {
-		return fmt.Errorf("unreferenced tail collection=%d, want 5: %v", n, err)
+	if n, err := operator.CollectBlobTombstones(ctx, lease, 100, deleter); err != nil || n != 1 {
+		return fmt.Errorf("source deletion collection=%d, want 1: %v", n, err)
+	}
+	if err := checkStoreGCRows(ctx, s.DB(), 5, 0); err != nil {
+		return err
+	}
+	if err := s.Close(); err != nil {
+		return err
+	}
+	s, err = store.Open(path)
+	if err != nil {
+		return err
+	}
+	operator = s.AsOperator()
+	if err := checkStoreRetainedGraphBytes(ctx, s, 55); err != nil {
+		return err
+	}
+	var copies int
+	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM blob_records WHERE team=? AND run_id='copy' AND source_run_id='upload' AND digest=?", store.DefaultTeam, strings.Repeat("b", 64)).Scan(&copies); err != nil || copies != 1 {
+		return fmt.Errorf("copied output lost its source provenance across retention: copies=%d: %v", copies, err)
+	}
+	if _, err := s.DB().ExecContext(ctx, "DELETE FROM runs WHERE team=? AND id='copy'", store.DefaultTeam); err != nil {
+		return err
+	}
+	if n, err := operator.MarkBlobTombstones(ctx, lease, 100); err != nil || n != 4 {
+		return fmt.Errorf("last-copy deletion marks=%d, want 4: %v", n, err)
+	}
+	if _, err := s.DB().ExecContext(ctx, "UPDATE blob_tombstones SET marked_at=?", old); err != nil {
+		return err
+	}
+	if n, err := operator.CollectBlobTombstones(ctx, lease, 100, deleter); err != nil || n != 4 {
+		return fmt.Errorf("last-copy deletion collection=%d, want 4: %v", n, err)
 	}
 	if err := checkStoreGCRows(ctx, s.DB(), 1, 0); err != nil {
 		return err
 	}
-	return expireStoreSourceBoundary(ctx, s, lease, old)
+	if err := checkStoreRetainedGraphBytes(ctx, s, 19); err != nil {
+		return err
+	}
+	if err := expireStoreSourceBoundary(ctx, s, lease, old); err != nil {
+		return err
+	}
+	if err := checkStoreRetainedGraphBytes(ctx, s, 0); err != nil {
+		return err
+	}
+	return checkStoreGCTakeoverBoundary(ctx, s, lease)
+}
+
+func checkStoreRetainedGraphBytes(ctx context.Context, s *store.Store, want int64) error {
+	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return err
+	}
+	bytes, err := tenant.StorageRetainedBytes(ctx)
+	if err != nil || bytes != want {
+		return fmt.Errorf("retained graph bytes=%d, want %d: %v", bytes, want, err)
+	}
+	return nil
 }
 
 func expireStoreSourceBoundary(ctx context.Context, s *store.Store, lease store.SingletonLease, old int64) error {
@@ -189,6 +246,14 @@ func seedStoreReachabilityBoundary(ctx context.Context, db *sql.DB) error {
 		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
 			return err
 		}
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days)
+SELECT team,'copy',2,pipeline,'success',request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,?,?,log_retention_class,log_retention_days FROM runs WHERE team=? AND id='upload'`, time.Now().UnixNano(), time.Now().UnixNano(), store.DefaultTeam); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,manifest_digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,created_at)
+SELECT team,kind,'copied',name,digest,manifest_digest,'copy',repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,? FROM blob_records WHERE team=? AND kind='output' AND scope='pinned'`, time.Now().UnixNano(), store.DefaultTeam); err != nil {
+		return err
 	}
 	return nil
 }

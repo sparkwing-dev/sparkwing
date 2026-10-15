@@ -95,7 +95,7 @@ func TestDataDownloadClaimUsesCloudProvenance(t *testing.T) {
 	if len(head.keys) != 0 {
 		t.Fatalf("legacy storage accessed %d times", len(head.keys))
 	}
-	if err := st.SetTrustLocalBuilds(ctx, store.DefaultTeam, true); err != nil {
+	if err := tenant.SetTrustLocalBuilds(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 	for _, request := range []dataDownloadRequest{

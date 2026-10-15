@@ -79,7 +79,6 @@ type Server struct {
 	downloadCDN      *sign.URLSigner
 	downloadDomain   string
 	directUploads    *directUploadS3
-	lastOutputPrune  time.Time
 	outputSigner     outputSigner
 	logRetention     map[store.Team]int
 	logLifecycle     logLifecycle
@@ -1358,7 +1357,6 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			return
 		case <-ticker.C:
 			s.sweepEgressUsage(ctx)
-			s.pruneOutputsWithoutStoragePass(ctx, time.Now())
 			s.reapLeased(ctx)
 			s.reconcileOwnedRuns(ctx)
 			s.sampleOperationalSeries(ctx)

@@ -84,7 +84,7 @@ func triggerFloor(t *testing.T, st *store.Store, pool store.ClaimIdentity) int64
 
 func balance(t *testing.T, st *store.Store) int64 {
 	t.Helper()
-	b, err := st.CreditBalanceMicro(context.Background())
+	b, err := tenant(t, st, store.DefaultTeam).CreditBalanceMicro(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,7 +383,7 @@ func TestMeteredTriggerRequeueRefundsHeartbeatUsage(t *testing.T) {
 	for i := range table {
 		table[i].MicroPerSecond *= 2
 	}
-	if err := st.SetCreditRateTable(ctx, table); err != nil {
+	if _, err := st.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &table}); err != nil {
 		t.Fatal(err)
 	}
 	backdateTriggerClaim(t, st, "run-unstarted-paid", pastTriggerMinimum(5*time.Second), time.Time{})

@@ -21,11 +21,45 @@ its independent repair path.
 and a batch limit to `Store.ReapUnits`. Results identify the team, run and unit.
 Lease loss requeues unfinished remote work within the same run. Started local
 owners fail in place. Unstarted owners consume no execution attempt or disruption.
+## Build trust uses tenant handles
+
+`Store.TrustLocalBuilds` and `Store.SetTrustLocalBuilds` are removed. Obtain a
+tenant with `Store.ForTeam`, then call `Tenant.TrustLocalBuilds` or
+`Tenant.SetTrustLocalBuilds` without a team argument. Local stores use
+`store.DefaultTeam`. The default is false. The HTTP build-trust routes and
+their membership requirements keep their existing behavior.
+
+## Financial totals use persisted awards
+
+`Store.CreditLedgerTotals` subtracts refundable reservations using the immutable
+billing awards and intervals. Reading a report leaves billing checkpoints and
+intervals unchanged. Unstarted metered awards contribute no settled seconds.
+Open compute intervals stop at the persisted charged checkpoint in reports.
+Storage charges affect balances but contribute no compute seconds.
+
+The unused `Store.RunFinished` method is removed. Leased retention and tagged
+log-stream maintenance own pruning.
+
+## Grant requests use tenant handles
+
+`Store.RecordCreditGrant` is removed. Obtain a tenant with `Store.ForTeam`,
+then call `Tenant.RecordCreditGrant`. Local stores use `store.DefaultTeam`.
+
+## Billing reads use tenant handles
+
+`Store.CreditBalanceMicro`, `Store.CreditState` and `Store.ListCreditGrants` are
+removed. Obtain a tenant with `Store.ForTeam`, then call the matching Tenant method.
+Local stores use the handle for `store.DefaultTeam`.
 
 ## Rate-table presence uses the settings snapshot
 
-`Store.CreditRateTableSet` is removed. Read `CreditSettings.RateTableSet` so the
-presence flag and prices come from the same settings snapshot.
+`Store.CreditRateTableSet`, `Store.CreditRateMicroPerSecond` and
+`Store.CreditGraceSeconds` are removed. Read `CreditSettings.RateTableSet`,
+`CreditSettings.RateMicroPerSecond` and `CreditSettings.GraceSeconds` from the
+same settings snapshot.
+
+`Store.SetCreditRateTable` is removed. Write the table through
+`SetCreditSettings` with `CreditSettingsUpdate.RateTable`.
 
 ## Abandoned logs use tagged streams
 
