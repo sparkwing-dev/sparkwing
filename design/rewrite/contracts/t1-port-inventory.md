@@ -488,6 +488,18 @@ rejection before renewal, source acquisition, SDK startup or result writes.
 
 ## Open questions for the lead
 
+The [W3 diagnostics continuation](w3-diagnostics-continuation.md) ports the
+step-log assertions to
+`protocol_test.go:TestProtocol/protocol-step-failure-policies/hermetic-native-go-steps`.
+Eleven cases use real Go SDK processes and the common executor. Seven SQLite
+step cases verify committed diagnostic ordering and refused writes. The old
+`TestHostDrivesSteps` becomes `TestHostStepWindows` and retains only the native
+window cases. Native placement and sealed StartAt/StopAt/Only inputs remain open.
+The same continuation ports the old orchestrator foreign-holder refusal to
+`lifecycle_test.go:TestLifecycle/lifecycle-transition-replay-and-fencing/hermetic-store-foreign-awards`.
+Four SQLite cases refuse changed holder, capability, generation and ordinal
+before renewal or execution and preserve state/events.
+
 The [W3 step continuation](w3-step-continuation.md) ports the stored-step checks
 from `TestHostDrivesSteps` through the common executor. Native Go processes prove
 step states for ordering, parallel work, fail-fast, Finally, collect-all,

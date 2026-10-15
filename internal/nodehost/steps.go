@@ -14,50 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// safety: a step graph the host cannot order would hang an attempt or run a
-// step before its need, so the run fails before any node starts.
-func validateSteps(n nodeproto.JobSpec) error {
-	if len(n.Steps) == 0 {
-		return nil
-	}
-	indeg := make(map[string]int, len(n.Steps))
-	children := map[string][]string{}
-	for _, st := range n.Steps {
-		if st.ID == "" {
-			return invalid("node %s holds a step with no id", n.ID)
-		}
-		if _, dup := indeg[st.ID]; dup {
-			return invalid("node %s holds step %s twice", n.ID, st.ID)
-		}
-		indeg[st.ID] = len(st.Needs)
-	}
-	var ready []string
-	for _, st := range n.Steps {
-		for _, d := range st.Needs {
-			if _, ok := indeg[d]; !ok {
-				return invalid("step %s of node %s needs %s, which the node does not hold", st.ID, n.ID, d)
-			}
-			children[d] = append(children[d], st.ID)
-		}
-		if len(st.Needs) == 0 {
-			ready = append(ready, st.ID)
-		}
-	}
-	for done := 0; len(ready) > 0; done++ {
-		id := ready[0]
-		ready = ready[1:]
-		for _, c := range children[id] {
-			if indeg[c]--; indeg[c] == 0 {
-				ready = append(ready, c)
-			}
-		}
-		if done+1 == len(n.Steps) {
-			return nil
-		}
-	}
-	return invalid("node %s has a step dependency cycle", n.ID)
-}
-
 // safety: ports the SDK's in-process RunWork decision for decision, so a
 // pipeline's steps end the same whichever executor drives them.
 type stepRun struct {

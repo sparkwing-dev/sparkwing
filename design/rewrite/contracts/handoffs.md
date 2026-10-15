@@ -1,5 +1,13 @@
 # Cross-area handoffs
 
+W3's [diagnostics continuation](w3-diagnostics-continuation.md) ports retained
+step logs and activates the eleven-case native Go step-policy component. The
+SQLite step cell now verifies diagnostic commit ordering and refused delivery.
+Four further SQLite cases port the orchestrator's foreign-holder refusal and
+refuse changed capability, generation and ordinal before renewal or execution.
+Step windows, owner policies, process authority, native placements and legacy
+runtime removal remain open.
+
 W3's [step continuation](w3-step-continuation.md) adds fenced step persistence,
 six SQLite cases and native Go step-state/dry-run coverage. The remaining
 cross-area contract gaps and legacy runtime cuts are listed there.

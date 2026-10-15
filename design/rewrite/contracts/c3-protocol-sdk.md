@@ -1,5 +1,9 @@
 # C3 protocol and SDK contract
 
+[Execution diagnostics](w3-diagnostics-continuation.md) adds committed step/retry
+logs and the native Go step-policy acceptance component. Step windows and native
+placement assembly remain open.
+
 [Step persistence](w3-step-continuation.md) connects the common executor to C1's
 fenced step writer and ports native step-state and dry-run assertions.
 
@@ -144,6 +148,7 @@ are part of this contract.
 | `nodehost.ConcurrencyKey`, `nodehost.ParseConcurrencyKey` | Encode and decode scoped group identity without separator collisions. |
 | `nodehost.NodeHost.Execute` | Replans, checks drift, runs executor layers and reports through store transitions. |
 | `nodehost.NewNodeExecutor`, `ExecutorDependencies`, `ExecutorProcess` | Connect the common executor to the fenced store, matched engine, SDK process and storage adapters. |
+| `nodehost.ExecutorDependencies.Log` | Delivers masked host diagnostics under the committed attempt after step/retry writes. Delivery errors stop further author code, prevent retries and propagate after joining work. |
 | `nodehost.OutputRecords`, `nodehost.JobUpload` | Publish typed output through verified uploads and record commits; read authorized output only after verified EOF. JobUpload supplies the common attempt/scope binding for output and artifact writes. |
 | `nodehost.ArtifactRecords`, `ArtifactRecords.Stage`, `ArtifactRecords.Publish`, `ArtifactRecords.Prepare` | Stage authorized manifest members and capture workspace files through verified uploads and a transactional manifest commit. The artifact layer stages once and publishes after retries with the last attempt's binding. |
 | `nodehost.DepcacheRecords`, `DepcacheRecords.Prepare` | Restore declared directories once and save cold successful caches after retries through the current storage binding. |

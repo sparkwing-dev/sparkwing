@@ -32,12 +32,14 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 		if timeout != nil {
 			result = h.failureAt(timeout, stage)
 			var cleanupErr *executorCleanupError
-			if errors.As(err, &cleanupErr) {
-				result = h.failureAt(errors.Join(timeout, cleanupErr), stage)
+			var writeErr *executorStepRecordError
+			writeFailed := errors.As(err, &writeErr)
+			if errors.As(err, &cleanupErr) || writeFailed {
+				result = h.failureAt(errors.Join(timeout, err), stage)
 			} else {
 				err = nil
 			}
-			if !retryAllowed && !afterRun && session != nil && parent.Err() == nil {
+			if !retryAllowed && !afterRun && session != nil && parent.Err() == nil && !writeFailed {
 				afterCtx, afterCancel := context.WithTimeout(parent, limits.CleanupTimeout)
 				afterErr := h.afterRun(afterCtx, session, input, job, result)
 				afterCancel()

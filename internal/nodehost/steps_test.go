@@ -5,8 +5,8 @@ package nodehost
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
+	"maps"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -17,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -37,33 +36,6 @@ func (h *stepsHost) records(node, event string) map[string]sparkwing.LogRecord {
 		}
 	}
 	return out
-}
-
-func (h *stepsHost) outcomes(t *testing.T, node string) map[string]string {
-	t.Helper()
-	got := map[string]string{}
-	for id, r := range h.records(node, "step_end") {
-		got[id] = fmt.Sprint(r.Attrs["outcome"])
-	}
-	for id := range h.records(node, "step_skipped") {
-		got[id] = "skipped"
-	}
-	return got
-}
-
-func (h *stepsHost) rows(t *testing.T, node string) map[string]string {
-	t.Helper()
-	steps, err := h.st.ListNodeSteps(t.Context(), h.runID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := map[string]string{}
-	for _, s := range steps {
-		if s.NodeID == node {
-			got[s.StepID] = s.Status
-		}
-	}
-	return got
 }
 
 func (h *stepsHost) wantLog(t *testing.T, node string, present, absent []string) {
@@ -89,19 +61,7 @@ func (h *stepsHost) wantNode(t *testing.T, node string, outcome sparkwing.Outcom
 	}
 }
 
-func equalMaps(a, b map[string]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if b[k] != v {
-			return false
-		}
-	}
-	return true
-}
-
-func TestHostDrivesSteps(t *testing.T) {
+func TestHostStepWindows(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a pipeline binary; run without -short")
 	}
@@ -143,101 +103,6 @@ func TestHostDrivesSteps(t *testing.T) {
 	t.Run("Main", func(t *testing.T) {
 		h := host(t, "run-steps", "main", func(c *Config) { c.StartAt = "r-b" })
 
-		t.Run("NeedsAndGroupsOrderStepsInOneProcess", func(t *testing.T) {
-			h.wantNode(t, "order", sparkwing.Success, "")
-			if got := string(h.res.Nodes["order"].Output); got != `"result-from-a"` {
-				t.Errorf("order output = %s, want the result step's", got)
-			}
-			h.wantLog(t, "order", []string{"b saw from-a after 2 checks"}, nil)
-			want := map[string]string{"a": "success", "c1": "success", "c2": "success", "b": "success"}
-			if got := h.outcomes(t, "order"); !equalMaps(got, want) {
-				t.Errorf("order step outcomes = %v, want %v", got, want)
-			}
-			want = map[string]string{"a": store.StepPassed, "c1": store.StepPassed, "c2": store.StepPassed, "b": store.StepPassed}
-			if got := h.rows(t, "order"); !equalMaps(got, want) {
-				t.Errorf("order step rows = %v, want %v", got, want)
-			}
-			if r := h.records("order", "step_end")["b"]; r.Attrs["duration_ms"] == nil || r.JobID != "order" {
-				t.Errorf("step_end b = %+v, want a duration and the node", r)
-			}
-		})
-
-		t.Run("IndependentStepsRunAtOnce", func(t *testing.T) {
-			h.wantNode(t, "parallel", sparkwing.Success, "")
-		})
-
-		t.Run("FailFastCancelsSiblingsAndRunsFinally", func(t *testing.T) {
-			h.wantNode(t, "failfast", sparkwing.Failed, `step "reject": rejected`)
-			h.wantLog(t, "failfast", []string{"slow saw its cancel", "cleanup saw env-7"}, []string{"pending ran"})
-			want := map[string]string{"setup": "success", "slow": "cancelled", "reject": "failed", "pending": "cancelled", "cleanup": "success"}
-			if got := h.outcomes(t, "failfast"); !equalMaps(got, want) {
-				t.Errorf("failfast step outcomes = %v, want %v", got, want)
-			}
-			if got := h.rows(t, "failfast"); got["slow"] != store.StepCancelled || got["pending"] != store.StepCancelled || got["reject"] != store.StepFailed || got["cleanup"] != store.StepPassed {
-				t.Errorf("failfast step rows = %v", got)
-			}
-			ff, ok := h.records("failfast", "work_fail_fast")["reject"]
-			if !ok || ff.Attrs["trigger_step"] != "reject" || fmt.Sprint(ff.Attrs["cancelled_steps"]) != "[pending slow]" || ff.Attrs["cancelled_siblings"] != 2 {
-				t.Errorf("work_fail_fast = %+v (found %v), want reject cancelling pending and slow", ff, ok)
-			}
-			failure, firstCancel := -1, -1
-			for i, r := range h.logs.records["failfast"] {
-				if r.Event != "step_end" {
-					continue
-				}
-				if r.Msg == "reject" {
-					failure = i
-				}
-				if r.Attrs["outcome"] == "cancelled" && firstCancel == -1 {
-					firstCancel = i
-				}
-			}
-			if failure == -1 || failure > firstCancel {
-				t.Errorf("the failure (%d) is recorded after the first cancellation (%d)", failure, firstCancel)
-			}
-		})
-
-		t.Run("CollectAllFinishesSiblingsButHoldsDependents", func(t *testing.T) {
-			h.wantNode(t, "collect", sparkwing.Failed, "rejected")
-			h.wantLog(t, "collect", []string{"independent finished"}, []string{"dependent ran"})
-			if _, ok := h.records("collect", "work_fail_fast")["reject"]; ok {
-				t.Error("collect-all wrote a fail-fast record")
-			}
-		})
-
-		t.Run("ContinueOnErrorLetsDependentsRun", func(t *testing.T) {
-			h.wantNode(t, "continue", sparkwing.Failed, "rejected")
-			h.wantLog(t, "continue", []string{"dependent ran"}, nil)
-		})
-
-		t.Run("OptionalMasksTheRollup", func(t *testing.T) {
-			h.wantNode(t, "optional", sparkwing.Success, "")
-			h.wantLog(t, "optional", []string{"real work ran"}, nil)
-			if got := h.outcomes(t, "optional")["best-effort"]; got != "failed" {
-				t.Errorf("best-effort outcome = %s, want failed", got)
-			}
-		})
-
-		t.Run("SkipIfSkipsAStepAndSatisfiesItsDependents", func(t *testing.T) {
-			h.wantNode(t, "skips", sparkwing.Success, "")
-			h.wantLog(t, "skips", []string{"ran b"}, []string{"ran a"})
-			if r := h.records("skips", "step_skipped")["a"]; r.Attrs["outcome"] != "skipped" || r.Attrs["reason"] != nil {
-				t.Errorf("step_skipped a = %+v, want outcome skipped and no reason", r)
-			}
-			if got := h.rows(t, "skips")["a"]; got != store.StepSkipped {
-				t.Errorf("a row = %q, want skipped", got)
-			}
-		})
-
-		t.Run("APanickingSkipIfFailsItsStep", func(t *testing.T) {
-			h.wantNode(t, "skippanic", sparkwing.Failed, "guard blew up")
-			h.wantLog(t, "skippanic", nil, []string{"guarded ran"})
-		})
-
-		t.Run("APanickingStepFailsTheNode", func(t *testing.T) {
-			h.wantNode(t, "panics", sparkwing.Failed, "dropped a wrench")
-		})
-
 		t.Run("StartAtSkipsUpstreamSteps", func(t *testing.T) {
 			h.wantNode(t, "range", sparkwing.Success, "")
 			h.wantLog(t, "range", []string{"ran r-b", "ran r-c"}, []string{"ran r-a"})
@@ -245,15 +110,6 @@ func TestHostDrivesSteps(t *testing.T) {
 				t.Errorf("step_skipped r-a = %+v, want the window's reason", r)
 			}
 		})
-	})
-
-	t.Run("DryRunRunsOnlyStepsThatDeclareIt", func(t *testing.T) {
-		h := host(t, "run-dry", "dry", func(c *Config) { c.Run.DryRun = true })
-		h.wantNode(t, "dry", sparkwing.Success, "")
-		h.wantLog(t, "dry", []string{"dry body", "safe ran"}, []string{"real body", "plain ran"})
-		if r := h.records("dry", "step_skipped")["plain"]; r.Attrs["reason"] != "no_dry_run_defined" {
-			t.Errorf("step_skipped plain = %+v, want no_dry_run_defined", r)
-		}
 	})
 
 	t.Run("AnUnknownBoundFailsTheRun", func(t *testing.T) {
@@ -295,7 +151,7 @@ func TestRangeSkips(t *testing.T) {
 			if got == nil {
 				got = map[string]string{}
 			}
-			if !equalMaps(got, tc.want) {
+			if !maps.Equal(got, tc.want) {
 				t.Errorf("skips = %v, want %v", got, tc.want)
 			}
 		})

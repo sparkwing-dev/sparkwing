@@ -62,7 +62,9 @@ type ExecutorActivity struct {
 // A bearer-bearing input requires Bind; unbound transports may omit it.
 // BindStorage refreshes byte/record authority after each start or retry commit.
 // Configured storage requires this factory; failed refresh suppresses finalizer writes.
+// Log receives masked host diagnostics with their committed attempt; delivery errors stop work.
 type ExecutorDependencies struct {
+	Log           func(context.Context, NodeInput, nodeproto.FrameLog) error
 	BindStorage   func(context.Context, NodeInput) (StorageBinding, error)
 	Store         NodeTransitionStore
 	Bind          func(context.Context, NodeInput) (nodeproto.ProcessBinding, error)
@@ -275,6 +277,15 @@ func (h *nodeExecutor) attempts(ctx context.Context, input *NodeInput, spec runs
 			return h.failure(bindErr), bindErr
 		}
 		*input = bound
+		after := ""
+		if wait > 0 {
+			after = " after " + wait.String()
+		}
+		if err := h.diagnostic(ctx, *input, "info", "retry", "", fmt.Sprintf("retry attempt %d/%d%s", row.ApplicationRetries+retry+2, input.Execution.Retry.Value+1, after), map[string]any{
+			"attempt": row.ApplicationRetries + retry + 2, "total": input.Execution.Retry.Value + 1, "ordinal": input.Attempt,
+		}); err != nil {
+			return h.failure(err), err
+		}
 		if err = executorWait(ctx, wait); err != nil {
 			return h.failure(err), err
 		}

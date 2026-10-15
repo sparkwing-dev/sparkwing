@@ -46,6 +46,24 @@ func FuzzExecutorStepRecordFenceAndMask(f *testing.F) {
 		masker := secrets.NewMasker()
 		masker.Register(secret)
 		deps.Mask = masker.Mask
+		var diagnostics []nodeproto.FrameLog
+		deps.Log = func(_ context.Context, _ NodeInput, log nodeproto.FrameLog) error {
+			diagnostics = append(diagnostics, log)
+			var attrs any
+			if err := json.Unmarshal(log.Attrs, &attrs); err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := json.Marshal(attrs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, form := range forms {
+				if strings.Contains(log.Message, form) || strings.Contains(string(log.Attrs), form) || strings.Contains(string(decoded), form) {
+					t.Fatal("diagnostic exposed a registered failure")
+				}
+			}
+			return nil
+		}
 		records := &executorStepStore{NodeTransitionStore: st}
 		deps.Store = records
 		start := deps.Start
@@ -63,6 +81,9 @@ func FuzzExecutorStepRecordFenceAndMask(f *testing.F) {
 		}
 		if len(records.reports) != 2 {
 			t.Fatalf("step reports=%d", len(records.reports))
+		}
+		if len(diagnostics) < 2 {
+			t.Fatal("step diagnostics are absent")
 		}
 		for _, report := range records.reports {
 			if report.Actor != executorActor(input) || report.Attempt.Attempt != input.Attempt+1 || report.Attempt.Generation != input.Generation || report.Attempt.RunID != input.Accepted.RunID || report.Attempt.NodeID != input.NodeID {
@@ -231,63 +252,75 @@ func TestNodeExecutorStepWriteRefusalPreventsSuccessAndJoinsWork(t *testing.T) {
 }
 
 func TestNodeExecutorStepWriteRefusalJoinsParallelBodies(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	input, st, deps, processes := executorFixture(t)
-	job := input.Accepted.Plan.Jobs[0]
-	job.Steps = []nodeproto.StepSpec{{ID: "slow"}, {ID: "refuse"}, {ID: "cleanup", Needs: []string{"slow", "refuse"}, Finally: true}}
-	executorChangeJob(t, &input, st, job)
-	entered, joined := make(chan struct{}), make(chan struct{})
-	refused := errors.New("terminal step write refused")
-	records := &executorStepStore{NodeTransitionStore: st, write: func(ctx context.Context, report store.StepReport) error {
-		if report.StepID != "refuse" {
-			return nil
-		}
-		if report.State == "passed" {
-			return refused
-		}
-		select {
-		case <-entered:
-			return nil
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		}
-	}}
-	deps.Store = records
-	start := deps.Start
-	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
-		p, err := start(ctx, in, activity)
-		p.(*executorProcess).plan = input.Accepted.Plan
-		p.(*executorProcess).answer = func(ctx context.Context, r nodeproto.Request) (any, error) {
-			if r.Op != nodeproto.OpRunStep {
-				return nil, nil
+	for _, sink := range []string{"state", "diagnostic"} {
+		t.Run(sink, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			input, st, deps, processes := executorFixture(t)
+			job := input.Accepted.Plan.Jobs[0]
+			job.Steps = []nodeproto.StepSpec{{ID: "slow"}, {ID: "refuse"}, {ID: "cleanup", Needs: []string{"slow", "refuse"}, Finally: true}}
+			executorChangeJob(t, &input, st, job)
+			entered, joined := make(chan struct{}), make(chan struct{})
+			refused := errors.New("terminal step write refused")
+			records := &executorStepStore{NodeTransitionStore: st, write: func(ctx context.Context, report store.StepReport) error {
+				if report.StepID != "refuse" {
+					return nil
+				}
+				if report.State == "passed" && sink == "state" {
+					return refused
+				}
+				select {
+				case <-entered:
+					return nil
+				case <-ctx.Done():
+					return context.Cause(ctx)
+				}
+			}}
+			deps.Store = records
+			if sink == "diagnostic" {
+				deps.Log = func(_ context.Context, _ NodeInput, frame nodeproto.FrameLog) error {
+					if frame.Step == "refuse" && frame.Event == "step_end" {
+						return refused
+					}
+					return nil
+				}
 			}
-			if r.Step == "cleanup" {
-				t.Error("persistence failure started further author code")
+			start := deps.Start
+			deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+				p, err := start(ctx, in, activity)
+				p.(*executorProcess).plan = input.Accepted.Plan
+				p.(*executorProcess).answer = func(ctx context.Context, r nodeproto.Request) (any, error) {
+					if r.Op != nodeproto.OpRunStep {
+						return nil, nil
+					}
+					if r.Step == "cleanup" {
+						t.Error("persistence failure started further author code")
+					}
+					if r.Step == "slow" {
+						close(entered)
+						defer close(joined)
+						<-ctx.Done()
+						return nil, context.Cause(ctx)
+					}
+					return nodeproto.RunResult{Outcome: "success"}, nil
+				}
+				return p, err
 			}
-			if r.Step == "slow" {
-				close(entered)
-				defer close(joined)
-				<-ctx.Done()
-				return nil, context.Cause(ctx)
+			host, err := NewNodeExecutor(deps)
+			if err != nil {
+				t.Fatal(err)
 			}
-			return nodeproto.RunResult{Outcome: "success"}, nil
-		}
-		return p, err
-	}
-	host, err := NewNodeExecutor(deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := host.Execute(ctx, input); !errors.Is(err, refused) {
-		t.Fatalf("error=%v", err)
-	}
-	select {
-	case <-joined:
-	default:
-		t.Fatal("parallel body outlived the failed execution")
-	}
-	if len(*processes) != 1 || (*processes)[0].closed != 1 || (*processes)[0].cleaned != 1 || st.changes[len(st.changes)-1].To != store.NodeFailed {
-		t.Fatal("step refusal retried or escaped its process lifecycle")
+			if err := host.Execute(ctx, input); !errors.Is(err, refused) {
+				t.Fatalf("error=%v", err)
+			}
+			select {
+			case <-joined:
+			default:
+				t.Fatal("parallel body outlived the failed execution")
+			}
+			if len(*processes) != 1 || (*processes)[0].closed != 1 || (*processes)[0].cleaned != 1 || st.changes[len(st.changes)-1].To != store.NodeFailed {
+				t.Fatal("step refusal retried or escaped its process lifecycle")
+			}
+		})
 	}
 }
