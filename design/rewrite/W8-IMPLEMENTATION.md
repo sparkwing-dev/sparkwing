@@ -1,7 +1,7 @@
 # W8 implementation handoff
 
-Latest continuation: shared native npm invocation, upgrade proxy diagnostics
-and offline Node/npm acceptance are recorded at the end. W8 remains incomplete.
+Latest continuation: integration merge and award-bound shared controllers are
+recorded at the end. W8 remains incomplete.
 
 W8 remains incomplete. The runner, engine, launcher and local process runtime
 are exercised with component fixtures. Installed process composition, the shared
@@ -1590,3 +1590,84 @@ No Sparkwing executable, service, deployment or Git metadata write ran. Native n
 ran offline. Local Git configuration has no author or core.worktree override. The installed
 Overwing reports ten commits of staleness but returned all applicable cards.
 Worker scratch is deleted after verification. No native catalog cell is unskipped.
+
+## Continuation: integration merge and award-bound controllers
+
+All five new modify/delete conflicts retain their W8 deletions. Incoming edits
+only update obsolete routes, reconciliation and matcher calls. The three
+orchestrator wingd files and two warmpool files are absent, preserving deletion
+of 2,046 incoming lines. The lead must stage these paths because the brief
+forbids worker Git writes. No conflict markers remain in working files.
+
+Hosting replaces its generic Renew callback with the shared controller factory.
+It binds EngineOptions.Bearer to one award, uses Controller.Renew for confirmation
+and the keeper, and passes the same controller as the third argument to
+PrepareRun/PrepareNode. The root client stays in the claim loop. A cancelled
+bearer lookup returns no credential. Watch updates reach the existing observer.
+Keeper renewal does not start execution because the shared host owns that
+transition and W1 refuses executing renewal of an unstarted job.
+
+The security invariant is that each unit's renewal and preparation use its own
+award-bound client. TestRunnerControllerW8Components covers trigger/job preparation,
+confirmation, watches and keeper-before-source cleanup. The concurrent mixed-claim
+test keeps both clients live before checking their separate bearers. The fuzz
+property generates bearer/unit identities and cancelled credential lookups.
+Controller connection, missing-client and confirmation failures stop before source
+preparation. Existing initial-attempt, authority and deadline components use the
+new API. No native catalog cell or additional T1 inventory port is claimed.
+
+This is a W8-local signature change. It replaces one injectable callback with
+the shared client factory because the old callback left credential selection
+outside the common hosting boundary. It adds no wrapper, package, configuration
+key, process environment variable, timeout, trust root or compatibility path.
+Undo restores Hosting and its callers together. Source documentation is
+internal/runners/service/RUNNER-SERVICE.md. No generated reference consumes it.
+
+Shared Go files are tests/acceptance/initial_attempt_w8_test.go,
+tests/acceptance/runner_authority_w8_test.go and the new
+tests/acceptance/runner_controller_w8_test.go. Production edits stay in
+internal/runners/hosting.go. Other-area production APIs needed no caller migration.
+The existing Go files replace 45 old lines. No additional legacy subsystem is
+removed. The five merge deletions preserve earlier completed cuts.
+
+The integrated W1 claim/store/controller operations now have runtime bodies.
+Earlier handoff statements calling those operations stubs are superseded.
+Remaining real integration is W9's engine HTTP client, W3 source/keeper/host
+construction/delegation/replay, local shared-controller/queue/activity composition,
+runner/launcher/bootstrap factories and source handoff, managed-unit CLI wiring,
+native Windows/services and deployed Cloud probes/node cleanup. Existing
+workspace-off hashing and bootstrap grammar requests remain. No other-area
+contract or human product decision is added.
+
+### Verification for the controller binding
+
+Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and private
+GOCACHE/GOTMPDIR/TMPDIR below /tmp/sw-astra-W8. Package parallelism is at most four.
+
+- Whole-repository `go build -p 4 ./...` passes.
+- Vet passes for cluster, runners/engine/wingd and their subpackages, plus
+  tests/acceptance and internal/acceptance.
+- Full runner and engine package suites and tests/acceptance pass.
+  internal/acceptance has no runtime tests. Cluster passes with the previously
+  blocked TestStartMetricsListener_ServesMetrics excluded. Focused
+  `^(TestLocal|TestManaged)` wingd tests pass. Socket/native proofs are unexecuted.
+- Focused hosting and runner acceptance pass with `-race`, including the final
+  concurrent test refinement. FuzzRunnerControllerBindingW8 passes 7,165 cases
+  in five seconds with two workers.
+- Runner and acceptance tests cross-compile for windows/amd64. This supplies
+  compilation evidence only. Native Windows execution remains open.
+- Scoped commentcheck passes across both changed runner files and all three
+  changed acceptance files. Sleepcheck against HEAD and `git diff --check` pass.
+- Required `commentcheck -base main .` fails on existing merged comments in
+  internal/controllerwire/contracts.go:47, pkg/store/state_materialize.go:15 and
+  pkg/store/state_result_records.go:9. Those W1/W9 files are untouched here.
+- Independent immutable-snapshot review found no actionable correctness/security
+  issue and accepted the small factory seam. Its test-rendezvous concern is
+  resolved with synctest.Wait and a nonblocking count assertion. Recheck accepted
+  that change and the observer slice-ownership assertion. Review ran no tests.
+
+No Sparkwing binary or Git metadata write ran. Local Git configuration has no
+identity or core.worktree override. Overwing reports ten commits of staleness
+but returned its standards. The lead retains staging and the merge commit,
+including the new untracked runner_controller_w8_test.go. Scratch is removed
+after all checks finish.

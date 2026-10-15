@@ -118,4 +118,43 @@ SDK builds. Undoing it removes the hidden handler and these W8 install files.
 No cache service, remote pipeline-binary fetch, setting, environment variable,
 trust root or customer timeout was added.
 
+## Continuation: integration merge and award-bound controller
+
+The five new modify/delete conflicts retain W8's deletions: the three
+orchestrator wingd files and both warmpool files. Incoming changes remove old
+routes/reconciliation or rename the old matcher. They add no replacement
+contract. Their incoming contents total 2,046 lines. The files are absent, while
+the index remains unmerged for the lead because workers cannot write Git metadata.
+
+A1-39 now binds Hosting to the shared controller contract. ControllerURL and
+NewController replace the generic Renew callback. NewController defaults to
+client.NewEngineClient. Its EngineOptions.Bearer closes over one awarded bearer.
+The same Controller confirms and renews that unit and reaches PrepareRun or
+PrepareNode as the third argument. The keeper projects cancellation and watches
+without starting execution. Failure before confirmation cannot prepare source.
+
+The invariant is that a unit's renewal and preparation share a client bound to
+that unit's award, while root authority stays with claims. Component tests cover
+two concurrent mixed-kind claims, retained independent bearer callbacks, both
+preparation paths, connection/confirmation failure and watch projection. A fuzz
+property generates bearer/unit values and cancelled credential lookups. These
+are component proofs against fakes of the shared HTTP and host ports.
+
+This is a W8-local signature change. The two existing acceptance callers are
+migrated. No other-area production caller uses the removed callback. The existing
+controller client factory replaces one callback rather than adding another host
+or renewal layer. Keeping Renew would leave credential selection outside the
+common host boundary. Undo restores Hosting and those callers together.
+
+The merged W1 store and controller lifecycle/claim/renewal operations now have
+runtime implementations. Earlier statements in this audit that call those
+operations stubs are superseded. A1-08/26/27 still need final enrollment and HTTP
+composition. W9 NewEngineClient, W3 source projections/acquisition, Keeper.Run,
+remote owner operations and host construction remain unimplemented here.
+A1-11/12/19/36/38/40/48/49/50/55 remain integration obligations through those
+ports. The existing workspace-off cache-key, host construction/delegation/replay,
+local services/activity and Cloud bootstrap grammar/source-handoff requests remain.
+A1-41/42/43/51/52/53 keep their recorded CLI, deployment and native proof limits.
+No native catalog cell is unskipped and no T1 inventory port is newly claimed.
+
 <!-- design:end -->

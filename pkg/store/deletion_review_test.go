@@ -294,7 +294,6 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 	bystander := string(leaver.PersonalTeam)
 	for _, q := range []string{
 		`INSERT INTO egress_usage (principal, month, bytes, updated_at, team) VALUES ('leaver@example.com', '2026-09', 700, 1, '` + team + `')`,
-		`INSERT INTO node_bounces (run_id, node_id, seq, requested_at, requested_by, team) VALUES ('run-l', 'n', 1, 1, 'leaver@example.com', '` + team + `')`,
 		`INSERT INTO debug_pauses (run_id, node_id, reason, paused_at, expires_at, released_by, team) VALUES ('run-l', 'n', 'r', 1, 2, 'leaver@example.com', '` + team + `')`,
 		`INSERT INTO approvals (run_id, node_id, requested_at, approver, team) VALUES ('run-l', 'n', 1, 'deploy-bot', '` + team + `')`,
 		`INSERT INTO cron_schedules (id, repo_path, pipeline, cron, tz, overlap, catch_up_ns, armed_at, armed_by, updated_at, cursor_at, team)
@@ -322,7 +321,6 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 		{"triggers", "trigger_user"},
 		{"triggers", "claim_principal"},
 		{"runs", "created_principal"},
-		{"node_bounces", "requested_by"},
 		{"debug_pauses", "released_by"},
 		{"cron_schedules", "armed_by"},
 		{"approvals", "approver"},

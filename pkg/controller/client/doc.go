@@ -14,7 +14,7 @@
 // # Wire types
 //
 // Inputs and outputs use the [store] data model directly
-// ([store.Run], [store.Node], [store.NodeDispatch]). Request types
+// ([store.Run], [store.Node]). Request types
 // specific to the HTTP surface live here: [TriggerRequest] /
 // [TriggerResponse] for pipeline invocation, [AcquireSlotRequest] /
 // [AcquireSlotResponse] / [HeartbeatSlotResponse] for the

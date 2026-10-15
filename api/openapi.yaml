@@ -594,58 +594,6 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {description: The node has not finished.}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/dispatch:
-    parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
-    post:
-      x-sparkwing-scope: nodes.claim
-      tags: [nodes]
-      summary: Record a node-dispatch attempt.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/NodeDispatch"}
-      responses:
-        "204": {description: Recorded.}
-    get:
-      x-sparkwing-scope: runs.read
-      tags: [nodes]
-      summary: Fetch the latest dispatch (or a specific `?seq=N`) for a node.
-      description: >-
-        Admits `runs.read`, but fills `env_json` only for an `admin` principal; every other reader gets the row without it. `redacted_keys` is served to all readers.
-      parameters:
-        - in: query
-          name: seq
-          schema: {type: integer}
-      responses:
-        "200":
-          description: Dispatch row.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/NodeDispatch"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/runs/{id}/nodes/{nodeID}/dispatches:
-    parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
-    get:
-      x-sparkwing-scope: runs.read
-      tags: [nodes]
-      summary: List every dispatch attempt for a node.
-      description: >-
-        Admits `runs.read`, but fills `env_json` only for an `admin` principal; every other reader gets each row without it. `redacted_keys` is served to all readers.
-      responses:
-        "200":
-          description: Dispatch list.
-          content:
-            application/json:
-              schema:
-                type: array
-                items: {$ref: "#/components/schemas/NodeDispatch"}
-
   /api/v1/runs/{id}/nodes/{nodeID}/activity:
     parameters:
       - {$ref: "#/components/parameters/RunID"}
@@ -933,71 +881,6 @@ paths:
       summary: Release any active debug pause on the node.
       responses:
         "204": {description: Released or no-op.}
-
-  /api/v1/runs/{id}/nodes/{nodeID}/bounce:
-    parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
-    post:
-      x-sparkwing-scope: runs.control
-      tags: [nodes]
-      summary: Ask a running node to restart its process.
-      description: |
-        Records a bounce request against a running node of a live run and
-        stamps the requesting principal. The runner picks it up on its next
-        poll of the GET below.
-      responses:
-        "200":
-          description: The recorded bounce request.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/NodeBounce"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: "The node is not running, or the run is no longer live."}
-        "500": {$ref: "#/components/responses/InternalError"}
-    get:
-      x-sparkwing-scope: nodes.claim
-      tags: [nodes]
-      summary: Poll for a bounce request the runner has not consumed.
-      responses:
-        "200":
-          description: A bounce is pending.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/NodeBounce"}
-        "204": {description: No bounce pending. Empty body.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-
-  /api/v1/runs/{id}/nodes/{nodeID}/bounce/consume:
-    parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
-    post:
-      x-sparkwing-scope: nodes.claim
-      tags: [nodes]
-      summary: Close a bounce request the runner acted on.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleConsumeNodeBounce.body
-              type: object
-              properties:
-                seq: {type: integer, format: int64}
-                outcome:
-                  type: string
-                  description: Defaults to `bounced` when omitted.
-      responses:
-        "204": {description: Bounce closed. Empty body.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/debug-pause:
     parameters:
@@ -2855,40 +2738,6 @@ paths:
         "502": {description: The cache is unreachable or answered badly.}
         "503": {description: No cache is configured on this controller.}
 
-  /api/v1/maintenance/reconcile-orphans:
-    post:
-      x-sparkwing-scope: admin
-      tags: [runs]
-      summary: Close runs whose orchestrator process died.
-      description: |
-        Finishes every run still marked running whose run and node heartbeats
-        are all older than `threshold_nanos`, cascading its pending nodes to
-        cancelled, and answers how many runs it closed. The threshold must be
-        positive: zero would treat every running run as orphaned.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.reconcileOrphansReq
-              type: object
-              required: [threshold_nanos]
-              properties:
-                threshold_nanos: {type: integer, format: int64}
-      responses:
-        "200":
-          description: Sweep complete.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.reconcileOrphansResp
-                type: object
-                properties:
-                  reconciled: {type: integer}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "500": {$ref: "#/components/responses/InternalError"}
-
   /api/v1/pipelines/{name}/profile/contention:
     parameters: [{$ref: "#/components/parameters/PipelineName"}]
     post:
@@ -3037,35 +2886,6 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "500": {$ref: "#/components/responses/InternalError"}
-
-  /api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: {type: string}
-      - in: path
-        name: nodeID
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: runs.state
-      tags: [nodes]
-      summary: Reset an ordinarily failed node for its next in-place attempt.
-      description: |
-        Clears one terminal failed attempt back to pending while retaining its
-        consumed-attempt count. The caller must present the run's exact live
-        trigger generation unless controller-internal authorization applies.
-        Agent-loss failures use the separate recovery
-        path and cannot be reset here.
-      responses:
-        "204": {description: "Node reset, or already pending and unclaimed. Empty body."}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {description: Caller lacks the exact trigger claim identity.}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: Stale generation or node state cannot be reset.}
         "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/claim/input:
@@ -4592,7 +4412,7 @@ paths:
       tags: [teams]
       summary: Delete the signed-in user's account.
       description: >-
-        Needs an identity-provider session signed in within the last 10 minutes, and `confirm_email` equal to the account's address. Removes the account, its sign-in identities, memberships and sessions, and revokes every token it minted in any team. Teams the account is the only member of, its personal space included, are queued for deletion with all their data. Rows that recorded the account in teams it shared (runs, triggers, approvals, schedules, bounces, pause releases, credit grants, node claims, secrets, egress usage, event payloads) stay with those teams and name `deleted user`. While the account is the last owner of a team that has other members the request answers 409 and lists those teams.
+        Needs an identity-provider session signed in within the last 10 minutes, and `confirm_email` equal to the account's address. Removes the account, its sign-in identities, memberships and sessions, and revokes every token it minted in any team. Teams the account is the only member of, its personal space included, are queued for deletion with all their data. Rows that recorded the account in teams it shared (runs, triggers, approvals, schedules, pause releases, credit grants, node claims, secrets, egress usage, event payloads) stay with those teams and name `deleted user`. While the account is the last owner of a team that has other members the request answers 409 and lists those teams.
       requestBody:
         required: true
         content:
@@ -7431,14 +7251,7 @@ components:
         retried_as: {type: string}
         retry_source:
           type: string
-          enum: ["", manual, auto]
-        retry_cause_node_id: {type: string}
-        retry_cause_node_ids:
-          type: array
-          items: {type: string}
-        retry_available_at: {type: string, format: date-time, nullable: true}
-        retry_deadline_at: {type: string, format: date-time, nullable: true}
-        agent_loss_retry_count: {type: integer}
+          enum: ["", manual]
         replay_of_run_id: {type: string}
         replay_of_node_id: {type: string}
         invocation:
@@ -7520,9 +7333,6 @@ components:
           enum: [machine, cloud, github-actions, cluster]
           description: Display site derived from the claim credential and holder; absent without enough evidence.
         execution_site_name: {type: string, description: Public runner or repository name for the execution site.}
-        required_executor_location:
-          type: string
-          enum: ["", local, cloud, unknown]
         execution_started_at: {type: string, format: date-time, nullable: true}
         attempts_consumed: {type: integer}
         retry_root_run_id: {type: string}
@@ -7631,39 +7441,6 @@ components:
         ts: {type: string, format: date-time}
         payload:
           description: Either a structured JSON object or a raw string (escaped).
-    NodeDispatch:
-      x-sparkwing-go-type: pkg/store.NodeDispatch
-      type: object
-      description: >-
-        One dispatch-frame snapshot for a node attempt. Mirrors `pkg/store.NodeDispatch`. The byte-typed members carry base64-encoded JSON.
-      properties:
-        run_id: {type: string}
-        node_id: {type: string}
-        seq: {type: integer}
-        dispatched_at: {type: string, format: date-time}
-        code_version: {type: string}
-        binary_hash: {type: string}
-        runner_labels:
-          type: string
-          format: byte
-          description: JSON `[]string` of the labels the dispatch required.
-        env_json:
-          type: string
-          format: byte
-          description: >-
-            JSON `map[string]string` of the captured environment. Present only for an `admin` principal; a `runs.read` principal gets the row with this member absent.
-        redacted_keys:
-          type: string
-          format: byte
-          description: >-
-            JSON `[]string` naming the variables the snapshot dropped as credential-shaped. Served to every reader of the row.
-        workdir: {type: string}
-        input_envelope_json:
-          type: string
-          format: byte
-          description: JSON dispatch envelope; over-cap rows store a truncation stub.
-        input_size_bytes: {type: integer, format: int64}
-        secret_redactions: {type: integer}
     MetricSample:
       x-sparkwing-go-type: pkg/controller.metricSample
       type: object
@@ -7710,7 +7487,7 @@ components:
         retry_of: {type: string}
         retry_source:
           type: string
-          enum: ["", manual, auto]
+          enum: ["", manual]
         parent_node_id: {type: string}
         full: {type: boolean}
         repo_inherited:
@@ -8519,22 +8296,6 @@ components:
         holders:
           type: array
           items: {$ref: "#/components/schemas/ConcurrencyHolder"}
-    NodeBounce:
-      x-sparkwing-go-type: pkg/store.NodeBounce
-      type: object
-      description: A request that a running node restart its process.
-      properties:
-        run_id: {type: string}
-        node_id: {type: string}
-        seq: {type: integer, format: int64}
-        requested_by: {type: string}
-        requested_at: {type: string, format: date-time}
-        consumed_at:
-          type: string
-          format: date-time
-          nullable: true
-          description: When the running node picked the request up. Absent while it is still outstanding.
-        outcome: {type: string}
     ConcurrencyState:
       x-sparkwing-go-type: pkg/controller.stateResp
       type: object

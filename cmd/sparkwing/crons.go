@@ -179,9 +179,6 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, _ time.T
 }
 
 func (l cronLauncher) Active(ctx context.Context, _ store.CronSchedule, runID string, staleAfter time.Duration) (bool, error) {
-	if _, err := orchestrator.ReconcileOrphanedLocalRuns(ctx, l.store, 0); err != nil {
-		return false, err
-	}
 	run, err := l.store.GetRun(ctx, runID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {

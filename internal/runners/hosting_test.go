@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 type runHostFunc func(context.Context, nodehost.RunInput) (nodehost.RunCompletion, error)
@@ -38,14 +39,11 @@ func TestHostingDispatchesUnderKeeperAndJoinsBeforeCleanup(t *testing.T) {
 		t.Run(string(kind), func(t *testing.T) {
 			award := hostingAward(kind)
 			var events []string
-			host := Hosting{Lease: time.Minute, Interval: 10 * time.Second}
-			host.Renew = func(_ context.Context, got controllerwire.ClaimedUnit) (lease.Beat, error) {
-				if !reflect.DeepEqual(got, award) {
-					t.Fatal("renewal lost award authority")
-				}
+			host := Hosting{ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second}
+			host.NewController = hostingClient(func(context.Context) (lease.Beat, error) {
 				events = append(events, "renew")
 				return lease.Beat{}, nil
-			}
+			})
 			host.StartKeeper = func(ctx context.Context, k lease.Keeper) (context.Context, func()) {
 				if k.Lease != time.Minute || k.Interval != 10*time.Second {
 					t.Fatal("keeper timing changed")
@@ -54,7 +52,7 @@ func TestHostingDispatchesUnderKeeperAndJoinsBeforeCleanup(t *testing.T) {
 				return ctx, func() { events = append(events, "join") }
 			}
 			cleanup := func() error { events = append(events, "close"); return nil }
-			host.PrepareRun = func(_ context.Context, got controllerwire.ClaimedUnit) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
+			host.PrepareRun = func(_ context.Context, got controllerwire.ClaimedUnit, _ controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
 				if !reflect.DeepEqual(got, award) {
 					t.Fatal("run preparation lost award")
 				}
@@ -67,7 +65,7 @@ func TestHostingDispatchesUnderKeeperAndJoinsBeforeCleanup(t *testing.T) {
 					return nodehost.RunCompletion{Outcome: "passed"}, nil
 				}), nodehost.RunInput{RunID: "run"}, cleanup, nil
 			}
-			host.PrepareNode = func(_ context.Context, got controllerwire.ClaimedUnit) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
+			host.PrepareNode = func(_ context.Context, got controllerwire.ClaimedUnit, _ controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
 				if !reflect.DeepEqual(got, award) {
 					t.Fatal("node preparation lost award")
 				}
@@ -94,12 +92,12 @@ func TestHostingPreparationFailureStopsKeeperAndClosesPartialSource(t *testing.T
 	failure, cleanupFailure := errors.New("acquisition failed"), errors.New("cleanup failed")
 	var stopped, closed bool
 	host := Hosting{
-		Lease: time.Minute, Interval: 10 * time.Second,
-		Renew: func(context.Context, controllerwire.ClaimedUnit) (lease.Beat, error) { return lease.Beat{}, nil },
+		ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
+		NewController: hostingClient(func(context.Context) (lease.Beat, error) { return lease.Beat{}, nil }),
 		StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) {
 			return ctx, func() { stopped = true }
 		},
-		PrepareRun: func(context.Context, controllerwire.ClaimedUnit) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
+		PrepareRun: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
 			return nil, nodehost.RunInput{}, func() error {
 				if !stopped {
 					t.Error("source cleanup raced keeper")
@@ -118,10 +116,10 @@ func TestHostingPreparationFailureStopsKeeperAndClosesPartialSource(t *testing.T
 func TestHostingLostLeaseDuringPreparationCannotExecute(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
 	host := Hosting{
-		Lease: time.Minute, Interval: 10 * time.Second,
-		Renew:       func(context.Context, controllerwire.ClaimedUnit) (lease.Beat, error) { return lease.Beat{}, nil },
-		StartKeeper: func(context.Context, lease.Keeper) (context.Context, func()) { return ctx, func() {} },
-		PrepareNode: func(context.Context, controllerwire.ClaimedUnit) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
+		ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
+		NewController: hostingClient(func(context.Context) (lease.Beat, error) { return lease.Beat{}, nil }),
+		StartKeeper:   func(context.Context, lease.Keeper) (context.Context, func()) { return ctx, func() {} },
+		PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
 			cancel(lease.ErrLeaseLost)
 			return nodeHostFunc(func(context.Context, nodehost.NodeInput) error { t.Error("executed after lease loss"); return nil }), nodehost.NodeInput{}, nil, nil
 		},
@@ -146,15 +144,61 @@ func TestHostingRefusesInvalidAuthorityBeforeRenewal(t *testing.T) {
 	} {
 		u := hostingAward(capability.UnitNode)
 		change(&u)
-		host := Hosting{Lease: time.Minute, Interval: 10 * time.Second, Renew: func(context.Context, controllerwire.ClaimedUnit) (lease.Beat, error) {
+		host := Hosting{ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second, NewController: hostingClient(func(context.Context) (lease.Beat, error) {
 			t.Error("renewed invalid award")
 			return lease.Beat{}, nil
-		}, PrepareNode: func(context.Context, controllerwire.ClaimedUnit) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
+		}), PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
 			t.Error("prepared invalid award")
 			return nil, nodehost.NodeInput{}, nil, nil
 		}}
 		if err := host.Host(t.Context(), u); err == nil {
 			t.Fatal("invalid authority accepted")
 		}
+	}
+}
+
+type hostingRenewalClient struct {
+	controllerwire.Controller
+	renew func(context.Context) (lease.Beat, error)
+}
+
+func (c *hostingRenewalClient) Renew(ctx context.Context, _ string, _ controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error) {
+	beat, err := c.renew(ctx)
+	return controllerwire.RenewalResponse{CancelRequested: beat.CancelRequested, Watched: beat.Watched, WatchedJobs: beat.WatchedNodes}, err
+}
+
+func hostingClient(renew func(context.Context) (lease.Beat, error)) func(client.EngineOptions) (controllerwire.Controller, error) {
+	return func(client.EngineOptions) (controllerwire.Controller, error) {
+		return &hostingRenewalClient{renew: renew}, nil
+	}
+}
+
+func TestHostingControllerFailuresPreventPreparation(t *testing.T) {
+	failure := errors.New("controller unavailable")
+	for _, tc := range []struct {
+		name string
+		open func(client.EngineOptions) (controllerwire.Controller, error)
+	}{
+		{"connect", func(client.EngineOptions) (controllerwire.Controller, error) { return nil, failure }},
+		{"no_client", func(client.EngineOptions) (controllerwire.Controller, error) { return nil, nil }},
+		{"confirm", hostingClient(func(context.Context) (lease.Beat, error) { return lease.Beat{}, failure })},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host := Hosting{ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
+				NewController: tc.open,
+				StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) {
+					t.Error("started keeper without controller authority")
+					return ctx, func() {}
+				},
+				PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
+					t.Error("prepared source without controller authority")
+					return nil, nodehost.NodeInput{}, nil, nil
+				},
+			}
+			err := host.Host(t.Context(), hostingAward(capability.UnitNode))
+			if err == nil || tc.name != "no_client" && !errors.Is(err, failure) {
+				t.Fatalf("controller failure = %v", err)
+			}
+		})
 	}
 }

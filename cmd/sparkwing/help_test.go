@@ -140,7 +140,7 @@ func TestRequiredProfileFlagsDoNotAdvertiseDefault(t *testing.T) {
 }
 
 func TestRunsMutationHelpDescribesLocalAndRemoteModes(t *testing.T) {
-	for _, command := range []Command{cmdJobsRetry, cmdJobsCancel, cmdJobsBounce, cmdJobsPrune} {
+	for _, command := range []Command{cmdJobsRetry, cmdJobsCancel, cmdJobsPrune} {
 		foundProfile := false
 		for _, spec := range command.Flags {
 			if spec.Name != "profile" {

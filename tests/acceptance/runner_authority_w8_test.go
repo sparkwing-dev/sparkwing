@@ -72,17 +72,17 @@ func TestRunnerDeadlineW8Components(t *testing.T) {
 				}
 				executed, joined, cleaned := false, false, false
 				host := runners.Hosting{
-					Lease: time.Minute, Interval: 10 * time.Second,
-					Renew: func(ctx context.Context, _ controllerwire.ClaimedUnit) (lease.Beat, error) {
+					ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
+					NewController: runnerControllerFactoryW8(func(ctx context.Context) (lease.Beat, error) {
 						if deadline, ok := ctx.Deadline(); !ok || !deadline.Equal(first) {
 							t.Fatalf("renewal deadline = %v, present=%v, want %v", deadline, ok, first)
 						}
 						return lease.Beat{}, nil
-					},
+					}),
 					StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) {
 						return ctx, func() { joined = true }
 					},
-					PrepareNode: func(context.Context, controllerwire.ClaimedUnit) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
+					PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
 						return runnerDeadlineNodeW8(func(ctx context.Context) {
 								executed = true
 								<-ctx.Done()
@@ -189,17 +189,17 @@ func assertRunnerAuthorityW8(t *testing.T, unit controllerwire.ClaimedUnit, allo
 	reached := errors.New("host preparation reached")
 	renewed, prepared := false, false
 	host := runners.Hosting{
-		Lease: time.Minute, Interval: 10 * time.Second,
-		Renew: func(context.Context, controllerwire.ClaimedUnit) (lease.Beat, error) {
+		ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
+		NewController: runnerControllerFactoryW8(func(context.Context) (lease.Beat, error) {
 			renewed = true
 			return lease.Beat{}, nil
-		},
+		}),
 		StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) { return ctx, func() {} },
-		PrepareRun: func(context.Context, controllerwire.ClaimedUnit) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
+		PrepareRun: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
 			prepared = true
 			return nil, nodehost.RunInput{}, nil, reached
 		},
-		PrepareNode: func(context.Context, controllerwire.ClaimedUnit) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
+		PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
 			prepared = true
 			return nil, nodehost.NodeInput{}, nil, reached
 		},

@@ -145,16 +145,6 @@ func TestTenantRunsAreInvisibleToAnotherTeam(t *testing.T) {
 		t.Errorf("alpha.CountRuns = %d, %v; want 1", n, err)
 	}
 
-	all, err := op.ListRunsAcrossTeams(ctx, store.RunFilter{})
-	if err != nil {
-		t.Fatalf("operator ListRunsAcrossTeams: %v", err)
-	}
-	if len(all) != 2 {
-		t.Errorf("operator ListRunsAcrossTeams = %v, want both runs", runIDs(all))
-	}
-	if n, err := op.CountRunsAcrossTeams(ctx, store.RunFilter{}); err != nil || n != 2 {
-		t.Errorf("operator CountRunsAcrossTeams = %d, %v; want 2", n, err)
-	}
 	teams, err := op.ListTeams(ctx)
 	if err != nil {
 		t.Fatalf("ListTeams: %v", err)

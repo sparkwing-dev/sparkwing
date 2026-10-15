@@ -28,6 +28,14 @@ credential deadline, capped by the caller's deadline. Absent deadlines remain
 unbounded. The keeper owns renewable lease expiry. The host owns per-attempt
 deadlines, so application retries can continue under the same unit claim.
 
+`Hosting` creates one shared controller client for each award. Its bearer callback
+retains that award's capability and refuses a cancelled lookup. The same client
+confirms the award, renews through the keeper and reaches run or job preparation.
+The runner's root client stays in the claim loop. Preparation receives the full
+server award, including granted runner identity, engine and storage inputs.
+Keeper renewals leave `Executing` false because the host owns execution start.
+A job renewal cannot report execution before its start transition commits.
+
 `Inspect` reads the executable and arguments from the actual registration.
 It uses the runner's shared parser to identify the effective config, including
 repeated flags and values that resemble flags.

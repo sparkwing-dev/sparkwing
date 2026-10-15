@@ -19,10 +19,10 @@ func TestInitialAttemptW8Components(t *testing.T) {
 	t.Run("runner", func(t *testing.T) {
 		prepared := errors.New("preparation reached")
 		host := runners.Hosting{
-			Lease: time.Minute, Interval: 10 * time.Second,
-			Renew:       func(context.Context, controllerwire.ClaimedUnit) (lease.Beat, error) { return lease.Beat{}, nil },
-			StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) { return ctx, func() {} },
-			PrepareNode: func(_ context.Context, unit controllerwire.ClaimedUnit) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
+			ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
+			NewController: runnerControllerFactoryW8(func(context.Context) (lease.Beat, error) { return lease.Beat{}, nil }),
+			StartKeeper:   func(ctx context.Context, _ lease.Keeper) (context.Context, func()) { return ctx, func() {} },
+			PrepareNode: func(_ context.Context, unit controllerwire.ClaimedUnit, _ controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
 				if unit.Binding.Attempt != 0 {
 					t.Fatal("runner manufactured an execution ordinal before Start")
 				}

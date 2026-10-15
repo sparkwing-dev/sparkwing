@@ -58,7 +58,7 @@ const (
 	// the Git cache refresh. It does not reach an existing run.
 	ScopeRunsWrite = store.ScopeRunsWrite
 	// ScopeRunsControl gates acting on a run somebody else started, or on
-	// a schedule: retry, cancel, bounce, release a debug pause, and the
+	// a schedule: retry, cancel, release a debug pause, and the
 	// cron writes including firing one now. These are operator actions, so
 	// they are held apart from the scopes a runner carries: a runner
 	// reports state on work it holds and never reaches for another run.
