@@ -169,7 +169,7 @@ type ExchangeSpec struct {
 }
 
 // ProvisionKind names non-capability authority which can originate a root through Store.Issue.
-// Root provisioning is recorded as Delegate; this reading awaits the lead's decision.
+// Root provisioning is the trusted root-only Delegate case, not a fourth issuance kind.
 type ProvisionKind string
 
 const (
@@ -183,6 +183,12 @@ const (
 // ProvisionSpec is trusted issuer input, never decoded from a credential issuance HTTP body.
 // Issue rechecks the bootstrap gate, membership, registration or verified OIDC binding in its transaction.
 // The authority limits grants and pools; only operator authority sets Metered or service grants.
+// Trusted origins are: bootstrap gate for operator_bootstrap; current account
+// session and membership for member_token; authorized enrollment for
+// machine_registration; deployment operator authority for service_registration;
+// and verified repository/ref/SHA/workflow identity for github_actions_binding.
+// Authority records that authorizer; provisioned roots have no revocation parent.
+// Ordinary DelegateSpec cannot use this exception to detach from its parent.
 type ProvisionSpec struct {
 	Kind           ProvisionKind
 	Authority      *AuthorityRef

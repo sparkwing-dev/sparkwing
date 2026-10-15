@@ -39,6 +39,16 @@ func (s *EngineController) Claim(ctx context.Context, authorized capability.Auth
 	panic("unimplemented: controller-wire")
 }
 
+// SyncLauncher returns only this launcher's held awards, with bearer material omitted.
+func (s *EngineController) SyncLauncher(ctx context.Context, authorized capability.Authorized, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+	panic("unimplemented: controller-wire")
+}
+
+// Exchange consumes the authenticated bootstrap once and returns its original unit policy.
+func (s *EngineController) Exchange(ctx context.Context, authorized capability.Authorized) (controllerwire.ExchangeResponse, error) {
+	panic("unimplemented: controller-wire")
+}
+
 // RunDetail uses runspec.DisplayRequest/DisplaySpec and the same safe projection
 // for local and remote reads. Claim execution inputs are on their private wire.
 func (s *EngineController) RunDetail(ctx context.Context, authorized capability.Authorized) (controllerwire.RunDetail, error) {

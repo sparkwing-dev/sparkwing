@@ -46,6 +46,12 @@ func checkPolicyAlternative(t *testing.T, route capability.RoutePolicy, audience
 		t.Fatal("complete alternative is missing")
 	}
 	p, target := policyFixture(parts[0], parts[2], audience, grants)
+	if parts[2] == "claimSelection" {
+		target.ClaimKinds = []capability.UnitKind{capability.UnitNode}
+		if slices.Contains(grants, capability.TriggersClaim) {
+			target.ClaimKinds = []capability.UnitKind{capability.UnitTrigger}
+		}
+	}
 	auth := capability.Authenticated{Principal: p, Method: route.Method, Pattern: route.Path, Live: []capability.LiveAccess{{RuleIndex: index}}}
 	authorized, err := capability.Authorize(context.Background(), policyBinding{}, route, auth, target)
 	if err != nil || authorized.Access.Credential != capability.CredentialRule(parts[0]) {

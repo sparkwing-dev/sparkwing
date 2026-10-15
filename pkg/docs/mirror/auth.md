@@ -1,17 +1,45 @@
 # Authentication + authorization
 
-Run intake, plan acceptance, job transitions, finish, cancellation, retry and
-run/job renewal use the shared capability policy. The controller resolves the
-resource's team before authorization and derives actors and fences from the
-credential. Unknown or ended credentials get `unauthenticated`. A live
+`GET /api/v1/queue` uses the shared capability policy. A member or verified
+local peer needs `runs.read` for its active team. Queue groups and advertised
+runner headroom belong to that team. Machine roots and work claims cannot read
+the team queue. The former `/api/v1/queue/state` path is removed.
+
+Run intake, plan acceptance, job status reads, job transitions, finish,
+cancellation, retry and run/job renewal use the shared capability policy. The
+controller resolves the resource's team before authorization and derives
+actors and fences from the credential. Unknown or ended credentials get
+`unauthenticated`. A live
 credential without the grant or binding gets `forbidden`.
+
+`GET /api/v1/runs/{run}/jobs` returns a status array from one committed
+snapshot. It accepts member `runs.read` or the live run owner's `trigger.host`.
+`GET /api/v1/runs/{run}/jobs/{job}` also accepts that job's live `data.read`
+authority. An executor cannot list siblings or read another job through this
+route. Both responses use the shared safe job status fields. They omit job
+declarations, environment, claim identities and execution settings. The old
+`GET /nodes` and `GET /nodes/{nodeID}` paths are removed.
+
+`POST /api/v1/runs/{run}/jobs/{job}/cancel` accepts `runs.control` from a
+member or `trigger.host` from the live owner of that run. The state transaction
+requests cancellation of held jobs and preserves the holder's result rights.
+The current job transition contract has no cancellation-reason field.
+
+`GET /api/v1/runs/{run}/jobs/{job}/failure?generation=N` requires `data.read`
+and a declared recovery read edge to that source generation. It returns the
+persisted masked job failure, including its stage, or `null` when none was
+recorded. Status text is never converted into a synthetic failure. Missing,
+duplicate or nonpositive generation selectors return `bad_request` after
+credential authentication.
 
 `GET /api/v1/runs/{run}/snapshot` requires a live trigger owner with
 `trigger.host` bound to that run. It returns one committed scheduling view,
 including generated jobs and empty generator groups. Ordinary members and
 work or plan claims cannot read this private owner view. Cancellation and
 owner lease loss refuse new reads. A cancellation committed after
-authentication appears in the returned snapshot.
+authentication appears in the returned snapshot. Accepted expansion bodies,
+hashes and source generations travel in the same committed read. Replayed
+expansion responses retain each generated job's current state and attempt.
 
 Pipeline sizing uses `/api/v1/pipelines/{name}/sizing`. Members need
 `runs.read`. Executable claims need `source.read` and the bound run's exact
@@ -36,6 +64,14 @@ credential. Header and query hints cannot select another team.
 
 `GET /api/v1/team/members` returns the active team's member directory and
 requires `runs.read`. An empty team returns `[]`.
+
+`GET /api/v1/credits` and `GET /api/v1/credits/history` require a live member
+or verified local peer with `runs.read`. The committed credential selects the
+team. Machine roots, executable claims and bootstrap credentials cannot read
+the team ledger. Both routes use the common error envelope and authenticate
+before checking whether credit billing is enabled. An authorized caller gets
+`not_found` when billing is unavailable. History retains the `limit` query
+and returns empty grants and charges as arrays.
 
 `PATCH /api/v1/team/members/{account}` accepts a role of `owner`, `editor` or
 `reader`. `DELETE` on that path removes the membership. The store rechecks the
@@ -712,7 +748,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 
 | Scope             | Unlocks                                                                                           |
 |-------------------|---------------------------------------------------------------------------------------------------|
-| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, `/credits`, `/credits/history`, per-node metrics GETs, and similar team-scoped reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
+| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue`, `/credits`, `/credits/history`, per-node metrics GETs, and similar team-scoped reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `runs.write`      | POST `/api/v1/triggers`: starting new work |
 | `runs.control`    | POST `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, and the cron writes (`/crons/repos`, `pause`, `resume`, `run`, `disarm`, `override`): acting on a run or schedule somebody else started |
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |

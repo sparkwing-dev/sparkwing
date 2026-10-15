@@ -10,7 +10,6 @@ import (
 	"math"
 	"net/http"
 	"strconv"
-	"strings"
 )
 
 // Code is the sole wire error discriminator. Clients branch on it rather than status or message.
@@ -167,7 +166,6 @@ type Envelope struct {
 // decoder before accepting an Error. HTTP/CLI readers unwrap Envelope exactly once.
 func DecodeInner(data []byte) (*Error, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.UseNumber()
 	value, err := decodeValue(decoder)
 	if err != nil {
 		return nil, errors.New("invalid error JSON")
@@ -184,7 +182,7 @@ func DecodeInner(data []byte) (*Error, error) {
 	}
 	code, codeOK := object["code"].(string)
 	message, messageOK := object["message"].(string)
-	if !codeOK || strings.TrimSpace(code) == "" || !messageOK {
+	if !codeOK || code == "" || !messageOK {
 		return nil, errors.New("error requires string code and message")
 	}
 	failure := &Error{Code: Code(code), Message: message}

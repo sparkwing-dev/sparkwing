@@ -28,6 +28,36 @@
   },
   "routes": [
     {
+      "route": "/api/v1/queue",
+      "kind": "api",
+      "exempt": "Requires an authorized member and tenant concurrency groups with runner headroom, absent from the local dashboard corpus. A refusal does not measure the read. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/credits",
+      "kind": "api",
+      "exempt": "Requires a licensed controller, authorized member and tenant ledger corpus, absent from the local dashboard corpus. Authentication failures do not measure the authorized read. Latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/credits/history",
+      "kind": "api",
+      "exempt": "Requires a licensed controller, authorized member and tenant ledger history, absent from the local dashboard corpus. Authentication failures do not measure the authorized read. Latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/runs/{run}/jobs",
+      "kind": "api",
+      "exempt": "Requires authorized status fixtures and committed tenant snapshots, absent from the local dashboard corpus. An unauthenticated probe measures rejection. Authorized latency, cold start and response bytes remain unmeasured until store integration.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/runs/{run}/jobs/{job}",
+      "kind": "api",
+      "exempt": "Requires authorized status fixtures and committed tenant node reads, absent from the local dashboard corpus. An unauthenticated probe measures rejection. Authorized latency, cold start and response bytes remain unmeasured until store integration.",
+      "baselines": {}
+    },
+    {
       "route": "/api/v1/pipelines/{name}/sizing/waits",
       "kind": "api",
       "exempt": "Requires authorized sizing fixtures and committed claim bindings, absent from the local dashboard corpus. Writes also require the authority-bearing sizing transaction adapter. A probe without these measures rejection. Authorized latency, cold start and response bytes remain unmeasured.",

@@ -13,37 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// RouteAuthorization supplies the same authority checks for HTTP and verified local transports.
-// Identify handles sessions and local peers only when no Authorization header is present.
-// A peer identity must come from OS credentials, never an address or a request header.
-type RouteAuthorization struct {
-	Authenticator capability.Authenticator
-	Bindings      capability.BindingChecker
-	Identify      func(*http.Request) (capability.Presentation, error)
-	CheckCSRF     func(*http.Request, capability.Principal) error
-}
-
-// Endpoint binds a handler and its decoder to one router registration. Decode must
-// resolve ownership and body selectors, preserving the body for Handle when needed.
-// Verify authenticates the declared external proof before any external handler runs.
-// Handle returns errors before writing its response; store writes recheck Authorized.
-type Endpoint struct {
-	Method         string
-	Pattern        string
-	Authentication capability.Authentication
-	Decode         func(*http.Request) (capability.RequestEvidence, error)
-	Verify         func(*http.Request) error
-	Handle         func(http.ResponseWriter, *http.Request, capability.Authorized) error
-}
-
-// PolicyRouter matches a route before authentication and enforces its complete policy.
-// Register is a startup operation. The router is immutable while serving requests.
-type PolicyRouter struct {
-	mux           *http.ServeMux
-	authorization RouteAuthorization
-	registered    map[string]Endpoint
-}
-
 // NewPolicyRouter constructs the common controller/node-host authorization boundary.
 // Registration inventories come from handlers, independently of capability.Routes.
 func NewPolicyRouter(authorization RouteAuthorization) *PolicyRouter {

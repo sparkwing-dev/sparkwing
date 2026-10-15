@@ -42,11 +42,13 @@ type Server struct {
 	sourceCredentialLimit perMinuteLimiter
 	identityLinkLimit     perMinuteLimiter
 
-	auth               *Authenticator
-	authorization      RouteAuthorization
-	operatorSettings   operatorSettingsStore
-	engineController   *EngineController
-	resolveSizingStore func(context.Context, store.Team) (SizingStore, error)
+	auth                *Authenticator
+	authorization       RouteAuthorization
+	operatorSettings    operatorSettingsStore
+	engineController    *EngineController
+	resolveSizingStore  func(context.Context, store.Team) (SizingStore, error)
+	resolveCreditReader func(context.Context, store.Team) (CreditReader, error)
+	resolveQueueReader  func(context.Context, store.Team) (QueueReader, error)
 
 	peerPrincipal func(*http.Request) *Principal
 
@@ -749,7 +751,9 @@ func (s *Server) handler() http.Handler {
 		s.runnerPresence.listening(time.Now())
 		if !s.Metering() {
 			path := r.URL.Path
-			if strings.HasPrefix(path, "/api/v1/credits") ||
+			// safety: migrated ledger reads authenticate before checking billing availability.
+			legacyCredits := strings.HasPrefix(path, "/api/v1/credits") && path != "/api/v1/credits" && path != "/api/v1/credits/history"
+			if legacyCredits ||
 				strings.HasPrefix(path, "/api/v1/team/billing") ||
 				(strings.HasPrefix(path, "/api/v1/tokens/") && strings.HasSuffix(path, "/metered")) {
 				http.NotFound(w, r)
@@ -769,7 +773,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	mux.Handle("GET /api/v1/runs", requireScope(ScopeRunsRead, s.reconcileBeforeRead(s.handleListRuns)))
 	mux.Handle("GET /api/v1/runs/{id}", newClaimSensitiveRoute(claimSourceKinds, nil, http.HandlerFunc(s.handleGetRun)).orElse(requireScope(ScopeRunsRead, s.readableRun(s.reconcileBeforeRead(s.handleGetRun)), ScopeNodesClaim, ScopeTriggersClaim)))
-	mux.Handle("GET /api/v1/runs/{id}/nodes", requireScope(ScopeRunsRead, s.readableRun(http.HandlerFunc(s.handleListNodes)), ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("GET /api/v1/runs/{id}/receipt", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetRunReceipt)))
 	mux.Handle("GET /api/v1/runs/{id}/pending-triggers", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleListPendingTriggersForParent)), ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/attempt", s.newClaimResultRoute([]store.ClaimTokenKind{store.ClaimTokenPlan, store.ClaimTokenWork}, nil, s.handleReportAttempt))
@@ -778,7 +781,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/start", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleStartNode)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleStartNode)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finish", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleFinishNode))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/deps", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeDeps))))
-	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetNode)).orElse(requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNode)))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/output", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetNodeOutput)).orElse(requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNodeOutput)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/output-upload", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleOutputUpload)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleOutputUpload)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments", newClaimLogTailRoute(claimLogKinds, http.HandlerFunc(s.handleLogSegments)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleLogSegments)))))
@@ -867,7 +869,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/concurrency/{key}/release", newClaimReportingRouteBound(claimWorkKinds, ownClaimBinding, s.claimedSlot(s.slotRunFromBodyHolder, http.HandlerFunc(s.handleReleaseSlot))).orElse(requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBodyHolder, http.HandlerFunc(s.handleReleaseSlot)))))
 	mux.Handle("GET /api/v1/concurrency/{key}/holder", newClaimReportingRouteBound(claimWorkKinds, ownClaimBinding, s.claimedSlot(s.slotRunFromQueryHolder, http.HandlerFunc(s.handleObserveSlot))).orElse(requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromQueryHolder, http.HandlerFunc(s.handleObserveSlot)))))
 	mux.Handle("GET /api/v1/concurrency/{key}/state", newClaimReportingRouteBound(claimWorkKinds, ownClaimBinding, s.claimedSlot(s.slotOwnKey, http.HandlerFunc(s.handleConcurrencyState))).orElse(requireScope(ScopeRunsRead, http.HandlerFunc(s.handleConcurrencyState))))
-	mux.Handle("GET /api/v1/queue/state", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleQueueStateView)))
 	mux.Handle("GET /api/v1/concurrency/{key}/resolve", newClaimSensitiveRoute(claimWorkKinds, ownClaimBinding, s.claimedSlot(s.slotRunFromQueryRun, http.HandlerFunc(s.handleResolveWaiter))).orElse(requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromQueryRun, http.HandlerFunc(s.handleResolveWaiter)))))
 	mux.Handle("POST /api/v1/concurrency/{key}/cancel-waiter", newClaimReportingRouteBound(claimWorkKinds, ownClaimBinding, s.claimedSlot(s.slotRunFromBody, http.HandlerFunc(s.handleCancelWaiter))).orElse(requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBody, http.HandlerFunc(s.handleCancelWaiter)))))
 	mux.Handle("POST /api/v1/concurrency/{key}/force-release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleForceRelease)))
@@ -971,8 +972,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/team/billing/card", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingCard)))
 	mux.Handle("POST /api/v1/team/billing/pay", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingPay)))
 	mux.Handle("PUT /api/v1/team/billing/budget", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingBudget)))
-	mux.Handle("GET /api/v1/credits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsShow)))
-	mux.Handle("GET /api/v1/credits/history", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsHistory)))
 	mux.Handle("POST /api/v1/credits/reversals", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleReversePayment)))
 	mux.Handle("POST /api/v1/credits/freezes", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditFreeze)))
 	mux.Handle("POST /api/v1/credits/checkouts/closed", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCheckoutClosed)))
@@ -998,6 +997,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	s.registerEngineRoutes(router)
 	s.registerAuthorityRoutes(router)
 	s.registerPolicyEndpoints(router, s.sizingEndpoints())
+	s.registerPolicyEndpoints(router, s.creditEndpoints())
+	s.registerPolicyEndpoints(router, s.queueEndpoints())
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	// safety: the cache proves itself with its storage.count service token,
 	// which these handlers check.

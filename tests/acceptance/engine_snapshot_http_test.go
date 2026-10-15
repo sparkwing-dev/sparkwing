@@ -118,6 +118,28 @@ func TestEngineSnapshotHTTP(t *testing.T) {
 	}
 }
 
+func TestEngineSnapshotRetainsAcceptedExpansionBodies(t *testing.T) {
+	b := ownerBoundary()
+	f := snapshotFixture(b)
+	f.snapshot.Expansions = []store.AcceptedExpansionRow{
+		{Source: store.NodeRef{RunID: "run", NodeID: "first"}, SourceGeneration: 2, Body: json.RawMessage(`{"jobs":[]}`), BodyHash: "empty-body-hash"},
+		{Source: store.NodeRef{RunID: "run", NodeID: "generated"}, SourceGeneration: 4, Body: json.RawMessage(`{"jobs":[{"id":"nested"}]}`), BodyHash: "body-hash"},
+	}
+	w := snapshotRequest(snapshotServer(t, b, f), b, "GET", "/api/v1/runs/run/snapshot")
+	var got controllerwire.ScheduleSnapshot
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || len(got.Expansions) != 2 {
+		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
+	}
+	for i, row := range f.snapshot.Expansions {
+		if got.Expansions[i].SourceJob != row.Source.NodeID || got.Expansions[i].SourceGeneration != row.SourceGeneration || got.Expansions[i].BodyHash != row.BodyHash || string(got.Expansions[i].Body) != string(row.Body) {
+			t.Fatalf("expansion=%+v want=%+v", got.Expansions[i], row)
+		}
+	}
+	if f.reads != 1 {
+		t.Fatalf("snapshot reads=%d", f.reads)
+	}
+}
+
 func TestEngineSnapshotHTTPRefusals(t *testing.T) {
 	for _, state := range []string{"absent", "malformed", "revoked", "parent revoked", "membership lost", "lease expired", "stale generation", "wrong holder", "terminal owner", "cancelled", "wrong grant", "wrong run", "work", "plan", "member", "bootstrap", "nodehost", "binding", "missing run", "private read", "projection", "foreign team", "foreign run", "foreign job", "duplicate job", "missing job", "extra job", "bad declaration", "wrong declaration", "duplicate projection", "missing clock"} {
 		t.Run(state, func(t *testing.T) {

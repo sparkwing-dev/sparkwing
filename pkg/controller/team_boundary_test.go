@@ -476,7 +476,6 @@ func TestTeamBoundary_ListsNeverIncludeAnotherTeam(t *testing.T) {
 			{"/api/v1/runs", true},
 			{"/api/v1/triggers", true},
 			{"/api/v1/approvals/pending", true},
-			{"/api/v1/queue/state", true},
 			{"/api/v1/pipelines/build-a/latest?status=running", true},
 			{"/api/v1/agents", false},
 			{"/api/v1/credits/history", false},

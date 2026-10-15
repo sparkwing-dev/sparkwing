@@ -282,8 +282,9 @@ func (c *Client) GetRunReceipt(ctx context.Context, runID string) ([]byte, error
 	}
 }
 
+// ListNodes returns safe job status rows. Execution declarations and claim identities use the private execution wire.
 func (c *Client) ListNodes(ctx context.Context, runID string) ([]*store.Node, error) {
-	u := fmt.Sprintf("%s/api/v1/runs/%s/nodes", c.baseURL, url.PathEscape(runID))
+	u := fmt.Sprintf("%s/api/v1/runs/%s/jobs", c.baseURL, url.PathEscape(runID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
@@ -294,15 +295,13 @@ func (c *Client) ListNodes(ctx context.Context, runID string) ([]*store.Node, er
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, readHTTPError(resp)
+		return nil, readCapabilityHTTPError(resp)
 	}
-	var body struct {
-		Nodes []*store.Node `json:"nodes"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	var jobs []*store.Node
+	if err := json.NewDecoder(resp.Body).Decode(&jobs); err != nil {
 		return nil, err
 	}
-	return body.Nodes, nil
+	return jobs, nil
 }
 
 func (c *Client) FinishRun(ctx context.Context, runID, status, errMsg string) error {
@@ -565,26 +564,14 @@ func (c *Client) GetPipelineProfile(ctx context.Context, pipeline, nodeID string
 		}
 		return &prof, nil
 	case http.StatusNotFound:
-		data, err := io.ReadAll(resp.Body)
-		if err != nil {
+		err := readCapabilityHTTPError(resp)
+		var failure *apierr.Error
+		if !errors.As(err, &failure) || failure.Code != apierr.NotFound {
 			return nil, err
-		}
-		var envelope struct {
-			Error json.RawMessage `json:"error"`
-		}
-		if err := json.Unmarshal(data, &envelope); err != nil {
-			return nil, errors.New("invalid sizing error response")
-		}
-		failure, err := apierr.DecodeInner(envelope.Error)
-		if err != nil {
-			return nil, err
-		}
-		if failure.Code != apierr.NotFound {
-			return nil, failure
 		}
 		return nil, nil
 	default:
-		return nil, readHTTPError(resp)
+		return nil, readCapabilityHTTPError(resp)
 	}
 }
 
@@ -1073,9 +1060,9 @@ func (c *Client) GetLatestRun(ctx context.Context, pipeline string, statuses []s
 	}
 }
 
-// GetNode fetches one node.
+// GetNode fetches safe job status. Private execution fields require an awarded execution request.
 func (c *Client) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error) {
-	u := fmt.Sprintf("%s/api/v1/runs/%s/nodes/%s",
+	u := fmt.Sprintf("%s/api/v1/runs/%s/jobs/%s",
 		c.baseURL, url.PathEscape(runID), url.PathEscape(nodeID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -1093,10 +1080,8 @@ func (c *Client) GetNode(ctx context.Context, runID, nodeID string) (*store.Node
 			return nil, err
 		}
 		return &n, nil
-	case http.StatusNotFound:
-		return nil, notFound(resp)
 	default:
-		return nil, readHTTPError(resp)
+		return nil, readCapabilityHTTPError(resp)
 	}
 }
 
@@ -1802,7 +1787,28 @@ func controllerLacksRoute(route string) error {
 }
 
 func readHTTPError(resp *http.Response) error {
-	err := classifyHTTPError(resp)
+	return withRetryAdvice(resp, classifyHTTPError(resp))
+}
+
+func readCapabilityHTTPError(resp *http.Response) error {
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return withRetryAdvice(resp, err)
+	}
+	var envelope struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return withRetryAdvice(resp, errors.New("invalid controller error response"))
+	}
+	failure, err := apierr.DecodeInner(envelope.Error)
+	if err != nil {
+		return withRetryAdvice(resp, err)
+	}
+	return withRetryAdvice(resp, failure)
+}
+
+func withRetryAdvice(resp *http.Response, err error) error {
 	if resp.StatusCode == http.StatusTooManyRequests {
 		if wait, ok := parseRetryAfter(resp); ok {
 			return &RateLimitedError{RetryAfter: wait, Err: err}

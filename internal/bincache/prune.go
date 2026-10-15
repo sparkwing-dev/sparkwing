@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -137,7 +136,7 @@ func ConfiguredLimits() (Limits, error) {
 		return limits, err
 	}
 	if v := strings.TrimSpace(raw.MaxBytes); v != "" {
-		n, err := ParseBytes(v)
+		n, err := userconfig.ParseByteSize(v)
 		if err != nil {
 			return limits, fmt.Errorf("%s cache.max_bytes: %w", path, err)
 		}
@@ -150,48 +149,4 @@ func ConfiguredLimits() (Limits, error) {
 		limits.MaxEntries = *raw.MaxEntries
 	}
 	return limits, nil
-}
-
-func ParseBytes(raw string) (int64, error) {
-	s := strings.TrimSpace(raw)
-	if s == "" {
-		return 0, fmt.Errorf("empty size")
-	}
-	units := []struct {
-		suffix string
-		mult   int64
-	}{
-		{"KIB", 1 << 10},
-		{"MIB", 1 << 20},
-		{"GIB", 1 << 30},
-		{"TIB", 1 << 40},
-		{"KB", 1000},
-		{"MB", 1000 * 1000},
-		{"GB", 1000 * 1000 * 1000},
-		{"TB", 1000 * 1000 * 1000 * 1000},
-		{"B", 1},
-	}
-	upper := strings.ToUpper(s)
-	for _, u := range units {
-		if !strings.HasSuffix(upper, u.suffix) {
-			continue
-		}
-		num := strings.TrimSpace(upper[:len(upper)-len(u.suffix)])
-		n, err := strconv.ParseFloat(num, 64)
-		if err != nil {
-			return 0, fmt.Errorf("parse size %q: %w", raw, err)
-		}
-		if n < 0 {
-			return 0, fmt.Errorf("parse size %q: negative", raw)
-		}
-		return int64(n * float64(u.mult)), nil
-	}
-	n, err := strconv.ParseInt(upper, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("parse size %q: %w", raw, err)
-	}
-	if n < 0 {
-		return 0, fmt.Errorf("parse size %q: negative", raw)
-	}
-	return n, nil
 }

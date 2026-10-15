@@ -41,12 +41,28 @@ func (s *Server) engineEndpoints() []Endpoint {
 			Decode: engine.runTarget, Handle: engine.handleSnapshot,
 		},
 		{
+			Method: "GET", Pattern: "/api/v1/runs/{run}/jobs", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleJobs,
+		},
+		{
+			Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleJob,
+		},
+		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/finish", Authentication: capability.AuthCapability,
 			Decode: engine.runResultTarget, Handle: engine.handleFinish,
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/cancel", Authentication: capability.AuthCapability,
 			Decode: engine.runTarget, Handle: engine.handleCancel,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/cancel", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleCancelJob,
+		},
+		{
+			Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/failure", Authentication: capability.AuthCapability,
+			Decode: engine.failureTarget, Handle: engine.handleFailure,
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/retry", Authentication: capability.AuthCapability,

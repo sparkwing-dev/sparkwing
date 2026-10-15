@@ -54,8 +54,8 @@ pipelines:
   - name: deploy-prod
     entrypoint: Deploy
     guards:
-      require: [profile:controller]
-      reject:  [profile:local]
+      require: [where:controller]
+      reject:  [where:local]
     args:
       image: "registry.prod.com/myapp:latest"
       replicas: "10"
@@ -68,7 +68,7 @@ pipelines:
 	if p == nil {
 		t.Fatal("pipeline missing")
 	}
-	if len(p.Guards.Require) != 1 || p.Guards.Require[0] != "profile:controller" {
+	if len(p.Guards.Require) != 1 || p.Guards.Require[0] != "where:controller" {
 		t.Errorf("guards.require: %+v", p.Guards.Require)
 	}
 	if p.Args["replicas"] != "10" {
@@ -190,8 +190,8 @@ pipelines:
   - name: deploy
     entrypoint: Deploy
     guards:
-      require: [profile:controller]
-      rejct:   [profile:local]
+      require: [where:controller]
+      rejct:   [where:local]
 `
 	_, err := pipelines.Parse(strings.NewReader(yaml))
 	if err == nil || !strings.Contains(err.Error(), `guards: unknown field "rejct"`) {
@@ -211,14 +211,14 @@ pipelines:
       push:
         branches: [main]
     guards: &fence
-      require: [profile:controller]
+      require: [where:controller]
   - name: b
     entrypoint: B
     on:
       <<: *triggers
     guards:
       <<: *fence
-      reject: [profile:local]
+      reject: [where:local]
 `
 	cfg, err := pipelines.Parse(strings.NewReader(yaml))
 	if err != nil {
@@ -228,10 +228,10 @@ pipelines:
 	if p == nil || p.On.Push == nil || len(p.On.Push.Branches) != 1 {
 		t.Fatalf("merged triggers lost: %+v", p)
 	}
-	if len(p.Guards.Require) != 1 || p.Guards.Require[0] != "profile:controller" {
+	if len(p.Guards.Require) != 1 || p.Guards.Require[0] != "where:controller" {
 		t.Errorf("merged guards.require lost: %+v", p.Guards)
 	}
-	if len(p.Guards.Reject) != 1 || p.Guards.Reject[0] != "profile:local" {
+	if len(p.Guards.Reject) != 1 || p.Guards.Reject[0] != "where:local" {
 		t.Errorf("own guards.reject lost: %+v", p.Guards)
 	}
 }

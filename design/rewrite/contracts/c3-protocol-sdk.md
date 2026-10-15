@@ -1,5 +1,53 @@
 # C3 protocol and SDK contract
 
+## Amendment 1: shared host inputs
+
+[Amendments 1](amendments-1.md) defines the required worker integrations.
+RunInput and NodeInput now carry StorageBinding: verified byte storage,
+transactional records, current authority and optional read-only remote cache.
+Refresh the binding for each attempt/generation. The shared host layers use these
+clients for artifacts, memo and depcache. No cache-service or ArtifactStore adapter
+is restored. The SDK's declared Cache helpers remain author declarations, and
+pipeline tooling uses their public workdir-safe keys.
+
+Source acquisition consumes Source.Location from the request seal, separately
+from repo identity and checkout policy. RemoteURL contains no credential and
+remote acquisition uses the sealed SHA. LocalCheckout is authorized on the
+machine whose store admitted it. PipelineDir stays inside that checkout.
+Intake verifies that the location belongs to the sealed repository before any
+credential release. Repo display text is never a clone location. Source.Options.Base feeds procenv
+for Git and Install. Resolve the pin after acquisition, then call the selected
+engine's InstallSDK. Accepted executions Ensure the sealed engine identity before
+reconstruction. Host-version binaries and ambient runner identity are not substitutes.
+
+Reconciliation supports MaterializeOnly: an authorized cache/retry hit is committed,
+while a miss returns Dispatch without stealing remote execution. Private execution
+responses preserve declaration bytes/hash, settings, retries, fences, cancellation
+and expansion state. Expansion replay returns current persisted jobs, which may
+already be running or terminal. Accepted expansion bodies preserve empty groups.
+ReadFailure supplies persisted recovery context through the declared read edge.
+DecisionCancelHolder uses the owner's scoped cancellation request and lets the
+holder finish. Both owners continue to use the same scheduling projection/Decide.
+
+Protocol cancel accepts job with an optional step, or target with the active request
+ID. Job-only cancels that job's active run_step/eval operations. Target handles eval
+without synthetic job/step values. Selectors are mutually exclusive and never
+cross the process binding. Acknowledgement follows cancellation and completion
+of the selected operation. Cleanup waits for the original request to finish.
+
+Both SDKs use nodeproto's MaskRequest, AnnotationRequest and SummaryRequest on
+C2's declared node-host routes. Mask waits for acknowledgement, and annotation/
+summary errors propagate. Body env is applied after plan, startup env before spawn,
+and neither SDK reads credentials from env. Approval SkipIf remains an admission
+condition on every placement. Executable approval before/after hooks are removed.
+
+Concurrency declaration options preserve omission with pointers. The host resolves
+scope=global, capacity=1, cost=1 and on_limit=queue only when absent, persists winners
+in ExecutionSettings/JobExecutionSettings, and leaves declaration hashes unchanged.
+Explicit zero capacity/cost fails. Both SDKs share canonical v2 vectors for these
+presence cases, error objects, generated hashes and secret-containing identifiers.
+
+
 This is the implementation contract for node protocol 2, both author SDKs,
 the fake host, and the shared host library. It follows the frozen architecture
 and decisions 87-104. Declarations compile, but bodies marked

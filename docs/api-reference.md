@@ -101,7 +101,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/pipelines/{name}/sizing/observations` | `node.report` |
 | `PUT` | `/api/v1/pipelines/{name}/sizing/pin` | `node.report` |
 | `POST` | `/api/v1/pipelines/{name}/sizing/waits` | `node.report` |
-| `GET` | `/api/v1/queue/state` | `runs.read` |
+| `GET` | `/api/v1/queue` | `runs.read` |
 | `POST` | `/api/v1/runners/github/exchange` | `public` |
 | `GET` | `/api/v1/runs` | `runs.read` |
 | `POST` | `/api/v1/runs` | `runs.write` or `children.start` |
@@ -130,9 +130,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/runs/{id}/logs/{node}` | `logs.read` |
 | `GET` | `/api/v1/runs/{id}/logs/{node}/completeness` | `logs.read` |
 | `GET` | `/api/v1/runs/{id}/logs/{node}/stream` | `logs.read` |
-| `GET` | `/api/v1/runs/{id}/nodes` | `runs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes` | `runs.state` |
-| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/activity` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/attempt` | `claim` |
@@ -178,8 +176,12 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{run}/cancel` | `runs.control` |
 | `POST` | `/api/v1/runs/{run}/finish` | `runs.state` or `data.write` |
 | `POST` | `/api/v1/runs/{run}/heartbeat` | `trigger.host` |
+| `GET` | `/api/v1/runs/{run}/jobs` | `runs.read` or `trigger.host` |
+| `GET` | `/api/v1/runs/{run}/jobs/{job}` | `runs.read` or `data.read` or `trigger.host` |
 | `POST` | `/api/v1/runs/{run}/jobs/{job}/annotations` | `node.report` or `node.report` or `data.write` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/cancel` | `runs.control` or `trigger.host` |
 | `POST` | `/api/v1/runs/{run}/jobs/{job}/expansion` | `expansion.submit` |
+| `GET` | `/api/v1/runs/{run}/jobs/{job}/failure` | `data.read` |
 | `POST` | `/api/v1/runs/{run}/jobs/{job}/heartbeat` | `node.report` or `node.report` |
 | `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/annotations` | `node.report` or `node.report` or `data.write` |
 | `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/finish` | `node.report` or `node.report` or `data.write` |

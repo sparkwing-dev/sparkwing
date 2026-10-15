@@ -54,6 +54,21 @@ func TestParseEngineEndpointsUsesActualRegistrations(t *testing.T) {
 	}
 }
 
+func TestParseQueueEndpointUsesActualRegistration(t *testing.T) {
+	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.queueEndpoints())")
+	endpoint := `{Method: "GET", Pattern: "/api/v1/queue", Authentication: capability.AuthCapability}`
+	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "queue_view.go"), []byte(endpoint), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []Route{{Method: "GET", Path: "/api/v1/queue", Scope: "runs.read"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("queue registration=%+v want=%+v", got, want)
+	}
+}
+
 func TestParseAuthorityEndpointsUsesActualRegistrations(t *testing.T) {
 	src := writeFile(t, "server.go", "s.registerAuthorityRoutes(router)")
 	endpoints := `{Method: "DELETE", Pattern: "/api/v1/tokens/{token}", Authentication: capability.AuthCapability},
@@ -191,5 +206,23 @@ func TestParseSizingEndpointsUsesActualRegistrations(t *testing.T) {
 func TestParseMissingFile(t *testing.T) {
 	if _, err := Parse(filepath.Join(t.TempDir(), "absent.go"), nil); err == nil {
 		t.Fatal("Parse on a missing file returned no error")
+	}
+}
+
+func TestParseCreditEndpointsUsesActualRegistrations(t *testing.T) {
+	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.creditEndpoints())")
+	endpoints := `
+	{Method: "GET", Pattern: "/api/v1/credits"},
+	{Method: "GET", Pattern: "/api/v1/credits/history"},`
+	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "credit_routes.go"), []byte(endpoints), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Route{{Method: "GET", Path: "/api/v1/credits", Scope: "runs.read"}, {Method: "GET", Path: "/api/v1/credits/history", Scope: "runs.read"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("credit registrations=%+v want %+v", got, want)
 	}
 }

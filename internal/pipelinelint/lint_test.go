@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 func lintSource(t *testing.T, src string) []Finding {
@@ -221,8 +222,8 @@ func TestGuardMisuse_RequireAndRejectSameToken(t *testing.T) {
 		Name:       "deploy",
 		Entrypoint: "Deploy",
 		Guards: pipelines.Guards{
-			Require: []string{"profile:controller"},
-			Reject:  []string{"profile:controller"},
+			Require: []string{"where:controller"},
+			Reject:  []string{"where:controller"},
 		},
 	}}}
 	findings := AnalyzeGuards(cfg)
@@ -231,13 +232,12 @@ func TestGuardMisuse_RequireAndRejectSameToken(t *testing.T) {
 	}
 }
 
-func TestGuardMisuse_ProfileLocalAndControllerBothRequired(t *testing.T) {
-	cfg := &pipelines.Config{Pipelines: []pipelines.Pipeline{{
-		Name:       "deploy",
-		Entrypoint: "Deploy",
-		Guards:     pipelines.Guards{Require: []string{"profile:local", "profile:controller"}},
-	}}}
-	findings := AnalyzeGuards(cfg)
+func TestGuardMisuse_LocalAndControllerBothRequired(t *testing.T) {
+	cfg, err := projectconfig.Parse([]byte("pipelines: [{name: deploy, entrypoint: Deploy, guards: {when: [where:local, where:controller]}}]"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := AnalyzeGuards(cfg.Registry())
 	if got := countRule(findings, RuleGuardMisuse); got != 1 {
 		t.Fatalf("guard-misuse findings = %d, want 1: %+v", got, findings)
 	}
@@ -259,7 +259,7 @@ func TestGuardMisuse_CleanGuardsPass(t *testing.T) {
 	cfg := &pipelines.Config{Pipelines: []pipelines.Pipeline{{
 		Name:       "deploy",
 		Entrypoint: "Deploy",
-		Guards:     pipelines.Guards{Require: []string{"profile:controller"}, Reject: []string{"git:branch=main"}},
+		Guards:     pipelines.Guards{Require: []string{"where:controller"}, Reject: []string{"git:branch=main"}},
 	}}}
 	if findings := AnalyzeGuards(cfg); len(findings) != 0 {
 		t.Fatalf("clean guards should produce no findings: %+v", findings)

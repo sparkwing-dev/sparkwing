@@ -26,6 +26,7 @@ type RunTransactions interface {
 	ReadRun(context.Context, string) (store.RunRow, error)
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 	ReadNode(context.Context, store.NodeRef) (store.NodeRow, error)
+	ReadFailure(context.Context, store.NodeRef, int64, store.Actor) (*nodeproto.JobFailure, error)
 	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
 	AcceptExpansion(context.Context, store.ExpansionSubmission) (store.AcceptedExpansion, error)
 	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
@@ -191,7 +192,7 @@ func expansionResponse(accepted store.AcceptedExpansion) (controllerwire.Expansi
 		if err := json.Unmarshal(node.Spec, &job); err != nil || job.ID == "" || node.SpecHash == "" {
 			return controllerwire.ExpansionAccepted{}, errors.New("invalid persisted expansion job")
 		}
-		response.Jobs = append(response.Jobs, controllerwire.ExpandedJob{Job: job, SpecHash: node.SpecHash, Execution: node.Execution})
+		response.Jobs = append(response.Jobs, controllerwire.ExpandedJob{Job: job, SpecHash: node.SpecHash, Execution: node.Execution, Current: executionJob(node)})
 	}
 	return response, nil
 }

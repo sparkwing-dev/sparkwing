@@ -64,6 +64,12 @@ const CloudRetentionDays = 30
 func CompliantClaimPollsPerMinute() int
 const ComputeLimitRefusedCode = "compute_limit"
 const ComputeLimitRetryAfterSeconds = 5
+type CreditReader interface {
+	Team() store.Team
+	CreditState(context.Context, time.Duration) (store.CreditState, error)
+	ListCreditGrants(context.Context, int) ([]store.CreditGrant, error)
+	ListCreditCharges(context.Context, int) ([]store.CreditCharge, error)
+}
 const CreditsFrozenCode = "credits_frozen"
 const CreditsRefusedCode = "insufficient_credits"
 func CronIdempotencyKey(scheduleID string, due time.Time) string
@@ -82,11 +88,36 @@ type Dashboard struct {
 
 	InsecureCookies bool
 }
+type DataBinding struct {
+	Authority blob.Authority
+	Signer    blob.DataSigner
+	Records   blob.RecordStore
+}
+type DataController struct {
+	Store   *store.Store
+	Objects blob.ObjectBackend
+
+	ResolveTenant func(context.Context, store.Team) (DataTransactions, error)
+
+	ResolveAuthority func(context.Context, capability.Authorized) (blob.Authority, error)
+
+	ReadBlob func(context.Context, blob.Authority, blob.Digest) (blob.Blob, error)
+	Access   capability.DataAccessChecker
+}
+func (s *DataController) BindData(ctx context.Context, authorized capability.Authorized) (DataBinding, error)
+func (s *DataController) DataAuthority(ctx context.Context, authorized capability.Authorized) (blob.Authority, error)
 type DataDownloadResponse struct {
 	URL     string
 	SHA256  string
 	Size    int64
 	Expires time.Time
+}
+type DataTransactions interface {
+	blob.RecordStore
+	ReserveBlobUpload(context.Context, store.UploadReservationRequest) (store.UploadReservation, error)
+	LookupBlobUpload(context.Context, blob.Authority, string) (store.UploadReservation, error)
+	CommitBlobUpload(context.Context, store.VerifiedUploadCommit) (blob.Receipt, error)
+	AbortBlobUpload(context.Context, blob.Authority, string) error
 }
 const DefaultLiveLogIdleTimeout = 10 * time.Minute
 const DefaultLiveLogMaxNodes = 1024
@@ -128,15 +159,19 @@ type EngineController struct {
 func (s *EngineController) AcceptExpansion(ctx context.Context, authorized capability.Authorized, body controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error)
 func (s *EngineController) AcceptPlan(ctx context.Context, a capability.Authorized, body controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error)
 func (s *EngineController) Cancel(ctx context.Context, a capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error)
+func (s *EngineController) CancelJob(ctx context.Context, a capability.Authorized, _ controllerwire.CancelRequest) (controllerwire.Applied, error)
 func (s *EngineController) Claim(ctx context.Context, authorized capability.Authorized, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
 func (s *EngineController) Compatibility(ctx context.Context, engineVersion string) (controllerwire.Compatibility, error)
 func (s *EngineController) CreateRun(ctx context.Context, authorized capability.Authorized, body controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error)
+func (s *EngineController) Exchange(ctx context.Context, authorized capability.Authorized) (controllerwire.ExchangeResponse, error)
 func (s *EngineController) Finish(ctx context.Context, a capability.Authorized, body controllerwire.FinishRequest) (controllerwire.Applied, error)
+func (s *EngineController) ReadFailure(ctx context.Context, a capability.Authorized) (*nodeproto.JobFailure, error)
 func (s *EngineController) ReconcileJob(ctx context.Context, authorized capability.Authorized, body controllerwire.ReconcileRequest) (controllerwire.ReconcileResponse, error)
 func (s *EngineController) Renew(ctx context.Context, a capability.Authorized, _ controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error)
 func (s *EngineController) Retry(ctx context.Context, a capability.Authorized, body controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error)
 func (s *EngineController) RunDetail(ctx context.Context, authorized capability.Authorized) (controllerwire.RunDetail, error)
 func (s *EngineController) Snapshot(ctx context.Context, authorized capability.Authorized) (controllerwire.ScheduleSnapshot, error)
+func (s *EngineController) SyncLauncher(ctx context.Context, authorized capability.Authorized, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
 func (s *EngineController) TransitionJob(ctx context.Context, a capability.Authorized, body controllerwire.JobTransitionRequest) (controllerwire.Applied, error)
 func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error)
 func EnsureCheckoutToken(ctx context.Context, st *store.Store, raw string, now time.Time) (bool, error)
@@ -287,6 +322,10 @@ type Principal struct {
 func (p *Principal) HasScope(s string) bool
 func PrincipalFromContext(ctx context.Context) (*Principal, bool)
 const PurchaseLimitCode = "purchase_limit"
+type QueueReader interface {
+	Team() store.Team
+	ListConcurrencyStates(context.Context) ([]*store.ConcurrencyState, error)
+}
 const RecommendedHeartbeatsPerMinute = 1200
 type RequestBudget struct {
 	ClaimsPerMinute     int
@@ -308,6 +347,7 @@ type RunTransactions interface {
 	ReadRun(context.Context, string) (store.RunRow, error)
 	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
 	ReadNode(context.Context, store.NodeRef) (store.NodeRow, error)
+	ReadFailure(context.Context, store.NodeRef, int64, store.Actor) (*nodeproto.JobFailure, error)
 	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
 	AcceptExpansion(context.Context, store.ExpansionSubmission) (store.AcceptedExpansion, error)
 	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
@@ -365,6 +405,7 @@ func (s *Server) WithCacheGrantKey(key string) *Server
 func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
+func (s *Server) WithCreditReader(resolve func(context.Context, store.Team) (CreditReader, error)) *Server
 func (s *Server) WithDashboard(d Dashboard) *Server
 func (s *Server) WithDashboardURL(url string) *Server
 func (s *Server) WithDirectUploads(client *s3.Client, bucket, prefix string) *Server
@@ -392,6 +433,7 @@ func (s *Server) WithOperatorAccounts(ids []string) *Server
 func (s *Server) WithOutputSignKey(key []byte) *Server
 func (s *Server) WithPayments(verifier capability.PaymentAuthenticator, ledger PaymentSettler) *Server
 func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server
+func (s *Server) WithQueueReader(resolve func(context.Context, store.Team) (QueueReader, error)) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
@@ -457,6 +499,15 @@ const UnsupportedRouteError = "unsupported"
 func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)
 
 # methods on un-declared receiver types (likely a bug)
+func (s *boundData) Commit(ctx context.Context, request blob.CommitUpload) (blob.Receipt, error)
+func (s *boundData) CommitRecord(ctx context.Context, request blob.CommitRecordRequest) (blob.Record, error)
+func (s *boundData) CopyMemo(ctx context.Context, request blob.CopyMemoRequest) (blob.MemoHit, error)
+func (s *boundData) Download(ctx context.Context, request blob.GetRequest) (blob.SignedTransfer, error)
+func (s *boundData) HasMany(ctx context.Context, request blob.HasManyRequest) (blob.Presence, error)
+func (s *boundData) LookupDepcache(ctx context.Context, request blob.DepcacheLookup) (blob.DepcacheHit, error)
+func (s *boundData) LookupMemo(ctx context.Context, request blob.MemoLookup) (blob.MemoHit, error)
+func (s *boundData) LookupRecord(ctx context.Context, request blob.RecordLookup) (blob.RecordLookupResult, error)
+func (s *boundData) Upload(ctx context.Context, intent blob.UploadIntent) (blob.UploadTicket, error)
 func (c *claimTokenRoute) ServeHTTP(w http.ResponseWriter, r *http.Request)
 func (t *creditRateTableIn) UnmarshalJSON(raw []byte) error
 func (creditsCollector) Collect(ch chan<- prometheus.Metric)

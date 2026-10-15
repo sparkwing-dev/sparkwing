@@ -213,22 +213,22 @@ func TestDisplayNameCarriesTheEntryNameForEveryEntryButDefault(t *testing.T) {
 	}
 }
 
-func TestDeclaredSchedulesReadsBothYAMLShapes(t *testing.T) {
+func TestDeclaredSchedulesReadsScheduleLists(t *testing.T) {
 	root := writeRepo(t, "svc", `  - name: nightly
     entrypoint: Nightly
     on:
       schedule:
-        cron: "0 3 * * *"
-        where: local
+        - cron: "0 3 * * *"
+          where: local
   - name: hourly
     entrypoint: Hourly
     on:
       schedule:
-        cron: "@hourly"
-        where: local
-        tz: America/Denver
-        overlap: queue
-        catch_up: 6h
+        - cron: "@hourly"
+          where: local
+          tz: America/Denver
+          overlap: queue
+          catch_up: 6h
   - name: manual
     entrypoint: Manual
 `)
@@ -240,14 +240,14 @@ func TestDeclaredSchedulesReadsBothYAMLShapes(t *testing.T) {
 		t.Fatalf("declared %d schedules, want 2: %+v", len(declared), declared)
 	}
 	if declared[0].Pipeline != "nightly" || declared[0].Trigger.Cron != "0 3 * * *" {
-		t.Errorf("scalar form: %+v", declared[0])
+		t.Errorf("unnamed schedule: %+v", declared[0])
 	}
 	if declared[0].Trigger.TZ != "" || declared[0].Trigger.OverlapPolicy() != store.CronOverlapSkip {
-		t.Errorf("scalar form should carry the defaults: %+v", declared[0].Trigger)
+		t.Errorf("unnamed schedule should carry the defaults: %+v", declared[0].Trigger)
 	}
 	m := declared[1].Trigger
 	if m.Cron != "@hourly" || m.TZ != "America/Denver" || m.Overlap != "queue" || m.CatchUp != "6h" {
-		t.Errorf("mapping form: %+v", m)
+		t.Errorf("configured schedule: %+v", m)
 	}
 	if declared[1].RepoPath != root {
 		t.Errorf("RepoPath = %q, want %q", declared[1].RepoPath, root)

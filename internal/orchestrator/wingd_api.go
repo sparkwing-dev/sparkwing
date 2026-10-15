@@ -71,10 +71,11 @@ var apiReadRoutes = []string{
 	"GET /api/v1/runs/{id}/logs/{node}/completeness",
 	"GET /api/v1/runs/grep",
 	"GET /api/v1/runs",
+	"GET /api/v1/queue",
 	"GET /api/v1/runs/{id}/pending-triggers",
 	"GET /api/v1/runs/{id}",
-	"GET /api/v1/runs/{id}/nodes",
-	"GET /api/v1/runs/{id}/nodes/{nodeID}",
+	"GET /api/v1/runs/{run}/jobs",
+	"GET /api/v1/runs/{run}/jobs/{job}",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/output",
 	"GET /api/v1/outputs/objects/{key...}",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch",
@@ -339,13 +340,9 @@ func (a *wingdAPI) prepareSecrets(ctx context.Context, rw *store.Store) controll
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), APIRequestTimeout)
 	defer cancel()
-	// safety: the reseal proves the key against the values already sealed
-	// before the import seals anything, so a wrong key imports nothing.
+	// safety: prove the key against existing values before serving secret reads.
 	srv := controller.New(rw, a.logger).WithSecretsCipher(cipher)
 	if _, err := srv.ResealStoredSecrets(ctx); err != nil {
-		return a.refuseSecrets(err)
-	}
-	if err := a.importLegacySecrets(ctx, rw, cipher); err != nil {
 		return a.refuseSecrets(err)
 	}
 	return cipher

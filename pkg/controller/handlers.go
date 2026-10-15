@@ -319,28 +319,6 @@ func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, store.RedactedRun(run))
 }
 
-func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	runID := r.PathValue("id")
-	nodes, err := tenant.ListNodes(r.Context(), runID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if nodes == nil {
-		nodes = []*store.Node{}
-	}
-	public, err := s.publicNodesWithExecutionLocation(r.Context(), nodes)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"nodes": public})
-}
-
 func splitCSV(s string) []string {
 	raw := strings.Split(s, ",")
 	out := make([]string, 0, len(raw))
@@ -1470,30 +1448,6 @@ func writeError(w http.ResponseWriter, status int, err error) {
 func (s *Server) writeInternalError(w http.ResponseWriter, r *http.Request, operation string, err error) {
 	s.logger.Error(operation, append(requestLogAttrs(r), "err", err)...)
 	writeError(w, http.StatusInternalServerError, err)
-}
-
-func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	n, err := tenant.GetNode(r.Context(), runID, nodeID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	public, err := s.publicNodesWithExecutionLocation(r.Context(), []*store.Node{n})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, public[0])
 }
 
 func (s *Server) handleWriteNodeDispatch(w http.ResponseWriter, r *http.Request) {

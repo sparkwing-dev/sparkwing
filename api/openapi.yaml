@@ -493,24 +493,6 @@ paths:
 
   /api/v1/runs/{id}/nodes:
     parameters: [{$ref: "#/components/parameters/RunID"}]
-    get:
-      x-sparkwing-scope: runs.read or nodes.claim or triggers.claim
-      tags: [nodes]
-      summary: List nodes for a run, insertion order.
-      responses:
-        "200":
-          description: Nodes wrapped under `nodes`.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                required: [nodes]
-                properties:
-                  nodes:
-                    type: array
-                    items: {$ref: "#/components/schemas/Node"}
-        "500": {$ref: "#/components/responses/InternalError"}
     post:
       x-sparkwing-scope: runs.state
       tags: [nodes]
@@ -525,22 +507,6 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "409": {description: "The run already finished, or the claim naming it no longer holds it."}
         "500": {$ref: "#/components/responses/InternalError"}
-
-  /api/v1/runs/{id}/nodes/{nodeID}:
-    parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
-    get:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [nodes]
-      summary: Fetch one node.
-      responses:
-        "200":
-          description: Node.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/Node"}
-        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/start:
     parameters:
@@ -1932,15 +1898,16 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/queue/state:
+  /api/v1/queue:
     get:
       x-sparkwing-scope: runs.read
       tags: [concurrency]
       summary: Snapshot every concurrency key, holder, waiter, and runner.
       description: |
-        One deployment-wide view for the queue dashboard: per-key capacity
-        and cost held, the live holders, the waiting nodes with their
-        positions, and the headroom each runner last reported.
+        The authorized team's concurrency groups, holders, waiting jobs and
+        advertised runner headroom. The team comes from the committed
+        member or verified local credential. Errors use
+        the common envelope. The former /queue/state path is removed.
       responses:
         "200":
           description: The queue snapshot.
@@ -7465,6 +7432,122 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
 
+  /api/v1/runs/{run}/jobs:
+    parameters:
+      - name: run
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: runs.read or trigger.host
+      tags: [runs]
+      summary: Read safe job statuses from one committed run snapshot.
+      description: Requires member read access or live run ownership. An executor cannot enumerate siblings.
+      responses:
+        "200":
+          description: Safe job status array, empty when the run has no jobs.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/EngineJobDetail"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{run}/jobs/{job}:
+    parameters:
+      - name: run
+        in: path
+        required: true
+        schema: {type: string}
+      - name: job
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: runs.read or data.read or trigger.host
+      tags: [runs]
+      summary: Read one safe job status.
+      description: Requires member read access, live run ownership, or this job's live data-read authority.
+      responses:
+        "200":
+          description: Status without raw declarations, environment, execution settings or claim identities.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineJobDetail"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{run}/jobs/{job}/cancel:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: runs.control or trigger.host
+      tags: [runs]
+      summary: Request cancellation of one job.
+      description: An authorized member or the live trigger owner requests cancellation. A held job retains its result rights. The transaction records a cancellation request instead of ending its attempt. The current job transition does not persist the optional reason.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineCancelRequest"}
+      responses:
+        "200":
+          description: Committed cancellation or cancellation request, including replay.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineApplied"}
+        default:
+          description: Shared capability error. Authentication is checked before request errors.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CapabilityFailure"}
+
+  /api/v1/runs/{run}/jobs/{job}/failure:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: data.read
+      tags: [runs]
+      summary: Read the persisted masked failure for a recovery source.
+      description: Requires data.read and a declared recovery read edge to this source and generation. An absent failure returns null. Status strings do not create synthetic errors.
+      parameters:
+        - in: query
+          name: generation
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+      responses:
+        "200":
+          description: Recorded masked failure, or null when no failure was recorded.
+          content:
+            application/json:
+              schema:
+                allOf: [{$ref: "#/components/schemas/EngineJobFailure"}]
+                nullable: true
+        default:
+          description: Shared capability error. Authentication is checked before selector errors.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CapabilityFailure"}
+
 components:
   securitySchemes:
     bearerToken:
@@ -9206,6 +9289,29 @@ components:
         state_seq: {type: integer}
         generation: {type: integer}
         attempt: {type: integer}
+    EngineJobFailure:
+      x-sparkwing-go-type: internal/nodeproto.JobFailure
+      type: object
+      required: [job, stage, error]
+      properties:
+        job: {type: string}
+        stage: {type: string}
+        error: {$ref: "#/components/schemas/InnerAPIError"}
+    InnerAPIError:
+      x-sparkwing-go-type: internal/apierr.Error
+      type: object
+      required: [code, message]
+      properties:
+        code: {type: string}
+        message: {type: string}
+        hint: {type: string}
+        details: {type: object, additionalProperties: true}
+    CapabilityFailure:
+      x-sparkwing-go-type: internal/apierr.Envelope
+      type: object
+      required: [error]
+      properties:
+        error: {$ref: "#/components/schemas/InnerAPIError"}
     EngineCancelRequest:
       x-sparkwing-go-type: internal/controllerwire.CancelRequest
       type: object
@@ -9230,10 +9336,26 @@ components:
         cancel_reason: {type: string}
         watched: {type: boolean}
         watched_jobs: {type: array, items: {type: string}}
+    EngineJobDetail:
+      x-sparkwing-go-type: internal/controllerwire.JobDetail
+      type: object
+      required: [id, status, generation, attempt, state_seq, expansion]
+      properties:
+        id: {type: string}
+        status: {type: string}
+        outcome: {type: string}
+        status_detail: {type: string}
+        generation: {type: integer, format: int64}
+        attempt: {type: integer, format: int64}
+        state_seq: {type: integer, format: int64}
+        expansion: {type: string}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        cancel_requested_at: {type: string, format: date-time}
     EngineScheduleSnapshot:
       x-sparkwing-go-type: internal/controllerwire.ScheduleSnapshot
       type: object
-      required: [run_id, store_now, cancel_requested, jobs, generators]
+      required: [run_id, store_now, cancel_requested, jobs, generators, expansions]
       properties:
         run_id: {type: string}
         store_now: {type: string, format: date-time}
@@ -9245,6 +9367,18 @@ components:
         generators:
           type: array
           items: {$ref: "#/components/schemas/EngineScheduleGenerator"}
+        expansions:
+          type: array
+          items: {$ref: "#/components/schemas/EngineAcceptedExpansion"}
+    EngineAcceptedExpansion:
+      x-sparkwing-go-type: internal/controllerwire.AcceptedExpansion
+      type: object
+      required: [source_job, source_generation, body, body_hash]
+      properties:
+        source_job: {type: string}
+        source_generation: {type: integer, format: int64}
+        body: {type: object}
+        body_hash: {type: string}
     EngineScheduleGenerator:
       x-sparkwing-go-type: internal/controllerwire.ScheduleGenerator
       type: object

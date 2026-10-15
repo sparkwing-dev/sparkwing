@@ -1,5 +1,48 @@
 # Migrating to the next release
 
+## Queue reads
+
+Read `/api/v1/queue` instead of `/api/v1/queue/state`. The CLI's remote queue
+reader and the dashboard use the new path. The old path is removed. The
+response retains the concurrency groups, holders, waiters and runner headroom
+for the authorized team.
+
+A member or verified local peer needs `runs.read`. Machine roots and work
+claims cannot read the team queue. Configure the controller's shared verifier
+and binding adapters before serving the route. Errors use the common envelope.
+Embedded controllers may supply the existing tenant read contract through
+`WithQueueReader`. Its default uses the server's store.
+
+## Credit ledger reads
+
+`GET /api/v1/credits` and `GET /api/v1/credits/history` use the shared
+capability verifier. A member or verified local peer needs `runs.read` for
+its active team. Configure the controller's shared authentication and binding
+adapters before serving these routes. Machine roots and claims cannot read
+the team ledger, even when they carry `runs.read`.
+
+The paths and successful response fields stay the same. Errors use the
+canonical envelope. Missing or dead credentials return `unauthenticated`.
+Live credentials without member authority return `forbidden`. Authorized
+reads return `not_found` when credit billing is disabled. History accepts
+one nonnegative `limit`, at most 1000 rows of each kind. Omission or zero
+uses the store's existing default.
+
+## Job status
+
+Read `/api/v1/runs/{run}/jobs` and `/api/v1/runs/{run}/jobs/{job}` instead
+of the corresponding `/nodes` paths. The collection returns a JSON array of
+safe job status objects. The detail returns one such object. Both use `id`
+for the job identifier and omit raw declarations, environment, holder and
+capability fields. Private execution inputs use the awarded execution wire.
+The existing Go client's status readers use these paths and the canonical
+error envelope. Missing jobs return the typed `not_found` API error.
+
+Members need `runs.read`. The live run owner may read the collection and
+details with `trigger.host`. A job's live `data.read` authority reaches its
+own detail only. Controllers need the shared authentication/binding adapters
+and C1's tenant snapshot/node reads. No old path or credential fallback remains.
+
 ## Pipeline sizing
 
 Replace `/api/v1/pipelines/{name}/profile` with

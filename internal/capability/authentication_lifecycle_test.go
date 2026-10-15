@@ -51,6 +51,70 @@ func TestAuthenticationHereWindowAndSessionParent(t *testing.T) {
 	requireAuthenticationCode(t, err, apierr.Unauthenticated)
 }
 
+func TestHereClaimStaysNamedAcrossReclaim(t *testing.T) {
+	for _, state := range []string{"initial", "initial expired", "reclaim", "other run", "queue scan", "requester lost runs.write", "parent revoked", "expired"} {
+		t.Run(state, func(t *testing.T) {
+			r, presentation, _ := authenticationFixture()
+			c := &r.snapshot.Authorities[0].Principal.Capability
+			parent := &r.snapshot.Authorities[1].Principal
+			parent.Class, parent.Authority.Kind = capability.CredentialSession, capability.AuthoritySession
+			parent.Capability.Subject = capability.Subject{Kind: capability.SubjectAccount, ID: "account"}
+			parent.Capability.Grants = []capability.Grant{capability.RunsWrite}
+			c.Parent = &parent.Authority
+			c.Unit, c.Purpose, c.Grants = capability.UnitTrigger, capability.PurposeHere, []capability.Grant{capability.TriggerHost}
+			claimBy := r.snapshot.Now.Add(time.Minute)
+			c.Binding = capability.Binding{Kind: capability.BindingTrigger, RunID: "run", Reservation: "here:run", ClaimBy: &claimBy}
+			r.snapshot.Binding.Current = c.Binding
+			path := "/api/v1/runs/{run}/claim"
+			target := capability.Target{Team: "a", RunID: "run"}
+			code := apierr.Code("")
+			switch state {
+			case "initial expired":
+				r.snapshot.Now = claimBy
+				code = apierr.Unauthenticated
+			case "reclaim":
+				r.snapshot.Now = claimBy.Add(time.Minute)
+				r.snapshot.Binding.HereClaimed = true
+			case "other run":
+				target.RunID = "other"
+				code = apierr.Forbidden
+			case "queue scan":
+				path = "/api/v1/runners/claim"
+				target.RunID = ""
+				target.ClaimKinds = []capability.UnitKind{capability.UnitTrigger}
+				code = apierr.Forbidden
+			case "requester lost runs.write":
+				parent.Capability.Grants = nil
+				code = apierr.Unauthenticated
+			case "parent revoked":
+				parent.Capability.RevokedAt = &r.snapshot.Now
+				code = apierr.Unauthenticated
+			case "expired":
+				c.ExpiresAt = &r.snapshot.Now
+				code = apierr.Unauthenticated
+			}
+			route, ok := capability.LookupRoute("POST", path)
+			if !ok {
+				t.Fatal("missing claim route")
+			}
+			authenticated, err := capability.NewAuthenticator(r).Authenticate(t.Context(), presentation, route)
+			if err == nil {
+				_, err = capability.Authorize(t.Context(), allowAuthenticationBinding{}, route, authenticated, target)
+			}
+			if code != "" {
+				requireAuthenticationCode(t, err, code)
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !c.Binding.ClaimBy.Equal(claimBy) || c.Binding.Reservation != "here:run" {
+				t.Fatal("claim window or reservation changed")
+			}
+		})
+	}
+}
+
 func TestAuthenticationHereDescendantRetainsRequester(t *testing.T) {
 	r, _, _ := authenticationFixture()
 	here := r.snapshot.Authorities[0]

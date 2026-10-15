@@ -17,39 +17,51 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type engineTransactions struct {
-	intake           store.IntakeRequest
-	plan             store.PlanAcceptance
-	expansion        store.ExpansionSubmission
-	run              store.RunRow
-	node             store.NodeRow
-	admitted         store.AdmissionResult
-	accepted         store.AcceptedPlan
-	expanded         store.AcceptedExpansion
-	nodeChange       store.NodeTransition
-	runChange        store.RunTransition
-	finish           store.FinishRunRequest
-	renewActor       store.Actor
-	renewRef         store.NodeRef
-	beat             store.LeaseBeat
-	applied          store.Applied
-	annotation       store.AnnotationWrite
-	summary          store.SummaryWrite
-	step             store.StepReport
-	authorityActor   store.Actor
-	revokedAuthority capability.AuthorityRef
-	membership       store.MembershipUpdate
-	members          []store.Membership
-	memberReads      int
-	commitAuthority  func()
-	writes           int
-	err              error
-	readErr          error
+	intake            store.IntakeRequest
+	plan              store.PlanAcceptance
+	expansion         store.ExpansionSubmission
+	run               store.RunRow
+	node              store.NodeRow
+	admitted          store.AdmissionResult
+	accepted          store.AcceptedPlan
+	expanded          store.AcceptedExpansion
+	nodeChange        store.NodeTransition
+	runChange         store.RunTransition
+	finish            store.FinishRunRequest
+	renewActor        store.Actor
+	renewRef          store.NodeRef
+	beat              store.LeaseBeat
+	applied           store.Applied
+	annotation        store.AnnotationWrite
+	summary           store.SummaryWrite
+	step              store.StepReport
+	authorityActor    store.Actor
+	revokedAuthority  capability.AuthorityRef
+	membership        store.MembershipUpdate
+	members           []store.Membership
+	memberReads       int
+	commitAuthority   func()
+	writes            int
+	err               error
+	readErr           error
+	failure           *nodeproto.JobFailure
+	failureRef        store.NodeRef
+	failureGeneration int64
+	failureActor      store.Actor
+	failureReads      int
+}
+
+func (f *engineTransactions) ReadFailure(_ context.Context, source store.NodeRef, generation int64, actor store.Actor) (*nodeproto.JobFailure, error) {
+	f.failureRef, f.failureGeneration, f.failureActor = source, generation, actor
+	f.failureReads++
+	return f.failure, f.readErr
 }
 
 func (f *engineTransactions) Members(context.Context) ([]store.Membership, error) {
@@ -177,7 +189,7 @@ func TestEngineAdaptersCallFinalTransactions(t *testing.T) {
 		accepted: store.AcceptedPlan{PlanHash: "second-seal", Plan: json.RawMessage(`{"jobs":[]}`), Replayed: true},
 		expanded: store.AcceptedExpansion{
 			SourceGeneration: 4, State: store.ExpansionAccepted, BodyHash: "expansion-seal", Replayed: true,
-			Nodes: []store.NodeRow{{Spec: json.RawMessage(`{"id":"generated"}`), SpecHash: "generated-seal"}},
+			Nodes: []store.NodeRow{{Ref: store.NodeRef{RunID: "run", NodeID: "generated"}, Spec: json.RawMessage(`{"id":"generated"}`), SpecHash: "generated-seal", Status: store.StatusRunning, Generation: 8, Attempt: 3, StateSeq: 12, ClaimedBy: "current-holder", ApplicationRetries: 2, Disruptions: 1}},
 		},
 	}
 	e := fakeEngine(t, f)
@@ -207,6 +219,10 @@ func TestEngineAdaptersCallFinalTransactions(t *testing.T) {
 	expanded, err := e.AcceptExpansion(t.Context(), a, controllerwire.ExpansionSubmission{SourceGeneration: 4, Body: json.RawMessage(`{"jobs":[]}`)})
 	if err != nil || !expanded.Replayed || expanded.BodyHash != "expansion-seal" || len(expanded.Jobs) != 1 || expanded.Jobs[0].Job.ID != "generated" || expanded.Jobs[0].SpecHash != "generated-seal" {
 		t.Fatalf("expansion = %+v, %v", expanded, err)
+	}
+	current := expanded.Jobs[0].Current
+	if current.ID != "generated" || current.Status != "running" || current.Generation != 8 || current.Attempt != 3 || current.StateSeq != 12 || current.ClaimedBy != "current-holder" || current.ApplicationRetries != 2 || current.Disruptions != 1 || current.SpecHash != "generated-seal" {
+		t.Fatalf("replayed expansion lost current execution state: %+v", current)
 	}
 	refusal := &apierr.Error{Code: apierr.LockHeld, Message: "transaction fence changed"}
 	f.err = refusal

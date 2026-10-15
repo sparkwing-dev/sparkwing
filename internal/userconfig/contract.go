@@ -118,13 +118,19 @@ type RunConfig struct {
 // used. Unknown keys include agent, logs, dispatch_wait, gitcache and profile
 // backend settings. Decoding does not fill defaults or resolve precedence.
 func Decode(path string, raw []byte) (Config, error) {
-	panic("unimplemented: c4-surface-config")
+	return decodeConfig(path, raw)
 }
 
 // ReadConfig verifies the owner-only regular file with fssecure on Unix and
 // Windows, then calls Decode; no migration or legacy fallback runs.
-func ReadConfig(path string) (Config, error) { panic("unimplemented: c4-surface-config") }
+func ReadConfig(path string) (Config, error) {
+	raw, err := readFile(path)
+	if err != nil {
+		return Config{}, err
+	}
+	return Decode(path, raw)
+}
 
 // ValidateConfig applies the same key, enum and explicit-zero checks to callers
 // that already have typed data. It does not echo credentials in its errors.
-func ValidateConfig(cfg Config) error { panic("unimplemented: c4-surface-config") }
+func ValidateConfig(cfg Config) error { return validateConfig(cfg) }

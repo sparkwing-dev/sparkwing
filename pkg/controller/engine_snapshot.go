@@ -24,16 +24,9 @@ func (s *EngineController) handleSnapshot(w http.ResponseWriter, r *http.Request
 // Snapshot takes one committed read and its shared scheduling projection. Empty
 // generators survive, and no separate read can mix job state from another instant.
 func (s *EngineController) Snapshot(ctx context.Context, authorized capability.Authorized) (controllerwire.ScheduleSnapshot, error) {
-	tenant, err := s.runTransactions(ctx, authorized.Target.Team)
+	snapshot, err := s.readRunSnapshot(ctx, authorized)
 	if err != nil {
 		return controllerwire.ScheduleSnapshot{}, err
-	}
-	snapshot, err := tenant.ReadSnapshot(ctx, authorized.Target.RunID)
-	if err != nil {
-		return controllerwire.ScheduleSnapshot{}, engineLookupError(err)
-	}
-	if snapshot.Run.ID != authorized.Target.RunID || string(snapshot.Run.Team) != authorized.Target.Team || snapshot.StoreNow.IsZero() {
-		return controllerwire.ScheduleSnapshot{}, errors.New("invalid persisted run snapshot")
 	}
 	project := s.ProjectScheduling
 	if project == nil {
@@ -47,6 +40,10 @@ func (s *EngineController) Snapshot(ctx context.Context, authorized capability.A
 }
 
 func schedulingResponse(snapshot store.RunSnapshot, graph store.ScheduleSnapshot) (controllerwire.ScheduleSnapshot, error) {
+	expansions, err := snapshotExpansions(snapshot)
+	if err != nil {
+		return controllerwire.ScheduleSnapshot{}, err
+	}
 	nodes := make(map[string]store.NodeRow, len(snapshot.Nodes))
 	for _, node := range snapshot.Nodes {
 		if node.Ref.RunID != snapshot.Run.ID || node.Ref.NodeID == "" {
@@ -60,6 +57,7 @@ func schedulingResponse(snapshot store.RunSnapshot, graph store.ScheduleSnapshot
 	out := controllerwire.ScheduleSnapshot{
 		RunID: snapshot.Run.ID, StoreNow: snapshot.StoreNow, CancelRequested: graph.CancelRequested,
 		Jobs: make([]controllerwire.ScheduleJob, 0, len(graph.Nodes)), Generators: make([]controllerwire.ScheduleGenerator, 0, len(graph.Expansions)),
+		Expansions: expansions,
 	}
 	for _, scheduled := range graph.Nodes {
 		node, exists := nodes[scheduled.ID]
@@ -82,6 +80,28 @@ func schedulingResponse(snapshot store.RunSnapshot, graph store.ScheduleSnapshot
 		})
 	}
 	return out, nil
+}
+
+func snapshotExpansions(snapshot store.RunSnapshot) ([]controllerwire.AcceptedExpansion, error) {
+	out := make([]controllerwire.AcceptedExpansion, 0, len(snapshot.Expansions))
+	for _, row := range snapshot.Expansions {
+		if row.Source.RunID != snapshot.Run.ID || row.Source.NodeID == "" || row.SourceGeneration <= 0 || row.BodyHash == "" || !json.Valid(row.Body) {
+			return nil, errors.New("invalid persisted expansion snapshot")
+		}
+		out = append(out, controllerwire.AcceptedExpansion{
+			SourceJob: row.Source.NodeID, SourceGeneration: row.SourceGeneration,
+			Body: append(json.RawMessage(nil), row.Body...), BodyHash: row.BodyHash,
+		})
+	}
+	return out, nil
+}
+
+func executionJob(node store.NodeRow) controllerwire.ExecutionJob {
+	return controllerwire.ExecutionJob{
+		JobDetail: snapshotJob(node), Spec: node.Spec, SpecHash: node.SpecHash, Execution: node.Execution,
+		ClaimedBy: node.ClaimedBy, CapabilityPrefix: node.CapabilityPrefix, ReadyAt: node.ReadyAt, LeaseExpiresAt: node.LeaseExpiresAt,
+		ApplicationRetries: node.ApplicationRetries, Disruptions: node.Disruptions, ExpansionDigest: node.ExpansionDigest,
+	}
 }
 
 func snapshotJob(node store.NodeRow) controllerwire.JobDetail {

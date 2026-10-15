@@ -18,12 +18,6 @@ var frontendSegmentValues = map[string][]string{
 	"action": {"pause", "resume", "run"},
 }
 
-// safety: each entry is a route the dashboard calls only where another
-// process serves it, with where that is.
-var frontendRoutesServedElsewhere = map[string]string{
-	"GET /api/v1/queue": "the laptop admission queue, which `sparkwing serve` answers; the nav shows the tab only there",
-}
-
 // safety: an empty method is a call site that names none, such as a path built
 // from another literal's constant, and any registered method satisfies it.
 type frontendCall struct {
@@ -40,9 +34,6 @@ func TestEveryFrontendAPICallIsAControllerRoute(t *testing.T) {
 	authed, public := New(nil, nil).routers()
 	for _, c := range calls {
 		key := c.method + " " + c.path
-		if _, elsewhere := frontendRoutesServedElsewhere[strings.TrimSpace(key)]; elsewhere {
-			continue
-		}
 		if !muxServes(authed, public, c.method, c.path) {
 			t.Errorf("%s: the dashboard calls %s and the controller registers no such route", c.site, strings.TrimSpace(key))
 		}

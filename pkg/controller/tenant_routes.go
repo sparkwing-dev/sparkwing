@@ -66,13 +66,11 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/concurrency/{key}/resolve":        resConcurrencyKey,
 	"GET /api/v1/concurrency/{key}/state":          resConcurrencyKey,
 
-	"GET /api/v1/credits":                      resNone,
 	"POST /api/v1/credits/card-payments":       resNone,
 	"POST /api/v1/credits/card-refunds":        resNone,
 	"POST /api/v1/credits/cards":               resNone,
 	"POST /api/v1/credits/checkouts/closed":    resNone,
 	"POST /api/v1/credits/freezes":             resNone,
-	"GET /api/v1/credits/history":              resNone,
 	"GET /api/v1/credits/payments/{reference}": resPayment,
 	"POST /api/v1/credits/reversals":           resNone,
 	"GET /api/v1/credits/settings":             resNone,
@@ -108,15 +106,9 @@ var tenantRoutes = map[string]tenantResource{
 
 	"POST /api/v1/nodes/claim": resNone,
 
-	"GET /api/v1/pipelines":                              resNone,
-	"GET /api/v1/pipelines/{name}/latest":                resPipeline,
-	"GET /api/v1/pipelines/{name}/profile":               resPipeline,
-	"POST /api/v1/pipelines/{name}/profile/contention":   resPipeline,
-	"POST /api/v1/pipelines/{name}/profile/observations": resPipeline,
-	"PUT /api/v1/pipelines/{name}/profile/pin":           resPipeline,
-	"POST /api/v1/pipelines/{name}/profile/waits":        resPipeline,
+	"GET /api/v1/pipelines":               resNone,
+	"GET /api/v1/pipelines/{name}/latest": resPipeline,
 
-	"GET /api/v1/queue/state": resNone,
 
 	"GET /api/v1/runs":                                               resNone,
 	"GET /api/v1/runs/grep":                                          resNone,
@@ -144,9 +136,7 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/runs/{id}/logs/{node}/completeness":                 resRun,
 	"GET /api/v1/runs/{id}/logs/{node}/stream":                       resRun,
 	"GET /api/v1/runs/{id}/logs/search":                              resRun,
-	"GET /api/v1/runs/{id}/nodes":                                    resRun,
 	"POST /api/v1/runs/{id}/nodes":                                   resRun,
-	"GET /api/v1/runs/{id}/nodes/{nodeID}":                           resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/activity":                 resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest":        resRun,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/attempt":                  resRun,

@@ -157,6 +157,9 @@ type RoutePolicy struct {
 // NodeID names the path job, or the parent job for child intake.
 // Unit fields project the resolved blob.LogSubject at the controller boundary without an import cycle.
 type Target struct {
+	// ClaimKinds is decoded before claimSelection, which requires every kind's grant.
+	ClaimKinds           []UnitKind
+	SourceGeneration     int64
 	Team                 string
 	ClaimID              string
 	Unit                 UnitKind
@@ -220,6 +223,11 @@ type Authenticated struct {
 // BindingChecker supplies relational facts through the store or the nodehost's sealed plan.
 // It owns lookups for team ownership, declarations, pools, ancestry, slots and data edges.
 // Implementations return typed apierr errors and perform no external side effects.
+// claimSelection refuses empty, duplicate, unknown or unauthorized ClaimKinds before selection.
+// nodes.claim authorizes node, triggers.claim authorizes trigger, and claims.launch
+// authorizes plan/eval/node only. The request cannot combine alternatives to widen authority.
+// The named trigger route also accepts a here Award's trigger.host for its exact
+// reserved run under LiveHereClaim. This exception never opens an ordered queue scan.
 type BindingChecker interface {
 	CheckBinding(context.Context, Principal, BindingRule, Target) error
 }
@@ -265,6 +273,12 @@ func Authorize(ctx context.Context, bindings BindingChecker, route RoutePolicy, 
 			refusal = err
 			continue
 		}
+		if rule.Binding == BindClaimSelection {
+			if err := claimSelection(p, route.Path, target.ClaimKinds); err != nil {
+				refusal = err
+				continue
+			}
+		}
 		if !bindingShape(p, rule.Binding, target) {
 			refusal = forbidden(apierr.ReasonBinding)
 			continue
@@ -283,6 +297,48 @@ func Authorize(ctx context.Context, bindings BindingChecker, route RoutePolicy, 
 		}, nil
 	}
 	return Authorized{}, refusal
+}
+
+func claimSelection(p Principal, path string, kinds []UnitKind) error {
+	if path == "/api/v1/launcher/sync" {
+		return nil
+	}
+	if len(kinds) == 0 {
+		return forbidden(apierr.ReasonBinding)
+	}
+	seen := make(map[UnitKind]bool, len(kinds))
+	for _, kind := range kinds {
+		if seen[kind] {
+			return forbidden(apierr.ReasonBinding)
+		}
+		seen[kind] = true
+		var grant Grant
+		switch path {
+		case "/api/v1/launcher/claim":
+			if kind != UnitNode && kind != UnitPlan && kind != UnitEval {
+				return forbidden(apierr.ReasonBinding)
+			}
+			grant = ClaimsLaunch
+		case "/api/v1/runners/claim", "/api/v1/runs/{run}/claim":
+			switch kind {
+			case UnitNode:
+				if path != "/api/v1/runners/claim" {
+					return forbidden(apierr.ReasonBinding)
+				}
+				grant = NodesClaim
+			case UnitTrigger:
+				grant = TriggersClaim
+			default:
+				return forbidden(apierr.ReasonBinding)
+			}
+		default:
+			return policyFailure()
+		}
+		if !slices.Contains(p.Capability.Grants, grant) {
+			return forbidden(apierr.ReasonMissingGrant)
+		}
+	}
+	return nil
 }
 
 func policyFailure() *apierr.Error {
