@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -44,10 +43,6 @@ func (s *Server) accountEndpoints() []Endpoint {
 		{Method: "POST", Pattern: "/api/v1/teams", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleCreateTeam},
 		{Method: "POST", Pattern: "/api/v1/invitations/{invitation}/accept", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleAcceptInvitation},
 	}
-}
-
-func (s *Server) registerAccountRoutes(mux *http.ServeMux) {
-	s.registerPolicyEndpoints(mux, s.accountEndpoints())
 }
 
 var _ AccountReader = (*store.Store)(nil)

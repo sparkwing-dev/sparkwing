@@ -44,16 +44,25 @@ func TestReportingRouteAuthorityProperty(t *testing.T) {
 		ResolveRunTeam: func(context.Context, string) (store.Team, error) { return "a", nil },
 	})
 	raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	for _, endpoint := range s.reportingEndpoints() {
-		t.Run(endpoint.Pattern, func(t *testing.T) {
+	endpoints := append(s.reportingEndpoints(), s.teamReadEndpoints()...)
+	endpoints = append(endpoints, s.scheduleEndpoints()...)
+	endpoints = append(endpoints, s.runControlEndpoints()...)
+	for _, endpoint := range endpoints {
+		if endpoint.Pattern == "/metrics" {
+			continue
+		}
+		t.Run(endpoint.Method+" "+endpoint.Pattern, func(t *testing.T) {
 			property := func(input []byte, mutation uint8) bool {
 				run, job := "r"+hex.EncodeToString(input), "j"+hex.EncodeToString(input)
 				now := time.Unix(100, 0).UTC()
-				p := capability.Principal{Class: capability.CredentialBearer,
+				p := capability.Principal{
+					Class:     capability.CredentialBearer,
 					Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "credential"},
-					Capability: capability.Capability{Prefix: "credential", Digest: sha256.Sum256([]byte(raw)), Team: "a",
+					Capability: capability.Capability{
+						Prefix: "credential", Digest: sha256.Sum256([]byte(raw)), Team: "a",
 						Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "account"},
-						Issuance: capability.Delegate, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.LogsRead}},
+						Issuance: capability.Delegate, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead, capability.LogsRead, capability.RunsControl, capability.TeamAdmin, capability.ApprovalsWrite},
+					},
 				}
 				member := true
 				status, code := 204, apierr.Code("")
@@ -91,8 +100,8 @@ func TestReportingRouteAuthorityProperty(t *testing.T) {
 				if err := router.Register(entry); err != nil {
 					t.Fatal(err)
 				}
-				path := strings.NewReplacer("{run}", run, "{job}", job, "{name}", "ci").Replace(entry.Pattern)
-				r := httptest.NewRequest("GET", path+"?team=forged&run_id=other&job_id=other&selector="+url.QueryEscape(string(input)), nil)
+				path := strings.NewReplacer("{run}", run, "{job}", job, "{name}", "ci", "{schedule}", "schedule", "{installation}", "17").Replace(entry.Pattern)
+				r := httptest.NewRequest(endpoint.Method, path+"?team=forged&run_id=other&job_id=other&selector="+url.QueryEscape(string(input)), nil)
 				r.Header.Set("Authorization", "Bearer "+raw)
 				r.Header.Set("X-Sparkwing-Team", "forged")
 				w := httptest.NewRecorder()

@@ -56,21 +56,21 @@ type invitationJSON struct {
 	ExpiresAt int64  `json:"expires_at"`
 }
 
-func (s *Server) handleListInvitations(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+func (s *Server) handleListInvitations(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	invites, err := t.Invitations(r.Context(), time.Now())
 	if err != nil {
-		s.writeInternalError(w, r, "list invitations", err)
-		return
+		return engineLookupError(err)
 	}
 	out := make([]invitationJSON, 0, len(invites))
 	for _, inv := range invites {
 		out = append(out, invitationJSON{ID: inv.ID, Email: inv.Email, Role: string(inv.Role), ExpiresAt: inv.ExpiresAt.Unix()})
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 type inviteReq struct {

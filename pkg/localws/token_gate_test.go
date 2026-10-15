@@ -82,7 +82,7 @@ func TestRun_AdmitsOnlyTheServeTokenHolder(t *testing.T) {
 	for _, tc := range []struct{ method, path, auth string }{
 		{http.MethodGet, "/api/v1/runs", ""},
 		{http.MethodPost, "/api/v1/secrets", ""},
-		{http.MethodPost, "/api/v1/crons/nightly/pause", ""},
+		{http.MethodPost, "/api/v1/schedules/nightly/pause", ""},
 		{http.MethodGet, "/api/v1/runs", strings.Repeat("0", len(token))},
 		{http.MethodGet, "/api/v1/runs", "swl1.00.00"},
 		{http.MethodPost, SignInCodePath, ""},

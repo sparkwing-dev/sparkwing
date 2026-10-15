@@ -83,7 +83,9 @@ func TestStoreDataStorageRoutesScopeQuotaAndReplicaReports(t *testing.T) {
 	}
 	r = storeDataRequest(t, s, http.MethodGet, "/api/v1/storage?team=b", "", Principal{Name: "same-name", Team: "a", Scopes: []string{ScopeRunsRead}})
 	w = httptest.NewRecorder()
-	s.handleStorageShow(w, r)
+	if err := s.handleStorageShow(w, r, capability.Authorized{Target: capability.Target{Team: "a"}}); err != nil {
+		t.Fatal(err)
+	}
 	if w.Code != http.StatusOK {
 		t.Fatalf("read=%d %s", w.Code, w.Body.String())
 	}

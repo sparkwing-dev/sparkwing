@@ -62,6 +62,8 @@ type Server struct {
 	resolveCredentialRotator   func(context.Context, store.Team) (CredentialRotator, error)
 	resolveSourceAuditReader   func(context.Context, store.Team) (SourceAuditReader, error)
 	resolveSecretReader        func(context.Context, store.Team) (SecretReader, error)
+	resolveScheduleWriter      func(context.Context, store.Team) (ScheduleWriter, error)
+	resolveRunControlWriter    func(context.Context, store.Team) (RunControlWriter, error)
 
 	peerIdentity func(*http.Request) capability.Subject
 
@@ -415,7 +417,7 @@ func (s *Server) observedHandler(router *http.ServeMux, labels ...*http.ServeMux
 			// safety: migrated ledger reads authenticate before checking billing availability.
 			legacyCredits := strings.HasPrefix(path, "/api/v1/credits") && path != "/api/v1/credits" && path != "/api/v1/credits/history" && path != "/api/v1/credits/settings"
 			if legacyCredits ||
-				strings.HasPrefix(path, "/api/v1/team/billing") {
+				strings.HasPrefix(path, "/api/v1/team/billing") && r.Method != http.MethodGet {
 				http.NotFound(w, r)
 				return
 			}
@@ -433,73 +435,47 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	mux.Handle("DELETE /api/v1/runs/{id}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteRun)))
 
-	mux.Handle("GET /api/v1/crons", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListCrons)))
-	mux.Handle("PUT /api/v1/crons/repos", requireScope(ScopeRunsControl, http.HandlerFunc(s.handlePutCronRepo)))
-	mux.Handle("DELETE /api/v1/crons/repos", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleDeleteCronRepo)))
-	mux.Handle("GET /api/v1/crons/{id}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetCron)))
-	mux.Handle("POST /api/v1/crons/{id}/pause", requireScope(ScopeRunsControl, http.HandlerFunc(s.handlePauseCron)))
-	mux.Handle("POST /api/v1/crons/{id}/resume", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleResumeCron)))
-	mux.Handle("POST /api/v1/crons/{id}/run", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleRunCronNow)))
-	mux.Handle("POST /api/v1/crons/{id}/disarm", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleDisarmCron)))
-	mux.Handle("PUT /api/v1/crons/{id}/override", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleSetCronOverride)))
-	mux.Handle("DELETE /api/v1/crons/{id}/override", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleClearCronOverride)))
-
-	// safety: the run counters name every team's pipelines, so on the shared
-	// API listener the scrape is the operator's; --metrics-addr serves it open.
-	if s.metricsAddr == "" {
-		mux.Handle("GET /metrics", requireScope(ScopeAdmin, metricsHandler()))
-	}
-
-	mux.Handle("POST /api/v1/runs/{id}/debug-pauses", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateDebugPause)))
-
-	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}/request", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRequestApproval)))
-	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}", requireScope(ScopeApprovalsWrite, http.HandlerFunc(s.handleResolveApproval)))
-
 	mux.Handle("PATCH /api/v1/team", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleRenameTeam)))
 	mux.Handle("DELETE /api/v1/team", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteTeam)))
-	mux.Handle("GET /api/v1/team/invitations", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleListInvitations)))
 	mux.Handle("POST /api/v1/team/invitations", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleInvite)))
 	mux.Handle("DELETE /api/v1/team/invitations/{id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteInvitation)))
-	mux.Handle("GET /api/v1/team/build-trust", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetBuildTrust)))
 	mux.Handle("PUT /api/v1/team/build-trust", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutBuildTrust)))
-	mux.Handle("GET /api/v1/team/github-app", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGitHubAppShow)))
 	mux.Handle("DELETE /api/v1/team/github-app/installations/{installation_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppUnbind)))
-	mux.Handle("GET /api/v1/team/github-app/installations/{installation_id}/repositories", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGitHubAppRepositories)))
-	mux.Handle("GET /api/v1/team/github-app/triggers", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubAppTriggers)))
 	mux.Handle("PUT /api/v1/team/github-app/triggers", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitHubAppTrigger)))
 	mux.Handle("DELETE /api/v1/team/github-app/triggers", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteGitHubAppTrigger)))
 	mux.Handle("GET /api/v1/team/github-app/automation", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGitHubAppAutomation)))
 	mux.Handle("PUT /api/v1/team/github-app/automation", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppAutomation)))
 	mux.Handle("DELETE /api/v1/team/github-app/automation", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppAutomation)))
-	mux.Handle("GET /api/v1/team/github-app/extra-repos", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubAppExtraRepos)))
 	mux.Handle("PUT /api/v1/team/github-app/extra-repos", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitHubAppExtraRepos)))
 
-	mux.Handle("GET /api/v1/storage", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleStorageShow)))
-
-	mux.Handle("GET /api/v1/team/billing", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTeamBilling)))
 	mux.Handle("POST /api/v1/team/billing/checkout", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingCheckout)))
 	mux.Handle("POST /api/v1/team/billing/card", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingCard)))
 	mux.Handle("POST /api/v1/team/billing/pay", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingPay)))
 	mux.Handle("PUT /api/v1/team/billing/budget", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingBudget)))
 
 	router := http.NewServeMux()
-	s.registerOperatorRoutes(router)
-	s.registerEngineRoutes(router)
-	s.registerPolicyEndpoints(router, s.claimEndpoints())
-	s.registerAuthorityRoutes(router)
-	s.registerPolicyEndpoints(router, s.capabilityEndpoints())
-	s.registerCredentialRoutes(router)
-	s.registerPolicyEndpoints(router, s.sizingEndpoints())
-	s.registerPolicyEndpoints(router, s.creditEndpoints())
-	s.registerPolicyEndpoints(router, s.queueEndpoints())
-	s.registerPolicyEndpoints(router, s.concurrencyEndpoints())
-	s.registerPolicyEndpoints(router, s.dataEndpoints())
-	s.registerPolicyEndpoints(router, s.sourceEndpoints())
-	s.registerPolicyEndpoints(router, s.actionsEndpoints())
-	s.registerPolicyEndpoints(router, s.githubRunnerEndpoints())
-	s.registerPolicyEndpoints(router, s.sessionEndpoints())
-	s.registerAccountRoutes(router)
-	s.registerReportingRoutes(router)
+	var endpoints []Endpoint
+	endpoints = append(endpoints, s.operatorEndpoints()...)
+	endpoints = append(endpoints, s.engineEndpoints()...)
+	endpoints = append(endpoints, s.claimEndpoints()...)
+	endpoints = append(endpoints, s.authorityEndpoints()...)
+	endpoints = append(endpoints, s.capabilityEndpoints()...)
+	endpoints = append(endpoints, s.credentialEndpoints()...)
+	endpoints = append(endpoints, s.sizingEndpoints()...)
+	endpoints = append(endpoints, s.creditEndpoints()...)
+	endpoints = append(endpoints, s.queueEndpoints()...)
+	endpoints = append(endpoints, s.concurrencyEndpoints()...)
+	endpoints = append(endpoints, s.dataEndpoints()...)
+	endpoints = append(endpoints, s.sourceEndpoints()...)
+	endpoints = append(endpoints, s.actionsEndpoints()...)
+	endpoints = append(endpoints, s.githubRunnerEndpoints()...)
+	endpoints = append(endpoints, s.sessionEndpoints()...)
+	endpoints = append(endpoints, s.accountEndpoints()...)
+	endpoints = append(endpoints, s.reportingEndpoints()...)
+	endpoints = append(endpoints, s.teamReadEndpoints()...)
+	endpoints = append(endpoints, s.scheduleEndpoints()...)
+	endpoints = append(endpoints, s.runControlEndpoints()...)
+	s.registerControllerEndpoints(router, endpoints)
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	if s.dataController != nil {
 		if objects, ok := s.dataController.Objects.(*blob.Filesystem); ok {

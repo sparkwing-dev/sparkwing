@@ -403,6 +403,11 @@ type RouteAuthorization struct {
 	Identify      func(*http.Request) (capability.Presentation, error)
 	CheckCSRF     func(*http.Request, capability.Principal) error
 }
+type RunControlWriter interface {
+	Team() store.Team
+	CreateAuthorizedDebugPause(context.Context, capability.Authorized, string, string, time.Time, string) error
+	ResolveAuthorizedApproval(context.Context, capability.Authorized, controllerwire.ApprovalDecision) (controllerwire.ApprovalResult, error)
+}
 type RunStatusFacts struct {
 	Snapshot store.RunSnapshot
 	Attempts []store.NodeAttempt
@@ -438,6 +443,15 @@ type RunnerMeteringWriter interface {
 type S3DataSigner struct {
 }
 func (s *S3DataSigner) Sign(ctx context.Context, object capability.ObjectToSign) (capability.SignedObject, error)
+type ScheduleWriter interface {
+	Team() store.Team
+	ReplaceAuthorizedSchedules(context.Context, capability.Authorized, controllerwire.ScheduleRepoRequest) ([]string, []string, error)
+	DeleteAuthorizedSchedules(context.Context, capability.Authorized, string) (int, error)
+	PauseAuthorizedSchedule(context.Context, capability.Authorized, string, bool) (string, error)
+	OverrideAuthorizedSchedule(context.Context, capability.Authorized, string, *controllerwire.ScheduleOverride) (string, error)
+	RunAuthorizedSchedule(context.Context, capability.Authorized, string, string) (string, string, bool, error)
+	DeleteAuthorizedSchedule(context.Context, capability.Authorized, string) (string, bool, error)
+}
 const ScopeAdmin = "admin"
 const ScopeApprovalsWrite = store.ScopeApprovalsWrite
 const ScopeClaimsLaunch = store.LaunchScope
@@ -521,7 +535,9 @@ func (s *Server) WithPeerIdentity(fn func(*http.Request) capability.Subject) *Se
 func (s *Server) WithQueueReader(resolve func(context.Context, store.Team) (QueueReader, error)) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
+func (s *Server) WithRunControlWriter(resolve func(context.Context, store.Team) (RunControlWriter, error)) *Server
 func (s *Server) WithRunnerMeteringWriter(writer RunnerMeteringWriter) *Server
+func (s *Server) WithScheduleWriter(resolve func(context.Context, store.Team) (ScheduleWriter, error)) *Server
 func (s *Server) WithSecretReader(resolve func(context.Context, store.Team) (SecretReader, error)) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server

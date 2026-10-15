@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -19,18 +21,17 @@ type githubAppExtraReposJSON struct {
 	ExtraRepos []string `json:"extra_repos"`
 }
 
-func (s *Server) handleListGitHubAppExtraRepos(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handleListGitHubAppExtraRepos(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	_, t, ok := s.teamMember(w, r, store.RoleReader)
-	if !ok {
-		return
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	all, err := t.AllGitHubAppExtraRepos(r.Context())
 	if err != nil {
-		s.writeInternalError(w, r, "list github app extra repos", err)
-		return
+		return engineLookupError(err)
 	}
 	out := []githubAppExtraReposJSON{}
 	for repo, extras := range all {
@@ -38,6 +39,7 @@ func (s *Server) handleListGitHubAppExtraRepos(w http.ResponseWriter, r *http.Re
 	}
 	slices.SortFunc(out, func(a, b githubAppExtraReposJSON) int { return strings.Compare(a.Repository, b.Repository) })
 	writeJSON(w, http.StatusOK, map[string]any{"extra_repos": out})
+	return nil
 }
 
 // safety: only a team owner widens what a run's token reads, never the

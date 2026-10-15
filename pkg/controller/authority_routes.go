@@ -56,10 +56,6 @@ func (s *Server) authorityEndpoints() []Endpoint {
 	}
 }
 
-func (s *Server) registerAuthorityRoutes(mux *http.ServeMux) {
-	s.registerPolicyEndpoints(mux, s.authorityEndpoints())
-}
-
 func authorityTarget(r *http.Request) (capability.RequestEvidence, error) {
 	return capability.RequestEvidence{Target: capability.Target{TokenPrefix: r.PathValue("token"), AccountID: r.PathValue("account")}}, nil
 }

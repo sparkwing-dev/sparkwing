@@ -56,11 +56,11 @@ func TestMuxSpecificity_CronRoutes(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
-	mux.Handle("GET /api/v1/crons", marker("overview"))
-	mux.Handle("GET /api/v1/crons/{id}", marker("detail"))
-	mux.Handle("POST /api/v1/crons/{id}/pause", marker("pause"))
-	mux.Handle("POST /api/v1/crons/{id}/resume", marker("resume"))
-	mux.Handle("POST /api/v1/crons/{id}/run", marker("run"))
+	mux.Handle("GET /api/v1/schedules", marker("overview"))
+	mux.Handle("GET /api/v1/schedules/{id}", marker("detail"))
+	mux.Handle("POST /api/v1/schedules/{id}/pause", marker("pause"))
+	mux.Handle("POST /api/v1/schedules/{id}/resume", marker("resume"))
+	mux.Handle("POST /api/v1/schedules/{id}/run", marker("run"))
 	mux.Handle("/api/v1/", marker("controller-catchall"))
 
 	cases := []struct {
@@ -68,14 +68,14 @@ func TestMuxSpecificity_CronRoutes(t *testing.T) {
 		path   string
 		want   string
 	}{
-		{http.MethodGet, "/api/v1/crons", "overview"},
-		{http.MethodGet, "/api/v1/crons/crn_0123456789ab", "detail"},
-		{http.MethodPost, "/api/v1/crons/crn_0123456789ab/pause", "pause"},
-		{http.MethodPost, "/api/v1/crons/crn_0123456789ab/resume", "resume"},
-		{http.MethodPost, "/api/v1/crons/crn_0123456789ab/run", "run"},
-		{http.MethodGet, "/api/v1/crons/dotfiles%2Fnightly", "detail"},
-		{http.MethodPost, "/api/v1/crons/dotfiles%2Fnightly/pause", "pause"},
-		{http.MethodGet, "/api/v1/crons/crn_0123456789ab/pause", "controller-catchall"},
+		{http.MethodGet, "/api/v1/schedules", "overview"},
+		{http.MethodGet, "/api/v1/schedules/crn_0123456789ab", "detail"},
+		{http.MethodPost, "/api/v1/schedules/crn_0123456789ab/pause", "pause"},
+		{http.MethodPost, "/api/v1/schedules/crn_0123456789ab/resume", "resume"},
+		{http.MethodPost, "/api/v1/schedules/crn_0123456789ab/run", "run"},
+		{http.MethodGet, "/api/v1/schedules/dotfiles%2Fnightly", "detail"},
+		{http.MethodPost, "/api/v1/schedules/dotfiles%2Fnightly/pause", "pause"},
+		{http.MethodGet, "/api/v1/schedules/crn_0123456789ab/pause", "controller-catchall"},
 	}
 
 	for _, tc := range cases {

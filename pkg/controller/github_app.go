@@ -493,24 +493,24 @@ type githubAppResp struct {
 	Installations []githubAppInstallationJSON `json:"installations"`
 }
 
-func (s *Server) handleGitHubAppShow(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handleGitHubAppShow(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	_, t, ok := s.teamMember(w, r, store.RoleReader)
-	if !ok {
-		return
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	list, err := t.GitHubAppInstallations(r.Context())
 	if err != nil {
-		s.writeInternalError(w, r, "list github app installations", err)
-		return
+		return engineLookupError(err)
 	}
 	out := githubAppResp{Slug: s.githubApp.client.Slug(), Installations: []githubAppInstallationJSON{}}
 	for _, in := range list {
 		out.Installations = append(out.Installations, githubAppInstallationOut(in))
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 func installationIDFrom(w http.ResponseWriter, r *http.Request) (int64, bool) {
@@ -570,35 +570,34 @@ type githubAppRepositoryJSON struct {
 	Private      bool   `json:"private"`
 }
 
-func (s *Server) handleGitHubAppRepositories(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handleGitHubAppRepositories(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	_, t, ok := s.teamMember(w, r, store.RoleReader)
-	if !ok {
-		return
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
-	id, ok := installationIDFrom(w, r)
-	if !ok {
-		return
+	id, err := strconv.ParseInt(r.PathValue("installation"), 10, 64)
+	if err != nil || id <= 0 {
+		return invalidEngineBody("installation must be a positive integer")
 	}
 	if _, err := t.GitHubAppInstallation(r.Context(), id); err != nil {
-		writeIdentityError(w, s, r, "github app installation", err)
-		return
+		return engineLookupError(err)
 	}
 	repos, err := s.githubApp.client.InstallationRepositories(r.Context(), id)
 	// safety: a list cut at GitHub's listing bound only displays; nothing is
 	// refused or withdrawn for a repository missing from it.
 	if err != nil && !errors.Is(err, githubapp.ErrTooManyRepositories) {
 		s.logger.Warn("github app repositories", "installation_id", id, "err", err.Error())
-		writeError(w, http.StatusBadGateway, errors.New("GitHub could not list the installation's repositories"))
-		return
+		return &apierr.Error{Code: apierr.Unavailable, Message: "GitHub could not list the installation's repositories"}
 	}
 	out := []githubAppRepositoryJSON{}
 	for _, repo := range repos {
 		out = append(out, githubAppRepositoryJSON{RepositoryID: repo.ID, FullName: repo.FullName, Private: repo.Private})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"repositories": out})
+	return nil
 }
 
 type githubAppTriggerReq struct {
@@ -657,24 +656,24 @@ func githubAppTriggerOut(tr store.GitHubAppTrigger) githubAppTriggerJSON {
 	}
 }
 
-func (s *Server) handleListGitHubAppTriggers(w http.ResponseWriter, r *http.Request) {
-	if !s.githubAppEnabled(w) {
-		return
+func (s *Server) handleListGitHubAppTriggers(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if s.githubApp == nil {
+		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}
 	}
-	_, t, ok := s.teamMember(w, r, store.RoleReader)
-	if !ok {
-		return
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	list, err := t.GitHubAppTriggers(r.Context())
 	if err != nil {
-		s.writeInternalError(w, r, "list github app triggers", err)
-		return
+		return engineLookupError(err)
 	}
 	out := []githubAppTriggerJSON{}
 	for _, tr := range list {
 		out = append(out, githubAppTriggerOut(tr))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"triggers": out})
+	return nil
 }
 
 // safety: the repository is resolved through GitHub to an installation this

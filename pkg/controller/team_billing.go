@@ -4,8 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -95,44 +98,41 @@ func teamLimitsBody(st store.SpendStanding) teamLimitsJSON {
 	}
 }
 
-func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleReader)
-	if !ok {
-		return
+func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	if !s.Metering() {
+		return &apierr.Error{Code: apierr.NotFound, Message: "billing is not enabled"}
+	}
+	t, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	ctx := r.Context()
 	state, err := t.CreditState(ctx, creditsBurnWindow)
 	if err != nil {
-		s.writeInternalError(w, r, "team billing state", err)
-		return
+		return engineLookupError(err)
 	}
 	usage, err := t.CreditUsageByRun(ctx, teamBillingHistoryLimit)
 	if err != nil {
-		s.writeInternalError(w, r, "team billing usage", err)
-		return
+		return engineLookupError(err)
 	}
 	grants, err := t.ListCreditGrants(ctx, teamBillingHistoryLimit)
 	if err != nil {
-		s.writeInternalError(w, r, "team billing grants", err)
-		return
+		return engineLookupError(err)
 	}
 	freeze, err := t.CreditFreeze(ctx)
 	if err != nil {
-		s.writeInternalError(w, r, "team billing freeze", err)
-		return
+		return engineLookupError(err)
 	}
 	now := time.Now()
 	spend, err := t.SpendStanding(ctx, now)
 	if err != nil {
-		s.writeInternalError(w, r, "team billing spend", err)
-		return
+		return engineLookupError(err)
 	}
 	standing, err := t.BillingStanding(ctx, now)
 	if err != nil {
-		s.writeInternalError(w, r, "team billing standing", err)
-		return
+		return engineLookupError(err)
 	}
-	owner := store.Role(p.Role).AtLeast(store.RoleOwner)
+	owner := slices.Contains(a.Principal.Capability.Grants, capability.TeamAdmin)
 	out := teamBillingJSON{
 		Team:                      string(t.Team()),
 		BalanceMicro:              state.BalanceMicro,
@@ -183,6 +183,7 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 type teamCheckoutReq struct {

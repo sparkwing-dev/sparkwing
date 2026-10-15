@@ -421,33 +421,6 @@ func (s *Server) handleListNodeSteps(w http.ResponseWriter, r *http.Request, aut
 	return nil
 }
 
-func (s *Server) handleCreateDebugPause(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	var body store.DebugPause
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	body.RunID = runID
-	if body.NodeID == "" || body.Reason == "" {
-		writeError(w, http.StatusBadRequest, errors.New("node_id and reason are required"))
-		return
-	}
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	if err := tenant.CreateDebugPause(r.Context(), body); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusCreated)
-}
-
 func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	tenant, err := s.reportingTenant(r, authorized)
 	if err != nil {

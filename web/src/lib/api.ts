@@ -754,7 +754,7 @@ export async function getPaused(runID: string): Promise<PauseState[]> {
 
 export interface Approval {
   run_id: string;
-  node_id: string;
+  job_id: string;
   requested_at: string;
   message?: string;
   timeout_ms?: number;
@@ -796,7 +796,7 @@ export async function resolveApproval(
     `${API_URL}/api/v1/runs/${pathSegment(runID)}/approvals/${pathSegment(nodeID)}`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
       body: JSON.stringify({ resolution, comment }),
     },
   );
@@ -804,7 +804,8 @@ export async function resolveApproval(
     const text = await res.text().catch(() => "");
     throw new Error(text || `resolve failed: ${res.status}`);
   }
-  return res.json();
+  const body = await res.json();
+  return body.approval;
 }
 
 export async function releaseNode(
@@ -1174,7 +1175,7 @@ export interface CronDetail {
 }
 
 export async function getCrons(): Promise<CronsOverview | null> {
-  const res = await authFetch(`${API_URL}/api/v1/crons`, {
+  const res = await authFetch(`${API_URL}/api/v1/schedules`, {
     cache: "no-store",
   }).catch(() => null);
   if (!res || !res.ok) return null;
@@ -1183,7 +1184,7 @@ export async function getCrons(): Promise<CronsOverview | null> {
 
 export async function getCron(id: string): Promise<CronDetail | null> {
   const res = await authFetch(
-    `${API_URL}/api/v1/crons/${encodeURIComponent(id)}`,
+    `${API_URL}/api/v1/schedules/${encodeURIComponent(id)}`,
     { cache: "no-store" },
   ).catch(() => null);
   if (!res || !res.ok) return null;
@@ -1192,8 +1193,8 @@ export async function getCron(id: string): Promise<CronDetail | null> {
 
 async function postCron<T>(id: string, action: string): Promise<T> {
   const res = await authFetch(
-    `${API_URL}/api/v1/crons/${encodeURIComponent(id)}/${action}`,
-    { method: "POST" },
+    `${API_URL}/api/v1/schedules/${encodeURIComponent(id)}/${action}`,
+    { method: "POST", headers: action === "run" ? { "Idempotency-Key": crypto.randomUUID() } : undefined },
   );
   if (!res.ok) {
     const text = (await res.text().catch(() => "")).trim();

@@ -2504,4 +2504,77 @@ HTTP routes. W3 must retire that runtime or move those callers to the typed
 Controller.RecordStep boundary. No ordinal is inferred by reading a later row.
 No W1, W3 or W9 contract signature changes in this integration.
 
+
+### Schedule and review credential cut
+
+The ten schedule routes register under `/api/v1/schedules`. The crons family
+and POST disarm route are removed. Existing controllerwire ScheduleRepoRequest,
+ScheduleOverride, ScheduleOverview, DetailView, ScheduleEnvelope, ScheduleRun
+and ScheduleDeletion are the transport types. List reads honor all and next;
+detail reads honor fires and next, including explicit zero. Override pointers
+preserve empty zones, zero catch-up and empty arguments.
+
+C2 declares ScheduleWriter with these exact methods:
+
+- Team() store.Team
+- ReplaceAuthorizedSchedules(context.Context, capability.Authorized, controllerwire.ScheduleRepoRequest) ([]string, []string, error)
+- DeleteAuthorizedSchedules(context.Context, capability.Authorized, string) (int, error)
+- PauseAuthorizedSchedule(context.Context, capability.Authorized, string, bool) (string, error)
+- OverrideAuthorizedSchedule(context.Context, capability.Authorized, string, *controllerwire.ScheduleOverride) (string, error)
+- RunAuthorizedSchedule(context.Context, capability.Authorized, string, string) (string, string, bool, error)
+- DeleteAuthorizedSchedule(context.Context, capability.Authorized, string) (string, bool, error)
+
+Replace returns stored IDs and withdrawn names. Pause/override return the
+resolved ID. A nil override resets the edit. Run returns schedule ID, run ID
+and replayed; its final argument is the request key. Delete returns the resolved
+ID and whether it was deleted. Team is checked before any writer call.
+
+W1's adapter must use the store clock, recheck complete authority ancestry,
+current membership, runs.control, exact tenant and repository authority in the
+committing transaction. Resolve names within that tenant. Derive all row IDs,
+team, armed-by, verified GitHub identity, cursor and timestamps. Retain the
+existing interval, per-repository and per-team schedule limits. Replace the
+whole declared set atomically, preserving existing state and overrides and
+withdrawing omitted declarations. Validate effective override cadence and
+compute its next due instant in that same transaction. Run-now uses final
+intake, immutable original source facts, current admission/billing guards and
+transactional idempotency. The HTTP adapter never calls legacy admitTrigger,
+ArmPushed, Pause, RunNow or the old unguarded write methods.
+
+C2 declares RunControlWriter with these exact methods:
+
+- Team() store.Team
+- CreateAuthorizedDebugPause(context.Context, capability.Authorized, string, string, time.Time, string) error
+- ResolveAuthorizedApproval(context.Context, capability.Authorized, controllerwire.ApprovalDecision) (controllerwire.ApprovalResult, error)
+
+Debug arguments after Authorized are job ID, reason, optional expiry and replay
+key. W1 rechecks live member/local runs.control, exact run/job ownership and
+current lifecycle; it derives pause timestamps and release fields. Approval
+resolution rechecks approvals.write and derives the approver from the committed
+actor. Human decisions accept approved or denied; owner timeout is not a public
+caller-selected decision. Both operations commit masked text, state/events and
+request replay together, refusing a changed body under an old key.
+
+W2 registers both writes through PolicyRouter. Debug accepts job_id, reason and
+expires_at. Approval accepts resolution and comment and returns ApprovalResult.
+Both need one nonempty replay header. The raw approval-request route and its
+handler are deleted. Gate creation belongs to the run owner. Approval read
+projections use the public controllerwire Approval with job_id.
+
+WithScheduleWriter and WithRunControlWriter supply the local C2 adapters. The
+default requires Tenant to implement them and refuses missing or wrong-team
+adapters with policy_missing. W2 has no new SQL or substitute issuer. Tests use
+transaction fakes; no real schedule intake or review-transaction integration is
+claimed. Existing unfenced Store/Tenant APIs are not production adapters.
+
+Ten team/schedule reads and API metrics also moved off the legacy verifier.
+They select tenants from Authorized, with private infrastructure errors.
+Billing availability follows authentication. Metrics uses operator.limits or
+console policy, while the dedicated listener retains its network boundary.
+Controller endpoint groups register together once, so one shared PolicyRouter
+owns every method on a path. Discovery follows those actual endpoint calls.
+
+See [the continuation report](../W2-business-cut-handoff.md) for remaining
+legacy routes, old caller fixtures and production store integration.
+
 <!-- design:end -->

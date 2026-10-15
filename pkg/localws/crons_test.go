@@ -180,7 +180,7 @@ func TestCronsOverview_MatchesTheDashboardContract(t *testing.T) {
 		t.Fatalf("pause: %v", err)
 	}
 
-	body := decodeCron(t, fx.do(t, http.MethodGet, "/api/v1/crons"))
+	body := decodeCron(t, fx.do(t, http.MethodGet, "/api/v1/schedules"))
 	wantKeys(t, "overview", body, []string{"health", "schedules"})
 
 	health := objectAt(t, body, "health")
@@ -267,7 +267,7 @@ func TestCronDetail_CarriesFiresRunStatusAndUpcoming(t *testing.T) {
 	fx.fire(t, fx.nights, store.CronOutcomeFired, "run_abc", "", now.Add(-9*time.Hour))
 	fx.fire(t, fx.nights, store.CronOutcomeFired, "run_gone", "", now.Add(-time.Hour))
 
-	body := decodeCron(t, fx.do(t, http.MethodGet, "/api/v1/crons/"+fx.nights))
+	body := decodeCron(t, fx.do(t, http.MethodGet, "/api/v1/schedules/"+fx.nights))
 	wantKeys(t, "detail", body, []string{"fires", "schedule", "upcoming"})
 	wantKeys(t, "detail.schedule", objectAt(t, body, "schedule"), cronScheduleKeys)
 
@@ -312,7 +312,7 @@ func TestCronDetail_CarriesFiresRunStatusAndUpcoming(t *testing.T) {
 
 func TestCronDetail_ResolvesADisplayName(t *testing.T) {
 	fx := newCronFixture(t, false)
-	body := decodeCron(t, fx.do(t, http.MethodGet, "/api/v1/crons/dotfiles%2Fnightly"))
+	body := decodeCron(t, fx.do(t, http.MethodGet, "/api/v1/schedules/dotfiles%2Fnightly"))
 	if objectAt(t, body, "schedule")["id"] != fx.nights {
 		t.Fatalf("a display name did not resolve to %s: %+v", fx.nights, body["schedule"])
 	}
@@ -321,7 +321,7 @@ func TestCronDetail_ResolvesADisplayName(t *testing.T) {
 func TestCronPauseAndResume_FlipTheRow(t *testing.T) {
 	fx := newCronFixture(t, false)
 
-	paused := decodeCron(t, fx.do(t, http.MethodPost, "/api/v1/crons/"+fx.nights+"/pause"))
+	paused := decodeCron(t, fx.do(t, http.MethodPost, "/api/v1/schedules/"+fx.nights+"/pause"))
 	wantKeys(t, "pause", paused, []string{"schedule"})
 	row := objectAt(t, paused, "schedule")
 	if row["paused"] != true || row["state"] != "paused" {
@@ -332,7 +332,7 @@ func TestCronPauseAndResume_FlipTheRow(t *testing.T) {
 		t.Fatalf("stored row = %+v, err %v, want paused", stored, err)
 	}
 
-	resumed := decodeCron(t, fx.do(t, http.MethodPost, "/api/v1/crons/"+fx.nights+"/resume"))
+	resumed := decodeCron(t, fx.do(t, http.MethodPost, "/api/v1/schedules/"+fx.nights+"/resume"))
 	row = objectAt(t, resumed, "schedule")
 	if row["paused"] != false || row["state"] != "armed" {
 		t.Fatalf("resume did not flip the row back: %+v", row)
@@ -349,7 +349,7 @@ func TestCronRunNow_ReturnsTheRunItLaunched(t *testing.T) {
 	}
 	t.Cleanup(func() { cronRunNow = restore })
 
-	body := decodeCron(t, fx.do(t, http.MethodPost, "/api/v1/crons/"+fx.nights+"/run"))
+	body := decodeCron(t, fx.do(t, http.MethodPost, "/api/v1/schedules/"+fx.nights+"/run"))
 	wantKeys(t, "run", body, []string{"run_id", "schedule"})
 	if body["run_id"] != "run_launched" {
 		t.Fatalf("run_id = %v, want the launched run", body["run_id"])
@@ -368,7 +368,7 @@ func TestCronRunNow_ReportsALaunchFailureAsBadGateway(t *testing.T) {
 	}
 	t.Cleanup(func() { cronRunNow = restore })
 
-	rec := fx.do(t, http.MethodPost, "/api/v1/crons/"+fx.nights+"/run")
+	rec := fx.do(t, http.MethodPost, "/api/v1/schedules/"+fx.nights+"/run")
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502: %s", rec.Code, rec.Body.String())
 	}
@@ -381,7 +381,7 @@ func TestCronRoutes_ReadOnlyRefusesWritesAndServesReads(t *testing.T) {
 	fx := newCronFixture(t, true)
 
 	for _, path := range []string{"/pause", "/resume", "/run"} {
-		rec := fx.do(t, http.MethodPost, "/api/v1/crons/"+fx.nights+path)
+		rec := fx.do(t, http.MethodPost, "/api/v1/schedules/"+fx.nights+path)
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("POST %s = %d, want 403: %s", path, rec.Code, rec.Body.String())
 		}
@@ -389,10 +389,10 @@ func TestCronRoutes_ReadOnlyRefusesWritesAndServesReads(t *testing.T) {
 			t.Errorf("POST %s body = %q", path, rec.Body.String())
 		}
 	}
-	if rec := fx.do(t, http.MethodGet, "/api/v1/crons"); rec.Code != http.StatusOK {
+	if rec := fx.do(t, http.MethodGet, "/api/v1/schedules"); rec.Code != http.StatusOK {
 		t.Errorf("GET overview = %d, want 200 in read-only mode", rec.Code)
 	}
-	if rec := fx.do(t, http.MethodGet, "/api/v1/crons/"+fx.nights); rec.Code != http.StatusOK {
+	if rec := fx.do(t, http.MethodGet, "/api/v1/schedules/"+fx.nights); rec.Code != http.StatusOK {
 		t.Errorf("GET detail = %d, want 200 in read-only mode", rec.Code)
 	}
 	if stored, err := teststore.ForTeam(t, fx.store, store.DefaultTeam).GetCronSchedule(context.Background(), fx.nights); err != nil || stored.Paused {
@@ -403,15 +403,15 @@ func TestCronRoutes_ReadOnlyRefusesWritesAndServesReads(t *testing.T) {
 func TestCronRoutes_UnknownScheduleIsNotFound(t *testing.T) {
 	fx := newCronFixture(t, false)
 	for _, path := range []string{
-		"/api/v1/crons/crn_ffffffffffff",
-		"/api/v1/crons/no-such-pipeline",
+		"/api/v1/schedules/crn_ffffffffffff",
+		"/api/v1/schedules/no-such-pipeline",
 	} {
 		rec := fx.do(t, http.MethodGet, path)
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("GET %s = %d, want 404: %s", path, rec.Code, rec.Body.String())
 		}
 	}
-	rec := fx.do(t, http.MethodPost, "/api/v1/crons/crn_ffffffffffff/pause")
+	rec := fx.do(t, http.MethodPost, "/api/v1/schedules/crn_ffffffffffff/pause")
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("POST pause on an unknown id = %d, want 404: %s", rec.Code, rec.Body.String())
 	}
@@ -421,7 +421,7 @@ func TestCronRoutes_WithoutALocalStore(t *testing.T) {
 	mux := http.NewServeMux()
 	registerCronRoutes(mux, &cronsAPI{})
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/crons", nil))
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/schedules", nil))
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502 with no store: %s", rec.Code, rec.Body.String())
 	}

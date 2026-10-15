@@ -28,6 +28,16 @@ Wingd's connection context. Explicit credentials keep precedence. Browser
 requests supply their own authentication. These handlers expose the shared
 policy routes and exclude the legacy route fallback.
 
+Schedule, invitation, build-trust, billing and storage reads use member
+capability policy. The same holds for GitHub App installation, repository,
+trigger and extra-repository reads. Schedule and review mutations pass the verified
+`Authorized` value to tenant transactions through `WithScheduleWriter` and
+`WithRunControlWriter`. Each committing transaction rechecks ancestry,
+membership and the selected route alternative. The old token verifier and
+legacy request principal cannot authorize these routes. Missing adapters fail
+with `policy_missing`. Metrics on the API listener uses deployment or console
+policy.
+
 Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.
 
 Job logs use `/api/v1/runs/{run}/jobs/{job}/logs`, with `/stream` and `/completeness` beneath it. The old `/runs/{run}/logs/{job}` paths are removed. Use `/api/v1/runners` instead of `/api/v1/agents`, `/api/v1/approvals` instead of `/api/v1/approvals/pending`, and `/api/v1/sizing` or `/api/v1/sizing/explain` instead of `/api/v1/capacity/profiles`. Read debug pauses at `/runs/{run}/debug-pauses`. The `paused` alias is removed.

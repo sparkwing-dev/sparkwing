@@ -8,7 +8,7 @@ import (
 )
 
 func TestParseOperatorEndpointsUsesActualRegistrations(t *testing.T) {
-	src := writeFile(t, "server.go", "s.registerOperatorRoutes(router)")
+	src := writeFile(t, "server.go", "s.operatorEndpoints()")
 	endpoints := `{Method: "GET", Pattern: "/api/v1/operator/limits", Handle: s.limits},
 {Method: "GET", Pattern: "/api/v1/operator/teams", Handle: s.teams},
 {Method: "GET", Pattern: "/api/v1/operator/object-store", Handle: s.storage},`
@@ -37,7 +37,7 @@ func TestParseOperatorEndpointsUsesActualRegistrations(t *testing.T) {
 }
 
 func TestParseCapabilityEndpointsUsesActualRegistrations(t *testing.T) {
-	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.capabilityEndpoints())")
+	src := writeFile(t, "server.go", "s.capabilityEndpoints()")
 	endpoints := `{Method: "GET", Pattern: "/api/v1/tokens"},
 {Method: "GET", Pattern: "/api/v1/operator/tokens/{token}"},
 {Method: "POST", Pattern: "/api/v1/operator/tokens/{token}/rotate"},`
@@ -59,7 +59,7 @@ func TestParseCapabilityEndpointsUsesActualRegistrations(t *testing.T) {
 }
 
 func TestParseGitHubRunnerEndpointsUsesActualRegistrations(t *testing.T) {
-	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.githubRunnerEndpoints())")
+	src := writeFile(t, "server.go", "s.githubRunnerEndpoints()")
 	endpoints := `{Method: "GET", Pattern: "/api/v1/runners/github"},
 {Method: "POST", Pattern: "/api/v1/runners/github"},
 {Method: "DELETE", Pattern: "/api/v1/runners/github/{repository}"},`
@@ -81,7 +81,7 @@ func TestParseGitHubRunnerEndpointsUsesActualRegistrations(t *testing.T) {
 }
 
 func TestParseEngineEndpointsUsesActualRegistrations(t *testing.T) {
-	src := writeFile(t, "server.go", "s.registerEngineRoutes(router)")
+	src := writeFile(t, "server.go", "s.engineEndpoints()")
 	endpoints := `{
 		Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/expansion", Authentication: capability.AuthCapability,
 	}`
@@ -99,7 +99,7 @@ func TestParseEngineEndpointsUsesActualRegistrations(t *testing.T) {
 }
 
 func TestParseQueueEndpointUsesActualRegistration(t *testing.T) {
-	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.queueEndpoints())")
+	src := writeFile(t, "server.go", "s.queueEndpoints()")
 	endpoint := `{Method: "GET", Pattern: "/api/v1/queue", Authentication: capability.AuthCapability}`
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "queue_view.go"), []byte(endpoint), 0o600); err != nil {
 		t.Fatal(err)
@@ -169,7 +169,7 @@ func TestParseIdentityLinkEndpointsUsesNamedProof(t *testing.T) {
 }
 
 func TestParseSourceEndpointsUsesActualRegistrations(t *testing.T) {
-	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.sourceEndpoints())")
+	src := writeFile(t, "server.go", "s.sourceEndpoints()")
 	endpoints := `{Method: "POST", Pattern: "/api/v1/runs/{run}/source-credential", Authentication: capability.AuthCapability},
 {Method: "PUT", Pattern: "/api/v1/tokens/{token}/git-credentials", Authentication: capability.AuthCapability},`
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "source_controller.go"), []byte(endpoints), 0o600); err != nil {
@@ -186,7 +186,7 @@ func TestParseSourceEndpointsUsesActualRegistrations(t *testing.T) {
 }
 
 func TestParseAuthorityEndpointsUsesActualRegistrations(t *testing.T) {
-	src := writeFile(t, "server.go", "s.registerAuthorityRoutes(router)")
+	src := writeFile(t, "server.go", "s.authorityEndpoints()")
 	endpoints := `{Method: "DELETE", Pattern: "/api/v1/tokens/{token}", Authentication: capability.AuthCapability},
 {Method: "DELETE", Pattern: "/api/v1/operator/tokens/{token}", Authentication: capability.AuthCapability},
 {Method: "PATCH", Pattern: "/api/v1/team/members/{account}", Authentication: capability.AuthCapability},
@@ -293,7 +293,7 @@ func (s *Server) routes() {
 }
 
 func TestParseSizingEndpointsUsesActualRegistrations(t *testing.T) {
-	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.sizingEndpoints())")
+	src := writeFile(t, "server.go", "s.sizingEndpoints()")
 	endpoints := `
 	{Method: "GET", Pattern: "/api/v1/pipelines/{name}/sizing"},
 	{Method: "PUT", Pattern: "/api/v1/pipelines/{name}/sizing/pin"},
@@ -320,7 +320,7 @@ func TestParseSizingEndpointsUsesActualRegistrations(t *testing.T) {
 }
 
 func TestParseCredentialEndpoints(t *testing.T) {
-	src := writeFile(t, "server.go", "s.registerCredentialRoutes(router)")
+	src := writeFile(t, "server.go", "s.credentialEndpoints()")
 	endpoints := `
 {Method: "GET", Pattern: "/api/v1/secrets"},
 {Method: "POST", Pattern: "/api/v1/secrets"},
@@ -357,7 +357,7 @@ func TestParseMissingFile(t *testing.T) {
 }
 
 func TestParseCreditEndpointsUsesActualRegistrations(t *testing.T) {
-	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.creditEndpoints())")
+	src := writeFile(t, "server.go", "s.creditEndpoints()")
 	endpoints := `
 	{Method: "GET", Pattern: "/api/v1/credits"},
 	{Method: "GET", Pattern: "/api/v1/credits/history"},`
@@ -375,7 +375,7 @@ func TestParseCreditEndpointsUsesActualRegistrations(t *testing.T) {
 }
 
 func TestParseDataEndpointsUsesActualRegistrations(t *testing.T) {
-	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.dataEndpoints())")
+	src := writeFile(t, "server.go", "s.dataEndpoints()")
 	endpoints := `{Method: "POST", Pattern: "/api/v1/data/download", Authentication: capability.AuthCapability},
  {Method: "POST", Pattern: "/api/v1/data/has-many", Authentication: capability.AuthCapability},`
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "data_routes.go"), []byte(endpoints), 0o600); err != nil {
@@ -395,7 +395,7 @@ func TestParseDataEndpointsUsesActualRegistrations(t *testing.T) {
 }
 
 func TestParseActionsEndpointUsesActualProof(t *testing.T) {
-	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.actionsEndpoints())")
+	src := writeFile(t, "server.go", "s.actionsEndpoints()")
 	endpoints := `{Method: "POST", Pattern: "/api/v1/runners/github/exchange", Authentication: capability.AuthGitHubActions}`
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "github_actions_exchange.go"), []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
@@ -411,7 +411,7 @@ func TestParseActionsEndpointUsesActualProof(t *testing.T) {
 }
 
 func TestParseConcurrencyEndpointsUsesActualRegistrations(t *testing.T) {
-	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.concurrencyEndpoints())")
+	src := writeFile(t, "server.go", "s.concurrencyEndpoints()")
 	data, err := os.ReadFile(filepath.Join("..", "..", "pkg", "controller", "concurrency_routes.go"))
 	if err != nil {
 		t.Fatal(err)
@@ -426,6 +426,35 @@ func TestParseConcurrencyEndpointsUsesActualRegistrations(t *testing.T) {
 	for _, r := range routes {
 		if r.Path == "/api/v1/queue/groups/{group}/force-release" && r.Scope != "runs.control" {
 			t.Fatalf("force-release=%+v", r)
+		}
+	}
+}
+
+func TestParseControllerBusinessRegistrations(t *testing.T) {
+	routes, err := Parse("../../pkg/controller/server.go", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		"GET /api/v1/schedules":                   false,
+		"DELETE /api/v1/schedules/{schedule}":     false,
+		"POST /api/v1/schedules/{schedule}/run":   false,
+		"GET /api/v1/team/billing":                false,
+		"POST /api/v1/runs/{run}/approvals/{job}": false,
+		"POST /api/v1/runs/{run}/debug-pauses":    false,
+		"GET /metrics":                            false,
+		"GET /api/v1/runners":                     false,
+		"POST /api/v1/runners":                    false,
+	}
+	for _, route := range routes {
+		key := route.Method + " " + route.Path
+		if _, exists := want[key]; exists {
+			want[key] = true
+		}
+	}
+	for key, found := range want {
+		if !found {
+			t.Errorf("registration missing from discovery: %s", key)
 		}
 	}
 }

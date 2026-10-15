@@ -44,11 +44,11 @@ type cronsAPI struct {
 // safety: the controller catch-all at /api/v1/ claims any route not named here, and the local mux
 // does not wrap these handlers, so read-only is enforced inside them.
 func registerCronRoutes(mux *http.ServeMux, api *cronsAPI) {
-	mux.Handle("GET /api/v1/crons", http.HandlerFunc(api.overview))
-	mux.Handle("GET /api/v1/crons/{id}", http.HandlerFunc(api.detail))
-	mux.Handle("POST /api/v1/crons/{id}/pause", http.HandlerFunc(api.pause))
-	mux.Handle("POST /api/v1/crons/{id}/resume", http.HandlerFunc(api.resume))
-	mux.Handle("POST /api/v1/crons/{id}/run", http.HandlerFunc(api.runNow))
+	mux.Handle("GET /api/v1/schedules", http.HandlerFunc(api.overview))
+	mux.Handle("GET /api/v1/schedules/{id}", http.HandlerFunc(api.detail))
+	mux.Handle("POST /api/v1/schedules/{id}/pause", http.HandlerFunc(api.pause))
+	mux.Handle("POST /api/v1/schedules/{id}/resume", http.HandlerFunc(api.resume))
+	mux.Handle("POST /api/v1/schedules/{id}/run", http.HandlerFunc(api.runNow))
 }
 
 func (a *cronsAPI) overview(w http.ResponseWriter, r *http.Request) {

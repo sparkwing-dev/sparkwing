@@ -254,32 +254,28 @@ type storageStateJSON struct {
 	Team     *teamStandingJSON   `json:"team,omitempty"`
 }
 
-func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	ctx := r.Context()
 	settings, err := s.store.AsOperator().StorageSettings(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+	tenant, err := s.reportingTenant(r, a)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	quota, err := tenant.StorageQuota(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	month := store.StorageMonth(time.Now().UTC())
 	usage, err := tenant.StorageUsageFor(ctx, "", month)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	retained, err := tenant.StorageRetainedBytes(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	_, _, alarm, _ := s.storage.read()
 	out := storageStateJSON{
@@ -291,11 +287,11 @@ func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
 		},
 		Alarm: alarm,
 	}
-	if out.Team, err = s.callerStorageStanding(r); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+	if out.Team, err = s.teamStorageStanding(r, tenant.Team()); err != nil {
+		return engineLookupError(err)
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 func (s *Server) appendAdminStorage(ctx context.Context, out *storageStateJSON, month string) error {

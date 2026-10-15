@@ -1709,3 +1709,27 @@ check for a live deployment administrator capability. The store must implement
 `HasDeploymentAdministrator(context.Context) (bool, error)` for that check.
 A missing reader refuses startup when the flag is set. It never falls back to
 `ListTokens`. Health reports authentication enabled before bootstrap completes.
+
+
+## Schedule and review credential routes
+
+Move `/api/v1/crons` and its descendants to `/api/v1/schedules`. Replace
+`POST /crons/{id}/disarm` with `DELETE /schedules/{schedule}`. Repository
+replacement and deletion remain `PUT` and `DELETE` beneath `/schedules/repos`.
+The retired routes have no aliases. Use member `runs.read` for schedule reads
+and `runs.control` for mutations. Deployment admin tokens and unbound runner
+roots do not substitute for member authority.
+
+Send one `Idempotency-Key` header when running a schedule, resolving an approval
+or creating a debug pause. Schedule run-now returns its `replayed` result.
+Approval resolution accepts only `approved` or `denied`, with optional `comment`;
+the server derives the approver. Its response is an `approval` envelope with
+`replayed`. Approval objects use `job_id`. Replace debug-pause `node_id` with
+`job_id` and omit lifecycle/release fields. The raw approval-request route is
+removed; execution owns gate creation.
+
+Embedded controllers must supply authority-bearing `ScheduleWriter` and
+`RunControlWriter` adapters. Legacy schedule, approval and debug-pause writes
+are not substitutes. The default refuses a missing adapter. Team invitation,
+trust, GitHub App, billing and storage reads now require the shared capability
+policy; API metrics requires `operator.limits` or console authority.

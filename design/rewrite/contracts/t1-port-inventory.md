@@ -1201,3 +1201,30 @@ They do not establish final-schema run/reporting SQL or native composed log,
 receipt and runner-read implementations. Those retained tenant reads still need
 their owning store integration. The legacy verifier and remaining schedules,
 team mutations and other registrations are unfinished work.
+
+
+## W2 schedule and review credential continuation
+
+Thirteen legacy controller cron HTTP tests are ported to
+TestScheduleHTTPReadWriteAndReplay, TestScheduleHTTPOverrideAndWithdrawal,
+TestScheduleHTTPInvalidInputAndBackend and
+TestScheduleHTTPRetainedHistoryAndCounts, plus the expanded
+TestReportingRouteAuthorityProperty. The replaced test functions are deleted;
+the old shared fixture remains for unported legacy callers. The ports preserve
+stored metadata, withdrawal, invalid URL/cadence/branch refusal, pause/resume,
+override/reset, explicit empty arguments and zero catch-up, whole retained
+history, health before the first tick, deletion and capability refusal.
+
+TestRunControlHTTPAuthorityProperty and Refusals exercise verified team/run/actor
+forwarding and rejected approver, team, lifecycle and replay-body selectors.
+TestBusinessRetiredRoutesAndExactMethods checks the crons family and raw gate
+request are absent, with canonical methods on shared read/write paths.
+TestMetricsHTTPDeploymentPolicy exercises the deployment boundary.
+
+These are component proofs with fake authentication facts and committing
+writers. Schedule metadata/history use real SQLite. Native gate creation,
+run-now intake/provenance, per-team and admission limits, atomic replay and
+masking at the real committing edge remain W1/W3 integration obligations.
+The surviving legacy run-now, cron-team, compute-limit and approval fixtures
+must be ported to final intake and lifecycle before their old state APIs go.
+No native matrix cell is newly complete in this continuation.

@@ -100,7 +100,7 @@ func allowedRouteMethods(mux *http.ServeMux, r *http.Request, methods []string) 
 		}
 		seen[method] = true
 		probe.Method = method
-		if _, pattern := mux.Handler(probe); pattern != "" {
+		if _, pattern := mux.Handler(probe); pattern != "" && (!strings.Contains(pattern, " ") || strings.HasPrefix(pattern, method+" ")) {
 			allowed = append(allowed, method)
 		}
 	}
@@ -234,5 +234,21 @@ func writePolicyError(w http.ResponseWriter, err error) {
 	if err := apierr.WriteHTTP(w, failure); err != nil {
 		// safety: internal errors may contain credentials; log only the safe code.
 		slog.Error("write API error response", "code", failure.Code)
+	}
+}
+
+func (s *Server) registerControllerEndpoints(mux *http.ServeMux, endpoints []Endpoint) {
+	policy := NewPolicyRouter(s.authorization)
+	for _, endpoint := range endpoints {
+		if err := policy.Register(endpoint); err != nil {
+			panic(err)
+		}
+	}
+	for _, endpoint := range endpoints {
+		var handler http.Handler = policy
+		if endpoint.Authentication != capability.AuthPublic {
+			handler = noStore(handler)
+		}
+		mux.Handle(endpoint.Method+" "+endpoint.Pattern, handler)
 	}
 }

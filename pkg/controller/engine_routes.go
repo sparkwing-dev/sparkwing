@@ -132,18 +132,6 @@ func (s *EngineController) handleExpansion(w http.ResponseWriter, r *http.Reques
 	return nil
 }
 
-func (s *Server) registerEngineRoutes(mux *http.ServeMux) {
-	endpoints := s.engineEndpoints()
-	// safety: the run list still has its own registration on this shared collection path.
-	router := NewPolicyRouter(s.authorization)
-	if err := router.Register(endpoints[0]); err != nil {
-		mux.HandleFunc("POST /api/v1/runs", func(w http.ResponseWriter, _ *http.Request) { writePolicyError(w, err) })
-	} else {
-		mux.Handle("POST /api/v1/runs", noStore(router))
-	}
-	s.registerPolicyEndpoints(mux, endpoints[1:])
-}
-
 func (s *EngineController) runTarget(r *http.Request) (capability.RequestEvidence, error) {
 	evidence := capability.RequestEvidence{Target: capability.Target{RunID: r.PathValue("run"), NodeID: r.PathValue("job")}}
 	var team store.Team

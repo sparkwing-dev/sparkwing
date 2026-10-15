@@ -44,52 +44,26 @@ var (
 // server.go registers one this table lacks, so a new route is classified
 // before it serves anything.
 var tenantRoutes = map[string]tenantResource{
-
-	"GET /api/v1/crons":                  resNone,
-	"GET /api/v1/crons/{id}":             resCron,
-	"POST /api/v1/crons/{id}/disarm":     resCron,
-	"DELETE /api/v1/crons/{id}/override": resCron,
-	"PUT /api/v1/crons/{id}/override":    resCron,
-	"POST /api/v1/crons/{id}/pause":      resCron,
-	"POST /api/v1/crons/{id}/resume":     resCron,
-	"POST /api/v1/crons/{id}/run":        resCron,
-	"DELETE /api/v1/crons/repos":         resNone,
-	"PUT /api/v1/crons/repos":            resNone,
-
-	"DELETE /api/v1/runs/{id}":                          resRun,
-	"POST /api/v1/runs/{id}/approvals/{nodeID}":         resRun,
-	"POST /api/v1/runs/{id}/approvals/{nodeID}/request": resRun,
-	"POST /api/v1/runs/{id}/debug-pauses":               resRun,
-
-	"GET /api/v1/storage": resNone,
+	"DELETE /api/v1/runs/{id}": resRun,
 
 	"DELETE /api/v1/team": resNone,
 	"PATCH /api/v1/team":  resNone,
 
-	"GET /api/v1/team/billing":           resNone,
 	"PUT /api/v1/team/billing/budget":    resNone,
 	"POST /api/v1/team/billing/card":     resNone,
 	"POST /api/v1/team/billing/checkout": resNone,
 	"POST /api/v1/team/billing/pay":      resNone,
 
-	"GET /api/v1/team/build-trust": resNone,
 	"PUT /api/v1/team/build-trust": resNone,
 
-	"GET /api/v1/team/github-app":                                              resNone,
-	"DELETE /api/v1/team/github-app/automation":                                resNone,
-	"GET /api/v1/team/github-app/automation":                                   resNone,
-	"PUT /api/v1/team/github-app/automation":                                   resNone,
-	"GET /api/v1/team/github-app/extra-repos":                                  resNone,
-	"PUT /api/v1/team/github-app/extra-repos":                                  resNone,
-	"DELETE /api/v1/team/github-app/installations/{installation_id}":           resGitHubInstallation,
-	"GET /api/v1/team/github-app/installations/{installation_id}/repositories": resGitHubInstallation,
-	"DELETE /api/v1/team/github-app/triggers":                                  resNone,
-	"GET /api/v1/team/github-app/triggers":                                     resNone,
-	"PUT /api/v1/team/github-app/triggers":                                     resNone,
+	"DELETE /api/v1/team/github-app/automation":                      resNone,
+	"GET /api/v1/team/github-app/automation":                         resNone,
+	"PUT /api/v1/team/github-app/automation":                         resNone,
+	"PUT /api/v1/team/github-app/extra-repos":                        resNone,
+	"DELETE /api/v1/team/github-app/installations/{installation_id}": resGitHubInstallation,
+	"DELETE /api/v1/team/github-app/triggers":                        resNone,
+	"PUT /api/v1/team/github-app/triggers":                           resNone,
 
-	"GET /api/v1/team/invitations":         resNone,
 	"POST /api/v1/team/invitations":        resNone,
 	"DELETE /api/v1/team/invitations/{id}": resInvitation,
-
-	"GET /metrics": resNone,
 }

@@ -4,6 +4,34 @@ Reporting reads use the shared capability policy and the authorized resource's t
 
 Job logs use `/api/v1/runs/{run}/jobs/{job}/logs`, with `/stream` and `/completeness` beneath it. The old `/runs/{run}/logs/{job}` paths are removed. Use `/api/v1/runners` instead of `/api/v1/agents`, `/api/v1/approvals` instead of `/api/v1/approvals/pending`, and `/api/v1/sizing` or `/api/v1/sizing/explain` instead of `/api/v1/capacity/profiles`. Read debug pauses at `/runs/{run}/debug-pauses`. The `paused` alias is removed.
 
+Schedule reads and writes use `/api/v1/schedules`. Repository replacement uses
+`PUT /schedules/repos`; repository deletion uses `DELETE /schedules/repos`.
+Delete one schedule with `DELETE /schedules/{schedule}`. The `/api/v1/crons`
+family and `POST .../disarm` are removed. Reads require member `runs.read`;
+writes require member `runs.control`. List queries accept `all` and `next`;
+detail queries accept `fires` and `next`, including zero. Overrides preserve
+explicit empty argument sets, empty zones and zero catch-up.
+
+Approval decisions use `POST /runs/{run}/approvals/{job}` with `resolution`
+(`approved` or `denied`) and optional `comment`. The authenticated identity
+supplies the approver. Success returns `{"approval":{...},"replayed":false}`.
+Approval reads and decisions use `job_id`. The approval-request HTTP route is
+removed; the run owner creates gates through its execution lifecycle.
+
+Schedule run-now, approval decisions and debug-pause creation require one
+`Idempotency-Key` header. Debug-pause creation accepts `job_id`, `reason` and
+optional `expires_at`, with the run selected by the route. Caller-supplied
+approvers, release fields, run selectors and legacy `node_id` fields are refused.
+Embedded controllers supply `WithScheduleWriter` and `WithRunControlWriter`;
+these adapters recheck authority and commit state, events and replay together.
+Missing transaction adapters return `policy_missing`.
+
+Team invitation, build-trust, billing and storage reads use the same capability
+boundary, as do GitHub App installation, repository, trigger and extra-repository
+reads. Billing availability is checked after authentication.
+The API's `/metrics` route requires deployment `operator.limits` or a verified
+console session. A dedicated metrics listener keeps its existing network boundary.
+
 The CLI, runners, fetched engines and dashboard use `/api/v1`. The local
 controller exposes the same messages and authorization policy over its private API
 socket. The [HTTP reference](api-reference.md) is generated from the shared

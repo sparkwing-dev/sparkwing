@@ -45,16 +45,6 @@ func (s *Server) reportingEndpoints() []Endpoint {
 	return endpoints
 }
 
-func (s *Server) registerReportingRoutes(mux *http.ServeMux) {
-	router := NewPolicyRouter(s.authorization)
-	for _, endpoint := range s.reportingEndpoints() {
-		if err := router.Register(endpoint); err != nil {
-			panic(err)
-		}
-		mux.Handle(endpoint.Method+" "+endpoint.Pattern, noStore(router))
-	}
-}
-
 func reportingPipelineTarget(r *http.Request) (capability.RequestEvidence, error) {
 	return capability.RequestEvidence{Target: capability.Target{Pipeline: r.PathValue("name")}}, nil
 }

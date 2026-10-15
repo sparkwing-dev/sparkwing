@@ -31,6 +31,9 @@ unlock.
 
 ### Changed
 
+- **controller (Breaking):** Schedule and review routes use shared capability authorization
+  Schedules move to `/api/v1/schedules`. Run-now, approval decisions and debug-pause creation carry replay keys. Approval objects use `job_id`; the raw gate-request route is removed. See [migration guide](docs/migrations/_unreleased.md#schedule-and-review-credential-routes).
+
 - **controller:** Verify Stripe card setup, payment, refund, warning and dispute events through the signed callback
   Provider lookups verify card identity and mode. Non-checkout settlement still needs its store adapter.
 - **controller (Breaking):** Replace token-table startup seeding with the once-only capability bootstrap transaction

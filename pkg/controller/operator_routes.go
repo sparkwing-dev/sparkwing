@@ -54,10 +54,6 @@ func (s *Server) operatorEndpoints() []Endpoint {
 	return endpoints
 }
 
-func (s *Server) registerOperatorRoutes(mux *http.ServeMux) {
-	s.registerPolicyEndpoints(mux, s.operatorEndpoints())
-}
-
 func (s *Server) registerPolicyEndpoints(mux *http.ServeMux, endpoints []Endpoint) {
 	router := NewPolicyRouter(s.authorization)
 	var registrationError error
