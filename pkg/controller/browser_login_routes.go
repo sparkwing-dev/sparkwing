@@ -64,8 +64,8 @@ func (s *Server) verifyLoginSubmit(r *http.Request) error {
 		return err
 	}
 	p, c := auth.Principal, auth.Principal.Capability
-	if p.Class != capability.CredentialBearer || c.Subject.Kind != capability.SubjectAccount || c.Audience != capability.Controller || c.Team == "" || c.Unit != "" || c.Purpose != "" || c.Binding.Kind != capability.BindingNone {
-		return &apierr.Error{Code: apierr.Forbidden, Message: "sign-in requires an unbound account access token"}
+	if p.Class != capability.CredentialBearer || c.Subject.Kind != capability.SubjectAccount || c.Audience != capability.Controller || c.Team == "" || c.Unit != "" || c.Purpose != "" || c.Binding.Kind != capability.BindingNone || c.Data != nil {
+		return &apierr.Error{Code: apierr.Forbidden, Message: "sign-in requires an unbound account access token without data scope"}
 	}
 	raw, session, err := s.store.CreateCapabilitySession(r.Context(), c.Prefix, s.sessionInitialTTL())
 	if err != nil {
