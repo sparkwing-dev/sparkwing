@@ -209,16 +209,25 @@ func (t *Tenant) HoldByOperator(ctx context.Context, actor, reason string, now t
 func (s *Store) holdTeam(
 	ctx context.Context, team Team, disputeID, paymentID, reason, actor string, now time.Time,
 ) (_ bool, err error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer rollbackOrLog(tx)
+	changed, err := holdTeamTx(ctx, tx, team, disputeID, paymentID, reason, actor, now)
+	if err != nil {
+		return false, err
+	}
+	return changed, tx.Commit()
+}
+
+func holdTeamTx(ctx context.Context, tx *storeTx, team Team, disputeID, paymentID, reason, actor string, now time.Time) (_ bool, err error) {
 	team = NormalizeTeam(team)
 	disputeID, paymentID = strings.TrimSpace(disputeID), strings.TrimSpace(paymentID)
 	if disputeID == "" {
 		return false, errors.New("credits: a hold names the dispute it is for")
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer rollbackUnlessDone(tx, &err)
+
 	// safety: a metered claim reads the freeze under the ledger lock, so the
 	// hold takes the same lock; a claim that read the team as not frozen then
 	// commits before the hold does, and none can commit after it.
@@ -254,7 +263,7 @@ func (s *Store) holdTeam(
 	}); err != nil {
 		return false, err
 	}
-	return true, tx.Commit()
+	return true, nil
 }
 
 func refuseBoundDisputeTx(ctx context.Context, tx *storeTx, disputeID string, team Team, paymentID string) (bool, error) {
@@ -301,6 +310,19 @@ func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string,
 func (s *Store) releaseFreezes(
 	ctx context.Context, team Team, disputeID string, operatorOnly bool, actor, reason string, now time.Time,
 ) (_ int64, err error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer rollbackOrLog(tx)
+	count, err := releaseFreezesTx(ctx, tx, team, disputeID, operatorOnly, actor, reason, now)
+	if err != nil {
+		return 0, err
+	}
+	return count, tx.Commit()
+}
+
+func releaseFreezesTx(ctx context.Context, tx *storeTx, team Team, disputeID string, operatorOnly bool, actor, reason string, now time.Time) (_ int64, err error) {
 	team = NormalizeTeam(team)
 	if team == "" {
 		return 0, errors.New("credits: a release names the team")
@@ -313,11 +335,7 @@ func (s *Store) releaseFreezes(
 	if operatorOnly {
 		query, args = query+` AND dispute_id LIKE ?`, append(args, OperatorHoldPrefix+"%")
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer rollbackUnlessDone(tx, &err)
+
 	released, err := releasedDisputesTx(ctx, tx, query+` RETURNING dispute_id`, args...)
 	if err != nil {
 		return 0, err
@@ -333,7 +351,7 @@ func (s *Store) releaseFreezes(
 			return 0, err
 		}
 	}
-	return int64(len(released)), tx.Commit()
+	return int64(len(released)), nil
 }
 
 func releasedDisputesTx(ctx context.Context, tx *storeTx, query string, args ...any) (_ []string, err error) {

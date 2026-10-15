@@ -1,5 +1,9 @@
 # W2 native credentials continuation
 
+The next continuation is [W2-console-continuation.md](W2-console-continuation.md).
+It adds native console commits and queue-priority HTTP. The four missing
+registrations and the unimplemented queue ordering transaction remain open.
+
 Items (a), (c), and the available part of (d) are implemented. Item (b) has
 native bootstrap, peer-read, launcher and data adapters. Item (e) closes 18 of
 23 missing registrations, counting resume. Five serving operations still need

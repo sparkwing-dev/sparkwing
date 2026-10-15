@@ -29,8 +29,9 @@ import (
 
 // Server serves controller HTTP requests.
 type Server struct {
-	store  *store.Store
-	logger *slog.Logger
+	resolveQueuePriorityWriter func(context.Context, store.Team) (QueuePriorityWriter, error)
+	store                      *store.Store
+	logger                     *slog.Logger
 
 	hostKeyScan       func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
 	identityLinkLimit perMinuteLimiter

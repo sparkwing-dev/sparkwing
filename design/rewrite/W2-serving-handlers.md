@@ -1,6 +1,6 @@
 # W2 production serving handlers
 
-This slice implements 17 of the 23 missing registrations. The separate resume worker supplies resume, leaving five missing routes in both metrics configurations. No policies or features were removed to make the inventory pass.
+This slice implements 18 of the 23 missing registrations. The separate resume worker supplies resume, leaving four missing routes in both metrics configurations. No policies or features were removed to make the inventory pass.
 
 ## Implemented
 
@@ -17,13 +17,19 @@ Log signing accepts blob.LogSigningRequest. Log commits accept subject, segments
 
 Child intake accepts controllerwire.CreateRunRequest. Its lineage must name the path parent and a parent job. Reads return controllerwire.RunDetail. Pool operations use existing controllerwire shapes and return canonical repository keys.
 
-## Remaining five routes
+## Remaining four routes
 
 1. GET /api/v1/runs/{run}/jobs/{job}/output needs a native committed result/record-selector read projection. NodeRow has none. Member reads need a C1 authorized read of that record before signing. The generic data authority resolver accepts capability authority, not member sessions. Do not restore OutputReadGrant or legacy claim tokens.
 2. GET /api/v1/runs/{run}/children/{child}/jobs/{job}/output needs that projection and the child read edge through the blob authority path. W1b owns committed-result/materialization integration. Current blob read relations cover dependencies and declared pipeline references but no child edge.
 3. POST /api/v1/runs/{run}/jobs/{job}/claim/input needs the chosen committed memo/coalescing/reference input wire request and native read projection. Retained ClaimInputRequest/ClaimInput accepts legacy ClaimToken and returns legacy output grants.
-4. PUT /api/v1/queue/groups/{group}/priority has a wire request but C1 stores only arrival order. There is no persisted priority or mutation. Acquisition, promotion and state reads use arrival order. Integer priority needs a C1 queue-order contract/schema change. Changing arrivals alone would alter continuity semantics and fail to implement integer priority.
-5. POST /api/v1/operator/teams/{team}/refunds needs a human-refund request/queue contract joining current console authority to the provider and ledger owners. Provider verification and SettlePayment come from other work. The old automatic card-refund worker does not define this human operation.
+4. POST /api/v1/operator/teams/{team}/refunds needs a human-refund request/queue contract joining current console authority to the provider and ledger owners. Provider verification and SettlePayment come from other work. The old automatic card-refund worker does not define this human operation.
+
+PUT /api/v1/queue/groups/{group}/priority now has a handler against C2's
+QueuePriorityWriter. It validates the existing wire request and preserves exact
+zero, tenant authority and the idempotency key. The default refuses a missing
+transaction. C1 stores arrival order and still needs a persisted integer-priority
+contract and ordering mutation. Changing arrivals would alter continuity and
+would not implement integer priority. The HTTP property uses a fake transaction.
 
 Real integration points remain. W9 has no native log HTTP client for these completed shapes. Tests fake only W7 object I/O. Dashboard log readers still select legacy NodeLog records; new submissions persist native log_streams/log_segments. That reader cut belongs to the storage owner. Child replay identity currently scopes by subject/pipeline without parent generation. A replacement parent reusing a key may replay an earlier child's intake, while its new generation correctly cannot read that child. C1 must include the immutable parent fence in child replay identity. Pool branch patterns are accepted by the existing wire contract and new handler, but intakePoolsTx still compares branch values exactly. C1 needs to consume those patterns against verified App ref evidence.
 
@@ -41,7 +47,7 @@ Passed:
 - TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject drives actual HTTP claim, execution start, signing, two incremental verified commits, final commit and exact replay, then reads native metadata. Generated substitutions obtain no signed URL. It exposed the controller attempt-zero authentication defect, which the parent fixed through the existing committed snapshot.
 - TestControllerRegistersDeclaredLogSubmissions.
 
-TestFinalCredentialServingRegistrations still reports exactly the five routes above in both metrics configurations. No native acceptance matrix cell is claimed. The existing child-binding test now uses real AdmitRun. No working test was deleted.
+TestFinalCredentialServingRegistrations now reports exactly the four routes above in both metrics configurations. No native acceptance matrix cell is claimed. The existing child-binding test now uses real AdmitRun. No working test was deleted.
 
 ## Files and budget
 

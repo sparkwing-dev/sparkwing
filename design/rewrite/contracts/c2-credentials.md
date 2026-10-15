@@ -2325,8 +2325,9 @@ Amendment 1 ratifies the interpretations below. They are not approval gates.
 
 7. **Console mutation rechecks.** The console's nine business mutations now use
    `controller.ConsoleWriter`, receiving the verified `Authorized` value. A
-   missing adapter returns `policy_missing`. C1 must implement the direct-session,
-   revocation and actor checks inside each committing transaction. The prior
+   missing adapter returns `policy_missing`. Store.AsConsole implements the
+   direct-session, revocation and actor checks inside each committing transaction.
+   Its configured-operator callback reads the server's live account gate. The prior
    raw store methods are no longer HTTP fallbacks. Deployment-settings writes
    still need their separate authority-bearing contract. No C1 signature was
    changed in this cutover.
@@ -2715,10 +2716,12 @@ ConsoleUnfreeze (hold and reason to TeamCreditFreeze), ConsoleDeleteAccount
 (account IDs, oldest and replay key to []Account), ConsoleSetCreditSettings
 (CreditSettingsUpdate to CreditSettings), and ConsoleUnbindGitHubInstallation
 (installation ID to Team). Each also returns error. WithConsoleWriter injects it.
-The default discovers it only on Store.AsOperator and refuses its absence.
+The default uses Store.AsConsole with the server's live configured-operator gate.
+The concrete adapter has compile-time ConsoleWriter conformance.
 
-C1 rechecks the hashed direct account-session authority with no capability parent,
-current configured console authorization and operator.console inside every write.
+The production Console rechecks the hashed direct account-session authority with
+no capability parent and current configured console authorization inside every
+write. It requires the console-tagged Authorized subject to match that session.
 The committing adapter owns the trusted configured-operator gate. Derive all audit
 actors from that authority, use the store clock, select the target from Authorized,
 and preserve the existing business validation, ledger deduplication and audit effects.
@@ -2730,8 +2733,13 @@ atomically. App unbind resolves installation ownership inside its transaction.
 Waitlist approval commits one selected batch and its replay record together,
 rejects a changed body under the same key, and returns only newly admitted accounts
 for notification. A repeated completed request never selects the next oldest batch.
-Errors produce no approval notification. W1 supplies these transactions. C2 tests
-use fakes and do not prove the persistence rechecks.
+Errors and completed replays produce no approval notification. The approval
+marker stores only the request digest under a hash of operator account and key
+in settings. A changed body conflicts. The marker and selected batch commit
+together. Native HTTP tests exercise all nine writes through the default
+composition. A generated property refuses derived, expired, revoked, missing
+and substituted sessions before any write. Delisting before commit rolls back
+the operation and its audit.
 
 TestGitHubBrowserConnectionAuthorityProperty and StateProperty generate hostile
 selectors, authority, cookie, form and signed-state cases. ProviderAndReplay runs
@@ -2970,3 +2978,28 @@ unit ownership and launcher ancestry. It returns immutable execution inputs
 without bearers, or the exact supplied Kubernetes instance for cleanup. Sync
 preserves holder result rights. The legacy SyncLaunchJobs implementation is
 deleted. W8 owns real Kubernetes correlation and teardown evidence.
+
+
+## Native console and queue-priority adapters
+
+Console finance operations share the existing ledger transaction helpers.
+Account selection resolves an exact ID or unique email in the deletion
+transaction. Native deletion revokes capability envelopes and advances their
+revocation generations. Team deletion uses the shared run and job transitions
+to record cancellation intent. Its internal deletion actor exists only while
+that transaction holds the selected team's deletion scope. A wire actor cannot
+create that scope. Live jobs retain their holder and attempt while draining.
+Global account audit events use nullable team ownership from the final schema,
+with a deterministic primary key preserving kind/subject deduplication.
+
+PUT /api/v1/queue/groups/{group}/priority is registered under its existing policy.
+It validates controllerwire.QueuePriorityWrite, preserves explicit zero and
+passes the Idempotency-Key through controller.QueuePriorityWriter. That local
+interface declares Team() and SetAuthorizedGroupPriority(context.Context,
+capability.Authorized, string, controllerwire.QueuePriorityWrite)
+(controllerwire.QueuePriorityResult, error). WithQueuePriorityWriter supplies a
+tenant resolver. A missing or foreign tenant writer returns policy_missing.
+The transaction owns current authority, stable run/number resolution, rank and
+position selection, exact retry identity and unchanged holder leases. C1 has
+not declared persisted integer priority or an ordering transaction. The HTTP
+property uses a fake for that boundary and claims no persisted ranking evidence.
