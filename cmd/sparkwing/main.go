@@ -437,6 +437,8 @@ func dispatchCommand(args []string) error {
 		return runDocs(args[1:])
 	case "commands":
 		return runCommands(args[1:])
+	case "upgrade":
+		return runUpgrade(args[1:])
 	case "update":
 		return runUpdate(args[1:])
 	case "version":
@@ -631,77 +633,7 @@ func runJobs(args []string) error {
 		return nil
 
 	case "status":
-		fs := flag.NewFlagSet(cmdJobsStatus.Path, flag.ContinueOnError)
-		runID := fs.String("run", "", "run identifier")
-		outputFormat := fs.StringP("output", "o", "", "output format: json|table|plain (default: table)")
-		follow := fs.BoolP("follow", "f", false, "poll until the run reaches a terminal state")
-		steps := fs.Bool("steps", false, "render every step on every node in plain output")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block) instead of this machine's store")
-		exitZero := fs.Bool("exit-zero", false,
-			"return exit code 0 even when the run failed/cancelled (opt out of the scriptable exit contract)")
-		view := fs.String("view", "", "render one view of the run: summary|timeline|receipt|errors|tree")
-		timeout := fs.Duration("timeout", 0, "with --follow, give up (exit 2) after this long; 0 waits without limit")
-		poll := fs.Duration("poll", 3*time.Second, "with --timeout, -o json or --view, the poll interval while following")
-		width := fs.Int("width", 60, "timeline bar width in characters (--view timeline)")
-		if err := parseAndCheck(cmdJobsStatus, fs, args[1:]); err != nil {
-			if errors.Is(err, errHelpRequested) {
-				return nil
-			}
-			return err
-		}
-		id, idErr := runIDFromArgs(cmdJobsStatus.Path, fs.Args(), *runID)
-		if idErr != nil {
-			return idErr
-		}
-		*runID = normalizeRunID(id)
-		resolvedFormat, err := resolveOutputFormat(*outputFormat, "runs status")
-		if err != nil {
-			return err
-		}
-		if *view == "receipt" && fs.Changed("output") && resolvedFormat != "json" {
-			return errors.New("runs status: --view receipt only renders json")
-		}
-		if *timeout != 0 && !*follow {
-			return errors.New("runs status: --timeout needs --follow")
-		}
-		statusOptions := orchestrator.StatusOpts{JSON: resolvedFormat == "json", Follow: *follow, Steps: *steps}
-		p, profileErr := resolveProfileFlag(*profileName)
-		if profileErr != nil {
-			return profileErr
-		}
-		statusOptions.Profile = p
-		if *follow && (*timeout > 0 || resolvedFormat != "pretty" || *view != "") {
-			if err := waitForTerminalRun(contextValue, paths, p, *runID, *timeout, *poll); err != nil {
-				return err
-			}
-			statusOptions.Follow = false
-		}
-		if *view != "" {
-			v := runView{name: *view, runID: *runID, format: resolvedFormat, steps: *steps, width: *width}
-			if *view == "receipt" {
-				v.format = "json"
-			}
-			if p != nil && (*profileName != "" || p.ControllerURL() != "") {
-				if err := requireController(p, "runs status --view"); err != nil {
-					return err
-				}
-				v.remote = p
-			}
-			if err := renderRunView(contextValue, paths, v); err != nil {
-				return err
-			}
-		} else if err := orchestrator.JobStatus(contextValue, paths, *runID, statusOptions, os.Stdout); err != nil {
-			return err
-		}
-		if *exitZero {
-			return nil
-		}
-
-		status, statusErr := orchestrator.RunStatus(contextValue, paths, p, *runID)
-		if statusErr != nil {
-			return statusErr
-		}
-		return statusExitCode(status)
+		return runRunsStatus(contextValue, args[1:])
 
 	case "logs", "grep":
 		fs := flag.NewFlagSet(cmdJobsLogs.Path, flag.ContinueOnError)

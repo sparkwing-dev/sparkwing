@@ -499,7 +499,12 @@ func Registry() []Command {
 			{Name: "yes"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing runs status", Flags: []Flag{
+		{Path: "sparkwing runs status", Rules: []string{
+			"Read the same public run detail through a controller profile or the local controller. Numeric run selectors are per-team numbers.",
+			"Views: summary, timeline, receipt, errors, tree. --steps includes recorded steps. Receipts retain the controller's hashes and settled cost.",
+			"--follow streams observations until the run ends. Exit 0 means success, 1 means a failed or cancelled run, 2 means invalid usage, and 3 means the observation is incomplete. --exit-zero suppresses terminal failure only.",
+			"JSON preserves run details and notices. Plain prints the status, failed job IDs for errors, run IDs for tree, or the receipt hash. --steps adds job/step IDs in plain status and tree output.",
+		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID", Required: true},
 			{Name: "follow", Short: "f"},
 			{Name: "steps"},

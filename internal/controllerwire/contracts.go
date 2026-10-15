@@ -244,6 +244,7 @@ type RunDetail struct {
 	Inputs            runspec.Display   `json:"inputs"`
 	Jobs              []JobDetail       `json:"jobs"`
 	Attempts          []AttemptDetail   `json:"attempts"`
+	Steps             []StepDetail      `json:"steps,omitempty"`
 	Logs              []blob.LogSubject `json:"logs"`
 	StartedAt         *time.Time        `json:"started_at,omitempty"`
 	FinishedAt        *time.Time        `json:"finished_at,omitempty"`

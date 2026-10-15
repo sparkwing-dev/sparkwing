@@ -577,9 +577,6 @@ func gatherTips() []InfoTip {
 	if t, ok := tipTabComplete(); ok {
 		tips = append(tips, t)
 	}
-	if t, ok := tipDashboardNotRunning(); ok {
-		tips = append(tips, t)
-	}
 
 	return tips
 }
@@ -656,22 +653,6 @@ func completionConfigured(candidates []string) bool {
 		}
 	}
 	return false
-}
-
-func tipDashboardNotRunning() (InfoTip, bool) {
-	dp, err := resolveDashboardPaths("")
-	if err != nil {
-		return InfoTip{}, false
-	}
-	if _, alive := readLivePID(dp.pid); alive {
-		return InfoTip{}, false
-	}
-	return InfoTip{
-		ID:      "dashboard",
-		Title:   "Local dashboard is not running",
-		Command: "sparkwing serve start",
-		Note:    "runs at http://127.0.0.1:4343; open the link it prints",
-	}, true
 }
 
 func goToolchainVersion() string {

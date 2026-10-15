@@ -76,6 +76,37 @@ exercise exact result replay, stale-fence refusal and expansion failure, and
 check old-engine request fixtures across the guaranteed window. Stub bodies do
 not establish these behaviors.
 
+### Public run observations
+
+`controllerwire.RunReader` uses the same authenticated transport as `Controller`
+for CLI status views. `ReadRun` retains one `RunDetail` for local and remote
+connections. Its optional `steps` field carries `StepDetail` values when a client
+requests step history. No execution seal or raw store row enters these views.
+
+The W9 observation types complete three existing C2 GET routes:
+
+| Route | Request | Response |
+| --- | --- | --- |
+| `/api/v1/runs` | positive `limit`, opaque `cursor`, optional exact `parent_run_id` | `RunPage` with `runs`, `next_cursor`, `truncated` |
+| `/api/v1/runs/{run}/steps` | stable ID or team number | `RunSteps` with `steps` |
+| `/api/v1/runs/{run}/receipt` | stable ID or team number | `Receipt` |
+
+Pages contain public run details. A truncated page supplies a new nonempty
+cursor. A final page has an empty cursor. The parent filter selects direct
+children. CLI tree traversal consumes every page and refuses repeated run IDs
+or cursors. The server still authenticates every read through C2's route policy.
+
+Steps identify `job_id`, step `id`, label, attempt, state, masked reason and
+timestamps. Receipts retain the controller's identity hashes, job-named steps,
+cost and settlement facts. Input hashes exclude secret arguments. The CLI does
+not calculate replacement costs or receipt hashes. These W9 wire additions need
+W2's final read adapters. Transport fakes establish client behavior only.
+
+Status follow compares the observed detail, including read-time policy notices,
+and refreshes descendant trees independently of the parent's state sequence.
+An interrupted, timed-out or otherwise incomplete observation exits 3. Invalid
+flags exit 2. Terminal failure exits 1 unless `--exit-zero` is selected.
+
 `EngineOptions.Launcher` selects `/api/v1/launcher/claim` for every launcher
 selection, including node-only and named jobs. Unit kinds cannot distinguish
 a runner's `nodes.claim` credential from a launcher's `claims.launch`

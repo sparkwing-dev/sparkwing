@@ -1,0 +1,143 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
+)
+
+type upgradeResolver interface {
+	Upgrade(context.Context, engine.UpgradeRequest, engine.UpgradeVerifier) (engine.UpgradeResult, error)
+}
+
+type upgradeCommand struct {
+	newResolver func() (upgradeResolver, error)
+	verifier    engine.UpgradeVerifier
+	out         io.Writer
+	terminal    bool
+}
+
+func runUpgrade(args []string) error {
+	command := upgradeCommand{
+		newResolver: func() (upgradeResolver, error) {
+			mode, err := toolchain.ParseMode(os.Getenv("SPARKWING_TOOLCHAIN"))
+			if err != nil {
+				return nil, err
+			}
+			return engine.NewResolver(engine.Config{Mode: mode})
+		},
+		verifier: &upgradeVerifier{environment: os.Environ(), buildEnv: procenv.Build, exec: executeUpgradeCheck},
+		out:      os.Stdout, terminal: color.IsInteractiveStdout(),
+	}
+	return command.run(context.Background(), args)
+}
+
+func (c upgradeCommand) run(ctx context.Context, args []string) error {
+	inv, err := clisurface.Parse("sparkwing", append([]string{"upgrade"}, args...))
+	if err != nil {
+		return err
+	}
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), c.out, inv.Output(c.terminal))
+	}
+	start := inv.Value("checkout")
+	if start == "" {
+		start, err = os.Getwd()
+		if err != nil {
+			return err
+		}
+	}
+	dir, err := findSparkwingDirFrom(start)
+	if err != nil {
+		return err
+	}
+	typescript, err := pipelineentry.IsTypeScript(dir)
+	if err != nil {
+		return err
+	}
+	sdk := engine.GoSDK
+	if typescript {
+		sdk = engine.TypeScriptSDK
+	}
+	resolver, err := c.newResolver()
+	if err != nil {
+		return err
+	}
+	request := engine.UpgradeRequest{Checkout: filepath.Dir(dir), SDK: sdk, Version: inv.Value("version"), DryRun: inv.Bool("dry-run")}
+	result, err := resolver.Upgrade(ctx, request, c.verifier)
+	if err != nil {
+		return err
+	}
+	if result.DryRun != request.DryRun || result.DryRun && (result.Applied || result.Verified) || !result.DryRun && !result.Verified {
+		return errors.New("upgrade: resolver returned an inconsistent verification result")
+	}
+	if !result.DryRun && len(result.Plan.Edits) > 0 && !result.Applied {
+		return errors.New("upgrade: verified pin changes were not applied")
+	}
+	return writeUpgradeReport(c.out, inv.Output(c.terminal), result)
+}
+
+type upgradeReport struct {
+	Before   engine.Pin      `json:"before"`
+	After    engine.Pin      `json:"after"`
+	Engine   engine.Identity `json:"engine"`
+	Files    []string        `json:"files"`
+	Notices  []engine.Notice `json:"notices"`
+	Applied  bool            `json:"applied"`
+	Verified bool            `json:"verified"`
+	DryRun   bool            `json:"dry_run"`
+}
+
+func writeUpgradeReport(out io.Writer, format string, result engine.UpgradeResult) error {
+	report := upgradeReport{Before: result.Plan.Before, After: result.Plan.After, Engine: result.Plan.Engine, Files: []string{}, Notices: result.Plan.Notices, Applied: result.Applied, Verified: result.Verified, DryRun: result.DryRun}
+	if report.Notices == nil {
+		report.Notices = []engine.Notice{}
+	}
+	for _, edit := range result.Plan.Edits {
+		report.Files = append(report.Files, edit.Path)
+	}
+	if format == "json" {
+		return json.NewEncoder(out).Encode(report)
+	}
+	if format == "plain" {
+		_, err := fmt.Fprintln(out, report.After.Version)
+		return err
+	}
+	status := "Verified"
+	if result.Applied {
+		status = "Verified and applied"
+	}
+	if result.DryRun {
+		status = "Preview"
+	}
+	if _, err := fmt.Fprintf(out, "%s: %s SDK %s -> %s\n", status, report.After.SDK, report.Before.Version, report.After.Version); err != nil {
+		return err
+	}
+	for _, path := range report.Files {
+		if _, err := fmt.Fprintln(out, "  "+path); err != nil {
+			return err
+		}
+	}
+	for _, notice := range report.Notices {
+		if _, err := fmt.Fprintln(out, "warning: "+notice.Reason); err != nil {
+			return err
+		}
+		if notice.Hint != "" {
+			if _, err := fmt.Fprintln(out, "hint: "+notice.Hint); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

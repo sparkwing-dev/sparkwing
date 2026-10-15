@@ -257,30 +257,6 @@ func (c *Client) getRun(ctx context.Context, runID string, secretValues bool) (*
 	}
 }
 
-// GetRunReceipt fetches the receipt JSON for a run. Returned as raw
-// bytes so callers can pretty-print or pipe without round-trip
-// re-encoding (the receipt's hashes commit to canonical bytes).
-func (c *Client) GetRunReceipt(ctx context.Context, runID string) ([]byte, error) {
-	u := fmt.Sprintf("%s/api/v1/runs/%s/receipt", c.baseURL, url.PathEscape(runID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusOK:
-		return io.ReadAll(resp.Body)
-	case http.StatusNotFound:
-		return nil, notFound(resp)
-	default:
-		return nil, readHTTPError(resp)
-	}
-}
-
 func (c *Client) ListNodes(ctx context.Context, runID string) ([]*store.Node, error) {
 	u := fmt.Sprintf("%s/api/v1/runs/%s/nodes", c.baseURL, url.PathEscape(runID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)

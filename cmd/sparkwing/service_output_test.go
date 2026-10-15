@@ -2,104 +2,10 @@ package main
 
 import (
 	"bytes"
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
-
-func TestServiceOutputStoppedRoutes(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.2s of real work; the fast class runs under -short")
-	}
-	for _, tc := range []struct {
-		args    []string
-		service string
-		code    int
-	}{
-		{[]string{"serve", "status"}, "dashboard", 1},
-		{[]string{"serve", "stop"}, "dashboard", 0},
-		{[]string{"runs", "consumer", "status"}, "consumer", 1},
-		{[]string{"runs", "consumer", "stop"}, "consumer", 0},
-	} {
-		for _, mode := range []string{"", "json", "plain", "pretty"} {
-			t.Run(strings.Join(tc.args, " ")+"/"+mode, func(t *testing.T) {
-				args := append([]string{}, tc.args...)
-				if mode != "" {
-					args = append(args, "--output", mode)
-				}
-				cmd := outputContractCommand(t, args...)
-				var stderr bytes.Buffer
-				cmd.Stderr = &stderr
-				out, err := cmd.Output()
-				if cmd.ProcessState.ExitCode() != tc.code {
-					t.Fatalf("exit: %v: %s", err, &stderr)
-				}
-				switch mode {
-				case "", "json":
-					records := decodeOutputRecords(t, out)
-					if len(records) != 1 || records[0]["service"] != tc.service || records[0]["state"] != "stopped" || records[0]["home"] == "" {
-						t.Fatalf("status: %s", out)
-					}
-				case "plain":
-					if string(out) != "stopped\n" {
-						t.Fatalf("plain: %q", out)
-					}
-				case "pretty":
-					if !strings.Contains(string(out), "not running") && !strings.Contains(string(out), "stopped") {
-						t.Fatalf("pretty: %q", out)
-					}
-				}
-			})
-		}
-	}
-}
-
-func TestServiceOutputDoesNotTrustOpaqueDashboardPID(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(home, "dashboard.pid"), fmt.Appendf(nil, "%d", os.Getpid()), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cmd := outputContractCommand(t, "serve", "status")
-	cmd.Env = setEnv(cmd.Env, "SPARKWING_HOME", home)
-	out, err := cmd.Output()
-	if err == nil || cmd.ProcessState.ExitCode() != 2 {
-		t.Fatalf("opaque PID error: %v", err)
-	}
-	records := decodeOutputRecords(t, out)
-	if len(records) != 1 || records[0]["state"] != "unknown" || records[0]["pid"] != float64(os.Getpid()) || records[0]["home"] != home {
-		t.Fatalf("running report: %s", out)
-	}
-	if _, ok := records[0]["url"]; ok {
-		t.Fatalf("missing URL should not become prose in JSON: %s", out)
-	}
-}
-
-func TestServiceOutputRejectsModesBeforeStart(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
-	}
-	for _, args := range [][]string{{"serve", "start"}, {"runs", "consumer", "start"}} {
-		for _, flag := range [][]string{{"--output="}, {"-o=jsonl"}, {"--output"}} {
-			cmd := outputContractCommand(t, append(append([]string{}, args...), flag...)...)
-			var stderr bytes.Buffer
-			cmd.Stderr = &stderr
-			out, err := cmd.Output()
-			if err == nil || len(out) != 0 || !strings.Contains(stderr.String(), "pretty|json|plain") {
-				t.Fatalf("%v %v: %v %q %s", args, flag, err, out, &stderr)
-			}
-			for _, name := range []string{"dashboard.pid", "dashboard.log", "trigger-consumer.pid", "trigger-consumer.log", "trigger-consumer.lock"} {
-				if _, err := os.Stat(filepath.Join(cmd.Dir, "state", name)); !os.IsNotExist(err) {
-					t.Fatalf("invalid mode touched %s: %v", name, err)
-				}
-			}
-		}
-	}
-}
 
 func TestHooksStatusOutputRoute(t *testing.T) {
 	repo := gateRepo(t)

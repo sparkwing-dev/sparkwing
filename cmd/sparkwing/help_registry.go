@@ -252,7 +252,7 @@ var commandSynopses = map[string]string{
 	"sparkwing runs prune":                          "Delete finished runs older than a threshold, or by id",
 	"sparkwing runs retry":                          "Trigger fresh runs copying pipeline + args from old ones",
 	"sparkwing runs stats":                          "Report run counts, success rate, and duration percentiles",
-	"sparkwing runs status":                         "Show one run's status (non-zero exit unless status=success)",
+	"sparkwing runs status":                         "Read one run's status, attempts, notices and selected view",
 	"sparkwing schedules":                           "Manage scheduled pipeline runs",
 	"sparkwing schedules install":                   "Arm a repo's declared schedules on this host and install the OS timer",
 	"sparkwing schedules list":                      "List the schedules armed on this host",
@@ -325,7 +325,6 @@ var (
 	cmdDashboard                      = surfaceCommand("sparkwing dashboard")
 	cmdDashboardStart                 = surfaceCommand("sparkwing dashboard start")
 	cmdDashboardStop                  = surfaceCommand("sparkwing dashboard stop")
-	cmdDashboardRestart               = Command{Path: "sparkwing dashboard restart", Hidden: true}
 	cmdDashboardLogs                  = surfaceCommand("sparkwing dashboard logs")
 	cmdDashboardStatus                = surfaceCommand("sparkwing dashboard status")
 	cmdWorker                         = Command{Path: "sparkwing cluster worker", Hidden: true}

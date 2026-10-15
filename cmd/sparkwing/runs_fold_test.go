@@ -41,42 +41,6 @@ func runsFoldHome(t *testing.T, runs ...store.Run) orchestrator.Paths {
 	return paths
 }
 
-func TestRunsStatusFollowTimeoutExitsTwo(t *testing.T) {
-	runsFoldHome(t, store.Run{ID: "run-busy", Pipeline: "build", Status: "running", StartedAt: time.Now()})
-	var err error
-	captureStdout(t, func() {
-		err = runJobs([]string{"status", "run-busy", "--follow", "--timeout", "50ms", "--poll", "10ms", "-o", "json"})
-	})
-	if exitCodeFor(err) != 2 {
-		t.Fatalf("err = %v (exit %d), want exit 2 on timeout", err, exitCodeFor(err))
-	}
-}
-
-func TestRunsStatusFollowReturnsTheTerminalRecord(t *testing.T) {
-	runsFoldHome(t, store.Run{ID: "run-done", Pipeline: "build", Status: "failed", StartedAt: time.Now()})
-	var err error
-	out := captureStdout(t, func() {
-		err = runJobs([]string{"status", "run-done", "--follow", "--timeout", "1m", "-o", "json"})
-	})
-	if exitCodeFor(err) != 1 || !strings.Contains(out, `"run-done"`) {
-		t.Fatalf("out=%q err=%v, want the run record and exit 1 for a failed run", out, err)
-	}
-}
-
-func TestRunsStatusTimeoutNeedsFollow(t *testing.T) {
-	runsFoldHome(t)
-	if err := runJobs([]string{"status", "run-x", "--timeout", "1m"}); err == nil || !strings.Contains(err.Error(), "--follow") {
-		t.Fatalf("err = %v, want --timeout to require --follow", err)
-	}
-}
-
-func TestRunsStatusRejectsAnUnknownView(t *testing.T) {
-	runsFoldHome(t, store.Run{ID: "run-done", Pipeline: "build", Status: "success", StartedAt: time.Now()})
-	if err := runJobs([]string{"status", "run-done", "--view", "gantt"}); err == nil || !strings.Contains(err.Error(), "summary|timeline|receipt|errors|tree") {
-		t.Fatalf("err = %v, want the view list", err)
-	}
-}
-
 func TestRunsListFiltersByRepositoryAndRootOnly(t *testing.T) {
 	runsFoldHome(t,
 		store.Run{ID: "run-web", Pipeline: "build", Status: "success", StartedAt: time.Now(), DeclaredRepo: "acme/web"},

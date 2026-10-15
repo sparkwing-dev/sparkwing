@@ -36,9 +36,6 @@ func TestRunReadersDistinguishMissingRunFromEmptyRun(t *testing.T) {
 		"logs": func(id string) error {
 			return orchestrator.JobLogs(context.Background(), paths, id, orchestrator.LogsOpts{}, &bytes.Buffer{})
 		},
-		"errors": func(id string) error {
-			return orchestrator.JobErrors(context.Background(), paths, id, false, &bytes.Buffer{})
-		},
 		"annotations": func(id string) error {
 			_, err := listLocalAnnotations(context.Background(), paths, id, "", "", false)
 			return err

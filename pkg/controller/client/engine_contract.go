@@ -27,6 +27,23 @@ type EngineOptions struct {
 // It decodes errors once with apierr.DecodeInner, accepts additive fields and
 // unknown codes, and branches on codes rather than treating every 409 as lease loss.
 func NewEngineClient(options EngineOptions) (controllerwire.Controller, error) {
+	c, err := newEngineClient(options)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// NewRunReader uses the authenticated controller transport for public run views.
+func NewRunReader(options EngineOptions) (controllerwire.RunReader, error) {
+	c, err := newEngineClient(options)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func newEngineClient(options EngineOptions) (*engineClient, error) {
 	base, err := url.Parse(options.URL)
 	if err != nil || base == nil || base.Host == "" || (base.Scheme != "http" && base.Scheme != "https") || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
 		return nil, fmt.Errorf("controller URL must be an HTTP(S) base URL without credentials, query or fragment")

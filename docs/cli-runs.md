@@ -19,7 +19,7 @@ Inspect and control pipeline runs
 - `prune` -- Delete finished runs older than a threshold, or by id
 - `retry` -- Trigger fresh runs copying pipeline + args from old ones
 - `stats` -- Report run counts, success rate, and duration percentiles
-- `status` -- Show one run's status (non-zero exit unless status=success)
+- `status` -- Read one run's status, attempts, notices and selected view
 
 ### Flags
 
@@ -322,7 +322,15 @@ Report run counts, success rate, and duration percentiles
 
 ## `sparkwing runs status`
 
-Show one run's status (non-zero exit unless status=success)
+Read one run's status, attempts, notices and selected view
+
+Read the same public run detail through a controller profile or the local controller. Numeric run selectors are per-team numbers.
+
+Views: summary, timeline, receipt, errors, tree. --steps includes recorded steps. Receipts retain the controller's hashes and settled cost.
+
+--follow streams observations until the run ends. Exit 0 means success, 1 means a failed or cancelled run, 2 means invalid usage, and 3 means the observation is incomplete. --exit-zero suppresses terminal failure only.
+
+JSON preserves run details and notices. Plain prints the status, failed job IDs for errors, run IDs for tree, or the receipt hash. --steps adds job/step IDs in plain status and tree output.
 
 ### Flags
 

@@ -127,7 +127,6 @@ func clientCalls() []struct {
 			_, err := c.GetRunForExecution(ctx, "r1")
 			return err
 		}},
-		{"GetRunReceipt", func(ctx context.Context, c *client.Client) error { _, err := c.GetRunReceipt(ctx, "r1"); return err }},
 		{"GetLatestRun", func(ctx context.Context, c *client.Client) error {
 			_, err := c.GetLatestRun(ctx, "p", nil, 0)
 			return err

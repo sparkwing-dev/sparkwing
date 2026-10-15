@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
 )
 
@@ -268,7 +269,7 @@ func resolveNpmCacheDir(workdir string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if command, err := npmCacheCommand(ctx, goruntime.GOOS, exec.LookPath); err == nil {
+	if command, err := pipelineentry.NPMCommand(ctx, goruntime.GOOS, exec.LookPath, "config", "get", "cache"); err == nil {
 		command.Dir = workdir
 		if out, err := command.Output(); err == nil {
 			if v := strings.TrimSpace(string(out)); v != "" && v != "undefined" {
@@ -277,23 +278,6 @@ func resolveNpmCacheDir(workdir string) (string, error) {
 		}
 	}
 	return defaultNpmCacheDir(goruntime.GOOS)
-}
-
-func npmCacheCommand(ctx context.Context, goos string, lookPath func(string) (string, error)) (*exec.Cmd, error) {
-	npm, err := lookPath("npm")
-	if err != nil {
-		return nil, err
-	}
-	args := []string{"config", "get", "cache"}
-	if goos != "windows" || strings.EqualFold(filepath.Ext(npm), ".exe") {
-		return exec.CommandContext(ctx, npm, args...), nil
-	}
-	node, err := lookPath("node")
-	if err != nil {
-		return nil, err
-	}
-	cli := filepath.Join(filepath.Dir(npm), "node_modules", "npm", "bin", "npm-cli.js")
-	return exec.CommandContext(ctx, node, append([]string{cli}, args...)...), nil
 }
 
 func defaultNpmCacheDir(goos string) (string, error) {

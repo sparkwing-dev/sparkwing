@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,25 +47,6 @@ func writeRun(t *testing.T, path, id string) {
 	}
 }
 
-func TestRunJobsReceipt_ReadsAStandaloneRun(t *testing.T) {
-	paths := standaloneHome(t)
-	out := captureStdout(t, func() {
-		if err := renderRunView(context.Background(), paths, runView{name: "receipt", runID: "run-alone", format: "json"}); err != nil {
-			t.Fatalf("receipt view: %v", err)
-		}
-	})
-	var rec map[string]any
-	if err := json.Unmarshal([]byte(out), &rec); err != nil {
-		t.Fatalf("decode receipt: %v\n%s", err, out)
-	}
-	if rec["run_id"] != "run-alone" {
-		t.Fatalf("run_id = %v, want run-alone", rec["run_id"])
-	}
-	if rec["store"] != "standalone/state.db" {
-		t.Fatalf("store = %v, want standalone/state.db", rec["store"])
-	}
-}
-
 func TestRunsRetry_StandaloneRunReachesTheRefusalWithNoDashboard(t *testing.T) {
 	standaloneHome(t)
 	err := runRunsRetry(context.Background(), []string{"--run", "run-alone", "--failed"})
@@ -101,23 +81,6 @@ func TestRunsAnnotate_WritesIntoTheStandaloneStore(t *testing.T) {
 	}
 	if len(node.Annotations) != 1 || node.Annotations[0] != "from the test" {
 		t.Fatalf("annotation did not land in the standalone store: %v", node.Annotations)
-	}
-}
-
-func TestRunsErrors_ReportsAStandaloneRunsFailure(t *testing.T) {
-	paths := standaloneHome(t)
-	writeFailedNode(t, paths.StandaloneStateDB(), "run-alone", "n1", "boom")
-
-	out := captureStdout(t, func() {
-		if err := orchestrator.JobErrors(context.Background(), paths, "run-alone", false, os.Stdout); err != nil {
-			t.Fatalf("JobErrors: %v", err)
-		}
-	})
-	if strings.Contains(out, "no failing nodes") {
-		t.Fatalf("runs errors reported a clean run for a failed standalone run:\n%s", out)
-	}
-	if !strings.Contains(out, "boom") {
-		t.Fatalf("runs errors did not report the failure:\n%s", out)
 	}
 }
 
