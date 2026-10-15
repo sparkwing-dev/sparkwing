@@ -110,44 +110,55 @@ func runCacheWarmCommand(ctx context.Context, args []string, out io.Writer, deps
 	return err
 }
 
-func warmLocalPipeline(ctx context.Context, dir string, env []string, diagnostics io.Writer) (result cacheWarmResult, err error) {
+func warmLocalPipeline(ctx context.Context, dir string, env []string, diagnostics io.Writer) (cacheWarmResult, error) {
+	return warmLocalPipelineWith(ctx, dir, env, diagnostics, resolveWarmEngine, func(ctx context.Context, selected engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
+		return selected.InstallSDK(ctx, request)
+	})
+}
+
+func resolveWarmEngine(ctx context.Context, dir string, sdk engine.SDKKind) (engine.Resolved, error) {
+	pin, err := engine.ReadPin(dir, sdk)
+	if err != nil {
+		return engine.Resolved{}, err
+	}
+	mode, err := toolchain.ParseMode(os.Getenv(toolchainModeEnv))
+	if err != nil {
+		return engine.Resolved{}, err
+	}
+	resolver, err := engine.NewResolver(engine.Config{Mode: mode})
+	if err != nil {
+		return engine.Resolved{}, err
+	}
+	return resolver.Resolve(ctx, pin, releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH})
+}
+
+func warmLocalPipelineWith(ctx context.Context, dir string, env []string, diagnostics io.Writer, resolve func(context.Context, string, engine.SDKKind) (engine.Resolved, error), install func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error)) (result cacheWarmResult, err error) {
 	result.Kind = "cache_warm"
 	ts, err := pipelineentry.IsTypeScript(dir)
 	if err != nil {
 		return result, err
 	}
 	sdk := engine.GoSDK
-	result.Language = "go"
 	if ts {
 		sdk = engine.TypeScriptSDK
-		result.Language = "typescript"
 	}
-	pin, err := engine.ReadPin(dir, sdk)
-	if err != nil {
-		return result, err
-	}
-	mode, err := toolchain.ParseMode(os.Getenv(toolchainModeEnv))
-	if err != nil {
-		return result, err
-	}
-	resolver, err := engine.NewResolver(engine.Config{Mode: mode})
-	if err != nil {
-		return result, err
-	}
-	selected, err := resolver.Resolve(ctx, pin, releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH})
+	selected, err := resolve(ctx, dir, sdk)
 	if err != nil {
 		return result, err
 	}
 	if err := writeEngineNotices(diagnostics, selected.Notices); err != nil {
 		return result, err
 	}
-	prepared, err := selected.InstallSDK(ctx, engine.SDKInstallRequest{Directory: filepath.Dir(dir), PipelineDir: filepath.Base(dir), SDK: sdk, Environment: env})
+	prepared, err := install(ctx, selected, engine.SDKInstallRequest{Directory: filepath.Dir(dir), PipelineDir: filepath.Base(dir), SDK: sdk, Environment: env})
 	if err != nil {
 		return result, err
 	}
 	if len(prepared.Command) == 0 || !filepath.IsAbs(prepared.Command[0]) {
-		return result, errors.New("Go preparation returned an invalid command")
+		return result, errors.New("SDK preparation returned an invalid command")
 	}
-	result.Status, result.Path = "prepared", prepared.Command[0]
+	result.Language, result.Status, result.Path = string(sdk), "prepared", prepared.Command[0]
+	if ts {
+		result.Path = filepath.Join(dir, "node_modules")
+	}
 	return result, nil
 }

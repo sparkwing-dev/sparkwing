@@ -112,6 +112,15 @@ func localRunSettingFlags(flags runFlags) settings.Values {
 		return fallback
 	}
 	values := settings.Values{}
+	if has("sw-only", flags.only != "") {
+		values.Only = &flags.only
+	}
+	if has("sw-stop-at", flags.stopAt != "") {
+		values.StopAt = &flags.stopAt
+	}
+	if has("sw-start-at", flags.startAt != "") {
+		values.StartAt = &flags.startAt
+	}
 	if has("publish", flags.publish != "") {
 		values.Publish = &flags.publish
 	}

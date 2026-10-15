@@ -17,7 +17,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 
 ## Functions
 
-- `func Annotate(ctx context.Context, annotation Annotation)` -- safety: Annotate preserves structured location while the host masks and enforces the 128 KiB limit.
+- `func Annotate(ctx context.Context, annotation Annotation)` -- Annotate emits a located annotation during execution and panics on invalid input or host write failure.
 - `func Debug(ctx context.Context, format string, args ...any)` -- Debug emits a debug record; the host decides whether to retain it.
 - `func Error(ctx context.Context, format string, args ...any)` -- Error emits an error-level message.
 - `func GithubOwnerRepo(slug string) (owner, repo string)` -- GithubOwnerRepo splits a "owner/name" slug into its parts.
@@ -25,10 +25,10 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - `func Info(ctx context.Context, format string, args ...any)` -- Info emits an info-level message to the active logger.
 - `func Inputs[T any](ctx context.Context) T` -- Inputs returns the typed Inputs struct that the orchestrator parsed for the current run -- the same value the pipeline's Plan(ctx, plan, in T, rc) method received.
 - `func IsDryRun(ctx context.Context) bool` -- IsDryRun reports whether ctx is in dry-run mode.
-- `func Main()` -- safety: Main keeps a pipeline executable independent of the controller and store.
-- `func Mask(ctx context.Context, value string) error` -- safety: Mask returns only after host registration so subsequent output cannot race masking.
+- `func Main()` -- Main serves registered pipelines over the node protocol.
+- `func Mask(ctx context.Context, value string) error` -- Mask returns only after host registration so subsequent output cannot race masking.
 - `func MustSecret(ctx context.Context, name string) string` -- MustSecret is Secret that panics on error.
-- `func MustVariable(ctx context.Context, name string) string` -- safety: MustVariable makes a missing required plain value fail the job.
+- `func MustVariable(ctx context.Context, name string) string` -- MustVariable makes a missing required plain value fail the job.
 - `func OIDCToken(ctx context.Context, audience string) (string, error)` -- OIDCToken returns an ID token the controller signed for this run, with aud set to audience.
 - `func Path(parts ...string) string` -- Path joins parts onto WorkDir() and returns the absolute path.
 - `func PipelineSecrets[T any](ctx context.Context) *T` -- PipelineSecrets returns the typed Secrets struct installed on ctx, or nil when the pipeline doesn't implement SecretsProvider.
@@ -39,7 +39,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - `func Secret(ctx context.Context, name string) (string, error)` -- Secret resolves a masked value through the resolver installed on ctx.
 - `func StepGet[T any](ctx context.Context, step *WorkStep) T` -- StepGet blocks until step has completed, then returns its typed output as T. Used inside another step's body when composing values from upstream typed steps.
 - `func Summary(ctx context.Context, markdown string)` -- Summary emits markdown for the active job or step.
-- `func Variable(ctx context.Context, name string) (string, error)` -- safety: Variable distinguishes a declared unmasked value from a secret.
+- `func Variable(ctx context.Context, name string) (string, error)` -- Variable distinguishes a declared unmasked value from a secret.
 - `func Warn(ctx context.Context, format string, args ...any)` -- Warn emits a warn-level message.
 - `func WithCommandEnv(ctx context.Context, env map[string]string) context.Context` -- WithCommandEnv returns a context whose sparkwing.Exec/Bash calls inherit env.
 - `func WorkDir() string` -- WorkDir returns the pipeline working directory (the repo root).
@@ -76,7 +76,7 @@ type AfterRunFn func(ctx context.Context, err error)
 
 ### type Annotation
 
-safety: Annotation carries source location and the same severity vocabulary as log records.
+Annotation carries source location and the same severity vocabulary as log records.
 
 ```
 type Annotation struct {
@@ -92,7 +92,7 @@ type Annotation struct {
 
 ### type Approval
 
-safety: Approval exposes only declarative gate behavior because gates execute no job hooks.
+Approval exposes only declarative gate behavior because gates execute no job hooks.
 
 ```
 type Approval struct {
@@ -100,18 +100,18 @@ type Approval struct {
 }
 ```
 
-- `func (a *Approval) ContinueOnError() *Approval` -- safety: ContinueOnError permits dependents after a gate failure.
-- `func (a *Approval) ID() string` -- safety: ID permits gate references without exposing executable-job internals.
-- `func (a *Approval) Needs(deps ...Dep) *Approval` -- safety: Needs waits for prerequisite jobs before requesting a decision.
-- `func (a *Approval) NeedsGenerated(generators ...*Generator) *Approval` -- safety: NeedsGenerated keeps a gate behind the persisted expansion barrier.
-- `func (a *Approval) NeedsIfPresent(deps ...Dep) *Approval` -- safety: NeedsIfPresent permits plans whose optional prerequisite is absent.
-- `func (a *Approval) OnFailure(id string, body any) *JobNode` -- safety: OnFailure declares an executable recovery job separate from the gate.
-- `func (a *Approval) Optional() *Approval` -- safety: Optional excludes a denied or expired gate from required run success.
-- `func (a *Approval) SkipIf(predicate SkipPredicate, opts ...SkipOption) *Approval` -- safety: SkipIf conditions gate admission without running executable before/after hooks.
+- `func (a *Approval) ContinueOnError() *Approval` -- ContinueOnError permits dependents after a gate failure.
+- `func (a *Approval) ID() string` -- ID permits gate references without exposing executable-job internals.
+- `func (a *Approval) Needs(deps ...Dep) *Approval` -- Needs waits for prerequisite jobs before requesting a decision.
+- `func (a *Approval) NeedsGenerated(generators ...*Generator) *Approval` -- NeedsGenerated keeps a gate behind the persisted expansion barrier.
+- `func (a *Approval) NeedsIfPresent(deps ...Dep) *Approval` -- NeedsIfPresent permits plans whose optional prerequisite is absent.
+- `func (a *Approval) OnFailure(id string, body any) *JobNode` -- OnFailure declares and returns a recovery job for a failed gate.
+- `func (a *Approval) Optional() *Approval` -- Optional excludes a denied or expired gate from required run success.
+- `func (a *Approval) SkipIf(predicate SkipPredicate, opts ...SkipOption) *Approval` -- SkipIf conditions gate admission without running executable before/after hooks.
 
 ### type ApprovalConfig
 
-safety: ApprovalConfig preserves indefinite waiting when Timeout is zero.
+ApprovalConfig preserves indefinite waiting when Timeout is zero.
 
 ```
 type ApprovalConfig struct {
@@ -173,7 +173,7 @@ type BeforeRunFn func(ctx context.Context) error
 
 ### type Checkout
 
-safety: Checkout distinguishes absent source settings from explicit zero and false values.
+Checkout distinguishes absent source settings from explicit zero and false values.
 
 ```
 type Checkout struct {
@@ -291,18 +291,18 @@ type DirCache struct {
 
 - `func Dir(path string, key KeySource) DirCache` -- Dir declares a dependency cache rooted at path with explicit key inputs.
 - `func GoModules() DirCache` -- GoModules caches downloaded Go modules using go.sum as its input.
-- `func Npm() DirCache` -- safety: Npm requests npm's download cache without introducing a package proxy.
-- `func (c DirCache) Key(workdir string) (string, error)` -- Key hashes the cache declaration, platform and first present key file inside workdir.
+- `func Npm() DirCache` -- Npm requests npm's download cache without introducing a package proxy.
+- `func (c DirCache) Key(workdir string) (string, error)` -- Key hashes the declaration, platform and first present key file contained in workdir.
 
 ### type EnvOption
 
-safety: EnvOption distinguishes process startup settings from body-only environment.
+EnvOption distinguishes process startup settings from body-only environment.
 
 ```
 type EnvOption func(*envOptions)
 ```
 
-- `func Startup() EnvOption` -- safety: Startup marks interpreter configuration that must never influence plan declarations.
+- `func Startup() EnvOption` -- Startup marks interpreter configuration that must never influence plan declarations.
 
 ### type EnvVarDoc
 
@@ -436,7 +436,7 @@ const (
 
 ### type GenerateFn
 
-safety: GenerateFn reconstructs executable declarations from the source's persisted output.
+GenerateFn reconstructs declarations from persisted source output without the source job's body environment.
 
 ```
 type GenerateFn func(context.Context, *Plan) error
@@ -445,7 +445,7 @@ type GenerateFn func(context.Context, *Plan) error
 
 ### type Generator
 
-safety: Generator identifies a source expansion whose settlement precedes dependent jobs.
+Generator identifies a source expansion whose settlement precedes dependent jobs.
 
 ```
 type Generator struct {
@@ -453,7 +453,7 @@ type Generator struct {
 }
 ```
 
-- `func (g *Generator) ID() string` -- safety: ID exposes the stable group identifier used in persisted expansion identity.
+- `func (g *Generator) ID() string` -- ID exposes the stable group identifier used in persisted expansion identity.
 
 ### type Git
 
@@ -519,20 +519,20 @@ type JobGroup struct {
 - `func GroupJobs(p *Plan, name string, nodes ...*JobNode) *JobGroup` -- GroupJobs groups existing Plan nodes under name and returns a dependency target covering every member.
 - `func JobFanOut[T any](p *Plan, name string, items []T, fn func(T) (string, any)) *JobGroup` -- JobFanOut registers one job per item during plan construction.
 - `func (g *JobGroup) AfterRun(fn AfterRunFn) *JobGroup` -- AfterRun registers a post-run hook on every member.
-- `func (g *JobGroup) Artifacts(globs ...string) *JobGroup` -- safety: Artifacts applies published-file patterns to every group member.
+- `func (g *JobGroup) Artifacts(globs ...string) *JobGroup` -- Artifacts applies published-file patterns to every group member.
 - `func (g *JobGroup) BeforeRun(fn BeforeRunFn) *JobGroup` -- BeforeRun registers a pre-run hook on every member.
-- `func (g *JobGroup) Cache(caches ...DirCache) *JobGroup` -- safety: Cache applies dependency-file declarations to every group member.
+- `func (g *JobGroup) Cache(caches ...DirCache) *JobGroup` -- Cache applies dependency-file declarations to every group member.
 - `func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup` -- Concurrency enrolls every member of the group in concurrency group g with the given admission cost.
 - `func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup` -- Consumes stages the given producer's artifacts into every member's workspace before it runs, and implies Needs(producer) on each.
 - `func (g *JobGroup) ContinueOnError() *JobGroup` -- ContinueOnError marks every member so downstream dependents proceed even on failure.
-- `func (g *JobGroup) Env(key, value string, opts ...EnvOption) *JobGroup` -- safety: Env applies the same startup/body distinction to all members.
+- `func (g *JobGroup) Env(key, value string, opts ...EnvOption) *JobGroup` -- Env applies the same startup/body distinction to all members.
 - `func (g *JobGroup) Inline() *JobGroup` -- Inline places every member on the dispatcher's host.
 - `func (g *JobGroup) Members() []*JobNode` -- Members returns the group's jobs in declaration order.
-- `func (g *JobGroup) Memo(key MemoKeyFn, opts ...MemoOption) *JobGroup` -- safety: Memo applies one reuse policy to each static or generated group member.
+- `func (g *JobGroup) Memo(key MemoKeyFn, opts ...MemoOption) *JobGroup` -- Memo applies one reuse policy to each static or generated group member.
 - `func (g *JobGroup) Name() string` -- Name returns the group's declared name, or "" for an unnamed (structural-only) group.
 - `func (g *JobGroup) Needs(deps ...Dep) *JobGroup` -- Needs declares an upstream dependency on every member of the group.
-- `func (g *JobGroup) NeedsGenerated(generators ...*Generator) *JobGroup` -- safety: NeedsGenerated carries the same expansion barrier to every group member.
-- `func (g *JobGroup) NeedsIfPresent(deps ...Dep) *JobGroup` -- safety: NeedsIfPresent applies presence-sensitive ordering to every group member.
+- `func (g *JobGroup) NeedsGenerated(generators ...*Generator) *JobGroup` -- NeedsGenerated carries the same expansion barrier to every group member.
+- `func (g *JobGroup) NeedsIfPresent(deps ...Dep) *JobGroup` -- NeedsIfPresent applies presence-sensitive ordering to every group member.
 - `func (g *JobGroup) NeedsTools(names ...string) *JobGroup` -- NeedsTools restricts every member to agents that have the named tools.
 - `func (g *JobGroup) NoProgressTimeout(d time.Duration) *JobGroup` -- NoProgressTimeout sets the per-attempt inactivity timeout on every member.
 - `func (g *JobGroup) Optional() *JobGroup` -- Optional marks every member as non-essential.
@@ -556,23 +556,23 @@ type JobNode struct {
 
 - `func Job(p *Plan, id string, x any) *JobNode` -- Job registers a Workable or func(context.Context) error under id.
 - `func (n *JobNode) AfterRun(fn AfterRunFn) *JobNode` -- AfterRun registers a hook invoked after Run and all retries finish.
-- `func (n *JobNode) Artifacts(globs ...string) *JobNode` -- safety: Artifacts distinguishes published files from the job's typed output.
+- `func (n *JobNode) Artifacts(globs ...string) *JobNode` -- Artifacts distinguishes published files from the job's typed output.
 - `func (n *JobNode) BeforeRun(fn BeforeRunFn) *JobNode` -- BeforeRun registers a hook to run once before the node's Run method on the first attempt.
-- `func (n *JobNode) Cache(caches ...DirCache) *JobNode` -- safety: Cache declares files restored through the host-authorized depcache scope.
+- `func (n *JobNode) Cache(caches ...DirCache) *JobNode` -- Cache declares files restored through the host-authorized depcache scope.
 - `func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode` -- Concurrency enrolls the node in concurrency group g with the given admission cost (default 1).
 - `func (n *JobNode) Consumes(producer *JobNode, opts ...ConsumeOption) *JobNode` -- Consumes declares that this node stages the artifacts produced by producer into its workspace before it runs, and implies Needs(producer).
 - `func (n *JobNode) ContinueOnError() *JobNode` -- ContinueOnError tells the orchestrator that downstream dependents should proceed even when this node fails.
-- `func (n *JobNode) Env(key, value string, opts ...EnvOption) *JobNode` -- safety: Env defaults to body scope; startup declarations take effect before attempt process creation.
-- `func (n *JobNode) Generate(fn GenerateFn) *Generator` -- safety: Generate declares an expansion after source success or memo reuse; the host owns acceptance.
+- `func (n *JobNode) Env(key, value string, opts ...EnvOption) *JobNode` -- Env defaults to body scope; startup declarations take effect before attempt process creation.
+- `func (n *JobNode) Generate(fn GenerateFn) *Generator` -- Generate declares an expansion after source success or memo reuse; the host owns acceptance.
 - `func (n *JobNode) ID() string`
 - `func (n *JobNode) Inline() *JobNode` -- Inline places the node on the dispatcher's host.
-- `func (n *JobNode) Memo(key MemoKeyFn, opts ...MemoOption) *JobNode` -- safety: Memo declares result reuse; missing or corrupt cached bytes produce a miss.
+- `func (n *JobNode) Memo(key MemoKeyFn, opts ...MemoOption) *JobNode` -- Memo declares result reuse; missing or corrupt cached bytes produce a miss.
 - `func (n *JobNode) Needs(deps ...Dep) *JobNode` -- Needs declares hard upstream dependencies.
-- `func (n *JobNode) NeedsGenerated(generators ...*Generator) *JobNode` -- safety: NeedsGenerated waits for expansion settlement and all generated prerequisites.
-- `func (n *JobNode) NeedsIfPresent(deps ...Dep) *JobNode` -- safety: NeedsIfPresent ignores absent dependencies but preserves failure ordering for present jobs.
+- `func (n *JobNode) NeedsGenerated(generators ...*Generator) *JobNode` -- NeedsGenerated waits for expansion settlement and all generated prerequisites.
+- `func (n *JobNode) NeedsIfPresent(deps ...Dep) *JobNode` -- NeedsIfPresent ignores absent dependencies but preserves failure ordering for present jobs.
 - `func (n *JobNode) NeedsTools(names ...string) *JobNode` -- NeedsTools restricts the job to agents that have every named tool on their PATH.
 - `func (n *JobNode) NoProgressTimeout(d time.Duration) *JobNode` -- NoProgressTimeout caps how long an attempt may run without emitting a node log record.
-- `func (n *JobNode) OnFailure(id string, x any) *JobNode` -- OnFailure registers a recovery node that runs only when this node terminates with outcome=failed; otherwise it's marked Skipped.
+- `func (n *JobNode) OnFailure(id string, x any) *JobNode` -- OnFailure declares and returns a recovery job that runs when this job fails.
 - `func (n *JobNode) Optional() *JobNode` -- Optional marks the node as non-essential: a failure is logged as a warning and does not count toward the run's overall success/fail outcome.
 - `func (n *JobNode) Prefers(labels ...string) *JobNode` -- Prefers holds the node back, for the controller's placement hold, from a claim-mode runner that does not advertise the labels while a live runner that does advertise them has a free slot.
 - `func (n *JobNode) Requires(labels ...string) *JobNode` -- Requires records label terms used to filter runner claims for non-inline dispatched jobs.
@@ -625,7 +625,7 @@ type Logger interface {
 
 ### type MemoKeyFn
 
-safety: MemoKeyFn evaluates author-owned inputs before the host scopes their key.
+MemoKeyFn evaluates author-owned inputs before the host scopes their key.
 
 ```
 type MemoKeyFn func(context.Context) (MemoValue, error)
@@ -634,17 +634,17 @@ type MemoKeyFn func(context.Context) (MemoValue, error)
 
 ### type MemoOption
 
-safety: MemoOption keeps unset TTL distinct from an explicit duration.
+MemoOption keeps unset TTL distinct from an explicit duration.
 
 ```
 type MemoOption func(*memoOptions)
 ```
 
-- `func MemoTTL(d time.Duration) MemoOption` -- safety: MemoTTL declares retention subject to the host's ceiling at plan acceptance.
+- `func MemoTTL(d time.Duration) MemoOption` -- MemoTTL declares retention subject to the host's ceiling at plan acceptance.
 
 ### type MemoValue
 
-safety: MemoValue separates job-result reuse from dependency file caches.
+MemoValue separates job-result reuse from dependency file caches.
 
 ```
 type MemoValue string
@@ -654,7 +654,7 @@ type MemoValue string
 const NoMemo MemoValue = "memo:none"
 ```
 
-- `func MemoKey(parts ...any) MemoValue` -- safety: MemoKey hashes ordered inputs; callers resolve references before hashing.
+- `func MemoKey(parts ...any) MemoValue` -- MemoKey hashes ordered inputs; callers resolve references before hashing.
 
 ### type NoInputs
 
@@ -765,8 +765,8 @@ type Plan struct {
 
 - `func NewPlan() *Plan`
 - `func (p *Plan) AdmissionClass(class AdmissionClass) *Plan` -- AdmissionClass sets the pipeline's local contention class.
-- `func (p *Plan) Approval(id string, cfg ApprovalConfig) *Approval` -- safety: Approval declares a manual gate whose owner enforces waiting and timeout policy.
-- `func (p *Plan) Checkout(config Checkout) *Plan` -- safety: Checkout declares source preferences for host resolution without reading YAML in the SDK.
+- `func (p *Plan) Approval(id string, cfg ApprovalConfig) *Approval` -- Approval declares a manual gate whose owner enforces waiting and timeout policy.
+- `func (p *Plan) Checkout(config Checkout) *Plan` -- Checkout declares source preferences for host resolution without reading YAML in the SDK.
 - `func (p *Plan) ClaimWait(d time.Duration) *Plan` -- ClaimWait declares how long each ready job may wait for a runner claim.
 - `func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan` -- Concurrency gates the whole run on concurrency group g: the run acquires each declared plan-level budget before any node dispatches and releases it when the run reaches a terminal status.
 - `func (p *Plan) Priority(n int) *Plan` -- Priority sets this run's local admission priority.
@@ -891,7 +891,7 @@ RetryOption tunes a Retry(...) call.
 type RetryOption func(*RetryConfig)
 ```
 
-- `func Backoff(d time.Duration) RetryOption` -- safety: Backoff declares retry delay without selecting an execution placement.
+- `func Backoff(d time.Duration) RetryOption` -- Backoff declares retry delay without selecting an execution placement.
 
 ### type RunContext
 
@@ -1104,7 +1104,7 @@ type Work struct {
 ```
 
 - `func NewWork() *Work` -- NewWork returns an empty Work.
-- `func (w *Work) FailurePolicy(policy ParallelFailurePolicy) *Work` -- safety: FailurePolicy chooses fail_fast or collect_all without changing dependency requirements.
+- `func (w *Work) FailurePolicy(policy ParallelFailurePolicy) *Work` -- FailurePolicy chooses fail_fast or collect_all without changing dependency requirements.
 
 ### type WorkDep
 

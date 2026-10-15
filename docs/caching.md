@@ -77,6 +77,11 @@ path, missing input or read failure returns an error.
 
 ### Storage
 
+Local runs keep archives under `$SPARKWING_HOME/depcache/`. Hosts with a signed
+data binding restore through it and refresh the binding after execution, so
+retries save under the final attempt. A refused binding runs cold or skips saving.
+Downloads verify length and SHA-256 and close before extraction publishes files.
+
 Remote cache records use repository-bound authority and signed `/data` transfers.
 The read-only cache contract permits verified default-branch memo, artifact and
 dependency-cache records. It has no write or pipeline-binary fetch operation.

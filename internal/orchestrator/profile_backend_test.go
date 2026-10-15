@@ -55,10 +55,11 @@ func TestOpenReadBackendForProfile_ControllerProfile(t *testing.T) {
 	}
 }
 
-func TestResolveLocalBackends_OpensThisMachinesStore(t *testing.T) {
+func TestResolveLocalBackends_OpensOnlyState(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_URL", "bogus-scheme://removed")
 	paths := Paths{Root: t.TempDir()}
 	opts := Options{DefaultStateDB: filepath.Join(paths.Root, "state.db")}
-	if err := resolveLocalBackends(&opts, paths, false); err != nil {
+	if err := resolveLocalBackends(&opts, false); err != nil {
 		t.Fatalf("resolveLocalBackends: %v", err)
 	}
 	st, ok := opts.State.(*store.Store)
@@ -66,8 +67,8 @@ func TestResolveLocalBackends_OpensThisMachinesStore(t *testing.T) {
 		t.Fatalf("State = %T, want *store.Store", opts.State)
 	}
 	defer st.Close()
-	if opts.ArtifactStore == nil {
-		t.Error("no local artifact cache")
+	if _, err := os.Stat(filepath.Join(paths.Root, "cache")); !os.IsNotExist(err) {
+		t.Fatalf("opened the retired artifact cache: %v", err)
 	}
 }
 
@@ -79,7 +80,7 @@ func TestResolveLocalBackends_RespectsPreSetState(t *testing.T) {
 	defer pre.Close()
 	paths := Paths{Root: t.TempDir()}
 	opts := Options{State: pre, DefaultStateDB: filepath.Join(paths.Root, "should-not-win.db")}
-	if err := resolveLocalBackends(&opts, paths, false); err != nil {
+	if err := resolveLocalBackends(&opts, false); err != nil {
 		t.Fatalf("resolveLocalBackends: %v", err)
 	}
 	if opts.State != pre {

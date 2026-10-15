@@ -1,6 +1,0 @@
-# pkg/storage/conformance
-
-func TestArtifactStore(t *testing.T, factory func() storage.ArtifactStore)
-func TestConditionalWriter(t *testing.T, factory func() storage.ArtifactStore)
-func TestConditionalWriterAcrossHandles(t *testing.T, pair func() (storage.ArtifactStore, storage.ArtifactStore))
-func TestLogStore(t *testing.T, factory func() storage.LogStore)

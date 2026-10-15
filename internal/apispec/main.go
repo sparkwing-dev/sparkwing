@@ -126,6 +126,9 @@ func operationDocument(builder *schemaBuilder, route capability.RoutePolicy, pat
 			}
 			responses["2XX"] = schema{"description": "Response selected by the request operation.", "content": jsonContent(schema{"anyOf": variants})}
 		}
+		if body.response == nil && len(body.variants) == 0 {
+			responses["204"] = schema{"description": "Completed without a response body."}
+		}
 		if body.selector != nil {
 			params = append(params, schema{"name": "selector", "in": "query", "required": true, "content": jsonContent(builder.value(body.selector))})
 		}

@@ -95,6 +95,226 @@ unlock.
 - **controller (Breaking):** Run intake, plan acceptance and lifecycle writes use the shared capability policy and controller wire. Raw run upserts and plan snapshots are removed. Child intake binds to its parent job, retries retain the source seal, and run finish commits its owner unit in the same transaction
 - **controller (Breaking):** Deployment limits, signup controls and object-store administration use separate grants under `/api/v1/operator`. Team storage reads omit deployment totals. Usage-metrics and repo-dispatch endpoints are removed. See [migration guide](docs/migrations/_unreleased.md#deployment-authorization).
 - **controller (Breaking):** Twelve console endpoints use the shared authorization policy. Account/team deletion, installation unbinding and credit-settings writes move under `/api/v1/operator` and refuse deployment bearers. Console mutations require CSRF proof and record the authenticated account ID. See [migration guide](docs/migrations/_unreleased.md#console-authorization).
+
+### Added
+- **controller:** Embedded data bindings validate persisted uploader identity, reserve uploads before signing, settle receipts after byte verification and check every record edge. Remote-cache bindings require verified default-branch reads and reject writes.
+- **controller:** Job cancellation and persisted recovery failures use the shared capability policy. Cancellation preserves a live holder's result rights. Failure reads require the declared recovery edge and source generation.
+- **controller:** A run owner can read `/api/v1/runs/{run}/snapshot` through the shared capability policy. One committed read supplies job state, accepted declarations and generator membership, including empty groups.
+- **controller:** The generator expansion endpoint accepts success or a structured failure under live owner or eval authority. It binds submission to the source job and generation and passes both outcomes to the same store transaction.
+- **controller:** Remove unused cache-service egress flag selection and proxy
+  usage classification.
+
+- **storage (Breaking):** Removed `AttemptReport.OutputFrom`, the `output_from`
+  attempt payload, `Store.FinishNodeCopyingOutput` and the unused backend
+  output-read methods. Memo materialization uses transactional blob records.
+  See [migration steps](docs/migrations/_unreleased.md#memo-copies-use-transactional-blob-records).
+
+- **storage (Breaking):** Configuring the controller's data backend also installs
+  transactional result verification against its physical manifests. Corrupt
+  manifests refuse completion without changing the job. Removed unused
+  `storage.SafeArtifactKey`, `storage.SafeRelPath`, `Store.PrunableNodeLogs`
+  and `Store.DeleteRunNodeLogs`. See
+  [migration steps](docs/migrations/_unreleased.md#storage-uses-record-backed-maintenance).
+
+- **storage (Breaking):** Run and team log cleanup uses the shared filesystem
+  or S3 backend, including retired retention classes and late signed uploads.
+  Removed `fs.ArtifactStore` and its sharded reader, writer and locks.
+  Deployment measurement uses `fs.NewUsageReporter`.
+  See [migration steps](docs/migrations/_unreleased.md#filesystem-object-writes-use-signed-transfers).
+
+- **storage (Breaking):** Standalone controllers configure the shared filesystem
+  data backend and signed transfer routes. Removed the older filesystem output
+  signer, output routes, raw log adapter and `Server.WithOutputSignKey`. See
+  [migration steps](docs/migrations/_unreleased.md#filesystem-transfers-use-the-shared-data-backend).
+
+- **storage (Breaking):** The controller's leased maintenance pass collects
+  unreachable CAS objects through the configured backend. Removed bucket-listing
+  accounting, the free-log-share pruner, `WithStoragePass`, `RunStoragePass`,
+  `StoragePassEvery` and the `storage_pass` health field. See
+  [migration steps](docs/migrations/_unreleased.md#storage-uses-record-backed-maintenance).
+
+- **storage:** Opted-in remote memo and dependency-cache lookups let the server
+  select the verified default ref. Local archive readers can restore without a
+  caller-selected ref. Local saves stay local after remote misses.
+
+- **storage (Breaking):** Log readers expose only reads and streams. Removed
+  `LogStore.Append`, `LogStore.DeleteRun`, `NodeLogs.Append`,
+  `NodeLogs.DeleteRun` and the unused `storage.SafeLogIDs` helper. See
+  [migration steps](docs/migrations/_unreleased.md#log-readers-expose-only-reads).
+
+- **storage (Breaking):** Removed the unused filesystem append-log backend
+  and append/delete `conformance.TestLogStore` suite, plus the cache-specific
+  `artifact_store_error` daemon status field.
+  Tagged sinks write immutable log segments. See
+  [migration steps](docs/migrations/_unreleased.md#filesystem-logs-use-tagged-segments).
+
+- **storage:** (Breaking) Physical log key helpers move from `logseg` to
+  `internal/blob`. Signed log slots reserve zero for the final manifest and use
+  positive segment indexes. Store and authenticated transport binding remain pending.
+
+- **storage:** SDK and host dependency-cache keys share workspace-contained
+  lockfile reads. Go module caches use the protocol resolver. Signed-data cache
+  saves refresh the upload binding after retries. Refused bindings run cold.
+
+- **storage:** Filesystem and S3 manifest readers verify stored length, digest
+  and successful close before returning file metadata. Authenticated controller
+  binding remains pending.
+
+- **storage:** Filesystem and S3 CAS backends support the leased reachability
+  collector. Removed age-based output pruning and bucket-measurement expiry.
+  Referenced bytes survive regardless of object age.
+
+- **storage:** Blob commits require the upload ticket's verified staging bytes
+  even when identical final content exists. A digest alone cannot mint another
+  uploader's receipt. Committed receipt replay remains a store operation.
+- **storage:** Repo-bound remote-cache readers can use verified cache read edges
+  without a job attempt. Binary, source and owner-upload edges remain excluded.
+
+- **storage (Breaking):** Removed the raw `storage.ArtifactStore` interface,
+  `storage.ErrListNotSupported`, `conformance.TestArtifactStore` and unused
+  `s3.ArtifactStore.Delete`. Shared signed-data bytes and records own storage.
+  See [migration steps](docs/migrations/_unreleased.md#raw-artifact-plug-ins-are-removed).
+
+- **storage (Breaking):** Direct source fetches keep Git objects in each run's
+  checkout. Removed persistent Git mirrors, shared worktrees and mirror eviction.
+  See [migration steps](docs/migrations/_unreleased.md#direct-source-fetches-own-their-git-objects).
+- **storage (Breaking):** Local binary-cache status and pruning use only the
+  current entry layout. Removed old-layout discovery, quarantine and retirement,
+  and the `legacy_entries` and `legacy_bytes` fields from `cache info -o json`.
+  See [migration steps](docs/migrations/_unreleased.md#local-binary-caches-use-one-layout).
+- **storage:** Artifact staging and dependency-cache restore now check download
+  close errors before publishing files. Failed downloads preserve the destination
+  for that object.
+
+### Removed
+- **storage (Breaking):** removed cache-grant issuance, verification, the controller credential and the grant-authenticated data routes
+  Services no longer announce those routes. Authenticated byte/record adapter wiring remains incomplete. See [migration steps](docs/migrations/_unreleased.md#cache-grants-are-removed).
+- **logs (Breaking):** removed `logseg.AttemptPrefix` and flat manifest identity fields
+  Sinks require a tagged subject. Manifest reads and abandoned seals check the
+  subject against the object prefix. See [migration steps](docs/migrations/_unreleased.md#log-identities-use-tagged-subjects).
+- **storage (Breaking):** removed the cache-service accounting client, its five internal counter routes and the `storage.count` service scope
+  Storage and download accounting remains in the controller's database. See [migration steps](docs/migrations/_unreleased.md#cache-service-accounting-is-removed).
+- **logs (Breaking):** moved retention-class parsing from `logseg.ClassDays` into the internal byte-storage owner
+  Log keys, expiry and controller cleanup use the same canonical class check.
+- **logs (Breaking):** removed reads of unrecorded exported log objects
+  The controller reads logs indexed by the store. Object listings no longer make an unrecorded log readable.
+- **storage (Breaking):** removed runner and launcher gitcache/package-proxy options, agent `gitcache`, controller cache URL announcements, and the CLI cache-health probe. Runners fetch source directly. Custom registry settings use `run.submit_env_allow`.
+- **runner (Breaking):** removed legacy shared binary transfers and cache-grant environment renewal
+  Runners build into their machine's binary cache while the new record-backed storage client awaits host binding.
+- **storage (Breaking):** removed the cache-grant source client and pretrigger object-key uploads
+  Source bundles use verified blob transfers and exact uploader records. Working-tree triggers fail before upload or submission until intake and host storage bindings are connected.
+
+### Added
+- **logs:** added filesystem expiry and S3 lifecycle checks and segment reads
+  Storage components expire files by their stored class and verify S3 segments through committed records. Controller maintenance and tagged-log routes remain pending.
+- **logs:** Added batch signing and filesystem transfer support for tagged logs
+  The storage components issue fifteen-minute PUT-only URLs and preserve the first payload at each segment or manifest key. Controller and host bindings remain pending.
+- **controller wire (Breaking):** Execution reports preserve their source attempt ordinal
+  Job transitions keep omission distinct from zero and forward the ordinal into the store's replay fence. Typed step reports use the existing start, finish and skip routes with acknowledged persistence. Launcher sync carries complete award and Kubernetes Job-instance identities, cleanup requires a UID precondition, and failed decoding cannot expose a partial response with bearer material. Native step and launcher bindings remain integration requirements. See [execution reports](docs/api.md#intake-execution-and-display) and [launcher reconciliation](docs/api.md#launcher-reconciliation).
+
+- **debug CLI (Breaking):** Job inspection uses the shared public controller projections
+  Env and attach use the local API socket or profile transport. Failed pause reads stay errors. Attach uses the server's explicit pod, namespace and execution container. JSON streams shell output in `debug_output` records. Native debug projection bindings remain an integration requirement. See [job inspection](docs/debugging.md).
+
+- **engine CLI (Breaking):** Local dispatch uses the shared exact SDK-matched engine resolver
+  Newer installed versions and missing release assets cannot substitute another engine. Cached starts still check signed policy. The legacy CLI downloader, cache and environment recursion marker are removed. Native engine resolution remains an integration requirement.
+
+- **daemon events (Breaking):** Cursor pagination replaces offsets
+  Continuations retain the original time cutoff and unread history across appends. Changed history fails with a restart hint. JSON includes a final page record. See [migration](docs/migrations/_unreleased.md#daemon-event-cursors).
+- **daemon (Breaking):** Status, stop and restart use the shared local controller lifecycle
+  JSON reports safe lifecycle state and activity. Restart preserves stopped controllers and waits for shutdown before replacement. Store/API diagnostics move to doctor. Native local-services construction remains an integration requirement. See [migration](docs/migrations/_unreleased.md#daemon-lifecycle-reports).
+- **controller wire (Breaking):** Job reports retain the complete structured failure for recovery
+  `JobResult.Failure` replaces the error-only field and preserves job, stage and canonical error details. See [migration](docs/migrations/_unreleased.md#job-failure-reports).
+
+- **TypeScript SDK release:** required native Windows x64 and arm64 bridge builds feed one version-stamped package assembly. Publication uses the checked package, and missing or skipped native verification blocks assembly. Windows execution still requires CI evidence.
+- **API documentation:** OpenAPI is generated from the final capability policy and shared JSON types. Removed legacy trigger routes and handler/store schemas are deleted. Operations without a documented success body are marked explicitly.
+
+- **upgrade:** verification calls the selected engine's SDK installer before Go compilation or TypeScript type checking and describe/plan checks. Captured install/check environments share a masker for proxy credentials. Native engine resolution and upgrade staging remain integration requirements.
+- **API documentation:** the HTTP reference is generated from the final capability policy, retaining credential alternatives, grants, binding, liveness, audience and retry rules. API, signed-data and versioning guides describe the frozen contracts and name native integration boundaries.
+
+- **sparks:** (Breaking) `pipeline sparks inflate --library MODULE` copies a library into the project through the shared command grammar. Plain output reports its destination. Catalog and agent guidance use the same selector. See [migration](docs/migrations/_unreleased.md#spark-library-inflation).
+- **documentation:** fenced CLI examples are checked against the shared parser, including flags, selectors and pipeline argument separators. Local execution, scheduling and security guides describe sealed inputs, capabilities and the exclusive Cloud Job boundary, with native integration gaps stated.
+
+- **here runs:** sealed resume and retry follow public logs through their final persisted segments. The first interrupt requests controller cancellation while hosting continues. A second interrupt stops and joins hosting and log following. Incomplete observation exits 3.
+- **runner enrollment:** (Breaking) uses the complete machine runner schema and keeps the bearer in its private credential file. Omitted concurrency stays unset and uses the shared default of one. Explicit empty preferences survive writes and rollback. See [migration](docs/migrations/_unreleased.md#runner-enrollment-files).
+
+- **pipeline aliases:** (Breaking) local argument parsing, help, completion and catalog metadata use the configured SDK entrypoint while keeping the invoked pipeline name. Aliases retain the entrypoint's secret classifications and risk declarations. `pipeline plan --pipeline NAME -- <args>` passes required inputs to the registered entrypoint while preserving the invoked alias in the run context. Previews and structured planning failures redact secret arguments. Plan output uses `jobs`; the unreachable static-plan parser and renderer are removed. See [migration](docs/migrations/_unreleased.md#plan-inspection).
+
+- **cli rewrite:** here retries retain their one-time bearer in a private controller/run-bound file. `pipeline trigger --resume` resolves the existing run and passes its awarded seals to the shared host. Incomplete handoffs exit 3 without claiming native execution. Native host construction and initial trigger intake remain integration requirements.
+
+### Added
+- **cli rewrite:** Go SDK preparation builds and reuses local pipeline binaries. The compiler, toolchain probes and missing-sum recovery use the captured install environment and masked diagnostics. Cache identity includes Go build settings and the selected workspace dependencies. `cache warm` uses the same compiler. Matching-engine acquisition and native host composition remain integration requirements.
+- **cli rewrite (Breaking):** `runs retry` uses the shared controller API with explicit `failed` or `all` selection and independent idempotency keys. Receipts exclude sealed execution inputs and here credentials. Post-trigger outcome reads use one public run detail. Removed the legacy retry/list-trigger clients and undispatched trigger-management CLI. Native retry intake, reuse and here handoff remain integration requirements. See [migration](docs/migrations/_unreleased.md#retry-requests-and-receipts).
+- **protocol documentation:** publish generated v2 schemas for hello, job requests, flat plans and shared errors. Documentation checks reject wire-shape drift. The protocol guide describes handle transport and node-host services; native placement conformance remains part of the rewrite.
+- **cli rewrite:** runner enrollment writes a private credential file under `runner.credentials_dir`. Failed configuration or service installation revokes the new credential and restores the previous enrollment without overwriting concurrent changes. See [migration](docs/migrations/_unreleased.md#runner-enrollment-files).
+- **controller client:** mixed claims use `/runners/claim`; launcher claims, synchronization and bootstrap exchange retain private execution inputs. Here intake, retry and claim handoffs do not automatically replay one-time credentials. Recovery reads preserve persisted failures and expansion state. The shared data client now supplies signed transfers and logical record operations over HTTP or api.sock. Final server adapters remain integration requirements.
+- **engine CLI:** the hidden SDK installer validates the matching pin, filters its inherited environment and masks installer diagnostics. TypeScript preparation returns Node argv without a preload. Native Go preparation, engine resolution and host composition remain integration requirements.
+- **cli (Breaking):** queue reads use the shared authenticated client. `queue list --group` replaces the removed cluster concurrency handler. Group views retain capacity, leases and ordered jobs. Priority adapters preserve explicit zero and stable mutation keys. Native controller projections and replay remain integration requirements. See [migration](docs/migrations/_unreleased.md#queue-and-concurrency-views).
+- **cli rewrite:** (Breaking) `cache warm` prepares TypeScript dependencies and emits a preparation receipt. Go preparation uses the shared installer seam and reports `unavailable` until its native compiler binding exists. Local compilation no longer downloads or uploads pipeline binaries through gitcache. The removed sparks warmup entrypoint and its remote-transfer tests are deleted. TypeScript installer output and preparation errors, including structured hints and details, use the shared proxy-aware stream masker. Native Go preparation still needs the shared compiler environment/output binding. See [migration](docs/migrations/_unreleased.md#local-cache-warming).
+- **cli rewrite:** (Breaking) doctor reads controller lifecycle findings without opening the local state store or repairing files. Reports preserve partial findings and incomplete-check failures. Project toolchain, hook and competing-install diagnostics remain available. Native controller construction and controller-owned repair operations remain integration requirements. See [migration](docs/migrations/_unreleased.md#controller-diagnostics).
+- **cli rewrite:** (Breaking) machine updates use the final `--dry-run` grammar and refresh managed schedule and controller units after verified installation. Success receipts confirm refresh. Refresh failures identify the installed version and retry command. Builds without managed-unit integration refuse before replacement. Removed unused legacy cron, bounce and automatic-retry reset client APIs.
+- **cli rewrite:** runner enrollment and removal use typed, idempotent team credential management with confirmed revocation and explicit runner-kind checks. Repeated labels and repository patterns preserve every value. JSON receipts exclude raw bearers. The unused legacy Client token creation, lookup and revocation APIs and models are removed. Authentication documentation follows capability audiences and marks remaining controller/runtime integration.
+- **cli rewrite:** (Breaking) schedule reads and management use typed `/api/v1/schedules` routes, named schedule selectors and idempotent immediate runs. Overrides retain explicit empty and zero values. Schedule response types move from `internal/api` to `internal/controllerwire`. Local installation, pinning and timer lifecycle still need runtime integration.
+- **cli rewrite:** (Breaking) secrets use typed controller management, preserve pool restrictions and exact input bytes, and separate metadata lists from explicit value reads. Runner listing uses `/api/v1/runners` and retains granted pools, active jobs and headroom. Profile removal requires member metadata and confirmed revocation. Final server projections and restricted-secret enforcement remain integration requirements. The unused legacy Client.RotateSecrets API and unreachable cluster-health report are removed.
+- **cli rewrite:** (Breaking) statistics read every matching controller page. Sizing reads preserve job measurements and demand floors. Pool rules use typed team-admin routes, and token management separates team credentials from deployment credentials. JSON retains mutation results and token metadata. The replaced Client.ListTokens, Client.RotateToken and RotatedToken APIs are removed. Server projections and the missing sizing-reset route remain integration requirements.
+- **cli rewrite:** run listing, logs/search, annotations, approvals and prune use typed controller adapters. Listing filters and pagination reach the controller, follow retains runs that match later, and prune completes selection before deleting. Final server adapters, annotation policy and persisted log completeness remain integration requirements.
+- **cli rewrite:** repository upgrade now has an adapter for staged dependency checks, compilation or type checking, and describe/plan verification with the selected engine. The engine resolver and process-environment implementations are still required for end-to-end upgrades.
+- **cli rewrite:** run status reads the shared controller display model, including attempts and version notices. Receipt, step and paginated child-tree views use typed controller reads. Incomplete observations exit 3, and numeric run selectors reach the controller unchanged. Final controller read adapters remain an integration requirement.
+- **cli rewrite:** the hidden foreground controller command forwards home, version, stay and standalone mode to `LocalRuntime.Run` and waits for shutdown. Budget, headroom and alternate state-db flags require runtime contract fields. Dashboard commands use the local controller lifecycle and managed-unit contracts. The separate supervisor, PID records and restart command are removed. Runtime, service and log-source composition remains an integration requirement.
+- **cli + controller:** `sparkwing pipeline trigger --runner here --reason TEXT` hosts a hotfix run on the caller's machine under a one-shot runner credential bound to that run
+  `POST /api/v1/triggers` takes `runner: here` and a one-line `reason`, mints a runner credential with the trigger, pins the trigger to it and returns it once as `runner_token` with `runner_token_expires_at` (six hours, the hosted-run limit). Only that credential may claim the pinned trigger, once and within 10 minutes; its requests are fenced to the run's own routes; secrets reach the run through its claims as on any runner. The audit line and a `runner_here` run event record the caller, the credential prefix and the reason. See [Hotfix runner](docs/hotfix-runner.md).
+- **cli:** a `.sparkwing/package.json` that depends on `@sparkwing/sdk` is a TypeScript pipeline. `sparkwing run`, `pipeline plan`, help, describe and the pod node host start its `main` file as `node --import <the SDK's ./bootstrap> <main> --sw-node-protocol`, after `npm ci` when `node_modules` lacks the SDK. The preload removes `SPARKWING_NODE_TOKEN` and `SPARKWING_PROTOCOL_HANDLES` before any entry module evaluates, and the TypeScript SDK refuses a process started without it. `sparkwing cache explain` reports it as not cached. Launcher Jobs, dispatched Jobs and warm runners start it the same way and install with their node processes' environment. Node processes and installs on a runner also receive its `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` (either case), `NODE_EXTRA_CA_CERTS` and `SSL_CERT_FILE`
+- **engine:** a retry run on the engine host copies each node its source run already succeeded at, with its output, artifact manifest and a `node_skipped_from_retry` event, instead of running it; a copied generator's nodes are generated again from the copied output in an eval process, and a node whose recorded output is gone runs again; an automatic retry with causes runs only its causes, their dependents (including nodes that wait on what a rerun generator adds) and on_failure nodes and copies every other result. A node whose spec hash differs from its source row, as a regenerated node's may, runs again. A runner-hosted retry rehydrates the same way. A retry whose checkout plans a different plan from its source fails with `retry provenance drift`. Attempts an earlier run of a node's lineage spent come out of the node's retry budget, and a node with none left fails with `exhausted its N execution-attempt budget`
+- **wingwire:** `AdmissionRequest.ParentNodeID`, and `NodeHostParticipant`, `NodeSemaphoreParticipant` and `PlanSemaphoresParticipant`, which name the admission participants a run's nodes and plan groups take
+- **cli:** a `.sparkwing/package.json` that depends on `@sparkwing/sdk` is a TypeScript pipeline. `sparkwing run`, `pipeline plan`, help, describe and the pod node host start its `main` file as `node --import <the SDK's ./bootstrap> <main> --sw-node-protocol`, after `npm ci` when `node_modules` lacks the SDK. The preload removes `SPARKWING_NODE_TOKEN` and `SPARKWING_PROTOCOL_HANDLES` before any entry module evaluates, and the TypeScript SDK refuses a process started without it. Launcher Jobs, dispatched Jobs and warm runners start it the same way and install with their node processes' environment. Node processes and installs on a runner also receive its `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` (either case), `NODE_EXTRA_CA_CERTS` and `SSL_CERT_FILE`
+- **runner image:** ships Node.js 22.23.3 and npm, and declares the `node` and `npm` tools
+- **engine:** the host attempt executor drives a node's steps with one `run_step` each, in `needs` order with independent steps at once, applying fail-fast or collect-all, `finally`, `continue_on_error`, `optional`, step `skip_if`, dry-run and the `--sw-start-at`/`--sw-stop-at` window; it writes the step records and rows, and a node whose steps repeat an id, need an unknown step or form a cycle is `plan_invalid`. The node protocol gains `cancel`, which fail fast sends for each running sibling, and the plan lists each step's `has_dry_run` and `safe_without_dry_run`
+- **engine:** the host scheduler evaluates a succeeded node's `generator` closures in its attempt process, adds the returned nodes once the node's output is recorded, and holds a node with `needs_generated` until every generated node finishes; a generator error, a duplicate id or a generated node that does not need its source cancels the waiting nodes. A generated node's attempt rebuilds it with the generator and fails with `plan_drift` when it differs. The plan document emits `needs_generated`
+- **engine:** an SDK process session that runs `<entry> --sw-node-protocol` as a process-session leader, exchanges requests and frames on fds 3 and 4, records stdout and stderr as text, measures the session's usage, and kills the whole session on cancel
+- **engine:** a node-host attempt executor that runs each node in its own `--sw-node-protocol` process with a node bearer, plans again and fails the node with `plan_drift` when its `spec_hash` differs from the accepted plan's, runs `run_node`, stores the masked logs, error and output, then revokes the bearer and runs the node's cleanups. The stored plan snapshot carries each node's `spec_hash`; a plan with a repeated key or a case-folded alias of a known field is `plan_invalid`. An SDK process whose caller passes no environment gets only `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_*`, `TZ` and `USER` (plus `SystemRoot`, `ComSpec`, `PATHEXT`, `TEMP` and `TMP` on Windows) from the engine
+- **engine:** the host scheduler stages a node's `consumes` into its workspace before it runs and publishes its `outputs` with their digests after it succeeds; an output glob or `into` prefix that leaves the workspace fails the node before it runs
+- **engine:** a host scheduler that plans a run in a short-lived `--sw-node-protocol` process, fills unset flags from describe's defaults, refuses a plan with a cycle, an unknown dependency or a duplicate node or closure id (`plan_invalid`), records the run and node rows, and runs the nodes in dependency order with the in-process dispatcher's failure propagation, optional and continue-on-error semantics and cancellation; no command runs it yet
+- **sdk:** a pipeline binary started with `--sw-node-protocol` answers `describe` and `plan` requests on descriptors 3 and 4 (inherited handles named by `SPARKWING_PROTOCOL_HANDLES` on Windows), with the run context taken from the request
+- **engine:** the host scheduler evaluates a node's `skip_if` closures in an eval process before the node starts or its approval gate asks, each within `skip_if_budget_ms` (30 seconds by default), and skips the node when one returns true; an error or overrun does not skip. Each attempt runs `before_run` on attempt 1 only, `verify` after a successful body, failing the attempt with reason `verify`, a node's generators only once verify passes, and `after_run` in the last attempt with the node's outcome and error, or after a timeout in an eval process of its own bounded to 2 minutes. A failed `before_run` is never retried. The plan document carries `modifiers.skip_if_budget_ms`
+- **engine:** the host scheduler holds a node in a debug pause before it starts (an approval gate before it waits), after it ends, or after it fails, until an operator releases it or the pause times out; a recovery node never pauses. A bounce request kills the node's process session and runs the node again under the same admission lease, and a request that lands as the node ends is recorded as missed
+- **engine:** the host scheduler waits on an approval node's gate in the store instead of running it, with the in-process dispatcher's timeout policies, outcomes, output, annotation and `approval_requested` event; a late human answer wins over the timeout
+- **engine:** host-side node admission: each node takes a local admission lease for its declared cores and memory with the plan's priority and admission class, and runs its `conc_*` concurrency group through the admission daemon (box and run scope) or the coordination store, with the dispatcher's keys, queue timeout, skip, fail, cancel_others eviction and cancel-while-queued behavior; no command runs it yet
+- **engine:** the host scheduler holds the run's plan-level concurrency groups and its own local admission lease from before its first node starts until it ends: a full group under skip skips every node, under fail fails the run, and an eviction or daemon cancel cancels it. The plan document's `plan_concurrency_groups` entries carry `capacity`, `cost`, `on_limit`, `queue_timeout_ms` and `cancel_timeout_ms`
+- **engine:** the host scheduler retries a failed node up to its `retry` budget with the in-process doubling backoff (`retry_auto` included, since each attempt is already a fresh process), keeps the node row running until the last attempt ends, and fails an attempt past its `timeout_ms` (`timeout`) or after `no_progress_timeout_ms` without a log line (`no_progress_timeout`), a count a child-run await holds while it is open
+- **engine:** `nodehost.RecordUsage` records each host attempt's measured session CPU, peak memory and wall time on the node row, where the capacity record reads them; usage that covers only the session leader, as on Windows, is marked partial so it only raises a profile
+- **engine:** the host scheduler memoizes a node with a `cache_key` closure, evaluated in an eval process before the node starts: a stored result for the key is copied with outcome `cached` and no attempt, admission lease or group slot, concurrent runs of one key coalesce behind a leader, and a success records its output under the dispatcher's keys and TTL. `null` (NoCache) runs without memo, and an empty key or a closure error fails the node. A copied result writes the dispatcher's `cache_hit` or `coalesced` event and node log `node_end` record. A copied source's generators run in an eval process, and the output route answers a node's own copied output and reads `cached` nodes
+- **engine:** the host scheduler writes the dispatcher's run events with its payloads: `node_started`, `node_succeeded`, `node_failed`, `node_cancelled`, `node_skipped`, `node_skipped_concurrent`, `node_superseded`, `artifacts_staged`, `artifacts_published`, `attempt_retry`, `node_auto_retry`, `expansion_generated`, `approval_requested`, `plan_skipped_concurrent`, `plan_failed_concurrent` and the `concurrency_*` waits, on a local store and a controller alike, and logs each retry in the node log
+- **engine:** the host scheduler restores a node's `caches` into the repository before the node runs and saves them after it succeeds, with the in-process dispatcher's keys and backends
+- **engine:** a node-host log sink that masks each SDK stdout, stderr and frame log line, stamps it with the host's clock and node, stores it in the run's node log, writes `node_annotation` and `node_summary` records to the store, and stores host-reserved events from the SDK as plain messages
+- **sdk:** under `--sw-node-protocol`, `run_step` runs one step body of a planned node, several at once, and keeps step outputs in the process for later `StepGet` calls; a generator closure's eval adds its nodes to the process's plan and answers their node documents
+- **sdk:** under `--sw-node-protocol`, `run_node` runs a planned node and answers its outcome and output, and `eval` runs a node's `skip_if`, `cache_key`, `before_run`, `verify`, `after_run` or step `skip_if` closure by id, alongside a running node
+- **sdk:** under `--sw-node-protocol`, `Secret`, `Config`, `Ref.Get` of a node that ran in another process, `RefToLastRun`, `RunAndAwait`, `OIDCToken` and `cleanup.Register` call the host's `/node/v1` routes at `SPARKWING_NODE_URL`, and nothing else. The SDK removes `SPARKWING_NODE_TOKEN` from its environment before any package's `init` runs a command, accepts only an `http` loopback URL with a port, never follows a redirect, and retries a 429 for at most 2 minutes. `RunAndAwait`'s `WithFreshTimeout` bounds the whole call, and a 502 while starting a child run is returned rather than retried, so a retry never starts a second child
+- **sdk:** under `--sw-node-protocol`, a node's `PipelineSecrets[T]` struct is filled through the host's secrets route before the body runs; a required secret the host does not hold fails the node naming it, and an optional one stays empty
+- **sdk:** `sparkwing.InputError` is the error a `Registration`'s `Invoke` returns when args fail the declared flags of the pipeline or of a job's `WithArgs`; find it with `errors.As`
+- **controller:** `sparkwing-controller admin freeze|unfreeze --team T --reason R [--hold ID]` holds or releases a team from inside the controller pod when console sign-in is down
+  It acts on the state database directly and commits the console's `team.frozen` and `team.unfrozen` business events with `sparkwing-controller admin` as the actor, and writes an `audit` line to stderr. See [Break-glass](docs/auth.md#break-glass).
+- **controller + web:** The operator console sets a trusted team's daily cap, card rung and Cloud node cap, and releases a payment dispute's hold
+  `POST /api/v1/operator/teams/{team}/unfreeze` takes `hold` to release that one hold, a dispute's included, and `GET /api/v1/operator/teams/{team}` reports `daily_cap_cents`, `rung_cents` and `runner_cap` in `billing`.
+- **controller:** `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input` answers a memo source's `artifact_manifest` with its output grant, so a launcher Job's memo hit or coalesce follower takes its source's output and artifacts from one read instead of running again
+  A memoized node that declares outputs runs as a miss, on every host, when its source's manifest or any file it lists is gone from the artifact store, and a coalesce follower does when its leader recorded no manifest
+- **store:** `SecretPreflightError` refuses a plan whose required secrets the run cannot read, and `EventKindSecretPreflightRefused` names the run event that holds its `Detail`
+
+- **controller + cli:** `GET /api/v1/runs/{id}/logs/{node}/stream` follows a node through every attempt of it in the run and resumes from `Last-Event-ID`
+  Each line carries an event id that resumes the stream after it, and the stream ends with `stream_end` once the node will write no more, so `sparkwing runs logs --follow` shows each retry and replacement claim once, in order, and ends with an error on a refused stream. Following needs a controller that keeps log segments. In Go, `storage.WithLogCursor` carries the cursor to `LogStore.Stream`.
+
+- **runner + controller:** Cluster runners keep each node's log as segments the controller stores
+  Against a controller that advertises `logs.segments` in `GET /api/v1/capabilities`, the Kubernetes Job, warm runner, self-hosted agent, GitHub Actions runner, launcher Job and the trigger runner's in-process nodes and compile output upload a gzip segment every 10 seconds or 1 MiB, and seal the log with a manifest when the binary exits, whether or not they have a logs URL; before, a runner without one left the log on a disk that died with the pod. A runner lost mid-node loses at most the segment it was filling; the controller seals the attempt 60 seconds after the node finished, and the log reads `incomplete`. While a node runs, its runner posts each line to the live ring with its byte offset (`X-Sparkwing-Log-Offset`), so a follow joins the ring to the segments without repeating or skipping a line. New routes: `POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments` (claim or `runs.state`) signs one compressed segment's PUT for its exact size and Content-MD5 and charges the team that size, `POST /api/v1/runs/{id}/nodes/{nodeID}/log-manifest` seals the attempt with a manifest the controller checks against the segments it signed, and `PUT /api/v1/log-segments/{key...}` stores a segment on a controller without a cache bucket. A node holds at most 65 MiB of stored segments, and a launcher pod's claim or a runner's node claim may finish its own attempt's log for 60 seconds after its node reports its outcome. While the controller is unreachable a runner keeps cut segments in its spool and retries them, so a runner lost during an outage loses what it had not uploaded. A controller that keeps no segments sees no change. See [migration guide](docs/migrations/_unreleased.md#node-logs-reach-the-controller-as-segments).
+- **storage:** `pkg/storage/logseg` stores one node attempt's log as numbered segments sealed by a manifest
+  It carries the `Sink` that spools and uploads, the reader (`Open`, `Log.Read`, `Log.Completeness`), the controller's `SealAbandoned` and the key layout. `storage.ReadOpts.Apply` is the one filter every log store applies; the filesystem and S3 stores use it.
+- **client:** `Client.LogSegment`, `Client.SealLog`, `Client.NewLogSegmentUploader` and `Client.KeepsLogSegments` sign, upload and seal a node attempt's log segments, and `Client.NodeLogs` reads, follows and greps node logs through the controller's log routes
+- **store:** Schemas v95 and v100 record where each node attempt's log segments live and which segments the controller signed
+  The `node_logs` table holds the attempt's key prefix, its highest signed segment, stored bytes and seal time, and `node_log_segments` holds each signed segment's size, MD5 and SHA-256. `Store.CurrentNodeAttempt`, `OpenNodeLog`, `SignNodeLogSegment`, `NodeLogSegments`, `MarkNodeLogSealed`, `LatestNodeLog`, `RunNodeLogs`, `AbandonedNodeLogs` and `DeleteRunNodeLogs` read and write them, and the `ClaimLogTail` route class lets an ended claim finish its own attempt's log for `NodeLogSealGrace`.
+
+- **controller:** `--log-retention team=days[,team=days...]` keeps the named teams' node log segments for a set number of days
+  Each distinct number is a retention class under `<cache prefix>/logs/r<days>/` with its own bucket lifecycle rule.
+
+- **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
+
+### Changed
 - **controller wire:** reconciliation preserves materialized result identities by run, job and state sequence. Private snapshots retain sealed guard refusals alongside cancellation, using the store's scheduling projection. Native owner consumption and transactional result copying remain integration requirements.
 
 - **documentation:** guide route examples are checked against the final shared HTTP policy. Source, Actions, limits and log guides use claim-scoped source/data access, job routes and deployment operator namespaces. Native runtime boundaries remain explicit.
@@ -327,6 +547,9 @@ unlock.
 
 ### Removed
 
+- **runner (Breaking):** Removed cache-server source fetching; source and working-tree baselines use upstream Git
+- **engine (Breaking):** Removed the legacy artifact transport; publication and staging require authorized blob records
+- **SDK + storage:** remove the gitcache clone probe and the lint-cache HTTP helpers. Git clones use their upstream directly. Binary transfers use signed controller data routes without cache-service fallbacks.
 - **cli (Breaking):** Remove `runs bounce` and `debug rerun`, including their help entries and rerun pod implementation
 - **store + controller (Breaking):** Removed `SetNodeStatus`, `RevokeNodeReady` and their legacy HTTP handlers. Debug pauses use activity detail. Queue withdrawal uses the owner-fenced node transition. See [migration guide](docs/migrations/_unreleased.md#node-state-writes-use-transitions).
 - **store + controller + doctor (Breaking):** Removed `TouchRunHeartbeat`, `TouchNodeHeartbeat`, `Run.LastHeartbeatAt`, the independent timestamp heartbeat loops and their legacy HTTP handlers. Run liveness follows the owner lease. Doctor no longer finalizes runs from heartbeat age or reports `orphaned_runs`. The elected unit reaper owns expired-owner recovery.

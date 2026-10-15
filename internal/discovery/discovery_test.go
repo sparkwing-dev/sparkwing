@@ -11,13 +11,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 )
 
-func TestServicesFor_ReturnsAnnouncedCachePod(t *testing.T) {
+func TestServicesFor_ReturnsAnnouncedDashboard(t *testing.T) {
 	discovery.ResetCache()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/services" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(discovery.Services{CachePod: "https://cache.example.dev"})
+		_ = json.NewEncoder(w).Encode(discovery.Services{Dashboard: "https://dashboard.example.dev"})
 	}))
 	defer srv.Close()
 
@@ -25,8 +25,8 @@ func TestServicesFor_ReturnsAnnouncedCachePod(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ServicesFor: %v", err)
 	}
-	if svc.CachePod != "https://cache.example.dev" {
-		t.Errorf("CachePod = %q", svc.CachePod)
+	if svc.Dashboard != "https://dashboard.example.dev" {
+		t.Errorf("Dashboard = %q", svc.Dashboard)
 	}
 }
 
@@ -35,7 +35,7 @@ func TestServicesFor_CachesAcrossCalls(t *testing.T) {
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt32(&hits, 1)
-		_ = json.NewEncoder(w).Encode(discovery.Services{CachePod: "https://x"})
+		_ = json.NewEncoder(w).Encode(discovery.Services{Dashboard: "https://x"})
 	}))
 	defer srv.Close()
 
@@ -49,7 +49,7 @@ func TestServicesFor_CachesAcrossCalls(t *testing.T) {
 	}
 }
 
-func TestServicesFor_404IsNoErrorNoCachePod(t *testing.T) {
+func TestServicesFor_404ReturnsNoServices(t *testing.T) {
 	discovery.ResetCache()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -60,8 +60,8 @@ func TestServicesFor_404IsNoErrorNoCachePod(t *testing.T) {
 	if err != nil {
 		t.Errorf("404 should report no error (caller falls back); got %v", err)
 	}
-	if svc.CachePod != "" {
-		t.Errorf("CachePod should be empty on 404; got %q", svc.CachePod)
+	if svc.Dashboard != "" {
+		t.Errorf("Dashboard should be empty on 404; got %q", svc.Dashboard)
 	}
 }
 
@@ -76,7 +76,7 @@ func TestServicesFor_SendsBearerToken(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
-		_ = json.NewEncoder(w).Encode(discovery.Services{CachePod: "x"})
+		_ = json.NewEncoder(w).Encode(discovery.Services{Dashboard: "x"})
 	}))
 	defer srv.Close()
 

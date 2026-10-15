@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -37,9 +38,9 @@ type Config struct {
 	// --sw-stop-at; each must name a step in the plan.
 	StartAt, StopAt string
 	State           storage.StateStoreOld
-	// Artifacts holds the files nodes publish with outputs and stage with
-	// consumes; nil turns both off.
-	Artifacts storage.ArtifactStore
+	// Artifacts resolves storage under the current job's authenticated binding.
+	// A job that declares artifacts requires this binding before it executes.
+	Artifacts func(context.Context, *NodeRun) (artifacts.Data, error)
 	// Execute runs one attempt of a node. Nil runs it with Attempts, and
 	// fails every node it reaches when Attempts is nil too.
 	Execute  Executor

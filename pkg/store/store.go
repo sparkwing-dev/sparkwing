@@ -1699,10 +1699,10 @@ func (s *Store) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outc
 
 // FinishNodeWithOutputRef is [Store.FinishNodeWithOutputRef] confined to t's team.
 func (t *Tenant) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error {
-	return t.finishNode(ctx, runID, nodeID, outcome, errMsg, output, nil, reason, exitCode)
+	return t.finishNode(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
 }
 
-func (t *Tenant) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, copied *copySource,
+func (t *Tenant) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef,
 	reason string, exitCode *int,
 ) error {
 	var code any
@@ -1728,11 +1728,6 @@ func (t *Tenant) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg 
 	}
 	if output != nil {
 		if err := checkOutputRefTx(ctx, tx, Team(team), runID, nodeID, consumed+1, generation, output); err != nil {
-			return err
-		}
-	}
-	if copied != nil {
-		if output, err = sourceOutputRefTx(ctx, tx, Team(team), copied.run, copied.node); err != nil {
 			return err
 		}
 	}

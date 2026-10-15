@@ -533,43 +533,6 @@ func (c *Client) SetPipelinePin(ctx context.Context, pipeline, nodeID string, co
 	return nil
 }
 
-// HeartbeatStatus is the structured response from a heartbeat call.
-type HeartbeatStatus struct {
-	CancelRequested bool `json:"cancel_requested"`
-}
-
-// HeartbeatTrigger charges a metered claim and extends its lease, returning
-// whether cancellation was requested. ErrNotFound or ErrLockHeld means the
-// claim is no longer live and the worker should abort.
-func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatStatus, error) {
-	path := fmt.Sprintf("/api/v1/triggers/%s/heartbeat", url.PathEscape(id))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	setNodeClaimFenceHeaders(req, ctx)
-	resp, err := c.do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusOK:
-		var status HeartbeatStatus
-		if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-			return nil, err
-		}
-		return &status, nil
-	case http.StatusNoContent:
-		// hack: older controllers without cancel support return 204; treat as not-cancelled.
-		return &HeartbeatStatus{}, nil
-	case http.StatusNotFound:
-		return nil, notFound(resp)
-	default:
-		return nil, readHTTPError(resp)
-	}
-}
-
 // TriggerRequest is the body of POST /api/v1/triggers.
 type TriggerRequest struct {
 	Pipeline string            `json:"pipeline"`

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func runWingd(args []string) error {
@@ -106,4 +108,41 @@ func foregroundOptions(inv clisurface.Invocation, options wingd.LocalStartOption
 	}
 	options.Standalone = options.Standalone || inv.Has("standalone-reason")
 	return options, nil
+}
+
+func runWingdRunWith(args []string, open func(context.Context, string) (wingd.LocalController, error)) error {
+	inv, err := clisurface.Parse("sparkwing", append([]string{"wingd", "run"}, args...))
+	if err != nil {
+		return err
+	}
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(false))
+	}
+	if open == nil {
+		return errors.New("local controller composition is unavailable: shared controller authorization, store recovery and trigger hosting must be configured")
+	}
+	options, err := foregroundOptions(inv, wingd.LocalStartOptions{Version: installedVersion()})
+	if err != nil {
+		return err
+	}
+	budget, err := wingd.ResolveBudget("")
+	if err != nil {
+		return err
+	}
+	policy, source, err := wingd.ResolveAdmissionPolicy()
+	if err != nil {
+		return err
+	}
+	logger := log.New(os.Stderr, "", log.LstdFlags|log.LUTC)
+	runtime, err := wingd.NewLocalRuntime(wingd.LocalRuntimeConfig{
+		Admission: wingd.Config{Home: options.Home, Budget: budget.Budget, BudgetSource: budget.Source, BudgetOrigin: budget.Origin, AdmissionPolicy: &policy, StoreSchemaVersion: store.ExpectedSchemaVersion(), Logf: logger.Printf},
+		Open:      open,
+	})
+	if err != nil {
+		return err
+	}
+	logger.Printf("admission mode %s (%s)", policy.Mode, source)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return runtime.Run(ctx, options)
 }

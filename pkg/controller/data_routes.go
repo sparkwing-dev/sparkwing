@@ -16,6 +16,15 @@ type dataDownloadRequest struct {
 	Digest blob.Digest `json:"digest"`
 }
 
+// DataDownloadResponse describes one authorized object and its short-lived URL.
+type DataDownloadResponse struct {
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers"`
+	SHA256  string            `json:"sha256"`
+	Size    int64             `json:"size"`
+	Expires time.Time         `json:"expires"`
+}
+
 type dataPresenceRequest struct {
 	Digests  []blob.Digest `json:"digests"`
 	Deadline time.Time     `json:"deadline,omitzero"`
@@ -28,6 +37,9 @@ type dataPresenceResponse struct {
 // WithDataController supplies authenticated byte and record adapters.
 func (s *Server) WithDataController(data *DataController) *Server {
 	s.dataController = data
+	if data != nil {
+		s.WithDataObjects(data.Objects)
+	}
 	return s
 }
 

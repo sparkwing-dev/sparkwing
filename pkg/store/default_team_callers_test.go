@@ -43,7 +43,6 @@ var defaultTeamCallers = map[string]string{
 	"internal/orchestrator.(localState).CreateDebugPause":              defaultTeamState,
 	"internal/orchestrator.(localState).EnqueueTriggerWithEnv":         defaultTeamState,
 	"internal/orchestrator.(localState).FindSpawnedChildTriggerID":     defaultTeamState,
-	"internal/orchestrator.(localState).FinishNodeCopyingOutput":       defaultTeamState,
 	"internal/orchestrator.(localState).FinishNodeExecutionAttempt":    defaultTeamState,
 	"internal/orchestrator.(localState).FinishNodeStep":                defaultTeamState,
 	"internal/orchestrator.(localState).FinishTrigger":                 defaultTeamState,

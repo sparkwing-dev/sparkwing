@@ -233,7 +233,7 @@ func newEnvelopeRig(t *testing.T, daemon bool) *envelopeRig {
 		startWingd(t, home, 16)
 		r.daemon = &watchedAdmitter{
 			Admitter: &hostedAdmitter{
-				la: testWingdAdmission(home, nil), backends: LocalBackends(paths, st, nil), pipeline: "envelope",
+				la: testWingdAdmission(home, nil), backends: LocalBackends(paths, st), pipeline: "envelope",
 				plan: func() *nodeproto.PlanDoc { return nil },
 			},
 			queued: make(chan string, 64), refused: make(chan string, 64),
@@ -269,9 +269,7 @@ func (r *envelopeRig) start(runID, pipeline string, args map[string]string, twea
 			OpenLog: func(context.Context, string, string) (nodehost.NodeLog, error) { return discardNodeLog{}, nil },
 		},
 		Admission: &nodehost.Admission{Slots: r.slots},
-		Memo: &nodehost.Memo{Slots: r.slots, Source: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) (nodehost.MemoSource, error) {
-			return nodehost.ReadMemoSource(ctx, r.st, runID, nodeID)
-		}},
+		Memo:      &nodehost.Memo{Slots: r.slots},
 	}
 	if r.daemon != nil {
 		cfg.Admission.Daemon = r.daemon

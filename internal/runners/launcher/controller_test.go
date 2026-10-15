@@ -14,6 +14,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	batchv1 "k8s.io/api/batch/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	ktesting "k8s.io/client-go/testing"
 )
 
 type launcherWireFake struct {
@@ -118,7 +121,7 @@ func TestControllerSyncUsesPersistedObservationsAndExactFences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation := CloudJobObservation{Binding: binding, JobName: jobName(binding), JobNamespace: "cloud", JobUID: "instance", NodeUID: "node-uid"}
+	observation := CloudJobObservation{Binding: binding, JobNamespace: "cloud", JobName: jobName(binding), JobUID: "job-uid", NodeUID: "node-uid"}
 	for _, test := range []struct {
 		name           string
 		response       func() controllerwire.LauncherSyncResponse
@@ -274,13 +277,17 @@ func TestControllerEvalSyncPreservesBothGenerations(t *testing.T) {
 			case "wrong_lease":
 				unit.Binding.Expansion.ID = "another-eval"
 			}
-			control, err := NewControllerControl(launcherWireFake{sync: func(context.Context, controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+			control, err := NewControllerControl(launcherWireFake{sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+				want := capability.LeaseRef{Kind: capability.UnitEval, ID: binding.UnitID, Holder: binding.Holder, Generation: binding.Generation}
+				if len(request.Observed) != 1 || request.Observed[0].Award != want {
+					t.Fatalf("eval observation lost its live award: %+v", request.Observed)
+				}
 				return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{unit}}, nil
 			}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitEval}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			states, err := control.Sync(t.Context(), []CloudJobObservation{{Binding: binding, JobName: jobName(binding), JobNamespace: "cloud", JobUID: "instance", NodeUID: "node-uid"}})
+			states, err := control.Sync(t.Context(), []CloudJobObservation{{Binding: binding, JobNamespace: "cloud", JobName: jobName(binding), JobUID: "job-uid", NodeUID: "node-uid"}})
 			if change == "none" {
 				if err != nil || len(states) != 1 || states[0].Binding.Generation != 3 || states[0].Binding.SourceGeneration != 7 {
 					t.Fatalf("live eval lost its two fences: %+v err=%v", states, err)
@@ -290,6 +297,71 @@ func TestControllerEvalSyncPreservesBothGenerations(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLauncherObservesCreatedJobIdentity(t *testing.T) {
+	l, kube, _, control := fixture()
+	kube.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		job := action.(ktesting.CreateAction).GetObject().(*batchv1.Job)
+		job.UID = "created-job-uid"
+		return false, nil, nil
+	})
+	calls := 0
+	l.Control = syncControl{control, func(observations []CloudJobObservation) ([]CloudJobState, error) {
+		calls++
+		if len(observations) != 1 || observations[0].JobNamespace != "cloud" || observations[0].JobUID != "created-job-uid" || observations[0].NodeUID != "uid" {
+			t.Fatalf("lost observed Job or node identity: %+v", observations)
+		}
+		return []CloudJobState{{Binding: observations[0].Binding}}, nil
+	}}
+	if _, err := l.LaunchOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("observations=%d, want creation and restart reconciliation", calls)
+	}
+}
+
+func FuzzControllerCleanupRequiresObservedJobIdentity(f *testing.F) {
+	for _, field := range []uint8{0, 1, 2} {
+		f.Add(field, "replacement")
+		f.Add(field, "")
+	}
+	f.Fuzz(func(t *testing.T, field uint8, replacement string) {
+		unit := wireAward(capability.UnitNode)
+		binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observed := CloudJobObservation{Binding: binding, JobNamespace: "cloud", JobName: jobName(binding), JobUID: "job-uid", NodeUID: "node-uid"}
+		original := controllerwire.LauncherJobRef{Namespace: observed.JobNamespace, Name: observed.JobName, UID: observed.JobUID}
+		remove := original
+		switch field % 3 {
+		case 0:
+			remove.Namespace = replacement
+		case 1:
+			remove.Name = replacement
+		case 2:
+			remove.UID = replacement
+		}
+		control, err := NewControllerControl(launcherWireFake{sync: func(context.Context, controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+			return controllerwire.LauncherSyncResponse{Remove: []controllerwire.LauncherJobRef{remove}}, nil
+		}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		states, err := control.Sync(t.Context(), []CloudJobObservation{observed})
+		if remove != original {
+			if err == nil || len(states) != 0 {
+				t.Fatalf("unobserved Job selected for cleanup: %+v, %v", states, err)
+			}
+		} else if err != nil || len(states) != 1 || !states[0].Delete {
+			t.Fatalf("observed Job cleanup refused: %+v, %v", states, err)
+		}
+	})
 }
 
 func TestCloudJobNamesSeparateAwardedUnits(t *testing.T) {

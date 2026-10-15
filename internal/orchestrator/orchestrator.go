@@ -86,8 +86,6 @@ type Options struct {
 
 	DispatchWaitTimeout time.Duration
 
-	ArtifactStore storage.ArtifactStore
-
 	State storage.StateStoreOld
 
 	DefaultStateDB string
@@ -202,11 +200,10 @@ func localRunBackends(ctx context.Context, paths Paths, opts *Options) (_ Backen
 	// safety: a standalone run holds the store the fallback already chose, so
 	// backend resolution must not reopen or replace it.
 	keepState := hosted.APISocket != "" || opts.standalone != nil
-	if err := resolveLocalBackends(opts, paths, keepState); err != nil {
+	if err := resolveLocalBackends(opts, keepState); err != nil {
 		return Backends{}, closeAll, err
 	}
 	if hosted.APISocket != "" {
-		hosted.Artifact = opts.ArtifactStore
 		return hosted, closeAll, nil
 	}
 	st, ok := opts.State.(*store.Store)
@@ -216,7 +213,7 @@ func localRunBackends(ctx context.Context, paths Paths, opts *Options) (_ Backen
 	if ownsState {
 		closers = append(closers, st.Close)
 	}
-	return LocalBackends(paths, st, opts.ArtifactStore), closeAll, nil
+	return LocalBackends(paths, st), closeAll, nil
 }
 
 func mergeInvokeArgs(opts Options) map[string]string {

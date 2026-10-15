@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -306,7 +307,11 @@ func TestCredits_TriggerHeartbeatLedgerFailureRefusesRenewal(t *testing.T) {
 		t.Fatal(err)
 	}
 	fenced := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: claimed.ClaimSeq})
-	if _, err := c.HeartbeatTrigger(fenced, claimed.ID); !errors.Is(err, store.ErrLockHeld) {
+	renewal, err := client.NewEngineClient(client.EngineOptions{URL: f.url, Bearer: func(context.Context) (string, error) { return f.runner, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := renewal.Renew(fenced, claimed.ID, controllerwire.RenewalRequest{}); !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("failed ledger heartbeat = %v, want the terminal 409 claim refusal", err)
 	}
 	got, err := f.store.GetTrigger(ctx, claimed.ID)

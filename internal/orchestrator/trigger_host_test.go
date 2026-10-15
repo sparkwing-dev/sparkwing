@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -31,7 +32,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -114,16 +114,19 @@ func (h *hostedTrigger) host(t *testing.T, ctx context.Context, r runner.Runner,
 	t.Helper()
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	if heartbeat > 0 {
-		c := client.NewWithToken(h.url, nil, h.token)
+		c, err := client.NewEngineClient(client.EngineOptions{URL: h.url, Bearer: func(context.Context) (string, error) { return h.token, nil }})
+		if err != nil {
+			t.Fatal(err)
+		}
 		keeper := lease.Keeper{Interval: heartbeat, Lease: store.DefaultLeaseDuration, Renew: func(ctx context.Context) (lease.Beat, error) {
-			status, err := c.HeartbeatTrigger(ctx, h.trig.ID)
+			status, err := c.Renew(ctx, h.trig.ID, controllerwire.RenewalRequest{})
 			if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) || client.IsTokenDead(err) {
 				return lease.Beat{}, &apierr.Error{Code: apierr.LockHeld, Message: "test trigger claim ended"}
 			}
 			if err != nil {
 				return lease.Beat{}, err
 			}
-			return lease.Beat{CancelRequested: status != nil && status.CancelRequested}, nil
+			return lease.Beat{CancelRequested: status.CancelRequested}, nil
 		}}
 		var stop func()
 		ctx, stop = keeper.Run(DispatchContext(ctx, h.trig))
@@ -158,7 +161,7 @@ func (h *hostedTrigger) node(t *testing.T, id string) *store.Node {
 // for that node, and finishes the trigger. Neither the runner's token nor a
 // claim token reaches the node.
 func TestTriggerHost_HostsTheRunWithEachNodeUnderItsOwnClaim(t *testing.T) {
-	t.Setenv("GOPROXY", "https://cache.example/proxy/golang")
+	t.Setenv("HTTPS_PROXY", "http://proxy.example:3128")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "runner-aws")
 	envOut := filepath.Join(t.TempDir(), "env")
 	h := newHostedTrigger(t, map[string]string{"envout": envOut})
@@ -181,9 +184,9 @@ func TestTriggerHost_HostsTheRunWithEachNodeUnderItsOwnClaim(t *testing.T) {
 	if strings.Contains(string(env), h.token) || strings.Contains(string(env), store.ClaimTokenPrefix+"_") {
 		t.Fatalf("the node's environment holds a controller credential:\n%s", env)
 	}
-	// safety: the runner's dependency proxy reaches go in the node, and nothing else of its environment does.
-	if !strings.Contains(string(env), "GOPROXY=https://cache.example/proxy/golang") || strings.Contains(string(env), "runner-aws") {
-		t.Fatalf("the node's environment = \n%s\nwant the runner's GOPROXY and none of its other settings", env)
+	// safety: network access requires the proxy, while the runner credential stays private.
+	if !strings.Contains(string(env), "HTTPS_PROXY=http://proxy.example:3128") || strings.Contains(string(env), "runner-aws") {
+		t.Fatalf("the node's environment = \n%s\nwant the runner's HTTPS_PROXY and none of its other settings", env)
 	}
 	trig, err := h.st.GetTrigger(t.Context(), h.trig.ID)
 	if err != nil || trig.Status != "done" {
@@ -709,15 +712,15 @@ func TestTriggerHost_AReclaimedTriggerResumesItsRun(t *testing.T) {
 	}
 }
 
-// safety: a dependency proxy URL can carry a credential, which the node
+// safety: a network proxy URL can carry a credential, which the node
 // receives to reach the proxy but which no stored log may show.
 func TestTriggerHost_MasksTheProxyCredentialsANodeReceives(t *testing.T) {
 	dir := t.TempDir()
 	envOut, echo := filepath.Join(dir, "env"), filepath.Join(dir, "echo")
 	values := map[string]string{
-		"GOPROXY":             "https://a:go-one-password@one.invalid/golang|https://b:go-two-password@two.invalid/golang,direct",
-		"npm_config_registry": "https://cache-reader:npm-prefix,npm-suffix@cache.invalid/proxy/npm",
-		"PIP_INDEX_URL":       "https://cache-reader:s%61fe-pip-password@cache.invalid/proxy/pypi/simple",
+		"HTTPS_PROXY": "https://a:go-one-password@one.invalid/golang|https://b:go-two-password@two.invalid/golang,direct",
+		"HTTP_PROXY":  "https://cache-reader:npm-prefix,npm-suffix@cache.invalid/proxy/npm",
+		"https_proxy": "https://cache-reader:s%61fe-pip-password@cache.invalid/proxy/pypi/simple",
 	}
 	var echoed []string
 	for name, value := range values {
@@ -739,11 +742,7 @@ func TestTriggerHost_MasksTheProxyCredentialsANodeReceives(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	objs, err := fs.NewArtifactStore(h.st.OutputDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	logs, err := segmentController{st: h.st}.nodeLog(t, h.trig.ID, "build").Read(t.Context(), objs, storage.ReadOpts{})
+	logs, err := client.NewWithToken(h.url, nil, h.token).NodeLogs().Read(t.Context(), h.trig.ID, "build", storage.ReadOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -757,7 +756,7 @@ func TestTriggerHost_MasksTheProxyCredentialsANodeReceives(t *testing.T) {
 			t.Errorf("the build log shows %s", secret)
 		}
 	}
-	if !strings.Contains(string(logs), "GOPROXY=***") {
+	if !strings.Contains(string(logs), "HTTPS_PROXY=***") {
 		t.Errorf("the build log = %s, want the echoed proxy settings masked", logs)
 	}
 }

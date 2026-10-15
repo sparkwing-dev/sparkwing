@@ -150,7 +150,6 @@ func clientCalls() []struct {
 			return err
 		}},
 		{"GetTrigger", func(ctx context.Context, c *client.Client) error { _, err := c.GetTrigger(ctx, "t1"); return err }},
-		{"HeartbeatTrigger", func(ctx context.Context, c *client.Client) error { _, err := c.HeartbeatTrigger(ctx, "t1"); return err }},
 		{"GetPipelineProfile", func(ctx context.Context, c *client.Client) error {
 			_, err := c.GetPipelineProfile(ctx, "p", "n1")
 			return err

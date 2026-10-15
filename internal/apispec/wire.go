@@ -2,9 +2,12 @@ package main
 
 import (
 	"reflect"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	wire "github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -52,7 +55,7 @@ func wireOperations() map[string]wireOperation {
 		"POST /api/v1/runs/{run}/jobs/{job}/reconcile":         operation("Reconcile persisted job execution", wire.ReconcileRequest{}, wire.ReconcileResponse{}),
 		"POST /api/v1/runs/{run}/jobs/{job}/expansion":         operation("Accept a generated expansion", wire.ExpansionSubmission{}, wire.ExpansionAccepted{}),
 		"POST /api/v1/runs/{run}/jobs/{job}/cancel":            operation("Request job cancellation", wire.CancelRequest{}, wire.Applied{}),
-		"GET /api/v1/runs/{run}/jobs/{job}/failure":            operation("Read an authorized persisted failure", nil, (*nodeproto.JobFailure)(nil), query("source_generation", "integer")),
+		"GET /api/v1/runs/{run}/jobs/{job}/failure":            operation("Read an authorized persisted failure", nil, (*nodeproto.JobFailure)(nil), query("generation", "integer")),
 		"GET /api/v1/runs/{run}/logs":                          operation("Read persisted run logs", nil, wire.LogPage{}),
 		"GET /api/v1/runs/{run}/jobs/{job}/logs":               operation("Read persisted job logs", nil, wire.LogPage{}),
 		"GET /api/v1/runs/{run}/logs/search":                   operation("Search persisted run logs", nil, wire.LogPage{}),
@@ -100,12 +103,22 @@ func wireOperations() map[string]wireOperation {
 		result["POST /api/v1/runs/{run}/jobs/{job}/steps/"+action] = operation("Persist an attempt-fenced step report", wire.StepReportRequest{}, wire.StepRecorded{})
 	}
 	for _, path := range []string{"/api/v1/tokens", "/api/v1/operator/tokens"} {
-		result["GET "+path] = operation("List credential metadata", nil, wire.Tokens{}, query("kind", "string"), query("include_revoked", "boolean"))
-		result["POST "+path] = operation("Issue a credential", wire.TokenCreate{}, wire.TokenCreated{})
-		result["GET "+path+"/{token}"] = operation("Read credential metadata", nil, wire.TokenMetadata{})
-		result["DELETE "+path+"/{token}"] = operation("Revoke a credential", nil, wire.TokenRevoked{})
-		result["POST "+path+"/{token}/rotate"] = operation("Rotate a credential", wire.TokenRotate{}, wire.TokenRotated{})
+		result["GET "+path] = operation("List credential metadata", nil, struct {
+			Tokens []capability.Metadata `json:"tokens"`
+		}{}, query("kind", "string"), query("include_revoked", "string"))
+		var create any = client.CreateTokenRequest{}
+		if path == "/api/v1/operator/tokens" {
+			create = client.CreateServiceTokenRequest{}
+		}
+		result["POST "+path] = operation("Issue a credential once", create, client.CreatedToken{})
+		result["GET "+path+"/{token}"] = operation("Read credential metadata", nil, capability.Metadata{})
+		result["DELETE "+path+"/{token}"] = operation("Revoke a credential", nil, nil)
+		result["POST "+path+"/{token}/rotate"] = operation("Rotate a credential once", struct {
+			GraceSecs int64      `json:"grace_secs"`
+			ExpiresAt *time.Time `json:"expires_at,omitempty"`
+		}{}, client.RotatedToken{})
 	}
+	result["POST /api/v1/runners"] = operation("Enroll a runner once", client.EnrollRunnerRequest{}, client.CreatedToken{})
 	result["GET /api/v1/data/records"] = wireOperation{
 		summary:    "Look up authorized records, memo or dependency cache",
 		parameters: []any{query("lookup", "string")},

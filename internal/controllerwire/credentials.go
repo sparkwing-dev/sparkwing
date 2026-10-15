@@ -34,7 +34,7 @@ type Tokens struct {
 }
 
 // TokenCreate requests a root through the issuer's provisioning rules. TTL is
-// seconds: nil selects the server default, explicit zero requests no expiry.
+// seconds: nil and zero preserve the issuer's expiry policy.
 type TokenCreate struct {
 	Kind           string             `json:"kind,omitempty"`
 	Principal      string             `json:"principal,omitempty"`

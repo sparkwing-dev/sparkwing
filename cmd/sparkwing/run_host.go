@@ -144,13 +144,6 @@ func validateLocalRunFlags(flags runFlags) error {
 	if flags.parseErr != nil {
 		return flags.parseErr
 	}
-	for _, flag := range []struct{ name, value string }{
-		{"sw-start-at", flags.startAt}, {"sw-stop-at", flags.stopAt}, {"sw-only", flags.only},
-	} {
-		if flag.value != "" {
-			return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "run: --" + flag.name + " has no sealed intake representation"}
-		}
-	}
 	if flags.prioritySet || flags.priority != "" {
 		priority, err := validatePriorityFlag(flags.priority)
 		if err != nil {

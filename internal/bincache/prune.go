@@ -84,8 +84,8 @@ func pruneToLimitsAtRoot(ctx context.Context, root string, maxBytes int64, maxEn
 	if err != nil {
 		return PruneResult{}, err
 	}
-	total := status.ObservedBytes + status.LegacyBytes
-	count := status.EntryCount + status.LegacyEntries
+	total := status.ObservedBytes
+	count := status.EntryCount
 	bytesGoal := total - maxBytes
 	if maxBytes <= 0 || bytesGoal < 0 {
 		bytesGoal = 0

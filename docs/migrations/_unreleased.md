@@ -1,5 +1,20 @@
 # Migrating to the next release
 
+## Sealed step selections
+
+`--sw-start-at`, `--sw-stop-at` and `--sw-only` enter the request seal as
+`options.start_at`, `options.stop_at` and `options.only`. Each carries presence,
+value and origin. Plan acceptance rejects a changed selection, and retry keeps
+the original values. Hosts must read these fields from the seal. The native
+host integration remains unfinished.
+
+## Internal launcher arguments
+
+Launcher invocations require `--docker-image` with a digest-pinned DinD image
+beside the runner `--image`. Remove `--deadline`. The Job deadline derives from
+the awarded execution inputs. Plan awards omit `--job` in `fetch-source` and
+`run-node`; work and eval retain the job from their private award metadata.
+
 ## Daemon event cursors
 
 Replace `daemon events --offset N` with the returned `--cursor`. Repeat the same
@@ -112,7 +127,7 @@ unfinished native controller integrations.
 Before, `sparkwing pipeline sparks warmup` compiled a pipeline and uploaded its
 binary to gitcache. Local execution could also download that binary.
 
-Use `sparkwing cache warm --checkout /path/to/repo` to prepare the local cache.
+Use `sparkwing cache warm` from the checkout to prepare the local cache.
 Go pipelines build on this machine. TypeScript checkouts install dependencies.
 Compiled pipeline binaries stay local. Remove remote binary-upload steps from
 warming scripts. Explicit result publication and memo/artifact reads use their
@@ -137,6 +152,607 @@ Doctor no longer repairs private-home permissions or reaps processes from the
 CLI. Remove automation that expects those side effects. See
 [Doctor reports](../diagnosing-admission.md#doctor-reports) for the unfinished
 native runtime and machine-reader integration.
+
+## Retry requests and receipts
+
+Use `runs retry --run RUN --failed` to reuse successful jobs or `--all-jobs`
+to execute the complete sealed plan again. Repeated `--run`, comma lists and
+`--run -` select multiple runs. The old `full=1` query and legacy retry client
+method are removed. Each source run gets an independent idempotency key.
+
+Local and remote retries use the controller API. JSON emits one safe receipt
+or structured failure per source run. Plain emits new run IDs. The CLI no longer
+opens local or standalone state files to retry runs. Native retry intake, reuse
+and here handoff still require integration. An incomplete here handoff exits 3
+and its JSON failure receipt identifies the created run without its credential.
+
+## Plan inspection
+
+Use `sparkwing pipeline plan --pipeline NAME -- <pipeline arguments>` to supply
+required inputs. The registered SDK entrypoint selects the code; the invoked
+project name remains in the run context. Secret inputs reach planning but are
+redacted in previews and structured diagnostics. The preview JSON uses `jobs`
+in place of `nodes`.
+
+## Memo copies use transactional blob records
+
+`AttemptReport.OutputFrom`, its `output_from` payload and
+`Store.FinishNodeCopyingOutput` are removed. Use `blob.RecordStore.CopyMemo`
+for authorized output and manifest materialization. The host memo layer
+already calls it. Requests carrying `output_from` now fail strict decoding.
+No alias or conversion of stored output pointers is provided.
+
+The unused `backend.StoreBackend.GetNodeOutput` and
+`backend.ClientBackend.GetNodeOutput` methods are also removed.
+
+## Filesystem object writes use signed transfers
+
+`fs.ArtifactStore`, `fs.NewArtifactStore` and the sharded filesystem object
+layout are removed. Use the shared signed-data backend for byte transfers and
+the controller for log deletion. Use `fs.NewUsageReporter` for deployment usage
+totals. It exposes no object reads or writes. No object conversion is provided.
+
+Run deletion and team purge/recheck use the configured common backend to remove
+logs across stored retention classes. They leave CAS objects to reachability
+collection. Authenticated log and host bindings remain integration work.
+
+## Filesystem transfers use the shared data backend
+
+The standalone controller opens its filesystem data backend under its home
+when no S3 bucket is configured. Signed transfers use
+`/api/v1/data/uploads/{upload}`, `/api/v1/data/objects/{key...}` and
+`/api/v1/log-segments/{key...}`. They use the same verified physical objects
+as the record-backed maintenance pass.
+
+Removed `Server.WithOutputSignKey`, the older `/api/v1/outputs` handlers,
+filesystem output moves and the raw filesystem log adapter. No data conversion
+or fallback is provided. The legacy S3 output/log adapters still require their
+final authenticated cutover. Local-controller construction and authenticated
+data/host bindings remain separate integration work.
+
+## Log readers expose only reads
+
+`storage.LogStore` provides `Read`, `ReadRun` and `Stream`. Its unused
+`Append` and `DeleteRun` methods and the corresponding `client.NodeLogs`
+methods are removed. Writers publish tagged segments with `logseg.Sink`.
+Delete a run through the controller's run API to remove its logs.
+
+```go
+// Before
+logs.Append(ctx, runID, jobID, data)
+logs.DeleteRun(ctx, runID)
+
+// After
+sink.Append(data, "", 0, 0)
+controllerClient.DeleteRun(ctx, runID)
+```
+
+`storage.SafeLogIDs`, `SafeRelPath` and `SafeArtifactKey` are removed with
+unused raw storage surfaces. Use `blob.LogObjectKey` for tagged log slots and
+`blob.RecordNamespace` for record namespaces. Those helpers validate their
+structured inputs.
+
+## Filesystem logs use tagged segments
+
+`fs.LogStore` and `fs.NewLogStore` are removed. Log writers use a tagged
+`logseg.Sink` with the host's bound `logseg.SubjectUploader`. Filesystem and S3
+storage use the same immutable segment format.
+
+`conformance.TestLogStore` is removed.
+Tagged-log coverage lives in `pkg/storage/logseg` and the storage acceptance
+cells, including verified offset reads and physical retention.
+
+Daemon handshake and status responses drop `artifact_store_error`, which
+described a cache backend the daemon no longer opens. Remove that field from
+status consumers. API binding faults still use `api_ready` and `api_error`.
+
+## Log identities use tagged subjects
+
+- **Before:** log manifests carried separate run, node, attempt and generation
+  fields. `logseg.AttemptPrefix` built an attempt-only key.
+- **After:** manifests require `subject`, which identifies a job attempt or a
+  trigger, plan or eval unit. Job keys include `/jobs/`. Owner keys include
+  `/units/`. Readers reject a manifest whose subject differs from its key.
+- **Upgrade steps:** pass `Options.Subject` when creating a log sink and use
+  `blob.LogObjectKey` for signed slots and `blob.LogSubjectPrefix` for prefixes.
+  The former `logseg` key helpers are removed. Update readers and writers together. Existing
+  untagged manifests require a fresh run. There is no old-format reader.
+
+## Direct source fetches own their Git objects
+
+- **Before:** direct fetches reused a bare mirror per remote and checked out
+  linked worktrees. Runner cleanup swept idle mirrors.
+- **After:** each checkout fetches from upstream and owns its Git objects.
+  Fetches need upstream access even for a commit an earlier run fetched.
+  Failed fetches remove their checkout. Existing destinations remain untouched.
+- **Upgrade steps:** stop older runners and their active runs before removing
+  unused `source-direct` directories under the Sparkwing home. The new runner
+  leaves these directories untouched.
+
+## Local binary caches use one layout
+
+- **Before:** cache status counted binaries in older directories, and pruning
+  quarantined those entries before deleting them after a grace period.
+- **After:** status and pruning use `cache/pipelines/v1/entries` in the Sparkwing
+  home. Older directories are left untouched. The CLI's JSON cache report drops
+  `legacy_entries` and `legacy_bytes`.
+- **Upgrade steps:** update report consumers to use `entries` and `total_bytes`.
+  Pipelines without a current cache entry compile on their next run. Stop older
+  Sparkwing processes before removing their unused cache directories.
+
+## Node state writes use transitions
+
+`SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed.
+The per-node `status` and `revoke-ready` HTTP endpoints are removed with them.
+Use `Tenant.TransitionNode` for lifecycle changes. Queue withdrawal supplies
+`To: NodePending`, `Cause: CauseRevoke` and the current run owner's authority.
+Only ready, unclaimed jobs can be withdrawn. A competing claim or stale owner
+returns an error without changing state or events. An identical committed
+transition replays.
+
+Debug pauses write `paused` to activity detail and clear it on resume.
+They preserve the job's lifecycle status, start timestamp and claim.
+
+## Owner leases replace run heartbeats
+
+`TouchRunHeartbeat` and `TouchNodeHeartbeat` on Store, Tenant and Client, plus
+`Run.LastHeartbeatAt`, are removed. Hosts use `Store.RenewUnit` or
+`Tenant.RenewOwner` with their current owner authority. Owner renewal also
+renews self-claimed jobs. A remotely renewed job
+cannot extend the owner's lease.
+
+Doctor no longer finalizes runs from heartbeat age or reports `orphaned_runs`.
+The controller's elected `ReapUnits` pass recovers expired owners under the
+store clock. Started local orphans fail in place. Unstarted owners requeue.
+The legacy run-heartbeat and node-touch HTTP handlers are removed. The old
+Kubernetes dispatcher no longer sends advisory heartbeat writes for its pods.
+The pod's own claim renewal supplies its liveness timestamp.
+
+## Plan acceptance uses tenant seals
+
+`Store.AcceptPlan`, its legacy plan validator and `Client.SubmitPlan` are removed.
+Use `Tenant.AcceptPlan` with `PlanAcceptance`, including the admitted request,
+checkout declarations, resolved settings and the v2 `jobs` document. The store
+reruns the shared validator and settings resolver before committing both the
+second seal and jobs. Identical submissions replay. Changed sealed input returns
+`spec_drift`. The controller's legacy claim-token plan-acceptance branch and the
+old launched planner are removed.
+
+Missing required secrets return canonical `plan_invalid`. The detailed refusal
+is saved once for run status, after the failed acceptance rolls back, under the
+current owner fence and store clock. No seal or job is committed by that refusal.
+
+## Unit claims reserve compute credit
+
+Metered `Store.ClaimUnit` awards commit a refundable compute reservation with
+the claim. The award retains its CPU class, rate and payer after settings change
+or bootstrap exchange. Unfunded queued work leaves funded matches eligible.
+The shared billing calculator is required for renewal and final settlement.
+
+## Offer-round fallback is removed
+
+The warm dispatcher, its factory and the `finalize-ready` endpoint are removed.
+`Store.FinalizeClaimRound`, `ClaimRoundResult`, `WithQueueRunners` and
+`Client.FinalizeNodeReady` are removed with them. Use `Store.ClaimUnit` for queued
+or named claims and `Tenant.ReconcileNode` for owner execution decisions.
+Eligible work can be claimed immediately. Soft preferences rank eligible work.
+A mismatch leaves the ready row and its queue position unchanged.
+
+## Concurrency maintenance requires the operator fence
+
+`Store.MaintainConcurrency` and the `store.Maintenance` registry are removed.
+Acquire `controller.reaper` through `Operator.AcquireSingletonLease` and pass that
+fence to `Operator.MaintainConcurrency(ctx, lease, options)`. The pass commits
+holder cleanup, waiter cleanup and promotion together. An error returns no
+committed counts. The old concurrency-cache sweep and count APIs are removed.
+Memo-record retention uses `Operator.MaintainRetention` under its maintenance
+lease. `Store.PurgeDeadLocalConcurrency` and `Store.CountDeadLocalConcurrency`
+are removed. The elected pass cleans terminal capacity in every scope. Doctor's
+`dead_concurrency_holders` and `dead_concurrency_waiters` fields are removed with
+its independent repair path.
+
+## Egress accounting uses tenant and replica counters
+
+`Store.RecordEgressUsage`, `Store.ListEgressUsage` and `Store.PruneEgressUsage`
+are removed. Write additive bytes with `Tenant.AddUsage` using `egress_bytes`,
+a UTC day and the controller's trusted replica ID. Read day or month totals with
+`Tenant.EgressUsage`. Deployment reports use `Operator.EgressUsageAcrossTeams`.
+Pruning uses `Operator.PruneEgressUsage` with the maintenance lease.
+
+The controller records delivered successful-response bytes at request completion,
+including partial transfers and reads served without an in-memory meter. Logs
+consume egress while remaining exempt from download caps. Alarm reload uses team
+totals. A failed counter write emits an error. A controller crash before request
+completion can lose that request's egress sample. Thirteen months of reports stay
+available. There is no principal-based persistence or periodic flush.
+
+## Event charges use tenant handles and replica identity
+
+`Store.AppendEventCharged` is removed. Obtain a tenant with `Store.ForTeam`,
+then call `Tenant.AppendEventCharged(ctx, replicaID, runID, nodeID, kind, payload)`.
+The replica ID is the controller's trusted identity. The caller no longer
+selects a charged principal. The tenant supplies the team and the store owns time.
+
+Event writes, retained run counters, shared storage quotas and replica usage
+commit together. Pending uploads and events share monthly and run byte capacity.
+Events consume no object capacity. Usage is recorded without a configured quota.
+The existing event limits and free-tier policy keep their meaning. The HTTP
+request and response shapes stay the same.
+
+## Download charges use tenant handles and replica identity
+
+`Store.ChargeDownload` is removed. Obtain a tenant with `Store.ForTeam`, then
+call `Tenant.ChargeDownload`. `DownloadCharge.ReplicaID` identifies the trusted
+controller replica. The request no longer accepts `Team` or `Now`. The store
+selects the current UTC day under its shared quota lock.
+
+Admission and replica usage commit together. Free and funded caps keep their
+existing behavior, including finishing the download that crosses the cap and
+recording already delivered bytes. Logs stay exempt. Controller integrations
+use their existing lease-holder identity and require no new configuration.
+
+## Paid credit requires verified checkout settlement
+
+`POST /api/v1/credits/grants` is removed. `Tenant.GrantCredits` and
+`Tenant.RecordCreditGrant` refuse `paid` grants.
+Free operator grants keep their console path. Payment reversals require a
+verified provider event.
+
+Checkout integrations must supply C2's verified provider event to
+`Store.SettlePayment`. The committed checkout supplies the team and credit
+amount. The event must match its session, payment, amount, currency and test/live
+mode. Actionable fraud warnings refuse settlement before any credit or event
+receipt commits. Replayed events grant once. Provider verification and its
+controller adapter remain integration work.
+
+## Storage counters use verified upload tickets
+
+The `/internal/storage/reserve`, `/internal/storage/commit`,
+`/internal/storage/release` and `/internal/downloads/charge` endpoints are removed.
+Remove cache `controller-token` credentials and service-counter integrations.
+`Store.RenewStorage` and its rolling block receipts are removed.
+
+The final storage adapter reserves quota with `Tenant.ReserveBlobUpload`, verifies
+physical bytes, then commits with `Tenant.CommitBlobUpload`. Signing or transfer
+failure uses `Tenant.AbortBlobUpload`. The ticket binds the exact uploader and
+retains immutable replay state. The signed-data controller adapter remains an
+integration dependency. There is no service-token fallback.
+
+`SetFreeTeamSlots` writes the final settings table and refuses sealed values.
+Its slot count and signup behavior keep their existing meaning.
+
+## Storage maintenance uses committed inventory
+
+Remove `Server.WithStoragePass` and `Server.RunStoragePass` calls. The controller's
+existing maintenance timer runs leased retention, tagged-log sealing and storage
+billing. An embedding that serves `Handler` directly calls `Server.MaintainStorage`.
+`StoragePassEvery` is removed. `StorageMaintenanceInterval` names the timer period.
+
+`Store.StorageMarks`, `ReconcileStorage`, `TeamsOverFreeLogShare`,
+`PrunableNodeLogs`, `PruneStorageCommitReceipts` and `PruneDownloadDays` are removed.
+Use `Tenant.StorageRetainedBytes` for retained inventory and `Tenant.StorageUsageFor`
+for summed replica usage. `Operator.ChargeRetainedStorage` and `MaintainRetention`
+require the current maintenance lease. Bucket listings no longer replace usage
+counters. Log retention follows the run's persisted class. Allowance-driven
+physical eviction still requires the final storage adapter.
+
+
+## OAuth browser callbacks
+
+OAuth start and callback use the shared route policy and browser-flow verifier.
+Callback requires one flow cookie, one matching state and one code. A declined
+callback carries one error and no code. Remove duplicate query selectors.
+Refused proofs preserve the flow cookie. HEAD and unsupported methods return
+the common `405 method_not_allowed` error.
+
+Refusals return the common error envelope instead of a sign-in HTML page.
+An invalid or replayed code returns `401 unauthenticated`. An unverified email
+returns `403 forbidden`. Provider and session backend failures return
+`503 unavailable`. The existing login budgets retain `429` and `Retry-After`.
+Successful navigation and same-origin return paths retain their browser pages.
+
+## Capability inventory and rotation
+
+Use `GET /api/v1/tokens` instead of `GET /api/v1/team/tokens`. The collection
+returns `{tokens:[...]}`. Read `subject.kind` and `subject.id` instead of
+`family`, `kind`, `name` or `principal`, and `grants` instead of `scopes`.
+`issued_at`, `expires_at`, `last_used_at` and `revoked_at` use RFC3339 timestamps.
+Members see owned credentials. Team admins can see the team's credentials.
+Deployment service/operator metadata uses `/api/v1/operator/tokens`.
+
+Rotation uses `POST` on the selected token resource's `/rotate` suffix.
+Send `grace_secs` and optional absolute `expires_at`, replacing `ttl_secs`.
+Explicit expiry must pass the original parent's ceilings or current root
+origin policy. Grace defaults to 24
+hours, accepts zero for immediate replacement and has the existing seven-day
+ceiling. Read the one-time bearer from `capability`, its metadata from `new`,
+and the old credential's deadline from the RFC3339 `old_revoked_at`.
+`old_prefix` replaces `old_replaced_by`. Never automatically retry rotation.
+
+Embedded controllers provide `WithCapabilityManager`. Its reads and rotation
+must recheck authority inside their store transaction. The retired token-table
+APIs cannot supply this contract. Missing adapters return `policy_missing`.
+
+## Session lifecycle
+
+Session renewal and logout use the shared policy router with session proof.
+Present one session cookie or one `Authorization: Session <id>` header.
+Bearer credentials cannot substitute for a session. Renewal refuses HEAD and
+ambiguous presentations and retains current membership and parent grant ceilings.
+
+`POST /api/v1/auth/logout` takes no body. Remove `session_id` and supply the
+session-bound CSRF header and cookie plus a matching Origin or Referer. Logout
+ends only the verified session and clears its browser cookies. Both endpoints
+return the common error envelope and no-store. Storage and key failures return
+`unavailable`. Configure the bound secrets cipher before serving sessions.
+
+Ordinary policy routes also accept the Session header and enforce the configured
+absolute lifetime without renewing. Browser logout posts a form to `/logout`
+with the session-bound `csrf_token`. It uses the shared proof boundary, returns
+canonical failures and redirects to `/login` only after successful deletion.
+
+## Browser capability requests
+
+Shared policy routes authenticate browser sessions through their committed
+hashed identity. Writes use the controller's session-bound CSRF verifier.
+Configure the bound secrets cipher before serving sessions. The same cipher
+protects the persisted session signing key. Forged, cross-session and
+foreign-origin proofs return `forbidden`. Key access failures return
+`unavailable`.
+
+## Secret-by-name reads
+
+GET `/api/v1/secrets/{name}` uses the shared capability policy. Member or
+verified local authority with `secrets.read` or `team.admin` reads unmasked
+config in its own team. Masked values require a live `secrets.release` claim
+whose sealed run declares the name and permits its pipeline/shared scope and
+reserved pool. Machine roots and deployment-admin tokens gain no read access.
+
+Embedded controllers supply `WithSecretReader` with the authority-bearing tenant
+transaction. Missing adapters return `policy_missing`. Bound encryption is
+required, errors use the shared API envelope, and all responses use no-store.
+Duplicate selectors and malformed queries fail after authentication.
+
+`Server.ResealStoredSecrets` and `LegacyCipher` are removed with the startup
+migration. Row-secret helpers require BoundCipher and never fall back to
+unbound Seal/Open methods. Plaintext
+and pre-team envelopes remain unreadable. Rewrite them through the authenticated
+credential API. Explicit key rotation remains available for bound envelopes.
+
+## Credential maintenance
+
+Secret-key rotation requires live member or verified local `team.admin`
+authority and selects only the authenticated team. Browser sessions require
+CSRF. Rotation takes no body and returns the shared API error envelope.
+Missing bound encryption returns `unavailable`. Plaintext and unbound rows
+stay unreadable. Rewrite them through the authenticated credential API.
+An unreadable git credential or any sealing failure rolls back secret and
+git changes together. Unreadable secrets remain unchanged in `skipped`.
+
+Source-release audit lists use the same team policy. Replace `token_prefix`
+with `capability_prefix` in their responses. Each row also carries
+`repository`, `job_id` and `generation`. Times remain Unix seconds.
+
+Embedded controllers supply `WithCredentialRotator` and `WithSourceAuditReader`.
+Missing adapters return `policy_missing`. The old global rotation and legacy
+audit reader cannot provide these tenant and authority guarantees.
+
+## Credential mutations
+
+Secret create/delete and git-credential create/confirm/delete require live
+member or verified local authority with `team.admin`. Session mutations require
+CSRF. The authenticated team selects the rows, and errors use the shared API
+envelope. A deployment-admin bearer gains no team credential authority.
+
+Embedded controllers supply `WithCredentialWriter` with tenant transactions
+that recheck authority before commit. The default refuses writes with
+`policy_missing` until that adapter is installed. Existing unfenced Tenant
+writers cannot stand in for it. Secret names must pass the shared grammar on
+replacement too. Omit an SSH port to use 22. An explicit zero is invalid.
+
+## Credential inventories
+
+Secret and git-credential lists use the shared capability policy. Use a live
+member or verified local credential with `runs.read`. Secret inventory also
+accepts `team.admin`. The authenticated team selects the rows. Machine roots,
+claims and bootstraps cannot list them. Masked secret values and stored git
+credentials remain private. An unreadable public config value fails the whole
+secret list instead of disappearing from a successful response.
+
+Embedded controllers may supply `WithCredentialInventoryReader` using Tenant's
+existing read methods. Its reader must belong to the authenticated team.
+
+## Source credentials
+
+`POST /api/v1/runs/{run}/source-credential` takes no body and requires a live
+`source.read` capability bound to the run. The response carries `kind`, `host`,
+`secret`, optional `username` and optional `known_hosts`. Checkout identity and
+policy come from the sealed execution input. The store commits authorization
+and its audit before the controller decrypts the credential.
+
+Move machine consent to `PUT /api/v1/tokens/{token}/git-credentials` with
+`{"enabled":true}` or `{"enabled":false}`. The machine owner's account session
+and CSRF proof are required. Team administration cannot substitute for ownership.
+
+Embedded controllers may supply `WithSourceController` with the declared
+transaction and bound-cipher interfaces. `WithSecretsCipher` also configures
+C1's plan-secret opener. Missing keys refuse decryption and plan validation.
+
+## Work claims
+
+Use `POST /api/v1/runners/claim` with the shared claim request instead of the
+separate trigger and job queue endpoints. Every requested kind needs its own
+grant. The response contains a private `claim`, or an empty object when no work
+matches. Enrollment supplies the runner identity, repository scope and pools.
+The body supplies labels, current availability and the runner version.
+
+`POST /api/v1/runs/{run}/claim` acquires the named trigger, including a reserved
+here run. It requires the single `trigger` kind. `POST /api/v1/launcher/claim`
+requires launcher authority and accepts plan, eval and job kinds. Configure the
+engine controller's verified runner policy and the store's enrollment resolver
+before accepting claims. Existing holders may renew while software policy
+blocks new awards.
+
+Send a pod bootstrap to `POST /api/v1/claims/exchange` with an empty JSON object.
+It yields the original award's full in-memory capability once and consumes the
+bootstrap. Renew through `POST /api/v1/claims/{claim}/heartbeat`, where `claim`
+is the award's unit ID. Renewal cannot start a job without its start transition.
+
+Claim, exchange and reconciliation responses carry bearer material once. Do not
+retry a lost response automatically. The unused award recovers through its lease.
+Launcher sync carries each immutable award fence as `{kind,id,holder,generation}`,
+the Kubernetes Job as `{namespace,name,uid}`, and `node_uid`. It returns awards
+with empty capabilities and full Job references to remove. Name-only cleanup
+is removed. Embedded controllers must
+supply `EngineController.Launcher`. Missing snapshot wiring returns
+`policy_missing` and exposes no award.
+
+The standalone artifact-manifest write is removed. Publish manifests through
+record and result commits. Legacy remote state clients cannot publish a manifest
+separately. Local state writers retain their existing direct persistence while
+the host moves to result transactions.
+
+## Data writes and records
+
+Upload and commit use live controller capabilities through the shared policy
+router. Replace `{kind,key,size,sha256,run_id}` with `{digest,size}` on
+`POST /api/v1/data/upload`. PUT the bytes with the returned signed headers,
+then commit with `{upload_id}`. Commit returns `{digest,created_at}` with
+HTTP 200. Cache grants and the pretrigger user-token upload path are removed.
+
+Create references with `POST /api/v1/data/records` and look them up with
+`GET /api/v1/data/records`. The controller derives the team, repository, write
+ref and uploader. Record responses omit private authority and receipt facts.
+See [Direct data uploads](../data-uploads.md) for the request fields.
+
+Embedded controllers must configure `WithDataController`. Upload discovery
+uses those adapters. The older direct S3 output/log configuration does not
+advertise authenticated data writes.
+
+## Data reads
+
+`POST /api/v1/data/download` accepts `{"digest":"<sha256>"}` through the shared
+capability policy. Replace cache grants and `{kind,key}` requests with a live
+data capability and an authorized digest. Responses include signed `headers`
+alongside `url`, `sha256`, `size` and `expires`. Send those headers to storage.
+
+`POST /api/v1/data/has-many` returns only readable live digests from its
+`digests` array. Missing and unreadable objects are indistinguishable. This
+query does not consume the team's download allowance. Both routes return
+the common error envelope.
+
+## Run detail
+
+`GET /api/v1/runs/{run}` returns `RunDetail` with display-safe `inputs`,
+`jobs`, `attempts`, `logs`, `engine` and `notices`. Replace readers of raw
+run fields and the former `{run, nodes}` wrapper with this shared shape.
+Fetch approval, step and child details through their own resources.
+
+`include=secret_values` is removed. Secret argument values stay redacted for
+members, claims and local peers. Missing or invalid classification hides every
+value, including on finished runs. Execution inputs travel in the private
+claim wire. Members require `runs.read`; bound claims require `source.read`
+or `trigger.host` for their run. Bare machine roots cannot use this read.
+
+Embedded controllers must configure the shared authorization adapters and
+`EngineController.ReadRunStatus` when overriding the default
+`Tenant.ReadRunView` adapter. The reader supplies one committed snapshot,
+complete attempt history and validated log subjects for the selected team and
+run. Missing wiring refuses the request with `policy_missing`.
+
+## Queue reads
+
+Read `/api/v1/queue` instead of `/api/v1/queue/state`. The CLI's remote queue
+reader and the dashboard use the new path. The old path is removed. The
+response retains the concurrency groups, holders, waiters and runner headroom
+for the authorized team.
+
+A member or verified local peer needs `runs.read`. Machine roots and work
+claims cannot read the team queue. Configure the controller's shared verifier
+and binding adapters before serving the route. Errors use the common envelope.
+Embedded controllers may supply the existing tenant read contract through
+`WithQueueReader`. Its default uses the server's store.
+
+## Credit ledger reads
+
+`GET /api/v1/credits` and `GET /api/v1/credits/history` use the shared
+capability verifier. A member or verified local peer needs `runs.read` for
+its active team. Configure the controller's shared authentication and binding
+adapters before serving these routes. Machine roots and claims cannot read
+the team ledger, even when they carry `runs.read`.
+
+The paths and successful response fields stay the same. Errors use the
+canonical envelope. Missing or dead credentials return `unauthenticated`.
+Live credentials without member authority return `forbidden`. Authorized
+reads return `not_found` when credit billing is disabled. History accepts
+one nonnegative `limit`, at most 1000 rows of each kind. Omission or zero
+uses the store's existing default.
+
+## Job status
+
+Read `/api/v1/runs/{run}/jobs` and `/api/v1/runs/{run}/jobs/{job}` instead
+of the corresponding `/nodes` paths. The collection returns a JSON array of
+safe job status objects. The detail returns one such object. Both use `id`
+for the job identifier and omit raw declarations, environment, holder and
+capability fields. Private execution inputs use the awarded execution wire.
+The existing Go client's status readers use these paths and the canonical
+error envelope. Missing jobs return the typed `not_found` API error.
+
+Members need `runs.read`. The live run owner may read the collection and
+details with `trigger.host`. A job's live `data.read` authority reaches its
+own detail only. Controllers need the shared authentication/binding adapters
+and C1's tenant snapshot/node reads. No old path or credential fallback remains.
+
+## Pipeline sizing
+
+Replace `/api/v1/pipelines/{name}/profile` with
+`/api/v1/pipelines/{name}/sizing` for the read and its `pin`, `observations`,
+`contention` and `waits` operations. Replace the `node` query with `job`.
+The old paths are removed. The Go controller client uses the new paths.
+
+Reads require member `runs.read` or an executable claim with `source.read`
+and authority for the sealed repository and pipeline. A bare runner or
+Actions credential no longer reads arbitrary sizing records. Bootstrap
+credentials cannot read sizing. Writes require `node.report` on the bound
+pipeline. Admin grants cannot bypass the claim check.
+
+Controllers must configure the shared authentication and binding adapters.
+Sizing writes also require an authority-bearing transaction adapter through
+`WithSizingStore`. An absent adapter returns `policy_missing`. Implementations
+must recheck revocation, membership and the claim fence under the write lock,
+and avoid duplicating a measurement on an exact retry.
+
+## Credential discovery
+
+`GET /api/v1/auth/whoami`, `GET /api/v1/services` and
+`GET /api/v1/data/capabilities` require live capability authority, a session or
+a verified local peer. Service and data discovery also require an active team.
+Configure the controller's shared authentication reader and transport adapters
+before serving these routes. An incomplete policy returns `policy_missing`.
+
+`whoami` returns the committed subject ID in `principal`, its subject kind in
+`kind`, and effective grants in `scopes`. The kind is `account`, `machine`,
+`service`, `operator`, `local` or `anonymous`. `token_prefix` is present only
+for a capability. The response omits `role` and session identifiers.
+Callers should handle the common `unauthenticated`, `forbidden` and `not_found`
+error envelope. Bootstrap and eval credentials cannot discover services.
+
+The OIDC discovery document and public keys stay public. Their disabled-issuer
+response uses the same error envelope. All five discovery routes accept only
+`GET` and return `method_not_allowed` with `Allow: GET` for other methods.
+
+## Job reporting
+
+Annotations, summaries and step start, finish and skip requests use
+`/api/v1/runs/{run}/jobs/{job}`. Replace `/nodes/{nodeID}` in those seven
+reporting paths with `/jobs/{job}`. The Go controller client uses the new
+paths. The old paths are removed.
+
+Reports require an awarded job or trigger capability with `node.report`, or
+the run's local publication authority. Caller-supplied holder and generation
+headers grant no authority. Step finish accepts `passed`, `failed` and
+`cancelled`, plus an optional inner error with a code and masked message.
+Annotations and summaries accept at most 128 KiB of masked text.
 ## Unit recovery requires the elected reaper lease
 
 `Store.ReapExpiredNodeClaims`, `Maintenance.RecoverExpiredNodeClaims`,
@@ -622,67 +1238,19 @@ To upgrade:
 
 ## The cache's static operator token is removed
 
-- **Before:** one static secret had two names. The cache read it as the file
-  `cache-token` under `--credentials-dir` (the runner-bundle chart's
-  `cache.tokenSecret`) and accepted it on every route; the controller read it
-  as `SPARKWING_CACHE_TOKEN`, sent it on its git-cache proxy and team purges,
-  and accepted it on the storage counter routes
-  (`/internal/storage/reserve`, `commit`, `release`,
-  `/internal/downloads/charge` and `/internal/egress/totals`), where the cache
-  sent it back. An operator could also send it to the cache from a shell, and
-  the CLI, git clones, `.CacheDir` and the artifact store fell back to
-  `SPARKWING_CACHE_TOKEN` when no `SPARKWING_CACHE_GRANT` was set.
-- **After:** the cache accepts cache grants only, signed with
-  `cache-grant-key`. For its own calls (the git-cache proxy, team purges, and
-  the new `POST /api/v1/cache/store-ceiling/measure` and `thaw` routes) the
-  controller signs a five-minute operator grant with its own
-  `cache-grant-key` credential. The controller's service-token storage and
-  download counter routes are removed. Remove the cache's `controller-token`
-  credential. A cache refuses to start without `cache-grant-key` unless
-  `--allow-unauthenticated` is set. The controller ignores
-  `SPARKWING_CACHE_TOKEN`, and so does every client. The runner-bundle chart
-  drops `cache.tokenSecret`, refuses to render while it is set, and requires
-  `cache.grantKeySecret` for a cache-enabled install unless
-  `cache.allowUnauthenticated=true`. A person reaches the cache only through
-  the controller with an `admin` bearer.
-- **Operator steps:**
-  1. Remove the cache's `controller-token` credential.
-  2. Make sure the cache and the controller hold the same grant key:
-     `cache.grantKeySecret` in the runner-bundle chart (the full chart mounts
-     it into the controller's credentials directory too), or the
-     `cache-grant-key` file in both services' `--credentials-dir` in your own
-     manifests.
-     An install that had only the cache token creates one:
+Remove `SPARKWING_CACHE_TOKEN`, the `cache-token` credential and
+`cache.tokenSecret` from older installations. The separate cache service,
+its grant-key replacement and the controller's cache proxy are now removed.
+Do not provision a replacement cache token or grant key. Remove the cache
+deployment and use the controller's authenticated data routes for byte storage.
 
-     ```bash
-     kubectl -n sparkwing create secret generic sparkwing-cache-grant-key \
-       --from-literal=key="$(openssl rand -hex 32)"
-     ```
+## Cache-service accounting is removed
 
-  3. Unset `cache.tokenSecret` (or
-     `sparkwing-runner-bundle.cache.tokenSecret` in the full chart), set
-     `cache.grantKeySecret.name`, and upgrade the cache and controller
-     together, since an older controller sends the cache a token it no longer
-     takes.
-  4. Remove `SPARKWING_CACHE_TOKEN` from the controller's environment and from
-     operators' shells, remove the `cache-token` file from the cache's
-     credentials, and delete the old Secret:
-     `kubectl -n sparkwing delete secret sparkwing-cache-token`.
-  5. Replace any `curl` against the cache with the controller's routes and an
-     `admin` bearer: `POST /api/v1/gitcache/git/register` to register a
-     mirror, and `POST /api/v1/cache/store-ceiling/measure` or `thaw` for the
-     store ceiling.
-- **Edge cases:** rotating the counter token is minting a new one, swapping
-  the Secret and revoking the old prefix with
-  `sparkwing cluster tokens revoke`. A single-team controller without a grant
-  key calls the cache with no bearer, which only a cache started with
-  `--allow-unauthenticated` serves. `sparkwing spark` and a laptop's compile
-  no longer upload binaries to a cache with an operator's token; only a run's
-  grant writes there. Every authenticated cache now has a grant key, so two
-  rules that applied only to a cache with one now apply to all: a cache with
-  `--blob-store` needs `--controller` and its `controller-token`, and the
-  daily egress alarm defaults to 200 GiB unless `--egress-daily-alarm-bytes`
-  is set (the alarm reports in `/health` and the metrics and refuses nothing).
+The cache service and its accounting client have been deleted. Remove the
+cache deployment and its `controller-token` credential. The controller no longer
+registers the cache's storage-reserve, commit, release, download-charge or
+egress-total routes. The `storage.count` service scope has been removed.
+Storage and download accounting stays in the controller's database.
 
 ## The source-token route is removed
 
@@ -847,19 +1415,6 @@ Nothing converts an old pin.
 - **Plan document:** dependency caches are listed under `caches` instead
   of `dir_caches`, including in `sparkwing pipeline plan --static -o json`.
 
-## Retry requests and receipts
-
-Use `runs retry --run RUN --failed` to reuse successful jobs or `--all-jobs`
-to execute the complete sealed plan again. Repeated `--run`, comma lists and
-`--run -` select multiple runs. The old `full=1` query and legacy retry client
-method are removed. Each source run gets an independent idempotency key.
-
-Local and remote retries use the controller API. JSON emits one safe receipt
-or structured failure per source run. Plain emits new run IDs. The CLI no longer
-opens local or standalone state files to retry runs. Native retry intake, reuse
-and here handoff still require integration. An incomplete here handoff exits 3
-and its JSON failure receipt identifies the created run without its credential.
-
 ## The pipeline binary answers only the node protocol
 
 The compiled pipeline binary no longer runs, plans or inspects a pipeline by
@@ -882,10 +1437,142 @@ script that called the binary directly moves to the CLI:
 describe, instead of the per-field Go names and resolution notes the binary
 printed.
 
-## Plan inspection
+## Cache grants are removed
 
-Use `sparkwing pipeline plan --pipeline NAME -- <pipeline arguments>` to supply
-required inputs. The registered SDK entrypoint selects the code; the invoked
-project name remains in the run context. Secret inputs reach planning but are
-redacted in previews and structured diagnostics. The preview JSON uses `jobs`
-in place of `nodes`.
+The `swcg` protocol, `cache-grant-key` controller credential and
+`POST /api/v1/runs/{id}/cache-grant` route are gone. Data upload, commit,
+download and capability requests now use live controller capabilities.
+Replace grant authentication and `{kind,key}` downloads with the requests in
+[Data storage](../data-uploads.md) and [Data downloads](../api.md#data-downloads).
+
+Byte-storage consumers use the `blob.Store`, `DataSigner` and `RecordStore`
+contracts. Controller embedders configure their authenticated adapters with
+`WithDataController`. Services advertise data transfers only when those adapters
+are configured. There is no compatibility endpoint or cache-service fallback.
+Existing output and job-log handlers keep their separate transfer setup until
+their own cutover.
+
+## Raw artifact plug-ins are removed
+
+`storage.ArtifactStore`, `storage.ErrListNotSupported` and
+`conformance.TestArtifactStore` are removed. The unused raw
+`s3.ArtifactStore.Delete` method is also removed. Use the common signed-data
+backend and authorized records. A digest or a raw object existence check does
+not establish read access or an upload receipt.
+
+Deployment usage reporting remains separate through `storage.UsageReporter`.
+Its filesystem constructor is `fs.NewUsageReporter`.
+
+## Storage uses record-backed maintenance
+
+`Store.PrunableNodeLogs` and `Store.DeleteRunNodeLogs` are removed. Run and team
+deletion use the controller APIs and the shared backend. Retention uses the
+store's leased maintenance pass.
+
+`Server.WithDataObjects` also installs the backend's verified manifest reader
+for result attachment. Configure it before serving or sharing the store.
+
+Remove calls to `WithStoragePass` and `RunStoragePass`, references to
+`StoragePassEvery`, and readers of the `storage_pass` health field. No forwarding
+API remains. Controller embedders supply the physical backend with
+`WithDataObjects`. Leased retained-data maintenance marks unreachable blobs,
+collects eligible tombstones and expires filesystem logs. Bucket listings no
+longer replace tenant usage counts. Log lifetime follows retention classes.
+
+## Storage standing uses retained inventory
+
+Use `Store.ForTeam(ctx, team)` followed by `Tenant.StorageStanding(ctx)` for
+the team's storage report. The snapshot returns retained event, blob and log
+bytes plus live blob-upload reservation bytes. Historical usage counters remain
+financial records and do not determine retained storage. Deleting a run releases
+its retained event bytes without a repair call.
+
+`Store.StorageStandingFor`, `Store.TeamStorage`, `TeamStorageUsage` and
+`Store.ReconcileFreeEventBytes` are removed. The pre-launch schema also removes
+the duplicate `free_slots.event_bytes` column. Rebuild the disposable store.
+
+`Store.ReleaseExpiredStorage` is removed. Final upload reservations expire
+through quota admission and leased blob maintenance. An expired upload ticket
+cannot commit, including a zero-byte ticket.
+
+## Credit persistence uses explicit handles
+
+Deployment billing settings now use `store.AsOperator()`. This includes
+`CreditSettings`, `SetCreditSettings`, `SetOperatorCreditSettings`,
+`CreditRateTable` and `WarmCPUClassCores`. Their raw Store methods are removed.
+The settings, validation and update rules are unchanged.
+
+`Store.GrantCredits`, `Store.ListCreditCharges` and `Store.AppendEventOnce` are
+removed. Select the intended team with `ForTeam` and call its Tenant method.
+Local callers that mean the default team must select `store.DefaultTeam`.
+
+## Console authorization
+
+Account deletion, team deletion, GitHub App installation unbinding, orphan
+reconciliation and credit-settings writes move under `/api/v1/operator`.
+The former deployment-admin paths are removed. These actions require an
+operator-console session and CSRF proof. Bearer tokens cannot perform them.
+Console errors use the shared `error` object with `code`, `message`, and optional
+`details`. Account-deletion conflicts place affected teams in `error.details.teams`.
+
+Controller embedders must configure `Server.WithAuthorization` with the shared
+verifier, binding checker, verified transport identity and session-bound CSRF
+adapter before constructing the handler. Missing dependencies refuse requests.
+The operator account list alone does not configure API authentication.
+
+## Deployment authorization
+
+Use `/api/v1/operator/limits` and `/api/v1/operator/signups` with a deployment
+credential carrying `operator.limits`. Object-store administration uses
+`/api/v1/operator/object-store` and its `/breaker`, `/reset-breaker`, `/settings`,
+`/quotas/{team}` and `/quotas/{team}/allowance` routes, with
+`operator.object_store`. An operator-console session may use both groups;
+its mutations require CSRF proof. Quota selectors name the team.
+
+`GET /api/v1/storage` returns team data. Deployment totals are on
+`GET /api/v1/operator/object-store`. The former compute-limits, signups,
+object-store and storage-settings paths are removed, along with
+`GET /api/v1/admin/usage-metrics` and the repo-dispatch mutation route.
+
+## Credential revocation
+
+Use `DELETE /api/v1/tokens/{token}` for a team capability. The old
+`DELETE /api/v1/team/tokens/{prefix}` path is removed. Deployment token
+revocation moves to `DELETE /api/v1/operator/tokens/{token}` and requires
+`operator.tokens` or an operator console session. The Go admin client's
+`RevokeToken` uses the deployment path.
+
+Member updates use `/api/v1/team/members/{account}`. PATCH accepts a JSON object
+with `role` set to `reader`, `editor` or `owner`. DELETE removes the membership.
+Browser mutations require CSRF proof. Last-owner refusals use the shared
+`conflict` error with HTTP 409. Dead credentials use `unauthenticated` with
+HTTP 401. The old token-state response fields and one-hour retry hint do not
+apply to these routes.
+
+### Member credential issuance
+
+Replace member requests to `/api/v1/team/tokens` and the former global token
+mint with `POST /api/v1/tokens`. Send `grants` and optional RFC3339
+`expires_at`. Read `capability`, `prefix`, `team`, `grants` and optional
+`expires_at`. The request no longer accepts principal, kind, scopes, TTL or
+metering. A session provisions its own member root. A member bearer narrows
+its authority through delegation. Save the returned capability privately and
+do not automatically retry issuance.
+
+## Root provisioning
+
+Machine enrollment uses `POST /api/v1/runners` with `name`, `repos`, optional
+`reserved_pools`, optional narrow `grants` and optional absolute `expires_at`.
+It requires `team.admin`. `POST /api/v1/team/tokens` is removed. Deployment
+service issuance uses `POST /api/v1/operator/tokens` with `name`, operational
+`grants` and optional `expires_at`, under `operator.tokens` or console authority.
+Both return `capability`, `prefix`, `team`, `grants` and optional RFC3339 expiry.
+They return the bearer once, use no-store and require session CSRF for cookie
+authentication. Do not automatically replay issuance.
+
+Go callers use `EnrollRunner` and `CreateServiceToken`. Member `CreateToken`
+accepts `Grants` and `ExpiresAt`; the old kind/principal/scopes/TTL request and
+Token/Metadata response fields are removed. Controller integrations retain the
+existing `WithCredentialIssuer` and C1 `ProvisionPolicy` transaction boundary.
+Missing origin policy refuses with `unavailable`. Production enrollment and
+console-origin persistence must be provided before enabling those flows.

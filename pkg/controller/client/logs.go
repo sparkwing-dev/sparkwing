@@ -27,16 +27,6 @@ var _ storage.LogStore = NodeLogs{}
 // NodeLogs returns the reader for this controller's node logs.
 func (c *Client) NodeLogs() NodeLogs { return NodeLogs{c: c} }
 
-// Append refuses: node logs reach the controller as segments.
-func (NodeLogs) Append(context.Context, string, string, []byte) error {
-	return fmt.Errorf("%w: node logs reach the controller as segments", storage.ErrNotSupported)
-}
-
-// DeleteRun refuses: deleting a run deletes its logs.
-func (NodeLogs) DeleteRun(context.Context, string) error {
-	return fmt.Errorf("%w: delete the run to delete its logs", storage.ErrNotSupported)
-}
-
 func (l NodeLogs) logPath(runID, nodeID string) string {
 	p := "/api/v1/runs/" + url.PathEscape(runID) + "/logs"
 	if nodeID != "" {

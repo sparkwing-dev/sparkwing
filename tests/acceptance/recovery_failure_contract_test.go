@@ -13,7 +13,7 @@ func TestRecoveryFailureAbsenceContract(t *testing.T) {
 	for _, endpoint := range []string{"http://api.sock", "https://controller.example"} {
 		t.Run(endpoint, func(t *testing.T) {
 			c, err := client.NewEngineClient(client.EngineOptions{URL: endpoint, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
-				if req.Method != "GET" || req.URL.RequestURI() != "/api/v1/runs/run/jobs/source/failure?source_generation=2" {
+				if req.Method != "GET" || req.URL.RequestURI() != "/api/v1/runs/run/jobs/source/failure?generation=2" {
 					t.Fatalf("failure read: %s %s", req.Method, req.URL)
 				}
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("null"))}, nil

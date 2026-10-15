@@ -120,11 +120,11 @@ func (c *engineClient) CancelJob(ctx context.Context, run, job string, input con
 }
 
 func (c *engineClient) ReadFailure(ctx context.Context, run, job string, generation int64) (*nodeproto.JobFailure, error) {
-	if !validSelector(run) || !validSelector(job) || generation < 0 {
+	if !validSelector(run) || !validSelector(job) || generation <= 0 {
 		return nil, &apierr.Error{Code: apierr.BadRequest, Message: "failure read requires valid run, job and source generation"}
 	}
 	var result *nodeproto.JobFailure
-	err := c.request(ctx, "GET", "/api/v1/runs/{run}/jobs/{job}/failure", "/api/v1/runs/"+url.PathEscape(run)+"/jobs/"+url.PathEscape(job)+"/failure?source_generation="+strconv.FormatInt(generation, 10), "", nil, &result)
+	err := c.request(ctx, "GET", "/api/v1/runs/{run}/jobs/{job}/failure", "/api/v1/runs/"+url.PathEscape(run)+"/jobs/"+url.PathEscape(job)+"/failure?generation="+strconv.FormatInt(generation, 10), "", nil, &result)
 	if err != nil {
 		return nil, err
 	}

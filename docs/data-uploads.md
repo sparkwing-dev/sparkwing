@@ -1,82 +1,101 @@
-# Direct data uploads
+# Data storage
 
-The controller authorizes blobs and logical records through `/api/v1/data`.
-S3 and filesystem backends implement the same signed-object contract. A runner
-uses its current capability. Local publication uses run-bound publisher authority.
-The signed object client receives only the returned transfer URL and headers.
+Data routes use live controller capabilities. A job's `data.write` authority
+names its exact run, job, attempt and generation. A run owner can upload only
+the record kinds its award permits. Local publication uses the authorized
+publication run. The controller derives the team, uploader, repository and ref
+from persisted facts. Machine roots need an award before they can upload.
 
-This page describes the frozen data contract. Native signer, transaction and
-backend integration require separate evidence. The shared wire client and its
-transport tests do not establish those server guarantees.
+1. `POST /api/v1/data/upload` takes `{"digest":"<sha256>","size":N}`. The
+   digest is lowercase SHA-256 and size is nonnegative. The controller reserves
+   quota before signing a PUT for that digest and size. The response contains
+   `upload_id`, `url`, `headers`, `expires_at`, `sha256` and `size`.
+2. PUT exactly those bytes to the URL with the returned headers. Send only the
+   signed headers to object storage. Keep the controller bearer private.
+3. `POST /api/v1/data/commit` takes `{"upload_id":"<ticket>"}`. It resolves
+   the original reservation, rechecks authority and verifies the physical
+   bytes before committing existence and an uploader receipt. The response
+   contains `digest` and `created_at`. A failed verification grants no receipt.
 
-<!-- design:begin -->
+Signing failures release their reservations. A physical object left by an
+interrupted commit grants no read authority. A later commit must verify its
+bytes and pass the transaction's authority checks. Storage quota failures use
+`quota_exceeded`. Bad bytes use `integrity_failure`. Private backend errors
+return the common `internal` envelope.
 
-## Authorization
+`POST /api/v1/data/records` creates an authorized logical reference. It takes
+`kind`, `pipeline`, `job`, `key`, `name`, `digest`, optional `manifest_digest`,
+`members` and optional `expires_at`. A member contains `digest`, `path`, `size`
+and `mode`. Record kinds are `output`, `manifest`, `memo`, `depcache`, `binary`
+and `source_bundle`. The controller supplies each member's team and manifest
+identity. It checks every primary, manifest and member digest before calling
+the store's committing transaction. Job A's receipt never grants unrelated
+job B authority to reference the same bytes.
 
-Repository identity, ref facts, uploader and read edges come from authenticated,
-persisted state. Request fields select values to compare with that state.
-Possession of a digest or another receipt from the same run grants no access.
-Each signing, commit, record lookup and record write rechecks current authority.
+`GET /api/v1/data/records` selects `kind`, `ref`, `pipeline`, `job`, `key` and
+`name`. Optional `deadline` is an RFC3339 timestamp. Optional
+`verified_default_only=true` narrows the lookup. Repeated or unknown selectors
+fail with `bad_request`. A miss returns `{"found":false,"members":[]}`.
+A hit returns public record metadata and authorized member metadata. It omits
+private authority references, uploader identities and read-set snapshots.
 
-A job upload binds team, run, job, attempt and generation. Owner-unit receipts
-and non-job publication receipts cover binary/source bundles. Imported publication
-attempts may attach output and manifest records only for their bound published job.
-The server assigns provenance independently of caller-supplied metadata.
+`POST /api/v1/data/memo/lookup` takes `pipeline`, `job`, `hash` and optional
+RFC3339 `deadline`. `POST /api/v1/data/depcache/lookup` takes `name`, `key`
+and optional `deadline`. The store applies memo's own-ref/default fallback
+and depcache's own-ref/PR-base/default order. Remote-cache credentials read
+only verified default-branch entries. Missing or corrupt cache data is a miss.
 
-## Transfer messages
+`POST /api/v1/data/memo/copy` takes the memo selectors. It requires both
+`data.read` and `data.write` and copies authorized output and manifest edges
+to the claim's current attempt. The caller cannot choose the destination.
 
-All names use snake_case. The shared messages live in `internal/controllerwire`.
+These requests accept only unique, known string fields. Memo responses carry
+`found`, optional `output` and `manifest` digests, and public `members`.
+Depcache hits carry public `record` metadata and the winning restore `source`.
+Read-set snapshots and uploader identities stay private.
 
-| Operation | Request | Response |
-| --- | --- | --- |
-| `POST /api/v1/data/upload` | `DataUploadRequest` | `DataUploadTicket` |
-| `POST /api/v1/data/commit` | `DataCommitRequest` | `DataReceipt` |
-| `POST /api/v1/data/download` | `DataDownloadRequest` | `DataSignedTransfer` |
-| `POST /api/v1/data/has-many` | `DataHasManyRequest` | `DataPresence` |
-| `GET /api/v1/data/records` | `lookup` and URL-escaped `selector` JSON | Matching record, memo or depcache result |
-| `POST /api/v1/data/records` | `DataRecordWriteRequest` | Committed record or copied memo hit |
+Write requests cannot choose a team, repository, ref verification flag or
+provenance. Submitter-vouched writes use the sealed manual ref namespace.
+Remote-cache credentials always require verified default-branch records and
+cannot write. See [Data downloads](api.md#data-downloads) for byte reads and
+presence queries.
 
-`DataUploadRequest` carries `authority`, `identity`, `digest` and `size`.
-The digest is a lowercase SHA-256 string. The controller reserves quota before
-signing. The ticket contains `id` and a `transfer` with `url`, `headers`,
-`expires_at`, `digest` and `size`.
+`GET /api/v1/services` advertises `direct_data` when the authenticated upload
+adapters are configured. `GET /api/v1/data/capabilities` reports upload and
+download availability separately. An embedded controller supplies these
+adapters through `WithDataController`. Missing wiring fails closed. The
+signing and transaction contracts serve S3 and filesystem backends. Native
+transfer and client integration must be verified before deployment.
 
-The client sends the exact bytes and signed headers to that one-object URL. It
-then commits with `authority` and `ticket_id`. Commit verifies physical size and
-digest, repeats current authorization and publishes the immutable object and
-receipt. A reservation or an uploaded temporary object alone is not a receipt.
-Retries retain the upload idempotency key and the exact commit body.
+## Verified byte transfers
 
-Downloads select `authority` and `digest`. The server checks the live readable
-set before returning a transfer. The client verifies size and digest through EOF.
-Closing a partial reader does not establish a successful verified read. A signed
-URL remains a temporary credential until its expiry. Revocation stops new signing
-and commits but cannot revoke a URL already issued.
+The byte-storage components share `blob.Store` for binaries, source bundles,
+outputs, artifact manifests, memo and dependency caches. `NewSignedStore` uses
+an authenticated `DataSigner` for upload tickets, commits, downloads and presence
+queries. `RecordStore` owns logical names and authorized reference edges.
 
-The object client refuses reusable authorization, cookie and proxy credentials
-in signed transfer headers. It does not forward the controller bearer to storage.
-Redirects cannot move those headers to another destination.
+The filesystem and S3 backends sign one-object transfers. A PUT binds the expected
+size and SHA-256 to a staging object. Commit verifies stored bytes through EOF
+and successful close before publishing an immutable `teams/<team>/cas/<sha256>`
+object. Retrying an interrupted commit verifies an existing final object too.
+Object metadata and a successful physical copy cannot establish a receipt.
+The store rechecks live authority and settles the reservation before it
+records existence and the exact uploader's receipt.
 
-`HasMany` reports readable live blobs only. Unauthorized and absent digests are
-indistinguishable. A deadline or storage budget failure remains an error rather
-than successful absence.
+Downloads verify size and SHA-256 at EOF. Artifact staging fails on missing or
+corrupt bytes. Memo becomes a miss and dependency caches run cold. HasMany reports
+presence only within the caller's authorized read set.
 
-## Logical records and reuse
+Local remote-cache reads require explicit profile opt-in. They read authorized
+verified-default-branch memo, artifacts and dependency caches, never write shared
+records, and never fetch executable pipeline binaries.
 
-Record lookup selects `lookup=record`, `memo` or `depcache` with the matching
-selector payload. `verified_default_only` is explicit. Responses retain authorized
-member metadata, read edges and provenance. A client cannot submit response read
-sets or ref facts as authorization proof.
+Logs use a separate signed segment path and controller-proxied reads. Tagged
+subjects distinguish job attempts from trigger, plan and eval units.
 
-Record writes tag `operation=commit` or `copy_memo` and contain exactly the matching
-payload. The store checks record, member and copy edges in the mutation transaction.
-A memo hit copies output and manifest records and installs read edges atomically.
-
-Memo scope contains repository, ref, pipeline, job and hash. Depcache restores the
-own ref, verified pull-request base, then verified default branch. Memo has no
-pull-request-base fallback. A submitter-vouched ref writes under `manual:<ref>`.
-It cannot overwrite a verified ref. Missing or corrupt memo becomes a miss,
-depcache runs cold, and required output or artifact reads fail loudly.
+The `swcg` cache-grant protocol and `cache-grant-key` credential are removed.
+Authenticated data routes use live capabilities. There is no compatibility
+endpoint or cache-service fallback.
 
 ## Local cache reads and publication
 
@@ -89,9 +108,3 @@ reads. Pipeline binaries stay in the local binary cache.
 results and logs under `trust_local_builds`. Publication failure is reported
 independently and does not change the completed local run outcome. Source-bundle
 intake and publication result-copy composition still need their owner bindings.
-
-Logs use their own signed upload and controller-proxied read path. They are not
-blob data downloads. See [Controller HTTP API](api.md), [Observability](observability.md)
-and [Storage limits](limits.md).
-
-<!-- design:end -->

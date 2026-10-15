@@ -33,6 +33,7 @@ does not bring back:
   (see [self-hosting](self-hosting.md#node-log-retention)).
 - Artifact, output and dependency-cache bytes in the selected storage backend.
 - Machine-local pipeline binaries, which rebuild from source.
+- Run checkouts, which fetch their own Git objects from upstream.
 
 Back those up on their own schedule, or accept losing them; the
 controller serves run and node records without them.

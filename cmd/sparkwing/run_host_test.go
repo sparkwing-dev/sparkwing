@@ -142,7 +142,7 @@ func TestLocalRunUsesSealedIntakeAndNamedOwnerClaim(t *testing.T) {
 }
 
 func TestLocalRunRejectsUnsupportedSelectionsBeforeAnyEffect(t *testing.T) {
-	for _, flags := range []runFlags{{startAt: "job"}, {stopAt: "job"}, {only: "job"}, {detached: true, index: "/index"}} {
+	for _, flags := range []runFlags{{detached: true, index: "/index"}} {
 		deps := localRunDependencies{resolve: func(context.Context, localRunOptions) (localRunRuntime, error) {
 			t.Fatal("unsupported input reached native composition")
 			return localRunRuntime{}, nil
@@ -226,7 +226,7 @@ func TestLocalPreparationRetainsC4PresenceAndMachineDefaults(t *testing.T) {
 	input.machineFile = "/captured/config.yaml"
 	input.machine.Run = &userconfig.RunConfig{CacheFrom: new("ci-cache")}
 	input.settings.Environment = settings.Values{NoMemo: new(true), Output: new("plain")}
-	flags, args := parseRunFlags([]string{"--publish", "history", "--sw-no-memo=false", "--sw-workers", "2", "--sw-priority=0", "--sw-pause-before", "build,test", "--sw-pause-on-failure=false", "--", "--password", "private-value"})
+	flags, args := parseRunFlags([]string{"--publish", "history", "--sw-start-at", "build/compile", "--sw-stop-at", "test/verify", "--sw-only", "build*", "--sw-no-memo=false", "--sw-workers", "2", "--sw-priority=0", "--sw-pause-before", "build,test", "--sw-pause-on-failure=false", "--", "--password", "private-value"})
 	if flags.parseErr != nil {
 		t.Fatal(flags.parseErr)
 	}
@@ -235,6 +235,9 @@ func TestLocalPreparationRetainsC4PresenceAndMachineDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	options := request.Request.Options
+	if !options.StartAt.Set || options.StartAt.Value != "build/compile" || options.StopAt.Value != "test/verify" || options.Only.Value != "build*" || options.StartAt.Origin.Layer != runspec.LayerFlag {
+		t.Fatalf("lost sealed selections: %+v", options)
+	}
 	if !options.NoMemo.Set || options.NoMemo.Value || options.NoMemo.Origin.Layer != runspec.LayerFlag || options.Output.Value != "plain" || options.Output.Origin.Layer != runspec.LayerEnv || options.Workers.Value != 2 || !options.Priority.Set || options.Priority.Value != 0 || options.Publish.Value != "history" || options.CacheFrom.Value != "ci-cache" || options.CacheFrom.Origin.Layer != runspec.LayerMachine || options.CacheFrom.Origin.File != input.machineFile {
 		t.Fatalf("lost C4 presence or precedence: %+v", options)
 	}

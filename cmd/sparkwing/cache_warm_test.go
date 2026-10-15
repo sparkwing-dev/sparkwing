@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
@@ -178,5 +181,42 @@ func TestCacheWarmFlushesDiagnosticsBeforeSuccess(t *testing.T) {
 	err := runCacheWarmCommand(t.Context(), []string{"-o", "json"}, &out, deps)
 	if !errors.Is(err, io.ErrClosedPipe) || out.Len() != 0 {
 		t.Fatalf("diagnostics failure reported success: err=%v out=%s", err, &out)
+	}
+}
+
+func TestCacheWarmUsesSelectedEngineAndCapturedEnvironment(t *testing.T) {
+	for _, sdk := range []engine.SDKKind{engine.GoSDK, engine.TypeScriptSDK} {
+		t.Run(string(sdk), func(t *testing.T) {
+			dir := t.TempDir()
+			manifest := "go.mod"
+			body := "module example.com/fixture\ngo 1.26\n"
+			if sdk == engine.TypeScriptSDK {
+				manifest, body = "package.json", `{"main":"pipeline.ts","dependencies":{"@sparkwing/sdk":"1.0.0"}}`
+			}
+			if err := os.WriteFile(filepath.Join(dir, manifest), []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			selected := engine.Resolved{Executable: filepath.Join(t.TempDir(), "engine")}
+			environment := []string{"CAPTURED=value"}
+			called := false
+			result, err := warmLocalPipelineWith(t.Context(), dir, environment, io.Discard, func(ctx context.Context, got string, language engine.SDKKind) (engine.Resolved, error) {
+				if got != dir || language != sdk || ctx.Err() != nil {
+					t.Fatal("wrong engine selection inputs")
+				}
+				return selected, nil
+			}, func(ctx context.Context, got engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
+				called = true
+				if ctx.Err() != nil || got.Executable != selected.Executable || request.Directory != filepath.Dir(dir) || request.PipelineDir != filepath.Base(dir) || request.SDK != sdk || !reflect.DeepEqual(request.Environment, environment) {
+					t.Fatal("installation changed selected engine or captured input")
+				}
+				return engine.SDKCommand{Directory: dir, Command: []string{filepath.Join(dir, "pipeline")}}, nil
+			})
+			if err != nil || !called || result.Language != string(sdk) || result.Status != "prepared" {
+				t.Fatalf("result=%+v called=%v err=%v", result, called, err)
+			}
+			if sdk == engine.TypeScriptSDK && result.Path != filepath.Join(dir, "node_modules") {
+				t.Fatalf("TypeScript path=%q", result.Path)
+			}
+		})
 	}
 }

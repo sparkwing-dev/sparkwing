@@ -113,6 +113,8 @@ Clone a gitops repo, patch image tags in `kustomization.yaml`, push, and
 optionally sync ArgoCD. `Deploy` retries on concurrent push conflicts and
 reports whether it changed anything.
 
+**Transport:** clone and push both go directly to the remote using the
+configured Git credentials.
 
 When `SPARKWING_CONTROLLER` is set, `Deploy` asks the controller to
 authorize the push before it happens: a 403 blocks the deploy, while an

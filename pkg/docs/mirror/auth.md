@@ -1,12 +1,256 @@
-# Authentication design
+# Authentication + authorization
 
 A connection chooses the controller. A credential identifies the caller and its
 exact authority. A claim confines execution to the work the controller awarded.
 
-This page specifies the target authentication contract. Controller provisioning,
-route enforcement and native runner configuration still need integration.
-Client fixtures do not establish those server guarantees. The implemented
-client surface is documented in [Credential management](credentials.md).
+The controller enforces the shared capability policy through store-backed
+authentication and transactional authorization. Native runner and deployment
+verification remain separate from client transport tests. See
+[Credential management](credentials.md) for the CLI surface.
+
+## Controller authorization
+
+The controller's shared policy routes use the store's authentication snapshot
+and binding checker by default. Each request reads current capability ancestry
+and account membership. Browser writes use the session-bound CSRF verifier by default. The header
+and cookie must match the token derived from the persisted encrypted key, and
+the request must come from the same origin. A forged or cross-session token
+returns `forbidden`. Session key failures return `unavailable`. Verified local-peer and operator-console presentations need
+their transport-specific adapters. Request headers and loopback addresses do
+not supply those identities.
+
+`GET /api/v1/queue` uses the shared capability policy. A member or verified
+local peer needs `runs.read` for its active team. Queue groups and advertised
+runner headroom belong to that team. Machine roots and work claims cannot read
+the team queue. The former `/api/v1/queue/state` path is removed.
+
+Run intake, plan acceptance, job status reads, job transitions, finish,
+cancellation, retry and run/job renewal use the shared capability policy. The
+controller resolves the resource's team before authorization and derives
+actors and fences from the credential. Unknown or ended credentials get
+`unauthenticated`. A live
+credential without the grant or binding gets `forbidden`.
+
+`GET /api/v1/runs/{run}/jobs` returns a status array from one committed
+snapshot. It accepts member `runs.read` or the live run owner's `trigger.host`.
+`GET /api/v1/runs/{run}/jobs/{job}` also accepts that job's live `data.read`
+authority. An executor cannot list siblings or read another job through this
+route. Both responses use the shared safe job status fields. They omit job
+declarations, environment, claim identities and execution settings. The old
+`GET /nodes` and `GET /nodes/{nodeID}` paths are removed.
+
+`POST /api/v1/runs/{run}/jobs/{job}/cancel` accepts `runs.control` from a
+member or `trigger.host` from the live owner of that run. The state transaction
+requests cancellation of held jobs and preserves the holder's result rights.
+The first cancellation reason is recorded separately from the holder's
+terminal result and reaches the holder on renewal.
+
+`GET /api/v1/runs/{run}/jobs/{job}/failure?generation=N` requires `data.read`
+and a declared recovery read edge to that source generation. It returns the
+persisted masked job failure, including its stage, or `null` when none was
+recorded. Status text is never converted into a synthetic failure. Missing,
+duplicate or nonpositive generation selectors return `bad_request` after
+credential authentication.
+
+`GET /api/v1/runs/{run}/snapshot` requires a live trigger owner with
+`trigger.host` bound to that run. It returns one committed scheduling view,
+including generated jobs and empty generator groups. Ordinary members and
+work or plan claims cannot read this private owner view. Cancellation and
+owner lease loss refuse new reads. A cancellation committed after
+authentication appears in the returned snapshot. Accepted expansion bodies,
+hashes and source generations travel in the same committed read. Replayed
+expansion responses retain each generated job's current state and attempt.
+
+Pipeline sizing uses `/api/v1/pipelines/{name}/sizing`. Members need
+`runs.read`. Executable claims need `source.read` and the bound run's exact
+sealed repository and pipeline. Bare runner and Actions roots cannot read
+sizing. Bootstrap credentials can acquire source but cannot read sizing.
+The `job` query selects one job. Omitting it selects the pipeline rollup.
+An authorized missing measurement returns `not_found`.
+
+Pins, observations, contention and waits use the `pin`, `observations`,
+`contention` and `waits` suffixes on that path. They require `node.report`
+and the same pipeline binding. Cancellation permits reporting while the
+claim remains live. Member and admin grants cannot bypass this binding.
+Writes require an authority-bearing sizing transaction adapter. Without one,
+the controller returns `policy_missing` before storing a measurement.
+The old `/profile` paths are removed.
+
+Token revocation and member updates use the same policy router. A team token is
+revoked at `DELETE /api/v1/tokens/{token}`. Deployment service/operator roots use
+`DELETE /api/v1/operator/tokens/{token}` with `operator.tokens` or an operator
+console session. Team routes derive their active team from the committed
+credential. Header and query hints cannot select another team.
+
+`GET /api/v1/team/members` returns the active team's member directory and
+requires `runs.read`. An empty team returns `[]`.
+
+`GET /api/v1/credits` and `GET /api/v1/credits/history` require a live member
+or verified local peer with `runs.read`. The committed credential selects the
+team. Machine roots, executable claims and bootstrap credentials cannot read
+the team ledger. Both routes use the common error envelope and authenticate
+before checking whether credit billing is enabled. An authorized caller gets
+`not_found` when billing is unavailable. History retains the `limit` query
+and returns empty grants and charges as arrays.
+
+`PATCH /api/v1/team/members/{account}` accepts a role of `owner`, `editor` or
+`reader`. `DELETE` on that path removes the membership. The store rechecks the
+authenticated authority and updates the membership generation in the same
+transaction. A missing member returns `not_found`. A last-owner change returns
+`conflict`. Browser mutations require CSRF proof. Revocation stops descendants'
+new controller operations, including those parented to a session. Previously
+issued external credentials and signed URLs keep their documented lifetimes.
+
+`POST /api/v1/runs` accepts a `request` and `idempotency_key`. The request names
+its team. A bound job creating a child must name its own run and job as the
+parent. Intake returns the committed run number and first seal. A here bearer
+is returned once. Replaying intake returns the committed response without
+another bearer.
+
+`POST /api/v1/runs/{run}/plan` accepts `declarations`, `resolved` and `plan`.
+The store validates the second seal against the persisted first seal, including
+a retry's preserved source seal. Raw plan snapshots are no longer accepted.
+Plan, job-transition and finish requests from ended claims require the exact
+recorded body, actor and fence to replay. Mutations recheck authority inside
+the store transaction. A lost fence gets `lock_held`.
+
+Job transitions use `/api/v1/runs/{run}/jobs/{job}/transition`. Finish ends the
+run and its owner unit together. Published local runs use a separate transition
+edge and receive no executable owner. Cancellation carries a reason. Retry
+carries an idempotency key and leaves source seals unchanged. Run/job heartbeat
+responses carry the committed lease expiry, cancellation and watched jobs.
+Every request uses JSON. Bodies cannot replace authority, holders or fences.
+
+Job and step annotations, summaries and step transitions use the same policy
+under `/api/v1/runs/{run}/jobs/{job}`. A job claim reports only its own job.
+A trigger owner may report its run's jobs, subject to the transaction's holder
+check. A local publisher uses its separate run-bound publication authority.
+Cancellation permits reporting while the claim remains live. An ended claim
+cannot write these reports.
+
+Step reports carry a positive `source_attempt`, `step_id`, state and an
+optional masked inner error. The controller derives the actor and claim fence
+from authorization. The store owns stale-attempt refusal and committed timestamps. Annotations and summaries accept at most
+128 KiB of masked text. The old `/nodes/` reporting paths are removed.
+
+## Data read authority
+
+Download signing and batched presence use the shared capability policy.
+A live claim needs its data grant and sealed run/repository/ref binding.
+A repository reader needs existing repository authority. Cache grants,
+ordinary member tokens and machine roots cannot substitute for either.
+Each operation resolves current authority again and checks the read set
+before reading metadata. Presence queries omit unreadable digests. Download
+signing applies the team's daily byte cap and returns a 60-second URL for
+one immutable object. The returned storage headers contain no controller bearer.
+
+## Credential discovery
+
+`GET /api/v1/auth/whoami` uses the shared policy verifier. It returns the
+committed subject ID as `principal`, the subject kind as `kind`, and grants
+as `scopes`. `team` is present when the credential has an active team.
+`token_prefix` names a capability. Sessions and verified local peers omit it.
+The response excludes session IDs, ancestry, claim fences and billing facts.
+An empty grant set returns `"scopes":[]`.
+
+`GET /api/v1/services` and `GET /api/v1/data/capabilities` use the same verifier
+and require an active team. They announce configured services and data transfer
+support. Availability is checked after authorization. An authorized caller gets
+`not_found` when nothing is configured. Missing or dead credentials receive
+`unauthenticated` regardless of service configuration. Bootstrap and eval
+credentials cannot use these discovery routes or `whoami`.
+
+All three routes return `Cache-Control: no-store`. Unsupported methods return
+`method_not_allowed` with `Allow: GET`. Identity lookup requires an explicit
+credential or a verified local peer. An address, query parameter or identity
+header cannot supply authority.
+
+The OIDC discovery document at `/.well-known/openid-configuration` and public
+key set at `/.well-known/jwks.json` also use the policy router. Providers can
+read them without a Sparkwing credential. Both retain their one-hour public
+cache header. A controller without an issuer returns `not_found`, and
+unsupported methods return `method_not_allowed` with `Allow: GET`.
+
+## Generator expansion authority
+
+`POST /api/v1/runs/{run}/jobs/{job}/expansion` uses the shared capability
+policy. It requires `expansion.submit`, the bound source job and generation,
+and a live owner or eval lease. Eval also requires a live controller ownership
+lease. The ended source claim cannot submit an expansion.
+
+The body supplies `source_generation` and exactly one of `body` or `failure`.
+A successful empty expansion uses `"body":{"jobs":[]}`. A failure uses the
+shared inner error object with `code` and `message`. The controller derives
+the actor, holder and lease generation from authorization. Success and failure
+reach the same store transaction, which rechecks authority before acceptance
+and owns replay. Unsupported methods return a JSON `method_not_allowed` error
+with `Allow: POST`.
+
+## Capability inventory and rotation
+
+`GET /api/v1/tokens` lists credentials within the authenticated team. Members
+need `runs.read` and see their own credentials. A team admin can see the team's
+credentials. `GET /api/v1/tokens/{token}` checks ownership of that prefix.
+Deployment service and operator credentials use the corresponding collection
+and detail routes under `/api/v1/operator/tokens`, requiring `operator.tokens`
+or an operator console session.
+
+The collection returns `{tokens:[...]}`. Each row carries `prefix`, `team`,
+`subject`, `audience`, `grants`, `created_by`, `issued_at`, `git_credentials`,
+`metered`, and optional `expires_at`, `last_used_at` and `revoked_at`. Times are RFC3339
+timestamps. The response omits bearer secrets, digests, bindings and ancestry.
+`kind` filters by `account`, `machine`, `service` or `operator`.
+`include_revoked=1` includes revoked rows. Duplicate or invalid filters fail.
+
+`POST /api/v1/tokens/{token}/rotate` replaces an owned credential. Deployment
+credentials use `/api/v1/operator/tokens/{token}/rotate`. The body accepts
+`grace_secs` and optional `expires_at`. Grace defaults to 24 hours and accepts
+zero through seven days. An omitted expiry keeps the original expiry. An
+explicit expiry must pass the original parent's ceilings or the current root
+origin policy. The transaction preserves the original
+authority and ends the old credential after the grace window. Explicit
+revocation ends that window at once.
+
+The rotation response returns `capability` once, `new` public metadata,
+`old_prefix` and the RFC3339 `old_revoked_at`. Do not replay a rotation after
+losing its response. Browser mutations require session-bound CSRF proof.
+All inventory and rotation responses use `Cache-Control: no-store` and the
+common error envelope. Embedded controllers provide `WithCapabilityManager`
+for authority-bearing inventory and rotation transactions.
+
+## Browser session lifecycle
+
+`GET /api/v1/auth/session` accepts a live account session from one session
+cookie or one `Authorization: Session <id>` header. An Authorization header
+takes precedence over cookies. Duplicate headers, duplicate session cookies,
+unknown or ended sessions and HEAD are refused. The response includes the
+current role, narrowed scopes, session-bound CSRF token and renewed expiry.
+Renewal cannot extend the absolute session lifetime. A disabled account-session
+license or failed proof cannot renew the session.
+
+`POST /api/v1/auth/logout` takes no body. It ends only the presented session,
+requires the session's CSRF header and cookie plus same-origin proof, and
+clears the browser cookies on success. A body or query parameter cannot select
+another session. Both endpoints return `Cache-Control: no-store` and the
+canonical error envelope. Session-key and deletion failures return `unavailable`.
+
+Other policy routes accept the same Session header or one session cookie and
+check the configured absolute lifetime without renewing. A malformed header
+cannot fall back to a cookie. Dashboard requests reach that proof boundary
+before session renewal, so a failed CSRF check cannot extend a live session.
+
+The browser form posts to `POST /logout`. It requires a live session and a
+`csrf_token` field matching both the CSRF cookie and the stored session, plus
+same-origin proof. It deletes only that session, clears its browser cookies and
+redirects to `/login`. It never renews before checking proof. Refusals use the
+canonical error envelope. An unavailable session returns `401`; a key or
+deletion failure returns `503` and leaves the cookies in place.
+
+A session renewal extends expiry by seven days, but never past 30 days from
+creation. Ordinary policy reads and writes check that lifetime without
+renewing. The renewal endpoint refuses an over-age or future-created session
+and removes its row. An embedder changes the cap with
+`controller.Server.WithSessionMaxLifetime`.
 
 <!-- design:begin -->
 
@@ -273,32 +517,6 @@ Public discovery, sign-in, provider callbacks, webhooks and signed data URLs use
 their declared proof requirements. A route being reachable without a bearer is
 not an authorization bypass. A signed URL, verified webhook or provider proof
 is valid only for its own operation. Every registered route declares its proof.
-
-`GET /api/v1/auth/session` accepts a live account session from one session
-cookie or one `Authorization: Session <id>` header. An Authorization header
-takes precedence over cookies. Duplicate headers, duplicate session cookies,
-unknown or ended sessions and HEAD are refused. The response includes the
-current role, narrowed scopes, session-bound CSRF token and renewed expiry.
-Renewal cannot extend the absolute session lifetime. A disabled account-session
-license or failed proof cannot renew the session.
-
-`POST /api/v1/auth/logout` takes no body. It ends only the presented session,
-requires the session's CSRF header and cookie plus same-origin proof, and
-clears the browser cookies on success. A body or query parameter cannot select
-another session. Both endpoints return `Cache-Control: no-store` and the
-canonical error envelope. Session-key and deletion failures return `unavailable`.
-
-Other policy routes accept the same Session header or one session cookie and
-check the configured absolute lifetime without renewing. A malformed header
-cannot fall back to a cookie. Dashboard requests reach that proof boundary
-before session renewal, so a failed CSRF check cannot extend a live session.
-
-The browser form posts to `POST /logout`. It requires a live session and a
-`csrf_token` field matching both the CSRF cookie and the stored session, plus
-same-origin proof. It deletes only that session, clears its browser cookies and
-redirects to `/login`. It never renews before checking proof. Refusals use the
-canonical error envelope. An unavailable session returns `401`; a key or
-deletion failure returns `503` and leaves the cookies in place.
 
 ## Dashboard authorization
 

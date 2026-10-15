@@ -1,9 +1,9 @@
 # GitHub Actions runners
 
 GitHub Actions execution uses the same runner claim, hosting and storage contracts
-as other placements. The controller declares its OIDC exchange route. Native
-exchange, runner startup and workflow generation still need integration evidence.
-The sections below describe the target contract.
+as other placements. The controller verifies OIDC exchange
+through the shared capability policy. Native runner startup and workflow execution
+require separate integration evidence.
 
 <!-- design:begin -->
 ## Repository consent and identity
@@ -21,6 +21,30 @@ User-supplied labels grant no repository or pool authority.
 OIDC evidence establishes the workflow's push scope. Verified default-branch
 trust comes from a signed App delivery. See [GitHub App](github-app.md) and
 [credentials](credentials.md).
+
+## Credential issuance
+
+The exchange issues a controller capability with `nodes.claim` and
+`triggers.claim`, a one-hour lifetime, and the verified repository, ref, commit
+and workflow run binding. Repository identity uses GitHub's numeric ID, so a
+rename preserves that identity. An owner transfer requires a matching new
+binding.
+
+The request takes `id_token` and `team`. The controller derives grants, push
+facts, expiry and runner identity. Its response carries `token`, `team`,
+`repository`, `expires_at` and `labels`. The token is returned once. The exchange
+has no automatic retry because a repeated request cannot recover a lost bearer.
+
+`POST /api/v1/runners/claim` accepts the requested trigger and job kinds. Each
+kind requires its own claim grant, and the store checks repository and push
+authority before awarding work. Source, secrets, data and execution reporting
+use the separate capability awarded for that unit. A runner root cannot read
+them or a pipeline's sizing records by itself. Discovery routes remain
+available to live roots.
+
+The cache-grant protocol and its issuance route are removed. Byte-storage
+access uses the authenticated data adapter and the unit's live authority.
+
 
 ## Claims and execution
 

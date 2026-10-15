@@ -73,6 +73,8 @@ these file names, mounted whole.
 | `github-app-key`, `github-app-webhook-secret` | GitHub App private key and webhook secret | no GitHub App |
 | `cloudfront-key` | CloudFront signing key | no signed CloudFront downloads |
 | `billing-token` | Bearer for the hosted checkout service | `--billing-url` refuses to start |
+| `stripe-api-key` | Stripe API credential matching `--payment-mode test` or `live` | a configured payment callback refuses to start |
+| `stripe-webhook-secret` | Signature key for `/webhooks/stripe` | a configured payment callback refuses to start |
 
 Keep the directory readable by the controller's user alone (`0700`, files
 `0600`); a Kubernetes projected volume with `defaultMode: 0400` does this.
@@ -93,9 +95,14 @@ access control configuration.
 The controller returns a 60-second CloudFront URL for requests arriving
 through the public ingress. Requests through the in-cluster Service receive a
 regional S3 URL instead, so runner pods in the bucket's region can use the S3
-gateway endpoint. Local filesystem storage keeps its direct byte-serving path and
-does not need CloudFront signing keys. See [Data downloads](api.md#data-downloads)
-for route behavior.
+gateway endpoint. Without an S3 bucket, the standalone controller opens filesystem storage in
+its home directory's `data` directory and mounts signed data and log transfers.
+It uses `--external-url` when set, otherwise its listener address. Wildcard
+listener addresses use localhost in signed URLs. Set `--external-url` for remote
+runners. Filesystem storage needs no CloudFront signing keys.
+Controller embedders configure authenticated data routes through
+`WithDataController`. Host storage bindings need separate wiring. See
+[Data downloads](api.md#data-downloads) for route behavior.
 The self-hosted controller runs without credit metering unless a signed license
 grants `metering` or `multi-team`. It bills no runner or storage usage, exposes
 no credit or team billing routes, and gives teams unlimited room in the
@@ -207,9 +214,26 @@ sparkwing runners remove --profile prod --runner dev-laptop
 Removal validates its controller and credential kind before stopping the service
 and revoking authority. A failed or unconfirmed revocation is an error.
 
-The native runner dispatcher and service templates still need final startup
-integration. Legacy agent-format installers are not a substitute for that
-binding. Windows enrollment prints manual supervision steps rather than
+GitHub Releases also contain `sparkwing-runner` binaries for amd64 and arm64
+on macOS, Linux, and Windows (Windows asset names end in `.exe`). Before
+registering or restarting a downloaded runner, inspect its embedded identity
+without contacting the network:
+
+```bash
+sparkwing-runner version -o json --offline
+```
+
+The record names the runner binary, release version, target platform, and any
+VCS provenance embedded by the Go build. The runner does not yet download or
+replace its own executable; update the service binary through the same installer
+or service manager you used to install it.
+
+Runner service definitions run `sparkwing-runner start --config PATH` in the
+foreground. Linux uses a systemd user service. macOS uses a launchd agent.
+The service file names an existing machine configuration and contains no
+credential. The duplicate shell enrollment installer has been removed.
+
+Windows enrollment prints manual supervision steps rather than
 installing a login service. See [runner reference](cli-runners.md) and
 [machine settings](machine-config.md).
 
@@ -238,9 +262,9 @@ remain active after logout.
 
 ### Troubleshooting
 
-**The runner returns `401 unauthorized`.** Check `runner.credentials_dir` in
-`~/.config/sparkwing/config.yaml` and the private credential file it names.
-Verify that the credential is live on the selected controller.
+**The runner returns `401 unauthorized`.** Confirm that `agent-token` under
+`runner.credentials_dir` holds a live controller credential. Restart the runner
+after replacing that file because it retains the credential read at startup.
 
 **The runner does not claim work.** Confirm that the pipeline was remotely
 triggered and that the runner can reach the configured controller and logs
@@ -270,8 +294,8 @@ Run retention is disabled by default on a self-hosted controller. A multi-team
 controller defaults to 90 days. An explicit operator value, including zero,
 survives restarts. Node metrics have their own retention window.
 
-Read policy with `GET /api/v1/storage` and replace it with
-`PUT /api/v1/operator/object-store/settings` with deployment `operator.object_store` authority:
+Read the deployment policy with `GET /api/v1/operator/object-store` and write it with
+`PUT /api/v1/operator/object-store/settings` (grant `operator.object_store`):
 
 ```bash
 curl -sS -X PUT "$CONTROLLER/api/v1/operator/object-store/settings" \
@@ -289,7 +313,7 @@ usage survive run deletion. Metrics expire under their independent window.
 
 `database_alarm_bytes` sets a warning threshold. Passing it logs a warning and
 sets `database.alarm` on `GET /api/v1/health`. Sizes and table names appear only
-in the deployment view of `GET /api/v1/operator/object-store`.
+on `GET /api/v1/operator/object-store` with `operator.object_store`.
 
 SQLite samples allocated pages minus its free pages. Removing data can lower
 the sample while the file keeps its size until `VACUUM`. PostgreSQL samples

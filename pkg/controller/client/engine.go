@@ -113,7 +113,13 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		return false, &apierr.Error{Code: apierr.ProtocolError, Message: "controller API redirects are refused"}
 	}
-	resultType := reflect.TypeOf(output).Elem()
+	if resp.StatusCode == http.StatusNoContent && output == nil && len(bytes.TrimSpace(data)) == 0 {
+		return false, nil
+	}
+	var resultType reflect.Type
+	if output != nil {
+		resultType = reflect.TypeOf(output).Elem()
+	}
 	if resultType == reflect.TypeFor[*nodeproto.JobFailure]() {
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 && bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
 			return false, json.Unmarshal(data, output)
@@ -142,6 +148,9 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 	// safety: recovery carries a persisted inner error as part of its successful result.
 	if _, exists := fields["error"]; exists && resultType != reflect.TypeFor[nodeproto.JobFailure]() {
 		return false, fmt.Errorf("successful controller response contains an error")
+	}
+	if output == nil {
+		return false, fmt.Errorf("controller operation requires an empty 204 response")
 	}
 	if err := requiredResponseFields(fields, resultType); err != nil {
 		return false, err

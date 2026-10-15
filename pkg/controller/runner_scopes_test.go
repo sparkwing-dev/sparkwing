@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -100,7 +101,11 @@ func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
 	if gotTrigger.ID != trig.ID {
 		t.Fatalf("GetTrigger ID = %q, want %q", gotTrigger.ID, trig.ID)
 	}
-	if _, err := c.HeartbeatTrigger(ctx, trig.ID); err != nil {
+	renewal, err := client.NewEngineClient(client.EngineOptions{URL: f.url, Bearer: func(context.Context) (string, error) { return raw, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := renewal.Renew(ctx, trig.ID, controllerwire.RenewalRequest{}); err != nil {
 		t.Fatalf("HeartbeatTrigger: %v", err)
 	}
 
@@ -352,21 +357,29 @@ func TestTriggerClaimMutation_RequiresExactTokenAndGeneration(t *testing.T) {
 		t.Fatalf("ClaimTrigger heartbeat-trigger = (%+v, %v)", claimed, err)
 	}
 	claimCtx := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: claimed.ClaimSeq})
-	if _, err := owner.HeartbeatTrigger(claimCtx, claimed.ID); err != nil {
+	ownerRenewal, err := client.NewEngineClient(client.EngineOptions{URL: f.url, Bearer: func(context.Context) (string, error) { return ownerRaw, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherRenewal, err := client.NewEngineClient(client.EngineOptions{URL: f.url, Bearer: func(context.Context) (string, error) { return otherRaw, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ownerRenewal.Renew(claimCtx, claimed.ID, controllerwire.RenewalRequest{}); err != nil {
 		t.Fatalf("owner heartbeat: %v", err)
 	}
-	if _, err := other.HeartbeatTrigger(claimCtx, claimed.ID); err == nil ||
+	if _, err := otherRenewal.Renew(claimCtx, claimed.ID, controllerwire.RenewalRequest{}); err == nil ||
 		!strings.Contains(err.Error(), "controller 403: claim_required") {
 		t.Fatalf("other-token heartbeat = %v, want 403 claim_required", err)
 	}
 	if _, err := f.store.DB().Exec(`UPDATE triggers SET claim_seq = claim_seq + 1 WHERE id = ?`, claimed.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := owner.HeartbeatTrigger(claimCtx, claimed.ID); !errors.Is(err, store.ErrLockHeld) {
+	if _, err := ownerRenewal.Renew(claimCtx, claimed.ID, controllerwire.RenewalRequest{}); !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("stale-generation heartbeat = %v, want ErrLockHeld", err)
 	}
 	currentCtx := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: claimed.ClaimSeq + 1})
-	if _, err := owner.HeartbeatTrigger(currentCtx, claimed.ID); err != nil {
+	if _, err := ownerRenewal.Renew(currentCtx, claimed.ID, controllerwire.RenewalRequest{}); err != nil {
 		t.Fatalf("current-generation heartbeat: %v", err)
 	}
 

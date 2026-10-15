@@ -51,7 +51,7 @@ func TestNodeClaimTokenUploadsItsNodesLogSegmentsUntilTheClaimEnds(t *testing.T)
 		t.Fatalf("open the log with the claim token: %v", err)
 	}
 	sink, err := logseg.NewSink(ctx, up, logseg.Options{
-		Run: "r1", Node: "n1", SpoolDir: t.TempDir(), SegmentBytes: 16,
+		Subject: up.Subject(), SpoolDir: t.TempDir(), SegmentBytes: 16,
 		RetryBase: time.Millisecond, RetryMax: time.Millisecond,
 	})
 	if err != nil {

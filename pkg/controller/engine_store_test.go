@@ -11,6 +11,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+func engineOwnerAuthorization() capability.Authorized {
+	binding := capability.Binding{Kind: capability.BindingTrigger, RunID: "run", Holder: "host", Generation: 4}
+	return capability.Authorized{
+		Principal: capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, Capability: capability.Capability{Team: "a", Prefix: "owner", Unit: capability.UnitTrigger, Binding: binding}},
+		Binding:   binding,
+		Target:    capability.Target{Team: "a", RunID: "run", NodeID: "job"},
+	}
+}
+
 func TestEngineReconcileDeliversClaimWithoutPublishingItsBearer(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	result := store.ReconciledNode{Kind: store.Execute, Node: store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Generation: 5}, Claim: &store.ClaimAward{Holder: "runner", Generation: 5, CapabilityPrefix: "claim", LeaseExpiresAt: now}, Bearer: []byte("one-time-bearer")}

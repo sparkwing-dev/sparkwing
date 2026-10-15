@@ -11,27 +11,14 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
-
-const ArtifactStoreEnvVar = "SPARKWING_CACHE_URL"
-
-func resolveArtifactStoreFromEnv(ctx context.Context) (storage.ArtifactStore, error) {
-	url := os.Getenv(ArtifactStoreEnvVar)
-	if url == "" {
-		return nil, nil
-	}
-	return storeurl.OpenArtifactStore(ctx, url)
-}
 
 type Backends struct {
 	State       StateBackend
 	Logs        LogBackend
 	Concurrency ConcurrencyBackend
-
-	Artifact storage.ArtifactStore
 
 	// DiskRoot is a directory on the volume this run's own storage sits on,
 	// set only where that storage is local. A run backed by an object store
@@ -100,12 +87,11 @@ type ConcurrencyBackend interface {
 	CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 }
 
-func LocalBackends(paths Paths, st *store.Store, art storage.ArtifactStore) Backends {
+func LocalBackends(paths Paths, st *store.Store) Backends {
 	return Backends{
 		State:             localState{st: st},
 		Logs:              localLogs{paths: paths},
 		Concurrency:       localConcurrency{st: st},
-		Artifact:          art,
 		DiskRoot:          paths.Root,
 		LocalCoordination: true,
 	}
@@ -234,10 +220,6 @@ func (l localState) AddNodeMetricSample(ctx context.Context, runID, nodeID strin
 
 func (l localState) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error) {
 	return l.st.GetLatestRun(ctx, pipeline, statuses, maxAge)
-}
-
-func (l localState) FinishNodeCopyingOutput(ctx context.Context, runID, nodeID, outcome, reason string, src copiedOutput) error {
-	return l.st.FinishNodeCopyingOutput(ctx, runID, nodeID, outcome, reason, src.runID, src.nodeID)
 }
 
 func (l localState) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {

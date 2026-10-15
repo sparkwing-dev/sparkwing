@@ -15,11 +15,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/runners/service"
+	runnerservice "github.com/sparkwing-dev/sparkwing/internal/runners/service"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -28,6 +29,7 @@ type runnersFixture struct {
 	calls     *[]string
 	tokens    []controllerwire.TokenMetadata
 	created   []controllerwire.TokenCreate
+	enrolled  []client.EnrollRunnerRequest
 	timeline  []string
 	mintErr   error
 	revokeErr error
@@ -45,8 +47,8 @@ func newRunnersFixture(t *testing.T) *runnersFixture {
 	if runtime.GOOS == "windows" {
 		f.binary = "C:/usr/local/bin/sparkwing-runner.exe"
 	}
-	t.Cleanup(swapRunnerServiceHost(func(configPath string) (service.Host, error) {
-		return service.Host{
+	t.Cleanup(swapRunnerServiceHost(func(configPath string) (runnerservice.Host, error) {
+		return runnerservice.Host{
 			GOOS: "linux", Home: home, ConfigHome: filepath.Join(home, ".config"), Binary: f.binary, ConfigPath: configPath,
 			Exec: func(_ context.Context, name string, args ...string) (string, error) {
 				call := strings.TrimSpace(name + " " + strings.Join(args, " "))
@@ -97,6 +99,19 @@ func (f *runnersFixture) ReadToken(_ context.Context, prefix string) (controller
 	return controllerwire.TokenMetadata{}, errors.New("token missing")
 }
 
+func (f *runnersFixture) EnrollRunner(ctx context.Context, request client.EnrollRunnerRequest) (*client.CreatedToken, error) {
+	f.enrolled = append(f.enrolled, request)
+	created, err := f.CreateToken(ctx, controllerwire.TokenCreate{Kind: "runner", Principal: "runner:" + request.Name, Scopes: []capability.Grant{capability.NodesClaim, capability.TriggersClaim, capability.RunsState}})
+	if err != nil {
+		return nil, err
+	}
+	grants := make([]string, len(created.Metadata.Scopes))
+	for i, grant := range created.Metadata.Scopes {
+		grants[i] = string(grant)
+	}
+	return &client.CreatedToken{Capability: created.Token, Prefix: created.Metadata.Prefix, Grants: grants}, nil
+}
+
 func (f *runnersFixture) CreateToken(_ context.Context, input controllerwire.TokenCreate) (controllerwire.TokenCreated, error) {
 	f.created = append(f.created, input)
 	if f.mintErr != nil {
@@ -130,7 +145,7 @@ func (f *runnersFixture) RevokeToken(_ context.Context, prefix string) (controll
 	return controllerwire.TokenRevoked{}, errors.New("token missing")
 }
 
-func swapRunnerServiceHost(fn func(string) (service.Host, error)) func() {
+func swapRunnerServiceHost(fn func(string) (runnerservice.Host, error)) func() {
 	prev := runnerServiceHost
 	previousGOOS := runnerServiceGOOS
 	runnerServiceGOOS = "linux"
@@ -470,7 +485,7 @@ func TestRunnersAddForceTwiceKeepsTheLatestConfigReadable(t *testing.T) {
 		t.Fatalf("load after the second add: %v", err)
 	}
 	if second.HolderPrefix != "second" {
-		t.Errorf("holder_prefix = %q, want the second name", second.HolderPrefix)
+		t.Errorf("runner display name = %q", second.HolderPrefix)
 	}
 	if second.Token == first.Token {
 		t.Error("the second add reused the first token")
@@ -568,9 +583,8 @@ func TestRunnersAddWritesTheAllowList(t *testing.T) {
 	if !slices.Equal(raw.AllowRepos, []string{"github.com/acme/*", "gitlab.example.com/acme/tools"}) {
 		t.Fatalf("repos = %v", raw.AllowRepos)
 	}
-	cfg, err := agentconfig.Validate(*raw)
-	if err != nil || cfg.Gitcache != "" {
-		t.Fatalf("the written config = gitcache %q, %v; want direct source", cfg.Gitcache, err)
+	if _, err := agentconfig.Validate(*raw); err != nil {
+		t.Fatalf("validate written config: %v", err)
 	}
 	if len(f.runnerTokens(t)) != 1 {
 		t.Fatal("runners add minted no token")
@@ -591,15 +605,15 @@ func TestRunnersAddRefusesABadAllowPatternBeforeMinting(t *testing.T) {
 	}
 }
 
-func TestRunnersEnrollmentSendsOneKeyAndPreservesRepeatedSelectors(t *testing.T) {
+func TestRunnersEnrollmentUsesRegistrationAndPreservesRepeatedSelectors(t *testing.T) {
 	f := newRunnersFixture(t)
 	captureStdout(t, func() {
 		if err := f.run([]string{"add", "--profile", "prod", "--runner", "desk", "--config", f.config, "--no-service", "--label", "os=linux,arch=amd64", "--label", "gpu", "--repos", "github.com/acme/*,gitlab.example.com/acme/*"}); err != nil {
 			t.Fatal(err)
 		}
 	})
-	if len(f.created) != 1 || f.created[0].IdempotencyKey == "" {
-		t.Fatalf("issuance: %+v", f.created)
+	if len(f.enrolled) != 1 || f.enrolled[0].Name != "desk" || !slices.Equal(f.enrolled[0].Repos, []string{"github.com/acme/*", "gitlab.example.com/acme/*"}) {
+		t.Fatalf("enrollment: %+v", f.enrolled)
 	}
 	raw, err := agentconfig.Load(f.config)
 	if err != nil {

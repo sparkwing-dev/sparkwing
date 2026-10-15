@@ -81,6 +81,7 @@
         "scheduling",
         "github-actions-runners",
         "github-app",
+        "storage",
         "git-credentials"
       ]
     },

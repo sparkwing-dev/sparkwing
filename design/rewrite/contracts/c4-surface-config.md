@@ -84,11 +84,21 @@ A1-07, A1-11, A1-12, A1-47 and A1-49.
 Project-file readers use the strict schema. `Config.Registry` projects validated
 project declarations into dispatch metadata for the existing CLI and hosts.
 Settings winners remain owned by `settings.ResolvePlan` and the store seals.
+`runspec.Options.StartAt`, `StopAt` and `Only` retain the CLI's step-window
+selections as `Setting[string]`. Intake sets them through the shared settings
+table. Plan resolution preserves their values and origins, and `SealSpec`
+refuses a changed selection. Retry carries them with the original request.
+W3 consumes these sealed values when validating and executing the plan.
 CLI grammar, host execution and local lifecycle have separate owners.
 The acceptance suite runs each configuration boundary under its scenario's
 `runspec-config` cell. Placement cells require the T1 driver and real hosts.
 
 ## Ownership
+
+The internal launcher grammar requires `--docker-image` beside `--image` and
+does not accept `--deadline`. Both images are digest-pinned by W8's validator.
+`fetch-source` and `run-node` permit an absent `--job` for a plan award. W8
+validates the private award's kind and binding before source or execution.
 
 W9 fills the library-inflation selector omitted from the initial registry.
 `pipeline sparks inflate --library MODULE` takes a required sparks-core name or

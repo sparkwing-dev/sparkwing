@@ -124,10 +124,6 @@ These were all investigated and benchmarked. The savings are real but small
 because **builds are CPU-bound, not network-bound**.
 
 - **Base image pull time** -- only ~2s on fast networks.
-- **Package download caching (proxy/mounts)** -- saves 2–7s on a 105s build.
-  Downloads are ~15% of total time; compilation is ~72%. The proxy's value
-  is reliability (builds work when registries are down) and bandwidth
-  savings, not speed.
 - **P2P artifact distribution** -- overkill at current scale. The dependency
   access pattern (many small files, different per-repo) doesn't benefit from
   peer-to-peer the way large uniform blobs do.

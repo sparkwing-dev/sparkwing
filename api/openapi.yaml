@@ -203,6 +203,59 @@ components:
         - holder
       type: object
       x-sparkwing-go-type: capability.LeaseRef
+    internal.capability.Metadata:
+      additionalProperties: true
+      properties:
+        audience:
+          type: string
+        created_by:
+          type: string
+        expires_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        git_credentials:
+          type: boolean
+        grants:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        issued_at:
+          format: date-time
+          type: string
+        last_used_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        metered:
+          type: boolean
+        prefix:
+          type: string
+        revoked_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        subject:
+          $ref: '#/components/schemas/internal.capability.Subject'
+        team:
+          type: string
+      required:
+        - prefix
+        - team
+        - subject
+        - audience
+        - grants
+        - created_by
+        - issued_at
+        - git_credentials
+        - metered
+      type: object
+      x-sparkwing-go-type: capability.Metadata
     internal.capability.PushScope:
       additionalProperties: true
       properties:
@@ -3632,151 +3685,6 @@ components:
         - detail
       type: object
       x-sparkwing-go-type: controllerwire.TimerStateView
-    internal.controllerwire.TokenCreate:
-      additionalProperties: true
-      properties:
-        kind:
-          type: string
-        principal:
-          type: string
-        scopes:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        ttl_secs:
-          anyOf:
-            - type: integer
-            - type: "null"
-      type: object
-      x-sparkwing-go-type: controllerwire.TokenCreate
-    internal.controllerwire.TokenCreated:
-      additionalProperties: true
-      properties:
-        metadata:
-          $ref: '#/components/schemas/internal.controllerwire.TokenMetadata'
-        token:
-          type: string
-      required:
-        - token
-        - metadata
-      type: object
-      x-sparkwing-go-type: controllerwire.TokenCreated
-    internal.controllerwire.TokenMetadata:
-      additionalProperties: true
-      properties:
-        expires_at:
-          anyOf:
-            - type: integer
-            - type: "null"
-        issued_at:
-          anyOf:
-            - type: integer
-            - type: "null"
-        kind:
-          type: string
-        last_used_at:
-          anyOf:
-            - type: integer
-            - type: "null"
-        metered:
-          type: boolean
-        prefix:
-          type: string
-        principal:
-          type: string
-        repositories:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        reserved_pools:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        revoked_at:
-          anyOf:
-            - type: integer
-            - type: "null"
-        scopes:
-          anyOf:
-            - items:
-                type: string
-              type: array
-            - type: "null"
-        subject:
-          anyOf:
-            - $ref: '#/components/schemas/internal.capability.Subject'
-            - type: "null"
-        team:
-          type: string
-      required:
-        - prefix
-        - kind
-        - principal
-        - scopes
-      type: object
-      x-sparkwing-go-type: controllerwire.TokenMetadata
-    internal.controllerwire.TokenRevoked:
-      additionalProperties: true
-      properties:
-        prefix:
-          type: string
-        revoked:
-          type: boolean
-      required:
-        - prefix
-        - revoked
-      type: object
-      x-sparkwing-go-type: controllerwire.TokenRevoked
-    internal.controllerwire.TokenRotate:
-      additionalProperties: true
-      properties:
-        grace_secs:
-          type: integer
-        ttl_secs:
-          anyOf:
-            - type: integer
-            - type: "null"
-      required:
-        - grace_secs
-      type: object
-      x-sparkwing-go-type: controllerwire.TokenRotate
-    internal.controllerwire.TokenRotated:
-      additionalProperties: true
-      properties:
-        metadata:
-          $ref: '#/components/schemas/internal.controllerwire.TokenMetadata'
-        old_prefix:
-          type: string
-        old_revoked_at:
-          type: integer
-        token:
-          type: string
-      required:
-        - token
-        - metadata
-        - old_prefix
-        - old_revoked_at
-      type: object
-      x-sparkwing-go-type: controllerwire.TokenRotated
-    internal.controllerwire.Tokens:
-      additionalProperties: true
-      properties:
-        tokens:
-          anyOf:
-            - items:
-                $ref: '#/components/schemas/internal.controllerwire.TokenMetadata'
-              type: array
-            - type: "null"
-      required:
-        - tokens
-      type: object
-      x-sparkwing-go-type: controllerwire.Tokens
     internal.engine.Identity:
       additionalProperties: true
       properties:
@@ -4837,6 +4745,8 @@ components:
           $ref: '#/components/schemas/internal.runspec.JobExecutionSettings'
         no_memo:
           $ref: '#/components/schemas/internal.runspec.Setting.bool.'
+        only:
+          $ref: '#/components/schemas/internal.runspec.Setting.string.'
         output:
           $ref: '#/components/schemas/internal.runspec.Setting.string.'
         owner_execution_timeout:
@@ -4861,6 +4771,10 @@ components:
           $ref: '#/components/schemas/internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.Resources.'
         runner:
           $ref: '#/components/schemas/internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.RunnerSelection.'
+        start_at:
+          $ref: '#/components/schemas/internal.runspec.Setting.string.'
+        stop_at:
+          $ref: '#/components/schemas/internal.runspec.Setting.string.'
         submit_env_allow:
           $ref: '#/components/schemas/internal.runspec.Setting...string.'
         workers:
@@ -4875,6 +4789,9 @@ components:
         - checkout
         - requires
         - prefers
+        - start_at
+        - stop_at
+        - only
         - dry_run
         - no_memo
         - allow_risk
@@ -5414,6 +5331,189 @@ components:
         - sealed_at
       type: object
       x-sparkwing-go-type: runspec.Spec
+    pkg.controller.client.CreateServiceTokenRequest:
+      additionalProperties: true
+      properties:
+        expires_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        grants:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        name:
+          type: string
+      required:
+        - name
+        - grants
+      type: object
+      x-sparkwing-go-type: client.CreateServiceTokenRequest
+    pkg.controller.client.CreateTokenRequest:
+      additionalProperties: true
+      properties:
+        expires_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        grants:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+      required:
+        - grants
+      type: object
+      x-sparkwing-go-type: client.CreateTokenRequest
+    pkg.controller.client.CreatedToken:
+      additionalProperties: true
+      properties:
+        capability:
+          type: string
+        expires_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        grants:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        prefix:
+          type: string
+        team:
+          type: string
+      required:
+        - capability
+        - prefix
+        - team
+        - grants
+      type: object
+      x-sparkwing-go-type: client.CreatedToken
+    pkg.controller.client.EnrollRunnerRequest:
+      additionalProperties: true
+      properties:
+        expires_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        grants:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        name:
+          type: string
+        repos:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        reserved_pools:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+      required:
+        - name
+        - repos
+      type: object
+      x-sparkwing-go-type: client.EnrollRunnerRequest
+    pkg.controller.client.RotatedToken:
+      additionalProperties: true
+      properties:
+        capability:
+          type: string
+        new:
+          $ref: '#/components/schemas/pkg.controller.client.TokenInfo'
+        old_prefix:
+          type: string
+        old_revoked_at:
+          format: date-time
+          type: string
+      required:
+        - capability
+        - new
+        - old_prefix
+        - old_revoked_at
+      type: object
+      x-sparkwing-go-type: client.RotatedToken
+    pkg.controller.client.TokenInfo:
+      additionalProperties: true
+      properties:
+        audience:
+          type: string
+        created_by:
+          type: string
+        expires_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        git_credentials:
+          type: boolean
+        grants:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        issued_at:
+          format: date-time
+          type: string
+        last_used_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        metered:
+          type: boolean
+        prefix:
+          type: string
+        revoked_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        subject:
+          $ref: '#/components/schemas/pkg.controller.client.TokenSubject'
+        team:
+          type: string
+      required:
+        - prefix
+        - team
+        - subject
+        - audience
+        - grants
+        - created_by
+        - issued_at
+        - git_credentials
+        - metered
+      type: object
+      x-sparkwing-go-type: client.TokenInfo
+    pkg.controller.client.TokenSubject:
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+      required:
+        - kind
+        - id
+      type: object
+      x-sparkwing-go-type: client.TokenSubject
     pkg.wingwire.BudgetState:
       additionalProperties: true
       properties:
@@ -7710,13 +7810,23 @@ paths:
         - in: query
           name: include_revoked
           schema:
-            type: boolean
+            type: string
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.Tokens'
+                additionalProperties: true
+                properties:
+                  tokens:
+                    anyOf:
+                      - items:
+                          $ref: '#/components/schemas/internal.capability.Metadata'
+                        type: array
+                      - type: "null"
+                required:
+                  - tokens
+                type: object
           description: Successful response.
         default:
           content:
@@ -7748,14 +7858,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/internal.controllerwire.TokenCreate'
+              $ref: '#/components/schemas/pkg.controller.client.CreateServiceTokenRequest'
         required: true
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.TokenCreated'
+                $ref: '#/components/schemas/pkg.controller.client.CreatedToken'
           description: Successful response.
         default:
           content:
@@ -7763,7 +7873,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: Issue a credential
+      summary: Issue a credential once
       x-sparkwing-policy:
         method: POST
         path: /api/v1/operator/tokens
@@ -7791,12 +7901,8 @@ paths:
           schema:
             type: string
       responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.TokenRevoked'
-          description: Successful response.
+        "204":
+          description: Completed without a response body.
         default:
           content:
             application/json:
@@ -7834,7 +7940,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.TokenMetadata'
+                $ref: '#/components/schemas/internal.capability.Metadata'
           description: Successful response.
         default:
           content:
@@ -7873,14 +7979,25 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/internal.controllerwire.TokenRotate'
+              additionalProperties: true
+              properties:
+                expires_at:
+                  anyOf:
+                    - format: date-time
+                      type: string
+                    - type: "null"
+                grace_secs:
+                  type: integer
+              required:
+                - grace_secs
+              type: object
         required: true
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.TokenRotated'
+                $ref: '#/components/schemas/pkg.controller.client.RotatedToken'
           description: Successful response.
         default:
           content:
@@ -7888,7 +8005,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: Rotate a credential
+      summary: Rotate a credential once
       x-sparkwing-policy:
         method: POST
         path: /api/v1/operator/tokens/{token}/rotate
@@ -8701,15 +8818,26 @@ paths:
             liveness: credential
         retry: safe
     post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/pkg.controller.client.EnrollRunnerRequest'
+        required: true
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/pkg.controller.client.CreatedToken'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: POST /api/v1/runners
+      summary: Enroll a runner once
       x-sparkwing-policy:
         method: POST
         path: /api/v1/runners
@@ -8723,7 +8851,6 @@ paths:
             binding: none
             liveness: credential
         retry: never
-      x-sparkwing-wire: undocumented
   /api/v1/runners/{runner}:
     delete:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -10227,7 +10354,7 @@ paths:
           schema:
             type: string
         - in: query
-          name: source_generation
+          name: generation
           schema:
             type: integer
       responses:
@@ -13434,13 +13561,23 @@ paths:
         - in: query
           name: include_revoked
           schema:
-            type: boolean
+            type: string
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.Tokens'
+                additionalProperties: true
+                properties:
+                  tokens:
+                    anyOf:
+                      - items:
+                          $ref: '#/components/schemas/internal.capability.Metadata'
+                        type: array
+                      - type: "null"
+                required:
+                  - tokens
+                type: object
           description: Successful response.
         default:
           content:
@@ -13467,14 +13604,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/internal.controllerwire.TokenCreate'
+              $ref: '#/components/schemas/pkg.controller.client.CreateTokenRequest'
         required: true
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.TokenCreated'
+                $ref: '#/components/schemas/pkg.controller.client.CreatedToken'
           description: Successful response.
         default:
           content:
@@ -13482,7 +13619,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: Issue a credential
+      summary: Issue a credential once
       x-sparkwing-policy:
         method: POST
         path: /api/v1/tokens
@@ -13505,12 +13642,8 @@ paths:
           schema:
             type: string
       responses:
-        2XX:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.controllerwire.TokenRevoked'
-          description: Successful response.
+        "204":
+          description: Completed without a response body.
         default:
           content:
             application/json:
@@ -13543,7 +13676,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.TokenMetadata'
+                $ref: '#/components/schemas/internal.capability.Metadata'
           description: Successful response.
         default:
           content:
@@ -13607,14 +13740,25 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/internal.controllerwire.TokenRotate'
+              additionalProperties: true
+              properties:
+                expires_at:
+                  anyOf:
+                    - format: date-time
+                      type: string
+                    - type: "null"
+                grace_secs:
+                  type: integer
+              required:
+                - grace_secs
+              type: object
         required: true
       responses:
         2XX:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/internal.controllerwire.TokenRotated'
+                $ref: '#/components/schemas/pkg.controller.client.RotatedToken'
           description: Successful response.
         default:
           content:
@@ -13622,7 +13766,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: Rotate a credential
+      summary: Rotate a credential once
       x-sparkwing-policy:
         method: POST
         path: /api/v1/tokens/{token}/rotate

@@ -106,6 +106,9 @@ type Values struct {
 	CatchUp           *time.Duration
 	RunnerPreferences *userconfig.RunnerConfig
 	RunnerSelection   *runspec.RunnerSelection
+	StartAt           *string
+	StopAt            *string
+	Only              *string
 	DryRun            *bool
 	NoMemo            *bool
 	AllowRisk         []string
@@ -290,6 +293,9 @@ var RequestProjection = []ProjectionField{
 	{"Checkout", "Checkout", "source"},
 	{"Requires", "Requires", "requires"},
 	{"Prefers", "Prefers", "prefers"},
+	{"StartAt", "StartAt", "start_at"},
+	{"StopAt", "StopAt", "stop_at"},
+	{"Only", "Only", "only"},
 	{"DryRun", "DryRun", "dry_run"},
 	{"NoMemo", "NoMemo", "no_memo"},
 	{"AllowRisk", "AllowRisk", "allow_risk"},

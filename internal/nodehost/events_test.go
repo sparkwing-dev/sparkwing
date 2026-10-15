@@ -19,7 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	fsstore "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -130,10 +129,6 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 	eventBackends(t, func(t *testing.T, st *store.Store, state storage.StateStoreOld) {
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		defer cancel()
-		art, err := fsstore.NewArtifactStore(t.TempDir())
-		if err != nil {
-			t.Fatal(err)
-		}
 		workspace := t.TempDir()
 		logs := &eventLog{records: map[string][]sparkwing.LogRecord{}}
 
@@ -144,8 +139,8 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 			{ID: "skipper", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 			{ID: "superseded", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 			{ID: "flaky", Retry: &nodeproto.RetrySpec{Attempts: 1}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-			{ID: "produce", Artifacts: []string{"out.txt"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-			{ID: "consume", Needs: deps("produce"), Consumes: []nodeproto.ArtifactInput{{Producer: "produce", Into: "in"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			{ID: "produce", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			{ID: "consume", Needs: deps("produce"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 			{ID: "gate", Approval: &nodeproto.ApprovalSpec{Message: "ship it?"}},
 			{ID: "targets", Closures: nodeproto.ClosureSpec{Generate: []string{testGenerator}}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		}}
@@ -191,7 +186,7 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 			}
 		}()
 		cfg := Config{
-			Execute: exec, Artifacts: art, Session: SessionConfig{Dir: workspace, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
+			Execute: exec, Session: SessionConfig{Dir: workspace, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
 			Attempts: &Attempts{OpenLog: logs.open, Masker: secrets.NewMasker()},
 		}
 		res := hostEvents(t, ctx, asking, cfg, doc)
@@ -217,8 +212,6 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 		wantEvent(t, events, "skipper", "node_skipped", `"skip reason"`)
 		wantEvent(t, events, "superseded", "node_superseded", `"lost the slot"`)
 		wantEvent(t, events, "flaky", "attempt_retry", `"attempt 2/2"`)
-		wantEvent(t, events, "produce", "artifacts_published", `{"manifest_digest":"`+nodeRow(t, st, "produce").ArtifactManifest+`"}`)
-		wantEvent(t, events, "consume", "artifacts_staged", `{"files":1}`)
 		wantEvent(t, events, "gate", "approval_requested", `{"message":"ship it?","timeout_ms":0}`)
 		wantEvent(t, events, "targets", "expansion_generated", `"2 children"`)
 

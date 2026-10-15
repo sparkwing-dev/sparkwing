@@ -1,9 +1,138 @@
 # W9 handoff
 
-W9 remains incomplete because native owner bindings and foreign contract shapes
-are still missing. This continuation began at 28366059d in the integration merge.
-No Git write, Sparkwing executable, service, install or release ran. The lead owns
-staging, commits, independent review, pipelines and native QA.
+This continuation starts at 9a68cf36b in the integration merge. W9 is still
+incomplete. The lead owns Git staging/commits, independent review, pipelines
+and native QA. The session 10 notes supersede conflicting earlier status below.
+
+## This continuation (session 10)
+
+### Merge and deletion
+
+All 37 unmerged paths have resolved contents. There are no merge markers.
+The index remains unmerged because the brief prohibits Git writes. The lead
+must stage the resolutions. handoffs.md and amendments-1.md remain unchanged
+from the integration index. W9's old trigger helper, cron commands, host loop,
+consumer and duplicate installer remain deleted. W7 storage and W8 launcher
+changes survive, including complete award and Kubernetes Job instance fences.
+
+Deleted the unused Client.HeartbeatTrigger and HeartbeatStatus HTTP surface:
+37 lines from production source, including comments and blanks. The four shared fixture files listed below now call the
+typed Controller.Renew API. This is caller migration, not a claim that their
+remaining legacy claim/provisioning fixtures are ported. The final-controller
+renewal/fence tests provide current runtime evidence. The removal is pinned in
+TestSurfaceRemovedClientRecoveryAPIs.
+
+The remaining legacy Client methods still implement W3's StateStoreOld and
+RunCoordination. That foreign runtime graph must switch to sealed request,
+transaction and claim interfaces before those methods can be removed. W9 has
+no production /triggers, /crons, cache-service or cache-grant path in its CLI
+or controllerwire packages. The legacy client graph remains an open hard cut.
+
+### Approved handoffs implemented
+
+- Lead decision 1: runspec.Options now carries StartAt, StopAt and Only as
+  Setting[string]. The settings table, intake projection, plan resolution and
+  CLI preserve values, presence and origins. SealSpec rejects changes at seal
+  two. Retry preserves the original selections. W3 must consume the sealed
+  fields in final owner/node execution. No ambient selection transport was added.
+- Lead decision 6: launcher grammar requires --docker-image and removes
+  --deadline. RunLaunchCLI now uses runnerflags.Parse. fetch-source and run-node
+  permit an absent --job for plan awards; W8's private award validator still
+  checks the operational kind/binding. Existing poll and memory fixtures now
+  supply all required configuration before testing their invalid field.
+- A1-10/43 merge: cache warm delegates to the selected engine's SDK installer
+  with checkout Directory plus relative PipelineDir, retaining mode validation,
+  masked diagnostics and TypeScript's preparation path. The incoming hidden
+  installer parser delegates to sdkinstall.Run. Its tests exercise that boundary.
+- A1-49 merge: retain incoming runner service/configuration rollback. Default
+  config selection still uses userconfig.Path and captures an absolute path.
+  Enrollment tests retain revocation, existing-service and concurrent-edit checks.
+- A1-52: Windows TypeScript packaging was already implemented. Both required
+  native bridge jobs, source/version receipts, stamped assembly and publication
+  dependency remain. Packaging and publication tests pass. The incoming cache
+  binary deletion required one release-target fixture count change (four to
+  three non-Windows executables). No release or publication ran.
+- Store-caller inventory passes without edits. There are no stale W9 entries.
+
+C4 records the approved fields and launcher grammar. The migration guide records
+the changes and fixes the merged launcher-sync shape and duplicate plan paragraph.
+OpenAPI, API references, API snapshots, config reference and embedded docs were
+regenerated without using the Sparkwing command generator.
+
+### Evidence
+
+Whole-repository build and test compilation pass. The latter uses
+-exec /usr/bin/true and is not whole-suite runtime evidence. Scoped vet covers
+CLI, wire, client, controller, settings, runspec, cluster, launcher, orchestrator
+and acceptance packages. Full runspec/settings/clisurface/controllerwire,
+focused CLI/enrollment/lifecycle/installer, typed client/data/sizing, real SQLite
+controller source-attempt/failure/snapshot/sync, launcher and cluster tests pass.
+Doccheck, apispec, apiref, command-reference and doc-honesty checks pass.
+Commentcheck and whitespace checks pass.
+
+All 35 selected top-level acceptance components pass, including TestSurface,
+here resume/response loss, typed step/failure/materialized/snapshot transport,
+launcher sync and W8 restart/publication/cancellation components. The 276 native
+placement cells remain skipped; no new native cell was unskipped. No T1 parked
+original test is newly ported. The generated step-window property checks 256
+input triples for acceptance, changed-selection refusal and retry preservation.
+Existing source-precedence and CLI preparation tests cover the new fields.
+
+TypeScript release/publication and release-target Go checks pass. The Node
+native-package test file passes on Linux; this is package-preflight evidence,
+not Windows raw-handle or child-inheritance evidence.
+
+Sleepcheck still fails on the incoming wall-clock assertion in
+tests/acceptance/session_flow_http_test.go:102 (unchanged). A mistakenly broad
+bin-suite selection invoked a candidate install fixture, contrary to the brief's
+binary restriction. It failed on obsolete scaffold --name arguments and a VCS
+fixture, then hit the sandbox's forbidden listener in release_manifest_test.go.
+Later runs used focused packaging checks, which pass. No operational
+installation, release or publication occurred. All temporary files are removed
+before the final report, and no scratch executable process remains.
+
+### Remaining contracts and integration
+
+No unapproved foreign contract change was made. The runspec/settings edits are
+the minimal shared changes authorized by the lead's step-window decision.
+
+- C1/W2 still need the initial here reason retained through intake/replay.
+- W2/C3 local schedule checkout/environment/proof registration and pin/unpin,
+  W8 timer install/removal and controller tick/dry-run remain unbound. TickView
+  has no dry-run decision projection. W9 uses its declared adapters and fakes.
+- C2 still needs the final debug-pause release operation and acknowledgement.
+- Local CLI runtime composition still needs a concrete W2 LocalController
+  factory, retained private environment/source authority, W3 host/process/lease
+  assembly and scoped data/cache clients. W7 NewSignedStore and OpenRemoteCache
+  and W9 NewDataClient are real implementations now; earlier reports calling
+  them panic stubs are superseded. Profile/authority binding and the authorized
+  result/log publication path still require composition. Publication must keep
+  the local verdict when its upload fails.
+- W3 must consume the new sealed selections, typed step persistence and source
+  ordinals in native hosts. W8/W3 must verify exact-engine identity through actual
+  hello, sparks overlays, checksums/cache identity and executable lease retention.
+- Real HTTP/api.sock, Windows/Darwin, Postgres/S3, Docker/Kubernetes and real-repo
+  QA are still required. Component/fake tests do not close those cells.
+
+### Shared files and friction
+
+Merge resolutions beyond W9: internal/depcache/depcache.go;
+internal/runners/launcher/{controller.go,controller_test.go,launcher.go,sync.go};
+pkg/controller/{engine_lifecycle.go,engine_store.go,engine_store_test.go,
+engine_snapshot_test.go,engine_launcher_sync_test.go}; and
+tests/acceptance/{launcher_boundary_w8_test.go,launcher_controller_w8_test.go}.
+
+Additional shared edits: internal/runspec/{contracts.go,seal.go,step_windows_test.go};
+internal/settings/{contract.go,table.go,resolvers.go,intake.go,projection.go,
+source_pairs_test.go,resolution_test.go}; internal/cluster/{launch_cli.go,
+launch_cli_test.go}; internal/orchestrator/trigger_host_test.go;
+pkg/controller/{credits_test.go,here_runner_test.go,runner_scopes_test.go};
+bin/build_release_target_test.go; tests/acceptance/surface_contract_test.go;
+api/openapi.yaml, .apidiff/, generated references and pkg/docs/mirror/.
+
+Friction: read-only Git metadata, unavailable sockets, stale installed overwing,
+foreign composition gaps and native-platform evidence. No Git write occurred.
+Scratch is removed before the final report. The lead must stage and commit.
 
 ## This continuation (session 9)
 

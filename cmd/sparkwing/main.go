@@ -243,6 +243,9 @@ func runSparkwing(args []string) (result error) {
 		}
 		defer func() { result = errors.Join(result, os.Chdir(previous)) }()
 	}
+	if inv.Command.Path == "sparkwing __sdk-install" {
+		return runSDKInstall(invocationArgs(inv)[1:])
+	}
 	cleanupStaleUpdate()
 	args = invocationArgs(inv)
 	toolchainReplayArgs = args

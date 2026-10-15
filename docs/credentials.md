@@ -42,8 +42,14 @@ Failures keep their structured error on stderr.
 Omitting creation TTL selects the server default. Explicit `--ttl 0` requests
 no expiry, subject to issuer policy. Rotation with zero or omitted TTL keeps the
 old remaining lifetime. Grace defaults to 24 hours. TTL and grace use nonnegative
-whole seconds. A credential mutation keeps one idempotency key and the same body
-across transport retries.
+whole seconds. Creation and rotation return a bearer once and are never
+automatically replayed after a lost response.
+
+The HTTP request carries `grants` and optional absolute `expires_at`. Credential
+metadata uses `subject.kind` and `subject.id` with RFC3339 timestamps. Creation
+returns the one-time bearer as `capability`. Rotation returns `capability`,
+`new` metadata, `old_prefix` and `old_revoked_at`. The CLI keeps its own display
+projection for list and creation output.
 
 Runner enrollment uses the same typed team token manager. Its JSON result
 contains the runner name, profile, config path, credential metadata and service

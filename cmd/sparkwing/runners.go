@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,7 +25,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/internal/runners/service"
+	runnerservice "github.com/sparkwing-dev/sparkwing/internal/runners/service"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -85,8 +84,26 @@ func runRunnersAdd(args []string) error {
 	return enrollRunner(context.Background(), manager, enrollment)
 }
 
-func runnerTokenManager(prof *namedProfile) (controllerwire.TokenManager, error) {
-	return client.NewTokenManager(client.EngineOptions{URL: prof.ControllerURL(), Bearer: func(context.Context) (string, error) { return prof.ControllerToken(), nil }}, false)
+type runnerTokenOperations interface {
+	controllerwire.TokenManager
+	EnrollRunner(context.Context, client.EnrollRunnerRequest) (*client.CreatedToken, error)
+}
+
+type runnerController struct {
+	controllerwire.TokenManager
+	client *client.Client
+}
+
+func (c runnerController) EnrollRunner(ctx context.Context, request client.EnrollRunnerRequest) (*client.CreatedToken, error) {
+	return c.client.EnrollRunner(ctx, request)
+}
+
+func runnerTokenManager(prof *namedProfile) (runnerTokenOperations, error) {
+	manager, err := client.NewTokenManager(client.EngineOptions{URL: prof.ControllerURL(), Bearer: func(context.Context) (string, error) { return prof.ControllerToken(), nil }}, false)
+	if err != nil {
+		return nil, err
+	}
+	return runnerController{TokenManager: manager, client: client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())}, nil
 }
 
 func prepareRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, error) {
@@ -154,19 +171,27 @@ func parseRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, erro
 	return enrollment, prof, nil
 }
 
-func enrollRunner(ctx context.Context, manager controllerwire.TokenManager, enrollment runnerEnrollment) error {
-	principal := "runner:" + *enrollment.config.HolderPrefix
-	minted, err := manager.CreateToken(ctx, controllerwire.TokenCreate{Kind: "runner", Principal: principal, Scopes: []capability.Grant{capability.NodesClaim, capability.TriggersClaim, capability.RunsState}, IdempotencyKey: rand.Text()})
+func enrollRunner(ctx context.Context, manager runnerTokenOperations, enrollment runnerEnrollment) error {
+	issued, err := manager.EnrollRunner(ctx, client.EnrollRunnerRequest{Name: *enrollment.config.HolderPrefix, Repos: enrollment.config.Repos})
 	if err != nil {
 		return err
 	}
-	service, err := finishRunnerEnrollment(enrollment.path, enrollment.config, minted.Token, enrollment.force, enrollment.service)
-	if err != nil {
+	if issued == nil || issued.Capability == "" || issued.Prefix == "" {
+		return errors.New("the controller returned no runner credential")
+	}
+	minted := controllerwire.TokenCreated{Token: issued.Capability, Metadata: controllerwire.TokenMetadata{Prefix: issued.Prefix, Kind: "runner", Principal: "runner:" + *enrollment.config.HolderPrefix}}
+	for _, grant := range issued.Grants {
+		minted.Metadata.Scopes = append(minted.Metadata.Scopes, capability.Grant(grant))
+	}
+	service, err := finishRunnerEnrollment(enrollment.path, enrollment.config, minted.Token, enrollment.force, enrollment.service, func() error {
 		_, revokeErr := manager.RevokeToken(context.WithoutCancel(ctx), minted.Metadata.Prefix)
 		if revokeErr != nil {
 			printRunnerRevokeHint(enrollment.profileName, minted.Metadata.Prefix)
-			return errors.Join(err, fmt.Errorf("revoke failed enrollment token %s: %w", minted.Metadata.Prefix, revokeErr))
+			return fmt.Errorf("revoke failed enrollment token %s: %w", minted.Metadata.Prefix, revokeErr)
 		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	return renderRunnerEnrollment(enrollment, minted.Metadata, service)
@@ -214,11 +239,11 @@ func renderRunnerEnrollment(enrollment runnerEnrollment, token controllerwire.To
 	return nil
 }
 
-func finishRunnerEnrollment(path string, cfg userconfig.RunnerConfig, bearer string, force bool, service runnerServicePlan) (result runnerServiceResult, err error) {
+func finishRunnerEnrollment(path string, cfg userconfig.RunnerConfig, bearer string, force bool, service runnerServicePlan, revoke func() error) (result runnerServiceResult, err error) {
 	written, err := writeRunnerConfig(path, cfg, bearer, force)
 	defer func() {
 		if err != nil {
-			err = errors.Join(err, written.rollback())
+			err = errors.Join(err, revoke(), written.rollback())
 		}
 	}()
 	if err != nil {
@@ -376,7 +401,11 @@ func agentConfigPath(override string) (string, error) {
 	if override != "" {
 		return filepath.Abs(override)
 	}
-	return userconfig.Path()
+	path, err := userconfig.Path()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(path)
 }
 
 func checkAgentConfigAbsent(path string, force bool) error {
@@ -394,6 +423,10 @@ func errAgentSectionExists(path string) error {
 // safety: the absence check repeats under the settings lock, so a second
 // enrollment racing this one cannot overwrite the section it wrote.
 func writeRunnerConfig(path string, cfg userconfig.RunnerConfig, bearer string, force bool) (runnerConfigWrite, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return runnerConfigWrite{}, err
+	}
 	written := runnerConfigWrite{path: path}
 	if err := validateRunnerEnrollment(cfg); err != nil {
 		return written, err
@@ -402,7 +435,7 @@ func writeRunnerConfig(path string, cfg userconfig.RunnerConfig, bearer string, 
 		return written, errors.New("runner credential is empty")
 	}
 	var section yaml.Node
-	err := userconfig.Update(path, userconfig.Runner, "the runner config", &section, func(found bool) error {
+	err = userconfig.Update(path, userconfig.Runner, "the runner config", &section, func(found bool) error {
 		if found && !force {
 			return errAgentSectionExists(path)
 		}
@@ -507,7 +540,7 @@ func (w runnerConfigWrite) rollback() error {
 
 // safety: the decision about this machine's service manager, taken before anything irreversible happens.
 type runnerServicePlan struct {
-	host    service.Host
+	host    runnerservice.Host
 	skipped bool
 	manual  bool
 }
@@ -528,8 +561,8 @@ func planRunnerService(configPath string, skip bool) (runnerServicePlan, error) 
 	if host.Binary == "" {
 		return runnerServicePlan{}, errRunnerBinaryMissing()
 	}
-	if err := service.Preflight(context.Background(), host); err != nil {
-		if errors.Is(err, service.ErrUnsupported) {
+	if err := runnerservice.Preflight(context.Background(), host); err != nil {
+		if errors.Is(err, runnerservice.ErrUnsupported) {
 			return runnerServicePlan{manual: true}, nil
 		}
 		return runnerServicePlan{}, err
@@ -545,8 +578,19 @@ func (p runnerServicePlan) start(configPath string) (runnerServiceResult, error)
 		}
 		return runnerServiceResult{Status: status, Command: []string{runnerBinaryName, "start", "--config", configPath}}, nil
 	}
-	state, err := service.Install(context.Background(), p.host)
+	before, err := runnerservice.Inspect(context.Background(), p.host)
 	if err != nil {
+		return runnerServiceResult{}, err
+	}
+	state, err := runnerservice.Install(context.Background(), p.host)
+	if err != nil {
+		if !before.Installed && !before.Foreign {
+			after, inspectErr := runnerservice.Inspect(context.Background(), p.host)
+			err = errors.Join(err, inspectErr)
+			if inspectErr == nil && after.Installed && !after.Foreign && !after.Mismatch {
+				err = errors.Join(err, cleanupNewRunnerService(p.host, after.Path))
+			}
+		}
 		return runnerServiceResult{}, err
 	}
 	return runnerServiceResult{Status: "started", Detail: state.Detail, Path: state.Path}, nil
@@ -560,17 +604,17 @@ func stopRunnerService(configPath string, skip bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	state, err := service.Uninstall(context.Background(), host)
-	if errors.Is(err, service.ErrUnsupported) {
+	state, err := runnerservice.Uninstall(context.Background(), host)
+	if errors.Is(err, runnerservice.ErrUnsupported) {
 		return "", nil
 	}
 	return state.Detail, err
 }
 
-func defaultRunnerServiceHost(configPath string) (service.Host, error) {
+func defaultRunnerServiceHost(configPath string) (runnerservice.Host, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return service.Host{}, fmt.Errorf("resolve the home directory the service is installed under: %w", err)
+		return runnerservice.Host{}, fmt.Errorf("resolve the home directory the service is installed under: %w", err)
 	}
 	configHome := os.Getenv("XDG_CONFIG_HOME")
 	if configHome == "" {
@@ -578,9 +622,9 @@ func defaultRunnerServiceHost(configPath string) (service.Host, error) {
 	}
 	root, err := paths.DefaultPaths()
 	if err != nil {
-		return service.Host{}, err
+		return runnerservice.Host{}, err
 	}
-	return service.Host{
+	return runnerservice.Host{
 		GOOS:       runnerServiceGOOS,
 		Home:       home,
 		ConfigHome: configHome,
@@ -588,7 +632,7 @@ func defaultRunnerServiceHost(configPath string) (service.Host, error) {
 		ConfigPath: configPath,
 		LogPath:    filepath.Join(root.Root, "runner.log"),
 		UID:        os.Getuid(),
-		Exec:       service.DefaultExec,
+		Exec:       runnerservice.DefaultExec,
 	}, nil
 }
 
@@ -613,4 +657,27 @@ func errRunnerBinaryMissing() error {
 		"Install it with `go install github.com/sparkwing-dev/sparkwing/cmd/%s@latest` or from the release assets, "+
 		"then run this command again; `--no-service` writes the config without it",
 		runnerBinaryName, runnerBinaryName)
+}
+
+func cleanupNewRunnerService(host runnerservice.Host, path string) error {
+	published, statErr := os.Lstat(path)
+	_, err := runnerservice.Uninstall(context.Background(), host)
+	if err == nil {
+		return nil
+	}
+	if statErr != nil {
+		return errors.Join(err, statErr)
+	}
+	current, statErr := os.Lstat(path)
+	if errors.Is(statErr, os.ErrNotExist) {
+		return err
+	}
+	if statErr != nil {
+		return errors.Join(err, statErr)
+	}
+	// safety: manager failure must not strand a new file, but a replacement belongs to another writer.
+	if !current.Mode().IsRegular() || !os.SameFile(published, current) {
+		return errors.Join(err, fmt.Errorf("runner service file changed during failed enrollment cleanup: %s", path))
+	}
+	return errors.Join(err, os.Remove(path))
 }

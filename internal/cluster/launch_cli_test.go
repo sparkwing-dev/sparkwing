@@ -31,7 +31,7 @@ func TestLauncherCommandPassesOnlyOperatorConfiguration(t *testing.T) {
 }
 
 func TestLauncherCommandRejectsRemovedCacheAndScratchOptions(t *testing.T) {
-	for _, option := range []string{"--cache=http://cache", "--gitcache=http://cache", "--dependency-proxy=http://proxy", "--scratch=40Gi"} {
+	for _, option := range []string{"--cache=http://cache", "--gitcache=http://cache", "--dependency-proxy=http://proxy", "--scratch=40Gi", "--deadline=1h"} {
 		if err := RunLaunchCLI(t.Context(), []string{option}, nil); err == nil {
 			t.Fatalf("accepted %s", option)
 		}
@@ -42,7 +42,7 @@ func TestLauncherCommandRejectsMemoryOverflowBeforeRuntime(t *testing.T) {
 	image := "example.com/image@sha256:" + strings.Repeat("a", 64)
 	for _, memory := range []string{"18446744073709551617", "-18446744073709551615", "9223372036854775808"} {
 		t.Run(memory, func(t *testing.T) {
-			err := RunLaunchCLI(t.Context(), []string{"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=1", "--memory-ceiling=" + memory}, func(context.Context, launcher.CloudJobConfig, string) (*launcher.Launcher, error) {
+			err := RunLaunchCLI(t.Context(), []string{"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=1", "--memory-ceiling=" + memory, "--credentials-dir=" + t.TempDir()}, func(context.Context, launcher.CloudJobConfig, string) (*launcher.Launcher, error) {
 				t.Error("overflow reached runtime factory")
 				return nil, nil
 			})

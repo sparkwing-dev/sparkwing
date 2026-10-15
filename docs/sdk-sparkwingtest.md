@@ -10,7 +10,7 @@ Import as `swsparkwingtest "github.com/sparkwing-dev/sparkwing/sparkwing/sparkwi
 
 ### type Host
 
-safety: Host exercises author code through the same plan and operation contract as a real host.
+Host exercises author code through the same plan and operation contract as a real host.
 
 ```
 type Host interface {
@@ -30,7 +30,7 @@ type Host interface {
 
 ### type Options
 
-safety: Options injects external results without exporting runtime plumbing from the author SDK.
+Options injects external results without exporting runtime plumbing from the author SDK.
 
 ```
 type Options struct {
@@ -47,7 +47,7 @@ type Options struct {
 
 ### type Secret
 
-safety: Secret preserves masking classification so tests cannot substitute plain variables for secrets.
+Secret preserves masking classification so tests cannot substitute plain variables for secrets.
 
 ```
 type Secret struct {

@@ -59,6 +59,19 @@ customer approval or unstarted capacity is not execution time.
 
 ## Uploads and storage accounting
 
+Storage usage comes from committed blob rows and tagged log-stream records.
+`GET /api/v1/storage` reports retained event, blob and tagged-log bytes plus
+live blob-upload holds. Historical usage counters and bucket listings do not
+replace those authoritative counts. Exact ticket replay never charges twice.
+Deployment reports sum usage by tenant, period and replica.
+
+The controller's leased maintenance pass expires records, marks unreachable
+blobs and collects tombstones after the 24-hour grace period. New references
+preserve their bytes. Physical deletion failures retain the tombstone for retry.
+S3 uses log lifecycle rules. A filesystem backend expires classed objects during
+leased maintenance. The former bucket-reconciliation pass, free-log-share pruner
+and `storage_pass` health field are removed.
+
 The controller authorizes `/api/v1/data/upload` and reserves quota before signing
 a PUT. `/api/v1/data/commit` verifies physical bytes and rechecks authority before
 committing existence, receipts and accounting. Aborted or expired reservations

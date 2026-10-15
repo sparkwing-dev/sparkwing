@@ -19,6 +19,6 @@
 // [TriggerResponse] for pipeline invocation, [AcquireSlotRequest] /
 // [AcquireSlotResponse] / [HeartbeatSlotResponse] for the
 // concurrency admission protocol, [Secret] for vault reads,
-// [HeartbeatStatus] for runner liveness, [GitMeta] and
+// [GitMeta] and
 // [TriggerMeta] for run-origin context.
 package client

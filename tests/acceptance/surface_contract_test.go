@@ -57,6 +57,7 @@ func TestSurfaceGrammarContract(t *testing.T) {
 func TestSurfaceRemovedClientRecoveryAPIs(t *testing.T) {
 	clientType := reflect.TypeFor[*client.Client]()
 	for _, name := range []string{
+		"HeartbeatTrigger",
 		"PendingNodeBounce", "ConsumeNodeBounce", "ResetNodeForAutoRetry", "RetryRun", "ListTriggers",
 		"ListCrons", "GetCron", "PutCronRepo", "DeleteCronRepo", "PauseCron", "ResumeCron",
 		"DisarmCron", "RunCronNow", "SetCronOverride", "ClearCronOverride",
@@ -113,9 +114,9 @@ func TestSurfaceManagementTransportsKeepAuthorityNamespaces(t *testing.T) {
 			case "/api/v1/pools":
 				body = `{"pools":[{"name":"prod","runners":["desktop"],"rules":[{"id":"rule-1","repos":["acme/api"],"branches":["main"],"source":"github","route":true}]}]}`
 			case "/api/v1/tokens":
-				body = `{"tokens":[{"prefix":"swk_member","kind":"member","principal":"build","scopes":["runs.read"]}]}`
+				body = `{"tokens":[{"prefix":"swk_member","team":"team","audience":"controller","created_by":"owner","git_credentials":false,"metered":false,"subject":{"kind":"account","id":"build"},"grants":["runs.read"],"issued_at":"2026-01-01T00:00:00Z"}]}`
 			case "/api/v1/operator/tokens":
-				body = `{"tokens":[{"prefix":"swk_deployment","kind":"service","principal":"deploy","scopes":["operator.tokens"]}]}`
+				body = `{"tokens":[{"prefix":"swk_deployment","team":"","audience":"controller","created_by":"owner","git_credentials":false,"metered":false,"subject":{"kind":"service","id":"deploy"},"grants":["operator.tokens"],"issued_at":"2026-01-01T00:00:00Z"}]}`
 			case "/api/v1/sizing":
 				encoded, err := json.Marshal(controllerwire.SizingPage{Sizing: []controllerwire.SizingDetail{{Pipeline: "check", Repo: "acme/api", Source: "floor", MemoExcluded: 5, Rollup: controllerwire.SizingMeasurements{FloorCores: 6.5, FloorMemoryBytes: 7 << 30}, Jobs: []controllerwire.JobSizing{}}}})
 				if err != nil {

@@ -36,25 +36,6 @@ func (f FlagNames) orDefault() FlagNames {
 	return f
 }
 
-// Surfaces says which budgets a service can enforce, so a service that
-// holds no live log stream open and one that cannot tell its callers
-// apart each register only the flags that mean something to them.
-type Surfaces struct {
-	// PerPrincipal registers the download concurrency cap. A service
-	// whose callers all resolve to one principal leaves it false: its
-	// refusal would fall on the whole fleet at once.
-	PerPrincipal bool
-	// LogStreams registers the live log stream cap.
-	LogStreams bool
-}
-
-// ControllerSurfaces and CacheSurfaces name what each
-// binary passes to [Bind].
-var (
-	ControllerSurfaces = Surfaces{PerPrincipal: true, LogStreams: true}
-	CacheSurfaces      = Surfaces{}
-)
-
 // Named reports which budgets the operator set themselves on the command line. A caller filling unset budgets from a profile needs it
 // to tell a budget nobody named from one deliberately set to zero, which is
 // unlimited and a value in its own right.
@@ -64,12 +45,8 @@ type Named struct {
 	MaxDownloads    bool
 }
 
-// Bind registers a service's egress budget flags on fs and returns the reader
-// that turns the parsed values into a [Config]. Every budget defaults to
-// unlimited, so a service given no budget serves exactly what it served
-// before. The reader refuses a negative value rather than serving a budget
-// the operator did not mean.
-func Bind(fs *flag.FlagSet, surfaces Surfaces) func() (Config, Named, error) {
+// Bind registers the controller's egress flags and returns their validated configuration.
+func Bind(fs *flag.FlagSet) func() (Config, Named, error) {
 	names := FlagNames{
 		DailyAlarmBytes: FlagDailyAlarmBytes,
 		MaxLogStreams:   FlagMaxLogStreams,
@@ -80,18 +57,13 @@ func Bind(fs *flag.FlagSet, surfaces Surfaces) func() (Config, Named, error) {
 			"the health route and the metrics report and the log carries at warn level. It refuses "+
 			"nothing. 0, the default, disables the alarm")
 
-	var downloadsFlag, streamsFlag *int64
-	if surfaces.PerPrincipal {
-		downloadsFlag = fs.Int64("egress-max-downloads", 0,
-			"metered downloads one principal may hold open at once; a further one is refused "+
-				"with 429. Every pod sharing a bearer counts against the same cap. 0, the "+
-				"default, is unlimited")
-	}
-	if surfaces.LogStreams {
-		streamsFlag = fs.Int64("egress-max-log-streams", 0,
-			"live log streams one principal may hold open at once; a further one is refused "+
-				"with 429. 0, the default, is unlimited")
-	}
+	downloadsFlag := fs.Int64("egress-max-downloads", 0,
+		"metered downloads one principal may hold open at once; a further one is refused "+
+			"with 429. Every pod sharing a bearer counts against the same cap. 0, the "+
+			"default, is unlimited")
+	streamsFlag := fs.Int64("egress-max-log-streams", 0,
+		"live log streams one principal may hold open at once; a further one is refused "+
+			"with 429. 0, the default, is unlimited")
 
 	return func() (Config, Named, error) {
 		named := Named{
@@ -99,12 +71,10 @@ func Bind(fs *flag.FlagSet, surfaces Surfaces) func() (Config, Named, error) {
 			MaxLogStreams:   fs.Changed(trimFlag(names.MaxLogStreams)),
 			MaxDownloads:    fs.Changed(trimFlag(names.MaxDownloads)),
 		}
-		cfg := Config{GlobalDailyAlarmBytes: *dailyFlag, Flags: names}
-		if downloadsFlag != nil {
-			cfg.MaxDownloadsPerPrincipal = int(*downloadsFlag)
-		}
-		if streamsFlag != nil {
-			cfg.MaxStreamsPerPrincipal = int(*streamsFlag)
+		cfg := Config{
+			GlobalDailyAlarmBytes: *dailyFlag, Flags: names,
+			MaxDownloadsPerPrincipal: int(*downloadsFlag),
+			MaxStreamsPerPrincipal:   int(*streamsFlag),
 		}
 		return cfg, named, cfg.Validate()
 	}

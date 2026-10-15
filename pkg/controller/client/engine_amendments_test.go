@@ -111,7 +111,7 @@ func TestEngineClientRecoveryAndLauncherMethods(t *testing.T) {
 		response           any
 		call               func(controllerwire.Controller) (any, error)
 	}{
-		{"failure", "GET", "/api/v1/runs/r1/jobs/source%2Fbuild/failure?source_generation=3", failure, func(c controllerwire.Controller) (any, error) {
+		{"failure", "GET", "/api/v1/runs/r1/jobs/source%2Fbuild/failure?generation=3", failure, func(c controllerwire.Controller) (any, error) {
 			return c.ReadFailure(t.Context(), "r1", "source/build", 3)
 		}},
 		{"cancel-job", "POST", "/api/v1/runs/r1/jobs/source%2Fbuild/cancel", controllerwire.Applied{CancelRequested: true, Attempt: 4, Generation: 3}, func(c controllerwire.Controller) (any, error) {
@@ -243,7 +243,7 @@ func TestEngineClientRecoveryRejectsInvalidSelectorsAndInnerFailure(t *testing.T
 		t.Fatal("invalid recovery selector reached transport")
 		return nil, nil
 	})
-	for _, generation := range []int64{-1, -2} {
+	for _, generation := range []int64{0, -1, -2} {
 		if _, err := c.ReadFailure(t.Context(), "r1", "j1", generation); err == nil {
 			t.Fatal("invalid generation accepted")
 		}

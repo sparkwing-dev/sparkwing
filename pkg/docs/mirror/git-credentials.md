@@ -1,56 +1,92 @@
 # Team git credentials
 
-The shared source contract acquires an authorized checkout at the sealed SHA.
-The controller declares source-release and credential-management routes. Native
-source acquisition and transactional release still need integration evidence.
-The sections below describe their target behavior.
+`POST /api/v1/runs/{run}/source-credential` releases the stored credential
+for a live claim's sealed source location. It takes no body. The response
+contains `kind`, `host`, `secret`, optional `username` and optional
+`known_hosts`. The host already has the checkout URL, SHA and policy in its
+sealed execution input.
 
-<!-- design:begin -->
-## Which credential a run gets
+The controller derives the credential's host from the sealed source location.
+The store checks live ancestry, the current claim fence, repository permission,
+executor enrollment and machine-owner consent in one transaction. It commits
+the release audit before the controller opens the envelope. The envelope is
+bound to the team and host, so copying it to another row does not open it.
 
-`POST /api/v1/runs/{run}/source-credential` requires a live claim with
-`source.read` and the source binding. The sealed repository must be authorized
-for that executor. A typed repository name or advertised runner label grants
-no fetch authority.
-
-A GitHub App credential is restricted to the authorized repository and approved
-extra repositories. Releasing a stored team credential requires a same-team cloud
-executor or explicit consent from the machine's owner. Team-admin token
-management alone cannot provide that owner's consent. SSH credentials also
-require confirmation of the pinned host key.
-
-The store rechecks the live claim, repository permission and consent in the
-transaction that records the release. A failed audit write releases nothing.
-Credentials stay out of the audit record. See [credentials](credentials.md) and
-[GitHub App](github-app.md#source-for-cloud-runners).
+A bare machine root cannot release source credentials. Trigger, plan and job
+capabilities need `source.read` and the run's source binding. A job loses source
+access when execution starts. Unknown, revoked or ended credentials receive
+401. Live authority without the required grant or binding receives 403.
+Errors use the shared `{"error":{"code","message"}}` envelope.
 
 ## Extra repositories
 
-An owner manages the repository's allow-list through
-`PUT /api/v1/team/github-app/extra-repos`. Members read it through
-`GET /api/v1/team/github-app/extra-repos`. Source code cannot widen the list
-used to issue its own credential. Every listed private repository still needs
-live authorization when source is acquired.
+Team owners manage GitHub App extra-repository lists at
+`PUT /api/v1/team/github-app/extra-repos`. The server stores repository IDs
+with the list so a rename cannot transfer access to a reused name. Stored
+source release checks the sealed source repository against current enrollment.
 
 ## Store a credential
 
-| Operation | Route |
-| --- | --- |
-| List metadata | `GET /api/v1/team/git-credentials` |
-| Store or replace | `POST /api/v1/team/git-credentials` |
-| Confirm an SSH host | `POST /api/v1/team/git-credentials/{host}/confirm` |
-| Delete | `DELETE /api/v1/team/git-credentials/{host}` |
-| Inspect release audits | `GET /api/v1/team/git-credentials/releases` |
+A team owner stores one credential per host, under **Team > Git
+credentials** in the dashboard or with
+`POST /api/v1/team/git-credentials`. Live member or verified local authority
+with `team.admin` stores, replaces,
+confirms or deletes one, and no route returns its value: the list shows the
+host, the kind, the pinned host key and who stored it. The controller seals
+the value under its secrets key, bound to the team and the host, so a
+controller started without `SPARKWING_SECRETS_KEY` holds none.
 
-Listing requires run-read permission. Writes and audit reads require team-admin
-permission. Machine-owner consent uses
-`PUT /api/v1/tokens/{token}/git-credentials`. It is separate from permission to
-manage the team's stored credential.
+`GET /api/v1/team/git-credentials` requires live member or verified local
+authority with `runs.read`. It lists the authenticated team's metadata and
+uses `Cache-Control: no-store`. Query parameters and caller headers cannot
+select another team. Stored secrets are omitted, including when no decryption
+key is configured. Machine roots, claims and bootstraps cannot read this list.
 
-Prefer a read-only deploy key or repository-scoped token. Values are sealed
-under the controller's secrets key. Management reads return metadata.
+Session writes require CSRF proof. Embedded controllers supply
+`WithCredentialWriter` with tenant transactions that recheck authority before
+commit. Missing adapters return `policy_missing`. Mutation responses omit stored
+credentials and use `Cache-Control: no-store`.
 
-## How the runner uses it
+A credential is one of these kinds:
+
+- **An SSH deploy key** (`kind: ssh`, `private_key`), unencrypted, since a
+  runner cannot type a passphrase. When it is stored, the controller opens an
+  ssh handshake to the host (port 22 unless `port` says otherwise), reads the
+  host key the way `ssh-keyscan` does, and pins it. The answer shows the key's
+  SHA256 fingerprint, and the credential is unusable until an owner confirms
+  that fingerprint with `POST /api/v1/team/git-credentials/{host}/confirm`.
+  Check it against the fingerprint your forge publishes. The controller
+  refuses a host that resolves inside its own network, and it dials the very
+  address it checked, so a name that resolves differently a second time
+  cannot steer the scan inward.
+- **An HTTPS token** (`kind: https`, `token`, optional `username`), such as a
+  GitLab or Bitbucket access token or a fine-grained GitHub token. The
+  username defaults to `x-access-token`; Bitbucket repository access tokens
+  need `x-token-auth`. It is usable once stored.
+
+Prefer a read-only deploy key or token scoped to the repositories the team
+builds.
+
+A team stores at most 50 credentials.
+
+## Who receives it
+
+A live authorized claim receives a stored credential only when its executor
+is a team Cloud runner, or its machine owner has consented. Cloud identity
+comes from the award and current enrollment. Machine consent belongs to the
+account that registered the machine. Team administration cannot replace it.
+
+The machine owner changes consent with
+`PUT /api/v1/tokens/{token}/git-credentials` and `{"enabled":true}` or
+`{"enabled":false}`. This requires the owner's account session and CSRF proof.
+The store rechecks the account and machine under the same lock used by release.
+
+Each release records the repository, host, run, job, generation, machine,
+owner, capability prefix and store timestamp. Audit failure returns no
+credential. The source controller requires the bound secrets cipher before
+requesting a release.
+
+## Use the credential
 
 The source owner supplies credentials in memory or through a private temporary
 file. The Git process receives the filtered Git environment and source-owned
@@ -67,12 +103,29 @@ Pipeline code running as the same OS account can reach that account's credential
 while they are in use. Repository scoping and a read-only credential limit the
 exposed authority.
 
+Use the released credential for the sealed source location. Keep it in memory
+or a private temporary file and remove that file when git exits. The SSH
+response carries the confirmed known_hosts entry for the credential's host.
+
 ## Rotate and revoke
 
-Replacing or deleting a credential changes later releases. The source-release
-audit survives rotation. Controller revocation prevents new releases but cannot
-recall an upstream credential that has already been issued.
+Storing a credential for the same host replaces it; the next release hands
+out the new value. Replacing an SSH key keeps its confirmation only while the
+host's key is the one already confirmed. Deleting it
+(`DELETE /api/v1/team/git-credentials/{host}`) makes every later release
+fail. Nothing the runner held outlives the fetch it was released for.
 
-`POST /api/v1/secrets/rotate` uses the encrypted-secret rotation contract. Keep
-the preceding key until every encrypted value has been resealed successfully.
-<!-- design:end -->
+`POST /api/v1/secrets/rotate` requires `team.admin` and reseals the authenticated
+team's secrets and git credentials under the new key in one transaction.
+Browser sessions require CSRF. An unreadable secret stays listed in `skipped`.
+An unreadable git credential or a sealing failure aborts both sets of changes.
+Plaintext and unbound rows stay unreadable. The previous key is still needed
+while any secret is skipped.
+
+`GET /api/v1/team/git-credentials/releases` requires `team.admin` and returns
+the latest 200 releases for the authenticated team. Each row carries `host`,
+`repository`, `run_id`, `job_id`, `generation`, `runner`, `capability_prefix`
+and `released_at` in Unix seconds. Both routes return no-store.
+
+Embedded controllers supply `WithCredentialRotator` and `WithSourceAuditReader`
+with the declared tenant interfaces. An absent adapter returns `policy_missing`.

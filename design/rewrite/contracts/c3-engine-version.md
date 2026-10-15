@@ -65,6 +65,7 @@ and resolved executables are the same file. Info reads pin metadata without
 fetching or guessing cache paths. Source/host composition and native execution
 remain separate integration work.
 
+
 ## Ownership
 
 `internal/engine` owns exact SDK-to-engine selection, release verification,
