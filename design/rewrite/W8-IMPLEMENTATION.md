@@ -1955,3 +1955,64 @@ go run ./internal/commentcheck -base main .
 go run ./internal/commentcheck -base HEAD .
 go run ./internal/sleepcheck -base HEAD .
 ```
+
+
+## Continuation: integration merge and chart identity plumbing
+
+The continuation starts at c88ef4512 with two unmerged paths. handoffs.md
+retains both histories. runner_pool_cli.go remains deleted. Its incoming edit
+only removes the retired ambient runner identity path, which W8's granted
+NodeInput construction already replaces. Retaining the deletion keeps 887
+incoming legacy lines out of the tree. No Git write ran, so the lead must
+stage both resolutions and finish the merge.
+
+All 26 amendment rows assigned to W8 and the W4 execution-identity handoff
+were rechecked. The remaining source, lease, controller-client and shared
+host construction contracts have no implementation delta in this merge.
+W8's existing components continue to test those interfaces with fakes.
+
+The runner chart still injected POD_NAME, contrary to frozen section 7.4.
+Removed that four-line default block and regenerated the vendored bundle with
+`helm dependency update /home/bombuntu/.xwing/envs/1086/sparkwing/charts/sparkwing-full --skip-refresh`.
+The controller enrollment profile supplies identity. Pod metadata and advertised
+labels cannot replace it. The chart's Auth documentation states that rule.
+The existing source and full-chart render tests both failed on POD_NAME before
+the cut. This continuation adds no mechanism, contract shape, flag, environment
+name, timeout or compatibility path. No other-area production caller needed
+migration. No T1 inventory test was newly ported and no native catalog cell was
+activated. New production deletion is four lines in one retained file.
+
+Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE=/tmp/sw-astra-W8/cache, GOTMPDIR=/tmp/sw-astra-W8/gotmp and
+TMPDIR=/tmp/sw-astra-W8/tmp. Commands run in this worktree with `go -C`:
+
+- `go build -p 4 ./...` passed for the whole repository.
+- `go vet -p 4 ./internal/runners/... ./internal/engine/... ./internal/cluster ./internal/wingd/... ./tests/acceptance ./internal/acceptance` passed.
+- `go test -p 4 ./internal/runners/... ./internal/engine/... ./tests/acceptance ./internal/acceptance -count=1 -timeout=3m` passed.
+- `go test -p 4 ./internal/cluster -skip '^TestStartMetricsListener_ServesMetrics$' -count=1 -timeout=2m` passed. The omitted metrics listener needs a socket denied by this sandbox.
+- `go test -p 4 ./internal/wingd -run '^(TestLocal|TestManagedUnit|TestManagedController|FuzzLocal)' -count=1 -timeout=2m` passed against its file/fake boundaries.
+- `go vet -p 4 ./charts` passed.
+- `go run ./internal/commentcheck -base main .` passed across 1,009 files.
+
+The W8 component acceptance suite passes. Native cells remain blocked pending
+real HTTP/api.sock, host, platform and deployed boundary evidence. Existing
+contract changes needed are the W3 run/plan/eval granted identity and shared
+process constructor, W9's plan-without-job bootstrap grammar, and the cache
+owner's explicit workspace-off key operation. Runtime integration still needs
+W3 source/keeper/shared hosts/delegated routes/replay, W9 NewEngineClient,
+W1/W2 local services and plan/eval resource awards plus SyncLauncher. Native
+Windows SID/services, Kubernetes enforcement probes and reservation cleanup,
+actual hello and real-repository QA remain open. No new product question arose.
+
+Edits outside the W8 implementation directories are the chart source/template,
+its existing render tests, the regenerated bundle, the chart README and these
+W8 design notes. charts is W8-owned. The shared handoffs.md resolution retains
+the incoming W3 notice. No cross-area Go contract or implementation was edited.
+The cache chart/templates remain W7's deletion work.
+
+Full `go test -p 4 ./charts -count=1 -timeout=3m` passed in 120.159 seconds,
+including both identity-environment regressions and the vendor drift check.
+`git diff --check` passed. Shared Git config has no author or core.worktree
+override. All owned check sessions completed. Worker scratch was deleted.
+The lead retains independent review, staging and committing. W8 remains
+incomplete at the real-integration boundaries listed above.

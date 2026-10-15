@@ -10,19 +10,15 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"slices"
 	"sort"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -258,7 +254,7 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 	if logDir != "" {
 		inv["log_path"] = logDir
 	}
-	if wd := sparkwing.WorkDir(); wd != "" {
+	if wd, err := os.Getwd(); err == nil {
 		inv["cwd"] = wd
 	} else if cwd, err := os.Getwd(); err == nil && cwd != "" {
 		inv["cwd"] = cwd
@@ -416,238 +412,6 @@ func canceledByRun(err error) bool {
 	// safety: a ctx-cancelled child is SIGKILLed; its ExitError carries
 	// no wrapped context error, only the "signal: killed" text.
 	return strings.Contains(err.Error(), "signal: killed")
-}
-
-func snapshotPipelineRefs(refs []sparkwing.RefTarget) []nodeproto.PlanPipelineRef {
-	var out []nodeproto.PlanPipelineRef
-	for _, r := range refs {
-		out = append(out, nodeproto.PlanPipelineRef{Pipeline: r.Pipeline, Node: r.NodeID})
-	}
-	return out
-}
-
-type planSnapshotMeta struct {
-	Secrets          pipelines.SecretsField
-	PipelineRequires []string
-}
-
-func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnapshotMeta) (nodeproto.PlanDocOld, error) {
-	snap := nodeproto.PlanDocOld{
-		Protocol:       authwire.NodeProtocolVersion,
-		AdmissionClass: string(p.AdmissionClassValue()),
-		Pipeline:       rc.Pipeline,
-		RunID:          rc.RunID,
-		Priority:       p.PriorityValue(),
-		ClaimWaitMS:    p.ClaimWaitValue().Milliseconds(),
-		Requires:       slices.Clone(meta.PipelineRequires),
-		Secrets:        meta.Secrets,
-		// safety: an empty plan still writes "nodes": [], the shape every SDK and reader expects.
-		Nodes: []nodeproto.PlanNode{},
-	}
-	for _, membership := range p.PlanConcurrency() {
-		if membership.Group == nil {
-			continue
-		}
-		limit := membership.Group.Limit()
-		pc := nodeproto.PlanConc{
-			Key:             scopedGroupKey(membership.Group, rc.RunID),
-			Capacity:        limit.Capacity,
-			Cost:            membership.Cost,
-			OnLimit:         string(limit.OnLimit),
-			QueueTimeoutMS:  limit.QueueTimeout.Milliseconds(),
-			CancelTimeoutMS: limit.CancelTimeout.Milliseconds(),
-		}
-		if snap.PlanConc == nil {
-			snap.PlanConc = &pc
-		}
-		snap.PlanConcs = append(snap.PlanConcs, pc)
-	}
-	if rh := p.ResourceHints(); rh != nil {
-		snap.Resources = &nodeproto.PlanResources{
-			Cores:       rh.Cores,
-			MemoryBytes: rh.MemoryBytes,
-		}
-	}
-	seen := make(map[string]bool)
-	for _, n := range p.Nodes() {
-		sn := nodeproto.PlanNode{
-			ID:           n.ID(),
-			Deps:         n.DepIDs(),
-			OptionalDeps: n.OptionalDepIDs(),
-			Env:          n.EnvMap(),
-			Outputs:      n.OutputGlobs(),
-			Consumes:     snapshotConsumeEdges(n.ConsumeEdges()),
-			Groups:       p.JobGroupNames(n.ID()),
-			Dynamic:      p.IsDynamicNode(n.ID()),
-			PipelineRefs: snapshotPipelineRefs(n.PipelineRefs()),
-		}
-		if cfg := n.ApprovalConfigOld(); cfg != nil {
-			sn.Approval = &nodeproto.PlanApproval{
-				Message:   cfg.Message,
-				TimeoutMS: cfg.Timeout.Milliseconds(),
-				OnTimeout: string(cfg.OnExpiry),
-			}
-		}
-		snapshotNodeEnvelope(p, n, &sn)
-		snap.Nodes = append(snap.Nodes, sn)
-		seen[n.ID()] = true
-	}
-	for _, n := range p.Nodes() {
-		rec := n.OnFailureNode()
-		if rec == nil || seen[rec.ID()] {
-			continue
-		}
-		recSnap := nodeproto.PlanNode{
-			ID:           rec.ID(),
-			Deps:         rec.DepIDs(),
-			OptionalDeps: rec.OptionalDepIDs(),
-			Env:          rec.EnvMap(),
-			Outputs:      rec.OutputGlobs(),
-			Consumes:     snapshotConsumeEdges(rec.ConsumeEdges()),
-			Groups:       p.JobGroupNames(rec.ID()),
-			OnFailureOf:  n.ID(),
-			PipelineRefs: snapshotPipelineRefs(rec.PipelineRefs()),
-		}
-		snapshotNodeEnvelope(p, rec, &recSnap)
-		snap.Nodes = append(snap.Nodes, recSnap)
-		seen[rec.ID()] = true
-	}
-	return snap, nil
-}
-
-func snapshotNodeEnvelope(p *sparkwing.Plan, n *sparkwing.JobNode, sn *nodeproto.PlanNode) {
-	sn.Modifiers = nodeModifiersSnapshot(n)
-	sn.Caches = nodeDirCaches(n)
-	closures, stepClosures := sparkwingruntime.NodeClosureIDs(p, n)
-	sn.Closures = closures
-	sn.NeedsGenerated = sparkwingruntime.NeedsGeneratedIDs(p, n)
-	if closures != nil && closures.CacheKey != "" {
-		sn.MemoKey = &nodeproto.PlanMemoKey{Closure: closures.CacheKey}
-	}
-	if w := n.Work(); w != nil {
-		sn.Work = snapshotWorkOf(w, n.ResultStep(), stepClosures)
-	}
-}
-
-func snapshotConsumeEdges(edges []sparkwing.ConsumeEdge) []nodeproto.PlanConsume {
-	out := make([]nodeproto.PlanConsume, len(edges))
-	for i, edge := range edges {
-		out[i] = nodeproto.PlanConsume{Producer: edge.Producer, Into: edge.Into}
-	}
-	return out
-}
-
-func nodeModifiersSnapshot(n *sparkwing.JobNode) *nodeproto.PlanModifiers {
-	rc := n.RetryConfig()
-	m := nodeproto.PlanModifiers{
-		Retry:               rc.Attempts,
-		RetryBackoffMS:      rc.Backoff.Milliseconds(),
-		RetryAuto:           rc.Auto,
-		TimeoutMS:           n.TimeoutDuration().Milliseconds(),
-		NoProgressTimeoutMS: n.NoProgressTimeoutDuration().Milliseconds(),
-		RunsOn:              n.RequiresLabels(),
-		Prefers:             n.PrefersLabels(),
-		WhenRunner:          n.WhenRunnerLabels(),
-		Inline:              n.IsInline(),
-		Optional:            n.IsOptional(),
-		ContinueOnError:     n.IsContinueOnError(),
-		HasBeforeRun:        len(n.BeforeRunHooks()) > 0,
-		HasAfterRun:         len(n.AfterRunHooks()) > 0,
-		HasSkipIf:           len(n.SkipPredicates()) > 0,
-		HasVerify:           n.Verifier() != nil,
-		SkipIfBudgetMS:      n.SkipIfBudget().Milliseconds(),
-	}
-	if rec := n.OnFailureNode(); rec != nil {
-		m.OnFailure = rec.ID()
-	}
-	if cc := n.MemoizeConfig(); cc != nil {
-		m.Cache = true
-		m.CacheTTLMS = cc.TTL.Milliseconds()
-	}
-	if g := n.ConcurrencyGroupRef(); g != nil {
-		limit := g.Limit()
-		m.ConcGroup = g.Name()
-		m.ConcCapacity = limit.Capacity
-		m.ConcCost = n.ConcurrencyCost()
-		m.ConcScope = string(limit.Scope)
-		m.ConcOnLimit = string(limit.OnLimit)
-		m.ConcQueueTimeoutMS = limit.QueueTimeout.Milliseconds()
-		m.ConcCancelTimeoutMS = limit.CancelTimeout.Milliseconds()
-	}
-	if rh := n.ResourceHints(); rh != nil {
-		m.ResCores = rh.Cores
-		m.ResMemoryBytes = rh.MemoryBytes
-	}
-	if isZeroModifiers(m) {
-		return nil
-	}
-	return &m
-}
-
-func isZeroModifiers(m nodeproto.PlanModifiers) bool {
-	return m.Retry == 0 &&
-		m.RetryBackoffMS == 0 &&
-		!m.RetryAuto &&
-		m.TimeoutMS == 0 &&
-		m.NoProgressTimeoutMS == 0 &&
-		len(m.RunsOn) == 0 &&
-		len(m.Prefers) == 0 &&
-		len(m.WhenRunner) == 0 &&
-		!m.Cache &&
-		m.CacheTTLMS == 0 &&
-		m.ConcGroup == "" &&
-		m.ConcCapacity == 0 &&
-		m.ConcCost == 0 &&
-		m.ConcScope == "" &&
-		m.ConcOnLimit == "" &&
-		m.ConcQueueTimeoutMS == 0 &&
-		m.ConcCancelTimeoutMS == 0 &&
-		m.ResCores == 0 &&
-		m.ResMemoryBytes == 0 &&
-		!m.Inline &&
-		!m.Optional &&
-		!m.ContinueOnError &&
-		m.OnFailure == "" &&
-		!m.HasBeforeRun &&
-		!m.HasAfterRun &&
-		!m.HasSkipIf &&
-		!m.HasVerify &&
-		m.SkipIfBudgetMS == 0
-}
-
-func snapshotWorkOf(work *sparkwing.Work, resultStep *sparkwing.WorkStep, closures map[string]*nodeproto.PlanClosures) *nodeproto.PlanWork {
-	out := &nodeproto.PlanWork{FailurePolicy: string(work.ParallelFailurePolicy())}
-	if resultStep != nil {
-		out.ResultStep = resultStep.ID()
-	}
-	for _, s := range work.Steps() {
-		out.Steps = append(out.Steps, nodeproto.PlanStep{
-			ID:        s.ID(),
-			Needs:     s.DepIDs(),
-			IsResult:  s == resultStep,
-			HasSkipIf: len(s.SkipPredicates()) > 0,
-			Finally:   s.IsFinally(),
-			Risks:     s.Risks(),
-
-			ContinueOnError:   s.IsContinueOnError(),
-			Optional:          s.IsOptional(),
-			HasDryRun:         s.HasDryRun(),
-			SafeWithoutDryRun: s.IsSafeWithoutDryRun(),
-			Closures:          closures[s.ID()],
-		})
-	}
-	for _, g := range work.Groups() {
-		members := g.Members()
-		ids := make([]string, len(members))
-		for i, m := range members {
-			ids[i] = m.ID()
-		}
-		out.StepGroups = append(out.StepGroups, nodeproto.PlanStepGroup{
-			Name:    g.Name(),
-			Members: ids,
-		})
-	}
-	return out
 }
 
 func newRunID() string {

@@ -2,15 +2,27 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"sort"
+	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 type stepRiskFinding struct {
 	NodeID string
 	StepID string
 	Labels []string
+}
+
+type riskBlockedError struct {
+	Pipeline      string
+	StepID        string
+	MissingLabels []string
+}
+
+func (e *riskBlockedError) Error() string {
+	return fmt.Sprintf("step %q in pipeline %q requires --sw-allow %s to confirm (or --sw-dry-run to preview).", e.StepID, e.Pipeline, strings.Join(e.MissingLabels, ","))
 }
 
 // safety: a step declares its risk labels in Go, so they are legible only from
@@ -23,18 +35,18 @@ func declaredRisks(ctx context.Context, sparkwingDir, pipelineName string) []ste
 	return risksIn(schemas, pipelineName)
 }
 
-func risksIn(schemas []sparkwing.DescribePipeline, pipelineName string) []stepRiskFinding {
+func risksIn(schemas []nodeproto.PipelineDescription, pipelineName string) []stepRiskFinding {
 	for _, s := range schemas {
 		if s.Name != pipelineName {
 			continue
 		}
 		var out []stepRiskFinding
-		for _, row := range s.RisksBySteps {
+		for _, row := range s.RisksByStep {
 			if len(row.Labels) == 0 {
 				continue
 			}
 			out = append(out, stepRiskFinding{
-				NodeID: row.NodeID,
+				NodeID: row.JobID,
 				StepID: row.StepID,
 				Labels: row.Labels,
 			})
@@ -94,11 +106,7 @@ func enforceRiskGate(
 	if len(stepOrder) > 0 {
 		stepID = stepOrder[0]
 	}
-	return &sparkwing.RiskBlockedError{
-		Pipeline:      pipelineName,
-		StepID:        stepID,
-		MissingLabels: allMissing,
-	}
+	return &riskBlockedError{Pipeline: pipelineName, StepID: stepID, MissingLabels: allMissing}
 }
 
 func contains(xs []string, s string) bool {

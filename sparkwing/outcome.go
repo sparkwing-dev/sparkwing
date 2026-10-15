@@ -1,34 +1,24 @@
 package sparkwing
 
-// Outcome is a terminal node state.
+// Outcome is a persisted terminal job verdict.
 type Outcome string
 
 const (
-	Success   Outcome = "success"
-	Failed    Outcome = "failed"
-	Satisfied Outcome = "satisfied"
-	Cached    Outcome = "cached"
-	Skipped   Outcome = "skipped"
-	Cancelled Outcome = "cancelled"
-
-	// SkippedConcurrent records a full concurrency group with OnLimit [Skip].
-	SkippedConcurrent Outcome = "skipped-concurrent"
-
-	// Superseded records eviction by a concurrency group's [CancelOthers] policy.
+	Success    Outcome = "success"
+	Failed     Outcome = "failed"
+	Cancelled  Outcome = "cancelled"
+	Skipped    Outcome = "skipped"
 	Superseded Outcome = "superseded"
 )
 
-// Terminal reports true for Outcome values.
-func (o Outcome) Terminal() bool { return true }
-
-// Paused is the debug-pause status, outside the terminal Outcome set.
-const Paused = "paused"
-
-// OK reports whether the outcome satisfies downstream dependencies.
-func (o Outcome) OK() bool {
+// Terminal reports whether the verdict belongs to the terminal vocabulary.
+func (o Outcome) Terminal() bool {
 	switch o {
-	case Success, Satisfied, Cached, Skipped, SkippedConcurrent:
+	case Success, Failed, Cancelled, Skipped, Superseded, Memoized:
 		return true
 	}
 	return false
 }
+
+// OK reports whether the verdict satisfies a successful dependency.
+func (o Outcome) OK() bool { return o == Success || o == Memoized || o == Skipped }

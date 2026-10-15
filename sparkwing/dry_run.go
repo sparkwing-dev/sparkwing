@@ -14,8 +14,8 @@ func IsDryRun(ctx context.Context) bool {
 }
 
 // DryRun installs a dry-run body on this WorkStep. The closure runs
-// in place of the apply Fn whenever the orchestrator dispatches the
-// step under WithDryRun(ctx). DryRun bodies must NEVER mutate state
+// in place of the apply Fn whenever the host dispatches the step in
+// dry-run mode. DryRun bodies must NEVER mutate state
 // -- the contract is "what would the apply do, written so it can be
 // inspected without doing it" (terraform plan, kubectl apply
 // --dry-run=server, helm upgrade --dry-run, etc.).
@@ -42,13 +42,3 @@ func (s *WorkStep) SafeWithoutDryRun() *WorkStep {
 	s.safeWithoutDryRun = true
 	return s
 }
-
-// HasDryRun reports whether a dry-run body has been installed.
-// Used by PreviewPlan to render `would_dry_run` for steps whose
-// dispatcher path under --dry-run would call DryRunFn.
-func (s *WorkStep) HasDryRun() bool { return s.dryRunFn != nil }
-
-// IsSafeWithoutDryRun reports whether the step is marked safe.
-// Mirrors HasDryRun's PreviewPlan use: under --dry-run a safe step
-// renders `would_run` (apply Fn is what executes).
-func (s *WorkStep) IsSafeWithoutDryRun() bool { return s.safeWithoutDryRun }

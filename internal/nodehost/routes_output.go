@@ -47,7 +47,7 @@ func (s *Server) serveNodeOutput(w http.ResponseWriter, r *http.Request, g *gran
 	case row.Status != "done":
 		s.writeError(w, http.StatusConflict, "not_ready", "node "+quote(node)+" has not finished")
 		return
-	case row.Outcome != string(sparkwing.Success) && row.Outcome != string(sparkwing.Cached):
+	case row.Outcome != string(sparkwing.Success) && row.Outcome != string(sparkwing.Memoized):
 		s.writeError(w, http.StatusNotFound, "no_output", "node "+quote(node)+" finished without succeeding")
 		return
 	}

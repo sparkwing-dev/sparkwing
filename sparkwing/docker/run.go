@@ -11,8 +11,8 @@ import (
 	"os/exec"
 	"sort"
 
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/cleanup"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
 // RunOptions configures a one-shot container invocation. The intended
@@ -84,7 +84,7 @@ type RunOptions struct {
 // The docker daemon at DOCKER_HOST need not share a filesystem with
 // the caller; all I/O moves through the docker API.
 func Run(ctx context.Context, opts RunOptions) error {
-	planguard.Guard(ctx, "docker.Run")
+	sdkserve.RequireExecution(ctx, "docker.Run")
 	if err := ensureDocker(); err != nil {
 		return err
 	}

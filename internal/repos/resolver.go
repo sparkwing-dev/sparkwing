@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 var ErrNotFound = errors.New("repos: no registered repo provides that pipeline")
@@ -19,7 +19,7 @@ var ErrNotFound = errors.New("repos: no registered repo provides that pipeline")
 // emits: each pipeline's name, arguments, and the risk labels its steps
 // declare. A caller that needs only the names, and one that has to weigh what
 // a pipeline declares, read the same entry.
-func DescribeRepo(absPath string) ([]sparkwing.DescribePipeline, error) {
+func DescribeRepo(absPath string) ([]nodeproto.PipelineDescription, error) {
 	sparkwingDir := filepath.Join(absPath, ".sparkwing")
 	if _, err := os.Stat(sparkwingDir); err != nil {
 		return nil, fmt.Errorf("no .sparkwing/ at %s: %w", sparkwingDir, err)
@@ -102,7 +102,7 @@ func PipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
 	return pipelineNamesIfBuilt(absPath)
 }
 
-func describePipelines(entry pipelineentry.Command, workDir string) ([]sparkwing.DescribePipeline, error) {
+func describePipelines(entry pipelineentry.Command, workDir string) ([]nodeproto.PipelineDescription, error) {
 	doc, err := Describe(context.Background(), entry, workDir)
 	if err != nil {
 		return nil, fmt.Errorf("describe %s: %w", entry[len(entry)-1], err)
@@ -110,7 +110,7 @@ func describePipelines(entry pipelineentry.Command, workDir string) ([]sparkwing
 	return doc.Pipelines, nil
 }
 
-func pipelineNames(schemas []sparkwing.DescribePipeline) []string {
+func pipelineNames(schemas []nodeproto.PipelineDescription) []string {
 	names := make([]string, 0, len(schemas))
 	for _, s := range schemas {
 		if s.Name != "" {

@@ -124,10 +124,6 @@ spec:
               value: /tmp/sparkwing/gocache
             - name: GOMODCACHE
               value: /tmp/sparkwing/gomodcache
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
             {{- with .Values.runner.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

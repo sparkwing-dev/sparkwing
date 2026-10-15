@@ -23,7 +23,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type oidcFixture struct {
@@ -139,7 +138,7 @@ func TestOIDCTokenVerifiesAndNamesTheClaimedRun(t *testing.T) {
 		ID: "run-hook", Pipeline: "deploy", TriggerSource: "github",
 		GitBranch: "main", GitSHA: "0123456789abcdef0123456789abcdef01234567",
 		GithubOwner: "acme", GithubRepo: "api", GithubRepoID: 123456789,
-		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: "push"},
+		TriggerEnv: map[string]string{"GITHUB_EVENT_NAME": "push"},
 	})
 	raw := f.runner(t, f.acme, "agent:acme")
 	srv := serveOIDC(t, f.st, oidcKeyPEM(t), nil)
@@ -199,7 +198,7 @@ func TestOIDCSubjectNamesTheRepository(t *testing.T) {
 			ID: tc.id, Pipeline: "deploy", TriggerSource: "github",
 			GitBranch: "main", GitSHA: strings.Repeat("a", 40),
 			GithubOwner: "acme", GithubRepo: tc.repo, GithubRepoID: tc.repoID,
-			TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: "push"},
+			TriggerEnv: map[string]string{"GITHUB_EVENT_NAME": "push"},
 		})
 	}
 	raw := f.runner(t, f.acme, "agent:acme")
@@ -528,18 +527,18 @@ func TestOIDCTokenPullRequestNeverLooksLikeAPush(t *testing.T) {
 	f.run(t, f.acme, store.Trigger{
 		ID: "run-pr", Pipeline: "deploy", TriggerSource: "github", GitBranch: "main",
 		GithubOwner: "acme", GithubRepo: "api", GithubRepoID: 42,
-		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest, sparkwing.EnvPRNumber: "7"},
+		TriggerEnv: map[string]string{"GITHUB_EVENT_NAME": "pull_request", "GITHUB_PR_NUMBER": "7"},
 	})
 	f.run(t, f.acme, store.Trigger{
 		ID: "run-push", Pipeline: "deploy", TriggerSource: "github", GitBranch: "main",
 		GithubOwner: "acme", GithubRepo: "api", GithubRepoID: 42,
-		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: "push"},
+		TriggerEnv: map[string]string{"GITHUB_EVENT_NAME": "push"},
 	})
 	f.run(t, f.acme, store.Trigger{ID: "run-no-event", Pipeline: "deploy", TriggerSource: "github", GitBranch: "main"})
 	f.run(t, f.acme, store.Trigger{
 		ID: "run-push-no-repo-id", Pipeline: "deploy", TriggerSource: "github", GitBranch: "main",
 		GithubOwner: "acme", GithubRepo: "api",
-		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: "push"},
+		TriggerEnv: map[string]string{"GITHUB_EVENT_NAME": "push"},
 	})
 	for _, tc := range []struct{ id, event, branch, ref string }{
 		{"run-release", "release", "v1", "refs/tags/v1"},
@@ -548,7 +547,7 @@ func TestOIDCTokenPullRequestNeverLooksLikeAPush(t *testing.T) {
 	} {
 		f.run(t, f.acme, store.Trigger{
 			ID: tc.id, Pipeline: "deploy", TriggerSource: "github", GitBranch: tc.branch, GithubRepoID: 42,
-			TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: tc.event, "GITHUB_REF": tc.ref},
+			TriggerEnv: map[string]string{"GITHUB_EVENT_NAME": tc.event, "GITHUB_REF": tc.ref},
 		})
 	}
 	raw := f.runner(t, f.acme, "agent:acme")
@@ -586,7 +585,7 @@ func TestOIDCTokenTagPushNamesTagRef(t *testing.T) {
 	f.run(t, f.acme, store.Trigger{
 		ID: "run-tag", Pipeline: "deploy", TriggerSource: "github", GitSHA: "0123456789abcdef0123456789abcdef01234567",
 		GithubOwner: "acme", GithubRepo: "api", GithubRepoID: 42,
-		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: "push", "GITHUB_REF": "refs/tags/v1.2.3", "GITHUB_REF_TYPE": "tag", "GITHUB_TAG": "v1.2.3"},
+		TriggerEnv: map[string]string{"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/tags/v1.2.3", "GITHUB_REF_TYPE": "tag", "GITHUB_TAG": "v1.2.3"},
 	})
 	raw := f.runner(t, f.acme, "agent:acme")
 	srv := serveOIDC(t, f.st, oidcKeyPEM(t), nil)

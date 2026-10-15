@@ -115,7 +115,7 @@ func (p *JevLint) run(ctx context.Context, in JevLintArgs) error {
 		return err
 	}
 	if len(analysis.Pairs) == 0 && len(analysis.Rules) == 0 && analysis.Change == nil && len(invariants.Invariants) == 0 {
-		sparkwing.AnnotateOld(ctx, "jev-lint: no changed function matched a semantic rule candidate")
+		sparkwing.Annotate(ctx, sparkwing.Annotation{Message: "jev-lint: no changed function matched a semantic rule candidate"})
 		return nil
 	}
 
@@ -141,7 +141,7 @@ func (p *JevLint) run(ctx context.Context, in JevLintArgs) error {
 			}
 			sparkwing.Info(ctx, "jev-lint dry run; %s request follows:\n%s", item.name, body)
 		}
-		sparkwing.AnnotateOld(ctx, fmt.Sprintf("jev-lint: dry run prepared %d responsibility pair(s), %d function-rule candidate(s), %d repository invariant(s), and %d request(s)", len(analysis.Pairs), len(analysis.Rules), len(invariants.Invariants), len(requests)))
+		sparkwing.Annotate(ctx, sparkwing.Annotation{Message: fmt.Sprintf("jev-lint: dry run prepared %d responsibility pair(s), %d function-rule candidate(s), %d repository invariant(s), and %d request(s)", len(analysis.Pairs), len(analysis.Rules), len(invariants.Invariants), len(requests))})
 		return nil
 	}
 
@@ -150,7 +150,7 @@ func (p *JevLint) run(ctx context.Context, in JevLintArgs) error {
 		key = strings.TrimSpace(secrets.APIKey)
 	}
 	client := &http.Client{Timeout: 45 * time.Second}
-	cacheDir := sparkwing.ToolCacheDir("jev-lint")
+	cacheDir := pipelineCacheDir("jev-lint")
 	var pairFindings []jevLintFinding
 	var ruleFindings []jevLintRuleFinding
 	var designFinding *jevLintDesignFinding
@@ -230,7 +230,7 @@ func (p *JevLint) run(ctx context.Context, in JevLintArgs) error {
 	if analysis.Change != nil {
 		changeCandidates = 1
 	}
-	sparkwing.AnnotateOld(ctx, fmt.Sprintf("jev-lint: %d advisory finding(s) across %d responsibility pair(s), %d function-rule candidate(s), %d change-design candidate(s), and %d repository invariant(s); %d/%d request(s) cached", reported, len(analysis.Pairs), len(analysis.Rules), changeCandidates, len(invariants.Invariants), cachedRequests, len(requests)))
+	sparkwing.Annotate(ctx, sparkwing.Annotation{Message: fmt.Sprintf("jev-lint: %d advisory finding(s) across %d responsibility pair(s), %d function-rule candidate(s), %d change-design candidate(s), and %d repository invariant(s); %d/%d request(s) cached", reported, len(analysis.Pairs), len(analysis.Rules), changeCandidates, len(invariants.Invariants), cachedRequests, len(requests))})
 	return nil
 }
 

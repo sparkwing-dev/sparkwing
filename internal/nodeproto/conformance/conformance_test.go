@@ -1,516 +1,301 @@
-//go:build unix
-
 package conformance
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
-	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
-	"slices"
+	"runtime"
 	"strings"
 	"testing"
-	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/internal/protofd"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-var update = flag.Bool("update", false, "rewrite the golden transcripts under testdata/transcripts")
-
-type fixtureFile struct {
-	Fixture struct {
-		Forged string `json:"forged"`
-	} `json:"fixture"`
-	Run      map[string]any `json:"run"`
-	Sessions []session      `json:"sessions"`
+type corpus struct {
+	Sessions []corpusSession `json:"sessions"`
 }
 
-type session struct {
-	Name         string `json:"name"`
-	PrintsForged bool   `json:"prints_forged"`
-	SamePlanAs   string `json:"same_plan_as"`
-	Requests     []step `json:"requests"`
+type corpusSession struct {
+	Name       string       `json:"name"`
+	Binding    bool         `json:"binding"`
+	BindingJob string       `json:"binding_job,omitempty"`
+	Protocol   int          `json:"protocol,omitempty"`
+	Requests   []corpusStep `json:"requests"`
 }
 
-type step struct {
-	Send      map[string]any   `json:"send"`
-	Malformed bool             `json:"malformed"`
-	Expect    expect           `json:"expect"`
-	Parallel  []step           `json:"parallel"`
-	Logs      []map[string]any `json:"logs"`
+type corpusStep struct {
+	Op         nodeproto.Op `json:"op"`
+	ID         string       `json:"id,omitempty"`
+	Kind       string       `json:"kind,omitempty"`
+	Code       string       `json:"code,omitempty"`
+	Contains   string       `json:"contains,omitempty"`
+	Name       string       `json:"name,omitempty"`
+	PlanVector string       `json:"plan_vector,omitempty"`
+	Job        string       `json:"job,omitempty"`
 }
 
-type expect struct {
-	Code            string           `json:"code"`
-	MessageContains string           `json:"message_contains"`
-	Result          map[string]any   `json:"result"`
-	Absent          []string         `json:"absent"`
-	PlanNodes       map[string]any   `json:"plan_nodes"`
-	Logs            []map[string]any `json:"logs"`
-}
-
-type schemas struct{ proto, doc, record *Schema }
-
-// safety: the host writes these from what it drives, so an SDK record that
-// carries one would duplicate or contradict the host's.
-var hostEvents = []string{"step_start", "step_end", "step_skipped", "work_fail_fast", "node_start", "node_end", "retry"}
-
-func TestGoSDKConforms(t *testing.T) {
+func TestGoSDKConformsV2(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "gofixture")
-	build := exec.Command("go", "build", "-o", bin, "./gofixture")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build the Go fixture: %v\n%s", err, out)
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
 	}
-	runSuite(t, "go", []string{bin})
-}
-
-func TestTypeScriptSDKConforms(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not on PATH")
+	build := exec.CommandContext(t.Context(), "go", "build", "-p", "4", "-o", bin, "./gofixture")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build fixture: %v\n%s", err, output)
 	}
-	sdk, err := filepath.Abs(filepath.Join("..", "..", "..", "sdk", "typescript"))
+	raw, err := os.ReadFile(filepath.Join("testdata", "v2-corpus.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// safety: the suite starts the fixture exactly as a host starts a TypeScript entry, behind the bootstrap preload.
-	runSuite(t, "ts", pipelineentry.Node(node, filepath.Join(sdk, "src", "bootstrap.ts"), filepath.Join(sdk, "test", "fixtures", "conformance.ts")))
-}
-
-// safety: sessions run in file order because same_plan_as compares a plan
-// with one an earlier session recorded.
-func runSuite(t *testing.T, sdk string, command []string) {
-	raw, err := os.ReadFile(filepath.Join("testdata", "fixture.json"))
-	if err != nil {
+	var cases corpus
+	if err := json.Unmarshal(raw, &cases); err != nil {
 		t.Fatal(err)
 	}
-	var fx fixtureFile
-	if err := json.Unmarshal(raw, &fx); err != nil {
-		t.Fatalf("testdata/fixture.json: %v", err)
+	vectors := map[string]declarationVector{}
+	for _, vector := range readVectors(t).Plans {
+		vectors[vector.Name] = vector
 	}
-	var sc schemas
-	for dst, name := range map[**Schema]string{&sc.proto: "node-protocol", &sc.doc: "describe", &sc.record: "log-record"} {
-		if *dst, err = LoadSchema(filepath.Join("..", "..", "..", "docs", "schemas", name+".schema.json")); err != nil {
-			t.Fatal(err)
-		}
-	}
-	plans := map[string]any{}
-	for _, sess := range fx.Sessions {
-		t.Run(sess.Name, func(t *testing.T) {
-			p := start(t, command, sc)
-			for _, st := range sess.Requests {
-				p.do(st, fx.Run)
+	for _, session := range cases.Sessions {
+		t.Run(session.Name, func(t *testing.T) {
+			p := startFixture(t, bin)
+			protocol := nodeproto.Version
+			if session.Protocol != 0 {
+				protocol = session.Protocol
 			}
-			p.end()
-			if sess.PrintsForged && (!strings.Contains(p.stdout.String(), fx.Fixture.Forged) || !strings.Contains(p.stderr.String(), fx.Fixture.Forged)) {
-				t.Errorf("stdout %q and stderr %q, want the fixture's forged line verbatim in both", p.stdout.String(), p.stderr.String())
+			hello := nodeproto.Request{
+				ID: "hello", Op: nodeproto.OpHello, Protocol: protocol,
+				Engine: &nodeproto.EngineIdentity{Version: "fixture"},
+				Runner: &nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 			}
-			plans[sess.Name] = p.plan
-			if want, ok := plans[sess.SamePlanAs]; sess.SamePlanAs != "" && (!ok || !reflect.DeepEqual(want, p.plan)) {
-				t.Errorf("plan differs from session %s's for the same request; plan code must be deterministic", sess.SamePlanAs)
+			if session.Binding {
+				hello.Binding = &nodeproto.ProcessBinding{RunID: "r", JobID: "task", Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "secret"}}
+				if session.BindingJob != "" {
+					hello.Binding.JobID = session.BindingJob
+				}
 			}
-			golden(t, filepath.Join("testdata", "transcripts", sdk, sess.Name+".txt"), p.transcript)
+			p.send(t, hello)
+			frame := p.reply(t)
+			if protocol == nodeproto.Version && (!frame.OK || frame.Result == nil) {
+				t.Fatalf("hello: %+v", frame)
+			}
+			if protocol != nodeproto.Version && (frame.Error == nil || frame.Error.Code != apierr.ProtocolMismatch) {
+				t.Fatalf("mismatch: %+v", frame)
+			}
+			for i, step := range session.Requests {
+				request := p.makeRequest(step, i)
+				p.send(t, request)
+				got := p.reply(t)
+				if got.ID != request.ID {
+					t.Fatalf("reply ID %q, request ID %q", got.ID, request.ID)
+				}
+				if step.Code != "" {
+					if got.OK || got.Error == nil || string(got.Error.Code) != step.Code {
+						t.Fatalf("%s: %+v, want code %s", step.Op, got, step.Code)
+					}
+					continue
+				}
+				if !got.OK {
+					t.Fatalf("%s: %+v", step.Op, got)
+				}
+				if step.Op == nodeproto.OpPlan {
+					p.validate(t, p.documents, "PlanDoc", got.Result)
+					if bytes.Contains(got.Result, []byte(`"protocol"`)) || bytes.Contains(got.Result, []byte(`"spec_hash"`)) {
+						t.Fatalf("plan carries host fields: %s", got.Result)
+					}
+					var plan nodeproto.PlanDoc
+					if err := got.Decode(&plan); err != nil || len(plan.Jobs) != 1 || plan.Jobs[0].ID != "task" {
+						t.Fatalf("plan: %+v, %v", plan, err)
+					}
+					p.plan = plan
+				}
+				if step.Op == nodeproto.OpDescribe {
+					p.validate(t, p.documents, "DescribeDoc", got.Result)
+				}
+				if step.Op == nodeproto.OpRunStep {
+					p.validate(t, p.wire, "RunResult", got.Result)
+					var result nodeproto.RunResult
+					if err := got.Decode(&result); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if step.Op == nodeproto.OpEval {
+					p.validate(t, p.wire, "EvalResult", got.Result)
+					p.checkEval(t, got, step, vectors)
+				}
+				if step.Contains != "" && !bytes.Contains(got.Result, []byte(step.Contains)) {
+					t.Fatalf("%s result %s lacks %q", step.Op, got.Result, step.Contains)
+				}
+			}
+			p.end(t)
 		})
 	}
 }
 
-type proc struct {
-	t              *testing.T
-	sc             schemas
-	cmd            *exec.Cmd
-	req            *os.File
-	frames         *nodeproto.Reader
-	stdout, stderr bytes.Buffer
-	tracker        nodeproto.Tracker
-	transcript     []string
-	plan           map[string]any
+func (p *fixtureProcess) checkEval(t *testing.T, reply nodeproto.Reply, step corpusStep, vectors map[string]declarationVector) {
+	t.Helper()
+	var result nodeproto.EvalResult
+	if err := reply.Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	kind := map[string]string{"skip": "skip_if", "memo": "memo_key", "before": "before_run", "after": "after_run", "verify": "verify", "generate": "generate"}[step.Kind]
+	if err := result.ValidateValue(kind); err != nil {
+		t.Fatal(err)
+	}
+	if step.PlanVector == "" {
+		return
+	}
+	vector, ok := vectors[step.PlanVector]
+	if !ok || step.Kind != "generate" || vector.Code != "" || vector.SourceJob == "" {
+		t.Fatalf("invalid expansion vector %q", step.PlanVector)
+	}
+	if result.Error != nil {
+		t.Fatalf("expansion failed: %v", result.Error)
+	}
+	raw := append(append([]byte(`{"jobs":`), result.Value...), '}')
+	if _, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{
+		Placement: nodeproto.PlacementLocal, Secrets: vectorSecrets{}, Expansion: true,
+		SourceJob: vector.SourceJob, ExistingJobs: p.plan.Jobs, ExistingConcurrency: p.plan.Concurrency,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := runspec.CanonicalHash(json.RawMessage(raw))
+	if err != nil || string(hash) != vector.SHA256 {
+		t.Fatalf("generated declaration = %s, hash = %s, %v; want %s", raw, hash, err, vector.Canonical)
+	}
 }
 
-// safety: the process gets what a host gives an unbound process: exactly
-// --sw-node-protocol, the pipes on descriptors 3 and 4, stdin from the null
-// device and no SPARKWING_* variable but the handle list it must remove.
-func start(t *testing.T, command []string, sc schemas) *proc {
-	reqR, reqW, err := os.Pipe()
+type fixtureProcess struct {
+	process   *acceptance.GoSDKProcess
+	plan      nodeproto.PlanDoc
+	wire      *Schema
+	documents *Schema
+}
+
+func startFixture(t *testing.T, bin string) *fixtureProcess {
+	t.Helper()
+	p := &fixtureProcess{}
+	var err error
+	p.wire, err = LoadSchema(filepath.Join("testdata", "v2-wire.schema.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	frR, frW, err := os.Pipe()
+	p.documents, err = LoadSchema(filepath.Join("testdata", "v2-documents.schema.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
-	t.Cleanup(cancel)
-	p := &proc{t: t, sc: sc, req: reqW, frames: nodeproto.NewReader(frR)}
-	p.cmd = exec.CommandContext(ctx, command[0], append(slices.Clone(command[1:]), protofd.Arg)...)
-	p.cmd.Dir = t.TempDir()
-	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "SPARKWING_") {
-			p.cmd.Env = append(p.cmd.Env, kv)
-		}
-	}
-	p.cmd.Env = append(p.cmd.Env, protofd.HandlesEnv+"=3,4", "GORACE=atexit_sleep_ms=0")
-	p.cmd.ExtraFiles = []*os.File{reqR, frW}
-	p.cmd.Stdout, p.cmd.Stderr = &p.stdout, &p.stderr
-	if err := p.cmd.Start(); err != nil {
+	p.process, err = acceptance.StartGoSDKProcess(t.Context(), bin)
+	if err != nil {
 		t.Fatal(err)
 	}
-	_ = reqR.Close()
-	_ = frW.Close()
-	t.Cleanup(func() {
-		_ = reqW.Close()
-		_ = frR.Close()
-		if p.cmd.ProcessState == nil {
-			_ = p.cmd.Process.Kill()
-			_ = p.cmd.Wait()
-		}
-	})
+	t.Cleanup(p.process.Close)
 	return p
 }
 
-func (p *proc) do(st step, run map[string]any) {
-	p.t.Helper()
-	group := st.Parallel
-	if group == nil {
-		group = []step{st}
-	}
-	ids := make([]string, len(group))
-	for i, g := range group {
-		ids[i] = p.send(g, run)
-	}
-	mark := len(p.transcript)
-	replies, logs := p.await(ids)
-	if len(group) > 1 {
-		slices.Sort(p.transcript[mark:])
-	}
-	for i, g := range group {
-		p.check(g.Send, replies[ids[i]], logs, g.Expect)
-	}
-	for _, want := range st.Logs {
-		requireLog(p.t, logs, want)
-	}
-}
-
-func (p *proc) send(st step, run map[string]any) string {
-	p.t.Helper()
-	req := map[string]any{}
-	for k, v := range st.Send {
-		req[k] = v
-	}
-	if req["op"] == "plan" && req["run"] == nil {
-		req["run"] = run
-	}
-	if ref, ok := req["closure"].(map[string]any); ok {
-		req["closure"] = p.closureID(ref)
-	}
-	op, _ := req["op"].(string)
-	req["id"] = p.tracker.Start(nodeproto.OpOld(op))
-	line, err := json.Marshal(req)
-	if err != nil {
-		p.t.Fatal(err)
-	}
-	if !st.Malformed {
-		p.validate(p.sc.proto, "request", req, "request")
-	}
-	p.transcript = append(p.transcript, "-> "+string(line))
-	if _, err := p.req.Write(append(line, '\n')); err != nil {
-		p.t.Fatalf("write request: %v", err)
-	}
-	return req["id"].(string)
-}
-
-// safety: every frame is judged as the host judges it, by ParseFrame and the
-// tracker, and then against docs/schemas, so a frame the host would take as
-// protocol_error fails the session even when its values look right.
-func (p *proc) await(ids []string) (map[string]map[string]any, []map[string]any) {
-	p.t.Helper()
-	replies := map[string]map[string]any{}
-	var logs []map[string]any
-	for len(replies) < len(ids) {
-		line, err := p.frames.ReadLine()
-		if err != nil {
-			p.t.Fatalf("frame pipe ended waiting for replies to %v: %v; stderr:\n%s", ids, err, p.stderr.String())
-		}
-		frame, err := nodeproto.ParseFrameOld(line)
-		if err != nil {
-			p.t.Fatalf("protocol_error: %v: %s", err, line)
-		}
-		var obj map[string]any
-		if err := json.Unmarshal(line, &obj); err != nil {
-			p.t.Fatal(err)
-		}
-		p.transcript = append(p.transcript, "<- "+normalize(p.t, obj))
-		if frame.Kind == nodeproto.KindLog {
-			p.validate(p.sc.record, "", obj, "log record")
-			if ev, _ := obj["event"].(string); slices.Contains(hostEvents, ev) {
-				p.t.Errorf("log record carries event %s, which only the host writes: %s", ev, line)
-			}
-			logs = append(logs, obj)
-			continue
-		}
-		op, err := p.tracker.Resolve(frame.Reply)
-		if err != nil {
-			p.t.Fatalf("protocol_error: %v", err)
-		}
-		p.validate(p.sc.proto, "reply", obj, "reply")
-		if result, ok := obj["result"].(map[string]any); ok {
-			p.validateResult(op, result)
-		}
-		replies[frame.Reply.ID] = obj
-	}
-	return replies, logs
-}
-
-func (p *proc) validateResult(op nodeproto.OpOld, result map[string]any) {
-	switch op {
-	case nodeproto.OpDescribeOld:
-		p.validate(p.sc.doc, "", result, "describe result")
-	case nodeproto.OpPlanOld:
-		p.validate(p.sc.doc, "plan", result, "plan result")
-	case nodeproto.OpRunNodeOld, nodeproto.OpRunStepOld:
-		p.validate(p.sc.proto, "runResult", result, string(op)+" result")
-	case nodeproto.OpEvalOld:
-		p.validate(p.sc.proto, "evalResult", result, "eval result")
-		if nodes, ok := result["value"].([]any); ok {
-			for _, n := range nodes {
-				p.validate(p.sc.doc, "node", n, "generated node")
-			}
-		}
-	}
-}
-
-func (p *proc) validate(s *Schema, def string, v any, at string) {
-	p.t.Helper()
-	d, ok := s.Def(def)
-	if !ok {
-		p.t.Fatalf("schema has no $defs/%s", def)
-	}
-	if errs := s.Validate(d, v, at); len(errs) > 0 {
-		p.t.Errorf("does not match docs/schemas: %s", strings.Join(errs, "; "))
-	}
-}
-
-func (p *proc) check(send, reply map[string]any, logs []map[string]any, want expect) {
-	p.t.Helper()
-	at := fmt.Sprintf("%v %v", send["op"], send)
-	errObj, _ := reply["error"].(map[string]any)
-	if want.Code != "" {
-		msg, _ := errObj["message"].(string)
-		if reply["ok"] != false || errObj["code"] != want.Code || !strings.Contains(msg, want.MessageContains) {
-			p.t.Errorf("%s: reply %v, want a failed reply with code %s and a message containing %q", at, reply, want.Code, want.MessageContains)
-		}
-		return
-	}
-	result, _ := reply["result"].(map[string]any)
-	if reply["ok"] != true {
-		p.t.Errorf("%s: reply %v, want ok", at, reply)
-		return
-	}
-	if want.Result != nil {
-		if err := subset(want.Result, result, "result"); err != nil {
-			p.t.Errorf("%s: %v; got %v", at, err, result)
-		}
-	}
-	if msg, _ := result["error"].(string); !strings.Contains(msg, want.MessageContains) {
-		p.t.Errorf("%s: result error %q, want it to contain %q", at, msg, want.MessageContains)
-	}
-	for _, key := range want.Absent {
-		if _, has := result[key]; has {
-			p.t.Errorf("%s: result carries %q, want it absent: %v", at, key, result)
-		}
-	}
-	if send["op"] == "plan" {
-		p.checkPlan(result, want.PlanNodes)
-	}
-	for _, rec := range want.Logs {
-		requireLog(p.t, logs, rec)
-	}
-}
-
-// safety: spec_hash and requires belong to the host, so an SDK that writes
-// either is out of contract even when the plan is otherwise right.
-func (p *proc) checkPlan(doc, want map[string]any) {
-	p.plan = doc
-	nodes, _ := doc["nodes"].([]any)
-	got := map[string]any{}
-	for _, n := range nodes {
-		node, _ := n.(map[string]any)
-		id, _ := node["id"].(string)
-		got[id] = node
-		for _, hostOwned := range []string{"spec_hash", "requires"} {
-			if _, has := node[hostOwned]; has {
-				p.t.Errorf("plan node %s carries %s, which only the host fills", id, hostOwned)
-			}
-		}
-	}
-	if want == nil {
-		return
-	}
-	if err := subset(want, got, "plan nodes"); err != nil || len(got) != len(want) {
-		p.t.Errorf("plan nodes by id = %v, want exactly the nodes %v (%v)", got, want, err)
-	}
-}
-
-func (p *proc) closureID(ref map[string]any) string {
-	p.t.Helper()
-	nodes, _ := p.plan["nodes"].([]any)
-	for _, n := range nodes {
-		node, _ := n.(map[string]any)
-		if node["id"] != ref["node"] {
-			continue
-		}
-		holder := node
-		if ref["step"] != nil {
-			work, _ := node["work"].(map[string]any)
-			steps, _ := work["steps"].([]any)
-			holder = nil
-			for _, s := range steps {
-				if s, _ := s.(map[string]any); s["id"] == ref["step"] {
-					holder = s
-				}
-			}
-		}
-		closures, _ := holder["closures"].(map[string]any)
-		switch ids := closures[ref["kind"].(string)].(type) {
-		case string:
-			return ids
-		case []any:
-			i, _ := ref["index"].(float64)
-			if int(i) < len(ids) {
-				id, _ := ids[int(i)].(string)
-				return id
-			}
-		}
-	}
-	p.t.Fatalf("the plan lists no closure %v", ref)
-	return ""
-}
-
-// safety: end of input must end the process with status 0 and no frame after
-// the last reply, which is how a host stops every process it starts.
-func (p *proc) end() {
-	p.t.Helper()
-	if err := p.req.Close(); err != nil {
-		p.t.Fatal(err)
-	}
-	if line, err := p.frames.ReadLine(); !errors.Is(err, io.EOF) {
-		p.t.Errorf("frame after end of input: %q, %v", line, err)
-	}
-	if err := p.cmd.Wait(); err != nil {
-		p.t.Errorf("exit after end of input: %v; stderr:\n%s", err, p.stderr.String())
-	}
-}
-
-func requireLog(t *testing.T, logs []map[string]any, want map[string]any) {
+func (p *fixtureProcess) send(t *testing.T, req nodeproto.Request) {
 	t.Helper()
-	for _, rec := range logs {
-		if subset(want, rec, "record") == nil {
-			return
-		}
-	}
-	t.Errorf("no log record matches %v among %v", want, logs)
-}
-
-// safety: objects match on the keys want names, so an SDK may add optional
-// fields, while arrays and scalars match exactly.
-func subset(want, got any, at string) error {
-	switch w := want.(type) {
-	case map[string]any:
-		g, ok := got.(map[string]any)
-		if !ok {
-			return fmt.Errorf("%s: %v is not an object", at, got)
-		}
-		for k, wv := range w {
-			gv, has := g[k]
-			if !has {
-				return fmt.Errorf("%s.%s is missing", at, k)
-			}
-			if err := subset(wv, gv, at+"."+k); err != nil {
-				return err
-			}
-		}
-		return nil
-	case []any:
-		g, ok := got.([]any)
-		if !ok || len(g) != len(w) {
-			return fmt.Errorf("%s: %v, want %d items", at, got, len(w))
-		}
-		for i := range w {
-			if err := subset(w[i], g[i], fmt.Sprintf("%s[%d]", at, i)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("%s = %v, want %v", at, got, want)
-	}
-	return nil
-}
-
-// safety: timestamps, measured latencies and the SDK's build version differ
-// on every run, so the golden transcripts hold placeholders for them.
-func normalize(t *testing.T, v map[string]any) string {
-	t.Helper()
-	var walk func(any)
-	walk = func(v any) {
-		switch v := v.(type) {
-		case map[string]any:
-			for k, sub := range v {
-				switch _, isStr := sub.(string); {
-				case k == "ts" && isStr:
-					v[k] = "<ts>"
-				case k == "duration_ms" || k == "cancellation_latency_ms":
-					v[k] = 0
-				case k == "sdk":
-					if sdk, ok := sub.(map[string]any); ok && sdk["version"] != nil {
-						sdk["version"] = "<version>"
-					}
-				default:
-					walk(sub)
-				}
-			}
-		case []any:
-			for _, sub := range v {
-				walk(sub)
-			}
-		}
-	}
-	walk(v)
-	var out bytes.Buffer
-	enc := json.NewEncoder(&out)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
+	if err := p.process.Send(req); err != nil {
 		t.Fatal(err)
 	}
-	return strings.TrimSuffix(out.String(), "\n")
 }
 
-func golden(t *testing.T, path string, lines []string) {
+func (p *fixtureProcess) reply(t *testing.T) nodeproto.Reply {
 	t.Helper()
-	got := strings.Join(lines, "\n") + "\n"
-	if *update {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	for {
+		line, err := p.process.NextFrame()
+		if err != nil {
+			p.process.Close()
+			t.Fatalf("frame read: %v; stderr: %s", err, p.process.Stderr())
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(line, &fields); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+		if _, isReply := fields["reply"]; !isReply {
+			p.validate(t, p.wire, "FrameLog", line)
+			continue
+		}
+		p.validate(t, p.wire, "Reply", line)
+		var reply nodeproto.Reply
+		if err := json.Unmarshal(line, &reply); err != nil {
 			t.Fatal(err)
 		}
-		return
+		_, hasResult := fields["result"]
+		_, hasError := fields["error"]
+		if reply.OK != hasResult || reply.OK == hasError || (hasError && reply.Error == nil) {
+			t.Fatalf("inconsistent reply envelope: %s", line)
+		}
+		return reply
 	}
-	want, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("%v; run with -update to record it", err)
+}
+
+func (p *fixtureProcess) validate(t *testing.T, schema *Schema, definition string, raw []byte) {
+	t.Helper()
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatal(err)
 	}
-	if string(want) != got {
-		t.Errorf("transcript differs from %s; run with -update after checking the change:\n--- want\n%s--- got\n%s", path, want, got)
+	def, ok := schema.Def(definition)
+	if !ok {
+		t.Fatalf("missing schema definition %s", definition)
+	}
+	if problems := schema.Validate(def, value, definition); len(problems) > 0 {
+		t.Fatalf("schema %s: %s", definition, strings.Join(problems, "; "))
+	}
+}
+
+func (p *fixtureProcess) makeRequest(step corpusStep, index int) nodeproto.Request {
+	id := step.ID
+	if id == "" {
+		id = fmt.Sprintf("%d", index+1)
+	}
+	r := nodeproto.Request{ID: id, Op: step.Op}
+	switch step.Op {
+	case nodeproto.OpPlan:
+		r.Pipeline = "conformance"
+		r.Args = map[string]string{"name": "demo"}
+		if step.Name != "" {
+			r.Args["name"] = step.Name
+		}
+		r.Run = &nodeproto.RunContext{RunID: "r", Pipeline: "conformance"}
+	case nodeproto.OpRunStep:
+		r.Job, r.Step, r.Attempt = "task", "run", 1
+		r.Settled = []string{}
+		if step.Job != "" {
+			r.Job = step.Job
+		}
+	case nodeproto.OpEval:
+		if len(p.plan.Jobs) != 0 {
+			switch step.Kind {
+			case "skip":
+				r.Closure = p.plan.Jobs[0].Closures.SkipIf[0]
+			case "memo":
+				r.Closure = p.plan.Jobs[0].Closures.MemoKey
+			case "generate":
+				r.Closure = p.plan.Jobs[0].Closures.Generate[0]
+			case "before":
+				r.Closure = p.plan.Jobs[0].Closures.BeforeRun[0]
+			case "verify":
+				r.Closure = p.plan.Jobs[0].Closures.Verify
+			case "after":
+				r.Closure = p.plan.Jobs[0].Closures.AfterRun[0]
+				r.Input = json.RawMessage(`{"outcome":"success"}`)
+			}
+		}
+	case nodeproto.OpCancel:
+		r.Job, r.Step = "task", "run"
+	}
+	return r
+}
+
+func (p *fixtureProcess) end(t *testing.T) {
+	t.Helper()
+	if err := p.process.Finish(); err != nil {
+		t.Fatal(err)
 	}
 }

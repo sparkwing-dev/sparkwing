@@ -10,18 +10,18 @@ import (
 )
 
 type stubAwaiter struct {
-	lastReq AwaitRequest
+	lastReq awaitRequest
 	runID   string
 	data    []byte
 	err     error
 }
 
-func (s *stubAwaiter) Await(_ context.Context, req AwaitRequest) (*ResolvedPipelineRef, error) {
+func (s *stubAwaiter) await(_ context.Context, req awaitRequest) (*resolvedPipelineRef, error) {
 	s.lastReq = req
 	if s.err != nil {
 		return nil, s.err
 	}
-	return &ResolvedPipelineRef{RunID: s.runID, Data: s.data}, nil
+	return &resolvedPipelineRef{RunID: s.runID, Data: s.data}, nil
 }
 
 type awaitOut struct {
@@ -78,16 +78,13 @@ func TestRunAndAwait_AwaiterError(t *testing.T) {
 	}
 }
 
-func TestRunAndAwait_EmptyDataZeroValue(t *testing.T) {
+func TestRunAndAwait_MissingOutputFails(t *testing.T) {
 	aw := &stubAwaiter{runID: "child", data: nil}
 	ctx := context.WithValue(context.Background(), keyPipelineAwaiter, aw)
 
 	got, err := RunAndAwait[awaitOut, NoInputs](ctx, "up", "n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Image != "" {
-		t.Fatalf("want zero, got %+v", got)
+	if err == nil || !strings.Contains(err.Error(), "up/n") || got.Image != "" {
+		t.Fatalf("missing output = %+v, %v", got, err)
 	}
 }
 

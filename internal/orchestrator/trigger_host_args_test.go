@@ -115,7 +115,7 @@ func TestTriggerHost_AnAggregatorStagesCachedProducersArtifacts(t *testing.T) {
 	second := first.another(t, "run-hosted-cached", args)
 	second.hostIn(t, t.TempDir())
 	for _, id := range []string{"shard-1", "shard-2"} {
-		if n := second.node(t, id); n.Outcome != string(sparkwing.Cached) {
+		if n := second.node(t, id); n.Outcome != string(sparkwing.Memoized) {
 			t.Fatalf("second run %s = %s/%s (%s), want cached", id, n.Status, n.Outcome, n.Error)
 		}
 	}

@@ -69,8 +69,8 @@ type NoInputs struct{}
 // InputSchema is the resolved description of a pipeline's Inputs
 // struct: one InputField per declared flag, plus a flag indicating
 // whether a `flag:",extra"` bag field is present.
-type InputSchema struct {
-	Fields []InputField
+type inputSchema struct {
+	Fields []inputField
 	Extra  bool
 }
 
@@ -78,7 +78,7 @@ type InputSchema struct {
 // registration time. Drives CLI parsing, --help rendering, schema
 // introspection, shell completion, dashboard run-form, and MCP tool
 // definitions.
-type InputField struct {
+type inputField struct {
 	Name        string // flag name (no `--` prefix)
 	Short       string // optional one-letter alias
 	GoName      string // original Go field name
@@ -92,13 +92,6 @@ type InputField struct {
 	fieldIndex []int
 	isExtraBag bool
 }
-
-// IsExtraBag reports whether this field is the catch-all "extra"
-// map[string]string bag (used to collect unknown args). Introspection
-// helpers skip these because they aren't first-class flag entries.
-//
-// Exposed for internal/sparkwingruntime.
-func (f InputField) IsExtraBag() bool { return f.isExtraBag }
 
 type fieldKind int
 
@@ -116,17 +109,17 @@ const (
 
 const maxEmbedDepth = 8
 
-func parseInputsSchema(t reflect.Type) (InputSchema, error) {
+func parseInputsSchema(t reflect.Type) (inputSchema, error) {
 	if t == nil {
-		return InputSchema{}, nil
+		return inputSchema{}, nil
 	}
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {
-		return InputSchema{}, fmt.Errorf("Inputs type must be a struct, got %s", t.Kind())
+		return inputSchema{}, fmt.Errorf("Inputs type must be a struct, got %s", t.Kind())
 	}
-	var schema InputSchema
+	var schema inputSchema
 	seenShort := map[string]string{}
 	seenName := map[string]string{}
 	if err := walkInputFields(t, nil, &schema, seenShort, seenName, 0); err != nil {
@@ -138,7 +131,7 @@ func parseInputsSchema(t reflect.Type) (InputSchema, error) {
 func walkInputFields(
 	t reflect.Type,
 	parentIndex []int,
-	schema *InputSchema,
+	schema *inputSchema,
 	seenShort map[string]string,
 	seenName map[string]string,
 	depth int,
@@ -184,7 +177,7 @@ func walkInputFields(
 				return fmt.Errorf("field %s: at most one flag:\",extra\" field allowed per Inputs struct", f.Name)
 			}
 			schema.Extra = true
-			schema.Fields = append(schema.Fields, InputField{
+			schema.Fields = append(schema.Fields, inputField{
 				GoName:     f.Name,
 				fieldIndex: idxPath,
 				isExtraBag: true,
@@ -192,7 +185,7 @@ func walkInputFields(
 			continue
 		}
 
-		field := InputField{
+		field := inputField{
 			Name:       flagTag,
 			GoName:     f.Name,
 			fieldIndex: idxPath,
@@ -277,7 +270,7 @@ func walkInputFields(
 	return nil
 }
 
-func populateInputs(schema InputSchema, dst reflect.Value, m map[string]string) error {
+func populateInputs(schema inputSchema, dst reflect.Value, m map[string]string) error {
 	byName := map[string]int{}
 	for i, f := range schema.Fields {
 		if f.isExtraBag {
@@ -376,7 +369,7 @@ func fieldByIndexAlloc(v reflect.Value, idx []int) (reflect.Value, error) {
 	return v, nil
 }
 
-func setField(fv reflect.Value, f InputField, raw string) error {
+func setField(fv reflect.Value, f inputField, raw string) error {
 	if !fv.CanSet() {
 		return fmt.Errorf("field not settable")
 	}

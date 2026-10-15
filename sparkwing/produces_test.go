@@ -1,20 +1,18 @@
-package sparkwing_test
+package sparkwing
 
 import (
 	"context"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type producedJob struct {
-	sparkwing.Base
-	sparkwing.Produces[buildOut]
+	Base
+	Produces[buildOut]
 }
 
-func (j *producedJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	return sparkwing.Step(w, "run", j.run), nil
+func (j *producedJob) Work(w *Work) (*WorkStep, error) {
+	return Step(w, "run", j.run), nil
 }
 
 func (j *producedJob) run(ctx context.Context) (buildOut, error) {
@@ -22,12 +20,12 @@ func (j *producedJob) run(ctx context.Context) (buildOut, error) {
 }
 
 type markerOnlyJob struct {
-	sparkwing.Base
-	sparkwing.Produces[buildOut]
+	Base
+	Produces[buildOut]
 }
 
-func (j *markerOnlyJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", func(ctx context.Context) error { return nil })
+func (j *markerOnlyJob) Work(w *Work) (*WorkStep, error) {
+	Step(w, "run", func(ctx context.Context) error { return nil })
 	return nil, nil
 }
 
@@ -36,12 +34,12 @@ type otherOut struct {
 }
 
 type mismatchJob struct {
-	sparkwing.Base
-	sparkwing.Produces[otherOut]
+	Base
+	Produces[otherOut]
 }
 
-func (j *mismatchJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	return sparkwing.Step(w, "run", j.run), nil
+func (j *mismatchJob) Work(w *Work) (*WorkStep, error) {
+	return Step(w, "run", j.run), nil
 }
 
 func (j *mismatchJob) run(ctx context.Context) (buildOut, error) {
@@ -49,11 +47,11 @@ func (j *mismatchJob) run(ctx context.Context) (buildOut, error) {
 }
 
 type unmarkedTypedJob struct {
-	sparkwing.Base
+	Base
 }
 
-func (j *unmarkedTypedJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	return sparkwing.Step(w, "run", j.run), nil
+func (j *unmarkedTypedJob) Work(w *Work) (*WorkStep, error) {
+	return Step(w, "run", j.run), nil
 }
 
 func (j *unmarkedTypedJob) run(ctx context.Context) (buildOut, error) {
@@ -61,18 +59,18 @@ func (j *unmarkedTypedJob) run(ctx context.Context) (buildOut, error) {
 }
 
 func TestProduces_AlignedJobRegistersOK(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "build", &producedJob{})
-	if n.OutputType() == nil {
+	plan := NewPlan()
+	n := Job(plan, "build", &producedJob{})
+	if n.outType == nil {
 		t.Fatal("aligned marker+SetResult job should have outType")
 	}
-	if got := n.OutputType().Name(); got != "buildOut" {
+	if got := n.outType.Name(); got != "buildOut" {
 		t.Fatalf("outType = %q, want buildOut", got)
 	}
 }
 
 func TestProduces_MarkerWithoutSetResultPanics(t *testing.T) {
-	plan := sparkwing.NewPlan()
+	plan := NewPlan()
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -83,11 +81,11 @@ func TestProduces_MarkerWithoutSetResultPanics(t *testing.T) {
 			t.Fatalf("panic should mention Produces and Work, got %q", msg)
 		}
 	}()
-	sparkwing.Job(plan, "marker-only", &markerOnlyJob{})
+	Job(plan, "marker-only", &markerOnlyJob{})
 }
 
 func TestProduces_SetResultWithoutMarkerPanics(t *testing.T) {
-	plan := sparkwing.NewPlan()
+	plan := NewPlan()
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -98,11 +96,11 @@ func TestProduces_SetResultWithoutMarkerPanics(t *testing.T) {
 			t.Fatalf("panic should mention Produces, got %q", msg)
 		}
 	}()
-	sparkwing.Job(plan, "unmarked", &unmarkedTypedJob{})
+	Job(plan, "unmarked", &unmarkedTypedJob{})
 }
 
 func TestProduces_MismatchPanics(t *testing.T) {
-	plan := sparkwing.NewPlan()
+	plan := NewPlan()
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -113,12 +111,12 @@ func TestProduces_MismatchPanics(t *testing.T) {
 			t.Fatalf("panic message should mention Produces, got %q", msg)
 		}
 	}()
-	sparkwing.Job(plan, "mismatch", &mismatchJob{})
+	Job(plan, "mismatch", &mismatchJob{})
 }
 
 func TestProduces_OnFailureRecoveryAppliesContract(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	parent := sparkwing.Job(plan, "parent", jobFnNoop())
+	plan := NewPlan()
+	parent := Job(plan, "parent", jobFnNoop())
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -133,17 +131,17 @@ func TestProduces_OnFailureRecoveryAppliesContract(t *testing.T) {
 }
 
 func TestOutput_WiresFromMarker(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "build", &producedJob{})
-	ref := sparkwing.RefTo[buildOut](n)
+	plan := NewPlan()
+	n := Job(plan, "build", &producedJob{})
+	ref := RefTo[buildOut](n)
 	if ref.Job() != "build" {
 		t.Fatalf("Ref.Job() = %q, want build", ref.Job())
 	}
 }
 
 func TestOutput_PanicsOnUntypedNode(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "noop", jobFnNoop())
+	plan := NewPlan()
+	n := Job(plan, "noop", jobFnNoop())
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -154,12 +152,12 @@ func TestOutput_PanicsOnUntypedNode(t *testing.T) {
 			t.Fatalf("expected 'Produces[' in panic, got %q", msg)
 		}
 	}()
-	_ = sparkwing.RefTo[buildOut](n)
+	_ = RefTo[buildOut](n)
 }
 
 func TestOutput_PanicsOnTypeMismatch(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	n := sparkwing.Job(plan, "build", &producedJob{})
+	plan := NewPlan()
+	n := Job(plan, "build", &producedJob{})
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -170,38 +168,28 @@ func TestOutput_PanicsOnTypeMismatch(t *testing.T) {
 			t.Fatalf("panic should mention node id and produced type, got %q", msg)
 		}
 	}()
-	_ = sparkwing.RefTo[otherOut](n)
-}
-
-func TestLintWarning_NoneWhenAligned(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	sparkwing.Job(plan, "build", &producedJob{})
-	sparkwing.Job(plan, "noop", jobFnNoop())
-
-	if warns := plan.LintWarnings(); len(warns) != 0 {
-		t.Fatalf("expected 0 lint warnings, got %+v", warns)
-	}
+	_ = RefTo[otherOut](n)
 }
 
 type refConsumerJob struct {
-	sparkwing.Base
-	Build sparkwing.Ref[buildOut]
-	Prev  sparkwing.Ref[buildOut]
+	Base
+	Build Ref[buildOut]
+	Prev  Ref[buildOut]
 }
 
-func (j *refConsumerJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", func(ctx context.Context) error { return nil })
+func (j *refConsumerJob) Work(w *Work) (*WorkStep, error) {
+	Step(w, "run", func(ctx context.Context) error { return nil })
 	return nil, nil
 }
 
 func TestRefToField_AddsDependencyEdge(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	produce := sparkwing.Job(plan, "produce", &producedJob{})
-	consume := sparkwing.Job(plan, "consume", &refConsumerJob{
-		Build: sparkwing.RefTo[buildOut](produce),
-		Prev:  sparkwing.RefToLastRun[buildOut]("other-pipeline", "artifact"),
+	plan := NewPlan()
+	produce := Job(plan, "produce", &producedJob{})
+	consume := Job(plan, "consume", &refConsumerJob{
+		Build: RefTo[buildOut](produce),
+		Prev:  RefToLastRun[buildOut]("other-pipeline", "artifact"),
 	})
-	if got := consume.DepIDs(); len(got) != 1 || got[0] != "produce" {
+	if got := consume.needs; len(got) != 1 || got[0] != "produce" {
 		t.Fatalf("DepIDs = %v, want [produce]; a cross-pipeline ref is not an edge", got)
 	}
 }

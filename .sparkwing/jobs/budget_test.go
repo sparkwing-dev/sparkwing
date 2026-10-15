@@ -151,7 +151,7 @@ func TestBudgetReportsAfterAFailedStepWithoutOverridingIt(t *testing.T) {
 			return nil, "no Go files", nil
 		})
 	w := sparkwing.NewWork()
-	w.ParallelFailures(sparkwing.FailFast)
+	w.FailurePolicy(sparkwing.FailFast)
 	started := make(chan struct{})
 	b.step(w, "red", func(context.Context) error {
 		<-started

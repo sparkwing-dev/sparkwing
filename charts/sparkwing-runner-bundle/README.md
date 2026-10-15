@@ -164,6 +164,9 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 
 ## Auth
 
+The controller's enrollment profile supplies the runner identity on each award.
+Pod metadata and advertised labels cannot select that identity.
+
 Set `launcher.serviceAccountName` to provision the Cloud launcher's identity,
 its node reservation permissions, and `sparkwing-customer-job`. The launcher
 can create and delete bootstrap Secrets. It cannot read or list them. Customer

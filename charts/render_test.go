@@ -1112,9 +1112,9 @@ func TestCachePinsAWritableHome(t *testing.T) {
 func TestRunnerUsesDirectSourceAndNoImplicitPackageProxy(t *testing.T) {
 	rendered := renderRunner(t)
 	env := runnerEnv(t, rendered)
-	for _, key := range []string{"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST", "SPARKWING_GITCACHE_URL", "GITHUB_TOKEN"} {
+	for _, key := range []string{"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST", "SPARKWING_GITCACHE_URL", "GITHUB_TOKEN", "POD_NAME"} {
 		if _, exists := env[key]; exists {
-			t.Errorf("runner configures removed credential/proxy environment %s", key)
+			t.Errorf("runner configures removed environment %s", key)
 		}
 	}
 	container := runnerContainer(t, rendered)
@@ -1224,7 +1224,7 @@ func TestTriggerClaimingRendersWithoutAGitcache(t *testing.T) {
 
 func TestFullChartRunnerHasNoImplicitPackageProxy(t *testing.T) {
 	env := runnerEnv(t, helmRender(t, "./sparkwing-full", "charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing"))
-	for _, key := range []string{"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST", "SPARKWING_GITCACHE_URL"} {
+	for _, key := range []string{"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST", "SPARKWING_GITCACHE_URL", "POD_NAME"} {
 		if _, exists := env[key]; exists {
 			t.Errorf("vendored runner configures removed environment %s", key)
 		}

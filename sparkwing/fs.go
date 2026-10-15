@@ -78,7 +78,7 @@ func WriteFile(path string, data []byte) error {
 // `.sparkwing/` was found above cwd. Uses filepath.Glob, so `**` is
 // NOT supported -- only `*`, `?`, and character classes. For
 // repo-aware matching with `**`, use inputs.Files / inputs.RepoFiles
-// in a CacheKeyFn instead.
+// in a MemoKeyFn instead.
 func Glob(pattern string) ([]string, error) {
 	resolved, err := resolvePath(pattern)
 	if err != nil {

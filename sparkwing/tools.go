@@ -34,19 +34,13 @@ func mustKnowTools(caller string, names []string) {
 	}
 }
 
-// ClaimWait bounds how long each of the run's ready nodes waits for an agent
-// to claim it before the controller fails it as unclaimable. Zero or less
-// keeps the controller's default of 24 hours.
+// ClaimWait declares how long each ready job may wait for a runner claim.
+// The host requires a positive duration within the operator ceiling when it
+// accepts the plan. Leaving ClaimWait unset uses the host's default.
 func (p *Plan) ClaimWait(d time.Duration) *Plan {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.claimWait = max(d, 0)
+	p.claimWait = d
+	p.claimWaitSet = true
 	return p
-}
-
-// ClaimWaitValue returns the wait ClaimWait set, or zero for the default.
-func (p *Plan) ClaimWaitValue() time.Duration {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.claimWait
 }

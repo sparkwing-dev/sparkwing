@@ -2,29 +2,6 @@ package sparkwing
 
 import "strings"
 
-// RiskBlockedError is the typed error returned when the dispatcher
-// refuses a run because one or more reachable steps declare risk
-// labels the operator hasn't acknowledged via --sw-allow (or
-// --sw-dry-run, which bypasses every gate). MissingLabels is the
-// full set the operator must authorize, sorted, so a single retry
-// with `--sw-allow a,b,c` satisfies the gate in one shot.
-//
-// JSON consumers (agents, dashboard) can pattern-match on the typed
-// fields rather than parsing the message.
-type RiskBlockedError struct {
-	Pipeline      string
-	StepID        string
-	MissingLabels []string
-}
-
-func (e *RiskBlockedError) Error() string {
-	return "step " + quote(e.StepID) + " in pipeline " + quote(e.Pipeline) +
-		" requires --sw-allow " + strings.Join(e.MissingLabels, ",") +
-		" to confirm (or --sw-dry-run to preview)."
-}
-
-func quote(s string) string { return `"` + s + `"` }
-
 // Risk marks a WorkStep as gated by the given operator-acknowledged
 // labels. The dispatcher refuses to run a pipeline containing such a
 // step unless every label is listed in --sw-allow (or --sw-dry-run
@@ -45,15 +22,6 @@ func (s *WorkStep) Risk(labels ...string) *WorkStep {
 		s.addRisk(l)
 	}
 	return s
-}
-
-// Risks returns the labels declared on this step in declaration order
-// with duplicates collapsed. Empty when no label was declared -- the
-// canonical "no gate fires" state.
-func (s *WorkStep) Risks() []string {
-	out := make([]string, len(s.risks))
-	copy(out, s.risks)
-	return out
 }
 
 func (s *WorkStep) addRisk(label string) {

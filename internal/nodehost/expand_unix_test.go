@@ -89,9 +89,9 @@ func TestFanOutEndToEnd(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 		defer cancel()
 		res, err := Execute(ctx, Config{
-			Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second},
+			Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
 			Pipeline: "attempts", Args: map[string]string{"fanout": fanout},
-			Run:   nodeproto.RunContextOld{RunID: runID},
+			Run:   nodeproto.RunContext{RunID: runID},
 			State: st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
 			Attempts: &Attempts{
 				Routes: srv, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(), Claim: outputController(t, st),

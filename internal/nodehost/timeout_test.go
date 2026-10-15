@@ -22,26 +22,26 @@ func hang(ctx context.Context, _ *NodeRun) Result {
 func TestTimeoutFailsWithTheExecutorsReasons(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		mods   nodeproto.PlanModifiers
+		mods   nodeproto.JobSpec
 		after  time.Duration
 		reason string
 		msg    string
 	}{
 		{
 			"wall",
-			nodeproto.PlanModifiers{TimeoutMS: 5000},
+			nodeproto.JobSpec{TimeoutMS: new(int64(5000)), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 			5 * time.Second, store.FailureTimeout,
 			"timeout exceeded (5s): context deadline exceeded",
 		},
 		{
 			"no progress",
-			nodeproto.PlanModifiers{NoProgressTimeoutMS: 2000},
+			nodeproto.JobSpec{NoProgressTimeoutMS: new(int64(2000)), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 			2 * time.Second, store.FailureNoProgressTimeout,
 			"no progress for 2s: context deadline exceeded",
 		},
 		{
 			"silence before the wall",
-			nodeproto.PlanModifiers{TimeoutMS: 9000, NoProgressTimeoutMS: 2000},
+			nodeproto.JobSpec{TimeoutMS: new(int64(9000)), NoProgressTimeoutMS: new(int64(2000)), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 			2 * time.Second, store.FailureNoProgressTimeout,
 			"no progress for 2s: context deadline exceeded",
 		},
@@ -69,7 +69,7 @@ func TestTimeoutProgressRestartsTheSilenceCount(t *testing.T) {
 			}
 			return hang(ctx, n)
 		}
-		res := timeoutLayer(nil, chatty)(t.Context(), retryNode(nodeproto.PlanModifiers{NoProgressTimeoutMS: 2000}))
+		res := timeoutLayer(nil, chatty)(t.Context(), retryNode(nodeproto.JobSpec{NoProgressTimeoutMS: new(int64(2000)), Steps: []nodeproto.StepSpec{{ID: "body"}}}))
 		if res.Reason != store.FailureNoProgressTimeout || time.Since(start) != 6500*time.Millisecond {
 			t.Errorf("reason %q after %s, want no_progress_timeout 2s after the last line at 4.5s", res.Reason, time.Since(start))
 		}
@@ -78,7 +78,7 @@ func TestTimeoutProgressRestartsTheSilenceCount(t *testing.T) {
 
 func TestTimeoutLeavesOtherEndingsAlone(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		mods := nodeproto.PlanModifiers{TimeoutMS: 5000, NoProgressTimeoutMS: 5000}
+		mods := nodeproto.JobSpec{TimeoutMS: new(int64(5000)), NoProgressTimeoutMS: new(int64(5000)), Steps: []nodeproto.StepSpec{{ID: "body"}}}
 		late := func(ctx context.Context, _ *NodeRun) Result {
 			<-ctx.Done()
 			return Result{Outcome: sparkwing.Success}
@@ -108,7 +108,7 @@ func TestTimeoutAppliesToEachRetry(t *testing.T) {
 			calls++
 			return hang(ctx, n)
 		}
-		mods := nodeproto.PlanModifiers{Retry: 2, RetryBackoffMS: 1000, TimeoutMS: 3000}
+		mods := nodeproto.JobSpec{TimeoutMS: new(int64(3000)), Retry: &nodeproto.RetrySpec{Attempts: 2, BackoffMS: new(int64(1000))}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 		res := retryLayer(nil, timeoutLayer(nil, stuck))(t.Context(), retryNode(mods))
 		if calls != 3 || res.Reason != store.FailureTimeout {
 			t.Errorf("calls %d reason %q, want 3 timed-out attempts", calls, res.Reason)
@@ -129,7 +129,7 @@ func TestLogSinkReportsProgressPerRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	sink.Text(LevelInfo, "compiling")
-	sink.Record(nodeproto.LogRecord{Level: "info", Msg: "linking"})
+	sink.Record(nodeproto.FrameLog{Level: "info", Message: "linking"})
 	if ticks != 2 {
 		t.Errorf("progress ticks %d, want one per stored record", ticks)
 	}
@@ -164,7 +164,7 @@ func TestTimeoutPausesNestUntilTheLastResume(t *testing.T) {
 			second()
 			return hang(ctx, n)
 		}
-		res := timeoutLayer(nil, waits)(t.Context(), retryNode(nodeproto.PlanModifiers{NoProgressTimeoutMS: 2000}))
+		res := timeoutLayer(nil, waits)(t.Context(), retryNode(nodeproto.JobSpec{NoProgressTimeoutMS: new(int64(2000)), Steps: []nodeproto.StepSpec{{ID: "body"}}}))
 		if res.Reason != store.FailureNoProgressTimeout || time.Since(start) != 12*time.Second {
 			t.Errorf("reason %q after %s, want no_progress_timeout 2s after the last resume at 10s", res.Reason, time.Since(start))
 		}

@@ -258,4 +258,25 @@ workspace-off binary-cache operation, local shared services and native platform,
 deployment and real-repository proofs remain open. The existing fake component
 proofs do not complete those integrations or activate native catalog cells.
 
+## Continuation: integration merge and chart identity plumbing
+
+All 26 amendment rows assigned to W8 and every W8 handoff were rechecked.
+The two merge resolutions retain the W8 deletion of runner_pool_cli.go and
+both handoff histories. The incoming CLI edit removes its ambient runner
+identity path. W8's awarded NodeInput constructor already replaces that path.
+The index still needs the lead's staging and merge commit under the no-Git-write rule.
+
+A1-19/48/51 also lose the chart's default POD_NAME injection, as frozen section
+7.4 requires. Source and vendored runner charts now rely on the controller's
+enrollment identity. Both existing render tests rejected POD_NAME before the
+cut. The chart's Auth documentation records the identity source. No contract
+shape, setting, environment name or API was added.
+
+The previous source/keeper/client stubs and missing shared run/plan/eval
+identity constructor remain. Plan/eval resources, SyncLauncher, workspace-off
+binary-cache keys and shared local services still need their owning areas.
+W8 keeps its existing fake-based component coverage at those declared ports.
+Native platform, placement, deployment and real-repository evidence remains
+open. No native cell or new T1 port is claimed.
+
 <!-- design:end -->

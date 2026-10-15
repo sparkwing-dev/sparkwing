@@ -54,7 +54,7 @@ func (l *maskLog) joined() string {
 func splitLineEntry(t *testing.T) pipelineentry.Command {
 	t.Helper()
 	entry := filepath.Join(t.TempDir(), "split-line")
-	script := "#!/bin/sh\nhead -c 1048566 /dev/zero | tr '\\000' x\nprintf '" + splitSecret + " tail\\n'\n"
+	script := "#!/bin/sh\n" + testHelloScript + "head -c 1048566 /dev/zero | tr '\\000' x\nprintf '" + splitSecret + " tail\\n'\n"
 	if err := os.WriteFile(entry, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestSessionMasksASecretSplitAtTheLineLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, err := StartSession(t.Context(), SessionConfig{
-		Entry: splitLineEntry(t), Dir: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin"}, Sink: sink, Masker: masker, Grace: 2 * time.Second,
+		Entry: splitLineEntry(t), Dir: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin"}, Sink: sink, Masker: masker, Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func TestHostNodeLogMasksMessageAndAttrs(t *testing.T) {
 	masker.Register(splitSecret)
 	log := &maskLog{}
 	cfg := &Config{Attempts: &Attempts{Masker: masker, OpenLog: func(context.Context, string, string) (NodeLog, error) { return log, nil }}}
-	n := &NodeRun{Run: &Run{ID: "r", Logger: slog.New(slog.DiscardHandler)}, Plan: nodeproto.PlanNode{ID: "n"}}
+	n := &NodeRun{Run: &Run{ID: "r", Logger: slog.New(slog.DiscardHandler), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}, Plan: nodeproto.JobSpec{ID: "n", Steps: []nodeproto.StepSpec{{ID: "body"}}}}
 	hostNodeLog(t.Context(), cfg, n, sparkwing.LogRecord{
 		Level: "info", Msg: "retry " + splitSecret,
 		Attrs: map[string]any{"attempt": 2, "why": map[string]any{"err": "<" + splitSecret + ">"}},
@@ -124,7 +124,7 @@ func (s *queueSink) Text(_, line string) {
 	s.text = append(s.text, line)
 }
 
-func (s *queueSink) Record(rec nodeproto.LogRecord) { s.Text("", rec.Msg) }
+func (s *queueSink) Record(rec nodeproto.FrameLog) { s.Text("", rec.Message) }
 
 func (s *queueSink) joined() string {
 	s.mu.Lock()
@@ -141,7 +141,7 @@ func TestSinkQueueMasksASplitSecretAroundADropNotice(t *testing.T) {
 	q := newSinkQueue(LevelWarn, masker)
 	head := strings.Repeat("x", maxTextLine-4)
 	q.push(sinkItem{text: head + splitSecret[:4], piece: true})
-	q.notice(nodeproto.LogRecord{Msg: "sparkwing: 3 log lines dropped while the log sink was behind"})
+	q.notice(nodeproto.FrameLog{Message: "sparkwing: 3 log lines dropped while the log sink was behind"})
 	q.push(sinkItem{text: splitSecret[4:] + " tail"})
 	q.close()
 	q.run(sink)
@@ -178,7 +178,7 @@ func TestPlanningErrorsComeBackMasked(t *testing.T) {
 	const secret = "plan-secret-4242"
 	script := `IFS= read -r line <&3
 id=$(printf '%s' "$line" | sed 's/.*"id":"\([^"]*\)".*/\1/')
-printf '{"reply":"%s","ok":true,"result":{"protocol":"1","pipelines":[{"name":"demo","args":[{"name":"tok","secret":true,"default":"` + secret + `"}]}]}}\n' "$id" >&4
+printf '{"reply":"%s","ok":true,"result":{"pipelines":[{"name":"demo","args":[{"name":"tok","type":"string","required":false,"secret":true,"default":"` + secret + `"}]}]}}\n' "$id" >&4
 IFS= read -r line <&3
 id=$(printf '%s' "$line" | sed 's/.*"id":"\([^"]*\)".*/\1/')
 printf '{"reply":"%s","ok":false,"error":{"code":"plan_failed","message":"plan panicked: ` + secret + `"}}\n' "$id" >&4
@@ -201,11 +201,11 @@ func TestSessionDeliversAPieceEndingExactlyAtEOF(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry := filepath.Join(t.TempDir(), "exact-line")
-	if err := os.WriteFile(entry, []byte("#!/bin/sh\nhead -c 1048576 /dev/zero | tr '\\000' x\n"), 0o700); err != nil {
+	if err := os.WriteFile(entry, []byte("#!/bin/sh\n"+testHelloScript+"head -c 1048576 /dev/zero | tr '\\000' x\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	s, err := StartSession(t.Context(), SessionConfig{
-		Entry: pipelineentry.Binary(entry), Dir: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin"}, Sink: sink, Masker: masker, Grace: 2 * time.Second,
+		Entry: pipelineentry.Binary(entry), Dir: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin"}, Sink: sink, Masker: masker, Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -294,14 +294,14 @@ func TestOuterLayerNodeFailuresAreMaskedThenBounded(t *testing.T) {
 	masker.Register(splitSecret)
 	t.Run("pod host", func(t *testing.T) {
 		st := failedNodeStore(t)
-		cfg := Config{State: st, Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContextOld{RunID: "r"}, Logger: slog.New(slog.DiscardHandler)}
+		cfg := Config{State: st, Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}, Logger: slog.New(slog.DiscardHandler)}
 		run := podRun(&cfg)
 		checkMaskedNodeFailure(t, st, podHost(t.Context(), &cfg, run, "n", Result{Outcome: sparkwing.Failed, Err: outerLayerFailure()}))
 	})
 	t.Run("scheduler", func(t *testing.T) {
 		st := failedNodeStore(t)
-		cfg := Config{State: st, Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContextOld{RunID: "r"}, Logger: slog.New(slog.DiscardHandler)}
-		s := &scheduler{run: newRun(&cfg, nodeproto.PlanDocOld{}, nil, nil), results: map[string]Result{}}
+		cfg := Config{State: st, Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}, Logger: slog.New(slog.DiscardHandler)}
+		s := &scheduler{run: newRun(&cfg, nodeproto.PlanDoc{}, nil, nil), results: map[string]Result{}}
 		s.finish(t.Context(), "n", Result{Outcome: sparkwing.Failed, Err: outerLayerFailure()})
 		checkMaskedNodeFailure(t, st, s.results["n"])
 	})
@@ -367,7 +367,7 @@ func TestTheRunsStoreMasksEveryTextItIsGiven(t *testing.T) {
 	masker := secrets.NewMasker()
 	masker.Register(splitSecret)
 	inner := &textStore{}
-	cfg := Config{State: inner, Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContextOld{RunID: "r"}}
+	cfg := Config{State: inner, Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}}
 	st := podRun(&cfg).State
 	ctx, s := t.Context(), "x "+splitSecret
 	_ = st.FinishRun(ctx, "r", "failed", s)
@@ -415,14 +415,14 @@ func TestARefusedOutputsErrorIsMaskedThenBounded(t *testing.T) {
 	ok := Result{Outcome: sparkwing.Success, Output: []byte(`{"v":1}`)}
 	t.Run("pod host", func(t *testing.T) {
 		st := failedNodeStore(t)
-		cfg := Config{State: &refusingOutputStore{StateStoreOld: st}, Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContextOld{RunID: "r"}, Logger: slog.New(slog.DiscardHandler)}
+		cfg := Config{State: &refusingOutputStore{StateStoreOld: st}, Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}, Logger: slog.New(slog.DiscardHandler)}
 		run := podRun(&cfg)
 		checkMaskedNodeFailure(t, st, podHost(t.Context(), &cfg, run, "n", ok))
 	})
 	t.Run("scheduler", func(t *testing.T) {
 		st := failedNodeStore(t)
-		cfg := Config{State: maskState(&refusingOutputStore{StateStoreOld: st}, masker), Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContextOld{RunID: "r"}, Logger: slog.New(slog.DiscardHandler)}
-		s := &scheduler{run: newRun(&cfg, nodeproto.PlanDocOld{}, nil, nil), results: map[string]Result{}}
+		cfg := Config{State: maskState(&refusingOutputStore{StateStoreOld: st}, masker), Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}, Logger: slog.New(slog.DiscardHandler)}
+		s := &scheduler{run: newRun(&cfg, nodeproto.PlanDoc{}, nil, nil), results: map[string]Result{}}
 		s.finish(t.Context(), "n", ok)
 		checkMaskedNodeFailure(t, st, s.results["n"])
 	})
@@ -434,7 +434,7 @@ func TestARunsLoggerMasksItsDiagnostics(t *testing.T) {
 	masker := secrets.NewMasker()
 	masker.Register(splitSecret)
 	var out strings.Builder
-	cfg := Config{State: openStore(t), Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContextOld{RunID: "r"}}
+	cfg := Config{State: openStore(t), Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}}
 	cfg.Logger = slog.New(slog.NewTextHandler(&out, nil))
 	logger := podRun(&cfg).Logger.With("key", "k-"+splitSecret)
 	logger.Error("generator "+splitSecret, "err", errors.New("boom "+splitSecret), slog.Group("g", "keys", []string{splitSecret}))
@@ -452,11 +452,11 @@ func TestSessionNormalizesACRLFSplitAtTheLineLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry := filepath.Join(t.TempDir(), "crlf-line")
-	if err := os.WriteFile(entry, []byte("#!/bin/sh\nhead -c 1048575 /dev/zero | tr '\\000' x\nprintf '\\r\\nnext\\n'\n"), 0o700); err != nil {
+	if err := os.WriteFile(entry, []byte("#!/bin/sh\n"+testHelloScript+"head -c 1048575 /dev/zero | tr '\\000' x\nprintf '\\r\\nnext\\n'\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	s, err := StartSession(t.Context(), SessionConfig{
-		Entry: pipelineentry.Binary(entry), Dir: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin"}, Sink: sink, Grace: 2 * time.Second,
+		Entry: pipelineentry.Binary(entry), Dir: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin"}, Sink: sink, Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 	})
 	if err != nil {
 		t.Fatal(err)
