@@ -1,141 +1,120 @@
 # W1b handoff
 
-Continues f9cbf87b2 and W1b-session1792073641.out. W1b remains incomplete.
+Continues 0aca55e2f and W1b-session1792074610.out. W1b remains incomplete.
 The worktree started clean. The lead owns review, commits and pipelines.
 
 ## Implemented
 
-Tenant record operations now use the manifest reader installed by
-Store.SetResultBlobRecords when their caller supplies no explicit reader.
-Server.WithDataObjects already configures that backend. Previously it reached
-terminal result attachment only. C2 DataTransactions returns Tenant, whose
-CommitRecord, LookupRecord, LookupMemo, LookupDepcache and CopyMemo methods all
-constructed records with a nil reader. Manifest operations therefore failed
-with "verified manifest reader is not configured" after normal controller setup.
+Log persistence separates decoded ranges from physical byte counts. The first
+regression failed with 20,000 retained bytes for a 109-byte gzip payload.
+SubjectUploader supplied decoded Segment.Size, and RecordSegments used that
+value for both cursor ranges and physical inventory.
 
-The existing record factory now selects the configured reader. An explicit
-BlobRecords reader still wins. No schema, pricing, public signature, authority
-rule, settings field, compatibility adapter or extra backend was added.
-Configuration still happens before sharing the store.
+C1 Segment adds StoredBytes for the immutable compressed payload. Size and
+Offset retain decoded cursor semantics. Digest covers the stored payload.
+The schema already has start/end offsets and stored_bytes, so no schema change
+is needed. The uploader supplies both sizes on append and final sealing.
+ReadLogSegments reconstructs decoded Size from the range. CommittedReader
+verifies stored length and digest before emitting decoded bytes. Omitted stored
+size is refused for a segment. Empty final seals remain valid.
 
-Invariant: tenant record reads and commits verify manifests through the
-configured physical backend before exposing members or attaching results.
-The generated controller property now uses Tenant.CommitRecord and
-Tenant.LookupRecord after WithDataObjects, instead of injecting a separate
-reader into its fixture. It failed on its first input before the fix. All 12
-payload trials now pass. The property checks live claim/start, verified uploads,
-manifest commit/read, corrupt physical manifest refusal with no exposed hit,
-terminal rollback, restored bytes and exact completion replay.
+Invariant: retained inventory counts each compressed segment once, while read
+cursors follow decoded bytes. Replay cannot change either size. The regression
+checks compressed accounting, decoded selection, immutable replay and invalid
+stored sizes. Existing generated physical-upload acceptance checks compressed
+inventory after sealing, replay and reopening. Filesystem and S3 objects,
+lost upload responses, resumed reads and revocation remain covered.
 
-Production Go changes add three executable lines and delete zero legacy
-executable lines. The controller fixture deletes its explicit-reader bypass.
-Previous warning identity, payer ambiguity, accounting, receipt, record mutation,
-quota and retention work remains in the earlier commits. No finished acceptance
-cell was reimplemented or newly activated.
+Deleted legacy APIs/code: zero lines. The single-size accounting expressions
+are replaced. No archived T1 test was ported or retired. No new acceptance cell
+was enabled, and no pricing setting, authority rule or compatibility path changed.
 
 ## Verification
 
-Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
 GOCACHE=/tmp/sw-astra-W1b/gocache, GOTMPDIR=/tmp/sw-astra-W1b/gotmp and
-TMPDIR=/tmp/sw-astra-W1b/gotmp. Build, vet and test use -p 4.
+TMPDIR=/tmp/sw-astra-W1b/gotmp. Build, vet and test used -p 4.
 
-- Whole-repository go build ./... passes.
-- go vet ./pkg/store ./pkg/controller passes.
-- Focused store record, result, manifest, scope and selection tests pass.
-- Controller TestDataStorage tests pass, including the strengthened property.
-- Commentcheck against main passes across 2,118 files.
-- Documentation mirror and git diff --check pass.
-- TestBilling and TestStorage pass 287 cases and skip 562 cases across both
-  acceptance packages. Fourteen existing SQLite cells pass:
-  - billing-start-award-versus-start/store-sqlite
-  - billing-ledger-survives-retention/store-data-sqlite
-  - storage-cas-integrity/store-data-sqlite
-  - storage-replica-safe-accounting/store-data-sqlite
-  - storage-quota-settlement-crash-replay/store-data-sqlite
-  - storage-log-segments-and-fallback/store-data-sqlite
-  - storage-hasmany-read-set/store-data-sqlite
-  - storage-hasmany-large-budget/store-data-sqlite
-  - storage-reachability-and-retention-tails/store-data-sqlite
-  - storage-memo-and-depcache-scope/store-data-sqlite
-  - storage-reference-edge-laundering/store-data-sqlite
-  - storage-publish-one-way/store-data-sqlite
-  - storage-owner-receipts-and-stream-verification/store-data-sqlite
-  - storage-local-remote-cache-opt-in/store-data-sqlite
+Passed:
 
-Reproduce the focused tests with:
+- Whole-repository `go build ./...`.
+- go vet ./pkg/store ./pkg/storage/logseg ./internal/acceptance.
+- Store TestLogPersistence and TestResultSegments tests.
+- All pkg/storage/logseg tests, including stored-length and partial-read refusals.
+- TestStorage/storage-log-segments-and-fallback: existing store-data-sqlite,
+  filesystem-records, s3-records, filesystem-sink, s3-sink and storage-components
+  checks pass. Native placement skeletons skip. internal/acceptance has no
+  top-level test under this selection.
+- Commentcheck against main: clean across 2,119 files.
+- Both pkg/docs mirror guards, changelog check and git diff --check.
 
-`go test -p 4 ./pkg/store -run '^(TestBlobRecords|TestBlobResult|TestResultRecords|TestBlobManifest|TestBlobDataAccessLogicalSelection|TestBlobDataBinding|TestBlobDataAccess|TestBlob.*Memo|TestBlob.*Depcache|TestBlob.*Output)' -count=1`
+The expanded store selection also ran TestResultFinalLogs successfully but
+failed two untouched legacy tests in execution_attempt_log_claim_test.go.
+TestNodeExecutionAttemptBelongsToLiveClaimOutlivesTheAttempt seeds removed
+runs.args_json. TestTriggerExecutionAttemptBelongsToLiveClaimOutlivesTheAttempt
+seeds removed triggers.pipeline. Both fail before log accounting. The full
+pkg/docs probe failed in TestWebClient_Versions_HappyPath because the sandbox
+refuses httptest's TCP listener. The socket-free mirror guards pass.
+No full store-suite, native, provider, PostgreSQL or pipeline pass is claimed.
 
-`go test -p 4 ./pkg/controller -run '^TestDataStorage' -count=1`
+## Remaining contracts and work
 
-`go test -p 4 ./tests/acceptance ./internal/acceptance -run '^(TestBilling|TestStorage)' -count=1`
+1. Decision 07:40 item 2 needs W2's expanded verified PaymentEvent. This checkout
+   and bw-3095-w2-credentials still declare only checkout paid/expired/failed,
+   with checkout/payment IDs, currency, amount and mode. W2 must declare verified
+   setup/customer/method/fingerprint/completion facts, collection attempt/payment
+   correlation, refund identity/amount/status, warning identity/payment/card/
+   actionability and dispute identity/payment/outcome. Metadata cannot select
+   the payer. Existing transaction helpers remain ready for the dispatcher.
+2. W1 owns payment schema changes. payment_events requires checkout_id,
+   a same-team/mode credit_checkouts foreign key and one of three checkout
+   outcomes. Initial setup has no durable setup/customer-to-tenant correlation.
+3. W1's spend/grace join remains open, including on bw-3095-w1-store.
+   accountUnitBillingTx returns only error, renewal builds LeaseBeat before
+   accounting and billing_awards has no exhaustion anchor. W1 must expose the
+   committing policy result for job/host/plan/eval. W1b then supplies spend/grace
+   policy while preserving prepaid runway, customer waits and holder drain.
+4. Output consumers still use OutputReadGrant, and localState forwards
+   GetNodeOutput without final authority/record keys. Controller log reads
+   still query node_logs. LogSegmentUploader still calls removed writer routes.
+   W2/W3/W9 must supply authenticated blob/log bindings and final keys. This
+   slice fixes final tagged storage/uploader/reader accounting, while consumer
+   cutovers and legacy claim-credit retirement remain open.
+5. W1's private CopyMaterializedRecords has no production implementation.
+   Materialized memo/retry/coalesced destinations need a declared record identity
+   and read edge without a synthetic attempt. Public CopyMemo requires a live
+   positive attempt. The prior configured manifest-reader join is implemented.
 
-No old T1 function was ported or retired in this slice. No full-suite,
-PostgreSQL, race, provider, native placement or pipeline pass is claimed.
-
-## Contract changes needed and prioritized work
-
-1. Lead decision 07:40 item 2 remains blocked on the undeclared expanded C2
-   contract. Both this checkout and bw-3095-w2-credentials still declare only
-   checkout paid/expired/failed, with checkout/payment IDs, currency, amount and
-   mode. No setup, refund, warning or dispute event facts are declared. W1b
-   cannot implement a dispatcher against a missing foreign interface. W2 must
-   declare verified setup/customer/method/fingerprint/completion facts,
-   collection attempt/payment correlation, refund identity/amount/status,
-   warning identity/payment/card/actionability and dispute identity/payment/
-   outcome. Provider metadata must never select the payer.
-2. W1 must extend payment_events and durable setup correlation. The current
-   schema requires checkout_id, a matching credit_checkouts row and one of
-   three checkout outcomes. Initial card setup has no pending setup/customer
-   to tenant binding. Broader event correlation must retain payment mode.
-   Existing settlement transaction helpers remain ready for the verified
-   dispatcher. No speculative event schema or foreign API was added.
-3. W1 spend/grace join remains open. billing_awards has no per-award exhaustion
-   anchor, accountUnitBillingTx returns only error and renewal fills LeaseBeat
-   before accounting. W1 must expose the committing renewal policy result for
-   job/host/plan/eval while retaining prepaid runway, customer-wait exclusions,
-   existing grace/spend policy and holder drain rights. W1b supplies the policy
-   once that join is declared. No W1 implementation was edited.
-4. Legacy output consumers still use OutputReadGrant and localState forwards
-   GetNodeOutput without final blob authority or record keys. W2/W3/W9 must
-   supply those bindings for the final clients. Legacy log reads still query
-   node_logs. LogSegmentUploader calls the removed node log writer routes.
-   W2/W3/W9 must compose the declared blob.LogTransport with tagged subjects.
-   Removing these consumers without replacement would remove output/log
-   behavior. No removed writer was restored.
-
-## Amendment and remaining integration audit
-
-- A1-24 and A1-29 through A1-35 retain their implemented persistence behavior.
-  This slice closes the configured-manifest dependency for C2's default tenant
-  transactions. Live DataAuthority resolution, ReadBlob/ChargeDownload
-  composition, source-before-run binding, verified small-output use and
-  allowance-driven physical eviction remain integration work.
-- A1-27 lifecycle accounting joins remain implemented. Spend/grace and legacy
-  claim-credit retirement still depend on W1's join above.
-- A1-28 and decision 07:40 item 2 remain checkout-only for the stated reasons.
-- Materialized memo/retry/coalesced destinations need W1/W7's declared record
-  identity and read edge. Public CopyMemo requires a live positive attempt.
-  Synthetic attempts remain forbidden.
-- A1-53 native/provider/PostgreSQL evidence remains with T1/lead. Lead-owned
-  handoffs, amendments and port inventories are unchanged.
+A1-24 and A1-29 through A1-35 retain implemented persistence behavior. Live
+data-authority resolution, ReadBlob/ChargeDownload composition, source-before-run
+binding, verified small-output use and allowance-driven physical eviction remain
+integration work. A1-27 lifecycle accounting joins remain implemented, with
+spend/grace and legacy credit retirement open. A1-28 remains checkout-only.
+A1-53 native/provider/PostgreSQL evidence stays with T1/lead. No lead-owned
+handoff, amendment or port inventory was edited.
 
 ## Shared files and friction
 
-Outside pkg/store, changed only pkg/controller/data_result_test.go,
-design/rewrite/contracts/c1-data.md, CHANGELOG.md and its generated
-pkg/docs/changelog.md mirror. The controller change migrates the fixture to
-its real tenant interface and strengthens its existing generated property.
-No W1 file was edited. The C1 note records the local default-reader behavior.
+No W1 implementation file changed. The local C1 change adds Segment.StoredBytes.
+C2 can retain the RecordSegments signature when it implements log transport.
+Outside pkg/store:
 
-The first modified controller property reproduced the missing-reader failure.
-The expanded C2 event contract and W1 renewal/schema seams remain unavailable,
-including on the parallel W2 branch. No other area's stub was treated as a
-reason to skip its declared interface. This slice uses the real SQLite store,
-filesystem objects and existing controller configuration.
+- pkg/storage/logseg/subject.go supplies stored size at two construction sites.
+- pkg/storage/logseg/committed.go and committed_test.go consume both lengths.
+- internal/acceptance/blob_logs.go checks compressed physical inventory.
+- internal/acceptance/store_logs.go, store_abandoned_logs.go and
+  store_published_logs.go supply explicit sizes in existing fixtures.
+- design/rewrite/contracts/c1-data.md documents the local contract and GoDoc.
+- CHANGELOG.md and its generated pkg/docs/changelog.md mirror.
 
-No Git write, Sparkwing executable, candidate, pipeline, service, release,
-subagent or harness-memory write ran. The repository Git configuration retains
-the normal user identity and has no core.worktree override. Scratch /tmp/sw-astra-W1b/ is deleted after verification. Independent review remains with the lead.
+The changelog fixer initially regrouped duplicate categories. Those unrelated
+changes were removed, and sync-docs regenerated only the one-line mirror update.
+The first focused rerun exposed a fixture that changed decoded sizes but kept
+its old stored size. It now supplies both. The broader legacy fixture and socket
+failures above remain visible. No foreign event or renewal contract was guessed.
+
+No Git write, Sparkwing candidate, pipeline, service, release, subagent or
+harness-memory write ran. Git identity remains Korey Gambill with no
+core.worktree override. Scratch /tmp/sw-astra-W1b/ is deleted after verification.
 
 STATUS: CONTINUE

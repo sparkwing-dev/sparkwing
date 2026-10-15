@@ -37,7 +37,7 @@ func checkStorePublishedLogBoundary(ctx context.Context, root string) (err error
 	actor := store.Actor{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: request.Intent.Authority.CapabilityRef}, CapabilityPrefix: request.Intent.Authority.CapabilityRef}
 	attempt := runspec.AttemptIdentity{Team: string(store.DefaultTeam), RunID: "upload", NodeID: "a", Attempt: 1, Generation: 7}
 	commit := store.SegmentCommit{Subject: blob.LogSubject{Kind: blob.LogJobAttempt, Team: attempt.Team, RunID: attempt.RunID, Attempt: &attempt}, Actor: actor, RetentionClass: "r30", Final: true, IncompleteReason: "local tail unavailable"}
-	segment := store.Segment{Index: 1, Size: 3, Digest: strings.Repeat("a", 64)}
+	segment := store.Segment{Index: 1, Size: 3, StoredBytes: 3, Digest: strings.Repeat("a", 64)}
 	segment.ObjectKey, err = blob.LogObjectKey(commit.Subject, commit.RetentionClass, 1)
 	if err != nil {
 		return err

@@ -299,6 +299,10 @@ rechecks reachability and calls `BlobDeleter`. A deletion failure preserves the
 row and tombstone. A new upload or reference clears its tombstone.
 
 `RecordSegments` and `ReadLogSegments` accept tagged job or owner-unit subjects.
+`Segment.Size` and `Offset` count decoded bytes. `StoredBytes` counts the
+compressed object whose hash is `Digest`. Retained storage and billing count
+stored bytes once. Cursors continue to count decoded bytes. Both lengths are
+immutable on replay, and the proxied reader verifies both before returning bytes.
 `LogSegmentObjectKey` is shared with signing so a commit cannot substitute an
 object from another stream. Segments are contiguous and immutable. Final commits
 seal even empty streams, and only identical final bodies replay. Job tail grace

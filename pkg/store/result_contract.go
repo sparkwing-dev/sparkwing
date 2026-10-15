@@ -38,13 +38,14 @@ type SummaryWrite struct {
 	Markdown string
 }
 
-// Segment describes one immutable log range; logs use their own signer and never a blob data download.
+// Segment separates decoded byte offsets and size from the stored payload's bytes and digest.
 type Segment struct {
-	Index     int64
-	Offset    int64
-	Size      int64
-	Digest    string
-	ObjectKey string
+	Index       int64
+	Offset      int64
+	Size        int64
+	StoredBytes int64
+	Digest      string
+	ObjectKey   string
 }
 
 // SegmentCommit fences attribution and completeness to a job attempt or owner unit.

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"slices"
 	"unicode/utf8"
 
@@ -160,21 +161,21 @@ func (t *Tenant) recordSegments(ctx context.Context, commit SegmentCommit) error
 }
 
 func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, identity logStreamIdentity, segments []Segment) error {
-	var next, offset int64
-	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(n)+1,1),COALESCE(MAX(end_offset),0) FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ?", team, run, identity.id).Scan(&next, &offset); err != nil {
+	var next, offset, stored int64
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(n)+1,1),COALESCE(MAX(end_offset),0),COALESCE(SUM(stored_bytes),0) FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ?", team, run, identity.id).Scan(&next, &offset, &stored); err != nil {
 		return err
 	}
 	for _, segment := range segments {
 		hash, err := hex.DecodeString(segment.Digest)
-		if err != nil || len(hash) != sha256.Size || hex.EncodeToString(hash) != segment.Digest || segment.ObjectKey == "" || segment.Index < 1 || segment.Index > int64(limits.MaxLogSegmentNumber) || segment.Offset < 0 || segment.Size < 0 {
+		if err != nil || len(hash) != sha256.Size || hex.EncodeToString(hash) != segment.Digest || segment.ObjectKey == "" || segment.Index < 1 || segment.Index > int64(limits.MaxLogSegmentNumber) || segment.Offset < 0 || segment.Size <= 0 || segment.StoredBytes <= 0 {
 			return authorityError(apierr.BadRequest, "invalid immutable log segment")
 		}
-		if segment.Size > limits.LogSegmentUploadBytes || segment.Offset > limits.AttemptLogBytes-segment.Size {
+		if segment.Size > limits.LogSegmentUploadBytes || segment.StoredBytes > limits.LogSegmentUploadBytes || segment.Offset > limits.AttemptLogBytes-segment.Size {
 			return authorityError(apierr.PayloadTooLarge, "log segment exceeds the byte limit")
 		}
 		if segment.Index < next {
 			var existing Segment
-			err := tx.QueryRowContext(ctx, "SELECT n,start_offset,stored_bytes,sha256,object_key FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ? AND n = ?", team, run, identity.id, segment.Index).Scan(&existing.Index, &existing.Offset, &existing.Size, &existing.Digest, &existing.ObjectKey)
+			err := tx.QueryRowContext(ctx, "SELECT n,start_offset,end_offset-start_offset,stored_bytes,sha256,object_key FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ? AND n = ?", team, run, identity.id, segment.Index).Scan(&existing.Index, &existing.Offset, &existing.Size, &existing.StoredBytes, &existing.Digest, &existing.ObjectKey)
 			if err != nil {
 				return err
 			}
@@ -186,14 +187,18 @@ func appendSegmentsTx(ctx context.Context, tx *storeTx, team Team, run string, i
 		if segment.Index != next || segment.Offset != offset {
 			return authorityError(apierr.Conflict, "log segments must be contiguous")
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO log_segments(team,run_id,stream_id,generation,n,stored_bytes,sha256,object_key,start_offset,end_offset) VALUES (?,?,?,?,?,?,?,?,?,?)`, team, run, identity.id, identity.generation, segment.Index, segment.Size, segment.Digest, segment.ObjectKey, segment.Offset, segment.Offset+segment.Size)
+		if stored < 0 || stored > math.MaxInt64-segment.StoredBytes {
+			return authorityError(apierr.IntegrityFailure, "log inventory byte total is out of range")
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO log_segments(team,run_id,stream_id,generation,n,stored_bytes,sha256,object_key,start_offset,end_offset) VALUES (?,?,?,?,?,?,?,?,?,?)`, team, run, identity.id, identity.generation, segment.Index, segment.StoredBytes, segment.Digest, segment.ObjectKey, segment.Offset, segment.Offset+segment.Size)
 		if err != nil {
 			return err
 		}
 		next++
 		offset += segment.Size
+		stored += segment.StoredBytes
 	}
-	_, err := tx.ExecContext(ctx, "UPDATE log_streams SET uploaded_through = ?, stored_bytes = ? WHERE team = ? AND run_id = ? AND id = ?", offset, offset, team, run, identity.id)
+	_, err := tx.ExecContext(ctx, "UPDATE log_streams SET uploaded_through = ?, stored_bytes = ? WHERE team = ? AND run_id = ? AND id = ?", offset, stored, team, run, identity.id)
 	return err
 }
 
@@ -336,13 +341,13 @@ func (t *Tenant) readLogSegments(ctx context.Context, actor Actor, request blob.
 		return result, err
 	}
 	result.Complete = completeness == "complete"
-	rows, err := tx.QueryContext(ctx, "SELECT n,start_offset,stored_bytes,sha256,object_key FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ? AND generation = ? AND end_offset > ? ORDER BY n", t.team, request.Subject.RunID, identity.id, identity.generation, request.Offset)
+	rows, err := tx.QueryContext(ctx, "SELECT n,start_offset,end_offset-start_offset,stored_bytes,sha256,object_key FROM log_segments WHERE team = ? AND run_id = ? AND stream_id = ? AND generation = ? AND end_offset > ? ORDER BY n", t.team, request.Subject.RunID, identity.id, identity.generation, request.Offset)
 	if err != nil {
 		return result, err
 	}
 	for rows.Next() {
 		var segment Segment
-		if err := rows.Scan(&segment.Index, &segment.Offset, &segment.Size, &segment.Digest, &segment.ObjectKey); err != nil {
+		if err := rows.Scan(&segment.Index, &segment.Offset, &segment.Size, &segment.StoredBytes, &segment.Digest, &segment.ObjectKey); err != nil {
 			return result, errors.Join(err, rows.Close())
 		}
 		result.Segments = append(result.Segments, segment)

@@ -35,7 +35,7 @@ func checkStoreLogBoundary(ctx context.Context, root string) (err error) {
 	if err != nil {
 		return err
 	}
-	first := store.Segment{Index: 1, Size: 3, Digest: strings.Repeat("a", 64)}
+	first := store.Segment{Index: 1, Size: 3, StoredBytes: 3, Digest: strings.Repeat("a", 64)}
 	first.ObjectKey, err = blob.LogObjectKey(commit.Subject, commit.RetentionClass, first.Index)
 	if err != nil {
 		return err
@@ -52,12 +52,12 @@ func checkStoreLogBoundary(ctx context.Context, root string) (err error) {
 	if err := tenant.RecordSegments(ctx, bad); err == nil {
 		return errors.New("log replay replaced immutable content")
 	}
-	second := store.Segment{Index: 2, Offset: 3, Size: 2, Digest: strings.Repeat("b", 64)}
+	second := store.Segment{Index: 2, Offset: 3, Size: 2, StoredBytes: 2, Digest: strings.Repeat("b", 64)}
 	second.ObjectKey, err = blob.LogObjectKey(commit.Subject, commit.RetentionClass, second.Index)
 	if err != nil {
 		return err
 	}
-	bad.Segments = []store.Segment{second, {Index: 4, Offset: 5, Size: 1, Digest: strings.Repeat("c", 64)}}
+	bad.Segments = []store.Segment{second, {Index: 4, Offset: 5, Size: 1, StoredBytes: 1, Digest: strings.Repeat("c", 64)}}
 	bad.Segments[1].ObjectKey, err = blob.LogObjectKey(commit.Subject, commit.RetentionClass, 4)
 	if err != nil {
 		return err

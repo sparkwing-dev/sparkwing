@@ -2,6 +2,17 @@
 
 <!-- design:begin -->
 
+## Log byte accounting
+
+`Segment.Offset` and `Segment.Size` describe decoded log bytes. `StoredBytes`
+and `Digest` describe the immutable compressed payload. Both sizes are positive
+and participate in replay identity. `log_segments.stored_bytes` and
+`log_streams.stored_bytes` count retained physical bytes. Segment start/end
+offsets and `uploaded_through` count decoded bytes. Reads return both sizes.
+The schema needs no new column because decoded size is `end_offset-start_offset`.
+The subject uploader supplies both sizes on append and final sealing. The
+committed reader verifies stored length and digest before emitting decoded bytes.
+
 ## Controller result verification
 
 `Server.WithDataObjects` installs `storage.BlobManifests{Objects: objects}` through
@@ -1872,7 +1883,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `StepReport` | StepReport fences step state to the attempt that produced it. |
 | `AnnotationWrite` | AnnotationWrite carries already masked text; the store rechecks the shared annotation byte limit without truncation. |
 | `SummaryWrite` | SummaryWrite carries masked job or step markdown under the writer's live binding. |
-| `Segment` | Segment describes one immutable log range; logs use their own signer and never a blob data download. |
+| `Segment` | Segment separates decoded byte offsets and size from the stored payload's bytes and digest. |
 | `SegmentCommit` | Fences immutable segments and completeness to a tagged job attempt or owner unit. |
 | `Tenant.RecordStep` | RecordStep refuses stale attempts instead of letting delayed reports replace a later attempt's steps. |
 | `Tenant.WriteAnnotation` | WriteAnnotation refuses an oversized masked annotation so the store cannot split UTF-8 or reveal a raw suffix. |

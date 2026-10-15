@@ -42,7 +42,7 @@ func committedFixture(t *testing.T, subject blob.LogSubject) (logseg.CommittedRe
 		seg, body := subjectSegment(t, i, line)
 		key := blob.LogSegmentKey(prefix, i)
 		objects.put(key, body)
-		f.view.Segments = append(f.view.Segments, store.Segment{Index: int64(i), Offset: offset, Size: seg.Bytes, Digest: seg.SHA256, ObjectKey: key})
+		f.view.Segments = append(f.view.Segments, store.Segment{Index: int64(i), Offset: offset, Size: seg.Bytes, StoredBytes: seg.StoredBytes, Digest: seg.SHA256, ObjectKey: key})
 		offset += seg.Bytes
 		raw.WriteString(line)
 	}
@@ -71,14 +71,15 @@ func TestCommittedReadsVerifyBytesAndResume(t *testing.T) {
 
 func TestCommittedReadsRejectSubstitutedMetadata(t *testing.T) {
 	for name, change := range map[string]func(*store.LogSegments){
-		"subject":    func(v *store.LogSegments) { v.Subject = ownerSubject(blob.LogPlan) },
-		"generation": func(v *store.LogSegments) { a := *v.Subject.Attempt; a.Generation++; v.Subject.Attempt = &a },
-		"gap":        func(v *store.LogSegments) { v.Segments[1].Offset++ },
-		"overlap":    func(v *store.LogSegments) { v.Segments[1].Offset-- },
-		"index":      func(v *store.LogSegments) { v.Segments[1].Index++ },
-		"size":       func(v *store.LogSegments) { v.Segments[0].Size = -1 },
-		"digest":     func(v *store.LogSegments) { v.Segments[0].Digest = "" },
-		"object key": func(v *store.LogSegments) { v.Segments[0].ObjectKey = "teams/acme/cas/unrelated" },
+		"subject":     func(v *store.LogSegments) { v.Subject = ownerSubject(blob.LogPlan) },
+		"generation":  func(v *store.LogSegments) { a := *v.Subject.Attempt; a.Generation++; v.Subject.Attempt = &a },
+		"gap":         func(v *store.LogSegments) { v.Segments[1].Offset++ },
+		"overlap":     func(v *store.LogSegments) { v.Segments[1].Offset-- },
+		"index":       func(v *store.LogSegments) { v.Segments[1].Index++ },
+		"size":        func(v *store.LogSegments) { v.Segments[0].Size = -1 },
+		"stored size": func(v *store.LogSegments) { v.Segments[0].StoredBytes = 0 },
+		"digest":      func(v *store.LogSegments) { v.Segments[0].Digest = "" },
+		"object key":  func(v *store.LogSegments) { v.Segments[0].ObjectKey = "teams/acme/cas/unrelated" },
 		"foreign object": func(v *store.LogSegments) {
 			v.Segments[0].ObjectKey = strings.Replace(v.Segments[0].ObjectKey, "teams/acme/", "teams/other/", 1)
 		},
@@ -99,7 +100,7 @@ func TestCommittedReadsRejectSubstitutedMetadata(t *testing.T) {
 }
 
 func TestCommittedReadsStopBeforeCorruptBytes(t *testing.T) {
-	for _, fault := range []string{"corrupt", "wrong size", "missing"} {
+	for _, fault := range []string{"corrupt", "wrong size", "wrong stored size", "missing"} {
 		t.Run(fault, func(t *testing.T) {
 			r, f, objects, _ := committedFixture(t, jobSubject())
 			second := &f.view.Segments[1]
@@ -109,6 +110,8 @@ func TestCommittedReadsStopBeforeCorruptBytes(t *testing.T) {
 			case "wrong size":
 				second.Size++
 				f.view.Segments[2].Offset++
+			case "wrong stored size":
+				second.StoredBytes++
 			case "missing":
 				objects.mu.Lock()
 				delete(objects.objs, second.ObjectKey)
