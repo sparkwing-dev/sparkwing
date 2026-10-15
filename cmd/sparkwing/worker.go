@@ -6,123 +6,22 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 
-	flag "github.com/spf13/pflag"
-
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
-	"github.com/sparkwing-dev/sparkwing/internal/tokenpark"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func runWorker(args []string) error {
-	fs := flag.NewFlagSet(cmdWorker.Path, flag.ContinueOnError)
-	on := addProfileFlag(fs)
-	poll := fs.Duration("poll", time.Second, "claim poll interval when the queue is empty")
-	heartbeat := fs.Duration("heartbeat", 5*time.Second, "trigger claim heartbeat cadence")
-	if err := parseAndCheck(cmdWorker, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	for {
-		err := claimTriggers(ctx, *on, *poll, *heartbeat)
-		if !errors.Is(err, errProfileChanged) {
-			return err
-		}
-	}
-}
-
-var errProfileChanged = errors.New("the profile's config changed while its token was dead")
-
-// safety: the change watch starts before the profile is read, so a rewrite
-// racing the read costs one extra reload rather than an hour parked on the
-// old token.
-func claimTriggers(ctx context.Context, profileName string, poll, heartbeat time.Duration) error {
-	var changed func() bool
-	if path, err := profile.DefaultPath(); err == nil {
-		changed = tokenpark.FileChanged(path)
-	}
-	prof, err := resolveProfile(profileName)
-	if err != nil {
-		return err
-	}
-	if err := requireController(prof, "worker"); err != nil {
-		return err
-	}
-	fmt.Fprintf(os.Stderr, "sparkwing worker: profile=%s controller=%s poll=%s\n",
-		prof.Name, prof.ControllerURL(), poll)
-
-	token := prof.ControllerToken()
-	cli := client.NewWithToken(prof.ControllerURL(), nil, token).
-		WithRunnerIdentity(client.ProcessIdentity("worker"))
-	shed := client.NewShedLog(client.ShedWarnInterval)
-	pacer := client.NewPacer(poll)
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil
-		}
-		trigger, err := cli.ClaimTriggerFor(ctx, nil, nil)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
-			pace := pacer.Failure(err)
-			switch {
-			case pace.Dead != nil:
-				fmt.Fprintf(os.Stderr, "worker: %s\n", pace.Dead.Explain(token,
-					fmt.Sprintf("Give profile %q a live token; the worker reloads config.yaml within seconds of the rewrite", prof.Name)))
-			case pace.Parked:
-				fmt.Fprintf(os.Stderr, "worker: token %s is still refused; asking again in %s\n",
-					client.TokenPrefix(token), pace.Wait.Round(time.Minute))
-			case pace.Shed:
-				if shed.Due() {
-					fmt.Fprintf(os.Stderr,
-						"worker: the controller is shedding claims; polling again in %s\n", pace.Wait)
-				}
-			default:
-				fmt.Fprintf(os.Stderr, "worker: claim failed: %v (retrying in %s)\n", err, pace.Wait.Round(time.Millisecond))
-			}
-			watch := changed
-			if !pace.Parked {
-				watch = nil
-			}
-			if tokenpark.Wait(ctx, pace.Wait, watch) {
-				fmt.Fprintln(os.Stderr, "worker: config.yaml changed while parked; reloading the profile")
-				return errProfileChanged
-			}
-			continue
-		}
-		if pacer.Success() {
-			fmt.Fprintln(os.Stderr, "worker: token accepted again; resuming claims")
-		}
-		if trigger == nil {
-			sleepOrCancel(ctx, client.AdvisedPoll(poll, cli))
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "worker: claimed %s (pipeline=%s)\n", trigger.ID, trigger.Pipeline)
-		if err := hostTrigger(ctx, cli, trigger, prof.ControllerURL(), token, heartbeat); err != nil {
-			fmt.Fprintf(os.Stderr, "worker: trigger %s: %v\n", trigger.ID, err)
-		}
-	}
-}
-
 // safety: plan code and every node run in their own processes with the minimal environment, so the profile's
 // token stays here. The claim is renewed from before the build, so a cold build outlasting its lease keeps it; a
-// worker shutting down leaves the trigger to that lease, and a run that never started fails here, or is cancelled.
+// host shutting down leaves the trigger to that lease, and a run that never started fails here, or is cancelled.
 func hostTrigger(ctx context.Context, cli *client.Client, trigger *store.Trigger, controllerURL, token string, heartbeat time.Duration) error {
 	return hostTriggerWith(ctx, cli, trigger, controllerURL, token, heartbeat, buildCheckoutPipeline, orchestrator.HostTriggerRun)
 }
@@ -178,11 +77,11 @@ func buildCheckoutPipeline(ctx context.Context) (entry pipelineentry.Command, di
 		entry, err := orchestrator.PrepareTypeScriptOnRunner(ctx, sparkwingDir)
 		return entry, filepath.Dir(sparkwingDir), func() {}, err
 	}
-	key, keyParts, err := bincache.ExplainCacheKey(sparkwingDir)
+	key, keyParts, err := bincache.ExplainCacheKey(sparkwingDir, os.Environ())
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("read .sparkwing/: %w", err)
 	}
-	lease, _, err := pipelineBinary(ctx, sparkwingDir, key, keyParts, os.Environ())
+	lease, _, err := pipelineBinary(ctx, sparkwingDir, key, keyParts, os.Environ(), os.Stderr)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("build the pipeline: %w", err)
 	}
@@ -204,13 +103,4 @@ func hostTriggerFromCheckout(ctx context.Context, trigger *store.Trigger, contro
 	return host(ctx, orchestrator.TriggerHost{
 		ControllerURL: controllerURL, Token: token, Trigger: trigger, Entry: entry, Dir: dir,
 	})
-}
-
-func sleepOrCancel(ctx context.Context, d time.Duration) {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-t.C:
-	case <-ctx.Done():
-	}
 }

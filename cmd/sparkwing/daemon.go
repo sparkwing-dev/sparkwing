@@ -1,12 +1,11 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,46 +13,9 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-// safety: the last of the nesting shutdown windows on wingd.FinalizeDrainWindow.
-// A restart outlasts the supervisor's termination grace, or it reports on a
-// daemon that is still stopping.
-const daemonRestartTimeout = 20 * time.Second
-
-// safety: a stop waits out the same nesting shutdown windows a restart does,
-// plus the supervisor's own exit, so it reports a daemon that is still
-// stopping rather than one it merely stopped watching.
-const daemonStopTimeout = 30 * time.Second
-
-type daemonReport struct {
-	Running             bool   `json:"running"`
-	Healthy             bool   `json:"healthy"`
-	Draining            bool   `json:"draining"`
-	Restarted           bool   `json:"restarted"`
-	Stopped             bool   `json:"stopped"`
-	BinaryVersion       string `json:"binary_version,omitempty"`
-	RunningRevision     string `json:"running_revision,omitempty"`
-	PreviousVersion     string `json:"previous_version,omitempty"`
-	PreviousRevision    string `json:"previous_revision,omitempty"`
-	Socket              string `json:"socket"`
-	APISocket           string `json:"api_socket"`
-	APIReady            *bool  `json:"api_ready,omitempty"`
-	APIError            string `json:"api_error,omitempty"`
-	InstalledVersion    string `json:"installed_version,omitempty"`
-	DaemonSchemaVersion int    `json:"daemon_schema_version,omitempty"`
-	StoreSchemaVersion  int    `json:"store_schema_version,omitempty"`
-	StoreSchemaError    string `json:"store_schema_error,omitempty"`
-	DaemonStoreReady    *bool  `json:"daemon_store_ready,omitempty"`
-	DaemonStoreError    string `json:"daemon_store_error,omitempty"`
-	StorePath           string `json:"store_path,omitempty"`
-	SchemaDiverged      bool   `json:"schema_diverged,omitempty"`
-}
 
 func runDaemon(args []string) error {
 	if handleParentHelp(cmdDaemon, args) {
@@ -64,12 +26,8 @@ func runDaemon(args []string) error {
 		return nil
 	}
 	switch args[0] {
-	case "status":
-		return runDaemonStatus(args[1:])
-	case "restart":
-		return runDaemonRestart(args[1:])
-	case "stop":
-		return runDaemonStop(args[1:])
+	case "status", "restart", "stop":
+		return runDaemonLifecycle(args)
 	case "recover-state":
 		return runDaemonRecoverState(args[1:])
 	case "events":
@@ -80,120 +38,7 @@ func runDaemon(args []string) error {
 	}
 }
 
-func daemonJournal(home string) ([]journal.Record, int, error) {
-	dir, err := wingd.StateDir(home)
-	if err != nil {
-		return nil, 0, err
-	}
-	return journal.ReadWithStats(dir)
-}
-
-func reportSkippedJournalRecords(skipped int) {
-	if skipped > 0 {
-		fmt.Fprintf(os.Stderr, "Skipped %d unreadable journal records.\n", skipped)
-	}
-}
-
-func runDaemonEvents(args []string) error {
-	fs := flag.NewFlagSet(cmdDaemonEvents.Path, flag.ContinueOnError)
-	run := fs.String("run", "", "run ID")
-	since := fs.Duration("since", 0, "lookback duration")
-	kinds := fs.StringArray("kind", nil, "record kind (repeatable)")
-	incarnation := fs.Int64("incarnation", 0, "daemon incarnation")
-	limit := fs.Int("limit", 50, "maximum records (0 for all)")
-	offset := fs.Int("offset", 0, "matching records to skip from newest")
-	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-	explain := fs.Bool("explain", false, "with --run, explain the run's admission history in sentences")
-	if err := parseAndCheck(cmdDaemonEvents, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if *explain {
-		for _, name := range []string{"since", "kind", "incarnation", "limit", "offset"} {
-			if fs.Changed(name) {
-				return fmt.Errorf("daemon events --explain: --%s filters the event list; --explain reads every record of the run", name)
-			}
-		}
-		if *run == "" {
-			return errors.New("daemon events --explain: --run is required")
-		}
-		return explainRunAdmission(*run, *output)
-	}
-	if *since < 0 {
-		return errors.New("daemon events: --since must be nonnegative")
-	}
-	if *incarnation < 0 {
-		return errors.New("daemon events: --incarnation must be nonnegative")
-	}
-	if *limit < 0 || *offset < 0 {
-		return errors.New("daemon events: --limit and --offset must be nonnegative")
-	}
-	format, err := resolveTTYAwareOutput(*output, cmdDaemonEvents.Path)
-	if err != nil {
-		return err
-	}
-	records, skipped, err := daemonJournal("")
-	if err != nil {
-		return err
-	}
-	reportSkippedJournalRecords(skipped)
-	if len(records) == 0 && format != "json" {
-		dir, err := wingd.StateDir("")
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(os.Stdout, "No events are retained in %s.\n", dir)
-		return nil
-	}
-	cutoff := time.Now().Add(-*since)
-	selected := make([]journal.Record, 0, len(records))
-	for _, r := range records {
-		if *run != "" && r.RunID != *run && r.DisplayRunID != *run {
-			continue
-		}
-		if *since > 0 && r.TS.Before(cutoff) {
-			continue
-		}
-		if *incarnation != 0 && r.Incarnation != uint64(*incarnation) {
-			continue
-		}
-		if len(*kinds) > 0 && !slices.Contains(*kinds, r.Kind) {
-			continue
-		}
-		selected = append(selected, r)
-	}
-	end := max(0, len(selected)-*offset)
-	start := 0
-	if *limit > 0 {
-		start = max(0, end-*limit)
-	}
-	for _, r := range selected[start:end] {
-		if format == "json" {
-			if err := printJournalJSON(r); err != nil {
-				return err
-			}
-		} else {
-			fmt.Fprintf(os.Stdout, "%s  #%d.%d  %-22s %s %s\n", r.TS.Format(time.RFC3339Nano), r.Incarnation, r.Seq, r.Kind, r.RunID, compactData(r.Data))
-		}
-	}
-	if start > 0 {
-		fmt.Fprintf(os.Stderr, "Older events retained; rerun with the same filters and --offset %d (or --limit 0 for all).\n", *offset+end-start)
-	}
-	return nil
-}
-
-func explainRunAdmission(runID, output string) error {
-	format, err := resolveTTYAwareOutput(output, cmdDaemonEvents.Path)
-	if err != nil {
-		return err
-	}
-	records, skipped, err := daemonJournal("")
-	if err != nil {
-		return err
-	}
-	reportSkippedJournalRecords(skipped)
+func explainRunAdmission(out io.Writer, records []journal.Record, runID, format string) error {
 	children := make(map[string][]string)
 	related := map[string]bool{runID: true}
 	for _, r := range records {
@@ -237,7 +82,7 @@ func explainRunAdmission(runID, output string) error {
 		}
 		found = true
 		if format == "json" {
-			if err := printJournalJSON(r); err != nil {
+			if err := json.NewEncoder(out).Encode(r); err != nil {
 				return err
 			}
 			continue
@@ -250,20 +95,14 @@ func explainRunAdmission(runID, output string) error {
 			}
 			label = name + ": "
 		}
-		fmt.Fprintf(os.Stdout, "%s  %s%s\n", r.TS.Local().Format("2006-01-02 15:04:05"), label, explainEvent(r))
+		if _, err := fmt.Fprintf(out, "%s  %s%s\n", r.TS.Local().Format("2006-01-02 15:04:05"), label, explainEvent(r)); err != nil {
+			return err
+		}
 	}
 	if !found && format != "json" {
-		fmt.Fprintf(os.Stdout, "No retained admission events for %s.\n", runID)
-	}
-	return nil
-}
-
-func printJournalJSON(r journal.Record) error {
-	body, err := json.Marshal(r)
-	if err != nil {
+		_, err := fmt.Fprintf(out, "No retained admission events for %s.\n", runID)
 		return err
 	}
-	fmt.Fprintln(os.Stdout, string(body))
 	return nil
 }
 
@@ -458,324 +297,4 @@ func runDaemonRecoverState(args []string) error {
 	}
 	fmt.Fprintf(os.Stdout, "preserved unreadable daemon state at %s\n", quarantined)
 	return nil
-}
-
-func runDaemonStatus(args []string) error {
-	fs := flag.NewFlagSet(cmdDaemonStatus.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-	if err := parseAndCheck(cmdDaemonStatus, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	report, err := inspectDaemon(ctx, "")
-	if err != nil {
-		return err
-	}
-	format, err := resolveTTYAwareOutput(*output, cmdDaemonStatus.Path)
-	if err != nil {
-		return err
-	}
-	return emitDaemonReport(report, format)
-}
-
-func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
-	socket, err := wingd.SocketPath(home)
-	if err != nil {
-		return daemonReport{}, err
-	}
-	apiSocket, err := wingd.APISocketPath(home)
-	if err != nil {
-		return daemonReport{}, err
-	}
-	report := daemonReport{
-		Socket:           socket,
-		APISocket:        apiSocket,
-		InstalledVersion: installedVersion(),
-		StorePath:        storeDBPath(home),
-	}
-	version, schemaErr := storeSchemaState(ctx, home)
-	report.StoreSchemaVersion = version
-	if schemaErr != nil {
-		report.StoreSchemaError = schemaErr.Error()
-	}
-	info, err := wingdclient.Probe(ctx, socket)
-	if errors.Is(err, wingdclient.ErrNoDaemon) {
-		return report, nil
-	}
-	if err != nil {
-		return daemonReport{}, fmt.Errorf("daemon status: %w", err)
-	}
-	report.Running = true
-	report.Healthy = !info.Draining
-	report.Draining = info.Draining
-	report.BinaryVersion = info.BinaryVersion
-	report.RunningRevision = versionRevision(info.BinaryVersion)
-	report.DaemonSchemaVersion = info.StoreSchemaVersion
-	report.DaemonStoreReady = info.StoreReady
-	report.DaemonStoreError = info.StoreError
-	report.APIReady = info.APIReady
-	report.APIError = info.APIError
-	report.SchemaDiverged = report.DaemonSchemaVersion != 0 && report.StoreSchemaVersion > report.DaemonSchemaVersion
-	if report.SchemaDiverged || report.StoreSchemaError != "" || daemonStoreUnusable(report) || daemonAPIUnusable(report) {
-		report.Healthy = false
-	}
-	return report, nil
-}
-
-// safety: a daemon whose API socket is unbound arbitrates admission and
-// serves no run state, so it answers a probe like a healthy daemon while
-// every hosted run fails; only a daemon that reports the field at all can be
-// judged on it.
-func daemonAPIUnusable(report daemonReport) bool {
-	return report.APIReady != nil && !*report.APIReady && !report.Draining
-}
-
-// safety: a daemon that has not met the store yet reports the same "not ready" as
-// one that cannot open it, so the daemon's own reason is a fault only when this
-// home has a store to open.
-func daemonStoreUnusable(report daemonReport) bool {
-	if report.DaemonStoreError == "" {
-		return false
-	}
-	return report.StoreSchemaVersion > 0 || report.StoreSchemaError != ""
-}
-
-func storeDBPath(home string) string {
-	root, err := wingd.HomeDir(home)
-	if err != nil || root == "" {
-		return ""
-	}
-	return paths.PathsAt(root).StateDB()
-}
-
-// safety: an absent store is 0 with no error, but a store that exists and
-// cannot be read must be an error. Folding the two together reported an
-// unreadable store as a healthy daemon.
-func storeSchemaState(ctx context.Context, home string) (int, error) {
-	root, err := wingd.HomeDir(home)
-	if err != nil {
-		return 0, fmt.Errorf("resolve the sparkwing home: %w", err)
-	}
-	if root == "" {
-		return 0, errors.New("the sparkwing home did not resolve to a directory")
-	}
-	db := paths.PathsAt(root).StateDB()
-	if _, err := os.Stat(db); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return 0, nil
-		}
-		return 0, fmt.Errorf("stat the runs store: %w", err)
-	}
-	st, err := store.OpenReadOnly(db)
-	if err != nil {
-		return 0, fmt.Errorf("open the runs store: %w", err)
-	}
-	defer func() { _ = st.Close() }()
-	version, err := st.CurrentSchemaVersion(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("read the runs-store schema: %w", err)
-	}
-	return version, nil
-}
-
-func runDaemonRestart(args []string) error {
-	return runDaemonRestartWith(args, daemonRestartDeps{
-		installedVersion: installedVersion,
-		refresh:          wingdclient.RefreshRunning,
-		restart:          wingdclient.RestartRunning,
-		inspect:          inspectDaemon,
-	})
-}
-
-type daemonRestartDeps struct {
-	installedVersion func() string
-	refresh          func(context.Context, wingdclient.Options) (wingdclient.RefreshResult, error)
-	restart          func(context.Context, wingdclient.Options) (wingdclient.RefreshResult, error)
-	inspect          func(context.Context, string) (daemonReport, error)
-}
-
-func runDaemonRestartWith(args []string, deps daemonRestartDeps) error {
-	fs := flag.NewFlagSet(cmdDaemonRestart.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-	force := fs.Bool("force", false, "replace the daemon even when it already serves this build")
-	if err := parseAndCheck(cmdDaemonRestart, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), daemonRestartTimeout)
-	defer cancel()
-	format, err := resolveTTYAwareOutput(*output, cmdDaemonRestart.Path)
-	if err != nil {
-		return err
-	}
-	target := deps.installedVersion()
-	replace := deps.refresh
-	if *force {
-		replace = deps.restart
-	}
-	result, err := replace(ctx, wingdclient.Options{
-		Home:    "",
-		Version: target,
-		Logf:    func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) },
-	})
-	if errors.Is(err, wingdclient.ErrNoDaemon) {
-		report, inspectErr := deps.inspect(ctx, "")
-		if inspectErr != nil {
-			return inspectErr
-		}
-		return emitDaemonReport(report, format)
-	}
-	if err != nil {
-		return fmt.Errorf("daemon restart: %w", err)
-	}
-	report, err := deps.inspect(ctx, "")
-	if err != nil {
-		return err
-	}
-	report.Restarted = result.Restarted
-	report.PreviousVersion = result.PreviousVersion
-	report.PreviousRevision = versionRevision(result.PreviousVersion)
-	return emitDaemonReport(report, format)
-}
-
-func runDaemonStop(args []string) error {
-	return runDaemonStopWith(args, daemonStopDeps{
-		stop:    wingdclient.Stop,
-		inspect: inspectDaemon,
-	})
-}
-
-type daemonStopDeps struct {
-	stop    func(context.Context, wingdclient.Options) error
-	inspect func(context.Context, string) (daemonReport, error)
-}
-
-func runDaemonStopWith(args []string, deps daemonStopDeps) error {
-	fs := flag.NewFlagSet(cmdDaemonStop.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-	if err := parseAndCheck(cmdDaemonStop, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), daemonStopTimeout)
-	defer cancel()
-	format, err := resolveTTYAwareOutput(*output, cmdDaemonStop.Path)
-	if err != nil {
-		return err
-	}
-	before, err := deps.inspect(ctx, "")
-	if err != nil {
-		return err
-	}
-	if !before.Running {
-		return emitDaemonReport(before, format)
-	}
-	stopErr := deps.stop(ctx, wingdclient.Options{
-		Home:    "",
-		Version: installedVersion(),
-		Logf:    func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) },
-	})
-	if stopErr != nil && !errors.Is(stopErr, wingdclient.ErrNoDaemon) {
-		return fmt.Errorf("daemon stop: %w", stopErr)
-	}
-	report, err := deps.inspect(ctx, "")
-	if err != nil {
-		return err
-	}
-	if report.Running {
-		return fmt.Errorf("daemon stop: %s still answers after %s; run `sparkwing daemon status` for what it reports",
-			report.BinaryVersion, daemonStopTimeout)
-	}
-	report.Stopped = true
-	report.PreviousVersion = before.BinaryVersion
-	report.PreviousRevision = versionRevision(before.BinaryVersion)
-	return emitDaemonReport(report, format)
-}
-
-func apiFault(report daemonReport) string {
-	if report.APIError != "" {
-		return report.APIError
-	}
-	return "the daemon did not say why"
-}
-
-func schemaRemedy(report daemonReport) string {
-	if report.InstalledVersion != "" && report.InstalledVersion == report.BinaryVersion {
-		return fmt.Sprintf(
-			"the installed sparkwing is the same build (%s), so `sparkwing daemon restart` will not help; install a sparkwing that understands schema %d, or set %s to a binary that does and stop the daemon",
-			report.InstalledVersion, report.StoreSchemaVersion, wingdclient.HostBinEnv)
-	}
-	return fmt.Sprintf("run `sparkwing daemon restart` to replace it with the installed %s", report.InstalledVersion)
-}
-
-func storeRemedy(report daemonReport) string {
-	if report.StorePath == "" {
-		return "run `sparkwing doctor` to inspect this home's runs store"
-	}
-	return fmt.Sprintf("inspect %s, then run `sparkwing doctor`", report.StorePath)
-}
-
-func emitDaemonReport(report daemonReport, output string) error {
-	switch output {
-	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		return enc.Encode(report)
-	case "plain":
-		if !report.Running {
-			fmt.Fprintln(os.Stdout, "stopped")
-			return nil
-		}
-		fmt.Fprintln(os.Stdout, report.BinaryVersion)
-		return nil
-	case "pretty", "":
-		if report.Stopped {
-			was := ""
-			if report.PreviousVersion != "" {
-				was = " (was " + report.PreviousVersion + ")"
-			}
-			fmt.Fprintf(os.Stdout, "wingd is stopped%s\n", was)
-			return nil
-		}
-		if !report.Running {
-			fmt.Fprintln(os.Stdout, "wingd is stopped")
-			return nil
-		}
-		action := "running"
-		if report.Restarted {
-			action = "restarted"
-		}
-		fmt.Fprintf(os.Stdout, "wingd %s %s\n", action, report.BinaryVersion)
-		switch {
-		case report.APIReady == nil:
-		case *report.APIReady:
-			fmt.Fprintf(os.Stdout, "controller API on %s\n", report.APISocket)
-		default:
-			fmt.Fprintf(os.Stdout, "controller API not served: %s\n", apiFault(report))
-		}
-		if report.StoreSchemaError != "" {
-			fmt.Fprintf(os.Stdout, "runs store unreadable: %s\n", report.StoreSchemaError)
-		}
-		if daemonStoreUnusable(report) {
-			fmt.Fprintf(os.Stdout, "the daemon cannot use the runs store: %s\n", report.DaemonStoreError)
-			if !report.SchemaDiverged {
-				fmt.Fprintln(os.Stdout, storeRemedy(report))
-			}
-		}
-		if report.SchemaDiverged {
-			fmt.Fprintf(os.Stdout, "runs-store schema mismatch: the daemon understands %d, the store is at %d\n",
-				report.DaemonSchemaVersion, report.StoreSchemaVersion)
-			fmt.Fprintln(os.Stdout, schemaRemedy(report))
-		}
-		return nil
-	default:
-		return fmt.Errorf("daemon: unsupported output format %q", output)
-	}
 }

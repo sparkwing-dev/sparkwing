@@ -20,12 +20,6 @@ import (
 const (
 	MaxOutputBytes    int64 = 64 << 20
 	MaxRunOutputBytes int64 = 1 << 30
-	// MaxUnpaidOutputBytes is the largest output every team may store even
-	// with no storage room; a larger one needs room.
-	MaxUnpaidOutputBytes int64 = 1 << 20
-	// MaxSmallOutputOverage is how far past its share a team's small outputs
-	// may take its storage; past it, a small output needs room too.
-	MaxSmallOutputOverage int64 = 64 << 20
 )
 
 // OutputRef names a node's output object: its key in the team's output store,

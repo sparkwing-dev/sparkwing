@@ -80,32 +80,6 @@ const cronsMinutelyRepo = `pipelines:
         where: local
 `
 
-func TestCronsInstallArmsTheRepoAndInstallsTheTimer(t *testing.T) {
-	_, _ = cronsTestHome(t)
-	repo := cronsTestRepo(t, cronsMinutelyRepo)
-
-	out := captureStdout(t, func() {
-		if err := runIn(t, repo, runCronsInstall, "--no-prove", "-o", "pretty"); err != nil {
-			t.Fatalf("crons install: %v", err)
-		}
-	})
-	if !strings.Contains(out, "armed "+filepath.Base(repo)+"/every-minute") {
-		t.Fatalf("install output:\n%s", out)
-	}
-	if !strings.Contains(out, "timer: ") || !strings.Contains(out, "sparkwing-crons") {
-		t.Errorf("install did not report the timer:\n%s", out)
-	}
-
-	list := captureStdout(t, func() {
-		if err := runCronsList([]string{"-o", "pretty"}); err != nil {
-			t.Fatalf("crons list: %v", err)
-		}
-	})
-	if !strings.Contains(list, "every-minute") || !strings.Contains(list, "armed") {
-		t.Fatalf("list output:\n%s", list)
-	}
-}
-
 func TestCronsInstallOnARepoDeclaringNoScheduleInstallsNoTimer(t *testing.T) {
 	_, _ = cronsTestHome(t)
 	repo := cronsTestRepo(t, `pipelines:
@@ -114,7 +88,7 @@ func TestCronsInstallOnARepoDeclaringNoScheduleInstallsNoTimer(t *testing.T) {
 `)
 	out := captureStdout(t, func() {
 		if err := runIn(t, repo, runCronsInstall, "--no-prove", "-o", "pretty"); err != nil {
-			t.Fatalf("crons install: %v", err)
+			t.Fatalf("schedules install: %v", err)
 		}
 	})
 	if !strings.Contains(out, "nothing to arm") {
@@ -125,52 +99,19 @@ func TestCronsInstallOnARepoDeclaringNoScheduleInstallsNoTimer(t *testing.T) {
 	}
 }
 
-func TestCronsListTimerOnAnEmptyHomeIsHealthy(t *testing.T) {
-	_, _ = cronsTestHome(t)
-	out := captureStdout(t, func() {
-		if err := runCronsList([]string{"--timer", "-o", "pretty"}); err != nil {
-			t.Fatalf("crons list --timer: %v", err)
-		}
-	})
-	if !strings.Contains(out, "0 armed") || !strings.Contains(out, "nothing is armed here") {
-		t.Fatalf("status output:\n%s", out)
-	}
-}
-
-func TestCronsListTimerExitsNonZeroWhenAnArmedHostHasNoTimer(t *testing.T) {
-	_, _ = cronsTestHome(t)
-	repo := cronsTestRepo(t, cronsMinutelyRepo)
-	captureStdout(t, func() {
-		if err := runIn(t, repo, runCronsInstall, "--no-prove", "--no-timer", "-o", "pretty"); err != nil {
-			t.Fatalf("crons install: %v", err)
-		}
-	})
-	var err error
-	out := captureStdout(t, func() { err = runCronsList([]string{"--timer", "-o", "pretty"}) })
-	if err == nil {
-		t.Fatalf("status exited zero with an armed schedule and no timer:\n%s", out)
-	}
-	if code := exitCodeFor(err); code == 0 {
-		t.Errorf("exit code = %d, want non-zero", code)
-	}
-	if !strings.Contains(out, "1 armed") {
-		t.Errorf("status output:\n%s", out)
-	}
-}
-
 func TestCronsTickFiresADueScheduleThroughTheLauncher(t *testing.T) {
 	_, launcher := cronsTestHome(t)
 	repo := cronsTestRepo(t, cronsMinutelyRepo)
 	captureStdout(t, func() {
 		if err := runIn(t, repo, runCronsInstall, "--no-prove", "--no-timer", "-o", "pretty"); err != nil {
-			t.Fatalf("crons install: %v", err)
+			t.Fatalf("schedules install: %v", err)
 		}
 	})
 
 	when := time.Now().Add(2 * time.Minute).UTC().Truncate(time.Minute).Format(time.RFC3339)
 	dry := captureStdout(t, func() {
 		if err := runCronsTick([]string{"--dry-run", "--sw-now", when, "-o", "pretty"}); err != nil {
-			t.Fatalf("crons tick --dry-run: %v", err)
+			t.Fatalf("__tick --dry-run: %v", err)
 		}
 	})
 	if !strings.Contains(dry, "1 fired") {
@@ -182,7 +123,7 @@ func TestCronsTickFiresADueScheduleThroughTheLauncher(t *testing.T) {
 
 	out := captureStdout(t, func() {
 		if err := runCronsTick([]string{"--sw-now", when, "-o", "pretty"}); err != nil {
-			t.Fatalf("crons tick: %v", err)
+			t.Fatalf("__tick: %v", err)
 		}
 	})
 	if len(launcher.launched) != 1 {
@@ -192,211 +133,18 @@ func TestCronsTickFiresADueScheduleThroughTheLauncher(t *testing.T) {
 		t.Errorf("tick output does not name the run:\n%s", out)
 	}
 
-	show := captureStdout(t, func() {
-		if err := runCronsShow([]string{"every-minute", "-o", "pretty"}); err != nil {
-			t.Fatalf("crons show: %v", err)
-		}
-	})
-	if !strings.Contains(show, "fired") || !strings.Contains(show, launcher.launched[0]) {
-		t.Fatalf("show output:\n%s", show)
+	session, release, err := openCrons("")
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestCronsRunLaunchesRegardlessOfCadence(t *testing.T) {
-	_, launcher := cronsTestHome(t)
-	repo := cronsTestRepo(t, `pipelines:
-  - name: yearly
-    entrypoint: Yearly
-    on:
-      schedule:
-        cron: "@yearly"
-        where: local
-`)
-	captureStdout(t, func() {
-		if err := runIn(t, repo, runCronsInstall, "--no-prove", "--no-timer", "-o", "pretty"); err != nil {
-			t.Fatalf("crons install: %v", err)
-		}
-	})
-	captureStdout(t, func() {
-		if err := runCronsSet([]string{"yearly", "--pause", "-o", "pretty"}); err != nil {
-			t.Fatalf("crons set --pause: %v", err)
-		}
-	})
-	out := captureStdout(t, func() {
-		if err := runCronsRun([]string{"yearly", "-o", "pretty"}); err != nil {
-			t.Fatalf("crons run: %v", err)
-		}
-	})
-	if len(launcher.launched) != 1 {
-		t.Fatalf("crons run launched %v", launcher.launched)
+	defer release()
+	rows, err := session.svc.List(t.Context())
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("schedules: %+v %v", rows, err)
 	}
-	for _, want := range []string{"submitted", "runs logs --run", "runs cancel --run"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("run output is missing %q:\n%s", want, out)
-		}
-	}
-	resumed := captureStdout(t, func() {
-		if err := runCronsSet([]string{"yearly", "--resume", "-o", "pretty"}); err != nil {
-			t.Fatalf("crons set --resume: %v", err)
-		}
-	})
-	if !strings.Contains(resumed, "armed") {
-		t.Errorf("resume output:\n%s", resumed)
-	}
-}
-
-func TestCronsListAndNextEmitNDJSON(t *testing.T) {
-	_, _ = cronsTestHome(t)
-	for _, body := range []string{cronsMinutelyRepo, `pipelines:
-  - name: nightly
-    entrypoint: Nightly
-    on:
-      schedule:
-        cron: "0 3 * * *"
-        where: local
-`} {
-		repo := cronsTestRepo(t, body)
-		captureStdout(t, func() {
-			if err := runIn(t, repo, runCronsInstall, "--no-prove", "--no-timer", "-o", "pretty"); err != nil {
-				t.Fatalf("crons install: %v", err)
-			}
-		})
-	}
-
-	list := captureStdout(t, func() {
-		if err := runCronsList([]string{"-o", "json"}); err != nil {
-			t.Fatalf("crons list: %v", err)
-		}
-	})
-	rows := decodeNDJSONLines[crons.Row](t, list)
-	if len(rows) != 2 {
-		t.Fatalf("list emitted %d row(s):\n%s", len(rows), list)
-	}
-	for _, r := range rows {
-		if r.Display == "" || r.State != crons.StateArmed {
-			t.Errorf("row: %+v", r)
-		}
-	}
-
-	next := captureStdout(t, func() {
-		if err := runCronsList([]string{"--next", "3", "-o", "json"}); err != nil {
-			t.Fatalf("crons list --next: %v", err)
-		}
-	})
-	instants := decodeNDJSONLines[cronsUpcoming](t, next)
-	if len(instants) != 3 {
-		t.Fatalf("next emitted %d instant(s):\n%s", len(instants), next)
-	}
-	for i := 1; i < len(instants); i++ {
-		if instants[i].At.Before(instants[i-1].At) {
-			t.Fatalf("instants are not in time order: %+v", instants)
-		}
-	}
-}
-
-func TestCronsShowNextWalksOneScheduleFromTheGivenInstant(t *testing.T) {
-	_, _ = cronsTestHome(t)
-	repo := cronsTestRepo(t, cronsMinutelyRepo)
-	captureStdout(t, func() {
-		if err := runIn(t, repo, runCronsInstall, "--no-prove", "--no-timer", "-o", "pretty"); err != nil {
-			t.Fatalf("crons install: %v", err)
-		}
-	})
-	out := captureStdout(t, func() {
-		if err := runCronsShow([]string{"every-minute", "--next", "2", "--sw-now", "2026-01-01T03:00:30Z", "-o", "json"}); err != nil {
-			t.Fatalf("crons show --next: %v", err)
-		}
-	})
-	instants := decodeNDJSONLines[cronsUpcoming](t, out)
-	if len(instants) != 2 || !instants[0].At.Equal(time.Date(2026, 1, 1, 3, 1, 0, 0, time.UTC)) {
-		t.Fatalf("show --next instants: %+v", instants)
-	}
-	if err := runCronsShow([]string{"every-minute", "--next", "0"}); err == nil || !strings.Contains(err.Error(), "must be positive") {
-		t.Errorf("--next 0: err = %v", err)
-	}
-	if err := runCronsShow([]string{"every-minute", "--next", "2", "--fires", "3"}); err == nil {
-		t.Error("--next with --fires was accepted")
-	}
-}
-
-func TestCronsFoldedFlagsRefuseMixedRequests(t *testing.T) {
-	_, _ = cronsTestHome(t)
-	for _, args := range [][]string{
-		{"--timer", "--next", "3"},
-		{"--all", "--timer"},
-		{"nightly", "--next", "3"},
-	} {
-		if err := runCronsList(args); err == nil {
-			t.Errorf("crons list %v was accepted", args)
-		}
-	}
-	for _, args := range [][]string{
-		{"nightly", "--pause", "--resume"},
-		{"nightly", "--reset", "--cron", "0 5 * * *"},
-		{"nightly", "--pin", "--unpin"},
-	} {
-		if err := runCronsSet(args); err == nil || !strings.Contains(err.Error(), "stand alone") {
-			t.Errorf("crons set %v: err = %v", args, err)
-		}
-	}
-	if err := runCronsUninstall([]string{"--name", "nightly", "--fleet"}); err == nil {
-		t.Error("crons uninstall --name with --fleet was accepted")
-	}
-}
-
-func TestCronsShowEmitsOneJSONRecord(t *testing.T) {
-	_, _ = cronsTestHome(t)
-	repo := cronsTestRepo(t, cronsMinutelyRepo)
-	captureStdout(t, func() {
-		if err := runIn(t, repo, runCronsInstall, "--no-prove", "--no-timer", "-o", "pretty"); err != nil {
-			t.Fatalf("crons install: %v", err)
-		}
-	})
-	out := captureStdout(t, func() {
-		if err := runCronsShow([]string{"every-minute", "-o", "json"}); err != nil {
-			t.Fatalf("crons show: %v", err)
-		}
-	})
-	report := oneJSONRecord[cronsShowReport](t, out)
-	if report.Pipeline != "every-minute" || report.Cron != "* * * * *" {
-		t.Fatalf("show record: %+v", report.Row)
-	}
-}
-
-func TestCronsVerbsEmitOneJSONRecordPerLine(t *testing.T) {
-	_, _ = cronsTestHome(t)
-	repo := cronsTestRepo(t, cronsMinutelyRepo)
-
-	install := captureStdout(t, func() {
-		if err := runIn(t, repo, runCronsInstall, "--no-prove", "--no-timer", "-o", "json"); err != nil {
-			t.Fatalf("crons install: %v", err)
-		}
-	})
-	if armed := oneJSONRecord[cronsInstallReport](t, install); armed.Armed != 1 {
-		t.Errorf("install record: %+v", armed)
-	}
-
-	status := captureStdout(t, func() { _ = runCronsList([]string{"--timer", "-o", "json"}) })
-	if health := oneJSONRecord[crons.Health](t, status); health.Armed != 1 {
-		t.Errorf("status record: %+v", health)
-	}
-
-	paused := captureStdout(t, func() {
-		if err := runCronsSet([]string{"every-minute", "--pause", "-o", "json"}); err != nil {
-			t.Fatalf("crons set --pause: %v", err)
-		}
-	})
-	if row := oneJSONRecord[crons.Row](t, paused); row.State != crons.StatePaused {
-		t.Errorf("pause record: %+v", row)
-	}
-
-	ran := captureStdout(t, func() {
-		if err := runCronsRun([]string{"every-minute", "-o", "json"}); err != nil {
-			t.Fatalf("crons run: %v", err)
-		}
-	})
-	if launched := oneJSONRecord[cronsRunReport](t, ran); launched.RunID == "" {
-		t.Errorf("run record: %+v", launched)
+	_, fires, err := session.svc.Show(t.Context(), rows[0].ID, 10)
+	if err != nil || len(fires) != 1 || fires[0].RunID != launcher.launched[0] {
+		t.Fatalf("history: %+v %v", fires, err)
 	}
 }
 
@@ -422,7 +170,7 @@ func TestCronsInstallReportsWhatItArmedOnAPlatformWithNoTimer(t *testing.T) {
 	if report.Armed != 1 {
 		t.Errorf("install record: %+v", report)
 	}
-	if !strings.Contains(report.TimerSkip, "crons tick") {
+	if !strings.Contains(report.TimerSkip, "__tick") {
 		t.Errorf("timer_skipped = %q, want the hint about driving the tick", report.TimerSkip)
 	}
 }
@@ -458,30 +206,6 @@ func TestCronsInstallRendersTheReportWhenTheTimerStepFails(t *testing.T) {
 	}
 }
 
-func TestCronsPlainPrintsThePrimaryValueOnly(t *testing.T) {
-	_, launcher := cronsTestHome(t)
-	repo := cronsTestRepo(t, cronsMinutelyRepo)
-	install := captureStdout(t, func() {
-		if err := runIn(t, repo, runCronsInstall, "--no-prove", "--no-timer", "-o", "plain"); err != nil {
-			t.Fatalf("crons install: %v", err)
-		}
-	})
-	if install != filepath.Base(repo)+"/every-minute\n" {
-		t.Errorf("install plain = %q, want the armed name alone", install)
-	}
-
-	ran := captureStdout(t, func() {
-		if err := runCronsRun([]string{"every-minute", "-o", "plain"}); err != nil {
-			t.Fatalf("crons run: %v", err)
-		}
-	})
-	if len(launcher.launched) != 1 || ran != launcher.launched[0]+"\n" {
-		t.Errorf("run plain = %q, want the run id alone", ran)
-	}
-}
-
-// safety: one JSON line per verb is what makes a piped verb safe to cut with
-// head and jq.
 func oneJSONRecord[T any](t *testing.T, body string) T {
 	t.Helper()
 	records := decodeNDJSONLines[T](t, body)
@@ -491,50 +215,17 @@ func oneJSONRecord[T any](t *testing.T, body string) T {
 	return records[0]
 }
 
-func TestCronsResolveNamesTheCandidatesOrSaysNothingIsArmed(t *testing.T) {
-	_, _ = cronsTestHome(t)
-	err := runCronsShow([]string{"nope", "-o", "pretty"})
-	if err == nil {
-		t.Fatal("show of an unarmed name succeeded")
-	}
-	if !strings.Contains(err.Error(), "crons list") {
-		t.Errorf("error %q does not point at the listing", err)
-	}
-
-	for _, name := range []string{"alpha", "beta"} {
-		dir := filepath.Join(t.TempDir(), name)
-		if merr := os.MkdirAll(dir, 0o755); merr != nil {
-			t.Fatal(merr)
-		}
-		writeRepoFile(t, filepath.Join(dir, ".sparkwing", "sparkwing.yaml"), cronsMinutelyRepo)
-		captureStdout(t, func() {
-			if ierr := runIn(t, dir, runCronsInstall, "--no-prove", "--no-timer", "-o", "pretty"); ierr != nil {
-				t.Fatalf("crons install: %v", ierr)
-			}
-		})
-	}
-	err = runCronsShow([]string{"every-minute", "-o", "pretty"})
-	if !errors.Is(err, crons.ErrAmbiguousName) {
-		t.Fatalf("error = %v, want ErrAmbiguousName", err)
-	}
-	for _, want := range []string{"alpha/every-minute", "beta/every-minute"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not name %q", err, want)
-		}
-	}
-}
-
 func TestCronsUninstallRemovesTheRowsAndTheTimer(t *testing.T) {
 	_, _ = cronsTestHome(t)
 	repo := cronsTestRepo(t, cronsMinutelyRepo)
 	captureStdout(t, func() {
 		if err := runIn(t, repo, runCronsInstall, "--no-prove", "-o", "pretty"); err != nil {
-			t.Fatalf("crons install: %v", err)
+			t.Fatalf("schedules install: %v", err)
 		}
 	})
 	out := captureStdout(t, func() {
 		if err := runIn(t, repo, runCronsUninstall, "-o", "pretty"); err != nil {
-			t.Fatalf("crons uninstall: %v", err)
+			t.Fatalf("schedules uninstall: %v", err)
 		}
 	})
 	if !strings.Contains(out, "disarmed 1 schedule(s)") {
@@ -543,13 +234,14 @@ func TestCronsUninstallRemovesTheRowsAndTheTimer(t *testing.T) {
 	if !strings.Contains(out, "removed") {
 		t.Errorf("uninstall did not report the timer going:\n%s", out)
 	}
-	list := captureStdout(t, func() {
-		if err := runCronsList([]string{"--all", "-o", "pretty"}); err != nil {
-			t.Fatalf("crons list: %v", err)
-		}
-	})
-	if !strings.Contains(list, "no schedules are armed here") {
-		t.Fatalf("list after uninstall:\n%s", list)
+	session, release, err := openCrons("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	rows, err := session.svc.List(t.Context())
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("uninstall left schedules: %+v %v", rows, err)
 	}
 }
 
@@ -672,51 +364,6 @@ func TestCronLauncherStopsCountingAPendingRunOnceItIsStale(t *testing.T) {
 	}
 }
 
-func TestCronsSetPauseAndResumeNameTheScheduleTheWayListDoes(t *testing.T) {
-	_, _ = cronsTestHome(t)
-	repo := cronsTestRepo(t, `pipelines:
-  - name: sweep
-    entrypoint: Sweep
-    on:
-      schedule:
-        - name: quick
-          cron: "*/5 * * * *"
-          where: local
-`)
-	captureStdout(t, func() {
-		if err := runIn(t, repo, runCronsInstall, "--no-prove", "--no-timer", "-o", "pretty"); err != nil {
-			t.Fatalf("crons install: %v", err)
-		}
-	})
-	want := filepath.Base(repo) + "/sweep/quick"
-
-	paused := captureStdout(t, func() {
-		if err := runCronsSet([]string{"sweep/quick", "--pause", "-o", "pretty"}); err != nil {
-			t.Fatalf("crons set --pause: %v", err)
-		}
-	})
-	if !strings.Contains(paused, want+" is paused") {
-		t.Errorf("pause named the schedule as %q, want %q:\n%s", strings.TrimSpace(paused), want, paused)
-	}
-	resumed := captureStdout(t, func() {
-		if err := runCronsSet([]string{"sweep/quick", "--resume", "-o", "pretty"}); err != nil {
-			t.Fatalf("crons set --resume: %v", err)
-		}
-	})
-	if !strings.Contains(resumed, want+" is armed") {
-		t.Errorf("resume named the schedule as %q, want %q:\n%s", strings.TrimSpace(resumed), want, resumed)
-	}
-}
-
-func TestCronsPinAndUnpinRefuseProfile(t *testing.T) {
-	if !strings.Contains(cmdCronsSet.Description, "neither takes\n--profile") {
-		t.Errorf("crons set does not say --pin and --unpin refuse --profile:\n%s", cmdCronsSet.Description)
-	}
-	if !strings.Contains(cmdCrons.Description, "every verb but tick, set --pin and set --unpin") {
-		t.Errorf("the crons group still claims every verb but tick takes --profile:\n%s", cmdCrons.Description)
-	}
-}
-
 func cronsTestTimerBinary() string {
 	if runtime.GOOS == "windows" {
 		return filepath.VolumeName(os.TempDir()) + "/usr/local/bin/sparkwing"
@@ -729,7 +376,7 @@ func TestCronsUninstallStillDisarmsAfterTheProjectFilesAreGone(t *testing.T) {
 	repo := cronsTestRepo(t, cronsMinutelyRepo)
 	captureStdout(t, func() {
 		if err := runIn(t, repo, runCronsInstall, "--no-prove", "--no-timer", "-o", "pretty"); err != nil {
-			t.Fatalf("crons install: %v", err)
+			t.Fatalf("schedules install: %v", err)
 		}
 	})
 	if err := os.Remove(filepath.Join(repo, ".sparkwing", "sparkwing.yaml")); err != nil {
@@ -737,7 +384,7 @@ func TestCronsUninstallStillDisarmsAfterTheProjectFilesAreGone(t *testing.T) {
 	}
 	out := captureStdout(t, func() {
 		if err := runIn(t, repo, runCronsUninstall, "-o", "pretty"); err != nil {
-			t.Fatalf("crons uninstall with the markers gone: %v", err)
+			t.Fatalf("schedules uninstall with the markers gone: %v", err)
 		}
 	})
 	if !strings.Contains(out, "disarmed 1 schedule(s)") {

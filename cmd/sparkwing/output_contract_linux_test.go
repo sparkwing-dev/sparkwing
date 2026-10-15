@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -26,14 +25,6 @@ func TestOutputContractTerminal(t *testing.T) {
 		{"plain", "plain", []string{"version", "--offline"}, 0},
 		{"onboarding-json", "json", []string{"info", "--first-time"}, 0},
 		{"help-json", "json", []string{"--help"}, 0},
-		{"serve-running-default", "", []string{"serve", "start"}, 0},
-		{"serve-running-json", "json", []string{"serve", "start"}, 0},
-		{"serve-running-plain", "plain", []string{"serve", "start"}, 0},
-		{"serve-default", "", []string{"serve", "stop"}, 0},
-		{"serve-json", "json", []string{"serve", "stop"}, 0},
-		{"serve-plain", "plain", []string{"serve", "stop"}, 0},
-		{"consumer-default", "", []string{"runs", "consumer", "stop"}, 0},
-		{"consumer-json", "json", []string{"runs", "consumer", "stop"}, 0},
 		{"update-default", "", []string{"repos", "update", "--in-place", "--check"}, 2},
 		{"update-json", "json", []string{"repos", "update", "--in-place", "--check"}, 2},
 		{"update-plain", "plain", []string{"repos", "update", "--in-place", "--check"}, 2},
@@ -58,18 +49,10 @@ func TestOutputContractTerminal(t *testing.T) {
 			}
 			defer slave.Close()
 			args := append([]string{}, tc.args...)
-			home := ""
-			if strings.HasPrefix(tc.name, "serve-running") {
-				dp, _, _ := dashboardSleepingRecord(t)
-				home = dp.home
-			}
 			if mode != "" {
 				args = append(args, "--output", mode)
 			}
 			cmd := outputContractCommand(t, args...)
-			if home != "" {
-				cmd.Env = setEnv(cmd.Env, "SPARKWING_HOME", home)
-			}
 			cmd.Env = setEnv(cmd.Env, "NO_COLOR", "")
 			cmd.Env = setEnv(cmd.Env, "CLICOLOR_FORCE", "1")
 			cmd.Stdout = slave

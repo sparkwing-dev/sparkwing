@@ -224,12 +224,12 @@ func TestRepeatedHeadingsAreDisambiguatedByBreadcrumb(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var examples int
+	var flags int
 	for _, s := range secs {
-		if s.Heading != "Examples" {
+		if s.Heading != "Flags" {
 			continue
 		}
-		examples++
+		flags++
 		if s.Breadcrumb == "" {
 			t.Errorf("an %q section at line %d carries no breadcrumb", s.Heading, s.StartLine)
 		}
@@ -237,8 +237,8 @@ func TestRepeatedHeadingsAreDisambiguatedByBreadcrumb(t *testing.T) {
 			t.Errorf("breadcrumb %q repeats the doc title, which the slug already carries", s.Breadcrumb)
 		}
 	}
-	if examples < 10 {
-		t.Fatalf("found only %d Examples sections; the check is not exercising the case", examples)
+	if flags < 2 {
+		t.Fatalf("found only %d Flags sections; the check is not exercising the case", flags)
 	}
 }
 

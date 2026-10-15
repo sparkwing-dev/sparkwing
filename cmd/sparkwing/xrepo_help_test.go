@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os/exec"
 	"strings"
 	"testing"
 )
@@ -27,9 +26,8 @@ func TestXrepoSubcommandsAreRegistered(t *testing.T) {
 
 func TestXrepoRuntimeHelpUsesCommandRegistry(t *testing.T) {
 	t.Parallel()
-	bin := buildSubmitCLI(t)
 
-	parent, err := exec.Command(bin, "repos", "--help").CombinedOutput()
+	parent, err := outputContractCommand(t, "repos", "--help", "--output", "plain").CombinedOutput()
 	if err != nil {
 		t.Fatalf("xrepo help: %v\n%s", err, parent)
 	}
@@ -37,7 +35,7 @@ func TestXrepoRuntimeHelpUsesCommandRegistry(t *testing.T) {
 		t.Fatalf("xrepo help does not use the registered child synopsis:\n%s", parent)
 	}
 
-	leaf, err := exec.Command(bin, "repos", "list", "--help").CombinedOutput()
+	leaf, err := outputContractCommand(t, "repos", "list", "--help", "--output", "plain").CombinedOutput()
 	if err != nil {
 		t.Fatalf("xrepo list help: %v\n%s", err, leaf)
 	}
@@ -51,12 +49,12 @@ func TestXrepoRuntimeHelpUsesCommandRegistry(t *testing.T) {
 		}
 	}
 
-	add, err := exec.Command(bin, "repos", "add", "--help").CombinedOutput()
+	add, err := outputContractCommand(t, "repos", "add", "--help", "--output", "plain").CombinedOutput()
 	if err != nil {
 		t.Fatalf("xrepo add help: %v\n%s", err, add)
 	}
-	if !strings.Contains(string(add), "sparkwing repos add [path] [flags]") {
-		t.Fatalf("xrepo add help does not render its optional path once:\n%s", add)
+	if !strings.Contains(string(add), "sparkwing repos add [flags]") {
+		t.Fatalf("xrepo add help retains a removed positional path:\n%s", add)
 	}
 }
 
@@ -77,10 +75,10 @@ func TestXrepoRegistryDescribesRuntimeInputs(t *testing.T) {
 	assertFlag(t, cmdReposList, "output", "o")
 	assertFlag(t, cmdReposList, "pipelines", "")
 
-	if len(cmdReposAdd.PosArgs) != 1 || cmdReposAdd.PosArgs[0].Required {
-		t.Fatalf("xrepo add positional arguments = %#v, want one optional path", cmdReposAdd.PosArgs)
-	}
-	if len(cmdReposRemove.PosArgs) != 1 || !cmdReposRemove.PosArgs[0].Required {
-		t.Fatalf("xrepo remove positional arguments = %#v, want one required path or basename", cmdReposRemove.PosArgs)
+	for _, command := range []Command{cmdReposAdd, cmdReposRemove, cmdReposInfo} {
+		if len(command.PosArgs) != 0 {
+			t.Errorf("%s advertises positional arguments", command.Path)
+		}
+		assertFlag(t, command, "checkout", "C")
 	}
 }

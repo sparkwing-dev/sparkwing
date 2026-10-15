@@ -72,6 +72,10 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 			control := &cloudControlW8{award: &award}
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "dedicated", UID: "node-uid", Labels: map[string]string{launcher.TeamNodeLabel: launcher.TeamNodeValue("team")}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
 			kube := fake.NewClientset(node)
+			kube.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+				action.(ktesting.CreateAction).GetObject().(*batchv1.Job).UID = "job-uid"
+				return false, nil, nil
+			})
 			// safety: retain deleting Jobs so the fake API exercises reconstruction while DinD drains.
 			kube.PrependReactor("delete", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
 				name := action.(ktesting.DeleteAction).GetName()
@@ -81,6 +85,10 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 					return true, nil, err
 				}
 				job := object.(*batchv1.Job).DeepCopy()
+				preconditions := action.(ktesting.DeleteAction).GetDeleteOptions().Preconditions
+				if preconditions == nil || preconditions.UID == nil || *preconditions.UID != job.UID {
+					t.Fatal("cleanup lost its observed Job UID precondition")
+				}
 				now := metav1.Now()
 				job.DeletionTimestamp = &now
 				return true, nil, kube.Tracker().Update(gvr, job, cfg.Namespace)
@@ -182,11 +190,12 @@ func restartedLauncherW8(t *testing.T, kube *fake.Clientset, boundary launcher.C
 						t.Fatalf("restart observed %d Jobs", len(request.Observed))
 					}
 					observation := request.Observed[0]
-					if observation.UnitID != b.UnitID || observation.NodeUID != "node-uid" {
+					wantAward := capability.LeaseRef{Kind: unit.Unit, ID: b.UnitID, Holder: b.Holder, Generation: b.Generation}
+					if observation.Award != wantAward || observation.NodeUID != "node-uid" || observation.Job.Namespace != cfg.Namespace || observation.Job.UID != "job-uid" {
 						t.Fatal("restart lost persisted unit or node identity")
 					}
 					if control.remove {
-						return controllerwire.LauncherSyncResponse{Remove: []string{observation.JobName}}, nil
+						return controllerwire.LauncherSyncResponse{Remove: []controllerwire.LauncherJobRef{observation.Job}}, nil
 					}
 					return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{unit}}, nil
 				},

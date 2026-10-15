@@ -872,9 +872,6 @@ type Dialect int
 func (d Dialect) String() string
 const DialectPostgres
 const DialectSQLite Dialect = iota
-const DirectUploadMaxPending = 100
-const DirectUploadMaxSize int64 = 500 << 20
-const DirectUploadTTL = 24 * time.Hour
 const Dispatch ReconcileKind = "dispatch"
 const DispatchedHeartbeatInterval = 5 * time.Second
 func DisplayProfileKey(key string) string
@@ -999,7 +996,6 @@ var ErrNodeLogSegmentConflict = errors.New("store: the log segment was signed fo
 var ErrNodeMetricLimit = errors.New("store: a node holds at most 10000 metric samples")
 var ErrNotFound = errors.New("not found")
 var ErrNotMember = errors.New("store: not a member of this team")
-var ErrObjectExists = errors.New("object already committed")
 var ErrOnlyTeam = errors.New("store: this is your only team; delete your account instead")
 var ErrOpenCheckout = errors.New("store: the team has a credit checkout in progress; " +
 	"wait for the checkout to expire or complete, then delete the team")
@@ -1033,7 +1029,6 @@ var ErrTeamLimit = errors.New("store: this user has created as many teams as one
 var ErrTeamOwes = errors.New("store: the team owes for usage or has a card charge in progress; pay it before deleting the team")
 var ErrTokenExpired = errors.New("token is expired")
 var ErrTokenRevoked = errors.New("token is revoked")
-var ErrTooManyPendingUploads = fmt.Errorf("a team holds at most %d uncommitted uploads; commit them or wait for them to expire", DirectUploadMaxPending)
 var ErrUnknownPayment = errors.New("credits: no settled grant belongs to this payment id")
 var ErrUnknownTeam = errors.New("store: team is not registered")
 var ErrUnknownToken = errors.New("unknown token")
@@ -1500,11 +1495,9 @@ const MaxRunOutputBytes int64 = 1 << 30
 const MaxRunnerTokensPerTeam = 100
 const MaxSecretValueBytes = 128 << 10
 const MaxSecretsPerTeam = 100
-const MaxSmallOutputOverage int64 = 64 << 20
 const MaxSourceMints = 3
 const MaxStorageRateMicroPerGBDay = 1_000_000_000_000
 const MaxTeamBalanceMicro = 5_000 * 100 * MicroCreditsPerCent
-const MaxUnpaidOutputBytes int64 = 1 << 20
 type Membership struct {
 	Team        Team
 	DisplayName string
@@ -2829,7 +2822,6 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 func (s *Store) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error)
 func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (ClaimedRun, error)
 func (s *Store) Close() error
-func (s *Store) CommitUpload(ctx context.Context, team Team, id, recordedUploader string, now time.Time) (err error)
 func (s *Store) CommittedObject(ctx context.Context, team Team, key string) (Upload, error)
 func (s *Store) ComputeAlarmState(ctx context.Context) (runners, alarm int64, err error)
 func (s *Store) ComputeLimits(ctx context.Context) (_ ComputeLimits, err error)
@@ -2964,14 +2956,12 @@ func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery st
 func (s *Store) RecordLocalOutput(ctx context.Context, runID, nodeID string, ref OutputRef, now time.Time) (err error)
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
-func (s *Store) ReleaseStorage(ctx context.Context, team Team, id string, now time.Time) (err error)
 func (s *Store) ReleaseUnit(ctx context.Context, claim UnitClaim, capabilityPrefix string) error
 func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executing bool) (LeaseBeat, error)
 func (s *Store) ReplayClaimResult(ctx context.Context, tok ClaimToken, digest string) error
 func (s *Store) ReportAttempt(ctx context.Context, commit ClaimResultCommit, report AttemptReport, now time.Time) (replayed bool, err error)
 func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) ResealSecrets(ctx context.Context, sealedPrefix string, batchSize int, reseal func(Team, Secret) (string, error)) (SecretResealCounts, error)
-func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload, err error)
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
 func (s *Store) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error)
 func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req ClaimInputRequest, now time.Time) (ClaimInput, error)
@@ -3030,7 +3020,6 @@ func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSes
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
-func (s *Store) UploadForTeam(ctx context.Context, team Team, id string) (Upload, error)
 func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) ([]WaitlistedAccount, error)
 type SummaryWrite struct {
 	Ref      NodeRef
@@ -3263,6 +3252,7 @@ func (t *Tenant) PromoteNextWaiters(ctx context.Context, key string, lease time.
 func (t *Tenant) PutGitCredential(ctx context.Context, c GitCredential, now time.Time) (_ GitCredential, err error)
 func (t *Tenant) PutGitHubAppAutomation(ctx context.Context, a GitHubAppAutomation, now time.Time) error
 func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, now time.Time) (GitHubAppTrigger, error)
+func (t *Tenant) ReadBlob(ctx context.Context, authority blob.Authority, digest blob.Digest) (blob.Blob, error)
 func (t *Tenant) ReadFailure(ctx context.Context, source NodeRef, generation int64, actor Actor) (*nodeproto.JobFailure, error)
 func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.LogReadRequest) (LogSegments, error)
 func (t *Tenant) ReadNode(ctx context.Context, ref NodeRef) (NodeRow, error)
@@ -3539,21 +3529,6 @@ type Upload struct {
 	Ref         string
 	ExpiresAt   time.Time
 	CommittedAt time.Time
-}
-type UploadRequest struct {
-	Team        Team
-	RunID       string
-	Kind        StorageKind
-	Key         string
-	Size        int64
-	SHA256      string
-	Principal   string
-	ClaimPrefix string
-	Provenance  string
-
-	Repo string
-	Ref  string
-	Now  time.Time
 }
 type UploadReservation struct {
 	ID          string

@@ -38,7 +38,7 @@ func TestCommandsJSONCarriesIndexFieldsOnly(t *testing.T) {
 }
 
 func TestCommandsJSONSubcommandCountMatchesTheListing(t *testing.T) {
-	records := decodeNDJSON[CommandIndexJSON](t, commandsOutput(t, "--limit", "0", "-o", "json"))
+	records := decodeNDJSON[CommandIndexJSON](t, commandsOutput(t, "--limit", "100000", "-o", "json"))
 	children := map[string]int{}
 	for _, c := range records {
 		fields := strings.Fields(c.Path)
@@ -89,17 +89,17 @@ func TestCommandsJSONOmitsHiddenUnlessAsked(t *testing.T) {
 	}
 
 	found := false
-	for _, c := range decodeNDJSON[CommandIndexJSON](t, commandsOutput(t, "--include-hidden", "--limit", "0", "-o", "json")) {
+	for _, c := range decodeNDJSON[CommandIndexJSON](t, commandsOutput(t, "--all", "--limit", "100000", "-o", "json")) {
 		if c.Path != hidden {
 			continue
 		}
 		found = true
 		if !c.Hidden {
-			t.Errorf("--include-hidden listed %q without marking it hidden", hidden)
+			t.Errorf("--all listed %q without marking it hidden", hidden)
 		}
 	}
 	if !found {
-		t.Errorf("--include-hidden did not list %q", hidden)
+		t.Errorf("--all did not list %q", hidden)
 	}
 }
 

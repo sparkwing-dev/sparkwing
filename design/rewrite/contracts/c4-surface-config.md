@@ -41,6 +41,29 @@ is bound to one home, owns one store and uses the shared controller, queue and U
 Readiness includes startup reconciliation. Drain joins shutdown. The four existing
 activity counts determine idle exit, with stay as an explicit override.
 
+The CLI's daemon status, stop and restart adapters consume `LocalLifecycle`
+through the same local-services binding as dashboard, doctor and update.
+Status projects only `LocalStatus`. It never opens the store or probes the old
+daemon transport. Restart preserves a stopped controller, skips the same exact
+version unless forced, joins Stop, confirms stopped status, then calls
+EnsureStarted with the captured home/executable/address and preceding stay value.
+An answering controller after Stop or an unready/wrong-version start is an error.
+No success receipt is emitted after a lifecycle, cancellation or output failure.
+The existing 2/20/30-second status/restart/stop observation budgets remain.
+Native local-services construction and readiness remain W8 integration points.
+
+`daemon events` reads the retained local journal with the final clisurface
+grammar. It selects the newest 50 matching records by default and accepts
+positive limits. Opaque cursors bind the journal directory, normalized filters,
+initial since cutoff and exact unread prefix. Newer appends keep continuation stable.
+Missing, inserted, reordered or edited unread records fail with a restart hint. The cursor
+contains hashes, cutoff and count, never record payloads. It grants no authority.
+JSON emits event rows followed by a page record with next_cursor and truncated,
+including empty and final pages. Plain/pretty continuation goes to stderr.
+`--explain --run` renders the complete related timeline without page metadata.
+It conflicts with list filters and pagination. Offset and zero-limit paths are
+deleted. Journal producer lifecycle remains W8-owned.
+
 Managed controller units call foreground `wingd run --stay --home <absolute-home>`.
 Managed timers call `__tick --home <absolute-home>`. Public dashboard start stays a
 lifecycle client. ManagedUnit retains Home and update re-renders both kinds before
@@ -66,6 +89,12 @@ The acceptance suite runs each configuration boundary under its scenario's
 `runspec-config` cell. Placement cells require the T1 driver and real hosts.
 
 ## Ownership
+
+W9 fills the library-inflation selector omitted from the initial registry.
+`pipeline sparks inflate --library MODULE` takes a required sparks-core name or
+full Go module path, matching the library selector used by catalog. There is no
+`--module` alias. Plain output is the destination. JSON retains module, version,
+destination and replacement. The shared parser governs help and execution.
 
 C4 owns process environment construction, shared limits and deadline arithmetic,
 configuration precedence, both YAML file shapes, command grammar, local controller
@@ -284,6 +313,23 @@ GlobalFlags and CommonRules apply to every row. Unknown engine flags fail;
 pipeline arguments start after `--`. Only run and pipeline trigger take a
 pipeline positional. Output selection is validated before side effects; lists
 are NDJSON and diagnostics use the C2 error object on stderr.
+
+`__complete --word` accepts an empty value to select root completions. Shell
+completion requests use `--kind` and `--word`, with explicit plain output.
+
+`clisurface.ResolvePipeline` captures the invoked name and registered SDK
+entrypoint from validated project configuration. An unconfigured pipeline uses
+the same name for both. A configured entrypoint that is missing from describe
+cannot fall back to an SDK registration named after the alias. Help, completion,
+arguments, secrets and risks all use the selected entrypoint's schema while
+displaying the invoked name. Hosts carry the pair into the sealed source and
+resolved entrypoint. Protocol v2 plan requests select the entrypoint in
+`Request.Pipeline` and retain the invoked name in `RunContext.Pipeline`.
+
+`pipeline plan --pipeline NAME -- <pipeline args>` accepts opaque pipeline flags
+after the separator while retaining the kind-named selector. It resolves the
+configured entrypoint for SDK requests and keeps the invoked name in RunContext.
+Plan previews redact classified arguments and structured planning failures.
 
 - `run` is local. `--publish P` uploads the record/results/logs with local
   provenance under trust_local_builds; publication failure cannot fail the run.
@@ -613,6 +659,8 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 | [`CommonRules`](../../../internal/clisurface/contract.go#L96) | CommonRules fixes shared meanings so a new command cannot reinterpret a flag. |
 | [`Validate`](../../../internal/clisurface/contract.go#L117) | Validate catches grammar drift before a parser or help generator consumes it. |
 | [`Registry`](../../../internal/clisurface/registry.go#L4) | the final tree is independent of runtime dispatch so help and parsers share one contract. |
+| [`PipelineIdentity`](../../../internal/clisurface/pipeline.go) | Captures the invoked name separately from the registered SDK entrypoint. |
+| [`ResolvePipeline`](../../../internal/clisurface/pipeline.go) | Resolves the configured pair without process globals or later configuration reads. |
 
 ### pkg/projectconfig
 

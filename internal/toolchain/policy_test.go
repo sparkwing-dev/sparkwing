@@ -6,31 +6,6 @@ import (
 	"testing"
 )
 
-func TestSelectKeepsStableReleaseMatrix(t *testing.T) {
-	tests := []struct {
-		name      string
-		selection Selection
-		want      Action
-	}{
-		{"older switches", Selection{Installed: "v0.38.2", Required: "v0.40.0", Mode: ModeAuto}, Switch},
-		{"equal stays", Selection{Installed: "v0.40.0", Required: "v0.40.0", Mode: ModeAuto}, Stay},
-		{"newer stays", Selection{Installed: "v0.41.0", Required: "v0.40.0", Mode: ModeAuto}, Stay},
-		{"replacement stays", Selection{Installed: "v0.38.2", Required: "v0.40.0", Replacement: "..", Mode: ModeAuto}, Stay},
-		{"pseudo requirement stays", Selection{Installed: "v0.38.2", Required: "v0.0.0-20260101120000-abcdef123456", Mode: ModeAuto}, Stay},
-		{"source build stays", Selection{Installed: "(devel)", Required: "v0.40.0", Mode: ModeAuto}, Stay},
-		{"local refuses", Selection{Installed: "v0.38.2", Required: "v0.40.0", Mode: ModeLocal}, Refuse},
-		{"matching guard stays", Selection{Installed: "v0.38.2", Required: "v0.40.0", Active: "v0.40.0", Mode: ModeAuto}, Stay},
-		{"different guard still switches", Selection{Installed: "v0.38.2", Required: "v0.40.0", Active: "v0.39.0", Mode: ModeAuto}, Switch},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := Select(test.selection); got != test.want {
-				t.Fatalf("Select(%+v) = %v, want %v", test.selection, got, test.want)
-			}
-		})
-	}
-}
-
 func TestParseMode(t *testing.T) {
 	for raw, want := range map[string]Mode{"": ModeAuto, " auto ": ModeAuto, "local": ModeLocal} {
 		got, err := ParseMode(raw)

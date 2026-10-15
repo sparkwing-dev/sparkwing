@@ -19,8 +19,8 @@ func TestUpdateDoesNotExecuteUnverifiedFallback(t *testing.T) {
 
 	t.Run("latest lookup failure", func(t *testing.T) {
 		updateFetchLatest = func(context.Context) (string, error) { return "", errors.New("lookup denied") }
-		if err := runUpdateBinary("", false, false); err == nil {
-			t.Fatal("runUpdateBinary() succeeded")
+		if _, err := updateBinary("", false, false); err == nil {
+			t.Fatal("updateBinary() succeeded")
 		}
 	})
 
@@ -28,8 +28,8 @@ func TestUpdateDoesNotExecuteUnverifiedFallback(t *testing.T) {
 		updateDownloadInstall = func(string, string) (installedRelease, error) {
 			return installedRelease{}, errors.New("signature invalid")
 		}
-		if err := runUpdateBinary("v0.28.0", false, false); err == nil {
-			t.Fatal("runUpdateBinary() succeeded")
+		if _, err := updateBinary("v0.28.0", false, false); err == nil {
+			t.Fatal("updateBinary() succeeded")
 		}
 	})
 }

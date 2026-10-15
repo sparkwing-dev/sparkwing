@@ -61,7 +61,7 @@ func TestPipelineCacheKey_ReplaceVersionIsPartOfIdentity(t *testing.T) {
 func TestCompilePipeline_PassesTrimpathAndStrips(t *testing.T) {
 	log := installFakeGo(t)
 	dir := newPipelineDir(t)
-	if err := CompilePipeline(context.Background(), dir, filepath.Join(t.TempDir(), "bin", "pipelines")); err != nil {
+	if err := CompilePipeline(context.Background(), dir, filepath.Join(t.TempDir(), "bin", "pipelines"), CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr}); err != nil {
 		t.Fatalf("CompilePipeline: %v", err)
 	}
 	raw, err := os.ReadFile(log)
@@ -82,7 +82,7 @@ func TestCompilePipeline_PassesTrimpathAndStrips(t *testing.T) {
 func TestCompilePipeline_BuildFlagsAreNamedInTheCacheKey(t *testing.T) {
 	log := installFakeGo(t)
 	dir := newPipelineDir(t)
-	if err := CompilePipeline(context.Background(), dir, filepath.Join(t.TempDir(), "bin", "pipelines")); err != nil {
+	if err := CompilePipeline(context.Background(), dir, filepath.Join(t.TempDir(), "bin", "pipelines"), CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr}); err != nil {
 		t.Fatalf("CompilePipeline: %v", err)
 	}
 	raw, err := os.ReadFile(log)
@@ -91,7 +91,7 @@ func TestCompilePipeline_BuildFlagsAreNamedInTheCacheKey(t *testing.T) {
 	}
 	want := strings.Join(compiledFlags(t, strings.Fields(strings.TrimSpace(string(raw)))), " ")
 
-	_, parts, err := ExplainCacheKey(dir)
+	_, parts, err := ExplainCacheKey(dir, os.Environ())
 	if err != nil {
 		t.Fatalf("ExplainCacheKey: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestCompilePipeline_IdenticalBinariesAcrossCheckoutPaths(t *testing.T) {
 	sum := func(pipelineDir string) string {
 		t.Helper()
 		dest := filepath.Join(t.TempDir(), "pipelines")
-		if err := CompilePipeline(context.Background(), pipelineDir, dest); err != nil {
+		if err := CompilePipeline(context.Background(), pipelineDir, dest, CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr}); err != nil {
 			t.Fatalf("CompilePipeline(context.Background(), %s): %v", pipelineDir, err)
 		}
 		f, err := os.Open(dest)
@@ -170,7 +170,7 @@ func TestCompilePipeline_IdenticalBinariesAcrossCheckoutPaths(t *testing.T) {
 	}
 
 	t.Setenv("GOWORK", "off")
-	t.Setenv("GOFLAGS", "")
+	t.Setenv("GOFLAGS", "-buildvcs=false")
 
 	a, b := newCheckout(t, t.TempDir()), newCheckout(t, t.TempDir())
 	if sumA, sumB := sum(a), sum(b); sumA != sumB {

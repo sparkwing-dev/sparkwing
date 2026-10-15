@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -90,7 +91,7 @@ func TestShapesNamedForAnEventCarryItsTrigger(t *testing.T) {
 			if len(cfg.Registry().Pipelines) != 1 {
 				t.Fatalf("got %d pipelines, want 1", len(cfg.Registry().Pipelines))
 			}
-			if len(describeTriggers(cfg.Registry().Pipelines[0].On)) == 0 {
+			if reflect.DeepEqual(cfg.Registry().Pipelines[0].On, pipelines.Triggers{}) {
 				t.Fatal("entry has no triggers at all")
 			}
 			tc.check(t, cfg.Registry().Pipelines[0].On)
@@ -111,7 +112,7 @@ func TestShapesWithoutAnEventStayManual(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(describeTriggers(cfg.Registry().Pipelines[0].On)) > 0 {
+	if !reflect.DeepEqual(cfg.Registry().Pipelines[0].On, pipelines.Triggers{}) {
 		t.Errorf("structural shape declared triggers %+v", cfg.Registry().Pipelines[0].On)
 	}
 }
@@ -175,12 +176,12 @@ func TestEveryTriggerBlockParses(t *testing.T) {
 			}
 			on := cfg.Registry().Pipelines[0].On
 			if event == "manual" {
-				if len(describeTriggers(on)) > 0 {
+				if !reflect.DeepEqual(on, pipelines.Triggers{}) {
 					t.Errorf("--on manual declared %+v; it is the opt-out", on)
 				}
 				return
 			}
-			if len(describeTriggers(on)) == 0 {
+			if reflect.DeepEqual(on, pipelines.Triggers{}) {
 				t.Errorf("--on %s decoded to no trigger at all", event)
 			}
 		})

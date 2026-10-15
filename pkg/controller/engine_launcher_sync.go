@@ -25,6 +25,6 @@ func (s *EngineController) syncLauncher(ctx context.Context, a capability.Author
 	for i := range response.Awards {
 		response.Awards[i].Capability = ""
 	}
-	response.Remove = append([]string{}, response.Remove...)
+	response.Remove = append([]controllerwire.LauncherJobRef{}, response.Remove...)
 	return response, nil
 }

@@ -18,7 +18,7 @@ same command reaches any controller you can reach, including one your team
 runs:
 
 ```bash
-sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
+sparkwing profiles add --controller https://api.sparkwing.example --token-stdin
 ```
 
 Start local. Read [Install](#install) and [Quick start](#quick-start),
@@ -87,14 +87,14 @@ go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing@latest
 ```
 
 This installs the `sparkwing` binary, which is the single CLI for
-both admin / inspection (`sparkwing serve start`,
+both admin / inspection (`sparkwing dashboard start`,
 `sparkwing pipeline list`) and pipeline invocation
 (`sparkwing run <pipeline>`).
 
 > **Note:** `go install` does not include the Next.js dashboard
 > bundle, which is a generated artifact and not checked into the
 > repository. A source-built binary will refuse to start
-> `sparkwing serve` with a clear message pointing back to the
+> `sparkwing dashboard` with a clear message pointing back to the
 > release binary. CLI-only commands (`run`, `pipeline`, `runs`, etc.)
 > work fine. If you want the dashboard from a source checkout, run
 > `bash bin/build-web.sh` first to generate the bundle, then
@@ -104,7 +104,7 @@ both admin / inspection (`sparkwing serve start`,
 
 Prebuilt Windows binaries are published to GitHub Releases:
 `sparkwing-windows-amd64.exe` and `sparkwing-windows-arm64.exe`. They
-embed the dashboard bundle, so `sparkwing serve start` runs locally
+embed the dashboard bundle, so `sparkwing dashboard start` runs locally
 just as it does on macOS/Linux. Download the one for your architecture,
 rename it to `sparkwing.exe`, and put it on PATH. Install
 [Git for Windows](https://git-scm.com/download/win) as well -- pipelines
@@ -119,7 +119,7 @@ go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing@latest
 
 A source build does not include the Next.js dashboard bundle (it is a
 generated artifact, not checked into the repository), so
-`sparkwing serve start` on a source-built CLI refuses to start unless
+`sparkwing dashboard start` on a source-built CLI refuses to start unless
 you run `bash bin/build-web.sh` from a repo checkout first. The prebuilt
 release binary has no such limitation.
 
@@ -132,13 +132,13 @@ installer inside WSL when systemd user services are enabled.
 ```bash
 # 1. Set up your repo
 cd your-project
-sparkwing pipeline new --name release   # single-node minimal template by default
+sparkwing pipeline new --pipeline release   # single-node minimal template by default
 
 # 2. Run your first pipeline
 sparkwing run release
 
 # 3. (Optional) Watch runs in the browser
-sparkwing serve start    # detached local dashboard + API on :4343
+sparkwing dashboard start    # detached local dashboard + API on :4343
 ```
 
 The scaffold adds `sparkwing-pipeline` to `.sparkwing/.gitignore` so Git
@@ -153,14 +153,14 @@ For a build/test/deploy DAG instead of a single node, pass
 `--template build-test-deploy`:
 
 ```bash
-sparkwing pipeline new --name release --template build-test-deploy
+sparkwing pipeline new --pipeline release --template build-test-deploy
 ```
 
 The five shapes are structure only -- they run green in any repo, and
 you replace the echo bodies with real work. For how a real pipeline is
 written, read a finished one: `sparkwing examples` lists the registry
 (static-site deploys, containerized deploys to Kubernetes,
-migrate+deploy, CI-hygiene gates, and more), and `--name <example>
+migrate+deploy, CI-hygiene gates, and more), and `--example <example>
 --body` prints the source. Usually `sparkwing docs search -q "<task>"`
 gets you there in one step, since it ranks examples alongside the docs.
 
@@ -169,18 +169,16 @@ not an example name. See the
 [template catalog](sparks.md#the-template-catalog) for the full picture.
 
 If you want to own and edit a spark library's helper code directly rather
-than importing it, `sparkwing pipeline sparks inflate --module <name>`
+than importing it, `sparkwing pipeline sparks inflate --library <name>`
 copies its source into your repo. See
 [inflating a spark library](sparks.md#inflating-a-spark-library).
 
 Each `sparkwing` invocation compiles `.sparkwing/` and runs the pipeline as a host
 subprocess. Run state lives under `~/.sparkwing/` (SQLite + log files).
-`sparkwing serve start` spawns a detached local web server (`pkg/localws`,
-embedded in the CLI) against the same SQLite store, exposing the dashboard
-plus the JSON / logs APIs on one port - useful when several runs are going
-in parallel and the terminal gets crowded. `sparkwing serve status` /
-`kill` manage its lifecycle. These commands print a compact status record when
-piped, including `service`, `state`, `pid` when known, `home`, and `log`.
+The dashboard commands use the local controller lifecycle. This rewrite build
+still needs its native runtime, managed-service and log bindings. Commands report
+`unavailable` when those bindings are absent. See [Local dashboard](native-mode.md)
+for the current integration boundary.
 Dashboard records include `url` when known. Use `--output plain` for a single
 `running` or `stopped` value, or `--output pretty` for the terminal layout.
 A stopped `status` still exits 1; stopping an absent server exits 0.
@@ -344,7 +342,7 @@ sparkwing pipeline trigger build --profile dev --working-tree  # uncommitted cha
 sparkwing pipeline trigger build --profile prod        # run on the "prod" cluster
 ```
 
-Cluster names are profiles. `sparkwing cloud connect` writes one; see
+Cluster names are profiles. `sparkwing profiles add` writes one; see
 [Sparkwing Cloud](#sparkwing-cloud). Sparkwing itself
 does not run in-cluster locally - clusters named by `--profile` are
 user-managed deploy targets, not local sparkwing deployments.
@@ -357,47 +355,40 @@ reach it over outbound HTTPS. The same command reaches any controller you
 can reach, Sparkwing Cloud and one your team runs alike.
 
 ```bash
-sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
+sparkwing profiles add --controller https://api.sparkwing.example --token-stdin
 ```
 
-It reads the token you were given on stdin, writes the profile into
-`~/.config/sparkwing/config.yaml`, and prints the dashboard URL the
-controller announces along with the same probes `sparkwing configure profiles
-test` runs. Nothing here asks you to edit YAML.
+It reads the token from stdin, verifies the connection, and saves the profile in
+`~/.config/sparkwing/config.yaml`. The result contains the controller URL and a
+redacted token prefix. Use `sparkwing profiles show --profile NAME` to inspect
+it and `sparkwing profiles set --profile NAME --token-stdin` to replace its token.
 
-An administrator of a controller mints those tokens with
-`--admin-token-stdin` instead, which reads an admin credential and issues a
-user token carrying `runs.read`, `runs.write`, `triggers.read`, `logs.read`
-and `approvals.write`. The admin token is never stored. See
-[Self-hosting](self-hosting.md) for running the controller that issues them.
-
-The profile is named after the controller host (`api-sparkwing-example`
-above) unless you pass `--name`. An existing profile of that
-name is replaced only with `--force`, because the token it holds stays live
-until it is revoked.
+The profile name comes from the controller host unless `--profile` names it.
+An existing profile is replaced only with `--force`. Removing a profile with
+`sparkwing profiles remove --profile NAME` revokes its token first.
+`--keep-token` removes only the saved connection. Project configuration cannot
+supply connection profiles or credentials.
 
 Commands reach the connection only when they name it with `--profile`;
 without the flag they act on this machine's store.
 
 ```bash
-sparkwing cloud status --profile prod        # principal, scopes, and probes
-sparkwing cloud disconnect --name prod --admin-token-stdin   # revoke and remove
+sparkwing profiles show --profile prod        # saved connection, with token redacted
+sparkwing profiles remove --profile prod      # revoke and remove
 ```
 
-Disconnect revokes the profile's token. The profile's own token revokes only
-when it carries `admin`, so `--admin-token-stdin` supplies one that does; a
-revoke the credential is not allowed to make leaves the token live and names
-the prefix and the command that finishes the job. `--keep-token` removes the
-profile and touches no credential.
+Removal first verifies that the saved credential is a member credential and
+confirms its revocation. A failed revocation leaves the connection saved.
+`--keep-token` removes only the connection and leaves its credential live.
 
 To run work on this machine for that controller, add it as a runner with
-`sparkwing cluster runners add --profile prod --name this-laptop`.
+`sparkwing runners add --profile prod --runner this-laptop`.
 
 ### Start a run
 
 On a controller with teams, a team's runners fetch each run's source from
 GitHub themselves, so every run names a repository. A runner claims only
-runs whose repository matches one of its `--allow-repo` patterns, and a run
+runs whose repository matches one of its `--repos` patterns, and a run
 nothing may build stays pending. Start one from the dashboard or a terminal.
 
 **From the dashboard.** On the Runs page, **+ Start a run** opens a form that
@@ -419,7 +410,7 @@ this browser.
 token** mints a personal token and shows it once with two commands:
 
 ```bash
-sparkwing cloud connect --controller https://api.sparkwing.example --name acme --token-stdin
+sparkwing profiles add --controller https://api.sparkwing.example --profile acme --token-stdin
 sparkwing pipeline trigger <pipeline> --profile acme
 ```
 

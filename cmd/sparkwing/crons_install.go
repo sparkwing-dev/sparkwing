@@ -58,9 +58,9 @@ type cronsArmed struct {
 
 func runCronsInstall(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsInstall.Path, flag.ContinueOnError)
-	fleet := fs.Bool("fleet", false, "arm every registered repo")
-	only := fs.StringSlice("only", nil, "arm only these pipelines or pipeline/name entries")
-	follow := fs.Bool("follow", false, "arm without pinning, so each fire compiles the checkout")
+	fleet := fs.Bool("all-repos", false, "arm every registered repo")
+	only := fs.StringSlice("schedule", nil, "arm only these pipelines or pipeline/name entries")
+	follow := fs.Bool("unpinned", false, "arm without pinning, so each fire compiles the checkout")
 	noProve := fs.Bool("no-prove", false, "arm without compiling the pipelines first, which also pins nothing")
 	on := addCronsProfileFlag(fs)
 	noTimer := fs.Bool("no-timer", false, "arm without installing the OS timer")
@@ -75,10 +75,10 @@ func runCronsInstall(args []string) error {
 		return err
 	}
 	if *fleet && len(*only) > 0 {
-		return errors.New("crons install: --only names entries of one repo; drop --fleet or drop --only")
+		return errors.New("schedules install: --schedule names entries of one repo; drop --all-repos or drop --schedule")
 	}
 	if *on != "" && *fleet {
-		return fmt.Errorf("crons install: %w", errCronsProfileAndFleet)
+		return fmt.Errorf("schedules install: %w", errCronsProfileAndFleet)
 	}
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsInstall.Path)
 	if err != nil {
@@ -87,14 +87,14 @@ func runCronsInstall(args []string) error {
 
 	roots, err := cronsTargetRoots(*fleet)
 	if err != nil {
-		return fmt.Errorf("crons install: %w", err)
+		return fmt.Errorf("schedules install: %w", err)
 	}
 	if *on != "" {
 		return runCronsInstallProfile(*on, roots[0], *only, *follow, format)
 	}
 	session, release, err := openCrons("")
 	if err != nil {
-		return fmt.Errorf("crons install: %w", err)
+		return fmt.Errorf("schedules install: %w", err)
 	}
 	defer release()
 
@@ -140,10 +140,10 @@ func runCronsInstall(args []string) error {
 		return err
 	}
 	if len(failed) > 0 {
-		return fmt.Errorf("crons install: %s", strings.Join(failed, ", "))
+		return fmt.Errorf("schedules install: %s", strings.Join(failed, ", "))
 	}
 	if report.TimerError != "" {
-		return fmt.Errorf("crons install: the schedules are armed but the timer is not: %s", report.TimerError)
+		return fmt.Errorf("schedules install: the schedules are armed but the timer is not: %s", report.TimerError)
 	}
 	return nil
 }
@@ -305,8 +305,7 @@ func cronsClampedCatchUps(schedules []store.CronSchedule) []cronsCatchUpCap {
 
 func runCronsUninstall(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsUninstall.Path, flag.ContinueOnError)
-	fleet := fs.Bool("fleet", false, "disarm every registered repo")
-	name := fs.String("name", "", "disarm this one schedule instead of the repo's")
+	fleet := fs.Bool("all-repos", false, "disarm every registered repo")
 	outFmt := cronsOutputFlag(fs)
 	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmdCronsUninstall, fs, args); err != nil {
@@ -316,41 +315,32 @@ func runCronsUninstall(args []string) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("crons uninstall: unexpected positional %q; --name NAME disarms one schedule", fs.Arg(0))
+		return fmt.Errorf("schedules uninstall: unexpected positional %q; --name NAME disarms one schedule", fs.Arg(0))
 	}
 	if *on != "" && *fleet {
-		return fmt.Errorf("crons uninstall: %w", errCronsProfileAndFleet)
-	}
-	if fs.Changed("name") && *fleet {
-		return errors.New("crons uninstall: --name disarms one schedule and --fleet every one; drop one")
-	}
-	if fs.Changed("name") && *name == "" {
-		return errors.New("crons uninstall: --name needs a schedule name")
+		return fmt.Errorf("schedules uninstall: %w", errCronsProfileAndFleet)
 	}
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsUninstall.Path)
 	if err != nil {
 		return err
 	}
-	if *name != "" {
-		return runCronsDisarmOne(*name, format, *on)
-	}
 	if *on != "" {
 		root, rerr := resolveCleanupRoot()
 		if rerr != nil {
-			return fmt.Errorf("crons uninstall: %w", rerr)
+			return fmt.Errorf("schedules uninstall: %w", rerr)
 		}
 		return runCronsUninstallProfile(*on, root, format)
 	}
 	session, release, err := openCrons("")
 	if err != nil {
-		return fmt.Errorf("crons uninstall: %w", err)
+		return fmt.Errorf("schedules uninstall: %w", err)
 	}
 	defer release()
 
 	ctx := context.Background()
 	rows, err := session.svc.List(ctx)
 	if err != nil {
-		return fmt.Errorf("crons uninstall: %w", err)
+		return fmt.Errorf("schedules uninstall: %w", err)
 	}
 	namesByRepo := map[string][]string{}
 	var armedRoots []string
@@ -364,7 +354,7 @@ func runCronsUninstall(args []string) error {
 	if !*fleet {
 		root, rerr := resolveCleanupRoot()
 		if rerr != nil {
-			return fmt.Errorf("crons uninstall: %w", rerr)
+			return fmt.Errorf("schedules uninstall: %w", rerr)
 		}
 		roots = []string{root}
 	}
@@ -373,7 +363,7 @@ func runCronsUninstall(args []string) error {
 	for _, root := range roots {
 		removed, derr := session.svc.DisarmRepo(ctx, root)
 		if derr != nil {
-			return fmt.Errorf("crons uninstall: %w", derr)
+			return fmt.Errorf("schedules uninstall: %w", derr)
 		}
 		report.Repos = append(report.Repos, cronsDisarmed{Repo: root, Removed: removed, Schedules: namesByRepo[root]})
 		report.Removed += removed
@@ -381,20 +371,20 @@ func runCronsUninstall(args []string) error {
 
 	remaining, err := session.svc.List(ctx)
 	if err != nil {
-		return fmt.Errorf("crons uninstall: %w", err)
+		return fmt.Errorf("schedules uninstall: %w", err)
 	}
 	report.Remaining = len(remaining)
 	if report.Remaining == 0 {
 		host, herr := cronsTimerHost(session.paths)
 		if herr != nil {
-			return fmt.Errorf("crons uninstall: %w", herr)
+			return fmt.Errorf("schedules uninstall: %w", herr)
 		}
 		state, terr := crontimer.Uninstall(ctx, host)
 		switch {
 		case errors.Is(terr, crontimer.ErrUnsupported):
 			report.TimerDetail = "no OS timer runs the tick on this platform"
 		case terr != nil:
-			return fmt.Errorf("crons uninstall: %w", terr)
+			return fmt.Errorf("schedules uninstall: %w", terr)
 		default:
 			report.Timer = &state
 			report.TimerDetail = state.Detail
@@ -450,7 +440,7 @@ func cronsTargetRoots(fleet bool) ([]string, error) {
 			return nil, err
 		}
 		if len(roots) == 0 {
-			return nil, errors.New("no repos registered; run `sparkwing repos add <dir>` first")
+			return nil, errors.New("no repos registered; run `sparkwing repos add --checkout DIR` first")
 		}
 		return roots, nil
 	}
@@ -520,7 +510,7 @@ func compileRepoPipelines(ctx context.Context, repoRoot string) (crons.Proof, er
 		return crons.Proof{}, fmt.Errorf("cache entry: %w", err)
 	}
 	lease, _, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		return bincache.CompilePipeline(ctx, sparkwingDir, tempPath)
+		return bincache.CompilePipeline(ctx, sparkwingDir, tempPath, bincache.CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr})
 	})
 	if err != nil {
 		return crons.Proof{}, fmt.Errorf("compile %s: %w", sparkwingDir, err)

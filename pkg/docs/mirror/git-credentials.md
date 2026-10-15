@@ -88,6 +88,21 @@ requesting a release.
 
 ## Use the credential
 
+The source owner supplies credentials in memory or through a private temporary
+file. The Git process receives the filtered Git environment and source-owned
+argv/configuration. It cannot inherit a capability, ambient credential helper,
+SSH command override or arbitrary Git configuration from the runner's shell.
+Selected CA and proxy settings follow the shared process policy.
+
+Acquisition-owned files are removed after the fetch. Credentials stay out of
+clone URLs, execution seals and pipeline environments. Diagnostics use the shared
+masker. A local owner credential is usable only under the runner owner's
+repository allow-list.
+
+Pipeline code running as the same OS account can reach that account's credentials
+while they are in use. Repository scoping and a read-only credential limit the
+exposed authority.
+
 Use the released credential for the sealed source location. Keep it in memory
 or a private temporary file and remove that file when git exits. The SSH
 response carries the confirmed known_hosts entry for the credential's host.

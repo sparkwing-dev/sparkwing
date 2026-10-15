@@ -4,7 +4,13 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"io"
+
 	"errors"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +21,7 @@ import (
 )
 
 const (
-	fixtureDescribe = `"ok":true,"result":{"pipelines":[{"name":"demo","args":[{"name":"env","type":"string","required":true},{"name":"fast","type":"bool"}]}]}}`
+	fixtureDescribe = `"ok":true,"result":{"pipelines":[{"name":"demo","args":[{"name":"env","type":"string","required":true},{"name":"fast","type":"bool","required":false}]}]}}`
 	fixturePlan     = `"ok":true,"result":{"jobs":[{"id":"build","steps":[{"id":"lint","closures":{"skip_if":["build/step/lint/skip_if/0"]}},{"id":"compile","needs":["lint"]},{"id":"test","needs":["compile"]}],"failure_policy":"fail_fast"},{"id":"deploy-prod","deps":["build"],"retry":{"attempts":2},"timeout_ms":60000,"steps":[{"id":"run"}]}]}}`
 	fixtureEval     = `"ok":true,"result":{"value":true}}`
 )
@@ -69,14 +75,14 @@ Range: --start-at=- --stop-at=test
 Args:
   env=prod
   fast=true
-  Node "build" [would_run]
+  Job "build" [would_run]
     Step "lint" [may_skip (user_skipif)]
       reason: SkipIf is evaluated at run time
     Step "compile" [would_run]
       needs: lint
     Step "test" [would_run]
       needs: compile
-  Node "deploy-prod" [would_run]
+  Job "deploy-prod" [would_run]
     Step "run" [would_run]
 `
 	if got != want {
@@ -107,11 +113,11 @@ func TestPlanNeverEvaluatesSkipIf(t *testing.T) {
 	if reqs := readRequests(t, requests); strings.Contains(reqs, `"op":"eval"`) {
 		t.Fatalf("plan evaluated a closure:\n%s", reqs)
 	}
-	if lint := doc.Nodes[0].Work.Steps[0]; lint.Decision != "may_skip" || lint.SkipReason != "user_skipif" {
+	if lint := doc.Jobs[0].Work.Steps[0]; lint.Decision != "may_skip" || lint.SkipReason != "user_skipif" {
 		t.Fatalf("lint = %+v, want may_skip from an unevaluated SkipIf", lint)
 	}
-	if doc.Nodes[0].Decision != "would_run" {
-		t.Fatalf("build = %+v, want would_run", doc.Nodes[0])
+	if doc.Jobs[0].Decision != "would_run" {
+		t.Fatalf("build = %+v, want would_run", doc.Jobs[0])
 	}
 }
 
@@ -125,39 +131,12 @@ func TestPlanRangeSkipsStepsOutsideTheBounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	steps := doc.Nodes[0].Work.Steps
+	steps := doc.Jobs[0].Work.Steps
 	if steps[0].SkipReason != "range_skip" || steps[0].SkipDetail != "upstream of --start-at=compile" || steps[1].Decision != "would_run" {
 		t.Fatalf("steps = %+v", steps)
 	}
 	if _, err := previewPlan(planned, "compil", ""); err == nil || !strings.Contains(err.Error(), `did you mean "compile"?`) {
 		t.Fatalf("err = %v, want a suggestion", err)
-	}
-}
-
-func TestExplainRendersThePlanDocument(t *testing.T) {
-	bin, requests := fakePlanSDK(t, fixtureDescribe, fixturePlan, fixtureEval)
-	planned, err := planOverProtocol(context.Background(), pipelineentry.Binary(bin), t.TempDir(), "demo", []string{"--env=prod"}, "explain")
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := captureStdout(t, func() { printPlanSnapshot(&planned.doc) })
-	want := `  Node "build"
-    Work
-      Step "lint" [skip_if]
-      Step "compile"  needs: lint
-      Step "test"  needs: compile
-  Node "deploy-prod" (Retry=2 Timeout=1m0s)
-    Work
-      Step "run"
-
-Plan edges:
-  build -> deploy-prod
-`
-	if got != want {
-		t.Fatalf("explain output:\n%s\nwant:\n%s", got, want)
-	}
-	if reqs := readRequests(t, requests); strings.Contains(reqs, `"op":"eval"`) {
-		t.Fatalf("explain evaluated closures:\n%s", reqs)
 	}
 }
 
@@ -197,12 +176,120 @@ func TestPlanErrorsNameTheirCause(t *testing.T) {
 
 func TestPlanStopsAtTheDeadline(t *testing.T) {
 	bin, _ := fakePlanSDK(t, fixtureDescribe, fixturePlan, fixtureEval)
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nwhile read -r line <&3; do :; done\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	if _, err := planOverProtocol(ctx, pipelineentry.Binary(bin), t.TempDir(), "demo", nil, "plan"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v, want the deadline", err)
+	}
+}
+
+func TestPlanParserRetainsPipelineArgumentsAfterSeparator(t *testing.T) {
+	parsed, help, err := parsePipelinePlanArgs([]string{"--pipeline", "deploy-prod", "--", "--region", "us-east", "--image", "release"})
+	if err != nil || help || parsed.pipeline != "deploy-prod" || strings.Join(parsed.passthrough, " ") != "--region us-east --image release" {
+		t.Fatalf("inspection arguments: %+v help=%v err=%v", parsed, help, err)
+	}
+}
+
+func TestPlanInspectionMasksSecretArgumentsAndErrors(t *testing.T) {
+	describe := `"ok":true,"result":{"pipelines":[{"name":"demo","args":[{"name":"token","type":"string","required":true,"secret":true}]}]}}`
+	secret := "private-inspection-token"
+	for _, response := range []string{fixturePlan, `"ok":false,"error":{"code":"plan_failed","message":"` + secret + `","hint":"` + secret + `","details":{"value":"` + secret + `"}}}`} {
+		bin, requests := fakePlanSDK(t, describe, response, fixtureEval)
+		planned, err := planOverProtocol(t.Context(), pipelineentry.Binary(bin), t.TempDir(), "demo", []string{"--token", secret}, "plan")
+		var output strings.Builder
+		if err != nil {
+			if writeErr := writeInvocationError(&output, err, func(w io.Writer, failure *apierr.Error) error {
+				return json.NewEncoder(w).Encode(apierr.Envelope{Error: failure})
+			}); writeErr != nil {
+				t.Fatal(writeErr)
+			}
+		} else {
+			preview, err := previewPlan(planned, "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.NewEncoder(&output).Encode(preview); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if strings.Contains(output.String(), secret) || !strings.Contains(output.String(), "***") {
+			t.Fatalf("secret visible or classification lost: %s", &output)
+		}
+		if !strings.Contains(readRequests(t, requests), `"token":"`+secret+`"`) {
+			t.Fatal("SDK planning did not receive the execution value")
+		}
+	}
+}
+
+func FuzzPlanInspectionDoesNotDisplaySecrets(f *testing.F) {
+	f.Add([]byte("token"), false)
+	f.Add([]byte("quotes\"\n"), true)
+	f.Fuzz(func(t *testing.T, input []byte, fail bool) {
+		if len(input) > 1024 {
+			return
+		}
+		secret := "private-token-" + hex.EncodeToString(input)
+		encoded := base64.StdEncoding.EncodeToString([]byte(secret))
+		describe := `"ok":true,"result":{"pipelines":[{"name":"demo","args":[{"name":"token","type":"string","required":true,"secret":true}]}]}}`
+		response := fixturePlan
+		if fail {
+			response = `"ok":false,"error":{"code":"plan_failed","message":"` + secret + `","hint":"` + encoded + `","details":{"token":"` + encoded + `"}}}`
+		}
+		bin, _ := fakePlanSDK(t, describe, response, fixtureEval)
+		planned, err := planOverProtocol(t.Context(), pipelineentry.Binary(bin), t.TempDir(), "demo", []string{"--token", secret}, "plan")
+		var output strings.Builder
+		if fail {
+			if err == nil {
+				t.Fatal("failed plan succeeded")
+			}
+			if err := writeInvocationError(&output, err, func(w io.Writer, failure *apierr.Error) error {
+				return json.NewEncoder(w).Encode(apierr.Envelope{Error: failure})
+			}); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			if err != nil {
+				t.Fatal(err)
+			}
+			preview, err := previewPlan(planned, "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.NewEncoder(&output).Encode(preview); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if strings.Contains(output.String(), secret) || strings.Contains(output.String(), encoded) {
+			t.Fatalf("classified value escaped: %s", &output)
+		}
+	})
+}
+
+func TestPlanPreviewUsesJobVocabulary(t *testing.T) {
+	bin, _ := fakePlanSDK(t, fixtureDescribe, fixturePlan, fixtureEval)
+	planned, err := planOverProtocol(t.Context(), pipelineentry.Binary(bin), t.TempDir(), "demo", []string{"--env", "prod"}, "plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := previewPlan(planned, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(preview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatal(err)
+	}
+	if _, found := value["jobs"]; !found {
+		t.Fatal("plan preview omitted jobs")
+	}
+	if _, found := value["nodes"]; found {
+		t.Fatal("plan preview exposed removed nodes field")
 	}
 }

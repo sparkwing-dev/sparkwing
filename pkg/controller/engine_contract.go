@@ -43,7 +43,8 @@ func (s *EngineController) ReconcileJob(ctx context.Context, authorized capabili
 	}
 	request := store.ReconcileRequest{Ref: store.NodeRef{RunID: authorized.Target.RunID, NodeID: authorized.Target.NodeID}, Actor: actor, Policy: store.SourcePolicy(body.Policy), MaterializeOnly: body.MaterializeOnly}
 	if body.Source != nil {
-		request.Source = &store.MaterializeSource{Kind: store.SourcePolicy(body.Source.Policy), Source: body.Source.Attempt, Record: body.Source.Record}
+		source := reconcileSourceForStore(*body.Source)
+		request.Source = &source
 	}
 	result, err := tenant.ReconcileNode(ctx, request)
 	if err != nil {
@@ -51,7 +52,8 @@ func (s *EngineController) ReconcileJob(ctx context.Context, authorized capabili
 	}
 	response := controllerwire.ReconcileResponse{Kind: string(result.Kind), Job: executionJob(result.Node)}
 	if result.Source != nil {
-		response.Source = &controllerwire.ReuseSource{Policy: string(result.Source.Kind), Attempt: result.Source.Source, Record: result.Source.Record}
+		source := engineReuseSource(*result.Source)
+		response.Source = &source
 	}
 	if result.Claim == nil {
 		return response, nil

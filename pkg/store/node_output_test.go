@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,24 +15,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-func commitOutput(ctx context.Context, t *testing.T, s *store.Store, team store.Team, runID, nodeID string, data []byte) store.OutputRef {
+func commitOutput(ctx context.Context, t *testing.T, s *store.Store, runID, nodeID string, data []byte) store.OutputRef {
 	t.Helper()
 	key, err := s.NodeOutputKey(ctx, runID, nodeID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sha := digestOf(data)
-	u, err := s.ReserveUpload(ctx, store.UploadRequest{
-		Team: team, RunID: runID, Kind: store.StorageCache, Key: key, Size: int64(len(data)),
-		SHA256: sha, Principal: runID + "/" + nodeID, Provenance: "cloud",
-	})
-	if err != nil {
-		t.Fatalf("reserve output: %v", err)
+	ref := store.OutputRef{Key: key, Size: int64(len(data)), SHA256: sha}
+	if err := s.RecordLocalOutput(ctx, runID, nodeID, ref, time.Now()); err != nil {
+		t.Fatalf("record output fixture: %v", err)
 	}
-	if err := s.CommitUpload(ctx, team, u.ID, u.Principal, time.Now()); err != nil {
-		t.Fatalf("commit output: %v", err)
-	}
-	return store.OutputRef{Key: key, Size: int64(len(data)), SHA256: sha}
+	return ref
 }
 
 func TestFinishNodeWithOutputRef_RefusesAnotherRunsObject(t *testing.T) {
@@ -47,66 +40,13 @@ func TestFinishNodeWithOutputRef_RefusesAnotherRunsObject(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	foreign := commitOutput(t.Context(), t, s, store.DefaultTeam, "run-fin-b", "n", []byte(`"b"`))
+	foreign := commitOutput(t.Context(), t, s, "run-fin-b", "n", []byte(`"b"`))
 	if err := s.FinishNodeWithOutputRef(ctx, "run-fin-a", "n", "success", "", &foreign, "", nil); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("finish naming another run's output: err = %v, want refused", err)
 	}
-	own := commitOutput(t.Context(), t, s, store.DefaultTeam, "run-fin-a", "n", []byte(`"a"`))
+	own := commitOutput(t.Context(), t, s, "run-fin-a", "n", []byte(`"a"`))
 	if err := s.FinishNodeWithOutputRef(ctx, "run-fin-a", "n", "success", "", &own, "", nil); err != nil {
 		t.Fatalf("finish naming its own output: %v", err)
-	}
-}
-
-func TestReserveUpload_EnforcesOutputLimits(t *testing.T) {
-	s := storetest.Open(t)
-	req := func(run string, size int64) error {
-		key, _ := store.NewOutputKey(run, "n", 1, 0)
-		_, err := s.ReserveUpload(t.Context(), store.UploadRequest{
-			Team: store.DefaultTeam, RunID: run, Kind: store.StorageCache, Key: key, Size: size,
-			SHA256: strings.Repeat("a", 64), Principal: "p", Provenance: "cloud",
-		})
-		return err
-	}
-	if err := req("run-limit", store.MaxOutputBytes+1); !errors.Is(err, store.ErrOutputLimit) {
-		t.Fatalf("an output over 64 MiB: err = %v, want refused", err)
-	}
-	for i := int64(0); i < store.MaxRunOutputBytes/store.MaxOutputBytes; i++ {
-		if err := req("run-limit", store.MaxOutputBytes); err != nil {
-			t.Fatalf("output %d within the run's 1 GiB: %v", i, err)
-		}
-	}
-	if err := req("run-limit", 1); !errors.Is(err, store.ErrOutputLimit) {
-		t.Fatalf("a byte past the run's 1 GiB: err = %v, want refused", err)
-	}
-	if err := req("run-other", store.MaxOutputBytes); err != nil {
-		t.Fatalf("another run is charged for the first run's outputs: %v", err)
-	}
-	key, _ := store.NewOutputKey("run-other", "n", 1, 0)
-	if _, err := s.ReserveUpload(t.Context(), store.UploadRequest{
-		Team: store.DefaultTeam, RunID: "run-limit", Kind: store.StorageCache, Key: key, Size: 1,
-		SHA256: strings.Repeat("a", 64), Principal: "p", Provenance: "cloud",
-	}); !errors.Is(err, store.ErrInvalidInput) {
-		t.Fatalf("a reservation for another run's key: err = %v, want refused", err)
-	}
-}
-
-func TestReserveUpload_OutputsCountTowardTheTeamShare(t *testing.T) {
-	s := storetest.Open(t)
-	setFreeAllowance(t, s, 16<<10)
-	freeTeam(t, s, "team-out")
-	reserve := func(size int64) error {
-		key, _ := store.NewOutputKey("run-share", "n", 1, 0)
-		_, err := s.ReserveUpload(t.Context(), store.UploadRequest{
-			Team: "team-out", RunID: "run-share", Kind: store.StorageCache, Key: key, Size: size,
-			SHA256: strings.Repeat("a", 64), Principal: "p", Provenance: "cloud",
-		})
-		return err
-	}
-	if err := reserve(1 << 10); err != nil {
-		t.Fatalf("an output within the share: %v", err)
-	}
-	if err := reserve(store.MaxUnpaidOutputBytes + 1); !errors.Is(err, store.ErrStorageQuota) {
-		t.Fatalf("an output past the share: err = %v, want a storage refusal", err)
 	}
 }
 
@@ -190,74 +130,6 @@ func TestFinishNode_HoldsALocalRunToItsOutputLimit(t *testing.T) {
 	}
 }
 
-func TestReserveUpload_ASlotlessTeamStoresOnlySmallOutputs(t *testing.T) {
-	s := storetest.Open(t)
-	teamHandle(t, s, "team-slotless")
-	if err := s.SetFreeTeamSlots(t.Context(), 0); err != nil {
-		t.Fatal(err)
-	}
-	reserve := func(size int64) error {
-		key, _ := store.NewOutputKey("run-slotless", "n", 1, 0)
-		_, err := s.ReserveUpload(t.Context(), store.UploadRequest{
-			Team: "team-slotless", RunID: "run-slotless", Kind: store.StorageCache, Key: key, Size: size,
-			SHA256: strings.Repeat("a", 64), Principal: "p", Provenance: "cloud",
-		})
-		return err
-	}
-	key, _ := store.NewOutputKey("run-slotless", "n", 1, 0)
-	u, err := s.ReserveUpload(t.Context(), store.UploadRequest{
-		Team: "team-slotless", RunID: "run-slotless", Kind: store.StorageCache, Key: key, Size: store.MaxUnpaidOutputBytes,
-		SHA256: strings.Repeat("a", 64), Principal: "p", Provenance: "cloud",
-	})
-	if err != nil {
-		t.Fatalf("a 1 MiB output: %v", err)
-	}
-	if err := s.CommitUpload(t.Context(), "team-slotless", u.ID, "p", time.Now()); err != nil {
-		t.Fatalf("committing a 1 MiB output with every slot taken: %v", err)
-	}
-	if err := reserve(store.MaxUnpaidOutputBytes + 1); !errors.Is(err, store.ErrFreeStoragePaused) {
-		t.Fatalf("an output past 1 MiB: err = %v, want free storage paused", err)
-	}
-	if _, err := s.ReserveUpload(t.Context(), store.UploadRequest{
-		Team: "team-slotless", RunID: "run-slotless", Kind: store.StorageCache, Key: "artifacts/blobs/" + strings.Repeat("b", 64),
-		Size: 1, SHA256: strings.Repeat("b", 64), Principal: "p", Provenance: "cloud",
-	}); !errors.Is(err, store.ErrFreeStoragePaused) {
-		t.Fatalf("a one-byte artifact: err = %v, want free storage paused", err)
-	}
-}
-
-func TestReserveUpload_AFullShareStillTakesSmallOutputs(t *testing.T) {
-	s := storetest.Open(t)
-	setFreeAllowance(t, s, 16<<10)
-	freeTeam(t, s, "team-full")
-	reserve := func(key string, size int64) error {
-		_, err := s.ReserveUpload(t.Context(), store.UploadRequest{
-			Team: "team-full", RunID: "run-full", Kind: store.StorageCache, Key: key, Size: size,
-			SHA256: strings.Repeat("a", 64), Principal: "p", Provenance: "cloud",
-		})
-		return err
-	}
-	output := func() string {
-		key, _ := store.NewOutputKey("run-full", "n", 1, 0)
-		return key
-	}
-	if err := reserve("artifacts/blobs/"+strings.Repeat("c", 64), 12<<10); err != nil {
-		t.Fatalf("filling the share: %v", err)
-	}
-	if err := reserve(output(), store.MaxUnpaidOutputBytes); err != nil {
-		t.Fatalf("a 1 MiB output past a full share: %v", err)
-	}
-	if got := usageOf(t, s, "team-full", store.StorageCache).ReservedBytes; got < store.MaxUnpaidOutputBytes {
-		t.Fatalf("reserved bytes = %d, want the small output counted", got)
-	}
-	if err := reserve(output(), store.MaxUnpaidOutputBytes+1); !errors.Is(err, store.ErrStorageQuota) {
-		t.Fatalf("an output past 1 MiB with a full share: err = %v, want the storage refusal", err)
-	}
-	if err := reserve("artifacts/blobs/"+strings.Repeat("d", 64), 1); !errors.Is(err, store.ErrStorageQuota) {
-		t.Fatalf("a one-byte artifact with a full share: err = %v, want the storage refusal", err)
-	}
-}
-
 func TestWriteOutputFileDurably_KeepsAMatchingFileAndReplacesAnother(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "out")
 	if err := os.WriteFile(path, []byte(`"same"`), 0o600); err != nil {
@@ -278,32 +150,6 @@ func TestWriteOutputFileDurably_KeepsAMatchingFileAndReplacesAnother(t *testing.
 	}
 }
 
-func TestReserveUpload_SmallOutputsStopAtTheOverage(t *testing.T) {
-	s := storetest.Open(t)
-	teamHandle(t, s, "team-over")
-	if err := s.SetFreeTeamSlots(t.Context(), 0); err != nil {
-		t.Fatal(err)
-	}
-	reserve := func(size int64) error {
-		key, _ := store.NewOutputKey("run-over", "n", 1, 0)
-		_, err := s.ReserveUpload(t.Context(), store.UploadRequest{
-			Team: "team-over", RunID: "run-over", Kind: store.StorageCache, Key: key, Size: size,
-			SHA256: strings.Repeat("a", 64), Principal: "p", Provenance: "cloud",
-		})
-		return err
-	}
-	for i := range store.MaxSmallOutputOverage / store.MaxUnpaidOutputBytes {
-		if err := reserve(store.MaxUnpaidOutputBytes); err != nil {
-			t.Fatalf("small output %d within the 64 MiB overage: %v", i, err)
-		}
-	}
-	if err := reserve(1); !errors.Is(err, store.ErrFreeStoragePaused) {
-		t.Fatalf("a small output past the overage: err = %v, want a storage refusal", err)
-	}
-}
-
-// A read of an output whose file was changed or lost is an error a cache hit
-// can recognize, never the wrong bytes.
 func TestGetNodeOutput_ReportsBadOrMissingBytes(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := t.Context()

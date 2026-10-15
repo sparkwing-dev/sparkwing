@@ -156,11 +156,10 @@ func (s *Store) SignNodeLogSegment(ctx context.Context, l NodeLog, seg NodeLogSe
 	var charged int64
 	if charge {
 		charged = seg.StoredBytes
-		c := storageCommit{Team: l.Team, Kind: StorageLogs, Bytes: charged, Now: now}
-		if err := takeStorageSlotTx(ctx, tx, c.Team, c.Bytes, c.Now); err != nil {
+		if err := takeStorageSlotTx(ctx, tx, l.Team, charged, now); err != nil {
 			return err
 		}
-		if _, err := commitStorageTx(ctx, tx, c); err != nil {
+		if err := addLegacyLogStorageTx(ctx, tx, l.Team, charged, now); err != nil {
 			return err
 		}
 	}

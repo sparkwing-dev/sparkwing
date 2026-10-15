@@ -57,7 +57,7 @@ rebuild) or pre-compiled base images avoid it.
 
 ## Caching layers -- what each one does
 
-Docker provides two caching layers. Each addresses a different failure mode:
+Docker's layer cache and BuildKit cache mounts avoid different kinds of repeated work:
 
 ### 1. Docker layer cache (biggest win: ~99% speedup)
 
@@ -138,6 +138,14 @@ because **builds are CPU-bound, not network-bound**.
 - **Pre-compiled base images** -- a custom base image with common gems
   pre-installed eliminates compilation entirely for those deps. This is the
   nuclear option: build time drops to seconds, but you own the base image.
+
+## Dependency downloads
+
+Package managers fetch directly from their registries. An operator-provided
+standard mirror can serve those tools through their ordinary configuration.
+Sparkwing's shared process policy filters inherited tool settings and masks proxy
+credential components. Signed dependency-cache archives and memo results follow
+the authorized [data contract](data-uploads.md).
 
 ## Native frontend exports
 

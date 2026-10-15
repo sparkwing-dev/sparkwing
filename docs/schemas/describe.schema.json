@@ -1,321 +1,668 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Sparkwing node protocol: describe document",
-  "description": "What an SDK process answers to the describe and plan requests of docs/node-protocol.md. $defs/node is also the shape a generator closure returns.",
-  "type": "object",
-  "properties": {
-    "protocol": {
-      "type": "string",
-      "description": "The node protocol version the SDK speaks, the same value it sends in the Sparkwing-Node-Protocol header. The host refuses any value but its own."
-    },
-    "sdk": { "$ref": "#/$defs/sdk" },
-    "pipelines": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/pipeline" }
-    }
-  },
-  "required": ["protocol", "pipelines"],
-  "additionalProperties": false,
   "$defs": {
-    "sdk": {
-      "type": "object",
-      "description": "The SDK that answered, so a refusal can name the package to upgrade.",
+    "approval": {
+      "additionalProperties": false,
       "properties": {
-        "language": { "type": "string", "description": "Such as go or typescript." },
-        "version": { "type": "string", "description": "The SDK's release version." }
+        "message": {
+          "type": "string"
+        },
+        "on_timeout": {
+          "enum": [
+            "fail",
+            "deny",
+            "approve"
+          ],
+          "type": "string"
+        },
+        "timeout_ms": {
+          "minimum": 0,
+          "type": "integer"
+        }
       },
-      "required": ["language", "version"],
-      "additionalProperties": false
-    },
-    "pipeline": {
-      "type": "object",
-      "description": "One registered pipeline.",
-      "properties": {
-        "name": { "type": "string" },
-        "short": { "type": "string" },
-        "help": { "type": "string" },
-        "examples": { "type": "array", "items": { "$ref": "#/$defs/example" } },
-        "args": { "type": "array", "items": { "$ref": "#/$defs/arg" } },
-        "env_vars": { "type": "array", "items": { "$ref": "#/$defs/envVar" } },
-        "extra": { "type": "boolean", "description": "The pipeline accepts flags it does not declare." },
-        "risks": { "type": "array", "items": { "type": "string" } },
-        "risks_by_step": { "type": "array", "items": { "$ref": "#/$defs/stepRisks" } },
-        "secrets": { "type": "array", "items": { "$ref": "#/$defs/secret" } }
-      },
-      "required": ["name", "args"],
-      "additionalProperties": false
-    },
-    "example": {
-      "type": "object",
-      "properties": {
-        "comment": { "type": "string" },
-        "command": { "type": "string" }
-      },
-      "required": ["comment", "command"],
-      "additionalProperties": false
+      "type": "object"
     },
     "arg": {
-      "type": "object",
+      "additionalProperties": true,
       "properties": {
-        "name": { "type": "string" },
-        "go_name": { "type": "string", "description": "The declaring field's name in the SDK's own language." },
-        "short": { "type": "string" },
-        "type": { "enum": ["string", "bool", "int", "int64", "float64", "duration", "[]string"] },
-        "required": { "type": "boolean" },
-        "desc": { "type": "string" },
-        "default": { "type": "string" },
-        "enum": { "type": "array", "items": { "type": "string" } },
-        "secret": { "type": "boolean" },
-        "job_id": { "type": "string" }
+        "default": {
+          "type": "string"
+        },
+        "desc": {
+          "type": "string"
+        },
+        "enum": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "secret": {
+          "type": "boolean"
+        },
+        "short": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
       },
-      "required": ["name", "go_name", "type", "required"],
-      "additionalProperties": false
-    },
-    "envVar": {
-      "type": "object",
-      "properties": {
-        "name": { "type": "string" },
-        "description": { "type": "string" },
-        "default": { "type": "string" }
-      },
-      "required": ["name"],
-      "additionalProperties": false
-    },
-    "stepRisks": {
-      "type": "object",
-      "properties": {
-        "node_id": { "type": "string" },
-        "step_id": { "type": "string" },
-        "labels": { "type": "array", "items": { "type": "string" } }
-      },
-      "required": ["node_id", "step_id", "labels"],
-      "additionalProperties": false
-    },
-    "plan": {
-      "type": "object",
-      "description": "One run's plan, the result of the plan request: the nodes, their edges and each node's execution envelope.",
-      "properties": {
-        "protocol": { "type": "string", "description": "The node protocol version, as at the top level." },
-        "pipeline": { "type": "string" },
-        "run_id": { "type": "string" },
-        "priority": { "type": "integer" },
-        "claim_wait_ms": { "type": "integer" },
-        "admission_class": { "type": "string" },
-        "requires": { "type": "array", "items": { "type": "string" }, "description": "Runner labels the whole pipeline requires. The host fills it from sparkwing.yaml; an SDK leaves it out." },
-        "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
-        "plan_concurrency": { "$ref": "#/$defs/concurrencyKey" },
-        "plan_concurrency_groups": { "type": "array", "items": { "$ref": "#/$defs/concurrencyKey" } },
-        "plan_resources": { "$ref": "#/$defs/resources" },
-        "secrets": { "type": "array", "items": { "$ref": "#/$defs/secret" } },
-        "source": { "$ref": "#/$defs/source" }
-      },
-      "required": ["pipeline", "run_id", "nodes"],
-      "additionalProperties": false
-    },
-    "source": {
-      "type": "object",
-      "properties": {
-        "depth": { "type": "integer" },
-        "tags": { "type": "boolean" },
-        "submodules": { "type": "boolean" },
-        "lfs": { "type": "boolean" }
-      },
-      "required": ["depth"],
-      "additionalProperties": false
-    },
-    "secret": {
-      "type": "object",
-      "properties": {
-        "name": { "type": "string" },
-        "required": { "type": "boolean" },
-        "optional": { "type": "boolean" }
-      },
-      "required": ["name"],
-      "additionalProperties": false
-    },
-    "concurrencyKey": {
-      "type": "object",
-      "properties": {
-        "key": { "type": "string" },
-        "capacity": { "type": "integer" },
-        "cost": { "type": "integer" },
-        "on_limit": { "type": "string" },
-        "queue_timeout_ms": { "type": "integer" },
-        "cancel_timeout_ms": { "type": "integer" }
-      },
-      "additionalProperties": false
-    },
-    "resources": {
-      "type": "object",
-      "properties": {
-        "cores": { "type": "number" },
-        "memory_bytes": { "type": "integer" }
-      },
-      "additionalProperties": false
-    },
-    "node": {
-      "type": "object",
-      "description": "One node of the plan, or one node a generator closure returns. `deps`, `optional_deps` and `needs_generated` are its edges.",
-      "properties": {
-        "id": { "type": "string" },
-        "deps": { "type": ["array", "null"], "items": { "type": "string" } },
-        "optional_deps": { "type": "array", "items": { "type": "string" } },
-        "env": { "type": "object", "additionalProperties": { "type": "string" } },
-        "outputs": { "type": "array", "items": { "type": "string" }, "description": "Artifact globs the node publishes." },
-        "consumes": { "type": "array", "items": { "$ref": "#/$defs/consume" }, "description": "Artifacts the node stages from a producer before it starts." },
-        "groups": { "type": "array", "items": { "type": "string" } },
-        "dynamic": { "type": "boolean" },
-        "approval": { "$ref": "#/$defs/approval" },
-        "on_failure_of": { "type": "string" },
-        "modifiers": { "$ref": "#/$defs/modifiers" },
-        "work": { "$ref": "#/$defs/work" },
-        "spec_hash": { "type": "string", "description": "The host's hash of the node document; an SDK leaves it out." },
-        "pipeline_refs": { "type": "array", "items": { "$ref": "#/$defs/pipelineRef" } },
-        "caches": { "type": "array", "items": { "$ref": "#/$defs/cache" }, "description": "Dependency-cache directories the host restores before the node's first process starts and saves after the node succeeds." },
-        "memo_key": { "$ref": "#/$defs/memoKey", "description": "Memo key inputs the host hashes." },
-        "closures": { "$ref": "#/$defs/closures", "description": "Ids of the node's closures, which the host evaluates with eval." },
-        "tools": { "type": "array", "items": { "type": "string" }, "description": "Tool names the host puts on PATH before the node starts." },
-        "needs_generated": { "type": "array", "items": { "type": "string" }, "description": "Generator closure ids; the node waits for every node each generator adds." }
-      },
-      "required": ["id", "deps"],
-      "additionalProperties": false
-    },
-    "consume": {
-      "type": "object",
-      "properties": {
-        "producer": { "type": "string" },
-        "into": { "type": "string" }
-      },
-      "required": ["producer"],
-      "additionalProperties": false
-    },
-    "approval": {
-      "type": "object",
-      "properties": {
-        "message": { "type": "string" },
-        "timeout_ms": { "type": "integer" },
-        "on_timeout": { "type": "string" }
-      },
-      "additionalProperties": false
-    },
-    "pipelineRef": {
-      "type": "object",
-      "properties": {
-        "pipeline": { "type": "string" },
-        "node": { "type": "string" }
-      },
-      "required": ["pipeline", "node"],
-      "additionalProperties": false
-    },
-    "modifiers": {
-      "type": "object",
-      "description": "The node's execution envelope. Durations are integer milliseconds; an absent field is the zero value.",
-      "properties": {
-        "retry": { "type": "integer", "minimum": 0 },
-        "retry_backoff_ms": { "type": "integer", "minimum": 0 },
-        "retry_auto": { "type": "boolean" },
-        "timeout_ms": { "type": "integer", "minimum": 0 },
-        "no_progress_timeout_ms": { "type": "integer", "minimum": 0 },
-        "runs_on": { "type": "array", "items": { "type": "string" }, "description": "Runner labels the node requires." },
-        "prefers": { "type": "array", "items": { "type": "string" } },
-        "when_runner": { "type": "array", "items": { "type": "string" } },
-        "cache": { "type": "boolean", "description": "The node is memoized." },
-        "cache_ttl_ms": { "type": "integer", "minimum": 0 },
-        "conc_group": { "type": "string" },
-        "conc_capacity": { "type": "integer" },
-        "conc_cost": { "type": "integer" },
-        "conc_scope": { "type": "string" },
-        "conc_on_limit": { "type": "string" },
-        "conc_queue_timeout_ms": { "type": "integer" },
-        "conc_cancel_timeout_ms": { "type": "integer" },
-        "res_cores": { "type": "number" },
-        "res_memory_bytes": { "type": "integer" },
-        "inline": { "type": "boolean", "description": "The host runs the node on the host that dispatches the run, in its own process, rather than through a runner." },
-        "optional": { "type": "boolean" },
-        "continue_on_error": { "type": "boolean" },
-        "on_failure": { "type": "string", "description": "Id of the node that runs when this one fails." },
-        "has_before_run": { "type": "boolean" },
-        "has_after_run": { "type": "boolean" },
-        "has_skip_if": { "type": "boolean" },
-        "has_verify": { "type": "boolean", "description": "The node carries a Verify closure." },
-        "skip_if_budget_ms": { "type": "integer", "minimum": 0, "description": "Time the host allows each node skip_if closure; absent means 30000." }
-      },
-      "additionalProperties": false
-    },
-    "work": {
-      "type": "object",
-      "description": "The steps inside a node. `needs` on a step is its edge.",
-      "properties": {
-        "steps": { "type": "array", "items": { "$ref": "#/$defs/step" } },
-        "step_groups": { "type": "array", "items": { "$ref": "#/$defs/stepGroup" } },
-        "result_step": { "type": "string" },
-        "failure_policy": { "type": "string" }
-      },
-      "additionalProperties": false
-    },
-    "step": {
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "needs": { "type": "array", "items": { "type": "string" } },
-        "is_result": { "type": "boolean" },
-        "has_skip_if": { "type": "boolean" },
-        "finally": { "type": "boolean" },
-        "risks": { "type": "array", "items": { "type": "string" } },
-        "continue_on_error": { "type": "boolean", "description": "A failure of this step does not fail the node." },
-        "optional": { "type": "boolean", "description": "The step may be skipped without failing the node." },
-        "has_dry_run": { "type": "boolean", "description": "The step has a dry-run body, which the SDK runs instead of its body in a dry run." },
-        "safe_without_dry_run": { "type": "boolean", "description": "The step's body runs unchanged in a dry run." },
-        "closures": { "$ref": "#/$defs/closures", "description": "Ids of the step's closures; a step has only skip_if." }
-      },
-      "required": ["id"],
-      "additionalProperties": false
-    },
-    "stepGroup": {
-      "type": "object",
-      "properties": {
-        "name": { "type": "string" },
-        "members": { "type": "array", "items": { "type": "string" } }
-      },
-      "required": ["members"],
-      "additionalProperties": false
+      "required": [
+        "name",
+        "type",
+        "required"
+      ],
+      "type": "object"
     },
     "cache": {
-      "type": "object",
-      "description": "One dependency-cache directory. Exactly one of path and resolver is set.",
+      "additionalProperties": false,
       "properties": {
-        "name": { "type": "string" },
-        "path": { "type": "string" },
-        "resolver": { "enum": ["gomod", "npm"], "description": "A cache location the host resolves with the toolchain, such as `go env GOMODCACHE`." },
-        "key_scope": { "type": "string", "description": "Hashed ahead of the key file, so two directories keyed by the same lockfile get different keys." },
-        "key_files": { "type": "array", "items": { "type": "string" }, "description": "Candidate key files; the first that exists keys the cache." }
+        "key_files": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "key_scope": {
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "resolver": {
+          "type": "string"
+        }
       },
-      "required": ["name", "key_files"],
-      "additionalProperties": false
-    },
-    "memoKey": {
-      "type": "object",
-      "description": "Memo key inputs. The host hashes files, env and const together; closure names a cache_key closure whose string the host namespaces.",
-      "properties": {
-        "files": { "type": "array", "items": { "type": "string" }, "description": "Files whose content the host hashes." },
-        "env": { "type": "array", "items": { "type": "string" }, "description": "Environment variable names whose values the host hashes." },
-        "const": { "type": "array", "items": { "type": "string" }, "description": "Constant strings the host hashes." },
-        "closure": { "type": "string", "description": "Id of the node's cache_key closure, the same id as closures.cache_key." }
-      },
-      "additionalProperties": false
+      "required": [
+        "name",
+        "key_files"
+      ],
+      "type": "object"
     },
     "closures": {
-      "type": "object",
-      "description": "Closure ids by kind. Each id is opaque to the host and unique within the plan and its generated nodes. The Go SDK writes `<node>/<kind>/<i>` for a node's closures and `<node>/step/<step>/<kind>/<i>` for a step's, where `<i>` counts that kind's closures from 0 in declaration order and `<node>` and `<step>` are the ids with `%` written as `%25` and `/` as `%2F`. The first segment is then always the whole node id and the second a kind or `step`, so the ids of two distinct nodes or steps cannot collide: node `a/b` gives `a%2Fb/skip_if/0`, and step `b` of node `a` gives `a/step/b/skip_if/0`.",
+      "additionalProperties": false,
       "properties": {
-        "skip_if": { "type": "array", "items": { "type": "string" } },
-        "before_run": { "type": "array", "items": { "type": "string" } },
-        "after_run": { "type": "array", "items": { "type": "string" } },
-        "verify": { "type": "string" },
-        "cache_key": { "type": "string" },
-        "generator": { "type": "array", "items": { "type": "string" }, "description": "Generators that add nodes after this node succeeds." }
+        "after_run": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "before_run": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "generate": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "memo_key": {
+          "type": "string"
+        },
+        "skip_if": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "verify": {
+          "type": "string"
+        }
       },
-      "additionalProperties": false
+      "type": "object"
+    },
+    "concurrency": {
+      "additionalProperties": false,
+      "properties": {
+        "cancel_timeout_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "capacity": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "cost": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "group": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "on_limit": {
+          "enum": [
+            "queue",
+            "fail",
+            "skip",
+            "cancel_others"
+          ],
+          "type": "string"
+        },
+        "queue_timeout_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "scope": {
+          "enum": [
+            "global",
+            "run",
+            "box"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "group"
+      ],
+      "type": "object"
+    },
+    "consume": {
+      "additionalProperties": false,
+      "properties": {
+        "into": {
+          "type": "string"
+        },
+        "producer": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "producer"
+      ],
+      "type": "object"
+    },
+    "describe": {
+      "additionalProperties": true,
+      "properties": {
+        "pipelines": {
+          "items": {
+            "$ref": "#/$defs/pipeline"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "pipelines"
+      ],
+      "type": "object"
+    },
+    "envValue": {
+      "additionalProperties": false,
+      "properties": {
+        "startup": {
+          "type": "boolean"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "type": "object"
+    },
+    "envVar": {
+      "additionalProperties": true,
+      "properties": {
+        "default": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "example": {
+      "additionalProperties": true,
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "comment": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "comment",
+        "command"
+      ],
+      "type": "object"
+    },
+    "job": {
+      "additionalProperties": false,
+      "properties": {
+        "approval": {
+          "$ref": "#/$defs/approval"
+        },
+        "artifacts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "caches": {
+          "items": {
+            "$ref": "#/$defs/cache"
+          },
+          "type": "array"
+        },
+        "closures": {
+          "$ref": "#/$defs/closures"
+        },
+        "concurrency": {
+          "items": {
+            "$ref": "#/$defs/concurrency"
+          },
+          "type": "array"
+        },
+        "consumes": {
+          "items": {
+            "$ref": "#/$defs/consume"
+          },
+          "type": "array"
+        },
+        "continue_on_error": {
+          "type": "boolean"
+        },
+        "deps": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "deps_if_present": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "$ref": "#/$defs/envValue"
+          },
+          "type": "object"
+        },
+        "failure_policy": {
+          "enum": [
+            "fail_fast",
+            "collect_all"
+          ],
+          "type": "string"
+        },
+        "groups": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "inline": {
+          "type": "boolean"
+        },
+        "memo": {
+          "$ref": "#/$defs/memo"
+        },
+        "needs_generated": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "no_progress_timeout_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "on_failure_of": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "pipeline_refs": {
+          "items": {
+            "$ref": "#/$defs/pipelineRef"
+          },
+          "type": "array"
+        },
+        "prefers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "requires": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "resources": {
+          "$ref": "#/$defs/resources"
+        },
+        "result_step": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "retry": {
+          "$ref": "#/$defs/retry"
+        },
+        "skip_if_budget_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/step"
+          },
+          "type": "array"
+        },
+        "timeout_ms": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "memo": {
+      "additionalProperties": false,
+      "properties": {
+        "ttl_ms": {
+          "maximum": 2592000000,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "pipeline": {
+      "additionalProperties": true,
+      "properties": {
+        "args": {
+          "items": {
+            "$ref": "#/$defs/arg"
+          },
+          "type": "array"
+        },
+        "env_vars": {
+          "items": {
+            "$ref": "#/$defs/envVar"
+          },
+          "type": "array"
+        },
+        "examples": {
+          "items": {
+            "$ref": "#/$defs/example"
+          },
+          "type": "array"
+        },
+        "extra": {
+          "type": "boolean"
+        },
+        "help": {
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "risks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "risks_by_step": {
+          "items": {
+            "$ref": "#/$defs/stepRisks"
+          },
+          "type": "array"
+        },
+        "secrets": {
+          "items": {
+            "$ref": "#/$defs/secret"
+          },
+          "type": "array"
+        },
+        "short": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "args"
+      ],
+      "type": "object"
+    },
+    "pipelineRef": {
+      "additionalProperties": false,
+      "properties": {
+        "job": {
+          "type": "string"
+        },
+        "pipeline": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "pipeline",
+        "job"
+      ],
+      "type": "object"
+    },
+    "plan": {
+      "additionalProperties": false,
+      "properties": {
+        "admission_class": {
+          "type": "string"
+        },
+        "claim_wait_ms": {
+          "type": "integer"
+        },
+        "concurrency": {
+          "items": {
+            "$ref": "#/$defs/concurrency"
+          },
+          "type": "array"
+        },
+        "jobs": {
+          "items": {
+            "$ref": "#/$defs/job"
+          },
+          "type": "array"
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "resources": {
+          "$ref": "#/$defs/resources"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        }
+      },
+      "required": [
+        "jobs"
+      ],
+      "type": "object"
+    },
+    "resources": {
+      "additionalProperties": false,
+      "properties": {
+        "cores": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "memory_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "retry": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "maximum": 10,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "backoff_ms": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attempts"
+      ],
+      "type": "object"
+    },
+    "secret": {
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "optional": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "source": {
+      "additionalProperties": false,
+      "properties": {
+        "depth": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "full_history": {
+          "type": "boolean"
+        },
+        "lfs": {
+          "type": "boolean"
+        },
+        "submodules": {
+          "type": "boolean"
+        },
+        "tags": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "step": {
+      "additionalProperties": false,
+      "properties": {
+        "closures": {
+          "$ref": "#/$defs/closures"
+        },
+        "continue_on_error": {
+          "type": "boolean"
+        },
+        "finally": {
+          "type": "boolean"
+        },
+        "groups": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "has_dry_run": {
+          "type": "boolean"
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "needs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "risks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "safe_without_dry_run": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "stepRisks": {
+      "additionalProperties": true,
+      "properties": {
+        "job_id": {
+          "type": "string"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "step_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "step_id",
+        "labels"
+      ],
+      "type": "object"
     }
-  }
+  },
+  "$ref": "#/$defs/describe",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Generated from internal/nodeproto by go generate ./internal/doccheck. Plan shapes are strict; graph, secret, presence and placement checks belong to ValidatePlan.",
+  "title": "Sparkwing node protocol v2: describe and plan"
 }

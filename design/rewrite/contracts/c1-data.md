@@ -42,8 +42,12 @@ and the leased blob-maintenance pass.
 removed. Public uploads use tenant blob tickets with exact identity, size,
 digest, expiry and verified settlement. Generic byte deltas cannot mint a blob
 or receipt. The controller's retention probe reads `Tenant.StorageStanding`
-and slot availability without writing reservations. Private exact-size helpers
-remain only for legacy direct-upload and node-log transport callers.
+and slot availability without writing reservations. The legacy `Store.ReserveUpload`, `Store.CommitUpload`,
+`Store.UploadForTeam`, `Store.ReleaseStorage` and `UploadRequest` are removed.
+Their output-upload and output-commit HTTP writers are removed too. Generic
+`storage_reservations` and `storage_commit_receipts` no longer have writers.
+The legacy node-log transport retains its exact segment counter. Old output
+reads and host/client interfaces still need their final record cutover.
 `SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed
 with their legacy HTTP handlers. Debug pauses use `status_detail` through
 activity writes and leave lifecycle state intact. Queue withdrawal uses
@@ -428,6 +432,13 @@ Push authority never creates verified-branch trust. Production Actions evidence
 and enrollment remain C2's integration.
 
 ### Upload and record persistence
+
+`Tenant.ReadBlob(ctx, authority, digest)` supplies C2's live metadata read hook.
+It rechecks tenant authority and the digest's read edge in one transaction,
+then returns only untombstoned committed existence and size. An unreadable,
+missing or tombstoned digest returns no metadata. Reading creates no receipt
+or record edge. C2 still owns selecting the authenticated authority and wiring
+this tenant method into DataController.ReadBlob.
 
 `Tenant.TrustLocalBuilds` and `Tenant.SetTrustLocalBuilds` own the team's
 local binary execution opt-in. Their raw Store methods are removed. An absent

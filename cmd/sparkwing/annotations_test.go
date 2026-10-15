@@ -1,190 +1,199 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
 
-func seedAnnotationsRun(t *testing.T) orchestrator.Paths {
+type fakeRunReview struct {
+	run                 controllerwire.RunDetail
+	steps               controllerwire.RunSteps
+	approvals           controllerwire.Approvals
+	readErr, errorWrite error
+	selectors           []string
+	stepReads           int
+	annotation          controllerwire.AnnotationWrite
+	decision            controllerwire.ApprovalDecision
+}
+
+func (f *fakeRunReview) ReadRun(_ context.Context, id string) (controllerwire.RunDetail, error) {
+	f.selectors = append(f.selectors, id)
+	return f.run, f.readErr
+}
+
+func (f *fakeRunReview) ReadSteps(_ context.Context, id string) (controllerwire.RunSteps, error) {
+	f.selectors = append(f.selectors, id)
+	f.stepReads++
+	return f.steps, f.readErr
+}
+
+func (f *fakeRunReview) ListApprovals(_ context.Context, id string) (controllerwire.Approvals, error) {
+	f.selectors = append(f.selectors, id)
+	return f.approvals, f.readErr
+}
+
+func (f *fakeRunReview) AppendAnnotation(_ context.Context, run, job string, input controllerwire.AnnotationWrite) (controllerwire.Applied, error) {
+	f.selectors = append(f.selectors, run, job)
+	f.annotation = input
+	return controllerwire.Applied{Replayed: true}, f.errorWrite
+}
+
+func (f *fakeRunReview) ResolveApproval(_ context.Context, run, job string, input controllerwire.ApprovalDecision) (controllerwire.ApprovalResult, error) {
+	f.selectors = append(f.selectors, run, job)
+	f.decision = input
+	resolved := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	return controllerwire.ApprovalResult{Approval: controllerwire.Approval{RunID: "run-stable", JobID: job, Resolution: input.Resolution, Approver: "server-actor", ResolvedAt: &resolved}, Replayed: true}, f.errorWrite
+}
+
+func reviewFixture() *fakeRunReview {
+	return &fakeRunReview{run: controllerwire.RunDetail{ID: "run-stable", Jobs: []controllerwire.JobDetail{
+		{ID: "build", Annotations: []controllerwire.Annotation{{Level: "info", Message: "first"}, {Level: "warn", Message: "second", File: "main.go", Line: 7, Column: 3, EndLine: 8}}},
+		{ID: "deploy"},
+	}}, steps: controllerwire.RunSteps{Steps: []controllerwire.StepDetail{{JobID: "deploy", ID: "canary", Annotations: []controllerwire.Annotation{{Level: "error", Message: "third", File: "deploy.ts", Line: 5}}}}}}
+}
+
+func runReviewFake(t *testing.T, f *fakeRunReview, args []string) (string, error) {
 	t.Helper()
-	dir := t.TempDir()
-	paths := orchestrator.PathsAt(dir)
-	if err := paths.EnsureRoot(); err != nil {
-		t.Fatal(err)
-	}
-	st, err := teststore.Open(paths.StateDB())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	ctx := context.Background()
-	start := time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC)
-	if err := st.CreateRun(ctx, store.Run{
-		ID: "run-annot-1", Pipeline: "deploy", Status: "running", StartedAt: start,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-annot-1", NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-annot-1", NodeID: "deploy", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.AppendNodeAnnotation(ctx, "run-annot-1", "build", "produced 3 artifacts"); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.AppendNodeAnnotation(ctx, "run-annot-1", "build", "cache hit on layer 2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.AppendStepAnnotation(ctx, "run-annot-1", "deploy", "canary", "rolled to 5%"); err != nil {
-		t.Fatal(err)
-	}
-	return paths
+	var out bytes.Buffer
+	err := runReviewCommand(t.Context(), args, &out, func(context.Context, string) (controllerwire.RunReview, func(), error) { return f, func() {}, nil })
+	return out.String(), err
 }
 
-func TestAnnotationsList_LocalDefaultIsNodeOnly(t *testing.T) {
-	paths := seedAnnotationsRun(t)
-	out := captureStdout(t, func() {
-		if err := runAnnotationsList(context.Background(), paths,
-			[]string{"--run", "run-annot-1", "-o", "json"}); err != nil {
-			t.Fatalf("runAnnotationsList: %v", err)
-		}
+func TestReviewAnnotationsFiltersAndLocations(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		flags []string
+		count int
+		want  string
+		steps int
+	}{
+		{"job default", nil, 2, "second", 0},
+		{"include steps", []string{"--steps"}, 3, "third", 1},
+		{"job", []string{"--job", "deploy", "--steps"}, 1, "third", 1},
+		{"step", []string{"--step", "canary"}, 1, "third", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := reviewFixture()
+			args := append([]string{"runs", "annotations", "list", "--run", "412", "-o", "json"}, tc.flags...)
+			out, err := runReviewFake(t, f, args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := decodeNDJSON[annotationEntry](t, out)
+			if len(got) != tc.count || !strings.Contains(out, tc.want) || f.stepReads != tc.steps {
+				t.Fatalf("output=%s calls=%+v", out, f)
+			}
+			if tc.count > 1 && (got[0].Message != "first" || got[1].Message != "second") {
+				t.Fatalf("annotation order changed: %+v", got)
+			}
+			if f.selectors[0] != "412" || strings.Contains(out, "node_id") {
+				t.Fatalf("selector/vocabulary: %s %+v", out, f.selectors)
+			}
+			for _, entry := range got {
+				if entry.Message == "second" && (entry.Level != "warn" || entry.File != "main.go" || entry.Line != 7 || entry.Column != 3 || entry.EndLine != 8) {
+					t.Fatalf("location lost: %+v", entry)
+				}
+			}
+		})
+	}
+}
+
+func TestReviewAnnotationsMissingAndEmptyDiffer(t *testing.T) {
+	f := reviewFixture()
+	f.run.Jobs = nil
+	out, err := runReviewFake(t, f, []string{"runs", "annotations", "list", "--run", "412", "-o", "json"})
+	if err != nil || out != "" {
+		t.Fatalf("empty run: %q %v", out, err)
+	}
+	f.readErr = &apierr.Error{Code: apierr.NotFound, Message: "run missing"}
+	out, err = runReviewFake(t, f, []string{"runs", "annotations", "list", "--run", "missing", "--steps", "-o", "json"})
+	if err == nil || out != "" || f.stepReads != 0 {
+		t.Fatalf("missing run: %q %v", out, err)
+	}
+}
+
+func TestReviewAnnotationWriteAndPolicyGap(t *testing.T) {
+	f := reviewFixture()
+	out, err := runReviewFake(t, f, []string{"runs", "annotations", "add", "--run", "412", "--job", "deploy", "--step", "canary", "--message", "secret raw text", "-o", "json"})
+	if err != nil || f.annotation.StepID != "canary" || f.annotation.Level != "info" || f.annotation.Message != "secret raw text" || !strings.Contains(out, `"replayed":true`) || strings.Contains(out, "secret raw text") {
+		t.Fatalf("write output=%s input=%+v err=%v", out, f.annotation, err)
+	}
+	var api *apierr.Error
+	_, err = runReviewCommandWithoutTransport(t, []string{"runs", "annotations", "add", "--run", "412", "--message", "note"})
+	if !errors.As(err, &api) || api.Code != apierr.PolicyMissing {
+		t.Fatalf("run annotation gap: %v", err)
+	}
+	f.errorWrite = &apierr.Error{Code: apierr.Forbidden, Message: "member cannot report"}
+	out, err = runReviewFake(t, f, []string{"runs", "annotations", "add", "--run", "412", "--job", "deploy", "--message", "note", "-o", "plain"})
+	if !errors.As(err, &api) || api.Code != apierr.Forbidden || out != "" {
+		t.Fatalf("forbidden write: %q %v", out, err)
+	}
+}
+
+func runReviewCommandWithoutTransport(t *testing.T, args []string) (string, error) {
+	t.Helper()
+	var out bytes.Buffer
+	err := runReviewCommand(t.Context(), args, &out, func(context.Context, string) (controllerwire.RunReview, func(), error) {
+		t.Fatal("unexpected controller resolution")
+		return nil, nil, nil
 	})
-	got := decodeNDJSON[annotationEntry](t, out)
-	if len(got) != 2 {
-		t.Fatalf("got %d entries, want 2 node-level entries; out=%s", len(got), out)
-	}
-	for _, e := range got {
-		if e.StepID != "" {
-			t.Errorf("step-level entry leaked into default list: %+v", e)
-		}
-		if e.NodeID != "build" {
-			t.Errorf("unexpected node %q (only build has annotations)", e.NodeID)
-		}
-	}
-	if got[0].Message != "produced 3 artifacts" || got[1].Message != "cache hit on layer 2" {
-		t.Errorf("order not preserved: %+v", got)
-	}
+	return out.String(), err
 }
 
-func TestAnnotationsList_StepsFlagIncludesStepRows(t *testing.T) {
-	paths := seedAnnotationsRun(t)
-	out := captureStdout(t, func() {
-		if err := runAnnotationsList(context.Background(), paths,
-			[]string{"--run", "run-annot-1", "--steps", "-o", "json"}); err != nil {
-			t.Fatalf("runAnnotationsList: %v", err)
-		}
-	})
-	got := decodeNDJSON[annotationEntry](t, out)
-	var hasStep bool
-	for _, e := range got {
-		if e.StepID == "canary" && e.Message == "rolled to 5%" {
-			hasStep = true
+func TestReviewGrammarBeforeController(t *testing.T) {
+	for _, args := range [][]string{
+		{"runs", "annotations", "list"},
+		{"runs", "annotations", "list", "--run", "r", "--node", "j"},
+		{"runs", "annotations", "add", "--run", "r", "--job", "j", "-m", "text"},
+		{"runs", "approvals", "approve", "--run", "r"},
+		{"runs", "approvals", "deny", "r", "j"},
+	} {
+		if _, err := runReviewCommandWithoutTransport(t, args); err == nil {
+			t.Fatalf("accepted %v", args)
 		}
 	}
-	if !hasStep {
-		t.Fatalf("step annotation missing with --steps; got %+v", got)
-	}
-	if len(got) != 3 {
-		t.Errorf("got %d entries, want 3 (2 node + 1 step)", len(got))
-	}
-}
-
-func TestAnnotationsList_NodeFilter(t *testing.T) {
-	paths := seedAnnotationsRun(t)
-	out := captureStdout(t, func() {
-		if err := runAnnotationsList(context.Background(), paths,
-			[]string{"--run", "run-annot-1", "--node", "deploy", "--steps", "-o", "json"}); err != nil {
-			t.Fatalf("runAnnotationsList: %v", err)
-		}
-	})
-	got := decodeNDJSON[annotationEntry](t, out)
-	if len(got) != 1 || got[0].NodeID != "deploy" || got[0].StepID != "canary" {
-		t.Errorf("node filter failed: %+v", got)
-	}
-}
-
-func TestAnnotationsList_RequiresRunFlag(t *testing.T) {
-	paths := orchestrator.PathsAt(t.TempDir())
-	err := runAnnotationsList(context.Background(), paths, nil)
-	if err == nil || !strings.Contains(err.Error(), "--run is required") {
-		t.Fatalf("want --run required error, got %v", err)
-	}
-}
-
-func TestAnnotationsAdd_LocalAppendsToNode(t *testing.T) {
-	paths := seedAnnotationsRun(t)
-	_ = captureStdout(t, func() {
-		if err := runAnnotationsAdd(context.Background(), paths,
-			[]string{"--run", "run-annot-1", "--node", "build", "-m", "agent added this"}); err != nil {
-			t.Fatalf("runAnnotationsAdd: %v", err)
-		}
-	})
-	st, err := store.Open(paths.StateDB())
-	if err != nil {
+	if _, err := runReviewCommandWithoutTransport(t, []string{"runs", "annotations", "list", "--help"}); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = st.Close() }()
-	n, err := st.GetNode(context.Background(), "run-annot-1", "build")
-	if err != nil {
-		t.Fatal(err)
+}
+
+func TestReviewAnnotationsPlainIsOneValuePerLine(t *testing.T) {
+	f := reviewFixture()
+	f.run.Jobs[0].Annotations = []controllerwire.Annotation{{Level: "info", Message: "first\nsecond\rline"}}
+	out, err := runReviewFake(t, f, []string{"runs", "annotations", "list", "--run", "412", "-o", "plain"})
+	if err != nil || out != "first second line\n" {
+		t.Fatalf("plain annotation=%q err=%v", out, err)
 	}
-	if len(n.Annotations) != 3 {
-		t.Fatalf("annotations len = %d, want 3; %+v", len(n.Annotations), n.Annotations)
-	}
-	if n.Annotations[2] != "agent added this" {
-		t.Errorf("last annotation = %q, want %q", n.Annotations[2], "agent added this")
+	out, err = runReviewFake(t, f, []string{"runs", "annotations", "add", "--run", "412", "--job", "build", "--step", "compile", "--message", "note", "-o", "plain"})
+	if err != nil || out != "412/build/compile\n" {
+		t.Fatalf("plain mutation=%q err=%v", out, err)
 	}
 }
 
-func TestAnnotationsAdd_LocalAppendsToStep(t *testing.T) {
-	paths := seedAnnotationsRun(t)
-	_ = captureStdout(t, func() {
-		if err := runAnnotationsAdd(context.Background(), paths,
-			[]string{"--run", "run-annot-1", "--node", "deploy", "--step", "canary", "-m", "promoted to 50%"}); err != nil {
-			t.Fatalf("runAnnotationsAdd: %v", err)
+func TestReviewProfileSelectionAndTransportCleanup(t *testing.T) {
+	for _, profile := range []string{"", "remote"} {
+		f := reviewFixture()
+		args := []string{"runs", "annotations", "list", "--run", "412", "-o", "json"}
+		if profile != "" {
+			args = append([]string{"--profile", profile}, args...)
 		}
-	})
-	st, err := store.Open(paths.StateDB())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	steps, err := st.ListNodeSteps(context.Background(), "run-annot-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var found *store.NodeStep
-	for _, s := range steps {
-		if s.NodeID == "deploy" && s.StepID == "canary" {
-			found = s
-			break
+		closed := false
+		var out bytes.Buffer
+		err := runReviewCommand(t.Context(), args, &out, func(_ context.Context, selected string) (controllerwire.RunReview, func(), error) {
+			if selected != profile {
+				t.Fatalf("selected profile %q, want %q", selected, profile)
+			}
+			return f, func() { closed = true }, nil
+		})
+		if err != nil || !closed || f.selectors[0] != "412" {
+			t.Fatalf("profile=%q closed=%v err=%v", profile, closed, err)
 		}
-	}
-	if found == nil {
-		t.Fatal("canary step missing")
-	}
-	if len(found.Annotations) != 2 || found.Annotations[1] != "promoted to 50%" {
-		t.Errorf("step annotations = %+v", found.Annotations)
-	}
-}
-
-func TestAnnotationsAdd_RequiresRunAndNode(t *testing.T) {
-	paths := orchestrator.PathsAt(t.TempDir())
-	err := runAnnotationsAdd(context.Background(), paths,
-		[]string{"--run", "x", "-m", "hi"})
-	if err == nil || !strings.Contains(err.Error(), "--node is required") {
-		t.Fatalf("want --node required error, got %v", err)
-	}
-	err = runAnnotationsAdd(context.Background(), paths,
-		[]string{"--run", "x", "--node", "build"})
-	if err == nil || !strings.Contains(err.Error(), "--message is required") {
-		t.Fatalf("want --message required error, got %v", err)
 	}
 }
