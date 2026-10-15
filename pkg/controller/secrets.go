@@ -2,7 +2,6 @@ package controller
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -230,53 +229,6 @@ func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request, a ca
 	noteAuditTarget(r.Context(), "secret_name", name)
 	w.WriteHeader(http.StatusNoContent)
 	return nil
-}
-
-// safety: a row held as plaintext and one sealed under the previous key both
-// come out under the current key, so dropping the previous key loses nothing.
-func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request) {
-	if s.secretsCipher == nil {
-		writeError(w, http.StatusBadRequest,
-			errors.New("secrets cipher: no key configured, so there is nothing to rotate to"))
-		return
-	}
-	skipped := []secretsRotateSkip{}
-	total, err := s.store.RotateSecretValues(r.Context(), func(team store.Team, sec store.Secret) (string, error) {
-		sealed, rerr := s.resealStoredSecret(team, sec)
-		if rerr != nil {
-			// safety: one unreadable row must not cost every other row its rotation, so it keeps its bytes.
-			s.logger.Error("secret rotate: open envelope", "team", team, "name", sec.Name, "pipeline", sec.Pipeline, "err", rerr)
-			skipped = append(skipped, secretsRotateSkip{Name: sec.Name, Pipeline: sec.Pipeline})
-			return sec.Value, nil
-		}
-		return sealed, nil
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	// safety: a git credential is always sealed bound to its team and host,
-	// so one that does not open fails the rotation rather than being kept
-	// under a key the operator is about to drop.
-	gitCreds, err := s.store.RotateGitCredentialSecrets(r.Context(), func(c store.GitCredential) (string, error) {
-		binding := gitCredentialBinding(c.Team, c.Host)
-		plain, oerr := openSecret(s.secretsCipher, binding, c.Secret)
-		if oerr != nil {
-			return "", fmt.Errorf("git credential for %s in team %s: %w", c.Host, c.Team, oerr)
-		}
-		return sealSecret(s.secretsCipher, binding, plain)
-	})
-	if err != nil {
-		s.writeInternalError(w, r, "rotate git credentials", err)
-		return
-	}
-	principal := "anonymous"
-	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
-		principal = p.Name
-	}
-	s.logger.Info("secrets rotated", "count", total-len(skipped), "skipped", len(skipped),
-		"git_credentials", gitCreds, "principal", principal)
-	writeJSON(w, http.StatusOK, secretsRotateResponse{Rotated: total - len(skipped), Skipped: skipped, GitCredentials: gitCreds})
 }
 
 type secretsRotateResponse struct {

@@ -195,7 +195,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{run}/source-credential` | `source.read` |
 | `GET` | `/api/v1/secrets` | `runs.read` or `team.admin` |
 | `POST` | `/api/v1/secrets` | `team.admin` |
-| `POST` | `/api/v1/secrets/rotate` | `admin` |
+| `POST` | `/api/v1/secrets/rotate` | `team.admin` |
 | `DELETE` | `/api/v1/secrets/{name}` | `team.admin` |
 | `GET` | `/api/v1/secrets/{name}` | `claim` or `secrets.read` or `team.admin` |
 | `GET` | `/api/v1/services` | `authenticated` |

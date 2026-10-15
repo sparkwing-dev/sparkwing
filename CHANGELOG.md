@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **controller (Breaking):** Credential rotation and source-audit reads use the shared team policy
+  Rotation updates only the authenticated team's bound secrets and git credentials in one transaction. Audit rows carry capability, repository and job identities. Missing tenant adapters refuse with `policy_missing`. See [migration guide](docs/migrations/_unreleased.md#credential-maintenance).
 - **controller (Breaking):** Secret and git-credential mutations require `team.admin`, session CSRF and tenant transactions that recheck authority before commit
   Embedded controllers supply `WithCredentialWriter`. Missing adapters refuse writes. Secret replacement validates the shared name grammar, and an explicit SSH port of zero is invalid. See [migration guide](docs/migrations/_unreleased.md#credential-mutations).
 - **controller (Breaking):** Secret and git-credential inventories use the shared capability policy

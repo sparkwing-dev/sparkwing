@@ -1,5 +1,23 @@
 # Migrating to the next release
 
+## Credential maintenance
+
+Secret-key rotation requires live member or verified local `team.admin`
+authority and selects only the authenticated team. Browser sessions require
+CSRF. Rotation takes no body and returns the shared API error envelope.
+Missing bound encryption returns `unavailable`. Plaintext and unbound rows
+stay unreadable. Rewrite them through the authenticated credential API.
+An unreadable git credential or any sealing failure rolls back secret and
+git changes together. Unreadable secrets remain unchanged in `skipped`.
+
+Source-release audit lists use the same team policy. Replace `token_prefix`
+with `capability_prefix` in their responses. Each row also carries
+`repository`, `job_id` and `generation`. Times remain Unix seconds.
+
+Embedded controllers supply `WithCredentialRotator` and `WithSourceAuditReader`.
+Missing adapters return `policy_missing`. The old global rotation and legacy
+audit reader cannot provide these tenant and authority guarantees.
+
 ## Credential mutations
 
 Secret create/delete and git-credential create/confirm/delete require live

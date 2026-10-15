@@ -162,8 +162,7 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/runs/{id}/receipt":                                  resRun,
 	"GET /api/v1/runs/{id}/steps":                                    resRun,
 
-	"GET /api/v1/secrets/{name}":  resSecret,
-	"POST /api/v1/secrets/rotate": resNone,
+	"GET /api/v1/secrets/{name}": resSecret,
 
 	"GET /api/v1/storage": resNone,
 
@@ -178,8 +177,6 @@ var tenantRoutes = map[string]tenantResource{
 
 	"GET /api/v1/team/build-trust": resNone,
 	"PUT /api/v1/team/build-trust": resNone,
-
-	"GET /api/v1/team/git-credentials/releases": resNone,
 
 	"GET /api/v1/team/github-app":                                              resNone,
 	"DELETE /api/v1/team/github-app/automation":                                resNone,

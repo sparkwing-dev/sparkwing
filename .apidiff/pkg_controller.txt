@@ -72,6 +72,10 @@ type CredentialIssuer interface {
 	ProvisionCapability(context.Context, capability.ProvisionSpec) (capability.Issued, error)
 	DelegateCapability(context.Context, capability.DelegateSpec) (capability.Issued, error)
 }
+type CredentialRotator interface {
+	Team() store.Team
+	RotateCredentials(context.Context, capability.Authorized, func(store.Secret) (string, error), func(store.GitCredential) (string, error)) (int, int, error)
+}
 type CredentialWriter interface {
 	Team() store.Team
 	WriteSecret(context.Context, capability.Authorized, store.Secret) error
@@ -233,11 +237,14 @@ type GitCredentialJSON struct {
 	UpdatedAt int64
 }
 type GitCredentialReleaseJSON struct {
-	Host        string
-	RunID       string
-	Runner      string
-	TokenPrefix string
-	ReleasedAt  int64
+	Host             string
+	Repository       string
+	RunID            string
+	JobID            string
+	Generation       int64
+	Runner           string
+	CapabilityPrefix string
+	ReleasedAt       int64
 }
 const GitHubActionsLabel = "github-actions"
 func GitHubRunnerWorkflow(controllerURL, team string) string
@@ -441,6 +448,7 @@ func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithCredentialInventoryReader(resolve func(context.Context, store.Team) (CredentialInventoryReader, error)) *Server
 func (s *Server) WithCredentialIssuer(issuer CredentialIssuer) *Server
+func (s *Server) WithCredentialRotator(resolve func(context.Context, store.Team) (CredentialRotator, error)) *Server
 func (s *Server) WithCredentialWriter(resolve func(context.Context, store.Team) (CredentialWriter, error)) *Server
 func (s *Server) WithCreditReader(resolve func(context.Context, store.Team) (CreditReader, error)) *Server
 func (s *Server) WithDashboard(d Dashboard) *Server
@@ -481,6 +489,7 @@ func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Accou
 func (s *Server) WithSignUpWaitlist(on bool) *Server
 func (s *Server) WithSignedDownloads(cache *teamblob.Store, client *s3.Client, domain, keyPairID, privateKey string) error
 func (s *Server) WithSizingStore(resolve func(context.Context, store.Team) (SizingStore, error)) *Server
+func (s *Server) WithSourceAuditReader(resolve func(context.Context, store.Team) (SourceAuditReader, error)) *Server
 func (s *Server) WithSourceController(source *SourceController) *Server
 func (s *Server) WithStoragePass(cache *teamblob.Store) *Server
 func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
@@ -514,6 +523,10 @@ type SizingStore interface {
 	RecordProfileObservation(context.Context, capability.Authorized, store.ProfileObservation) error
 	RecordContention(context.Context, capability.Authorized) error
 	RecordWaitObservation(context.Context, capability.Authorized, time.Duration) error
+}
+type SourceAuditReader interface {
+	Team() store.Team
+	SourceReleaseAudits(context.Context, int) ([]capability.SourceReleaseAudit, error)
 }
 type SourceController struct {
 	Store         *store.Store

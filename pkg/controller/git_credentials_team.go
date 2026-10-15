@@ -52,11 +52,14 @@ type gitCredentialConfirmReq struct {
 
 // GitCredentialReleaseJSON is one audit row of a release.
 type GitCredentialReleaseJSON struct {
-	Host        string `json:"host"`
-	RunID       string `json:"run_id"`
-	Runner      string `json:"runner"`
-	TokenPrefix string `json:"token_prefix"`
-	ReleasedAt  int64  `json:"released_at"`
+	Host             string `json:"host"`
+	Repository       string `json:"repository"`
+	RunID            string `json:"run_id"`
+	JobID            string `json:"job_id"`
+	Generation       int64  `json:"generation"`
+	Runner           string `json:"runner"`
+	CapabilityPrefix string `json:"capability_prefix"`
+	ReleasedAt       int64  `json:"released_at"`
 }
 
 const (
@@ -208,26 +211,6 @@ func (s *Server) handleDeleteGitCredential(w http.ResponseWriter, r *http.Reques
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
-}
-
-func (s *Server) handleListGitCredentialReleases(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
-	}
-	rels, err := t.GitCredentialReleases(r.Context(), gitCredentialListSize)
-	if err != nil {
-		s.writeInternalError(w, r, "list git credential releases", err)
-		return
-	}
-	out := make([]GitCredentialReleaseJSON, 0, len(rels))
-	for _, rel := range rels {
-		out = append(out, GitCredentialReleaseJSON{
-			Host: rel.Host, RunID: rel.RunID, Runner: rel.Runner, TokenPrefix: rel.TokenPrefix,
-			ReleasedAt: rel.ReleasedAt.Unix(),
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"releases": out})
 }
 
 func validGitCredentialHost(host string) bool {

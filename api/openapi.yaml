@@ -3093,20 +3093,18 @@ paths:
 
   /api/v1/secrets/rotate:
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: team.admin
       tags: [secrets]
-      summary: Re-encrypt every stored secret under the controller's current key.
+      summary: Rotate the authenticated team's secrets and git credentials.
       description: |
-        Opens each stored value with the keys the controller holds -- the
-        current one, then the previous one when one is configured -- and
-        writes it back sealed and bound under the current key, in one
-        transaction. A value the controller was holding as plaintext comes
-        out encrypted. A value that opens under neither key keeps the bytes
-        it had and is named in `skipped`, so one unreadable row costs the
-        others nothing. The previous key can be dropped once a rotation
-        answers with `skipped` empty.
-
-        Answers `400` when no key is configured.
+        Requires live member or verified local authority. Session
+        mutations require CSRF. Takes no body. The tenant transaction rechecks
+        authority and rewrites only this team's value columns in both credential
+        tables together. An unreadable secret keeps its bytes and is listed in
+        skipped. Plaintext and unbound envelopes stay unreadable. An unreadable
+        git credential, a sealing failure or lost authority rolls back both
+        tables. Cipher diagnostics remain private. Requires the tenant rotation
+        adapter and bound encryption. Every response returns no-store.
       responses:
         "200":
           description: Rotation complete.
@@ -3122,7 +3120,7 @@ paths:
                     description: Secret rows rewritten under the current key.
                   git_credentials:
                     type: integer
-                    description: Team git credentials resealed under the current key. One that opens under no configured key fails the rotation with 500.
+                    description: Team git credentials resealed under the current key. One that opens under no configured key rolls back both tables with an internal error.
                   skipped:
                     type: array
                     description: Rows left as they were because they opened under no configured key.
@@ -3136,6 +3134,10 @@ paths:
                           type: string
                           description: Owning pipeline; absent on the unscoped row.
         "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {description: Rotation failed or the tenant transaction adapter is unavailable.}
+        "503": {description: Bound secret encryption is unavailable.}
 
   /api/v1/operator/object-store/breaker:
     get:
@@ -4538,7 +4540,7 @@ paths:
       x-sparkwing-scope: team.admin
       tags: [teams]
       summary: List the most recent releases of the team's git credentials.
-      description: An owner. Each release to a runner writes one row, newest first, at most 200.
+      description: Requires live member or verified local authority. Returns the authenticated team's committed release metadata, newest first, at most 200. Requires the tenant audit projection. Every response returns no-store.
       responses:
         "200":
           description: Recent releases.
@@ -4554,12 +4556,15 @@ paths:
                     items:
                       x-sparkwing-go-type: pkg/controller.GitCredentialReleaseJSON
                       type: object
-                      required: [host, run_id, runner, token_prefix, released_at]
+                      required: [host, repository, run_id, job_id, generation, runner, capability_prefix, released_at]
                       properties:
                         host: {type: string}
+                        repository: {type: string}
                         run_id: {type: string}
+                        job_id: {type: string}
+                        generation: {type: integer, format: int64}
                         runner: {type: string, description: "The runner principal the credential went to."}
-                        token_prefix: {type: string}
+                        capability_prefix: {type: string}
                         released_at: {type: integer, format: int64, description: Unix seconds.}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}

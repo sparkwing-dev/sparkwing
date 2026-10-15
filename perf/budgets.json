@@ -28,6 +28,18 @@
   },
   "routes": [
     {
+      "route": "/api/v1/secrets/rotate",
+      "kind": "api",
+      "exempt": "Requires live team-admin authority, a tenant rotation transaction and bound previous/current key fixtures, absent from the dashboard corpus. A scheduled write probe must not rotate real credentials. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/team/git-credentials/releases",
+      "kind": "api",
+      "exempt": "Requires live team-admin authority and the committed tenant source-audit projection, absent from the dashboard corpus. A refusal does not measure the authorized read. Latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
       "route": "/api/v1/secrets",
       "kind": "api",
       "exempt": "Requires authenticated tenant inventory, encrypted config fixtures and authority-bearing write transactions, absent from the dashboard corpus. A write probe would measure refusal without the transaction adapter. In-memory HTTP tests are correctness evidence. Authorized latency, cold start and response bytes remain unmeasured.",

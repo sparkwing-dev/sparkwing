@@ -222,9 +222,52 @@ SSH port uses 22. An explicit zero is invalid. Confirmation preserves the
 pinned fingerprint check and returns only public metadata. Secret values and
 git credential bytes never enter mutation responses.
 
-Secret-by-name release, tenant key rotation and source-release audit reads
-remain separate cutovers. Rotation needs a tenant-scoped authority-bearing
-store transaction because the existing Store rotation walks every team.
+Secret-by-name release remains a separate cutover. Tenant key rotation and
+source-release audit reads use the maintenance contracts below.
+
+### Credential maintenance
+
+POST `/api/v1/secrets/rotate` and GET
+`/api/v1/team/git-credentials/releases` use PolicyRouter's existing member
+`team.admin` rules. Both return no-store. Session rotation requires CSRF.
+Query parameters and headers cannot select another tenant or actor.
+
+Invariant: a request can rotate or inspect credential rows only within its
+authenticated tenant, and private values never enter maintenance responses.
+`CredentialRotator` exposes Team and RotateCredentials(ctx, Authorized,
+secretCallback, gitCallback) (secretCount, gitCount, error). The callbacks
+take store.Secret and store.GitCredential respectively and return replacement
+envelopes. One transaction rechecks ancestry, membership/team.admin or verified
+local authority, selects only that tenant's rows, calls each callback once
+serially and commits both tables together. Counts include all visited rows.
+Only values change. Row ownership, access fields, actors and timestamps stay
+unchanged. Any callback or authority error rolls back both tables.
+
+The controller requires BoundCipher. It opens the current or previous key's
+bound envelope and seals under the current key with the same complete binding.
+An unreadable secret keeps its bytes and appears by name/pipeline in skipped.
+Plaintext and unbound envelopes are unreadable and never gain trusted binding.
+An unreadable git credential aborts the transaction. Key-location refusal and
+any sealing failure also abort. Cipher diagnostics remain private, including
+errors that happen to implement the public API error type. Rotation takes no
+body. Its response retains rotated, skipped and git_credentials.
+
+`SourceAuditReader` exposes Team and SourceReleaseAudits(ctx, limit), returning
+[]capability.SourceReleaseAudit, newest first. The existing 200-row bound stays.
+Its reader decodes the committed capability prefix and nanosecond store time.
+The HTTP projection returns host, repository, run_id, job_id, generation,
+runner, capability_prefix and released_at in Unix seconds. It excludes audit
+IDs, credential IDs, owner account IDs and team fields. Empty lists are arrays.
+A foreign-team row fails the whole response without a partial list.
+
+WithCredentialRotator and WithSourceAuditReader supply these local C2 contracts
+to embedded controllers and tests. Defaults require the tenant to implement
+the same interfaces. Missing, nil and foreign-team adapters return
+policy_missing. The old Store rotation and GitCredentialReleases reader are
+not adapters. C1 must implement the final tenant transaction and audit
+projection. Generated tests exercise the real verifier, rotation cipher and
+HTTP projection with fakes. They do not prove C1's transaction or native
+transport. The production integrations remain open.
 
 ### Cache record transport
 
@@ -462,6 +505,8 @@ All capability names below are in `internal/capability`.
 | `controller.RunTransactions`, `EngineController.ResolveTenant`, `EngineController.ResolveRunTeam`, `Server.WithEngineController` | Supply final intake/sealing transactions and resource ownership. Production uses the existing store methods. Embedded controllers and tests may supply the same contracts without SQL or alternate authorization. |
 | `controller.SizingReader`, `controller.SizingStore`, `Server.WithSizingStore` | Supply tenant sizing reads and authority-bearing measurement transactions. Default reads use `Tenant.GetPipelineProfile`. Writes require the explicit adapter and fail closed when it is absent. |
 | `controller.CredentialInventoryReader`, `Server.WithCredentialInventoryReader` | Supply the existing tenant secret/git inventory reads with an authenticated-team check. |
+| `controller.CredentialRotator`, `Server.WithCredentialRotator` | Supply one tenant's authority-bearing atomic secret/git rotation. |
+| `controller.SourceAuditReader`, `Server.WithSourceAuditReader` | Supply one tenant's final committed source-release audit projection. |
 | `controller.CredentialWriter`, `Server.WithCredentialWriter` | Supply tenant credential mutations with committing authority rechecks and actor attribution. Missing adapters refuse writes. |
 | `controller.RunStatusFacts`, `EngineController.ReadRunStatus` | Supply one committed snapshot, complete attempt history and validated log subjects for the authorized team/run. Verified engine policy supplies notices. The default uses Tenant.ReadRunView. No C1 signature changes. |
 

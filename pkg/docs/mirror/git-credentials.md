@@ -100,5 +100,17 @@ host's key is the one already confirmed. Deleting it
 (`DELETE /api/v1/team/git-credentials/{host}`) makes every later release
 fail. Nothing the runner held outlives the fetch it was released for.
 
-`POST /api/v1/secrets/rotate` reseals every team's git credentials with the
-secrets under the new key.
+`POST /api/v1/secrets/rotate` requires `team.admin` and reseals the authenticated
+team's secrets and git credentials under the new key in one transaction.
+Browser sessions require CSRF. An unreadable secret stays listed in `skipped`.
+An unreadable git credential or a sealing failure aborts both sets of changes.
+Plaintext and unbound rows stay unreadable. The previous key is still needed
+while any secret is skipped.
+
+`GET /api/v1/team/git-credentials/releases` requires `team.admin` and returns
+the latest 200 releases for the authenticated team. Each row carries `host`,
+`repository`, `run_id`, `job_id`, `generation`, `runner`, `capability_prefix`
+and `released_at` in Unix seconds. Both routes return no-store.
+
+Embedded controllers supply `WithCredentialRotator` and `WithSourceAuditReader`
+with the declared tenant interfaces. An absent adapter returns `policy_missing`.
