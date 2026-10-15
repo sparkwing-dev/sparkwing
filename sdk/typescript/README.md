@@ -56,6 +56,9 @@ and nested pull-request facts.
 Cancellation reaches bodies and every closure kind. A callback that finishes
 after cancellation still reports a failed invocation. The SDK acknowledges
 cancellation after the selected operations finish and receive their own replies.
+Closure evaluations run in request order. Canceling a queued evaluation returns
+without calling its author code or waiting for the running closure. Overlapping
+generator replays return the recorded declaration after the first evaluation.
 Service scopes also reject after cancellation when their callback returns normally.
 They remove their containers before rejecting. If removal fails, host cleanup
 stays registered and the cancellation error is preserved.
@@ -79,8 +82,15 @@ the matching Windows MSVC environments with:
 node native/build.mjs --headers <node-headers/include/node> --node-lib <node.lib> --arch x64
 ```
 
+Before packaging, stamp the engine release version in both npm manifests:
+
+```sh
+npm version <engine-version-without-v> --no-git-tag-version
+```
+
 The release package must contain `native/win32-x64/protocol.node` and
-`native/win32-arm64/protocol.node`. `npm pack` checks both files and their
+`native/win32-arm64/protocol.node`. `npm pack` refuses the development version
+and inconsistent lockfile versions. It also checks both bridge files and their
 architecture and DLL headers. Native tests must also pass on each architecture
 because header checks cannot prove that Node can load and use the bridge.
 The bridge source is in [native/protocol.c](native/protocol.c). End users need

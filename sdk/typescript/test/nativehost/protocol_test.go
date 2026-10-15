@@ -61,6 +61,19 @@ func nativeHello(t *testing.T, h *host) {
 	if hello.Protocol != 2 || hello.SDK.Language != "typescript" || hello.SDK.Version == "" || hello.Features == nil {
 		t.Fatalf("hello: %+v", hello)
 	}
+	manifest, err := os.ReadFile(filepath.Join(h.command.Dir, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var identity struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(manifest, &identity); err != nil {
+		t.Fatal(err)
+	}
+	if hello.SDK.Version != "v"+identity.Version {
+		t.Fatalf("hello SDK version %q, package version %q", hello.SDK.Version, identity.Version)
+	}
 	var describe nodeproto.DescribeDoc
 	h.call(nodeproto.Request{ID: "describe", Op: nodeproto.OpDescribe}, &describe)
 	if len(describe.Pipelines) != 1 || describe.Pipelines[0].Name != "native" || len(describe.Pipelines[0].Secrets) != 1 {

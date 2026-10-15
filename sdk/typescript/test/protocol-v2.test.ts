@@ -25,7 +25,7 @@ test("protocol mismatch names supported majors", async () => {
   try {
     const frame = await host.send({ ...hello, protocol: 1 });
     assert.equal(frame.error.code, "protocol_mismatch");
-    assert.deepEqual(frame.error.details.supported, [2]);
+    assert.deepEqual(frame.error.details.supported_majors, [2]);
   } finally {
     await host.close();
   }

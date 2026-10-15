@@ -231,3 +231,88 @@ test("dry runs require declared handling and settle failures without invoking re
     await host.close();
   }
 });
+
+test("queued closure cancellation returns before unrelated work without invoking author code", async () => {
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const barrier = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  const host = await fixture((p) => {
+    p.job("job", () => null)
+      .beforeRun(async () => {
+        enter();
+        await barrier;
+      })
+      .verify(() => {
+        calls++;
+      });
+  });
+  try {
+    const first = host.send({ id: "first", op: "eval", closure: "job/before_run/0" });
+    await entered;
+    const queued = host.send({ id: "queued", op: "eval", closure: "job/verify/0" });
+    assert.equal((await host.send({ id: "cancel", op: "cancel", target: "queued" })).ok, true);
+    const reply = await queued;
+    assert.ok(reply.error ?? reply.result?.error, JSON.stringify(reply));
+    assert.equal(calls, 0);
+    assert.equal(
+      host.frames.some((frame) => frame.reply === "first"),
+      false,
+    );
+    const next = host.send({ id: "next", op: "eval", closure: "job/verify/0" });
+    assert.equal((await host.send({ id: "describe", op: "describe" })).ok, true);
+    assert.equal(calls, 0);
+    assert.equal(
+      host.frames.some((frame) => frame.reply === "next"),
+      false,
+    );
+    release();
+    assert.equal((await first).result.value, null);
+    assert.equal((await next).result.value, null);
+    assert.equal(calls, 1);
+  } finally {
+    release();
+    await host.close();
+  }
+});
+
+test("overlapping generator replays run author code once and return the recorded declaration", async () => {
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const barrier = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  const host = await fixture((p) => {
+    p.job("job", () => null).generate(async (generated, value) => {
+      calls++;
+      enter();
+      await barrier;
+      generated.job("child", () => value);
+    });
+  });
+  try {
+    const first = host.send({ id: "first", op: "eval", closure: "job/generate/0", input: "recorded" });
+    await entered;
+    const replay = host.send({ id: "replay", op: "eval", closure: "job/generate/0", input: "recorded" });
+    assert.equal((await host.send({ id: "describe", op: "describe" })).ok, true);
+    assert.equal(
+      host.frames.some((frame) => frame.reply === "replay"),
+      false,
+    );
+    release();
+    const results = await Promise.all([first, replay]);
+    for (const reply of results) assert.equal(reply.result?.error, undefined, JSON.stringify(reply));
+    assert.deepEqual(results[0]!.result.value, results[1]!.result.value);
+    assert.equal(calls, 1);
+  } finally {
+    release();
+    await host.close();
+  }
+});

@@ -57,7 +57,7 @@ class Session {
   readonly #active = new Map<string, Active>();
   readonly #steps = new Map<string, StepState>();
   readonly #generated = new Map<string, unknown>();
-  readonly #generating = new Set<string>();
+  #evalReady: Promise<void> = Promise.resolve();
   readonly #originalEnv = new Map<string, string | undefined>();
   constructor(options: ServeOptions) {
     this.#options = options;
@@ -130,7 +130,7 @@ class Session {
   #hello(req: Request): unknown {
     if (this.#helloSeen) throw failure("protocol_error", "hello occurs exactly once");
     this.#helloSeen = true;
-    if (req.protocol !== 2) throw failure("protocol_mismatch", "rebuild .sparkwing with the matching SDK", { supported: [2] });
+    if (req.protocol !== 2) throw failure("protocol_mismatch", "rebuild .sparkwing with the matching SDK", { supported_majors: [2] });
     const runner = Object.freeze({ ...(req.runner as RunnerInfo), labels: Object.freeze([...(req.runner as RunnerInfo).labels]) });
     if (req.binding !== undefined) {
       const binding = object(req.binding, "binding");
@@ -214,9 +214,8 @@ class Session {
     if (!this.#binding) throw failure("protocol_error", "execution requires a hello binding");
     if (!replay && this.#binding.job !== job) throw failure("protocol_error", "job does not match hello binding");
   }
-  #context(req: Request, spec: JobSpec, step?: string, replay = false): Context {
+  #context(req: Request, spec: JobSpec, signal: AbortSignal, step?: string, replay = false): Context {
     const { run, definition, plan, rawArgs } = this.#current();
-    this.#authorize(spec.id, replay);
     for (const [key, value] of this.#originalEnv) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -245,19 +244,13 @@ class Session {
     } catch (error) {
       throw failure("invalid_args", messageOf(error));
     }
-    const controller = new AbortController();
-    let finish!: () => void;
-    const done = new Promise<void>((resolve) => {
-      finish = resolve;
-    });
-    this.#active.set(req.id, { job: this.#binding!.job, ...(step === undefined ? {} : { step }), controller, done, finish });
     const outputs = this.#state(spec.id).outputs;
     return makeContext({
       run,
       jobId: spec.id,
       ...(step === undefined ? {} : { stepId: step }),
       args,
-      signal: controller.signal,
+      signal,
       frames: this.#frames,
       definition,
       outputs,
@@ -265,6 +258,15 @@ class Session {
       ...(failureInfo === undefined ? {} : { failure: failureInfo }),
       ...(this.#services === undefined ? {} : { services: this.#services }),
     });
+  }
+  #activate(id: string, step?: string): AbortSignal {
+    const controller = new AbortController();
+    let finish!: () => void;
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    this.#active.set(id, { job: this.#binding!.job, ...(step === undefined ? {} : { step }), controller, done, finish });
+    return controller.signal;
   }
   async #step(req: Request): Promise<unknown> {
     const { plan, run } = this.#current();
@@ -277,7 +279,7 @@ class Session {
     const state = this.#state(job.id);
     state.begin(spec, step.id, Number(req.attempt), req.settled as string[]);
     try {
-      const ctx = this.#context(req, spec, step.id);
+      const ctx = this.#context(req, spec, this.#activate(req.id, step.id), step.id);
       if (run.dryRun && !step.dryRunBody && !step.toSpec().safe_without_dry_run) throw failure("sdk_error", "step has no dry-run body");
       const body = run.dryRun && step.dryRunBody ? step.dryRunBody : step.body;
       ctx.signal.throwIfAborted();
@@ -297,40 +299,49 @@ class Session {
     if (!closure) throw failure("unknown_closure", "closure is not in this process's plan");
     const spec = plan.toDoc().jobs.find((value) => value.id === closure.job.id)!;
     this.#authorize(spec.id, closure.kind === "generate");
-    if (closure.step) this.#state(spec.id).begin(spec, closure.step.id, Number(req.attempt), req.settled as string[]);
-    else if (req.attempt !== undefined || req.settled !== undefined) throw failure("protocol_error", "job closure cannot carry step state");
-    const ctx = this.#context(req, spec, closure.step?.id, closure.kind === "generate");
+    const signal = this.#activate(req.id, closure.step?.id);
+    const previous = this.#evalReady;
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.#evalReady = previous.then(() => released);
+    let stepStarted = false;
     try {
-      return { value: jsonOutput(await runScope({ phase: "execute", root: this.#root() }, () => this.#call(closure, ctx, req))) ?? null };
-    } catch (error) {
-      return { value: null, error: errorFields(error) };
+      await evalTurn(previous, signal);
+      if (closure.step) {
+        this.#state(spec.id).begin(spec, closure.step.id, Number(req.attempt), req.settled as string[]);
+        stepStarted = true;
+      } else if (req.attempt !== undefined || req.settled !== undefined)
+        throw failure("protocol_error", "job closure cannot carry step state");
+      const ctx = this.#context(req, spec, signal, closure.step?.id, closure.kind === "generate");
+      try {
+        return { value: jsonOutput(await runScope({ phase: "execute", root: this.#root() }, () => this.#call(closure, ctx, req))) ?? null };
+      } catch (error) {
+        return { value: null, error: errorFields(error) };
+      }
     } finally {
-      if (closure.step) this.#state(spec.id).finish(closure.step.id, false);
+      if (stepStarted) this.#state(spec.id).finish(closure.step!.id, false);
+      release();
     }
   }
   async #call(closure: Closure, ctx: Context, req: Request): Promise<unknown> {
     ctx.signal.throwIfAborted();
     if (closure.kind === "generate") {
       if (this.#generated.has(closure.id)) return structuredClone(this.#generated.get(closure.id));
-      if (this.#generating.has(closure.id)) throw failure("protocol_error", "generator is already running");
-      this.#generating.add(closure.id);
-      try {
-        const generated = new Generated(closure.generator.source, closure.id, this.#current().plan);
-        await closure.fn(generated, req.input ?? null, ctx);
-        ctx.signal.throwIfAborted();
-        const jobs = jsonOutput(generated.toDoc().jobs);
-        const { definition, plan, rawArgs } = this.#current();
-        resolvedArgs(
-          [...(definition.args ?? []), ...[...plan.jobs(), ...generated.jobs()].flatMap((job) => job.argSpecs())],
-          rawArgs,
-          definition.extra === true,
-        );
-        plan.insert(generated);
-        this.#generated.set(closure.id, jobs);
-        return jobs;
-      } finally {
-        this.#generating.delete(closure.id);
-      }
+      const generated = new Generated(closure.generator.source, closure.id, this.#current().plan);
+      await closure.fn(generated, req.input ?? null, ctx);
+      ctx.signal.throwIfAborted();
+      const jobs = jsonOutput(generated.toDoc().jobs);
+      const { definition, plan, rawArgs } = this.#current();
+      resolvedArgs(
+        [...(definition.args ?? []), ...[...plan.jobs(), ...generated.jobs()].flatMap((job) => job.argSpecs())],
+        rawArgs,
+        definition.extra === true,
+      );
+      plan.insert(generated);
+      this.#generated.set(closure.id, jobs);
+      return jobs;
     }
 
     if (closure.kind === "after_run") {
@@ -362,6 +373,23 @@ class Session {
       return result;
     }
     return null;
+  }
+}
+
+async function evalTurn(previous: Promise<void>, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  let abort!: () => void;
+  try {
+    await Promise.race([
+      previous,
+      new Promise<never>((_, reject) => {
+        abort = () => reject(signal.reason);
+        signal.addEventListener("abort", abort, { once: true });
+      }),
+    ]);
+    signal.throwIfAborted();
+  } finally {
+    signal.removeEventListener("abort", abort);
   }
 }
 
