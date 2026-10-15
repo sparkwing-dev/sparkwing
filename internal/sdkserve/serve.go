@@ -11,7 +11,6 @@ import (
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 )
@@ -244,9 +243,6 @@ func (s *server) reply(id string, result any, err error) {
 	r := nodeproto.Reply{ID: id, OK: err == nil}
 	if err == nil {
 		r.Result, err = json.Marshal(result)
-		if int64(len(r.Result)) > limits.NodeOutputBytes+limits.ProtocolEnvelopeBytes-1024 {
-			err = fmt.Errorf("protocol result exceeds frame limit")
-		}
 	}
 	if err != nil {
 		r.OK = false
