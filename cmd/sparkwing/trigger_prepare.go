@@ -35,6 +35,7 @@ type triggerSourceInput struct {
 
 type preparedTriggerSource struct {
 	pipeline string
+	profile  string
 	git      runspec.Git
 	source   runspec.Source
 	checkout triggerCheckout
@@ -172,10 +173,23 @@ func prepareTriggerSource(ctx context.Context, input triggerSourceInput) (prepar
 	if err != nil {
 		return result, err
 	}
-	return preparedTriggerSource{pipeline: identity.Name, git: git, source: runspec.Source{
+	profile := ""
+	if cfg != nil {
+		if entry := cfg.Registry().Find(identity.Name); entry != nil {
+			profile = entry.Profile
+		}
+	}
+	return preparedTriggerSource{pipeline: identity.Name, profile: profile, git: git, source: runspec.Source{
 		Ref: pipelineSHA, Entrypoint: identity.Entrypoint,
 		Location: runspec.SourceLocation{RemoteURL: remote, PipelineDir: ".sparkwing"},
 	}, checkout: reader}, nil
+}
+
+func (s preparedTriggerSource) checkProfile(profile string) error {
+	if s.profile != "" && s.profile != profile {
+		return fmt.Errorf("pipeline trigger: pipeline %s is pinned to profile %s; pass --profile %s", s.pipeline, s.profile, s.profile)
+	}
+	return nil
 }
 
 func triggerPipelineRevision(ctx context.Context, checkout triggerCheckout, cfg *projectconfig.Config, pipeline, explicit, execution string) (string, error) {

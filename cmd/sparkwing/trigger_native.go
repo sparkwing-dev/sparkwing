@@ -50,6 +50,9 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (controllerwi
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}
+	if err := selected.checkProfile(flags.profile); err != nil {
+		return controllerwire.CreateRunRequest{}, err
+	}
 	if err := selected.checkReachable(ctx); err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}

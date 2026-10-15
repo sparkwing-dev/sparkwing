@@ -40,8 +40,10 @@ type scheduleCommand struct {
 }
 
 func defaultScheduleCommand() scheduleCommand {
-	return scheduleCommand{connect: connectSchedules, local: resolveLocalScheduleServices,
-		roots: scheduleRoots, load: loadScheduleProject, source: readScheduleRepository, environment: os.Environ, goos: runtime.GOOS}
+	return scheduleCommand{
+		connect: connectSchedules, local: resolveLocalScheduleServices,
+		roots: scheduleRoots, load: loadScheduleProject, source: readScheduleRepository, environment: os.Environ, goos: runtime.GOOS,
+	}
 }
 
 func connectSchedules(ctx context.Context, profile string) (scheduleConnection, error) {
@@ -132,9 +134,11 @@ func selectScheduleDeclarations(cfg *projectconfig.Config, only []string, where 
 				skipped = append(skipped, selector)
 				continue
 			}
-			selected = append(selected, controllerwire.ScheduleDeclaration{Pipeline: pipeline.Name, Name: name,
+			selected = append(selected, controllerwire.ScheduleDeclaration{
+				Pipeline: pipeline.Name, Name: name,
 				Cron: schedule.Cron, TZ: scheduleString(schedule.TZ), Overlap: scheduleString(schedule.Overlap),
-				CatchUp: scheduleString(schedule.CatchUp), Args: maps.Clone(schedule.Args)})
+				CatchUp: scheduleString(schedule.CatchUp), Args: maps.Clone(schedule.Args),
+			})
 		}
 	}
 	for key, found := range wanted {
@@ -219,6 +223,10 @@ func installSchedules(ctx context.Context, inv clisurface.Invocation, opts sched
 	if err != nil {
 		return err
 	}
+	mode := scheduleWriteMode(inv)
+	if mode == controllerwire.ScheduleUpsert && len(declarations) == 0 {
+		return renderScheduleInstallation(out, scheduleInstallation{Repo: roots[0], Profile: inv.Value("profile"), Skipped: skipped}, opts.format)
+	}
 	input, err := command.source(ctx, roots[0], inv.Bool("unpinned"))
 	if err != nil {
 		return err
@@ -227,16 +235,24 @@ func installSchedules(ctx context.Context, inv clisurface.Invocation, opts sched
 		return fmt.Errorf("--unpinned requires a checked-out branch")
 	}
 	input.Schedules = declarations
+	input.Mode = mode
 	connection, err := command.connect(ctx, inv.Value("profile"))
 	if err != nil {
 		return err
 	}
 	defer connection.close()
-	result, err := connection.repositories.ReplaceSchedules(ctx, input)
+	result, err := connection.repositories.WriteSchedules(ctx, input)
 	if err != nil {
 		return err
 	}
 	return renderScheduleInstallation(out, scheduleInstallation{Repo: roots[0], Profile: inv.Value("profile"), ScheduleRepoWritten: result, Skipped: skipped}, opts.format)
+}
+
+func scheduleWriteMode(inv clisurface.Invocation) controllerwire.ScheduleWriteMode {
+	if len(inv.Flags["schedule"]) > 0 {
+		return controllerwire.ScheduleUpsert
+	}
+	return controllerwire.ScheduleReplace
 }
 
 func uninstallRepositorySchedules(ctx context.Context, inv clisurface.Invocation, opts scheduleOptions, out io.Writer, command scheduleCommand) error {

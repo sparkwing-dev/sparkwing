@@ -34,7 +34,7 @@ type pipelineEngineSwitcher struct {
 	diagnostics io.Writer
 }
 
-func switchToolchain(dir string) error {
+func switchToolchain(dir string, beforeExec func()) error {
 	ctx, stop, _ := interruptContext()
 	defer stop()
 	typescript, err := pipelineentry.IsTypeScript(dir)
@@ -52,7 +52,12 @@ func switchToolchain(dir string) error {
 	command := pipelineEngineSwitcher{
 		readPin: readEnginePin, versionFor: enginePinVersion,
 		current: current, target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
-		execute: execToolchain, diagnostics: os.Stderr,
+		execute: func(binary string, args, environment []string) error {
+			if beforeExec != nil {
+				beforeExec()
+			}
+			return execToolchain(binary, args, environment)
+		}, diagnostics: os.Stderr,
 		resolve: func(ctx context.Context, pin engine.Pin, target releaseasset.Target, mode toolchain.Mode) (engine.Resolved, error) {
 			resolver, err := engine.NewResolver(engine.Config{Mode: mode})
 			if err != nil {

@@ -22,6 +22,13 @@ unlock.
 
 ### Fixed
 
+- **cli intake:** Preserve output selections and their origins through sealing
+  Detached receipts honor `-o`, `--output`, `--sw-output` and `SPARKWING_LOG_FORMAT`.
+- **pipeline selection:** Read trigger profile pins and run help from the selected revisions
+  Run help retains the execution checkout's alias while describing its selected code source.
+- **local controller:** Retain machine admission policy and resource budgets during construction
+- **source acquisition:** Apply the declared Git environment policy
+  Git retains proxy and CA settings while excluding inherited repository, configuration and SSH controls.
 - **pipeline engine:** Select and report the SDK pin from the pipeline directory's manifest and lockfile. A missing or different parent application manifest no longer selects or blocks that engine.
 - **pipeline describe:** Read the selected SDK's current arguments, risks and secret declarations. Cold or stale catalog caches no longer produce an incomplete successful schema during trigger inspection.
 - **owner hosting:** Local, standalone and here sessions derive their owner fence from the award, preserve authority-cancellation causes, and share resource cleanup.
@@ -32,6 +39,8 @@ unlock.
 
 ### Changed
 
+- **schedule wire (Breaking):** Separate full repository replacement from selective upserts
+  Repository writes require a `replace` or `upsert` mode through `WriteSchedules`. Selective updates preserve unselected declarations. Native controller handlers must implement the new mode before this path is enabled.
 - **local execution (Breaking):** Remove the legacy local server and run-host backend graph
   `pkg/localws`, `RunHosted`, `HostClaimedTrigger` and the separate trigger consumer are removed with their state, admission, logging and child-dispatch backends. Captured environments use the shared host contract. Native composition remains unfinished. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
 

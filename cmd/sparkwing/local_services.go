@@ -46,12 +46,31 @@ func resolveLocalServicesAt(ctx context.Context, home string) (dashboardServices
 	if err != nil {
 		return dashboardServices{}, err
 	}
-	host := crontimer.Host{GOOS: runtime.GOOS, Home: userHome, ConfigHome: configHome,
+	host := crontimer.Host{
+		GOOS: runtime.GOOS, Home: userHome, ConfigHome: configHome,
 		SparkwingHome: home, Binary: binary, Version: installedVersion(),
-		PathEnv: os.Getenv("PATH"), UID: os.Getuid(), Exec: crontimer.DefaultExec}
-	return composeLocalServices(ctx, wingd.LocalRuntimeConfig{
-		Admission: wingd.Config{Home: home}, Open: openLocalController,
-	}, host)
+		PathEnv: os.Getenv("PATH"), UID: os.Getuid(), Exec: crontimer.DefaultExec,
+	}
+	config, err := resolveLocalRuntimeConfig(home)
+	if err != nil {
+		return dashboardServices{}, err
+	}
+	return composeLocalServices(ctx, config, host)
+}
+
+func resolveLocalRuntimeConfig(home string) (wingd.LocalRuntimeConfig, error) {
+	budget, err := wingd.ResolveBudget("")
+	if err != nil {
+		return wingd.LocalRuntimeConfig{}, err
+	}
+	policy, _, err := wingd.ResolveAdmissionPolicy()
+	if err != nil {
+		return wingd.LocalRuntimeConfig{}, err
+	}
+	return wingd.LocalRuntimeConfig{Admission: wingd.Config{
+		Home: home, Version: installedVersion(), Budget: budget.Budget,
+		BudgetSource: budget.Source, BudgetOrigin: budget.Origin, AdmissionPolicy: &policy,
+	}, Open: openLocalController}, nil
 }
 
 func openLocalController(context.Context, string) (wingd.LocalController, error) {

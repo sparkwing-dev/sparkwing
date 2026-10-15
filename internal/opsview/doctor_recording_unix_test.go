@@ -13,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func TestDoctorSweepSurvivesPrunedRun(t *testing.T) {
+func TestSessionSweepRecordingToleratesPrunedRun(t *testing.T) {
 	p := paths.PathsAt(t.TempDir())
 	st, err := teststore.Open(p.StateDB())
 	if err != nil {

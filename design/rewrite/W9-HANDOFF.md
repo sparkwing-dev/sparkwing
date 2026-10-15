@@ -1,3 +1,127 @@
+## Adversarial review remediation from 1813bdeb9
+
+This section supersedes conflicting status below. **Do not merge W9 yet.**
+W9-owned fixes are implemented. Findings 1, 2 and 7 remain open at foreign
+composition/contract boundaries. Finding 3 has its W9 contract and client fix;
+W2/W1 must implement that contract in the native handler. No Git writes or
+Sparkwing binaries ran. The lead retains landing, pipelines and native QA.
+
+### Findings
+
+| # | Status | Invariant, change and evidence |
+|---|---|---|
+| 1 | OPEN; DESIGN routed to W2/W3/W8 | Public execution commands must reach concrete shared owners. `TestReviewProductionExecutionBindings` reaches the actual local-run, controller and local-schedule factories without substituting them. All three fail on the unconditional refusals. The missing bindings are named below. |
+| 2 | OPEN; DESIGN routed to W8 | Seal origin and current execution identity remain distinct. New tests call `Hosting.Host`, `ControllerControl.Claim` and `BootstrapHost.Run`. Initial controls pass their validators; retries fail before the next boundary. The hosting property generates independent origin/current IDs. The earlier `runInputFor` helper test is not execution-entrypoint evidence. |
+| 3 | W9 FIXED; W2/W1 handler adoption required | Selection cannot delete or change unselected schedules. `ScheduleRepoRequest.mode` is required: `replace` reconciles the complete set; `upsert` changes only supplied declarations. `WriteSchedules` replaces `ReplaceSchedules` without an alias. Local registration carries the same mode. An all-elsewhere selection sends no declaration write. The client rejects unknown modes and upsert withdrawals. A stateful installed-set regression failed for both selecting one controller schedule and selecting only a local schedule, then passed. HTTP client mode/withdrawal tests pass. |
+| 4 | FIXED | Routing checks, schema and help derive from the selected source. Trigger preparation captures the profile with the selected execution commit's entrypoint and uses that capture for the guard. The duplicate HEAD reader and false comment are removed. Run help captures execution configuration/identity once, selects the requested execution ref and configured/explicit code ref, then binds the source description to that identity. Engine replay cleans selected worktrees before replacing the process. Both command regressions failed before the fixes and pass; nested dirty files and malformed selected configuration are covered. |
+| 5 | FIXED | Runtime construction retains configured admission policy and machine budget. The local-services constructor now calls the existing resolvers and passes policy, budget, budget origin/source and version. Invalid configuration failed the new production-constructor regression before the fix. Tests now pass for off, auto, jev, custom and classic, including custom weights and aging. |
+| 6 | FIXED; minimal W6-owned edit | Git acquisition must accept its declared process kind while excluding inherited process controls and credentials. `procenv.Build` now accepts Git and enforces its existing C4 base policy. The registry includes the two declared Git CA paths. The 128-case property failed with unknown process kind before the fix and passes with Git/SSH overrides and credentials excluded. Full procenv tests pass. |
+| 7 | OPEN; DESIGN routed to W8/W2 | Doctor's reported sweep must come from the public command's actual cleanup. `TestReviewPublicDoctorSweepsAndWarnsForPrunedRun` uses the command and real lifecycle/runtime with a pruned run's ledger entry. It fails because the entry remains and the warning is absent. The legacy helper test is renamed `TestSessionSweepRecordingToleratesPrunedRun`; its passing result is only recording-component evidence. |
+| 8 | FIXED | Accepted output selection and origin survive intake. Parsing captures the winning format/origin once; sealing projects that capture instead of reinterpreting flag presence. Parsed command tests cover -o, --output, --sw-output and SPARKWING_LOG_FORMAT through intake and detached receipts. The three formerly dropped selections failed before the fix. The existing receipt test now parses its invocation too. |
+| 9 | FIXED | A removed launcher flag must fail specifically as unknown before runtime. The test first proves otherwise-valid argv and credentials reach a nonnil factory, then asserts the exact unknown-flag error and no additional factory call. Temporarily restoring --deadline made it fail with the runtime boundary and two calls. The mutation is reverted; the corrected test passes. |
+| 10 | FIXED | Environment documentation covers the authoritative policy and external reads. The inventory now unions procenv.Registry with AST-discovered reads. A new registry coverage regression failed before the docs fix. Runtime, tool, CA and deny-only rows are documented explicitly, including SPARKWING_DRY_RUN, PIP_INDEX_URL and PIP_TRUSTED_HOST. Both coverage checks and embedded-doc checks pass. |
+| 11 | FIXED | Migration advice names a live intake API. The new documentation regression failed on EnqueueTriggerWithEnv. Migration and C3 guidance now use sealed CreateRunRequest through Controller.CreateRun, retaining the environment digest and options. The regression passes. |
+
+### Contract changes needed and DESIGN routes
+
+**DESIGN: production composition (finding 1; W2/W3/W8).** One elected controller
+must own the store, queue, reconciliation, maintenance and authorized API/UI.
+W2 must supply the concrete `wingd.LocalController` factory. W2/W3 must provide
+private `ReadSnapshot`, `ReadNode`, `TransitionRun` and `TransitionNode` with the
+C1 host signatures: public status and scheduling projections cannot reconstruct
+them. W9's existing `cliHostState` can consume those implementations. Native host
+assembly must also retain captured environments, source authority, delegated
+process credentials, data/log storage, compute activity and joined owner policies.
+Local schedule registration still needs its source/proof/pin/tick owner.
+These foreign declarations/implementations are absent, so the refusal factories
+were not replaced with successful component bindings.
+
+**DESIGN: award validation (finding 2; W8 with W9 wire owner).** Validate an award
+once before hosting, launcher claim projection or bootstrap exchange. Bind the
+current execution ID only to the current claim fence. Bind accepted spec origin,
+team and request hash to the original request seal, and verify the seals and
+engine together. Do not compare either original seal ID with the current
+execution ID. Pass that validated projection to all three consumers. The new
+entrypoint tests must pass before treating the helper-level repair as complete.
+No W8 production code or foreign contract was changed here.
+
+**DESIGN: controller-owned doctor sweep (finding 7; W8/W2).** Add a controller-owned
+maintenance operation with explicit dry-run input and a result containing sweep
+outcomes plus independent recording warnings. The local lifecycle should invoke
+that operation and return its findings; W9 renders them and derives failure from
+cleanup, not a missing run's ledger event. The existing C4 Doctor signature takes
+only a version, so it cannot convey dry-run or the required operation. W8 must
+amend that contract before W9 adapts it. Retire the unused opsview doctor facade
+after moving its live cleanup/reporting responsibilities. Do not open a second
+writing store from the CLI to run the old facade.
+
+**W2/W1 schedule adoption (finding 3).** C3 is W9-owned and is amended in this
+worktree. The existing PUT `/api/v1/schedules/repos` carries the explicit mode;
+route authority and credentials are unchanged. Apply each write atomically.
+Upsert preserves unselected declarations, source pins, overrides and pause state;
+empty upsert is a no-op. Local schedule registration must preserve the same scope.
+The repository HTTP handler is not implemented in this worktree, so the stateful
+fixture and client tests are component evidence, not native persistence evidence.
+
+### Tests and verification
+
+Every Go command used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE=/tmp/sw-astra-W9/gocache and TMPDIR/GOTMPDIR=/tmp/sw-astra-W9/tmp.
+Tests used -p 4. The user-selected cache location overrides the brief's shared
+cache default; /tmp/sw-gocache was not deleted or changed.
+
+- Whole-repository `go build -p 4 ./...` passes after the final production edits.
+- Vet passes for cmd/sparkwing, clisurface, controllerwire, controller/client,
+  procenv, cluster, runners, runners/launcher and opsview.
+- Full clisurface, controllerwire, controller/client, procenv and doccheck tests
+  pass. Focused CLI intake/output, selected-source/help, admission, schedules,
+  doctor-command and launcher suites pass. Engine-switch/replay checks pass.
+  The renamed legacy recording-component test passes.
+- Environment inventory, registry coverage, migration guidance and source/mirror
+  equality checks pass. Commentcheck against main is clean across 2,041 files.
+  Whitespace checks pass. No sleep, retry policy, customer flag or timeout added.
+- Known-open integration probes are retained under the `rewrite_integration`
+  build tag. They remain red, with the exact production refusal, retry validation
+  and missing cleanup failures described above. Reproduce with:
+  `go test -p 4 -tags rewrite_integration ./cmd/sparkwing ./internal/runners ./internal/runners/launcher -run '^TestReview'`.
+  The tag keeps these explicit handoff probes separate from default component
+  checks; they are not counted as passed or closed.
+- No native acceptance cell was unskipped and no archived T1 port is newly
+  complete. Existing component results do not establish native placement.
+  The full CLI suite and Sparkwing pipelines were not run because this session
+  forbids Sparkwing binaries and Git writes.
+
+### Deletion, scope and assumptions
+
+Removed the duplicate HEAD-based profile guard and the inline help path, with
+obsolete tests of that removed reader replaced by command-level selection tests.
+No production file was deleted. W9 production Go is **198 added, 83 removed,
+net +115** this pass, including the new untracked helper. W9 totals **-8,128
+versus main**, within the -2,900 budget. Tests, testdata and contract declaration
+files are excluded. The minimal procenv edit is outside that W9 count.
+
+The required reconciliation mode removes ambiguity that filtering cannot fix.
+The output-origin capture prevents a second interpretation of the parsed flags.
+The selected-help helper and pre-exec cleanup use the existing compiler and
+engine switcher; reading HEAD or changing only the pin guard cannot fix source
+selection. Reverting these mechanisms would restore the reproduced scenarios.
+No new customer configuration, restriction, environment variable or alias was added.
+
+Shared/foreign files touched: internal/procenv/build.go and registry.go;
+internal/cluster/launch_cli_test.go; the two tagged w9_retry_review_test.go files
+under internal/runners and launcher; internal/opsview/doctor_recording_unix_test.go;
+C3's controller-wire contract; CHANGELOG.md and generated pkg/docs mirrors.
+Lead-owned handoffs.md and amendments remain untouched. Other edits are W9-owned.
+The natural-writing skill was used for prose. No harness memory was written.
+
+Friction: native composition and the doctor operation lack the foreign contracts
+listed above. Socket/native/backend QA remains with the lead. Temporary source
+fixtures use a Git stand-in, not real Git writes. Scratch /tmp/sw-astra-W9 is
+removed after verification. Git still resolves Korey's identity with no
+core.worktree override. There are no new questions beyond these named handoffs.
+
+---
+
 # W9 handoff
 
 ## Continuation from 8b254e8fa

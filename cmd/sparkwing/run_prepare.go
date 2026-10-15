@@ -65,7 +65,18 @@ func prepareLocalRunRequest(ctx context.Context, input localRunPreparation, flag
 	inputs := input.settings
 	inputs.Context.Origin, inputs.Context.Submitter, inputs.Context.Local = runspec.OriginLocal, true, true
 	inputs.Context.Detached = flags.detached
+	if flags.outputOrigin.Source == settings.Default {
+		inputs.Context.Terminal = flags.outputFormat == "pretty"
+	}
 	inputs.Flags = localRunSettingFlags(flags)
+	if flags.outputOrigin.Source == settings.Env {
+		inputs.Environment.Output = &flags.outputFormat
+		inputs.Environment.Origins = maps.Clone(inputs.Environment.Origins)
+		if inputs.Environment.Origins == nil {
+			inputs.Environment.Origins = map[string]settings.Origin{}
+		}
+		inputs.Environment.Origins["output"] = flags.outputOrigin
+	}
 	if input.machine.Run != nil {
 		inputs.Machine.CacheFrom = input.machine.Run.CacheFrom
 		inputs.Machine.SubmitEnvAllow = input.machine.Run.SubmitEnvAllow
@@ -136,8 +147,9 @@ func localRunSettingFlags(flags runFlags) settings.Values {
 	if has("sw-dry-run", flags.dryRun) {
 		values.DryRun = &flags.dryRun
 	}
-	if has("sw-output", flags.outputFormat != "") {
+	if flags.outputOrigin.Source == settings.Flag || flags.invocation.Command.Path == "" && flags.outputFormat != "" {
 		values.Output = &flags.outputFormat
+		values.Origins = map[string]settings.Origin{"output": flags.outputOrigin}
 	}
 	if has("sw-priority", flags.prioritySet || flags.priority != "") {
 		priority, _ := strconv.Atoi(flags.priority)

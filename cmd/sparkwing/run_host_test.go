@@ -126,7 +126,8 @@ func TestLocalRunUsesSealedIntakeAndNamedOwnerClaim(t *testing.T) {
 			var calls []string
 			var out bytes.Buffer
 			deps := localRuntimeFor(t, localTestAward(t), detached, &calls)
-			err := runLocalCommand(t.Context(), "ci", runFlags{detached: detached, outputFormat: "json"}, []string{"--password", "private-value"}, &out, deps)
+			flags, args := parseRunFlags([]string{fmt.Sprintf("--sw-detached=%t", detached), "-o=json", "--", "--password", "private-value"})
+			err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps)
 			want := []string{"resolve", "prepare", "create", "claim", "bind", "host", "host-close", "close"}
 			if detached {
 				want = []string{"resolve", "prepare", "create", "close"}
@@ -218,6 +219,37 @@ func localTestPreparation(t *testing.T, award controllerwire.ClaimedUnit) localR
 		described: []nodeproto.PipelineDescription{{Name: "CI", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true}}}},
 		git:       award.Request.Request.Git, source: runspec.Source{Entrypoint: "CI"}, environment: env,
 		settings: settings.Inputs{Context: settings.Context{NumCPU: 4}},
+	}
+}
+
+func TestParsedLocalOutputSurvivesIntakeAndReceipt(t *testing.T) {
+	for _, option := range [][]string{{"-o", "plain"}, {"--output=plain"}, {"--sw-output=plain"}, nil} {
+		t.Run(strings.Join(option, " "), func(t *testing.T) {
+			t.Setenv("SPARKWING_LOG_FORMAT", "plain")
+			flags, args := parseRunFlags(append(append([]string{"--sw-detached"}, option...), "--", "--password=private-value"))
+			var calls []string
+			deps := localRuntimeFor(t, localTestAward(t), true, &calls)
+			resolve := deps.resolve
+			deps.resolve = func(ctx context.Context, opts localRunOptions) (localRunRuntime, error) {
+				runtime, err := resolve(ctx, opts)
+				create := runtime.controller.(localTestController).create
+				runtime.controller = localTestController{create: func(ctx context.Context, request controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
+					wantLayer := runspec.LayerFlag
+					if option == nil {
+						wantLayer = runspec.LayerEnv
+					}
+					if output := request.Request.Options.Output; output.Value != "plain" || output.Origin.Layer != wantLayer {
+						t.Errorf("sealed output = %+v, want plain from %s", output, wantLayer)
+					}
+					return create(ctx, request)
+				}}
+				return runtime, err
+			}
+			var out bytes.Buffer
+			if err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps); err != nil || out.String() != "local-run\n" {
+				t.Fatalf("receipt = %q, error = %v", &out, err)
+			}
+		})
 	}
 }
 

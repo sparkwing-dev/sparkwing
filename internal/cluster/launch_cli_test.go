@@ -13,7 +13,7 @@ import (
 
 func TestLauncherCommandPassesOnlyOperatorConfiguration(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, agentTokenCredential), []byte("private-launcher-root"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, agentTokenCredential), []byte("private-launcher-root"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	boundary := errors.New("fixture boundary")
@@ -31,9 +31,26 @@ func TestLauncherCommandPassesOnlyOperatorConfiguration(t *testing.T) {
 }
 
 func TestLauncherCommandRejectsRemovedCacheAndScratchOptions(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, agentTokenCredential), []byte("private-launcher-root"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	image := "example.com/image@sha256:" + strings.Repeat("a", 64)
+	args := []string{"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=1", "--memory-ceiling=1Gi", "--credentials-dir=" + dir}
+	boundary := errors.New("runtime boundary")
+	calls := 0
+	factory := func(context.Context, launcher.CloudJobConfig, string) (*launcher.Launcher, error) {
+		calls++
+		return nil, boundary
+	}
+	if err := RunLaunchCLI(t.Context(), args, factory); !errors.Is(err, boundary) || calls != 1 {
+		t.Fatalf("otherwise-valid launch did not reach runtime: %v", err)
+	}
 	for _, option := range []string{"--cache=http://cache", "--gitcache=http://cache", "--dependency-proxy=http://proxy", "--scratch=40Gi", "--deadline=1h"} {
-		if err := RunLaunchCLI(t.Context(), []string{option}, nil); err == nil {
-			t.Fatalf("accepted %s", option)
+		name, _, _ := strings.Cut(option, "=")
+		err := RunLaunchCLI(t.Context(), append(append([]string{}, args...), option), factory)
+		if err == nil || err.Error() != "unknown flag: "+name || calls != 1 {
+			t.Fatalf("%s: want unknown flag before runtime, got %v (calls %d)", option, err, calls)
 		}
 	}
 }

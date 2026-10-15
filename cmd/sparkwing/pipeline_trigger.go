@@ -3,11 +3,8 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -69,9 +66,6 @@ func runTriggerCommand(ctx context.Context, args []string, out io.Writer, prepar
 				return resumeAttachedHereRun(ctx, options, run, defaultHereDependencies(flags.output))
 			})
 	}
-	if err := refuseOtherThanPinnedProfile(flags.pipeline, flags.profile, flags.workingTree); err != nil {
-		return err
-	}
 	request, err := prepare(ctx, flags)
 	if err != nil {
 		return err
@@ -100,29 +94,4 @@ func runTriggerCommand(ctx context.Context, args []string, out io.Writer, prepar
 			return outcome, errors.Join(followErr, err)
 		},
 	})
-}
-
-// safety: the pin guards against sending a pipeline to the wrong controller by
-// mistake; the controller still decides who may run it.
-func refuseOtherThanPinnedProfile(pipelineName, profileName string, workingTree bool) error {
-	// safety: the runner compiles the .sparkwing/ at the root of the checkout
-	// the trigger submits, so that file holds the pin, never a nested one.
-	top, err := gitOutput(context.Background(), ".", nil, "rev-parse", "--show-toplevel")
-	if err != nil {
-		return fmt.Errorf("pipeline trigger: find the git checkout to read pipeline %s's pin: %w", pipelineName, err)
-	}
-	// safety: without --working-tree the controller runs the commit HEAD names,
-	// so that commit's sparkwing.yaml holds the pin, not the working tree's.
-	ref := "HEAD"
-	if workingTree {
-		ref = ""
-	}
-	entry, err := pinnedPipelineAt(filepath.Join(strings.TrimSpace(top), ".sparkwing"), ref, pipelineName)
-	if err != nil {
-		return fmt.Errorf("pipeline trigger: %w", err)
-	}
-	if entry == nil || entry.Profile == "" || entry.Profile == profileName {
-		return nil
-	}
-	return fmt.Errorf("pipeline trigger: pipeline %s is pinned to profile %s; pass --profile %s", pipelineName, entry.Profile, entry.Profile)
 }

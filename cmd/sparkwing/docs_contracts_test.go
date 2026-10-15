@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
@@ -93,6 +94,28 @@ var constructedEnvReads = map[string][]string{
 
 var envPageRow = regexp.MustCompile("(?m)^\\| `([A-Z][A-Z0-9_]*)` \\|")
 
+func TestDocsCoverAuthoritativeEnvironmentPolicy(t *testing.T) {
+	reference, err := docs.ReadRaw("environment-variables")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, variable := range procenv.Registry {
+		if !docsMentionEnvVar(reference, variable.Name) {
+			t.Errorf("environment reference omits policy variable %s", variable.Name)
+		}
+	}
+}
+
+func TestMigrationGuidanceUsesSealedRunIntake(t *testing.T) {
+	raw, err := docs.ReadRaw("migrations/_unreleased")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw, "EnqueueTriggerWithEnv") || !strings.Contains(raw, "CreateRunRequest") {
+		t.Fatal("migration guidance must use CreateRunRequest rather than the removed enqueue API")
+	}
+}
+
 func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
@@ -120,6 +143,9 @@ func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 		if !slices.Contains(dynamic, site) {
 			t.Errorf("constructedEnvReads lists %q, which the walk no longer finds; drop it", site)
 		}
+	}
+	for _, variable := range procenv.Registry {
+		names = append(names, variable.Name)
 	}
 	slices.Sort(names)
 	names = slices.Compact(names)

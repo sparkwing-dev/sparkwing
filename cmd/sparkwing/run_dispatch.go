@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -57,6 +58,7 @@ type runFlags struct {
 	pipelineRef    string
 	idempotencyKey string
 	outputFormat   string
+	outputOrigin   settings.Origin
 }
 
 func validatePriorityFlag(v string) (string, error) {
@@ -80,7 +82,7 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		}
 		return runFlags{parseErr: err}, nil
 	}
-	output := runOutput(inv, os.Getenv("SPARKWING_LOG_FORMAT"), color.IsInteractiveStdout())
+	output, outputOrigin := runOutput(inv, os.Getenv("SPARKWING_LOG_FORMAT"), color.IsInteractiveStdout())
 	if output != "pretty" && output != "json" && output != "plain" {
 		return runFlags{parseErr: errors.New("SPARKWING_LOG_FORMAT must be pretty, json or plain")}, nil
 	}
@@ -104,21 +106,21 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		dryRun: inv.Bool("sw-dry-run"), allow: inv.Flags["sw-allow-risk"],
 		index: inv.Value("sw-index"), runHandleFile: inv.Value("sw-run-handle-file"),
 		detached: inv.Bool("sw-detached"), idempotencyKey: inv.Value("sw-idempotency-key"),
-		outputFormat: output,
+		outputFormat: output, outputOrigin: outputOrigin,
 	}, inv.Args
 }
 
-func runOutput(inv clisurface.Invocation, environment string, terminal bool) string {
+func runOutput(inv clisurface.Invocation, environment string, terminal bool) (string, settings.Origin) {
 	if inv.Has("sw-output") {
-		return inv.Value("sw-output")
+		return inv.Value("sw-output"), settings.Origin{Source: settings.Flag, Key: "sw-output"}
 	}
 	if inv.Has("output") {
-		return inv.Value("output")
+		return inv.Value("output"), settings.Origin{Source: settings.Flag, Key: "output"}
 	}
 	if environment != "" {
-		return environment
+		return environment, settings.Origin{Source: settings.Env, Key: "SPARKWING_LOG_FORMAT"}
 	}
-	return inv.Output(terminal)
+	return inv.Output(terminal), settings.Origin{Source: settings.Default, Key: "output"}
 }
 
 func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, pipelineDirectory string, cleanup func(), err error) {

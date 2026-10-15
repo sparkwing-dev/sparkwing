@@ -13,7 +13,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
-	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -98,7 +97,7 @@ func dispatchRun(args []string) error {
 	return dispatchRunWithEngine(args, switchToolchain)
 }
 
-func dispatchRunWithEngine(args []string, selectEngine func(string) error) error {
+func dispatchRunWithEngine(args []string, selectEngine func(string, func()) error) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		if len(args) == 0 {
 			PrintHelp(cmdRun, os.Stderr)
@@ -123,40 +122,27 @@ func dispatchRunWithEngine(args []string, selectEngine func(string) error) error
 			return err
 		}
 	}
-
 	dir, err := findSparkwingDir()
 	if err != nil {
 		return err
 	}
-	if !helpRequested {
-		entry, err := pinnedPipelineAt(dir, flags.ref, pipelineName)
-		if err != nil {
-			return fmt.Errorf("run: %w", err)
-		}
-		if err := orchestrator.RefusePinnedLocalRun(entry); err != nil {
-			return fmt.Errorf("run: %w", err)
-		}
+	if helpRequested {
+		return runSelectedHelp(dir, pipelineName, flags, selectEngine)
+	}
+	entry, err := pinnedPipelineAt(dir, flags.ref, pipelineName)
+	if err != nil {
+		return fmt.Errorf("run: %w", err)
+	}
+	if err := orchestrator.RefusePinnedLocalRun(entry); err != nil {
+		return fmt.Errorf("run: %w", err)
 	}
 
 	// safety: the exec replays this command, so the pin must settle before any daemon, worktree, run, or output.
-	if err := selectEngine(dir); err != nil {
+	if err := selectEngine(dir, nil); err != nil {
 		return err
 	}
 
-	if !helpRequested {
-		return runLocalInvocation(pipelineName, flags, passthrough)
-	}
-	run := newPipelineRun(dir, compileOptions{NoUpdate: flags.noUpdate, NoBincache: flags.noBincache})
-	defer run.stop()
-	run.ctx = gotoolchain.WithSession(run.ctx, os.Environ(), nil)
-	if err := run.materialize(os.Environ()); err != nil {
-		return run.finish(err)
-	}
-	schema, err := run.describedPipeline(pipelineName)
-	if err == nil {
-		printPipelineHelp(os.Stdout, schema)
-	}
-	return run.finish(err)
+	return runLocalInvocation(pipelineName, flags, passthrough)
 }
 
 func pinnedPipeline(sparkwingDir, pipelineName string) (*pipelines.Pipeline, error) {

@@ -39,7 +39,7 @@ type scheduleRepositoryFixture struct {
 	calls   *[]string
 }
 
-func (f *scheduleRepositoryFixture) ReplaceSchedules(_ context.Context, input controllerwire.ScheduleRepoRequest) (controllerwire.ScheduleRepoWritten, error) {
+func (f *scheduleRepositoryFixture) WriteSchedules(_ context.Context, input controllerwire.ScheduleRepoRequest) (controllerwire.ScheduleRepoWritten, error) {
 	*f.calls = append(*f.calls, "replace")
 	f.input = input
 	return controllerwire.ScheduleRepoWritten{Schedules: []controllerwire.ScheduleView{{ID: "remote-id", Name: "repo/sweep/cloud"}}}, nil
@@ -109,8 +109,9 @@ func newScheduleCommandFixture(t *testing.T) *scheduleCommandFixture {
 	row.Schedule.RepoPath = root
 	f.manager.rows["s1"], f.manager.rows["check/nightly"] = row, row
 	f.repository = &scheduleRepositoryFixture{calls: &f.calls}
-	f.services = localScheduleServices{lifecycle: scheduleLifecycleFixture{calls: &f.calls},
-		units: scheduleUnitsFixture{calls: &f.calls}, options: wingd.LocalStartOptions{Home: home, Executable: filepath.Join(home, "sparkwing"), Version: "v1.2.3"},
+	f.services = localScheduleServices{
+		lifecycle: scheduleLifecycleFixture{calls: &f.calls},
+		units:     scheduleUnitsFixture{calls: &f.calls}, options: wingd.LocalStartOptions{Home: home, Executable: filepath.Join(home, "sparkwing"), Version: "v1.2.3"},
 		register: func(_ context.Context, input localScheduleRegistration) (controllerwire.ScheduleRepoWritten, error) {
 			f.calls = append(f.calls, "register")
 			f.registrations = append(f.registrations, input)
@@ -130,11 +131,13 @@ func newScheduleCommandFixture(t *testing.T) *scheduleCommandFixture {
 		}, uninstallTimer: func(context.Context) error {
 			f.calls = append(f.calls, "uninstall-timer")
 			return nil
-		}}
-	f.command = scheduleCommand{connect: func(_ context.Context, profile string) (scheduleConnection, error) {
-		f.calls = append(f.calls, "connect:"+profile)
-		return scheduleConnection{manager: f.manager, repositories: f.repository, close: func() { f.calls = append(f.calls, "close") }}, nil
-	}, local: func(context.Context, string) (localScheduleServices, error) { return f.services, nil },
+		},
+	}
+	f.command = scheduleCommand{
+		connect: func(_ context.Context, profile string) (scheduleConnection, error) {
+			f.calls = append(f.calls, "connect:"+profile)
+			return scheduleConnection{manager: f.manager, repositories: f.repository, close: func() { f.calls = append(f.calls, "close") }}, nil
+		}, local: func(context.Context, string) (localScheduleServices, error) { return f.services, nil },
 		roots: func(bool, bool) ([]string, error) { return []string{root}, nil },
 		load:  func(string) (*projectconfig.Config, error) { return projectconfig.Parse([]byte(scheduleProject)) },
 		source: func(_ context.Context, _ string, follow bool) (controllerwire.ScheduleRepoRequest, error) {
@@ -143,7 +146,8 @@ func newScheduleCommandFixture(t *testing.T) *scheduleCommandFixture {
 				input.SHA = strings.Repeat("a", 40)
 			}
 			return input, nil
-		}, environment: func() []string { return []string{"PATH=/bin", "BUILD_FLAG=captured"} }, goos: "linux"}
+		}, environment: func() []string { return []string{"PATH=/bin", "BUILD_FLAG=captured"} }, goos: "linux",
+	}
 	return f
 }
 

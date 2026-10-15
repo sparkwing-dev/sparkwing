@@ -19,6 +19,7 @@ import (
 )
 
 type localScheduleRegistration struct {
+	Mode        controllerwire.ScheduleWriteMode
 	RepoPath    string
 	Project     *projectconfig.Config
 	Schedules   []controllerwire.ScheduleDeclaration
@@ -128,8 +129,10 @@ func installLocalSchedules(ctx context.Context, inv clisurface.Invocation, opts 
 		if err != nil {
 			return err
 		}
-		requests = append(requests, localScheduleRegistration{RepoPath: root, Project: cfg, Schedules: declarations,
-			Environment: slices.Clone(environment), Follow: inv.Bool("unpinned") || inv.Bool("no-prove"), Prove: !inv.Bool("no-prove")})
+		requests = append(requests, localScheduleRegistration{
+			Mode: scheduleWriteMode(inv), RepoPath: root, Project: cfg, Schedules: declarations,
+			Environment: slices.Clone(environment), Follow: inv.Bool("unpinned") || inv.Bool("no-prove"), Prove: !inv.Bool("no-prove"),
+		})
 		skipped = append(skipped, other)
 		count += len(declarations)
 	}
@@ -144,9 +147,12 @@ func installLocalSchedules(ctx context.Context, inv clisurface.Invocation, opts 
 		return err
 	}
 	for i, request := range requests {
-		result, err := services.register(ctx, request)
-		if err != nil {
-			return err
+		var result controllerwire.ScheduleRepoWritten
+		if request.Mode != controllerwire.ScheduleUpsert || len(request.Schedules) > 0 {
+			result, err = services.register(ctx, request)
+			if err != nil {
+				return err
+			}
 		}
 		if err := renderScheduleInstallation(out, scheduleInstallation{Repo: request.RepoPath, ScheduleRepoWritten: result, Skipped: skipped[i]}, opts.format); err != nil {
 			return err

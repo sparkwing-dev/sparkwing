@@ -599,9 +599,9 @@ log-capability probe and bearer getter are removed.
 `Client.CreateToken`, `ListTokens`, `LookupToken`, `RevokeToken`, `RotateToken`
 and `ListSecrets` are removed. Credential and secret management use the typed
 managers above. Their issuance and metadata messages remain shared with the
-controller. `Client.EnqueueTrigger` is removed. The remaining legacy host caller
-requires `EnqueueTriggerWithEnv` directly, including an explicit nil environment.
-There is no environment-dropping fallback. The final engine constructors live
+controller. `Client.EnqueueTrigger` and its environment variant are removed. All intake
+uses sealed `CreateRunRequest` through `Controller.CreateRun`, retaining the
+captured environment digest and resolved options. The final engine constructors live
 in `engine_client.go`, and the data constructor lives beside its implementation
 in `data.go`.
 
@@ -634,7 +634,8 @@ replay. `DeleteSchedule` deletes `/{schedule}` and returns canonical
 
 `ScheduleRepositoryManager` puts `/schedules/repos` using `ScheduleRepoRequest`:
 repository URL, branch, original SHA or follow policy, and the complete array of
-`ScheduleDeclaration` entries. `ScheduleRepoWritten` retains rows and withdrawn
+`ScheduleDeclaration` entries for the selected `replace` or `upsert` mode.
+`ScheduleRepoWritten` retains rows and withdrawn
 display names. Delete uses `repo_url` and returns the same URL and nonnegative
 removed count. These are proposals. C2 derives team/repository authority.
 
@@ -779,3 +780,16 @@ provided. Private execution snapshots, the elected controller factory and native
 host/data/log composition remain integration points.
 
 <!-- design:end -->
+
+### Schedule reconciliation scope
+
+`ScheduleRepoRequest.mode` is required: `replace` reconciles the complete
+repository declaration set, and `upsert` changes only the supplied declarations.
+`ScheduleRepositoryManager.WriteSchedules` uses the existing PUT repository route
+for both modes. Upsert cannot withdraw a schedule or change another schedule's
+source pin, overrides or pause state. An empty upsert is a no-op.
+The CLI selects upsert when `--schedule` is present and skips the write when all
+selected declarations run elsewhere. Local registration carries the same mode.
+The client rejects missing or unknown modes and a withdrawal in an upsert receipt.
+W2/W1 must apply the mode atomically; neither route authorization nor repository
+authority changes. Native repository handlers remain an integration dependency.
