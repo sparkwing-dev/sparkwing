@@ -76,7 +76,14 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 			return PaymentSettlement{}, err
 		}
 		if used != 0 {
-			return PaymentSettlement{}, authorityError(apierr.Conflict, "payment identity belongs to another checkout")
+			return PaymentSettlement{}, errors.Join(ErrCreditGrantConflict, authorityError(apierr.Conflict, "payment identity belongs to another checkout"))
+		}
+		grant, found, err := paidGrantForPaymentTx(ctx, tx, event.PaymentID)
+		if err != nil {
+			return PaymentSettlement{}, err
+		}
+		if found && (grant.Team != checkout.result.Team || grant.ID != checkout.grant.String) {
+			return PaymentSettlement{}, errors.Join(ErrCreditGrantConflict, authorityError(apierr.Conflict, "payment identity already funded another grant"))
 		}
 	}
 	body, err := json.Marshal(event)

@@ -82,7 +82,6 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/credits/card-payments":       resNone,
 	"POST /api/v1/credits/card-refunds":        resNone,
 	"POST /api/v1/credits/cards":               resNone,
-	"POST /api/v1/credits/checkouts/closed":    resNone,
 	"POST /api/v1/credits/freezes":             resNone,
 	"POST /api/v1/credits/grants":              resNone,
 	"GET /api/v1/credits/history":              resNone,

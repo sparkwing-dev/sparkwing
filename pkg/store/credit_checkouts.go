@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -182,59 +181,6 @@ func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) (err error) 
 		return err
 	}
 	return tx.Commit()
-}
-
-// ErrCheckoutNotFound is returned when a team holds no checkout for the
-// payment session a report names.
-var ErrCheckoutNotFound = errors.New("credits: the team holds no checkout for this session")
-
-// CloseCreditCheckout moves t's checkout for sessionID from open and unpaid
-// to closed with outcome, [BusinessEventCheckoutFailed] or
-// [BusinessEventCheckoutExpired], records that event and stops the checkout
-// counting against the balance cap. It reports whether it closed the
-// checkout: a paid or already closed one is left as it is and records
-// nothing. A session t holds no checkout for is [ErrCheckoutNotFound].
-func (t *Tenant) CloseCreditCheckout(
-	ctx context.Context, sessionID, outcome, actor string, now time.Time,
-) (_ bool, err error) {
-	if outcome != BusinessEventCheckoutFailed && outcome != BusinessEventCheckoutExpired {
-		return false, fmt.Errorf("%w: checkout outcome %q", ErrInvalidInput, outcome)
-	}
-	if sessionID = strings.TrimSpace(sessionID); sessionID == "" {
-		return false, fmt.Errorf("%w: a closed checkout names its session", ErrInvalidInput)
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	var id string
-	var paid, closed sql.NullInt64
-	err = tx.QueryRowContext(ctx,
-		`SELECT id, paid_at, closed_at FROM credit_checkouts WHERE team = ? AND session_id = ?`+tx.forUpdate(),
-		string(t.team), sessionID).Scan(&id, &paid, &closed)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, ErrCheckoutNotFound
-	}
-	if err != nil {
-		return false, err
-	}
-	if paid.Valid || closed.Valid {
-		return false, tx.Commit()
-	}
-	nowNS := now.UnixNano()
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE credit_checkouts SET closed_at = ?, expires_at = CASE WHEN expires_at > ? THEN ? ELSE expires_at END
-		 WHERE team = ? AND id = ?`, nowNS, nowNS, nowNS, string(t.team), id); err != nil {
-		return false, err
-	}
-	if err := RecordBusinessEvent(tx, BusinessEvent{
-		At: now, Team: t.team, Kind: outcome, SubjectID: id, Actor: actor,
-		Attrs: map[string]any{"session_id": sessionID},
-	}); err != nil {
-		return false, err
-	}
-	return true, tx.Commit()
 }
 
 // safety: runs inside the paid grant's transaction, so the checkout stops

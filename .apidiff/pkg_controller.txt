@@ -356,7 +356,6 @@ type TrendPoint struct {
 	P95DurMs  int64
 	AvgWaitMs int64
 }
-const UnknownCheckoutCode = "unknown_checkout"
 const UnknownPaymentCode = "unknown_payment"
 const UnpricedCPUClassCode = "unpriced_cpu_class"
 const UnsupportedRouteError = "unsupported"

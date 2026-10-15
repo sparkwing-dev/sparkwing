@@ -1064,7 +1064,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/credits/grants", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditsGrant)))
 	mux.Handle("POST /api/v1/credits/reversals", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleReversePayment)))
 	mux.Handle("POST /api/v1/credits/freezes", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditFreeze)))
-	mux.Handle("POST /api/v1/credits/checkouts/closed", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCheckoutClosed)))
 	mux.Handle("POST /api/v1/credits/cards", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleSavedCard)))
 	mux.Handle("POST /api/v1/credits/card-payments", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCardPayment)))
 	mux.Handle("POST /api/v1/credits/warnings", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handlePaymentWarning)))

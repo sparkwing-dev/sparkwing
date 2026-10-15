@@ -797,7 +797,6 @@ var ErrAnnotationTooLarge = errors.New("store: an annotation holds at most 64 Ki
 var ErrAttemptInvalid = errors.New("store: attempt report refused")
 var ErrBindingLimit = errors.New("store: this team binds as many repositories as it may")
 var ErrCLITokenLimit = errors.New("store: this member holds as many member tokens as a member may")
-var ErrCheckoutNotFound = errors.New("credits: the team holds no checkout for this session")
 var ErrClaimCancelRequested = errors.New("store: the run this claim belongs to is being cancelled")
 var ErrClaimNotLive = errors.New("store: the claim on the run is no longer live")
 var ErrClaimNotRunner = errors.New("store: the claim token is not a runner's node claim")
@@ -889,7 +888,7 @@ var ErrTeamOwes = errors.New("store: the team owes for usage or has a card charg
 var ErrTokenExpired = errors.New("token is expired")
 var ErrTokenRevoked = errors.New("token is revoked")
 var ErrTooManyPendingUploads = fmt.Errorf("a team holds at most %d uncommitted uploads; commit them or wait for them to expire", DirectUploadMaxPending)
-var ErrUnknownPayment = errors.New("credits: no paid grant carries this payment id")
+var ErrUnknownPayment = errors.New("credits: no settled grant belongs to this payment id")
 var ErrUnknownTeam = errors.New("store: team is not registered")
 var ErrUnknownToken = errors.New("unknown token")
 var ErrUnpricedCPUClass = errors.New("credits: cpu request above the largest priced class")
@@ -2429,7 +2428,7 @@ func (s *Store) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeS
 func (s *Store) OpenInvitationsForEmail(ctx context.Context, email string, now time.Time) (_ []Invitation, err error)
 func (s *Store) OpenNodeLog(ctx context.Context, l NodeLog, now time.Time) (NodeLog, error)
 func (s *Store) OutputDir() string
-func (s *Store) PaidGrantTeam(ctx context.Context, reference string) (Team, bool, error)
+func (s *Store) PaidGrantTeam(ctx context.Context, paymentID string) (team Team, found bool, err error)
 func (s *Store) PaymentTeam(ctx context.Context, paymentID string) (Team, error)
 func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
 func (s *Store) PrincipalHoldsNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, now time.Time) (bool, error)
@@ -2669,9 +2668,6 @@ func (t *Tenant) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcom
 func (t *Tenant) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time) error
-func (t *Tenant) CloseCreditCheckout(
-	ctx context.Context, sessionID, outcome, actor string, now time.Time,
-) (_ bool, err error)
 func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) ConfirmGitCredential(ctx context.Context, host, fingerprint string, now time.Time) (GitCredential, error)
 func (t *Tenant) ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq int64, outcome string) error

@@ -464,14 +464,15 @@ func (s *Store) recordCreditGrant(
 		return CreditGrantResult{}, err
 	}
 	if req.Reference != "" {
-		// safety: a payment id is the processor's, so one already paid to
-		// another team is a caller mistake and must not pay this team too; any
-		// other reference is the team's own name for its grant.
-		lookup := team
+		var existing CreditGrant
+		var found bool
+		var err error
 		if req.Kind == CreditGrantPaid {
-			lookup = ""
+			// safety: checkout and card grants share a provider payment identity.
+			existing, found, err = paidGrantForPaymentTx(ctx, tx, req.Reference)
+		} else {
+			existing, found, err = creditGrantByReferenceTx(ctx, tx, team, req.Kind, req.Reference)
 		}
-		existing, found, err := creditGrantByReferenceTx(ctx, tx, lookup, req.Kind, req.Reference)
 		if err != nil {
 			return CreditGrantResult{}, err
 		}

@@ -280,6 +280,14 @@ checkout records at most one credit grant, even when multiple paid event IDs arr
 Failures and expiry cannot undo paid credit. Financial rows have no run cascade.
 Human grants, refunds and freezes remain console-only operations.
 
+Payment lookups and console refunds follow the checkout's persisted `grant_id`.
+The grant's ledger reference is not a provider payment ID. Refunds retain that
+ledger reference in `reverses`, count prior reversals and cap the total at the
+paid grant. Checkout lookups select the configured test/live mode. Distinct card
+charge grants retain their provider payment reference. Ambiguous payment/grant
+associations fail instead of choosing a team. Caller-directed checkout closure
+is removed. Verified failure and expiry events own those outcomes.
+
 | Export | Purpose |
 |---|---|
 | `CapabilityRecord`, `CapabilityRecord.Validate` | Preserve and validate complete versioned authority alongside indexed projections. |
