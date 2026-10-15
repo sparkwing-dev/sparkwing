@@ -89,7 +89,7 @@ build the matching native bridge first. Missing Node, TypeScript dependencies
 or bridge binaries fail the test.
 
 The Go acceptance suite also runs SDK boundary tests for the protocol scenarios.
-These tests use native pipes and fake bound services. Run the native pipe test
-on Windows to verify raw handles there. Controller authorization, store
-transitions, artifact/memo persistence, real DinD and the six placement paths
-require their corresponding integration hosts.
+These tests use native pipes, fake bound services and a temporary Git file remote.
+Run the native pipe test on Windows to verify raw handles there. Controller
+authorization, store transitions, artifact/memo persistence, real DinD and the
+six placement paths require their corresponding integration hosts.

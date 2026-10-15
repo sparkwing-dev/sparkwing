@@ -4,6 +4,36 @@ Snapshot: 2026-10-14. W5 remains incomplete at the native Windows and integrated
 host acceptance boundaries. The source implementation and local SDK proofs are
 ready for integration. The lead owns commits, pipelines and native verification.
 
+## Continuation: real Git helper execution
+
+The SDK acceptance body now exercises Git against a temporary bare remote using
+the file transport. It checks shallow clone depth, paths containing spaces,
+fetch without moving HEAD, sealed snapshot facts after fast-forward, changed
+files, tag publication, remote collisions, stale local tags, retrying a local
+tag at HEAD and transport failures. Git configuration and repositories stay
+inside the fixture. No network access or user configuration is needed.
+
+`protocol-host-layers-risk-cleanup/typescript_sdk_boundary` now includes
+`git-helper.test.ts`. This closes local Git execution coverage. Authenticated
+network transports, native Windows, host/store integration and placement cells
+remain open. W4's protocol parser and plan validator still panic in this branch.
+Package preflight still refuses the missing Windows x64 bridge.
+
+All 127 TypeScript tests, strict typechecking and Prettier passed. Repository-wide
+`go build -p 4 ./...`, focused `go vet -p 4` and `go test -p 4` for
+`./sdk/typescript/test/nativehost ./internal/acceptance ./tests/acceptance` passed.
+This includes the existing SDK acceptance children and Linux native pipes.
+No placement or native Windows cell was enabled.
+
+No runtime or contract changed. No further inventory tests were ported or legacy
+code deleted. The prior deletion remains 2,896 lines. The only shared edit
+selects the Git test file in `internal/acceptance/typescript.go`.
+Go checks used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4` and
+caches and temporary files under `/tmp/sw-astra-W5`. TypeScript tests used
+`node --test --experimental-test-isolation=none 'test/**/*.test.ts'`.
+No Sparkwing binary ran or worktree Git metadata changed. The temporary
+directory was removed.
+
 ## Continuation: signed zero duration arguments
 
 Duration arguments now accept `+0` and `-0`, matching Go's `time.ParseDuration`.
@@ -246,8 +276,8 @@ selects masked versus plain values, so describe still carries names and optional
    retries and actual cleanup after process death.
 3. Exercise W1/W2/W7 authorization and persistence: artifacts, memo/depcache,
    reference pins, secret masking, child ancestry, OIDC and failure propagation.
-4. Run actual Docker/DinD and Git remote helper cases, all six placements, and the
-   Windows/Darwin native lanes. W9 must stamp the npm version with the release.
+4. Run actual Docker/DinD and authenticated Git transports, all six placements,
+   and the Windows/Darwin native lanes. W9 must stamp the npm version with the release.
 5. Migrate W4's old conformance corpus to v2. Its TypeScript launch caller is
    updated, but the shared v1 request/transcript suite was not rewritten by W5.
    W9's old protocol docs and generated mirrors also remain in its scope.

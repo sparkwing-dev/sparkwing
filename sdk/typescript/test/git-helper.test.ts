@@ -3,9 +3,105 @@ import test from "node:test";
 import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { git, Git, gitFromTree, githubOwnerRepo } from "../src/index.ts";
+import { pathToFileURL } from "node:url";
+import { definePipeline, git, Git, gitFromTree, githubOwnerRepo, withCommandEnv } from "../src/index.ts";
+import { resetPipelines } from "../src/plan.ts";
 import { runScope } from "../src/scope.ts";
 import { fakeContext, commandFailure } from "./helper-context.ts";
+import { Host, hello } from "./helpers.ts";
+
+test("Git helpers clone, fetch and protect tags against a real local remote", async (t) => {
+  const root = await fs.mkdtemp(join(tmpdir(), "sdk-git-remote "));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const seed = join(root, "seed"),
+    remote = join(root, "remote.git"),
+    clone = join(root, "clone with spaces");
+  const config = join(root, "gitconfig"),
+    hooks = join(root, "hooks");
+  await fs.mkdir(hooks);
+  await fs.writeFile(config, "");
+  resetPipelines();
+  definePipeline({
+    name: "fixture",
+    plan(plan) {
+      plan.job("build", async (bound) => {
+        const ctx = withCommandEnv(bound, { GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: "1" });
+        const command = (...args: [string, ...string[]]) => ctx.exec(["git", ...args]).string();
+        const configure = async (directory: string) => {
+          for (const [name, value] of [
+            ["user.name", "SDK fixture"],
+            ["user.email", "sdk@example.invalid"],
+            ["commit.gpgsign", "false"],
+            ["tag.gpgsign", "false"],
+            ["core.hooksPath", hooks],
+          ])
+            await command("-C", directory, "config", "--local", name!, value!);
+        };
+        await command("init", "--initial-branch=main", seed);
+        await command("init", "--bare", "--initial-branch=main", remote);
+        await configure(seed);
+        const commit = async (content: string) => {
+          await fs.writeFile(join(seed, "file.txt"), content);
+          await command("-C", seed, "add", "file.txt");
+          await command("-C", seed, "commit", "-m", content);
+          return git.currentSHA(ctx, seed);
+        };
+        await commit("first");
+        const second = await commit("second");
+        await command("-C", seed, "remote", "add", "origin", remote);
+        await command("-C", seed, "push", "origin", "main");
+        await git.clone(ctx, pathToFileURL(remote).href, "clone with spaces", { depth: 1 });
+        await configure(clone);
+        assert.equal(await command("-C", clone, "rev-parse", "--is-shallow-repository"), "true");
+        assert.equal(await command("-C", clone, "rev-list", "--count", "HEAD"), "1");
+        const snapshot = await gitFromTree(ctx, clone);
+        assert.equal(snapshot.commit, second);
+        assert.equal(snapshot.branch, "main");
+        assert.equal(snapshot.defaultBranch, "main");
+        assert.equal(await snapshot.isDirty(ctx), false);
+
+        await git.pushTag(ctx, clone, "sdk/v1.0.0", "release");
+        assert.equal(await git.tagExistsOnRemote(ctx, clone, "sdk/v1.0.0"), true);
+        await assert.rejects(git.pushTag(ctx, clone, "sdk/v1.0.0", "retry"), /already exists on remote/);
+        const third = await commit("third");
+        await command("-C", seed, "push", "origin", "main");
+        await git.fetch(ctx, clone);
+        assert.equal(await git.currentSHA(ctx, clone), second);
+        assert.equal(await command("-C", clone, "rev-parse", "origin/main"), third);
+        await command("-C", clone, "merge", "--ff-only", "origin/main");
+        assert.equal(await git.currentSHA(ctx, clone), third);
+        assert.equal(snapshot.commit, second);
+        assert.deepEqual(await git.changedFiles(ctx, clone, second), ["file.txt"]);
+        await command("-C", clone, "tag", "sdk/stale", second);
+        await assert.rejects(git.pushTag(ctx, clone, "sdk/stale", "stale"), /outside HEAD/);
+        assert.equal(await git.tagExistsOnRemote(ctx, clone, "sdk/stale"), false);
+        await command("-C", clone, "tag", "sdk/v1.1.0");
+        await git.pushTag(ctx, clone, "sdk/v1.1.0", "existing local tag at HEAD");
+        assert.equal(await git.tagExistsOnRemote(ctx, clone, "sdk/v1.1.0"), true);
+        assert.equal(await git.latestTag(ctx, clone, "sdk/"), "sdk/v1.1.0");
+        await fs.rm(remote, { recursive: true });
+        await assert.rejects(git.tagExistsOnRemote(ctx, clone, "sdk/v2.0.0"), (error: unknown) => {
+          assert.ok(error instanceof Error && "exitCode" in error);
+          assert.notEqual(error.exitCode, 0);
+          return true;
+        });
+        return "verified";
+      });
+    },
+  });
+  const host = new Host({ root });
+  try {
+    const binding = { run_id: "run", job_id: "build", routes: { url: "http://127.0.0.1:1", bearer: "unused" } };
+    assert.equal((await host.send({ ...hello, binding })).ok, true);
+    const planned = await host.send({ id: "plan", op: "plan", pipeline: "fixture", args: {}, run: { run_id: "run", pipeline: "fixture" } });
+    assert.equal(planned.ok, true, JSON.stringify(planned));
+    const executed = await host.send({ id: "body", op: "run_step", job: "build", step: "run", attempt: 1 });
+    assert.equal(executed.result?.outcome, "success", JSON.stringify(executed));
+    assert.equal(executed.result.output, "verified");
+  } finally {
+    await host.close();
+  }
+});
 
 test("git queries preserve sealed snapshot and use direct promptless commands", async () => {
   const root = resolve("repo");

@@ -23,7 +23,7 @@ func TypeScriptTests(scenario string) []string {
 	case "protocol-memo-input-boundaries":
 		return []string{"files-memo.test.ts"}
 	case "protocol-host-layers-risk-cleanup":
-		return []string{"command.test.ts", "docker-services.test.ts"}
+		return []string{"command.test.ts", "docker-services.test.ts", "git-helper.test.ts"}
 	default:
 		return nil
 	}
