@@ -24,15 +24,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func decodedJob(t *testing.T, raw string) nodeproto.JobSpec {
-	t.Helper()
-	var n nodeproto.JobSpec
-	if err := json.Unmarshal([]byte(raw), &n); err != nil {
-		t.Fatal(err)
-	}
-	return n
-}
-
 // hack: the rows are recorded through the scheduler's own expansion path, as a run host records them, without a run.
 func genPod(t *testing.T, mode string) (Config, *store.Store, string) {
 	t.Helper()
@@ -62,22 +53,22 @@ func genPod(t *testing.T, mode string) (Config, *store.Store, string) {
 	if err := st.CreateRun(t.Context(), store.Run{ID: "run-probe", Pipeline: "probe", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	source := decodedJob(t, `{"id":"targets","steps":[{"id":"body"}],"result_step":"body","deps":[],"closures":{"generate":["targets/generate/0"]},"timeout_ms":20}`)
+	source := nodeproto.JobSpec{ID: "targets", Steps: []nodeproto.StepSpec{{ID: "body"}}, ResultStep: "body", Closures: nodeproto.ClosureSpec{Generate: []string{"targets/generate/0"}}, TimeoutMS: new(int64(20))}
 	run := &Run{ID: "run-probe", Doc: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{source}}, State: st, Logger: cfg.Logger, validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	s := &scheduler{run: run, results: map[string]Result{}, started: map[string]bool{}}
 	if err := s.add(t.Context(), t.Context(), []nodeproto.JobSpec{source}, nil); err != nil {
 		t.Fatal(err)
 	}
-	child := `{"id":"child","steps":[{"id":"body"}],"result_step":"body","groups":["targets/generate/0"],"deps":["targets"],"timeout_ms":20}`
+	child := nodeproto.JobSpec{ID: "child", Steps: []nodeproto.StepSpec{{ID: "body"}}, ResultStep: "body", Groups: []string{"targets/generate/0"}, Needs: []string{"targets"}, TimeoutMS: new(int64(20))}
 	if mode == "nested" {
-		child = `{"id":"child","steps":[{"id":"body"}],"result_step":"body","groups":["targets/generate/0"],"deps":["targets"],"timeout_ms":20,"closures":{"generate":["child/generate/0"]}}`
+		child.Closures.Generate = []string{"child/generate/0"}
 	}
-	children := []nodeproto.JobSpec{decodedJob(t, child), decodedJob(t, `{"id":"recover","steps":[{"id":"body"}],"result_step":"body","groups":["targets/generate/0"],"deps":[],"on_failure_of":"child"}`)}
+	children := []nodeproto.JobSpec{child, {ID: "recover", Steps: []nodeproto.StepSpec{{ID: "body"}}, ResultStep: "body", Groups: []string{"targets/generate/0"}, OnFailureOf: "child"}}
 	if err := s.addGenerated(t.Context(), "targets", expansion{closure: "targets/generate/0", nodes: children}); err != nil {
 		t.Fatal(err)
 	}
 	if mode == "nested" {
-		grandchild := []nodeproto.JobSpec{decodedJob(t, `{"id":"grandchild","steps":[{"id":"body"}],"result_step":"body","groups":["child/generate/0"],"deps":["child"]}`)}
+		grandchild := []nodeproto.JobSpec{{ID: "grandchild", Steps: []nodeproto.StepSpec{{ID: "body"}}, ResultStep: "body", Groups: []string{"child/generate/0"}, Needs: []string{"child"}}}
 		if err := s.addGenerated(t.Context(), "child", expansion{closure: "child/generate/0", nodes: grandchild}); err != nil {
 			t.Fatal(err)
 		}

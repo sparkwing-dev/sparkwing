@@ -220,8 +220,9 @@ bound work that keeps producing output.
 `BeforeRun` registers a callback before execution. `Verify` checks the successful
 body and fails the job when it returns an error. `AfterRun` receives the final
 error, with nil for success. `OnFailure(id, body)` declares a separate recovery
-job. Recovery callbacks can accept `sw.Failure` to inspect the failed job, stage
-and error. Recovery jobs may declare their own recovery chains.
+job and returns that job, so chained modifiers configure the recovery.
+Recovery callbacks can accept `sw.Failure` to inspect `Stage` and `Err`.
+Calling `OnFailure` on the returned job declares the next recovery in the chain.
 
 ## Approvals
 
@@ -319,9 +320,11 @@ sw.Job(plan, "deploy", func(context.Context) error { return nil }).
 ```
 
 Scopes are `sw.ScopeGlobal`, `sw.ScopeRun` and `sw.ScopeBox`. Policies are
-`sw.Queue`, `sw.Fail`, `sw.Skip` and `sw.CancelOthers`. Unset values resolve to
-global scope, capacity one, cost one and queueing. Explicit zero capacity or cost
-fails validation. Reused group definitions must agree on scope, capacity and
+`sw.Queue`, `sw.Fail`, `sw.Skip` and `sw.CancelOthers`. Set a positive `Capacity`
+in every Go `ConcurrencyLimit`. Its zero value is an explicit zero and fails
+validation. Omitted scope, membership cost and policy resolve to global scope,
+cost one and queueing. An explicit zero cost also fails validation.
+Reused group definitions must agree on scope, capacity and
 policy. The host computes the scoped key. `QueueTimeout` bounds waiting and
 `CancelTimeout` bounds cancellation of existing holders.
 
