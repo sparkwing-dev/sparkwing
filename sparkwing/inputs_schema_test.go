@@ -2,12 +2,15 @@ package sparkwing
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 var inputsSchemaTestSequence atomic.Uint64
@@ -438,27 +441,20 @@ type secretValuesCreds struct {
 type secretValuesPipe struct{}
 
 func (secretValuesPipe) Plan(_ context.Context, _ *Plan, _ secretValuesCreds, _ RunContext) error {
-	return nil
+	return errors.New("from-args fallback-secret not-secret")
 }
 
-func TestRegistration_SecretValues(t *testing.T) {
+func TestPlanningDiagnosticsPreservePublicArguments(t *testing.T) {
 	name := inputsSchemaTestName("secret-values-fixture-")
 	Register[secretValuesCreds](name, func() Pipeline[secretValuesCreds] {
 		return secretValuesPipe{}
 	})
-	reg, _ := lookup(name)
-	got := reg.secretValues(map[string]string{
+	_, _, err := (sdkOperations{}).Plan(t.Context(), name, map[string]string{
 		"token":   "from-args",
 		"visible": "not-secret",
-	})
-	want := map[string]bool{"from-args": true, "fallback-secret": true}
-	if len(got) != len(want) {
-		t.Fatalf("got %v secret values, want 2: %v", len(got), got)
-	}
-	for _, v := range got {
-		if !want[v] {
-			t.Errorf("unexpected secret value %q (want %v)", v, want)
-		}
+	}, nodeproto.RunContext{})
+	if err == nil || err.Error() != "*** *** not-secret" {
+		t.Fatalf("planning diagnostic = %v", err)
 	}
 }
 
