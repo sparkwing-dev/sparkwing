@@ -38,6 +38,10 @@ func (c *storedRunnerW8) Renew(ctx context.Context, unit string, body controller
 	return c.server.Renew(ctx, c.authorized, body)
 }
 
+func (c *storedRunnerW8) Exchange(ctx context.Context) (controllerwire.ExchangeResponse, error) {
+	return c.server.Exchange(ctx, c.authorized)
+}
+
 func (c *storedRunnerW8) TransitionJob(ctx context.Context, run, job string, body controllerwire.JobTransitionRequest) (controllerwire.Applied, error) {
 	authorized := c.authorized
 	authorized.Target.RunID, authorized.Target.NodeID = run, job

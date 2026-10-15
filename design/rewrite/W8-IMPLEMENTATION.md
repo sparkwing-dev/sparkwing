@@ -2069,3 +2069,56 @@ The lead retains independent review and committing. No Sparkwing executable,
 pipeline, deployment, release or Git write ran. Shared Git config has no author
 or core.worktree override. All owned check processes finished. Worker scratch
 was deleted. W8 remains incomplete at the integration boundaries above.
+
+## Continuation: persisted Cloud work bootstrap
+
+`tests/acceptance/bootstrap_store_w8_test.go` connects real service provisioning,
+Cloud work claiming and exchange to BuildJob's private files, BootstrapHost.RunFile
+and Hosting. The test reuses the existing in-process controller transport and
+SQLite fixture. It proves that exchange refuses replay while the work claim is
+live, preserves ancestry to the launcher root, renews with exchanged authority,
+passes the accepted engine and granted runner to NodeInput, starts attempt one,
+persists completion and joins the keeper before source cleanup.
+
+The confinement invariant is that changed claim identity, engine, deadlines or
+resources cannot reach Cloud execution. FuzzCloudStoreBootstrapConfinementW8
+mutates those fields against a real persisted award and checks both refusal and
+credential-free errors. Its thirteen seed cases include independent owner,
+attempt and parent deadlines.
+
+The fixture inserts accepted run/plan rows directly. Enrollment/software policy,
+source projection/acquisition, the keeper and executor are fakes. Source is a
+fixture projection because source.ForExecution remains a panic stub. HTTP,
+middleware, actual SDK hello and Kubernetes execution are outside this proof.
+Native catalog cells remain blocked. This adds component acceptance evidence for
+A1-19/38/39 and no new T1 inventory port. All 26 W8 amendment rows and the W8
+handoffs were rechecked. Their remaining production obligations are unchanged.
+
+No production implementation, old code, API or contract changed. Deleted lines
+and files in this continuation: **0/0**. Shared files touched are the new
+bootstrap_store_w8_test.go and the four-line Exchange method in
+runner_store_w8_test.go. W8-AMENDMENTS-1.md records the A1-38 evidence.
+No other-area production caller required migration and no mechanism was added.
+
+Contract changes still needed are W3's run/plan/eval identity inputs and shared
+process constructor, W9's plan-without-job grammar, and the cache owner's
+workspace-off key operation. W3 source/keeper/host/delegated-route/replay runtime,
+W9 clients and final factories, shared local services, controller plan/eval
+resources and SyncLauncher, Windows SID transport, Cloud enforcement/cleanup
+and native/real-repository QA remain integration work. No new product question
+or contract change in another area is introduced.
+
+Verification used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W8. Commands use this worktree
+through `go -C`.
+
+- Whole-repository `go build -p 4 ./...` passed.
+- `go vet -p 4 ./internal/runners/... ./internal/engine/... ./internal/cluster ./internal/wingd/... ./tests/acceptance ./internal/acceptance` passed.
+- `go test -p 4 ./internal/runners/... ./internal/engine/... ./tests/acceptance ./internal/acceptance -count=1 -timeout=3m` passed. Component acceptance took 17.977 seconds.
+- `go test -p 4 ./tests/acceptance -run '^$' -fuzz '^FuzzCloudStoreBootstrapConfinementW8$' -fuzztime=5s -parallel=2 -timeout=2m` passed with thirteen seeds and sixteen executions.
+- Cluster passed with only TestStartMetricsListener_ServesMetrics excluded because the sandbox refuses listeners. Focused local-runtime and managed-unit tests passed in wingd and its client.
+- `go run ./internal/commentcheck -base main .` passed across 1,015 files. `sleepcheck -base HEAD`, gofmt and `git diff --check` passed.
+
+No Sparkwing binary, pipeline, Git write, deployment or release ran. Git config
+has no author or core.worktree override. All owned check sessions finished and
+worker scratch was deleted. The lead retains independent review and committing.
