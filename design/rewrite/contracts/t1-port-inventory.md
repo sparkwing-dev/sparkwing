@@ -995,3 +995,18 @@ reports in both supersession cases. The 39-line legacy function and its trailing
 blank line are deleted. Other legacy admission tests remain because their full
 terminal-state and waiter-cleanup assertions still need owner policy integration.
 No acceptance cell is added, unskipped or marked complete.
+
+
+## W3 real-store native test port
+
+[The native store port report](../w3-native-store-port-progress.md) records the
+retained admission, approval, scheduling, dispatch, generator, retry and masking
+ports. Intake, owner and job awards, transitions, expansion delegation and capacity
+use actual SQLite. SDK compute and selected foreign record boundaries remain
+fakes. Atomic expansion replaces partial batch repair. A skipped source skips its
+generated consumers, following frozen section 3.6.
+
+Four debug test roots and the selection test remain in their old fixtures because
+the final bound pause contract and sealed selection fields are absent. Socket
+coverage remains unverified in the sandbox. The complete nodehost package does
+not pass. No native acceptance cell is added, unskipped or claimed complete.

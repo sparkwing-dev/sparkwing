@@ -285,8 +285,12 @@ func (h *OwnerHost) expand(ctx context.Context, input RunInput, accepted Accepte
 	if (len(body) == 0) == (failure == nil) {
 		return errors.New("generator must return declarations or a structured failure")
 	}
+	actor, err := h.expansionActor(ctx, input, row)
+	if err != nil {
+		return err
+	}
 	commit := func() error {
-		_, err := h.Store.AcceptExpansion(ctx, store.ExpansionSubmission{Source: row.Ref, SourceGeneration: row.Generation, Actor: input.Owner, Body: body, Failure: failure})
+		_, err := h.Store.AcceptExpansion(ctx, store.ExpansionSubmission{Source: row.Ref, SourceGeneration: row.Generation, Actor: actor, Body: body, Failure: failure})
 		return err
 	}
 	if h.Masks != nil && failure == nil {

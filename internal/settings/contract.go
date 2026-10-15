@@ -246,15 +246,6 @@ type PlanInputs struct {
 	Context      Context
 }
 
-// ResolveConcurrency preserves explicit values and fills only omitted policy fields:
-// scope global, capacity 1, cost 1 and on_limit queue. Group is required. Explicit
-// zero capacity/cost and empty enums fail. SDKs never insert these defaults into declarations.
-// ResolvePlan and ResolveExpansion check cost <= capacity and group consistency, then
-// persist winners without changing declarative job/plan hashes.
-func ResolveConcurrency(declarations []nodeproto.ConcurrencySpec) ([]runspec.Concurrency, error) {
-	panic("unimplemented: c4-surface-config")
-}
-
 // ExpansionInputs prevents generated jobs from consulting new host preferences.
 type ExpansionInputs struct {
 	Spec    runspec.Spec

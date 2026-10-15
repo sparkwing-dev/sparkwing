@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -169,6 +170,17 @@ type ownerNodeFunc func(context.Context, NodeInput) error
 
 func (fn ownerNodeFunc) Execute(ctx context.Context, in NodeInput) error { return fn(ctx, in) }
 
+type ownerDelegatorFixture struct{ actor store.Actor }
+
+func (f ownerDelegatorFixture) ResolveAuthority(context.Context, capability.AuthorityRef) (capability.Principal, error) {
+	owner := f.actor.Owner
+	return capability.Principal{Authority: f.actor.Authority, Capability: capability.Capability{Binding: capability.Binding{Kind: capability.BindingTrigger, RunID: owner.RunID, Holder: owner.Holder, Generation: owner.Generation}}}, nil
+}
+
+func (ownerDelegatorFixture) DelegateCapability(_ context.Context, spec capability.DelegateSpec) (capability.Issued, error) {
+	return capability.Issued{Capability: capability.Capability{Prefix: "expansion", Parent: &spec.Parent, Audience: spec.Audience, Grants: spec.Grants, Binding: spec.Binding}}, nil
+}
+
 func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunInput) {
 	t.Helper()
 	request := runspec.Request{Pipeline: "build", PullRequest: runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{Number: 42}}}
@@ -184,6 +196,7 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 	h := OwnerHost{
 		Mask:  func(value string) string { return value },
 		Store: f, Renew: f.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
+		Delegator: ownerDelegatorFixture{actor: in.Owner},
 		Acquire: func(context.Context, RunInput) (*source.Entry, error) {
 			f.record("acquire")
 			return &source.Entry{Engine: selected}, nil

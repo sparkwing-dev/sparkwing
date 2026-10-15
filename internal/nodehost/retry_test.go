@@ -11,6 +11,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -175,31 +176,66 @@ func (s *stateWrites) FinishNodeWithReason(ctx context.Context, runID, nodeID, o
 }
 
 func TestRetryLeavesTheRowRunningBetweenAttempts(t *testing.T) {
-	st := &stateWrites{Store: openStore(t)}
-	retry := &nodeproto.JobSpec{Retry: &nodeproto.RetrySpec{Attempts: 1}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
-	var during *store.Node
-	body := func(ctx context.Context, n *NodeRun) Result {
-		if n.Attempt == 1 {
-			return Result{Outcome: sparkwing.Failed, Err: errors.New("flake")}
+	fixture := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "flaky", Retry: &nodeproto.RetrySpec{Attempts: 1, BackoffMS: new(int64(0))}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+	_, _, dependencies, _ := executorFixture(t)
+	dependencies.Store = fixture.State
+	attempts := 0
+	var during store.NodeRow
+	dependencies.Start = func(ctx context.Context, input NodeInput, _ ExecutorActivity) (ExecutorProcess, error) {
+		attempts++
+		process := &executorProcess{plan: fixture.Accepted.Plan, result: nodeproto.RunResult{Outcome: "success"}}
+		if attempts == 1 {
+			process.result = nodeproto.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "flake"}}
 		}
-		row, err := st.GetNode(ctx, testRunID, "flaky")
-		if err != nil {
-			return Result{Outcome: sparkwing.Failed, Err: err}
+		if attempts == 2 {
+			var err error
+			during, err = fixture.Tenant.ReadNode(ctx, store.NodeRef{RunID: fixture.Accepted.RunID, NodeID: input.NodeID})
+			if err != nil {
+				return nil, err
+			}
+			if during.Generation != input.Generation || during.Attempt != input.Attempt {
+				return nil, errors.New("retry changed its claim generation or attempt")
+			}
 		}
-		during = row
-		return Result{Outcome: sparkwing.Success}
+		return process, nil
 	}
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "flaky", Retry: retry.Retry, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
-	if res := hostDoc(t, t.Context(), st, doc, body); res.Status != "success" {
-		t.Fatalf("status %s err %v, want success", res.Status, res.Err)
+	executor, err := NewNodeExecutor(dependencies)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if during.Status != "running" || during.Outcome != "" {
-		t.Errorf("row before the retry: status %q outcome %q, want running with no outcome", during.Status, during.Outcome)
+	fixture.Host.Executor = executor
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	completion, err := fixture.Host.Run(ctx, fixture.Input)
+	if err != nil || completion.Outcome != "success" {
+		t.Fatalf("completion=%+v error=%v", completion, err)
 	}
-	if fmt.Sprint(st.writes) != "[start start finish success]" {
-		t.Errorf("writes %v, want a start per attempt and one finish", st.writes)
+	if attempts != 2 || during.Status != store.StatusRunning || during.Outcome != "" || during.StartedAt == nil || during.Attempt != 2 {
+		t.Fatalf("attempts=%d retry row=%+v", attempts, during)
 	}
-	wantRow(t, st.Store, "flaky", sparkwing.Success, "")
+	row, err := fixture.Tenant.ReadNode(ctx, during.Ref)
+	if err != nil || row.Outcome != store.NodeSuccess || row.Attempt != 2 || row.Generation != during.Generation || row.FinishedAt == nil {
+		t.Fatalf("final row=%+v error=%v", row, err)
+	}
+	events, err := fixture.Tenant.ReadStateEvents(ctx, fixture.Accepted.RunID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	successes, failures := 0, 0
+	for _, event := range events {
+		if event.NodeID != "flaky" {
+			continue
+		}
+		if event.Kind == "job_succeeded" {
+			successes++
+		}
+		if event.Kind == "job_failed" {
+			failures++
+		}
+	}
+	if successes != 1 || failures != 0 {
+		t.Fatalf("terminal events success=%d failure=%d", successes, failures)
+	}
 }
 
 // safety: a dispatched node's retries and backoff run on its one host, so

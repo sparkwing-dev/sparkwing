@@ -2,6 +2,7 @@ package nodehost
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"slices"
 	"strconv"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -73,18 +76,29 @@ func TestOnlyRefusesWhatTheDispatcherRefused(t *testing.T) {
 
 func TestDryRunEnvHandsTheSwitchToTheNode(t *testing.T) {
 	for _, dryRun := range []bool{true, false} {
-		cfg := Config{Session: SessionConfig{Env: []string{}}, Run: nodeproto.RunContext{DryRun: dryRun}}
-		planned, err := planSession(cfg)
+		input, state, _, _ := executorFixture(t)
+		var spec runspec.Spec
+		if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
+			t.Fatal(err)
+		}
+		spec.Resolved.Settings.Options.DryRun.Set, spec.Resolved.Settings.Options.DryRun.Value = true, dryRun
+		var err error
+		input.Accepted.Spec, err = json.Marshal(spec)
 		if err != nil {
 			t.Fatal(err)
 		}
-		attempt, _, err := attemptEnvironments(cfg.Session, &NodeRun{Run: &Run{Context: cfg.Run}})
+		policy := SDKEnvironment{Store: state}
+		planned, err := policy.planning(t.Context(), PlanningProcessInput{Run: nodeproto.RunContext{RunID: "run", Pipeline: "ci", DryRun: dryRun}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		attempt, err := policy.job(t.Context(), procenv.Attempt, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner)
 		if err != nil {
 			t.Fatal(err)
 		}
 		want := "SPARKWING_DRY_RUN=" + strconv.FormatBool(dryRun)
-		if !slices.Contains(planned.Env, want) || !slices.Contains(attempt, want) {
-			t.Fatalf("plan=%v attempt=%v, want %s", planned.Env, attempt, want)
+		if !slices.Contains(planned, want) || !slices.Contains(attempt, want) {
+			t.Fatalf("plan=%v attempt=%v, want %s", planned, attempt, want)
 		}
 	}
 }

@@ -93,6 +93,11 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	owner.Computing = processes.computing
 	owner.Snapshots, owner.Masks, owner.Mask = config.Snapshots, config.Masks, config.Masks.masker.Mask
 	owner.Executor, owner.Planner = executor, &planner
+	if config.Capacity == nil {
+		if capacity, ok := config.Store.(CapacityStore); ok {
+			config.Capacity = &StoreAdmission{Store: capacity}
+		}
+	}
 	configureNativeAdmission(&owner, config.Admission, config.Capacity)
 	owner.Planning.Validation = validation
 	layers := owner.Layer

@@ -54,9 +54,10 @@ type OwnerLayerResult struct {
 // Source supplies the shared acquisition path. Acquire may replace it with a
 // trusted adapter that uses RunInput's sealed request and persisted acceptance.
 type OwnerHost struct {
-	Snapshots CapturedEnvironmentLoader
-	Store     OwnerStore
-	Lease     lease.Keeper
+	bindAdmission func(*OwnerHost, store.Actor)
+	Snapshots     CapturedEnvironmentLoader
+	Store         OwnerStore
+	Lease         lease.Keeper
 	// Renew reports current compute through the authenticated unit renewal transaction.
 	Renew     func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
 	Computing func(string) bool
@@ -75,6 +76,7 @@ type OwnerHost struct {
 	Around    func(context.Context, AcceptedRun, func(context.Context) (RunCompletion, error)) (RunCompletion, error)
 	// AdoptClaim retains the private award for per-attempt process delegation.
 	AdoptClaim func(context.Context, store.ReconciledNode) error
+	Delegator  OwnerDelegator
 	Executor   NodeHost
 	Expand     func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error)
 	// Mask shares the source and SDK secret registry and protects returned errors.
@@ -91,10 +93,20 @@ var (
 // Run requires an initial successful renewal before acquiring source or resuming work.
 // It joins every executor and renewal before returning, including error paths.
 func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunCompletion, err error) {
+	if h.bindAdmission != nil {
+		copy := *h
+		h = &copy
+		h.bindAdmission(h, input.Owner)
+	}
 	if h.Store == nil || h.Wait == nil || h.Mask == nil || h.Renew == nil {
 		return completion, errors.New("run host requires store, unit renewal, state follower and masking adapters")
 	}
-	defer func() { err = maskHostError(err, h.Mask) }()
+	defer func() {
+		if cause := context.Cause(parent); cause != nil && !errors.Is(err, cause) {
+			err = errors.Join(cause, err)
+		}
+		err = maskHostError(err, h.Mask)
+	}()
 	if input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost || input.Owner.Owner.RunID != input.RunID {
 		return completion, errors.New("run host requires a bound owner and sealed request")
 	}

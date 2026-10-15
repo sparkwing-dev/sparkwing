@@ -171,7 +171,8 @@ func resolveJob(base Inputs, job nodeproto.JobSpec, run runspec.Options) (runspe
 	result.Requires = projected.Requires
 	result.Prefers = projected.Prefers
 	result.Resources = projected.Resources
-	return result, nil
+	result.Concurrency, err = ResolveConcurrency(job.Concurrency)
+	return result, err
 }
 
 // ResolvePlan returns every job winner keyed by declared job ID after C3 validation.
@@ -192,7 +193,15 @@ func ResolvePlan(in PlanInputs) (runspec.ExecutionSettings, error) {
 	if err != nil {
 		return runspec.ExecutionSettings{}, err
 	}
-	return runspec.ExecutionSettings{Options: options, Jobs: jobs}, nil
+	concurrency, err := ResolveConcurrency(in.Plan.Concurrency)
+	if err != nil {
+		return runspec.ExecutionSettings{}, err
+	}
+	result := runspec.ExecutionSettings{Options: options, Jobs: jobs, Concurrency: concurrency}
+	if err := checkConcurrencyGroups(result); err != nil {
+		return runspec.ExecutionSettings{}, err
+	}
+	return result, nil
 }
 
 func resolveJobs(in Inputs, jobs []nodeproto.JobSpec, options runspec.Options) (map[string]runspec.JobExecutionSettings, error) {
@@ -234,5 +243,20 @@ func ResolveExpansion(in ExpansionInputs) (map[string]runspec.JobExecutionSettin
 	if err != nil {
 		return nil, err
 	}
-	return resolveJobs(inputs, plan.Jobs, in.Spec.Resolved.Settings.Options)
+	jobs, err := resolveJobs(inputs, plan.Jobs, in.Spec.Resolved.Settings.Options)
+	if err != nil {
+		return nil, err
+	}
+	combined := in.Spec.Resolved.Settings
+	combined.Jobs = make(map[string]runspec.JobExecutionSettings, len(jobs)+len(in.Spec.Resolved.Settings.Jobs))
+	for id, settings := range in.Spec.Resolved.Settings.Jobs {
+		combined.Jobs[id] = settings
+	}
+	for id, settings := range jobs {
+		combined.Jobs[id] = settings
+	}
+	if err := checkConcurrencyGroups(combined); err != nil {
+		return nil, err
+	}
+	return jobs, nil
 }

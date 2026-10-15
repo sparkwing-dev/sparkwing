@@ -15,8 +15,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -245,66 +249,79 @@ func TestSinkQueueDiscardsAHeldSecretHeadWhenTheRestIsDropped(t *testing.T) {
 // safety: the secret sits where the bound cuts the headline, so a bound taken
 // before masking would keep a fragment the masker no longer recognizes.
 func outerLayerFailure() error {
-	return errors.New(strings.Repeat("h", nodeErrTextHeadBytes-10) + splitSecret + " slot full\n" + strings.Repeat("y", 2*nodeErrTextMaxBytes))
+	return errors.New(strings.Repeat("h", int(limits.ErrorBytes)/2-20) + splitSecret + " slot full\n" + strings.Repeat("y", 2*int(limits.ErrorBytes)))
 }
 
-func checkMaskedNodeFailure(t *testing.T, st *store.Store, res Result) {
+func checkMaskedNativeFailure(t *testing.T, f *storeHostFixture, input NodeInput, err error) {
 	t.Helper()
-	node, err := st.GetNode(t.Context(), "r", "n")
-	if err != nil {
+	if err == nil {
+		t.Fatal("failure was lost")
+	}
+	row, readErr := f.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID})
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	var storedError string
+	if err := f.Store.DB().QueryRowContext(t.Context(), "SELECT error FROM nodes WHERE team=? AND run_id=? AND node_id=?", store.DefaultTeam, input.Accepted.RunID, input.NodeID).Scan(&storedError); err != nil {
 		t.Fatal(err)
 	}
-	events, err := st.ListEventsAfter(t.Context(), "r", 0, 100)
-	if err != nil {
-		t.Fatal(err)
+	events, readErr := f.Tenant.ListEventsAfter(t.Context(), input.Accepted.RunID, 0, 100)
+	if readErr != nil {
+		t.Fatal(readErr)
 	}
 	var payloads strings.Builder
-	for _, e := range events {
-		if e.Kind == "node_failed" {
-			payloads.Write(e.Payload)
+	for _, event := range events {
+		if event.Kind == "job_failed" {
+			payloads.Write(event.Payload)
 		}
 	}
-	if payloads.Len() == 0 {
-		t.Fatalf("no node_failed event among %d events", len(events))
+	if row.Outcome != "failed" || payloads.Len() == 0 {
+		t.Fatalf("row = %+v, events = %+v", row, events)
 	}
-	for what, text := range map[string]string{"row": node.Error, "events": payloads.String(), "result": res.Err.Error()} {
+	for name, text := range map[string]string{"row": storedError, "events": payloads.String(), "error": err.Error()} {
 		if strings.Contains(text, splitSecret[:10]) {
-			t.Errorf("%s holds a piece of the secret", what)
+			t.Errorf("%s holds a secret fragment", name)
 		}
 	}
+	if len(storedError) > int(limits.ErrorBytes) || !strings.Contains(storedError, "***") || len(err.Error()) > int(limits.ErrorBytes) {
+		t.Fatalf("unbounded or unmasked failure: row=%d error=%d", len(storedError), len(err.Error()))
+	}
 }
 
-func failedNodeStore(t *testing.T) *store.Store {
+func maskingExecutorFixture(t *testing.T) (*storeHostFixture, NodeInput, ExecutorDependencies) {
 	t.Helper()
-	st := openStore(t)
-	if err := st.CreateRun(t.Context(), store.Run{ID: "r", Pipeline: "p", Status: "running"}); err != nil {
+	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", ResultStep: "body", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+	releaseRemote(t, f, "build")
+	_, input := claimRemote(t, f, "build")
+	entry, err := f.Host.Acquire(t.Context(), f.Input)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateNode(t.Context(), store.Node{RunID: "r", NodeID: "n", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	return st
-}
-
-// A failure from a layer outside the attempt, such as admission refusing a
-// concurrency key that holds a secret, is masked, then bounded, wherever a
-// node's result is recorded.
-func TestOuterLayerNodeFailuresAreMaskedThenBounded(t *testing.T) {
+	input.Entry = entry
+	_, _, deps, _ := executorFixture(t)
+	deps.Store = f.State
 	masker := secrets.NewMasker()
 	masker.Register(splitSecret)
-	t.Run("pod host", func(t *testing.T) {
-		st := failedNodeStore(t)
-		cfg := Config{State: st, Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}, Logger: slog.New(slog.DiscardHandler)}
-		run := podRun(&cfg)
-		checkMaskedNodeFailure(t, st, podHost(t.Context(), &cfg, run, "n", Result{Outcome: sparkwing.Failed, Err: outerLayerFailure()}))
-	})
-	t.Run("scheduler", func(t *testing.T) {
-		st := failedNodeStore(t)
-		cfg := Config{State: st, Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}, Logger: slog.New(slog.DiscardHandler)}
-		s := &scheduler{run: newRun(&cfg, nodeproto.PlanDoc{}, nil, nil), results: map[string]Result{}}
-		s.finish(t.Context(), "n", Result{Outcome: sparkwing.Failed, Err: outerLayerFailure()})
-		checkMaskedNodeFailure(t, st, s.results["n"])
-	})
+	deps.Mask = masker.Mask
+	deps.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+		return input.Engine, nil
+	}
+	deps.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {
+		return &executorProcess{plan: f.Accepted.Plan, result: nodeproto.RunResult{Outcome: "success", Output: json.RawMessage(`{"v":1}`)}}, nil
+	}
+	return f, input, deps
+}
+
+func TestOuterLayerNodeFailuresAreMaskedThenBounded(t *testing.T) {
+	f, input, deps := maskingExecutorFixture(t)
+	deps.PrepareLayer = func(context.Context, LayerSpec, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error) {
+		return nil, outerLayerFailure()
+	}
+	host, err := NewNodeExecutor(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkMaskedNativeFailure(t, f, input, host.Execute(t.Context(), input))
 }
 
 type textStore struct {
@@ -391,41 +408,17 @@ func TestTheRunsStoreMasksEveryTextItIsGiven(t *testing.T) {
 	}
 }
 
-// safety: refuses the first output write with an error quoting the secret
-// where the bound cuts the headline, as a storage failure can.
-type refusingOutputStore struct {
-	storage.StateStoreOld
-	refused bool
-}
-
-func (s *refusingOutputStore) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
-	if !s.refused && output != nil {
-		s.refused = true
-		lead := strings.Repeat("h", nodeErrTextHeadBytes-10-len(store.ErrOutputNotStored.Error()+": "))
-		return fmt.Errorf("%w: %s", store.ErrOutputNotStored, lead+splitSecret+"\n"+strings.Repeat("y", 2*nodeErrTextMaxBytes))
-	}
-	return s.StateStoreOld.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
-}
-
-// An output the store refuses replaces a masked result with the store's
-// error, which is masked before it is bounded and returned.
 func TestARefusedOutputsErrorIsMaskedThenBounded(t *testing.T) {
-	masker := secrets.NewMasker()
-	masker.Register(splitSecret)
-	ok := Result{Outcome: sparkwing.Success, Output: []byte(`{"v":1}`)}
-	t.Run("pod host", func(t *testing.T) {
-		st := failedNodeStore(t)
-		cfg := Config{State: &refusingOutputStore{StateStoreOld: st}, Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}, Logger: slog.New(slog.DiscardHandler)}
-		run := podRun(&cfg)
-		checkMaskedNodeFailure(t, st, podHost(t.Context(), &cfg, run, "n", ok))
-	})
-	t.Run("scheduler", func(t *testing.T) {
-		st := failedNodeStore(t)
-		cfg := Config{State: maskState(&refusingOutputStore{StateStoreOld: st}, masker), Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}, Logger: slog.New(slog.DiscardHandler)}
-		s := &scheduler{run: newRun(&cfg, nodeproto.PlanDoc{}, nil, nil), results: map[string]Result{}}
-		s.finish(t.Context(), "n", ok)
-		checkMaskedNodeFailure(t, st, s.results["n"])
-	})
+	f, input, deps := maskingExecutorFixture(t)
+	deps.PublishOutput = func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error) {
+		lead := strings.Repeat("h", int(limits.ErrorBytes)/2-20-len(store.ErrOutputNotStored.Error()+": "))
+		return nil, fmt.Errorf("%w: %s", store.ErrOutputNotStored, lead+splitSecret+"\n"+strings.Repeat("y", 2*int(limits.ErrorBytes)))
+	}
+	host, err := NewNodeExecutor(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkMaskedNativeFailure(t, f, input, host.Execute(t.Context(), input))
 }
 
 // A run's host diagnostics, such as a generator's error or a queued
