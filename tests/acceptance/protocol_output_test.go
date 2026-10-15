@@ -36,6 +36,39 @@ func testGoSDKReplyResultReuse(t *testing.T) {
 	})
 }
 
+func testGoSDKRequiredDescribeFields(t *testing.T) {
+	for name, raw := range map[string]string{
+		"pipelines":         `{}`,
+		"pipeline-name":     `{"pipelines":[{"args":[]}]}`,
+		"pipeline-args":     `{"pipelines":[{"name":"build"}]}`,
+		"argument-name":     `{"pipelines":[{"name":"build","args":[{"type":"string","required":false}]}]}`,
+		"argument-type":     `{"pipelines":[{"name":"build","args":[{"name":"target","required":false}]}]}`,
+		"argument-required": `{"pipelines":[{"name":"build","args":[{"name":"target","type":"string"}]}]}`,
+		"secret-name":       `{"pipelines":[{"name":"build","args":[],"secrets":[{}]}]}`,
+		"environment-name":  `{"pipelines":[{"name":"build","args":[],"env_vars":[{}]}]}`,
+		"example-command":   `{"pipelines":[{"name":"build","args":[],"examples":[{"comment":"build"}]}]}`,
+		"risk-labels":       `{"pipelines":[{"name":"build","args":[],"risks_by_step":[{"job_id":"build","step_id":"run"}]}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var describe nodeproto.DescribeDoc
+			err := (nodeproto.Reply{ID: "describe", OK: true, Result: json.RawMessage(raw)}).Decode(&describe)
+			if !errors.Is(err, nodeproto.ErrMalformed) {
+				t.Fatalf("missing required describe field accepted: %s: %v", raw, err)
+			}
+		})
+	}
+	for _, raw := range []string{
+		`{"pipelines":[]}`,
+		`{"pipelines":[{"name":"build","args":[]}]}`,
+		`{"pipelines":[{"name":"build","args":[{"name":"target","type":"string","required":false,"future":null}],"secrets":[{"name":"TOKEN"}],"env_vars":[{"name":"REGION"}],"examples":[{"comment":"","command":"build"}],"risks_by_step":[{"job_id":"build","step_id":"run","labels":[]}],"future":null}],"future":null}`,
+	} {
+		var describe nodeproto.DescribeDoc
+		if err := (nodeproto.Reply{ID: "describe", OK: true, Result: json.RawMessage(raw)}).Decode(&describe); err != nil {
+			t.Fatalf("valid describe with optional or additive fields refused: %s: %v", raw, err)
+		}
+	}
+}
+
 func testGoSDKProcessOutputEncodingFailure(t *testing.T) {
 	host := sparkwingtest.New(sparkwingtest.Options{})
 	t.Cleanup(func() { _ = host.Close() })

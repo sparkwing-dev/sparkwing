@@ -67,6 +67,37 @@ func testGoSDKHelloAndHandles(t *testing.T) {
 			}
 		})
 	}
+	t.Run("required-run-snapshot-fields", func(t *testing.T) {
+		process := startProtocolProbe(t, bin)
+		sendProtocolProbe(t, process, probeHello())
+		protocolProbeReply(t, process, "hello")
+		for name, run := range map[string]string{
+			"git-sha":     `{"run_id":"r","pipeline":"p","git":{"branch":"main"}}`,
+			"git-branch":  `{"run_id":"r","pipeline":"p","git":{"sha":"commit"}}`,
+			"source":      `{"run_id":"r","pipeline":"p","trigger":{}}`,
+			"pull-number": `{"run_id":"r","pipeline":"p","trigger":{"source":"push","pull_request":{}}}`,
+		} {
+			sendProtocolProbe(t, process, map[string]any{
+				"id": name, "op": "plan", "pipeline": protocolgo.Name,
+				"args": map[string]string{"name": "demo"}, "run": json.RawMessage(run),
+			})
+			if reply := protocolProbeReply(t, process, name); reply.OK || reply.Error == nil {
+				t.Fatalf("plan accepted a snapshot missing %s: %+v", name, reply)
+			}
+		}
+		sendProtocolProbe(t, process, map[string]any{
+			"id": "valid", "op": "plan", "pipeline": protocolgo.Name, "args": map[string]string{"name": "demo"},
+			"run": json.RawMessage(`{"run_id":"r","pipeline":"p","git":{"sha":"","branch":"","future":null},"trigger":{"source":"","pull_request":{"number":0}},"dry_run":false,"future":null}`),
+		})
+		var plan nodeproto.PlanDoc
+		decodeProtocolProbe(t, protocolProbeReply(t, process, "valid"), &plan)
+		if len(plan.Jobs) == 0 {
+			t.Fatal("valid snapshot did not reach pipeline declaration")
+		}
+		if err := process.Finish(); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func runProtocolProbe(t *testing.T, process *acceptance.GoSDKProcess, mode string, runner *nodeproto.RunnerIdentity) {

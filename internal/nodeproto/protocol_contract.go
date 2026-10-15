@@ -327,9 +327,6 @@ func (r Reply) Decode(result any) error {
 		if err != nil {
 			return err
 		}
-		if err := requiredString(obj, "outcome"); err != nil {
-			return err
-		}
 		if v.Outcome != "success" && v.Outcome != "failed" {
 			return fmt.Errorf("%w: unknown run outcome", ErrMalformed)
 		}
@@ -349,9 +346,6 @@ func (r Reply) Decode(result any) error {
 		obj, err := protocolObject(r.Result)
 		if err != nil {
 			return err
-		}
-		if _, ok := obj["value"]; !ok {
-			return fmt.Errorf("%w: eval result needs value", ErrMalformed)
 		}
 		if raw, ok := obj["error"]; ok {
 			v.Error, err = apierr.DecodeInner(raw)

@@ -29,6 +29,14 @@ func checkProtocolValue(raw json.RawMessage, kind reflect.Type) error {
 		if err != nil {
 			return err
 		}
+		if kind.Kind() == reflect.Struct {
+			for i := range kind.NumField() {
+				name, _, optional := strings.Cut(kind.Field(i).Tag.Get("json"), ",")
+				if _, present := obj[name]; !optional && name != "" && name != "-" && !present {
+					return fmt.Errorf("%w: required field %s is absent", ErrMalformed, name)
+				}
+			}
+		}
 		for key, value := range obj {
 			var child reflect.Type
 			if kind.Kind() == reflect.Map {

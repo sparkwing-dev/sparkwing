@@ -64,6 +64,7 @@ func TestProtocol(t *testing.T) {
 						t.Run("replay-environment", testGoSDKReplayEnvironment)
 						t.Run("output-failures", testGoSDKOutputFailures)
 						t.Run("reply-result-reuse", testGoSDKReplyResultReuse)
+						t.Run("required-describe-fields", testGoSDKRequiredDescribeFields)
 						t.Run("interface-outputs", testGoSDKInterfaceOutputs)
 						t.Run("real-process-plan-and-output", testGoSDKProcessPlanOutput)
 						t.Run("real-process-body-failure", testGoSDKProcessFailure)
