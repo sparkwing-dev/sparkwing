@@ -135,7 +135,9 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 	if c.kind == blob.KindMemo || c.kind == blob.KindDepcache {
 		allowed := slices.Contains(scope.ReadRefs, c.ref)
 		if c.ref != blobRefScope(a.authority.Ref.Scope) {
-			allowed = allowed && c.facts.Scope.Verified
+			verifiedDefault := c.facts.DefaultBranchVerified && c.facts.Scope.Ref == a.authority.Ref.DefaultBranch
+			verifiedBase := c.kind == blob.KindDepcache && a.authority.Ref.PullRequestBase.Set && c.facts.Scope.Ref == a.authority.Ref.PullRequestBase.Value
+			allowed = allowed && c.facts.Scope.Verified && (verifiedDefault || verifiedBase)
 		}
 		if c.kind == blob.KindMemo {
 			allowed = allowed && c.pipeline == a.pipeline && a.authority.Attempt.Set && c.source.Attempt.Value.NodeID == a.authority.Attempt.Value.NodeID
@@ -304,6 +306,9 @@ func (t *Tenant) CheckDataAccess(ctx context.Context, authorized capability.Auth
 	input := blob.Authority{CapabilityRef: c.Prefix}
 	if c.Prefix == "" || c.Team != string(t.team) {
 		return authorityError(apierr.Forbidden, "data route requires tenant capability authority")
+	}
+	if target.RunID != "" && target.NodeID != "" && target.Attempt > 0 && target.Generation > 0 {
+		input.Attempt = runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: string(t.team), RunID: target.RunID, NodeID: target.NodeID, Attempt: target.Attempt, Generation: target.Generation}}
 	}
 	if target.Operation == capability.DataUpload || target.Operation == capability.DataCommit || target.Operation == capability.DataRecord {
 		tx, err := t.s.beginTx(ctx)

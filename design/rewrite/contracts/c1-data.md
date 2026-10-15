@@ -481,6 +481,18 @@ reading bytes or member metadata. A verified ref without default-branch evidence
 does not qualify. Memo uses own scope before default fallback and has no PR-base
 fallback. Depcache preserves its own-ref, PR-base, default order.
 
+The same fallback restrictions govern persisted read edges, including HasMany,
+download authorization and new references. A PR-base grant permits depcache
+reads, not memo reads. A default fallback needs recorded default-branch evidence
+matching the reader's sealed default branch. The
+`storage-memo-and-depcache-scope/store-data-sqlite` proof checks those read-set
+decisions after reopening. It seeds records and publication authority; native
+App intake, namespace rules and byte verification remain integration work.
+
+`CheckDataAccess` carries a complete target run/job/attempt/generation tuple into
+the authority recheck. Published job receipts require that exact imported
+attempt; omitting the selectors cannot borrow a receipt from another job.
+
 The `storage-reachability-and-retention-tails/store-data-sqlite` proof exercises
 leased record expiry, newest-success output pins, receipt roots, transitive
 members, persisted tombstones, grace and failed physical deletion. Collection

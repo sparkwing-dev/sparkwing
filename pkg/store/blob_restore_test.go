@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -31,11 +33,12 @@ func blobRestoreFixture(t *testing.T) (*Store, *blobRecords, blob.UploadIntent) 
 		t.Fatal(err)
 	}
 	record.Value.Data.ReadRefs = []string{"feature", "release", "main"}
+	record.Value.Data.WriteRef = "feature"
 	body, err = json.Marshal(record)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, "UPDATE capabilities SET authority_json=? WHERE prefix=?", body, intent.Authority.CapabilityRef)
+	rewriteSchemaExec(t, s.db, "UPDATE capabilities SET authority_json=?,ref_scope='feature' WHERE prefix=?", body, intent.Authority.CapabilityRef)
 	return s, records, intent
 }
 
@@ -151,5 +154,47 @@ func TestBlobRecordsExpiredCacheBudgetsRunCold(t *testing.T) {
 	dep, err := records.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: intent.Authority, Key: blob.DepcacheKey{Repo: "gh:1", Ref: key.Scope.Ref, Name: "modules", Key: "input-hash"}, Budget: budget})
 	if err != nil || dep.Found {
 		t.Fatalf("expired depcache budget=%+v: %v", dep, err)
+	}
+}
+
+func TestBlobRecordsReadSetEnforcesCacheFallbackProvenance(t *testing.T) {
+	formerDefault := restoreFacts("release", true)
+	formerDefault.DefaultBranch = "release"
+	for _, kind := range []blob.Kind{blob.KindMemo, blob.KindDepcache} {
+		for _, test := range []struct {
+			name, ref string
+			facts     blob.RefFacts
+			allowed   bool
+		}{
+			{"own", "feature", restoreFacts("feature", false), true},
+			{"pr_base", "release", restoreFacts("release", false), kind == blob.KindDepcache},
+			{"pr_base_former_default", "release", formerDefault, kind == blob.KindDepcache},
+			{"unproven_default", "main", restoreFacts("main", false), false},
+			{"default", "main", restoreFacts("main", true), true},
+		} {
+			t.Run(string(kind)+"/"+test.name, func(t *testing.T) {
+				s, records, intent := blobRestoreFixture(t)
+				intent.Digest = blob.Digest(strings.Repeat("b", 64))
+				rewriteSchemaExec(t, s.db, "INSERT INTO blobs(team,digest,size,created_at) VALUES ('a',?,3,1)", intent.Digest)
+				plantBlobRestore(t, s, records, intent, kind, test.ref, test.facts, false)
+				presence, err := records.tenant.ReadableBlobs(t.Context(), blob.HasManyRequest{Authority: intent.Authority, Digests: []blob.Digest{intent.Digest}})
+				if err != nil || (len(presence.Present) == 1) != test.allowed {
+					t.Errorf("cache presence=%+v, allowed=%v: %v", presence, test.allowed, err)
+				}
+				principal := capability.Principal{Capability: capability.Capability{Prefix: intent.Authority.CapabilityRef, Team: "a"}}
+				for _, operation := range []capability.DataOperation{capability.DataDownload, capability.DataRecord} {
+					err := records.tenant.CheckDataAccess(t.Context(), capability.Authorized{Principal: principal}, capability.DataTarget{Operation: operation, Digest: string(intent.Digest)})
+					if test.allowed && err != nil || !test.allowed && !errors.Is(err, blob.ErrDigestNotReadable) {
+						t.Errorf("%s allowed=%v: %v", operation, test.allowed, err)
+					}
+				}
+				request := blobOutputRequest(intent)
+				request.Key.Scope.Ref = blob.RefScope{Ref: "feature", Verified: true}
+				_, err = records.CommitRecord(t.Context(), request)
+				if test.allowed && err != nil || !test.allowed && !errors.Is(err, blob.ErrDigestNotReadable) {
+					t.Fatalf("cache reference commit allowed=%v: %v", test.allowed, err)
+				}
+			})
+		}
 	}
 }
