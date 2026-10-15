@@ -34,7 +34,9 @@ func (l *Launcher) Sync(ctx context.Context) error {
 		return fmt.Errorf("list Cloud Jobs: %w", err)
 	}
 	var errs []error
-	for _, job := range jobs.Items {
+	var observations []CloudJobObservation
+	live := make(map[string]int)
+	for i, job := range jobs.Items {
 		binding, reservation, err := jobOwnership(job)
 		if err != nil {
 			errs = append(errs, err)
@@ -51,12 +53,8 @@ func (l *Launcher) Sync(ctx context.Context) error {
 			remove = true
 		}
 		if !remove {
-			retire, err := l.shouldRetire(ctx, binding, job.Name, reservation.NodeUID)
-			if err != nil {
-				errs = append(errs, err)
-				continue
-			}
-			remove = retire
+			live[job.Name] = i
+			observations = append(observations, CloudJobObservation{Binding: binding, JobName: job.Name, NodeUID: reservation.NodeUID})
 		}
 		if remove {
 			if err := l.teardown(ctx, &job, reservation); err != nil && !errors.Is(err, ErrContainersRunning) {
@@ -64,18 +62,54 @@ func (l *Launcher) Sync(ctx context.Context) error {
 			}
 		}
 	}
+	if len(observations) > 0 {
+		retirements, err := l.retirements(ctx, observations)
+		if err != nil {
+			return errors.Join(append(errs, err)...)
+		}
+		for _, observation := range observations {
+			if !retirements[observation.JobName] {
+				continue
+			}
+			job := &jobs.Items[live[observation.JobName]]
+			_, reservation, err := jobOwnership(*job)
+			if err == nil {
+				err = l.teardown(ctx, job, reservation)
+			}
+			if err != nil && !errors.Is(err, ErrContainersRunning) {
+				errs = append(errs, err)
+			}
+		}
+	}
 	return errors.Join(errs...)
 }
 
-func (l *Launcher) shouldRetire(ctx context.Context, binding CloudJobBinding, jobName, nodeUID string) (bool, error) {
-	states, err := l.Control.Sync(ctx, []CloudJobObservation{{Binding: binding, JobName: jobName, NodeUID: nodeUID}})
+func (l *Launcher) retirements(ctx context.Context, observations []CloudJobObservation) (map[string]bool, error) {
+	states, err := l.Control.Sync(ctx, observations)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	if len(states) != 1 || !sameBinding(states[0].Binding, binding) {
-		return false, errors.New("controller sync returned a mismatched binding")
+	if len(states) != len(observations) {
+		return nil, errors.New("controller sync omitted or added Cloud Job decisions")
 	}
-	return states[0].Delete, nil
+	bindings := make(map[string]CloudJobBinding, len(observations))
+	for _, observation := range observations {
+		if _, exists := bindings[observation.JobName]; exists {
+			return nil, errors.New("duplicate Cloud Job observation")
+		}
+		bindings[observation.JobName] = observation.Binding
+	}
+	decisions := make(map[string]bool, len(states))
+	for _, state := range states {
+		name := jobName(state.Binding)
+		binding, found := bindings[name]
+		_, duplicate := decisions[name]
+		if !found || duplicate || !sameBinding(state.Binding, binding) {
+			return nil, errors.New("controller sync returned a duplicate or mismatched binding")
+		}
+		decisions[name] = state.Delete
+	}
+	return decisions, nil
 }
 
 func sameBinding(a, b CloudJobBinding) bool {

@@ -135,8 +135,8 @@ func (l *Launcher) LaunchOne(ctx context.Context) (bool, error) {
 		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
 	}
 	// safety: reservation probes and publication may outlive the award's execution authority.
-	retire, err := l.shouldRetire(ctx, award.Binding, created.Name, r.Reservation.NodeUID)
-	if err == nil && retire {
+	retirements, err := l.retirements(ctx, []CloudJobObservation{{Binding: award.Binding, JobName: created.Name, NodeUID: r.Reservation.NodeUID}})
+	if err == nil && retirements[created.Name] {
 		err = errors.New("Cloud award ended before Job activation")
 	}
 	if err != nil {

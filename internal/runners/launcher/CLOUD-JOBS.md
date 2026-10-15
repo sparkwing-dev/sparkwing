@@ -42,7 +42,12 @@ starts teardown.
 
 `Sync` reconstructs ownership from persisted Job and
 node metadata. It adopts live Jobs and retires cancelled, expired or terminal
-Jobs. Teardown deletes the bootstrap Secret and retains the node reservation
+Jobs. One controller call reconciles all live observations. Decisions may arrive
+in any order; each must match exactly one observed binding before any live Job
+is retired. Duplicate, changed, extra or missing decisions preserve live Jobs
+and return an error. Expired or locally terminal Jobs can still be cleaned up
+when the controller is unavailable.
+Teardown deletes the bootstrap Secret and retains the node reservation
 while a Job container remains. `KubernetesBoundary.Release` also requires pod
 removal and reservation-scoped cleanup before another Job can reserve the node.
 If Job deletion fails, teardown still deletes its bootstrap after confirming

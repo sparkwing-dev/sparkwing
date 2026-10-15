@@ -504,3 +504,104 @@ are all zero. Overwing discovery works but reports an outdated installed binary.
 No Sparkwing binary, pipeline, Git write, deployment or release ran. Local Git
 config has no identity or core.worktree override. The lead retains committing
 and native verification. Worker scratch is removed after the final file check.
+
+## Continuation: private HTTP and launcher reconciliation
+
+The approved cancellation implementation was already present at the start of
+this continuation. Both TestLoopPendingAwardPreservesPolicyDenial and
+TestLoopPendingPolicyAcceptsArbitraryCancellationCause pass. The approved stop
+path remains 84 -> 75 physical lines, its pending wait 44 -> 40, and loop.go
+408 -> 401. No finished cancellation work was repeated or changed.
+
+A1-38/39/40 now have two further production integrations:
+
+- wingd/client.NewAPIClient and APIBaseURL own HTTP over DialSocket. Requests
+  cannot select a proxy or follow a redirect. Statuses and bodies remain intact;
+  the shared route client owns application retries. The existing 45-second
+  request and five-second dial budgets are retained. Secret CLI, orchestration
+  coordination and health probes consume this owner. Orchestration keeps its
+  existing retry wrapper because W3 has not replaced its legacy controller client.
+- Launcher.Sync reconstructs all live observations from Kubernetes and makes
+  one controller sync call. It validates the entire unordered result before
+  retiring live Jobs. Missing, duplicate, changed or extra decisions fail without
+  live teardown. Local terminal/expired cleanup remains available during a
+  controller failure. LaunchOne uses the same binding validation before activation.
+
+The transport invariant is that a private API request never reaches an ambient
+proxy or a remote redirect. The sync invariant is that every controller-directed
+teardown matches one persisted observed binding. New HTTP behavior tests and
+FuzzAPITransportUsesPrivateSocket exercise private-directory validation with
+adversarial destinations, cancellation, redirects and non-success responses.
+TestSyncReconcilesAllPersistedJobsTogether and FuzzSyncRejectsUnboundCleanup
+cover reordered decisions and invalid complete batches. The existing
+TestLauncherControllerW8Components now composes the wire adapter, launcher and
+Kubernetes API fake with two persisted Jobs, selective retirement and transport
+failure. No native catalog cell is activated and no additional T1 port is claimed.
+
+Production changes add 98 and delete 59 physical lines. Removed surfaces are
+orchestrator.NewAPISocketClient, HostedAPIBaseURL, apiSocketTransport and the
+single-Job shouldRetire helper. The old orchestrator definitions account for
+41 deleted lines; 12 local composition lines retain its existing retry/probe
+policy around the W8 transport. No compatibility alias remains.
+
+Shared caller migrations are cmd/sparkwing/secret.go,
+internal/orchestrator/hosted_backends.go,
+internal/orchestrator/hosted_retry_test.go and
+internal/orchestrator/local_secrets.go. The shared acceptance edit is
+tests/acceptance/launcher_controller_w8_test.go. Source docs are
+internal/wingd/LOCAL-TRANSPORT.md and internal/runners/launcher/CLOUD-JOBS.md;
+the new behavior tests cover their changed contracts. The handoffs file records
+the transport entrypoint for W9. No other area's frozen Go contract changed.
+
+All 26 amendment rows and W8 handoffs retain their prior coverage, with the
+transport and sync progress above. Real construction remains open at these
+verified boundaries:
+
+- W3 source.ForRequest, ForExecution, Acquire and Entry.Close still panic.
+  lease.Keeper.Run and CancelError.Error still panic. Hosting already calls the
+  declared keeper and tests it through its fake runtime port.
+- W3 has no concrete RunHost/NodeHost contract constructors or plan/eval inputs.
+  Granted run/plan/eval identity, delegated node routes, storage binding and
+  generated-code replay construction remain the recorded contract requests.
+- W9 NewEngineClient and NewDataClient still panic. The W8 private transport is
+  ready for both. Launcher image/deadline grammar, plan-without-job grammar and
+  source-init/runtime handoff remain their recorded contract requests.
+- W2 EngineController.SyncLauncher still panics. W1/W2 have no shared local
+  controller/store/services adapter satisfying wingd.LocalController. W8's local
+  runtime continues to exercise readiness, reconciliation, serving and joined
+  shutdown against that declared interface with fakes.
+- Plan/eval CPU/memory awards, the W3/W7 workspace-off binary-cache key, Cloud
+  network probes and reservation-scoped cleanup remain open. Native placement,
+  Windows/macOS execution, actual SDK hello and real-repository QA still need
+  their real drivers. None is claimed by these component passes.
+
+No new product decision or foreign contract change is requested. No Git write,
+deployment, release or pipeline ran. Initial sparkwing info discovery happened
+before the swarm brief's no-binaries rule was loaded; no further Sparkwing binary
+ran. Overwing discovery worked while reporting its installed binary behind source.
+The metrics-listener test and native sockets remain unexecuted in this sandbox.
+
+Verification for this continuation:
+
+| Check | Result |
+| --- | --- |
+| GOWORK=off GOFLAGS=-buildvcs=false go build ./... | Passed over the complete repository. |
+| go vet -p 4 | Passed for runners/..., engine/..., wingd/..., cluster, orchestrator, cmd/sparkwing and tests/acceptance. |
+| go test -p 4 ./internal/runners/... ./internal/engine/... -count=1 | Passed full suites. |
+| go test -p 4 ./tests/acceptance ./internal/acceptance -count=1 | Passed; acceptance took 85.753 seconds. Native catalog drivers remain skipped. |
+| go test ./internal/wingd -run '^TestLocalRuntime' -count=1 | Passed. |
+| go test ./internal/wingd/client -run '^(TestAPIClient\|FuzzAPITransport)' -count=1 | Passed the new HTTP test and property seeds. |
+| FuzzLoopPendingPolicyInterruption, fuzztime=100x, parallel=2 | Passed 100 executions. |
+| FuzzSyncRejectsUnboundCleanup, fuzztime=100x, parallel=2 | Passed 100 executions. |
+| FuzzAPITransportUsesPrivateSocket, fuzztime=100x, parallel=2 | Passed 100 executions. |
+| Cluster suite excluding TestStartMetricsListener_ServesMetrics | Passed. The excluded test needs native sockets. |
+| commentcheck -base main . | Clean across 1,181 Go files. |
+
+All Go checks used GOMAXPROCS=4, GOWORK=off, GOFLAGS=-buildvcs=false and
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W8. No sleep was added. The new
+properties ran generated cases as well as their seeds. The lead retains Git
+commits and the real HTTP, native-platform, deployment and full placement proofs.
+
+The migrated orchestrator's socket-free TestHostedRetryPolicy_ selection also
+passes. Git config has no local identity or core.worktree override. Worker
+scratch is removed after all checks finish.

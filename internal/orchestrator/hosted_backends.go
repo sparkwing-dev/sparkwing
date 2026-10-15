@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -14,20 +13,11 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-// HostedAPIBaseURL is the host every hosted request is addressed to. The
-// transport dials a unix socket and ignores it, but net/http still needs a
-// syntactically whole URL.
-const HostedAPIBaseURL = "http://sparkwing-api"
-
-// safety: a peer accepting requests without answering must not hang the host indefinitely.
-const hostedAPITimeout = 45 * time.Second
 
 const hostedAPIProbeTimeout = 3 * time.Second
 
@@ -35,35 +25,16 @@ const hostedAPIProbeTimeout = 3 * time.Second
 // must fix, which is the one store answer that refuses a run outright.
 var errHostedStoreFault = errors.New("the admission daemon cannot read this machine's runs store")
 
-// NewAPISocketClient returns an HTTP client that reaches the daemon's
-// controller API over the unix socket at sock. Requests carry no bearer
-// token: the daemon takes the connection's peer uid as the principal. A
-// write the daemon can still be shown to have missed is retried across a
-// daemon restart; see [HostedRestartBudget].
-func NewAPISocketClient(sock string) *http.Client {
-	return &http.Client{
-		Timeout:   hostedAPITimeout,
-		Transport: otelutil.WrapTransport(newHostedRetryTransport(apiSocketTransport(sock))),
-	}
+func newHostedAPIClient(sock string) *http.Client {
+	httpClient := wingdclient.NewAPIClient(sock)
+	httpClient.Transport = otelutil.WrapTransport(newHostedRetryTransport(httpClient.Transport))
+	return httpClient
 }
 
-// safety: selection must read the daemon's answer, not wait it out. The
-// retrying client exists so a run outlives a restart; a probe that retried a
-// 503 would spend its whole budget on a daemon that already said no.
 func newAPIProbeClient(sock string) *http.Client {
-	return &http.Client{Timeout: hostedAPIProbeTimeout, Transport: apiSocketTransport(sock)}
-}
-
-func apiSocketTransport(sock string) *http.Transport {
-	return &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return wingd.DialSocket(ctx, sock, 5*time.Second)
-		},
-		MaxIdleConns:          16,
-		MaxIdleConnsPerHost:   16,
-		IdleConnTimeout:       90 * time.Second,
-		ResponseHeaderTimeout: hostedAPITimeout,
-	}
+	httpClient := wingdclient.NewAPIClient(sock)
+	httpClient.Timeout = hostedAPIProbeTimeout
+	return httpClient
 }
 
 // HostedBackends are the backends of a local run whose state lives behind
@@ -72,11 +43,11 @@ func apiSocketTransport(sock string) *http.Transport {
 // files as they are for a run that opens the store directly. The returned
 // function releases the connections the run held.
 func HostedBackends(paths Paths, sock string, art storage.ArtifactStore) (Backends, func()) {
-	httpClient := NewAPISocketClient(sock)
+	httpClient := newHostedAPIClient(sock)
 	return Backends{
-		State:             client.New(HostedAPIBaseURL, httpClient),
+		State:             client.New(wingdclient.APIBaseURL, httpClient),
 		Logs:              localLogs{paths: paths},
-		Concurrency:       NewHTTPConcurrency(HostedAPIBaseURL, httpClient, "", store.DefaultConcurrencyLease),
+		Concurrency:       NewHTTPConcurrency(wingdclient.APIBaseURL, httpClient, "", store.DefaultConcurrencyLease),
 		Artifact:          art,
 		LocalCoordination: true,
 		APISocket:         sock,
@@ -189,7 +160,7 @@ type hostedHealth struct {
 func hostedAPIReachable(ctx context.Context, sock string) error {
 	ctx, cancel := context.WithTimeout(ctx, hostedAPIProbeTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, HostedAPIBaseURL+"/api/v1/health", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, wingdclient.APIBaseURL+"/api/v1/health", nil)
 	if err != nil {
 		return err
 	}
@@ -255,7 +226,7 @@ const hostedProbeID = "sparkwing-route-probe"
 func hostedAPIServesCoordination(ctx context.Context, sock string) error {
 	httpClient := newAPIProbeClient(sock)
 	defer httpClient.CloseIdleConnections()
-	c := client.New(HostedAPIBaseURL, httpClient)
+	c := client.New(wingdclient.APIBaseURL, httpClient)
 	for _, probe := range hostedCoordinationProbes {
 		if err := probe(ctx, c); errors.Is(err, client.ErrControllerLacksRoute) {
 			return err

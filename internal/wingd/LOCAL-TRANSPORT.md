@@ -6,6 +6,13 @@ keys. Unix uses those keys as socket paths. Windows hashes the normalized key
 into a local named-pipe name. Environment variables and request fields cannot
 select a peer identity.
 
+`wingd/client.NewAPIClient` carries HTTP to `APISocketPath` through `DialSocket`
+on every platform. `APIBaseURL` supplies the HTTP request origin. The transport
+ignores request network addresses, consults no proxy and follows no redirects.
+It preserves response statuses and bodies and performs no application retries.
+Callers supply it as `EngineOptions.HTTP` and `APIBaseURL` as `EngineOptions.URL`;
+the shared clients' route policy owns any retry. Close idle connections when finished.
+
 `ListenSocket` yields `APIConn` only after checking the kernel identity against
 the controller account. Unix supplies the socket peer UID. Windows reads one
 transport preamble byte, obtains the pipe client's identification token and

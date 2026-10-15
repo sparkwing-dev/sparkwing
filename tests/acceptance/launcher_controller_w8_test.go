@@ -99,7 +99,14 @@ func TestLauncherControllerW8Components(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kube := fake.NewClientset(resources.Job, resources.BootstrapSecret)
+	second := award
+	second.Binding.UnitID += "-second"
+	second.Binding.NodeID += "-second"
+	other, err := launcher.BuildJob(t.Context(), now, config, second, boundary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kube := fake.NewClientset(resources.Job, resources.BootstrapSecret, other.Job, other.BootstrapSecret)
 	demand := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, AvailableCores: 4, AvailableMemoryBytes: 8 << 30}
 	remove := false
 	transportErr := error(nil)
@@ -111,24 +118,33 @@ func TestLauncherControllerW8Components(t *testing.T) {
 			return controllerwire.ClaimResponse{}, nil
 		},
 		sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
-			want := controllerwire.LauncherObservation{UnitID: award.Binding.UnitID, JobName: resources.Job.Name, NodeUID: resources.Reservation.NodeUID}
-			if !slices.Equal(request.Observed, []controllerwire.LauncherObservation{want}) {
+			want := []controllerwire.LauncherObservation{
+				{UnitID: award.Binding.UnitID, JobName: resources.Job.Name, NodeUID: resources.Reservation.NodeUID},
+				{UnitID: second.Binding.UnitID, JobName: other.Job.Name, NodeUID: other.Reservation.NodeUID},
+			}
+			slices.SortFunc(want, func(a, b controllerwire.LauncherObservation) int { return strings.Compare(a.JobName, b.JobName) })
+			if !slices.Equal(request.Observed, want) {
 				t.Fatalf("restart lost persisted observation: %+v", request.Observed)
 			}
 			if transportErr != nil {
 				return controllerwire.LauncherSyncResponse{}, transportErr
 			}
-			if remove {
-				return controllerwire.LauncherSyncResponse{Remove: []string{resources.Job.Name}}, nil
+			response := controllerwire.LauncherSyncResponse{}
+			for _, binding := range []launcher.CloudJobBinding{second.Binding, award.Binding} {
+				if remove && binding.UnitID == award.Binding.UnitID {
+					response.Remove = append(response.Remove, resources.Job.Name)
+					continue
+				}
+				b := binding
+				response.Awards = append(response.Awards, controllerwire.ClaimedUnit{
+					Unit: capability.UnitNode, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap,
+					UnitID: b.UnitID, RunID: b.RunID, JobID: b.NodeID,
+					Binding:       capability.Binding{Kind: capability.BindingNode, RunID: b.RunID, NodeID: b.NodeID, Holder: b.Holder, Generation: b.Generation, Attempt: b.Attempt},
+					Request:       runspec.SealedRequest{RunID: b.RunID, Request: runspec.Request{Team: b.Team}},
+					OwnerDeadline: &b.OwnerDeadline, AttemptDeadline: &b.AttemptDeadline, ParentCapabilityExpiry: &b.ParentCapabilityExpiry,
+				})
 			}
-			b := award.Binding
-			return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{{
-				Unit: capability.UnitNode, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap,
-				UnitID: b.UnitID, RunID: b.RunID, JobID: b.NodeID,
-				Binding:       capability.Binding{Kind: capability.BindingNode, RunID: b.RunID, NodeID: b.NodeID, Holder: b.Holder, Generation: b.Generation, Attempt: b.Attempt},
-				Request:       runspec.SealedRequest{RunID: b.RunID, Request: runspec.Request{Team: b.Team}},
-				OwnerDeadline: &b.OwnerDeadline, AttemptDeadline: &b.AttemptDeadline, ParentCapabilityExpiry: &b.ParentCapabilityExpiry,
-			}}}, nil
+			return response, nil
 		},
 	}
 	control, err := launcher.NewControllerControl(wire, demand)
@@ -151,7 +167,7 @@ func TestLauncherControllerW8Components(t *testing.T) {
 		t.Fatalf("retirement failed: released=%d err=%v", boundary.released, err)
 	}
 	secrets, err := kube.CoreV1().Secrets(config.Namespace).List(t.Context(), metav1.ListOptions{})
-	if err != nil || len(secrets.Items) != 0 {
-		t.Fatalf("retirement retained a bootstrap: %v", err)
+	if err != nil || len(secrets.Items) != 1 || secrets.Items[0].Name != other.BootstrapSecret.Name {
+		t.Fatalf("retirement did not preserve only the live bootstrap: %v", err)
 	}
 }

@@ -132,3 +132,19 @@ The policy/claim stop path shrinks from 84 to 75 lines, the pending wait from
 returns to the existing stop checks. This supersedes W8's pending DESIGN status
 above. W3's shared run/plan/eval identity construction remains open. See
 ../W8-AMENDMENTS-1.md for verification and remaining real-integration points.
+
+**W8 to W9: local HTTP transport implemented.**
+`wingd/client.NewAPIClient(socket)` and `APIBaseURL` supply the private HTTP
+transport for `EngineOptions.HTTP` and `URL`. It uses `DialSocket` on every
+platform, has no proxy or application retry, and returns redirects unchanged.
+The exported orchestrator socket client, URL constant and duplicate dialer are
+removed; secret CLI, host coordination, health probes and retry tests use the
+shared owner. Legacy orchestration retains its own retry wrapper until W3's
+host cutover. Socket-free HTTP and generated destination tests pass. W9's
+`NewEngineClient` and `NewDataClient` still need their implementations.
+
+W8 launcher reconciliation now sends every live persisted Job in one sync call
+and validates the complete unordered decision set before retiring any live Job.
+The two-Job wire-adapter acceptance component passes. The controller-side
+`EngineController.SyncLauncher` remains a stub owned by W2; launcher components
+test that contract with a fake rather than invoking the stub.

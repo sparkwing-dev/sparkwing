@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -41,7 +42,7 @@ const APISecretsSealed = "sealed"
 func ReadLocalAPIHealth(ctx context.Context, sock string) (LocalAPIHealth, error) {
 	ctx, cancel := context.WithTimeout(ctx, hostedAPIProbeTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, HostedAPIBaseURL+"/api/v1/health", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, wingdclient.APIBaseURL+"/api/v1/health", nil)
 	if err != nil {
 		return LocalAPIHealth{}, err
 	}
