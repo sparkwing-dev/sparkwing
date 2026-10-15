@@ -45,7 +45,7 @@ func TestEngineLifecycleHTTP(t *testing.T) {
 				f := &engineTransactions{applied: store.Applied{Replayed: true, CancelRequested: true, StateSeq: 8, Generation: 4, Attempt: 2},
 					beat:     store.LeaseBeat{ExpiresAt: b.snapshot.Now.Add(time.Minute), CancelRequested: true, CancelReason: "requested", Watched: true, WatchedNodes: []string{"job"}},
 					admitted: store.AdmissionResult{RunID: "retry", Replayed: true}}
-				path, body := "/api/v1/runs/run/jobs/job/transition", `{"to":"failed","cause":"report","result":{"outcome":"failed","reason":"exit","error":{"code":"sdk_error","message":"masked"},"exit_code":1}}`
+				path, body := "/api/v1/runs/run/jobs/job/transition", `{"to":"failed","cause":"report","result":{"outcome":"failed","reason":"exit","failure":{"job":"job","stage":"action","error":{"code":"sdk_error","message":"masked"}},"exit_code":1}}`
 				switch operation {
 				case "owner finish":
 					b, path, body = ownerBoundary(), "/api/v1/runs/run/finish", `{"outcome":"success"}`

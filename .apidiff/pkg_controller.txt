@@ -73,6 +73,17 @@ const CloudRetentionDays = 90
 func CompliantClaimPollsPerMinute() int
 const ComputeLimitRefusedCode = "compute_limit"
 const ComputeLimitRetryAfterSeconds = 5
+type ConcurrencyStore interface {
+	Team() store.Team
+	AcquireAuthorizedSlot(context.Context, capability.Authorized, store.AcquireSlotRequest) (store.AcquireSlotResponse, error)
+	HeartbeatAuthorizedSlot(context.Context, capability.Authorized, string, string, time.Duration) (time.Time, bool, error)
+	ReadAuthorizedHolder(context.Context, capability.Authorized, string, string) (store.ConcurrencyHolder, error)
+	ReleaseAuthorizedSlot(context.Context, capability.Authorized, string, string, string, string, string, time.Duration) error
+	ReadAuthorizedGroup(context.Context, capability.Authorized, string) (*store.ConcurrencyState, error)
+	ResolveAuthorizedWaiter(context.Context, capability.Authorized, string, string, string, string, string, string, bool) (store.WaiterResolution, error)
+	CancelAuthorizedWaiter(context.Context, capability.Authorized, string, store.NodeRef) (bool, error)
+	ForceReleaseAuthorizedSlots(context.Context, capability.Authorized, string) ([]store.ConcurrencyHolder, error)
+}
 type CredentialInventoryReader interface {
 	Team() store.Team
 	ListSecrets() ([]store.Secret, error)
@@ -461,6 +472,7 @@ func (s *Server) WithAuthorization(authorization RouteAuthorization) *Server
 func (s *Server) WithBillingCheckout(url, token string) *Server
 func (s *Server) WithBucketUsage(a storage.UsageReporter) *Server
 func (s *Server) WithCapabilityManager(resolve func(context.Context, store.Team) (CapabilityManager, error)) *Server
+func (s *Server) WithConcurrencyStore(resolve func(context.Context, store.Team) (ConcurrencyStore, error)) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithCredentialInventoryReader(resolve func(context.Context, store.Team) (CredentialInventoryReader, error)) *Server
 func (s *Server) WithCredentialIssuer(issuer CredentialIssuer) *Server

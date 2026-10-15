@@ -31,7 +31,6 @@ var (
 	resInvitation         = tenantResource{"invitation", ownerTeam}
 	resTeamToken          = tenantResource{"team token", ownerTeam}
 	resPipeline           = tenantResource{"pipeline", ownerTeam}
-	resConcurrencyKey     = tenantResource{"concurrency key", ownerTeam}
 	resGitHubRunner       = tenantResource{"github runner binding", ownerTeam}
 	resGitHubInstallation = tenantResource{"github app installation", ownerTeam}
 	resOwnInvitation      = tenantResource{"invitation to the caller", ownerAccount}
@@ -51,15 +50,6 @@ var tenantRoutes = map[string]tenantResource{
 
 	"GET /api/v1/capacity/profiles":         resNone,
 	"GET /api/v1/capacity/profiles/explain": resNone,
-
-	"POST /api/v1/concurrency/{key}/acquire":       resConcurrencyKey,
-	"POST /api/v1/concurrency/{key}/cancel-waiter": resConcurrencyKey,
-	"POST /api/v1/concurrency/{key}/force-release": resConcurrencyKey,
-	"POST /api/v1/concurrency/{key}/heartbeat":     resConcurrencyKey,
-	"GET /api/v1/concurrency/{key}/holder":         resConcurrencyKey,
-	"POST /api/v1/concurrency/{key}/release":       resConcurrencyKey,
-	"GET /api/v1/concurrency/{key}/resolve":        resConcurrencyKey,
-	"GET /api/v1/concurrency/{key}/state":          resConcurrencyKey,
 
 	"GET /api/v1/crons":                  resNone,
 	"GET /api/v1/crons/{id}":             resCron,

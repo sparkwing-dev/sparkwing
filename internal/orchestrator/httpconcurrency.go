@@ -2,8 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -44,7 +44,7 @@ func (h *HTTPConcurrency) AcquireSlot(ctx context.Context, req store.AcquireSlot
 		BypassRead:        req.BypassRead,
 	})
 	if err != nil {
-		if strings.Contains(err.Error(), store.ErrConcurrencySuperseded.Error()) {
+		if errors.Is(err, store.ErrConcurrencySuperseded) {
 			return store.AcquireSlotResponse{}, store.ErrConcurrencySuperseded
 		}
 		return store.AcquireSlotResponse{}, err
@@ -88,27 +88,32 @@ func (h *HTTPConcurrency) State(ctx context.Context, key string) (*store.Concurr
 		return nil, err
 	}
 	out := &store.ConcurrencyState{
-		Key:               resp.Key,
+		Key:               resp.Group,
 		Capacity:          resp.Capacity,
 		EffectiveCapacity: resp.EffectiveCapacity,
 		UsedCost:          resp.UsedCost,
 	}
 	for _, holder := range resp.Holders {
-		out.Holders = append(out.Holders, storeHolderFromClient(key, holder))
+		h := store.ConcurrencyHolder{Key: key, HolderID: holder.HolderID, RunID: holder.RunID, NodeID: holder.JobID,
+			ClaimedAt: holder.ClaimedAt, LeaseExpiresAt: holder.LeaseExpiresAt, Superseded: holder.Superseded, Cost: holder.Cost}
+		if holder.QueueArrivedAt != nil {
+			h.QueueArrivedAt = *holder.QueueArrivedAt
+		}
+		out.Holders = append(out.Holders, h)
 	}
 	for _, waiter := range resp.Waiters {
 		out.Waiters = append(out.Waiters, store.ConcurrencyWaiter{
 			Key:           key,
 			RunID:         waiter.RunID,
-			NodeID:        waiter.NodeID,
+			NodeID:        waiter.JobID,
 			ArrivedAt:     waiter.ArrivedAt,
 			Policy:        waiter.Policy,
 			CacheKeyHash:  waiter.CacheKeyHash,
 			LeaderRunID:   waiter.LeaderRunID,
-			LeaderNodeID:  waiter.LeaderNodeID,
+			LeaderNodeID:  waiter.LeaderJobID,
 			Cost:          waiter.Cost,
-			Position:      waiter.Position,
-			CancelTimeout: waiter.CancelTimeoutDuration(),
+			Position:      waiter.Position - 1,
+			CancelTimeout: waiter.CancelTimeout,
 		})
 	}
 	return out, nil

@@ -3,15 +3,17 @@ package main
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 // safety: a cache miss describes the binary again so the reason it cannot
@@ -27,6 +29,10 @@ func (r *pipelineRun) describedPipeline(pipelineName string) (nodeproto.Pipeline
 			schemas = readDescribeFile(describeCachePath(key))
 		}
 	}
+	identity, err := pipelineIdentityAt(bindDir, pipelineName)
+	if err != nil {
+		return nodeproto.PipelineDescription{}, err
+	}
 	if schemas == nil {
 		doc, err := describeEntry(r.ctx, bindDir, r.entry)
 		if err != nil {
@@ -34,17 +40,24 @@ func (r *pipelineRun) describedPipeline(pipelineName string) (nodeproto.Pipeline
 		}
 		schemas = doc.Pipelines
 	}
-	_, config, err := projectconfig.Discover(bindDir)
+	r.pipeline = nodehost.PipelineIdentity{Invoked: identity.Name, Entrypoint: identity.Entrypoint}
+	return boundPipelineSchema(schemas, identity)
+}
+
+func pipelineIdentityAt(dir, name string) (clisurface.PipelineIdentity, error) {
+	cfg, err := projectconfig.Load(filepath.Join(dir, projectconfig.Filename))
 	if err != nil {
-		return nodeproto.PipelineDescription{}, err
+		return clisurface.PipelineIdentity{}, err
 	}
-	selection := nodehost.ResolvePipeline(config, pipelineName)
-	schema, err := findPipelineSchema(schemas, selection.Entrypoint)
+	return clisurface.ResolvePipeline(cfg, name)
+}
+
+func boundPipelineSchema(schemas []nodeproto.PipelineDescription, identity clisurface.PipelineIdentity) (nodeproto.PipelineDescription, error) {
+	schema, err := findPipelineSchema(schemas, identity.Entrypoint)
 	if err != nil {
-		return schema, err
+		return schema, fmt.Errorf("pipeline %q: %w", identity.Name, err)
 	}
-	r.pipeline = selection
-	schema.Name = selection.Invoked
+	schema.Name = identity.Name
 	return schema, nil
 }
 
@@ -107,9 +120,24 @@ func parsePipelineArgs(schema nodeproto.PipelineDescription, args []string) (map
 			i++
 			value = args[i]
 		}
-		if found {
-			if len(arg.Enum) > 0 && !slices.Contains(arg.Enum, value) {
-				return nil, fmt.Errorf("flag --%s: %q is not one of %s", name, value, strings.Join(arg.Enum, ", "))
+		if found && len(arg.Enum) > 0 {
+			values := []string{value}
+			if arg.Type == "[]string" {
+				values = nil
+				for _, item := range strings.Split(value, ",") {
+					if item = strings.TrimSpace(item); item != "" {
+						values = append(values, item)
+					}
+				}
+			}
+			for _, item := range values {
+				if slices.Contains(arg.Enum, item) {
+					continue
+				}
+				if arg.Secret {
+					return nil, fmt.Errorf("flag --%s: invalid secret value", name)
+				}
+				return nil, fmt.Errorf("flag --%s: %q is not one of %s", name, item, strings.Join(arg.Enum, ", "))
 			}
 		}
 		out[name] = value
@@ -157,7 +185,7 @@ func printPipelineHelp(w io.Writer, schema nodeproto.PipelineDescription) {
 		fmt.Fprintln(w)
 	}
 	fmt.Fprintln(w, "SPARKWING FLAGS")
-	for _, d := range runFlagSpecs {
+	for _, d := range cmdRun.Flags {
 		head := "--" + d.Name
 		if d.Short != "" {
 			head = "-" + d.Short + ", " + head

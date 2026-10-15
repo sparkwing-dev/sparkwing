@@ -140,3 +140,23 @@ func TestPipelineHelpFromDescribe(t *testing.T) {
 		t.Errorf("help for a pipeline without flags:\n%s", out)
 	}
 }
+
+func TestPipelineArgumentEnumDoesNotEchoSecretValue(t *testing.T) {
+	schema := nodeproto.PipelineDescription{Name: "demo", Args: []nodeproto.ArgumentDescription{{Name: "password", Type: "string", Secret: true, Enum: []string{"valid-private-value"}}}}
+	_, err := parsePipelineArgs(schema, []string{"--password", "invalid-private-value"})
+	if err == nil || strings.Contains(err.Error(), "invalid-private-value") || strings.Contains(err.Error(), "valid-private-value") {
+		t.Fatalf("secret enum diagnostic: %v", err)
+	}
+}
+
+func TestPipelineArgumentSliceEnumChecksEachValue(t *testing.T) {
+	schema := nodeproto.PipelineDescription{Name: "demo", Args: []nodeproto.ArgumentDescription{{Name: "target", Type: "[]string", Enum: []string{"linux", "darwin"}}}}
+	for _, value := range []string{"linux,darwin", "linux, darwin,", ""} {
+		if _, err := parsePipelineArgs(schema, []string{"--target", value}); err != nil {
+			t.Fatalf("valid list: %v", err)
+		}
+	}
+	if _, err := parsePipelineArgs(schema, []string{"--target", "linux,unknown"}); err == nil {
+		t.Fatal("invalid list member accepted")
+	}
+}

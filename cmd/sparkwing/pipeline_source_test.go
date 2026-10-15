@@ -41,7 +41,7 @@ func declaredSourceFixture(t *testing.T) *submitTestEnv {
 	}
 	e.extraEnv = []string{"SPARKWING_WINGD_BIN=" + e.bin}
 	source := `package main
-import("context"; "os"; "github.com/sparkwing-dev/sparkwing/sparkwing"; "github.com/sparkwing-dev/sparkwing/pkg/runner")
+import("context"; "os"; "github.com/sparkwing-dev/sparkwing/sparkwing")
 type Fixture struct { sparkwing.Base }
 func (*Fixture) Plan(_ context.Context, p *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
  sparkwing.Job(p,"subject",func(context.Context) error {
@@ -51,13 +51,13 @@ func (*Fixture) Plan(_ context.Context, p *sparkwing.Plan, _ sparkwing.NoInputs,
  })
  return nil
 }
-func main() { sparkwing.Register("fixture",func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Fixture{} }); runner.Main() }
+func main() { sparkwing.Register("fixture",func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Fixture{} }); sparkwing.Main() }
 `
 
 	if err := os.WriteFile(filepath.Join(e.repoDir, ".sparkwing", "main.go"), []byte(source), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg := "pipelines:\n  - name: fixture\n    entrypoint: Fixture\n    source: main\n"
+	cfg := "pipelines:\n  - name: fixture\n    entrypoint: fixture\n    source: main\n"
 	if err := os.WriteFile(filepath.Join(e.repoDir, ".sparkwing", "sparkwing.yaml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}

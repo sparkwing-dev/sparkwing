@@ -124,7 +124,6 @@ func (s *Server) hereFenceMux(next http.Handler) *http.ServeMux {
 	mux.Handle("/api/v1/triggers/{id}", byRun)
 	mux.Handle("/api/v1/triggers/{id}/{rest...}", byRun)
 	// safety: each of these binds to a live claim on a named run.
-	mux.Handle("/api/v1/concurrency/{key}/{rest...}", pass)
 	mux.Handle("/api/v1/pipelines/{name}/profile", byPipeline)
 	mux.Handle("/api/v1/pipelines/{name}/profile/{rest...}", byPipeline)
 	mux.Handle("GET /api/v1/secrets/{name}", pass)

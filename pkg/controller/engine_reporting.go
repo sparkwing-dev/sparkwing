@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -19,16 +20,6 @@ type annotationRequest struct {
 	Message string `json:"message"`
 	File    string `json:"file,omitempty"`
 	Line    *int   `json:"line,omitempty"`
-}
-
-type stepStartRequest struct {
-	StepID string `json:"step_id"`
-}
-
-type stepFinishRequest struct {
-	StepID string        `json:"step_id"`
-	Status string        `json:"status"`
-	Error  *apierr.Error `json:"error,omitempty"`
 }
 
 func (s *EngineController) handleSummary(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -59,52 +50,35 @@ func (s *EngineController) handleSummary(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *EngineController) handleStep(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	report, err := decodeStepReport(r)
+	var body controllerwire.StepReportRequest
+	if err := decodeEngineRequest(r, &body); err != nil {
+		return err
+	}
+	action, err := body.Action()
 	if err != nil {
 		return err
+	}
+	if !strings.HasSuffix(r.Pattern, "/steps/"+action) || int64(len(body.MaskedError)) > limits.ErrorBytes {
+		return invalidEngineBody("invalid step report")
 	}
 	tenant, err := s.runTransactions(r.Context(), a.Target.Team)
 	if err != nil {
 		return err
 	}
-	report.Attempt, err = reportingAttempt(r.Context(), tenant, a)
+	attempt, err := reportingAttempt(r.Context(), tenant, a)
 	if err != nil {
 		return err
 	}
-	report.Actor = engineActor(a)
+	if body.SourceAttempt != attempt.Attempt {
+		return &apierr.Error{Code: apierr.LockHeld, Message: "step report names another attempt"}
+	}
+	report := store.StepReport{Attempt: attempt, Actor: engineActor(a), StepID: body.StepID, State: body.State,
+		MaskedError: body.MaskedError, StartedAt: body.StartedAt, FinishedAt: body.FinishedAt}
 	if err := tenant.RecordStep(r.Context(), report); err != nil {
 		return engineLookupError(err)
 	}
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusOK, controllerwire.StepRecorded{Recorded: true})
 	return nil
-}
-
-func decodeStepReport(r *http.Request) (store.StepReport, error) {
-	report := store.StepReport{State: store.StepRunning}
-	if strings.HasSuffix(r.Pattern, "/finish") {
-		var body stepFinishRequest
-		if err := decodeEngineRequest(r, &body); err != nil {
-			return report, err
-		}
-		if err := store.ValidateStepTerminalStatus(body.Status); err != nil {
-			return report, invalidEngineBody("step status must be passed, failed, or cancelled")
-		}
-		masked, err := engineMaskedError(body.Error)
-		if err != nil {
-			return report, err
-		}
-		report.StepID, report.State, report.MaskedError = body.StepID, body.Status, masked
-	} else {
-		var body stepStartRequest
-		if err := decodeEngineRequest(r, &body); err != nil {
-			return report, err
-		}
-		report.StepID = body.StepID
-		if strings.HasSuffix(r.Pattern, "/skip") {
-			report.State = store.StepSkipped
-		}
-	}
-	return report, reportingStep(r, report.StepID)
 }
 
 func reportingAttempt(ctx context.Context, tenant RunTransactions, a capability.Authorized) (runspec.AttemptIdentity, error) {

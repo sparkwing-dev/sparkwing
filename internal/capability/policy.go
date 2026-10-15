@@ -173,6 +173,8 @@ type Target struct {
 	BodyRunID            string
 	Pipeline             string
 	ChildRunID           string
+	SlotKey              string
+	SlotHolderID         string
 	SlotRunID            string
 	SlotNodeID           string
 	SlotGeneration       int64

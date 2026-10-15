@@ -145,11 +145,11 @@ host memory pressure cannot obscure a CPU admission experiment.
 duration becomes the learned admission unit:
 
 ```bash
-sparkwing run admission-stress-light-sequential --class interactive
-sparkwing run admission-stress-light-parallel --class normal
-sparkwing run admission-stress-medium-fan-in --class batch
-sparkwing run admission-stress-cpu-heavy --class batch
-sparkwing run admission-stress-heavy --class batch
+sparkwing run admission-stress-light-sequential -- --class interactive
+sparkwing run admission-stress-light-parallel -- --class normal
+sparkwing run admission-stress-medium-fan-in -- --class batch
+sparkwing run admission-stress-cpu-heavy -- --class batch
+sparkwing run admission-stress-heavy -- --class batch
 sparkwing run admission-stress # the complete phased matrix, class=batch
 ```
 

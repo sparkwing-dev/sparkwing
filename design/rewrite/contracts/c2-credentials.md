@@ -1546,16 +1546,18 @@ controller suite, native transports and Sparkwing pipelines were not run.
 Seven reporting endpoints use `PolicyRouter`: job and step annotations and
 summaries, plus step start, finish and skip. Their paths use `/jobs/{job}`.
 The old `/nodes/{nodeID}` registrations and seven handler bodies are deleted.
-The existing Go client methods use the new paths. Bodies retain `step_id`,
-`message`, `markdown` and step-finish `status`. Annotations also accept the
-C1 level, file and line fields. Finish accepts an optional shared inner error.
+Annotation and summary bodies retain `step_id`, `message` and `markdown`.
+Annotations also accept the C1 level, file and line fields. Step lifecycle
+uses the shared StepReportRequest and StepRecorded contracts described below.
 
 The adapter passes tagged authority and holder/generation fences to C1's
 existing `WriteAnnotation`, `WriteSummary` and `RecordStep` signatures through
 `RunTransactions`. Job claims supply their bound attempt. Trigger owners and
 publishers load the persisted job attempt without replacing their own actor
-or owner fence. An unstarted job has no reportable step attempt and returns
-`illegal_transition`. The store owns timestamps, replay and the final recheck.
+or owner fence. The captured source_attempt must match that attempt before
+RecordStep runs. An unstarted job returns illegal_transition. Optional reported
+timestamps retain nanoseconds. The store owns timestamp defaults, replay and
+the final recheck.
 Annotations and summaries enforce `limits.AnnotationBytes` without truncation.
 
 The HTTP tests cover all three allowed authority alternatives, cancellation,
@@ -1564,8 +1566,8 @@ transaction refusals, malformed requests, exact text bounds, method refusals
 and removed paths. A request-body checkpoint changes the fixture generation
 after authentication. The original fence reaches the transaction and its
 refusal reaches HTTP. This is a fake-backed boundary proof, not a database
-race proof. The seven existing client methods also reach these handlers over
-an in-memory HTTP transport. The old standalone cancellation test is replaced
+race proof. Annotation/summary clients and the typed engine step writer reach
+these handlers over an in-memory HTTP transport. The old standalone cancellation test is replaced
 by the new step-finish case. No additional full T1 scenario or native placement
 cell is claimed complete.
 
@@ -2243,5 +2245,99 @@ these transactions before successful production mutations are enabled. HTTP
 properties exercise real SQLite authentication and CSRF with fake transactions.
 They prove transport behavior and private errors, not atomic persistence or
 native credential matrix cells. Closed invitations use canonical conflict.
+
+### Concurrency route cutover
+
+The eight `/api/v1/concurrency/{key}` registrations are removed. Their C2
+replacements are `/api/v1/queue/groups/{group}` and its `acquire`, `heartbeat`,
+`release`, `cancel-waiter`, `holder`, `resolve` and `force-release` operations.
+They use PolicyRouter and the existing access alternatives. Acquire and resolve
+use sensitive liveness. Heartbeat, release, cancellation and holder reads use
+reporting liveness. Group reads allow members or a claim bound to its declared
+group. Force release requires member `runs.control`. Local and deployment
+administrators cannot bypass a claim's binding.
+
+The wire uses `job_id`, `leader_job_id` and `origin_job_id`. Group reads use
+controllerwire.QueueGroup, including one-based waiter positions and numeric
+cancel_timeout_ns. The existing Go client sends the final paths and shapes. Its duplicate
+ConcurrencyState and StateWaiter wire types and duration parser are removed.
+The group read returns the validated shared QueueGroup.
+The orchestrator converts group positions to its store's zero-based form.
+The legacy runner, here and Actions slot-route permissions are removed. Hosted
+transport retries use the final paths and refuse automatic acquire replay.
+Client domain errors retain the canonical apierr.Error alongside the existing
+store sentinel. A canonical rate-limit error is never an admission result.
+
+C2 adds Target.SlotKey and Target.SlotHolderID. The decoder preserves the exact
+selected group, holder and body/query run and job. ResolveTarget supplies the
+authenticated generation. Holder-only calls and group reads use the bound run
+and job as the proposed identity. This does not establish that a stored holder
+belongs to that identity. BindingChecker must resolve the selected holder and
+declared group from persistence before granting access. Duplicate query values,
+retired node_id selectors, unknown JSON fields, trailing JSON and invalid or
+overflowing durations are refused. The existing one-MiB request budget remains.
+
+C2 declares controller.ConcurrencyStore and Server.WithConcurrencyStore. Each
+resolved adapter must report the authorized team. Its methods are:
+
+- AcquireAuthorizedSlot(ctx, Authorized, store.AcquireSlotRequest)
+  (store.AcquireSlotResponse, error).
+- HeartbeatAuthorizedSlot(ctx, Authorized, group, holder, lease)
+  (time.Time, superseded bool, error).
+- ReadAuthorizedHolder(ctx, Authorized, group, holder)
+  (store.ConcurrencyHolder, error).
+- ReleaseAuthorizedSlot(ctx, Authorized, group, holder, outcome, outputRef,
+  cacheKeyHash, cacheTTL) error.
+- ReadAuthorizedGroup(ctx, Authorized, group) (*store.ConcurrencyState, error).
+- ResolveAuthorizedWaiter(ctx, Authorized, group, run, job, cacheKeyHash,
+  leaderRun, leaderJob, bypassRead) (store.WaiterResolution, error).
+- CancelAuthorizedWaiter(ctx, Authorized, group, store.NodeRef) (bool, error).
+- ForceReleaseAuthorizedSlots(ctx, Authorized, group)
+  ([]store.ConcurrencyHolder, error).
+
+These transactions own the store clock and must recheck full live authority,
+tenancy, holder and generation, the sealed group or memo namespace and policy,
+and every referenced output or leader edge. Inheritance cannot join another
+job's holder. Supplied capacity and cost cannot replace the accepted declaration.
+Leases cannot exceed effective authority or work deadlines. Release and force
+release include notification and waiter promotion in their committing transaction.
+A cancelled claim keeps reporting rights without reacquiring capacity. Holder
+continuity and capacity accounting follow C1's existing frozen contract.
+The default uses Tenant only if it implements this interface. There is no call
+to the old unfenced methods when it does not.
+
+C1's current BindSlotOfBoundNode checker still refuses missing resolved selectors.
+W1 must consume SlotKey/SlotHolderID and implement the transaction interface.
+The HTTP properties use committed-fact and transaction fakes. They prove target
+transport, policy selection, cancellation classes and safe failure. They do not
+close native group/memo declaration, cross-team leader, lease-continuity or
+transaction-race acceptance cells. Those integration obligations remain open.
+
+### Typed step handoff integration
+
+The controller consumes controllerwire.StepReportRequest on start/finish/skip.
+State selects the path through the shared Action validator. source_attempt
+must be positive and must equal the authenticated job attempt or the current
+persisted attempt selected for an owner or publisher. A mismatch returns
+lock_held before writing. C1 repeats the derived AttemptIdentity and authority
+checks when committing RecordStep. An error contains masked text, bounded by
+the existing ErrorBytes limit. Optional timestamps retain nanoseconds.
+Success returns HTTP 200 and StepRecorded{Recorded:true} only after persistence.
+The two old private request structs and their separate decoder are deleted.
+
+TestEngineTypedStepHTTP connects W9's actual typed client to W2's actual
+registrations with a fake transaction adapter. The generated
+TestEngineTypedStepAttemptProperty varies job/owner ordinals and timestamps.
+A delayed report cannot be attached to a newer attempt and does not reach the
+writer. Existing reporting authority, cancellation, body-race and malformed-body
+tests now use the shared contract. The earlier untyped start/status/error-object
+bodies are rejected.
+
+The retained StateStoreOld runtime still requires Client.StartNodeStep,
+FinishNodeStep and SkipNodeStep. Their signatures carry no captured ordinal.
+They remain an unfinished legacy caller cut, not a fallback accepted by these
+HTTP routes. W3 must retire that runtime or move those callers to the typed
+Controller.RecordStep boundary. No ordinal is inferred by reading a later row.
+No W1, W3 or W9 contract signature changes in this integration.
 
 <!-- design:end -->

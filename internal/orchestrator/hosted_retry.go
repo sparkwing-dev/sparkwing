@@ -74,11 +74,10 @@ var hostedRoutePolicies = map[string]hostedRetryPolicy{
 	"POST /api/v1/triggers/{id}/done":                     hostedRetryRepeatable,
 	"POST /api/v1/triggers/{id}/heartbeat":                hostedRetryRepeatable,
 
-	"POST /api/v1/concurrency/{key}/acquire":       hostedRetryRepeatable,
-	"POST /api/v1/concurrency/{key}/cancel-waiter": hostedRetryRepeatable,
-	"POST /api/v1/concurrency/{key}/force-release": hostedRetryRepeatable,
-	"POST /api/v1/concurrency/{key}/heartbeat":     hostedRetryRepeatable,
-	"POST /api/v1/concurrency/{key}/release":       hostedRetryRepeatable,
+	"POST /api/v1/queue/groups/{group}/cancel-waiter": hostedRetryRepeatable,
+	"POST /api/v1/queue/groups/{group}/force-release": hostedRetryRepeatable,
+	"POST /api/v1/queue/groups/{group}/heartbeat":     hostedRetryRepeatable,
+	"POST /api/v1/queue/groups/{group}/release":       hostedRetryRepeatable,
 }
 
 var hostedRouteMux = sync.OnceValue(func() *http.ServeMux {

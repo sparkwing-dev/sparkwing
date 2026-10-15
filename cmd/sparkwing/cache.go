@@ -32,12 +32,14 @@ func runCache(args []string) error {
 		return runCachePrune(args[1:])
 	case "explain":
 		return runCacheExplain(args[1:])
+	case "warm":
+		return runCacheWarm(args[1:])
 	case "help", "-h", "--help":
 		PrintHelp(cmdCache, os.Stdout)
 		return nil
 	default:
 		PrintHelp(cmdCache, os.Stderr)
-		return fmt.Errorf("cache: unknown verb %q (valid: info, prune, explain)", args[0])
+		return fmt.Errorf("cache: unknown verb %q (valid: info, prune, explain, warm)", args[0])
 	}
 }
 
@@ -373,7 +375,7 @@ func runCacheExplain(args []string) error {
 		})
 	}
 
-	key, parts, err := bincache.ExplainCacheKey(dir)
+	key, parts, err := bincache.ExplainCacheKey(dir, os.Environ())
 	if err != nil {
 		return fmt.Errorf("cache explain: %w", err)
 	}

@@ -209,10 +209,3 @@ func (s *Server) handleClaimInput(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "claim input", err)
 	}
 }
-
-// safety: binds a route whose run is named in its body or by a holder, so the
-// handler behind it must check that run against the claim's own.
-func ownClaimBinding(r *http.Request) (string, string) {
-	tok, _ := claimTokenFromContext(r.Context())
-	return tok.RunID, tok.NodeID
-}

@@ -389,3 +389,23 @@ func TestParseActionsEndpointUsesActualProof(t *testing.T) {
 		t.Fatalf("Actions registration=%+v want=%+v", got, want)
 	}
 }
+
+func TestParseConcurrencyEndpointsUsesActualRegistrations(t *testing.T) {
+	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.concurrencyEndpoints())")
+	data, err := os.ReadFile(filepath.Join("..", "..", "pkg", "controller", "concurrency_routes.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "concurrency_routes.go"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	routes, err := Parse(src, nil)
+	if err != nil || len(routes) != 8 {
+		t.Fatalf("routes=%+v error=%v", routes, err)
+	}
+	for _, r := range routes {
+		if r.Path == "/api/v1/queue/groups/{group}/force-release" && r.Scope != "runs.control" {
+			t.Fatalf("force-release=%+v", r)
+		}
+	}
+}

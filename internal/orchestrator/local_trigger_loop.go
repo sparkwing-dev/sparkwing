@@ -698,7 +698,7 @@ func (c *localCompileCache) compile(sparkwingDir string) (string, error) {
 		return "", fmt.Errorf("cache entry: %w", err)
 	}
 	lease, _, err := entry.AcquireOrMaterialize(context.Background(), func(tempPath string) error {
-		return bincache.CompilePipeline(context.Background(), sparkwingDir, tempPath)
+		return bincache.CompilePipeline(context.Background(), sparkwingDir, tempPath, bincache.CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr})
 	})
 	if err != nil {
 		return "", err

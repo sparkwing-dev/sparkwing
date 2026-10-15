@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 )
 
 var (
@@ -83,6 +86,12 @@ func TestInfoLeadsWithMissingDeclaredHooks(t *testing.T) {
 
 func TestInfoReportsInvalidPipelineConfig(t *testing.T) {
 	projectAt(t, "pipelines: [invalid YAML\n")
+	previousPin, previousVersion := readEnginePin, enginePinVersion
+	t.Cleanup(func() { readEnginePin, enginePinVersion = previousPin, previousVersion })
+	readEnginePin = func(string, engine.SDKKind) (engine.Pin, error) {
+		return engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, nil
+	}
+	enginePinVersion = func(engine.Pin) (string, error) { return "v1.2.3", nil }
 	for _, args := range [][]string{{"-o", "json"}, {"-o", "pretty"}, {"--for-agent", "-o", "plain"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			out := captureStdout(t, func() {
@@ -99,16 +108,30 @@ func TestInfoReportsInvalidPipelineConfig(t *testing.T) {
 				if err := json.Unmarshal([]byte(out), &report); err != nil {
 					t.Fatal(err)
 				}
-				if !strings.Contains(report.Project.PipelinesError, "parse") {
+				if !strings.Contains(report.Project.PipelinesError, "sparkwing.yaml") || !strings.Contains(report.Project.PipelinesError, "line 1") {
 					t.Fatalf("catalog error absent: %s", out)
 				}
 			} else {
-				if !strings.Contains(out, "pipelines unavailable") || !strings.Contains(out, "parse") {
+				if !strings.Contains(out, "pipelines unavailable") || !strings.Contains(out, "sparkwing.yaml") || !strings.Contains(out, "line 1") {
 					t.Fatalf("catalog error absent: %s", out)
 				}
 				if strings.Contains(out, "0 pipeline") {
 					t.Fatal("failed catalog reported an empty pipeline count")
 				}
+			}
+		})
+	}
+}
+
+func TestInfoSuggestionsUseSharedGrammar(t *testing.T) {
+	steps := append([]InfoNextStep(nil), infoForAgents...)
+	steps = append(steps, nextStepsFor(Info{})...)
+	steps = append(steps, nextStepsFor(Info{Project: InfoProject{Found: true}})...)
+	for _, step := range steps {
+		t.Run(step.Command, func(t *testing.T) {
+			args := strings.Fields(step.Command)
+			if _, err := clisurface.Parse(args[0], args[1:]); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

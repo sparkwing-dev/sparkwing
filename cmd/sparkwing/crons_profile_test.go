@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http/httptest"
 	"os"
@@ -57,86 +56,13 @@ func (f *cronsProfileFixture) push(t *testing.T) {
 	}
 }
 
-func TestCronsListProfile_RendersTheControllersRows(t *testing.T) {
-	f := newCronsProfileFixture(t)
-	f.push(t)
-
-	out := captureStdout(t, func() {
-		if err := runCrons([]string{"list", "--profile", "prod", "-o", "pretty"}); err != nil {
-			t.Errorf("crons list --profile: %v", err)
-		}
-	})
-	if !strings.Contains(out, "acme/widgets/nightly") {
-		t.Errorf("listing does not name the controller's schedule:\n%s", out)
-	}
-	if !strings.Contains(out, "0 3 * * *") {
-		t.Errorf("listing does not carry the cadence:\n%s", out)
-	}
-}
-
-func TestCronsShowProfile_RendersOneRow(t *testing.T) {
-	f := newCronsProfileFixture(t)
-	f.push(t)
-
-	out := captureStdout(t, func() {
-		if err := runCrons([]string{"show", "acme/widgets/nightly", "--profile", "prod", "-o", "json"}); err != nil {
-			t.Errorf("crons show --profile: %v", err)
-		}
-	})
-	var row map[string]any
-	if err := json.Unmarshal([]byte(out), &row); err != nil {
-		t.Fatalf("decode: %v\n%s", err, out)
-	}
-	if row["where"] != store.CronWhereController {
-		t.Errorf("where = %v, want controller", row["where"])
-	}
-	if row["git_branch"] != "main" {
-		t.Errorf("git_branch = %v, want main", row["git_branch"])
-	}
-}
-
-func TestCronsListTimerProfile_ReportsTheControllerLoop(t *testing.T) {
-	f := newCronsProfileFixture(t)
-	f.push(t)
-
-	out := captureStdout(t, func() {
-		// safety: a controller that has never ticked is unhealthy while
-		// something is armed, which is the exit code an operator reads.
-		_ = runCrons([]string{"list", "--timer", "--profile", "prod", "-o", "pretty"})
-	})
-	if !strings.Contains(out, crons.ControllerTimerDetail) {
-		t.Errorf("status does not name the controller loop:\n%s", out)
-	}
-}
-
-func TestCronsSetPauseProfile_PausesOnTheController(t *testing.T) {
-	f := newCronsProfileFixture(t)
-	f.push(t)
-
-	out := captureStdout(t, func() {
-		if err := runCrons([]string{"set", "acme/widgets/nightly", "--pause", "--profile", "prod", "-o", "pretty"}); err != nil {
-			t.Errorf("crons set --pause --profile: %v", err)
-		}
-	})
-	if !strings.Contains(out, "is paused") {
-		t.Errorf("pause did not report the new state:\n%s", out)
-	}
-	rows, err := (&crons.Service{Store: f.store, Schedules: teststore.ForTeam(t, f.store, store.DefaultTeam)}).List(context.Background())
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if !rows[0].Paused {
-		t.Error("the controller's row is not paused")
-	}
-}
-
 func TestCronsInstallAndUninstallProfile_PushesAndRemovesARepository(t *testing.T) {
 	f := newCronsProfileFixture(t)
 	repo := newCronsControllerRepo(t)
 
 	out := captureStdout(t, func() {
-		if err := runIn(t, repo, runCrons, "install", "--profile", "prod", "--follow", "-o", "pretty"); err != nil {
-			t.Errorf("crons install --profile: %v", err)
+		if err := runIn(t, repo, func(args []string) error { return runSchedules(t.Context(), args) }, "install", "--profile", "prod", "--unpinned", "-o", "pretty"); err != nil {
+			t.Errorf("schedules install --profile: %v", err)
 		}
 	})
 	if !strings.Contains(out, "pushed") {
@@ -165,8 +91,8 @@ func TestCronsInstallAndUninstallProfile_PushesAndRemovesARepository(t *testing.
 	}
 
 	out = captureStdout(t, func() {
-		if err := runIn(t, repo, runCrons, "uninstall", "--profile", "prod", "-o", "pretty"); err != nil {
-			t.Errorf("crons uninstall --profile: %v", err)
+		if err := runIn(t, repo, func(args []string) error { return runSchedules(t.Context(), args) }, "uninstall", "--profile", "prod", "-o", "pretty"); err != nil {
+			t.Errorf("schedules uninstall --profile: %v", err)
 		}
 	})
 	if !strings.Contains(out, "disarmed 1") {
@@ -178,14 +104,6 @@ func TestCronsInstallAndUninstallProfile_PushesAndRemovesARepository(t *testing.
 	}
 	if len(rows) != 0 {
 		t.Errorf("controller still holds %d schedules", len(rows))
-	}
-}
-
-func TestCronsSetPinProfile_SaysThePinMovesWithThePush(t *testing.T) {
-	newCronsProfileFixture(t)
-	err := runCrons([]string{"set", "nightly", "--pin", "--profile", "prod"})
-	if err == nil || !strings.Contains(err.Error(), "crons install --profile") {
-		t.Fatalf("crons set --pin --profile: err = %v, want the push named as the way to re-pin", err)
 	}
 }
 
@@ -244,11 +162,11 @@ func TestCronsInstallProfile_RefusesAHeadNoRemoteBranchCarries(t *testing.T) {
 	newCronsProfileFixture(t)
 	repo := newCronsControllerRepo(t)
 
-	err := runIn(t, repo, runCrons, "install", "--profile", "prod", "-o", "pretty")
+	err := runIn(t, repo, func(args []string) error { return runSchedules(t.Context(), args) }, "install", "--profile", "prod", "-o", "pretty")
 	if err == nil {
 		t.Fatal("a commit no remote branch carries was pushed anyway")
 	}
-	for _, want := range []string{"no origin branch", "--follow"} {
+	for _, want := range []string{"no origin branch", "--unpinned"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q is missing %q", err, want)
 		}
@@ -266,8 +184,8 @@ func TestCronsInstallProfile_PushesOnceARemoteBranchCarriesHeadAndWarnsWhenDirty
 	var out string
 	warning := captureStderr(t, func() {
 		out = captureStdout(t, func() {
-			if err := runIn(t, repo, runCrons, "install", "--profile", "prod", "-o", "pretty"); err != nil {
-				t.Errorf("crons install --profile: %v", err)
+			if err := runIn(t, repo, func(args []string) error { return runSchedules(t.Context(), args) }, "install", "--profile", "prod", "-o", "pretty"); err != nil {
+				t.Errorf("schedules install --profile: %v", err)
 			}
 		})
 	})
@@ -291,8 +209,8 @@ func TestCronsInstallProfile_PlainPrintsBareNames(t *testing.T) {
 	repo := newCronsControllerRepo(t)
 
 	out := captureStdout(t, func() {
-		if err := runIn(t, repo, runCrons, "install", "--profile", "prod", "--follow", "-o", "plain"); err != nil {
-			t.Errorf("crons install --profile -o plain: %v", err)
+		if err := runIn(t, repo, func(args []string) error { return runSchedules(t.Context(), args) }, "install", "--profile", "prod", "--unpinned", "-o", "plain"); err != nil {
+			t.Errorf("schedules install --profile -o plain: %v", err)
 		}
 	})
 	lines := strings.Split(strings.TrimSpace(out), "\n")

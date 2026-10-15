@@ -29,36 +29,6 @@ const cronsLockFile = "crons.lock"
 
 const cronsPinDir = "crons"
 
-func runCrons(args []string) error {
-	if handleParentHelp(cmdCrons, args) {
-		return nil
-	}
-	if len(args) == 0 {
-		PrintHelp(cmdCrons, os.Stderr)
-		return errors.New("crons: subcommand required " +
-			"(install|uninstall|list|show|set|run)")
-	}
-	switch args[0] {
-	case "install":
-		return runCronsInstall(args[1:])
-	case "uninstall":
-		return runCronsUninstall(args[1:])
-	case "set":
-		return runCronsSet(args[1:])
-	case "list":
-		return runCronsList(args[1:])
-	case "show":
-		return runCronsShow(args[1:])
-	case "run":
-		return runCronsRun(args[1:])
-	case "tick":
-		return runCronsTick(args[1:])
-	default:
-		PrintHelp(cmdCrons, os.Stderr)
-		return fmt.Errorf("crons: unknown subcommand %q", args[0])
-	}
-}
-
 type cronsSession struct {
 	svc   *crons.Service
 	store *store.Store
@@ -138,13 +108,6 @@ func armedBy(host string) string {
 		return host
 	}
 	return name + "@" + host
-}
-
-func (s *cronsSession) now() time.Time {
-	if s.svc.Now != nil {
-		return s.svc.Now()
-	}
-	return time.Now()
 }
 
 // safety: tests replace this to record launches instead of starting runs.
@@ -266,7 +229,7 @@ func cronsTimerBinary() (string, error) {
 	return filepath.Abs(exe)
 }
 
-const unsupportedTimerHint = "run `sparkwing crons tick` from any scheduler on this machine, once a minute"
+const unsupportedTimerHint = "run `sparkwing __tick` from any scheduler on this machine, once a minute"
 
 func cronsOutputFlag(fs *flag.FlagSet) *string {
 	return fs.StringP("output", "o", "", "output format: pretty|json|plain")
@@ -278,38 +241,4 @@ func cronsNowFlag(fs *flag.FlagSet) *string {
 		panic(err)
 	}
 	return now
-}
-
-// safety: reads against the tick's clock, so --sw-now renders deterministically.
-func cronRelTime(now, t time.Time) string {
-	if t.IsZero() {
-		return "-"
-	}
-	if t.After(now) {
-		return "in " + shortDuration(t.Sub(now))
-	}
-	return shortDuration(now.Sub(t)) + " ago"
-}
-
-func shortDuration(d time.Duration) string {
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd", int(d.Hours()/24))
-	}
-}
-
-func cronAbsTime(t time.Time, loc *time.Location) string {
-	if t.IsZero() {
-		return "-"
-	}
-	if loc == nil {
-		loc = time.UTC
-	}
-	return t.In(loc).Format("2006-01-02 15:04:05 MST")
 }

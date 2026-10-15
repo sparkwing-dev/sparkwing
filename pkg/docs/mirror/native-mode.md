@@ -1,83 +1,43 @@
-# Local dashboard (native mode)
+# Local dashboard
 
-Running `sparkwing` executes pipelines on your laptop, each job in its own process. Native mode adds one thing on top of that: a way to watch several runs side by side.
+The public dashboard commands use the local controller lifecycle. See the
+[dashboard reference](cli-dashboard.md) for their grammar and output formats.
 
-The design is small:
+This build still needs native runtime, managed-service and log-source bindings.
+Dashboard commands report `unavailable` when those bindings are absent. They do
+not fall back to a separate dashboard server or open another state store.
 
-1. Every local `sparkwing` run writes records to the SQLite store under `~/.sparkwing/`.
-2. `sparkwing serve start` spawns a detached local server (`pkg/localws`) against that store, hosting the embedded dashboard SPA, the JSON API, and the log endpoints on one port (default `http://127.0.0.1:4343`). `sparkwing serve status` and `sparkwing serve stop` manage its lifecycle.
+Doctor reports an incomplete controller inspection when its lifecycle binding is
+absent. Its project toolchain, hook survey and competing-install checks still
+run. An incomplete inspection is an error, even when those machine checks pass.
 
-No daemon, no controller pod, no queue, no cluster lifecycle commands.
+<!-- design:begin -->
+## Controller lifecycle contract
 
-## What gets written per run
+The local controller owns the state store, admission, queue and dashboard in one
+home. Local pipeline execution stays in the CLI process. Standalone CI uses the
+same runtime in process and must not open a home already owned by a controller.
 
-Run state lives in the SQLite store at `~/.sparkwing/state.db`. Per-run artifacts live under `~/.sparkwing/runs/<runID>/`: one `.log` file per node. Each run, including a child run dispatched locally by `sparkwing.RunAndAwait`, also gets `_envelope.ndjson` there for run-level events (run start, plan, finish). The dashboard reads both the store and the logs.
+Runs, queued work, held leases and open dashboard connections keep the controller
+alive. With none of those holds, it may exit after the shared idle interval.
+Dashboard start with `--stay` keeps it up until stopped. Health probes alone do
+not keep it alive.
 
-Run IDs are timestamp-prefixed, so they sort chronologically.
+Login services on Linux and macOS use a foreground controller process with an
+absolute home. The CLI adapter forwards home, version, stay and standalone mode
+to that runtime and waits for it to return. Signal cancellation reaches the same
+runtime context. Startup reconciliation and shutdown draining belong to the
+runtime. Windows supports stay mode and daemon schedules, without a login-service
+installer.
 
-You do not have to assemble that path yourself. Each run records the directory as `log_path` on the `run_start` event and on the run's stored invocation, so `sparkwing runs status --run <id>` prints it (and `-o json` carries it as a top-level `log_path`). The recorded path belongs to the machine that executed the run, so a run you read back through `--profile` may name a directory that does not exist here; the text output marks those. Runs whose logs go to a controller or an object store leave the field out entirely.
+Managed schedule timers use one stable hidden entrypoint with the captured home.
+Machine updates refresh both timer and controller units. The controller runtime,
+service manager, timer and log bindings still need native integration evidence.
 
-`SPARKWING_HOME` overrides the `~/.sparkwing` root; see [config-reference.md](config-reference.md).
+The foreground contract has no fields for explicit budget, headroom or alternate
+state-db flags. The CLI reports `unavailable` for those explicit flags instead of
+dropping them. Machine admission settings remain the runtime's responsibility.
+<!-- design:end -->
 
-## Running the dashboard
-
-```
-sparkwing serve start    # start only when no instance is running
-sparkwing serve status   # report owned process, URLs and readiness
-sparkwing serve stop     # stop it
-```
-
-The CLI binary embeds the dashboard. `start` detaches a child and returns after an HTTP readiness response identifies that exact instance. A repeated `start` leaves the PID and effective options unchanged, even if the service is unhealthy or the installed binary changed. Its warning and build comparison explain the difference. Use `sparkwing serve restart` to replace the owned instance; unchanged flags retain the running options.
-
-`stop` sends TERM, waits five seconds, then forces the same owned process to exit and waits up to two more seconds. Linux uses a process handle and boot/birth identity. macOS checks boot/birth immediately before each signal; a PID-reuse race between that check and the signal remains possible. Other platforms refuse verified lifecycle actions. An old numeric PID file without the new ownership record is unknown; automatic stop and replacement refuse it. The original process must be stopped through its existing owner before a new instance can be created.
-
-`status` and mutation receipts share dashboard/API URLs, effective bind, PID, ownership, readiness, state paths and build comparison. Matching artifact SHA256 establishes a match; version labels and revisions alone do not. Running executable hashes remain unknown where the operating system cannot expose the executing artifact independently of its install path. Endpoint scope describes the bind, not verified access from another machine.
-
-Piped output is one compact JSON service record; `--output pretty|json|plain` overrides detection. Plain prints the state word. Repeated start and stop succeed; stopped status exits 1, while unknown ownership or failed readiness exits 2. `sparkwing serve logs` reads the last 40 lines from a bounded 1 MiB tail; `--limit 0` skips history and `--follow` waits for new lines. Log records are compact JSON when piped.
-
-For the bind address and the other `serve start` flags, see [cli-serve.md](cli-serve.md).
-
-## Run history
-
-The Runs page shows 50 runs per page, newest first, and pages through every run in the store with **Newer**, **Older** and **Newest**. The page lives in the URL as `older=` or `newer=` followed by a run's start instant and id, so a copied link reopens the same page. Only the newest page polls for new runs, every two seconds, and a run arriving while you read it does not move the rows on screen; an older page loads once and offers **Refresh**.
-
-Filters apply in the store, before paging, so a status, trigger, repository, pipeline, branch, commit, tag, date or search filter finds matching runs however old they are. Changing a filter returns to the newest page. The filter menus offer the values seen on the current page; a value from an older run can still be typed into the search box.
-
-Search, the log search view, reads job logs of matching runs newest first, 200 runs per request, and stops a request after 10 matches. It reports how many runs it has searched; **Search older runs** continues from the last run searched.
-
-## Why no resident process
-
-Locally, nothing needs to stay up between runs:
-
-- **Concurrency**: run five `sparkwing`s at once and you get five entries. That is the user's call.
-- **History**: the local store is the history.
-- **Webhooks and remote triggering**: that is the cluster's job.
-- **Background runs**: `sparkwing ... &` works in any shell, and `sparkwing run --sw-detached` hands the run to a consumer that exits when the queue drains.
-- **Schedules**: an OS timer runs `sparkwing crons tick` every minute and sparkwing evaluates the cadences inside that tick, so the machine holds a timer rather than a scheduler. See [crons.md](crons.md).
-
-The one daemon on a local machine is `wingd`, the admission daemon. It starts on demand when a pipeline needs a concurrency decision, serves the runs that asked for it, and exits when it goes idle. `sparkwing daemon status` reports it and never starts one.
-
-The daemon's CPU and memory scheduling is configured independently from pipeline
-risk. See [Local admission policy](admission.md) for the compatibility-preserving
-`classic` default and the `off`, `auto`, `jev`, and `custom` modes.
-
-## Multi-run demo
-
-In one terminal, start a couple of background runs:
-
-```
-sparkwing run build &
-sparkwing run test &
-```
-
-In another, start the dashboard:
-
-```
-sparkwing serve start
-```
-
-Open the dashboard link it prints, `http://127.0.0.1:4343/#code=...`; the browser then stays signed in to `http://127.0.0.1:4343`. Both runs stream live; when they finish, status flips to `passed` or `failed`.
-
-## What lives in the controller instead
-
-Cluster mode. The controller queues work for runners that poll and claim it, ingests GitHub webhooks, and tracks team-wide history -- none of which applies when you iterate on your own laptop.
+See [machine settings](machine-config.md), [local admission](admission.md) and
+[machine updates](updates.md) for the related configuration and contracts.

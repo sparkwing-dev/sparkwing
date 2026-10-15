@@ -377,6 +377,54 @@
       "kind": "api",
       "exempt": "Enrollment commits a one-time root and requires a production origin policy plus authenticated registration corpus. These fixtures are absent from the dashboard performance corpus. Authorized latency, cold start and response bytes are unmeasured.",
       "baselines": {}
+    },
+    {
+      "route": "/api/v1/queue/groups/{group}",
+      "kind": "api",
+      "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/queue/groups/{group}/acquire",
+      "kind": "api",
+      "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/queue/groups/{group}/heartbeat",
+      "kind": "api",
+      "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/queue/groups/{group}/release",
+      "kind": "api",
+      "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/queue/groups/{group}/cancel-waiter",
+      "kind": "api",
+      "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/queue/groups/{group}/holder",
+      "kind": "api",
+      "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/queue/groups/{group}/resolve",
+      "kind": "api",
+      "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/queue/groups/{group}/force-release",
+      "kind": "api",
+      "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
     }
   ]
 }

@@ -147,7 +147,6 @@ func (s *Server) githubFenceMux(next http.Handler) *http.ServeMux {
 	// safety: each of these binds to a live claim on a named run or
 	// pipeline, and this credential holds claims only on its own
 	// repository's runs.
-	mux.Handle("/api/v1/concurrency/{key}/{rest...}", pass)
 	mux.Handle("/api/v1/pipelines/{name}/profile", pass)
 	mux.Handle("/api/v1/pipelines/{name}/profile/{rest...}", pass)
 	mux.Handle("GET /api/v1/secrets/{name}", pass)

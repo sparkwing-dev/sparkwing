@@ -16,7 +16,8 @@ import (
 func protocolFixture(t *testing.T, path, counter, pipelines string) {
 	t.Helper()
 	writeExec(t, path, "#!/bin/sh\necho x >> "+counter+"\nread -r _ <&3\n"+
-		`printf '{"reply":"1","ok":true,"result":{"protocol":"1","pipelines":`+pipelines+`}}\n' >&4`+"\n")
+		`printf '{"reply":"1","ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"fixture"},"features":[]}}\n' >&4`+"\nread -r _ <&3\n"+
+		`printf '{"reply":"2","ok":true,"result":{"pipelines":`+pipelines+`}}\n' >&4`+"\n")
 }
 
 func starts(t *testing.T, counter string) int {
@@ -65,7 +66,7 @@ func TestDescribeCacheReadsTheProtocolDocumentOnceAndInvalidatesOnSourceChange(t
 	writeRepoFile(t, filepath.Join(sparkwingDir, "go.mod"), "module fixture\n\ngo 1.26\n")
 	writeRepoFile(t, filepath.Join(sparkwingDir, "main.go"), "package main\n")
 	fixture, counter := filepath.Join(t.TempDir(), "pipeline"), filepath.Join(t.TempDir(), "starts")
-	protocolFixture(t, fixture, counter, `[{"name":"build","args":[{"name":"env","go_name":"Env","type":"string"}]}]`)
+	protocolFixture(t, fixture, counter, `[{"name":"build","args":[{"name":"env","type":"string","required":false}]}]`)
 	firstKey := materializeFixture(t, sparkwingDir, fixture)
 
 	for range 2 {
@@ -79,7 +80,7 @@ func TestDescribeCacheReadsTheProtocolDocumentOnceAndInvalidatesOnSourceChange(t
 	}
 
 	writeRepoFile(t, filepath.Join(sparkwingDir, "main.go"), "package main\n\n// changed\n")
-	protocolFixture(t, fixture, counter, `[{"name":"deploy"}]`)
+	protocolFixture(t, fixture, counter, `[{"name":"deploy","args":[]}]`)
 	if key := materializeFixture(t, sparkwingDir, fixture); key == firstKey {
 		t.Fatal("a source change kept the cache key")
 	}
@@ -95,10 +96,10 @@ func TestDescribeCacheReadsTheProtocolDocumentOnceAndInvalidatesOnSourceChange(t
 func TestDescribeCacheIgnoresDocumentsOfAnotherShape(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	for name, body := range map[string]string{
-		"legacy array":   `[{"name":"build"}]`,
-		"other protocol": `{"protocol":"0","pipelines":[{"name":"build"}]}`,
-		"no pipelines":   `{"protocol":"1"}`,
-		"not json":       `{`,
+		"legacy array": `[{"name":"build","args":[]}]`,
+		"missing args": `{"pipelines":[{"name":"build"}]}`,
+		"no pipelines": `{}`,
+		"not json":     `{`,
 	} {
 		path := describeCachePath("k-" + strings.ReplaceAll(name, " ", "-"))
 		writeRepoFile(t, path, body)
@@ -116,9 +117,9 @@ func TestEnsureDescribeCacheRewritesALegacyEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeRepoFile(t, describeCachePath(key), `[{"name":"build"}]`)
+	writeRepoFile(t, describeCachePath(key), `[{"name":"build","args":[]}]`)
 	fixture, counter := filepath.Join(t.TempDir(), "pipeline"), filepath.Join(t.TempDir(), "starts")
-	protocolFixture(t, fixture, counter, `[{"name":"build"}]`)
+	protocolFixture(t, fixture, counter, `[{"name":"build","args":[]}]`)
 
 	ensureDescribeCache(context.Background(), sparkwingDir, key, pipelineentry.Binary(fixture))
 	ensureDescribeCache(context.Background(), sparkwingDir, key, pipelineentry.Binary(fixture))
@@ -140,12 +141,13 @@ func TestSourceRunDescribesWithTheCallersBinding(t *testing.T) {
 	// safety: the fixture names its one pipeline after the checkout it was
 	// started in, standing in for the YAML binding that checkout declares.
 	writeExec(t, fixture, "#!/bin/sh\nread -r _ <&3\n"+
-		`printf '{"reply":"1","ok":true,"result":{"protocol":"1","pipelines":[{"name":"%s"}]}}\n' "$(basename "$PWD")" >&4`+"\n")
+		`printf '{"reply":"1","ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"fixture"},"features":[]}}\n' >&4`+"\nread -r _ <&3\n"+
+		`printf '{"reply":"2","ok":true,"result":{"pipelines":[{"name":"%s","args":[]}]}}\n' "$(basename "$PWD")" >&4`+"\n")
 	key, err := bincache.PipelineCacheKey(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeRepoFile(t, describeCachePath(key), `{"protocol":"1","pipelines":[{"name":"source"}]}`)
+	writeRepoFile(t, describeCachePath(key), `{"pipelines":[{"name":"source","args":[]}]}`)
 
 	run := &pipelineRun{ctx: context.Background(), sparkwingDir: source, entry: pipelineentry.Binary(fixture)}
 	if _, err := run.describedPipeline("source"); err != nil {

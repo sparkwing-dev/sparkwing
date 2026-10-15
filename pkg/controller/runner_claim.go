@@ -121,8 +121,6 @@ func runnerClaimReaches(r *http.Request, tok store.ClaimToken) bool {
 	switch {
 	case read && (path == "/api/v1/triggers/"+run || path == "/api/v1/services"):
 		return true
-	case strings.HasPrefix(path, "/api/v1/concurrency/"):
-		return runnerClaimSlot(r, tok)
 	}
 	rest, ok := strings.CutPrefix(path, "/api/v1/runs/"+run)
 	if !ok || (rest != "" && !strings.HasPrefix(rest, "/")) {
@@ -230,38 +228,6 @@ func peekClaimBody(r *http.Request, into any) bool {
 	_ = r.Body.Close()
 	r.Body = io.NopCloser(bytes.NewReader(raw))
 	return err == nil && len(raw) <= 1<<20 && json.Unmarshal(raw, into) == nil
-}
-
-// safety: a slot names its run and holder in the query or the body, and a
-// holder id is run/node, so the claim reaches only its own node's slots.
-func runnerClaimSlot(r *http.Request, tok store.ClaimToken) bool {
-	holder := tok.RunID + "/" + tok.NodeID
-	action := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
-	q := r.URL.Query()
-	switch action {
-	case "holder":
-		return r.Method == http.MethodGet && q.Get("holder_id") == holder
-	case "resolve":
-		return r.Method == http.MethodGet && q.Get("run_id") == tok.RunID && q.Get("node_id") == tok.NodeID
-	}
-	var slot struct {
-		HolderID          string `json:"holder_id"`
-		InheritedHolderID string `json:"inherited_holder_id"`
-		RunID             string `json:"run_id"`
-		NodeID            string `json:"node_id"`
-	}
-	if r.Method != http.MethodPost || !peekClaimBody(r, &slot) {
-		return false
-	}
-	switch action {
-	case "cancel-waiter":
-		return slot.RunID == tok.RunID && slot.NodeID == tok.NodeID
-	case "acquire":
-		return slot.HolderID == holder && slot.RunID == tok.RunID && slot.NodeID == tok.NodeID && slot.InheritedHolderID == ""
-	case "heartbeat", "release":
-		return slot.HolderID == holder
-	}
-	return false
 }
 
 // safety: a launcher's token answers only a route written for its kind; a

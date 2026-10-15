@@ -1,21 +1,112 @@
 # Controller HTTP API
 
-The controller exposes its HTTP API under the
-`/api/v1` base path. The CLI, runners, the dashboard, and pipelines'
-cross-run refs are all clients. Responses are JSON.
+The CLI, runners, fetched engines and dashboard use `/api/v1`. The local
+controller exposes the same messages and authorization policy over its private API
+socket. The [HTTP reference](api-reference.md) is generated from the shared
+capability table. It includes node-host and external-proof routes with their
+separate audiences.
 
-The complete route surface -- every method, path, and the scope each
-requires -- is generated from the routing code in
-[api-reference.md](api-reference.md). This page covers the cross-cutting
-behavior that table doesn't.
+The repository's `api/openapi.yaml` is generated from the same policy and the
+shared wire types. Each operation retains its complete authorization alternatives
+under `x-sparkwing-policy`. JSON schemas preserve omitted fields, nulls and byte
+encoding. Shared validators enforce constraints beyond those serialization shapes.
+Operations without a documented success body carry `x-sparkwing-wire: undocumented`.
+They do not inherit a body from a removed endpoint.
+
+The shared wire contract and controller policy use the same route declarations.
+Native deployment and storage composition require acceptance evidence beyond
+client transport fixtures.
+
+<!-- design:begin -->
 
 ## Authentication
 
-Requests carry a bearer token, browser session or verified local identity.
-The route reference lists accepted authority. Capability routes require
-their declared grants, bindings and liveness; `admin` cannot bypass that
-policy. Token kinds, the scope set, unauthenticated endpoints and bootstrap
-are described in [auth.md](auth.md).
+A route requires one complete access alternative: credential class, every listed
+grant, resource binding and liveness. Alternatives cannot supply one another's
+missing checks. Ownership comes from a server lookup. A request cannot choose its
+actor, granted runner identity, billing provenance or claim fence.
+
+Capabilities, browser sessions and local peers pass the same applicable resource
+checks. Operator-console sessions and deployment-admin capabilities have separate
+powers. See [Authentication](auth.md) and [Security](security.md).
+
+External routes name their own proof: GitHub webhook HMAC, payment signature,
+GitHub Actions OIDC, browser CSRF/nonce or exact signed-object URL. A missing or
+invalid credential returns 401. A live credential without the route's authority
+returns 403. Resource conflicts use their canonical code, including `lock_held`.
+
+## Errors and retries
+
+HTTP errors use one envelope:
+
+```json
+{"error":{"code":"lock_held","message":"another holder owns this claim","hint":"wait for its lease"}}
+```
+
+The inner object requires a nonempty code and a string message. Optional `hint`
+and `details` retain their declared string and object types. Clients accept
+unknown additive fields and future codes. They reject duplicate keys, null
+required fields, malformed bodies and nested envelopes without echoing the body.
+
+The route's retry policy governs the shared HTTP/socket transport. Exact-body
+retries preserve the body. Keyed intake keeps its idempotency key and body.
+Claims, named claims and reconciliation can return a fresh bearer once, so a lost
+response is never automatically replayed. Here intake and retry also suppress
+replay. Lease recovery resolves an uncertain claim. A lost initial here bearer
+requires a fresh trigger request. See [Here runners](hotfix-runner.md).
+
+## Intake, execution and display
+
+| Operation | Request | Response |
+| --- | --- | --- |
+| `POST /api/v1/runs` | `CreateRunRequest` | `CreateRunResponse` |
+| `POST /api/v1/runners/claim` | `ClaimRequest` | `ClaimResponse` |
+| `POST /api/v1/launcher/claim` | `ClaimRequest` | `ClaimResponse` |
+| `POST /api/v1/runs/{run}/claim` | Named trigger `ClaimRequest` | `ClaimResponse` |
+| `POST /api/v1/runs/{run}/plan` | `PlanSubmission` | `PlanAccepted` |
+| `GET /api/v1/runs/{run}/snapshot` | Run selector | `ScheduleSnapshot` |
+| `POST /api/v1/runs/{run}/jobs/{job}/reconcile` | `ReconcileRequest` | `ReconcileResponse` |
+| `POST /api/v1/runs/{run}/jobs/{job}/transition` | `JobTransitionRequest` | `Applied` |
+| `POST /api/v1/runs/{run}/jobs/{job}/steps/start` | `StepReportRequest` with state `running` | `StepRecorded` |
+| `POST /api/v1/runs/{run}/jobs/{job}/steps/finish` | `StepReportRequest` with state `passed`, `failed` or `cancelled` | `StepRecorded` |
+| `POST /api/v1/runs/{run}/jobs/{job}/steps/skip` | `StepReportRequest` with state `skipped` | `StepRecorded` |
+| `POST /api/v1/runs/{run}/jobs/{job}/expansion` | `ExpansionSubmission` | `ExpansionAccepted` |
+| `POST /api/v1/runs/{run}/finish` | `FinishRequest` | `Applied` |
+| `POST /api/v1/runs/{run}/retry` | `RetryRequest` | `CreateRunResponse` |
+| `GET /api/v1/runs/{run}` | Run ID or team number | `RunDetail` |
+
+The wire types live in `internal/controllerwire`. Intake seals requested inputs
+once. Acceptance seals checkout declarations, resolved settings and the validated
+plan together. Retry retains the original request, source authority, SHA and
+accepted seals, with the retrier recorded separately. It never rewrites the
+original seal's identity to match the new run ID.
+
+Private claim and reconciliation responses carry execution settings, fences,
+accepted inputs and fresh capabilities. Public `RunDetail` and `JobDetail` carry
+safe display projections. Status clients never substitute a raw execution seal
+for a display record.
+
+A snapshot is one consistent scheduling read. Generator replay uses the exact
+accepted body and source fence, including empty expansions. The persisted topology
+stays authoritative. Held jobs receive a cancellation request while their current
+holder retains result rights. A result replay compares the actor, operation,
+fence and body digest. Holder start, retry, report and unstarted release include
+`source_attempt`. Initial start uses zero. Later reports use the captured ordinal
+returned by `Applied.attempt`. Omission and explicit zero remain distinct.
+Other actors and causes omit the field. The store refuses a mismatched ordinal
+and replays an identical transition without consuming another attempt.
+
+Step reports carry a positive `source_attempt`, step ID, state, optional masked
+error and optional start/finish timestamps. They carry no actor or claim fence.
+The controller derives those from authorization and current state, compares the
+source ordinal, and commits through the store's attempt-fenced step writer.
+The host waits for `{"recorded":true}` before emitting its step diagnostic.
+The controller commits these reports through the shared attempt-fenced writer.
+
+A reported job result carries `failure: {job, stage, error}` when it has a
+structured failure. The inner error retains its code, message, hint and details.
+Recovery reads that same persisted failure. An outcome or reason cannot replace
+its stage. The error-only result field is removed.
 
 ## Run detail
 
@@ -35,20 +126,38 @@ The controller requires its shared verifier and a complete status-read adapter.
 An absent adapter returns `policy_missing`. It never fills missing history with
 invented attempts or returns a partial status response after a read error.
 
-## Run completion
+## Launcher reconciliation
 
-`POST /api/v1/runs/{id}/finish` accepts `success`, `failed`, or `cancelled`.
-Another status returns `400` without finishing the run. Repeating the same
-status and error text succeeds without moving its finish time; a different
-verdict after completion returns `400`. `POST /api/v1/runs` cannot attach a
-finish time to a pending or running row, or reopen a pending row that already
-has one.
+`POST /api/v1/launcher/sync` accepts `LauncherSyncRequest`. Each observation
+contains `award: {kind, id, holder, generation}`, `job: {namespace, name, uid}`,
+and the reserved `node_uid`. The award generation identifies the unit award,
+including an eval's own lease. It does not replace that eval's source generation.
+The server compares observations with this launcher's stored awards.
 
-## Payment references
+The response contains held `awards` without bearer material and a `remove` list
+of exact Job instances. Each removal carries namespace, name and UID. The
+launcher must use that UID as a Kubernetes deletion precondition because a new
+Job can reuse the name. A failed transport, decode or validation returns no
+partial sync result. Native observation, reconciliation and cleanup bindings
+still require integration.
 
-A paid payment reference belongs to one team across prepaid grants and card
-settlements. Repeating a card settlement for that team changes nothing. Reporting
-it for another team returns `409` and leaves both teams’ balances and grants unchanged.
+## Logs and stored data
+
+Run logs use `GET /api/v1/runs/{run}/logs`. Job reads, streams and completeness
+use `/api/v1/runs/{run}/jobs/{job}/logs`, `/logs/stream` and
+`/logs/completeness`. Job segment and manifest writes use the matching
+`/log-segments` and `/log-manifest` routes. Log subjects distinguish job attempts
+from trigger, plan and eval units. A final log-tail exception cannot reopen work
+or write another attempt's logs.
+
+An interrupted or incomplete observation remains visible independently of the
+recorded run verdict. The CLI returns exit 3 when it cannot establish a complete
+observation. See [Observability](observability.md).
+
+Blob transfers and logical memo/depcache records use the authenticated `/data`
+routes. Storage authorization rechecks the live capability, bound uploader and
+persisted read edges. Object requests receive only signed transfer headers.
+See [Direct data uploads](data-uploads.md).
 
 ## Data downloads
 
@@ -83,85 +192,28 @@ URLs work through the backend selected by the controller. Cache grants and
 `{kind,key}` download requests are removed. There is no cache-service fallback.
 Logs use controller-proxied reads, separate from byte-storage downloads.
 
-## Webhooks
+## Concurrency groups
 
-`POST /webhooks/github-app` ingests the [GitHub App](github-app.md)'s
-deliveries, the only signed GitHub trigger. It is verified by HMAC
-(`X-Hub-Signature-256`) against the App's webhook secret rather than a bearer
-token, since GitHub can't carry one, and answers `401` when the signature does
-not verify. The installation a delivery names picks the team, and the team's
-subscriptions pick the pipelines; a pull request from a fork starts nothing. A
-redelivery answers `duplicate` with the runs it already started, and a
-delivery with no `X-GitHub-Delivery` header answers `400`. See
-[security.md](security.md).
+Concurrency operations use `/api/v1/queue/groups/{group}`. The former
+`/api/v1/concurrency/{key}` routes are removed. Requests and responses use
+`job_id`, `leader_job_id` and `origin_job_id`. A group read returns `QueueGroup`
+with one-based waiter positions and numeric `cancel_timeout_ns`.
 
-## Node logs
+Acquire and waiter resolution require a live claim bound to the declared group.
+After cancellation, the holder can still heartbeat, release and cancel its
+waiter while its reporting authority remains live. Force release requires
+`runs.control`. The transaction checks the current authority, holder generation,
+sealed declaration and reference edges before reading or changing state.
+Embedded controllers provide `WithConcurrencyStore`. A missing transaction
+adapter refuses the operation with `policy_missing`.
 
-The controller serves node logs, which runners upload as segments (see
-[Log completeness](observability.md#log-completeness)). Every read needs
-`logs.read` and answers only for the caller's team:
+## Version policy
 
-- `GET /api/v1/runs/{id}/logs` reads the whole run.
-- `GET /api/v1/runs/{id}/logs/{node}` reads one node, filtered by `tail`,
-  `head`, `lines` or `grep`.
-- `GET /api/v1/runs/{id}/logs/{node}/stream` follows a node over SSE
-  through every attempt of it in this run, in order, holding the node's
-  live-view watch while open, and ends with a `stream_end` event once the
-  node is done with an outcome other than failed, or its run is over (only
-  a failure can be retried), and its last attempt is sealed. Each line carries the cursor just past
-  it as its event id; sending the last one back as `Last-Event-ID` (or
-  `cursor=`, which the header overrides) resumes after it.
-- `GET /api/v1/runs/{id}/logs/{node}/completeness` returns the node's
-  completeness verdict.
-- `GET /api/v1/runs/{id}/logs/search` searches one run, and
-  `GET /api/v1/runs/grep` searches across runs; each reads at most 256 MiB
-  and scans for at most 10 seconds.
+A repository's exact SDK pin selects its verified engine. From launch freeze,
+the controller supports requests emitted by each engine for twelve calendar
+months after its release. Older engines continue until a signed security
+revocation or minimum-version policy takes effect. Additive fields and codes
+remain readable. Each selected engine owns its matching node protocol.
+See [Versioning](versioning.md).
 
-On a node read, `grep=TEXT&line_numbers=1` returns NDJSON objects with
-`line_no` (the position in the full node log) and `line`. Matching is
-case-sensitive. `max_matches=N` caps the response; omitting it returns all
-matches. Without `line_numbers=1`, the read returns plain text.
-
-A runner compresses and hashes each log segment, asks
-`POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments` under its node or
-trigger claim for one URL signed for that segment's exact size and
-Content-MD5, and puts the segment there. It seals the attempt by posting
-the manifest to `POST /api/v1/runs/{id}/nodes/{nodeID}/log-manifest`,
-which the controller checks against the segments it signed. A launcher
-pod's claim or a runner's node claim may finish both for its own attempt
-for 60 seconds after its node reports its outcome. The routes and their scopes are in
-[api-reference.md](api-reference.md).
-
-## Run coordination
-
-`POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start` records one
-attempt for the node's claim generation and ordinal. Repeating that exact
-request is safe. The execution-start and node `touch` routes answer a
-transient PostgreSQL lock or serialization conflict with `503` and
-`Retry-After: 1`. Runners retry execution-start up to three times after
-those responses or a transient connection error; a different store error
-remains `500`.
-
-A pipeline binary needs more than node state from whatever holds its
-runs: it dispatches its own child triggers, and it measures what the run
-cost so the next run of the same pipeline is priced from evidence. Those
-reach the controller as routes too -- `/api/v1/runs/{id}/pending-triggers`
-and `/api/v1/triggers/{id}/claim` for the child-trigger loop,
-`/api/v1/pipelines/{name}/sizing/observations`, `/contention`, and
-`/waits` for the capacity profile, `/api/v1/runs/{id}/nodes/{nodeID}/usage`
-for a reaped process's accounting. Owner recovery runs under the elected
-reaper lease, independently of reads.
-
-A capacity write names a pipeline rather than a run, so it is bound to a
-live claim on a run of that pipeline: a node claim for a runner executing
-one node, or the run's trigger claim for the orchestrator, which records
-the queue wait before the first node exists and the run's measurement
-after the last one is gone. Sizing writes require `node.report` and an
-authority-bearing transaction adapter that rechecks the sealed repository and
-pipeline. Without that adapter they return `policy_missing`.
-
-## Concurrency
-
-The `.Memoize()` and `.Concurrency()` coordination primitives are backed
-by the `/api/v1/concurrency/{key}/*` routes (acquire, heartbeat,
-release, state, resolve). See [caching.md](caching.md) for the model.
+<!-- design:end -->

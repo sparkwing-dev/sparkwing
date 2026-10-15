@@ -68,13 +68,7 @@ func newClaimLogTailRoute(kinds []store.ClaimTokenKind, next http.Handler) *clai
 }
 
 func newClaimReportingRoute(kinds []store.ClaimTokenKind, next http.Handler) *claimTokenRoute {
-	return newClaimReportingRouteBound(kinds, nil, next)
-}
-
-func newClaimReportingRouteBound(kinds []store.ClaimTokenKind, bind func(*http.Request) (string, string),
-	next http.Handler,
-) *claimTokenRoute {
-	return &claimTokenRoute{spec: claimRouteSpec{class: store.ClaimReporting, kinds: kinds, bind: bind}, next: next}
+	return &claimTokenRoute{spec: claimRouteSpec{class: store.ClaimReporting, kinds: kinds}, next: next}
 }
 
 // safety: the body's digest is the result's identity, so an ended claim is

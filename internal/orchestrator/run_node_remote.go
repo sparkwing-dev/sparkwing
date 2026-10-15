@@ -259,7 +259,7 @@ func resolveRemoteBinary(ctx context.Context, sparkwingDir string, data *bincach
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
 		tmp := filepath.Join(sparkwingDir, ".sparkwing-runner-bin")
-		if cerr := bincache.CompilePipeline(ctx, sparkwingDir, tmp); cerr != nil {
+		if cerr := bincache.CompilePipeline(ctx, sparkwingDir, tmp, bincache.CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr}); cerr != nil {
 			return remoteBinary{}, cerr
 		}
 		return remoteBinary{entry: pipelineentry.Binary(tmp)}, nil
@@ -278,7 +278,7 @@ func resolveRemoteBinary(ctx context.Context, sparkwingDir string, data *bincach
 			}
 		}
 		compiled = true
-		return bincache.CompilePipeline(ctx, sparkwingDir, tempPath)
+		return bincache.CompilePipeline(ctx, sparkwingDir, tempPath, bincache.CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr})
 	})
 	if err != nil {
 		return remoteBinary{}, err

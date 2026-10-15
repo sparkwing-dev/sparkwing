@@ -20,7 +20,7 @@ import (
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--sw-node-protocol" {
 		_, _ = bufio.NewReader(os.NewFile(3, "requests")).ReadString('\n')
-		fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":\"1\",\"pipelines\":[{\"name\":\"warmfixture\"}]}}")
+		fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":2,\"sdk\":{\"language\":\"go\",\"version\":\"fixture\"},\"features\":[]}}"); _, _ = bufio.NewReader(os.NewFile(3, "requests")).ReadString('\n'); fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"2\",\"ok\":true,\"result\":{\"pipelines\":[{\"name\":\"warmfixture\",\"args\":[]}]}}")
 		return
 	}
 	_ = os.Getenv("SPARKWING_HOME")

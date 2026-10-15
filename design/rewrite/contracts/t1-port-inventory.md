@@ -1038,3 +1038,37 @@ TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames is reversed by
 the successful awarded-claim mint tests. The old
 Trigger/ClaimedRun readers are deleted from W2. No native credential matrix
 cell or production C1 identity projection is claimed complete by this port.
+
+## W2 concurrency transport cut
+
+TestObserveSlotMapsMissingHolder and TestHeartbeatSlotMapsLostOwnership move to
+pkg/controller/client/concurrency_test.go:TestConcurrencyClientDomainErrors.
+The tests now use in-process transport and canonical errors. They preserve
+errors.Is for the store sentinels and errors.As for apierr.Error. Untyped legacy
+error bodies cannot become lost-ownership results. TestConcurrencyClientDistinguishesAdmissionFromRateLimits
+pins the refusal of a canonical 429 as an admission result.
+
+TestConcurrencyHTTPTransactions exercises the eight actual group registrations
+with job, trigger and plan authority and fake committing adapters. The generated
+TestConcurrencyHTTPBindingProperty varies body/query run, job, holder and
+encoded group selectors against independent binding facts. Refused requests
+never enter the transaction adapter. TestConcurrencyHTTPRefusals covers current
+liveness, cancellation-sensitive acquire, cancellation-reporting release,
+stale generation, transaction refusal, safe errors, tenant selection, malformed
+inputs and unsupported methods. The client round trip uses final paths and job
+fields. The retired-route property reaches no adapter.
+
+The old claim_run_test.go concurrency properties and the cross-team leader
+resolution test remain unported native requirements. Fake adapters do not
+establish sealed group or memo policy, foreign leader resolution, lease ceilings,
+inheritance refusal or persistence races. W1 must implement C2's authority-bearing
+ConcurrencyStore and SlotKey/SlotHolderID checker before those cells can close.
+No native acceptance matrix cell is newly completed in this continuation.
+
+W2's typed step continuation updates the existing TestEngineStepHTTP and
+reporting-authority cases to StepReportRequest. TestEngineTypedStepHTTP uses
+the actual typed engine client. TestEngineTypedStepAttemptProperty generates
+captured and current ordinals and nanosecond timestamps for job and owner
+reports. Mismatched ordinals return lock_held without entering RecordStep.
+These are HTTP component proofs with fake transactions. The legacy
+StateStoreOld step callers and native placement/store composition remain open.

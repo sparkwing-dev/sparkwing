@@ -369,7 +369,7 @@ func offlineWriteFixture(t *testing.T, gitBin, toolPath, fixtureHome string) (re
 			"replace %s => %s\n\nreplace github.com/sparkwing-dev/sparkwing => %s\n",
 		offlineFixtureModule, offlineSparkModule, offlineSparkModule, sparkDir, offlineRepoRoot(t)))
 	writeFile(t, filepath.Join(sparkwingDir, "sparkwing.yaml"), fmt.Sprintf(
-		"pipelines:\n  - name: offline\n    entrypoint: Offline\n    description: Runs with no network once its modules are on disk\n\n"+
+		"pipelines:\n  - name: offline\n    entrypoint: offline\n    description: Runs with no network once its modules are on disk\n\n"+
 			"sparks:\n  - name: offline-spark\n    source: %s\n    version: v0.1.0\n", offlineSparkModule))
 	writeFile(t, filepath.Join(sparkwingDir, "jobs", "jobs.go"), offlineFixtureJobs)
 	writeFile(t, filepath.Join(sparkwingDir, "main.go"), offlineFixtureMain)
@@ -447,8 +447,8 @@ const offlineFixtureMain = `package main
 import (
 	_ "offlinefixture/jobs"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func main() { runner.Main() }
+func main() { sparkwing.Main() }
 `

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
 
 func TestOutputContractProcess(t *testing.T) {
@@ -171,39 +173,12 @@ func TestOutputContractKeepsFlagValues(t *testing.T) {
 	}
 }
 
-func TestRootOutputNeverReachesThePipeline(t *testing.T) {
-	for _, verb := range [][]string{
-		{"-o", "pretty", "run", "pipeline", "--", "--output", "child"},
-		{"-o", "json", "run", "pipeline"},
-	} {
-		arguments, err := moveRootFlags(verb)
-		if err == nil {
-			t.Fatalf("%q: root output survived as %q; want a refusal", verb, arguments)
-		}
-		if !strings.Contains(err.Error(), "-o/--output does not select a run's stream") {
-			t.Fatalf("%q: err = %v", verb, err)
-		}
-	}
-}
-
-func TestRootOutputStillReachesRunHelp(t *testing.T) {
-	arguments, err := moveRootFlags([]string{"-o", "json", "run", "--help"})
+func TestRootOutputSelectsRunStream(t *testing.T) {
+	inv, err := clisurface.Parse("sparkwing", []string{"-o", "pretty", "run", "pipeline", "--", "--output", "child"})
 	if err != nil {
-		t.Fatalf("help: %v", err)
+		t.Fatal(err)
 	}
-	expected := []string{"run", "-o", "json", "--help"}
-	if !slices.Equal(arguments, expected) {
-		t.Fatalf("got %q, want %q", arguments, expected)
-	}
-}
-
-func TestRootOutputStillMovesForOtherVerbs(t *testing.T) {
-	arguments, err := moveRootFlags([]string{"-o", "json", "runs", "list"})
-	if err != nil {
-		t.Fatalf("runs list: %v", err)
-	}
-	expected := []string{"runs", "list", "-o", "json"}
-	if !slices.Equal(arguments, expected) {
-		t.Fatalf("got %q, want %q", arguments, expected)
+	if runOutput(inv, "json", false) != "pretty" || !slices.Equal(inv.Args, []string{"--output", "child"}) {
+		t.Fatalf("output leaked into pipeline args: %#v", inv)
 	}
 }

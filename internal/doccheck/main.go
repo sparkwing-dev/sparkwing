@@ -24,6 +24,13 @@ var (
 )
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "--write-protocol-schemas" {
+		if err := writeProtocolSchemas(os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) != 3 {
 		fmt.Fprintln(os.Stderr, "usage: doccheck <docs-content-dir> <repo-root>")
 		os.Exit(2)
@@ -36,6 +43,8 @@ func main() {
 	fmt.Println()
 	ok = checkProfileConfigs(contentDir) && ok
 	fmt.Println()
+	ok = checkProtocolSchemas(contentDir) && ok
+	fmt.Println()
 	ok = checkBannedTokens(contentDir, repoRoot) && ok
 	fmt.Println()
 	ok = checkFailureReasons(contentDir, repoRoot) && ok
@@ -44,7 +53,9 @@ func main() {
 	fmt.Println()
 	ok = checkLinks(contentDir) && ok
 	fmt.Println()
-	ok = checkCLIVerbs(contentDir, repoRoot) && ok
+	ok = checkCLIVerbs(contentDir) && ok
+	fmt.Println()
+	ok = checkAPIRoutes(contentDir) && ok
 	fmt.Println()
 	ok = checkServicePorts(contentDir, repoRoot) && ok
 	fmt.Println()
@@ -93,7 +104,7 @@ func checkGoBlocks(contentDir, repoRoot string) bool {
 			fmt.Fprintln(os.Stderr, "write:", err)
 			os.Exit(2)
 		}
-		cmd := exec.Command("go", "build", "-o", os.DevNull, "./b"+fmt.Sprintf("%03d", i))
+		cmd := exec.Command("go", "build", "-buildvcs=false", "-o", os.DevNull, "./b"+fmt.Sprintf("%03d", i))
 		cmd.Dir = tmp
 		cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
 		out, berr := cmd.CombinedOutput()

@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -38,10 +42,10 @@ type AcquireSlotResponse struct {
 	HolderID         string    `json:"holder_id,omitempty"`
 	LeaseExpiresAt   time.Time `json:"lease_expires_at,omitempty"`
 	LeaderRunID      string    `json:"leader_run_id,omitempty"`
-	LeaderNodeID     string    `json:"leader_node_id,omitempty"`
+	LeaderNodeID     string    `json:"leader_job_id,omitempty"`
 	OutputRef        string    `json:"output_ref,omitempty"`
 	OriginRunID      string    `json:"origin_run_id,omitempty"`
-	OriginNodeID     string    `json:"origin_node_id,omitempty"`
+	OriginNodeID     string    `json:"origin_job_id,omitempty"`
 	SupersededIDs    []string  `json:"superseded_ids,omitempty"`
 	PreviousCapacity int       `json:"previous_capacity,omitempty"`
 	DriftNote        string    `json:"drift_note,omitempty"`
@@ -63,7 +67,7 @@ func (c *Client) AcquireSlot(ctx context.Context, key string, req AcquireSlotReq
 		body["inherited_holder_id"] = req.InheritedHolderID
 	}
 	if req.NodeID != "" {
-		body["node_id"] = req.NodeID
+		body["job_id"] = req.NodeID
 	}
 	if req.Max > 0 {
 		body["max"] = req.Max
@@ -91,7 +95,7 @@ func (c *Client) AcquireSlot(ctx context.Context, key string, req AcquireSlotReq
 	}
 	buf, _ := json.Marshal(body)
 
-	u := fmt.Sprintf("%s/api/v1/concurrency/%s/acquire", c.baseURL, url.PathEscape(key))
+	u := fmt.Sprintf("%s/api/v1/queue/groups/%s/acquire", c.baseURL, url.PathEscape(key))
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(buf))
 	if err != nil {
 		return nil, err
@@ -105,13 +109,27 @@ func (c *Client) AcquireSlot(ctx context.Context, key string, req AcquireSlotReq
 
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusAccepted, http.StatusTooManyRequests:
-		var out AcquireSlotResponse
-		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
 			return nil, err
+		}
+		var out AcquireSlotResponse
+		if err := json.Unmarshal(data, &out); err != nil {
+			return nil, &apierr.Error{Code: apierr.ProtocolError, Message: "invalid concurrency response"}
+		}
+		valid := resp.StatusCode == http.StatusOK && out.Granted && (out.Kind == string(store.AcquireGranted) || out.Kind == string(store.AcquireCached)) ||
+			resp.StatusCode == http.StatusAccepted && !out.Granted && (out.Kind == string(store.AcquireQueued) || out.Kind == string(store.AcquireCoalesced) || out.Kind == string(store.AcquireCancellingOthers)) ||
+			resp.StatusCode == http.StatusTooManyRequests && !out.Granted && (out.Kind == string(store.AcquireSkipped) || out.Kind == string(store.AcquireFailed))
+		if !valid {
+			if resp.StatusCode == http.StatusTooManyRequests {
+				resp.Body = io.NopCloser(bytes.NewReader(data))
+				return nil, readConcurrencyError(resp)
+			}
+			return nil, &apierr.Error{Code: apierr.ProtocolError, Message: "inconsistent concurrency response"}
 		}
 		return &out, nil
 	default:
-		return nil, readHTTPError(resp)
+		return nil, readConcurrencyError(resp)
 	}
 }
 
@@ -123,7 +141,7 @@ type HeartbeatSlotResponse struct {
 }
 
 func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*WaiterHolder, error) {
-	u := fmt.Sprintf("%s/api/v1/concurrency/%s/holder?holder_id=%s",
+	u := fmt.Sprintf("%s/api/v1/queue/groups/%s/holder?holder_id=%s",
 		c.baseURL, url.PathEscape(key), url.QueryEscape(holderID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -135,10 +153,10 @@ func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*Waiter
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, notFound(resp)
+		return nil, readConcurrencyError(resp)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, readHTTPError(resp)
+		return nil, readConcurrencyError(resp)
 	}
 	var out WaiterHolder
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -155,7 +173,7 @@ func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease 
 		body["lease_secs"] = int(lease.Seconds())
 	}
 	buf, _ := json.Marshal(body)
-	u := fmt.Sprintf("%s/api/v1/concurrency/%s/heartbeat", c.baseURL, url.PathEscape(key))
+	u := fmt.Sprintf("%s/api/v1/queue/groups/%s/heartbeat", c.baseURL, url.PathEscape(key))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(buf))
 	if err != nil {
 		return nil, err
@@ -166,11 +184,8 @@ func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease 
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusConflict {
-		return nil, store.ErrLockHeld
-	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, readHTTPError(resp)
+		return nil, readConcurrencyError(resp)
 	}
 	var out HeartbeatSlotResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -184,7 +199,7 @@ func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease 
 type WaiterHolder struct {
 	HolderID       string     `json:"holder_id"`
 	RunID          string     `json:"run_id"`
-	NodeID         string     `json:"node_id,omitempty"`
+	NodeID         string     `json:"job_id,omitempty"`
 	ClaimedAt      time.Time  `json:"claimed_at"`
 	QueueArrivedAt *time.Time `json:"queue_arrived_at,omitempty"`
 	LeaseExpiresAt time.Time  `json:"lease_expires_at"`
@@ -192,42 +207,8 @@ type WaiterHolder struct {
 	Cost           int        `json:"cost,omitempty"`
 }
 
-// ConcurrencyState mirrors the controller's state endpoint.
-type ConcurrencyState struct {
-	Key               string         `json:"key"`
-	Capacity          int            `json:"capacity"`
-	EffectiveCapacity int            `json:"effective_capacity"`
-	UsedCost          int            `json:"used_cost"`
-	Holders           []WaiterHolder `json:"holders"`
-	Waiters           []StateWaiter  `json:"waiters"`
-}
-
-type StateWaiter struct {
-	RunID         string    `json:"run_id"`
-	NodeID        string    `json:"node_id,omitempty"`
-	ArrivedAt     time.Time `json:"arrived_at"`
-	Policy        string    `json:"policy"`
-	CacheKeyHash  string    `json:"cache_key_hash,omitempty"`
-	LeaderRunID   string    `json:"leader_run_id,omitempty"`
-	LeaderNodeID  string    `json:"leader_node_id,omitempty"`
-	CancelTimeout string    `json:"cancel_timeout,omitempty"`
-	Cost          int       `json:"cost,omitempty"`
-	Position      int       `json:"position"`
-}
-
-func (w StateWaiter) CancelTimeoutDuration() time.Duration {
-	if w.CancelTimeout == "" {
-		return 0
-	}
-	d, err := time.ParseDuration(w.CancelTimeout)
-	if err != nil {
-		return 0
-	}
-	return d
-}
-
-func (c *Client) ConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error) {
-	u := fmt.Sprintf("%s/api/v1/concurrency/%s/state", c.baseURL, url.PathEscape(key))
+func (c *Client) ConcurrencyState(ctx context.Context, key string) (*controllerwire.QueueGroup, error) {
+	u := fmt.Sprintf("%s/api/v1/queue/groups/%s", c.baseURL, url.PathEscape(key))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
@@ -240,13 +221,16 @@ func (c *Client) ConcurrencyState(ctx context.Context, key string) (*Concurrency
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusNotFound:
-		return nil, notFound(resp)
+		return nil, readConcurrencyError(resp)
 	default:
-		return nil, readHTTPError(resp)
+		return nil, readConcurrencyError(resp)
 	}
-	var out ConcurrencyState
+	var out controllerwire.QueueGroup
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
+	}
+	if !validQueueGroup(out, key) {
+		return nil, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an inconsistent queue group"}
 	}
 	return &out, nil
 }
@@ -258,9 +242,9 @@ type WaiterResolution struct {
 	HolderLeaseExpires  time.Time      `json:"holder_lease_expires,omitempty"`
 	OutputRef           string         `json:"output_ref,omitempty"`
 	OriginRunID         string         `json:"origin_run_id,omitempty"`
-	OriginNodeID        string         `json:"origin_node_id,omitempty"`
+	OriginNodeID        string         `json:"origin_job_id,omitempty"`
 	LeaderRunID         string         `json:"leader_run_id,omitempty"`
-	LeaderNodeID        string         `json:"leader_node_id,omitempty"`
+	LeaderNodeID        string         `json:"leader_job_id,omitempty"`
 	LeaderOutcome       string         `json:"leader_outcome,omitempty"`
 	LeaderFailureReason string         `json:"leader_failure_reason,omitempty"`
 	Position            int            `json:"position,omitempty"`
@@ -274,7 +258,7 @@ func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 	q := url.Values{}
 	q.Set("run_id", runID)
 	if nodeID != "" {
-		q.Set("node_id", nodeID)
+		q.Set("job_id", nodeID)
 	}
 	if cacheKeyHash != "" {
 		q.Set("cache_key_hash", cacheKeyHash)
@@ -283,12 +267,12 @@ func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 		q.Set("leader_run_id", leaderRunID)
 	}
 	if leaderNodeID != "" {
-		q.Set("leader_node_id", leaderNodeID)
+		q.Set("leader_job_id", leaderNodeID)
 	}
 	if bypassRead {
 		q.Set("bypass_read", "true")
 	}
-	u := fmt.Sprintf("%s/api/v1/concurrency/%s/resolve?%s", c.baseURL, url.PathEscape(key), q.Encode())
+	u := fmt.Sprintf("%s/api/v1/queue/groups/%s/resolve?%s", c.baseURL, url.PathEscape(key), q.Encode())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
@@ -299,7 +283,7 @@ func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, readHTTPError(resp)
+		return nil, readConcurrencyError(resp)
 	}
 	var out WaiterResolution
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -312,10 +296,10 @@ func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 func (c *Client) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
 	body := map[string]any{"run_id": runID}
 	if nodeID != "" {
-		body["node_id"] = nodeID
+		body["job_id"] = nodeID
 	}
 	buf, _ := json.Marshal(body)
-	u := fmt.Sprintf("%s/api/v1/concurrency/%s/cancel-waiter", c.baseURL, url.PathEscape(key))
+	u := fmt.Sprintf("%s/api/v1/queue/groups/%s/cancel-waiter", c.baseURL, url.PathEscape(key))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(buf))
 	if err != nil {
 		return false, err
@@ -327,7 +311,7 @@ func (c *Client) CancelWaiter(ctx context.Context, key, runID, nodeID string) (b
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return false, readHTTPError(resp)
+		return false, readConcurrencyError(resp)
 	}
 	var out struct {
 		Cancelled bool `json:"cancelled"`
@@ -341,7 +325,7 @@ func (c *Client) CancelWaiter(ctx context.Context, key, runID, nodeID string) (b
 // ForceReleaseSuperseded drops superseded holders and promotes the next
 // waiters. Returns the dropped holders.
 func (c *Client) ForceReleaseSuperseded(ctx context.Context, key string) ([]WaiterHolder, error) {
-	u := fmt.Sprintf("%s/api/v1/concurrency/%s/force-release", c.baseURL, url.PathEscape(key))
+	u := fmt.Sprintf("%s/api/v1/queue/groups/%s/force-release", c.baseURL, url.PathEscape(key))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
 	if err != nil {
 		return nil, err
@@ -352,7 +336,7 @@ func (c *Client) ForceReleaseSuperseded(ctx context.Context, key string) ([]Wait
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, readHTTPError(resp)
+		return nil, readConcurrencyError(resp)
 	}
 	var out struct {
 		Dropped []WaiterHolder `json:"dropped"`
@@ -380,7 +364,7 @@ func (c *Client) ReleaseSlot(ctx context.Context, key, holderID, outcome, output
 		body["cache_ttl_ns"] = int64(ttl)
 	}
 	buf, _ := json.Marshal(body)
-	u := fmt.Sprintf("%s/api/v1/concurrency/%s/release", c.baseURL, url.PathEscape(key))
+	u := fmt.Sprintf("%s/api/v1/queue/groups/%s/release", c.baseURL, url.PathEscape(key))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(buf))
 	if err != nil {
 		return err
@@ -392,7 +376,25 @@ func (c *Client) ReleaseSlot(ctx context.Context, key, holderID, outcome, output
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
-		return readHTTPError(resp)
+		return readConcurrencyError(resp)
 	}
 	return nil
+}
+
+func readConcurrencyError(resp *http.Response) error {
+	err := readCapabilityHTTPError(resp)
+	var failure *apierr.Error
+	if errors.As(err, &failure) {
+		switch failure.Code {
+		case apierr.NotFound:
+			return errors.Join(store.ErrNotFound, err)
+		case apierr.LockHeld:
+			return errors.Join(store.ErrLockHeld, err)
+		case apierr.Conflict:
+			if failure.Details["reason"] == "concurrency_superseded" {
+				return errors.Join(store.ErrConcurrencySuperseded, err)
+			}
+		}
+	}
+	return err
 }
