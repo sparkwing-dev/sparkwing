@@ -388,11 +388,10 @@ func socketAlive(sock string) bool {
 	if err := ValidateSocketDir(sock); err != nil {
 		return false
 	}
-	info, err := os.Lstat(sock)
-	if err != nil || info.Mode()&os.ModeSocket == 0 {
+	if !socketPresent(sock) {
 		return false
 	}
-	c, err := net.DialTimeout("unix", sock, 100*time.Millisecond)
+	c, err := DialSocket(context.Background(), sock, 100*time.Millisecond)
 	if err != nil {
 		return false
 	}
@@ -407,6 +406,9 @@ func maxSunPath() int {
 }
 
 func ValidateSocketPath(sock string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
 	if m := maxSunPath(); len(sock) >= m {
 		return fmt.Errorf("wingd: socket path %q is %d bytes, over the %d-byte OS limit; use a shorter SPARKWING_HOME", sock, len(sock), m)
 	}

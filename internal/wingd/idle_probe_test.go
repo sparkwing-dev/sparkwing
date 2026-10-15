@@ -202,7 +202,7 @@ func TestHealthProbeConnectionMayOnlyReadQueueState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}
-	nc, err := net.Dial("unix", sock)
+	nc, err := wingd.DialSocket(context.Background(), sock, 3*time.Second)
 	if err != nil {
 		t.Fatalf("dial daemon: %v", err)
 	}

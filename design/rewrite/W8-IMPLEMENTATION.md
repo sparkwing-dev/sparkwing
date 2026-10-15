@@ -1,10 +1,9 @@
 # W8 implementation handoff
 
-W8 remains incomplete. The continuation at `da5917c98` is the latest implemented
-work. All 26 W8 amendment rows and both W8 handoffs retain their recorded status.
-This continuation corrects the Cloud documentation and records the remaining
-boundaries. It adds no production code, test ports or acceptance cells and
-deletes no old code.
+W8 remains incomplete. This continuation implements the Windows local transport
+and migrates its callers and fixtures. All 26 W8 amendment rows and both W8
+handoffs were rechecked. The shared host declarations and integration points
+below remain open. Native acceptance cells remain blocked.
 
 | Owner | Remaining boundary | Evidence in this checkout |
 | --- | --- | --- |
@@ -12,7 +11,7 @@ deletes no old code.
 | W3/W9 | Implement the declared source, keeper, remote owner and HTTP/data clients, then bind the installed runner and Cloud entrypoints. | `source.Acquire`, `source.ForRequest`, `source.ForExecution`, `lease.Keeper.Run`, `RemoteOwnerStore`, `NewEngineClient` and `NewDataClient` still panic. W8 already consumes these interfaces through component fakes. |
 | W1/W2/W9 | Supply Cloud plan/eval resources and launcher sync, the elected local controller services/activity, and CLI composition. | `EngineController.SyncLauncher` still panics. Plan/eval claims clear `Execution`. `LocalRuntimeConfig.Open` has no production shared-controller implementation. The shared bootstrap parser requires a job for plan units. |
 | W3/W7 | Declare workspace-off binary-cache hashing. | `sdkinstall` builds with `GOWORK=off`, while `bincache.PipelineCacheKey` follows the ambient workspace. The existing request remains open. |
-| W8/T1/lead | Complete Windows SID transport, deployment probes/node cleanup and native placement/real-repository acceptance. | Windows peer credential lookup returns no identity. `KubernetesBoundary` requires deployment-owned Probe/Clear implementations. Native catalog cells remain skipped. |
+| W8/T1/lead | Run native Windows transport tests and a distinct-account refusal, deployment probes/node cleanup and native placement/real-repository acceptance. | Windows transport and property tests cross-compile for amd64/arm64 but cannot execute on Linux. `KubernetesBoundary` requires deployment-owned Probe/Clear implementations. Native catalog cells remain skipped. |
 
 Missing shared implementations remain behind their declared interfaces and fake
 component proofs. Missing shared declarations prevent the remaining W8
@@ -21,17 +20,8 @@ The existing node-award constructor, private Cloud award transport and real
 controller/SQLite components remain implemented. Installed execution, actual
 hello and native deployment proofs remain open.
 
-Verification used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4` and
-private cache/temp directories under `/tmp/sw-astra-W8`. Whole-repository
-`go build -p 4 ./...` passed. Vet passed for runners, engine, cluster, wingd and
-both acceptance packages. Full runners/engine/component-acceptance tests passed.
-Cluster passed with its socket-listener test excluded. Focused local-runtime,
-lifecycle, managed-unit and client tests passed. Commentcheck passed across
-1,015 files. Sleepcheck and `git diff --check` passed. No new runtime behavior
-requires a documentation drift-test change. Shared production files and APIs
-changed: none. No new mechanism or product question was introduced. No
-Sparkwing binary, pipeline or Git write ran. Shared Git config has no local
-author or `core.worktree` override. Worker scratch was deleted after checks.
+Current verification and changed files are recorded in the final continuation
+below. Earlier sections retain their historical evidence.
 
 ## Completed before this continuation
 
@@ -2146,3 +2136,64 @@ through `go -C`.
 No Sparkwing binary, pipeline, Git write, deployment or release ran. Git config
 has no author or core.worktree override. All owned check sessions finished and
 worker scratch was deleted. The lead retains independent review and committing.
+
+## Continuation: Windows local transport
+
+A1-40 now has a Windows implementation. `DialSocket` and `ListenSocket` own
+platform transport selection. Unix keeps its peer UID boundary. Windows uses
+owner-only local named pipes, reads the client's identification-token SID and
+refuses anonymous tokens or missing identity. APIConn carries that verified SID
+to the shared controller. Admission also records the kernel-reported client PID.
+The source contract is `internal/wingd/LOCAL-TRANSPORT.md`.
+
+Windows closure joins pending connects, authentication methods and their
+cancellation callbacks. Authenticated connections remain usable for drain. The
+existing home election spans that drain, so a replacement binds after accepted
+predecessor connections close. The shutdown invariant requires every pending
+transport operation to finish before Close returns. A focused read-only review
+found the missing join. The corrected mechanism passed reinspection
+without another concrete finding. Both reviews were source-based because this
+environment cannot execute Windows.
+
+The new property test varies preamble bytes, anonymous tokens and forged SID
+bytes against the kernel identity. Native tests cover SID delivery, protected
+DACLs, exclusive binding, cancellation, incomplete authentication, immediate
+rebinding after close and connection survival during drain. Existing real-daemon,
+home-alias and mock-server fixtures now use the shared transport. The standalone
+Unix directory-permissions test retains its raw socket fixture.
+
+Deleted 26 production lines from query_absent_windows.go and
+query_absent_other.go, plus 13 obsolete Windows assertion lines. These handled
+AF_UNIX's WSAENETDOWN result. Unix binding and UID code moved into platform files.
+No new T1 inventory port or native catalog cell is claimed.
+
+Verification used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and private
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W8. Whole-repository build and focused
+vet passed, including the one migrated orchestrator caller. Runners, engine and
+component acceptance suites passed. Focused local-runtime, lifecycle, API,
+managed-unit and client tests passed. Cluster passed with its socket-based metrics
+test excluded. The portable identity fuzzer passed 96,502 executions in five
+seconds. Windows wingd/client tests compile for amd64 and arm64. Windows amd64
+vet passed for wingd, its client and orchestrator. Commentcheck passed across
+1,040 files. Sleepcheck and git diff --check passed.
+
+Shared production caller changed: internal/orchestrator/hosted_backends.go uses
+DialSocket instead of directly selecting Unix. Shared documentation changed:
+contracts/c4-surface-config.md records both transport constructors. The local
+constructor exports are W8-owned additions. No other area's contract changed.
+The added transport is required for Windows SID authentication. Keeping only
+the former UID accessor could not establish it. Native Go file polling supplies
+overlapped I/O, so no third-party dependency or second I/O framework was added.
+
+All 26 assigned amendment rows and both W8 handoffs were rechecked. W3 still
+needs host/process constructors and run/plan/eval identity inputs. W3/W7 still
+need the workspace-off cache-key contract. W9 still needs plan bootstrap grammar.
+Real integration remains for source/keeper/hosts, HTTP/data clients, local
+controller services, plan/eval resources and launcher sync. Native Windows
+execution with a distinct account, Cloud deployment/cleanup probes and native
+placement QA remain open. No new product question is raised.
+
+Friction: sandbox DNS prevented downloading go-winio, and sockets/native Windows
+are unavailable here. The transport uses existing Go/Windows APIs. No Sparkwing
+binary, pipeline, Git write, deployment or release ran. Git config remains free
+of author/core.worktree overrides. Worker scratch was deleted after final checks.

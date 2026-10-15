@@ -14,6 +14,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -54,10 +55,9 @@ func newAPIProbeClient(sock string) *http.Client {
 }
 
 func apiSocketTransport(sock string) *http.Transport {
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	return &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return dialer.DialContext(ctx, "unix", sock)
+			return wingd.DialSocket(ctx, sock, 5*time.Second)
 		},
 		MaxIdleConns:          16,
 		MaxIdleConnsPerHost:   16,

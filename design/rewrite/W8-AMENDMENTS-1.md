@@ -21,7 +21,7 @@ cell or establish an HTTP, Cloud or OS deployment proof.
 | A1-36 | Hosting retains the complete award for preparation. Bound byte/record clients must still be supplied to RunInput/NodeInput by the concrete host composition. |
 | A1-38 | NewControllerControl maps immutable awards and sync decisions. Jobs persist UnitID and report Job name/node UID after restart. Eval retains its source fence and separate Expansion lease. The immutable Secret carries award.json beside the bootstrap. ReadBootstrapAward and BootstrapHost.RunFile restore it before one-time exchange. CloudStoreBootstrapW8Components joins a real EngineController/SQLite work claim and exchange to Hosting through the builder's private files. It proves live replay refusal, retained root ancestry, renewal and persisted completion with fake source/keeper/executor ports. A fuzz property refuses altered claim identity, engine, deadlines and resources. Plan/eval resources, SyncLauncher, W9 grammar/HTTP and source/host composition remain open. |
 | A1-39 | The old cluster claim/source/heartbeat loops and old daemon remain deleted. Unified loop and Hosting components pass, including real EngineController/SQLite claim, renewal and completion with fake hosts/keeper. Root revocation refuses preparation through the real renewal boundary. Hosting binds node execution identity, checks direct delivery and unit purpose, and uses the earliest binding/owner/parent deadline. Property and controlled-clock components exercise these bounds. source.Acquire, lease.Keeper.Run and the engine HTTP client still panic. Host factories, delegated node routes and generated-code replay construction remain undeclared. |
-| A1-40 | The implemented local runtime keeps readiness/status/stay/drain and dynamic dashboard attachment. APIConn now exposes a verified UID/SID identity snapshot to the shared controller, replacing the UID-only accessor. Shared local controller/store/consumer services and native Windows SID transport remain unwired. |
+| A1-40 | The implemented local runtime keeps readiness/status/stay/drain and dynamic dashboard attachment. APIConn exposes a verified UID/SID identity snapshot. DialSocket/ListenSocket use Unix peer UIDs and Windows client identification-token SIDs. Windows DACL, anonymous-token, framing and lifecycle tests cross-compile for amd64/arm64. Native execution, distinct-account refusal and shared local controller/store/consumer services remain open. |
 | A1-41 | Implemented the native home-bound ManagedUnitManager and final foreground/timer arguments. Refresh preserves captured settings and restarts installed controllers. W9 dashboard/schedule/update/doctor composition and native login/crash/drain proofs remain open. |
 | A1-42 | Existing builder/boundary tests retain exclusive nodes, enforced network evidence, DinD and aggregate 20 GiB scratch. Deployed probes, reservation cleanup and native teardown proofs remain open with T1/lead. |
 | A1-43 | Historical closed release matrices and signed-index fallback remain intact. W9 still owns presentation notices and the upgrade verifier integration. |
@@ -79,8 +79,8 @@ No new human product decision is requested.
 
 The controller-facing peer projection is now W8's `APIConn.PeerIdentity`.
 W2 can consume the existing `LocalPeerIdentity` through that interface. This
-closes the missing UID/SID projection request. The Windows socket reader still
-has no SID evidence and continues to refuse access. Native transport and
+closes the missing UID/SID projection request. Windows now reads client SID
+evidence through the named-pipe identification token. Native execution and
 same-account/foreign-account proofs remain open.
 
 ## Runner credential and enrollment continuation

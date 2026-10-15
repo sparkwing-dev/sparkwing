@@ -3,8 +3,6 @@ package wingd
 import (
 	"context"
 	"net"
-	"os"
-	"runtime"
 	"time"
 )
 
@@ -101,8 +99,11 @@ func (l apiListener) Accept() (net.Conn, error) {
 		peer, perr := acceptedPeerIdentity(nc)
 		var connection *apiConn
 		if perr == nil {
-			uid := uint32(os.Getuid())
-			connection, perr = newAPIConn(nc, peer, LocalPeerIdentity{GOOS: runtime.GOOS, UID: &uid})
+			var owner LocalPeerIdentity
+			owner, perr = controllerPeerIdentity()
+			if perr == nil {
+				connection, perr = newAPIConn(nc, peer, owner)
+			}
 		}
 		if perr != nil {
 			l.d.cfg.logf("%v", perr)
