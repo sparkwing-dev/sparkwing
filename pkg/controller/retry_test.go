@@ -47,7 +47,7 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, src); err != nil {
 		t.Fatal(err)
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishRun(ctx, src.ID, "failed", "exit 1"); err != nil {
+	if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, src.ID, "failed", "exit 1"); err != nil {
 		t.Fatal(err)
 	}
 

@@ -160,43 +160,33 @@ func TestTenantRunsAreInvisibleToAnotherTeam(t *testing.T) {
 	}
 }
 
-// A mutator handed another team's id reports the same not-found its read
-// side reports, because a cancel endpoint that answered 200 and cancelled
-// nothing is the shape this disagreement takes in production.
 func TestTenantWritesReportNotFoundForAnotherTeamsRun(t *testing.T) {
-	ctx := context.Background()
 	st := storetest.New(t).Open(t)
-	alpha := tenantFor(t, st, "alpha")
-	beta := tenantFor(t, st, "beta")
-	seedTenantRun(t, alpha, "run-alpha", "build")
-
-	if err := beta.FinishRun(ctx, "run-alpha", "failed", "not yours"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("beta.FinishRun(run-alpha) = %v, want ErrNotFound", err)
-	}
-	if err := beta.FinishRun(ctx, "run-nowhere", "failed", ""); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("beta.FinishRun(run-nowhere) = %v, want ErrNotFound", err)
-	}
-
-	got, err := alpha.GetRun(ctx, "run-alpha")
+	own, finish := runCompletionFixture(t, st)
+	foreign := tenantFor(t, st, "foreign")
+	before, err := own.ReadRun(t.Context(), finish.Unit.RunID)
 	if err != nil {
-		t.Fatalf("alpha.GetRun: %v", err)
+		t.Fatal(err)
 	}
-	if got.Status != "running" {
-		t.Errorf("status = %q after another team tried to finish it, want running", got.Status)
+	if _, err := foreign.ReadRun(t.Context(), finish.Unit.RunID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("foreign read: %v", err)
 	}
-	if got.FinishedAt != nil {
-		t.Errorf("finished_at = %v after another team tried to finish it, want nil", got.FinishedAt)
+	if _, err := foreign.FinishRunAndUnit(t.Context(), finish); err == nil {
+		t.Fatal("foreign tenant finished run")
 	}
-
-	if err := alpha.FinishRun(ctx, "run-alpha", "success", ""); err != nil {
-		t.Fatalf("alpha.FinishRun: %v", err)
+	missing := finish
+	missing.Unit.RunID = "missing"
+	missing.Transition.RunID = "missing"
+	missing.Transition.Actor.Owner = missing.Unit
+	if _, err := own.FinishRunAndUnit(t.Context(), missing); err == nil {
+		t.Fatal("missing run finish succeeded")
 	}
-	got, err = alpha.GetRun(ctx, "run-alpha")
-	if err != nil {
-		t.Fatalf("alpha.GetRun after finish: %v", err)
+	after, err := own.ReadRun(t.Context(), finish.Unit.RunID)
+	if err != nil || before.State != after.State || after.FinishedAt != nil || before.StateSeq != after.StateSeq {
+		t.Fatalf("refused mutation changed run: %+v, %v", after, err)
 	}
-	if got.Status != "success" {
-		t.Errorf("status = %q after its own team finished it, want success", got.Status)
+	if _, err := own.FinishRunAndUnit(t.Context(), finish); err != nil {
+		t.Fatal(err)
 	}
 }
 

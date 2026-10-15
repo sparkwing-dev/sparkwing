@@ -42,7 +42,7 @@ func seedRun(t *testing.T, paths paths.Paths, runID, nodeID, msg string) {
 	if err := st.FinishNode(ctx, runID, nodeID, "success", "", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishRun(ctx, runID, "success", ""); err != nil {
+	if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, runID, "success", ""); err != nil {
 		t.Fatal(err)
 	}
 	line, err := json.Marshal(sparkwing.LogRecord{TS: time.Now(), Level: "info", JobID: nodeID, Msg: msg})

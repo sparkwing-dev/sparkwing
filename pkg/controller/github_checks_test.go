@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func (f *appFixture) drainChecks() {
@@ -742,7 +743,7 @@ func TestGitHubAppStaleQueuedUpdateKeepsATimedOutConclusion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.FinishRun(ctx, runID, "failed", "reaped: queue deadline"); err != nil {
+	if err := teststore.SeedRunFinish(f.store, ctx, tenant.Team(), runID, "failed", "reaped: queue deadline"); err != nil {
 		t.Fatal(err)
 	}
 	controller.ReportGitHubRunState(ctx, f.srv, runID, "timed_out")

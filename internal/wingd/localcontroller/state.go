@@ -40,7 +40,7 @@ func (s *localState) TypeSafeAPIKey(ctx context.Context) (string, error) {
 	if err := context.Cause(ctx); err != nil {
 		return "", err
 	}
-	secret, err := s.binding.Tenant.GetSecret("TYPESAFE_API_KEY")
+	secret, err := s.binding.Tenant.GetSecretRow("TYPESAFE_API_KEY", "")
 	if errors.Is(err, store.ErrNotFound) {
 		return "", nil
 	}

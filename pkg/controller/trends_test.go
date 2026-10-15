@@ -46,7 +46,7 @@ func TestTrends_BucketsRuns(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishRun(ctx, id, "success", ""); err != nil {
+		if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, id, "success", ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -61,7 +61,7 @@ func TestTrends_BucketsRuns(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishRun(ctx, id, "failed", "nope"); err != nil {
+		if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, id, "failed", "nope"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -118,7 +118,7 @@ func TestTrends_AvgWaitMs(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishRun(ctx, id, "success", ""); err != nil {
+		if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, id, "success", ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -168,7 +168,7 @@ func TestTrends_AvgWaitMs_ExcludesLegacyRows(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishRun(ctx, "r-real", "success", ""); err != nil {
+	if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, "r-real", "success", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
@@ -179,7 +179,7 @@ func TestTrends_AvgWaitMs_ExcludesLegacyRows(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishRun(ctx, "r-legacy", "success", ""); err != nil {
+	if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, "r-legacy", "success", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.DB().ExecContext(ctx, `UPDATE runs SET created_at = 0 WHERE id = ?`, "r-legacy"); err != nil {
@@ -228,7 +228,7 @@ func TestTrends_PipelineFilter(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishRun(ctx, id, "success", ""); err != nil {
+		if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, id, "success", ""); err != nil {
 			t.Fatal(err)
 		}
 	}

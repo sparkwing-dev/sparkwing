@@ -1,5 +1,22 @@
 # C1 data contract
 
+## Owner completion and retired store helpers
+
+`Tenant.FinishRun` and its unfenced terminal writer are removed. Use
+`Tenant.FinishRunAndUnit` with the current owner authority. Terminal time comes
+from the store clock. Exact replay preserves it. The first successful run
+records its team business event in the same transaction as the verdict, owner
+completion and pipeline pin. An event failure rolls the transaction back.
+
+The unused `ConcurrencyHeartbeatInterval`, `ConcurrencyHeartbeatTimeout` and
+both `DefaultConcurrencyHeartbeat*` constants are removed. The shared lease
+keeper owns refresh cadence and attempt deadlines.
+
+The unused `JoinProfileKey`, `SplitProfileKey`, `DisplayProfileKey`,
+`RepoIdentityFromURL` and `RepoIdentityFromPath` helpers are removed. Profile
+views display the stored pipeline key. They no longer decode historical keys.
+
+
 ## Reporting transactions and schedule lease
 
 `Tenant.WriteMetric(ctx, Authorized, MetricSample)` and

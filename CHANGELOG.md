@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Remove the unfenced tenant run finisher and unused heartbeat timing and profile-key helpers. Fenced completion records the team’s first success atomically. See [migration guide](docs/migrations/_unreleased.md#owner-completion-and-retired-store-helpers).
+
 - **store (Breaking):** Replace raw metric and usage writers with tenant transactions that recheck current reporting authority. Metric retries succeed at the sample limit. Cron ticks move to Operator and use the fenced schedule lease. See [migration guide](docs/migrations/_unreleased.md#reporting-transactions-and-schedule-lease).
 
 - **store (Breaking):** Remove default-team run/trigger writers, raw node-start and manifest setters, unused source-upload admission and context-carried claim fences. Select a tenant and use its typed lifecycle transactions. Metric retries use the final tenant-keyed schema. See [migration guide](docs/migrations/_unreleased.md#tenant-writes-and-typed-claim-fences).

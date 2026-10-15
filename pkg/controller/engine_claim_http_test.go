@@ -167,7 +167,10 @@ func TestEngineClaimHTTPRefusalsDoNotAward(t *testing.T) {
 }
 
 func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
-	e, _ := engineRuntimeStore(t)
+	e, tenant := engineRuntimeStore(t)
+	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCredit, Reference: "launcher-test", CreatedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
 	engineSQL(t, e.Store, `UPDATE runs SET dispatch='controller'`)
 	engineSQL(t, e.Store, `UPDATE triggers SET unit_kind='plan'`)
 	raw := engineHTTPRoot(t, e, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
@@ -192,6 +195,10 @@ func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
 	claim := exchange.Claim
 	if claim.Capability == "" || claim.Capability == bootstrap || claim.Delivery != capability.DeliveryDirect || !reflect.DeepEqual(claim.Binding, response.Claim.Binding) || !claim.LeaseExpiresAt.Equal(response.Claim.LeaseExpiresAt) {
 		t.Fatal("exchange changed the immutable award or did not replace its bootstrap")
+	}
+	principal, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(claim.Capability)))
+	if err != nil || principal.Capability.Billing == nil || !principal.Capability.Billing.Metered {
+		t.Fatalf("Cloud exchange lost metered provenance: %+v, %v", principal.Capability.Billing, err)
 	}
 	engineClaimHTTP(t, h, bootstrap, "POST", "/api/v1/claims/exchange", `{}`, 401)
 	engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/claims/exchange", `{}`, 403)

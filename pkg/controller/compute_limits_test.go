@@ -303,7 +303,7 @@ func TestComputeLimits_RetriesCountAgainstTheRetryingPrincipal(t *testing.T) {
 		t.Fatalf("mint a writer for the metered principal: %v", err)
 	}
 	seedRunNodeFor(t, f, "pool", "run-source", "build")
-	if err := teststore.ForTeam(t, f.store, store.DefaultTeam).FinishRun(ctx, "run-source", "failed", "boom"); err != nil {
+	if err := teststore.SeedRunFinish(f.store, ctx, store.DefaultTeam, "run-source", "failed", "boom"); err != nil {
 		t.Fatalf("finish the source run: %v", err)
 	}
 	setComputeLimit(t, f, store.ComputeLimitRunsPerHour, 1)

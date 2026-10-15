@@ -121,7 +121,7 @@ func finishRunT(t *testing.T, s *store.Store, runID string) {
 	}); err != nil {
 		t.Fatalf("CreateRun(%s): %v", runID, err)
 	}
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishRun(ctxT(t), runID, "success", ""); err != nil {
+	if err := teststore.SeedRunFinish(s, ctxT(t), store.DefaultTeam, runID, "success", ""); err != nil {
 		t.Fatalf("FinishRun(%s): %v", runID, err)
 	}
 }
@@ -435,7 +435,7 @@ func TestConcurrency_PromoteSkipsAndDeletesFinishedRunWaiter(t *testing.T) {
 		Key: "k", HolderID: "r3/n1", RunID: "r3", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishRun(ctx, "r2", "success", ""); err != nil {
+	if err := teststore.SeedRunFinish(s, ctx, store.DefaultTeam, "r2", "success", ""); err != nil {
 		t.Fatalf("finish r2: %v", err)
 	}
 	released, _, promoted, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", "r1/n1", "success", "", "", 0, 30*time.Second)

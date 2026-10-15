@@ -35,7 +35,7 @@ func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishRun(ctx, run.id, "success", ""); err != nil {
+		if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, run.id, "success", ""); err != nil {
 			t.Fatal(err)
 		}
 	}

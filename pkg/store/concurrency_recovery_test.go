@@ -312,7 +312,7 @@ func TestConcurrency_CoalesceFollowerPromotesWhenLeaderRunEndsWithoutNodeVerdict
 	if follower.Kind != store.AcquireCoalesced {
 		t.Fatalf("follower: want Coalesced got %s", follower.Kind)
 	}
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishRun(ctx, "leader", "cancelled", "executor cancelled before node verdict"); err != nil {
+	if err := teststore.SeedRunFinish(s, ctx, store.DefaultTeam, "leader", "cancelled", "executor cancelled before node verdict"); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
 

@@ -420,8 +420,6 @@ type ComputeUsage struct {
 	ByPrincipal  map[string]int64
 	AlarmReached bool
 }
-func ConcurrencyHeartbeatInterval(onLimit string) time.Duration
-func ConcurrencyHeartbeatTimeout(onLimit string) time.Duration
 type ConcurrencyHolder struct {
 	Key            string
 	HolderID       string
@@ -774,8 +772,6 @@ const DefaultArgon2AcquireTimeout = 250 * time.Millisecond
 const DefaultArgon2MemoryBudget = int64(256) << 20
 const DefaultBusyTimeoutMS = 30000
 const DefaultCancelTimeout = 60 * time.Second
-const DefaultConcurrencyHeartbeatInterval = 3 * time.Second
-const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
 const DefaultConcurrencyLease = DefaultLeaseDuration
 const DefaultCreditGraceSeconds = 60
 const DefaultCreditMaxChargeSeconds = 30
@@ -813,7 +809,6 @@ const DialectPostgres
 const DialectSQLite Dialect = iota
 const Dispatch ReconcileKind = "dispatch"
 const DispatchedHeartbeatInterval = 5 * time.Second
-func DisplayProfileKey(key string) string
 type DownloadCapError struct {
 	Team           string
 	Day            string
@@ -1205,7 +1200,6 @@ type InvitationAcceptance struct {
 const InvocationSecretArgsKey = "secret_args"
 func IsBusyErr(err error) bool
 func IsProtocolErr(err error) bool
-func JoinProfileKey(repo, pipeline string) string
 const KeepTerminal ReconcileKind = "keep_terminal"
 type LastOwnerError struct {
 	Teams []TeamInfo
@@ -1845,8 +1839,6 @@ type RegisteredAgent struct {
 type RepoDispatch string
 const RepoDispatchController RepoDispatch = "controller"
 const RepoDispatchTrigger RepoDispatch = "trigger"
-func RepoIdentityFromPath(repoPath string) string
-func RepoIdentityFromURL(remote string) string
 func RepoKey(owner, name string) string
 type RetentionRequest struct {
 	Lease SingletonLease
@@ -2363,7 +2355,6 @@ func (s SpendStanding) CardBilled() bool
 func (s SpendStanding) ChargeFailed() bool
 func (s SpendStanding) Headroom() (int64, string)
 const SpendWindowDays = 30
-func SplitProfileKey(key string) (repo, pipeline string)
 type StateEvent struct {
 	Seq      int64
 	StateSeq int64
@@ -2685,7 +2676,6 @@ func (t *Tenant) EgressUsage(ctx context.Context, period string) (EgressUsage, e
 func (t *Tenant) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
 func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey string) (*Trigger, error)
 func (t *Tenant) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error
-func (t *Tenant) FinishRun(ctx context.Context, runID, status, errMsg string) error
 func (t *Tenant) FinishRunAndUnit(ctx context.Context, finish FinishRunRequest) (Applied, error)
 func (t *Tenant) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error)
 func (t *Tenant) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error)

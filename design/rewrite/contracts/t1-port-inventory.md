@@ -1,3 +1,30 @@
+`Tenant.FinishRun` and `finishRunOnceTx` are removed. The retained timestamp
+checks in `TestATerminalRunAlwaysCarriesAFinishTime` now drive real admission,
+plan acceptance, claims and `FinishRunAndUnit` for success, failure and
+cancellation. Exact replay preserves the full terminal snapshot.
+`TestAPendingRunCarriesNoFinishTime` reads the admitted final-schema row.
+`TestTenantWritesReportNotFoundForAnotherTeamsRun` now refuses foreign and
+missing owner completions. `TestRunCompletionAuthorityProperty` retains forged
+owner, tenant and generation refusal. Its mutation snapshot now counts business
+events too. The rollback check covers failures in both event tables.
+
+`TestBusinessEventFirstRunSucceededOncePerTeamSQLite` and its PostgreSQL variant
+now finish a cancelled run followed by two successful retry runs through the
+real lifecycle. The team gets one first-success event naming a successful run.
+The PostgreSQL case still requires native execution. Legacy creation/upsert
+checks that supply their own terminal timestamp or construct a finished pending
+row target abandoned insertion semantics and are retired. Final schema
+constraints reject that shape. The remaining raw intake caller cut stays open.
+Unrelated reporting, concurrency and transport fixtures use `SeedRunFinish`.
+That fixture sets three columns and implements no lifecycle or replay policy.
+
+The three `concurrency_heartbeat_interval_test.go` checks are retired with the
+unused timing API. The shared `internal/lease` keeper owns cadence and bounded
+attempts. The profile-key round-trip, bare-shape, pre-encoding and Windows URL
+checks are retired with the unused codec and duplicate identity helpers. No
+production writer calls them. The profile view displays its stored pipeline key.
+Current profile tenant-isolation and mutation properties remain.
+
 `TestFinishAtGeneration_ConcurrentReclaimKeepsTheCurrentOutcome` now runs as
 `TestOwnerFinishRaceRejectsStaleAwardProperty` through real `ClaimUnit`,
 `ReleaseUnit` and `FinishRunAndUnit` transactions. It varies the initial

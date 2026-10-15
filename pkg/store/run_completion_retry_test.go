@@ -127,22 +127,26 @@ func TestRunCompletionAuthorityProperty(t *testing.T) {
 }
 
 func TestRunCompletionFailureRollsBackOwnerAndVerdict(t *testing.T) {
-	s := storetest.OpenSQLite(t)
-	tenant, finish := runCompletionFixture(t, s)
-	before := readMutationSnapshot(t, tenant, s, finish.Unit.RunID)
-	if _, err := s.DB().ExecContext(t.Context(), `CREATE TRIGGER refuse_completion_event BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT,'event refused'); END`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err == nil {
-		t.Fatal("completion ignored failed event")
-	}
-	if after := readMutationSnapshot(t, tenant, s, finish.Unit.RunID); !reflect.DeepEqual(before, after) {
-		t.Fatal("failed completion committed partial state")
-	}
-	if _, err := s.DB().ExecContext(t.Context(), `DROP TRIGGER refuse_completion_event`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err != nil {
-		t.Fatal(err)
+	for _, table := range []string{"events", "business_events"} {
+		t.Run(table, func(t *testing.T) {
+			s := storetest.OpenSQLite(t)
+			tenant, finish := runCompletionFixture(t, s)
+			before := readMutationSnapshot(t, tenant, s, finish.Unit.RunID)
+			if _, err := s.DB().ExecContext(t.Context(), `CREATE TRIGGER refuse_completion_event BEFORE INSERT ON `+table+` BEGIN SELECT RAISE(ABORT,'event refused'); END`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err == nil {
+				t.Fatal("completion ignored failed event")
+			}
+			if after := readMutationSnapshot(t, tenant, s, finish.Unit.RunID); !reflect.DeepEqual(before, after) {
+				t.Fatal("failed completion committed partial state")
+			}
+			if _, err := s.DB().ExecContext(t.Context(), `DROP TRIGGER refuse_completion_event`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tenant.FinishRunAndUnit(t.Context(), finish); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

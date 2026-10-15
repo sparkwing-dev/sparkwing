@@ -47,25 +47,6 @@ func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error) {
 	return t.s.countRuns(ctx, oneTeam(t.team), f)
 }
 
-// FinishRun marks one of t's runs terminal with the given status and
-// optional error. A run of another team reads as [ErrNotFound], the same
-// as [Tenant.GetRun] reports it, because a mutator that quietly matched
-// nothing would let a cancel endpoint answer 200 and cancel nothing.
-func (t *Tenant) FinishRun(ctx context.Context, runID, status, errMsg string) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, runID); err != nil {
-		return err
-	}
-	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, t.team); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 // safety: every tenant mutator runs this first, because a scoped UPDATE
 // matching nothing cannot be told from one that matched and changed
 // nothing, and a caller told "no error" for another team's id reads and

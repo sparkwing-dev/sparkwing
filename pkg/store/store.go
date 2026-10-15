@@ -768,47 +768,6 @@ func runOwnerTx(ctx context.Context, tx *storeTx, runID string) (Team, bool, err
 	return Team(owner), true, nil
 }
 
-const finishRunStmt = `
-UPDATE runs
-   SET status = ?, error = ?, finished_at = ?
- WHERE id = ? AND team = ? AND finished_at IS NULL AND NOT (` + runTerminalIn + `)`
-
-func finishRunOnceTx(ctx context.Context, tx *storeTx, runID, status, errMsg string, team Team) error {
-	if !isTerminalRunStatus(status) {
-		return fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
-	}
-	if team == "" {
-		return ErrNoTeam
-	}
-	res, err := tx.ExecContext(ctx, finishRunStmt,
-		status, errMsg, time.Now().UnixNano(), runID, string(team))
-	if err != nil {
-		return err
-	}
-	if changed, err := res.RowsAffected(); err != nil || changed != 0 {
-		if err != nil || status != outcomeSuccess {
-			return err
-		}
-		return RecordBusinessEvent(tx, BusinessEvent{
-			Team: team, Kind: BusinessEventFirstRunSucceeded, Attrs: map[string]any{"run_id": runID},
-		})
-	}
-	var priorStatus, priorError string
-	err = tx.QueryRowContext(ctx,
-		`SELECT status, error FROM runs WHERE id = ? AND team = ?`, runID, string(team)).
-		Scan(&priorStatus, &priorError)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	}
-	if err != nil {
-		return err
-	}
-	if priorStatus == status && priorError == errMsg {
-		return nil
-	}
-	return fmt.Errorf("%w: run %s already finished as %s", ErrInvalidInput, runID, priorStatus)
-}
-
 // safety: every run read shares this list, because a column added to runs
 // has to reach each of them and scanRun together or the scan misaligns.
 const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, admission, ` + runAttentionColumn

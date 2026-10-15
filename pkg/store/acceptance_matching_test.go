@@ -166,8 +166,8 @@ func assertMatchingRefusal(t *testing.T, err error, named bool) {
 }
 
 type mutationSnapshot struct {
-	State                   store.RunSnapshot
-	Awards, Events, Effects int
+	State                                   store.RunSnapshot
+	Awards, Events, Effects, BusinessEvents int
 }
 
 func readMutationSnapshot(t *testing.T, tenant *store.Tenant, s *store.Store, runID string) mutationSnapshot {
@@ -177,7 +177,7 @@ func readMutationSnapshot(t *testing.T, tenant *store.Tenant, s *store.Store, ru
 		t.Fatal(err)
 	}
 	snapshot.StoreNow = time.Time{}
-	var awards, events, effects int
+	var awards, events, effects, businessEvents int
 	if err := s.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM billing_awards`).Scan(&awards); err != nil {
 		t.Fatal(err)
 	}
@@ -187,5 +187,8 @@ func readMutationSnapshot(t *testing.T, tenant *store.Tenant, s *store.Store, ru
 	if err := s.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM run_effects`).Scan(&effects); err != nil {
 		t.Fatal(err)
 	}
-	return mutationSnapshot{snapshot, awards, events, effects}
+	if err := s.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM business_events`).Scan(&businessEvents); err != nil {
+		t.Fatal(err)
+	}
+	return mutationSnapshot{snapshot, awards, events, effects, businessEvents}
 }

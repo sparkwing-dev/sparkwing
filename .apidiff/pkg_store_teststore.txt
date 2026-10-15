@@ -7,5 +7,6 @@ func ReapUnits(ctx context.Context, s *store.Store) ([]store.ReapedUnit, error)
 func SeedCacheScope(ctx context.Context, db *sql.DB) (store.UploadReservationRequest, error)
 func SeedMetric(db *sql.DB, ctx context.Context, run, job string, sample store.MetricSample) error
 func SeedPresence(ctx context.Context, db *sql.DB) (store.UploadReservationRequest, error)
+func SeedRunFinish(s *store.Store, ctx context.Context, team store.Team, id, status, message string) error
 func SeedSecret(s *store.Store, team store.Team, row store.Secret, at time.Time) error
 func SeedUpload(ctx context.Context, db *sql.DB) (store.UploadReservationRequest, error)

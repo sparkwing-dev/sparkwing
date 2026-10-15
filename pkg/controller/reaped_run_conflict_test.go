@@ -75,7 +75,7 @@ func TestCreateNode_StrangerTokenLearnsNothingAboutTheRun(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishRun(ctx, "victim", "failed", secret); err != nil {
+	if err := teststore.SeedRunFinish(st, ctx, store.DefaultTeam, "victim", "failed", secret); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
 	raw, _, err := st.CreateToken("runner-stranger", store.TokenKindRunner,

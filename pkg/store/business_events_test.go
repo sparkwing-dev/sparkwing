@@ -5,6 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -121,22 +124,56 @@ func TestBusinessEventFirstRunSucceededOncePerTeamPostgres(t *testing.T) {
 func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 	t.Helper()
 	ctx := context.Background()
-	for id, status := range map[string]string{"run-fail": "failed", "run-ok-1": "success", "run-ok-2": "success"} {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: id, Pipeline: "demo", Status: "running"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishRun(ctx, id, status, ""); err != nil {
-			t.Fatal(err)
-		}
+	tenant, finish := runCompletionFixture(t, st)
+	run, err := tenant.ReadRun(ctx, finish.Unit.RunID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	events, err := tenant(t, st, store.DefaultTeam).BusinessEvents(ctx, store.BusinessEventFirstRunSucceeded)
+	owner, err := st.ResolveAuthority(ctx, finish.Transition.Actor.Authority)
+	if err != nil || owner.Capability.Parent == nil {
+		t.Fatalf("owner ancestry: %+v, %v", owner, err)
+	}
+	for i, status := range []store.RunState{store.RunCancelled, store.RunSuccess, store.RunSuccess} {
+		if status == store.RunCancelled {
+			cancel := store.RunTransition{RunID: finish.Unit.RunID, To: store.RunCancelled, Cause: store.RunCancel, Actor: store.Actor{Kind: store.ActorOperator, Authority: run.Request.AuthorityRef}}
+			if _, err := tenant.TransitionRun(ctx, cancel); err != nil {
+				t.Fatal(err)
+			}
+		}
+		finish.Transition.To = status
+		if _, err := tenant.FinishRunAndUnit(ctx, finish); err != nil {
+			t.Fatal(err)
+		}
+		if i == 2 {
+			break
+		}
+		admitted, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: run.Request.AuthorityRef, Request: runspec.Request{Lineage: runspec.Lineage{RetryOf: finish.Unit.RunID}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		claim, err := st.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: owner.Capability.Parent.ID, Target: &store.UnitRef{Kind: capability.UnitTrigger, RunID: admitted.RunID}, Available: match.Resources{Cores: 8}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		actor := store.Actor{Kind: store.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Owner: claim.Owner}
+		if _, err := tenant.TransitionRun(ctx, store.RunTransition{RunID: admitted.RunID, Actor: actor, To: store.RunRunning, Cause: store.RunStart}); err != nil {
+			t.Fatal(err)
+		}
+		finish = store.FinishRunRequest{Unit: claim.Owner, Transition: store.RunTransition{RunID: admitted.RunID, Actor: actor, Cause: store.RunFinish}}
+	}
+	events, err := tenant.BusinessEvents(ctx, store.BusinessEventFirstRunSucceeded)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(events) != 1 {
 		t.Fatalf("first-success events = %+v, want exactly one", events)
 	}
-	if run := events[0].Attrs["run_id"]; run != "run-ok-1" && run != "run-ok-2" {
-		t.Fatalf("first-success names run %v, want a successful run", run)
+	runID, ok := events[0].Attrs["run_id"].(string)
+	if !ok {
+		t.Fatalf("first-success run = %v", events[0].Attrs["run_id"])
+	}
+	run, err = tenant.ReadRun(ctx, runID)
+	if err != nil || run.State != store.RunSuccess {
+		t.Fatalf("first-success run = %+v, %v", run, err)
 	}
 }

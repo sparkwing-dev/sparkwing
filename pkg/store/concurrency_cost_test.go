@@ -519,7 +519,7 @@ func TestConcurrency_CostBackfillDeletesDeadEarlierWaiter(t *testing.T) {
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("dead: want Queued got %s", r.Kind)
 	}
-	if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishRun(ctxT(t), "dead", "failed", "test terminal run"); err != nil {
+	if err := teststore.SeedRunFinish(s, ctxT(t), store.DefaultTeam, "dead", "failed", "test terminal run"); err != nil {
 		t.Fatalf("FinishRun(dead): %v", err)
 	}
 	if r := acquireT(t, s, store.AcquireSlotRequest{
