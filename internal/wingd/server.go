@@ -73,6 +73,7 @@ type Daemon struct {
 	shuttingDown        bool
 	localActivity       LocalActivity
 	stay                bool
+	localControl        func(*bool) LocalStatus
 	lastActivity        time.Time
 	startedAt           time.Time
 
@@ -673,10 +674,17 @@ func (d *Daemon) serveConn(c *conn) {
 
 func (d *Daemon) dispatch(c *conn, msg wingwire.Message) bool {
 	if c.healthProbe {
-		if _, ok := msg.(*wingwire.QueueState); !ok {
+		switch m := msg.(type) {
+		case *wingwire.QueueState:
+			d.handleQueueState(c)
+		case *wingwire.LocalControl:
+			if m.Stay != nil {
+				return c.refuse(wingwire.TypeOf(msg))
+			}
+			return d.handleLocalControl(c, m)
+		default:
 			return c.refuse(wingwire.TypeOf(msg))
 		}
-		d.handleQueueState(c)
 		return false
 	}
 	switch m := msg.(type) {
@@ -696,6 +704,8 @@ func (d *Daemon) dispatch(c *conn, msg wingwire.Message) bool {
 		d.handleSetPriority(c, m)
 	case *wingwire.StatsReset:
 		d.handleStatsReset(c)
+	case *wingwire.LocalControl:
+		return d.handleLocalControl(c, m)
 	case *wingwire.DrainRequest:
 		d.handleDrain(c, m)
 		return true

@@ -8,8 +8,9 @@ ready. Standalone mode follows its caller's context because that process owns
 the controller lifetime.
 A failed startup cancels and joins both the runtime and its readiness waiter
 before returning. The runtime port must honor cancellation after cleanup.
-`StartDashboard` can promote an existing controller to stay mode. `Stop` waits
-for the runtime's admission drain and shutdown.
+`StartDashboard` can promote an existing controller to stay mode and start its
+dashboard serving loop. `Stop` waits for the runtime's admission drain and
+shutdown.
 
 `NewLocalRuntime` implements the process lifetime behind `LocalRuntime`. It
 acquires the admission election before invoking `LocalRuntimeConfig.Open`.
@@ -25,12 +26,19 @@ and cannot reuse a completed start's readiness or failure. `LocalLifecycle`
 observes the matching `Run` result, so startup failures and lost elections
 return instead of waiting forever.
 
+`EnsureDashboard` starts the dashboard on an existing ready controller. Requests
+for the same address share its listener and readiness. A bind failure leaves
+the controller running. A different address requires a stop and restart because
+the runtime owns one dashboard listener. Shutdown joins that serving loop before
+closing the store, including when the dashboard started after the controller.
+
 Any serving or worker failure cancels the runtime. Drain uses admission's
 draining state, stops listeners and joins workers, API requests and admission
 finalizers before closing the store. Election ownership lasts through store
 close. The daemon also joins its sampling, idle and diagnostic workers.
 Transient startup failures can be retried. An incompatible store remains a
-doctor finding.
+doctor finding. A dashboard startup failure reaches its caller after that
+cleanup, with the original service error preserved.
 
 Jev admission reads its optional `TYPESAFE_API_KEY` through the elected
 controller's secrets store. An explicit advisor takes precedence. A missing or
@@ -44,6 +52,11 @@ daemon. Health probes, repeated unchanged counts and idle API connections do
 not extend its idle deadline. The timeout comes from
 `limits.LocalControllerIdleTimeout` unless the existing admission configuration
 overrides it.
+
+Idle expiry and the stopping transition share the stay-policy lock. Once idle
+shutdown is committed, the controller refuses stay promotion and new admission.
+It cannot acknowledge a running owner and then exit from an earlier idle
+decision.
 
 `LocalSubject` accepts matching kernel UIDs on Linux and macOS, or matching
 client SIDs on Windows. Missing identity refuses access. The socket transport
@@ -68,10 +81,25 @@ must replace the controller fixture used by the runtime tests. The final store
 also needs an activity projection and a typed incompatible-store error. No
 compatibility router or second store opener supplies those gaps.
 
-Cross-process owner discovery, status, stay promotion and drain still need the
-final owner client. `NewLocalRuntime` controls its own process. It refuses a
-foreign election rather than opening that process's store. Windows transport
-still refuses API access when it cannot supply a client SID.
+`client.QueryLocalController` discovers the owner through the authenticated
+admission socket. It reports readiness, PID, version, stay policy and the four
+activity counts. The query uses a health-probe connection and leaves the idle
+deadline unchanged. `client.SetLocalStay` changes the owner's policy and checks
+its acknowledgement. Neither operation starts a process or replaces another
+version. Missing sockets, unreachable owners, unsupported operations and stalled
+replies remain distinct errors. The existing `client.Stop` uses admission drain
+and waits for the socket and election lock to close.
+
+The admission wire's `local_control` request carries an optional `stay` value.
+Only an elected `LocalRuntime` serves it. A health probe may read status but
+cannot change policy. `local_control_status` is the process snapshot, not an
+installed-service claim. Native service inspection supplies that separate fact.
+
+The CLI must bind these operations to its owner lifecycle and process startup.
+Dynamic dashboard startup is an in-process runtime operation and still needs a
+foreign-owner command. `NewLocalRuntime` refuses a foreign election before
+opening its store. Windows transport still refuses API access when it cannot
+supply a client SID.
 
 `ManagedUnitManager` remains the service-management port. Its policies specify
 `dashboard start --stay` and `__tick`. The CLI contract must settle how installed
@@ -82,7 +110,12 @@ contract before a renderer can be connected.
 
 `TestLocalRuntime*` exercises election-before-open, readiness, failure cleanup,
 restart after failed startup, all four activity holds and idle probes. It uses
-in-memory listeners and fake shared-controller services. The process/store
+in-memory listeners and fake shared-controller services. `TestLocalControl*`
+exercises the new wire exchange with `net.Pipe`, including probe restrictions,
+response validation, cancellation and stalled peers. `TestLocalDashboard*`
+covers starting the UI on an existing owner, failed binds, readiness and joined
+shutdown. The wire shape and round-trip tests cover both control messages.
+The process/store
 scenarios remain open: local controller
 idle lifecycle, health-probe process exit, dashboard install/update, Windows
 transport identity and local orphan recovery. These require the real controller

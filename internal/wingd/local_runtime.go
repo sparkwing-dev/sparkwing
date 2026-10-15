@@ -47,11 +47,12 @@ type localRuntime struct {
 }
 
 type localRuntimeSession struct {
-	daemon *Daemon
-	cancel context.CancelFunc
-	done   chan struct{}
-	ready  bool
-	err    error
+	daemon    *Daemon
+	cancel    context.CancelFunc
+	done      chan struct{}
+	ready     bool
+	err       error
+	dashboard chan localDashboardRequest
 }
 
 // NewLocalRuntime constructs the elected local process used by LocalLifecycle.
@@ -151,6 +152,7 @@ func (r *localRuntime) Run(ctx context.Context, opts LocalStartOptions) (err err
 		return err
 	}
 	d.cfg.Runs = controller
+	d.localControl = func(stay *bool) LocalStatus { return r.control(session, stay) }
 	return r.serve(ctx, session, controller, opts.DashboardAddress)
 }
 
@@ -164,7 +166,7 @@ func (r *localRuntime) begin(d *Daemon, cancel context.CancelFunc) (*localRuntim
 			return nil, errors.New("wingd: local runtime is already starting or running")
 		}
 	}
-	r.run = &localRuntimeSession{daemon: d, cancel: cancel, done: make(chan struct{})}
+	r.run = &localRuntimeSession{daemon: d, cancel: cancel, done: make(chan struct{}), dashboard: make(chan localDashboardRequest)}
 	r.changed()
 	return r.run, nil
 }
@@ -206,23 +208,47 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 			return controller.ServeAPI(ctx, &readyListener{Listener: ln, ready: apiReady})
 		})
 	}
-	dashboardReady := make(chan struct{})
-	if dashboard != "" {
+	var dashboardListener net.Listener
+	var dashboardAddress string
+	var dashboardReady chan struct{}
+	defer func() {
+		if dashboardListener != nil {
+			dashboardListener.Close()
+		}
+	}()
+	startDashboard := func(bindCtx context.Context, address string) error {
+		if dashboardListener != nil {
+			if dashboardAddress != address {
+				return fmt.Errorf("wingd: dashboard already serves %s; stop the controller before changing its address", dashboardAddress)
+			}
+			return nil
+		}
 		listen := r.listen
 		if listen == nil {
-			listen = net.Listen
+			listen = func(network, address string) (net.Listener, error) {
+				return (&net.ListenConfig{}).Listen(bindCtx, network, address)
+			}
 		}
-		ln, err := listen("tcp", dashboard)
+		ln, err := listen("tcp", address)
 		if err != nil {
 			return fmt.Errorf("wingd: dashboard listen: %w", err)
 		}
-		defer ln.Close()
+		dashboardListener, dashboardAddress = ln, address
+		dashboardReady = make(chan struct{})
 		workers.Go(func() {
+			defer ln.Close()
 			serve("dashboard", func() error {
 				return controller.ServeDashboard(ctx, &readyListener{Listener: ln, ready: dashboardReady})
 			})
 		})
+		return nil
+	}
+	if dashboard != "" {
+		if err := startDashboard(ctx, dashboard); err != nil {
+			return err
+		}
 	} else {
+		dashboardReady = make(chan struct{})
 		close(dashboardReady)
 	}
 	workers.Go(func() {
@@ -252,7 +278,32 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		r.changed()
 	}
 	r.mu.Unlock()
-	err := <-daemonDone
+	var err error
+running:
+	for {
+		select {
+		case err = <-daemonDone:
+			break running
+		case request := <-session.dashboard:
+			dashboardErr := request.ctx.Err()
+			if dashboardErr == nil {
+				dashboardErr = startDashboard(request.ctx, request.address)
+			}
+			if dashboardErr == nil {
+				select {
+				case <-dashboardReady:
+				case <-ctx.Done():
+					continue running
+				case <-request.ctx.Done():
+					dashboardErr = request.ctx.Err()
+				}
+			}
+			if ctx.Err() != nil && request.ctx.Err() == nil {
+				continue running
+			}
+			request.result <- dashboardErr
+		}
+	}
 	session.cancel()
 	workers.Wait()
 	// safety: the admission timeout can report a slow drain, but cannot close its backing store.
@@ -354,14 +405,31 @@ func (r *localRuntime) Status(ctx context.Context) (LocalStatus, error) {
 		return LocalStatus{}, nil
 	default:
 	}
-	d := r.run.daemon
+	return r.statusLocked(r.run), nil
+}
+
+func (r *localRuntime) statusLocked(session *localRuntimeSession) LocalStatus {
+	d := session.daemon
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	activity := d.localActivity
 	if !hasLocalActivity(activity) {
 		activity.IdleSince = d.lastActivity
 	}
-	return LocalStatus{Running: r.run.ready && !d.shuttingDown, PID: os.Getpid(), Version: d.cfg.Version, Stay: d.stay, Activity: activity}, nil
+	return LocalStatus{Running: session.ready && !d.shuttingDown && !d.draining, PID: os.Getpid(), Version: d.cfg.Version, Stay: d.stay, Activity: activity}
+}
+
+func (r *localRuntime) control(session *localRuntimeSession, stay *bool) LocalStatus {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	status := r.statusLocked(session)
+	if stay != nil && status.Running {
+		if err := session.daemon.SetStay(*stay); err != nil {
+			return r.statusLocked(session)
+		}
+		status = r.statusLocked(session)
+	}
+	return status
 }
 
 func (r *localRuntime) SetStay(ctx context.Context, stay bool) error {
@@ -378,8 +446,10 @@ func (r *localRuntime) SetStay(ctx context.Context, stay bool) error {
 		return errors.New("wingd: local controller is not running")
 	default:
 	}
-	r.run.daemon.SetStay(stay)
-	return nil
+	if !r.run.ready {
+		return errors.New("wingd: local controller is not ready")
+	}
+	return r.run.daemon.SetStay(stay)
 }
 
 func (r *localRuntime) Drain(ctx context.Context) error {

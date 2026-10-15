@@ -129,7 +129,18 @@ func (l *localLifecycle) awaitReady(ctx context.Context, run *localRun) error {
 }
 
 func (l *localLifecycle) StartDashboard(ctx context.Context, opts LocalStartOptions) (LocalStatus, error) {
-	return l.EnsureStarted(ctx, opts)
+	status, err := l.EnsureStarted(ctx, opts)
+	if err != nil || opts.DashboardAddress == "" {
+		return status, err
+	}
+	if err := l.runtime.EnsureDashboard(ctx, opts.DashboardAddress); err != nil {
+		return LocalStatus{}, err
+	}
+	status, err = l.Status(ctx)
+	if err == nil && !status.Running {
+		err = errors.New("wingd: controller stopped during dashboard startup")
+	}
+	return status, err
 }
 
 func (l *localLifecycle) Stop(ctx context.Context) error {

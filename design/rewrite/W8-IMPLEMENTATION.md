@@ -177,6 +177,10 @@ cross-area contracts listed below remain explicit integration work.
 
 ## Remaining integration and contract changes needed
 
+The fourth session below completes status/stay transport and dynamic dashboard
+startup inside the runtime. Foreign-owner startup and dashboard commands still
+need CLI composition.
+
 1. **W3/W9 runner composition.** Bind `RunnerFactory` to the authenticated
    controller, `Hosting` preparation/renewal callbacks, source acquisition,
    accepted engine identity, admission and the real keeper. `nodehost.RunHost`,
@@ -204,9 +208,10 @@ cross-area contracts listed below remain explicit integration work.
    lease methods remain stubs. W1 needs a local activity projection and a typed
    incompatible-store error. Preserve local secret sealing and stray-session
    cleanup in the final adapters; the deleted server no longer supplies them.
-7. **W8/W9 local transport and services.** Bind foreign-owner discovery, status,
-   stay promotion and drain. The current admission wire does not carry the final
-   activity/status/stay contract. Implement native managed units once W9 specifies
+7. **W8/W9 local transport and services.** Bind `client.QueryLocalController`,
+   `client.SetLocalStay` and admission drain into the foreign-owner lifecycle.
+   Dynamic dashboard startup also needs a foreign-owner command. Implement
+   native managed units once W9 specifies
    Home and foreground arguments for `dashboard start --stay` and `__tick`.
    Native runner replacement needs actual service registration hooks. Windows
    needs a native SID-authenticated transport; missing identity still refuses.
@@ -265,4 +270,91 @@ No git metadata was written. The earlier session recorded an initial installed
 `sparkwing info --for-agent` call before reading the no-binary rule. This third
 session ran no Sparkwing executable or pipeline. Native socket evidence remains
 unavailable in the sandbox. Worker scratch is removed after all checks finish.
-All third-session changes remain uncommitted for the lead.
+The lead committed the third-session changes before this continuation.
+
+## Fourth session: owner status, stay and dashboard startup
+
+The admission socket now carries `local_control` and `local_control_status`.
+`client.QueryLocalController` reads the elected runtime's readiness, PID,
+version, stay policy and four activity counts without resetting idle time.
+`client.SetLocalStay` verifies the policy acknowledgement. Both reuse the
+authenticated socket and refuse unsupported or malformed replies. Neither
+spawns a process, replaces a version or opens a store. Probe connections cannot
+mutate policy, and an admission-only daemon cannot impersonate a local runtime.
+Client cancellation interrupts the handshake. An unresponsive owner is distinct
+from an absent one.
+
+`LocalRuntime.EnsureDashboard` starts the UI on an existing controller.
+`StartDashboard` uses it after acquiring a ready owner. Requests for the same
+address reuse its listener and wait for the serving loop. A failed bind keeps
+the existing controller available. Dashboard shutdown joins before store close.
+
+Independent review reproduced two errors and verified their fixes:
+
+- Stay could be acknowledged between the idle decision and shutdown. The idle
+  check now marks stopping and draining under the stay-policy lock. Both local
+  and wire callers refuse promotion after that decision.
+- A dashboard startup failure reached its caller as internal cancellation.
+  The caller now waits for joined cleanup and receives the actual service error.
+
+### Fourth-session evidence
+
+All Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, and private cache,
+temporary build and test directories under `/tmp/sw-astra-W8/`. Package
+parallelism was at most four.
+
+- Whole-repository `go build -p 4 ./...` passed after the final fixes.
+- Vet passed for wingd and subpackages, wingwire, engine, runners and launcher,
+  cluster and acceptance tests.
+- `go test -race -p 4 ./internal/wingd ./internal/wingd/client -run '^TestLocal'`
+  passed. The tests use file elections, fake shared-controller services,
+  in-memory listeners and `net.Pipe`.
+- Full engine, runners, launcher, wingwire and component acceptance tests
+  passed. Cluster passed with only `TestStartMetricsListener_ServesMetrics`
+  excluded because the sandbox cannot bind sockets.
+- The wire registry check initially found missing round-trip fixtures for the
+  two messages. The fixtures and generated shape snapshot now pass.
+- Both independent review reproductions failed before the fixes and pass with
+  them. The focused re-review found no remaining defect in the corrections.
+- Wingd tests cross-compile for Windows/amd64. Native Windows execution and
+  peer identity remain unverified.
+- Commentcheck, sleepcheck and `git diff --check` passed on the final tree.
+
+No native catalog cell was unskipped, and no additional T1 port was claimed.
+The native process, service-manager and Cloud integration obligations remain
+listed above. This session deletes **0 whole obsolete files / 0 legacy-code
+lines**. It replaces existing lifecycle fragments but makes no further old-code
+hard cut.
+
+### Fourth-session contracts and shared files
+
+W8 adds `EnsureDashboard` to its runtime contract and the two local-control
+messages to the existing admission wire. `Daemon.SetStay` now returns an error
+after shutdown is committed. Runtime callers handle it. These are W8-owned
+contracts. No other area's contract was changed.
+
+The dashboard owns one listener. A different requested address requires a stop
+and restart because a live replacement would need to drain browser requests.
+The simpler silent-ignore behavior was incorrect. The addition uses the same
+runtime and worker joins instead of a separate dashboard process. The local
+control wire reuses existing peer authentication instead of adding HTTP routes
+or another auth policy. No setting, environment variable or service is added.
+
+Shared edits are limited to:
+
+- `pkg/wingwire/local.go`, `wingwire.go`, `wingwire_test.go` and
+  `testdata/shapes.json`.
+- `tests/acceptance/local_controller_w8_test.go`, whose runtime fixture supplies
+  the new interface method.
+- This handoff. W8 source documentation is `internal/wingd/LOCAL-CONTROLLER.md`.
+
+Real integration still needs W1/W2/W3 controller services and activity
+publication, W9 process/managed-unit arguments and owner lifecycle composition,
+runner and bootstrap transports, and Cloud enforcement/cleanup probes. No new
+external contract question was introduced. Socket restrictions prevent native
+execution evidence. The review fixture also had to initialize Go signal
+handling before entering a virtual-clock test bubble.
+
+Fourth-session changes remain uncommitted for the lead. No Sparkwing executable,
+pipeline or git-writing command ran. Worker scratch is deleted after the final
+checks and review complete.

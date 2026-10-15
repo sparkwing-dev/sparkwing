@@ -60,7 +60,7 @@ func TestLocalDaemonActivityAndProbeIdle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := &Daemon{cfg: Config{Now: func() time.Time { return now }}, ledger: ledger, lastActivity: now, conns: map[*conn]struct{}{&conn{}: {}}}
+	d := &Daemon{cfg: Config{Now: func() time.Time { return now }}, ledger: ledger, lastActivity: now, conns: map[*conn]struct{}{{}: {}}}
 	for _, hold := range []LocalActivity{{Runs: 1}, {QueuedTriggers: 1}, {HeldLeases: 1}, {DashboardConnections: 1}} {
 		if err := d.SetLocalActivity(hold); err != nil {
 			t.Fatal(err)
@@ -160,6 +160,8 @@ func (r *lifecycleRuntime) SetStay(_ context.Context, stay bool) error {
 	r.status.Stay = stay
 	return nil
 }
+
+func (r *lifecycleRuntime) EnsureDashboard(context.Context, string) error { return nil }
 
 func (r *lifecycleRuntime) Drain(context.Context) error {
 	r.mu.Lock()

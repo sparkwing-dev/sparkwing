@@ -39,7 +39,7 @@ import (
 // BuildIdentity changes whenever same-major wire behavior changes. It lets
 // source and installed builds compiled from the same protocol implementation
 // recognize each other even when their display versions differ.
-const BuildIdentity = "wingwire-v1-nonblocking-admission"
+const BuildIdentity = "wingwire-v1-local-controller-control"
 
 // ProtocolMajor is the newest wire protocol major this build speaks.
 // Clients send it in [Hello]; a daemon answers on it whenever the client
@@ -143,27 +143,29 @@ func (f ProtocolFloors) Newest() (floor ProtocolFloor, ok bool) {
 type MessageType string
 
 const (
-	TypeHello            MessageType = "hello"
-	TypeHelloAck         MessageType = "hello_ack"
-	TypeAdmissionRequest MessageType = "admission_request"
-	TypeGrant            MessageType = "grant"
-	TypeQueued           MessageType = "queued"
-	TypeEvicted          MessageType = "evicted"
-	TypeRelease          MessageType = "release"
-	TypeReattach         MessageType = "reattach"
-	TypeDrainRequest     MessageType = "drain_request"
-	TypeDrainAck         MessageType = "drain_ack"
-	TypeQueueState       MessageType = "queue_state"
-	TypeCancelLease      MessageType = "cancel_lease"
-	TypeCancelLeaseAck   MessageType = "cancel_lease_ack"
-	TypeSetPriority      MessageType = "set_priority"
-	TypeSetPriorityAck   MessageType = "set_priority_ack"
-	TypeCancel           MessageType = "cancel"
-	TypeStatsReset       MessageType = "stats_reset"
-	TypeStatsResetAck    MessageType = "stats_reset_ack"
-	TypeLivenessProbe    MessageType = "liveness_probe"
-	TypeLivenessAck      MessageType = "liveness_ack"
-	TypeUnsupported      MessageType = "unsupported"
+	TypeHello              MessageType = "hello"
+	TypeHelloAck           MessageType = "hello_ack"
+	TypeAdmissionRequest   MessageType = "admission_request"
+	TypeGrant              MessageType = "grant"
+	TypeQueued             MessageType = "queued"
+	TypeEvicted            MessageType = "evicted"
+	TypeRelease            MessageType = "release"
+	TypeReattach           MessageType = "reattach"
+	TypeDrainRequest       MessageType = "drain_request"
+	TypeDrainAck           MessageType = "drain_ack"
+	TypeQueueState         MessageType = "queue_state"
+	TypeCancelLease        MessageType = "cancel_lease"
+	TypeCancelLeaseAck     MessageType = "cancel_lease_ack"
+	TypeSetPriority        MessageType = "set_priority"
+	TypeSetPriorityAck     MessageType = "set_priority_ack"
+	TypeCancel             MessageType = "cancel"
+	TypeStatsReset         MessageType = "stats_reset"
+	TypeStatsResetAck      MessageType = "stats_reset_ack"
+	TypeLivenessProbe      MessageType = "liveness_probe"
+	TypeLivenessAck        MessageType = "liveness_ack"
+	TypeUnsupported        MessageType = "unsupported"
+	TypeLocalControl       MessageType = "local_control"
+	TypeLocalControlStatus MessageType = "local_control_status"
 )
 
 // Message is implemented by every concrete wire message. The
@@ -248,27 +250,29 @@ func (e *UnknownTypeError) Error() string {
 // safety: the wire shape snapshot is generated from this map, so a type reaches
 // the wire only by being registered here and cannot escape the snapshot.
 var messageRegistry = map[MessageType]func() Message{
-	TypeHello:            func() Message { return &Hello{} },
-	TypeHelloAck:         func() Message { return &HelloAck{} },
-	TypeAdmissionRequest: func() Message { return &AdmissionRequest{} },
-	TypeGrant:            func() Message { return &Grant{} },
-	TypeQueued:           func() Message { return &Queued{} },
-	TypeEvicted:          func() Message { return &Evicted{} },
-	TypeRelease:          func() Message { return &Release{} },
-	TypeReattach:         func() Message { return &Reattach{} },
-	TypeDrainRequest:     func() Message { return &DrainRequest{} },
-	TypeDrainAck:         func() Message { return &DrainAck{} },
-	TypeQueueState:       func() Message { return &QueueState{} },
-	TypeCancelLease:      func() Message { return &CancelLease{} },
-	TypeCancelLeaseAck:   func() Message { return &CancelLeaseAck{} },
-	TypeSetPriority:      func() Message { return &SetPriority{} },
-	TypeSetPriorityAck:   func() Message { return &SetPriorityAck{} },
-	TypeCancel:           func() Message { return &Cancel{} },
-	TypeStatsReset:       func() Message { return &StatsReset{} },
-	TypeStatsResetAck:    func() Message { return &StatsResetAck{} },
-	TypeLivenessProbe:    func() Message { return &LivenessProbe{} },
-	TypeLivenessAck:      func() Message { return &LivenessAck{} },
-	TypeUnsupported:      func() Message { return &Unsupported{} },
+	TypeHello:              func() Message { return &Hello{} },
+	TypeHelloAck:           func() Message { return &HelloAck{} },
+	TypeAdmissionRequest:   func() Message { return &AdmissionRequest{} },
+	TypeGrant:              func() Message { return &Grant{} },
+	TypeQueued:             func() Message { return &Queued{} },
+	TypeEvicted:            func() Message { return &Evicted{} },
+	TypeRelease:            func() Message { return &Release{} },
+	TypeReattach:           func() Message { return &Reattach{} },
+	TypeDrainRequest:       func() Message { return &DrainRequest{} },
+	TypeDrainAck:           func() Message { return &DrainAck{} },
+	TypeQueueState:         func() Message { return &QueueState{} },
+	TypeCancelLease:        func() Message { return &CancelLease{} },
+	TypeCancelLeaseAck:     func() Message { return &CancelLeaseAck{} },
+	TypeSetPriority:        func() Message { return &SetPriority{} },
+	TypeSetPriorityAck:     func() Message { return &SetPriorityAck{} },
+	TypeCancel:             func() Message { return &Cancel{} },
+	TypeStatsReset:         func() Message { return &StatsReset{} },
+	TypeStatsResetAck:      func() Message { return &StatsResetAck{} },
+	TypeLivenessProbe:      func() Message { return &LivenessProbe{} },
+	TypeLivenessAck:        func() Message { return &LivenessAck{} },
+	TypeUnsupported:        func() Message { return &Unsupported{} },
+	TypeLocalControl:       func() Message { return &LocalControl{} },
+	TypeLocalControlStatus: func() Message { return &LocalControlStatus{} },
 }
 
 func emptyMessage(t MessageType) (Message, error) {

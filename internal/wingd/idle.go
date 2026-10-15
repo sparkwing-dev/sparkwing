@@ -21,7 +21,7 @@ func (d *Daemon) idleLoop(ctx context.Context) {
 		case <-d.quit:
 			return
 		case <-t.C:
-			if d.idleElapsed() >= idle {
+			if d.beginIdleShutdown(idle) {
 				d.cfg.logf("idle for %s, exiting", idle)
 				d.shutdownWithReason("idle")
 				return
@@ -33,6 +33,21 @@ func (d *Daemon) idleLoop(ctx context.Context) {
 func (d *Daemon) idleElapsed() time.Duration {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	return d.idleElapsedLocked()
+}
+
+func (d *Daemon) beginIdleShutdown(idle time.Duration) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.shuttingDown || d.idleElapsedLocked() < idle {
+		return false
+	}
+	// safety: stay promotion and new admission must see the committed exit before its logging and cleanup.
+	d.shuttingDown, d.draining = true, true
+	return true
+}
+
+func (d *Daemon) idleElapsedLocked() time.Duration {
 	if d.stay || hasLocalActivity(d.localActivity) || len(d.byRun) > 0 {
 		return 0
 	}
@@ -66,11 +81,16 @@ func (d *Daemon) SetLocalActivity(activity LocalActivity) error {
 }
 
 // SetStay pins the controller until it is drained or stay mode is removed.
-func (d *Daemon) SetStay(stay bool) {
+// A controller that has committed to shutdown refuses the change.
+func (d *Daemon) SetStay(stay bool) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.shuttingDown || d.draining {
+		return fmt.Errorf("wingd: local controller is stopping")
+	}
 	if d.stay != stay {
 		d.stay = stay
 		d.touchLocked()
 	}
+	return nil
 }

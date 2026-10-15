@@ -22,6 +22,7 @@ type runtimeControllerFixture struct {
 	reconcile  func(context.Context) (LocalActivity, error)
 	background func(context.Context, func(LocalActivity) error) error
 	serve      func(context.Context, net.Listener) error
+	dashboard  func(context.Context, net.Listener) error
 	closed     atomic.Bool
 	closeErr   error
 	key        func(context.Context) (string, error)
@@ -40,6 +41,7 @@ func (f *runtimeControllerFixture) Reconcile(ctx context.Context) (LocalActivity
 	}
 	return LocalActivity{}, nil
 }
+
 func (f *runtimeControllerFixture) Run(ctx context.Context, report func(LocalActivity) error) error {
 	if f.background != nil {
 		return f.background(ctx, report)
@@ -47,15 +49,21 @@ func (f *runtimeControllerFixture) Run(ctx context.Context, report func(LocalAct
 	<-ctx.Done()
 	return nil
 }
+
 func (f *runtimeControllerFixture) ServeAPI(ctx context.Context, ln net.Listener) error {
 	if f.serve != nil {
 		return f.serve(ctx, ln)
 	}
 	return serveRuntimeFixture(ctx, ln)
 }
+
 func (f *runtimeControllerFixture) ServeDashboard(ctx context.Context, ln net.Listener) error {
+	if f.dashboard != nil {
+		return f.dashboard(ctx, ln)
+	}
 	return serveRuntimeFixture(ctx, ln)
 }
+
 func (f *runtimeControllerFixture) Close() error {
 	held, err := LockHeld(f.home)
 	if err != nil {
