@@ -307,3 +307,13 @@ func TestBlobMaterializationReadSelectorsCannotBeAliasedProperty(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func MaterializationDataAuthority(s *Store, ctx context.Context, ref capability.AuthorityRef) (blob.Authority, error) {
+	var authority blob.Authority
+	err := s.inTx(ctx, func(tx *storeTx) error {
+		actor, err := resolveBlobAuthorityTx(ctx, tx, "a", blob.Authority{CapabilityRef: ref.ID}, capability.DataRead)
+		authority = actor.authority
+		return err
+	})
+	return authority, err
+}

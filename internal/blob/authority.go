@@ -7,6 +7,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
+// CapabilityScope preserves the ref's trust tag when comparing sealed data grants.
+func (r RefScope) CapabilityScope() string {
+	if r.Verified {
+		return r.Ref
+	}
+	return "manual:" + r.Ref
+}
+
 func validAttempt(a runspec.AttemptIdentity) bool {
 	return a.Team != "" && a.RunID != "" && a.NodeID != "" && a.Attempt > 0 && a.Generation > 0
 }

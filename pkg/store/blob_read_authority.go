@@ -46,7 +46,7 @@ func blobRecordReadableTx(ctx context.Context, tx *storeTx, a blobActor, key blo
 	if err != nil {
 		return err
 	}
-	if c.repo != string(key.Scope.Repo) || c.ref != blobRefScope(key.Scope.Ref) || c.pipeline != key.Scope.Pipeline {
+	if c.repo != string(key.Scope.Repo) || c.ref != key.Scope.Ref.CapabilityScope() || c.pipeline != key.Scope.Pipeline {
 		return blob.ErrDigestNotReadable
 	}
 	if key.Kind == blob.KindMemo && (!c.source.Attempt.Set || c.source.Attempt.Value.NodeID != key.Scope.Job) {
@@ -117,7 +117,7 @@ func blobReadSetTx(ctx context.Context, tx *storeTx, a blobActor, digest blob.Di
 
 func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobReadCandidate) (blob.ReadEdge, bool, error) {
 	edge := blob.ReadEdge{}
-	if ((c.kind != blob.KindOutput && c.kind != blob.KindManifest) && c.ref != blobRefScope(c.facts.Scope)) || (c.facts.Scope.Verified && (c.facts.AppDeliveryKey == "" || c.facts.SHA == "")) || (c.facts.DefaultBranchVerified && (!c.facts.Scope.Verified || c.facts.Scope.Ref != c.facts.DefaultBranch)) {
+	if ((c.kind != blob.KindOutput && c.kind != blob.KindManifest) && c.ref != c.facts.Scope.CapabilityScope()) || (c.facts.Scope.Verified && (c.facts.AppDeliveryKey == "" || c.facts.SHA == "")) || (c.facts.DefaultBranchVerified && (!c.facts.Scope.Verified || c.facts.Scope.Ref != c.facts.DefaultBranch)) {
 		return edge, false, nil
 	}
 	scope := a.capability.Data
@@ -132,7 +132,7 @@ func blobCandidateEdgeTx(ctx context.Context, tx *storeTx, a blobActor, c blobRe
 	}
 	if c.kind == blob.KindMemo || c.kind == blob.KindDepcache {
 		allowed := slices.Contains(scope.ReadRefs, c.ref)
-		if c.ref != blobRefScope(a.authority.Ref.Scope) {
+		if c.ref != a.authority.Ref.Scope.CapabilityScope() {
 			verifiedDefault := c.facts.DefaultBranchVerified && c.facts.Scope.Ref == a.authority.Ref.DefaultBranch
 			verifiedBase := c.kind == blob.KindDepcache && a.authority.Ref.PullRequestBase.Set && c.facts.Scope.Ref == a.authority.Ref.PullRequestBase.Value
 			allowed = allowed && c.facts.Scope.Verified && (verifiedDefault || verifiedBase)

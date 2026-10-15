@@ -387,6 +387,17 @@ records in their own run. Dependency and pinned-reference readers also require
 the exact selector, including results that have no execution attempt. Another
 record pointing to the same digest grants no metadata access.
 
+The materialization proof uses the bound data controller for record lookup,
+authorization, blob metadata, download charging and filesystem signing. Restoring
+its copied output, manifest and independent artifact records the exact signed
+byte total. It still uses an in-process HTTP transport and test-only authority
+projection into the store's existing resolver.
+
+`blob.RefScope.CapabilityScope` supplies the same trust-tagged ref for store and
+controller checks. Manual refs compare as `manual:<ref>`. Verified refs compare
+as the raw ref. Data bindings compare write grants, read grants and logical
+lookup targets through that helper.
+
 Coalesced source copies remain closed until their contract supplies persisted
 read-edge authority. A source result and matching spec hash cannot grant that
 read. The legacy waiter table cannot supply it because its final schema excludes

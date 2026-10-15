@@ -56,7 +56,7 @@ func (r *blobRecords) CopyMaterializedRecords(ctx context.Context, tx *storeTx, 
 		}
 		if record.Key.Scope.Ref != a.authority.Ref.Scope {
 			facts := record.RefFacts
-			if source.Kind != SourceMemo || !facts.DefaultBranchVerified || !facts.Scope.Verified || facts.AppDeliveryKey == "" || facts.SHA == "" || facts.Scope.Ref != a.authority.Ref.DefaultBranch || !slices.Contains(a.capability.Data.ReadRefs, blobRefScope(facts.Scope)) {
+			if source.Kind != SourceMemo || !facts.DefaultBranchVerified || !facts.Scope.Verified || facts.AppDeliveryKey == "" || facts.SHA == "" || facts.Scope.Ref != a.authority.Ref.DefaultBranch || !slices.Contains(a.capability.Data.ReadRefs, facts.Scope.CapabilityScope()) {
 				return result, blob.ErrDigestNotReadable
 			}
 		}
@@ -168,7 +168,7 @@ func materializationKeysTx(ctx context.Context, tx *storeTx, team Team, a blobAc
 	if source.Kind == SourceMemo {
 		key := source.Record
 		var spec nodeproto.JobSpec
-		if json.Unmarshal(target.Spec, &spec) != nil || spec.Memo == nil || key.Team != string(team) || key.Kind != blob.KindMemo || key.Scope.Repo != a.authority.Repo || key.Scope.Pipeline != a.pipeline || key.Scope.Job != target.Ref.NodeID || !slices.Contains(a.capability.Data.ReadRefs, blobRefScope(key.Scope.Ref)) || key.Name != "output" && key.Name != "manifest" {
+		if json.Unmarshal(target.Spec, &spec) != nil || spec.Memo == nil || key.Team != string(team) || key.Kind != blob.KindMemo || key.Scope.Repo != a.authority.Repo || key.Scope.Pipeline != a.pipeline || key.Scope.Job != target.Ref.NodeID || !slices.Contains(a.capability.Data.ReadRefs, key.Scope.Ref.CapabilityScope()) || key.Name != "output" && key.Name != "manifest" {
 			return nil, blob.ErrDigestNotReadable
 		}
 		return []blob.RecordKey{key}, nil

@@ -223,7 +223,7 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 		refs = append(refs, blob.RefScope{Ref: a.authority.Ref.DefaultBranch, Verified: true})
 	}
 	for _, ref := range refs {
-		if !slices.Contains(a.capability.Data.ReadRefs, blobRefScope(ref)) {
+		if !slices.Contains(a.capability.Data.ReadRefs, ref.CapabilityScope()) {
 			continue
 		}
 		for _, name := range []string{"output", "manifest"} {
@@ -293,7 +293,7 @@ func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheL
 		}
 	}
 	for _, fallback := range refs {
-		if !slices.Contains(a.capability.Data.ReadRefs, blobRefScope(fallback.ref)) {
+		if !slices.Contains(a.capability.Data.ReadRefs, fallback.ref.CapabilityScope()) {
 			continue
 		}
 		if !request.Budget.Deadline.IsZero() && !tx.now().Before(request.Budget.Deadline) {

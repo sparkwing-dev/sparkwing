@@ -101,7 +101,7 @@ func checkRecordMutationKey(a blobActor, key blob.RecordKey, target *NodeRow) er
 	if target == nil {
 		return checkBlobWriteKey(a, key)
 	}
-	if a.source.Kind != blob.UploadOwnerUnit || a.source.RunID != target.Ref.RunID || (key.Kind != blob.KindOutput && key.Kind != blob.KindManifest) || key != materializedKey(Team(a.capability.Team), a, *target, key.Kind) || a.capability.Data.WriteRef != blobRefScope(key.Scope.Ref) {
+	if a.source.Kind != blob.UploadOwnerUnit || a.source.RunID != target.Ref.RunID || (key.Kind != blob.KindOutput && key.Kind != blob.KindManifest) || key != materializedKey(Team(a.capability.Team), a, *target, key.Kind) || a.capability.Data.WriteRef != key.Scope.Ref.CapabilityScope() {
 		return blob.ErrDigestNotReadable
 	}
 	return nil

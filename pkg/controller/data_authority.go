@@ -31,7 +31,7 @@ func validateDataAuthority(a capability.Authorized, authority blob.Authority) er
 	i := authority.Upload.Value
 	if scope.Use == capability.DataRemoteCache || scope.Use == capability.DataExpansion || i.Team != c.Team || i.RunID == "" ||
 		i.RunID != scope.RunID || i.Principal != authority.Principal || i.CapabilityRef != authority.CapabilityRef ||
-		scope.WriteRef == "" || authority.Ref.Scope.Ref != scope.WriteRef || c.Delivery == capability.DeliveryBootstrap {
+		scope.WriteRef == "" || authority.Ref.Scope.CapabilityScope() != scope.WriteRef || c.Delivery == capability.DeliveryBootstrap {
 		return dataForbidden()
 	}
 	switch i.Kind {
