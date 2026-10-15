@@ -126,7 +126,6 @@ func TestNodeClaimOwnership_StrangerTokenCannotWriteAnotherRunnersNode(t *testin
 		{"touch", "/api/v1/runs/run-1/nodes/only/touch", ""},
 		{"artifact-manifest", "/api/v1/runs/run-1/nodes/only/artifact-manifest", `{"digest":"sha256:abc"}`},
 		{"metrics", "/api/v1/runs/run-1/nodes/only/metrics", `{"cpu_nanos":1}`},
-		{"dispatch", "/api/v1/runs/run-1/nodes/only/dispatch", `{"seq":0}`},
 		{"steps/start", "/api/v1/runs/run-1/nodes/only/steps/start", `{"step_id":"s1","name":"s1"}`},
 		{"steps/finish", "/api/v1/runs/run-1/nodes/only/steps/finish", `{"step_id":"s1","outcome":"success"}`},
 		{"steps/skip", "/api/v1/runs/run-1/nodes/only/steps/skip", `{"step_id":"s1"}`},

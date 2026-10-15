@@ -594,58 +594,6 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {description: The node has not finished.}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/dispatch:
-    parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
-    post:
-      x-sparkwing-scope: nodes.claim
-      tags: [nodes]
-      summary: Record a node-dispatch attempt.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/NodeDispatch"}
-      responses:
-        "204": {description: Recorded.}
-    get:
-      x-sparkwing-scope: runs.read
-      tags: [nodes]
-      summary: Fetch the latest dispatch (or a specific `?seq=N`) for a node.
-      description: >-
-        Admits `runs.read`, but fills `env_json` only for an `admin` principal; every other reader gets the row without it. `redacted_keys` is served to all readers.
-      parameters:
-        - in: query
-          name: seq
-          schema: {type: integer}
-      responses:
-        "200":
-          description: Dispatch row.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/NodeDispatch"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/runs/{id}/nodes/{nodeID}/dispatches:
-    parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
-    get:
-      x-sparkwing-scope: runs.read
-      tags: [nodes]
-      summary: List every dispatch attempt for a node.
-      description: >-
-        Admits `runs.read`, but fills `env_json` only for an `admin` principal; every other reader gets each row without it. `redacted_keys` is served to all readers.
-      responses:
-        "200":
-          description: Dispatch list.
-          content:
-            application/json:
-              schema:
-                type: array
-                items: {$ref: "#/components/schemas/NodeDispatch"}
-
   /api/v1/runs/{id}/nodes/{nodeID}/activity:
     parameters:
       - {$ref: "#/components/parameters/RunID"}
@@ -7496,39 +7444,6 @@ components:
         ts: {type: string, format: date-time}
         payload:
           description: Either a structured JSON object or a raw string (escaped).
-    NodeDispatch:
-      x-sparkwing-go-type: pkg/store.NodeDispatch
-      type: object
-      description: >-
-        One dispatch-frame snapshot for a node attempt. Mirrors `pkg/store.NodeDispatch`. The byte-typed members carry base64-encoded JSON.
-      properties:
-        run_id: {type: string}
-        node_id: {type: string}
-        seq: {type: integer}
-        dispatched_at: {type: string, format: date-time}
-        code_version: {type: string}
-        binary_hash: {type: string}
-        runner_labels:
-          type: string
-          format: byte
-          description: JSON `[]string` of the labels the dispatch required.
-        env_json:
-          type: string
-          format: byte
-          description: >-
-            JSON `map[string]string` of the captured environment. Present only for an `admin` principal; a `runs.read` principal gets the row with this member absent.
-        redacted_keys:
-          type: string
-          format: byte
-          description: >-
-            JSON `[]string` naming the variables the snapshot dropped as credential-shaped. Served to every reader of the row.
-        workdir: {type: string}
-        input_envelope_json:
-          type: string
-          format: byte
-          description: JSON dispatch envelope; over-cap rows store a truncation stub.
-        input_size_bytes: {type: integer, format: int64}
-        secret_redactions: {type: integer}
     MetricSample:
       x-sparkwing-go-type: pkg/controller.metricSample
       type: object

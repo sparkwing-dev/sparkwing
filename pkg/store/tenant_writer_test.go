@@ -200,9 +200,6 @@ func TestRunOwnedRowsCarryTheRunsTeam(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateDebugPause: %v", err)
 	}
-	if err := acme.WriteNodeDispatch(ctx, store.NodeDispatch{RunID: "run-acme", NodeID: "build", DispatchedAt: now}); err != nil {
-		t.Fatalf("WriteNodeDispatch: %v", err)
-	}
 	if err := acme.AddNodeMetricSample(ctx, "run-acme", "build", store.MetricSample{TS: now, CPUMillicores: 1}); err != nil {
 		t.Fatalf("AddNodeMetricSample: %v", err)
 	}
@@ -237,7 +234,7 @@ func TestRunOwnedRowsCarryTheRunsTeam(t *testing.T) {
 	}
 
 	for _, table := range []string{
-		"events", "debug_pauses", "node_dispatches", "node_metrics",
+		"events", "debug_pauses", "node_metrics",
 		"node_execution_attempts", "node_steps", "approvals",
 	} {
 		requireRunRowsInTeam(t, st, table, "run-acme", "acme")

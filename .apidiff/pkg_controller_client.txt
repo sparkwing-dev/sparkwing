@@ -132,7 +132,6 @@ func (c *Client) GetChildRun(ctx context.Context, runID, childID string) (*store
 func (c *Client) GetCron(ctx context.Context, name string) (*api.DetailView, error)
 func (c *Client) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error)
 func (c *Client) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error)
-func (c *Client) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*store.NodeDispatch, error)
 func (c *Client) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)
 func (c *Client) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*store.PipelineProfile, error)
 func (c *Client) GetRun(ctx context.Context, runID string) (*store.Run, error)
@@ -152,7 +151,6 @@ func (c *Client) ListApprovalsForRun(ctx context.Context, runID string) ([]*stor
 func (c *Client) ListCrons(ctx context.Context) (*api.OverviewView, error)
 func (c *Client) ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error)
 func (c *Client) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error)
-func (c *Client) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*store.NodeDispatch, error)
 func (c *Client) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]store.MetricSample, error)
 func (c *Client) ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error)
 func (c *Client) ListNodes(ctx context.Context, runID string) ([]*store.Node, error)
@@ -219,7 +217,6 @@ func (c *Client) WithClaimResources(fn func() *ClaimResources) *Client
 func (c *Client) WithRunnerIdentity(id string) *Client
 func (c *Client) WithTriggerNodeRunner(kind string) *Client
 func (c *Client) WithWatchObserver(fn func(WatchReport)) *Client
-func (c *Client) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error
 type ConcurrencyState struct {
 	Key               string
 	Capacity          int

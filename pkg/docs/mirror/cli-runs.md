@@ -697,7 +697,7 @@ With --follow, polls until the run reaches a terminal status. Pass
 A local read looks the id up in this home's own store first and then
 in each standalone store, and reports which one held it. The verbs
 that write to a run -- annotations add, approvals approve
-and deny, debug rerun -- write in whichever store held
+and deny -- write in whichever store held
 it. Cancel and retry cannot act on a standalone run at all, because
 no daemon arbitrates one, and say so instead of reporting it
 missing.

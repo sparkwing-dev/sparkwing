@@ -168,6 +168,8 @@ unlock.
   The retry trigger was written with an empty `trigger_user` and only retry provenance in `trigger_env`, so a retried pull-request run planned as an anonymous push. It now copies the source trigger's user and the `GITHUB_EVENT_NAME` and `GITHUB_PR_*`/`GITHUB_BASE_*`/`GITHUB_HEAD_*` keys `PullRequestFromEnv` reads.
 
 ### Removed
+- **store + controller + cli (Breaking):** Remove dispatch snapshots and `sparkwing debug rerun`
+  The store no longer exposes `NodeDispatch`, `WriteNodeDispatch`, `GetNodeDispatch` or `ListNodeDispatches`. The controller no longer serves the node `/dispatch` and `/dispatches` routes.
 - **runs bounce (Breaking):** Removed the command, controller routes and store APIs for restarting a job in place
   Use `runs cancel` and `runs retry` to restart a run.
 - **pipeline binary (Breaking):** The pipeline binary answers only `--sw-node-protocol`; any other invocation exits 2 naming `sparkwing run`

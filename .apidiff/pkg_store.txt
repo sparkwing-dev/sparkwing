@@ -1272,14 +1272,14 @@ const MaxGitHubRunnerCredentials = 20
 const MaxInvitationEmailsPerDay = 5
 const MaxInvitationsPerDay = 100
 const MaxLeaseDuration = 10 * time.Minute
-const MaxNodeDispatchEnvelope = 4 << 20
 const MaxNodeIDBytes = 200
 const MaxNodeMetricMarkers = 8
 const MaxNodeMetricSamples = 10_000
 const MaxNodeRetries = 10
+
+const MaxPlanBytes = 4 << 20
 const MaxOpenInvitations = 50
 const MaxOutputBytes int64 = 64 << 20
-const MaxPlanBytes = MaxNodeDispatchEnvelope
 const MaxPlanNodes = 1000
 const MaxPurchaseLimitCents = MaxTeamBalanceMicro / MicroCreditsPerCent
 const MaxRetryBackoff = 5 * time.Minute
@@ -1438,21 +1438,6 @@ type NodeClaimFence struct {
 	ClaimGeneration int64
 }
 func NodeClaimFenceFromContext(ctx context.Context) (NodeClaimFence, bool)
-type NodeDispatch struct {
-	RunID            string
-	NodeID           string
-	Seq              int
-	DispatchedAt     time.Time
-	CodeVersion      string
-	BinaryHash       string
-	RunnerLabels     []byte
-	EnvJSON          []byte
-	Workdir          string
-	InputEnvelope    []byte
-	InputSizeBytes   int64
-	SecretRedactions int
-	RedactedKeys     []byte
-}
 type NodeLog struct {
 	Team       Team
 	RunID      string
@@ -2316,7 +2301,6 @@ func (s *Store) GetCronSchedule(ctx context.Context, id string) (CronSchedule, e
 func (s *Store) GetCronTick(ctx context.Context) (tick CronTick, err error)
 func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error)
 func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error)
-func (s *Store) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*NodeDispatch, error)
 func (s *Store) GetNodeLog(ctx context.Context, team Team, runID, nodeID string, attempt, generation int64) (NodeLog, error)
 func (s *Store) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)
 func (s *Store) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*PipelineProfile, error)
@@ -2356,7 +2340,6 @@ func (s *Store) ListCronSchedules(ctx context.Context) ([]CronSchedule, error)
 func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPause, error)
 func (s *Store) ListEgressUsage(ctx context.Context, month string) (_ []EgressUsage, err error)
 func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
-func (s *Store) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*NodeDispatch, error)
 func (s *Store) ListNodeExecutionAttempts(ctx context.Context, runID, nodeID string) ([]ExecutionAttempt, error)
 func (s *Store) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]MetricSample, error)
 func (s *Store) ListNodeMetricsPage(ctx context.Context, runID, nodeID string, after time.Time, limit int) ([]MetricSample, error)
@@ -2560,7 +2543,6 @@ func (s *Store) UploadForTeam(ctx context.Context, team Team, id string) (Upload
 func (s *Store) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) ([]WaitlistedAccount, error)
 func (s *Store) WarmCPUClassCores(ctx context.Context) (int64, error)
-func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error
 func SupportsRunCursor(version string) bool
 func SupportsRunDisplayFilters(version string) bool
 func SupportsRunIdentityFilters(version string) bool
@@ -2704,7 +2686,6 @@ func (t *Tenant) GetConcurrencyState(ctx context.Context, key string) (*Concurre
 func (t *Tenant) GetCronSchedule(ctx context.Context, id string) (CronSchedule, error)
 func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error)
 func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, error)
-func (t *Tenant) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*NodeDispatch, error)
 func (t *Tenant) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*PipelineProfile, error)
 func (t *Tenant) GetRun(ctx context.Context, runID string) (*Run, error)
 func (t *Tenant) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error)
@@ -2749,7 +2730,6 @@ func (t *Tenant) ListCronFires(ctx context.Context, scheduleID string, limit int
 func (t *Tenant) ListCronSchedules(ctx context.Context) ([]CronSchedule, error)
 func (t *Tenant) ListDebugPauses(ctx context.Context, runID string) (_ []*DebugPause, err error)
 func (t *Tenant) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
-func (t *Tenant) ListNodeDispatches(ctx context.Context, runID, nodeID string) (_ []*NodeDispatch, err error)
 func (t *Tenant) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]MetricSample, error)
 func (t *Tenant) ListNodeMetricsPage(ctx context.Context, runID, nodeID string, after time.Time, limit int) ([]MetricSample, error)
 func (t *Tenant) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error)
@@ -2860,7 +2840,6 @@ func (t *Tenant) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, 
 func (t *Tenant) WithdrawGitHubAppAutomation(ctx context.Context, installation, repository int64) error
 func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64, now time.Time) (int64, error)
 func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, now time.Time) (int64, error)
-func (t *Tenant) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error
 func TierQuota(tier string) (StorageQuota, bool)
 type Token struct {
 	Hash   string

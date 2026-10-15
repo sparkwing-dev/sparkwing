@@ -268,18 +268,6 @@ func (l localState) GetRun(ctx context.Context, runID string) (*store.Run, error
 	return l.st.GetRun(ctx, runID)
 }
 
-func (l localState) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error {
-	return l.st.WriteNodeDispatch(ctx, d)
-}
-
-func (l localState) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*store.NodeDispatch, error) {
-	return l.st.GetNodeDispatch(ctx, runID, nodeID, seq)
-}
-
-func (l localState) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*store.NodeDispatch, error) {
-	return l.st.ListNodeDispatches(ctx, runID, nodeID)
-}
-
 func (l localState) CreateDebugPause(ctx context.Context, p store.DebugPause) error {
 	return l.st.CreateDebugPause(ctx, p)
 }

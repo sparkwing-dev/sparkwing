@@ -1253,7 +1253,7 @@ no store it could read, so a run in a skipped store is not reported
 simply missing.
 
 `runs annotations add`, `runs approvals approve`,
-`runs approvals deny`, and `debug rerun` write to the
+and `runs approvals deny` write to the
 store that holds the run, so they act on a standalone run in its own
 store.
 

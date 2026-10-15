@@ -76,8 +76,6 @@ var apiReadRoutes = []string{
 	"GET /api/v1/runs/{id}/nodes/{nodeID}",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/output",
 	"GET /api/v1/outputs/objects/{key...}",
-	"GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch",
-	"GET /api/v1/runs/{id}/nodes/{nodeID}/dispatches",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/metrics",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/logs",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/debug-pause",

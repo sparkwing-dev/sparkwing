@@ -1,5 +1,154 @@
 # W1 store handoff
 
+This session continues cf58676f6. Its changes are uncommitted. W1b's
+accounting, billing, blob and log implementation and tests are untouched.
+The lead owns committing, independent review and delivery pipelines.
+
+## Dispatch snapshot hard cut
+
+Deleted NodeDispatch, MaxNodeDispatchEnvelope, WriteNodeDispatch,
+GetNodeDispatch and ListNodeDispatches from Store, Tenant, the legacy host
+interface and the controller client. The final schema already has no
+node_dispatches table. Account-deletion inventory no longer names it.
+
+Removed the controller's three snapshot routes, handlers and environment
+response filter. Removed the local host wrappers and both daemon route
+classifications. Deleted debug rerun, its registry/help entry, shell/pod
+implementation and tests. Removed the unused profile rerun_image field.
+This is the feature deletion required by frozen architecture C15 and section 9.
+
+The legacy plan byte ceiling remains 4 MiB. MaxPlanBytes now owns that
+literal and the plan-snapshot handler/test use it directly. This removes its
+accidental dependency on the deleted dispatch-envelope constant.
+
+Deleted 819 production Go lines and 622 test lines. Eleven replacement
+lines leave 1,430 fewer Go lines. These counts exclude docs and snapshots.
+No new setting, interface, service, wrapper or retry mechanism was added.
+
+Updated source prose, CLI help/reference, API source/reference, scoped API
+snapshot entries and documentation mirrors. Historical migration and released
+changelog entries retain their account of the old feature. CLI references
+were generated through a temporary Go test overlay calling the real renderer,
+then compared with that renderer. No Sparkwing CLI was needed for regeneration.
+The API generator and bin/sync-docs.sh regenerated their own artifacts.
+
+## Verification
+
+Go commands use GOWORK=off GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-astra-W1/cache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W1/tmp.
+Test parallelism is at most -p 4. The scratch directory is deleted at handoff.
+
+- Whole-repository go build -p 4 ./... passes.
+- Scoped go vet -p 4 passes for pkg/store, pkg/storage, pkg/controller,
+  pkg/controller/client, internal/orchestrator, internal/profile,
+  internal/userconfig and cmd/sparkwing.
+- The established W1 selection below passes 171 top-level tests and 499
+  cases including subtests, with no skips or failures.
+- All TestEngine controller tests and tenant-route checks pass.
+- Controller, CLI, orchestrator and storage test packages compile with -run '^$'.
+- Default-team caller guard passes after removing the deleted callers.
+- TestEveryControllerRouteIsClassified and
+  TestReadRouteListCarriesNoDuplicates pass after removing both snapshot
+  reads from the local controller's route list.
+- Selected CLI registry, dispatch, help, command-index and flag checks pass.
+  Every CLI reference page exactly matches the temporary renderer check.
+- internal/apispec checks pass, including deterministic generation, route
+  coverage and committed Go-type schemas.
+- Acceptance catalog, port inventory/destination, final credential-route
+  declarations and invariant coverage checks pass. They execute no runtime cell.
+- Full internal/profile and internal/userconfig tests pass.
+- Documentation mirror and git diff --check pass. No repository-local
+  user.name, user.email or core.worktree override is present.
+
+No native acceptance cell was activated and no archived test was ported in
+this session. Dispatch snapshots and debug rerun are explicit feature cuts.
+The final admission, plan, claim, reconciliation and recovery package proofs
+remain passing. T1 New and Run still panic, so native cells cannot pass yet.
+The legacy full suite, PostgreSQL, race checks, lint, pipelines and independent
+review remain lead checks. Full API snapshots have pre-existing rewrite drift.
+Only this cut's entries were updated.
+
+## Contract changes needed and remaining integration
+
+No other area's contract changed. Existing gaps remain:
+
+- W9 ReuseSource cannot carry MaterializeSource.Result by job/state sequence.
+- W9 ScheduleSnapshot cannot carry the sealed GuardRefusal.
+- W2 Authorized/IntakeForStore cannot carry the verified App delivery identity.
+- EngineController.Claim still lacks trusted enrollment-capacity and signed
+  runner-policy dependencies in its adapter contract. ClaimProfileResolver
+  and engine.Resolver.Index/EvaluateRunner are the owning contracts. Add an
+  injection point in the controller contract rather than trusting body labels
+  or turning reported availability into registered total capacity.
+
+W4/W6 must replace plan-validation and sealing/settings fakes. W2/W3/W8/W9
+must connect final routes, hosts, runners and keepers. Controller loops must
+call ReapUnits, ReconcileControllerRuns and completion delivery under their
+leases. W1b must join metered reservation/settlement to award, renewal, result
+and owner completion, and implement transactional materializationRecords and
+nodeResultRecords. Package tests fake those record boundaries and do not prove
+blob persistence, byte integrity or billing integration.
+
+StateStoreOld and old plan/claim/trigger APIs still have legacy callers.
+W1b billing tests also retain sweep/requeue callers, and RunReaperLeased lives
+in W1b's storage-lease file. Those files remain with their owner. W1 is not
+complete until these callers migrate, old paths disappear and native cells run.
+No new product or architecture question was introduced by this deletion.
+
+## Shared files touched
+
+Production outside pkg/store:
+
+- cmd/sparkwing/commands.go, debug.go and help_registry.go.
+- cmd/sparkwing/debug_rerun.go (deleted).
+- internal/orchestrator/backends.go and wingd_api.go.
+- internal/profile/profile.go (unused rerun_image field only).
+- pkg/controller/handlers.go, server.go and tenant_routes.go.
+- pkg/controller/client/dispatches.go (deleted) and client/doc.go.
+- pkg/storage/state.go and doc.go.
+
+Shared tests:
+
+- cmd/sparkwing/debug_rerun_test.go (deleted).
+- internal/orchestrator/wingd_api_routes_test.go.
+- pkg/controller/dispatch_env_scope_test.go (deleted).
+- pkg/controller/node_claim_ownership_test.go, node_client_contract_test.go
+  and plan_snapshot_limit_test.go.
+- pkg/controller/client/unsupported_test.go.
+
+Shared docs/artifacts:
+
+- .apidiff/pkg_store.txt, pkg_storage.txt and pkg_controller_client.txt.
+- CHANGELOG.md and api/openapi.yaml.
+- docs/api-reference.md, auth.md, cli-debug.md, cli-runs.md,
+  local-execution.md and machine-config.md, plus their generated mirrors.
+- pkg/docs/changelog.md and this handoff.
+
+## Friction
+
+An overbroad -run '^TestWingd.*Route' selector included
+TestWingdAPI_UnknownRouteAnswersUnsupportedWithNoStore. It attempted to start
+a native daemon and failed at the sandbox's Unix-socket restriction, then
+reported daemon did not stop. The process sweep found no scratch-owned child
+left running. That native test is not a passing proof and was not retried.
+The corrected in-process route tests initially caught two stale read entries,
+which were removed from wingd_api.go before their successful rerun.
+
+Bootstrap discovery invoked the installed sparkwing info --for-agent before
+the swarm brief's no-binaries rule was read. Apart from that discovery and
+the unintended native-test attempt, no Sparkwing executable was invoked.
+No candidate installation, pipeline or Git write was performed.
+
+The first temporary CLI-doc renderer omitted the generator's path sort. It
+was corrected to the same ordering before comparison, eliminating unrelated
+reference-page churn. The overlay is scratch only.
+
+## Prior committed handoff
+
+The following report is preserved as historical context. Its then-uncommitted
+work is now in cf58676f6. The dispatch-snapshot cut above supersedes its
+remaining-work description where applicable.
+
 This session continues f5e05c1b8. Its changes are uncommitted. W1b's
 accounting, blob and log files were not edited. The lead owns committing,
 independent review and the full delivery checks.

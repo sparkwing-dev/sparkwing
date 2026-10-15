@@ -20,7 +20,7 @@ var allCommands = []*Command{
 	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsSearch, &cmdDocsMigrations,
 	&cmdCache, &cmdCacheInfo, &cmdCachePrune, &cmdCacheExplain,
 	&cmdDebug, &cmdDebugRun, &cmdDebugRelease, &cmdDebugAttach,
-	&cmdDebugRerun, &cmdDebugEnv,
+	&cmdDebugEnv,
 	&cmdPipeline, &cmdPipelineList, &cmdPipelineDescribe,
 	&cmdPipelineNew, &cmdExamples, &cmdPipelineLint, &cmdPipelinePlan,
 	&cmdPipelineTrigger,

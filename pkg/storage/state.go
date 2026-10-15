@@ -8,7 +8,7 @@ import (
 )
 
 // StateStoreOld is the run-record store: runs, nodes, steps, annotations,
-// approvals, dispatches, debug pauses, and the schema migrations the
+// approvals, debug pauses, and the schema migrations the
 // orchestrator depends on.
 //
 // A profile's state is opened from a backends.Spec via
@@ -58,11 +58,6 @@ type StateStoreOld interface {
 
 	// Metric samples (advisory; drop-on-error is acceptable).
 	AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error
-
-	// Dispatch-snapshot surface. seq < 0 fetches the latest attempt.
-	WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error
-	GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*store.NodeDispatch, error)
-	ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*store.NodeDispatch, error)
 
 	// Debug-pause surface.
 	CreateDebugPause(ctx context.Context, p store.DebugPause) error

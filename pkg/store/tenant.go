@@ -273,7 +273,6 @@ var tenantTables = []string{
 	"github_runner_credentials",
 	"invitations",
 	"memberships",
-	"node_dispatches",
 	"node_execution_attempts",
 	"node_log_segments",
 	"node_logs",

@@ -808,9 +808,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/runs/{id}/children", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleEnqueueChildRun)))
 	mux.Handle("GET /api/v1/runs/{id}/children/{childID}", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetChildRun)))
 	mux.Handle("GET /api/v1/runs/{id}/children/{childID}/nodes/{nodeID}/output", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetChildNodeOutput)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/dispatch", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleWriteNodeDispatch))))
-	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetNodeDispatch)))
-	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/dispatches", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodeDispatches)))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/logs", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleAppendNodeLiveLog)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleAppendNodeLiveLog)))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsRead, s.metered(egress.ClassLog, s.readableRun(http.HandlerFunc(s.handleReadNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))

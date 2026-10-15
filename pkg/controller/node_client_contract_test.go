@@ -190,19 +190,6 @@ func runContractSurface(t *testing.T, c *client.Client) {
 		t.Errorf("spawn child output = %s", childOut)
 	}
 
-	if err := c.WriteNodeDispatch(ctx, store.NodeDispatch{
-		RunID: runID, NodeID: "produce", Seq: 1, CodeVersion: "local", DispatchedAt: time.Now().UTC(),
-	}); err != nil && !isUnsupported(err) {
-		t.Fatalf("WriteNodeDispatch: %v", err)
-	} else if err == nil {
-		if _, gerr := c.GetNodeDispatch(ctx, runID, "produce", -1); gerr != nil {
-			t.Fatalf("GetNodeDispatch: %v", gerr)
-		}
-		if _, lerr := c.ListNodeDispatches(ctx, runID, "produce"); lerr != nil {
-			t.Fatalf("ListNodeDispatches: %v", lerr)
-		}
-	}
-
 	if err := c.FinishRun(ctx, runID, "success", ""); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
