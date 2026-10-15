@@ -13,8 +13,6 @@ import (
 	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/modfile"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -44,7 +42,7 @@ func runSparks(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdSparks, os.Stderr)
-		return errors.New("spark: subcommand required (catalog|list|lint|resolve|update|add|remove|warmup|inflate)")
+		return errors.New("spark: subcommand required (catalog|list|lint|resolve|update|add|remove|inflate)")
 	}
 	switch args[0] {
 	case "catalog":
@@ -61,8 +59,6 @@ func runSparks(args []string) error {
 		return runSparksAdd(args[1:])
 	case "remove":
 		return runSparksRemove(args[1:])
-	case "warmup":
-		return runSparksWarmup(args[1:])
 	case "inflate":
 		return runSparksInflate(args[1:])
 	default:
@@ -576,73 +572,6 @@ func runSparksRemove(args []string) error {
 		return err
 	}
 	fmt.Fprintf(os.Stdout, "removed %s (%s) from %s\n", removed.Name, removed.Source, path)
-	return nil
-}
-
-func runSparksWarmup(args []string) error {
-	fs := flag.NewFlagSet(cmdSparksWarmup.Path, flag.ContinueOnError)
-	clearCache := fs.Bool("clear-cache", false, "delete the local pipeline binary cache before compiling")
-	if err := parseAndCheck(cmdSparksWarmup, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	sparkwingDir, err := defaultSparkwingDir()
-	if err != nil {
-		return err
-	}
-
-	ctx := gotoolchain.WithSession(context.Background(), nil, nil)
-	if _, err := sparksResolveAndWrite(ctx, sparkwingDir); err != nil {
-		return fmt.Errorf("spark warmup: resolve: %w", err)
-	}
-
-	if *clearCache {
-		result, err := bincache.PruneToLimits(ctx, 0, 0, true)
-		if err != nil {
-			return fmt.Errorf("spark warmup: clear cache: %w", err)
-		}
-		fmt.Fprintf(os.Stdout, "cache pruning removed %d bytes across %d entries\n",
-			result.LogicalRemovedBytes, result.ReclaimedEntries)
-	}
-
-	_, cfg, err := projectconfig.DiscoverPipelines(sparkwingDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warn: no pipelines discovered: %v\n", err)
-	} else {
-		fmt.Fprintf(os.Stdout, "warming up %d pipeline(s)\n", len(cfg.Pipelines))
-	}
-
-	key, err := bincache.PipelineCacheKey(sparkwingDir)
-	if err != nil {
-		return fmt.Errorf("spark warmup: hash pipeline: %w", err)
-	}
-	entry, err := bincache.PipelineEntry(key)
-	if err != nil {
-		return fmt.Errorf("spark warmup: cache entry: %w", err)
-	}
-	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		fmt.Fprintf(os.Stdout, "compiling %s\n", sparkwingDir)
-		return bincache.CompilePipeline(ctx, sparkwingDir, tempPath)
-	})
-	if err != nil {
-		return fmt.Errorf("spark warmup: %w", err)
-	}
-	defer func() { _ = lease.Release() }()
-	if !published {
-		fmt.Fprintf(os.Stdout, "binary already cached: %s\n", lease.Path())
-	}
-
-	if gcURL := bincache.CacheURL(); gcURL != "" {
-		if err := bincache.UploadBinary(ctx, gcURL, authwire.CacheBearerFromEnv(), key, lease.Path()); err != nil {
-			fmt.Fprintf(os.Stderr, "warn: gitcache upload failed: %v\n", err)
-		} else {
-			fmt.Fprintf(os.Stdout, "uploaded to %s/bin/%s\n", gcURL, key)
-		}
-	} else {
-		fmt.Fprintln(os.Stdout, "SPARKWING_GITCACHE_URL not set; skipping upload")
-	}
 	return nil
 }
 

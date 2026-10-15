@@ -1,5 +1,36 @@
 # Migrating to the next release
 
+## Local cache warming
+
+Before, `sparkwing pipeline sparks warmup` compiled a pipeline and uploaded its
+binary to gitcache. Local execution could also download that binary.
+
+Use `sparkwing cache warm --checkout /path/to/repo` to prepare the local cache.
+Go pipelines build on this machine. TypeScript checkouts install dependencies.
+Compiled pipeline binaries stay local. Remove remote binary-upload steps from
+warming scripts. Explicit result publication and memo/artifact reads use their
+separate run options.
+
+JSON warming output is one preparation receipt. Plain output is the prepared
+path. Scripts that consumed progress from stdout must read stderr instead.
+See [Warmup](../sparks.md#warmup) for native process-policy integration status.
+
+## Controller diagnostics
+
+Before, `sparkwing doctor` opened the local store and repaired abandoned state.
+It returned repair-oriented fields such as `orphaned_runs` and
+`permission_repairs`.
+
+Doctor now gets controller findings through the lifecycle interface. Scripts
+consume `findings`, `controller_checked` and `controller_error`. A failed
+inspection returns nonzero and can still include partial findings. Treat an
+empty array as complete only when `controller_checked` is true.
+
+Doctor no longer repairs private-home permissions or reaps processes from the
+CLI. Remove automation that expects those side effects. See
+[Doctor reports](../diagnosing-admission.md#doctor-reports) for the unfinished
+native runtime and machine-reader integration.
+
 ## Node logs reach the controller as segments
 
 - **Before:** a Kubernetes Job, warm runner, self-hosted agent, GitHub

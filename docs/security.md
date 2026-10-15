@@ -864,8 +864,7 @@ against the kernel's peer credentials (`SO_PEERCRED` on Linux,
 `LOCAL_PEERCRED` on macOS and FreeBSD) and dropped when the caller's uid
 differs, which holds even where socket file modes are not enforced on
 connect. Clients apply the same base and directory tests before dialing,
-including the peer sweep behind `sparkwing doctor`, so a `sparkwing`
-command refuses to hand a handshake to a socket sitting in a directory
+so a `sparkwing` command refuses to hand a handshake to a socket sitting in a directory
 this user does not own.
 
 The ownership, mode, and peer-credential checks are unix-only. Windows

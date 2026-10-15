@@ -153,7 +153,7 @@ var commandSynopses = map[string]string{
 	"sparkwing cache explain":                       "Show a pipeline's cache key and the inputs behind it",
 	"sparkwing cache info":                          "Print cache dir, size, ceilings, and recent entries",
 	"sparkwing cache prune":                         "Evict least recently used binaries down to the ceilings",
-	"sparkwing cache warm":                          "Build pipelines into the local binary cache",
+	"sparkwing cache warm":                          "Prepare the local pipeline cache and dependencies",
 	"sparkwing commands":                            "Search the command index or export the CLI reference",
 	"sparkwing completion":                          "Emit a shell completion script",
 	"sparkwing daemon":                              "Inspect and manage the local controller",
@@ -178,7 +178,7 @@ var commandSynopses = map[string]string{
 	"sparkwing docs migrations":                     "Per-version migration guides (agent-friendly)",
 	"sparkwing docs read":                           "Read one document",
 	"sparkwing docs search":                         "Find the section that answers a question",
-	"sparkwing doctor":                              "Inspect and repair abandoned local state",
+	"sparkwing doctor":                              "Inspect local controller and machine diagnostics",
 	"sparkwing examples":                            "Read complete example pipelines",
 	"sparkwing info":                                "Describe Sparkwing and the selected project",
 	"sparkwing operator":                            "Manage deployment operations",
@@ -377,7 +377,7 @@ var (
 	cmdSparksUpdate                   = surfaceCommand("sparkwing pipeline sparks update")
 	cmdSparksAdd                      = surfaceCommand("sparkwing pipeline sparks add")
 	cmdSparksRemove                   = surfaceCommand("sparkwing pipeline sparks remove")
-	cmdSparksWarmup                   = surfaceCommand("sparkwing cache warm")
+	cmdCacheWarm                      = surfaceCommand("sparkwing cache warm")
 	cmdSparksCatalog                  = surfaceCommand("sparkwing pipeline sparks catalog")
 	cmdSparksInflate                  = surfaceCommand("sparkwing pipeline sparks inflate")
 	cmdApprove                        = surfaceCommand("sparkwing runs approvals approve")

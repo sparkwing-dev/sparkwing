@@ -93,7 +93,7 @@ indexed in [cli-reference.md](cli-reference.md):
 | `version` | Composite CLI + SDK + sparks version card; `repos update --in-place` bumps the pinned SDK |
 | `update` | Self-update the `sparkwing` CLI binary |
 | `serve` | Detached local dashboard server: start / stop / restart / status / logs |
-| `doctor` | Diagnose and repair local state, including unsafe private-home permissions and records whose processes have exited |
+| `doctor` | Inspect local controller findings, project toolchains, hooks and competing installs |
 | `cloud` | Connect this machine to a controller: connect / status (`--cluster` for fleet and queue health) / disconnect |
 | `cluster` | Cluster ops against a profile's controller: agents / runners / worker / triggers / users / tokens / limits / concurrency / object-store |
 | `secrets` | Secrets in the local store, or controller-stored with `--profile`: set / get / list / delete / rotate |

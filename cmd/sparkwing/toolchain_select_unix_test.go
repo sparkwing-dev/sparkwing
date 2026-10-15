@@ -450,3 +450,14 @@ func TestRunToolchainReplaysTheArgvAfterRootFlags(t *testing.T) {
 		t.Fatalf("replayed argv = %q, want the verb with -C applied and gone", got)
 	}
 }
+
+func assertMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("%s mode = %04o, want %04o", path, got, want)
+	}
+}

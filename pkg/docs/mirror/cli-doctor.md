@@ -6,9 +6,9 @@ Every `sparkwing doctor` command, flag, and argument, generated from the CLI's o
 
 ## `sparkwing doctor`
 
-Inspect and repair abandoned local state
+Inspect local controller and machine diagnostics
 
-Identify removed timer verbs, service version skew and incompatible store schemas.
+Identify removed timer verbs, service version skew and incompatible store schemas through the local controller lifecycle. Inspection does not open state.db. Partial reports retain findings and exit nonzero when controller inspection fails.
 
 ### Flags
 

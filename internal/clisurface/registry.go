@@ -29,7 +29,7 @@ func Registry() []Command {
 			{Name: "all-entries"},
 			{Name: "docs"},
 		}},
-		{Path: "sparkwing cache warm", Flags: []Flag{
+		{Path: "sparkwing cache warm", Rules: []string{"Build Go pipelines into the local binary cache or install TypeScript dependencies. Binary cache entries stay on this machine. JSON emits one preparation receipt; plain emits the prepared path."}, Flags: []Flag{
 			{Name: "clear-cache"},
 		}},
 		{Path: "sparkwing commands", Flags: []Flag{
@@ -131,7 +131,7 @@ func Registry() []Command {
 			{Name: "body"},
 			{Name: "topics"},
 		}},
-		{Path: "sparkwing doctor", Rules: []string{"Identify removed timer verbs, service version skew and incompatible store schemas."}, Flags: []Flag{
+		{Path: "sparkwing doctor", Rules: []string{"Identify removed timer verbs, service version skew and incompatible store schemas through the local controller lifecycle. Inspection does not open state.db. Partial reports retain findings and exit nonzero when controller inspection fails."}, Flags: []Flag{
 			{Name: "dry-run"},
 			{Name: "timeout", Argument: "DURATION"},
 		}},

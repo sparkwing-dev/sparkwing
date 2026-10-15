@@ -188,5 +188,5 @@ the key to remove. The copy goes only into the machine's own `config.yaml`,
 never into a file `SPARKWING_CONFIG` names, and is skipped with a warning
 under a sandboxed `SPARKWING_HOME`. `SPARKWING_PROFILES`, `SPARKWING_REPOS`
 and `SPARKWING_FLEET_CONFIG` no longer move anything; a command refuses to
-start while one is set. `sparkwing doctor` lists old files already copied,
-which are safe to delete, apart from any it could not copy.
+start while one is set. `sparkwing doctor` does not migrate settings or
+remove old files.

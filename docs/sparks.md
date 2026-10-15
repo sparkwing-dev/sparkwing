@@ -369,8 +369,8 @@ scope: it writes `.resolved.mod` as usual but skips materializing
 
 Compiled pipeline binaries are cached under a `PipelineCacheKey` that hashes
 the pipeline source, local replace targets, the resolved sparks versions,
-and the overlay modfile contents. The same key is used locally
-(`~/.sparkwing/cache/pipelines/<key>/`) and in gitcache (`/bin/<key>`).
+and the overlay modfile contents. Binaries stay in the local cache under
+`$SPARKWING_HOME/cache/pipelines/v1/entries/<key>/`.
 
 Three tiers of cache behavior fall out of that key, each with a rough
 latency cost. Actual numbers vary by machine, network, and repo size; the
@@ -378,14 +378,12 @@ values below are order-of-magnitude on a developer laptop.
 
 | Tier | Latency | When it applies |
 |---|---|---|
-| Binary cache hit | ~0s | Same source, same resolved sparks versions, same overlay. The compiled binary is fetched and executed. The common case. |
+| Binary cache hit | ~0s | Same source, same resolved sparks versions, same overlay. The locally compiled binary is reused. The common case. |
 | Go build cache hit | ~2-3s | New sparks version or drifted overlay, so the binary cache misses, but most dependency object files are still in the Go build cache. Only the changed module recompiles and the final link runs. |
 | Fully cold | ~10-15s | First-ever build in a fresh environment, a Go toolchain version change, or an invalidated build cache. Every object file is rebuilt from source. |
 
-In-cluster, only the compiled pipeline binary is shared, via the gitcache
-`/bin/<key>` endpoint (see [Warmup](#warmup)). The Go build cache lives on
-the worker pod's scratch volume and dies with the pod, so a fresh pod that
-misses the binary cache pays the cold tier.
+Each machine builds and caches its own pipeline binary. A fresh ephemeral
+runner pays the cold tier until its local compiler cache is populated.
 
 ## `sparkwing pipeline sparks` CLI
 
@@ -413,8 +411,6 @@ and the overlay. What each subcommand does:
   For a range or `latest` constraint this picks up any newer tag; for an
   exact pin it is a no-op. Does not edit the `sparks:` block.
 - **add** / **remove** -- add or remove a library entry in the `sparks:` block.
-- **warmup** -- pre-compile pipeline binaries across consumer repos after a
-  release (see [Warmup](#warmup) below).
 - **inflate** -- copy a spark library's source into your repo so you can own
   and edit it (see [Inflating a spark library](#inflating-a-spark-library)
   below).
@@ -424,27 +420,29 @@ For the exact flags each subcommand takes, see
 
 ### Warmup
 
-`sparkwing pipeline sparks warmup` pre-compiles the pipeline binary across consumer
-repos after a sparks library release. It resolves the declared versions,
-compiles the repo's `.sparkwing/` package into its single pipeline binary,
-and uploads that binary to gitcache under its cache key (pass
-`--clear-cache` to discard the existing local binary cache first). The next
-`sparkwing run <pipeline>` run - locally or in-cluster - gets a binary-cache hit
-instead of paying the full compile cost.
+`sparkwing cache warm` resolves the checkout's sparks versions and compiles its
+Go pipeline into the same local cache used by `sparkwing run`. TypeScript
+checkouts install their declared dependencies with `npm ci`. Warming never
+executes the pipeline or transfers compiled binaries to another machine.
 
-Warmup uses the exact same build path as `sparkwing`, so cache keys match. It is
-an optimization, not a requirement: pipelines always resolve versions on
-build, warmup just removes the first-run compile cost after a release.
+Pass `--clear-cache` to prune the local binary cache first. Entries held by a
+running process remain protected. JSON returns one `cache_warm` receipt with
+`language`, `status`, `path`, an optional Go `key` and the confirmed `cleared`
+prune result. Plain prints the prepared path. Build and install progress goes
+to stderr. A preparation failure emits no success receipt.
 
-Most useful as a post-release step in a sparks library's own release
-pipeline. After tagging and pushing a new version, iterate over consumer
-repos and warm each:
-
-```bash
-for repo in repo-a repo-b repo-c; do
-    cd ~/code/$repo && sparkwing pipeline sparks warmup
-done
+```sh
+sparkwing cache warm --checkout /path/to/repo -o json
+sparkwing cache warm --checkout /path/to/repo --clear-cache -o plain
 ```
+
+<!-- design:begin -->
+The command uses the shared `procenv.Install` policy before pruning or building.
+Its implementation is still a dependency of this rewrite build. Command tests
+supply that policy through a fake. Native warming needs the process-environment
+implementation. Local compilation and TypeScript dependency preparation are
+separately tested with fake compiler and package-manager executables.
+<!-- design:end -->
 
 ### Inflating a spark library
 

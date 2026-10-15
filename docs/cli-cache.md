@@ -13,7 +13,7 @@ Inspect or trim the compiled pipeline binary cache
 - `explain` -- Show a pipeline's cache key and the inputs behind it
 - `info` -- Print cache dir, size, ceilings, and recent entries
 - `prune` -- Evict least recently used binaries down to the ceilings
-- `warm` -- Build pipelines into the local binary cache
+- `warm` -- Prepare the local pipeline cache and dependencies
 
 ### Flags
 
@@ -71,7 +71,9 @@ Evict least recently used binaries down to the ceilings
 
 ## `sparkwing cache warm`
 
-Build pipelines into the local binary cache
+Prepare the local pipeline cache and dependencies
+
+Build Go pipelines into the local binary cache or install TypeScript dependencies. Binary cache entries stay on this machine. JSON emits one preparation receipt; plain emits the prepared path.
 
 ### Flags
 

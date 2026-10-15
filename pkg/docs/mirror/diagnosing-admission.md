@@ -67,3 +67,38 @@ Supervisor records keep their enqueue time and daemon identity, and buffered
 records drain on supervisor shutdown. Journal writes do not hold admission or
 replacement. Policy endpoint URLs in records keep only the scheme, host, and
 path; userinfo, query parameters, and fragments are omitted.
+
+## Doctor reports
+
+```sh
+sparkwing doctor -o json
+sparkwing doctor --timeout 15s -o pretty
+sparkwing doctor --dry-run -o plain
+```
+
+Doctor inspects the project Go toolchain, repository hooks and competing CLI
+installs. Local controller findings come through its lifecycle interface.
+Both modes use the same diagnostic path. The CLI never opens `state.db`,
+repairs private-home permissions or reaps processes during this command.
+
+JSON output is one report. `controller_checked` is true only after the lifecycle
+check completes. `findings` retains each finding's `code`, `message`, optional
+`unit` and `hint`. When inspection fails, `controller_error` names the failure,
+the report retains any completed findings, and the command exits nonzero.
+Toolchain, hook-survey and install results remain in the same report. An empty
+finding array with `controller_checked: false` does not establish controller
+health.
+
+The timeout bounds inspection and its subprocesses. It defaults to ten seconds
+and accepts any positive duration. Cancellation keeps completed observations.
+
+<!-- design:begin -->
+Native runtime construction is not connected in this rewrite build. Doctor
+reports machine observations and returns an unavailable controller error.
+The machine hook survey still uses the legacy repository-settings loader,
+which can migrate configuration. Full read-only inspection also needs the final
+machine reader. Lifecycle tests with fakes cover the CLI composition. Native store-schema,
+service-skew and removed-timer checks still require the runtime implementation.
+Permission repair and process cleanup need controller-owned operations before
+they can be exposed again.
+<!-- design:end -->

@@ -213,7 +213,13 @@ See `examples/dep-cache/` for a runnable cold/warm demo.
 
 Sparkwing compiles the pipeline module and stores the binary under
 `$SPARKWING_HOME/cache/pipelines/v1/entries/<key>/` for reuse until its
-source inputs change.
+source inputs change. Compiled pipeline binaries are built on this machine and
+stay in its local cache. Explicit publication and remote memo/artifact reads do
+not transfer pipeline executables.
+
+`sparkwing cache warm --checkout /path/to/repo` prepares this local cache. A Go
+checkout compiles its pipeline. A TypeScript checkout installs dependencies.
+See [Warmup](sparks.md#warmup) for receipts and the process-policy integration.
 
 ### The key
 

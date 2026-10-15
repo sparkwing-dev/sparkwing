@@ -417,11 +417,9 @@ its own.
 A node that dies without running any code -- SIGKILL, the OOM killer, a
 crash -- cannot clean up after itself, so the node also leaves a record
 of every step session it starts in `<home>/sessions/`, removed when the
-command is reaped. Three sweeps read that ledger and end every session
-whose node is gone: `sparkwing run` before it dispatches, the admission
-daemon when a run's connection drops without a clean finish, and
-`sparkwing doctor`, which lists what it ended under `stray step sessions`
-and only reports under `--dry-run`. Each session ended this way appends a
+command is reaped. The run host and local controller read that ledger and end sessions
+whose jobs are gone. `sparkwing doctor` reads controller findings through
+the lifecycle interface and never reaps sessions from the CLI. Each session ended this way appends a
 `stray_session_reaped` event to its node, carrying the step's command line
 with the run's secret values masked as they were when the step started. The sweep is keyed on the
 session and the node's process incarnation, never on a process name, so
@@ -892,12 +890,10 @@ untrusted pipeline code under an account whose reach you accept.
 Sparkwing does protect its laptop-local persistence from other OS users. On
 POSIX systems it creates `$SPARKWING_HOME`, run directories, and private cache
 directories as `0700`, and local state databases, SQLite sidecars, logs, PID
-files, and materialized run values as `0600`. `sparkwing doctor --dry-run`
-lists permissive legacy paths; `sparkwing doctor` tightens them without
-following symlinks or removing the owner execute bit from cached pipeline
-binaries. Portable Go file modes do not describe Windows DACLs, so doctor
-reports that audit as unverified on Windows rather than claiming the ACL is
-private.
+files, and materialized run values as `0600`. `sparkwing doctor` is a
+diagnostic command. It does not repair private-home permissions.
+Portable Go file modes do not describe Windows DACLs. Private-file handling
+uses the platform-specific owner policy.
 
 SQLite creates local databases with private permissions on POSIX systems and
 coordinates concurrent opens through its own file locking. Creation works without
