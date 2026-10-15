@@ -143,10 +143,13 @@ func (sdkOperations) RunStep(ctx context.Context, built any, req nodeproto.Reque
 	if step == nil {
 		return result, sdkError(apierr.UnknownStep, "step is not declared")
 	}
-	if err := n.work.beginAttempt(req.Attempt); err != nil {
+	if err := n.work.beginStep(req.Attempt, step, req.Settled); err != nil {
 		return result, err
 	}
-	defer n.work.finishAttempt()
+	defer func() {
+		step.markDone(nil)
+		n.work.finishStep(step.id)
+	}()
 	result.Outcome = "failed"
 	defer func() {
 		if v := recover(); v != nil {
@@ -224,6 +227,15 @@ func (sdkOperations) Eval(ctx context.Context, built any, req nodeproto.Request)
 	n := closureJob(p, req.Closure)
 	if n == nil || (req.Job != "" && n.id != req.Job && !generatorClosure(n, req.Closure)) {
 		return result, sdkError(apierr.UnknownClosure, "closure is not declared for the bound job")
+	}
+	if step := closureStep(n, req.Closure); step != nil {
+		if err := n.work.beginStep(req.Attempt, step, req.Settled); err != nil {
+			return result, err
+		}
+		defer n.work.finishStep(step.id)
+		req.Step = step.id
+	} else if req.Attempt != 0 || req.Settled != nil {
+		return result, sdkError(apierr.ProtocolError, "job closure cannot carry step state")
 	}
 	ctx, err = executionContext(ctx, p, n, req)
 	if err != nil {
@@ -432,6 +444,19 @@ func hasClosure(c nodeproto.ClosureSpec, id string) bool {
 		}
 	}
 	return false
+}
+
+func closureStep(n *JobNode, id string) *WorkStep {
+	if n.work != nil {
+		for _, step := range n.work.steps {
+			for i := range step.skipIf {
+				if id == closureID(n.id, "step/"+step.id+"/skip", i) {
+					return step
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func maskText(text string, values []string) string {

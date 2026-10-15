@@ -335,8 +335,6 @@ func (s *hostedRunState) UpdatePlanSnapshot(ctx context.Context, runID string, s
 	return nil
 }
 
-// safety: a run missing a required secret stops before any node starts, naming each one with its fix, as the
-// dispatcher's preflight did; the snapshot write is the first point the host knows the declared secrets.
 func hostedSecretPreflight(ctx context.Context, r *secrets.Cached, names []string, opts Options) error {
 	missing := &sparkwingruntime.MissingSecretsError{Pipeline: opts.Pipeline}
 	for _, name := range names {

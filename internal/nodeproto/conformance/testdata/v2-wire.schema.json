@@ -270,6 +270,12 @@
         "runner": {
           "$ref": "#/$defs/RunnerIdentity"
         },
+        "settled": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "step": {
           "type": "string"
         },

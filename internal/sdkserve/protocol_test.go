@@ -138,7 +138,7 @@ func TestServeCancellationKeepsBothReplies(t *testing.T) {
 	var output bytes.Buffer
 	done := make(chan error, 1)
 	go func() { done <- Serve(context.Background(), in, &output, Config{SDKVersion: "v1", Operations: fake}) }()
-	for _, line := range []string{wireHello("hello"), wirePlan("plan"), `{"id":"step","op":"run_step","job":"j","step":"s","attempt":1}`} {
+	for _, line := range []string{wireHello("hello"), wirePlan("plan"), `{"id":"step","op":"run_step","job":"j","step":"s","attempt":1,"settled":[]}`} {
 		if _, err := io.WriteString(writer, line+"\n"); err != nil {
 			t.Fatal(err)
 		}
@@ -166,7 +166,7 @@ func TestServeInputCloseJoinsRunningStep(t *testing.T) {
 	var output bytes.Buffer
 	done := make(chan error, 1)
 	go func() { done <- Serve(context.Background(), in, &output, Config{SDKVersion: "v1", Operations: fake}) }()
-	for _, line := range []string{wireHello("hello"), wirePlan("plan"), `{"id":"step","op":"run_step","job":"j","step":"s","attempt":1}`} {
+	for _, line := range []string{wireHello("hello"), wirePlan("plan"), `{"id":"step","op":"run_step","job":"j","step":"s","attempt":1,"settled":[]}`} {
 		if _, err := io.WriteString(writer, line+"\n"); err != nil {
 			t.Fatal(err)
 		}

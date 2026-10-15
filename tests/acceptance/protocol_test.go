@@ -82,7 +82,7 @@ func TestProtocol(t *testing.T) {
 						t.Run("attribute-masking", testGoSDKFakeHostAttributeMasks)
 						t.Run("plan-error-masking", testGoSDKPlanErrorMasks)
 						t.Run("fake-host-run-snapshot", testGoSDKFakeHostRunSnapshot)
-						t.Run("entrypoint-alias", testGoSDKEntrypointAlias)
+						t.Run("resolved-entrypoint-and-invoked-name", testGoSDKEntrypointAlias)
 						t.Run("closure-identifiers", testGoSDKClosureIdentifiers)
 						t.Run("eval-run-logs", testGoSDKFakeHostEvalRunLogs)
 						t.Run("job-arguments", testGoSDKJobArguments)

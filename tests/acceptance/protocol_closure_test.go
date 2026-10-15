@@ -95,12 +95,22 @@ func testGoSDKClosureIdentifiers(t *testing.T) {
 					checks[step.Closures.SkipIf[0]] = "true"
 				}
 			}
+			stepClosures := map[string]bool{}
+			for _, step := range job.Steps {
+				for _, closure := range step.Closures.SkipIf {
+					stepClosures[closure] = true
+				}
+			}
 			for closure, want := range checks {
 				fake, err := host.Eval(t.Context(), plan, job.ID, closure, json.RawMessage("null"))
 				if err != nil || string(fake) != want {
 					t.Fatalf("fake closure %q = %s, %v; want %s", closure, fake, err, want)
 				}
-				sendProtocolProbe(t, process, nodeproto.Request{ID: closure, Op: nodeproto.OpEval, Closure: closure, Input: json.RawMessage("null")})
+				request := nodeproto.Request{ID: closure, Op: nodeproto.OpEval, Closure: closure, Input: json.RawMessage("null")}
+				if stepClosures[closure] {
+					request.Attempt, request.Settled = 1, []string{}
+				}
+				sendProtocolProbe(t, process, request)
 				var result nodeproto.EvalResult
 				decodeProtocolProbe(t, protocolProbeReply(t, process, closure), &result)
 				if result.Error != nil || string(result.Value) != want {

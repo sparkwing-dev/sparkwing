@@ -7,69 +7,92 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/sparkwing-dev/sparkwing/internal/swtags"
-
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/swtags"
 )
 
 func (sdkOperations) Describe(ctx context.Context) (nodeproto.DescribeDoc, error) {
 	doc := nodeproto.DescribeDoc{Pipelines: []nodeproto.PipelineDescription{}}
 	for _, name := range registered() {
 		reg, _ := lookup(name)
-		p := reg.instance()
-		d := nodeproto.PipelineDescription{Name: name, Args: []nodeproto.ArgumentDescription{}, Extra: reg.Schema.Extra}
-		if h, ok := p.(HelpProvider); ok {
-			d.Help = h.Help()
+		description, err := describePipeline(ctx, reg)
+		if err != nil {
+			return nodeproto.DescribeDoc{}, err
 		}
-		if h, ok := p.(ShortHelpProvider); ok {
-			d.Short = h.ShortHelp()
-		}
-		if h, ok := p.(ExampleProvider); ok {
-			for _, e := range h.Examples() {
-				d.Examples = append(d.Examples, nodeproto.UsageExample{Comment: e.Comment, Command: e.Command})
-			}
-		}
-		if h, ok := p.(EnvVarDocer); ok {
-			for _, e := range h.EnvVars() {
-				d.EnvVars = append(d.EnvVars, nodeproto.EnvironmentDescription{Name: e.Name, Description: e.Description, Default: &e.Default})
-			}
-		}
-		for _, f := range reg.Schema.Fields {
-			if f.isExtraBag {
-				continue
-			}
-			d.Args = append(d.Args, nodeproto.ArgumentDescription{Name: f.Name, Short: f.Short, Type: f.Type, Required: f.Required, Description: f.Description, Default: declaredDefault(f.Default), Enum: f.Enum, Secret: f.Secret})
-		}
-		if h, ok := p.(SecretsProvider); ok {
-			fields, err := secretDeclarations(h.Secrets())
-			if err != nil {
-				return doc, err
-			}
-			d.Secrets = fields
-		}
-		if plan := descriptionPlan(ctx, reg); plan != nil {
-			for _, a := range plan.declaredArguments() {
-				d.Args = append(d.Args, nodeproto.ArgumentDescription{Name: a.Name, Short: a.Short, Type: a.Type, Required: a.Required, Description: a.Desc, Default: declaredDefault(a.Default), Enum: a.Enum, JobID: a.JobID})
-			}
-			riskSet := map[string]bool{}
-			for _, job := range planDocument(plan).Jobs {
-				for _, step := range job.Steps {
-					if len(step.Risks) > 0 {
-						d.RisksByStep = append(d.RisksByStep, nodeproto.StepRisks{JobID: job.ID, StepID: step.ID, Labels: step.Risks})
-						for _, risk := range step.Risks {
-							riskSet[risk] = true
-						}
-					}
-				}
-			}
-			for risk := range riskSet {
-				d.Risks = append(d.Risks, risk)
-			}
-			sort.Strings(d.Risks)
-		}
-		doc.Pipelines = append(doc.Pipelines, d)
+		doc.Pipelines = append(doc.Pipelines, description)
 	}
 	return doc, nil
+}
+
+func describePipeline(ctx context.Context, reg *registration) (d nodeproto.PipelineDescription, err error) {
+	defer func() {
+		if failure := recover(); failure != nil {
+			var ok bool
+			err, ok = failure.(error)
+			if !ok {
+				err = fmt.Errorf("%v", failure)
+			}
+		}
+		if err != nil {
+			message := fmt.Sprintf("describe pipeline %q: %v", reg.Name, err)
+			err = sdkError(apierr.PlanFailed, maskText(message, reg.secretValues(nil)))
+		}
+	}()
+	p := reg.instance()
+	d = nodeproto.PipelineDescription{Name: reg.Name, Args: []nodeproto.ArgumentDescription{}, Extra: reg.Schema.Extra}
+	if h, ok := p.(HelpProvider); ok {
+		d.Help = h.Help()
+	}
+	if h, ok := p.(ShortHelpProvider); ok {
+		d.Short = h.ShortHelp()
+	}
+	if h, ok := p.(ExampleProvider); ok {
+		for _, e := range h.Examples() {
+			d.Examples = append(d.Examples, nodeproto.UsageExample{Comment: e.Comment, Command: e.Command})
+		}
+	}
+	if h, ok := p.(EnvVarDocer); ok {
+		for _, e := range h.EnvVars() {
+			d.EnvVars = append(d.EnvVars, nodeproto.EnvironmentDescription{Name: e.Name, Description: e.Description, Default: &e.Default})
+		}
+	}
+	for _, f := range reg.Schema.Fields {
+		if f.isExtraBag {
+			continue
+		}
+		d.Args = append(d.Args, nodeproto.ArgumentDescription{Name: f.Name, Short: f.Short, Type: f.Type, Required: f.Required, Description: f.Description, Default: declaredDefault(f.Default), Enum: f.Enum, Secret: f.Secret})
+	}
+	if h, ok := p.(SecretsProvider); ok {
+		fields, err := secretDeclarations(h.Secrets())
+		if err != nil {
+			return d, err
+		}
+		d.Secrets = fields
+	}
+	plan, err := reg.discover(ctx)
+	if err != nil {
+		return d, err
+	}
+	for _, a := range plan.declaredArguments() {
+		d.Args = append(d.Args, nodeproto.ArgumentDescription{Name: a.Name, Short: a.Short, Type: a.Type, Required: a.Required, Description: a.Desc, Default: declaredDefault(a.Default), Enum: a.Enum, JobID: a.JobID})
+	}
+	riskSet := map[string]bool{}
+	for _, job := range planDocument(plan).Jobs {
+		for _, step := range job.Steps {
+			if len(step.Risks) > 0 {
+				d.RisksByStep = append(d.RisksByStep, nodeproto.StepRisks{JobID: job.ID, StepID: step.ID, Labels: step.Risks})
+				for _, risk := range step.Risks {
+					riskSet[risk] = true
+				}
+			}
+		}
+	}
+	for risk := range riskSet {
+		d.Risks = append(d.Risks, risk)
+	}
+	sort.Strings(d.Risks)
+	return d, nil
 }
 
 func secretDeclarations(raw any) ([]nodeproto.SecretDeclaration, error) {
@@ -95,16 +118,6 @@ func secretDeclarations(raw any) ([]nodeproto.SecretDeclaration, error) {
 		out = append(out, nodeproto.SecretDeclaration{Name: f.Name, Optional: f.Optional})
 	}
 	return out, nil
-}
-
-func descriptionPlan(ctx context.Context, reg *registration) (plan *Plan) {
-	defer func() {
-		if recover() != nil {
-			plan = nil
-		}
-	}()
-	plan, _ = reg.Invoke(skipArgResolve(ctx), nil, RunContext{Pipeline: reg.Name})
-	return plan
 }
 
 type secretProviderKey struct{}

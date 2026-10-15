@@ -69,7 +69,7 @@ func testGoSDKReplayEnvironment(t *testing.T) {
 	if condition.Error != nil || string(condition.Value) != "false" {
 		t.Fatalf("process condition body environment = %+v", condition)
 	}
-	sendProtocolProbe(t, process, nodeproto.Request{ID: "body", Op: nodeproto.OpRunStep, Job: "leaf", Step: "run", Attempt: 1})
+	sendProtocolProbe(t, process, nodeproto.Request{ID: "body", Op: nodeproto.OpRunStep, Job: "leaf", Step: "run", Attempt: 1, Settled: []string{}})
 	var body nodeproto.RunResult
 	decodeProtocolProbe(t, protocolProbeReply(t, process, "body"), &body)
 	if body.Error != nil || body.Outcome != "success" {

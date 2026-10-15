@@ -102,7 +102,7 @@ func testGoSDKHelloAndHandles(t *testing.T) {
 
 func runProtocolProbe(t *testing.T, process *acceptance.GoSDKProcess, mode string, runner *nodeproto.RunnerIdentity) {
 	t.Helper()
-	sendProtocolProbe(t, process, nodeproto.Request{ID: "step", Op: nodeproto.OpRunStep, Job: "probe", Step: "run", Attempt: 1})
+	sendProtocolProbe(t, process, nodeproto.Request{ID: "step", Op: nodeproto.OpRunStep, Job: "probe", Step: "run", Attempt: 1, Settled: []string{}})
 	line, err := process.NextFrame()
 	if err != nil {
 		t.Fatal(err)

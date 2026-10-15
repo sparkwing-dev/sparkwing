@@ -11,8 +11,7 @@ import (
 type RunContext struct {
 	RunID string
 
-	// Pipeline is the registered name of the invoked pipeline
-	// (e.g. "lint", "build-test-deploy").
+	// Pipeline is the invoked project name, including any alias.
 	Pipeline string
 
 	// Git is the run's view of the cloned working tree.
@@ -25,16 +24,10 @@ type RunContext struct {
 
 	StartedAt time.Time
 
-	// NoMemo reports that this run was asked to ignore cached per-node
-	// results; cache writes still happen. Plan code reads the signal here
-	// because the orchestrator installs it on the context only after the
-	// plan is built.
+	// NoMemo bypasses memo reads while retaining writes.
 	NoMemo bool
 
-	// DryRun reports that this run was asked to describe its work rather
-	// than apply it. A step body reads the same answer from [IsDryRun];
-	// this field is what a Plan reads, which runs before the orchestrator
-	// installs the mode on the context.
+	// DryRun carries the same sealed mode as IsDryRun during planning and execution.
 	DryRun bool
 }
 

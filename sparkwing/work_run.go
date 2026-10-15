@@ -7,11 +7,22 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
-func (w *Work) beginAttempt(attempt int) error {
+func (w *Work) beginStep(attempt int, current *WorkStep, settled []string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if attempt < 1 || attempt < w.attempt || (attempt != w.attempt && w.active != 0) {
-		return sdkError(apierr.ProtocolError, "run_step attempt is stale or overlaps another attempt")
+	if attempt < 1 || attempt < w.attempt || (attempt != w.attempt && len(w.active) != 0) || w.active[current.id] || settled == nil {
+		return sdkError(apierr.ProtocolError, "step state is absent, stale or overlaps another attempt")
+	}
+	if attempt == w.attempt {
+		current.mu.Lock()
+		terminal := current.resolved
+		current.mu.Unlock()
+		if terminal {
+			return sdkError(apierr.ProtocolError, "step is already terminal in this attempt")
+		}
+	}
+	if err := w.validateSettlement(current, settled); err != nil {
+		return err
 	}
 	if attempt != w.attempt {
 		// safety: StepGet must never return output left by an earlier attempt.
@@ -22,28 +33,49 @@ func (w *Work) beginAttempt(attempt int) error {
 		}
 		w.attempt = attempt
 	}
-	w.active++
+	for _, id := range settled {
+		w.byID[id].markDone(nil)
+	}
+	if w.active == nil {
+		w.active = map[string]bool{}
+	}
+	w.active[current.id] = true
 	return nil
 }
 
-func (w *Work) finishAttempt() {
+func (w *Work) validateSettlement(current *WorkStep, settled []string) error {
+	terminal := make(map[string]bool, len(settled))
+	for _, id := range settled {
+		if id == current.id || w.byID[id] == nil || terminal[id] || w.active[id] {
+			return sdkError(apierr.ProtocolError, "settled steps contain an invalid or duplicate step")
+		}
+		terminal[id] = true
+	}
+	needs := append([]string(nil), current.needs...)
+	checked := map[string]bool{current.id: true}
+	for len(needs) > 0 {
+		id := needs[len(needs)-1]
+		needs = needs[:len(needs)-1]
+		if !terminal[id] {
+			return sdkError(apierr.ProtocolError, "step prerequisite is not settled")
+		}
+		if !checked[id] {
+			checked[id] = true
+			needs = append(needs, w.byID[id].needs...)
+		}
+	}
+	return nil
+}
+
+func (w *Work) finishStep(id string) {
 	w.mu.Lock()
-	w.active--
+	delete(w.active, id)
 	w.mu.Unlock()
 }
 
 func runStep(ctx context.Context, work *Work, step *WorkStep) (any, error) {
 	if work == nil || step == nil || work.byID[step.id] != step {
 		return nil, fmt.Errorf("sparkwing: run_step: step is not in the planned job")
-	}
-	for _, id := range step.needs {
-		dependency := work.byID[id]
-		if dependency == nil {
-			return nil, fmt.Errorf("sparkwing: run_step: step dependency is absent")
-		}
-		// safety: a failed prerequisite can be allowed by ContinueOnError; nil
-		// resolves StepGet without replacing a successful prior output.
-		dependency.markDone(nil)
 	}
 	if IsDryRun(ctx) {
 		if step.dryRunFn != nil {

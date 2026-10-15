@@ -1,7 +1,6 @@
 package sparkwing
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -166,25 +165,4 @@ func resolveAndBindJobArgs(p *Plan, args map[string]string) error {
 		}
 	}
 	return errors.Join(problems...)
-}
-
-type keySkipArgResolveType struct{}
-
-var keySkipArgResolve = keySkipArgResolveType{}
-
-// SkipArgResolve marks ctx so a registration's Invoke builds the plan
-// without resolving and binding [WithArgs] values. Describe-time
-// callers use it to walk the plan graph without failing on missing
-// required job args; run paths never set it, so a missing required
-// arg fails before any step runs.
-func skipArgResolve(ctx context.Context) context.Context {
-	return context.WithValue(ctx, keySkipArgResolve, true)
-}
-
-func skipArgResolveFromContext(ctx context.Context) bool {
-	if ctx == nil {
-		return false
-	}
-	v, _ := ctx.Value(keySkipArgResolve).(bool)
-	return v
 }

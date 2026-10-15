@@ -197,7 +197,7 @@ func testEnvelopeInvocationResults(t *testing.T, process *acceptance.GoSDKProces
 	requireProtocolCode(t, protocolProbeReply(t, process, "plan-again"), apierr.ProtocolError)
 	for _, attempt := range []int{0, -1, 1} {
 		id := map[int]string{0: "zero", -1: "negative", 1: "body"}[attempt]
-		sendProtocolProbe(t, process, map[string]any{"id": id, "op": "run_step", "job": "envelope", "step": "body", "attempt": attempt})
+		sendProtocolProbe(t, process, map[string]any{"id": id, "op": "run_step", "job": "envelope", "step": "body", "attempt": attempt, "settled": []string{}})
 		reply := protocolProbeReply(t, process, id)
 		if attempt < 1 {
 			requireProtocolCode(t, reply, apierr.BadRequest)
@@ -215,13 +215,13 @@ func testEnvelopeInvocationResults(t *testing.T, process *acceptance.GoSDKProces
 			t.Fatalf("body success = %+v", result)
 		}
 	}
-	sendProtocolProbe(t, process, nodeproto.Request{ID: "absent-step", Op: nodeproto.OpRunStep, Job: "envelope", Step: "absent", Attempt: 1})
+	sendProtocolProbe(t, process, nodeproto.Request{ID: "absent-step", Op: nodeproto.OpRunStep, Job: "envelope", Step: "absent", Attempt: 1, Settled: []string{}})
 	requireProtocolCode(t, protocolProbeReply(t, process, "absent-step"), apierr.UnknownStep)
 }
 
 func testEnvelopeCancel(t *testing.T, bin string) {
 	process, job := planEnvelopeProbe(t, bin, "cancel")
-	sendProtocolProbe(t, process, nodeproto.Request{ID: "sibling", Op: nodeproto.OpRunStep, Job: "envelope", Step: "sibling", Attempt: 1})
+	sendProtocolProbe(t, process, nodeproto.Request{ID: "sibling", Op: nodeproto.OpRunStep, Job: "envelope", Step: "sibling", Attempt: 1, Settled: []string{}})
 	requireEnvelopeLog(t, process, "sibling-waiting")
 	sendProtocolProbe(t, process, nodeproto.Request{ID: "memo", Op: nodeproto.OpEval, Closure: job.Closures.MemoKey})
 	requireEnvelopeLog(t, process, "memo-waiting")

@@ -3,16 +3,17 @@ package sparkwing
 import (
 	"context"
 	"encoding/json"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 func TestV2Declarations(t *testing.T) {
 	p := NewPlan().Priority(0).ClaimWait(0).Checkout(Checkout{Tags: new(bool)})
 	n := Job(p, "build", func(context.Context) error { return nil }).
 		Memo(func(context.Context) (MemoValue, error) { return MemoKey("build"), nil }, MemoTTL(0)).
-		Cache(Npm()).Artifacts("dist/**").Env("MODE", "test").Env("NODE_OPTIONS", "x", Startup()).
+		Cache(Npm()).Artifacts("dist/**").Env("MODE", "test").Env("CUSTOM_RUNTIME", "x", Startup()).Env("NODE_OPTIONS", "x").
 		Retry(0, Backoff(time.Second)).Timeout(0)
 	generated := n.Generate(func(_ context.Context, p *Plan) error {
 		Job(p, "child", func(context.Context) error { return nil })
@@ -27,7 +28,7 @@ func TestV2Declarations(t *testing.T) {
 	if j.Memo == nil || j.Memo.TTLMS == nil || *j.Memo.TTLMS != 0 || j.TimeoutMS == nil || j.Retry == nil {
 		t.Fatalf("lost presence: %+v", j)
 	}
-	if len(j.Caches) != 1 || len(j.Artifacts) != 1 || j.Env["MODE"].Startup || !j.Env["NODE_OPTIONS"].Startup {
+	if len(j.Caches) != 1 || len(j.Artifacts) != 1 || j.Env["MODE"].Startup || !j.Env["CUSTOM_RUNTIME"].Startup || j.Env["NODE_OPTIONS"].Startup {
 		t.Fatalf("declarations: %+v", j)
 	}
 	if doc.Jobs[1].Approval == nil || len(doc.Jobs[1].Steps) != 0 || len(doc.Jobs[1].Closures.SkipIf) != 1 {
@@ -68,7 +69,7 @@ func TestGeneratedCodeExecutesAndReplays(t *testing.T) {
 	if err != nil || replay.Error != nil || calls != 1 || string(replay.Value) != string(first.Value) {
 		t.Fatalf("replay: calls=%d %v %+v", calls, err, replay)
 	}
-	result, err := ops.RunStep(context.Background(), p, nodeproto.Request{Job: "child", Step: "run", Attempt: 1})
+	result, err := ops.RunStep(context.Background(), p, nodeproto.Request{Job: "child", Step: "run", Attempt: 1, Settled: []string{}})
 	if err != nil || result.Outcome != "success" {
 		t.Fatalf("generated body: %+v %v", result, err)
 	}
@@ -76,7 +77,7 @@ func TestGeneratedCodeExecutesAndReplays(t *testing.T) {
 	if err != nil || nested.Error != nil {
 		t.Fatalf("nested: %+v %v", nested, err)
 	}
-	result, err = ops.RunStep(context.Background(), p, nodeproto.Request{Job: "grandchild", Step: "run", Attempt: 1})
+	result, err = ops.RunStep(context.Background(), p, nodeproto.Request{Job: "grandchild", Step: "run", Attempt: 1, Settled: []string{}})
 	if err != nil || result.Outcome != "success" {
 		t.Fatalf("nested body: %+v %v", result, err)
 	}

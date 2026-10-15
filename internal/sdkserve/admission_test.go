@@ -34,7 +34,7 @@ func TestServeRefusesForeignJobBeforePreparation(t *testing.T) {
 	fake := &preparedOperations{}
 	requests := strings.Join([]string{
 		wireHello("hello"), wirePlan("plan"),
-		`{"id":"foreign","op":"run_step","job":"other","step":"s","attempt":1}`,
+		`{"id":"foreign","op":"run_step","job":"other","step":"s","attempt":1,"settled":[]}`,
 	}, "\n") + "\n"
 	var output bytes.Buffer
 	if err := Serve(t.Context(), strings.NewReader(requests), &output, Config{Operations: fake}); err != nil {
@@ -59,7 +59,7 @@ func TestServeMetadataDoesNotBlockCancellation(t *testing.T) {
 				done := make(chan error, 1)
 				go func() { done <- Serve(ctx, in, &output, Config{Operations: fake}) }()
 				defer func() { cancel(); _ = writer.Close(); <-done }()
-				for _, request := range []string{wireHello("hello"), wirePlan("plan"), `{"id":"step","op":"run_step","job":"j","step":"s","attempt":1}`} {
+				for _, request := range []string{wireHello("hello"), wirePlan("plan"), `{"id":"step","op":"run_step","job":"j","step":"s","attempt":1,"settled":[]}`} {
 					if _, err := io.WriteString(writer, request+"\n"); err != nil {
 						t.Fatal(err)
 					}
@@ -67,7 +67,7 @@ func TestServeMetadataDoesNotBlockCancellation(t *testing.T) {
 				<-fake.stepStarted
 				written := make(chan error, 1)
 				go func() {
-					_, err := io.WriteString(writer, metadata+"\n"+`{"id":"duplicate","op":"run_step","job":"j","step":"s","attempt":1}`+"\n"+`{"id":"cancel","op":"cancel","job":"j","step":"s"}`+"\n")
+					_, err := io.WriteString(writer, metadata+"\n"+`{"id":"duplicate","op":"run_step","job":"j","step":"s","attempt":1,"settled":[]}`+"\n"+`{"id":"cancel","op":"cancel","job":"j","step":"s"}`+"\n")
 					written <- err
 				}()
 				synctest.Wait()

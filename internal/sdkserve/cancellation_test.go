@@ -24,10 +24,12 @@ func (f *joinedOperations) wait(ctx context.Context, req nodeproto.Request) {
 	f.stopped <- req.ID
 	<-f.release
 }
+
 func (f *joinedOperations) RunStep(ctx context.Context, _ any, req nodeproto.Request) (nodeproto.RunResult, error) {
 	f.wait(ctx, req)
 	return nodeproto.RunResult{Outcome: "success"}, nil
 }
+
 func (f *joinedOperations) Eval(ctx context.Context, _ any, req nodeproto.Request) (nodeproto.EvalResult, error) {
 	f.wait(ctx, req)
 	return nodeproto.EvalResult{Value: []byte("null")}, nil
@@ -70,7 +72,7 @@ func TestCancelJoinsSelectedStepsAndEvals(t *testing.T) {
 				send(`{"id":"eval","op":"eval","closure":"condition"}`)
 				<-fake.started
 				if test.step {
-					send(`{"id":"step","op":"run_step","job":"j","step":"s","attempt":1}`)
+					send(`{"id":"step","op":"run_step","job":"j","step":"s","attempt":1,"settled":[]}`)
 					<-fake.started
 				}
 				send(`{"id":"cancel","op":"cancel",` + test.selector + `}`)

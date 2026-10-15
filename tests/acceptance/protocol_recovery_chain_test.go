@@ -92,7 +92,7 @@ func testRecoveryChainArguments(t *testing.T, bin string, host sparkwingtest.Hos
 				if !reflect.DeepEqual(fake, doc) {
 					t.Error("fake and process recovery chains differ")
 				}
-				sendProtocolProbe(t, process, nodeproto.Request{ID: "body", Op: nodeproto.OpRunStep, Job: "notify", Step: "run", Attempt: 1})
+				sendProtocolProbe(t, process, nodeproto.Request{ID: "body", Op: nodeproto.OpRunStep, Job: "notify", Step: "run", Attempt: 1, Settled: []string{}})
 				var result nodeproto.RunResult
 				decodeProtocolProbe(t, protocolProbeReply(t, process, "body"), &result)
 				if result.Outcome != "success" || result.Error != nil || string(result.Output) != tc.output {
@@ -149,7 +149,7 @@ func testGeneratedRecoveryChain(t *testing.T, bin string, host sparkwingtest.Hos
 			} else if result.Error != nil || !reflect.DeepEqual(result.Value, fake) {
 				t.Errorf("process expansion = %+v, want %s", result, fake)
 			}
-			sendProtocolProbe(t, process, nodeproto.Request{ID: "body", Op: nodeproto.OpRunStep, Job: "notify", Step: "run", Attempt: 1})
+			sendProtocolProbe(t, process, nodeproto.Request{ID: "body", Op: nodeproto.OpRunStep, Job: "notify", Step: "run", Attempt: 1, Settled: []string{}})
 			reply := protocolProbeReply(t, process, "body")
 			if tc.output == "" {
 				requireProtocolCode(t, reply, apierr.UnknownJob)

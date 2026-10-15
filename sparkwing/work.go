@@ -37,7 +37,7 @@ type Work struct {
 	groups   []*StepGroup
 	failures ParallelFailurePolicy
 	attempt  int
-	active   int
+	active   map[string]bool
 }
 
 // ParallelFailurePolicy controls whether independent Work items finish after

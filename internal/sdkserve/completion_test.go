@@ -43,13 +43,13 @@ func TestServeCompletionReleasesStepBeforeReply(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- Serve(t.Context(), in, out, Config{Operations: fake}) }()
 	defer func() { close(out.release); _ = requests.Close(); <-done }()
-	for _, line := range []string{wireHello("hello"), wirePlan("plan"), `{"id":"first","op":"run_step","job":"j","step":"s","attempt":1}`} {
+	for _, line := range []string{wireHello("hello"), wirePlan("plan"), `{"id":"first","op":"run_step","job":"j","step":"s","attempt":1,"settled":[]}`} {
 		if _, err := io.WriteString(requests, line+"\n"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	<-out.written
-	if _, err := io.WriteString(requests, `{"id":"second","op":"run_step","job":"j","step":"s","attempt":2}`+"\n"); err != nil {
+	if _, err := io.WriteString(requests, `{"id":"second","op":"run_step","job":"j","step":"s","attempt":2,"settled":[]}`+"\n"); err != nil {
 		t.Fatal(err)
 	}
 	<-fake.second

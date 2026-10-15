@@ -56,13 +56,15 @@ func TestBoundGeneratedJobReplaysThroughProtocol(t *testing.T) {
 	})
 	reader := bufio.NewReader(frames)
 	for _, request := range []nodeproto.Request{
-		{ID: "hello", Op: nodeproto.OpHello, Protocol: 2,
+		{
+			ID: "hello", Op: nodeproto.OpHello, Protocol: 2,
 			Engine: &nodeproto.EngineIdentity{Version: "fixture"}, Runner: &nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
-			Binding: &nodeproto.ProcessBinding{RunID: "r", JobID: "leaf", Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "leaf-only"}}},
+			Binding: &nodeproto.ProcessBinding{RunID: "r", JobID: "leaf", Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "leaf-only"}},
+		},
 		{ID: "plan", Op: nodeproto.OpPlan, Pipeline: "generated-replay-fixture", Args: map[string]string{}, Run: &nodeproto.RunContext{RunID: "r", Pipeline: "generated-replay-fixture"}},
 		{ID: "source", Op: nodeproto.OpEval, Closure: "source/generate/0", Input: json.RawMessage(`null`)},
 		{ID: "child", Op: nodeproto.OpEval, Closure: "child/generate/0", Input: json.RawMessage(`null`)},
-		{ID: "step", Op: nodeproto.OpRunStep, Job: "leaf", Step: "run", Attempt: 1},
+		{ID: "step", Op: nodeproto.OpRunStep, Job: "leaf", Step: "run", Attempt: 1, Settled: []string{}},
 	} {
 		if err := json.NewEncoder(requests).Encode(request); err != nil {
 			t.Fatal(err)

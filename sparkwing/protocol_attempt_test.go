@@ -37,7 +37,11 @@ func TestProtocolAttemptReplacesStepOutputs(t *testing.T) {
 			Job(plan, "job", &attemptJob{failFirst: failFirst})
 			for attempt := 1; attempt <= 2; attempt++ {
 				for _, step := range []string{"source", "result"} {
-					got, err := (sdkOperations{}).RunStep(t.Context(), plan, nodeproto.Request{Job: "job", Step: step, Attempt: attempt})
+					settled := []string{}
+					if step == "result" {
+						settled = append(settled, "source")
+					}
+					got, err := (sdkOperations{}).RunStep(t.Context(), plan, nodeproto.Request{Job: "job", Step: step, Attempt: attempt, Settled: settled})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -64,10 +68,10 @@ func TestProtocolAttemptReplacesStepOutputs(t *testing.T) {
 func TestProtocolAttemptForgetsSkippedDependencyOutput(t *testing.T) {
 	plan := NewPlan()
 	Job(plan, "job", &attemptJob{})
-	if _, err := (sdkOperations{}).RunStep(t.Context(), plan, nodeproto.Request{Job: "job", Step: "source", Attempt: 1}); err != nil {
+	if _, err := (sdkOperations{}).RunStep(t.Context(), plan, nodeproto.Request{Job: "job", Step: "source", Attempt: 1, Settled: []string{}}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := (sdkOperations{}).RunStep(t.Context(), plan, nodeproto.Request{Job: "job", Step: "result", Attempt: 2})
+	got, err := (sdkOperations{}).RunStep(t.Context(), plan, nodeproto.Request{Job: "job", Step: "result", Attempt: 2, Settled: []string{"source"}})
 	if err != nil || got.Error != nil || string(got.Output) != "0" {
 		t.Fatalf("skipped source reused its previous output: %+v, %v", got, err)
 	}
@@ -80,15 +84,15 @@ func TestProtocolAttemptCannotResetActiveWork(t *testing.T) {
 	Job(plan, "job", &parallelAttemptJob{started: started, release: release})
 	finished := make(chan error, 1)
 	go func() {
-		_, err := (sdkOperations{}).RunStep(t.Context(), plan, nodeproto.Request{Job: "job", Step: "wait", Attempt: 4})
+		_, err := (sdkOperations{}).RunStep(t.Context(), plan, nodeproto.Request{Job: "job", Step: "wait", Attempt: 4, Settled: []string{}})
 		finished <- err
 	}()
 	<-started
-	got, err := (sdkOperations{}).RunStep(t.Context(), plan, nodeproto.Request{Job: "job", Step: "run", Attempt: 4})
+	got, err := (sdkOperations{}).RunStep(t.Context(), plan, nodeproto.Request{Job: "job", Step: "run", Attempt: 4, Settled: []string{}})
 	if err != nil || got.Error != nil || got.Outcome != "success" {
 		t.Fatalf("parallel step within one attempt = %+v, %v", got, err)
 	}
-	_, err = (sdkOperations{}).RunStep(t.Context(), plan, nodeproto.Request{Job: "job", Step: "run", Attempt: 5})
+	_, err = (sdkOperations{}).RunStep(t.Context(), plan, nodeproto.Request{Job: "job", Step: "run", Attempt: 5, Settled: []string{}})
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != apierr.ProtocolError {
 		t.Fatalf("overlapping attempt = %v", err)
@@ -121,10 +125,10 @@ func TestProtocolAttemptRejectsStaleOrdinal(t *testing.T) {
 	plan := NewPlan()
 	job := &attemptJob{}
 	Job(plan, "job", job)
-	if _, err := (sdkOperations{}).RunStep(t.Context(), plan, nodeproto.Request{Job: "job", Step: "source", Attempt: 4}); err != nil {
+	if _, err := (sdkOperations{}).RunStep(t.Context(), plan, nodeproto.Request{Job: "job", Step: "source", Attempt: 4, Settled: []string{}}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := (sdkOperations{}).RunStep(t.Context(), plan, nodeproto.Request{Job: "job", Step: "source", Attempt: 3})
+	_, err := (sdkOperations{}).RunStep(t.Context(), plan, nodeproto.Request{Job: "job", Step: "source", Attempt: 3, Settled: []string{}})
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != apierr.ProtocolError || job.calls != 1 {
 		t.Fatalf("stale attempt = %v, body calls = %d", err, job.calls)

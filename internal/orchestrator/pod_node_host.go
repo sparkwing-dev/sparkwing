@@ -38,8 +38,7 @@ type podNode struct {
 	specHash string
 	engine   nodeproto.EngineIdentity
 	identity nodeproto.RunnerIdentity
-	// safety: the claim's 1-based attempt ordinal, which decides before_run and after_run under retry_auto.
-	attempt int
+	attempt  int
 	// safety: a node a run host dispatched already ran its skip_if, memo and admission there, and its accepted
 	// spec_hash is the one the run host recorded on its row.
 	dispatched bool

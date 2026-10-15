@@ -17,8 +17,9 @@ func TestParseRequestV2Shapes(t *testing.T) {
 		`{"id":"3","op":"describe","future":1}`,
 		`{"id":"4","op":"plan","pipeline":"p","args":{},"run":{"run_id":"r","pipeline":"p"}}`,
 		`{"id":"alias","op":"plan","pipeline":"Deploy","args":{},"run":{"run_id":"r","pipeline":"production"}}`,
-		`{"id":"5","op":"run_step","job":"j","step":"s","attempt":1}`,
+		`{"id":"5","op":"run_step","job":"j","step":"s","attempt":1,"settled":[]}`,
 		`{"id":"6","op":"eval","closure":"c","input":null}`,
+		`{"id":"step-eval","op":"eval","closure":"step-condition","attempt":2,"settled":["source"]}`,
 		`{"id":"7","op":"cancel","job":"j","step":"s"}`,
 	}
 	for _, line := range valid {
@@ -35,8 +36,14 @@ func TestParseRequestV2Shapes(t *testing.T) {
 		`{"id":"1","op":"describe","pipeline":"x"}`,
 		`{"id":"1","op":"plan","pipeline":"p","args":null,"run":{"run_id":"r","pipeline":"p"}}`,
 		`{"id":"1","op":"plan","pipeline":"p","args":{},"run":{"run_id":"r","pipeline":""}}`,
-		`{"id":"1","op":"run_step","job":"j","step":"s","attempt":0}`,
-		`{"id":"1","op":"cancel","job":"j","step":"s","attempt":1}`,
+		`{"id":"1","op":"run_step","job":"j","step":"s","attempt":0,"settled":[]}`,
+		`{"id":"1","op":"run_step","job":"j","step":"s","attempt":1}`,
+		`{"id":"1","op":"run_step","job":"j","step":"s","attempt":1,"settled":null}`,
+		`{"id":"1","op":"eval","closure":"c","attempt":2}`,
+		`{"id":"1","op":"eval","closure":"c","settled":[]}`,
+		`{"id":"1","op":"eval","closure":"c","attempt":0,"settled":[]}`,
+		`{"id":"1","op":"eval","closure":"c","attempt":2,"settled":[null]}`,
+		`{"id":"1","op":"cancel","job":"j","step":"s","attempt":1,"settled":[]}`,
 		`{"id":"1","op":"eval","closure":"c","failure":{"job":"j","stage":"action","error":{"code":"sdk_error","message":"x"}}}`,
 	}
 	for _, line := range invalid {

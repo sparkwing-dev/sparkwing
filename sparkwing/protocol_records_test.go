@@ -29,7 +29,7 @@ func TestRecordWriteFailuresPreserveCanonicalErrors(t *testing.T) {
 			})
 			ops := sdkOperations{}
 			ctx := ops.Context(t.Context(), nodeproto.RunContext{}, nodeproto.RunnerIdentity{}, refusedRecords{})
-			result, err := ops.RunStep(ctx, plan, nodeproto.Request{Job: "j", Step: "run", Attempt: 1})
+			result, err := ops.RunStep(ctx, plan, nodeproto.Request{Job: "j", Step: "run", Attempt: 1, Settled: []string{}})
 			if err != nil || result.Outcome != "failed" || result.Error == nil || result.Error.Code != apierr.Forbidden {
 				t.Fatalf("body result: %+v, %v", result, err)
 			}

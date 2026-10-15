@@ -82,7 +82,7 @@ func testGoSDKJobArguments(t *testing.T) {
 				if !reflect.DeepEqual(doc, fake) {
 					t.Error("fake and process argument plans differ")
 				}
-				sendProtocolProbe(t, process, nodeproto.Request{ID: "body", Op: nodeproto.OpRunStep, Job: "recovery", Step: "run", Attempt: 1})
+				sendProtocolProbe(t, process, nodeproto.Request{ID: "body", Op: nodeproto.OpRunStep, Job: "recovery", Step: "run", Attempt: 1, Settled: []string{}})
 				var result nodeproto.RunResult
 				decodeProtocolProbe(t, protocolProbeReply(t, process, "body"), &result)
 				if result.Error != nil || result.Outcome != "success" || string(result.Output) != tc.output {

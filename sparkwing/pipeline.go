@@ -17,11 +17,7 @@ import (
 // Base is the marker embedded by every pipeline.
 type Base struct{}
 
-// Registration is the registry's record for one pipeline. Produced
-// by [Register]; consumed by the orchestrator (via [Lookup]) and CLI
-// introspection (via the [InputSchema] in Schema).
 type registration struct {
-	// Name is the invocation name (e.g. "lint", "build-test-deploy").
 	Name string
 
 	// InputType is the reflect.Type of the struct Schema describes.
@@ -36,6 +32,7 @@ type registration struct {
 	// pipeline, and call its Plan.
 	Invoke func(ctx context.Context, args map[string]string, rc RunContext) (*Plan, error)
 
+	discover func(context.Context) (*Plan, error)
 	instance func() any
 }
 
@@ -67,7 +64,7 @@ func (e *InputError) Unwrap() error { return e.Err }
 //
 // The Inputs type T is the pipeline's typed flag schema. Pipelines
 // that take no flags use sparkwing.NoInputs. The schema is resolved
-// once at registration and cached on the returned Registration.
+// once at registration.
 //
 //	type Inputs struct {
 //	    SkipTests bool   `flag:"skip-tests" desc:"skip tests"`
@@ -107,7 +104,13 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 	if err != nil {
 		panic(fmt.Sprintf("%s(%q): invalid Inputs schema on %s: %v", callerLabel, name, t, err))
 	}
-	invoke := func(ctx context.Context, args map[string]string, rc RunContext) (*Plan, error) {
+	defaults := inputSchema{Extra: schema.Extra}
+	for _, field := range schema.Fields {
+		if field.Default != "" || field.isExtraBag {
+			defaults.Fields = append(defaults.Fields, field)
+		}
+	}
+	invoke := func(ctx context.Context, args map[string]string, rc RunContext, discovery bool) (*Plan, error) {
 		pipeKnown := map[string]bool{}
 		for _, f := range schema.Fields {
 			pipeKnown[f.Name] = true
@@ -128,7 +131,11 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 		}
 		var in T
 		if t != nil && t.Kind() == reflect.Struct {
-			if err := populateInputs(schema, reflect.ValueOf(&in).Elem(), pipeArgs); err != nil {
+			inputs := schema
+			if discovery {
+				inputs = defaults
+			}
+			if err := populateInputs(inputs, reflect.ValueOf(&in).Elem(), pipeArgs); err != nil {
 				return nil, &InputError{Err: fmt.Errorf("inputs for pipeline %q: %w", name, err)}
 			}
 		}
@@ -150,7 +157,7 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 				return nil, &InputError{Err: fmt.Errorf("inputs for pipeline %q: %w", name, err)}
 			}
 		}
-		if !skipArgResolveFromContext(ctx) {
+		if !discovery {
 			if err := resolveAndBindJobArgs(plan, args); err != nil {
 				return nil, &InputError{Err: fmt.Errorf("pipeline %q: %w", name, err)}
 			}
@@ -163,13 +170,17 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 		Name:      name,
 		InputType: t,
 		Schema:    schema,
-		Invoke:    invoke,
-		instance:  func() any { return factory() },
+		Invoke: func(ctx context.Context, args map[string]string, rc RunContext) (*Plan, error) {
+			return invoke(ctx, args, rc, false)
+		},
+		discover: func(ctx context.Context) (*Plan, error) {
+			return invoke(ctx, nil, RunContext{Pipeline: name}, true)
+		},
+		instance: func() any { return factory() },
 	}
 }
 
-// RegisterEntrypoint declares a named SDK entrypoint. The host maps project
-// pipeline names to this entrypoint before requesting a plan.
+// RegisterEntrypoint declares a named SDK entrypoint.
 func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T]) {
 	reg := buildRegistration(entrypointName, factory, "sparkwing.RegisterEntrypoint")
 	registryMu.Lock()
@@ -180,9 +191,6 @@ func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T]
 	registry[entrypointName] = reg
 }
 
-// Lookup returns the Registration for a registered pipeline name, or
-// ok=false if none. The returned Registration is shared and should be
-// treated as read-only; call Invoke to drive the pipeline.
 func lookup(name string) (*registration, bool) {
 	registryMu.RLock()
 	r, ok := registry[name]

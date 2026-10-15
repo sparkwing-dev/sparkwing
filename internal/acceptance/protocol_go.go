@@ -136,7 +136,7 @@ func runGoSDKSession(ctx context.Context, bin, job, routeOrigin string) (nodepro
 	}
 	var step nodeproto.RunResult
 	if job != "" {
-		request = nodeproto.Request{ID: "step", Op: nodeproto.OpRunStep, Job: job, Step: "run", Attempt: 1}
+		request = nodeproto.Request{ID: "step", Op: nodeproto.OpRunStep, Job: job, Step: "run", Attempt: 1, Settled: []string{}}
 		if err := sendGoSDKRequest(requestW, request); err != nil {
 			return plan, step, err
 		}

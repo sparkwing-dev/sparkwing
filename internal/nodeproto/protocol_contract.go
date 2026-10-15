@@ -42,6 +42,7 @@ type Request struct {
 	Job      string            `json:"job,omitempty"`
 	Step     string            `json:"step,omitempty"`
 	Attempt  int               `json:"attempt,omitempty"`
+	Settled  []string          `json:"settled,omitzero"`
 	Failure  *JobFailure       `json:"failure,omitempty"`
 	Closure  string            `json:"closure,omitempty"`
 	Input    json.RawMessage   `json:"input,omitempty"`
@@ -252,12 +253,17 @@ func (r Request) Validate() error {
 			return bad("plan needs an SDK entrypoint, args object and invoked pipeline in run context")
 		}
 	case OpRunStep:
-		if r.Job == "" || r.Step == "" || r.Attempt < 1 {
-			return bad("run_step needs job, step and positive attempt")
+		if r.Job == "" || r.Step == "" || r.Attempt < 1 || r.Settled == nil {
+			return bad("run_step needs job, step, positive attempt and settled steps")
 		}
 	case OpEval:
 		if r.Closure == "" {
 			return bad("eval needs a closure")
+		}
+		if r.Attempt != 0 || r.Settled != nil {
+			if r.Attempt < 1 || r.Settled == nil {
+				return bad("step eval needs positive attempt and settled steps")
+			}
 		}
 	case OpCancel:
 		if r.Target == "" && r.Job == "" || r.Target != "" && (r.Job != "" || r.Step != "") {
@@ -268,7 +274,8 @@ func (r Request) Validate() error {
 	}
 	if r.Op != OpHello && (r.Protocol != 0 || r.Engine != nil || r.Runner != nil || r.Binding != nil) ||
 		r.Op != OpPlan && (r.Pipeline != "" || r.Args != nil || r.Run != nil) ||
-		r.Op != OpRunStep && (r.Attempt != 0 || r.Failure != nil) ||
+		r.Op != OpRunStep && r.Failure != nil ||
+		r.Op != OpRunStep && r.Op != OpEval && (r.Attempt != 0 || r.Settled != nil) ||
 		r.Op != OpRunStep && r.Op != OpCancel && (r.Job != "" || r.Step != "") ||
 		r.Op != OpCancel && r.Target != "" ||
 		r.Op != OpEval && (r.Closure != "" || len(r.Input) != 0) {
@@ -411,15 +418,15 @@ func requestFields(obj map[string]json.RawMessage, op Op) error {
 	case OpPlan:
 		allowed["pipeline"], allowed["args"], allowed["run"] = true, true, true
 	case OpRunStep:
-		allowed["job"], allowed["step"], allowed["attempt"], allowed["failure"] = true, true, true, true
+		allowed["job"], allowed["step"], allowed["attempt"], allowed["failure"], allowed["settled"] = true, true, true, true, true
 	case OpEval:
-		allowed["closure"], allowed["input"] = true, true
+		allowed["closure"], allowed["input"], allowed["attempt"], allowed["settled"] = true, true, true, true
 	case OpCancel:
 		allowed["job"], allowed["step"], allowed["target"] = true, true, true
 	default:
 		return nil
 	}
-	for _, key := range []string{"protocol", "engine", "runner", "binding", "pipeline", "args", "run", "job", "step", "attempt", "failure", "closure", "input", "target"} {
+	for _, key := range []string{"protocol", "engine", "runner", "binding", "pipeline", "args", "run", "job", "step", "attempt", "settled", "failure", "closure", "input", "target"} {
 		if raw, found := obj[key]; found && (!allowed[key] || string(raw) == "null" && key != "input") {
 			return &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("operation %s cannot carry %s", op, key)}
 		}

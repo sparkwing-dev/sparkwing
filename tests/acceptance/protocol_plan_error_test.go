@@ -22,10 +22,10 @@ func testGoSDKPlanErrorMasks(t *testing.T) {
 		name string
 		args map[string]string
 	}{
-		{"defaults", map[string]string{}},
-		{"prefix-first", map[string]string{"first": "input-secret", "second": "input-secret-tail"}},
-		{"prefix-second", map[string]string{"first": "input-secret-tail", "second": "input-secret"}},
-		{"distinct", map[string]string{"first": "first-secret", "second": "second-secret"}},
+		{"defaults", map[string]string{"fail": "true"}},
+		{"prefix-first", map[string]string{"fail": "true", "first": "input-secret", "second": "input-secret-tail"}},
+		{"prefix-second", map[string]string{"fail": "true", "first": "input-secret-tail", "second": "input-secret"}},
+		{"distinct", map[string]string{"fail": "true", "first": "first-secret", "second": "second-secret"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			host := sparkwingtest.New(sparkwingtest.Options{})

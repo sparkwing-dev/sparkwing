@@ -28,6 +28,12 @@ type host struct {
 	masks   []string
 	records []sparkwing.LogRecord
 	plans   []json.RawMessage
+	settled map[stepStateKey][]string
+}
+
+type stepStateKey struct {
+	plan *sparkwing.Plan
+	job  string
 }
 
 func (h *host) Context(ctx context.Context) context.Context {
@@ -84,10 +90,11 @@ func (h *host) RunStep(ctx context.Context, p *sparkwing.Plan, job, step string)
 	if err := h.remember(p); err != nil {
 		return nil, err
 	}
-	result, err := sdkserve.DefaultOperations.RunStep(ctx, p, nodeproto.Request{Job: job, Step: step, Attempt: 1})
+	result, err := sdkserve.DefaultOperations.RunStep(ctx, p, nodeproto.Request{Job: job, Step: step, Attempt: 1, Settled: h.stepSnapshot(p, job)})
 	if err != nil {
 		return nil, err
 	}
+	h.settleStep(p, job, step)
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -103,17 +110,61 @@ func (h *host) Eval(ctx context.Context, p *sparkwing.Plan, job, closure string,
 	if err := h.remember(p); err != nil {
 		return nil, err
 	}
-	result, err := sdkserve.DefaultOperations.Eval(ctx, p, nodeproto.Request{Job: job, Closure: closure, Input: input})
+	request := nodeproto.Request{Job: job, Closure: closure, Input: input}
+	step := predicateStep(p, job, closure)
+	if step != "" {
+		request.Attempt = 1
+		request.Settled = h.stepSnapshot(p, job)
+	}
+	result, err := sdkserve.DefaultOperations.Eval(ctx, p, request)
 	if err != nil {
 		return nil, err
 	}
 	if result.Error != nil {
+		if step != "" {
+			h.settleStep(p, job, step)
+		}
 		return nil, result.Error
 	}
 	if err := h.remember(p); err != nil {
 		return nil, err
 	}
+	if step != "" && string(result.Value) == "true" {
+		h.settleStep(p, job, step)
+	}
 	return result.Value, nil
+}
+
+func (h *host) stepSnapshot(p *sparkwing.Plan, job string) []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string{}, h.settled[stepStateKey{plan: p, job: job}]...)
+}
+
+func (h *host) settleStep(p *sparkwing.Plan, job, step string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.settled == nil {
+		h.settled = make(map[stepStateKey][]string)
+	}
+	key := stepStateKey{plan: p, job: job}
+	if !slices.Contains(h.settled[key], step) {
+		h.settled[key] = append(h.settled[key], step)
+	}
+}
+
+func predicateStep(p *sparkwing.Plan, job, closure string) string {
+	for _, node := range sdkserve.DefaultOperations.Document(p).Jobs {
+		if node.ID != job {
+			continue
+		}
+		for _, step := range node.Steps {
+			if slices.Contains(step.Closures.SkipIf, closure) {
+				return step.ID
+			}
+		}
+	}
+	return ""
 }
 
 func (h *host) Records() []sparkwing.LogRecord {
@@ -137,6 +188,7 @@ func (h *host) Masks() []string {
 	defer h.mu.Unlock()
 	return append([]string(nil), h.masks...)
 }
+
 func (h *host) Close() error {
 	h.mu.Lock()
 	h.cancel()

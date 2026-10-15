@@ -19,5 +19,7 @@ func (p *retryProbe) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	})
 	return sparkwing.Step(w, "result", func(ctx context.Context) (int, error) {
 		return sparkwing.StepGet[int](ctx, source), nil
-	}).Needs(source), nil
+	}).Needs(source).SkipIf(func(ctx context.Context) bool {
+		return sparkwing.StepGet[int](ctx, source) == 0
+	}), nil
 }

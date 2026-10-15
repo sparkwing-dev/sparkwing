@@ -48,7 +48,7 @@ func testGoSDKAdditiveFieldsAndChildHandles(t *testing.T) {
 		t.Fatalf("additive plan request = %+v, %v", plan, err)
 	}
 	sendProtocolProbe(t, process, map[string]any{
-		"id": "child", "op": "run_step", "job": "child", "step": "run", "attempt": 1, "future": []any{false, nil},
+		"id": "child", "op": "run_step", "job": "child", "step": "run", "attempt": 1, "settled": []string{}, "future": []any{false, nil},
 	})
 	requireEnvelopeLog(t, process, "child-exited")
 	var result nodeproto.RunResult

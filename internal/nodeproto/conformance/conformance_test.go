@@ -265,6 +265,7 @@ func (p *fixtureProcess) makeRequest(step corpusStep, index int) nodeproto.Reque
 		r.Run = &nodeproto.RunContext{RunID: "r", Pipeline: "conformance"}
 	case nodeproto.OpRunStep:
 		r.Job, r.Step, r.Attempt = "task", "run", 1
+		r.Settled = []string{}
 		if step.Job != "" {
 			r.Job = step.Job
 		}
