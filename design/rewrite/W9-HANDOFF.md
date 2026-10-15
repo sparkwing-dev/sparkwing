@@ -1,9 +1,134 @@
 # W9 continuation handoff
 
-W9 remains incomplete. This continuation starts at `a1b2226fc`. Earlier work is
-committed. These changes remain uncommitted for lead review. The assigned
-worktree was reused. No Sparkwing executable, service or Git metadata was
-changed. Scratch is removed before the final report.
+W9 remains incomplete. This continuation started at `d9e4ba202` with a clean
+worktree. Earlier work is committed. The changes below are uncommitted for the
+lead. No Sparkwing executable, service or Git metadata was changed. Scratch is
+removed before the final report.
+
+## Queue continuation
+
+Queue commands now parse the final clisurface grammar. Bare `queue` shows help.
+`queue list` reads the same authenticated `/api/v1/queue` route locally and from
+profiles. It no longer uses a CLI-only HTTP fetch or a non-starting d.sock query.
+Connection and read failures emit no empty success snapshot. Existing admission
+rendering retains pressure, capacity, connected runs, waiter estimates and runner
+headroom. Text rendering buffers the shared renderer so write errors survive.
+
+`queue list --group` reads `/api/v1/queue/groups/{group}`. The shared
+`QueueGroup` projection preserves effective capacity, including zero, used cost,
+separate run/job identity, superseded holders, leases and one-based ordered
+waiters. Text retains scope, identities, cost, lease times and ordering. JSON
+retains the full projection. Capacity reductions may leave used cost above the
+new effective capacity. The adapter does not invent a fallback capacity.
+
+`queue priority --group` uses the existing PUT priority route. Integer zero stays
+present. Relative front/back stays a relative request. One generated mutation
+key and the exact body survive transport retries. The result keeps canonical run
+and group, missing/found, prior/new rank and positions, participant count and
+holder status. `--run` and `--set` are required in the registry, and profile flags
+work before the command. Remote priority without a group returns policy_missing
+before connecting because C2 has no run-priority route. W2 must supply that
+contract. It is not an approved feature restriction.
+
+Local admission priority keeps the unchanged d.sock operation. Team run numbers
+resolve through the typed RunReader before the rank mutation. A failed, empty or
+canceled resolution cannot mutate admission. The pre-change queue read must
+succeed before setting priority. Missing local daemons produce missing-run
+receipts. Existing holders keep their leases. Native d.sock integration was not
+exercised in this sandbox.
+
+The unused cluster concurrency command and its duplicated wire structs/rendering
+are deleted. Scope behavior moved to the final group view. The raw queue HTTP
+fetch and old pflag queue parsers are gone. Pure shared-renderer checks retain
+their test-only forwarding helpers rather than shipping unused wrappers.
+
+W9's controller-wire contract now names QueueManager, group observations and
+priority writes/results. This completes already-declared C2 routes. No C2 route,
+authorization alternative, other owner's Go interface or schema changed. W2 must
+implement canonical-number resolution, queue/group projections and relative-rank
+replay. W1/W2 must expose the required group-priority mutation through an
+authorized store transaction. No such C1 mutation contract was found in the
+frozen C1 contract document. W8 must provide native local-controller composition.
+
+Assumptions: the unchanged wingwire admission snapshot is shared rather than
+copied into another HTTP-only model. QueueManager supplies the typed HTTP seam
+because the old raw HTTP path bypassed common authentication/error/retry policy.
+The private CLI dependencies permit contract fakes while native owners are
+unfinished. No public flag beyond the frozen queue selectors, environment
+variable, timeout or service was introduced. The existing 5/30-second read and
+10-second priority budgets remain.
+
+## Queue deletion and test accounting
+
+Deleted five whole files, **595 lines**:
+
+- cmd/sparkwing/concurrency.go: 179.
+- cmd/sparkwing/concurrency_scope_test.go: 15.
+- cmd/sparkwing/queue_blindness_test.go: 165.
+- cmd/sparkwing/queue_list_test.go: 47.
+- cmd/sparkwing/queue_priority_test.go: 189.
+
+Tracked Go deletions total **772 lines gross** against this continuation's
+starting HEAD. This includes replaced parser/fetch/helper lines, not a net
+reduction claim.
+
+Added 18 tests: eleven CLI, five client, and two acceptance contract tests.
+Ported integer/relative rank selection, holder lease caveat, JSON receipt facts,
+missing-run failure and preflight checks. The old no-daemon versus idle regression
+is replaced by a failed controller read versus an empty successful read. Bare
+queue/list parity is obsolete because the final bare group shows help. Scope
+checks for global names containing @, box keys and memo keys now exercise the
+actual group renderer. Existing admission presentation tests still run. T1's
+parked inventory assigns no original source function directly to W9.
+
+Passing acceptance additions: TestSurfaceQueueTransport and
+TestSurfaceQueueGrammar. They exercise final HTTP routes, explicit zero,
+canonical IDs, profile-before-command and removed vocabulary on both local and
+remote fake transports. They do not establish native process/API parity.
+No whole native T1 surface scenario was unskipped or claimed complete.
+
+## Queue verification
+
+All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-astra-W9/cache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W9/tmp.
+Tests used -p 4 at most.
+
+Passed:
+
+- Whole-repository go build -p 4 ./... after the source changes.
+- go vet -p 4 on cmd/sparkwing, internal/clisurface, internal/controllerwire,
+  pkg/controller/client and tests/acceptance.
+- Full clisurface, controllerwire and tests/acceptance suites.
+  internal/acceptance compiles and has no test files.
+- CLI ^TestQueue, ^TestCommandReferenceMatchesRegistry and ^TestHelp.
+- Client ^TestQueue and ^TestEngineClient, including exact keyed retry bodies.
+- Pkg/docs mirror, changelog, read/list/search and catalog checks.
+- commentcheck -base HEAD <repo>, sleepcheck -base HEAD <repo>,
+  sync-docs --check and git diff --check.
+- The generated pkg_controller_client API snapshot matches this source.
+
+Command references were regenerated through a temporary Go test overlay that
+calls their existing generator. No Sparkwing binary ran. Source documentation,
+migration notes, changelog and embedded mirrors are synchronized.
+
+The full API snapshot comparison still reports drift for seven untouched
+packages: pkg/controller, pkg/match, pkg/projectconfig, pkg/storage,
+pkg/storage/storeurl, pkg/store and sparkwing. Only the W9 client snapshot was
+updated. These packages' source and snapshots were unchanged by this continuation.
+No whole-repository API-snapshot pass is claimed. Native sockets, services,
+controller transactions, legacy full CLI/client suites, pipelines and launch QA
+remain for owner integration and the lead.
+
+No production file outside W9 ownership changed. Shared files touched are
+.apidiff/pkg_controller_client.txt, CHANGELOG.md, pkg/docs/changelog.md,
+generated pkg/docs/mirror files, tests/acceptance/queue_contract_test.go,
+design/rewrite/contracts/c3-controller-wire.md and this handoff. No cross-package
+caller migration was needed. Git's identity remains Korey Gambill and
+core.worktree is unset. There is no new human decision request.
+
+The remaining work below still applies. The old queue/concurrency CLI adapters
+are no longer among those gaps. The prior continuation details are retained so
+the next worker does not repeat doctor/cache work.
 
 ## Earlier work retained
 
@@ -28,7 +153,7 @@ Dashboard and update share resolveLocalServices. Its native construction is stil
 missing. The old Client cron, bounce and automatic-retry reset APIs are already
 deleted. Do not redo these completed pieces.
 
-## This continuation
+## Prior continuation: doctor and warming
 
 Doctor now parses clisurface and inspects the existing
 `wingd.LocalLifecycle.Doctor(ctx, installedVersion)` contract. The CLI never
@@ -169,7 +294,8 @@ an extra paragraph was corrected and rechecked.
    agentservice plumbing. Integrate W2 registration and pool reservations.
 5. Replace profile.Load/Save, doctor's legacy registry load and connection
    selection with W6's machine parser and persistence. Profile scope enrollment remains a W2 gap.
-6. Migrate queue and remaining legacy client/management surfaces. Native cache
+6. Integrate the completed queue adapters with W2/W8 and migrate the remaining
+   legacy client/management surfaces. Native cache
    warm needs W6 process policy and shared masked installer-output composition.
    Finish guides, scripts, examples and runtime tests using removed vocabulary.
 7. Execute every native surface cell and launch QA after owner integration.

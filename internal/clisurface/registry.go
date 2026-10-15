@@ -302,8 +302,9 @@ func Registry() []Command {
 			{Name: "group", Argument: "GROUP"},
 		}},
 		{Path: "sparkwing queue priority", Flags: []Flag{
-			{Name: "run", Argument: "ID"},
-			{Name: "set", Argument: "VALUE"},
+			{Name: "profile", Argument: "PROFILE"},
+			{Name: "run", Argument: "ID", Required: true},
+			{Name: "set", Argument: "VALUE", Required: true},
 			{Name: "group", Argument: "GROUP"},
 		}},
 		{Path: "sparkwing repos", Flags: []Flag{}},

@@ -297,8 +297,6 @@ var (
 	cmdUpdate                         = surfaceCommand("sparkwing update")
 	cmdCommands                       = surfaceCommand("sparkwing commands")
 	cmdQueue                          = surfaceCommand("sparkwing queue")
-	cmdQueueList                      = surfaceCommand("sparkwing queue list")
-	cmdQueuePriority                  = surfaceCommand("sparkwing queue priority")
 	cmdDocs                           = surfaceCommand("sparkwing docs")
 	cmdDocsList                       = surfaceCommand("sparkwing docs list")
 	cmdDocsRead                       = surfaceCommand("sparkwing docs read")
@@ -366,7 +364,6 @@ var (
 	cmdRunners                        = surfaceCommand("sparkwing runners")
 	cmdRunnersAdd                     = surfaceCommand("sparkwing runners add")
 	cmdRunnersRemove                  = surfaceCommand("sparkwing runners remove")
-	cmdClusterConcurrency             = Command{Path: "sparkwing cluster concurrency", Hidden: true}
 	cmdClusterObjectStore             = surfaceCommand("sparkwing operator object-store")
 	cmdClusterObjectStoreStatus       = surfaceCommand("sparkwing operator object-store status")
 	cmdClusterObjectStoreResetBreaker = surfaceCommand("sparkwing operator object-store reset-breaker")

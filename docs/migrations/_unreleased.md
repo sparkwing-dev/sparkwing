@@ -1,5 +1,18 @@
 # Migrating to the next release
 
+## Queue and concurrency views
+
+Replace bare `sparkwing queue` listings with `sparkwing queue list`.
+Replace `sparkwing cluster concurrency --namespace GROUP --profile P` with
+`sparkwing queue list --group GROUP --profile P`. Bare `queue` shows help.
+The client uses `/api/v1/queue` and `/api/v1/queue/groups/{group}`.
+Connection failures return nonzero without an empty queue record.
+
+Use `queue priority --group GROUP --profile P --run ID --set VALUE` for a
+group rank change. Local admission priority keeps its existing admission
+operation. See [Queue views](../diagnosing-admission.md#queue-views) for the
+unfinished native controller integrations.
+
 ## Local cache warming
 
 Before, `sparkwing pipeline sparks warmup` compiled a pipeline and uploaded its

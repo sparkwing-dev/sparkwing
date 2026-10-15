@@ -87,7 +87,7 @@ indexed in [cli-reference.md](cli-reference.md):
 | `crons` | This host's pipeline schedules: install / uninstall / list / show / set / run |
 | `runs` | Inspect and manage runs: list / status / logs / stats / retry / cancel / bounce / prune, plus `approvals` and `annotations` |
 | `repos` | The machine's fleet of sparkwing repos and their SDK pins: list / info / update / add / remove / prune |
-| `queue` | Local admission: holders, connections, waiters, capacity; `priority` re-ranks a queued run |
+| `queue` | `list` reads admission or a selected concurrency group. `priority` changes a queued run's rank. See [Queue views](diagnosing-admission.md#queue-views). |
 | `cache` | The compiled pipeline binary cache and the docs cache: info / prune / explain |
 | `daemon` | The local admission daemon: status / events / restart / stop / recover-state |
 | `version` | Composite CLI + SDK + sparks version card; `repos update --in-place` bumps the pinned SDK |

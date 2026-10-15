@@ -368,4 +368,42 @@ use older runtime plumbing. No C2 route or authorization alternative changed.
 Fake-backed tests establish transport, selection and rendering, not scheduler
 persistence, timers or native execution.
 
+### Queue observations and priority
+
+`QueueManager` uses `GET /api/v1/queue`,
+`GET /api/v1/queue/groups/{group}` and
+`PUT /api/v1/queue/groups/{group}/priority` from the existing C2 route table.
+`ReadQueue` retains the unchanged `wingwire.QueueState` admission snapshot,
+including fractional capacity, connected holders, waiter estimates, pressure
+measurements and runner headroom. Both local HTTP and profiles use this client.
+An unavailable read returns an error and emits no empty success snapshot.
+
+`QueueGroup` retains its group identity, declared and effective capacities,
+used cost, holders and ordered waiters. Jobs have separate `job_id` fields.
+Positions are one-based. Holders retain supersession and lease timestamps.
+An explicit effective capacity of zero stays zero. Used cost may exceed capacity
+after a capacity reduction. Empty holder and waiter arrays remain explicit.
+
+`QueuePriorityWrite` selects a stable run ID or team number and either a
+pointer to an integer priority or `front`/`back`. Explicit zero is present.
+The controller resolves relative ranks against the current queue excluding the
+target run's own participants. The client sends one header idempotency key and
+replays the exact body. `QueuePriorityResult` retains canonical run and group,
+found/missing, prior and new priority, prior and new position, participant count
+and existing-holder status. Changing priority never releases a holder's lease.
+
+The CLI validates help, output, group and priority before resolving a connection.
+Bare `queue` shows help. `queue list` reads the snapshot, and `--group` selects a
+single concurrency group. JSON is one coherent snapshot or mutation receipt.
+Local admission priority resolves team numbers through `RunReader` before the
+unchanged d.sock operation. Remote run
+priority without a group has no C2 route and returns `policy_missing` before
+connecting. This is an open contract seam, not an approved feature restriction.
+
+W2 must serve the final queue/group projections, resolve team numbers and
+implement priority replay. W8 must compose local controller startup and keep the
+admission operation connected to its queue. Fake transports establish W9 parsing,
+rendering and request behavior, not those runtime integrations. No C2 policy or
+other owner's interface changed.
+
 <!-- design:end -->

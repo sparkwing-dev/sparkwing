@@ -1494,60 +1494,20 @@ that is merely busy still queues, because a holder finishing fixes that.
 
 ### Operating it
 
-Day-to-day operation runs through two commands, and neither can hurt the
-machine:
+Inspect admission and change queued priority with these commands:
 
-- `sparkwing queue list`, or bare `sparkwing queue` -- the truthful view of
-  local admission: every
-  resource holder with the repo it came from, how long it has held, and its
-  cost; connected run registrations that hold no resources, labeled separately;
-  every waiter in admission order with its position, priority, estimated start,
-  and the resources that actually hold it under the ledger's liveness rules,
-  plus a health flag on any holder that is not running cleanly:
-  `(stalled)` for one that is alive but idle while runs wait behind it,
-  and `(contended)` for one that is measurably slower than its profile
-  while the host is saturated. A child run riding its parent's lease
-  renders indented under that parent. The header summarizes the last day
-  of admission outcomes in one line -- runs granted, median wait,
-  evictions by key, queue timeouts, how many runs were contended, how many
-  younger backfills activated waiter protection, and how many runs an
-  operator reprioritized -- so a chronic pattern shows up before it becomes
-  an incident. It also
-  names the serving daemon's version and uptime, and warns when an
-  older-pinned pipeline binary is admitting outside the daemon. Every
-  view states whether the daemon was reached: an idle machine and a
-  socket that would not answer are different answers, and the second
-  exits 4 with the dial failure named rather than printing an empty
-  queue it never looked at. A running row also carries its expected
-  remaining time and the clock time it is expected to finish, and a queued
-  row its expected finish beside its expected start, both from the run's
-  measured p50 profile and the daemon's admission simulation. A cell without
-  an estimate names the measurement it lacks: `unmeasured` for a row the
-  daemon has no profile for, `past p50` for a run that has already outlived
-  the profile it has, and `unknown` for a queued row the daemon cannot place
-  because a run ahead of it has no estimate of its own. The header counts the
-  queued runs with no profile, because those are the ones that starve. `-o
-  json` carries each estimate as milliseconds from the snapshot and as an
-  RFC3339 clock time, and `-o plain` as a humanized duration and an RFC3339
-  clock time.
-- `sparkwing queue priority --run ID --set VALUE` -- re-rank a run that is
-  already queued, without restarting it. `--set` takes an integer, or
-  `front` / `back`: front is one above the highest priority among the
-  waiters that are not part of this run, back is one below the lowest, and
-  with nothing else waiting both land a step either side of zero. Because
-  the run's own participants are excluded, asking for `front` twice is
-  stable rather than an escalation against itself. A raise that frees the
-  run to start admits it there and then. One run is several admission
-  participants -- the run and each of its nodes -- and they all move
-  together; the new rank is remembered, so a node admitting later lands at
-  it rather than at the priority its plan carried, until the run has
-  released every lease and has no participant waiting. When the run
-  already holds a lease there is nothing
-  left to re-order and the command says so: only the node admissions it
-  has yet to make move. Local admission only knows runs a consumer has
-  claimed and started, so a run that is still sitting submitted in the
-  runs store is not visible here and the command exits 1 saying so; an
-  unreachable daemon exits 4, the same as `sparkwing queue`.
+- `sparkwing queue list` reads the local controller's admission snapshot.
+  It retains resource holders, connected runs, ordered waiters, pressure,
+  estimates and runner headroom. Add `--profile P` for a remote controller,
+  or `--group GROUP` for concurrency-group capacity, holder leases and waiters.
+  An unavailable controller returns an error without an empty success snapshot.
+  Bare `sparkwing queue` shows help.
+- `sparkwing queue priority --run ID --set VALUE` changes local admission
+  priority. VALUE is an integer, including zero, or `front`/`back`. The run's
+  existing holders keep their leases. Add `--group GROUP --profile P` for a
+  remote concurrency group. JSON retains prior and new ranks and positions.
+  See [Queue views](diagnosing-admission.md#queue-views) for native integration
+  requirements in the rewrite build.
 - `sparkwing doctor` -- the one repair verb. It tightens permissive local-home
   paths and removes only provably-dead state (an interrupted run's leftover
   row, an orphaned lock file whose owner is gone), then reports what it found
