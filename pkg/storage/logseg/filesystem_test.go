@@ -25,8 +25,21 @@ type logDataFixture struct {
 	reader    logseg.CommittedReader
 	view      store.LogSegments
 	commitErr error
+	verifyErr error
 	signs     int
+	checks    int
 	actor     store.Actor
+}
+
+func (f *logDataFixture) VerifyUpload(ctx context.Context, check blob.LogUploadCheck) error {
+	f.checks++
+	if f.verifyErr != nil {
+		return f.verifyErr
+	}
+	if !reflect.DeepEqual(check.Subject, f.view.Subject) {
+		return blob.ErrDigestNotReadable
+	}
+	return (logseg.UploadVerifier{Objects: f.reader.Objects}).Verify(ctx, check, "r90")
 }
 
 func (f *logDataFixture) SignSegments(ctx context.Context, req blob.LogSigningRequest) (blob.LogUploadBatch, error) {

@@ -102,10 +102,15 @@ writer. The first payload wins, an identical retry succeeds, and different bytes
 cannot replace it.
 S3 signs `If-None-Match: *` because future slots have no known payload digest or
 length. The batch and uploader carry that header through the PUT. S3 refuses
-every existing object with HTTP 412, including an identical retry. The uploader
-returns that error without committing a segment or final manifest. Controller
-replay verification and upload admission for unknown future payloads still need
-integration. A precondition failure alone never proves matching bytes.
+every existing object with HTTP 412, including an identical retry. After a
+transfer error, the uploader asks `LogTransport.VerifyUpload` to reauthorize the
+writer and verify that exact object's stored size and SHA-256. Only a successful
+verification permits the record commit to proceed. `logseg.UploadVerifier`
+performs the bounded object read after the controller supplies the run's
+persisted retention class. Cancellation, mismatched bytes and failed close
+remain errors. A precondition failure alone never proves matching bytes.
+The controller route and upload admission for unknown future payloads still
+need integration.
 `Get` opens a log object only for a controller-side authorized segment read.
 The S3 backend opens exact log keys and refuses objects beyond the shared
 segment or manifest size bound. The committed reader verifies each persisted

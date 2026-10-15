@@ -149,6 +149,15 @@ subject and run. Each segment URL includes its required `Headers`; the final
 manifest uses `ManifestURL` and `ManifestHeaders`. Storage transports must send
 those headers, including S3's signed create-only condition. HTTP 412 proves only
 that the key exists and cannot authorize a commit or an identical replay.
+`LogTransport.VerifyUpload` recovers an uncertain PUT by reauthorizing the exact
+writer and verifying the stored bytes. `LogUploadCheck` carries the subject,
+index, stored size and SHA-256. Index zero selects the final manifest. Positive
+indexes select segments. The controller derives the key from the subject and
+the run's persisted retention class. `logseg.UploadVerifier.Verify` consumes and
+closes that object before confirming its exact size and digest. Verification
+returns no bytes or read URL and creates no record edge. The subsequent
+`RecordSegments` transaction repeats writer authorization. Cancellation remains
+an error. A changed payload, missing object or failed close cannot recover.
 `ReadLogSegments` and `LogTransport.ReadLog` reauthorize the same
 subject, proxy bytes through the controller, meter egress and apply the log
 exception to download caps. Persisted segments fill gaps or stalls in the ring.
@@ -164,7 +173,9 @@ exception to download caps. Persisted segments fill gaps or stalls in the ring.
 | `blob.LogSubjectKind`, `blob.LogUnitKind` | Select attempt versus unit logs and the persisted owner-unit kind. |
 | `blob.LogSubject`, `blob.LogUnit`, `blob.LogSource`, `blob.LogSubject.Validate` | Carry and validate one fenced log identity. |
 | `blob.LogSigningRequest`, `blob.LogUploadURL`, `blob.LogUploadBatch` | Request and return bounded segment PUT slots for that identity. |
-| `blob.LogReadRequest`, `blob.LogTransport` | Sign uploads and proxy authenticated reads through the controller. |
+| `blob.LogUploadCheck`, `blob.LogTransport.VerifyUpload` | Verify the exact stored payload after an uncertain PUT under current writer authority. |
+| `logseg.UploadVerifier` | Derive one authorized object's key and check its stored size and digest after successful close. |
+| `blob.LogReadRequest`, `blob.LogTransport` | Sign uploads, verify uncertain writes and proxy authenticated reads through the controller. |
 | `SegmentCommit`, `LogSegments`, `Tenant.ReadLogSegments` | Commit and read persisted segments under the same subject fence. |
 
 ## Capability persistence, authority and payment settlement

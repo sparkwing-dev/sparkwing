@@ -163,7 +163,7 @@ func TestS3TaggedLogRoundTrip(t *testing.T) {
 }
 
 func TestS3LogConflictCannotAuthorizeCommit(t *testing.T) {
-	for _, fault := range []string{"segment conflict", "manifest conflict", "lost PUT response", "failed record commit"} {
+	for _, fault := range []string{"segment conflict", "manifest conflict"} {
 		t.Run(fault, func(t *testing.T) {
 			f, objects, data := bindS3Logs(t, jobSubject())
 			u, err := logseg.NewSubjectUploader(data)
@@ -179,10 +179,6 @@ func TestS3LogConflictCannotAuthorizeCommit(t *testing.T) {
 			switch fault {
 			case "segment conflict":
 				objects.objects[key] = []byte("another payload")
-			case "lost PUT response":
-				objects.loseNextPut = true
-			case "failed record commit":
-				f.commitErr = errors.New("record rejected")
 			}
 			put := func() error { return u.PutSegment(t.Context(), seg, body) }
 			if fault == "manifest conflict" {
@@ -209,6 +205,85 @@ func TestS3LogConflictCannotAuthorizeCommit(t *testing.T) {
 			}
 			if !bytes.Equal(objects.objects[key], original) || f.view.Complete || len(f.view.Segments) != wantSegments {
 				t.Fatalf("conflict changed bytes or records: %+v", f.view)
+			}
+		})
+	}
+}
+
+func TestS3LogRecoversVerifiedReplay(t *testing.T) {
+	for _, final := range []bool{false, true} {
+		for _, fault := range []string{"lost PUT response", "failed record commit"} {
+			t.Run(strconv.FormatBool(final)+"/"+fault, func(t *testing.T) {
+				f, objects, data := bindS3Logs(t, ownerSubject(blob.LogEval))
+				u, err := logseg.NewSubjectUploader(data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				seg, body := subjectSegment(t, 1, "line\n")
+				put := func() error { return u.PutSegment(t.Context(), seg, body) }
+				if final {
+					if err := put(); err != nil {
+						t.Fatal(err)
+					}
+					m := logseg.Manifest{Status: logseg.StatusComplete, Segments: []logseg.Segment{seg}}
+					put = func() error { return u.PutManifest(t.Context(), m) }
+				}
+				if fault == "lost PUT response" {
+					objects.loseNextPut = true
+				} else {
+					f.commitErr = errors.New("record rejected")
+				}
+				err = put()
+				if fault == "failed record commit" && !errors.Is(err, f.commitErr) {
+					t.Fatalf("first commit = %v", err)
+				}
+				if fault == "lost PUT response" && err != nil {
+					t.Fatalf("verified lost response = %v", err)
+				}
+				f.commitErr = nil
+				if err := put(); err != nil {
+					t.Fatalf("verified retry = %v", err)
+				}
+				if len(f.view.Segments) != 1 || f.view.Complete != final || f.checks == 0 {
+					t.Fatalf("retry state = %+v, checks = %d", f.view, f.checks)
+				}
+			})
+		}
+	}
+}
+
+func TestS3LogReplayRequiresCurrentAuthority(t *testing.T) {
+	for _, final := range []bool{false, true} {
+		t.Run(strconv.FormatBool(final), func(t *testing.T) {
+			f, objects, data := bindS3Logs(t, jobSubject())
+			u, err := logseg.NewSubjectUploader(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seg, body := subjectSegment(t, 1, "line\n")
+			put := func() error { return u.PutSegment(t.Context(), seg, body) }
+			if final {
+				if err := put(); err != nil {
+					t.Fatal(err)
+				}
+				m := logseg.Manifest{Status: logseg.StatusComplete, Segments: []logseg.Segment{seg}}
+				put = func() error { return u.PutManifest(t.Context(), m) }
+			}
+			objects.loseNextPut = true
+			f.verifyErr = blob.ErrDigestNotReadable
+			if err := put(); !errors.Is(err, blob.ErrDigestNotReadable) {
+				t.Fatalf("refused verification = %v", err)
+			}
+			wantSegments := 0
+			if final {
+				wantSegments = 1
+			}
+			if f.view.Complete || len(f.view.Segments) != wantSegments {
+				t.Fatalf("refused verification created records: %+v", f.view)
+			}
+			f.verifyErr = nil
+			if err := put(); err != nil || f.view.Complete != final || len(f.view.Segments) != 1 {
+				t.Fatalf("authorized recovery = %+v, %v", f.view, err)
 			}
 		})
 	}

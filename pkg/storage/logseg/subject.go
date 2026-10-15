@@ -134,7 +134,7 @@ func (u *SubjectUploader) PutSegment(ctx context.Context, seg Segment, body []by
 	}
 	u.pending = &seg
 	slot := u.batch.Segments[int64(seg.N)-u.batch.Segments[0].Index]
-	if err := u.put(ctx, slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {
+	if err := u.put(ctx, int64(seg.N), slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {
 		return err
 	}
 	record := store.Segment{Index: int64(seg.N), Offset: u.bytes, Size: seg.Bytes, Digest: seg.SHA256, ObjectKey: SegmentKey(u.prefix, seg.N)}
@@ -208,7 +208,7 @@ func validLogURL(raw string) bool {
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.User == nil && u.Fragment == ""
 }
 
-func (u *SubjectUploader) put(ctx context.Context, url string, headers map[string]string, expiry time.Time, body []byte) error {
+func (u *SubjectUploader) put(ctx context.Context, index int64, url string, headers map[string]string, expiry time.Time, body []byte) error {
 	ctx, cancel := context.WithDeadline(ctx, expiry)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
@@ -223,7 +223,18 @@ func (u *SubjectUploader) put(ctx context.Context, url string, headers map[strin
 	if err == nil && reader.Len() != 0 {
 		err = blob.ErrIntegrity
 	}
-	return err
+	if err != nil {
+		if ctx.Err() != nil {
+			return errors.Join(err, ctx.Err())
+		}
+		// safety: a failed or create-only PUT can recover only through the controller's
+		// authorized byte verification; HTTP status alone never proves a matching object.
+		check := blob.LogUploadCheck{Subject: cloneSubject(u.data.Subject), Index: index, Size: int64(len(body)), Digest: blob.Digest(hex.EncodeToString(sum[:]))}
+		if verifyErr := u.data.Transport.VerifyUpload(ctx, check); verifyErr != nil {
+			return errors.Join(err, verifyErr)
+		}
+	}
+	return ctx.Err()
 }
 
 func (u *SubjectUploader) commit(ctx context.Context, segments []store.Segment, final bool, reason string) error {
@@ -284,7 +295,7 @@ func (u *SubjectUploader) PutManifest(ctx context.Context, m Manifest) error {
 	}
 	// safety: retain the first final payload even after an uncertain PUT so retries cannot overwrite it.
 	u.final = bytes.Clone(raw)
-	if err := u.put(ctx, u.batch.ManifestURL, u.batch.ManifestHeaders, u.batch.ExpiresAt, raw); err != nil {
+	if err := u.put(ctx, 0, u.batch.ManifestURL, u.batch.ManifestHeaders, u.batch.ExpiresAt, raw); err != nil {
 		return err
 	}
 	var records []store.Segment

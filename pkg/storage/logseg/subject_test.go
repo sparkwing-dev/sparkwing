@@ -140,6 +140,10 @@ func (f *subjectFixture) ReadLog(_ context.Context, req blob.LogReadRequest) (io
 	return io.NopCloser(bytes.NewBufferString("controller-proxied")), nil
 }
 
+func (f *subjectFixture) VerifyUpload(context.Context, blob.LogUploadCheck) error {
+	return errors.New("upload verification unavailable")
+}
+
 func subjectSegment(t *testing.T, n int, raw string) (logseg.Segment, []byte) {
 	t.Helper()
 	var b bytes.Buffer
@@ -422,6 +426,44 @@ func TestSubjectOperationsPreserveCancellation(t *testing.T) {
 	}
 	if _, err := data.Read(ctx, 0, false); !errors.Is(err, context.Canceled) || f.read.Subject.Kind != "" {
 		t.Fatalf("read = %v", err)
+	}
+}
+
+type cancellingLogTransfer struct {
+	client blob.HTTPClient
+	cancel context.CancelFunc
+}
+
+func (c cancellingLogTransfer) Transfer(ctx context.Context, transfer blob.SignedTransfer, body io.Reader) (io.ReadCloser, error) {
+	response, err := c.client.Transfer(ctx, transfer, body)
+	c.cancel()
+	return response, errors.Join(err, errors.New("uncertain transfer"))
+}
+
+type replayProbe struct {
+	blob.LogTransport
+	checks int
+}
+
+func (p *replayProbe) VerifyUpload(context.Context, blob.LogUploadCheck) error {
+	p.checks++
+	return nil
+}
+
+func TestSubjectCancelledTransferCannotRecoverOrCommit(t *testing.T) {
+	f, data := newSubjectFixture(jobSubject())
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	probe := &replayProbe{LogTransport: data.Transport}
+	data.Transport = probe
+	data.HTTPClient = cancellingLogTransfer{client: data.HTTPClient, cancel: cancel}
+	u, err := logseg.NewSubjectUploader(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seg, body := subjectSegment(t, 1, "line\n")
+	if err := u.PutSegment(ctx, seg, body); !errors.Is(err, context.Canceled) || probe.checks != 0 || len(f.commits) != 0 {
+		t.Fatalf("cancelled upload = %v, checks = %d, commits = %d", err, probe.checks, len(f.commits))
 	}
 }
 

@@ -26,8 +26,18 @@ class lifecycle before any URL is signed. The signer copies the subject and
 derives every key from it. `LogPutSigner` returns URLs and headers for both
 `blob.Filesystem` and `blob.S3`. The filesystem backend permits only an identical
 retry at an existing key. S3 signs a create-only condition and rejects every
-overwrite. A 412 leaves the segment or manifest uncommitted. Recovery after an
-uncertain S3 PUT requires controller verification of the existing bytes.
+overwrite. After a transfer error, `SubjectUploader` calls
+`LogTransport.VerifyUpload` with the exact subject, index, stored size and digest.
+Index zero selects the final manifest. A successful verification lets the
+record commit proceed. A 412 alone cannot establish a matching payload.
+Cancellation prevents recovery and record commit.
+
+The controller must authorize the current writer and resolve the run's persisted
+retention class before calling `UploadVerifier.Verify`. The verifier derives one
+key, reads bounded bytes and requires successful close, exact size and SHA-256.
+It returns no bytes or read URL and creates no reference edge. `RecordSegments`
+rechecks the writer before committing that edge. The verifier works with both
+object backends. Its controller route remains an integration point.
 `blob.S3.LogClassReady` supplies the lifecycle callback for the S3 bucket.
 The filesystem backend exposes an expiry pass for the controller's maintenance
 lease. Its scheduling must be connected before enabling filesystem log signing.
@@ -48,12 +58,13 @@ record persistence, authorization and controller transport are fakes. Separate
 tests exercise lifecycle refusal, expiry, size bounds, concurrent immutable
 uploads and uncertain commit retries. S3 tests run the real presigner, transfer
 client, uploader and committed reader with fake object responses and records.
-They cover segment and manifest conflicts, lost PUT responses and failed record
-commits. These proofs do not count as native acceptance receipts.
+They cover segment and manifest conflicts, verified recovery after lost PUT
+responses and failed record commits, and refusal when current authority is lost.
+These proofs do not count as native acceptance receipts.
 
 The store's transactional authorization and log persistence, controller routes,
 egress settlement, retention scheduling and host bindings still need integration.
-S3 log signing still needs verified replay after an uncertain upload and admission
-for future slots whose payload size and digest are unknown. The existing controller and host paths still
+S3 log signing still needs admission for future slots whose payload size and
+digest are unknown. The existing controller and host paths still
 use the older attempt-only uploader and manifest fields. Those paths have no
 adapter into the tagged implementation.
