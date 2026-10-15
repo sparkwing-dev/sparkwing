@@ -55,6 +55,7 @@ func TestProtocol(t *testing.T) {
 						t.Run("sdk-frame-boundaries", testGoSDKFrameLimit)
 						t.Run("sdk-reply-frame-boundaries", testGoSDKReplyFrameLimit)
 						t.Run("public-fake-host", testGoSDKFakeHost)
+						t.Run("fileset-path-names", testGoSDKFilesetPathNames)
 						t.Run("fileset-ignore-read-failure", testGoSDKFilesetIgnoreReadFailure)
 						t.Run("declaration-services", testGoSDKDeclarationServices)
 						t.Run("attribute-masking", testGoSDKFakeHostAttributeMasks)

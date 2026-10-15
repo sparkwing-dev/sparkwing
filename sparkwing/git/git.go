@@ -129,8 +129,9 @@ func IsDirty(ctx context.Context, repoDir string) (bool, error) {
 // ignored files; without, falls back to a filesystem walk with a
 // small skip list. .dockerignore is honored in both modes.
 //
-// Paths, file permissions, and contents contribute to the hash. Unreadable
-// inputs or ignore rules return an error; tracked files absent from disk are omitted.
+// Paths (including whitespace and non-ASCII names), file permissions, and contents
+// contribute to the hash. Unreadable inputs or ignore rules return an error;
+// tracked files absent from disk are omitted.
 // File contents are read from disk (not from the git blob) so
 // staged-but-not-committed changes are reflected in the hash --
 // content addressing keys off the tree the build will actually see.
@@ -210,15 +211,13 @@ func listGitFiles(ctx context.Context, repoDir string) ([]string, error) {
 		}
 		dir = parent
 	}
-	tracked, err := runGit(ctx, repoDir, "ls-files")
+	listed, err := runGit(ctx, repoDir, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return nil, err
 	}
-	untracked, err := runGit(ctx, repoDir, "ls-files", "--others", "--exclude-standard")
-	if err != nil {
-		return nil, err
-	}
-	return append([]string{}, splitLines(tracked+"\n"+untracked)...), nil
+	// safety: Git terminates each literal path with NUL; line splitting loses quoted or whitespace-bearing names.
+	files := strings.Split(listed, "\x00")
+	return files[:len(files)-1], nil
 }
 
 func listFilesystemFiles(repoDir string) []string {
