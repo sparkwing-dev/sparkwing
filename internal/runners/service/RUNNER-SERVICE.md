@@ -77,6 +77,8 @@ work to an external owner through its installation hooks. Refresh alone does
 not complete that process handoff, refresh controller services or migrate
 schedule timers.
 
+`RunnerInstallation.Apply` serializes the complete update. Its stages are private,
+so replacement, refresh and restart cannot run out of order.
 `NativeInstallationConfig` keeps the registration's configuration and credential
 paths in its callbacks. Drain stops claims and joins renewing hosts. Refresh
 receives the installed runner version and also calls the controller/timer refresh

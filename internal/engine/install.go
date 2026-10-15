@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 
+	strictjson "sigs.k8s.io/json"
+
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -29,20 +31,10 @@ type SDKInstallRequest struct {
 
 // UnmarshalJSON refuses ambiguous requests and credentials sent through the input pipe.
 func (r *SDKInstallRequest) UnmarshalJSON(body []byte) error {
-	var fields map[string]json.RawMessage
-	if err := decodeUniqueJSON(body, &fields); err != nil {
-		return err
-	}
-	for field := range fields {
-		switch field {
-		case "directory", "pipeline_dir", "sdk":
-		default:
-			return errors.New("unknown SDK install request field")
-		}
-	}
 	type request SDKInstallRequest
 	var decoded request
-	if err := json.Unmarshal(body, &decoded); err != nil {
+	failures, err := strictjson.UnmarshalStrict(body, &decoded)
+	if err := errors.Join(err, errors.Join(failures...)); err != nil {
 		return err
 	}
 	*r = SDKInstallRequest(decoded)

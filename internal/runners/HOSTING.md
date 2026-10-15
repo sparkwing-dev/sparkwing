@@ -17,6 +17,12 @@ confirmation or service binding. `FuzzHostingRejectsIncompleteNodeAwards` checks
 every combination of missing inputs through the remote hosting entrypoint.
 The native owner and claimed hosts own source acquisition and their only lease keeper.
 
+The loop has one event wait for pending claims, host completions, poll timing,
+policy refresh and shutdown. A policy refresh leaves a pending claim in place.
+Stopping cancels and joins that request, takes responsibility for a late award,
+and joins every held host. Drain and policy denial preserve held host contexts.
+Caller cancellation reaches those hosts and remains in the returned error.
+
 `RuntimeConfig.Repositories` carries the machine owner's parsed `runner.repos`.
 `NewManagedRunner` checks the captured intake and accepted source locations before
 calling its host. Both must project valid sealed remote source admitted by that

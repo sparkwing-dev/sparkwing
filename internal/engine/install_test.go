@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -151,4 +152,41 @@ func TestInstallSDKPreservesRegisteredSecretsProperty(t *testing.T) {
 			t.Fatalf("registered install secret survived at seed %d", seed)
 		}
 	}
+}
+
+func FuzzSDKInstallRequestFields(f *testing.F) {
+	for _, field := range []string{"directory", "pipeline_dir", "sdk", "Directory", "environment", "masker", "unknown", ""} {
+		f.Add(field, "value", false)
+		f.Add(field, "value", true)
+	}
+	f.Fuzz(func(t *testing.T, field, value string, duplicate bool) {
+		key, err := json.Marshal(field)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := append(append([]byte{'{'}, key...), ':')
+		body = append(body, encoded...)
+		if duplicate {
+			body = append(body, ',')
+			body = append(body, key...)
+			body = append(body, ':')
+			body = append(body, encoded...)
+		}
+		body = append(body, '}')
+		var request SDKInstallRequest
+		err = json.Unmarshal(body, &request)
+		known := field == "directory" || field == "pipeline_dir" || field == "sdk"
+		if (err == nil) != (known && !duplicate) {
+			t.Fatalf("field=%q duplicate=%t: %v", field, duplicate, err)
+		}
+		if !known || duplicate {
+			if request.Directory != "" || request.PipelineDir != "" || request.SDK != "" || request.Environment != nil || request.Masker != nil {
+				t.Fatal("refused request published fields")
+			}
+		}
+	})
 }
