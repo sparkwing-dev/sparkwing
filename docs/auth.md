@@ -1,7 +1,30 @@
 # Authentication + authorization
 
-Sparkwing uses a shared-secret bearer token model with typed principals
-and per-endpoint scope annotations.
+Run intake, plan acceptance, job transitions, finish, cancellation, retry and
+run/job renewal use the shared capability policy. The controller resolves the
+resource's team before authorization and derives actors and fences from the
+credential. Unknown or ended credentials get `unauthenticated`. A live
+credential without the grant or binding gets `forbidden`.
+
+`POST /api/v1/runs` accepts a `request` and `idempotency_key`. The request names
+its team. A bound job creating a child must name its own run and job as the
+parent. Intake returns the committed run number and first seal. A here bearer
+is returned once. Replaying intake returns the committed response without
+another bearer.
+
+`POST /api/v1/runs/{run}/plan` accepts `declarations`, `resolved` and `plan`.
+The store validates the second seal against the persisted first seal, including
+a retry's preserved source seal. Raw plan snapshots are no longer accepted.
+Plan, job-transition and finish requests from ended claims require the exact
+recorded body, actor and fence to replay. Mutations recheck authority inside
+the store transaction. A lost fence gets `lock_held`.
+
+Job transitions use `/api/v1/runs/{run}/jobs/{job}/transition`. Finish ends the
+run and its owner unit together. Published local runs use a separate transition
+edge and receive no executable owner. Cancellation carries a reason. Retry
+carries an idempotency key and leaves source seals unchanged. Run/job heartbeat
+responses carry the committed lease expiry, cancellation and watched jobs.
+Every request uses JSON. Bodies cannot replace authority, holders or fences.
 
 ## Generator expansion authority
 

@@ -154,6 +154,7 @@ type RoutePolicy struct {
 
 // Target contains server-resolved ownership plus decoded path/body selectors.
 // BodyRunID includes parent lineage on POST /runs; it cannot be authorized inside the handler.
+// NodeID names the path job, or the parent job for child intake.
 // Unit fields project the resolved blob.LogSubject at the controller boundary without an import cycle.
 type Target struct {
 	Team                 string
@@ -402,7 +403,8 @@ func bindingShape(p Principal, rule BindingRule, t Target) bool {
 		return run && b.Kind == BindingTrigger && p.Capability.Unit == UnitTrigger &&
 			(b.Generation > 0 && b.Holder != "" || p.Capability.Purpose == PurposeHere && b.Reservation == "here:"+b.RunID)
 	case BindBodyNamesRun:
-		return isMember(p) || b.RunID != "" && t.BodyRunID == b.RunID
+		return isMember(p) || b.RunID != "" && t.BodyRunID == b.RunID &&
+			(b.Kind != BindingNode || b.NodeID != "" && t.NodeID == b.NodeID)
 	case BindSlotOfBoundNode:
 		return b.RunID != "" && b.RunID == t.SlotRunID && b.Generation > 0 && b.Generation == t.SlotGeneration &&
 			((b.Kind == BindingNode && b.NodeID != "" && b.NodeID == t.SlotNodeID) ||

@@ -37,7 +37,7 @@ func TestEveryFrontendAPICallIsAControllerRoute(t *testing.T) {
 	if len(calls) < 80 {
 		t.Fatalf("found %d frontend API calls; the parser has lost track of the call sites", len(calls))
 	}
-	authed, public := New(nil, nil).routers(nil)
+	authed, public := New(nil, nil).routers()
 	for _, c := range calls {
 		key := c.method + " " + c.path
 		if _, elsewhere := frontendRoutesServedElsewhere[strings.TrimSpace(key)]; elsewhere {

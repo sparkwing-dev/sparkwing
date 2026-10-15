@@ -23,17 +23,54 @@ import (
 )
 
 type engineTransactions struct {
-	intake    store.IntakeRequest
-	plan      store.PlanAcceptance
-	expansion store.ExpansionSubmission
-	run       store.RunRow
-	node      store.NodeRow
-	admitted  store.AdmissionResult
-	accepted  store.AcceptedPlan
-	expanded  store.AcceptedExpansion
-	writes    int
-	err       error
-	readErr   error
+	intake     store.IntakeRequest
+	plan       store.PlanAcceptance
+	expansion  store.ExpansionSubmission
+	run        store.RunRow
+	node       store.NodeRow
+	admitted   store.AdmissionResult
+	accepted   store.AcceptedPlan
+	expanded   store.AcceptedExpansion
+	nodeChange store.NodeTransition
+	runChange  store.RunTransition
+	finish     store.FinishRunRequest
+	renewActor store.Actor
+	renewRef   store.NodeRef
+	beat       store.LeaseBeat
+	applied    store.Applied
+	writes     int
+	err        error
+	readErr    error
+}
+
+func (f *engineTransactions) TransitionNode(_ context.Context, change store.NodeTransition) (store.Applied, error) {
+	f.nodeChange = change
+	f.writes++
+	return f.applied, f.err
+}
+
+func (f *engineTransactions) TransitionRun(_ context.Context, change store.RunTransition) (store.Applied, error) {
+	f.runChange = change
+	f.writes++
+	return f.applied, f.err
+}
+
+func (f *engineTransactions) FinishRunAndUnit(_ context.Context, finish store.FinishRunRequest) (store.Applied, error) {
+	f.finish = finish
+	f.writes++
+	return f.applied, f.err
+}
+
+func (f *engineTransactions) RenewOwner(_ context.Context, actor store.Actor) (store.LeaseBeat, error) {
+	f.renewActor = actor
+	f.writes++
+	return f.beat, f.err
+}
+
+func (f *engineTransactions) RenewNodeClaim(_ context.Context, ref store.NodeRef, actor store.Actor) (store.LeaseBeat, error) {
+	f.renewRef, f.renewActor = ref, actor
+	f.writes++
+	return f.beat, f.err
 }
 
 func (f *engineTransactions) AdmitRun(_ context.Context, request store.IntakeRequest) (store.AdmissionResult, error) {
@@ -137,13 +174,27 @@ func TestEnginePlanPublisherKeepsSessionAuthority(t *testing.T) {
 	a.Access = capability.AccessRule{Credential: capability.CredentialPublisher, Grants: []capability.Grant{capability.DataWrite}, Binding: capability.BindData, Liveness: capability.LiveCredential}
 	f := &engineTransactions{run: store.RunRow{ID: "run", Team: "team", Request: runspec.SealedRequest{RunID: "run"}}}
 	_, err := fakeEngine(t, f).AcceptPlan(t.Context(), a, controllerwire.PlanSubmission{Plan: json.RawMessage(`{"jobs":[]}`)})
-	if err != nil || f.plan.Actor.Authority != a.Principal.Authority || f.plan.Actor.CapabilityPrefix != "" || f.plan.Actor.Owner != (store.OwnerLeaseRef{}) {
+	if err != nil || f.plan.Actor.Kind != store.ActorOperator || f.plan.Actor.Authority != a.Principal.Authority || f.plan.Actor.CapabilityPrefix != "" || f.plan.Actor.Owner != (store.OwnerLeaseRef{}) {
 		t.Fatalf("publisher actor = %+v, %v", f.plan.Actor, err)
 	}
 	f.run.Team = "other"
 	before := f.writes
 	if _, err := fakeEngine(t, f).AcceptPlan(t.Context(), a, controllerwire.PlanSubmission{}); err == nil || f.writes != before {
 		t.Fatal("foreign first seal reached plan acceptance")
+	}
+}
+
+func TestEngineRetryPlanKeepsSourceSeal(t *testing.T) {
+	a := expansionAuthority()
+	a.Principal.Capability.Unit = capability.UnitPlan
+	a.Target.RunID = "retry"
+	a.Binding = capability.Binding{Kind: capability.BindingRun, RunID: "retry", Holder: "runner", Generation: 4}
+	f := &engineTransactions{run: store.RunRow{ID: "retry", Team: "team", Request: runspec.SealedRequest{RunID: "source", Hash: "original-seal"}}}
+	if _, err := fakeEngine(t, f).AcceptPlan(t.Context(), a, controllerwire.PlanSubmission{Plan: json.RawMessage(`{"jobs":[]}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if f.plan.RunID != "retry" || !reflect.DeepEqual(f.plan.Seal.Request, f.run.Request) {
+		t.Fatalf("retry plan changed its first seal: %+v", f.plan)
 	}
 }
 

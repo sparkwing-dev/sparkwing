@@ -103,7 +103,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/queue/state` | `runs.read` |
 | `POST` | `/api/v1/runners/github/exchange` | `public` |
 | `GET` | `/api/v1/runs` | `runs.read` |
-| `POST` | `/api/v1/runs` | `runs.state` |
+| `POST` | `/api/v1/runs` | `runs.write` or `children.start` |
 | `GET` | `/api/v1/runs/grep` | `logs.read` |
 | `DELETE` | `/api/v1/runs/{id}` | `admin` |
 | `GET` | `/api/v1/runs/{id}` | `claim` or `runs.read` or `nodes.claim` or `triggers.claim` |
@@ -113,7 +113,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}/request` | `admin` |
 | `GET` | `/api/v1/runs/{id}/attempts` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/cache-grant` | `claim` or `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/runs/{id}/cancel` | `runs.control` |
 | `POST` | `/api/v1/runs/{id}/children` | `claim` |
 | `GET` | `/api/v1/runs/{id}/children/{childID}` | `claim` |
 | `GET` | `/api/v1/runs/{id}/children/{childID}/nodes/{nodeID}/output` | `claim` |
@@ -122,11 +121,9 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/runs/{id}/events` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/events` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/events/stream` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/finish` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/gitcache/git/register` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/heartbeat` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/logs` | `logs.read` |
 | `GET` | `/api/v1/runs/{id}/logs/search` | `logs.read` |
 | `GET` | `/api/v1/runs/{id}/logs/{node}` | `logs.read` |
@@ -181,12 +178,17 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{id}/oidc-token` | `claim` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/paused` | `runs.read` |
 | `GET` | `/api/v1/runs/{id}/pending-triggers` | `triggers.read` or `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/runs/{id}/plan` | `claim` or `runs.state` |
 | `GET` | `/api/v1/runs/{id}/receipt` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/retry` | `runs.control` |
 | `POST` | `/api/v1/runs/{id}/source-credential` | `claim` |
 | `GET` | `/api/v1/runs/{id}/steps` | `runs.read` |
+| `POST` | `/api/v1/runs/{run}/cancel` | `runs.control` |
+| `POST` | `/api/v1/runs/{run}/finish` | `runs.state` or `data.write` |
+| `POST` | `/api/v1/runs/{run}/heartbeat` | `trigger.host` |
 | `POST` | `/api/v1/runs/{run}/jobs/{job}/expansion` | `expansion.submit` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/heartbeat` | `node.report` or `node.report` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/transition` | `node.result` or `node.result` or `data.write` |
+| `POST` | `/api/v1/runs/{run}/plan` | `node.result` or `data.write` |
+| `POST` | `/api/v1/runs/{run}/retry` | `runs.control` |
 | `GET` | `/api/v1/secrets` | `runs.read` or `team.admin` |
 | `POST` | `/api/v1/secrets` | `admin` or `team.admin` |
 | `POST` | `/api/v1/secrets/rotate` | `admin` |

@@ -33,28 +33,6 @@ func (s *EngineController) Claim(ctx context.Context, authorized capability.Auth
 	panic("unimplemented: controller-wire")
 }
 
-func (s *EngineController) Renew(ctx context.Context, authorized capability.Authorized, body controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error) {
-	panic("unimplemented: controller-wire")
-}
-
-func (s *EngineController) TransitionJob(ctx context.Context, authorized capability.Authorized, body controllerwire.JobTransitionRequest) (controllerwire.Applied, error) {
-	panic("unimplemented: controller-wire")
-}
-
-func (s *EngineController) Finish(ctx context.Context, authorized capability.Authorized, body controllerwire.FinishRequest) (controllerwire.Applied, error) {
-	panic("unimplemented: controller-wire")
-}
-
-func (s *EngineController) Cancel(ctx context.Context, authorized capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error) {
-	panic("unimplemented: controller-wire")
-}
-
-// Retry carries body.IdempotencyKey through AdmitRun while loading unchanged
-// source seals and recording retrier lineage. It never edits the source run.
-func (s *EngineController) Retry(ctx context.Context, authorized capability.Authorized, body controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error) {
-	panic("unimplemented: controller-wire")
-}
-
 // RunDetail uses runspec.DisplayRequest/DisplaySpec and the same safe projection
 // for local and remote reads. Claim execution inputs are on their private wire.
 func (s *EngineController) RunDetail(ctx context.Context, authorized capability.Authorized) (controllerwire.RunDetail, error) {

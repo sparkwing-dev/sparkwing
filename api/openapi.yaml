@@ -99,24 +99,31 @@ paths:
 
   /api/v1/runs:
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: runs.write or children.start
       tags: [runs]
-      summary: Create a run row directly.
-      description: |
-        Insert a [Run][1] in the caller-supplied state. Idempotent
-        upgrade of `pending` rows pre-allocated by trigger intake.
-        [1]: #/components/schemas/Run
+      summary: Admit a sealed run request.
+      description: The store derives authority, actor, source provenance, reservations and the run number. An idempotency key replays the committed intake.
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: "#/components/schemas/Run"
+            schema: {$ref: "#/components/schemas/EngineCreateRunRequest"}
       responses:
-        "201": {description: Created. Empty body.}
+        "201":
+          description: Run admitted. The here bearer is returned once.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineCreateRunResponse"}
+        "200":
+          description: Committed result, including replay.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineCreateRunResponse"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
+        "409": {description: The state or authority changed before the transaction committed.}
     get:
       x-sparkwing-scope: runs.read
       tags: [runs]
@@ -305,94 +312,117 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/finish:
-    parameters: [{$ref: "#/components/parameters/RunID"}]
+  /api/v1/runs/{run}/finish:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: runs.state or data.write
       tags: [runs]
-      summary: Mark a run terminal.
+      summary: Commit a terminal run and end its owner unit.
+      description: A live trigger owner finishes through one transaction. A run-bound local publisher uses the publication edge without an executable claim.
       requestBody:
         required: true
         content:
           application/json:
             schema: {$ref: "#/components/schemas/FinishRunRequest"}
       responses:
-        "204": {description: Run finished.}
+        "200":
+          description: Committed result, including replay.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineApplied"}
         "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
+        "409": {description: The state or authority changed before the transaction committed.}
 
-  /api/v1/runs/{id}/plan:
-    parameters: [{$ref: "#/components/parameters/RunID"}]
+  /api/v1/runs/{run}/plan:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: claim or runs.state
+      x-sparkwing-scope: node.result or data.write
       tags: [runs]
-      summary: Upload the run's plan-snapshot blob, or accept a plan claim's plan.
-      description: |
-        With a scoped bearer the body is opaque bytes (typically JSON
-        serialized plan) that replace the stored snapshot; Content-Type is
-        ignored.
-
-        With the claim token of the run's planning claim the body is the plan
-        document. The controller validates it, inserts its nodes, finishes the
-        planning node and releases the nodes with no dependencies, all in one
-        commit. A run accepts one plan: the identical body replays 200 after
-        the claim ends, and any other body is 409. A plan the controller will
-        not run is 422 and writes nothing, as is a plan declaring a required
-        secret that is neither set for the run's pipeline nor shared
-        team-wide; that refusal names only the declared secrets the run
-        cannot read, and records the reason for each as a
-        `secret_preflight_refused` run event. The claim route answers with a
-        status only.
+      summary: Accept the checkout declarations and plan together.
+      description: A live planner, trigger owner or run-bound publisher submits the second seal. The store preserves the first seal, owns validation and rechecks authority. An ended claim may only replay its recorded exact body.
       requestBody:
         required: true
         content:
-          application/octet-stream:
-            schema: {type: string, format: binary}
-      responses:
-        "200": {description: "The claim's plan was accepted or replayed."}
-        "204": {description: Plan stored.}
-        "409": {description: "The run accepted a different plan, or the claim ended without submitting this one."}
-        "422": {description: "The plan was refused; the error names the first reason, or every required secret the run cannot read."}
-        "500": {$ref: "#/components/responses/InternalError"}
-
-  /api/v1/runs/{id}/cancel:
-    parameters: [{$ref: "#/components/parameters/RunID"}]
-    post:
-      x-sparkwing-scope: runs.control
-      tags: [runs]
-      summary: Request cancellation. The orchestrator surfaces this via heartbeat.
-      description: Takes no request body; the handler reads none.
-      responses:
-        "204": {description: Cancellation requested.}
-        "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/runs/{id}/retry:
-    parameters: [{$ref: "#/components/parameters/RunID"}]
-    post:
-      x-sparkwing-scope: runs.control
-      tags: [runs]
-      summary: Re-run a failed run. `?full=1` re-runs every node; default skips passed.
-      parameters:
-        - in: query
-          name: full
-          schema: {type: string, enum: ["1", "true"]}
-          description: When set, re-runs every node regardless of prior outcome.
+          application/json:
+            schema: {$ref: "#/components/schemas/EnginePlanSubmission"}
       responses:
         "200":
-          description: New run created.
+          description: Committed result, including replay.
           content:
             application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                required: [run_id]
-                properties:
-                  run_id: {type: string}
-                  status: {type: string}
-                  trigger_source: {type: string}
-                  started_at: {type: string, format: date-time}
-        "404": {$ref: "#/components/responses/NotFound"}
+              schema: {$ref: "#/components/schemas/EnginePlanAccepted"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
+        "409": {description: The state or authority changed before the transaction committed.}
+
+  /api/v1/runs/{run}/cancel:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: runs.control
+      tags: [runs]
+      summary: Request cooperative cancellation.
+      description: The authenticated member requests cancellation. Live holders drain under reporting authority. Expected expansions are resolved in the transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineCancelRequest"}
+      responses:
+        "200":
+          description: Committed result, including replay.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineApplied"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+        "409": {description: The state or authority changed before the transaction committed.}
+
+  /api/v1/runs/{run}/retry:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: runs.control
+      tags: [runs]
+      summary: Admit a retry with the source seals unchanged.
+      description: The store loads the source seals and records the current requester as retrier lineage. The idempotency key applies to the new intake.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineRetryRequest"}
+      responses:
+        "200":
+          description: Committed result, including replay.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineCreateRunResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+        "409": {description: The state or authority changed before the transaction committed.}
 
   /api/v1/runs/{id}/attempts:
     parameters: [{$ref: "#/components/parameters/RunID"}]
@@ -869,38 +899,33 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "409": {description: Caller is not the current claim holder.}
 
-  /api/v1/runs/{id}/heartbeat:
-    parameters: [{$ref: "#/components/parameters/RunID"}]
+  /api/v1/runs/{run}/heartbeat:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: trigger.host
       tags: [runs]
-      summary: Stamp the run's liveness clock.
-      description: |
-        Keeps the reaper from declaring the run lost while its nodes are
-        between claims. The caller must hold a live claim on one of the
-        run's nodes. A caller that sends `X-Sparkwing-Log-Watch: 1` is
-        answered `200` with the run's nodes a viewer has open.
-      parameters:
-        - in: header
-          name: X-Sparkwing-Log-Watch
-          required: false
-          schema: {type: string, enum: ["1"]}
-          description: Ask which of the run's nodes a viewer watches.
+      summary: Renew the authorized run owner lease.
+      description: The store renews the owner and its self-claimed jobs and concurrency holders atomically, then returns cancellation and watched jobs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineRenewalRequest"}
       responses:
         "200":
-          description: Heartbeat recorded; lists the watched nodes.
+          description: Committed result, including replay.
           content:
             application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.runHeartbeatResp
-                type: object
-                properties:
-                  watched_nodes: {type: array, items: {type: string}}
-        "204": {description: Heartbeat recorded. Empty body.}
+              schema: {$ref: "#/components/schemas/EngineRenewalResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
+        "409": {description: The state or authority changed before the transaction committed.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/status:
     parameters:
@@ -7250,6 +7275,70 @@ paths:
       responses:
         default: {description: Undescribed.}
 
+  /api/v1/runs/{run}/jobs/{job}/transition:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: node.result or node.result or data.write
+      tags: [runs]
+      summary: Apply one job state transition.
+      description: The controller derives the actor and fence from capability authorization. The store owns legal edges, result records, replay and lifecycle events.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineJobTransitionRequest"}
+      responses:
+        "200":
+          description: Committed result, including replay.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineApplied"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+        "409": {description: The state or authority changed before the transaction committed.}
+
+  /api/v1/runs/{run}/jobs/{job}/heartbeat:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: node.report or node.report
+      tags: [runs]
+      summary: Renew the authorized job claim.
+      description: A job claimant renews its exact lease and bound concurrency holders. A trigger owner renews through its owner transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineRenewalRequest"}
+      responses:
+        "200":
+          description: Committed result, including replay.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineRenewalResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+        "409": {description: The state or authority changed before the transaction committed.}
+
 components:
   securitySchemes:
     bearerToken:
@@ -8631,12 +8720,13 @@ components:
         cost: {type: integer}
         position: {type: integer, description: One-based place in the key's queue.}
     FinishRunRequest:
-      x-sparkwing-go-type: pkg/controller.finishRunReq
+      x-sparkwing-go-type: internal/controllerwire.FinishRequest
       type: object
-      required: [status]
+      required: [outcome]
       properties:
-        status: {type: string}
-        error: {type: string}
+        outcome: {type: string}
+        reason: {type: string}
+        error: {type: object, description: The shared inner error with code and masked message.}
     FinishNodeRequest:
       x-sparkwing-go-type: pkg/controller.finishNodeReq
       type: object
@@ -8942,3 +9032,75 @@ components:
         overlap: {type: string, enum: [skip, queue]}
         catch_up: {type: string, description: A Go duration such as 6h.}
         args: {type: object, additionalProperties: {type: string}}
+    EngineCreateRunRequest:
+      x-sparkwing-go-type: internal/controllerwire.CreateRunRequest
+      type: object
+      properties:
+        request: {type: object}
+        idempotency_key: {type: string}
+    EngineCreateRunResponse:
+      x-sparkwing-go-type: internal/controllerwire.CreateRunResponse
+      type: object
+      properties:
+        run_id: {type: string}
+        number: {type: integer}
+        request: {type: object}
+        here_bearer: {type: string}
+        replayed: {type: boolean}
+    EnginePlanSubmission:
+      x-sparkwing-go-type: internal/controllerwire.PlanSubmission
+      type: object
+      properties:
+        declarations: {type: object}
+        resolved: {type: object}
+        plan: {type: object}
+    EnginePlanAccepted:
+      x-sparkwing-go-type: internal/controllerwire.PlanAccepted
+      type: object
+      properties:
+        spec: {type: object}
+        plan: {type: object}
+        plan_hash: {type: string}
+        replayed: {type: boolean}
+        notices: {type: array, items: {type: object}}
+    EngineJobTransitionRequest:
+      x-sparkwing-go-type: internal/controllerwire.JobTransitionRequest
+      type: object
+      properties:
+        to: {type: string}
+        cause: {type: string}
+        result: {type: object}
+        retry_at: {type: string, format: date-time}
+    EngineApplied:
+      x-sparkwing-go-type: internal/controllerwire.Applied
+      type: object
+      properties:
+        replayed: {type: boolean}
+        cancel_requested: {type: boolean}
+        state_seq: {type: integer}
+        generation: {type: integer}
+        attempt: {type: integer}
+    EngineCancelRequest:
+      x-sparkwing-go-type: internal/controllerwire.CancelRequest
+      type: object
+      properties:
+        reason: {type: string}
+    EngineRetryRequest:
+      x-sparkwing-go-type: internal/controllerwire.RetryRequest
+      type: object
+      properties:
+        idempotency_key: {type: string}
+    EngineRenewalRequest:
+      x-sparkwing-go-type: internal/controllerwire.RenewalRequest
+      type: object
+      properties:
+        executing: {type: boolean}
+    EngineRenewalResponse:
+      x-sparkwing-go-type: internal/controllerwire.RenewalResponse
+      type: object
+      properties:
+        expires_at: {type: string, format: date-time}
+        cancel_requested: {type: boolean}
+        cancel_reason: {type: string}
+        watched: {type: boolean}
+        watched_jobs: {type: array, items: {type: string}}

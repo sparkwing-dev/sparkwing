@@ -80,193 +80,6 @@ func validateGitSHA(sha string) error {
 	return errors.New("git.sha must be a 40-64 character hex object id")
 }
 
-func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
-	var body store.Run
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if body.ID == "" || body.Pipeline == "" || body.Status == "" {
-		writeError(w, http.StatusBadRequest, errors.New("id, pipeline, status are required"))
-		return
-	}
-	if err := validateGitSHA(body.GitSHA); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if p, ok := PrincipalFromContext(r.Context()); ok && !p.HasScope(ScopeAdmin) {
-		var authorized bool
-		r, authorized = s.triggerClaimRequest(w, r, body.ID)
-		if !authorized {
-			return
-		}
-		if !s.bindRunRepoToTrigger(w, r, &body) {
-			return
-		}
-	}
-	// safety: the per-principal guards measure the authenticated caller, so the
-	// principal comes from the token rather than anything the body asserts.
-	runCtx := store.WithCreatingPrincipal(r.Context(), claimIdentity(r).Principal)
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	if err := tenant.CreateRun(runCtx, body); err != nil {
-		if errors.Is(err, store.ErrIDOwnedByAnotherTeam) {
-			writeError(w, http.StatusConflict, err)
-			return
-		}
-		if errors.Is(err, store.ErrInvalidInput) {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		if errors.Is(err, store.ErrSecretInputHash) {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		if s.writeComputeLimitRefusal(w, r, "", "", err) {
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if body.Status == "running" {
-		s.reportGitHubRunState(context.WithoutCancel(r.Context()), body.ID, "running")
-	}
-	w.WriteHeader(http.StatusCreated)
-}
-
-// safety: a run's declared repository is display metadata, so it is copied from
-// the trigger rather than taken from the body, which keeps the two rows agreeing
-// on one story. Nothing is granted on either value.
-func (s *Server) bindRunRepoToTrigger(w http.ResponseWriter, r *http.Request, run *store.Run) bool {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return false
-	}
-	trig, err := tenant.GetTrigger(r.Context(), run.ID)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusInternalServerError, err)
-		return false
-	}
-	if trig == nil {
-		run.DeclaredRepo, run.RepoURL, run.GithubOwner, run.GithubRepo = "", "", "", ""
-		return true
-	}
-	if run.DeclaredRepo != "" && run.DeclaredRepo != trig.Repo {
-		writeError(w, http.StatusBadRequest,
-			fmt.Errorf("repo %q does not match the trigger's repository %q", run.DeclaredRepo, trig.Repo))
-		return false
-	}
-	run.DeclaredRepo, run.RepoURL = trig.Repo, trig.RepoURL
-	run.GithubOwner, run.GithubRepo = trig.GithubOwner, trig.GithubRepo
-	return true
-}
-
-type finishRunReq struct {
-	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
-}
-
-// safety: the run row is terminal before the follow-ups run, and nothing else
-// produces the terminal commit status for a finished run, so a client that
-// goes away must not take them with it. Staying under the shutdown budget
-// keeps a drain that starts mid-handler from ending one.
-const finishRunFollowUpTimeout = controllerShutdownBudget - time.Second
-
-func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
-	s.finishRun(w, r, s.foldRunProfiles)
-}
-
-func (s *Server) handleFinishDaemonRun(w http.ResponseWriter, r *http.Request) {
-	s.finishRun(w, r, nil)
-}
-
-func (s *Server) finishRun(w http.ResponseWriter, r *http.Request, recordProfile func(context.Context, *store.Tenant, *store.Run)) {
-	runID := r.PathValue("id")
-	var body finishRunReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if body.Status != "success" && body.Status != "failed" && body.Status != "cancelled" {
-		writeError(w, http.StatusBadRequest, errors.New("run completion requires a terminal status"))
-		return
-	}
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	run, runErr := tenant.GetRun(r.Context(), runID)
-	pipeline := ""
-	if runErr == nil && run != nil {
-		pipeline = run.Pipeline
-	}
-	otelutil.StampSpan(r.Context(), otelutil.SpanAttrs{
-		RunID: runID, Pipeline: pipeline, Outcome: body.Status,
-	})
-	finished, err := tenant.FinishRunIfActive(r.Context(), runID, body.Status, body.Error)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		if errors.Is(err, store.ErrInvalidInput) {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	follow, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), finishRunFollowUpTimeout)
-	defer cancel()
-	refreshed, err := tenant.GetRun(follow, runID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if finished {
-		observeRunFinish(refreshed.Pipeline, refreshed.Status, time.Since(refreshed.StartedAt))
-		if recordProfile != nil {
-			recordProfile(follow, tenant, refreshed)
-		}
-	}
-	s.reportGitHubRunState(follow, runID, refreshed.Status)
-	if !finished && (refreshed.Status != body.Status || refreshed.Error != body.Error) {
-		writeError(w, http.StatusBadRequest,
-			fmt.Errorf("%w: run %s already finished as %s", store.ErrInvalidInput, runID, refreshed.Status))
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) handleUpdatePlanSnapshot(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	defer r.Body.Close()
-	snapshot, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPlanSnapshotBody))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	if err := tenant.UpdatePlanSnapshot(r.Context(), runID, snapshot); err != nil {
-		if errors.Is(err, store.ErrPlanAccepted) {
-			writeError(w, http.StatusConflict, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	filter, parseErr := store.ParseRunFilterValidated(r.URL.Query())
 	if parseErr != nil {
@@ -1445,23 +1258,6 @@ func (s *Server) handleGetTrigger(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tr)
 }
 
-func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	id := r.PathValue("id")
-	if err := tenant.RequestCancel(r.Context(), id); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 	tenant, ok := s.requestTenant(w, r)
 	if !ok {
@@ -2242,10 +2038,6 @@ type nodeHeartbeatResp struct {
 	Watched bool `json:"watched"`
 }
 
-type runHeartbeatResp struct {
-	WatchedNodes []string `json:"watched_nodes"`
-}
-
 func (s *Server) handleUpdateNodeActivity(w http.ResponseWriter, r *http.Request) {
 	tenant, ok := s.requestTenant(w, r)
 	if !ok {
@@ -2518,32 +2310,6 @@ func (s *Server) writeNodeStoreError(w http.ResponseWriter, operation, runID, no
 		}
 	}
 	writeError(w, http.StatusInternalServerError, err)
-}
-
-func (s *Server) handleTouchRunHeartbeat(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	if _, err := tenant.GetRun(r.Context(), runID); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if err := tenant.TouchRunHeartbeat(r.Context(), runID); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	// safety: a dispatcher that predates the watched flag reads any answer but 204 as a failed beat.
-	if r.Header.Get(store.LogWatchHeader) == "1" {
-		writeJSON(w, http.StatusOK, runHeartbeatResp{WatchedNodes: s.liveLogs.WatchedNodes(runID)})
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleCreateDebugPause(w http.ResponseWriter, r *http.Request) {

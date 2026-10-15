@@ -201,6 +201,16 @@ func DecodeInner(data []byte) (*Error, error) {
 	return failure, nil
 }
 
+// UnmarshalJSON validates inner errors with the same codec used by protocol replies.
+func (e *Error) UnmarshalJSON(data []byte) error {
+	failure, err := DecodeInner(data)
+	if err != nil {
+		return err
+	}
+	*e = *failure
+	return nil
+}
+
 func decodeValue(decoder *json.Decoder) (any, error) {
 	token, err := decoder.Token()
 	if err != nil {

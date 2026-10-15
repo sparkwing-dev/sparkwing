@@ -33,6 +33,19 @@ func TestDecodeInner(t *testing.T) {
 	}
 }
 
+func TestErrorUnmarshalUsesInnerCodec(t *testing.T) {
+	for _, body := range []string{`{}`, `{"code":"x"}`, `{"code":"x","code":"y","message":"x"}`, `{"error":{"code":"x","message":"x"}}`} {
+		var failure apierr.Error
+		if err := json.Unmarshal([]byte(body), &failure); err == nil {
+			t.Fatalf("unmarshal accepted invalid inner error: %s", body)
+		}
+	}
+	var failure apierr.Error
+	if err := json.Unmarshal([]byte(`{"code":"future_code","message":"readable","future":true}`), &failure); err != nil || failure.Code != "future_code" {
+		t.Fatalf("additive inner error = %+v, %v", failure, err)
+	}
+}
+
 func TestErrorWriters(t *testing.T) {
 	failure := &apierr.Error{Code: apierr.RateLimited, Message: "retry later", Details: map[string]any{"retry_after_ms": 1001}}
 	w := httptest.NewRecorder()

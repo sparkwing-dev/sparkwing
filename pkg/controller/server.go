@@ -584,15 +584,6 @@ func (s *Server) claimedRun(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) claimedRunHeartbeat(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r, ok := s.runClaimRequest(w, r, r.PathValue("id"))
-		if ok {
-			next.ServeHTTP(w, r)
-		}
-	})
-}
-
 func (s *Server) claimedRunAccess(next http.Handler) http.Handler {
 	return s.runMember("", next)
 }
@@ -765,33 +756,18 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
 // Handler returns the HTTP router. Exposed separately from Serve so
 // tests can wrap it in httptest without binding a real port. Callers using
 // Handler directly must call Shutdown to drain server-owned background work.
-//
-// Auth shape:
-//   - /api/v1/health is always unauthenticated so k8s probes don't
-//     401-crashloop the pod.
-//   - Everything else goes through Authenticator.Middleware which
-//     stamps a Principal on ctx (or 401s). Handlers declare scope via
-//     requireScope.
-//   - When the Authenticator is disabled, middleware + requireScope are
-//     pass-through.
+// Engine and operator endpoints use RouteAuthorization. Health stays public.
 func (s *Server) Handler() http.Handler {
-	api := s.handler(s.handleFinishRun)
+	api := s.handler()
 	if s.dashboard == nil {
 		return api
 	}
 	return s.browserHandler(api)
 }
 
-// DaemonHandler leaves profile recording to the host orchestrator. Clients
-// completing runs through this handler must submit profile observations separately.
-// Call Shutdown to drain background work before exiting.
-func (s *Server) DaemonHandler() http.Handler {
-	return s.handler(s.handleFinishDaemonRun)
-}
-
-func (s *Server) handler(finishRun http.HandlerFunc) http.Handler {
+func (s *Server) handler() http.Handler {
 	s.requireAuthForTeams()
-	mux, router := s.routers(finishRun)
+	mux, router := s.routers()
 	router.Handle("/", s.authenticated(mux, s.githubRunnerFence(s.hereRunnerFence(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux)))))))
 	h := withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(router, mux), func(r *http.Request) string {
@@ -816,17 +792,14 @@ func (s *Server) handler(finishRun http.HandlerFunc) http.Handler {
 // safety: neither mux is wired to the other and no handler runs, so a caller
 // that only needs to know whether a route exists can build these from a zero
 // Server without reaching a store.
-func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.ServeMux) {
+func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux := http.NewServeMux()
 
-	mux.Handle("POST /api/v1/runs", requireScope(ScopeRunsState, http.HandlerFunc(s.handleCreateRun)))
 	mux.Handle("GET /api/v1/runs", requireScope(ScopeRunsRead, s.reconcileBeforeRead(s.handleListRuns)))
 	mux.Handle("GET /api/v1/runs/{id}", newClaimSensitiveRoute(claimSourceKinds, nil, http.HandlerFunc(s.handleGetRun)).orElse(requireScope(ScopeRunsRead, s.readableRun(s.reconcileBeforeRead(s.handleGetRun)), ScopeNodesClaim, ScopeTriggersClaim)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes", requireScope(ScopeRunsRead, s.readableRun(http.HandlerFunc(s.handleListNodes)), ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("GET /api/v1/runs/{id}/receipt", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetRunReceipt)))
 	mux.Handle("GET /api/v1/runs/{id}/pending-triggers", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleListPendingTriggersForParent)), ScopeNodesClaim, ScopeTriggersClaim))
-	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeRunsState, s.claimedRun(finishRun)))
-	mux.Handle("POST /api/v1/runs/{id}/plan", s.newClaimResultRoute([]store.ClaimTokenKind{store.ClaimTokenPlan}, planClaimBinding, s.handleAcceptPlan).orElse(requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleUpdatePlanSnapshot)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/attempt", s.newClaimResultRoute([]store.ClaimTokenKind{store.ClaimTokenPlan, store.ClaimTokenWork}, nil, s.handleReportAttempt))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleCreateNode))))
@@ -889,12 +862,9 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/runs/{id}/gitcache/git/{path...}", requireScope(ScopeNodesClaim,
 		s.meteredBytes(egress.ClassGit, s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheGit)))))
 
-	mux.Handle("POST /api/v1/runs/{id}/cancel", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleCancelRun)))
-
 	mux.Handle("GET /api/v1/trends", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTrends)))
 	mux.Handle("GET /api/v1/agents", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleAgents)))
 
-	mux.Handle("POST /api/v1/runs/{id}/retry", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleRetry)))
 	mux.Handle("GET /api/v1/runs/{id}/attempts", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListAttempts)))
 
 	mux.Handle("GET /api/v1/pipelines", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListPipelines)))
@@ -959,7 +929,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start", newClaimReportingRoute(claimSourceKinds, http.HandlerFunc(s.handleClaimExecutionStart)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAcknowledgeNodeExecutionStart)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeExecutionAttempt))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input", newClaimSensitiveRoute(claimWorkKinds, pathClaimBinding, http.HandlerFunc(s.handleClaimInput)))
-	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.claimedRunHeartbeat(http.HandlerFunc(s.handleTouchRunHeartbeat))))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleUpdateNodeActivity)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeActivity)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/touch", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleTouchNodeHeartbeat)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleTouchNodeHeartbeat)))))
@@ -1116,7 +1085,7 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 // because the caller asks before the store that server needs is open.
 func (s *Server) routeProbe() (*http.ServeMux, *http.ServeMux) {
 	s.routeProbeOnce.Do(func() {
-		s.routeProbeMux, s.routeProbePub = s.routers(s.handleFinishRun)
+		s.routeProbeMux, s.routeProbePub = s.routers()
 	})
 	return s.routeProbeMux, s.routeProbePub
 }

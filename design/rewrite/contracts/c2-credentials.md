@@ -8,7 +8,7 @@ interfaces. The policy evaluator, authentication verifier, HTTP policy router,
 delegation validator, data/source checks, billing calculation, payment verifier
 and error codec are implemented. Filesystem and S3 object signers implement the
 signing boundary. Persistent issuance and authentication reads still need the
-store implementation. The Stripe callback, generator expansion and twenty-three operator endpoints use this table in the existing
+store implementation. The Stripe callback, nine engine endpoints and twenty-three operator endpoints use this table in the existing
 controller. The remaining routes have not switched to it.
 
 ## Ownership
@@ -225,7 +225,7 @@ and deadline arithmetic remain C4's responsibility.
 | `run` | The resolved resource belongs to the capability's run. |
 | `ownNode` | Path run and job equal the bound run and job; attempt/generation come from the capability. |
 | `runOfTrigger` | A trigger owner reaches its run's jobs; store holder rights still reject another holder's row. |
-| `bodyNamesRun` | Decode and bind the body's run/parent lineage before handler execution. Member intake may omit a parent; a claim may not invent one. |
+| `bodyNamesRun` | Decode and bind the body's run/parent lineage before handler execution. Member intake may omit a parent. A bound job must name its own parent run and job. `Target.NodeID` carries the body parent job on intake. |
 | `pipelineOfBoundRun` | The requested pipeline equals the sealed bound run's pipeline. A bare machine or Actions root cannot read sizing through claim authority. |
 | `childOfBoundNode` | The child was created by this bound job; cross-run reads follow the declared child edge. |
 | `slotOfBoundNode` | Body/query holder identifies the authorized run/job/generation and declared concurrency key. Plan holders require the run owner. No admin bypass exists. |
@@ -671,6 +671,96 @@ not a list generated from `Routes`. A separate handler-policy lint must reject
 authorization calls inside handlers. T1 owns runtime scenarios; C2's tests
 exercise only available contract data and functions.
 
+### Engine intake and lifecycle cutover
+
+The running server registers intake, plan, finish, cancel, retry, run renewal,
+job transition and job renewal through `PolicyRouter`, alongside expansion.
+Each uses the shared controller wire. Intake preserves the idempotency key and
+returns its committed seal, number and one-time here bearer. Plan acceptance
+preserves the first seal even when a retry's embedded run ID names its source.
+Plan publication uses `ActorOperator` and acquires no executable owner.
+
+Lifecycle adapters derive tagged authority, holder, generation and owner
+references from `Authorized`. Job results preserve authorized record keys.
+Owner finish calls `FinishRunAndUnit`; publication calls `TransitionRun` with
+`RunPublish`. Cancellation records member authority on `RunCancel`. Retry
+names its source through `AdmitRun`, which owns source-seal loading. Renewal
+uses `RenewOwner` or `RenewNodeClaim` and returns the committed expiry,
+cancellation and watched jobs. The store owns all clocks, events and replay.
+Typed stale-generation/holder refusals map to `lock_held`; illegal/terminal
+edges map to `illegal_transition`. Private store failures remain private.
+
+Result-route decoders hash the exact body before authentication. This supplies
+`LiveResult` with actor, route, resource, fence and digest evidence before a
+terminal replay can reach its transaction. Every body uses JSON, rejects
+unknown fields and trailing objects, and cannot replace its actor or fence.
+`apierr.Error.UnmarshalJSON` shares `DecodeInner`, including duplicate-key and
+nested-envelope refusal. Unknown additive error codes remain readable.
+
+This cut also repairs the local C2 `bodyNamesRun` shape check. A node-bound
+credential creating a child must match the parent job as well as the parent
+run. A real-server test reproduced sibling-parent intake when the relational
+checker returned success. `Target.NodeID` already carries that decoded parent
+selector, so no C1 signature was added.
+
+`RunTransactions` now includes the five existing lifecycle/renewal methods
+used by these adapters. A single fake supplies their exact C1 signatures.
+The collection's existing GET list keeps its separate registration; intake
+registers only POST there. Other migrated paths route unsupported methods to
+the shared JSON 405. The old run upsert, repository-binding helper, plan
+snapshot/acceptance handlers, inline finish follow-ups, cancellation, retry
+and run heartbeat handlers are removed. `DaemonHandler` is removed and its
+sole orchestrator caller uses `Handler`.
+
+The removed legacy handler/route files contain 360 deleted source lines.
+Five replaced lifecycle adapter stubs remove 22 more lines. The removed
+inline-finish tests contain 192 lines. Their completion-effect responsibilities
+belong to C1's durable effect transaction and reconciler; the new finish test
+proves the joint transaction boundary, not delivery after a disconnect.
+No full T1 port or placement scenario is claimed complete.
+
+New HTTP proofs cover 16 intake cases, 14 plan cases, 56 lifecycle cases,
+five malformed inner errors, 12 terminal replay cases, four typed transition
+refusals and 28 method refusals. Additional adapter assertions cover publisher
+actor classification and inherited retry seals. These use real server routers
+with fake committed authentication and C1 transactions. They do not establish
+native transport, SQLite/Postgres races, completion effects or runtime parity.
+
+Contract/integration work still needed:
+
+- C1 must make HTTP result digests reproducible in persisted replay evidence.
+  `RequestEvidence.ResultDigest` hashes exact HTTP bytes, but `NodeTransition`,
+  `PlanAcceptance` and `FinishRunRequest` cannot carry those bytes or their
+  digest to the transaction. C1/C2 need one agreed digest codec or an explicit
+  transaction field before the fake replay proofs become persistence proofs.
+- Plan/eval units need a final renewal transaction and claim ownership lookup
+  for `/claims/{claim}/heartbeat`. C2 implements the declared trigger/job
+  renewal methods. `RenewalRequest.Executing` has no C1 parameter; those
+  methods derive execution from stored state. The wire/store owners must
+  decide whether the observation is needed.
+- C1 must implement the transaction bodies and committed authentication,
+  bindings and source-provenance adapters. W9 must connect the engine client
+  and remaining old lifecycle callers to the shared wire. Browser/session,
+  verified-peer and CSRF adapters still need production wiring.
+- Claims, reconciliation, run detail, snapshots, compatibility and the
+  remaining controller routes still need their cutover. Legacy credential
+  auth and node-write routes remain. Full T1 scenarios stay skipped.
+
+Shared changes are the one-line `internal/orchestrator/wingd_api.go` caller
+migration, `.apidiff/pkg_controller.txt`, OpenAPI, API/auth documentation,
+changelog and generated mirrors. API snapshots outside the controller already
+drift from their committed baselines; their generated edits were restored
+because this cut owns only the controller snapshot. No new configuration,
+issuer, store implementation or cache was added. The lead owns independent
+review, native integration, Sparkwing pipelines and launch checks.
+
+Verification passes the repository build, scoped vet, capability/API-error
+tests, focused controller tests, all executable acceptance proofs, API generator
+tests, OpenAPI drift, comment policy, documentation symbols and embedded mirrors.
+The full `pkg/docs` run cannot bind its web-client test sockets in the sandbox.
+Its symbol, changelog and mirror checks pass separately. The full legacy
+controller suite, native transports and Sparkwing pipelines were not run.
+
 ## Open questions for the lead
 
 1. **Root origins and sessions.** Section 5.1 names three issuance forms but
@@ -702,7 +792,7 @@ exercise only available contract data and functions.
    audit transaction. C2 supplies no alternate SQL implementation. Persistent
    root, delegation, claim and exchange entry points must reach `Store.Issue`.
 5. **Controller cutover.** The running `Server` uses `PolicyRouter` for the
-   Stripe callback, generator expansion and twenty-three operator endpoints. Other routes retain legacy auth and
+   Stripe callback, nine engine endpoints and twenty-three operator endpoints. Other routes retain legacy auth and
    registrations. Wire final handlers and decoders to `PolicyRouter`, provide
    account/console/verified-local identity and CSRF adapters, then delete the
    old auth stack and handler authorization. Final route-inventory and

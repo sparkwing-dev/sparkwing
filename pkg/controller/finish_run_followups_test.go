@@ -3,8 +3,6 @@ package controller
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -19,110 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
-
-const followUpNodeCount = 60
-
-func seedFinishRunFollowUpState(t *testing.T, st *store.Store, runID string) string {
-	t.Helper()
-	ctx := context.Background()
-	if err := st.CreateTrigger(ctx, store.Trigger{
-		ID: runID, Pipeline: "pr-gate", TriggerSource: "github",
-		Repo: "example/project", GithubOwner: "example", GithubRepo: "project", GithubRepoID: 701,
-		TriggerEnv: map[string]string{envGitHubAppInstallation: "7"},
-		GitSHA:     strings.Repeat("1", 40), CreatedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("CreateTrigger: %v", err)
-	}
-	if err := st.CreateRun(ctx, store.Run{
-		ID: runID, Pipeline: "pr-gate", Status: "running", StartedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-	last := ""
-	for i := range followUpNodeCount {
-		nodeID := fmt.Sprintf("node-%02d", i)
-		last = nodeID
-		if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
-			t.Fatalf("CreateNode %s: %v", nodeID, err)
-		}
-		if err := st.FinishNode(ctx, runID, nodeID, "success", "", nil); err != nil {
-			t.Fatal(err)
-		}
-		for s := range 5 {
-			if err := st.AddNodeMetricSample(ctx, runID, nodeID, store.MetricSample{
-				Kind:          store.MetricInterval,
-				TS:            time.Now().UTC().Add(time.Duration(s) * time.Second),
-				CPUMillicores: 500,
-				MemoryBytes:   1 << 20,
-			}); err != nil {
-				t.Fatalf("AddNodeMetricSample %s: %v", nodeID, err)
-			}
-		}
-	}
-	return last
-}
-
-// The terminal run row is already committed when the follow-ups run, and
-// nothing else produces a finished run's check run, so a client that
-// disconnects mid-handler must not take the fold or the check run with it.
-func TestFinishRun_FollowUpsSurviveARequestCancel(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	const runID = "run-disconnect"
-	lastNode := seedFinishRunFollowUpState(t, st, runID)
-
-	s := New(st, nil)
-	github := attachAppChecks(t, s, "")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cancelled := make(chan struct{})
-	go func() {
-		defer close(cancelled)
-		for {
-			run, err := st.GetRun(context.Background(), runID)
-			if err == nil && run != nil && run.FinishedAt != nil {
-				cancel()
-				return
-			}
-			time.Sleep(50 * time.Microsecond)
-		}
-	}()
-
-	body, _ := json.Marshal(finishRunReq{Status: "success"})
-	req := httptest.NewRequest(http.MethodPost,
-		"/api/v1/runs/"+runID+"/finish", strings.NewReader(string(body))).WithContext(ctx)
-	req.Header.Set("Content-Type", "application/json")
-	req.SetPathValue("id", runID)
-	rec := httptest.NewRecorder()
-	s.handleFinishRun(rec, req)
-	<-cancelled
-
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status=%d body=%s, want 204", rec.Code, rec.Body.String())
-	}
-	if ctx.Err() == nil {
-		t.Fatal("the request context was never cancelled, so the test proved nothing")
-	}
-	drainChecks(t, s)
-	if calls := github.CheckRunCalls(); len(calls) != 1 || calls[0].Conclusion != "success" {
-		t.Errorf("check run writes = %+v after the client went away, want the completed success", calls)
-	}
-	prof, err := st.GetPipelineProfile(context.Background(), "pr-gate", lastNode)
-	if err != nil {
-		t.Fatalf("GetPipelineProfile: %v", err)
-	}
-	if prof == nil {
-		t.Errorf("the profile fold stopped before %s when the client went away", lastNode)
-	}
-}
 
 type lockedBuffer struct {
 	mu sync.Mutex
@@ -199,11 +93,6 @@ func queuedCheckServer(t *testing.T, apiURL string, logs *lockedBuffer) *Server 
 // so its drain carries a budget of its own; ServeWith used to hand it the one
 // the listener's own shutdown had already spent.
 func TestDrainGitHubChecks_DoesNotInheritASpentBudget(t *testing.T) {
-	if finishRunFollowUpTimeout >= controllerShutdownBudget {
-		t.Fatalf("finishRunFollowUpTimeout %s must stay under the shutdown budget %s",
-			finishRunFollowUpTimeout, controllerShutdownBudget)
-	}
-
 	// safety: the spent server asks a github of its own, so the gate below
 	// can only be opened by the live server's own request.
 	spentGitHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
