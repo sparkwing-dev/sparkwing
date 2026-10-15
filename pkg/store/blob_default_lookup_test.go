@@ -40,11 +40,12 @@ func TestBlobRecordsVerifiedDefaultLookupFiltersPersistedEvidence(t *testing.T) 
 			}
 		})
 	}
-	sealed, err := json.Marshal(runspec.SealedRequest{Version: 1, Request: runspec.Request{Git: runspec.Git{DefaultBranch: runspec.Optional[string]{Set: true, Value: "trunk"}}}})
+	sealed, err := json.Marshal(runspec.SealedRequest{Version: 1, Request: runspec.Request{Git: runspec.Git{Ref: "main", DefaultBranch: runspec.Optional[string]{Set: true, Value: "trunk"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, "UPDATE runs SET request_json=? WHERE id='run'", sealed)
+	lookup.Authority.Ref = blob.RefFacts{}
 	if hit, err := records.LookupRecord(t.Context(), lookup); err != nil || hit.Found {
 		t.Fatalf("lookup ignored sealed default branch: %+v: %v", hit, err)
 	}
@@ -82,7 +83,7 @@ func TestBlobRecordsRemoteCacheCannotWeakenVerifiedDefaultPolicy(t *testing.T) {
 	}
 	key := request.Key
 	key.Scope.Ref = blob.RefScope{Ref: "main", Verified: true}
-	scope, err := records.rules.RecordNamespace(key)
+	scope, err := blob.RecordNamespace(key)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,7 +10,7 @@ import (
 
 // SetResultBlobRecords configures verified manifests for records and results before the store is shared.
 func (s *Store) SetResultBlobRecords(manifests BlobManifestReader) {
-	s.resultRecords = &blobRecords{manifests: manifests, rules: sharedBlobRules{}}
+	s.resultRecords = &blobRecords{manifests: manifests}
 }
 
 func (r *blobRecords) AttachResultRecords(ctx context.Context, tx *storeTx, team Team, actor Actor, row NodeRow, result NodeResult) error {

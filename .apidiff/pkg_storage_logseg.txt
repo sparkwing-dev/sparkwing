@@ -61,11 +61,6 @@ const ManifestVersion = 1
 const MaxNodeBytes int64 = 64 << 20
 func NewSink(ctx context.Context, up Uploader, opts Options) (*Sink, error)
 func NewSubjectUploader(data Data) (*SubjectUploader, error)
-type NodeProgress struct {
-	Started    bool
-	Terminal   bool
-	FinishedAt time.Time
-}
 type Options struct {
 	Subject blob.LogSubject
 
@@ -95,7 +90,6 @@ const ReasonSequenceGap = "sequence gap"
 const ReasonStopped = "node stopped before its log was finished"
 const ReasonUnsealed = "writer did not seal"
 const ReasonUploadFailed = "upload failed"
-const SealGrace = limits.LogSealGrace
 const SealedByNode = "node"
 type Segment struct {
 	N           int

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
 // ManifestVersion is the manifest format this package writes and reads.
@@ -123,8 +122,7 @@ func ParseManifest(raw []byte) (*Manifest, error) {
 
 // Completeness states a reader reports for one node's log.
 const (
-	// StateStreaming: the node is still running, or finished less than
-	// [SealGrace] ago and its manifest has not landed yet.
+	// StateStreaming identifies a log that can still receive bytes.
 	StateStreaming = "streaming"
 	// StateComplete: the manifest says every line arrived and every
 	// segment it lists verified.
@@ -139,11 +137,6 @@ const (
 	StateUnknown = "unknown"
 )
 
-// SealGrace is how long after a node finishes a reader waits for its
-// manifest before the controller seals the attempt as abandoned. A
-// writer whose claim ended may upload and seal for as long.
-const SealGrace = limits.LogSealGrace
-
 // Completeness is a reader's verdict on one node's log. Message is the
 // synthetic line a reader renders after the log; it is empty when there
 // is nothing to say.
@@ -152,14 +145,6 @@ type Completeness struct {
 	Lines        int64  `json:"lines"`
 	MissingLines int64  `json:"missing_lines,omitempty"`
 	Message      string `json:"message,omitempty"`
-}
-
-// NodeProgress is what the controller knows about a node that a
-// completeness verdict needs.
-type NodeProgress struct {
-	Started    bool
-	Terminal   bool
-	FinishedAt time.Time
 }
 
 // SyntheticLine renders c's message as the line a reader shows after the

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
@@ -36,6 +37,10 @@ func (l segmentLogs) subjects(ctx context.Context, runID, nodeID string) ([]blob
 	if err != nil {
 		return nil, err
 	}
+	return jobLogSubjects(view, nodeID), nil
+}
+
+func jobLogSubjects(view store.RunView, nodeID string) []blob.LogSubject {
 	var subjects []blob.LogSubject
 	for _, subject := range view.Logs {
 		if subject.Kind == blob.LogJobAttempt && subject.Attempt != nil && subject.Attempt.NodeID == nodeID {
@@ -48,7 +53,7 @@ func (l segmentLogs) subjects(ctx context.Context, runID, nodeID string) ([]blob
 		}
 		return compareLogOrdinal(a.Attempt.Generation, b.Attempt.Generation)
 	})
-	return subjects, nil
+	return subjects
 }
 
 func compareLogOrdinal(a, b int64) int {
@@ -298,11 +303,12 @@ func writeSSELines(out io.Writer, data []byte, base int64, id func(int64) string
 }
 
 // NodeLogCompleteness verifies persisted bytes before reporting the subject's seal.
-func (l segmentLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID string, node logseg.NodeProgress, now time.Time) (logseg.Completeness, bool, error) {
-	subjects, err := l.subjects(ctx, runID, nodeID)
+func (l segmentLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID string) (logseg.Completeness, bool, error) {
+	view, err := l.records.ReadRunView(ctx, runID)
 	if err != nil {
 		return logseg.Completeness{}, false, err
 	}
+	subjects := jobLogSubjects(view, nodeID)
 	if len(subjects) == 0 {
 		return logseg.Completeness{}, false, nil
 	}
@@ -311,8 +317,10 @@ func (l segmentLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID stri
 		return logseg.Completeness{}, true, err
 	}
 	verdict := logseg.Completeness{State: logseg.StateStreaming}
-	if node.Terminal && now.Sub(node.FinishedAt) >= logseg.SealGrace {
-		verdict = logseg.Completeness{State: logseg.StateIncomplete, Message: "logs incomplete: the runner never sealed this log"}
+	for _, attempt := range view.Attempts {
+		if attempt.Identity == *subjects[len(subjects)-1].Attempt && attempt.FinishedAt != nil && !view.Snapshot.StoreNow.Before(attempt.FinishedAt.Add(limits.LogSealGrace)) {
+			verdict = logseg.Completeness{State: logseg.StateIncomplete, Message: "logs incomplete: the runner never sealed this log"}
+		}
 	}
 	if result.Complete {
 		verdict = logseg.Completeness{State: logseg.StateComplete}

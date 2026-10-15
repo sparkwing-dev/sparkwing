@@ -22,6 +22,11 @@ Use `CommittedReader` with `SegmentObjects` and the selected tenant's
 `ReadLogSegments`. Physical manifests and listings cannot select readable
 segments. Abandoned seals belong to `Operator.SealAbandonedLogStreams`.
 
+`logseg.NodeProgress` and `logseg.SealGrace` are removed.
+`NodeLogs.NodeLogCompleteness` now takes only context, run and job IDs.
+The controller derives final tail grace from the selected attempt's persisted
+finish time and the store clock. Use `limits.LogSealGrace` for the shared bound.
+
 Controller reads select committed tagged subjects. Authenticated signing,
 physical verification and recording adapters still need their production
 bindings. The host must supply the persisted subject and its authenticated

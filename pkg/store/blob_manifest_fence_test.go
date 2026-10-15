@@ -25,18 +25,18 @@ func TestBlobRecordsManifestIOCannotOutliveAuthority(t *testing.T) {
 			members := []blob.Member{{Team: "a", ManifestDigest: manifest.Digest, Digest: intent.Digest, Path: "output", Mode: 0o644, Size: intent.Size}}
 			records.manifests = fakeBlobManifests{manifest.Digest: members}
 			memo := blobOutputRequest(intent)
-			memo.Key.Kind, memo.Key.Name, memo.Key.Scope.Key = blob.KindMemo, "output", "input"
+			memo.Key.Kind, memo.Key.Name, memo.Key.Scope.Key = blob.KindMemo, "output", fixtureMemoHash
 			memo.ManifestDigest = runspec.Optional[blob.Digest]{Set: true, Value: manifest.Digest}
 			memo.Members = members
 			if _, err := records.CommitRecord(t.Context(), memo); err != nil {
 				t.Fatal(err)
 			}
 			depcache := memo
-			depcache.Key = blob.RecordKey{Team: "a", Kind: blob.KindDepcache, Scope: blob.Scope{Repo: "gh:1", Key: "v1"}, Name: "modules"}
+			depcache.Key = blob.RecordKey{Team: "a", Kind: blob.KindDepcache, Scope: blob.Scope{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Key: "v1"}, Name: "modules"}
 			if _, err := records.CommitRecord(t.Context(), depcache); err != nil {
 				t.Fatal(err)
 			}
-			lookup := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Pipeline: "ci", Job: "job", Hash: "input"}}
+			lookup := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}}
 			property := func(remaining, stalled, fence uint8) bool {
 				now := base
 				s.clock = func() time.Time { return now }
@@ -88,7 +88,7 @@ func TestBlobRecordsManifestIOCannotOutliveAuthority(t *testing.T) {
 					exposed = hit.Found || len(hit.Members) != 0 || len(hit.ReadSet.Edges) != 0
 				case "depcache":
 					var hit blob.DepcacheHit
-					hit, err = records.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: intent.Authority, Key: blob.DepcacheKey{Repo: "gh:1", Name: "modules", Key: "v1"}})
+					hit, err = records.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: intent.Authority, Key: blob.DepcacheKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Name: "modules", Key: "v1"}})
 					exposed = hit.Found || len(hit.ReadSet.Edges) != 0
 				case "copy":
 					var hit blob.MemoHit

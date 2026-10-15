@@ -22,22 +22,9 @@ type BlobManifestReader interface {
 	ReadBlobManifest(context.Context, Team, blob.Digest) ([]blob.Member, error)
 }
 
-type blobRecordRules interface {
-	RecordNamespace(blob.RecordKey) (string, error)
-	AuthorizeEdge(blob.EdgeRequest) error
-}
-
-type sharedBlobRules struct{}
-
-func (sharedBlobRules) RecordNamespace(key blob.RecordKey) (string, error) {
-	return blob.RecordNamespace(key)
-}
-func (sharedBlobRules) AuthorizeEdge(edge blob.EdgeRequest) error { return blob.AuthorizeEdge(edge) }
-
 type blobRecords struct {
 	tenant    *Tenant
 	manifests BlobManifestReader
-	rules     blobRecordRules
 }
 
 // BlobRecords uses the supplied manifest reader or the store's configured reader.
@@ -45,7 +32,7 @@ func (t *Tenant) BlobRecords(manifests BlobManifestReader) blob.RecordStore {
 	if configured, ok := t.s.resultRecords.(*blobRecords); manifests == nil && ok {
 		manifests = configured.manifests
 	}
-	return &blobRecords{tenant: t, manifests: manifests, rules: sharedBlobRules{}}
+	return &blobRecords{tenant: t, manifests: manifests}
 }
 
 func (r *blobRecords) manifestMembers(ctx context.Context, request blob.CommitRecordRequest) ([]blob.Member, error) {
@@ -116,7 +103,7 @@ func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecor
 	if err != nil {
 		return blob.Record{}, err
 	}
-	scope, err := r.rules.RecordNamespace(request.Key)
+	scope, err := blob.RecordNamespace(request.Key)
 	if err != nil {
 		return blob.Record{}, err
 	}
@@ -277,7 +264,7 @@ func (r *blobRecords) authorizeDigestTx(ctx context.Context, tx *storeTx, a blob
 	if err != nil {
 		return err
 	}
-	if err := r.rules.AuthorizeEdge(blob.EdgeRequest{TargetKind: kind, Authority: a.authority, Digest: digest, ReadSet: set, OwnReceipt: own}); err != nil {
+	if err := blob.AuthorizeEdge(blob.EdgeRequest{TargetKind: kind, Authority: a.authority, Digest: digest, ReadSet: set, OwnReceipt: own}); err != nil {
 		return err
 	}
 	_, err = requireBlobTx(ctx, tx, r.tenant.team, digest)

@@ -1,5 +1,10 @@
 # Store data persistence
 
+Record writes, reads and memo copies call `blob.RecordNamespace` and
+`blob.AuthorizeEdge` directly. The store's rule adapter and permissive test
+implementation are removed. Store tests use the shared rules with valid sealed
+refs and memo hashes. The tests keep a manifest-reader fake for byte I/O.
+
 `SetResultBlobRecords` supplies verified manifests to tenant record commits,
 lookups, memo copies and terminal result attachment. `BlobRecords` uses that
 configured reader when its caller omits one. The controller's `WithDataObjects`

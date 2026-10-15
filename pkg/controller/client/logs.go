@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
@@ -123,7 +122,7 @@ func (l NodeLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadClos
 
 // NodeLogCompleteness asks the controller whether a node's log is
 // whole; found is false when the controller cannot tell.
-func (l NodeLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID string, _ logseg.NodeProgress, _ time.Time) (logseg.Completeness, bool, error) {
+func (l NodeLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID string) (logseg.Completeness, bool, error) {
 	var c logseg.Completeness
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, l.c.baseURL+l.logPath(runID, nodeID)+"/completeness", nil)
 	if err != nil {

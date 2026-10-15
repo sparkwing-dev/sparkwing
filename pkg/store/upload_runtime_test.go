@@ -531,7 +531,7 @@ func TestBlobUploadPublicationTicketsKeepImportedAttempt(t *testing.T) {
 				t.Fatalf("publication provenance=%q: %v", provenance, err)
 			}
 			if !imported {
-				records := &blobRecords{tenant: tenant, rules: fakeBlobRules{}}
+				records := &blobRecords{tenant: tenant}
 				request := blobOutputRequest(blobIntent(actor, attempt))
 				request.Authority, request.Source = intent.Authority, identity
 				if _, err := records.CommitRecord(t.Context(), request); err == nil {

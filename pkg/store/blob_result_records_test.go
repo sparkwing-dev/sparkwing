@@ -178,7 +178,6 @@ func TestBlobResultRecordsConfiguredAdapterAndEmbeddedManifest(t *testing.T) {
 	if !ok || configured.manifests == nil {
 		t.Fatal("store did not retain its manifest reader")
 	}
-	configured.rules = records.rules
 	rewriteSchemaExec(t, s.db, "UPDATE blob_records SET manifest_digest=? WHERE kind='output'", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	change.Extra.Result.ManifestRecord = nil
 	if _, err := records.tenant.TransitionNode(t.Context(), change); err != nil {

@@ -42,7 +42,7 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 	if key.Team != string(r.tenant.team) || key.Scope.Repo != a.authority.Repo {
 		return result, blob.ErrDigestNotReadable
 	}
-	namespace, err := r.rules.RecordNamespace(key)
+	namespace, err := blob.RecordNamespace(key)
 	if err != nil {
 		return result, err
 	}
@@ -108,7 +108,7 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 		if err != nil {
 			return result, err
 		}
-		if err := r.rules.AuthorizeEdge(blob.EdgeRequest{TargetKind: key.Kind, Authority: a.authority, Digest: digest, ReadSet: set, OwnReceipt: own}); err != nil {
+		if err := blob.AuthorizeEdge(blob.EdgeRequest{TargetKind: key.Kind, Authority: a.authority, Digest: digest, ReadSet: set, OwnReceipt: own}); err != nil {
 			return result, err
 		}
 		for i := range set.Edges {
@@ -349,7 +349,7 @@ func (r *blobRecords) CopyMemo(ctx context.Context, request blob.CopyMemoRequest
 			continue
 		}
 		key := blob.ResultRecordKey(request.Destination, a.authority.Repo, a.authority.Ref.Scope, a.pipeline, part.kind)
-		scope, err := r.rules.RecordNamespace(key)
+		scope, err := blob.RecordNamespace(key)
 		if err != nil {
 			return blob.MemoHit{}, err
 		}

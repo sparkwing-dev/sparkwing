@@ -15,6 +15,12 @@ authority. The object-side reader and abandoned-log sealer are removed.
 `Operator.SealAbandonedLogStreams` owns abandoned seals under the maintenance
 lease and preserves every committed segment. `AttemptPrefix` is removed.
 
+Dashboard completeness uses the selected attempt's persisted finish time and
+`RunSnapshot.StoreNow`. A later job finish or an unrelated attempt cannot extend
+that stream's final tail grace. `NodeProgress` and `SealGrace` are removed.
+`NodeLogs.NodeLogCompleteness` takes only context, run and job IDs. The shared
+grace constant remains `limits.LogSealGrace`.
+
 `SubjectUploader` verifies compressed bytes, raw size and line coverage before
 signing. Batches contain up to `limits.LogUploadBatch` segment slots and one
 manifest URL. Every URL carries its required signed headers. A batch must

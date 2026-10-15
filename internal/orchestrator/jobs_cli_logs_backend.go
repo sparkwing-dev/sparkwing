@@ -61,7 +61,7 @@ func writeLogsViaBackend(ctx context.Context, b backend.Backend, runID string, t
 }
 
 func completenessLine(ctx context.Context, b backend.Backend, runID string, n *store.Node) string {
-	c, err := backend.NodeLogCompleteness(ctx, b, runID, n, time.Now())
+	c, err := backend.NodeLogCompleteness(ctx, b, runID, n.NodeID)
 	if err != nil {
 		return ""
 	}

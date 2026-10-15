@@ -8,19 +8,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
-
-type expiringBlobNamespace struct {
-	fakeBlobRules
-	expire func()
-}
-
-func (r expiringBlobNamespace) RecordNamespace(key blob.RecordKey) (string, error) {
-	if key.Kind == blob.KindOutput {
-		r.expire()
-	}
-	return r.fakeBlobRules.RecordNamespace(key)
-}
 
 func TestBlobRecordsMutationCannotOutliveAuthority(t *testing.T) {
 	for _, operation := range []string{"commit", "copy"} {
@@ -33,7 +23,7 @@ func TestBlobRecordsMutationCannotOutliveAuthority(t *testing.T) {
 					expiry := now.Add(time.Duration(int(remaining)+1) * time.Microsecond)
 					if operation == "copy" {
 						memo := blobOutputRequest(intent)
-						memo.Key.Kind, memo.Key.Name, memo.Key.Scope.Key = blob.KindMemo, "output", "input"
+						memo.Key.Kind, memo.Key.Name, memo.Key.Scope.Key = blob.KindMemo, "output", fixtureMemoHash
 						if _, err := records.CommitRecord(t.Context(), memo); err != nil {
 							t.Fatal(err)
 						}
@@ -60,38 +50,51 @@ func TestBlobRecordsMutationCannotOutliveAuthority(t *testing.T) {
 						}
 						rewriteSchemaExec(t, s.db, "UPDATE capabilities SET authority_json=?,expires_at=? WHERE prefix=?", body, expiry.UnixNano(), prefix)
 					}
-					crossed := false
-					records.rules = expiringBlobNamespace{expire: func() {
-						crossed = true
-						now = expiry.Add(time.Duration(elapsed) * time.Nanosecond)
-						if !expired {
-							now = expiry.Add(-time.Nanosecond)
+					tx, err := s.beginTx(t.Context())
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer rollbackOrLog(tx)
+					authority, err := resolveBlobAuthorityTx(t.Context(), tx, records.tenant.team, intent.Authority, capability.DataWrite)
+					if err != nil {
+						t.Fatal(err)
+					}
+					request := blobOutputRequest(intent)
+					record := blob.Record{Key: request.Key, Digest: request.Digest, Source: intent.Identity, Uploader: "machine", Provenance: blob.ProvenanceLocal, RefFacts: authority.authority.Ref}
+					if operation == "copy" {
+						var original blob.Record
+						hit, err := records.lookupMemoTx(t.Context(), tx, authority, blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}}, &original)
+						if err != nil || !hit.Found {
+							t.Fatalf("prepare copy: %+v, %v", hit, err)
 						}
-					}}
-					var err error
-					exposed := false
-					if operation == "commit" {
-						var record blob.Record
-						record, err = records.CommitRecord(t.Context(), blobOutputRequest(intent))
-						exposed = record.Digest != ""
-					} else {
-						var hit blob.MemoHit
-						hit, err = records.CopyMemo(t.Context(), blob.CopyMemoRequest{
-							Lookup:      blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Pipeline: "ci", Job: "job", Hash: "input"}},
-							Destination: intent.Identity.Attempt.Value,
-						})
-						exposed = hit.Found || len(hit.ReadSet.Edges) != 0
+						record = original
+						record.Key, record.ExpiresAt = request.Key, runspec.Optional[time.Time]{}
+					}
+					scope, err := blob.RecordNamespace(record.Key)
+					if err != nil {
+						t.Fatal(err)
+					}
+					now = expiry.Add(time.Duration(elapsed) * time.Nanosecond)
+					if !expired {
+						now = expiry.Add(-time.Nanosecond)
+					}
+					batch, err := records.mutateRecordsTx(t.Context(), tx, authority, []blobRecordMutation{{record: record, scope: scope}}, operation == "copy")
+					exposed := len(batch) != 0
+					if err == nil {
+						err = tx.Commit()
+					} else if rollbackErr := tx.Rollback(); rollbackErr != nil {
+						t.Fatal(rollbackErr)
 					}
 					var count int
 					if err := s.db.QueryRow("SELECT COUNT(*) FROM blob_records WHERE kind IN ('output','manifest')").Scan(&count); err != nil {
 						t.Fatal(err)
 					}
-					valid := crossed && err != nil && !exposed && count == 0
+					valid := err != nil && !exposed && count == 0
 					if !expired {
-						valid = crossed && err == nil && exposed && count == 1
+						valid = err == nil && exposed && count == 1
 					}
 					if !valid {
-						t.Logf("crossed=%v exposed=%v records=%d error=%v", crossed, exposed, count, err)
+						t.Logf("exposed=%v records=%d error=%v", exposed, count, err)
 						return false
 					}
 					return true

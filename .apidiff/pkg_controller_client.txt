@@ -290,7 +290,7 @@ func NewSizingManager(options EngineOptions) (controllerwire.SizingManager, erro
 func NewTokenManager(options EngineOptions, deployment bool) (controllerwire.TokenManager, error)
 func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client
 type NodeLogs struct{}
-func (l NodeLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID string, _ logseg.NodeProgress, _ time.Time) (logseg.Completeness, bool, error)
+func (l NodeLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID string) (logseg.Completeness, bool, error)
 func (l NodeLogs) Read(ctx context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error)
 func (l NodeLogs) ReadRun(ctx context.Context, runID string) ([]byte, error)
 func (l NodeLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)

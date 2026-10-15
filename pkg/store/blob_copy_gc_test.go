@@ -17,7 +17,7 @@ func TestBlobCopiedOutputSurvivesSourceCollection(t *testing.T) {
 		now := s.now()
 		s.clock = func() time.Time { return now }
 		memo := blobOutputRequest(intent)
-		memo.Key.Kind, memo.Key.Name, memo.Key.Scope.Key = blob.KindMemo, "output", "input"
+		memo.Key.Kind, memo.Key.Name, memo.Key.Scope.Key = blob.KindMemo, "output", fixtureMemoHash
 		if _, err := records.CommitRecord(t.Context(), memo); err != nil {
 			t.Fatal(err)
 		}
@@ -31,7 +31,7 @@ func TestBlobCopiedOutputSurvivesSourceCollection(t *testing.T) {
 		var deleted int64
 		copyOutput := func() {
 			hit, copyErr = records.CopyMemo(t.Context(), blob.CopyMemoRequest{
-				Lookup:      blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Pipeline: "ci", Job: "job", Hash: "input"}},
+				Lookup:      blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}},
 				Destination: intent.Identity.Attempt.Value,
 			})
 		}

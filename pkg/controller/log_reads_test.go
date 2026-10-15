@@ -18,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
@@ -124,7 +125,7 @@ func TestCommittedDashboardLogReadsTaggedInventory(t *testing.T) {
 	if empty, err := reader.Read(t.Context(), "run", "missing", storage.ReadOpts{}); err != nil || len(empty) != 0 {
 		t.Fatalf("missing log=%q: %v", empty, err)
 	}
-	verdict, found, err := reader.NodeLogCompleteness(t.Context(), "run", "job", logseg.NodeProgress{}, time.Time{})
+	verdict, found, err := reader.NodeLogCompleteness(t.Context(), "run", "job")
 	if err != nil || !found || verdict.State != logseg.StateComplete {
 		t.Fatalf("complete=%+v,%v: %v", verdict, found, err)
 	}
@@ -268,7 +269,7 @@ func TestCommittedDashboardLogUsesFinalStore(t *testing.T) {
 	if err != nil || string(body) != "persisted log\n" {
 		t.Fatalf("final-schema read=%q: %v", body, err)
 	}
-	verdict, found, err := reader.NodeLogCompleteness(t.Context(), "run", "job", logseg.NodeProgress{Terminal: true}, time.Now())
+	verdict, found, err := reader.NodeLogCompleteness(t.Context(), "run", "job")
 	if err != nil || !found || verdict.State != logseg.StateComplete {
 		t.Fatalf("final-schema seal=%+v,%v: %v", verdict, found, err)
 	}
@@ -318,24 +319,77 @@ func TestCommittedDashboardLiveTailRechecksAuthority(t *testing.T) {
 }
 
 func TestCommittedDashboardUnsealedLogGrace(t *testing.T) {
-	now := time.Now()
+	now := time.Unix(1000, 0)
 	for _, test := range []struct {
-		name  string
-		node  logseg.NodeProgress
-		state string
+		name     string
+		age      time.Duration
+		finished bool
+		state    string
 	}{
-		{"running", logseg.NodeProgress{Started: true}, logseg.StateStreaming},
-		{"tail grace", logseg.NodeProgress{Started: true, Terminal: true, FinishedAt: now.Add(-logseg.SealGrace + time.Nanosecond)}, logseg.StateStreaming},
-		{"exact grace", logseg.NodeProgress{Started: true, Terminal: true, FinishedAt: now.Add(-logseg.SealGrace)}, logseg.StateIncomplete},
-		{"abandoned", logseg.NodeProgress{Started: true, Terminal: true, FinishedAt: now.Add(-2 * logseg.SealGrace)}, logseg.StateIncomplete},
+		{"running", 0, false, logseg.StateStreaming},
+		{"tail grace", limits.LogSealGrace - time.Nanosecond, true, logseg.StateStreaming},
+		{"exact grace", limits.LogSealGrace, true, logseg.StateIncomplete},
+		{"abandoned", 2 * limits.LogSealGrace, true, logseg.StateIncomplete},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			records := newScriptedSegmentLogs()
-			records.add(t, jobLogSubject(1, 1), "tail\n", false)
-			verdict, found, err := records.reader().NodeLogCompleteness(t.Context(), "run", "job", test.node, now)
+			subject := jobLogSubject(1, 1)
+			records.add(t, subject, "tail\n", false)
+			records.view.Snapshot.StoreNow = now
+			attempt := store.NodeAttempt{Identity: *subject.Attempt}
+			if test.finished {
+				finished := now.Add(-test.age)
+				attempt.FinishedAt = &finished
+			}
+			records.view.Attempts = []store.NodeAttempt{attempt}
+			verdict, found, err := records.reader().NodeLogCompleteness(t.Context(), "run", "job")
 			if err != nil || !found || verdict.State != test.state || records.gets != 1 {
 				t.Fatalf("verdict=%+v,found=%v,gets=%d,err=%v", verdict, found, records.gets, err)
 			}
 		})
+	}
+}
+
+func TestCommittedDashboardGraceUsesSelectedAttemptProperty(t *testing.T) {
+	property := func(ordinal, generation uint8, age int16, finished bool) bool {
+		records := newScriptedSegmentLogs()
+		subject := jobLogSubject(1+int64(ordinal), 1+int64(generation))
+		records.add(t, subject, "selected\n", false)
+		now := time.Unix(1000, 0)
+		records.view.Snapshot.StoreNow = now
+		old := now.Add(-24 * time.Hour)
+		records.view.Snapshot.Nodes = []store.NodeRow{{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusDone, FinishedAt: &old}}
+		selected := store.NodeAttempt{Identity: *subject.Attempt}
+		at := now.Add(-limits.LogSealGrace - time.Duration(age)*time.Nanosecond)
+		if finished {
+			selected.FinishedAt = &at
+		}
+		foreign := store.NodeAttempt{Identity: *subject.Attempt, FinishedAt: &old}
+		for _, dimension := range []string{"team", "run", "job", "attempt", "generation"} {
+			other := foreign
+			switch dimension {
+			case "team":
+				other.Identity.Team = "other"
+			case "run":
+				other.Identity.RunID = "other"
+			case "job":
+				other.Identity.NodeID = "other"
+			case "attempt":
+				other.Identity.Attempt++
+			case "generation":
+				other.Identity.Generation++
+			}
+			records.view.Attempts = append(records.view.Attempts, other)
+		}
+		records.view.Attempts = append(records.view.Attempts, selected)
+		verdict, found, err := records.reader().NodeLogCompleteness(t.Context(), "run", "job")
+		want := logseg.StateStreaming
+		if finished && age >= 0 {
+			want = logseg.StateIncomplete
+		}
+		return err == nil && found && verdict.State == want && records.gets == 1
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 144, Rand: rand.New(rand.NewSource(625024))}); err != nil {
+		t.Fatal(err)
 	}
 }
