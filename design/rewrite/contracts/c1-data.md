@@ -33,6 +33,16 @@ These declarations leave transaction implementation with W1.
   Member roots have their own optional expiry. The issuing session is checked at
   issuance and does not become their lifetime or revocation parent. Current
   account membership still constrains each subsequent use.
+- `provision_contract.go` declares `ProvisionPolicy.AuthorizeProvision` for trusted
+  bootstrap, machine/service enrollment and verified Actions evidence. W2 installs
+  the policy before serving. It receives the issuing transaction's authority
+  resolver and the complete trusted `ProvisionSpec`. Missing verification refuses
+  issuance. The store rechecks current authorizer scope, expiry, root shape and
+  registered team after verification. Only deployment token authority can set
+  metering or authorize service issuance. Provisioning never grants console
+  authority. Machine enrollment records the account authorizer in `created_by`,
+  so only that account can change source-credential consent. Roots retain no
+  revocation parent. The evidence providers remain W2's integration.
 - Claim selection checks every requested kind's grant before one ordered scan.
   Runner selection accepts trigger/node, launcher selection plan/eval/node. The
   named trigger path retains the exact here reservation's trigger.host exception. Unknown,
@@ -93,6 +103,13 @@ read-only transaction. Authorization and owner snapshots use the same repeatable
 snapshot for ancestry and resource relations. Write transactions retain ancestry,
 run and resource locks through commit. The public binding check grants no right
 to skip the committing transaction's authority and fence checks.
+
+`Tenant.ListRegisteredAgents` reads only its team's enrolled claimants.
+`Operator.ListWaitingNodes`, `Operator.SetNodeAttention` and
+`Operator.CountConcurrencyCache` own deployment inspection and advisory writes.
+Their raw `Store` methods are removed. The unused raw `SetRetriedAs`,
+`ActiveConcurrencyHolder` and `ListSpawnedChildrenByRun` wrappers are removed.
+Their tenant methods remain while legacy callers migrate.
 
 `Tenant.ReadOwnerSnapshot` reads the current owner authority, lease and scheduling
 state in one snapshot. A replaced, expired or revoked owner receives no snapshot.

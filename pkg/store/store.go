@@ -103,6 +103,7 @@ type Store struct {
 	plans            planContracts
 	planSecretOpener PlanSecretOpener
 	delegation       delegationContracts
+	provisions       ProvisionPolicy
 	sourcePolicy     sourceReleaseContracts
 	clock            func() time.Time
 	db               *sql.DB
@@ -1019,12 +1020,7 @@ ON CONFLICT(run_id) DO UPDATE SET plan_hash = run_definition_plans.plan_hash
 	return tx.Commit()
 }
 
-// SetRetriedAs stores the reverse retry pointer on runID. Idempotent.
-func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error {
-	return s.defaultTenant().SetRetriedAs(ctx, runID, newID)
-}
-
-// SetRetriedAs is [Store.SetRetriedAs] confined to t's team.
+// SetRetriedAs stores the reverse retry pointer within the tenant.
 func (t *Tenant) SetRetriedAs(ctx context.Context, runID, newID string) error {
 	_, err := t.s.exec(ctx,
 		`UPDATE runs SET retried_as = ? WHERE team = ? AND id = ?`, newID, string(t.team), runID)
@@ -4122,16 +4118,7 @@ type SpawnedChild struct {
 	ChildRunID   string `json:"child_run_id"`
 }
 
-// ListSpawnedChildrenByRun returns every cross-pipeline spawn the
-// nodes of runID triggered. Each child trigger was enqueued by an
-// awaiter inside a parent node's body; the row carries parent_node_id
-// + pipeline so the caller can attribute the spawn back to its node.
-// Ordered by parent_node_id, created_at so callers can stream-bucket.
-func (s *Store) ListSpawnedChildrenByRun(ctx context.Context, runID string) ([]SpawnedChild, error) {
-	return s.defaultTenant().ListSpawnedChildrenByRun(ctx, runID)
-}
-
-// ListSpawnedChildrenByRun is [Store.ListSpawnedChildrenByRun] confined to t's team.
+// ListSpawnedChildrenByRun returns this tenant's child runs ordered by parent job and creation time.
 func (t *Tenant) ListSpawnedChildrenByRun(ctx context.Context, runID string) ([]SpawnedChild, error) {
 	rows, err := t.s.query(ctx, `
 SELECT parent_node_id, pipeline, id

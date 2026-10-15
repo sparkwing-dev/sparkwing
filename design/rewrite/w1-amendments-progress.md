@@ -1,12 +1,88 @@
 # W1 store handoff
 
-W1 remains incomplete. This continuation starts from 98a03ea3a. The inherited
+W1 remains incomplete. This continuation starts from 5ede4a650. The inherited
 work is committed, and this continuation is left for the lead to review and
 commit. There are no unmerged index entries. W1b implementation files are
 unchanged. Earlier implementation evidence remains in Git and
 [w1-store-progress.md](w1-store-progress.md).
 
 ## This continuation
+
+Added store enforcement for bootstrap, machine registration, service registration
+and Actions roots. The existing member-root path remains. Provisioning requires
+trusted origin verification, rechecks current authority and expiry after that
+verification, and refuses execution fences, foreign scope, unknown/deleting teams
+and console grants. Deployment token authority controls metering and service
+issuance. Actions roots retain the verified repository/ref/SHA/workflow binding.
+Issued roots have no revocation parent. Machine roots record their account
+authorizer in created_by, so the existing consent API recognizes the actual owner.
+
+The security invariant is that provisioning cannot exceed its verified origin or
+current authorizer, and machine consent belongs to the recorded account owner.
+New tests cover all four origins, provider refusal, authority changes during
+verification, expiry, failed inserts, independent root lifetime and consent.
+Two property tests generate 384 forged scopes and execution fences.
+
+The local C1 contract adds ProvisionPolicy.AuthorizeProvision and
+Store.SetProvisionPolicy. The configured provider verifies bootstrap/enrollment
+or Actions evidence through the issuing transaction's authority resolver. A
+missing provider returns unavailable. This boundary is needed because W2 owns
+the external proof mechanisms. Hard-coding their evidence handling in Store
+would duplicate that owner. Removing the policy field, setter and call reverses
+this addition. No foreign contract type changed. W2 must supply the real provider.
+
+Added the passing SQLite cell
+TestCredentials/credentials-operator-console-split/store-sqlite. It checks trusted
+operator/service issuance, rejection of console grants, rollback of refused
+issuance, and independent root revocation. Origin verification is a fake. The
+native route matrix remains unimplemented. No archived test was ported in this
+continuation. Earlier ports remain listed in T1.
+
+Retired seven raw Store entry points. ListRegisteredAgents now belongs to Tenant.
+ListWaitingNodes, SetNodeAttention and CountConcurrencyCache belong to Operator.
+Deleted the unused SetRetriedAs, ActiveConcurrencyHolder and
+ListSpawnedChildrenByRun wrappers: **9 implementation lines**, plus their
+obsolete documentation. Their tenant methods remain for legacy callers. No
+forwarding shim was added. The 22-line member-only provisioning implementation
+was replaced by the origin-aware issuer.
+
+The production caller migration outside pkg/store is
+pkg/controller/claim_attention.go. Its fixture change is
+pkg/controller/claim_attention_internal_test.go. Other shared files are
+internal/acceptance/store_credentials.go, tests/acceptance/credentials_test.go,
+design/rewrite/contracts/c1-data.md and t1-port-inventory.md. Inside pkg/store,
+store.go gains only the policy dependency and wrapper removal. concurrency.go
+and claim_attention.go carry the handle changes. Their existing tests and the
+SQL-scope guard follow those changes. W1b files are unchanged.
+
+Final verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
+TMPDIR=/tmp/sw-astra-W1/tmp. Package parallelism is -p 4.
+
+- Whole-repository go build -p 4 ./... passes.
+- go vet -p 4 on pkg/store, pkg/controller, internal/acceptance and
+  tests/acceptance passes.
+- The earlier exact store selection plus provision_origins_test.go passes
+  254 top-level tests / 716 cases, without skips. The filenames for that
+  selection remain under Earlier verification.
+- Controller -run '^TestEngine' passes 33 top-level tests / 56 cases.
+- Full tests/acceptance passes 20 top-level tests / 205 executed cases, with
+  2,995 native/platform skips. internal/acceptance has no package tests.
+  Full pkg/match passes 14 top-level tests / 42 cases.
+- go run ./internal/commentcheck -base HEAD . is clean across 17 Go files.
+  The required -base main run still reports the pre-existing detached HereBearer
+  comment in internal/controllerwire/contracts.go. That W9 file is unchanged.
+- Edited Go files are formatted. git diff --check passes. No Git writes ran.
+
+Native PostgreSQL, HTTP/api.sock, Windows/Darwin, Docker, race, lint, delivery
+pipelines and independent review remain lead checks. The legacy full store suite
+is still not claimed green. The existing final-schema/legacy-fixture mismatch
+remains outside this selection. No extra compatibility path or schema was added.
+The provisioning API has component coverage through its origin-policy fake.
+The real bootstrap gate, persisted enrollment/OIDC evidence and transport
+registration are unverified integration points.
+
+## Earlier continuation
 
 Fixed authorization reads that requested PostgreSQL row locks inside read-only
 snapshots. The invariant is that reads use one consistent snapshot, while writes
@@ -72,16 +148,17 @@ remain external integrations where their implementation is absent.
 ## Remaining W1 work
 
 1. Integrate lifecycle accounting with W1b's reservation, interval and settlement
-   owner. Metered awards still fail closed. persistBillingAwardTx is the existing
-   unmetered path. Award, start, waits, renewal, release, terminal reports, owner
+   owner. Metered roots still fail closed at award. persistBillingAwardTx is the existing
+   unmetered path. Launcher awards must become metered regardless of root settings
+   when that integration replaces the path. Award, start, waits, renewal, release, terminal reports, owner
    finish and reaping must use the shared transaction contracts. C2 still owns
    the billing calculator. Do not edit W1b's implementation files.
 2. Supply materializationRecords and nodeResultRecords from W1b's record owner
    inside their calling transactions. Existing component tests use fakes. Public
    record methods that start another transaction cannot satisfy this requirement.
-3. Finish trusted provisioning for bootstrap, machine, service, Actions and other
-   declared origins. Member provisioning is implemented. Trusted enrollment must
-   record the account authorizer in created_by for machine-owner consent.
+3. Install W2's real ProvisionPolicy for bootstrap, machine/service enrollment
+   and Actions evidence. The store implementation and account-owner persistence
+   are implemented and tested through contract fakes.
 4. Retire StateStoreOld, the legacy plan/claim/trigger writers, offer rounds and
    the remaining raw Store twins after migrating or deleting their callers.
    W3/W8 runtime callers and W1b billing tests still reference legacy APIs.
@@ -120,7 +197,7 @@ These are existing gaps. This continuation changes no foreign contract shape.
   This remains an inspection finding, without a native runtime reproduction.
 
 W2 must install the intake policy, source policy/decryptor, plan secret opener,
-enrollment resolver and real route authorization. The separate GitHub App
+enrollment resolver, provisioning origin policy and real route authorization. The separate GitHub App
 credential mint/audit path remains open. W8 must supply the real engine resolver
 for SignedRunnerAdmission and SignedEngineVersionPolicy. W9 must implement the
 CompatibilityFor calendar helper. W6 concurrency resolution is tested through
@@ -130,7 +207,7 @@ The lead still needs to ratify the existing status-read choice: unavailable
 version policy returns an error rather than partial detail. No new customer
 restriction or human decision was introduced in this continuation.
 
-## Verification
+## Earlier verification
 
 Commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
 GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
@@ -180,7 +257,7 @@ HTTP/api.sock, Windows/Darwin, Docker, race, lint, delivery pipelines and indepe
 review remain lead checks. Aggregate API snapshots and the rewrite changelog
 remain integration work.
 
-## Shared files, mechanisms and friction
+## Earlier shared files, mechanisms and friction
 
 Shared runtime support changed only in pkg/store/dialect.go, capabilities_contract.go,
 schema.sql, schema_contract.go and tenant.go. Other owned store changes are the

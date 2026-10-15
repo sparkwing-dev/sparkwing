@@ -59,12 +59,12 @@ func TestNodeAttentionShowsOnTheRunUntilAClaim(t *testing.T) {
 	ctx := context.Background()
 	seedMatchNode(t, s, "run-tf", "", 1, "tool:terraform")
 	ageReadyNode(t, s, "run-tf", time.Minute)
-	waiting, err := s.ListWaitingNodes(ctx, time.Now().Add(-30*time.Second), [2]string{}, 10)
+	waiting, err := s.AsOperator().ListWaitingNodes(ctx, time.Now().Add(-30*time.Second), [2]string{}, 10)
 	if err != nil || len(waiting) != 1 || !slices.Equal(waiting[0].Selector, []string{"tool:terraform"}) {
 		t.Fatalf("waiting = %+v, %v", waiting, err)
 	}
 	const reason = "node work needs tool:terraform; no agent in team default has it"
-	if err := s.SetNodeAttention(ctx, []store.NodeAttention{{Team: store.DefaultTeam, RunID: "run-tf", NodeID: "work", Reason: reason}}); err != nil {
+	if err := s.AsOperator().SetNodeAttention(ctx, []store.NodeAttention{{Team: store.DefaultTeam, RunID: "run-tf", NodeID: "work", Reason: reason}}); err != nil {
 		t.Fatal(err)
 	}
 	run, err := s.GetRun(ctx, "run-tf")
@@ -105,7 +105,7 @@ func TestSetNodeAttentionHoldsOneNodeLockAtATime(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- s.SetNodeAttention(ctx, []store.NodeAttention{
+		done <- s.AsOperator().SetNodeAttention(ctx, []store.NodeAttention{
 			{Team: store.DefaultTeam, RunID: "run-x", NodeID: "work", Reason: "x"},
 			{Team: store.DefaultTeam, RunID: "run-y", NodeID: "work", Reason: "y"},
 		})

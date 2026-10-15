@@ -67,6 +67,11 @@ func (s *Store) issueTx(ctx context.Context, tx *storeTx, request capability.Iss
 	if err := persistCapabilityTx(ctx, tx, c); err != nil {
 		return capability.Issued{}, err
 	}
+	if request.Provision != nil {
+		if err := recordProvisionCreatorTx(ctx, tx, *request.Provision, c); err != nil {
+			return capability.Issued{}, err
+		}
+	}
 	if request.Exchange != nil {
 		if err := bindExchangedUnitTx(ctx, tx, c, request.Exchange.BootstrapPrefix); err != nil {
 			return capability.Issued{}, err
@@ -328,28 +333,6 @@ func exchangeCapabilityTx(ctx context.Context, tx *storeTx, spec capability.Exch
 	c.Grants = slices.Clone(policy.Grants)
 	c.RevokedAt = nil
 	return c, nil
-}
-
-func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) (capability.Capability, error) {
-	if spec.Kind != capability.ProvisionMember || spec.Authority == nil {
-		return capability.Capability{}, authorityError(apierr.Unavailable, "root provisioning authority is unavailable")
-	}
-	p, err := tx.ResolveAuthority(ctx, *spec.Authority)
-	if err != nil {
-		return capability.Capability{}, err
-	}
-	if p.Class != capability.CredentialSession || p.Capability.Subject != spec.Subject || spec.Subject.Kind != capability.SubjectAccount || spec.Team != p.Capability.Team || spec.Metered || len(spec.ReservedPools) != 0 || spec.Binding.Kind != capability.BindingNone || spec.Data != nil || len(spec.Repositories) != 0 {
-		return capability.Capability{}, authorityError(apierr.Forbidden, "member provisioning exceeds session authority")
-	}
-	for _, g := range spec.Grants {
-		if !slices.Contains(p.Capability.Grants, g) {
-			return capability.Capability{}, authorityError(apierr.Forbidden, "member provisioning exceeds session grants")
-		}
-	}
-	if spec.ExpiresAt != nil && !spec.ExpiresAt.After(tx.now()) {
-		return capability.Capability{}, authorityError(apierr.Forbidden, "member root expiry has passed")
-	}
-	return capability.Capability{Team: spec.Team, Subject: spec.Subject, Audience: capability.Controller, Grants: slices.Clone(spec.Grants), Binding: spec.Binding, Issuance: capability.Delegate, ExpiresAt: spec.ExpiresAt, ReservedPools: []string{}, Repositories: []string{}}, nil
 }
 
 func bindExchangedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, bootstrap string) error {

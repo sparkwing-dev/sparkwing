@@ -83,7 +83,7 @@ var reviewedUnscopedSQL = map[string]string{
 		"a scope with no team and no all-teams flag is refused there",
 	"(*Store).getLatestRun": "the team predicate comes from its scope at run time; " +
 		"a scope with no team and no all-teams flag is refused there",
-	"(*Store).CountConcurrencyCache":         "an ops gauge of the whole table, which is what the ceiling is set against",
+	"(*Operator).CountConcurrencyCache":      "an ops gauge of the whole table, which is what the ceiling is set against",
 	"(*Store).CountDeadLocalConcurrency":     "the dry run of that repair, and has to count what it would remove",
 	"(*Store).ListConcurrencyStates":         "enumerates the deployment's live keys with their teams and reads each through that team's handle",
 	"(*Store).PurgeDeadLocalConcurrency":     "repairs local-scope rows left by dead runs across the deployment, and deletes each through its own team",
