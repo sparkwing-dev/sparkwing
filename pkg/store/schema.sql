@@ -1081,7 +1081,6 @@ CREATE TABLE capabilities (
     created_by TEXT NOT NULL,
     metered BIGINT NOT NULL DEFAULT 0 CHECK(metered IN (0,1)),
     result_digest TEXT NOT NULL DEFAULT '',
-    source_mints BIGINT NOT NULL DEFAULT 0,
     payer_team TEXT REFERENCES teams(name),
     executor_class TEXT,
     reservation_id TEXT,

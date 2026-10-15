@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **store (Breaking):** Source credentials use capability transactions
+  Removed the unused token-based release, audit and machine-consent APIs and their source-mint counter. Direct consumers use `ReleaseSourceCredential`, `SourceReleaseAudits` and `SetSourceMachineConsent`. See [migration guide](docs/migrations/_unreleased.md#source-credentials-use-capability-transactions).
 - **store (Breaking):** Run completion uses the fenced run-and-owner transaction
   Removed `CreatePlanNode`, `FinishRunIfActive` and `FinishRunsIfActive`. Admit the owner unit with `AdmitRun` and complete it with `Tenant.FinishRunAndUnit`. Exact completion replays retain the committed verdict and time. See [migration guide](docs/migrations/_unreleased.md#run-completion-and-planning-units).
 - **store (Breaking):** Manual retries use the sealed intake transaction

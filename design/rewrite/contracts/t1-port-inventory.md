@@ -1,3 +1,32 @@
+Store recovery continuation moves `store_started.go`, `store_unstarted.go`,
+`store_retry.go`, `store_capacity.go`, `store_capacity_maintenance.go`,
+`store_orphans.go` and the cancellation/reconciliation checks in
+`store_recovery.go` into ordinary `pkg/store` tests. Their final test names are
+`TestStoreRecoveryStartedLapseCap`, `TestStoreRecoveryUnstartedLapse`,
+`TestStoreRecoveryApplicationRetry`, `TestStoreRecoveryCapacityAdoption`,
+`TestStoreRecoveryCapacityMaintenance`, `TestStoreRecoveryLocalOrphans`,
+`TestStoreRecoveryCancellation` and `TestStoreRecoveryReconciliation`.
+They seed through storetest, current sign-in, issuance, intake and accepted plans.
+No moved test contains a hand-written INSERT. Competing capacity uses a second
+admitted host-owned run. Recovery projection updates simulate expiry; they do
+not claim real transport, process-death or native-placement evidence. Their old
+SQLite wrappers are removed. Host-event and billing consumers still share the
+remaining harness fixture.
+
+The six legacy git-credential tests are replaced by
+`TestSourceGitCredentialConfirmationAndReplacement` and
+`TestSourceGitCredentialHTTPSDeletionAndTenant`, plus the retained
+`TestSourceConsentRequiresCurrentMachineOwner`,
+`TestSourceConsentCannotChangeAnotherOwnersMachine`,
+`TestSourceReleaseRefusesChangedAuthorityBeforeReleasing` and
+`TestSourceReleaseCannotWidenPersistedFacts`. These retain confirmation replay,
+rotation under the same fingerprint, changed-fingerprint refusal, HTTPS automatic
+confirmation, deletion, tenant isolation, owner consent, ancestry, lease and audit
+rollback through capability transactions. The source-mint counter and its two
+controller tests retire with the unused counter implementation. Claim ancestry
+and source liveness remain in the final generated store tests. This does not
+establish GitHub App token-provider integration.
+
 
 Store continuation moves three more harness files into `pkg/store` tests.
 `store_actions_enrollment.go` becomes

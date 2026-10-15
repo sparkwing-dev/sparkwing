@@ -2,6 +2,27 @@
 
 <!-- design:begin -->
 
+## Source credential hard cut and recovery proofs
+
+The unused `Tenant.ReleaseGitCredential`, `GitCredentialReleases`,
+`SetGitCredentialMachine` and `GitCredentialMachine` APIs are removed with
+`GitCredentialRelease`, `SourceSpend`, `MaxSourceMints`,
+`ErrSourceCredentialSpent` and the legacy source-counter helpers.
+`ReleaseSourceCredential`, `SourceReleaseAudits` and `SetSourceMachineConsent`
+retain transactional authority, host confirmation, consent and audit ownership.
+The unused capabilities.source_mints column is removed. No token-table release
+or caller-clock fallback remains.
+
+All eight store recovery harness cells now run as ordinary `pkg/store` tests.
+They open through storetest and seed sessions, machine registrations, admission,
+plans, owner claims and job claims through store APIs. Retry policy is accepted
+in the plan. Successor owners and competing runs use real issuance and admission.
+Tests retain reopen, cancellation, retry replay, free unstarted lapses, disruption
+caps, reconciliation races, local orphan recovery and concurrency adoption.
+Lease-expiry observations still use scoped projection updates. The shared
+recovery fixture remains for host-event and billing consumers. Native cells
+remain pending.
+
 ## Planning units and terminal run completion
 
 The unused legacy `Store.CreatePlanNode` writer is removed. Admission creates

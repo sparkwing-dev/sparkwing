@@ -49,18 +49,6 @@ type GitCredential struct {
 	UpdatedAt   time.Time
 }
 
-// GitCredentialRelease is the audit row one release writes.
-type GitCredentialRelease struct {
-	ID           string
-	Team         Team
-	CredentialID string
-	Host         string
-	RunID        string
-	Runner       string
-	TokenPrefix  string
-	ReleasedAt   time.Time
-}
-
 // ErrClaimNotLive refuses a release whose claimant no longer holds a live
 // claim on the run when the release commits, and a claim token whose claim
 // was lost, finished, released or superseded by a later generation.
@@ -228,92 +216,4 @@ func (t *Tenant) DeleteGitCredential(ctx context.Context, host string) error {
 		return notFound("git credential", host)
 	}
 	return nil
-}
-
-// ReleaseGitCredential commits source use and its credential audit together.
-func (t *Tenant) ReleaseGitCredential(ctx context.Context, tok ClaimToken, rel GitCredentialRelease, now time.Time) (_ GitCredential, _ SourceSpend, err error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return GitCredential{}, SourceSpend{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	spend, err := t.spendSourceClaimTx(ctx, tx, tok, now)
-	if err != nil {
-		return GitCredential{}, SourceSpend{}, err
-	}
-	c, err := scanGitCredential(tx.QueryRowContext(ctx, `
-		SELECT `+gitCredentialCols+` FROM git_credentials
-		WHERE team = ? AND host = ? AND confirmed_at IS NOT NULL`, string(t.team), rel.Host))
-	if errors.Is(err, sql.ErrNoRows) {
-		return GitCredential{}, SourceSpend{}, notFound("git credential", rel.Host)
-	}
-	if err != nil {
-		return GitCredential{}, SourceSpend{}, err
-	}
-	rel.CredentialID, rel.Host = c.ID, c.Host
-	if err := t.insertSourceReleaseTx(ctx, tx, tok, rel, now); err != nil {
-		return GitCredential{}, SourceSpend{}, err
-	}
-	return c, spend, tx.Commit()
-}
-
-// GitCredentialReleases lists the team's most recent releases, newest
-// first, at most limit of them.
-func (t *Tenant) GitCredentialReleases(ctx context.Context, limit int) (_ []GitCredentialRelease, err error) {
-	if limit <= 0 || limit > 500 {
-		limit = 500
-	}
-	rows, err := t.s.query(ctx, `
-		SELECT id, team, credential_id, host, run_id, runner, token_prefix, released_at
-		FROM git_credential_releases WHERE team = ?
-		ORDER BY released_at DESC, id DESC LIMIT ?`, string(t.team), limit)
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var out []GitCredentialRelease
-	for rows.Next() {
-		var r GitCredentialRelease
-		var team string
-		var at int64
-		if err := rows.Scan(&r.ID, &team, &r.CredentialID, &r.Host, &r.RunID, &r.Runner, &r.TokenPrefix, &at); err != nil {
-			return nil, err
-		}
-		r.Team = Team(team)
-		r.ReleasedAt = time.Unix(at, 0).UTC()
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
-// SetGitCredentialMachine opts the team's machine token prefix in to, or out
-// of, receiving the team's git credentials. Without it only a cloud runner
-// receives them. ErrNotFound when prefix is no unrevoked machine token of
-// the team.
-func (t *Tenant) SetGitCredentialMachine(ctx context.Context, prefix string, enabled bool, by string, now time.Time) error {
-	tok, err := t.TeamToken(ctx, prefix)
-	if err != nil {
-		return err
-	}
-	if tok.Family() != TokenFamilyMachine || (tok.RevokedAt != nil && !now.Before(*tok.RevokedAt)) {
-		return notFound("machine token", prefix)
-	}
-	if !enabled {
-		_, err := t.s.exec(ctx, `DELETE FROM git_credential_machines WHERE team = ? AND token_prefix = ?`,
-			string(t.team), prefix)
-		return err
-	}
-	_, err = t.s.exec(ctx, `
-		INSERT INTO git_credential_machines (team, token_prefix, enabled_by, enabled_at) VALUES (?, ?, ?, ?)
-		ON CONFLICT (team, token_prefix) DO NOTHING`, string(t.team), prefix, by, now.UTC().UnixNano())
-	return err
-}
-
-// GitCredentialMachine reports whether the team's owner opted the runner
-// token prefix in to receiving its git credentials.
-func (t *Tenant) GitCredentialMachine(ctx context.Context, prefix string) (bool, error) {
-	var n int
-	err := t.s.queryRow(ctx, `SELECT COUNT(*) FROM git_credential_machines WHERE team = ? AND token_prefix = ?`,
-		string(t.team), prefix).Scan(&n)
-	return n > 0, err
 }

@@ -1,5 +1,20 @@
 # Migrating to the next release
 
+## Source credentials use capability transactions
+
+`Tenant.ReleaseGitCredential`, `GitCredentialReleases`,
+`SetGitCredentialMachine` and `GitCredentialMachine` are removed with
+`GitCredentialRelease`, `SourceSpend`, `MaxSourceMints` and
+`ErrSourceCredentialSpent`.
+
+Use `Tenant.ReleaseSourceCredential(ctx, authorized)` with the current
+capability authority. It derives the sealed source and executor, checks live
+ancestry, claim fences, SSH confirmation and owner consent, and commits the
+audit before returning a sealed credential. Read committed audits with
+`SourceReleaseAudits`. Change machine consent with `SetSourceMachineConsent`
+and the current machine owner's authority. These calls use the store clock. The unused `capabilities.source_mints`
+column is removed from the final schema.
+
 ## Run completion and planning units
 
 `Store.CreatePlanNode` is removed. `Tenant.AdmitRun` creates the operational
@@ -1347,11 +1362,9 @@ To upgrade:
 3. If an owner listed extra repositories before their GitHub IDs were
    recorded, save the list again; such a list now answers 409 rather than
    minting by name.
-4. Code that calls `store.Tenant.SpendSourceCredential` or
-   `ReleaseGitCredential` passes the claim token and a
-   `store.GitCredentialRelease`; code that decoded
-   `controller.GitCredentialResponse` or `controller.SourceTokenResponse`
-   decodes `store.SourceCredential`.
+4. Direct source-release consumers use the capability transactions described
+   in [Source credentials use capability transactions](#source-credentials-use-capability-transactions).
+
 
 ## S3 and Postgres state profiles are removed
 
