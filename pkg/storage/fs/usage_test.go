@@ -7,11 +7,11 @@ import (
 	"testing"
 )
 
-func TestArtifactStore_UsageTotalsStoredBytesAndObjects(t *testing.T) {
+func TestUsageReporter_UsageTotalsStoredBytesAndObjects(t *testing.T) {
 	t.Parallel()
-	s, err := NewArtifactStore(t.TempDir())
+	s, err := NewUsageReporter(t.TempDir())
 	if err != nil {
-		t.Fatalf("NewArtifactStore: %v", err)
+		t.Fatalf("NewUsageReporter: %v", err)
 	}
 	ctx := context.Background()
 	usage, err := s.Usage(ctx)
@@ -22,12 +22,8 @@ func TestArtifactStore_UsageTotalsStoredBytesAndObjects(t *testing.T) {
 		t.Fatalf("empty store usage = %+v", usage)
 	}
 
-	for key, body := range map[string]string{"runs/abc/state.ndjson": "12345", "bin/some-key": "abc"} {
-		path, err := relPath(key)
-		if err != nil {
-			t.Fatal(err)
-		}
-		path = filepath.Join(s.Root, path)
+	for key, body := range map[string]string{"teams/acme/cas/blob": "12345", "logs/r90/teams/acme/run/segment": "abc"} {
+		path := filepath.Join(s.Root, key)
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}

@@ -2,10 +2,10 @@
 
 ## Filesystem object writes use signed transfers
 
-`fs.ArtifactStore.PutIfAbsent` and `Delete` are removed with the old sharded
-writer and its conditional-write locks. Use the shared signed-data backend for
-object writes and the controller for log deletion. Read-only fixture objects
-and filesystem usage measurement remain. No object conversion is provided.
+`fs.ArtifactStore`, `fs.NewArtifactStore` and the sharded filesystem object
+layout are removed. Use the shared signed-data backend for byte transfers and
+the controller for log deletion. Use `fs.NewUsageReporter` for deployment usage
+totals. It exposes no object reads or writes. No object conversion is provided.
 
 Run deletion and team purge/recheck use the configured common backend to remove
 logs across stored retention classes. They leave CAS objects to reachability
@@ -777,15 +777,16 @@ integration. There is no compatibility endpoint or cache-service fallback.
 Existing output and job-log handlers keep their separate transfer setup until
 their own cutover.
 
-## Raw storage writes are create-only
+## Raw artifact plug-ins are removed
 
-`pkg/storage.ArtifactStore` exposes `PutIfAbsent` for immutable raw objects.
-It returns `ErrPreconditionFailed` when the key already exists. Plug-in
-implementations must provide that method and remove `Put` and `Has`. The shared
-conformance suite checks that a second write cannot replace the first payload.
+`storage.ArtifactStore`, `storage.ErrListNotSupported` and
+`conformance.TestArtifactStore` are removed. The unused raw
+`s3.ArtifactStore.Delete` method is also removed. Use the common signed-data
+backend and authorized records. A digest or a raw object existence check does
+not establish read access or an upload receipt.
 
-Use an authorized blob presence query for distributed data. A digest or a raw
-object existence check does not establish read access or an upload receipt.
+Deployment usage reporting remains separate through `storage.UsageReporter`.
+Its filesystem constructor is `fs.NewUsageReporter`.
 
 ## Storage uses record-backed maintenance
 

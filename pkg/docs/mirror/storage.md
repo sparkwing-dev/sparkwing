@@ -132,8 +132,10 @@ logs across stored retention classes, including retired classes. The team rechec
 also removes logs uploaded through a still-valid URL after the first purge.
 Scoped deletion leaves other tenants, other runs and CAS objects untouched.
 Object listings select physical cleanup only and grant no read authority.
-The old sharded filesystem writer and its conditional-write locks are removed.
-Read-only fixtures and deployment usage measurement remain.
+The old sharded filesystem object reader and writer, their locks and the raw
+artifact plug-in interface are removed. Filesystem deployment measurement uses
+`fs.NewUsageReporter` and counts physical files without a logical object layout.
+It grants no byte-read or record authority.
 
 Physical log keys have one owner in `internal/blob`. Signed slots use
 `LogObjectKey`: zero names the final manifest and positive indexes name immutable

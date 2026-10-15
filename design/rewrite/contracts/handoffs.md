@@ -2,6 +2,41 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+## From W7 raw artifact interface retirement
+
+**Completed W7 hard cut.** Removed storage.ArtifactStore,
+ErrListNotSupported, pkg/storage/conformance, the unused S3 Delete method and
+the entire sharded filesystem reader/listing surface. Deployment filesystem
+measurement now uses fs.NewUsageReporter through storeurl.OpenMeasurementStore.
+The existing byte/record, receipt, manifest and tagged-log real-store joins remain.
+This session removes 664 tracked Go lines and adds 156, for a net cut of 508.
+
+**Minimal caller migrations.** The orchestrator pod/trigger masking fixtures and
+launcher e2e fixture read logs through client.NodeLogs. Completeness assertions
+use the controller's completeness query. They no longer open store-local output
+directories or legacy node-log records. Those host fixtures compile but are not
+claimed as passing final authenticated integration. The dropped-line test now
+runs the real sink with an uploader fake, and passes as a unit test.
+
+**Remaining joins.** DataAuthority, BindData, NewDataClient and PolicyRouter still
+panic. W2/W9 must construct LogTransport and SegmentRecorder bindings and declare
+the segment-commit wire operation. W1b's leased expired-staging cleanup seam is
+still absent. Fresh host/wingd bindings and server-derived repo-only record
+lookup remain open. The S3 output/log handlers, their clients and host sinks,
+raw S3 log reader/writer and store-local output APIs are still live and still
+need their hard cut. No replacement authority protocol was added.
+
+**Known W1b regression.** TestBlobRecordsMutationCannotOutliveAuthority still
+fails all six commit/copy lease, leaf and ancestor expiry cases. The approved
+transaction-local mutation redesign remains assigned to W1b. W7 changed none
+of that mechanism.
+
+Whole-repository build and test compilation, storage package tests, focused
+vet, commentcheck, current-diff sleepcheck and embedded-document drift checks
+pass. Existing TestStorage passes in 161.198 seconds with 81 passing events and
+424 native/platform skips. No acceptance cell was added or unskipped.
+See [w7-storage-report.md](w7-storage-report.md) for the full scope and limits.
+
 ## From W7 scoped physical log deletion
 
 **Completed W7 cleanup construction.** Run deletion and team purge/recheck now

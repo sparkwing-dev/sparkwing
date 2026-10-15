@@ -29,7 +29,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -753,11 +752,7 @@ func TestTriggerHost_MasksTheProxyCredentialsANodeReceives(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	objs, err := fs.NewArtifactStore(h.st.OutputDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	logs, err := segmentController{st: h.st}.nodeLog(t, h.trig.ID, "build").Read(t.Context(), objs, storage.ReadOpts{})
+	logs, err := client.NewWithToken(h.url, nil, h.token).NodeLogs().Read(t.Context(), h.trig.ID, "build", storage.ReadOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}

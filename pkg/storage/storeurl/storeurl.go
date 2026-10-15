@@ -27,7 +27,7 @@ func OpenMeasurementStore(ctx context.Context, raw string, maxPages int) (storag
 		if err != nil {
 			return nil, err
 		}
-		return fs.NewArtifactStore(path)
+		return fs.NewUsageReporter(path)
 	case "s3":
 		bucket, prefix, err := s3store.ParseURL("s3://" + rest)
 		if err != nil {

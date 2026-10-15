@@ -18,8 +18,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	fsstore "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -358,27 +358,18 @@ func TestE2E_AControllerDispatchedRunPlansRunsAndAwaitsAChild(t *testing.T) {
 	if slotEvents != 0 {
 		t.Errorf("build left %d concurrency holders; it takes and releases one", slotEvents)
 	}
-	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-e2e", "check")
-	if err != nil {
-		t.Fatalf("check kept no log segments: %v", err)
-	}
-	objs, err := fsstore.NewArtifactStore(f.st.OutputDir())
+	reader := client.NewWithToken(f.url, nil, f.token(t, controller.ScopeAdmin)).NodeLogs()
+	durable, err := reader.Read(ctx, "run-e2e", "check", storage.ReadOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	segments, err := logseg.Open(ctx, objs, rec.Prefix)
-	if err != nil {
-		t.Fatal(err)
+	if !strings.Contains(string(durable), "token=***") || strings.Contains(string(durable), "tok-e2e-value") {
+		t.Errorf("check's log = %q, want its masked token line", durable)
 	}
-	durable, err := segments.Read(ctx, objs, storage.ReadOpts{})
-	if err != nil {
-		t.Fatal(err)
+	state, known, err := reader.NodeLogCompleteness(ctx, "run-e2e", "check", logseg.NodeProgress{}, time.Time{})
+	if err != nil || !known || state.State != logseg.StateComplete {
+		t.Fatalf("log completeness = %+v, known=%t, error=%v", state, known, err)
 	}
-	if !strings.Contains(string(durable), "token=***") || strings.Contains(string(durable), "tok-e2e-value") || segments.Manifest == nil {
-		t.Errorf("check's durable log = %q (manifest %+v), want its masked token line, sealed", durable, segments.Manifest)
-	}
-	// safety: a node's log is its sealed segments, which the check above reads; the container's own output
-	// carries the host's lines, and neither may hold the secret's value.
 	for job, out := range podLogs {
 		if strings.Contains(out.String(), "tok-e2e-value") {
 			t.Errorf("%s logged the secret's value", job)

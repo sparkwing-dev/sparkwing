@@ -1,3 +1,0 @@
-# pkg/storage/conformance
-
-func TestArtifactStore(t *testing.T, factory func() storage.ArtifactStore)

@@ -87,12 +87,6 @@ func TestArtifactStore_RoundTrip(t *testing.T) {
 		t.Fatalf("Get(missing) err = %v, want ErrNotFound", err)
 	}
 
-	if err := s.Delete(ctx, "abcd1234"); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-	if _, err := s.Get(ctx, "abcd1234"); !errors.Is(err, storage.ErrNotFound) {
-		t.Fatalf("Get after Delete = %v", err)
-	}
 }
 
 func TestArtifactStore_PrefixIsolation(t *testing.T) {

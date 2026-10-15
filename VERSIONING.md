@@ -145,27 +145,14 @@ symbols moved, in what direction, with no other noise.
 
 ## Conformance suites for plug-in interfaces
 
-The plug-in interfaces under `pkg/storage` and `pkg/controller` ship
-portable test suites so adopters writing custom implementations can
-verify they honor the contract. Every exported `TestX(t, factory)`
-function in `pkg/storage/conformance` and `pkg/controller/ciphertest`
-is one such suite; `go doc ./pkg/storage/conformance` lists the
-current set. The suites shipped today:
+`pkg/controller/ciphertest.TestCipher` checks custom implementations of
+[`controller.Cipher`](./pkg/controller/cipher.go). Its factory returns a fresh
+implementation per subtest.
 
-| Interface | Suite |
-|---|---|
-| [`storage.ArtifactStore`](./pkg/storage/storage.go) | [`pkg/storage/conformance.TestArtifactStore`](./pkg/storage/conformance) |
-| [`controller.Cipher`](./pkg/controller/cipher.go) | [`pkg/controller/ciphertest.TestCipher`](./pkg/controller/ciphertest) |
-
-Each suite is a single exported `TestX(t, factory)` function. A
-downstream implementation calls it from its own `*_test.go` with a
-factory that returns a fresh implementation per subtest. Operations
-the implementation opts out of (`storage.ErrNotSupported`,
-`storage.ErrListNotSupported`) are skipped, not failed.
-
-`ArtifactStore` provides create-only `PutIfAbsent` writes. An existing key
-returns `ErrPreconditionFailed`. The mutable `Put` and unscoped `Has` APIs
-are removed. Distributed presence queries use the authorized blob read set.
+The raw `storage.ArtifactStore` interface and `pkg/storage/conformance` suite
+are removed. Immutable bytes use the common signed-data backend, and records
+supply read authority. Filesystem deployment measurement uses
+`fs.NewUsageReporter` and exposes only usage totals.
 
 Tagged log sinks and committed readers are tested in `pkg/storage/logseg`.
 The append/delete `TestLogStore` suite and its test-only facade are removed.

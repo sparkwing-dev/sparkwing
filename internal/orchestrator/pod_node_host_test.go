@@ -19,14 +19,15 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -140,15 +141,6 @@ func (r *launchedRun) host(t *testing.T, nodeID string) (token string, err error
 	return token, runLaunchedNode(ctx, r.url, r.runID, nodeID, token, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
-func (r *launchedRun) objects(t *testing.T) logseg.Objects {
-	t.Helper()
-	objs, err := fs.NewArtifactStore(r.st.OutputDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return objs
-}
-
 func (r *launchedRun) node(t *testing.T, nodeID string) *store.Node {
 	t.Helper()
 	n, err := r.st.GetNode(t.Context(), r.runID, nodeID)
@@ -200,13 +192,14 @@ func TestLaunchedNode_PlansHostsAndReports(t *testing.T) {
 	if !strings.Contains(string(env), "SPARKWING_NODE_ID=build") {
 		t.Errorf("the node's environment lacks its identity:\n%s", env)
 	}
-	l := segmentController{st: r.st}.nodeLog(t, r.runID, "build")
-	logs, err := l.Read(t.Context(), r.objects(t), storage.ReadOpts{})
+	reader := client.New(r.url, nil).NodeLogs()
+	logs, err := reader.Read(t.Context(), r.runID, "build", storage.ReadOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if l.Manifest == nil || l.Manifest.Status != logseg.StatusComplete {
-		t.Errorf("the node's log manifest = %+v, want it sealed complete", l.Manifest)
+	state, known, err := reader.NodeLogCompleteness(t.Context(), r.runID, "build", logseg.NodeProgress{}, time.Time{})
+	if err != nil || !known || state.State != logseg.StateComplete {
+		t.Fatalf("log completeness = %+v, known=%t, error=%v", state, known, err)
 	}
 	if strings.Contains(string(logs), token) || !strings.Contains(string(logs), "echo ***") {
 		t.Errorf("the node's log = %s, want its token masked", logs)
@@ -417,19 +410,28 @@ func TestLaunchedNode_PlanKeepsThePipelinesRequires(t *testing.T) {
 	}
 }
 
-// A log that lost lines seals as incomplete, so readers never take the prefix
-// for the whole log.
+type podLogUpload struct{ manifest logseg.Manifest }
+
+func (*podLogUpload) PutSegment(context.Context, logseg.Segment, []byte) error { return nil }
+
+func (u *podLogUpload) PutManifest(_ context.Context, m logseg.Manifest) error {
+	u.manifest = m
+	return nil
+}
+
 func TestPodNodeLog_SealsIncompleteAfterALoss(t *testing.T) {
-	ctrl, tok := newSegmentController(t)
+	up := &podLogUpload{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	nlog := &podNodeLog{sink: openNodeLogSink(t.Context(), client.NewWithToken(ctrl.url, nil, tok), "run-s", "a", logger), logger: logger}
-	if nlog.sink == nil {
-		t.Fatal("the controller issued no segment URLs")
+	subject := blob.LogSubject{Kind: blob.LogJobAttempt, Team: "acme", RunID: "run", Attempt: &runspec.AttemptIdentity{Team: "acme", RunID: "run", NodeID: "job", Attempt: 1, Generation: 1}}
+	sink, err := logseg.NewSink(t.Context(), up, logseg.Options{Subject: subject, Logger: logger})
+	if err != nil {
+		t.Fatal(err)
 	}
+	nlog := &podNodeLog{sink: &nodeLogSink{sink: sink, logger: logger}, logger: logger}
 	nlog.Emit(sparkwing.LogRecord{Msg: "kept"})
 	nlog.RecordLoss(2)
 	nlog.seal(t.Context(), false)
-	if m := ctrl.log(t).Manifest; m == nil || m.Status != logseg.StatusIncomplete || m.DroppedLines != 2 {
+	if m := up.manifest; m.Status != logseg.StatusIncomplete || m.DroppedLines != 2 {
 		t.Fatalf("manifest = %+v, want incomplete with 2 dropped lines", m)
 	}
 }

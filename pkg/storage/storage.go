@@ -11,10 +11,6 @@ import (
 // key (or run/node pair) does not exist.
 var ErrNotFound = errors.New("storage: not found")
 
-// ErrListNotSupported is returned by ArtifactStore.List on backends
-// without a native enumeration primitive.
-var ErrListNotSupported = errors.New("storage: list not supported")
-
 // ErrNotSupported reports an operation unavailable on the selected backend.
 var ErrNotSupported = errors.New("storage: operation not supported")
 
@@ -39,25 +35,6 @@ func LogCursor(ctx context.Context) string {
 
 // ErrPreconditionFailed reports an object that already exists.
 var ErrPreconditionFailed = errors.New("storage: conditional write precondition failed")
-
-// ArtifactStore reads and creates immutable raw objects for log storage and measurement.
-type ArtifactStore interface {
-	// Get returns a reader for the blob at key. The caller closes it.
-	// Returns ErrNotFound if the key has never been written.
-	Get(ctx context.Context, key string) (io.ReadCloser, error)
-
-	// PutIfAbsent refuses an existing key with ErrPreconditionFailed.
-	PutIfAbsent(ctx context.Context, key string, r io.Reader) error
-
-	// Delete removes the blob at key. Idempotent: missing keys are
-	// not an error.
-	Delete(ctx context.Context, key string) error
-
-	// List returns every key under prefix (inclusive). Order is
-	// implementation-defined. Backends without a native enumeration
-	// primitive return ErrListNotSupported.
-	List(ctx context.Context, prefix string) ([]string, error)
-}
 
 // StoreUsage is how much a store holds: its total stored bytes and the
 // number of objects those bytes sit in, measured at ObservedAt.

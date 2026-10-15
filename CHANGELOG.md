@@ -22,7 +22,8 @@ unlock.
 
 - **storage (Breaking):** Run and team log cleanup uses the shared filesystem
   or S3 backend, including retired retention classes and late signed uploads.
-  Removed `fs.ArtifactStore.PutIfAbsent`, `Delete` and conditional-write locks.
+  Removed `fs.ArtifactStore` and its sharded reader, writer and locks.
+  Deployment measurement uses `fs.NewUsageReporter`.
   See [migration steps](docs/migrations/_unreleased.md#filesystem-object-writes-use-signed-transfers).
 
 - **storage (Breaking):** Standalone controllers configure the shared filesystem
@@ -73,9 +74,10 @@ unlock.
 - **storage:** Repo-bound remote-cache readers can use verified cache read edges
   without a job attempt. Binary, source and owner-upload edges remain excluded.
 
-- **storage (Breaking):** Raw `ArtifactStore` plug-ins use create-only
-  `PutIfAbsent` writes. Removed mutable `Put` and unscoped `Has`.
-  See [migration steps](docs/migrations/_unreleased.md#raw-storage-writes-are-create-only).
+- **storage (Breaking):** Removed the raw `storage.ArtifactStore` interface,
+  `storage.ErrListNotSupported`, `conformance.TestArtifactStore` and unused
+  `s3.ArtifactStore.Delete`. Shared signed-data bytes and records own storage.
+  See [migration steps](docs/migrations/_unreleased.md#raw-artifact-plug-ins-are-removed).
 
 - **storage (Breaking):** Direct source fetches keep Git objects in each run's
   checkout. Removed persistent Git mirrors, shared worktrees and mirror eviction.

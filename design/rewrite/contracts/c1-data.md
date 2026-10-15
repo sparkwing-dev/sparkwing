@@ -347,6 +347,11 @@ the registered controller route.
 The common controller mounts these signed transfers without bearer middleware.
 Authenticated binding and new local-controller construction remain separate.
 Legacy filesystem output and raw log paths have been removed.
+The sharded filesystem ArtifactStore, generic raw storage.ArtifactStore contract
+and portable conformance package are also removed. Filesystem deployment
+measurement uses fs.NewUsageReporter. It exposes totals without an object-read
+or write API. S3's remaining raw log reader/writer still needs its authenticated
+cutover. Physical CAS reads and writes stay with the common object backend.
 
 `CommitObject` requires verified bytes at the exact ticket's staging key even
 when the final CAS object already exists. An absent staging key returns

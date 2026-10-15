@@ -86,8 +86,9 @@ are removed. Log tests call the tagged sink, reader and physical expiry APIs.
 across immutable cuts, including combined filters and invalid ranges. Physical
 retention has separate expiry tests.
 
-The store's transactional authorization and log persistence, controller routes,
-egress settlement, retention scheduling and host bindings still need integration.
+Filesystem and S3 acceptance proofs join the physical components to the store's
+transactional log records. Authenticated controller routes, egress settlement
+and host bindings remain integration work.
 S3 log signing still needs admission for future slots whose payload size and
 digest are unknown. The existing job-only controller and host transport uses
 tagged manifest identities and prefixes. It still signs individual segments.
@@ -99,11 +100,10 @@ the final manifest and positive indexes for segments. Signing, verification and
 reads use its prefix and filename helpers. The former `logseg` key helpers are
 removed. The store can use this owner without importing `logseg`.
 
-The filesystem-records acceptance cell joins signed uploads to real SQLite
-records, reopens the store and checks offset reads and revoked readers. It is
-blocked because the store uses a separate hashed namespace and starts segment
-records at zero. The first real commit refuses the signed segment. The component
-checks use record fakes and do not close that integration gap.
+The filesystem-records and s3-records acceptance cells join signed uploads to
+real SQLite records, reopen the store and check offset reads and revoked readers.
+Signed slots and committed records use the common physical keys and positive
+segment indexes. Authentication and award issuance remain fixtures.
 
 The S3 component property joins the real signer, SDK, batch uploader, upload
 verifier and committed reader against a fake object service. Its 128 inputs vary
