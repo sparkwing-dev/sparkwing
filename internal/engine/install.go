@@ -18,7 +18,44 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-func (r Resolved) installSDK(ctx context.Context, request SDKInstallRequest) (SDKCommand, error) {
+// SDKInstallRequest gives the verified matching engine its acquired source and filtered install base.
+type SDKInstallRequest struct {
+	Directory   string   `json:"directory"`
+	PipelineDir string   `json:"pipeline_dir"`
+	SDK         SDKKind  `json:"sdk"`
+	Environment []string `json:"-"`
+}
+
+// UnmarshalJSON refuses ambiguous requests and credentials sent through the input pipe.
+func (r *SDKInstallRequest) UnmarshalJSON(body []byte) error {
+	var fields map[string]json.RawMessage
+	if err := decodeUniqueJSON(body, &fields); err != nil {
+		return err
+	}
+	for field := range fields {
+		switch field {
+		case "directory", "pipeline_dir", "sdk":
+		default:
+			return errors.New("unknown SDK install request field")
+		}
+	}
+	type request SDKInstallRequest
+	var decoded request
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return err
+	}
+	*r = SDKInstallRequest(decoded)
+	return nil
+}
+
+// SDKCommand names the locally built Go command or Node/main command without protocol argv.
+type SDKCommand struct {
+	Directory string   `json:"directory"`
+	Command   []string `json:"command"`
+}
+
+// InstallSDK installs the SDK using its verified matching engine and filtered environment.
+func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (SDKCommand, error) {
 	if err := ctx.Err(); err != nil {
 		return SDKCommand{}, err
 	}

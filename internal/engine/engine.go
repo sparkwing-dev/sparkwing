@@ -27,8 +27,6 @@ const (
 )
 
 // Pin records the exact installed SDK version and the files that establish it.
-// Version is vMAJOR.MINOR.PATCH for Go and MAJOR.MINOR.PATCH for TypeScript,
-// with matching prerelease suffixes retained. File paths are checkout-relative.
 type Pin struct {
 	SDK          SDKKind `json:"sdk"`
 	Version      string  `json:"version"`
@@ -38,7 +36,6 @@ type Pin struct {
 }
 
 // Identity is portable across executor platforms and survives retry in the accepted run seal.
-// ManifestDigest binds the complete verified release manifest, not a machine executable path.
 type Identity struct {
 	Pin            Pin    `json:"pin"`
 	Version        string `json:"version"`
@@ -46,7 +43,6 @@ type Identity struct {
 }
 
 // Resolved includes the executable verified for this machine's exact platform.
-// Executable is local runtime data and must not enter a portable run seal.
 type Resolved struct {
 	Identity    Identity
 	Target      releaseasset.Target
@@ -72,8 +68,6 @@ type VerifiedRelease struct {
 }
 
 // Config supplies machine-owned storage and transport, never repository-selected trust roots or URLs.
-// Empty CacheDirectory uses DefaultCacheDirectory; an override belongs only to the host or tests.
-// ModeLocal may use a verified matching cached executable but never downloads an engine asset.
 type Config struct {
 	CacheDirectory string
 	Mode           toolchain.Mode
@@ -107,7 +101,6 @@ var SDKPlatforms = []SDKPlatform{
 }
 
 // VersionInfo retains every published release, including releases beyond their support window.
-// SupportUntil is PublishedAt plus limits.ControllerCompatibilityMonths calendar months.
 type VersionInfo struct {
 	Version      string    `json:"version"`
 	PublishedAt  time.Time `json:"published_at"`
@@ -115,8 +108,6 @@ type VersionInfo struct {
 }
 
 // Restriction carries signed notice and enforcement dates; an empty Version means no restriction.
-// A security reason is required for enforcement affecting a release still in its support window.
-// Emergency revocations may enforce immediately; other changes announce weeks before EffectiveAt.
 type Restriction struct {
 	Version     string    `json:"version"`
 	Reason      string    `json:"reason"`
@@ -126,8 +117,6 @@ type Restriction struct {
 }
 
 // VersionIndex is signed as the exact JSON body bytes. Versions is append-only by release identity.
-// Minimum applies to engines and runner software. Revocations name individual versions.
-// Unknown additive fields may be ignored after signature verification; duplicate keys are refused.
 type VersionIndex struct {
 	Format      int           `json:"format"`
 	PublishedAt time.Time     `json:"published_at"`
@@ -144,7 +133,6 @@ type SignedIndex struct {
 }
 
 // VerifiedIndex is obtainable only by checking the shared releaseauth trust roots.
-// Its zero value is invalid and every policy consumer must reject it.
 type VerifiedIndex struct {
 	index      VersionIndex
 	signed     SignedIndex

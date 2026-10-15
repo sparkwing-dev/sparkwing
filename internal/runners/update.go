@@ -9,9 +9,6 @@ import (
 )
 
 // RunnerInstallation preserves registration while draining and replacing managed runner software.
-// Drain stops new claims and renews held claims until completion. Replace preserves credentials,
-// configuration and executable paths. RefreshManagedUnits preserves controller services and timers.
-// Restart uses the existing platform registration, including native Windows replacement.
 type RunnerInstallation interface {
 	Drain(context.Context) error
 	Replace(context.Context, engine.VerifiedRelease) error

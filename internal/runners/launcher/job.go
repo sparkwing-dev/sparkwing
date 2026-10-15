@@ -58,7 +58,8 @@ func (c CloudJobConfig) Validate() error {
 	return nil
 }
 
-func buildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award CloudJobAward, boundary CloudBoundary) (CloudJobResources, error) {
+// BuildJob builds plan, eval and work Jobs after validating their award and reserving isolation.
+func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award CloudJobAward, boundary CloudBoundary) (CloudJobResources, error) {
 	if err := cfg.Validate(); err != nil {
 		return CloudJobResources{}, err
 	}

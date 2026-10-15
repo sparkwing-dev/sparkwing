@@ -25,6 +25,53 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
+// UpgradeRequest chooses an exact release or the signed index's latest permitted release.
+type UpgradeRequest struct {
+	Checkout string
+	SDK      SDKKind
+	Version  string
+	DryRun   bool
+}
+
+// PinEdit preserves the source digest so an upgrade cannot overwrite concurrent user edits.
+type PinEdit struct {
+	Path         string
+	BeforeDigest string
+	After        []byte
+}
+
+// UpgradePlan contains concrete pin edits and the matching verified engine selection.
+type UpgradePlan struct {
+	Before       Pin
+	After        Pin
+	Edits        []PinEdit
+	Engine       Identity
+	Notices      []Notice
+	inputDigests map[string]string
+}
+
+// UpgradeVerifier checks dependency resolution, Go compilation or TypeScript type checking,
+type UpgradeVerifier interface {
+	Verify(context.Context, string, Resolved) error
+}
+
+// UpgradeResult reports verification separately from a dry-run preview.
+type UpgradeResult struct {
+	Plan     UpgradePlan
+	Applied  bool
+	Verified bool
+	DryRun   bool
+}
+
+// SoftwareUpdate keeps a verified runner replacement separate from an SDK-matched pipeline engine.
+type SoftwareUpdate struct {
+	CurrentVersion string
+	Version        string
+	Release        VerifiedRelease
+	Required       bool
+	Notices        []Notice
+}
+
 // PrepareUpgrade previews concrete native pin edits in a private staging checkout.
 func (r *Resolver) PrepareUpgrade(ctx context.Context, request UpgradeRequest) (plan UpgradePlan, result error) {
 	stage, plan, _, err := r.prepareUpgrade(ctx, request)
