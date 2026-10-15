@@ -62,6 +62,8 @@ The author SDK owns declarations, typed input and output access, protocol servin
 
 Fake-host records mask attribute keys and nested values, including numeric, boolean and null values whose text contains a registered secret. Longer masks precede their prefixes. `Host.Records` preserves attribute numbers as `json.Number` so masking and snapshots never round large integers.
 
+SDK planning errors redact longer secret inputs before their prefixes, including defaults, so input field order cannot expose a suffix.
+
 ## Public symbol inventory
 
 Each row names one exported type or function. Retain means its declared signature is part of the target. New means its declaration is in a contract file. Delete means engine plumbing or a removed author feature. Types retain their author-facing fields except the field cuts stated above. Constructors and fluent methods retain their existing invalid-input behavior unless a host-owned validation rule above supersedes it.

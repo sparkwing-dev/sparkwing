@@ -213,6 +213,7 @@ func (r *registration) secretValues(args map[string]string) []string {
 		}
 		out = append(out, v)
 	}
+	sort.Slice(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
 	return out
 }
 

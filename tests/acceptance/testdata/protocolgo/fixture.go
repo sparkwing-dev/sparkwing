@@ -94,5 +94,6 @@ func Register() {
 		sparkwing.Register[sparkwing.NoInputs](RecoveryChainName, func() sparkwing.Pipeline[sparkwing.NoInputs] { return RecoveryChainPipeline{} })
 		sparkwing.Register[GeneratedRecoveryInputs](GeneratedRecoveryChainName, func() sparkwing.Pipeline[GeneratedRecoveryInputs] { return GeneratedRecoveryChainPipeline{} })
 		sparkwing.Register[ReplayEnvInputs](ReplayEnvName, func() sparkwing.Pipeline[ReplayEnvInputs] { return ReplayEnvPipeline{} })
+		sparkwing.Register[PlanErrorInputs](PlanErrorName, func() sparkwing.Pipeline[PlanErrorInputs] { return PlanErrorPipeline{} })
 	})
 }
