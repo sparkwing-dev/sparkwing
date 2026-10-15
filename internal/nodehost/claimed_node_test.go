@@ -114,7 +114,7 @@ func TestClaimedNodeHostRejectsLostAuthorityBeforeAcquisition(t *testing.T) {
 }
 
 func TestClaimedNodeHostDoesNotRenewAChangedAward(t *testing.T) {
-	for _, change := range []string{"holder", "generation", "attempt", "prefix", "seal", "settings", "engine"} {
+	for _, change := range []string{"holder", "generation", "attempt", "prefix", "seal", "settings", "engine", "missing_job_hash", "job_hash"} {
 		t.Run(change, func(t *testing.T) {
 			input, s, host, _ := claimedNodeFixture(t)
 			switch change {
@@ -132,6 +132,10 @@ func TestClaimedNodeHostDoesNotRenewAChangedAward(t *testing.T) {
 				input.Execution.Retry.Value++
 			case "engine":
 				input.Engine.Identity.Version = "other"
+			case "missing_job_hash":
+				input.SpecHash = ""
+			case "job_hash":
+				input.SpecHash = "other"
 			}
 			s.renew = func(context.Context) (store.LeaseBeat, error) {
 				t.Fatal("changed award renewed")

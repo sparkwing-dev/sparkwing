@@ -1,0 +1,72 @@
+package nodehost
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+)
+
+// safety: a failed command's error embeds its whole output, which the node's
+// log already holds, and the controller refuses a finish body over 1 MiB, so
+// the row and end event carry a bounded error.
+const (
+	nodeErrTextMaxBytes  = 8 << 10
+	nodeErrTextHeadBytes = 512
+)
+
+// safety: only the text is masked, so errors.Is and As still reach the cause.
+type maskedRunError struct {
+	err       error
+	text      string
+	canonical *apierr.Error
+}
+
+func (e maskedRunError) Error() string { return e.text }
+func (e maskedRunError) Unwrap() error { return e.err }
+
+func (e maskedRunError) As(target any) bool {
+	canonical, ok := target.(**apierr.Error)
+	if !ok || e.canonical == nil {
+		return false
+	}
+	*canonical = e.canonical
+	return true
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+// safety: only the node's row and end event are shortened; a cut taken before
+// masking could split a secret the masker no longer recognizes, so hook and
+// recovery inputs keep the whole error.
+func recordedErrText(err error) string {
+	return boundedNodeErrText(errText(err))
+}
+
+// RecordedErrText is err as a node's row records it, bounded as every node
+// finish bounds it.
+func RecordedErrText(err error) string { return recordedErrText(err) }
+
+// safety: the first line names what failed and the tail is where a command's
+// output reports why, so both survive and the elision is stated.
+func boundedNodeErrText(text string) string {
+	if len(text) <= nodeErrTextMaxBytes {
+		return text
+	}
+	head, _, _ := strings.Cut(text, "\n")
+	if len(head) > nodeErrTextHeadBytes {
+		head = strings.ToValidUTF8(head[:nodeErrTextHeadBytes], "")
+	}
+	tail := text[len(text)-(nodeErrTextMaxBytes-nodeErrTextHeadBytes-128):]
+	if i := strings.IndexByte(tail, '\n'); i >= 0 && i < len(tail)-1 {
+		tail = tail[i+1:]
+	}
+	tail = strings.ToValidUTF8(tail, "")
+	elided := len(text) - len(head) - len(tail)
+	return fmt.Sprintf("%s\n… (%d bytes of this error elided)\n%s", head, elided, tail)
+}

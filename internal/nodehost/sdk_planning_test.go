@@ -124,6 +124,52 @@ func sdkPlanningFixture(t *testing.T) (SDKPlanner, PlanningProcessInput, *planni
 	return p, input, f, processes
 }
 
+func TestSDKPlanningRetainsSealedRunContext(t *testing.T) {
+	planner, input, fixture, processes := sdkPlanningFixture(t)
+	input.Run.StartedAt = time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	input.Run.DryRun, input.Run.NoMemo = true, true
+	input.Run.Git = &nodeproto.Git{SHA: strings.Repeat("a", 40), Branch: "feature", DefaultBranch: "main", Repo: "acme/repo", RepoURL: "https://example.com/acme/repo.git"}
+	input.Run.Trigger = &nodeproto.Trigger{Source: "webhook", User: "octocat", PullRequest: &nodeproto.PullRequest{Number: 42, Action: "synchronize", BaseRef: "main", HeadRef: "feature"}}
+	sealed, err := json.Marshal(input.Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := planner.Start
+	planned := false
+	planner.Start = func(ctx context.Context, processInput PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
+		process, err := start(ctx, processInput, log)
+		p := process.(*executorProcess)
+		answer := p.answer
+		p.answer = func(ctx context.Context, request nodeproto.Request) (any, error) {
+			if request.Op == nodeproto.OpPlan {
+				planned = true
+				actual, marshalErr := json.Marshal(request.Run)
+				if marshalErr != nil || string(actual) != string(sealed) {
+					t.Errorf("planner changed sealed context: %s (%v)", actual, marshalErr)
+				}
+			}
+			return answer(ctx, request)
+		}
+		return p, err
+	}
+	prepared, err := planner.Prepare(t.Context(), input, fixture.input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.Run.Git.SHA, input.Run.Trigger.User, input.Run.Trigger.PullRequest.Number = "later", "later", 99
+	if _, err := PlanInitial(t.Context(), prepared.Input, prepared.Functions); err != nil {
+		t.Fatal(err)
+	}
+	if !planned || len(*processes) != 2 {
+		t.Fatal("context proof did not reach fresh SDK planning")
+	}
+	for _, process := range *processes {
+		if process.closed != 1 || process.cleaned != 1 {
+			t.Fatal("context proof leaked an SDK process")
+		}
+	}
+}
+
 func TestSDKPlanningCacheHitDoesNotStartAPlanProcess(t *testing.T) {
 	p, input, f, processes := sdkPlanningFixture(t)
 	for i := range 2 {

@@ -27,6 +27,7 @@ type claimEngine struct{ resolved engine.Resolved }
 func (r claimEngine) Resolve(context.Context, engine.Pin, releaseasset.Target) (engine.Resolved, error) {
 	return engine.Resolved{}, errors.New("accepted execution must ensure its sealed engine")
 }
+
 func (r claimEngine) Ensure(_ context.Context, identity engine.Identity, target releaseasset.Target) (engine.Resolved, error) {
 	if identity != r.resolved.Identity || target != r.resolved.Target {
 		return engine.Resolved{}, errors.New("source changed the selected engine")
@@ -45,25 +46,11 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 		t.Run(map[bool]string{false: "success", true: "lease_lost"}[lost], func(t *testing.T) {
 			input, s, host, _ := claimedNodeFixture(t)
 			host.Mask = func(s string) string { return s }
-			root := t.TempDir()
-			for _, args := range [][]string{
-				{"init", "--quiet"},
-				{"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "source"},
-			} {
-				cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", root}, args...)...)
-				cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
-				if out, err := cmd.CombinedOutput(); err != nil {
-					t.Fatalf("git: %v: %s", err, out)
-				}
-			}
-			cmd := exec.CommandContext(t.Context(), "git", "-C", root, "rev-parse", "HEAD")
-			sha, err := cmd.Output()
-			if err != nil {
-				t.Fatal(err)
-			}
+			root, sha := hostSourceCheckout(t)
 			s.run.Spec.Request.Request.Options.RepoLocation.Value = root
-			s.run.Spec.Request.Request.Git.SHA = strings.TrimSpace(string(sha))
+			s.run.Spec.Request.Request.Git.SHA = sha
 			s.run.Spec.Resolved.Entrypoint = "."
+			var err error
 			input.Accepted.Spec, err = json.Marshal(s.run.Spec)
 			if err != nil {
 				t.Fatal(err)
@@ -144,4 +131,25 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 			}
 		})
 	}
+}
+
+func hostSourceCheckout(t *testing.T) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "--quiet"},
+		{"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "source"},
+	} {
+		cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", root}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git: %v: %s", err, out)
+		}
+	}
+	cmd := exec.CommandContext(t.Context(), "git", "-C", root, "rev-parse", "HEAD")
+	sha, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root, strings.TrimSpace(string(sha))
 }

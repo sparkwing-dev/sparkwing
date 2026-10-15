@@ -48,9 +48,12 @@ type OwnerLayerResult struct {
 // against the snapshot's persisted state sequences before waiting for notification.
 // Layer implements each owner-side policy named by LayerTable; it is required before
 // dispatch so an unwired policy cannot silently permit execution.
+// Source supplies the shared acquisition path. Acquire may replace it with a
+// trusted adapter that uses RunInput's sealed request and persisted acceptance.
 type OwnerHost struct {
 	Store    OwnerStore
 	Lease    lease.Keeper
+	Source   source.Options
 	Acquire  func(context.Context, RunInput) (*source.Entry, error)
 	Prepare  func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
 	Project  func(store.RunSnapshot) (store.ScheduleSnapshot, error)
@@ -72,8 +75,8 @@ var (
 // Run requires an initial successful renewal before acquiring source or resuming work.
 // It joins every executor and renewal before returning, including error paths.
 func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunCompletion, err error) {
-	if h.Store == nil || h.Acquire == nil || h.Wait == nil {
-		return completion, errors.New("run host requires store, source and state follower")
+	if h.Store == nil || h.Wait == nil {
+		return completion, errors.New("run host requires store and state follower")
 	}
 	if input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost || input.Owner.Owner.RunID != input.RunID {
 		return completion, errors.New("run host requires a bound owner and sealed request")
@@ -105,14 +108,16 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 	} else if input.Accepted != nil {
 		return completion, errors.New("resume has no persisted acceptance")
 	}
-	entry, err := h.Acquire(ctx, input)
+	entry, err := h.acquire(ctx, input, snapshot.Run)
+	if entry != nil {
+		defer func() { err = errors.Join(err, entry.Close()) }()
+	}
 	if err != nil {
 		return completion, h.preparationFailure(ctx, input, snapshot.Run, err)
 	}
 	if entry == nil {
 		return completion, h.preparationFailure(ctx, input, snapshot.Run, errors.New("source acquisition returned no entry"))
 	}
-	defer func() { err = errors.Join(err, entry.Close()) }()
 	accepted, err := h.accept(ctx, input, snapshot.Run, entry)
 	if err != nil {
 		return completion, err
@@ -124,6 +129,27 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		}
 	}
 	return h.schedule(ctx, input, accepted, entry)
+}
+
+func (h *OwnerHost) acquire(ctx context.Context, input RunInput, row store.RunRow) (*source.Entry, error) {
+	if h.Acquire != nil {
+		return h.Acquire(ctx, input)
+	}
+	var spec source.Spec
+	var err error
+	if row.Spec == nil {
+		spec, err = source.ForRequest(row.Request)
+	} else {
+		spec, err = source.ForExecution(*row.Spec)
+	}
+	if err != nil {
+		return nil, err
+	}
+	options := h.Source
+	if options.Engines == nil && input.Engines != nil {
+		options.Engines = input.Engines
+	}
+	return source.Acquire(ctx, spec, options)
 }
 
 func (h *OwnerHost) keepOwner(parent context.Context, actor store.Actor) (context.Context, func()) {

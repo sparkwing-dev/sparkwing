@@ -224,6 +224,12 @@ The adapter joins execution, closes its entry and stops its keeper before return
 Self-claimed jobs execute directly under the owner's keeper, which already renews
 them atomically with the owner.
 
+Executor errors are masked before they return to the caller as well as before
+their terminal request is sent. Error matching still reaches the original cause,
+so lease-loss handling and refused-transaction detection retain their meaning.
+Structured error rendering receives the same masked message and hint with its
+original code. Untrusted SDK details are withheld from that rendered error.
+
 Setup failures report through `TransitionNode` with the awarded holder, capability
 prefix and generation. Requested cancellation reports a cancelled job. Lost
 authority or shutdown leaves reporting to recovery. Returned source errors are
@@ -238,6 +244,13 @@ The older run-host caller still uses its dispatched-heartbeat helper until its
 own lifecycle cut. The old Job builders in `internal/runners/k8s` and
 `internal/runners/launcher` still emit `run-node` and need the authenticated
 bootstrap cut owned by the runner area.
+
+The unused launcher execution function, its buffered attempt reporter and cache
+grant renewal loop are removed. `HostNode` and the claimed-mode pod branch are
+removed with them. The remaining legacy pod path executes dispatched work only.
+Its owner already applied skip, memo and admission. Claimed work uses
+`ClaimedNodeHost` and the common executor. Launcher bootstrap must provide its
+authenticated award and adapters through that boundary.
 
 `SDKPlanner.Prepare` runs describe with the acquired engine and granted runner
 identity. Describe and plan hello omit job bindings. All declared secret defaults,
@@ -263,6 +276,11 @@ leave the host. A failed close or cleanup discards the proposed plan.
 `OwnerHost` waits for its first successful renewal before acquiring source.
 Acquisition receives the persisted acceptance on resume, even when the caller
 omitted it. Checkout resolution cannot replace the stored intake request.
+Without a custom acquisition adapter, `OwnerHost.Source` supplies the shared
+`source.Acquire` path. New owners project `source.ForRequest` from persisted
+intake. Resumed owners project `source.ForExecution` from persisted acceptance,
+including its checkout policy and sealed engine. The explicit source options
+supply install and git environments. `RunInput.Engines` fills an absent resolver.
 Owner policy tasks run independently so a waiting approval or admission does
 not stop ready siblings. Completed executor errors are checked against persisted
 terminal state because a committed failure must still release recovery jobs.

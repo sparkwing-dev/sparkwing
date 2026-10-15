@@ -38,11 +38,6 @@ type podNode struct {
 	controllerURL, token, runID, nodeID string
 	// safety: the accepted plan's hash for the node, which the pod's own plan of it must match.
 	specHash string
-	// safety: the claim's 1-based attempt ordinal, which decides before_run and after_run under retry_auto.
-	attempt int
-	// safety: a node a run host dispatched already ran its skip_if, memo and admission there, and its accepted
-	// spec_hash is the one the run host recorded on its row.
-	dispatched bool
 	// safety: a dispatched node's caches use its own run's grant, since its host may serve other runs.
 	cacheGrant string
 	state      storage.StateStoreOld
@@ -59,14 +54,12 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	if err != nil {
 		return nodehost.Result{}, fmt.Errorf("read run %s: %w", p.runID, err)
 	}
-	if p.dispatched {
-		row, err := c.GetNode(ctx, p.runID, p.nodeID)
-		if err != nil {
-			return nodehost.Result{}, fmt.Errorf("read node %s: %w", p.nodeID, err)
-		}
-		p.specHash = row.SpecHash
-		ctx = depcache.WithCacheGrant(ctx, p.cacheGrant)
+	row, err := c.GetNode(ctx, p.runID, p.nodeID)
+	if err != nil {
+		return nodehost.Result{}, fmt.Errorf("read node %s: %w", p.nodeID, err)
 	}
+	p.specHash = row.SpecHash
+	ctx = depcache.WithCacheGrant(ctx, p.cacheGrant)
 	masker := secrets.NewMasker()
 	masker.Register(p.token)
 	// safety: ahead of the routes and the node log, so a bad allow list leaves nothing to close.
@@ -111,20 +104,7 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 			Usage:   nodehost.RecordUsage(nil),
 		},
 	}
-	var res nodehost.Result
-	if p.dispatched {
-		res = nodehost.HostDispatchedNode(ctx, cfg, p.nodeID, p.specHash)
-	} else {
-		slots := NewHTTPConcurrency(p.controllerURL, nil, p.token, store.DefaultConcurrencyLease)
-		// safety: the node's concurrency group and memo entry run through the claim, which the controller binds to
-		// this node; a memo hit's output and artifact manifest are the ones the controller picks for the claim's key.
-		cfg.Admission = &nodehost.Admission{Slots: slots}
-		cfg.Memo = &nodehost.Memo{Slots: slots, Claimed: true, NoCache: flags.NoCache, Source: func(ctx context.Context, in store.ClaimInputRequest, _, _ string) (nodehost.MemoSource, error) {
-			src, data, err := c.ClaimInput(ctx, p.runID, p.nodeID, in)
-			return nodehost.MemoSource{Output: data, ArtifactManifest: src.ArtifactManifest}, err
-		}}
-		res = nodehost.HostNode(ctx, cfg, p.nodeID, p.specHash, p.attempt)
-	}
+	res := nodehost.HostDispatchedNode(ctx, cfg, p.nodeID, p.specHash)
 	nlog.seal(ctx, ctx.Err() != nil || res.Outcome == sparkwing.Cancelled)
 	return res, nil
 }

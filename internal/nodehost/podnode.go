@@ -107,39 +107,13 @@ func hostRequires(doc nodeproto.PlanDocOld, raw []byte, requires []string) (node
 	return doc, raw, err
 }
 
-// safety: a pod's layers in scheduler order. The controller owns approvals and retry_auto, whose every
-// attempt is another claim and pod; a plain retry re-runs in the pod as the in-pod executor did. Memo
-// reads and records through the claim, and admission runs only the node's concurrency group.
-var (
-	podLayers     = []Layer{skipIfLayer, memoLayer, admissionLayer, artifactsLayer, cachesLayer, retryLayer, timeoutLayer}
-	podAutoLayers = []Layer{skipIfLayer, memoLayer, admissionLayer, artifactsLayer, cachesLayer, timeoutLayer}
-	// safety: a dispatched node's run host already ran its skip_if, memo and
-	// admission, so the pod runs the rest, retry_auto's attempts included.
-	podDispatchedLayers = []Layer{artifactsLayer, cachesLayer, retryLayer, timeoutLayer}
-)
-
-// HostNode runs node nodeID of cfg's run, as a pod that claimed it does, and
-// records the node's start and result in cfg.State. The node is planned
-// afresh, and it runs only when its spec_hash equals acceptedHash, the one the
-// run's accepted plan holds; otherwise it fails with plan_drift. attempt is
-// the claim's 1-based attempt ordinal: a retry_auto node runs only that
-// attempt, with before_run as every dispatch did, and after_run only when it
-// is the last, the one that exhausts the node's retry budget, capped at
-// [store.MaxNodeRetries] as the controller caps it; any other node runs its
-// plain retries in this process. cfg.Attempts is required.
-func HostNode(ctx context.Context, cfg Config, nodeID, acceptedHash string, attempt int) Result {
-	run := podRun(&cfg)
-	return podHost(ctx, &cfg, run, nodeID, podAttempt(ctx, &cfg, run, nodeID, acceptedHash, max(attempt, 1), false))
-}
-
 // HostDispatchedNode runs node nodeID of cfg's run for the run host that
 // dispatched it, which already ran the node's skip_if, memo and admission;
-// it records the node's start and result in cfg.State as [HostNode] does. The
-// node runs only when its spec_hash equals acceptedHash, and every retry, a
-// retry_auto node's included, runs in this process. cfg.Attempts is required.
+// it records the node's start and result in cfg.State. The node runs only when
+// its spec_hash equals acceptedHash. cfg.Attempts is required.
 func HostDispatchedNode(ctx context.Context, cfg Config, nodeID, acceptedHash string) Result {
 	run := podRun(&cfg)
-	return podHost(ctx, &cfg, run, nodeID, podAttempt(ctx, &cfg, run, nodeID, acceptedHash, 1, true))
+	return podHost(ctx, &cfg, run, nodeID, podAttempt(ctx, &cfg, run, nodeID, acceptedHash))
 }
 
 func podRun(cfg *Config) *Run {
@@ -163,7 +137,7 @@ func podHost(ctx context.Context, cfg *Config, run *Run, nodeID string, res Resu
 	return podFinish(ctx, run, nodeID, res)
 }
 
-func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash string, attempt int, dispatched bool) Result {
+func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash string) Result {
 	if cfg.Attempts == nil {
 		return failed(errors.New("nodehost: no attempt executor"))
 	}
@@ -187,46 +161,25 @@ func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash
 		return drift("node %s plans differently than when the run was accepted; plan code must be deterministic for a run", nodeID)
 	case i >= 0:
 		n.Plan = doc.Nodes[i]
-	case !dispatched:
-		return drift("node %s is not in this process's plan; plan code must be deterministic for a run", nodeID)
 	default:
 		if n.Plan, n.Generators, err = podGenerated(ctx, run, nodeID, acceptedHash); err != nil {
 			return failed(err)
 		}
 	}
-	layers := podLayers
-	if m := n.Plan.Modifiers; dispatched {
-		layers = podDispatchedLayers
-		// safety: the run host generates a dispatched source's nodes from the output this host records, since only
-		// it can add them to the run, so the generators do not run here as well.
-		if c := n.Plan.Closures; c != nil && len(c.Generator) > 0 {
-			stripped := *c
-			stripped.Generator = nil
-			n.Plan.Closures = &stripped
-		}
-		if parent := n.Plan.OnFailureOf; parent != "" {
-			row, err := run.State.GetNode(ctx, run.ID, parent)
-			if err != nil {
-				return failed(fmt.Errorf("read how %s failed: %w", parent, err))
-			}
-			n.Failure = parentFailure(parent, row.FailureReason, row.Error)
-		}
-	} else if m != nil && m.RetryAuto {
-		// safety: the attempt report cannot tell the controller a failed before_run is final, so every
-		// dispatch runs before_run again and a refused hook never lets a later dispatch run the body.
-		layers, n.Attempt, n.BeforeRunEachAttempt = podAutoLayers, attempt, true
-		budget := min(max(m.Retry, 0), store.MaxNodeRetries)
-		// safety: the controller's rule for claiming the node again, so after_run runs in the attempt it does not.
-		n.Retried = func(r Result) bool {
-			return r.Outcome == sparkwing.Failed && !r.Final && attempt <= budget && ctx.Err() == nil
-		}
+	// safety: only the owner can persist an expansion; executor replanning reconstructs code.
+	if c := n.Plan.Closures; c != nil && len(c.Generator) > 0 {
+		stripped := *c
+		stripped.Generator = nil
+		n.Plan.Closures = &stripped
 	}
-	res := podChain(cfg, layers)(ctx, n)
-	if !dispatched && len(res.expansions) > 0 && res.Outcome == sparkwing.Success {
-		// safety: a pod cannot add nodes to its run, and dropping them would read as an empty fan-out.
-		return failed(fmt.Errorf("node %s generates nodes, which a pod cannot host yet", nodeID))
+	if parent := n.Plan.OnFailureOf; parent != "" {
+		row, err := run.State.GetNode(ctx, run.ID, parent)
+		if err != nil {
+			return failed(fmt.Errorf("read how %s failed: %w", parent, err))
+		}
+		n.Failure = parentFailure(parent, row.FailureReason, row.Error)
 	}
-	return res
+	return podChain(cfg, []Layer{artifactsLayer, cachesLayer, retryLayer, timeoutLayer})(ctx, n)
 }
 
 // safety: a generated node is in no process's plan, so this host runs the spec the run host recorded on its row

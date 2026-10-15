@@ -146,6 +146,44 @@ The cache-mirror protocol has no replacement. Direct SSH, App and HTTPS source
 behavior remains covered by `internal/source`. Native runner and launcher source
 release through the final controller authority remains an integration requirement.
 
+`CheckExecutorEnvelope` drives `ClaimedNodeHost` and the common executor under
+`protocol-host-layers-risk-cleanup/hermetic-claimed-executor`. Its eight cases
+cover success, retries, drift, risk refusal, hook refusal, cleanup failure,
+output refusal and terminal-transaction refusal. The store, SDK, engine policy,
+validator, hasher, storage and route delegate are contract fakes. Native placement
+cells remain open. Every process closes and cleans up. Application retries keep
+the generation, advance the ordinal and get a fresh process binding. Storage
+layers wrap the retries once. Executor error text is masked in both returned
+errors and terminal requests.
+
+The unused launcher host and its tests are deleted. These dispositions retain
+their behavior requirements without retaining the removed claimed-mode runtime:
+
+| Removed test | Replacement or integration obligation |
+|---|---|
+| `TestLaunchedNode_PlansHostsAndReports` | `CheckExecutorEnvelope/success`, `TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK` and `TestSDKPlanningNativeProcessesMaskStreamsAndReusePlanCache` cover host execution, source, pipes and masking. Native environment policy, controller authority and log-manifest wiring remain open. |
+| `TestLaunchedNode_PlansWithTheTriggersActorAndPullRequest` | `TestSDKPlanningRetainsSealedRunContext` preserves actor, PR, git, start time, DryRun and NoMemo through planning. Native intake-to-SDK placement wiring remains open. |
+| `TestLaunchedNode_PlanDriftFailsTheNode` | `CheckExecutorEnvelope/drift` refuses before the body. |
+| `TestPodNode_WithoutAnAcceptedHashFailsClosed` | `TestClaimedNodeHostDoesNotRenewAChangedAward/missing_job_hash` and `/job_hash` refuse before acquisition or renewal. |
+| `TestLaunchedNode_RetryAutoRunsAfterRunLast` | Drop redispatch and retry-auto. `CheckExecutorEnvelope/retry` checks one before hook, one final after hook and three application attempts under the same generation. |
+| `TestLaunchedNode_RetryAutoNeverRunsABodyItsBeforeRunRefused` | Drop redispatch and retry-auto. `CheckExecutorEnvelope/before_refused` prevents the body and masks the error. |
+| `TestLaunchedNode_PlainRetryRunsInThePod` | `CheckExecutorEnvelope/retry` advances ordinals within one claim. |
+| `TestLaunchedNode_RunsItsConcurrencyGroupThroughTheClaim` | Replace executor-owned admission with owner admission and claim-renewed holders. Native store/admission integration remains open. |
+| `TestLaunchedNode_PlanKeepsThePipelinesRequires` | Checkout declarations and accepted settings must retain YAML placement. Native configuration/acceptance wiring remains open. |
+| `TestLaunchedNode_MemoHitsThroughTheClaim` | Memo is an owner decision committed by reconciliation. Missing output, missing artifacts and refused manifest edges remain required under `storage-memo-materialization-failures`. Native store/storage materialization remains open. |
+| `TestLaunchedNode_HonorsTheTriggersRunFlags` | `TestSDKPlanningRetainsSealedRunContext` covers DryRun propagation. Native Only and step-range projection and execution remain open. |
+| `TestLaunchedNode_NoCacheMissesTheMemo` | NoMemo remains an owner-side read bypass. `TestOwnerPolicyMemoKeyRequiresStringOrExplicitNull` covers key evaluation with that bypass. Native memo reads and writes remain open. |
+| `TestLaunchedNode_LayersTheCheckoutsYAMLArgsAndGuards` | `TestSDKPlanningDescribesDefaultsBeforePlanning` covers resolved argument propagation. Native checkout YAML resolution and guard evaluation remain open. |
+| `TestLaunchedNode_AGuardJudgesTheSDKsDefaults` | Describe supplies defaults before owner guard evaluation. Native configuration/guard integration remains open. |
+| `TestApplyGoEnvFile_ReadsOnlyTheModuleSettings` | Drop the file reader and ambient environment mutation. `TestOwnerHostAcquiresSealedSourceWithExplicitEnvironment` checks source installation's explicit environment for new and resumed owners. The legacy fetch-source file writer remains in the runner area. |
+
+`TestOwnerHostSourceProjectionFailureFinishesOnlyUnacceptedRuns` checks source
+failure settlement. The real-git owner test resolves a new checkout's pin and
+ensures the accepted engine on resume, with a fake engine resolver and installer.
+Neither path removes the user's checkout. `TestMemoFollowerWithNoOutputRunsTheNode`
+retains the missing-output miss proof after removal of the unused claimed-memo
+mode. The final storage/reconciliation acceptance cell remains open.
+
 ### Complete old credential dimension
 
 | Exact old label | Final fixture and decision |
@@ -260,4 +298,3 @@ The source reports describe residual failures that their committed tests do not 
 - Final positive permission tests use valid requests. Expected grants come from independent architecture cases, not from the policy table's own output.
 - Race cases coordinate at a real transaction or request-body boundary. A sleep that merely hopes to produce an ordering is insufficient evidence.
 - Run package tests for local invariants and acceptance scenarios for cross-process behavior. The parked test counts are inventory counts, not launch coverage claims.
-
