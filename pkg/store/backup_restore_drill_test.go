@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -178,12 +179,19 @@ func fingerprintInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) i
 		f.Grants = append(f.Grants, fmt.Sprintf("%s/%s/%d", g.Kind, g.Reference, g.AmountMicro))
 	}
 
-	tokens, err := st.ListTokens("", true)
+	rows, err := st.DB().QueryContext(ctx, `SELECT prefix, principal, kind FROM tokens`)
 	if err != nil {
-		t.Fatalf("list tokens: %v", err)
+		t.Fatal(err)
 	}
-	for _, tok := range tokens {
-		f.Tokens = append(f.Tokens, fmt.Sprintf("%s/%s/%s", tok.Prefix, tok.Principal, tok.Kind))
+	for rows.Next() {
+		var prefix, principal, kind string
+		if err := rows.Scan(&prefix, &principal, &kind); err != nil {
+			t.Fatal(err)
+		}
+		f.Tokens = append(f.Tokens, fmt.Sprintf("%s/%s/%s", prefix, principal, kind))
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		t.Fatal(err)
 	}
 
 	sort.Strings(f.Runs)

@@ -21,7 +21,7 @@ func TestRegisteredAgentsUseLiveCapabilityIdentityAndSavedLabels(t *testing.T) {
 	root.ReservedPools = []string{"prod"}
 	authorityPersist(t, s, root)
 	authorityPersist(t, s, authorityRoot("foreign", "b"))
-	if err := s.RecordAgentLabels(t.Context(), root.Prefix, []string{"gpu", "name=forged", "class=cloud", "pool=forged", "os=linux", "arch=arm64"}); err != nil {
+	if err := s.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{"gpu", "name=forged", "class=cloud", "pool=forged", "os=linux", "arch=arm64"}}); err != nil {
 		t.Fatal(err)
 	}
 	agents, err := (&Tenant{s: s, team: "a"}).ListRegisteredAgents(t.Context())
@@ -84,7 +84,7 @@ func TestRegisteredAgentsExcludeExpiredRevokedAndNonClaimants(t *testing.T) {
 			if problem != "missing" {
 				authorityPersist(t, s, root)
 			}
-			if err := s.RecordAgentLabels(t.Context(), root.Prefix, []string{"gpu"}); err == nil {
+			if err := s.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{"gpu"}}); err == nil {
 				t.Fatal("unavailable agent recorded labels")
 			}
 			agents, err := (&Tenant{s: s, team: "a"}).ListRegisteredAgents(t.Context())
@@ -108,7 +108,7 @@ func TestRegisteredAgentsRejectCorruptCapabilityAndLabels(t *testing.T) {
 	}
 }
 
-func TestRecordAgentLabelsRejectsExpiredParent(t *testing.T) {
+func TestRecordRunnerPollRejectsExpiredParent(t *testing.T) {
 	s := authorityStore(t)
 	now := time.Unix(1700000000, 123).UTC()
 	s.clock = func() time.Time { return now }
@@ -118,7 +118,7 @@ func TestRecordAgentLabelsRejectsExpiredParent(t *testing.T) {
 	root := authorityRoot("runner", "a")
 	root.Parent = &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: parent.Prefix}
 	authorityPersist(t, s, root)
-	err := s.RecordAgentLabels(t.Context(), root.Prefix, []string{"gpu"})
+	err := s.RecordRunnerPoll(t.Context(), UnitDemand{CapabilityPrefix: root.Prefix, Labels: []string{"gpu"}})
 	var denied *apierr.Error
 	if !errors.As(err, &denied) || denied.Code != apierr.Unauthenticated {
 		t.Fatalf("expired parent: %v", err)

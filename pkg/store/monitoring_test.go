@@ -72,37 +72,6 @@ func TestMonitoringHTTPRoutesUseTheStoreDialect(t *testing.T) {
 	}
 }
 
-func TestAgentClaimsUseTheStoreDialect(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now()
-	if err := st.CreateRun(ctx, store.Run{ID: "agent-run", Pipeline: "demo", Status: "running", StartedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "agent-run", NodeID: "work", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.MarkNodeReady(ctx, "agent-run", "work"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.ClaimNextReadyNode(ctx,
-		store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"},
-		"runner:laptop:1", time.Minute, nil); err != nil {
-		t.Fatal(err)
-	}
-	tenant, err := st.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
-	claims, err := tenant.ListAgentClaims(ctx, now.Add(-time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(claims) != 1 || claims[0].RunID != "agent-run" || claims[0].ClaimedBy != "runner:laptop:1" || claims[0].TokenPrefix != "swr_runner" {
-		t.Fatalf("agent claims = %+v", claims)
-	}
-}
-
 func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()

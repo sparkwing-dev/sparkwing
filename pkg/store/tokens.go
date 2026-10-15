@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
@@ -44,16 +43,9 @@ const PrefixLen = 12
 
 const mintAttempts = 5
 
-// Bearer rejection reasons. ErrNoTokenCandidates and ErrUnknownToken
-// carry the same message so the response never tells a caller whether
-// a prefix exists; only ErrUnknownToken means a stored hash was
-// actually compared.
 var (
-	ErrInvalidToken      = errors.New("invalid token")
-	ErrNoTokenCandidates = errors.New("unknown token")
-	ErrUnknownToken      = errors.New("unknown token")
-	ErrTokenRevoked      = errors.New("token is revoked")
-	ErrTokenExpired      = errors.New("token is expired")
+	ErrTokenRevoked = errors.New("token is revoked")
+	ErrTokenExpired = errors.New("token is expired")
 )
 
 // Token is one row in the tokens table.
@@ -327,204 +319,6 @@ func isTokenPrefixCollision(err error) bool {
 		strings.Contains(strings.ToLower(err.Error()), tokenPrefixColumn)
 }
 
-// LookupToken authenticates and bumps last_used_at. Materialize the
-// candidate list before any follow-up Exec -- MaxOpenConns=1 will
-// deadlock if a cursor is still open.
-func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
-	if len(raw) < PrefixLen {
-		return nil, ErrInvalidToken
-	}
-	prefix := raw[:PrefixLen]
-
-	candidates, err := s.selectTokensByPrefix(prefix)
-	if err != nil {
-		return nil, err
-	}
-	if len(candidates) == 0 {
-		return nil, ErrNoTokenCandidates
-	}
-
-	for i := range candidates {
-		t := &candidates[i]
-		ok, err := verifyToken(raw, t.Hash)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			continue
-		}
-		if err := TokenEnded(t.RevokedAt, t.ExpiresAt, now); err != nil {
-			return nil, err
-		}
-		s.noteTokenUse(t, now)
-		return t, nil
-	}
-	return nil, ErrUnknownToken
-}
-
-// perf: a fleet authenticates on every request, and last use to the hour
-// is all that is read.
-const tokenUseWriteEvery = time.Hour
-
-// safety: only the tokens a team mints for its machines slide, so an
-// operator's or GitHub runner's fixed lifetime is never extended by use.
-func slidesOnUse(t *Token) bool {
-	return isAgentToken(t.Kind, t.Principal) && t.ExpiresAt != nil
-}
-
-// safety: the write is conditional on the stored last use, so replicas that
-// authenticate the same token in one hour write it once between them.
-func (s *Store) noteTokenUse(t *Token, now time.Time) {
-	now = now.UTC()
-	if t.LastUsedAt != nil && now.Sub(*t.LastUsedAt) < tokenUseWriteEvery {
-		return
-	}
-	expires := t.ExpiresAt
-	if slidesOnUse(t) {
-		next := now.Add(RunnerTokenLifetime)
-		expires = &next
-	}
-	res, err := s.execNoCtx(
-		`UPDATE tokens SET last_used_at = ?, expires_at = ?
-		  WHERE team = ? AND hash = ? AND (last_used_at IS NULL OR last_used_at <= ?)`,
-		now.Unix(), expiresUnix(expires), string(t.Team), t.Hash, now.Add(-tokenUseWriteEvery).Unix(),
-	)
-	if err != nil {
-		return
-	}
-	if n, err := res.RowsAffected(); err == nil && n == 1 {
-		t.LastUsedAt, t.ExpiresAt = &now, expires
-	}
-}
-
-const selectTokensByPrefixSQL = `
-        SELECT team, hash, prefix, principal, kind, scopes,
-               created_at, expires_at, last_used_at, revoked_at,
-               COALESCE(replaced_by, ''), metered
-          FROM tokens
-         WHERE prefix = ?`
-
-func (s *Store) selectTokensByPrefix(prefix string) ([]Token, error) {
-	rows, err := s.queryNoCtx(selectTokensByPrefixSQL, prefix)
-	if err != nil {
-		return nil, fmt.Errorf("tokens: query: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	return scanTokenRows(rows)
-}
-
-func scanTokenRows(rows *sql.Rows) ([]Token, error) {
-	var out []Token
-	for rows.Next() {
-		var t Token
-		var scopes string
-		var expiresAt, lastUsedAt, revokedAt sql.NullInt64
-		var created, metered int64
-		if err := rows.Scan(
-			&t.Team, &t.Hash, &t.Prefix, &t.Principal, &t.Kind, &scopes,
-			&created, &expiresAt, &lastUsedAt, &revokedAt,
-			&t.ReplacedBy, &metered,
-		); err != nil {
-			return nil, err
-		}
-		t.Metered = metered != 0
-		t.Scopes = splitScopes(scopes)
-		t.CreatedAt = time.Unix(created, 0).UTC()
-		if expiresAt.Valid {
-			et := time.Unix(expiresAt.Int64, 0).UTC()
-			t.ExpiresAt = &et
-		}
-		if lastUsedAt.Valid {
-			lt := time.Unix(lastUsedAt.Int64, 0).UTC()
-			t.LastUsedAt = &lt
-		}
-		if revokedAt.Valid {
-			rt := time.Unix(revokedAt.Int64, 0).UTC()
-			t.RevokedAt = &rt
-		}
-		out = append(out, t)
-	}
-	return out, rows.Err()
-}
-
-// RevokeToken sets revoked_at=now; row is kept for audit. A token
-// already carrying a future revoked_at from a rotation grace window is
-// clamped down to now, so an operator can cut a leaked token short.
-func (s *Store) RevokeToken(prefix string, now time.Time) error {
-	ctx := context.Background()
-	ts := now.UTC().Unix()
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return fmt.Errorf("tokens: revoke: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	res, err := tx.ExecContext(ctx,
-		`UPDATE tokens SET revoked_at = ? WHERE prefix = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		ts, prefix, ts,
-	)
-	if err != nil {
-		return fmt.Errorf("tokens: revoke: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("tokens: revoke: %w", err)
-	}
-	if n == 0 {
-		return errors.New("token not found or already revoked")
-	}
-	// safety: an ambiguous prefix rolls back, so a stranger's token stays live
-	if n > 1 {
-		return fmt.Errorf("tokens: prefix %q matched %d rows, aborting", prefix, n)
-	}
-	return tx.Commit()
-}
-
-// ListTokens returns matching rows. Empty kind = all.
-func (s *Store) ListTokens(kind string, includeRevoked bool) ([]Token, error) {
-	q := `
-        SELECT team, hash, prefix, principal, kind, scopes,
-               created_at, expires_at, last_used_at, revoked_at,
-               COALESCE(replaced_by, ''), metered
-          FROM tokens
-    `
-	args := []any{}
-	where := []string{}
-	if kind != "" {
-		where = append(where, "kind = ?")
-		args = append(args, kind)
-	}
-	if !includeRevoked {
-		where = append(where, "revoked_at IS NULL")
-	}
-	if len(where) > 0 {
-		q += " WHERE " + strings.Join(where, " AND ")
-	}
-	q += " ORDER BY created_at DESC"
-
-	rows, err := s.queryNoCtx(q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	return scanTokenRows(rows)
-}
-
-// LookupTokenByPrefix returns the one row carrying prefix. More than one
-// match names no single principal, so it is an error rather than a guess.
-func (s *Store) LookupTokenByPrefix(prefix string) (*Token, error) {
-	rows, err := s.selectTokensByPrefix(prefix)
-	if err != nil {
-		return nil, err
-	}
-	if len(rows) == 0 {
-		return nil, errors.New("token not found")
-	}
-	if len(rows) > 1 {
-		return nil, fmt.Errorf("tokens: prefix %q matched %d rows, aborting", prefix, len(rows))
-	}
-	return &rows[0], nil
-}
-
 func prefixForKind(kind string) (string, bool) {
 	switch kind {
 	case TokenKindUser:
@@ -558,26 +352,6 @@ func hashToken(raw string) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("argon2id$%s$%s", hex.EncodeToString(salt), hex.EncodeToString(key)), nil
-}
-
-func verifyToken(raw, stored string) (bool, error) {
-	parts := strings.Split(stored, "$")
-	if len(parts) != 3 || parts[0] != "argon2id" {
-		return false, errors.New("tokens: malformed hash")
-	}
-	salt, err := hex.DecodeString(parts[1])
-	if err != nil {
-		return false, err
-	}
-	key, err := hex.DecodeString(parts[2])
-	if err != nil {
-		return false, err
-	}
-	cand, err := argonKey(raw, salt)
-	if err != nil {
-		return false, err
-	}
-	return subtle.ConstantTimeCompare(cand, key) == 1, nil
 }
 
 func dedupeScopes(in []string) []string {

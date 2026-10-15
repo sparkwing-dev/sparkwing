@@ -2190,3 +2190,22 @@ Egress concurrency refusals use `error.code=rate_limited`, with
 `egress_download_limit` or `egress_stream_limit` in `error.details.reason`.
 The exported `EgressDownloadLimitCode` and `EgressStreamLimitCode` constants are
 removed. Read the canonical error object instead of a top-level code.
+
+## Store credential readers and local-first claims
+
+Embedded callers replace `Store.LookupToken` and `LookupTokenByPrefix` with
+`ReadAuthentication` or `LookupCapability`, passing the complete digest.
+`ListTokens` and `RevokeToken` are removed. Use the tenant or operator capability
+inventory and authority-bearing mutation methods. Authentication reads preserve
+the credential's expiry.
+
+`CreateHereTriggerWithRun`, `HereRunner` and its principal-prefix helpers are
+removed. `AdmitRun` and `Issue` own here credentials. The initial acquisition
+window remains `limits.ClaimWindow`. `ClaimedRunFor` and the unused raw claim
+origin and agent-claim readers are removed. Secret reads use `ReadSecret`.
+
+`RecordRunnerPoll(ctx, UnitDemand)` replaces `RecordAgentLabels`. The controller
+stores observed capacity and labels with store time. Configured local-first
+preferences, hold and liveness now apply to shared named and queued job claims.
+Only a recent eligible runner with live authority and enough advertised capacity
+can hold work. No new flag, deadline or customer limit is added.

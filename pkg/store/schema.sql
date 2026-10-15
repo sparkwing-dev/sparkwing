@@ -1074,6 +1074,7 @@ CREATE TABLE capabilities (
     claim_by BIGINT,
     reserved_pools BLOB NOT NULL,
     advertised_labels_json BLOB,
+    claim_observation_json BLOB,
     created_at BIGINT NOT NULL,
     expires_at BIGINT,
     revoked_at BIGINT,

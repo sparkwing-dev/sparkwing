@@ -2025,3 +2025,23 @@ recovery and child-intake suites. `TestChildIntakePersistsLineageAndInvocationRe
 and `TestChildIntakeCannotEscapeItsLiveParentProperty` retain child identity,
 exact replay and current parent authority. No native
 acceptance cell is newly claimed by this cut.
+
+## W1 credential reader and here issuer retirement
+
+| Retired evidence | Current evidence |
+| --- | --- |
+| `TestCreateAndLookupToken`, the four `TestLookupToken_*` cases and collided-prefix lookup | `TestAuthenticationDigestSelectsOnlyLiveAuthorityProperty` generates changed presentations and digests, verifies the exact issued authority, preserves stored expiry and refuses revoked and expired credentials. `TestAuthenticationSnapshotRechecksAncestryAndMembership` retains ancestry, membership, class and audience refusal. Current capability prefixes are unique. |
+| `TestListTokens_FiltersKindAndRevoked`, `TestAmbiguousPrefixRefusesLookupAndRevoke` | `TestCapabilityInventoryFiltersAndRefusals`, `TestCapabilityInventoryOwnershipProperty`, `TestCapabilityInventoryDeploymentIsolation` and capability rotation properties cover the current inventory and committing mutations. Legacy ambiguity recovery retires with the token-table reader. The legacy mint uniqueness test remains for retained fixture writers. |
+| `TestRunnerTokenExpiryFollowsItsLastUse`, `TestTokenUseIsWrittenAtMostHourly` | Their token-table sliding and throttled-write mechanism retires. Current authentication checks persisted absolute expiry without changing it. The digest property covers that invariant. Runner poll activity now has its own store-clock write. |
+| `TestCreateHereTriggerWithRun_RefusesAClaimAfterTheWindow` | `TestClaimUnitHereWindowAndReclaim`, `TestAdmissionHereAwardRetainsRequestingAuthority` and `TestAuthenticationSnapshotHereClaimHistorySurvivesRequeue` cover the live here award, first acquisition and reclaim. |
+| The four `TestClaimedRunFor*` functions | `TestSecretReadClaimScopePrecedenceProperty`, `TestSecretReadAuthorityAndSelectionProperty` and `TestSecretReadCommitsBoundReleaseAndNeverDetachesAnImplicitRun` preserve team, run, pipeline, current holder and declared-secret selection through the current committing reader. Triggerless raw execution is removed. |
+| `TestAgentClaimsUseTheStoreDialect` | The unused raw agent-claim report is removed. `TestRegisteredAgentsUseLiveCapabilityIdentityAndSavedLabels` retains current registration identity. The complete runner inventory and active-job projection remain open integration work. |
+
+`TestClaimPlacementOnlyLiveEligibleRunnersCanHoldWorkProperty` covers configured
+and declared preferences through named and queued claims. It generates labels
+and checks stale, revoked, expired, foreign, repository-excluded, grantless,
+under-capacity and hard-selector-mismatched runners, the exact hold deadline and
+granted-name preferences against forged labels. Held polls preserve the entire
+node and award count. `TestEngineClaimHTTPLocalFirstUsesPersistedPoll` carries
+server configuration through the real HTTP handler and store with only enrollment
+and software-policy fakes. No native cell is newly claimed.

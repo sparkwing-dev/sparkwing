@@ -1,5 +1,34 @@
 # C1 data contract
 
+## Capability readers and configured job placement
+
+`Store.LookupToken`, `LookupTokenByPrefix`, `ListTokens` and `RevokeToken` are
+removed. Authentication uses `ReadAuthentication` or `LookupCapability` with a
+complete digest. Inventory and mutation use the tenant or operator capability
+transactions. Authentication reads never extend credential expiry. The unused
+`NodeClaimOrigin`, `TriggerClaimOrigin`, `Tenant.ListAgentClaims`, `AgentClaim`,
+`ClaimedRunFor` and `ClaimedRun` are removed. Secret selection uses `ReadSecret`
+with current authority. The raw `CreateHereTriggerWithRun` issuer, `HereRunner`
+and principal-prefix helpers are removed. Here admission and award use
+`AdmitRun` and `Issue`, with `limits.ClaimWindow` bounding first acquisition.
+
+`RecordRunnerPoll(ctx, UnitDemand)` replaces `RecordAgentLabels`. It checks live
+unbound machine authority and valid resources, strips reserved label keys and
+stores observed capacity, labels and the store timestamp on the capability row.
+`capabilities.claim_observation_json` holds the observations. It carries no bearer.
+The observation never supplies granted identity, pools or repository authority.
+
+`WithClaimPlacement` supplies the configured default preference, hold and
+liveness to `ClaimUnit`. Named, queued and reconciled job claims use that policy.
+An explicit job preference precedes the configured default. Within the hold
+from `ready_at`, a nonpreferred claimant waits only while a recent runner poll
+resolves to live same-team authority with job-claim rights, matching repository,
+selectors and pools, and enough free capacity. Both preference scoring and
+eligibility use `match.Evaluate`. Fallback becomes eligible at the hold deadline.
+Held polls leave the job, award rows and event sequence unchanged. Successful
+awards record the placement reason. The controller passes configuration and
+records machine observations through its existing shared claim routes.
+
 ## Seeded bootstrap and legacy execution retirement
 
 `ProvisionSpec.Seed` is validated by `Store.Issue` before any origin can issue.

@@ -60,7 +60,7 @@ func liveRunnerCould(r RunnerPresence, d match.Demand) bool {
 	return match.Evaluate(r.profile(), d).OK()
 }
 
-// ClaimPlacement is the local-first policy applied to one legacy claim. A node
+// ClaimPlacement is the local-first policy applied to a job claim. A node
 // whose preference the claiming runner does not advertise waits out Hold,
 // measured from the node's hold-from time, while another live runner both
 // advertises that preference and satisfies the node's hard requirements with a
@@ -73,6 +73,8 @@ type ClaimPlacement struct {
 	DefaultPrefers []string
 	// Hold is how long a preferred-but-absent runner gets the node to itself.
 	Hold time.Duration
+	// Liveness bounds the age of persisted runner polls eligible to hold work.
+	Liveness time.Duration
 	// Live are the other runners the controller has heard from inside its
 	// liveness window.
 	Live []RunnerPresence
@@ -80,8 +82,7 @@ type ClaimPlacement struct {
 
 type claimPlacementKey struct{}
 
-// WithClaimPlacement carries a local-first policy into [Store.ClaimNextReadyNode]
-// and its variants. A context without one claims first-in-first-out.
+// WithClaimPlacement supplies server placement policy to ClaimUnit and reconciliation.
 func WithClaimPlacement(ctx context.Context, placement ClaimPlacement) context.Context {
 	return context.WithValue(ctx, claimPlacementKey{}, placement)
 }

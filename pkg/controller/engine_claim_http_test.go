@@ -32,9 +32,11 @@ func engineHTTPRoot(t *testing.T, e *EngineController, team, prefix string, gran
 	if team == "" {
 		kind = capability.SubjectService
 	}
-	c := capability.Capability{Prefix: prefix, Team: team, Subject: capability.Subject{Kind: kind, ID: prefix},
+	c := capability.Capability{
+		Prefix: prefix, Team: team, Subject: capability.Subject{Kind: kind, ID: prefix},
 		Audience: capability.Controller, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone},
-		Issuance: capability.Delegate, ReservedPools: []string{}, Repositories: []string{}, IssuedAt: time.Unix(0, 1).UTC()}
+		Issuance: capability.Delegate, ReservedPools: []string{}, Repositories: []string{}, IssuedAt: time.Unix(0, 1).UTC(),
+	}
 	envelope, err := json.Marshal(store.CapabilityRecord{Version: 1, Value: c})
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +103,27 @@ func TestEngineClaimHTTPDeliversPrivateAwardOnce(t *testing.T) {
 	var count int
 	if err := e.Store.DB().QueryRow(`SELECT COUNT(*) FROM capabilities WHERE issuance='award' AND subject_id='root'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("awards=%d: %v", count, err)
+	}
+}
+
+func TestEngineClaimHTTPLocalFirstUsesPersistedPoll(t *testing.T) {
+	e, _, fallback := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
+	preferred := engineHTTPRoot(t, e, "a", "preferred", []capability.Grant{capability.NodesClaim})
+	now := time.Now().UnixNano()
+	engineSQL(t, e.Store, `UPDATE nodes SET ready_at=?,execution_json=?`, now, []byte(`{"requires":{"set":true,"value":["ready"]}}`))
+	h := New(e.Store, slog.New(slog.DiscardHandler)).WithEngineController(e).WithLocalFirstPlacement([]string{"gpu"}, time.Minute, time.Minute).Handler()
+	poll := `{"runner_version":"v1","kinds":["node"],"labels":["gpu"],"available_cores":1}`
+	engineClaimHTTP(t, h, preferred, "POST", "/api/v1/runners/claim", poll, http.StatusOK)
+	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=?`, []byte(`{}`))
+	w := engineClaimHTTP(t, h, fallback, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, http.StatusOK)
+	var held controllerwire.ClaimResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &held); err != nil || held.Claim != nil {
+		t.Fatalf("local-first hold: %+v, %v", held, err)
+	}
+	w = engineClaimHTTP(t, h, preferred, "POST", "/api/v1/runners/claim", poll, http.StatusOK)
+	var awarded controllerwire.ClaimResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &awarded); err != nil || awarded.Claim == nil || awarded.Claim.Runner.Name != "preferred" {
+		t.Fatalf("preferred award: %+v, %v", awarded, err)
 	}
 }
 

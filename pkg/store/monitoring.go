@@ -6,16 +6,6 @@ import (
 	"time"
 )
 
-// AgentClaim is one recent node claim an agent made.
-type AgentClaim struct {
-	RunID       string
-	Status      string
-	ClaimedBy   string
-	TokenPrefix string
-	StartedAt   time.Time
-	LastSeen    time.Time
-}
-
 // RunTrend is the store-owned input to the controller's time buckets.
 type RunTrend struct {
 	RunID      string

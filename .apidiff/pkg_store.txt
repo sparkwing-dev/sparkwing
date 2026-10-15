@@ -109,14 +109,6 @@ type AdmissionResult struct {
 const AdoptHolder AdoptionKind = "holder"
 const AdoptWaiter AdoptionKind = "waiter"
 type AdoptionKind string
-type AgentClaim struct {
-	RunID       string
-	Status      string
-	ClaimedBy   string
-	TokenPrefix string
-	StartedAt   time.Time
-	LastSeen    time.Time
-}
 type AnnotationWrite struct {
 	Ref     NodeRef
 	Actor   Actor
@@ -391,6 +383,8 @@ type ClaimPlacement struct {
 
 	Hold time.Duration
 
+	Liveness time.Duration
+
 	Live []RunnerPresence
 }
 func ClaimPlacementFromContext(ctx context.Context) (ClaimPlacement, bool)
@@ -415,10 +409,6 @@ const ClaimTokenPlan ClaimTokenKind = "plan"
 const ClaimTokenPrefix = "swc"
 const ClaimTokenTrigger ClaimTokenKind = "trigger"
 const ClaimTokenWork ClaimTokenKind = "work"
-type ClaimedRun struct {
-	Team     Team
-	Pipeline string
-}
 const CloudStorageRateMicroPerGBDay = 10 * MicroCreditsPerCent / 30
 const CompileLogNode = "_compile"
 const ComputeLimitConcurrentRunners = "max_concurrent_runners"
@@ -940,7 +930,6 @@ var ErrInvalidCreditSetting = errors.New("credits: invalid setting")
 var ErrInvalidEventKind = errors.New("invalid event kind")
 var ErrInvalidInput = errors.New("store: invalid input")
 var ErrInvalidSlug = errors.New("store: invalid team slug")
-var ErrInvalidToken = errors.New("invalid token")
 var ErrInvitationClosed = errors.New("store: invitation is expired or already used")
 var ErrInvitationLimit = errors.New("store: this team has sent as many invitations as it may for now")
 var ErrInvitationOpen = errors.New("store: that address already has an open invitation")
@@ -951,7 +940,6 @@ var ErrMeteredInProcessNodes = errors.New("a metered credential must run a trigg
 var ErrNoOutputDir = errors.New("store: this store keeps no output bytes; upload the output instead")
 var ErrNoPayableCharge = errors.New("card billing: no charge is waiting for payment")
 var ErrNoTeam = errors.New("store: team is required")
-var ErrNoTokenCandidates = errors.New("unknown token")
 var ErrNodeLogCap = errors.New("store: the node log reached its byte cap")
 var ErrNodeLogSealed = errors.New("store: the node log is sealed")
 var ErrNodeLogSegmentConflict = errors.New("store: the log segment was signed for other bytes")
@@ -991,7 +979,6 @@ var ErrTokenRevoked = errors.New("token is revoked")
 var ErrTooManyPendingUploads = fmt.Errorf("a team holds at most %d uncommitted uploads; commit them or wait for them to expire", DirectUploadMaxPending)
 var ErrUnknownPayment = errors.New("credits: no settled grant belongs to this payment id")
 var ErrUnknownTeam = errors.New("store: team is not registered")
-var ErrUnknownToken = errors.New("unknown token")
 var ErrUnpricedCPUClass = errors.New("credits: cpu request above the largest priced class")
 var ErrUnverifiedEmail = errors.New("store: a sign-in needs a verified email")
 var ErrWaitlisted = errors.New("store: this account is on the sign-up waitlist")
@@ -1229,18 +1216,6 @@ const GuardPublication EdgeGuard = "live_run_bound_publisher_and_publish_intake"
 const GuardQueueDeadline EdgeGuard = "queue_or_owner_deadline"
 const GuardRetry EdgeGuard = "retryable_failure_with_budget"
 const GuardUnclaimed EdgeGuard = "unclaimed"
-type HereRunner struct {
-	Reason string
-
-	By string
-
-	CreatedBy string
-	Scopes    []string
-	TTL       time.Duration
-}
-const HereRunnerClaimWindow = 10 * time.Minute
-const HereRunnerPrincipalPrefix = "here:"
-func HereRunnerRunID(principal string) (runID string, isHere bool)
 type Identity struct {
 	Provider string
 	Subject  string
@@ -2689,7 +2664,6 @@ func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, 
 func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*Trigger, error)
 func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant ClaimIdentity, lease time.Duration) (*Trigger, error)
 func (s *Store) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error)
-func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (ClaimedRun, error)
 func (s *Store) Close() error
 func (s *Store) CommitStorage(ctx context.Context, c StorageCommit) (err error)
 func (s *Store) CommitUpload(ctx context.Context, team Team, id, recordedUploader string, now time.Time) (err error)
@@ -2763,19 +2737,15 @@ func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int6
 func (s *Store) ListNodeExecutionAttempts(ctx context.Context, runID, nodeID string) ([]ExecutionAttempt, error)
 func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error)
 func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error)
-func (s *Store) ListTokens(kind string, includeRevoked bool) ([]Token, error)
 func (s *Store) LookupCapability(ctx context.Context, digest [32]byte) (capability.Principal, error)
 func (s *Store) LookupSession(ctx context.Context, rawSession string) (*Session, error)
 func (s *Store) LookupSessionAndRenew(ctx context.Context, rawSession string, ttl, maxLifetime time.Duration) (*Session, error)
-func (s *Store) LookupToken(raw string, now time.Time) (*Token, error)
-func (s *Store) LookupTokenByPrefix(prefix string) (*Token, error)
 func (s *Store) MarkCardRefundMade(
 	ctx context.Context, team Team, key, refundID, status string, now time.Time,
 ) error
 func (s *Store) MarkNodeLogSealed(ctx context.Context, l NodeLog, storedBytes int64, now time.Time) error
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) NewestWaitlisted(ctx context.Context, limit, offset int) ([]WaitlistedAccount, error)
-func (s *Store) NodeClaimOrigin(ctx context.Context, runID, nodeID string) (principal, holder, runner string, metered bool, err error)
 func (s *Store) NodeIsAncestor(ctx context.Context, team Team, runID, ancestor, node string) (_ bool, err error)
 func (s *Store) NodeLogSegments(ctx context.Context, l NodeLog) (_ []NodeLogSegment, err error)
 func (s *Store) NodeLogSettled(ctx context.Context, team Team, runID, nodeID string) (settled, found bool, err error)
@@ -2792,11 +2762,11 @@ func (s *Store) ReadAuthentication(ctx context.Context, lookup capability.Creden
 func (s *Store) ReadClaimProfile(ctx context.Context, authority capability.AuthorityRef) (match.Profile, match.Resources, error)
 func (s *Store) ReadLauncherAwards(ctx context.Context, authority capability.AuthorityRef) ([]LauncherAward, error)
 func (s *Store) ReapUnits(ctx context.Context, lease SingletonLease, limit int) ([]ReapedUnit, error)
-func (s *Store) RecordAgentLabels(ctx context.Context, prefix string, labels []string) error
 func (s *Store) RecordAttemptIntent(ctx context.Context, attemptID, paymentIntent string, now time.Time) error
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
 func (s *Store) RecordLocalOutput(ctx context.Context, runID, nodeID string, ref OutputRef, now time.Time) (err error)
 func (s *Store) RecordPaymentWarning(ctx context.Context, w PaymentWarning, now time.Time) (_ Team, err error)
+func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error
 func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID, actor, reason string, now time.Time) (int64, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) ReleaseStorage(ctx context.Context, team Team, id string, now time.Time) (err error)
@@ -2812,7 +2782,6 @@ func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpCond
 func (s *Store) ReversePayment(
 	ctx context.Context, paymentID, reference, createdBy string, amountMicro int64,
 ) (_ CreditReversal, err error)
-func (s *Store) RevokeToken(prefix string, now time.Time) error
 func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunNodeLogs(ctx context.Context, team Team, runID string) (_ []NodeLog, err error)
@@ -2850,7 +2819,6 @@ func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID str
 func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error)
 func (s *Store) TeamInfo(ctx context.Context, team Team) (TeamInfo, error)
 func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)
-func (s *Store) TriggerClaimOrigin(ctx context.Context, runID string, generation int64) (principal string, metered bool, err error)
 func (s *Store) TriggerRepoID(ctx context.Context, team Team, id string) (int64, error)
 func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSession string, now time.Time) (Identity, int64, error)
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
@@ -2942,7 +2910,6 @@ func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
 func (t *Tenant) CreateApproval(ctx context.Context, a Approval) error
 func (t *Tenant) CreateDebugPause(ctx context.Context, p DebugPause) error
 func (t *Tenant) CreateGitHubAutomationTriggerWithRun(ctx context.Context, trig Trigger, run Run, grant GitHubAppAutomation) error
-func (t *Tenant) CreateHereTriggerWithRun(ctx context.Context, trig Trigger, r Run, here HereRunner, now time.Time) (string, *Token, error)
 func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, role Role, now time.Time) (Invitation, error)
 func (t *Tenant) CreateRun(ctx context.Context, r Run) error
 func (t *Tenant) CreateSourceTriggerWithRun(ctx context.Context, trig Trigger, r Run, key, principal, tokenPrefix string) error
@@ -3014,7 +2981,6 @@ func (t *Tenant) HeartbeatTrigger(ctx context.Context, id string, lease time.Dur
 func (t *Tenant) HoldByOperator(ctx context.Context, actor, reason string, now time.Time) (string, error)
 func (t *Tenant) Info(ctx context.Context) (TeamInfo, error)
 func (t *Tenant) Invitations(ctx context.Context, now time.Time) (_ []Invitation, err error)
-func (t *Tenant) ListAgentClaims(ctx context.Context, since time.Time) (_ []AgentClaim, err error)
 func (t *Tenant) ListApprovalsForRun(ctx context.Context, runID string) (_ []*Approval, err error)
 func (t *Tenant) ListCapabilities(ctx context.Context, a capability.Authorized, filter capability.InventoryFilter) ([]capability.Metadata, error)
 func (t *Tenant) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)

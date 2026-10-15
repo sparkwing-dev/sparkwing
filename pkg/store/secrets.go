@@ -110,64 +110,6 @@ func (t *Tenant) ListSecrets() ([]Secret, error) {
 	return scanSecretRows(rows)
 }
 
-// ClaimedRun names the team and pipeline of a run a claimant holds live
-// work in. A secret read for that claimant resolves in Team, never in the
-// team of whoever asked, because the run's team is what owns its secrets.
-type ClaimedRun struct {
-	Team     Team
-	Pipeline string
-}
-
-// ClaimedRunFor returns the team and pipeline of runID when claimant holds
-// live work on it: an unexpired claim on one of its nodes, or the
-// unexpired claim on the trigger that created it. A trigger created without
-// its run, as a webhook's is, counts while its claimant is still fetching
-// the source that creates the run; the trigger then names the team and
-// pipeline. ErrNotFound when the claimant holds neither, so a caller cannot
-// name a run it is not executing.
-func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (ClaimedRun, error) {
-	if !claimant.bound() || runID == "" {
-		return ClaimedRun{}, ErrNotFound
-	}
-	var run ClaimedRun
-	var team string
-	err := s.queryRow(ctx, `
-        SELECT runs.team, runs.pipeline
-          FROM runs
-         WHERE runs.id = ?
-           AND (EXISTS (SELECT 1 FROM nodes
-                         WHERE nodes.run_id = runs.id
-                           AND nodes.claim_principal = ? AND nodes.claim_token_prefix = ?
-		                   AND `+nodeClaimLiveSQL("")+`)
-             OR EXISTS (SELECT 1 FROM triggers
-                         WHERE triggers.id = runs.id
-                           AND triggers.claim_principal = ? AND triggers.claim_token_prefix = ?
-		                   AND `+triggerClaimLiveSQL("")+`))`,
-		runID,
-		claimant.Principal, claimant.TokenPrefix, now.UnixNano(),
-		claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&team, &run.Pipeline)
-	if errors.Is(err, sql.ErrNoRows) {
-		// safety: only while no run row exists, so a run that does exist is
-		// always judged, and its team read, by the query above.
-		err = s.queryRow(ctx, `
-        SELECT triggers.team, triggers.pipeline
-          FROM triggers
-         WHERE triggers.id = ?
-           AND triggers.claim_principal = ? AND triggers.claim_token_prefix = ?
-           AND `+triggerClaimLiveSQL("triggers.")+`
-           AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.id = triggers.id)`,
-			runID, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&team, &run.Pipeline)
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return ClaimedRun{}, ErrNotFound
-	}
-	if err != nil {
-		return ClaimedRun{}, err
-	}
-	run.Team = Team(team)
-	return run, nil
-}
-
 // TeamSecret is a secret row together with the team that owns it, for the
 // few readers that walk every team at once.
 type TeamSecret struct {

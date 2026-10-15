@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -25,144 +24,6 @@ func dropPrefixUniqueIndex(t *testing.T, s *Store) {
 	t.Helper()
 	if _, err := s.execNoCtx(`DROP INDEX ` + TokenPrefixIndexName); err != nil {
 		t.Fatalf("drop %s: %v", TokenPrefixIndexName, err)
-	}
-}
-
-func collidePrefixes(t *testing.T, s *Store, keep, drop string) {
-	t.Helper()
-	dropPrefixUniqueIndex(t, s)
-	if _, err := s.execNoCtx(`UPDATE tokens SET prefix = ? WHERE prefix = ?`, keep, drop); err != nil {
-		t.Fatalf("collide: %v", err)
-	}
-}
-
-func TestCreateAndLookupToken(t *testing.T) {
-	s := newTestStore(t)
-	now := time.Now().UTC()
-
-	raw, tok, err := s.CreateToken("alice", TokenKindUser, []string{"admin"}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-	if !strings.HasPrefix(raw, "swu_") {
-		t.Fatalf("raw missing prefix: %q", raw)
-	}
-	if tok.Prefix != raw[:PrefixLen] {
-		t.Fatalf("prefix mismatch: token=%q raw prefix=%q", tok.Prefix, raw[:PrefixLen])
-	}
-	if tok.ExpiresAt != nil {
-		t.Fatalf("ttl=0 should leave expires_at nil, got %v", tok.ExpiresAt)
-	}
-
-	got, err := s.LookupToken(raw, now)
-	if err != nil {
-		t.Fatalf("LookupToken: %v", err)
-	}
-	if got.Principal != "alice" || got.Kind != TokenKindUser {
-		t.Fatalf("unexpected token: %+v", got)
-	}
-	if !got.HasScope("admin") {
-		t.Fatalf("missing admin scope: %v", got.Scopes)
-	}
-	if got.LastUsedAt == nil {
-		t.Fatalf("last_used_at should be stamped on successful lookup")
-	}
-}
-
-func TestLookupToken_UnknownReturnsError(t *testing.T) {
-	s := newTestStore(t)
-	_, err := s.LookupToken("swu_NoSuchTokenValueAtAll00000000000000000000", time.Now())
-	if err == nil {
-		t.Fatalf("expected error for unknown token")
-	}
-}
-
-func TestLookupToken_RevokedFails(t *testing.T) {
-	s := newTestStore(t)
-	now := time.Now().UTC()
-
-	raw, tok, err := s.CreateToken("alice", TokenKindUser, []string{"admin"}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-	if err := s.RevokeToken(tok.Prefix, now); err != nil {
-		t.Fatalf("RevokeToken: %v", err)
-	}
-	if _, err := s.LookupToken(raw, now.Add(time.Second)); err == nil {
-		t.Fatalf("expected revoked token to fail lookup")
-	}
-}
-
-func TestLookupToken_ExpiredFails(t *testing.T) {
-	s := newTestStore(t)
-	now := time.Now().UTC()
-
-	raw, _, err := s.CreateToken("alice", TokenKindUser, []string{"admin"}, time.Hour, now)
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-	if _, err := s.LookupToken(raw, now.Add(2*time.Hour)); err == nil {
-		t.Fatalf("expected expired token to fail lookup")
-	}
-	if _, err := s.LookupToken(raw, now.Add(30*time.Minute)); err != nil {
-		t.Fatalf("within-ttl lookup should succeed: %v", err)
-	}
-}
-
-func TestLookupToken_IgnoresCollidedRowsWithDifferentHash(t *testing.T) {
-	s := newTestStore(t)
-	now := time.Now().UTC()
-
-	rawA, tokA, err := s.CreateToken("alice", TokenKindUser, []string{"admin"}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken A: %v", err)
-	}
-	_, tokB, err := s.CreateToken("alice", TokenKindUser, []string{"runs.read"}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken B: %v", err)
-	}
-	collidePrefixes(t, s, tokA.Prefix, tokB.Prefix)
-
-	got, err := s.LookupToken(rawA, now)
-	if err != nil {
-		t.Fatalf("LookupToken A: %v", err)
-	}
-	if got.Principal != "alice" {
-		t.Fatalf("expected alice, got %q (LookupToken returned the wrong candidate on a prefix collision)", got.Principal)
-	}
-}
-
-func TestListTokens_FiltersKindAndRevoked(t *testing.T) {
-	s := newTestStore(t)
-	now := time.Now().UTC()
-
-	_, user1, _ := s.CreateToken("alice", TokenKindUser, []string{"admin"}, 0, now)
-	_, _, _ = s.CreateToken("pool", TokenKindRunner, []string{"nodes.claim"}, 0, now)
-	_, _, _ = s.CreateToken("web", TokenKindService, []string{"runs.read"}, 0, now)
-	_ = s.RevokeToken(user1.Prefix, now)
-
-	all, err := s.ListTokens("", true)
-	if err != nil {
-		t.Fatalf("ListTokens all: %v", err)
-	}
-	if len(all) != 3 {
-		t.Fatalf("expected 3 rows, got %d", len(all))
-	}
-
-	active, err := s.ListTokens("", false)
-	if err != nil {
-		t.Fatalf("ListTokens active: %v", err)
-	}
-	if len(active) != 2 {
-		t.Fatalf("expected 2 active rows, got %d", len(active))
-	}
-
-	runners, err := s.ListTokens(TokenKindRunner, false)
-	if err != nil {
-		t.Fatalf("ListTokens runner: %v", err)
-	}
-	if len(runners) != 1 || runners[0].Kind != TokenKindRunner {
-		t.Fatalf("expected 1 runner, got %+v", runners)
 	}
 }
 
@@ -220,12 +81,12 @@ func TestCreateToken_ConcurrentMintsGetDistinctPrefixes(t *testing.T) {
 		t.Fatalf("got %d distinct prefixes from %d mints: %v", len(seen), minters, prefixes)
 	}
 
-	stored, err := s.ListTokens("", true)
-	if err != nil {
-		t.Fatalf("ListTokens: %v", err)
+	var stored int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM tokens`).Scan(&stored); err != nil {
+		t.Fatal(err)
 	}
-	if len(stored) != minters {
-		t.Fatalf("stored %d rows, want %d", len(stored), minters)
+	if stored != minters {
+		t.Fatalf("stored %d rows, want %d", stored, minters)
 	}
 }
 
@@ -248,55 +109,6 @@ func TestCreateToken_StoreRefusesASecondRowOnOnePrefix(t *testing.T) {
 	}
 	if !isUniqueViolation(err) {
 		t.Fatalf("err = %v, want a unique-constraint violation", err)
-	}
-}
-
-func TestAmbiguousPrefixRefusesLookupAndRevoke(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
-	}
-	cases := []struct {
-		name string
-		act  func(*Store, string, time.Time) error
-	}{
-		{"lookup", func(s *Store, prefix string, _ time.Time) error {
-			_, err := s.LookupTokenByPrefix(prefix)
-			return err
-		}},
-		{"revoke", func(s *Store, prefix string, now time.Time) error {
-			return s.RevokeToken(prefix, now)
-		}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			s := newTestStore(t)
-			now := time.Now().UTC()
-			_, tokA, err := s.CreateToken("alice", TokenKindUser, []string{"admin"}, 0, now)
-			if err != nil {
-				t.Fatalf("CreateToken A: %v", err)
-			}
-			_, tokB, err := s.CreateToken("bob", TokenKindUser, []string{"runs.read"}, 0, now)
-			if err != nil {
-				t.Fatalf("CreateToken B: %v", err)
-			}
-			collidePrefixes(t, s, tokA.Prefix, tokB.Prefix)
-
-			err = tc.act(s, tokA.Prefix, now)
-			if err == nil {
-				t.Fatalf("%s on an ambiguous prefix should fail", tc.name)
-			}
-			if !strings.Contains(err.Error(), "matched 2 rows") {
-				t.Fatalf("err = %v, want the ambiguity refusal", err)
-			}
-
-			live, err := s.ListTokens("", false)
-			if err != nil {
-				t.Fatalf("ListTokens: %v", err)
-			}
-			if len(live) != 2 {
-				t.Fatalf("%d live rows after the refusal, want 2", len(live))
-			}
-		})
 	}
 }
 

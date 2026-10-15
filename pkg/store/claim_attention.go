@@ -31,22 +31,29 @@ func planClaimWait(snapshot []byte) int64 {
 	return (time.Duration(plan.ClaimWaitMS) * time.Millisecond).Nanoseconds()
 }
 
-// RecordAgentLabels stores the labels the agent holding prefix advertised
-// on its latest claim, which say what it could run while it is offline.
-func (s *Store) RecordAgentLabels(ctx context.Context, prefix string, labels []string) error {
-	raw, err := json.Marshal(match.SelfAsserted(labels))
+// RecordRunnerPoll stores a live machine's advertised capacity and labels with the store clock.
+func (s *Store) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error {
+	if !validMatchingResources(observation.Capacity) || !validMatchingResources(observation.Available) {
+		return authorityError(apierr.BadRequest, "invalid claim resources")
+	}
+	observation.Labels = match.SelfAsserted(observation.Labels)
+	raw, err := json.Marshal(observation.Labels)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(observation)
 	if err != nil {
 		return err
 	}
 	return s.inTx(ctx, func(tx *storeTx) error {
-		principal, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+		principal, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: observation.CapabilityPrefix})
 		if err != nil {
 			return err
 		}
 		if !registeredClaimant(principal.Capability) {
-			return authorityError(apierr.Forbidden, "agent labels require an unbound machine claimant")
+			return authorityError(apierr.Forbidden, "runner observations require an unbound machine claimant")
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,last_used_at=? WHERE team=? AND prefix=?`, raw, tx.now().UnixNano(), principal.Capability.Team, prefix)
+		_, err = tx.ExecContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,claim_observation_json=?,last_used_at=? WHERE team=? AND prefix=?`, raw, body, tx.now().UnixNano(), principal.Capability.Team, observation.CapabilityPrefix)
 		return err
 	})
 }

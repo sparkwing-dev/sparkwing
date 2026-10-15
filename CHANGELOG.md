@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Remove unused token-table credential readers and mutations, the raw here issuer and unused claim-origin readers. Capability snapshots, management and sealed intake own their replacements. Shared job claims honor configured local-first preferences using live persisted runner polls. See [migration guide](docs/migrations/_unreleased.md#store-credential-readers-and-local-first-claims).
+
 - **store (Breaking):** Commit the seeded deployment administrator once through capability issuance. The persisted gate survives restart, rotation, revocation and credential retention. Startup checks current administrator ancestry. The token-table bootstrap issuer is removed. See [migration guide](docs/migrations/_unreleased.md#verified-billing-events-and-deployment-bootstrap).
 - **store (Breaking):** Remove unused raw claim authentication, attempt reporting and child-run writers. Current capability checks, node transitions and child admission own their retained behavior. See [migration guide](docs/migrations/_unreleased.md#legacy-claim-authentication-and-writers).
 

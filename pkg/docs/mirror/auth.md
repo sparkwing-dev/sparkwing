@@ -50,6 +50,11 @@ membership and the selected route alternative. Team administration, run deletion
 with `policy_missing`. Metrics on the API listener uses deployment or console
 policy.
 
+Embedded store users authenticate through capability snapshots and use the
+tenant or operator capability inventory and mutation methods. The unused
+token-table authentication, listing, lookup and revocation APIs are removed.
+Here runs use sealed admission and capability issuance.
+
 GitHub App connection pages verify their signed browser flow through the shared
 policy router. Connecting, listing administered installations, selecting and
 completing a connection require a live account session with `team.admin` in its

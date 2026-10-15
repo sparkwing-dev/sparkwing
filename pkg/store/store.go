@@ -28,6 +28,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
@@ -3631,7 +3632,7 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 	args := []any{
 		triggerStatusClaimed, now.UnixNano(), expires.UnixNano(),
 		claimant.Principal, claimant.TokenPrefix,
-		id, triggerStatusPending, claimant.TokenPrefix, now.Add(-HereRunnerClaimWindow).UnixNano(),
+		id, triggerStatusPending, claimant.TokenPrefix, now.Add(-limits.ClaimWindow).UnixNano(),
 	}
 	res, err := tx.ExecContext(ctx,
 		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?, claim_seq = claim_seq + 1,

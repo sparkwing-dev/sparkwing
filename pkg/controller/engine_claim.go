@@ -66,7 +66,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 		return controllerwire.ClaimResponse{}, err
 	}
 	if principal.Capability.Subject.Kind == capability.SubjectMachine && principal.Capability.Binding.Kind == capability.BindingNone {
-		if err := s.Store.RecordAgentLabels(ctx, principal.Capability.Prefix, body.Labels); err != nil {
+		if err := s.Store.RecordRunnerPoll(ctx, store.UnitDemand{CapabilityPrefix: principal.Capability.Prefix, Labels: body.Labels, OS: profile.OS, Arch: profile.Arch, Capacity: profile.Capacity, Available: match.Resources{Cores: body.AvailableCores, MemoryBytes: body.AvailableMemoryBytes}}); err != nil {
 			return controllerwire.ClaimResponse{}, err
 		}
 	}
