@@ -22,6 +22,32 @@ type cloudControlW8 struct {
 	remove bool
 }
 
+func TestLauncherRefusesAdmittedNodeChangeW8Components(t *testing.T) {
+	for _, kind := range []launcher.CloudUnitKind{launcher.CloudPlan, launcher.CloudEval, launcher.CloudWork} {
+		t.Run(string(kind), func(t *testing.T) {
+			_, cfg, award := cloudFixture(kind)
+			kube := fake.NewClientset()
+			kube.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+				action.(ktesting.CreateAction).GetObject().(*batchv1.Job).Spec.Template.Spec.NodeName = "unreserved"
+				return false, nil, nil
+			})
+			boundary := &cloudBoundaryFake{}
+			l := &launcher.Launcher{Kube: kube, Control: &cloudControlW8{award: &award}, Boundary: boundary, Holder: award.Binding.Holder, Config: cfg}
+			if claimed, err := l.LaunchOne(t.Context()); !claimed || err == nil {
+				t.Fatalf("changed node admitted: claimed=%t err=%v", claimed, err)
+			}
+			for _, action := range kube.Actions() {
+				if action.GetVerb() == "create" && action.GetResource().Resource == "secrets" {
+					t.Fatal("bootstrap published for an unreserved node")
+				}
+			}
+			if boundary.released != 1 {
+				t.Fatalf("reservation releases=%d, want one", boundary.released)
+			}
+		})
+	}
+}
+
 func (c *cloudControlW8) Claim(context.Context, string) (*launcher.CloudJobAward, error) {
 	return c.award, nil
 }

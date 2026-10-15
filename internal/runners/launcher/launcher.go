@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -110,8 +109,8 @@ func (l *Launcher) LaunchOne(ctx context.Context) (bool, error) {
 		}
 		return true, errors.Join(err, lookup)
 	}
-	if !equality.Semantic.DeepEqual(created.Spec.Template.Spec.Resources, r.Job.Spec.Template.Spec.Resources) {
-		return true, errors.Join(errors.New("Kubernetes did not retain the shared pod resource budget; enable PodLevelResources"), l.teardown(ctx, created, r.Reservation))
+	if err := validateAdmittedJob(r.Job, created); err != nil {
+		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
 	}
 	r.BootstrapSecret.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: created.Name, UID: created.UID, Controller: ptr(true), BlockOwnerDeletion: ptr(true)}}
 	if _, err = l.Kube.CoreV1().Secrets(l.Config.Namespace).Create(ctx, r.BootstrapSecret, metav1.CreateOptions{}); err != nil {

@@ -166,6 +166,81 @@ func TestLauncherCleansFailedCreation(t *testing.T) {
 	}
 }
 
+func TestLauncherDeletesBootstrapWhenJobDeletionFails(t *testing.T) {
+	l, kube, boundary, control := fixture()
+	if _, err := l.LaunchOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	failure := errors.New("Job deletion unavailable")
+	kube.PrependReactor("delete", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, failure
+	})
+	control.remove = true
+	if err := l.Sync(t.Context()); !errors.Is(err, failure) {
+		t.Fatalf("Job deletion failure lost: %v", err)
+	}
+	name := jobName(control.award.Binding)
+	if _, err := kube.CoreV1().Secrets("cloud").Get(t.Context(), name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("bootstrap survived failed Job deletion: %v", err)
+	}
+	if _, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), name, metav1.GetOptions{}); err != nil {
+		t.Fatalf("lost teardown ownership: %v", err)
+	}
+	if boundary.releases != 0 {
+		t.Fatal("node released before Job deletion")
+	}
+}
+
+func TestLauncherTeardownPreservesReplacementBootstrap(t *testing.T) {
+	for _, conflict := range []bool{false, true} {
+		l, kube, boundary, control := fixture()
+		kube.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+			action.(ktesting.CreateAction).GetObject().(*batchv1.Job).UID = "original"
+			return false, nil, nil
+		})
+		if _, err := l.LaunchOne(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		original, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(control.award.Binding), metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		replacement := original.DeepCopy()
+		replacement.UID = "replacement"
+		if err := kube.Tracker().Update(batchv1.SchemeGroupVersion.WithResource("jobs"), replacement, "cloud"); err != nil {
+			t.Fatal(err)
+		}
+		secret, err := kube.CoreV1().Secrets("cloud").Get(t.Context(), original.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		secret.OwnerReferences[0].UID = replacement.UID
+		if err := kube.Tracker().Update(corev1.SchemeGroupVersion.WithResource("secrets"), secret, "cloud"); err != nil {
+			t.Fatal(err)
+		}
+		failure := errors.New("Job delete failed")
+		if conflict {
+			failure = apierrors.NewConflict(schema.GroupResource{Resource: "jobs"}, original.Name, failure)
+		}
+		kube.PrependReactor("delete", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+			options := action.(ktesting.DeleteAction).GetDeleteOptions()
+			if options.Preconditions == nil || options.Preconditions.UID == nil || *options.Preconditions.UID != original.UID {
+				t.Fatal("missing Job UID fence")
+			}
+			return true, nil, failure
+		})
+		if err := l.teardown(t.Context(), original, CloudNodeReservation{}); !errors.Is(err, failure) {
+			t.Fatalf("deletion failure lost: %v", err)
+		}
+		if _, err := kube.CoreV1().Secrets("cloud").Get(t.Context(), original.Name, metav1.GetOptions{}); err != nil {
+			t.Fatalf("replacement bootstrap removed: %v", err)
+		}
+		if boundary.releases != 0 {
+			t.Fatal("stale reservation released")
+		}
+	}
+}
+
 func TestSyncAdoptsLiveJobWithoutCreatingAnother(t *testing.T) {
 	l, kube, boundary, control := fixture()
 	if _, err := l.LaunchOne(t.Context()); err != nil {

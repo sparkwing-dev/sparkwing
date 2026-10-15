@@ -453,3 +453,77 @@ supply those boundaries. No Sparkwing executable, pipeline or git-writing
 command ran. No local Git identity or worktree configuration override was
 introduced. Worker scratch was removed after all checks and review finished.
 Changes remain uncommitted for the lead.
+
+## Sixth session: pending claims and admitted Cloud Jobs
+
+The runner now observes host completion, idle exit, claim expiry and signed
+policy refresh while its controller request is pending. An interrupted request
+is cancelled and joined before another request or software replacement starts.
+An error-free committed award returned during that join remains owned by the
+runner and drains under the parent context. Held hosts keep their contexts and
+renewals when software policy stops new claims.
+
+The mechanism is one pending claim goroutine in the existing loop. A request
+deadline alone would not observe host completion or start the idle interval
+when the last host finishes. There is no new setting, timeout policy, transport
+interface or service. Removing `claimWhileHosting` restores the previous
+blocking call and loses these lifecycle guarantees.
+
+`Launcher.LaunchOne` now validates the admitted suspended Job before publishing
+its bootstrap. Placement, authored containers and arguments, environment,
+private volumes, shared resources, failure policy and teardown ownership must
+survive admission. Ordinary Kubernetes defaults remain accepted. An injected
+`PodFailurePolicy.Ignore` cannot turn an OOM failure into another pod execution.
+
+Teardown attempts bootstrap deletion even when Job deletion fails. It first
+confirms the original Job UID on that failure path. A replacement or unknown
+Job retains its bootstrap and reservation. Cleanup failures remain errors.
+
+### Sixth-session evidence
+
+- Whole-repository `go build -p 4 ./...` passed on the final implementation.
+- Vet passed for cluster, runners and launcher, engine and both acceptance
+  packages.
+- Full engine, runners, launcher and component acceptance tests passed.
+  Cluster tests passed with only the previously established socket-bound
+  `TestStartMetricsListener_ServesMetrics` excluded. `internal/acceptance`
+  compiles and has no runtime tests.
+- Full `go test -race -p 2 ./internal/runners/... -count=1 -timeout 120s`
+  passed for both runners and launcher.
+- New controlled-clock tests cover blocked claims at idle, claim-expiry and
+  policy boundaries, host completion during a blocked claim and held-host
+  draining after policy denial. The committed-award cancellation regression
+  verifies ownership through the public loop.
+- `TestLauncherRefusesAdmittedNodeChangeW8Components` passes for plan, eval and
+  work. The launcher suite also covers altered admission fields, accepted API
+  defaults, OOM policy injection, failed Job deletion and replacement ownership.
+- The initial admission and blocked-transport regressions ran red before their
+  fixes. Independent review reproduced the OOM rule, replacement-bootstrap and
+  committed-award races. Its final snapshot and overlay tests pass with no
+  remaining concrete finding.
+- Commentcheck, sleepcheck, the docs mirror drift check and `git diff --check`
+  passed.
+
+Go commands use `GOWORK=off`, `GOFLAGS=-buildvcs=false`, and private cache,
+temporary and test directories under `/tmp/sw-astra-W8/`. Test package
+parallelism is at most four. These remain component proofs. No native catalog
+cell was unskipped and no additional T1 inventory port is claimed.
+
+This session removes no obsolete files or legacy subsystems. It replaces ten
+production lines from the prior blocking call, budget-only admission check
+and cleanup error handling. No public API was removed, so no external callers
+needed migration. Shared edits are
+`tests/acceptance/launcher_boundary_w8_test.go` and this handoff. Product changes
+stay under `internal/runners`; source documentation is `launcher/CLOUD-JOBS.md`
+and the loop's API comments.
+
+There are no new cross-area contract requests or open product questions. The
+existing integration list still applies: authenticated runner/host and launcher
+transports, source/bootstrap handoff and CLI grammar, the elected shared local
+controller and managed-unit arguments, native Windows identity, and deployed
+Cloud probes and cleanup. API default fixtures do not prove actual cluster
+admission, network enforcement, DinD behavior or native process lifecycle.
+No Sparkwing executable, pipeline or git-writing command ran.
+No local Git identity or worktree configuration override was introduced.
+Worker scratch was deleted after checks and review finished. Changes remain
+uncommitted for the lead.

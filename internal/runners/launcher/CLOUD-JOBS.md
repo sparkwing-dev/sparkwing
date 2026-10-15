@@ -12,12 +12,20 @@ ceiling, the builder refuses it before reserving a node. Exact values such as
 2.007 cores stay exact through conversion. The pod shares its awarded CPU and
 memory across the host and Docker sidecar.
 
-`Launcher.LaunchOne` persists a suspended Job before creating the bootstrap
-Secret, then activates it. `Sync` reconstructs ownership from persisted Job and
+`Launcher.LaunchOne` persists a suspended Job and checks the admitted response
+before creating the bootstrap Secret. Kubernetes defaults may fill unset fields.
+Changes to the authored placement, containers, private volumes, resource budget,
+execution policy or teardown ownership refuse activation. An injected failure
+policy cannot turn an OOM failure into another pod execution.
+
+`Sync` reconstructs ownership from persisted Job and
 node metadata. It adopts live Jobs and retires cancelled, expired or terminal
 Jobs. Teardown deletes the bootstrap Secret and retains the node reservation
 while a Job container remains. `KubernetesBoundary.Release` also requires pod
 removal and reservation-scoped cleanup before another Job can reserve the node.
+If Job deletion fails, teardown still deletes its bootstrap after confirming
+that the persisted Job has the original UID. An unknown or replacement Job
+retains its bootstrap and reservation until ownership can be established.
 
 The builder uses a readiness-gated native DinD sidecar, fixed aggregate 20 GiB
 scratch, a separate customer service account and no API-token automount. Its

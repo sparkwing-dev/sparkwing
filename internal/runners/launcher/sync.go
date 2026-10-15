@@ -82,12 +82,22 @@ func jobOwnership(job batchv1.Job) (CloudJobBinding, CloudNodeReservation, error
 func (l *Launcher) teardown(ctx context.Context, job *batchv1.Job, reservation CloudNodeReservation) error {
 	namespace := l.Config.Namespace
 	foreground := metav1.DeletePropagationForeground
-	err := l.Kube.BatchV1().Jobs(namespace).Delete(ctx, job.Name, metav1.DeleteOptions{PropagationPolicy: &foreground, Preconditions: &metav1.Preconditions{UID: &job.UID}})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
+	jobErr := l.Kube.BatchV1().Jobs(namespace).Delete(ctx, job.Name, metav1.DeleteOptions{PropagationPolicy: &foreground, Preconditions: &metav1.Preconditions{UID: &job.UID}})
+	if apierrors.IsNotFound(jobErr) {
+		jobErr = nil
 	}
-	err = l.Kube.CoreV1().Secrets(namespace).Delete(ctx, job.Name, metav1.DeleteOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
+	if jobErr != nil {
+		// safety: failed UID fencing cannot authorize deletion of a replacement Job's bootstrap.
+		current, lookupErr := l.Kube.BatchV1().Jobs(namespace).Get(ctx, job.Name, metav1.GetOptions{})
+		if lookupErr != nil || current.UID != job.UID {
+			return errors.Join(jobErr, lookupErr)
+		}
+	}
+	secretErr := l.Kube.CoreV1().Secrets(namespace).Delete(ctx, job.Name, metav1.DeleteOptions{})
+	if apierrors.IsNotFound(secretErr) {
+		secretErr = nil
+	}
+	if err := errors.Join(jobErr, secretErr); err != nil {
 		return err
 	}
 	pods, err := l.Kube.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: JobLabel + "=" + job.Name})

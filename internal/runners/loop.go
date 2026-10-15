@@ -15,6 +15,7 @@ import (
 
 // ClaimController uses the same queue for every runner configuration. The server
 // derives identity, repository authorization and placement from its credential.
+// Claim must return on context cancellation; draining joins the pending request.
 type ClaimController interface {
 	Claim(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
 }
@@ -42,6 +43,8 @@ type LoopConfig struct {
 
 // Loop claims trigger and node units through one controller queue. Drain stops
 // new claims while hosts keep their leases; cancellation stops and joins hosts.
+// A pending claim cannot delay host completion, idle exit or policy refresh.
+// Interrupted requests join before another claim starts; a committed award still drains.
 // Each Loop runs once. A new configuration or replacement process uses a new Loop.
 type Loop struct {
 	Config          LoopConfig
@@ -226,7 +229,12 @@ func (l *Loop) Run(ctx context.Context) (runErr error) {
 			}
 			return fmt.Errorf("runner version policy: %w", err)
 		}
-		response, err := l.Controller.Claim(claims, l.request())
+		response, err, interrupted := l.claimWhileHosting(claims, policyRefresh.C, results, finish, func() time.Duration {
+			return l.lifecycleWait(limits.VersionIndexRefresh, idleSince, len(active) == 0)
+		})
+		if interrupted {
+			continue
+		}
 		if err != nil {
 			if claims.Err() != nil {
 				if ctx.Err() != nil {
@@ -284,7 +292,10 @@ func (l *Loop) Run(ctx context.Context) (runErr error) {
 }
 
 func (l *Loop) pollWait(idleSince time.Time, idle bool) time.Duration {
-	wait := l.Config.PollInterval
+	return l.lifecycleWait(l.Config.PollInterval, idleSince, idle)
+}
+
+func (l *Loop) lifecycleWait(wait time.Duration, idleSince time.Time, idle bool) time.Duration {
 	if idle && l.Config.IdleExit > 0 {
 		wait = min(wait, time.Until(idleSince.Add(l.Config.IdleExit)))
 	}
@@ -294,10 +305,50 @@ func (l *Loop) pollWait(idleSince time.Time, idle bool) time.Duration {
 	return max(wait, 0)
 }
 
+func (l *Loop) claimWhileHosting(ctx context.Context, refresh <-chan time.Time, results <-chan unitResult, finish func(unitResult), wait func() time.Duration) (award controllerwire.ClaimResponse, claimErr error, interrupted bool) {
+	claimCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	request := l.request()
+	var response controllerwire.ClaimResponse
+	var err error
+	go func() {
+		defer close(done)
+		response, err = l.Controller.Claim(claimCtx, request)
+	}()
+	// safety: an interrupted request must join before another claim or a software replacement starts.
+	defer func() {
+		cancel()
+		<-done
+		// safety: a committed award still belongs to this runner when it races request cancellation.
+		if response.Claim != nil && err == nil {
+			award, claimErr, interrupted = response, nil, false
+		}
+	}()
+	timer := time.NewTimer(wait())
+	defer timer.Stop()
+	for {
+		select {
+		case <-done:
+			return response, err, false
+		case result := <-results:
+			finish(result)
+			timer.Reset(wait())
+		case <-refresh:
+			return controllerwire.ClaimResponse{}, nil, true
+		case <-timer.C:
+			return controllerwire.ClaimResponse{}, nil, true
+		case <-ctx.Done():
+			return controllerwire.ClaimResponse{}, context.Cause(ctx), false
+		}
+	}
+}
+
 func (l *Loop) request() controllerwire.ClaimRequest {
-	req := controllerwire.ClaimRequest{RunnerVersion: l.Config.Version,
-		Kinds:  slices.Clone(l.Config.Kinds),
-		Labels: slices.Clone(l.Config.Labels), RunID: l.Config.RunID}
+	req := controllerwire.ClaimRequest{
+		RunnerVersion: l.Config.Version,
+		Kinds:         slices.Clone(l.Config.Kinds),
+		Labels:        slices.Clone(l.Config.Labels), RunID: l.Config.RunID,
+	}
 	if l.RequestCapacity != nil {
 		req.AvailableCores, req.AvailableMemoryBytes = l.RequestCapacity()
 	}
