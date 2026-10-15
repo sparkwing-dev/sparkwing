@@ -122,7 +122,7 @@ lease. It expires objects by their stored class, including retired classes.
 An identical upload retry preserves the original age. The pass leaves CAS data
 to its separate reachability rules. The controller runs this pass after renewing
 its maintenance lease when its physical backend is configured. Standalone
-filesystem construction remains a host integration point.
+controllers construct this backend at startup. Host log bindings remain pending.
 
 The reader uses authorized segment records, verifies each segment before sending
 its bytes and resumes at an uncompressed byte offset. It reports how many bytes

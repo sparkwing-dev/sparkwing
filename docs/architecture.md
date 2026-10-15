@@ -18,10 +18,10 @@ team, not once per developer.
 ---
 
 Sparkwing (prod deployment) is a self-hosted CI/CD platform that runs on
-Kubernetes. The stack is three pods: a controller, which also serves the
-dashboard and node logs, a cache, and a runner. Building container images (Docker-in-Docker) and hosting an
-image registry, when a pipeline needs them, are external infrastructure
-the chart does not deploy.
+Kubernetes. The stack has a controller, which also serves the dashboard and
+node logs, and runners. Building container images (Docker-in-Docker) and
+hosting an image registry, when a pipeline needs them, are external
+infrastructure the chart does not deploy.
 
 ## Components
 
@@ -29,12 +29,12 @@ the chart does not deploy.
 ┌──────────────────────────────────────────────────────────────────┐
 │                      Kubernetes Cluster                            │
 │                                                                    │
-│  ┌──────────────┐  ┌──────────────┐                               │
-│  │  Controller  │  │   Cache      │                               │
-│  │ (API + queue │  │  (git HTTP + │                               │
-│  │  + webhooks  │  │   blob store │                               │
-│  │  + dashboard)│  │   + pkg proxy│                               │
-│  └──────┬───────┘  └──────────────┘                               │
+│  ┌──────────────┐                                                 │
+│  │  Controller  │                                                 │
+│  │ (API + queue │                                                 │
+│  │  + webhooks  │                                                 │
+│  │  + dashboard)│                                                 │
+│  └──────┬───────┘                                                 │
 │         │                                                          │
 │  ┌──────┴───────┐                                                 │
 │  │  Runner      │                                                 │
@@ -51,7 +51,7 @@ the chart does not deploy.
     └─────────┘          └─────────┘
 ```
 
-Three pods: sparkwing-controller, sparkwing-cache and sparkwing-runner.
+The chart deploys sparkwing-controller and sparkwing-runner.
 
 ### Controller
 
@@ -83,8 +83,9 @@ serves it to runners that poll and claim.
 Executes pipeline binaries. A standing warm-pool Deployment runs the
 unified `sparkwing-runner` binary, which polls the controller and claims
 pending nodes. For per-node isolation it launches a Kubernetes Job that
-runs `sparkwing-runner run-node`. The runner downloads code from the cache,
-compiles the pipeline and hosts the node: the pipeline runs in its own
+runs `sparkwing-runner run-node`. The runner fetches source directly from Git
+or an authorized source bundle, compiles the pipeline and hosts the node:
+the pipeline runs in its own
 processes over the node protocol, and the runner records the result.
 
 The trigger runner fetches and compiles with its shared source and build caches,
@@ -121,7 +122,7 @@ through the controller, which serves a node from the log segments its
 runner uploaded.
 
 The Fleet page shows the team's runners and queue activity. Operators can
-check controller and cache health through their own service endpoints.
+check controller health through its service endpoint.
 
 ### DinD (Docker-in-Docker)
 
@@ -158,14 +159,13 @@ sparkwing CLI ──────► Controller   trigger a run; poll until termi
 GitHub ────────► Controller        push webhook (HMAC verified)
 Runner ────────► k8s API           create / watch per-node Jobs
 Runner ────────► Controller        claim node; heartbeat; report finish; fetch details
-Runner ────────► Cache             clone repo, download code + packages
+Runner ────────► Git host          clone repository at its sealed SHA
+Runner ────────► Package registry  download packages
 Runner ────────► Controller        node log segment URLs; live lines while watched
 Runner ────────► Object store      node log segments (presigned PUT)
 Runner ────────► DinD              Docker builds (tcp://localhost:2375)
 Runner ────────► Registry          docker push (localhost:30500)
 Dashboard ─────► Controller        pages, runs / agents / pipelines, log reads (SSE)
-
-Cache ─────────► GitHub            git fetch (background, every 30s)
 
 sparkwing CLI ──────► Controller        create triggers; upload working-tree sources
 ```
@@ -178,7 +178,6 @@ ingress, each component needs these allow rules:
 | Component | Accepts traffic from |
 |-----------|---------------------|
 | Controller | External (webhooks, dashboard, API), Runners |
-| Cache | Controller, Runners |
 | DinD | Runners |
 | Registry | Runners, Nodes (image pulls) |
 
@@ -189,7 +188,6 @@ All components discover each other via k8s DNS. No hardcoded IPs.
 | Service | Internal address | Port |
 |---------|-----------------|------|
 | Controller | `sparkwing-controller.sparkwing.svc.cluster.local` | 80 -> 4344 |
-| Cache | `sparkwing-cache.sparkwing.svc.cluster.local` | 80 -> 8090 |
 | DinD | `dind.sparkwing.svc.cluster.local` | 2375 |
 | Registry | `registry.registry.svc.cluster.local` | 5000 (NodePort 30500) |
 
@@ -230,16 +228,15 @@ the daemon's socket or the runs store.
 
 ### Service URLs and dev.env
 
-`sparkwing-runner run-node` reads `SPARKWING_CONTROLLER_URL` and
-`SPARKWING_CACHE_URL` from its own environment and nowhere else; the
-runner that starts it sets those names. The local
+`sparkwing-runner run-node` reads `SPARKWING_CONTROLLER_URL` from its own
+environment; the runner that starts it sets that name. The local
 dashboard writes its address to `$SPARKWING_HOME/dev.env`, and only a CLI
 verb looking for that dashboard reads it.
 
 A suite running inside a node inherits the operator's home, so before
 every step that starts a product suite the repository gate pins
 `SPARKWING_HOME` to a directory of its own, which holds no `dev.env`, and
-clears the bindings the node injects: the controller and cache URLs, the
+clears the bindings the node injects: the controller URL, the
 agent token, the node route and its token, and the run and node ids.
 
 ### Controller API endpoints
@@ -299,7 +296,6 @@ git push origin main
 |-----------|---------|----------|
 | Controller | SQLite at `/data/state.db` | Run state, metadata, secrets, tokens, audit log |
 | Controller | `--cache-blob-store` bucket, or its output directory | Node log segments and manifests |
-| Cache | PVC at `/data/` | Bare repos, uploads, artifacts, binary cache, dependency cache, package proxy |
 | DinD | PVC | Docker layers and build cache |
 | Registry | PVC | Container images |
 

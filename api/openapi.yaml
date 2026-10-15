@@ -6446,15 +6446,6 @@ components:
       required: true
       schema: {type: string}
       description: Concurrency group key, global across the deployment.
-    GitcacheRepo:
-      in: query
-      name: repo
-      required: true
-      schema: {type: string}
-      description: |
-        Clone URL. Validated before proxying: a local path, a loopback or
-        private address, and a URL carrying embedded credentials are all
-        refused.
   responses:
     BadRequest:
       description: Invalid request (missing field, malformed JSON).
