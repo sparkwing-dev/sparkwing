@@ -103,40 +103,6 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
 }
 
-type secretValueGate func(*http.Request) bool
-
-func (s *Server) secretValuesAllowed(r *http.Request) bool {
-	p, ok := PrincipalFromContext(r.Context())
-	if !ok {
-		// safety: with auth off the whole API is open, and redacting here would
-		// feed runners "***" as a real argument value instead of failing.
-		return s.authMiddleware().AuthDisabled()
-	}
-	// safety: only a claim route bound to the claim's own run and live claim
-	// serves a claim principal, and a planning claim plans without secrets.
-	if p.Kind == principalKindClaim {
-		tok, _ := claimTokenFromContext(r.Context())
-		return tok.Kind == store.ClaimTokenWork
-	}
-	if p.HasScope(ScopeAdmin) {
-		return true
-	}
-	if !p.HasScope(ScopeNodesClaim) {
-		return false
-	}
-	// safety: a runner reads a run's credentials only while it holds a claim on one of its nodes.
-	held, err := s.store.PrincipalHoldsRunClaim(r.Context(), r.PathValue("id"), claimIdentity(r), time.Now())
-	return err == nil && held
-}
-
-func loopbackSecretValuesAllowed(r *http.Request) bool {
-	p, ok := PrincipalFromContext(r.Context())
-	if !ok {
-		return false
-	}
-	return p.HasScope(ScopeAdmin) || p.HasScope(ScopeNodesClaim)
-}
-
 func dispatchEnvAllowed(r *http.Request) bool {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok {
@@ -166,14 +132,6 @@ func dispatchesForResponse(r *http.Request, in []*store.NodeDispatch) []*store.N
 	return out
 }
 
-func runForResponse(r *http.Request, run *store.Run, allowed secretValueGate) *store.Run {
-	if includeHas(r.URL.Query().Get("include"), store.IncludeSecretValues) &&
-		allowed(r) {
-		return run
-	}
-	return store.RedactedRun(run)
-}
-
 func nodeForResponse(node *store.Node) *store.Node {
 	return api.PublicNode(node)
 }
@@ -188,86 +146,6 @@ func nodeForClaimResponse(node *store.Node) *store.Node {
 	out.ClaimMembershipID = node.ClaimMembershipID
 	out.ReservationID = node.ReservationID
 	return out
-}
-
-func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	run, err := tenant.GetRun(r.Context(), runID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if err := fillRunTrigger(r.Context(), tenant, run); err != nil {
-		s.writeInternalError(w, r, "run trigger", err)
-		return
-	}
-	if includeHas(r.URL.Query().Get("include"), "nodes") {
-		nodes, err := tenant.ListNodes(r.Context(), runID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		if nodes == nil {
-			nodes = []*store.Node{}
-		}
-		nodes, err = s.publicNodesWithExecutionLocation(r.Context(), nodes)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		for _, n := range nodes {
-			if n.Deps == nil {
-				n.Deps = []string{}
-			}
-		}
-		steps, err := tenant.ListNodeSteps(r.Context(), runID)
-		if err != nil {
-			s.writeInternalError(w, r, "run steps", err)
-			return
-		}
-		approvals, err := tenant.ListApprovalsForRun(r.Context(), runID)
-		if err != nil {
-			s.writeInternalError(w, r, "run approvals", err)
-			return
-		}
-		spawned, err := tenant.ListSpawnedChildrenByRun(r.Context(), runID)
-		if err != nil {
-			s.writeInternalError(w, r, "run children", err)
-			return
-		}
-		decorated := api.DecorateNodes(nodes, run.PlanSnapshot, steps, approvals, spawned)
-		writeJSON(w, http.StatusOK, map[string]any{"run": runForResponse(r, run, s.secretValuesAllowed), "nodes": decorated})
-		return
-	}
-	writeJSON(w, http.StatusOK, runForResponse(r, run, s.secretValuesAllowed))
-}
-
-// safety: a launcher's claims cannot read the trigger, so the run read carries
-// the trigger's actor and pull request that planning and every node's plan
-// need; a run with no trigger has neither.
-func fillRunTrigger(ctx context.Context, tenant *store.Tenant, run *store.Run) error {
-	trig, err := tenant.GetTrigger(ctx, run.ID)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	run.TriggerUser = trig.TriggerUser
-	if pr := sparkwing.PullRequestFromEnv(trig.TriggerEnv); pr != nil {
-		run.PullRequest = &store.RunPullRequest{
-			Number: pr.Number, Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA,
-		}
-	}
-	return nil
 }
 
 func includeHas(csv, target string) bool {

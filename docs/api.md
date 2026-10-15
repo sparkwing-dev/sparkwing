@@ -11,10 +11,29 @@ behavior that table doesn't.
 
 ## Authentication
 
-Requests carry a bearer token, and each route declares the scope it
-needs; `admin` satisfies any check. Token kinds, the scope set, the
-unauthenticated endpoints, and first-visit admin bootstrap are in
-[auth.md](auth.md).
+Requests carry a bearer token, browser session or verified local identity.
+The route reference lists accepted authority. Capability routes require
+their declared grants, bindings and liveness; `admin` cannot bypass that
+policy. Token kinds, the scope set, unauthenticated endpoints and bootstrap
+are described in [auth.md](auth.md).
+
+## Run detail
+
+`GET /api/v1/runs/{run}` returns the shared run status object with `inputs`,
+`jobs`, `attempts`, `logs` and `notices`. Job and attempt status excludes raw
+declarations, holder identities and capability prefixes. Log subjects preserve
+the distinction between job attempts and trigger, plan or eval work.
+
+Inputs always use the display projection. Secret argument values are redacted.
+Missing or invalid classification redacts every value, including on finished
+runs. The `include` query cannot reveal secrets or select an execution view.
+Members need `runs.read`. Bound claims need `source.read` or `trigger.host`
+for that run. Missing or dead credentials receive `401`; live credentials
+without the required authority receive `403`.
+
+The controller requires its shared verifier and a complete status-read adapter.
+An absent adapter returns `policy_missing`. It never fills missing history with
+invented attempts or returns a partial status response after a read error.
 
 ## Run completion
 

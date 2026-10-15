@@ -25,6 +25,9 @@ type EngineController struct {
 	// ProjectScheduling supplies the shared graph projection to embedded controllers
 	// and tests. A nil projector uses store.RunSnapshot.Scheduling.
 	ProjectScheduling func(store.RunSnapshot) (store.ScheduleSnapshot, error)
+	// ReadRunStatus returns one committed status read, including complete attempt
+	// history and validated log subjects. Missing wiring refuses the read.
+	ReadRunStatus func(context.Context, store.Team, string) (RunStatusFacts, error)
 }
 
 // ReconcileJob uses C1 ReconcileRequest and returns its persisted node and claim.
@@ -46,12 +49,6 @@ func (s *EngineController) SyncLauncher(ctx context.Context, authorized capabili
 
 // Exchange consumes the authenticated bootstrap once and returns its original unit policy.
 func (s *EngineController) Exchange(ctx context.Context, authorized capability.Authorized) (controllerwire.ExchangeResponse, error) {
-	panic("unimplemented: controller-wire")
-}
-
-// RunDetail uses runspec.DisplayRequest/DisplaySpec and the same safe projection
-// for local and remote reads. Claim execution inputs are on their private wire.
-func (s *EngineController) RunDetail(ctx context.Context, authorized capability.Authorized) (controllerwire.RunDetail, error) {
 	panic("unimplemented: controller-wire")
 }
 

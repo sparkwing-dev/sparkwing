@@ -60,10 +60,18 @@ func rewrite(spec string, routes []apiroutes.Route, scopes []string) (string, er
 	if paths == nil || paths.Kind != yaml.MappingNode {
 		return "", fmt.Errorf("no paths mapping")
 	}
+	seenPaths := map[string]bool{}
+	for i := 0; i+1 < len(paths.Content); i += 2 {
+		key := operationKey("", paths.Content[i].Value)
+		if seenPaths[key] {
+			return "", fmt.Errorf("duplicate templated path: %s", paths.Content[i].Value)
+		}
+		seenPaths[key] = true
+	}
 
 	registered := map[string]apiroutes.Route{}
 	for _, r := range routes {
-		registered[r.Method+" "+specPath(r.Path)] = r
+		registered[operationKey(r.Method, r.Path)] = r
 	}
 
 	documented, err := stampDocumented(paths, registered, scopes)
@@ -128,12 +136,12 @@ func stampDocumented(paths *yaml.Node, registered map[string]apiroutes.Route, sc
 				continue
 			}
 			opKey := strings.ToUpper(method) + " " + path
-			route, ok := registered[opKey]
+			route, ok := registered[operationKey(strings.ToUpper(method), path)]
 			if !ok {
 				phantom = append(phantom, opKey)
 				continue
 			}
-			documented[opKey] = true
+			documented[route.Method+" "+specPath(route.Path)] = true
 			op := item.Content[j+1]
 			setScalar(op, scopeKey, strings.ReplaceAll(route.Scope, "`", ""), true)
 			if claim := scopeProse(op, scopes); claim != "" {
@@ -198,7 +206,7 @@ func seedMissing(paths *yaml.Node, routes []apiroutes.Route, documented map[stri
 		if documented[r.Method+" "+path] {
 			continue
 		}
-		item := mapValue(paths, path)
+		item := equivalentPathItem(paths, path)
 		if item == nil {
 			item = &yaml.Node{Kind: yaml.MappingNode}
 			if params := pathParameters(path); params != nil {
@@ -207,7 +215,18 @@ func seedMissing(paths *yaml.Node, routes []apiroutes.Route, documented map[stri
 			appendPair(paths, path, item)
 		}
 		appendPair(item, strings.ToLower(r.Method), stub(r.Scope))
+		documented[r.Method+" "+path] = true
 	}
+}
+
+func equivalentPathItem(paths *yaml.Node, path string) *yaml.Node {
+	key := operationKey("", path)
+	for i := 0; i+1 < len(paths.Content); i += 2 {
+		if operationKey("", paths.Content[i].Value) == key {
+			return paths.Content[i+1]
+		}
+	}
+	return nil
 }
 
 func stub(scope string) *yaml.Node {
@@ -312,6 +331,11 @@ func scopeTokenRE(spelling string) *regexp.Regexp {
 
 func specPath(routePath string) string {
 	return wildcardRE.ReplaceAllString(routePath, "{$1}")
+}
+
+// safety: OpenAPI shares one templated path across methods, even when routers name its parameters differently.
+func operationKey(method, path string) string {
+	return method + " " + pathParamRE.ReplaceAllString(specPath(path), "{}")
 }
 
 func isMethod(s string) bool {

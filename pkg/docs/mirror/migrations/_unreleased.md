@@ -1,5 +1,23 @@
 # Migrating to the next release
 
+## Run detail
+
+`GET /api/v1/runs/{run}` returns `RunDetail` with display-safe `inputs`,
+`jobs`, `attempts`, `logs`, `engine` and `notices`. Replace readers of raw
+run fields and the former `{run, nodes}` wrapper with this shared shape.
+Fetch approval, step and child details through their own resources.
+
+`include=secret_values` is removed. Secret argument values stay redacted for
+members, claims and local peers. Missing or invalid classification hides every
+value, including on finished runs. Execution inputs travel in the private
+claim wire. Members require `runs.read`; bound claims require `source.read`
+or `trigger.host` for their run. Bare machine roots cannot use this read.
+
+Embedded controllers must configure the shared authorization adapters and
+`EngineController.ReadRunStatus`. The reader supplies one committed snapshot,
+complete attempt history and validated log subjects for the selected team and
+run. Missing wiring refuses the request with `policy_missing`.
+
 ## Queue reads
 
 Read `/api/v1/queue` instead of `/api/v1/queue/state`. The CLI's remote queue

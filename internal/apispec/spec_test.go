@@ -74,7 +74,7 @@ func TestEveryRegisteredRouteIsDocumented(t *testing.T) {
 	spec, routes, _ := realSpec(t)
 	documented := documentedOperations(t, spec)
 	for _, r := range routes {
-		key := r.Method + " " + specPath(r.Path)
+		key := operationKey(r.Method, r.Path)
 		if !documented[key] {
 			t.Errorf("route %s is registered but absent from api/openapi.yaml; regenerate with `%s`", key, regenerateSpec)
 		}
@@ -97,7 +97,7 @@ func documentedOperations(t *testing.T, spec string) map[string]bool {
 		for j := 0; j+1 < len(item.Content); j += 2 {
 			method := strings.ToLower(item.Content[j].Value)
 			if isMethod(method) {
-				out[strings.ToUpper(method)+" "+path] = true
+				out[operationKey(strings.ToUpper(method), path)] = true
 			}
 		}
 	}

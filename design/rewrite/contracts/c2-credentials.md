@@ -216,6 +216,7 @@ All capability names below are in `internal/capability`.
 | `controller.AuthorityRevoker`, `EngineController.ResolveOperator` | Reuse C1's existing RevokeAuthority transaction through the tenant or deployment scope. The optional resolver supports embedded controllers and fakes without another issuer or persistence owner. |
 | `controller.RunTransactions`, `EngineController.ResolveTenant`, `EngineController.ResolveRunTeam`, `Server.WithEngineController` | Supply final intake/sealing transactions and resource ownership. Production uses the existing store methods. Embedded controllers and tests may supply the same contracts without SQL or alternate authorization. |
 | `controller.SizingReader`, `controller.SizingStore`, `Server.WithSizingStore` | Supply tenant sizing reads and authority-bearing measurement transactions. Default reads use `Tenant.GetPipelineProfile`. Writes require the explicit adapter and fail closed when it is absent. |
+| `controller.RunStatusFacts`, `EngineController.ReadRunStatus` | Supply one committed snapshot, complete attempt history and validated log subjects for the authorized team/run. Verified engine policy supplies notices. An absent adapter refuses status reads. No C1 signature changes. |
 
 The exported data tables are `Grants`, `AwardPolicies`, `LivenessPolicies`,
 `Routes`, `BootstrapGrants`, `BootstrapUnits`, `UnitBillingMappings`,
@@ -1312,6 +1313,40 @@ The W2-owned `QueueReader` is a subset of the existing tenant API.
 tests. Its default uses `Store.ForTeam`. No C1 contract or persistence method
 changes. Fake-backed HTTP tests cover the policy and projection. Real store
 authentication, native transport and the complete T1 matrix remain open.
+
+### Run detail cutover
+
+`GET /api/v1/runs/{run}` uses `PolicyRouter` and returns the shared
+`controllerwire.RunDetail`. Members require `runs.read`. Live bound claims
+require `source.read` or `trigger.host` for that run. Decoder lookup errors
+follow authentication. Missing or dead authority cannot probe run existence.
+
+`DisplayRequest` and `DisplaySpec` are the sole input projections. The response
+includes safe job status, complete attempt history, tagged log subjects, the
+accepted portable engine identity and verified policy notices. Raw declarations,
+private hashes, ancestry, holders and capability prefixes are omitted. Query
+selectors cannot reveal secret arguments. Missing or invalid classification
+redacts all argument values, including on terminal runs.
+
+`EngineController.ReadRunStatus` supplies `RunStatusFacts` for embedded
+controllers and tests. The adapter must read the snapshot, complete attempt
+history and validated log subjects from one committed persistence read.
+`RunSnapshot` alone lacks history and subjects, so the controller refuses the
+read until this adapter is installed. No C1/C3 signature changed. W1 must supply
+the consistent read, including valid `LogSubject` values. W8 supplies notices
+from verified engine policy. W9 must migrate status consumers to `RunDetail`
+and execution consumers to the private award wire.
+
+Returned facts must match the selected run/team, both seals, the job set and
+attempt fences. Scope or read failures produce one canonical error before any
+status is written. The old handler, plaintext `include` escape, embedded
+decoration wrapper and contradictory legacy display tests are removed.
+
+Fake-backed HTTP tests cover member/claim/session/peer authority, dead claims,
+tenant/run binding, complete history, empty collections, missing dependencies,
+read failures and method refusal. Fuzz tests generate private seal fields and
+foreign nested status facts. These component proofs do not satisfy native
+transport, SQL consistency or the full T1 display-classification scenario.
 
 ## Contract interpretations
 

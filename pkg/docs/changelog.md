@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **controller (Breaking):** Run detail returns the shared display-safe status object with job status, attempt history and tagged log subjects. Secret values, raw declarations and claim identities stay private. The `include=secret_values` view is removed. See [migration guide](docs/migrations/_unreleased.md#run-detail).
 - **controller (Breaking):** Queue reads move from `/api/v1/queue/state` to `/api/v1/queue` under the shared capability policy. Members and verified local peers need `runs.read`. Groups and runner headroom stay inside the authorized team. See [migration guide](docs/migrations/_unreleased.md#queue-reads).
 - **controller (Breaking):** Credit balance and history reads require live member or verified local authority through the shared capability policy. Machine roots and claims cannot read the team ledger. Errors use the common envelope, including when billing is unavailable. See [migration guide](docs/migrations/_unreleased.md#credit-ledger-reads).
 - **controller (Breaking):** Job status reads move from `/nodes` to `/jobs` under the shared capability policy. The collection returns a safe status array. Job claims can read only their own detail. Raw declarations and claim identities are omitted. See [migration guide](docs/migrations/_unreleased.md#job-status).

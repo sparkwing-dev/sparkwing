@@ -109,11 +109,9 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/pipelines":               resNone,
 	"GET /api/v1/pipelines/{name}/latest": resPipeline,
 
-
 	"GET /api/v1/runs":                                               resNone,
 	"GET /api/v1/runs/grep":                                          resNone,
 	"DELETE /api/v1/runs/{id}":                                       resRun,
-	"GET /api/v1/runs/{id}":                                          resRun,
 	"GET /api/v1/runs/{id}/approvals":                                resRun,
 	"GET /api/v1/runs/{id}/approvals/{nodeID}":                       resRun,
 	"POST /api/v1/runs/{id}/approvals/{nodeID}":                      resRun,

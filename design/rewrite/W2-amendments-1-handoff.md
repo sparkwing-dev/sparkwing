@@ -440,4 +440,114 @@ discovery ran once during bootstrap before the brief's binary prohibition was
 read. All subsequent verification uses Go tools. No candidate installation or
 Git write ran. Scratch is deleted after verification. W2 remains incomplete.
 
+## Run detail continuation
+
+The worktree was clean on entry. No merge remains unresolved. The earlier
+queue cutover and prior W2 work are committed. This continuation makes no Git
+writes and runs no Sparkwing binary.
+
+`GET /api/v1/runs/{run}` now uses PolicyRouter and returns
+controllerwire.RunDetail. DisplayRequest/DisplaySpec own argument redaction.
+Members, live bound claims, sessions and verified local peers share that
+projection. The include query cannot reveal private execution values. The
+response preserves safe job status, complete attempt history, tagged log
+subjects, the accepted portable engine and verified policy notices.
+
+The invariant is that an authorized status read contains only display-safe
+inputs and status facts from its resolved run. It contains no execution seal,
+private hash, holder, capability prefix or secret argument value. Missing or
+invalid classification hides every argument value, including on terminal runs.
+The second invariant confines nested jobs, attempts and log subjects to the
+resolved team/run and recorded attempt identities. Both have generative fuzz
+tests through the actual registered HTTP route.
+
+Deleted 377 lines of legacy detail helpers and tests: 122 in handlers.go,
+85 in run_detail_decorations_test.go and 170 in secret_args_display_test.go.
+The old registration, tenant classification and panic stub are also removed.
+The retired helpers include the unused plaintext/admin/loopback gate.
+
+Six new test functions cover 45 HTTP subtests plus missing-reader and empty
+status cases. Two fuzz targets cover private projection and nested scope.
+They replace the old detail-redaction assertion, reverse the unclassified
+plaintext assertion, drop grandfathering, and remove the execution-view and
+auth-disabled plaintext expectations. The old embedded decoration-wrapper
+test is removed. Approval/step/child resources remain separate reads. These
+are component ports, not completion of the native display or route-matrix
+scenarios. No native T1 scenario is newly unskipped.
+
+### Contract additions and remaining integration
+
+W2 adds RunStatusFacts and EngineController.ReadRunStatus using existing
+store, blob and engine types. Missing wiring returns policy_missing.
+RunSnapshot alone has neither complete attempt history nor log subjects, and
+separate reads would lose consistency. The chosen seam avoids inventing an
+attempt from each current job or silently returning empty history. Replace the
+callback with the complete C1 read when that contract exists.
+
+No C1 or C3 declaration changed. C1 still needs a consistent status-read
+contract returning the snapshot, complete NodeAttempt rows and validated
+LogSubject rows. Its adapter must apply LogSubject.Validate and return only
+the tenant's persisted facts. W8 must supply notices from verified engine
+policy. W9 must migrate the old Client.GetRun consumers and the dashboard's
+former raw/wrapped response to RunDetail. GetRunForExecution remains in the
+legacy client and is no longer an execution-input path. Its consumers in
+internal/orchestrator/run_node.go, run_for_execution.go and
+secret_args_execution_test.go must move to the private award wire. W2 does
+not return redacted status arguments as execution inputs or add a forwarding
+compatibility endpoint.
+
+The inherited claim-delivery/reconciliation, launcher sync/exchange,
+plan/eval renewal, source/secret/log/data cutovers and upload-idempotency gaps
+remain. The complete controller/node-host registration matrix, production
+authentication/binding adapters and native transport/SQL/backend cells remain
+open. No other area's contract was changed.
+
+### Shared files and verification
+
+Shared implementation edits are internal/orchestrator/wingd_api.go (the final
+read-route pattern), internal/apispec/rewrite.go, spec_test.go and
+path_parameters_test.go. The API generator now recognizes equivalent path
+parameter names across methods, seeds missing methods on the existing path
+and refuses duplicate equivalent paths. This keeps the new GET and legacy
+DELETE on one valid OpenAPI resource without changing runtime routing.
+No other package's Go caller changed because no consumed Go signature was
+removed. The outstanding wire-consumer migrations are listed above.
+
+The remaining shared edits are api/openapi.yaml, docs/api-reference.md,
+docs/api.md, docs/auth.md, docs/migrations/_unreleased.md, CHANGELOG.md,
+perf/budgets.json, .apidiff/pkg_controller.txt and generated docs mirrors.
+Other API snapshots are unchanged. Authorized latency, cold start and response
+bytes remain unmeasured because the committed status corpus and adapter are
+absent from the dashboard performance fixture.
+
+The initial regression failed at the RunDetail panic. Whole-repository build,
+scoped vet, full executable acceptance/capability/API-error suites, API generator
+and schema suites, focused controller policy/signer/tenant checks, daemon route
+inventories, docs symbols/mirrors and changed-line comment policy pass. Both
+fuzz targets pass generated-input runs with two workers. Native SQL/transport,
+the legacy controller suite, independent review and Sparkwing pipelines remain
+with the lead. The scratch directory is removed after verification.
+
+Use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4,
+GOCACHE=/tmp/sw-astra-W2/cache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W2/tmp:
+
+```sh
+go build -p 4 ./...
+go vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./tests/acceptance ./internal/apispec ./internal/apiroutes
+go test -p 4 ./tests/acceptance ./internal/capability ./internal/apierr ./internal/apispec ./internal/apiroutes ./internal/apiref
+go test -p 4 ./tests/acceptance -run '^TestEngineRunDetail|^FuzzEngineRunDetail' -count=1
+go test -p 4 ./tests/acceptance -run '^$' -fuzz '^FuzzEngineRunDetailPrivateProjection$' -fuzztime=5s -parallel=2
+go test -p 4 ./tests/acceptance -run '^$' -fuzz '^FuzzEngineRunDetailScope$' -fuzztime=5s -parallel=2
+go test -p 4 ./pkg/controller -run '^TestPolicyRouter|^TestAuthorizedHandlersDoNotAuthorize$|^TestTenantRoutes|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$|^TestEveryFrontendAPICallIsAControllerRoute$'
+go test -p 4 ./internal/orchestrator -run '^TestEveryControllerRouteIsClassified$|^TestReadRouteListCarriesNoDuplicates$'
+go test -p 4 ./pkg/docs -run '^TestDocsNameOnlySymbolsThatExist$|^TestPkgDocsContentMatchesDocsRoot$|^TestEmbeddedChangelogMatchesRoot$'
+go run ./internal/commentcheck -base HEAD /home/bombuntu/.xwing/envs/1080/sparkwing
+```
+
+Friction was the absent consistent status-read contract, legacy clients that
+still expect execution values from the display endpoint, and the API generator's
+assumption that equivalent path parameters have identical names. No new issuer,
+service, configuration setting, environment variable or credential cache was
+added. W2 remains incomplete.
+
 <!-- design:end -->

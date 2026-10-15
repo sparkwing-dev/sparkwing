@@ -956,15 +956,12 @@ paused, the old write cannot land. An append already accepted by the log
 service remains confined to the old attempt substream rather than entering the
 replacement's log.
 
-The execution view (`GET /api/v1/runs/{id}?include=secret_values`) follows the
-same rule: it returns plaintext argument values to an `admin` principal, or to
-a `nodes.claim` principal holding an unexpired claim on one of the run's nodes.
-A trigger claimant may read the run record but receives redacted secret values
-until it holds a node claim.
-A controller serving unauthenticated returns **plaintext**, because the whole
-API is open in that mode and handing a runner `***` as a real argument value
-would corrupt the run rather than protect it. Once authentication is on, a
-request that carries no principal is refused.
+`GET /api/v1/runs/{run}` always returns display-safe inputs, even when a live
+claim reads it. `include=secret_values` cannot reveal plaintext arguments.
+Missing or invalid classification redacts every value. Execution uses the
+private awarded wire. Status reads require member `runs.read`, or a live
+claim with `source.read` or `trigger.host` bound to the run. Verified local
+authority follows the same policy. Missing or dead credentials receive `401`.
 
 ## Secret ownership
 

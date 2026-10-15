@@ -107,7 +107,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs` | `runs.write` or `children.start` |
 | `GET` | `/api/v1/runs/grep` | `logs.read` |
 | `DELETE` | `/api/v1/runs/{id}` | `admin` |
-| `GET` | `/api/v1/runs/{id}` | `claim` or `runs.read` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/approvals` | `runs.read` |
 | `GET` | `/api/v1/runs/{id}/approvals/{nodeID}` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}` | `approvals.write` |
@@ -173,6 +172,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/runs/{id}/receipt` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/source-credential` | `claim` |
 | `GET` | `/api/v1/runs/{id}/steps` | `runs.read` |
+| `GET` | `/api/v1/runs/{run}` | `runs.read` or `source.read` or `trigger.host` |
 | `POST` | `/api/v1/runs/{run}/cancel` | `runs.control` |
 | `POST` | `/api/v1/runs/{run}/finish` | `runs.state` or `data.write` |
 | `POST` | `/api/v1/runs/{run}/heartbeat` | `trigger.host` |

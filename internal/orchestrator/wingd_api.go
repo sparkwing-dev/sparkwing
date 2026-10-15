@@ -73,7 +73,7 @@ var apiReadRoutes = []string{
 	"GET /api/v1/runs",
 	"GET /api/v1/queue",
 	"GET /api/v1/runs/{id}/pending-triggers",
-	"GET /api/v1/runs/{id}",
+	"GET /api/v1/runs/{run}",
 	"GET /api/v1/runs/{run}/jobs",
 	"GET /api/v1/runs/{run}/jobs/{job}",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/output",

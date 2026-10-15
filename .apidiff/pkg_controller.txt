@@ -155,6 +155,8 @@ type EngineController struct {
 	ResolveOperator func(context.Context) (AuthorityRevoker, error)
 
 	ProjectScheduling func(store.RunSnapshot) (store.ScheduleSnapshot, error)
+
+	ReadRunStatus func(context.Context, store.Team, string) (RunStatusFacts, error)
 }
 func (s *EngineController) AcceptExpansion(ctx context.Context, authorized capability.Authorized, body controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error)
 func (s *EngineController) AcceptPlan(ctx context.Context, a capability.Authorized, body controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error)
@@ -169,7 +171,7 @@ func (s *EngineController) ReadFailure(ctx context.Context, a capability.Authori
 func (s *EngineController) ReconcileJob(ctx context.Context, authorized capability.Authorized, body controllerwire.ReconcileRequest) (controllerwire.ReconcileResponse, error)
 func (s *EngineController) Renew(ctx context.Context, a capability.Authorized, _ controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error)
 func (s *EngineController) Retry(ctx context.Context, a capability.Authorized, body controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error)
-func (s *EngineController) RunDetail(ctx context.Context, authorized capability.Authorized) (controllerwire.RunDetail, error)
+func (s *EngineController) RunDetail(ctx context.Context, a capability.Authorized) (controllerwire.RunDetail, error)
 func (s *EngineController) Snapshot(ctx context.Context, authorized capability.Authorized) (controllerwire.ScheduleSnapshot, error)
 func (s *EngineController) SyncLauncher(ctx context.Context, authorized capability.Authorized, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
 func (s *EngineController) TransitionJob(ctx context.Context, a capability.Authorized, body controllerwire.JobTransitionRequest) (controllerwire.Applied, error)
@@ -338,6 +340,12 @@ type RouteAuthorization struct {
 	Bindings      capability.BindingChecker
 	Identify      func(*http.Request) (capability.Presentation, error)
 	CheckCSRF     func(*http.Request, capability.Principal) error
+}
+type RunStatusFacts struct {
+	Snapshot store.RunSnapshot
+	Attempts []store.NodeAttempt
+	Logs     []blob.LogSubject
+	Notices  []engine.Notice
 }
 type RunTransactions interface {
 	AuthorityRevoker

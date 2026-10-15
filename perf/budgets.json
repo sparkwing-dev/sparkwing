@@ -28,6 +28,12 @@
   },
   "routes": [
     {
+      "route": "/api/v1/runs/{run}",
+      "kind": "api",
+      "exempt": "Requires authorized run status with complete committed attempt history and log subjects, absent from the local dashboard corpus. The status-read adapter must be installed. A refusal does not measure the read. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
       "route": "/api/v1/queue",
       "kind": "api",
       "exempt": "Requires an authorized member and tenant concurrency groups with runner headroom, absent from the local dashboard corpus. A refusal does not measure the read. Authorized latency, cold start and response bytes remain unmeasured.",
