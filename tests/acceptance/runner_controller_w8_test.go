@@ -91,7 +91,7 @@ func TestRunnerControllerW8Components(t *testing.T) {
 			}
 			host.PrepareNode = func(_ context.Context, got controllerwire.ClaimedUnit, controller controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
 				prepare(got, controller)
-				return runnerDeadlineNodeW8(func(context.Context) { events = append(events, "execute") }), nodehost.NodeInput{}, cleanup, nil
+				return runnerDeadlineNodeW8(func(context.Context) { events = append(events, "execute") }), runnerIdentityInputW8(got), cleanup, nil
 			}
 			if err := host.Host(t.Context(), unit); err != nil {
 				t.Fatal(err)
@@ -159,11 +159,13 @@ func TestRunnerMixedClaimsKeepControllerBindingsSeparateW8(t *testing.T) {
 			},
 			PrepareNode: func(_ context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
 				prepare(unit, controller)
-				return runnerDeadlineNodeW8(func(context.Context) {}), nodehost.NodeInput{}, nil, nil
+				return runnerDeadlineNodeW8(func(context.Context) {}), runnerIdentityInputW8(unit), nil, nil
 			},
 		}
-		loop := runners.Loop{Config: runners.LoopConfig{Version: "v0.20.0", MaxConcurrent: 2, MaxClaims: 2}, Controller: root, Host: host,
-			CheckVersion: func(context.Context, string) error { return nil }}
+		loop := runners.Loop{
+			Config: runners.LoopConfig{Version: "v0.20.0", MaxConcurrent: 2, MaxClaims: 2}, Controller: root, Host: host,
+			CheckVersion: func(context.Context, string) error { return nil },
+		}
 		done := make(chan error, 1)
 		go func() { done <- loop.Run(t.Context()) }()
 		synctest.Wait()

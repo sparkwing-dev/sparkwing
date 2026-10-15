@@ -29,12 +29,7 @@ func TestInitialAttemptW8Components(t *testing.T) {
 				return nil, nodehost.NodeInput{}, nil, prepared
 			},
 		}
-		unit := controllerwire.ClaimedUnit{
-			Unit: capability.UnitNode, UnitID: "job", RunID: "run", JobID: "job", Capability: "private-award",
-			Purpose: capability.PurposeWork, Delivery: capability.DeliveryDirect,
-			Binding:        capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "holder", Generation: 1},
-			LeaseExpiresAt: time.Now().Add(time.Minute),
-		}
+		unit := runnerAuthorityAwardW8(capability.UnitNode)
 		if err := host.Host(t.Context(), unit); !errors.Is(err, prepared) {
 			t.Fatalf("unstarted award never reached host preparation: %v", err)
 		}

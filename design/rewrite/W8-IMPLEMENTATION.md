@@ -1747,3 +1747,93 @@ bootstrap_test.go and tests/acceptance/bootstrap_w8_test.go. No candidate, servi
 pipeline or Git write ran. Local Git configuration has no author/core.worktree
 override. Initial discovery ran the installed Sparkwing info command only.
 Worker scratch is deleted after the checks. No new product decision is requested.
+
+## Continuation: execution identity handoff
+
+The prior work is committed at ec12ba220. This continuation starts clean, with
+no merge conflicts. All 26 amendment rows naming W8 and the new W4 handoff
+were rechecked. A1-19/39 gain a node-input constructor. A1-38 gains a component
+that connects bootstrap exchange to that same Hosting path for Cloud work.
+
+The invariant is that a job reaches NodeHost with its awarded runner and claim
+fence, and an acquired engine whose portable identity matches both the award
+and accepted spec. Hosting captures these facts before controller, observation
+and preparation callbacks. The constructor supplies Engine, GrantedRunner,
+NodeID, Generation and Attempt. It copies runner labels. A prepared identity
+cannot override the award, and an absent or mismatched source engine cannot
+reach Execute. Ordinal zero stays zero until the host's Start transition.
+
+The acceptance regression ran red before implementation. It demonstrated
+execution with forged prepared identity and with missing or mismatched source
+identity. The passing tests now cover those cases, forged ambient runner
+variables, exact pin/manifest changes, preserved route/source preparation,
+captured authority despite later pointer mutation, and keeper/source cleanup.
+FuzzRunnerExecutionIdentityW8 generates replacement identity inputs against
+that invariant. TestCloudWorkUsesRunnerExecutionIdentityW8 passes an exchanged
+work award through real BootstrapHost and Hosting with fake shared interfaces.
+
+W4 finding 3 remains partial. The W8 node-award slice is done. C3 still lacks
+a granted runner in RunInput, plan/eval execution inputs and a shared process
+constructor consuming the selected engine and granted runner together. W3
+must declare that boundary before W8 can compose every unit kind. The retained
+node-host runtime still reads runner identity from ambient env. No actual hello
+or selected-engine process launch is proved by these component tests.
+
+The existing other-area requests remain: source acquisition/host factories,
+delegated routes and replay, workspace-off binary-cache hashing, local shared
+services/activity, Cloud bootstrap grammar and original award/source transport,
+and resolved plan/eval resources. NewEngineClient and Keeper.Run still panic.
+Native Windows/services, Kubernetes enforcement/cleanup and real-repository QA
+remain open. No native catalog cell is unskipped, and no additional T1 inventory
+port or old production deletion is claimed (0 lines deleted).
+
+The private nodeExecution value holds the captured authority and owns this
+constructor. This adds no public API, environment variable or configuration.
+Keeping arbitrary prepared identity would leave the grant outside the common
+W8 execution boundary. Undo removes execution.go and its Hosting calls/tests.
+The existing source and NodeHost contracts retain release verification and
+per-start policy checks. Their fakes do not establish those integrations.
+
+Shared edits are the three existing W8 acceptance files, runner_identity_w8_test.go,
+contracts/handoffs.md and the W8 audit/handoff. Production edits stay in
+internal/runners. No other-area production caller was migrated. CLOUD-JOBS.md
+records the new work path. No generated reference consumes that internal doc.
+
+Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS at most four,
+and private GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W8. Tests use -p 4.
+
+- Whole-repository build passes.
+- Vet passes for runners, cluster, engine, wingd and their subpackages, plus
+  tests/acceptance and internal/acceptance.
+- Full runners, engine and tests/acceptance suites pass. Cluster tests pass
+  with TestStartMetricsListener_ServesMetrics excluded because sockets are
+  blocked in this worker sandbox.
+- Focused runner/identity/Cloud-work tests pass with the race detector.
+- The new property passes 8,547 generated cases in five seconds with two workers.
+- internal/runners tests cross-compile for windows/amd64. Native execution is open.
+- commentcheck -base HEAD passes. Required commentcheck -base main still flags
+  the three unchanged comments in controllerwire/contracts.go:47,
+  store/state_materialize.go:15 and store/state_result_records.go:9.
+- Formatting and git diff --check pass. Local Git configuration has no author
+  or core.worktree override. No Sparkwing executable, pipeline or Git write ran.
+
+The lead retains independent review, staging and committing. No new product
+decision or other-area contract shape was introduced.
+
+The verification commands, under the environment above and this worktree, are:
+
+```sh
+go build -p 4 ./...
+go vet -p 4 ./internal/runners/... ./internal/cluster ./internal/engine/... ./internal/wingd/... ./tests/acceptance ./internal/acceptance
+go test -p 4 ./internal/runners/... ./internal/engine/... ./tests/acceptance
+go test -p 4 ./internal/cluster -skip '^TestStartMetricsListener_ServesMetrics$'
+go test -p 4 -race ./internal/runners ./tests/acceptance -run '^(TestHosting.*|TestRunner.*W8.*|TestCloudWorkUsesRunnerExecutionIdentityW8|FuzzRunnerExecutionIdentityW8)$' -count=1
+go test -p 4 ./tests/acceptance -run '^$' -fuzz '^FuzzRunnerExecutionIdentityW8$' -fuzztime=5s -parallel=2
+go run ./internal/commentcheck -base main .
+go run ./internal/commentcheck -base HEAD .
+```
+
+The last identity-only race run includes the added forged ambient variables.
+Windows compilation uses GOOS=windows GOARCH=amd64 with
+`go test -p 4 -c -o /tmp/sw-astra-W8/runners.test.exe ./internal/runners`.
+Sleepcheck passes. Worker scratch was removed and its absence verified.

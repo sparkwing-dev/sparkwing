@@ -86,7 +86,7 @@ func TestRunnerDeadlineW8Components(t *testing.T) {
 						return runnerDeadlineNodeW8(func(ctx context.Context) {
 								executed = true
 								<-ctx.Done()
-							}), nodehost.NodeInput{}, func() error {
+							}), runnerIdentityInputW8(unit), func() error {
 								if !joined {
 									t.Error("source closed before keeper joined")
 								}
@@ -180,6 +180,7 @@ func runnerAuthorityAwardW8(kind capability.UnitKind) controllerwire.ClaimedUnit
 	if kind == capability.UnitNode {
 		unit.Purpose, unit.JobID = capability.PurposeWork, "job"
 		unit.Binding.Kind, unit.Binding.NodeID = capability.BindingNode, "job"
+		bindRunnerIdentityW8(&unit)
 	}
 	return unit
 }

@@ -36,6 +36,11 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 	if err := validateHostedAward(unit); err != nil {
 		return err
 	}
+	var execution nodeExecution
+	if unit.Unit == capability.UnitNode {
+		execution = nodeExecution{engine: *unit.Engine, runner: unit.Runner, job: unit.JobID, generation: unit.Binding.Generation, attempt: unit.Binding.Attempt}
+		execution.runner.Labels = slices.Clone(unit.Runner.Labels)
+	}
 	if err := limits.CheckRenewal(h.Interval, h.Lease); err != nil {
 		return err
 	}
@@ -133,6 +138,10 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 	if host == nil {
 		return errors.New("runner preparation returned no node host")
 	}
+	input, err = execution.input(input)
+	if err != nil {
+		return err
+	}
 	return host.Execute(unitCtx, input)
 }
 
@@ -170,6 +179,12 @@ func validateHostedAward(unit controllerwire.ClaimedUnit) error {
 	if unit.Unit == capability.UnitNode {
 		if unit.Purpose != capability.PurposeWork || binding.Kind != capability.BindingNode || unit.JobID == "" || binding.NodeID != unit.JobID || binding.Attempt < 0 {
 			return errors.New("runner award has an invalid job or attempt binding")
+		}
+		if unit.Engine == nil || unit.Accepted == nil || unit.Request.RunID != unit.RunID || unit.Request.Request.Team == "" || unit.Accepted.Spec.Request.RunID != unit.RunID || unit.Accepted.Spec.Request.Request.Team != unit.Request.Request.Team || unit.Accepted.Spec.Resolved.Engine != *unit.Engine {
+			return errors.New("runner award is missing its matching accepted engine and run")
+		}
+		if unit.Runner.Name == "" || unit.Runner.Type == "" {
+			return errors.New("runner award is missing its granted runner identity")
 		}
 	} else if (unit.Purpose != capability.PurposeTrigger && unit.Purpose != capability.PurposeHere) || binding.Kind != capability.BindingTrigger || unit.JobID != "" || binding.NodeID != "" {
 		return errors.New("runner award has an invalid trigger binding")

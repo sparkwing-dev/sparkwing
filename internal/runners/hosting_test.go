@@ -4,13 +4,19 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -31,7 +37,14 @@ func hostingAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
 		binding.Kind, binding.NodeID, binding.Attempt = capability.BindingNode, "job", 3
 		purpose = capability.PurposeWork
 	}
-	return controllerwire.ClaimedUnit{Unit: kind, Purpose: purpose, Delivery: capability.DeliveryDirect, UnitID: "unit", RunID: "run", JobID: binding.NodeID, Binding: binding, Capability: "award-secret", LeaseExpiresAt: time.Now().Add(time.Minute)}
+	unit := controllerwire.ClaimedUnit{Unit: kind, Purpose: purpose, Delivery: capability.DeliveryDirect, UnitID: "unit", RunID: "run", JobID: binding.NodeID, Binding: binding, Capability: "award-secret", LeaseExpiresAt: time.Now().Add(time.Minute)}
+	if kind == capability.UnitNode {
+		unit.Engine = &engine.Identity{Version: "v0.20.0"}
+		unit.Runner = nodeproto.RunnerIdentity{Name: "granted-runner", Type: "runner"}
+		unit.Request = runspec.SealedRequest{RunID: unit.RunID, Request: runspec.Request{Team: "team"}}
+		unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Resolved: runspec.Resolved{Engine: *unit.Engine}}}
+	}
+	return unit
 }
 
 func TestHostingDispatchesUnderKeeperAndJoinsBeforeCleanup(t *testing.T) {
@@ -76,7 +89,7 @@ func TestHostingDispatchesUnderKeeperAndJoinsBeforeCleanup(t *testing.T) {
 					}
 					events = append(events, "run")
 					return nil
-				}), nodehost.NodeInput{NodeID: "job"}, cleanup, nil
+				}), hostingInput(got), cleanup, nil
 			}
 			if err := host.Host(t.Context(), award); err != nil {
 				t.Fatal(err)
@@ -85,6 +98,39 @@ func TestHostingDispatchesUnderKeeperAndJoinsBeforeCleanup(t *testing.T) {
 				t.Fatalf("events %v, want %v", events, want)
 			}
 		})
+	}
+}
+
+func hostingInput(unit controllerwire.ClaimedUnit) nodehost.NodeInput {
+	return nodehost.NodeInput{Entry: &source.Entry{Engine: engine.Resolved{Identity: *unit.Engine, Executable: "/selected/engine", Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}}}
+}
+
+func TestHostingCapturesExecutionIdentityBeforePreparation(t *testing.T) {
+	unit := hostingAward(capability.UnitNode)
+	unit.Runner.Labels = []string{"pool=granted"}
+	input := hostingInput(unit)
+	executed := false
+	host := Hosting{
+		ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
+		NewController: hostingClient(func(context.Context) (lease.Beat, error) {
+			unit.Engine.Version = "v9.9.9"
+			unit.Accepted.Spec.Resolved.Engine.Version = "v9.9.9"
+			unit.Runner.Labels[0] = "pool=ambient"
+			return lease.Beat{}, nil
+		}),
+		StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) { return ctx, func() {} },
+		PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
+			return nodeHostFunc(func(_ context.Context, got nodehost.NodeInput) error {
+				executed = true
+				if got.Engine.Identity.Version != "v0.20.0" || got.GrantedRunner.Labels[0] != "pool=granted" {
+					t.Error("execution reread changed award data after admission")
+				}
+				return nil
+			}), input, nil, nil
+		},
+	}
+	if err := host.Host(t.Context(), unit); err != nil || !executed {
+		t.Fatalf("captured identity: executed=%v error=%v", executed, err)
 	}
 }
 
@@ -184,7 +230,8 @@ func TestHostingControllerFailuresPreventPreparation(t *testing.T) {
 		{"confirm", hostingClient(func(context.Context) (lease.Beat, error) { return lease.Beat{}, failure })},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			host := Hosting{ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
+			host := Hosting{
+				ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
 				NewController: tc.open,
 				StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) {
 					t.Error("started keeper without controller authority")
